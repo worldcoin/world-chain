@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-a7a66d73.js";
+            window.path_to_searchindex_js = "searchindex-7b1d0718.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-831b7506.js"></script>
@@ -1331,14 +1331,14 @@ requires: &lt;WIP-NNNN, EIP-NNNN&gt;  # if applicable
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="wip-1001-worldid-native-account-abstraction"><a href="#wip-1001-worldid-native-account-abstraction" class="header">WIP-1001: WorldID Native Account Abstraction</a></h1>
 <h2 id="abstract-1"><a class="header" href="#abstract-1">Abstract</a></h2>
-<p>A <em>World ID Key Ring</em> is a precompile-managed account with a deterministic, lifetime-stable address derived from its creation nullifier $\mathrm{addr}(\nu_k) = \mathrm{bytes20}(\mathrm{keccak256}(\nu_k))$. Because the keyring is a first-class account on World Chain and its authorized signer set is read natively by the protocol during transaction validation, keyrings achieve native account abstraction. We extend <a href="https://eips.ethereum.org/EIPS/eip-2718">EIP-2718</a> with a typed transaction envelope (<code>0x1D</code>) signed by any authorized <em>session key</em> of a <em>World ID Key Ring</em>.</p>
-<p>A single WorldID <code>MAY</code> manage any number of keyrings indexed by a user-chosen <code>keyringNonce</code>; keyrings owned by the same WorldID are unlinkable across distinct <code>keyringNonce</code> values. A keyring is created by a Uniqueness Proof over its <code>keyringNonce</code>; creation also installs a fresh <code>sessionId</code> bound to that keyring. Session keys are then added, removed, and rotated via fresh Session Proofs over the stored <code>sessionId</code>. Recovery from lost or compromised session keys is the degenerate case of the same upgrade path, protected by a configurable timelock.</p>
-<p>Keyring state lives natively in the <code>WORLD_ID_KEYRING_PRECOMPILE</code>. There is no per-WorldID uniqueness constraint, no generation counter, and no account recycling — a <em>World ID Account</em> is a public identifier for a <em>World ID</em> managed set of session keys; it is not an identity anchor.</p>
+<p>A <em>World ID Account</em> is a precompile-managed account whose 20-byte address is deterministic and lifetime-stable, derived from its creation nullifier $\mathrm{addr}(\nu_k) = \mathrm{bytes20}(\mathrm{keccak256}(\nu_k))$. Each World ID Account owns a <em>Key Ring</em> — the set of session keys authorized to sign on its behalf — held natively in the precompile and read by the protocol during transaction validation. Because the World ID Account is a first-class account on World Chain and its Key Ring is read natively by the protocol, World ID Accounts achieve native account abstraction. We extend <a href="https://eips.ethereum.org/EIPS/eip-2718">EIP-2718</a> with a typed transaction envelope (<code>0x1D</code>) signed by any session key in the Key Ring of a <em>World ID Account</em>.</p>
+<p>A single WorldID <code>MAY</code> manage any number of World ID Accounts indexed by a user-chosen <code>worldIDAccountNonce</code>; World ID Accounts owned by the same WorldID are unlinkable across distinct <code>worldIDAccountNonce</code> values. A World ID Account is created by a Uniqueness Proof over its <code>worldIDAccountNonce</code>; creation also installs a fresh <code>sessionId</code> bound to that account. Session keys are then added, removed, and rotated via fresh Session Proofs over the stored <code>sessionId</code>. Recovery from lost or compromised session keys is the degenerate case of the same upgrade path, protected by a configurable timelock.</p>
+<p>World ID Account state lives natively in the <code>WORLD_ID_ACCOUNT_PRECOMPILE</code>. There is no per-WorldID uniqueness constraint, no generation counter, and no account recycling — a <em>World ID Account</em> is a public identifier for a <em>World ID</em> managed set of session keys; it is not an identity anchor.</p>
 <h2 id="motivation-1"><a class="header" href="#motivation-1">Motivation</a></h2>
 <h3 id="computational-sustainability--world-chain-ux"><a class="header" href="#computational-sustainability--world-chain-ux">Computational Sustainability &amp; World Chain UX</a></h3>
 <p>Enshrining smart-account authenticators as protocol-level signature verification algorithms lets us jointly optimize transaction gas, expose a simple multi-auth API over familiar authenticators (<a href="https://www.w3.org/TR/webauthn-3/">Passkey</a> / <a href="https://www.w3.org/TR/webauthn-3/">WebAuthn</a>, <a href="https://neuromancer.sk/std/nist/P-256">P256</a>, <a href="https://en.wikipedia.org/wiki/Elliptic_Curve_Digital_Signature_Algorithm">ECDSA</a>, <a href="https://en.wikipedia.org/wiki/EdDSA">EdDSA</a>), minimize confirmation time, and remove the need for bundler infrastructure.</p>
 <h3 id="world-id-40-proofs-as-authorization"><a class="header" href="#world-id-40-proofs-as-authorization">World ID 4.0 Proofs as Authorization</a></h3>
-<p>Authorizing keyring creation with a World ID 4.0 Uniqueness Proof and subsequent mutations with Session Proofs — rather than a signing key — converges key rotation and recovery onto a single proof-verification path after enrollment: a fresh session proof. No “super key” is ever stored on-device. A <code>keyringNonce</code>-indexed action lets a single WorldID own unlinkably many keyrings.</p>
+<p>Authorizing World ID Account creation with a World ID 4.0 Uniqueness Proof and subsequent mutations with Session Proofs — rather than a signing key — converges key rotation and recovery onto a single proof-verification path after enrollment: a fresh session proof. No “super key” is ever stored on-device. A <code>worldIDAccountNonce</code>-indexed action lets a single WorldID own unlinkably many World ID Accounts.</p>
 <h2 id="specification-1"><a class="header" href="#specification-1">Specification</a></h2>
 <p>The key words “MUST”, “MUST NOT”, “REQUIRED”, “SHALL”, “SHALL NOT”, “SHOULD”, “SHOULD NOT”, “RECOMMENDED”, “NOT RECOMMENDED”, “MAY”, and “OPTIONAL” in this document are to be interpreted as described in <a href="https://www.rfc-editor.org/rfc/rfc2119">RFC 2119</a> and <a href="https://www.rfc-editor.org/rfc/rfc8174">RFC 8174</a>.</p>
 <h3 id="constants"><a class="header" href="#constants">Constants</a></h3>
@@ -1350,38 +1350,38 @@ requires: &lt;WIP-NNNN, EIP-NNNN&gt;  # if applicable
 <tbody>
 <tr><td><code>WORLD_TX_TYPE</code></td><td><code>0x1D</code></td><td><a href="https://eips.ethereum.org/EIPS/eip-2718">EIP-2718</a> tx type</td></tr>
 <tr><td><code>WORLD_CHAIN_RP_ID</code></td><td><code>480</code></td><td>World Chain’s registered RP ID</td></tr>
-<tr><td><code>WORLD_ID_KEYRING_PRECOMPILE</code></td><td><code>0x000000000000000000000000000000000000001D</code></td><td>Stateful precompile managing the keyring registry</td></tr>
-<tr><td><code>WORLD_ID_KEYRING_TAG</code></td><td><code>"WORLD_ID_KEYRING"</code> (UTF-8, 16 bytes)</td><td>Domain tag for keyring Uniqueness Proof actions</td></tr>
-<tr><td><code>WORLD_ID_KEYRING_NONCE</code></td><td>U256</td><td>The generational nonce of the key ring. Not necessarily monotonic</td></tr>
-<tr><td><code>MAX_SESSION_KEYS</code></td><td><code>20</code></td><td>Maximum authorized session keys per keyring</td></tr>
+<tr><td><code>WORLD_ID_ACCOUNT_PRECOMPILE</code></td><td><code>0x000000000000000000000000000000000000001D</code></td><td>Stateful precompile managing the World ID Account registry</td></tr>
+<tr><td><code>WORLD_ID_ACCOUNT_TAG</code></td><td><code>"WORLD_ID_ACCOUNT"</code> (UTF-8, 16 bytes)</td><td>Domain tag for World ID Account Uniqueness Proof actions</td></tr>
+<tr><td><code>WORLD_ID_ACCOUNT_NONCE</code></td><td>U256</td><td>The generational nonce of the World ID Account. Not necessarily monotonic</td></tr>
+<tr><td><code>MAX_SESSION_KEYS</code></td><td><code>20</code></td><td>Maximum authorized session keys per World ID Account</td></tr>
 </tbody>
 </table>
 </div>
-<h3 id="keyring-model"><a class="header" href="#keyring-model">KeyRing Model</a></h3>
-<p>A <em>World ID Key Ring</em> is an account whose creation <code>MUST</code> be gated by a World ID 4.0 Uniqueness Proof. Its address derives from the keyring nullifier $\nu_k$ of the initial creation proof, itself a deterministic function of the owning WorldID identity and a user-chosen <code>keyringNonce</code>. A single WorldID <code>MAY</code> manage any number of keyrings by variation over the <code>keyringNonce</code>. Each keyring <code>MUST</code> also store a <code>sessionId</code> created at enrollment; subsequent mutations are authorized against that stored session. The per-proof <code>sessionNullifier</code> used by <code>verifySession</code> is transient proof material and <code>MUST NOT</code> be persisted as keyring state.</p>
-<p><em>Session keys</em> are abstract signatories authorized to sign <code>0x1D</code> transactions on behalf of the keyring; they carry no intrinsic privileges beyond signing. Per-key permissions (expiry, spend limits, call scopes) are out of scope for this WIP (see <a href="#extensions">Extensions</a>).</p>
+<h3 id="world-id-account-model"><a class="header" href="#world-id-account-model">World ID Account Model</a></h3>
+<p>A <em>World ID Account</em> is an account whose creation <code>MUST</code> be gated by a World ID 4.0 Uniqueness Proof. Its address derives from the World ID Account nullifier $\nu_k$ of the initial creation proof, itself a deterministic function of the owning WorldID identity and a user-chosen <code>worldIDAccountNonce</code>. A single WorldID <code>MAY</code> manage any number of World ID Accounts by variation over the <code>worldIDAccountNonce</code>. Each World ID Account <code>MUST</code> also store a <code>sessionId</code> created at enrollment; subsequent mutations are authorized against that stored session. The per-proof <code>sessionNullifier</code> used by <code>verifySession</code> is transient proof material and <code>MUST NOT</code> be persisted as World ID Account state.</p>
+<p><em>Session keys</em> are abstract signatories authorized to sign <code>0x1D</code> transactions on behalf of the World ID Account; they carry no intrinsic privileges beyond signing. Per-key permissions (expiry, spend limits, call scopes) are out of scope for this WIP (see <a href="#extensions">Extensions</a>).</p>
 <h4 id="proof-authorization"><a class="header" href="#proof-authorization">Proof Authorization</a></h4>
-<p>Keyring creation is authorized by a World ID 4.0 Uniqueness Proof parameterized by:</p>
+<p>World ID Account creation is authorized by a World ID 4.0 Uniqueness Proof parameterized by:</p>
 <ul>
 <li><code>rpId = WORLD_CHAIN_RP_ID</code></li>
-<li><code>action = keccak256(abi.encodePacked(WORLD_ID_KEYRING_TAG, uint256(keyringNonce)))</code></li>
+<li><code>action = keccak256(abi.encodePacked(WORLD_ID_ACCOUNT_TAG, uint256(worldIDAccountNonce)))</code></li>
 <li><code>signalHash = uint256(keccak256(abi.encode(create))) &gt;&gt; 8</code></li>
 </ul>
 <p>where <code>create</code> is a <code>KeyringUpdate</code> with <code>mode = Create</code> (see <a href="#signal-semantics">Signal Semantics</a>).</p>
-<p>The creation nullifier $\nu_k$ is used once to instantiate the keyring. Because World ID authenticators do not issue the same <code>(rpId, action)</code> nullifier twice, a later mutation MUST NOT attempt to reuse the creation action. On successful <code>Create</code>, the caller MUST also provide a fresh <code>sessionId</code> for <code>WORLD_CHAIN_RP_ID</code>, and the precompile MUST associate it with the keyring.</p>
+<p>The creation nullifier $\nu_k$ is used once to instantiate the World ID Account. Because World ID authenticators do not issue the same <code>(rpId, action)</code> nullifier twice, a later mutation MUST NOT attempt to reuse the creation action. On successful <code>Create</code>, the caller MUST also provide a fresh <code>sessionId</code> for <code>WORLD_CHAIN_RP_ID</code>, and the precompile MUST associate it with the World ID Account.</p>
 <p>Subsequent <code>Add</code> and <code>Remove</code> mutations are authorized by World ID 4.0 Session Proofs parameterized by:</p>
 <ul>
 <li><code>rpId = WORLD_CHAIN_RP_ID</code></li>
-<li><code>sessionId = sessionId(keyring)</code></li>
-<li><code>signalHash = uint256(keccak256(abi.encode(update || WORLD_ID_KEYRING_NONCE)) &gt;&gt; 8</code></li>
+<li><code>sessionId = sessionId(worldIDAccount)</code></li>
+<li><code>signalHash = uint256(keccak256(abi.encode(update || WORLD_ID_ACCOUNT_NONCE)) &gt;&gt; 8</code></li>
 </ul>
 <blockquote>
-<p><strong>Note:</strong> <code>signalHash</code> must be unique for any given update to the KeyRing.</p>
+<p><strong>Note:</strong> <code>signalHash</code> must be unique for any given update to the World ID Account.</p>
 </blockquote>
 <p>where <code>update</code> is a <code>KeyringUpdate</code> with <code>mode != Create</code>. Session Proofs are verified with <code>verifySession</code>, supplying a fresh <code>sessionNullifier</code> for each update. That <code>sessionNullifier</code> is consumed only for verification of the current update; only <code>sessionId</code> is retained across updates.</p>
-<p>A keyring therefore accepts one Uniqueness Proof at creation and any number of Session Proofs over its lifetime.</p>
+<p>A World ID Account therefore accepts one Uniqueness Proof at creation and any number of Session Proofs over its lifetime.</p>
 <h5 id="session-proof-primer"><a class="header" href="#session-proof-primer">Session Proof Primer</a></h5>
-<p>A Session Proof proves that the caller controls the same World ID that previously established a stored <code>sessionId</code>, without reusing the keyring-creation action. The <code>sessionId</code> is the long-lived identifier retained on the keyring across updates. The <code>sessionNullifier</code> is fresh per proof, passed only to <code>verifySession</code>, and discarded after verification.</p>
+<p>A Session Proof proves that the caller controls the same World ID that previously established a stored <code>sessionId</code>, without reusing the World ID Account creation action. The <code>sessionId</code> is the long-lived identifier retained on the World ID Account across updates. The <code>sessionNullifier</code> is fresh per proof, passed only to <code>verifySession</code>, and discarded after verification.</p>
 <h5 id="oprf-nullifier-proof-primer"><a class="header" href="#oprf-nullifier-proof-primer">OPRF Nullifier Proof Primer</a></h5>
 <p>An <code>OPRFNullifierProof</code> is a <a href="https://eprint.iacr.org/2016/260">Groth16</a> proof over <a href="https://hackmd.io/@jpw/bn254">BN254</a> submitted on-chain as <code>uint256[5] = [a, b₀, b₁, c, merkle_root]</code>. The <code>WorldIDVerifier</code> reconstructs the 15 public inputs from calldata and on-chain registry lookups (notably <code>merkle_root</code> via <code>WorldIDRegistry.isValidRoot()</code> and <code>oprfPublicKey</code> via <code>OprfKeyRegistry[rpId]</code>) and invokes the Groth16 verifier.</p>
 <p>The circuit proves knowledge of a private witness $w = (s, k, p, \beta, R_{\mathrm{oprf}}, \mathit{cred}, \sigma_{\mathit{cred}})$ satisfying:</p>
@@ -1398,10 +1398,10 @@ requires: &lt;WIP-NNNN, EIP-NNNN&gt;  # if applicable
 <li><strong>(G5) Signal binding.</strong> The <code>signalHash</code> is “dummy-squared” in the circuit (constrained to $h \cdot h = h^2$), preventing a proof from being reused with a different signal.</li>
 </ul>
 <p>An accepting proof guarantees the prover holds a valid credential for a leaf in the tree, the OPRF evaluation is correct, and $\nu$ is deterministically bound to $(i, \mathrm{rpId}, a)$. Distinct action values yield distinct nullifier domains.</p>
-<p>For keyring creation, <strong>(G4)</strong> binds $\nu_k$ to the triple (owner leaf, <code>WORLD_CHAIN_RP_ID</code>, <code>action(keyringNonce)</code>) — making <code>keyringNonce</code> the sole keyring selector per identity — and <strong>(G5)</strong> binds the Uniqueness Proof to the exact <code>Create</code> payload it authorizes. For later updates, <code>verifySession</code> binds the proof to the keyring’s stored <code>sessionId</code>; the accompanying <code>sessionNullifier</code> is a per-proof verifier input rather than persistent keyring state.</p>
-<h4 id="keyring-address"><a class="header" href="#keyring-address">Keyring Address</a></h4>
+<p>For World ID Account creation, <strong>(G4)</strong> binds $\nu_k$ to the triple (owner leaf, <code>WORLD_CHAIN_RP_ID</code>, <code>action(worldIDAccountNonce)</code>) — making <code>worldIDAccountNonce</code> the sole World ID Account selector per identity — and <strong>(G5)</strong> binds the Uniqueness Proof to the exact <code>Create</code> payload it authorizes. For later updates, <code>verifySession</code> binds the proof to the World ID Account’s stored <code>sessionId</code>; the accompanying <code>sessionNullifier</code> is a per-proof verifier input rather than persistent World ID Account state.</p>
+<h4 id="world-id-account-address"><a class="header" href="#world-id-account-address">World ID Account Address</a></h4>
 <p>$$\mathrm{addr}(\nu_k) = \mathrm{bytes20}(\mathrm{keccak256}(\nu_k))$$</p>
-<p>The address is fixed for the lifetime of the keyring. Session key rotation does <strong>NOT</strong> change the address.</p>
+<p>The address is fixed for the lifetime of the World ID Account. Session key rotation does <strong>NOT</strong> change the address.</p>
 <h4 id="session-keys"><a class="header" href="#session-keys">Session Keys</a></h4>
 <pre><code class="language-solidity">enum KeyType { Secp256k1, P256, WebAuthn, EdDSA }
 
@@ -1432,16 +1432,16 @@ struct KeyringUpdate {
 }
 </code></pre>
 <ul>
-<li><strong><code>Create</code></strong> — installs <code>keys</code> as the full session key set at $\mathrm{addr}(\nu_k)$ and associates a fresh <code>sessionId</code> with the keyring. Does <strong>NOT</strong> store any <code>sessionNullifier</code>. MUST revert if the keyring already exists, if <code>keys.length == 0</code>, or if <code>keys.length &gt; MAX_SESSION_KEYS</code>.</li>
-<li><strong><code>Add</code></strong> — appends <code>keys</code> to the existing set. MUST revert if the keyring does not exist, if any key is already present, or if the resulting set exceeds <code>MAX_SESSION_KEYS</code>.</li>
-<li><strong><code>Remove</code></strong> — removes each entry in <code>keys</code> from the existing set. MUST revert if the keyring does not exist or if any key is absent. The set MAY become empty; a keyring with zero session keys exists but cannot sign transactions until the next <code>Add</code>.</li>
+<li><strong><code>Create</code></strong> — installs <code>keys</code> as the full session key set at $\mathrm{addr}(\nu_k)$ and associates a fresh <code>sessionId</code> with the World ID Account. Does <strong>NOT</strong> store any <code>sessionNullifier</code>. MUST revert if the World ID Account already exists, if <code>keys.length == 0</code>, or if <code>keys.length &gt; MAX_SESSION_KEYS</code>.</li>
+<li><strong><code>Add</code></strong> — appends <code>keys</code> to the existing set. MUST revert if the World ID Account does not exist, if any key is already present, or if the resulting set exceeds <code>MAX_SESSION_KEYS</code>.</li>
+<li><strong><code>Remove</code></strong> — removes each entry in <code>keys</code> from the existing set. MUST revert if the World ID Account does not exist or if any key is absent. The set MAY become empty; a World ID Account with zero session keys exists but cannot sign transactions until the next <code>Add</code>.</li>
 </ul>
 <h4 id="precompile-interface"><a class="header" href="#precompile-interface">Precompile Interface</a></h4>
-<pre><code class="language-solidity">interface IWorldIDKeyRing {
-    /// @notice Create a keyring authorized by a World ID 4.0 Uniqueness Proof.
+<pre><code class="language-solidity">interface IWorldIDAccount {
+    /// @notice Create a World ID Account authorized by a World ID 4.0 Uniqueness Proof.
     function create(
-        uint256 keyringNullifier,            // ν_k
-        uint256 keyringNonce,                // keyring selector; recomputed into `action`
+        uint256 worldIDAccountNullifier,       // ν_k
+        uint256 worldIDAccountNonce,           // World ID Account selector; recomputed into `action`
         uint256 proofNonce,                  // verifier request nonce
         uint256 sessionId,                   // fresh session for subsequent updates
         uint64  issuerSchemaId,
@@ -1449,11 +1449,11 @@ struct KeyringUpdate {
         uint256 credentialGenesisIssuedAtMin,
         uint256[5] calldata proof,           // compressed Groth16 proof
         KeyringUpdate calldata createUpdate
-    ) external returns (address keyringAddress);
+    ) external returns (address worldIDAccountAddress);
 
     /// @notice Apply an Add/Remove update authorized by a World ID 4.0 Session Proof.
     function update(
-        address keyring,
+        address worldIDAccount,
         uint256 proofNonce,                  // verifier request nonce
         uint64  issuerSchemaId,
         uint64  expiresAtMin,
@@ -1463,37 +1463,37 @@ struct KeyringUpdate {
         KeyringUpdate calldata keyringUpdate
     ) external;
 
-    function getSessionKeys(address keyring) external view returns (SessionKey[] memory);
-    function isAuthorized(address keyring, SessionKey calldata key) external view returns (bool);
-    function getKeyringNullifier(address keyring) external view returns (uint256);
+    function getSessionKeys(address worldIDAccount) external view returns (SessionKey[] memory);
+    function isAuthorized(address worldIDAccount, SessionKey calldata key) external view returns (bool);
+    function getWorldAccountNullifier(address worldIDAccount) external view returns (uint256);
 }
 </code></pre>
 <p>For <code>create</code>, the precompile MUST:</p>
 <ol>
 <li>Require <code>createUpdate.mode == Create</code>.</li>
-<li>Recompute <code>action = keccak256(abi.encodePacked(WORLD_ID_KEYRING_TAG, uint256(keyringNonce)))</code>.</li>
+<li>Recompute <code>action = keccak256(abi.encodePacked(WORLD_ID_ACCOUNT_TAG, uint256(worldIDAccountNonce)))</code>.</li>
 <li>Recompute <code>signalHash = uint256(keccak256(abi.encode(createUpdate))) &gt;&gt; 8</code>.</li>
-<li>Invoke <code>WorldID.verify(keyringNullifier, action, WORLD_CHAIN_RP_ID, proofNonce, signalHash, …, proof)</code>.</li>
-<li>Derive <code>keyringAddress = bytes20(keccak256(keyringNullifier))</code>, associate the supplied <code>sessionId</code> with <code>keyringAddress</code>, and apply <code>createUpdate</code> immediately.</li>
+<li>Invoke <code>WorldID.verify(worldIDAccountNullifier, action, WORLD_CHAIN_RP_ID, proofNonce, signalHash, …, proof)</code>.</li>
+<li>Derive <code>worldIDAccountAddress = bytes20(keccak256(worldIDAccountNullifier))</code>, associate the supplied <code>sessionId</code> with <code>worldIDAccountAddress</code>, and apply <code>createUpdate</code> immediately.</li>
 </ol>
 <p>For <code>update</code>, the precompile MUST:</p>
 <ol>
 <li>Require <code>update.mode != Create</code>.</li>
-<li>Load the stored <code>sessionId</code> for <code>keyring</code>.</li>
+<li>Load the stored <code>sessionId</code> for <code>worldIDAccount</code>.</li>
 <li>Recompute <code>signalHash = uint256(keccak256(abi.encode(update))) &gt;&gt; 8</code>.</li>
 <li>Invoke <code>WorldID.verifySession(WORLD_CHAIN_RP_ID, proofNonce, signalHash, …, sessionId, sessionNullifier, proof)</code>.</li>
-<li>Discard <code>sessionNullifier</code> after verification; it MUST NOT be persisted in keyring state.</li>
+<li>Discard <code>sessionNullifier</code> after verification; it MUST NOT be persisted in World ID Account state.</li>
 <li>Apply <code>update</code>, queued behind the timelock for <code>Add</code> / <code>Remove</code> (see <a href="#timelock">Timelock</a>).</li>
 </ol>
-<p>The precompile DOES NOT enforce a one-keyring-per-WorldID constraint; distinct keyrings remain indexed by distinct <code>keyringNonce</code> values.</p>
+<p>The precompile DOES NOT enforce a one-account-per-WorldID constraint; distinct World ID Accounts remain indexed by distinct <code>worldIDAccountNonce</code> values.</p>
 <blockquote>
-<p><strong>Note — Precompile gas accounting out of scope.</strong> The specific gas pricing schedule for interacting with <code>WORLD_ID_KEYRING_PRECOMPILE</code> — covering Groth16 verification cost, per-session-key storage mutation, timelock queue/cancel/execute operations, and the amortized cost of <code>isAuthorized</code> reads during <code>0x1D</code> validation — is <strong>NOT</strong> defined here. A follow-on revision MUST specify gas costs per operation.</p>
+<p><strong>Note — Precompile gas accounting out of scope.</strong> The specific gas pricing schedule for interacting with <code>WORLD_ID_ACCOUNT_PRECOMPILE</code> — covering Groth16 verification cost, per-session-key storage mutation, timelock queue/cancel/execute operations, and the amortized cost of <code>isAuthorized</code> reads during <code>0x1D</code> validation — is <strong>NOT</strong> defined here. A follow-on revision MUST specify gas costs per operation.</p>
 </blockquote>
 <h3 id="recovery"><a class="header" href="#recovery">Recovery</a></h3>
-<p>Recovery is the degenerate case of an <code>Add</code> or <code>Remove</code> submitted after session keys are lost or compromised. Because post-creation authorization is a World ID 4.0 Session Proof bound to the keyring’s stored <code>sessionId</code>, recovery requires only a fresh Session Proof — the full session-key surface is reachable via the same mutation path. No separate recovery flow or state is introduced.</p>
-<p>A single WorldID MAY enable recovery for any number of keyrings; keyrings at distinct <code>keyringNonce</code> values remain unlinkable across the recovery event.</p>
+<p>Recovery is the degenerate case of an <code>Add</code> or <code>Remove</code> submitted after session keys are lost or compromised. Because post-creation authorization is a World ID 4.0 Session Proof bound to the World ID Account’s stored <code>sessionId</code>, recovery requires only a fresh Session Proof — the full session-key surface is reachable via the same mutation path. No separate recovery flow or state is introduced.</p>
+<p>A single WorldID MAY enable recovery for any number of World ID Accounts; World ID Accounts at distinct <code>worldIDAccountNonce</code> values remain unlinkable across the recovery event.</p>
 <h3 id="timelock"><a class="header" href="#timelock">Timelock</a></h3>
-<p>A compromised WorldID authenticator could otherwise rotate session keys in a single block and drain a keyring. Keyring updates are subject to a configurable delay:</p>
+<p>A compromised WorldID authenticator could otherwise rotate session keys in a single block and drain a World ID Account. World ID Account updates are subject to a configurable delay:</p>
 <ul>
 <li><code>Create</code> executes immediately (no prior session keys exist to cancel).</li>
 <li><code>Add</code> and <code>Remove</code> are pending until the delay elapses.</li>
@@ -1502,7 +1502,7 @@ struct KeyringUpdate {
 </ul>
 <p>Queue / cancel / execute interface additions are TBD.</p>
 <h3 id="transaction-type-0x1d"><a class="header" href="#transaction-type-0x1d">Transaction Type <code>0x1D</code></a></h3>
-<p>A <code>0x1D</code> transaction is signed by a session key of a keyring and submitted directly to the mempool (no <a href="https://eips.ethereum.org/EIPS/eip-4337">ERC-4337</a> bundler required).</p>
+<p>A <code>0x1D</code> transaction is signed by a session key of a World ID Account and submitted directly to the mempool (no <a href="https://eips.ethereum.org/EIPS/eip-4337">ERC-4337</a> bundler required).</p>
 <h4 id="envelope"><a class="header" href="#envelope">Envelope</a></h4>
 <pre><code>0x1D || rlp([
     chain_id,                    // 0
@@ -1514,7 +1514,7 @@ struct KeyringUpdate {
     value,                       // 6
     data,                        // 7
     access_list,                 // 8
-    keyring,                     // 9   ← signer's keyring address
+    world_id_account,               // 9   ← signer's World ID Account address
     signature_type,              // 10
     session_key,                 // 11  ← `keyData` of the signing session key (per §Session Keys)
     signature_payload,           // 12
@@ -1550,46 +1550,46 @@ key; implementations MUST verify the recovered key matches the declared
 <li>Verify <code>signature_payload</code> against <code>signing_hash</code> using <code>session_key</code> as the
 verifying key (for <code>Secp256k1</code>, equivalently: recover and assert equality
 with <code>session_key</code>).</li>
-<li>Assert <code>IWorldIDKeyRing.isAuthorized(keyring, SessionKey { signature_type, session_key })</code>.</li>
+<li>Assert <code>IWorldIDAccount.isAuthorized(world_id_account, SessionKey { signature_type, session_key })</code>.</li>
 </ol>
 <p>The envelope is extensible to 2D nonces, batched transactions, and native paymaster support in follow-on WIPs.</p>
 <h3 id="extensions"><a class="header" href="#extensions">Extensions</a></h3>
 <ul>
 <li><strong>Per-key permissions.</strong> Session keys MAY be extended with <code>(expiry, spendLimit, CallScope[])</code> metadata enforced by the precompile during <code>0x1D</code> validation. This extends <code>SessionKey</code> and the <code>KeyringUpdate</code> signal; the World ID proof continues to bind the full permission set via <strong>(G5)</strong>.</li>
-<li><strong>Session rotation.</strong> Replacing a keyring’s stored <code>sessionId</code> with a newly-created session without re-creating the keyring is deferred.</li>
+<li><strong>Session rotation.</strong> Replacing a World ID Account’s stored <code>sessionId</code> with a newly-created session without re-creating the account is deferred.</li>
 <li><strong>Bundling, 2D nonces, paymasters.</strong> Reserved for follow-on WIPs on the <code>0x1D</code> envelope.</li>
 </ul>
 <h2 id="rationale"><a class="header" href="#rationale">Rationale</a></h2>
-<p><strong>Keyring state as precompile.</strong> The session key set lives in a precompile because <code>0x1D</code> signature validation happens at the protocol level and must read the authorized set natively. The same precompile owns the creation Uniqueness Proof and Session Proof verification paths, ensuring the address-to-keyset map is only mutated under valid World ID 4.0 proofs.</p>
-<p><strong>World ID 4.0 Proofs as authorization.</strong> Keyring creation uses a Uniqueness Proof and provisions a fresh session; subsequent mutations use Session Proofs bound to the stored <code>sessionId</code>, so repeated keyring updates do not rely on reusing the creation action. No “super key” ever needs to be stored on-device. The <code>keyringNonce</code>-indexed creation action (<code>keccak256(WORLD_ID_KEYRING_TAG || keyringNonce)</code>) lets a single WorldID own unlinkably many keyrings, with each keyring’s address pinned for life by $\mathrm{addr}(\nu_k) = \mathrm{bytes20}(\mathrm{keccak256}(\nu_k))$.</p>
-<p><strong>No sybil constraint on keyrings.</strong> Unlinkability across <code>keyringNonce</code> values is a stronger property than one-keyring-per-identity, and sybil resistance at the account layer is not the right locus — it belongs to whatever system consumes keyring addresses (e.g., gas subsidy accounting, application-layer rate limits), which can bind its own per-WorldID limits via independent nullifier domains.</p>
+<p><strong>World ID Account state as precompile.</strong> The session key set lives in a precompile because <code>0x1D</code> signature validation happens at the protocol level and must read the authorized set natively. The same precompile owns the creation Uniqueness Proof and Session Proof verification paths, ensuring the address-to-keyset map is only mutated under valid World ID 4.0 proofs.</p>
+<p><strong>World ID 4.0 Proofs as authorization.</strong> World ID Account creation uses a Uniqueness Proof and provisions a fresh session; subsequent mutations use Session Proofs bound to the stored <code>sessionId</code>, so repeated World ID Account updates do not rely on reusing the creation action. No “super key” ever needs to be stored on-device. The <code>worldIDAccountNonce</code>-indexed creation action (<code>keccak256(WORLD_ID_ACCOUNT_TAG || worldIDAccountNonce)</code>) lets a single WorldID own unlinkably many World ID Accounts, with each account’s address pinned for life by $\mathrm{addr}(\nu_k) = \mathrm{bytes20}(\mathrm{keccak256}(\nu_k))$.</p>
+<p><strong>No sybil constraint on World ID Accounts.</strong> Unlinkability across <code>worldIDAccountNonce</code> values is a stronger property than one-account-per-identity, and sybil resistance at the account layer is not the right locus — it belongs to whatever system consumes World ID Account addresses (e.g., gas subsidy accounting, application-layer rate limits), which can bind its own per-WorldID limits via independent nullifier domains.</p>
 <p><strong>Recovery timelock.</strong> Without a delay, a compromised WorldID authenticator could instantly replace all session keys and drain the account. The timelock gives existing session key holders a window to detect and cancel malicious changes.</p>
 <h2 id="backwards-compatibility"><a class="header" href="#backwards-compatibility">Backwards Compatibility</a></h2>
-<p>This WIP introduces a new account type and transaction type. Existing EOAs and smart contract accounts are unaffected. Standard <a href="https://eips.ethereum.org/EIPS/eip-1559">EIP-1559</a> transactions continue to work for legacy accounts; the <code>0x1D</code> envelope is required only for keyring-authenticated execution.</p>
+<p>This WIP introduces a new account type and transaction type. Existing EOAs and smart contract accounts are unaffected. Standard <a href="https://eips.ethereum.org/EIPS/eip-1559">EIP-1559</a> transactions continue to work for legacy accounts; the <code>0x1D</code> envelope is required only for World-ID-Account-authenticated execution.</p>
 <h3 id="existing-safe-accounts"><a class="header" href="#existing-safe-accounts">Existing Safe Accounts</a></h3>
-<p>Existing <a href="https://safe.global">Safe</a> accounts MAY adopt a WorldID Key Ring as an authenticator without migrating assets or changing the Safe address. The integration reduces to installing a module that gates execution on <code>msg.sender</code> matching a bound Key Ring address; because a <code>0x1D</code> transaction’s sender is the Key Ring itself, no additional signature verification is required at the Safe layer — protocol-level validation against <code>IWorldIDKeyRing.isAuthorized</code> already gates execution upstream.</p>
+<p>Existing <a href="https://safe.global">Safe</a> accounts MAY adopt a World ID Account as an authenticator without migrating assets or changing the Safe address. The integration reduces to installing a module that gates execution on <code>msg.sender</code> matching a bound World ID Account address; because a <code>0x1D</code> transaction’s sender is the World ID Account itself, no additional signature verification is required at the Safe layer — protocol-level validation against <code>IWorldIDAccount.isAuthorized</code> already gates execution upstream.</p>
 <h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
 <h3 id="proof-replay"><a class="header" href="#proof-replay">Proof Replay</a></h3>
 <p>Because neither the creation proof nor later Session Proofs are bound to the submitting party, any party observing an in-flight proof in the mempool can re-submit it. Signal binding <strong>(G5)</strong> prevents substituting a different update, but a griefer can front-run the original submitter. Harm is limited to gas and ordering — the resulting state is identical. Implementations MAY bind proofs to <code>msg.sender</code> or a session-key-signed commitment if stronger guarantees are required.</p>
-<h3 id="keyring-unlinkability"><a class="header" href="#keyring-unlinkability">Keyring Unlinkability</a></h3>
-<p>Two keyrings owned by the same WorldID are unlinkable across distinct creation <code>keyringNonce</code> values by the ZK property of the OPRF proof. Subsequent updates no longer reuse the creation action; they are authorized via Session Proofs bound to the keyring’s stored <code>sessionId</code>. Updates to the same keyring remain linkable through the keyring address and its on-chain state transitions.</p>
+<h3 id="world-id-account-unlinkability"><a class="header" href="#world-id-account-unlinkability">World ID Account Unlinkability</a></h3>
+<p>Two World ID Accounts owned by the same WorldID are unlinkable across distinct creation <code>worldIDAccountNonce</code> values by the ZK property of the OPRF proof. Subsequent updates no longer reuse the creation action; they are authorized via Session Proofs bound to the World ID Account’s stored <code>sessionId</code>. Updates to the same World ID Account remain linkable through the World ID Account address and its on-chain state transitions.</p>
 <h3 id="timelock-attacks"><a class="header" href="#timelock-attacks">Timelock Attacks</a></h3>
 <p>The revocation-then-add attack vector (a Session Proof removes all session keys, then adds malicious ones with no keys left to cancel) MUST be addressed in the timelock policy design. Possible mitigations include timelocking removals or allowing recently-removed keys to cancel pending adds.</p>
 <h3 id="session-key-deanonymization"><a class="header" href="#session-key-deanonymization">Session Key Deanonymization</a></h3>
-<p>A session key that is also used as an EOA or added to another keyring trivially links the keyring to that external identity. Clients SHOULD generate fresh session keys per keyring.</p>
+<p>A session key that is also used as an EOA or added to another World ID Account trivially links the account to that external identity. Clients SHOULD generate fresh session keys per World ID Account.</p>
 <h3 id="signature-key-ambiguity"><a class="header" href="#signature-key-ambiguity">Signature-key Ambiguity</a></h3>
-<p>A keyring may store up to <code>MAX_SESSION_KEYS</code> keys of mixed <code>KeyType</code>, but a <code>0x1D</code> transaction declares a single <code>signature_type</code>. The spec should define whether a key index is included in the envelope or whether the first matching key is authoritative.</p>
+<p>A World ID Account may store up to <code>MAX_SESSION_KEYS</code> keys of mixed <code>KeyType</code>, but a <code>0x1D</code> transaction declares a single <code>signature_type</code>. The spec should define whether a key index is included in the envelope or whether the first matching key is authoritative.</p>
 <h3 id="webauthn-challenge-binding"><a class="header" href="#webauthn-challenge-binding">WebAuthn Challenge Binding</a></h3>
 <p>For <code>signature_type = 0x02</code>, the <code>0x1D</code> <code>signing_hash</code> MUST appear as the <code>challenge</code> field inside <code>client_data_json</code>; otherwise the signature could be replayed from a different WebAuthn context.</p>
 <h3 id="stale-merkle-root"><a class="header" href="#stale-merkle-root">Stale Merkle Root</a></h3>
 <p>The <code>WorldIDRegistry</code> accepts roots within a validity window. An attacker whose credential has been revoked could race to submit <code>create</code> or <code>update</code> against a still-valid but stale root before expiry. The <code>expiresAtMin + minExpirationThreshold ≥ block.timestamp</code> check bounds this window, but its duration is a trust parameter.</p>
 <h3 id="oprf-key-rotation"><a class="header" href="#oprf-key-rotation">OPRF Key Rotation</a></h3>
-<p>If the OPRF key in <code>OprfKeyRegistry[480]</code> is rotated, both creation nullifier derivations and session re-derivations change. Existing $\nu_k$ values become unreachable for new creation proofs, and existing <code>sessionId</code> values can no longer be used to derive valid Session Proofs; the keyring becomes frozen at its current session key set. The protocol MUST define migration semantics across OPRF key epochs.</p>
+<p>If the OPRF key in <code>OprfKeyRegistry[480]</code> is rotated, both creation nullifier derivations and session re-derivations change. Existing $\nu_k$ values become unreachable for new creation proofs, and existing <code>sessionId</code> values can no longer be used to derive valid Session Proofs; the World ID Account becomes frozen at its current session key set. The protocol MUST define migration semantics across OPRF key epochs.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="wip-1002-worldid-gas-accounting"><a href="#wip-1002-worldid-gas-accounting" class="header">WIP-1002: WorldID Gas Accounting</a></h1>
 <h2 id="abstract-2"><a class="header" href="#abstract-2">Abstract</a></h2>
 <p>A <strong>WorldID Gas Accounting</strong> system enables per-credential gas subsidies for verified humans on World Chain. A <a href="https://worldcoin.org/world-id">World ID</a> opens a per-period subsidy record whose <code>nullifier</code> — derived from a <a href="https://github.com/worldcoin/world-id-protocol">World ID 4.0</a> Uniqueness Proof — is the record’s primary key for budget, authorization, and replay state. The initial claim is driven by a multi-item proof request authorized by a World-Chain-operated WIP-101 relying party contract (an <a href="https://eips.ethereum.org/EIPS/eip-1271">ERC-1271</a>-style smart-contract signer); the authenticator lists one <code>RequestItem</code> per credential the WorldID holds and emits one Uniqueness Proof per item, all sharing the same <code>nullifier</code>. Each proof’s signal carries the initial set of authorized accounts permitted to spend the budget. The first on-chain call also binds a World ID <code>sessionId</code> to the <code>nullifier</code> record; subsequent Session Proofs against that <code>sessionId</code> may claim credentials acquired later in the period or add / remove authorized addresses. Budgets are governance-configurable per <code>issuerSchemaId</code>, and subsidy records expire at period boundaries.</p>
-<p>Authorized addresses may be legacy EOAs, smart contract accounts, or <a href="#wip-1001-worldid-native-account-abstraction">WIP-1001</a> <em>World ID Key Rings</em> — the subsidy system is orthogonal to the account type it funds.</p>
+<p>Authorized addresses may be legacy EOAs, smart contract accounts, or <a href="#wip-1001-worldid-native-account-abstraction">WIP-1001</a> <em>World ID Accounts</em> — the subsidy system is orthogonal to the account type it funds.</p>
 <h2 id="motivation-2"><a class="header" href="#motivation-2">Motivation</a></h2>
 <p>World ID holders are currently already being subsidized for their gas usage on World Chain. Natively issued gas subsidies allow for a more fluid fee market, and enshrine gas allowances for World ID holders at the protocol (or builder) level rather than relying on off-chain paymasters.</p>
 <p>Per-credential budgeting lets subsidy weight reflect credential strength — a Proof-of-Human (Orb) credential carries more weight than a Phone credential, and governance can tune each independently via <code>issuerSchemaId</code>.</p>
@@ -1733,7 +1733,7 @@ with <code>session_key</code>).</li>
 }
 </code></pre>
 <h4 id="authorization-map"><a class="header" href="#authorization-map">Authorization Map</a></h4>
-<p>Reverse index from authorized account address to the set of <code>nullifier</code> records the address may draw budget from. Populated on <code>claimSubsidy</code> from the <code>addAddresses</code> list; mutated throughout the period by <code>updateAddresses</code>. Authorized addresses MAY be EOAs, smart contract accounts, or <a href="#wip-1001-worldid-native-account-abstraction">WIP-1001</a> <em>World ID Key Rings</em>.</p>
+<p>Reverse index from authorized account address to the set of <code>nullifier</code> records the address may draw budget from. Populated on <code>claimSubsidy</code> from the <code>addAddresses</code> list; mutated throughout the period by <code>updateAddresses</code>. Authorized addresses MAY be EOAs, smart contract accounts, or <a href="#wip-1001-worldid-native-account-abstraction">WIP-1001</a> <em>World ID Accounts</em>.</p>
 <h4 id="gas-budget-map"><a class="header" href="#gas-budget-map">Gas Budget Map</a></h4>
 <p>Maps <code>nullifier</code> values to the per-period subsidy record — remaining budget in Gwei, the <code>sessionId</code> used to verify subsequent Session Proofs, the bitmap of claimed <code>issuerSchemaId</code> values, the authorized-address set, and a monotonic update nonce incremented on each successful <code>updateAddresses</code> (prevents Session Proof replay). Budget accumulates as the initial multi-item <code>claimSubsidy</code> and later <code>claimAdditionalCredential</code> calls add credentials. A helper lookup by authorized address MAY resolve the budget through the same deterministic nullifier-selection rule used during transaction execution.</p>
 <h4 id="claimed-credentials-map"><a class="header" href="#claimed-credentials-map">Claimed-Credentials Map</a></h4>
@@ -1862,7 +1862,7 @@ struct UpdateAddressesSignal {
 <p>For an incoming transaction:</p>
 <ol>
 <li>The protocol (or builder) looks up whether the sender address has an associated subsidy <code>nullifier</code> in the authorization map.</li>
-<li>If the address maps to more than one <code>nullifier</code>, a deterministic rule selects which record’s budget to use. A <a href="#wip-1001-worldid-native-account-abstraction">WIP-1001</a> <code>0x1D</code> transaction MAY extend its envelope with an OPTIONAL <code>gas_nullifier</code> field; if present and the <code>keyring</code> is authorized under that <code>nullifier</code>, the declared budget is consumed.</li>
+<li>If the address maps to more than one <code>nullifier</code>, a deterministic rule selects which record’s budget to use. A <a href="#wip-1001-worldid-native-account-abstraction">WIP-1001</a> <code>0x1D</code> transaction MAY extend its envelope with an OPTIONAL <code>gas_nullifier</code> field; if present and the <code>world_id_account</code> is authorized under that <code>nullifier</code>, the declared budget is consumed.</li>
 <li>The budget is updated based on <code>gasUsed * baseFee</code> of the transaction.</li>
 </ol>
 <p><code>getBudget(address)</code> SHOULD apply the same deterministic nullifier-selection rule so off-chain callers observe the same effective budget that transaction execution would consume.</p>
@@ -1884,9 +1884,9 @@ struct UpdateAddressesSignal {
 <p><strong>Per-credential budgets.</strong> Different credentials represent different levels of verification. Proof-of-Human from an Orb carries more weight than a phone credential. Allowing governance to configure budget amounts per <code>issuerSchemaId</code> enables fine-grained subsidy policy.</p>
 <p><strong>Signal binding against frontrunning.</strong> Each method binds its non-ZK-committed call parameters into <code>signalHash</code>. The contract recomputes the expected <code>signalHash</code> rather than accepting it from the caller. Mirrors the <a href="#wip-1001-worldid-native-account-abstraction">WIP-1001</a> signal-binding pattern.</p>
 <p><strong>Periodic refresh with early submission.</strong> Fixed periods with expiring subsidies provide a clean budget lifecycle. Allowing early refresh prevents a thundering herd at period boundaries.</p>
-<p><strong>Orthogonality to Key Rings.</strong> <a href="#wip-1001-worldid-native-account-abstraction">WIP-1001</a> <em>World ID Key Rings</em> are authorized here like any other address — no special coupling is required. Legacy EOAs can opt in to gas subsidies without migrating account types, and Key Rings can sign <code>0x1D</code> transactions that either do or do not consume subsidized gas.</p>
+<p><strong>Orthogonality to World ID Accounts.</strong> <a href="#wip-1001-worldid-native-account-abstraction">WIP-1001</a> <em>World ID Accounts</em> are authorized here like any other address — no special coupling is required. Legacy EOAs can opt in to gas subsidies without migrating account types, and World ID Accounts can sign <code>0x1D</code> transactions that either do or do not consume subsidized gas.</p>
 <h2 id="backwards-compatibility-1"><a class="header" href="#backwards-compatibility-1">Backwards Compatibility</a></h2>
-<p>This WIP introduces a new protocol/builder-level accounting system. It does not modify the semantics of any existing transaction type. Any account type — legacy EOA, smart contract, or <a href="#wip-1001-worldid-native-account-abstraction">WIP-1001</a> Key Ring — may be authorized under a subsidy <code>nullifier</code> and thereby consume subsidized gas. Whether <a href="https://eips.ethereum.org/EIPS/eip-1559">EIP-1559</a> transactions from authorized accounts can consume gas budgets is an open question (see optional requirements).</p>
+<p>This WIP introduces a new protocol/builder-level accounting system. It does not modify the semantics of any existing transaction type. Any account type — legacy EOA, smart contract, or <a href="#wip-1001-worldid-native-account-abstraction">WIP-1001</a> World ID Account — may be authorized under a subsidy <code>nullifier</code> and thereby consume subsidized gas. Whether <a href="https://eips.ethereum.org/EIPS/eip-1559">EIP-1559</a> transactions from authorized accounts can consume gas budgets is an open question (see optional requirements).</p>
 <h2 id="test-cases"><a class="header" href="#test-cases">Test Cases</a></h2>
 <blockquote>
 <p>TODO: Test cases to be defined before moving out of Draft status.</p>
