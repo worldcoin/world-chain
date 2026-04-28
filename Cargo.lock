@@ -13362,6 +13362,7 @@ dependencies = [
  "op-alloy-network",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
+ "op-revm",
  "reqwest 0.12.28",
  "reth-chain-state",
  "reth-chainspec",

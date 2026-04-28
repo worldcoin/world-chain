@@ -1,5 +1,5 @@
 use alloy_consensus::BlockHeader;
-use alloy_op_evm::OpEvmFactory;
+use alloy_op_evm::{OpEvmFactory, OpTx};
 use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_rpc_types::BlockNumberOrTag;
 use jsonrpsee::{
@@ -7,7 +7,8 @@ use jsonrpsee::{
     proc_macros::rpc,
 };
 use lru::LruCache;
-use reth_evm::{ConfigureEvm, Evm as RethEvm, EvmFactory, op_revm::OpTransaction};
+use op_revm::OpTransaction;
+use reth_evm::{ConfigureEvm, Evm as RethEvm, EvmFactory};
 use reth_optimism_evm::OpEvmConfig;
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderFactory};
 use reth_revm::{State, database::StateProviderDatabase};
@@ -430,7 +431,7 @@ where
             None => MAX_SIMULATION_GAS,
         };
 
-        let tx = OpTransaction {
+        let tx = OpTx(OpTransaction {
             base: TxEnv {
                 caller: request.entry_point,
                 kind: TxKind::Call(request.sender),
@@ -441,7 +442,7 @@ where
                 ..Default::default()
             },
             ..Default::default()
-        };
+        });
 
         // 7. Execute
         let result_and_state =
@@ -449,20 +450,20 @@ where
 
         // 8. Build the response
         let (status, revert_reason, gas_used, logs) = match &result_and_state.result {
-            ExecutionResult::Success { gas_used, logs, .. } => {
-                (SimulationStatus::Success, None, *gas_used, logs.clone())
+            ExecutionResult::Success { gas, logs, .. } => {
+                (SimulationStatus::Success, None, gas.used(), logs.clone())
             }
-            ExecutionResult::Revert { gas_used, output } => {
+            ExecutionResult::Revert { gas, logs, output } => {
                 let reason = decode_revert_reason(output);
-                (SimulationStatus::Revert, Some(reason), *gas_used, vec![])
+                (SimulationStatus::Revert, Some(reason), gas.used(), logs.clone())
             }
-            ExecutionResult::Halt { gas_used, reason } => {
+            ExecutionResult::Halt { gas, logs, reason } => {
                 let reason_str = format!("{reason:?}");
                 (
                     SimulationStatus::Revert,
                     Some(reason_str),
-                    *gas_used,
-                    vec![],
+                    gas.used(),
+                    logs.clone(),
                 )
             }
         };
@@ -811,129 +812,80 @@ const NAME_SELECTOR: [u8; 4] = [0x06, 0xfd, 0xde, 0x03]; // name()
 const SYMBOL_SELECTOR: [u8; 4] = [0x95, 0xd8, 0x9b, 0x41]; // symbol()
 const DECIMALS_SELECTOR: [u8; 4] = [0x31, 0x3c, 0xe5, 0x67]; // decimals()
 
-/// Resolve on-chain metadata (name, symbol, decimals) for a token contract.
-/// Uses the pre-simulation state via fresh EVM calls.
-fn resolve_metadata_with_evm<Client>(
+/// Resolve metadata (name, symbol, decimals) for every token in `tokens`
+/// against a single shared EVM instance and one state provider.
+///
+/// Each token previously paid for 3 separate state-provider open + EVM build
+/// cycles; this batches all 3·N calls onto the same warm state cache.
+fn run_metadata_calls<Client>(
     client: &Client,
     evm_config: &OpEvmConfig,
     header: &alloy_consensus::Header,
     block_id: alloy_rpc_types::BlockId,
-    token: Address,
-    asset_type: AssetType,
-) -> AssetInfo
+    tokens: &[(Address, AssetType)],
+) -> Vec<(Address, AssetInfo)>
 where
     Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
 {
-    let name = evm_call_string(client, evm_config, header, block_id, token, &NAME_SELECTOR)
-        .unwrap_or_default();
-    let symbol = evm_call_string(
-        client,
-        evm_config,
-        header,
-        block_id,
-        token,
-        &SYMBOL_SELECTOR,
-    )
-    .unwrap_or_default();
-    let decimals = evm_call_u8(
-        client,
-        evm_config,
-        header,
-        block_id,
-        token,
-        &DECIMALS_SELECTOR,
-    )
-    .unwrap_or(0);
-
-    AssetInfo {
-        address: Some(token),
-        symbol,
-        name,
-        decimals,
-        asset_type,
-    }
-}
-
-/// Execute a view call that returns a string (ABI-encoded).
-fn evm_call_string<Client>(
-    client: &Client,
-    evm_config: &OpEvmConfig,
-    header: &alloy_consensus::Header,
-    block_id: alloy_rpc_types::BlockId,
-    to: Address,
-    selector: &[u8; 4],
-) -> Option<String>
-where
-    Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
-{
-    let output = evm_static_call(client, evm_config, header, block_id, to, selector)?;
-    decode_abi_string(&output)
-}
-
-/// Execute a view call that returns a uint8.
-fn evm_call_u8<Client>(
-    client: &Client,
-    evm_config: &OpEvmConfig,
-    header: &alloy_consensus::Header,
-    block_id: alloy_rpc_types::BlockId,
-    to: Address,
-    selector: &[u8; 4],
-) -> Option<u8>
-where
-    Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
-{
-    let output = evm_static_call(client, evm_config, header, block_id, to, selector)?;
-    if output.len() >= 32 {
-        Some(output[31])
-    } else {
-        None
-    }
-}
-
-/// Low-level: execute a simple static call and return raw output bytes.
-fn evm_static_call<Client>(
-    client: &Client,
-    evm_config: &OpEvmConfig,
-    header: &alloy_consensus::Header,
-    block_id: alloy_rpc_types::BlockId,
-    to: Address,
-    selector: &[u8; 4],
-) -> Option<Bytes>
-where
-    Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
-{
-    let mut evm_env = evm_config.evm_env(header).ok()?;
+    let Ok(mut evm_env) = evm_config.evm_env(header) else {
+        return Vec::new();
+    };
     evm_env.cfg_env.disable_block_gas_limit = true;
     evm_env.cfg_env.disable_eip3607 = true;
     evm_env.cfg_env.disable_base_fee = true;
 
-    let state_provider = client.state_by_block_id(block_id).ok()?;
+    let Ok(state_provider) = client.state_by_block_id(block_id) else {
+        return Vec::new();
+    };
     let db = StateProviderDatabase::new(state_provider.as_ref());
     let mut state = State::builder().with_database(db).build();
-
     let mut evm = OpEvmFactory::default().create_evm(&mut state, evm_env);
 
-    let tx = OpTransaction {
-        base: TxEnv {
-            caller: Address::ZERO,
-            kind: TxKind::Call(to),
-            data: Bytes::copy_from_slice(selector),
-            value: U256::ZERO,
-            gas_limit: 100_000,
-            gas_price: 0,
+    let mut call_view = |to: Address, selector: &[u8; 4]| -> Option<Bytes> {
+        let tx = OpTx(OpTransaction {
+            base: TxEnv {
+                caller: Address::ZERO,
+                kind: TxKind::Call(to),
+                data: Bytes::copy_from_slice(selector),
+                value: U256::ZERO,
+                gas_limit: 100_000,
+                gas_price: 0,
+                ..Default::default()
+            },
             ..Default::default()
-        },
-        ..Default::default()
+        });
+        match RethEvm::transact(&mut evm, tx).ok()?.result {
+            ExecutionResult::Success {
+                output: Output::Call(data),
+                ..
+            } => Some(data),
+            _ => None,
+        }
     };
 
-    let result = RethEvm::transact(&mut evm, tx).ok()?;
-    match result.result {
-        ExecutionResult::Success {
-            output: Output::Call(data),
-            ..
-        } => Some(data),
-        _ => None,
+    let mut out = Vec::with_capacity(tokens.len());
+    for (addr, asset_type) in tokens {
+        let name = call_view(*addr, &NAME_SELECTOR)
+            .and_then(|b| decode_abi_string(&b))
+            .unwrap_or_default();
+        let symbol = call_view(*addr, &SYMBOL_SELECTOR)
+            .and_then(|b| decode_abi_string(&b))
+            .unwrap_or_default();
+        let decimals = call_view(*addr, &DECIMALS_SELECTOR)
+            .and_then(|b| b.get(31).copied())
+            .unwrap_or(0);
+        out.push((
+            *addr,
+            AssetInfo {
+                address: Some(*addr),
+                symbol,
+                name,
+                decimals,
+                asset_type: *asset_type,
+            },
+        ));
     }
+    out
 }
 
 /// Decode an ABI-encoded string from raw bytes.
@@ -994,13 +946,14 @@ fn resolve_all_metadata<Client>(
         }
     }
 
-    // Resolve missing metadata via EVM calls and insert into cache
+    // Resolve missing metadata via a single shared EVM instance — the lock is
+    // intentionally not held during the EVM/disk work so concurrent requests
+    // can read other entries in parallel.
     if !to_resolve.is_empty() {
+        let resolved = run_metadata_calls(client, evm_config, header, block_id, &to_resolve);
         let mut cache_guard = cache.lock().unwrap();
-        for (addr, asset_type) in &to_resolve {
-            let info =
-                resolve_metadata_with_evm(client, evm_config, header, block_id, *addr, *asset_type);
-            cache_guard.put(*addr, info);
+        for (addr, info) in resolved {
+            cache_guard.put(addr, info);
         }
     }
 
