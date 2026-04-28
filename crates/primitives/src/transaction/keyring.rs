@@ -117,7 +117,10 @@ mod mock {
 
         /// Authorizes `key` on the Key Ring of `world_id_account`. Idempotent.
         pub fn authorize(&mut self, world_id_account: Address, key: SessionKey) {
-            self.authorized.entry(world_id_account).or_default().insert(key);
+            self.authorized
+                .entry(world_id_account)
+                .or_default()
+                .insert(key);
         }
 
         /// Revokes `key` from the Key Ring of `world_id_account`. Returns `true`
