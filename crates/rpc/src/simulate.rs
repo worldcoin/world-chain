@@ -159,22 +159,6 @@ pub struct SimulateUnsignedUserOpResult {
 // Simulation inspector — captures call trace and native ETH transfers
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Shared state captured by the simulation inspector.
-#[derive(Debug, Default)]
-struct InspectorState {
-    /// Full call stack trace — every CALL/STATICCALL/DELEGATECALL at every depth.
-    /// Includes reverted calls so debug consumers can see what was attempted.
-    traces: Vec<RawTrace>,
-    /// Native ETH transfers from successfully completed call frames only.
-    /// Reverted/halted frames don't actually move ETH, so their tentative
-    /// entries in `pending_frames` are dropped instead of being committed here.
-    native_transfers: Vec<NativeTransfer>,
-    /// One entry per active call frame, holding tentative native transfers
-    /// recorded on entry. On `call_end` the frame is popped: committed (or
-    /// merged into the parent frame) on success, dropped on revert/halt.
-    pending_frames: Vec<Vec<NativeTransfer>>,
-}
-
 #[derive(Debug)]
 struct RawTrace {
     from: Address,
@@ -190,45 +174,43 @@ struct NativeTransfer {
     value: U256,
 }
 
-/// Captures top-level calls made by the smart account and native ETH transfers.
+/// Captures the call stack and native ETH transfers of a single simulation.
 ///
-/// Uses `Arc<Mutex>` so the caller can read captured data after the EVM consumes
-/// the inspector.
-#[derive(Debug, Clone, Default)]
+/// Single-threaded by construction — the EVM drives it from one call site,
+/// and the caller recovers it via `evm.components_mut()` once `transact`
+/// returns. No interior mutability needed.
+#[derive(Debug, Default)]
 pub struct SimulationInspector {
-    state: Arc<Mutex<InspectorState>>,
+    /// Full call stack trace — every CALL/STATICCALL/DELEGATECALL at every depth.
+    /// Includes reverted calls so debug consumers can see what was attempted.
+    traces: Vec<RawTrace>,
+    /// Native ETH transfers from successfully completed call frames only.
+    /// Reverted/halted frames don't actually move ETH, so their tentative
+    /// entries in `pending_frames` are dropped instead of being committed here.
+    native_transfers: Vec<NativeTransfer>,
+    /// One entry per active call frame, holding tentative native transfers
+    /// recorded on entry. On `call_end` the frame is popped: committed (or
+    /// merged into the parent frame) on success, dropped on revert/halt.
+    pending_frames: Vec<Vec<NativeTransfer>>,
 }
 
-/// Handle returned to the caller for reading captured data after execution.
-#[derive(Debug, Clone)]
-pub struct InspectorHandle {
-    state: Arc<Mutex<InspectorState>>,
-}
-
-impl InspectorHandle {
-    pub fn take_trace_entries(&self) -> Vec<TraceEntry> {
-        let state = self.state.lock().unwrap();
-        state
-            .traces
-            .iter()
-            .map(|t| {
-                let sel = t.selector;
-                TraceEntry {
-                    from: t.from,
-                    to: t.to,
-                    method: selector_to_name(sel).map(str::to_string),
-                    selector: format!("0x{}", hex::encode(sel)),
-                    value: format!("{:#x}", t.value),
-                }
+impl SimulationInspector {
+    pub fn take_trace_entries(&mut self) -> Vec<TraceEntry> {
+        std::mem::take(&mut self.traces)
+            .into_iter()
+            .map(|t| TraceEntry {
+                from: t.from,
+                to: t.to,
+                method: selector_to_name(t.selector).map(str::to_string),
+                selector: format!("0x{}", hex::encode(t.selector)),
+                value: format!("{:#x}", t.value),
             })
             .collect()
     }
 
-    pub fn take_native_asset_changes(&self) -> Vec<AssetChange> {
-        let state = self.state.lock().unwrap();
-        state
-            .native_transfers
-            .iter()
+    pub fn take_native_asset_changes(&mut self) -> Vec<AssetChange> {
+        std::mem::take(&mut self.native_transfers)
+            .into_iter()
             .map(|t| AssetChange {
                 change_type: AssetType::Native,
                 from: t.from,
@@ -247,31 +229,35 @@ impl InspectorHandle {
     }
 }
 
-pub fn new_simulation_inspector() -> (SimulationInspector, InspectorHandle) {
-    let state = Arc::new(Mutex::new(InspectorState::default()));
-    (
-        SimulationInspector {
-            state: state.clone(),
-        },
-        InspectorHandle { state },
-    )
-}
+impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspector {
+    fn call(&mut self, context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
+        use revm::context_interface::LocalContextTr;
 
-impl<CTX> Inspector<CTX> for SimulationInspector {
-    fn call(&mut self, _context: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
-        let mut state = self.state.lock().unwrap();
-
-        // Record every call at every depth for a full stack trace
+        // Record every call at every depth for a full stack trace.
+        // `CallInput::SharedBuffer` is a range into the EVM shared-memory
+        // buffer (an internal optimization that avoids cloning calldata for
+        // child calls). Without explicit handling those calls would record a
+        // null selector — making methods like `addOwnerWithThreshold`
+        // invisible to the backend's forbidden-method detection.
+        // We resolve only the first 4 bytes; the full calldata isn't needed.
         let selector = match &inputs.input {
             revm::interpreter::CallInput::Bytes(b) if b.len() >= 4 => {
                 let mut sel = [0u8; 4];
                 sel.copy_from_slice(&b[..4]);
                 sel
             }
+            revm::interpreter::CallInput::SharedBuffer(range) if range.len() >= 4 => {
+                let head = range.start..range.start + 4;
+                let mut sel = [0u8; 4];
+                if let Some(slice) = context.local().shared_memory_buffer_slice(head) {
+                    sel.copy_from_slice(&slice);
+                }
+                sel
+            }
             _ => [0u8; 4],
         };
         let value = inputs.value.transfer().unwrap_or(U256::ZERO);
-        state.traces.push(RawTrace {
+        self.traces.push(RawTrace {
             from: inputs.caller,
             to: inputs.target_address,
             selector,
@@ -291,14 +277,13 @@ impl<CTX> Inspector<CTX> for SimulationInspector {
                 value,
             });
         }
-        state.pending_frames.push(frame);
+        self.pending_frames.push(frame);
 
         None
     }
 
     fn call_end(&mut self, _context: &mut CTX, _inputs: &CallInputs, outcome: &mut CallOutcome) {
-        let mut state = self.state.lock().unwrap();
-        let Some(frame) = state.pending_frames.pop() else {
+        let Some(frame) = self.pending_frames.pop() else {
             return;
         };
         if !outcome.instruction_result().is_ok() {
@@ -307,10 +292,10 @@ impl<CTX> Inspector<CTX> for SimulationInspector {
         }
         // Successful frame: bubble transfers up to the parent's tentative list,
         // or commit them as final if this was the outermost frame.
-        if let Some(parent) = state.pending_frames.last_mut() {
+        if let Some(parent) = self.pending_frames.last_mut() {
             parent.extend(frame);
         } else {
-            state.native_transfers.extend(frame);
+            self.native_transfers.extend(frame);
         }
     }
 }
@@ -500,9 +485,11 @@ where
         let mut state = State::builder().with_database(db).build();
 
         // 5. Create the Optimism-aware EVM with our simulation inspector
-        let (inspector, inspector_handle) = new_simulation_inspector();
-        let mut evm =
-            OpEvmFactory::default().create_evm_with_inspector(&mut state, evm_env, inspector);
+        let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+            &mut state,
+            evm_env,
+            SimulationInspector::default(),
+        );
 
         // 6. Build the transaction environment
         //    from = entry_point → msg.sender inside the smart account is the EntryPoint
@@ -581,10 +568,11 @@ where
         })?;
         let mut exposure_changes = parse_exposure_changes(&logs);
 
-        // 10. Extract trace and native transfers from inspector
-        let trace = inspector_handle.take_trace_entries();
-        let native_changes = inspector_handle.take_native_asset_changes();
-        asset_changes.extend(native_changes);
+        // 10. Extract trace and native transfers from the inspector. The EVM
+        //     owns it; recover a `&mut` via `components_mut()` and drain.
+        let (_, inspector, _) = evm.components_mut();
+        let trace = inspector.take_trace_entries();
+        asset_changes.extend(inspector.take_native_asset_changes());
 
         // 11. Resolve on-chain token metadata (name, symbol, decimals) — cached
         resolve_all_metadata(

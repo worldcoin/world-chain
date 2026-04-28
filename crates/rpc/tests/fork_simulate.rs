@@ -25,7 +25,7 @@ use revm_database::{AlloyDB, CacheDB, WrapDatabaseAsync};
 use revm_primitives::TxKind;
 
 use world_chain_rpc::simulate::{
-    AssetType, decode_revert_reason, new_simulation_inspector, parse_asset_changes,
+    AssetType, SimulationInspector, decode_revert_reason, parse_asset_changes,
     parse_exposure_changes, selector_to_name,
 };
 
@@ -356,8 +356,11 @@ async fn test_native_eth_transfer_inspector() {
         },
     );
 
-    let (inspector, handle) = new_simulation_inspector();
-    let mut evm = OpEvmFactory::default().create_evm_with_inspector(&mut db, evm_env(), inspector);
+    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+        &mut db,
+        evm_env(),
+        SimulationInspector::default(),
+    );
 
     let result = RethEvm::transact(
         &mut evm,
@@ -379,7 +382,8 @@ async fn test_native_eth_transfer_inspector() {
 
     assert!(matches!(result.result, ExecutionResult::Success { .. }));
 
-    let native = handle.take_native_asset_changes();
+    let (_, inspector, _) = evm.components_mut();
+    let native = inspector.take_native_asset_changes();
     assert_eq!(native.len(), 1);
     assert_eq!(native[0].change_type, AssetType::Native);
     assert_eq!(native[0].from, sender);
@@ -448,8 +452,11 @@ async fn test_trace_captures_calls() {
         },
     );
 
-    let (inspector, handle) = new_simulation_inspector();
-    let mut evm = OpEvmFactory::default().create_evm_with_inspector(&mut db, evm_env(), inspector);
+    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+        &mut db,
+        evm_env(),
+        SimulationInspector::default(),
+    );
 
     let result = RethEvm::transact(
         &mut evm,
@@ -475,7 +482,8 @@ async fn test_trace_captures_calls() {
 
     assert!(matches!(result.result, ExecutionResult::Success { .. }));
 
-    let trace = handle.take_trace_entries();
+    let (_, inspector, _) = evm.components_mut();
+    let trace = inspector.take_trace_entries();
     for entry in &trace {
         assert!(entry.selector.starts_with("0x"));
     }
@@ -575,8 +583,11 @@ async fn test_trace_detects_malicious_safe_call() {
     // selector is correctly decoded. Even though the call will revert
     // (not authorized), the inspector still captures it.
 
-    let (inspector, handle) = new_simulation_inspector();
-    let mut evm = OpEvmFactory::default().create_evm_with_inspector(&mut db, evm_env(), inspector);
+    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+        &mut db,
+        evm_env(),
+        SimulationInspector::default(),
+    );
 
     // Direct call — this is depth 0, so internal calls safe makes are depth 1.
     let _result = RethEvm::transact(
@@ -616,7 +627,8 @@ async fn test_trace_detects_malicious_safe_call() {
         "setup",
     ];
 
-    let trace = handle.take_trace_entries();
+    let (_, inspector, _) = evm.components_mut();
+    let trace = inspector.take_trace_entries();
     // Log what the trace captured (informational)
     for entry in &trace {
         println!(
