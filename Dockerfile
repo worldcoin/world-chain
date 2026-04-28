@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.10
-FROM public.ecr.aws/docker/library/rust:1.92.0-bookworm AS base
+FROM public.ecr.aws/docker/library/rust:1.95.0-bookworm AS base
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
   --mount=type=cache,target=/usr/local/cargo/git \
