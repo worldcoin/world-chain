@@ -356,9 +356,32 @@ where
     Client: BlockReaderIdExt
         + StateProviderFactory
         + HeaderProvider<Header = alloy_consensus::Header>
+        + Clone
+        + Send
+        + Sync
         + 'static,
 {
     async fn simulate_unsigned_user_op(
+        &self,
+        request: SimulateUnsignedUserOpRequest,
+    ) -> RpcResult<SimulateUnsignedUserOpResult> {
+        // The simulation does multiple synchronous state-provider reads and a
+        // full EVM execution; running it directly on the Tokio reactor thread
+        // would block other RPC tasks. Move it to the blocking pool.
+        let this = self.clone();
+        tokio::task::spawn_blocking(move || this.simulate_blocking(request))
+            .await
+            .map_err(|e| internal_err(format!("simulation task panicked: {e}")))?
+    }
+}
+
+impl<Client> WorldChainSimulate<Client>
+where
+    Client: BlockReaderIdExt
+        + StateProviderFactory
+        + HeaderProvider<Header = alloy_consensus::Header>,
+{
+    fn simulate_blocking(
         &self,
         request: SimulateUnsignedUserOpRequest,
     ) -> RpcResult<SimulateUnsignedUserOpResult> {
@@ -529,7 +552,15 @@ const APPROVAL_FOR_ALL_TOPIC: B256 =
 // Log parsing — asset changes
 // ═══════════════════════════════════════════════════════════════════════════════
 
-pub fn parse_asset_changes(logs: &[alloy_primitives::Log]) -> Vec<AssetChange> {
+/// Maximum number of (id, value) pairs accepted in a single ERC-1155 TransferBatch log.
+///
+/// Bounded to prevent adversarially crafted logs from forcing huge allocations
+/// in `decode_batch_transfer_data`.
+pub const MAX_BATCH_TRANSFERS: usize = 1000;
+
+pub fn parse_asset_changes(
+    logs: &[alloy_primitives::Log],
+) -> Result<Vec<AssetChange>, &'static str> {
     let mut changes = Vec::new();
 
     for log in logs {
