@@ -160,9 +160,16 @@ pub struct SimulateUnsignedUserOpResult {
 #[derive(Debug, Default)]
 struct InspectorState {
     /// Full call stack trace — every CALL/STATICCALL/DELEGATECALL at every depth.
+    /// Includes reverted calls so debug consumers can see what was attempted.
     traces: Vec<RawTrace>,
-    /// Native ETH transfers (calls with value > 0 at any depth).
+    /// Native ETH transfers from successfully completed call frames only.
+    /// Reverted/halted frames don't actually move ETH, so their tentative
+    /// entries in `pending_frames` are dropped instead of being committed here.
     native_transfers: Vec<NativeTransfer>,
+    /// One entry per active call frame, holding tentative native transfers
+    /// recorded on entry. On `call_end` the frame is popped: committed (or
+    /// merged into the parent frame) on success, dropped on revert/halt.
+    pending_frames: Vec<Vec<NativeTransfer>>,
 }
 
 #[derive(Debug)]
@@ -268,18 +275,45 @@ impl<CTX> Inspector<CTX> for SimulationInspector {
             value,
         });
 
-        // Track native ETH transfers at any depth
+        // Open a new frame for tentative native transfers. If this call frame
+        // reverts, `call_end` will drop the frame; only successful frames
+        // commit their transfers.
+        let mut frame = Vec::new();
         if let Some(value) = inputs.value.transfer()
             && value > U256::ZERO
         {
-            state.native_transfers.push(NativeTransfer {
+            frame.push(NativeTransfer {
                 from: inputs.caller,
                 to: inputs.target_address,
                 value,
             });
         }
+        state.pending_frames.push(frame);
 
         None
+    }
+
+    fn call_end(
+        &mut self,
+        _context: &mut CTX,
+        _inputs: &CallInputs,
+        outcome: &mut CallOutcome,
+    ) {
+        let mut state = self.state.lock().unwrap();
+        let Some(frame) = state.pending_frames.pop() else {
+            return;
+        };
+        if !outcome.instruction_result().is_ok() {
+            // Frame reverted/halted — drop its tentative transfers.
+            return;
+        }
+        // Successful frame: bubble transfers up to the parent's tentative list,
+        // or commit them as final if this was the outermost frame.
+        if let Some(parent) = state.pending_frames.last_mut() {
+            parent.extend(frame);
+        } else {
+            state.native_transfers.extend(frame);
+        }
     }
 }
 
