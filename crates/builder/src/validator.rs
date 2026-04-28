@@ -2,7 +2,7 @@ use alloy_consensus::{BlockHeader, Header, Transaction};
 use alloy_eips::Decodable2718;
 use op_revm::{OpHaltReason, OpSpecId};
 use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader, SignedTransaction};
-use std::{sync::Arc, time::Instant};
+use std::{io::Error, marker::PhantomData, sync::Arc, time::Instant};
 
 use alloy_primitives::{B256, Bytes, U256};
 
@@ -51,7 +51,6 @@ use crate::{
     database::{
         bal_builder_db::{BalBuilderDb, NoOpCommitDB},
         bundle_db::BundleDb,
-        shared_state_provider_db::SharedStateProviderDatabase,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
     executor::FlashblocksBlockBuilder,
@@ -77,7 +76,7 @@ pub struct FlashblocksBlockValidator {
 impl FlashblocksBlockValidator {
     pub fn validate_flashblock_with_state(
         &self,
-        client: impl StateProviderFactory + Clone,
+        client: impl StateProviderFactory + Clone + Sync,
         diff: ExecutionPayloadFlashblockDeltaV1,
         parent: &SealedHeader<Header>,
         payload_id: PayloadId,
@@ -306,7 +305,7 @@ impl FlashblocksBlockValidator {
 
     pub fn validate_flashblock_parallel(
         &self,
-        client: impl StateProviderFactory + Clone,
+        client: impl StateProviderFactory + Clone + Sync,
         diff: ExecutionPayloadFlashblockDeltaV1,
         parent: &SealedHeader<Header>,
         payload_id: PayloadId,
@@ -322,10 +321,9 @@ impl FlashblocksBlockValidator {
             .map_err(BalExecutorError::from)?;
 
         // 1. Setup database layers for the base evm/executor
-        let state_provider_ref = client
+        let state_provider = client
             .state_by_block_hash(parent.hash())
             .map_err(BalExecutorError::other)?;
-        let state_provider_database = SharedStateProviderDatabase::new(state_provider_ref);
         let block_access_index = access_list.min_tx_index;
 
         // 2. Create channel for state root computation
@@ -333,18 +331,18 @@ impl FlashblocksBlockValidator {
 
         let mut bundle_state = committed_state.bundle.clone();
 
-        let bundle_database =
-            BundleDb::new(state_provider_database.clone(), bundle_state.clone().into());
-
-        let temporal_db_factory = TemporalDbFactory::new(bundle_database, &access_list);
-        let temporal_db = temporal_db_factory.db(block_access_index as u64);
+        let fallback_bundle_state: Arc<BundleState> = bundle_state.clone().into();
 
         // The cumulative bundle for state root computation contains all state changes
         // from prior flashblocks plus the current access list.
+        let state_provider_database = StateProviderDatabase::new(state_provider.as_ref());
         access_list
             .extend_bundle(&mut bundle_state, &state_provider_database)
             .map_err(BalExecutorError::other)?;
 
+        let bundle_database = BundleDb::new(state_provider_database, fallback_bundle_state.clone());
+        let temporal_db_factory = TemporalDbFactory::new(&bundle_database, &access_list);
+        let temporal_db = temporal_db_factory.db(bundle_database, block_access_index as u64);
         let mut noop_state = NoOpCommitDB::new(temporal_db);
 
         let mut database = BalBuilderDb::new(&mut noop_state);
@@ -380,6 +378,7 @@ impl FlashblocksBlockValidator {
             parent,
             executor,
             bundle_state.clone().into(),
+            fallback_bundle_state,
             committed_state.transactions_iter().cloned().collect(),
             self.chain_spec.clone(),
             &temporal_db_factory,
@@ -400,8 +399,11 @@ impl FlashblocksBlockValidator {
             .map_err(BalExecutorError::other)?;
 
         // 4. Compute the block using BAL in parallel
-        let (outcome, fees): (BlockBuilderOutcome<OpPrimitives>, u128) =
-            validator.execute_block(finish_state_provider.as_ref(), executor_transactions)?;
+        let (outcome, fees): (BlockBuilderOutcome<OpPrimitives>, u128) = validator.execute_block(
+            client.clone(),
+            finish_state_provider.as_ref(),
+            executor_transactions,
+        )?;
 
         let computed_access_list = access_list_receiver
             .recv()
@@ -546,13 +548,15 @@ pub struct BalBlockValidator<'a, DbRef: DatabaseRef + 'a, R: OpReceiptBuilder, E
         OpPrimitives,
     >,
     pub bundle_state: Arc<BundleState>,
+    pub fallback_bundle_state: Arc<BundleState>,
     pub access_list_sender: crossbeam_channel::Sender<FlashblockAccessList>,
     pub state_root_receiver:
         crossbeam_channel::Receiver<Result<StateRootResult, BlockExecutionError>>,
-    pub temporal_db_factory: &'a TemporalDbFactory<DbRef>,
+    pub temporal_db_factory: &'a TemporalDbFactory,
     pub evm_env: EvmEnv<OpSpecId>,
     pub index_range: (u16, u16),
     pub attempt_metrics: &'a mut FlashblockValidationAttemptMetrics,
+    _db_ref: PhantomData<DbRef>,
 }
 
 impl<'a, DBRef, R, E> BalBlockValidator<'a, DBRef, R, E>
@@ -567,9 +571,10 @@ where
         parent: &'a SealedHeader<Header>,
         executor: OpBlockExecutor<E, R, Arc<OpChainSpec>>,
         bundle_state: Arc<BundleState>,
+        fallback_bundle_state: Arc<BundleState>,
         transactions: Vec<Recovered<OpTransactionSigned>>,
         chain_spec: Arc<OpChainSpec>,
-        temporal_db_factory: &'a TemporalDbFactory<DBRef>,
+        temporal_db_factory: &'a TemporalDbFactory,
         state_root_receiver: crossbeam_channel::Receiver<
             Result<StateRootResult, BlockExecutionError>,
         >,
@@ -589,12 +594,14 @@ where
                     transactions,
                 },
                 bundle_state,
+                fallback_bundle_state,
                 access_list_sender: tx,
                 state_root_receiver,
                 temporal_db_factory,
                 evm_env,
                 index_range,
                 attempt_metrics,
+                _db_ref: PhantomData,
             },
             rx,
         )
@@ -752,8 +759,9 @@ where
         + Sync
         + Clone,
 {
-    pub fn execute_block(
+    pub fn execute_block<Client>(
         mut self,
+        client: Client,
         state_provider: impl StateProvider + Clone,
         transactions: impl IntoParallelIterator<
             Item = (BlockAccessIndex, Recovered<OpTransactionSigned>),
@@ -761,7 +769,7 @@ where
         + Clone,
     ) -> Result<(BlockBuilderOutcome<OpPrimitives>, u128), BalExecutorError>
     where
-        DbRef: Send,
+        Client: StateProviderFactory + Clone + Sync,
     {
         if self.index_range.0 == 0 {
             self.prepare_database(0)?;
@@ -780,6 +788,8 @@ where
         let gas_used = self.inner.executor.gas_used;
 
         let db_factory = self.temporal_db_factory.clone();
+        let fallback_bundle_state = self.fallback_bundle_state.clone();
+        let parent_hash = self.inner.parent.hash();
 
         trace!(
             target: "flashblocks::builder::block_validator",
@@ -795,22 +805,39 @@ where
         let mut results = transactions
             .clone()
             .into_par_iter()
-            .map_with(db_factory, |db_factory, (index, tx)| {
-                let tx = tx.clone();
-                info!(
-                    "Executing tx at index {} hash {}",
-                    index,
-                    tx.clone().into_encoded().encoded_bytes().clone()
-                );
-                execute_transaction(
-                    (index, tx),
-                    receipt_builder.clone(),
-                    spec.clone(),
-                    execution_context.clone(),
-                    evm_env.clone(),
-                    db_factory,
-                )
-            })
+            // StateProviderBox is Send but not Sync/Clone. map_init gives each Rayon worker
+            // its own provider, so fallback reads do not go through a shared lock.
+            .map_init(
+                || client.state_by_block_hash(parent_hash),
+                |state_provider, (index, tx)| {
+                    let state_provider = state_provider.as_ref().map_err(|err| {
+                        BalExecutorError::other(Error::other(format!(
+                            "failed to create worker state provider: {err}"
+                        )))
+                    })?;
+
+                    let state_provider_database =
+                        StateProviderDatabase::new(state_provider.as_ref());
+                    let bundle_database =
+                        BundleDb::new(state_provider_database, fallback_bundle_state.clone());
+
+                    let tx = tx.clone();
+                    info!(
+                        "Executing tx at index {} hash {}",
+                        index,
+                        tx.clone().into_encoded().encoded_bytes().clone()
+                    );
+                    execute_transaction(
+                        (index, tx),
+                        receipt_builder.clone(),
+                        spec.clone(),
+                        execution_context.clone(),
+                        evm_env.clone(),
+                        &db_factory,
+                        bundle_database,
+                    )
+                },
+            )
             .collect::<Result<Vec<_>, BalExecutorError>>()?;
         // Sort results by transaction ascending index
         results.sort_unstable_by_key(|r| r.index);
@@ -881,16 +908,17 @@ pub fn execute_transaction<R, DBRef>(
     spec: Arc<OpChainSpec>,
     execution_context: OpBlockExecutionCtx,
     evm_env: EvmEnv<OpSpecId>,
-    db_factory: &TemporalDbFactory<DBRef>,
+    db_factory: &TemporalDbFactory,
+    db: DBRef,
 ) -> Result<ParalleExecutionResult, BalExecutorError>
 where
-    DBRef: DatabaseRef + Clone + std::fmt::Debug,
+    DBRef: DatabaseRef + std::fmt::Debug,
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>
         + Send
         + Sync
         + Clone,
 {
-    let temporal_db = db_factory.db(index as u64);
+    let temporal_db = db_factory.db(db, index as u64);
     let state = NoOpCommitDB::new(temporal_db);
     let mut database = BalBuilderDb::new(state);
 
