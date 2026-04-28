@@ -439,6 +439,116 @@ async fn test_revert_with_reason() {
     }
 }
 
+/// `take_revert_chain` captures the contract that emitted REVERT and the
+/// decoded reason — enabling the consumer to ABI-decode each frame's payload
+/// independently. Single-frame case: WLD reverts directly with no wrapper.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires WORLD_CHAIN_RPC_URL"]
+async fn test_revert_chain_captures_reverted_frame() {
+    let mut db = make_forked_db();
+    let caller = address!("00000000000000000000000000ffffffffffffff");
+    db.insert_account_info(
+        caller,
+        AccountInfo {
+            balance: U256::from(10u128.pow(21)),
+            ..Default::default()
+        },
+    );
+
+    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+        &mut db,
+        evm_env(),
+        SimulationInspector::default(),
+    );
+
+    let result = RethEvm::transact(
+        &mut evm,
+        OpTx(OpTransaction {
+            base: TxEnv {
+                caller,
+                kind: TxKind::Call(WLD),
+                data: transferCall {
+                    to: address!("000000000000000000000000000000000000dEaD"),
+                    amount: U256::from(1_000_000_000_000_000_000u128),
+                }
+                .abi_encode()
+                .into(),
+                gas_limit: 200_000,
+                gas_price: 0,
+                chain_id: Some(CHAIN_ID),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    )
+    .unwrap();
+
+    assert!(matches!(result.result, ExecutionResult::Revert { .. }));
+
+    let (_, inspector, _) = evm.components_mut();
+    let chain = inspector.take_revert_chain();
+    assert_eq!(chain.len(), 1, "expected single reverted frame, got {chain:?}");
+    assert_eq!(chain[0].contract, WLD);
+    assert_eq!(chain[0].reason, "ERC20: transfer amount exceeds balance");
+}
+
+/// Halt frames (OOG, invalid opcode, etc.) carry no decodable payload and
+/// must not appear on the revert chain — the top-level halt name is already
+/// surfaced via `revertReason`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires WORLD_CHAIN_RPC_URL"]
+async fn test_revert_chain_excludes_halt_frames() {
+    let mut db = make_forked_db();
+    let caller = address!("00000000000000000000000000ffffffffffffff");
+    db.insert_account_info(
+        caller,
+        AccountInfo {
+            balance: U256::from(10u128.pow(21)),
+            ..Default::default()
+        },
+    );
+
+    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+        &mut db,
+        evm_env(),
+        SimulationInspector::default(),
+    );
+
+    // gas_limit just above tx-intrinsic so the call starts but OOGs in WLD's
+    // SLOAD/SSTORE-heavy `transfer` body.
+    let result = RethEvm::transact(
+        &mut evm,
+        OpTx(OpTransaction {
+            base: TxEnv {
+                caller,
+                kind: TxKind::Call(WLD),
+                data: transferCall {
+                    to: address!("000000000000000000000000000000000000dEaD"),
+                    amount: U256::ZERO,
+                }
+                .abi_encode()
+                .into(),
+                gas_limit: 22_000,
+                gas_price: 0,
+                chain_id: Some(CHAIN_ID),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    )
+    .unwrap();
+
+    assert!(
+        matches!(result.result, ExecutionResult::Halt { .. }),
+        "expected halt, got {:?}",
+        result.result
+    );
+
+    let (_, inspector, _) = evm.components_mut();
+    let chain = inspector.take_revert_chain();
+    assert!(chain.is_empty(), "halt frames should not be captured: {chain:?}");
+}
+
 /// Trace captures top-level calls from a simulated execution.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires WORLD_CHAIN_RPC_URL"]

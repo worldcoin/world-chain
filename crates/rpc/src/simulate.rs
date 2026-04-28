@@ -20,7 +20,7 @@ use revm::{
         TxEnv,
         result::{ExecutionResult, Output},
     },
-    interpreter::{CallInputs, CallOutcome},
+    interpreter::{CallInputs, CallOutcome, InstructionResult},
 };
 use revm_primitives::TxKind;
 use serde::{Deserialize, Serialize};
@@ -319,9 +319,11 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
         let result = outcome.instruction_result();
         if !result.is_ok() {
             // Frame reverted or halted — drop its tentative transfers either
-            // way. Record only true reverts on the chain; halts have no
-            // payload worth decoding.
-            if result.is_revert() {
+            // way. Record only explicit REVERTs (the only variant that
+            // produces a decodable payload). is_revert() also covers
+            // CallTooDeep / OutOfFunds / EOF init-code failures whose
+            // outputs are empty and have nothing to ABI-decode.
+            if matches!(result, InstructionResult::Revert) {
                 self.reverted_frames
                     .push((inputs.target_address, outcome.output().clone()));
             }
