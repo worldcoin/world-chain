@@ -1,0 +1,492 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>WIP-1001: WorldID Native Account Abstraction - World Chain Specs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-2459343d.css">
+        <link rel="stylesheet" href="../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex-a7a66d73.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-831b7506.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">World Chain Specs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h2 id="abstract"><a class="header" href="#abstract">Abstract</a></h2>
+<p>A <em>World ID Key Ring</em> is a precompile-managed account with a deterministic, lifetime-stable address derived from its creation nullifier $\mathrm{addr}(\nu_k) = \mathrm{bytes20}(\mathrm{keccak256}(\nu_k))$. Because the keyring is a first-class account on World Chain and its authorized signer set is read natively by the protocol during transaction validation, keyrings achieve native account abstraction. We extend <a href="https://eips.ethereum.org/EIPS/eip-2718">EIP-2718</a> with a typed transaction envelope (<code>0x1D</code>) signed by any authorized <em>session key</em> of a <em>World ID Key Ring</em>.</p>
+<p>A single WorldID <code>MAY</code> manage any number of keyrings indexed by a user-chosen <code>keyringNonce</code>; keyrings owned by the same WorldID are unlinkable across distinct <code>keyringNonce</code> values. A keyring is created by a Uniqueness Proof over its <code>keyringNonce</code>; creation also installs a fresh <code>sessionId</code> bound to that keyring. Session keys are then added, removed, and rotated via fresh Session Proofs over the stored <code>sessionId</code>. Recovery from lost or compromised session keys is the degenerate case of the same upgrade path, protected by a configurable timelock.</p>
+<p>Keyring state lives natively in the <code>WORLD_ID_KEYRING_PRECOMPILE</code>. There is no per-WorldID uniqueness constraint, no generation counter, and no account recycling — a <em>World ID Account</em> is a public identifier for a <em>World ID</em> managed set of session keys; it is not an identity anchor.</p>
+<h2 id="motivation"><a class="header" href="#motivation">Motivation</a></h2>
+<h3 id="computational-sustainability--world-chain-ux"><a class="header" href="#computational-sustainability--world-chain-ux">Computational Sustainability &amp; World Chain UX</a></h3>
+<p>Enshrining smart-account authenticators as protocol-level signature verification algorithms lets us jointly optimize transaction gas, expose a simple multi-auth API over familiar authenticators (<a href="https://www.w3.org/TR/webauthn-3/">Passkey</a> / <a href="https://www.w3.org/TR/webauthn-3/">WebAuthn</a>, <a href="https://neuromancer.sk/std/nist/P-256">P256</a>, <a href="https://en.wikipedia.org/wiki/Elliptic_Curve_Digital_Signature_Algorithm">ECDSA</a>, <a href="https://en.wikipedia.org/wiki/EdDSA">EdDSA</a>), minimize confirmation time, and remove the need for bundler infrastructure.</p>
+<h3 id="world-id-40-proofs-as-authorization"><a class="header" href="#world-id-40-proofs-as-authorization">World ID 4.0 Proofs as Authorization</a></h3>
+<p>Authorizing keyring creation with a World ID 4.0 Uniqueness Proof and subsequent mutations with Session Proofs — rather than a signing key — converges key rotation and recovery onto a single proof-verification path after enrollment: a fresh session proof. No “super key” is ever stored on-device. A <code>keyringNonce</code>-indexed action lets a single WorldID own unlinkably many keyrings.</p>
+<h2 id="specification"><a class="header" href="#specification">Specification</a></h2>
+<p>The key words “MUST”, “MUST NOT”, “REQUIRED”, “SHALL”, “SHALL NOT”, “SHOULD”, “SHOULD NOT”, “RECOMMENDED”, “NOT RECOMMENDED”, “MAY”, and “OPTIONAL” in this document are to be interpreted as described in <a href="https://www.rfc-editor.org/rfc/rfc2119">RFC 2119</a> and <a href="https://www.rfc-editor.org/rfc/rfc8174">RFC 8174</a>.</p>
+<h3 id="constants"><a class="header" href="#constants">Constants</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Name</th><th>Value</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>WORLD_TX_TYPE</code></td><td><code>0x1D</code></td><td><a href="https://eips.ethereum.org/EIPS/eip-2718">EIP-2718</a> tx type</td></tr>
+<tr><td><code>WORLD_CHAIN_RP_ID</code></td><td><code>480</code></td><td>World Chain’s registered RP ID</td></tr>
+<tr><td><code>WORLD_ID_KEYRING_PRECOMPILE</code></td><td><code>0x000000000000000000000000000000000000001D</code></td><td>Stateful precompile managing the keyring registry</td></tr>
+<tr><td><code>WORLD_ID_KEYRING_TAG</code></td><td><code>"WORLD_ID_KEYRING"</code> (UTF-8, 16 bytes)</td><td>Domain tag for keyring Uniqueness Proof actions</td></tr>
+<tr><td><code>WORLD_ID_KEYRING_NONCE</code></td><td>U256</td><td>The generational nonce of the key ring. Not necessarily monotonic</td></tr>
+<tr><td><code>MAX_SESSION_KEYS</code></td><td><code>20</code></td><td>Maximum authorized session keys per keyring</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="keyring-model"><a class="header" href="#keyring-model">KeyRing Model</a></h3>
+<p>A <em>World ID Key Ring</em> is an account whose creation <code>MUST</code> be gated by a World ID 4.0 Uniqueness Proof. Its address derives from the keyring nullifier $\nu_k$ of the initial creation proof, itself a deterministic function of the owning WorldID identity and a user-chosen <code>keyringNonce</code>. A single WorldID <code>MAY</code> manage any number of keyrings by variation over the <code>keyringNonce</code>. Each keyring <code>MUST</code> also store a <code>sessionId</code> created at enrollment; subsequent mutations are authorized against that stored session. The per-proof <code>sessionNullifier</code> used by <code>verifySession</code> is transient proof material and <code>MUST NOT</code> be persisted as keyring state.</p>
+<p><em>Session keys</em> are abstract signatories authorized to sign <code>0x1D</code> transactions on behalf of the keyring; they carry no intrinsic privileges beyond signing. Per-key permissions (expiry, spend limits, call scopes) are out of scope for this WIP (see <a href="#extensions">Extensions</a>).</p>
+<h4 id="proof-authorization"><a class="header" href="#proof-authorization">Proof Authorization</a></h4>
+<p>Keyring creation is authorized by a World ID 4.0 Uniqueness Proof parameterized by:</p>
+<ul>
+<li><code>rpId = WORLD_CHAIN_RP_ID</code></li>
+<li><code>action = keccak256(abi.encodePacked(WORLD_ID_KEYRING_TAG, uint256(keyringNonce)))</code></li>
+<li><code>signalHash = uint256(keccak256(abi.encode(create))) &gt;&gt; 8</code></li>
+</ul>
+<p>where <code>create</code> is a <code>KeyringUpdate</code> with <code>mode = Create</code> (see <a href="#signal-semantics">Signal Semantics</a>).</p>
+<p>The creation nullifier $\nu_k$ is used once to instantiate the keyring. Because World ID authenticators do not issue the same <code>(rpId, action)</code> nullifier twice, a later mutation MUST NOT attempt to reuse the creation action. On successful <code>Create</code>, the caller MUST also provide a fresh <code>sessionId</code> for <code>WORLD_CHAIN_RP_ID</code>, and the precompile MUST associate it with the keyring.</p>
+<p>Subsequent <code>Add</code> and <code>Remove</code> mutations are authorized by World ID 4.0 Session Proofs parameterized by:</p>
+<ul>
+<li><code>rpId = WORLD_CHAIN_RP_ID</code></li>
+<li><code>sessionId = sessionId(keyring)</code></li>
+<li><code>signalHash = uint256(keccak256(abi.encode(update || WORLD_ID_KEYRING_NONCE)) &gt;&gt; 8</code></li>
+</ul>
+<blockquote>
+<p><strong>Note:</strong> <code>signalHash</code> must be unique for any given update to the KeyRing.</p>
+</blockquote>
+<p>where <code>update</code> is a <code>KeyringUpdate</code> with <code>mode != Create</code>. Session Proofs are verified with <code>verifySession</code>, supplying a fresh <code>sessionNullifier</code> for each update. That <code>sessionNullifier</code> is consumed only for verification of the current update; only <code>sessionId</code> is retained across updates.</p>
+<p>A keyring therefore accepts one Uniqueness Proof at creation and any number of Session Proofs over its lifetime.</p>
+<h5 id="session-proof-primer"><a class="header" href="#session-proof-primer">Session Proof Primer</a></h5>
+<p>A Session Proof proves that the caller controls the same World ID that previously established a stored <code>sessionId</code>, without reusing the keyring-creation action. The <code>sessionId</code> is the long-lived identifier retained on the keyring across updates. The <code>sessionNullifier</code> is fresh per proof, passed only to <code>verifySession</code>, and discarded after verification.</p>
+<h5 id="oprf-nullifier-proof-primer"><a class="header" href="#oprf-nullifier-proof-primer">OPRF Nullifier Proof Primer</a></h5>
+<p>An <code>OPRFNullifierProof</code> is a <a href="https://eprint.iacr.org/2016/260">Groth16</a> proof over <a href="https://hackmd.io/@jpw/bn254">BN254</a> submitted on-chain as <code>uint256[5] = [a, b₀, b₁, c, merkle_root]</code>. The <code>WorldIDVerifier</code> reconstructs the 15 public inputs from calldata and on-chain registry lookups (notably <code>merkle_root</code> via <code>WorldIDRegistry.isValidRoot()</code> and <code>oprfPublicKey</code> via <code>OprfKeyRegistry[rpId]</code>) and invokes the Groth16 verifier.</p>
+<p>The circuit proves knowledge of a private witness $w = (s, k, p, \beta, R_{\mathrm{oprf}}, \mathit{cred}, \sigma_{\mathit{cred}})$ satisfying:</p>
+<ul>
+<li><strong>(G1) Merkle membership.</strong> The authenticator key $k$ is a leaf in the <code>WorldIDRegistry</code> tree at the declared root.</li>
+<li><strong>(G2) Credential validity.</strong> $\mathit{cred}$ bears a valid EdDSA-Poseidon2 signature over <a href="https://eips.ethereum.org/EIPS/eip-2494">BabyJubJub</a> from the issuer identified by <code>issuerSchemaId</code>, and has not expired.</li>
+<li><strong>(G3) OPRF correctness.</strong> The OPRF response $R_{\mathrm{oprf}}$ was evaluated under the registered key for <code>rpId</code>, with a DLog equality proof binding blinded and unblinded responses.</li>
+<li><strong>(G4) Deterministic nullifier derivation.</strong></li>
+</ul>
+<p>$$q = \mathrm{Poseidon2}(\text{“World ID Query”}, ; i, ; \mathrm{rpId}, ; a)$$</p>
+<p>$$\nu = \mathrm{Poseidon2}(\text{“World ID Proof”}, ; q, ; R_{\mathrm{oprf}}.x, ; R_{\mathrm{oprf}}.y)$$</p>
+<p>$\nu$ is deterministic per $(i, \mathrm{rpId}, a)$: the same identity proving under the same $(\mathrm{rpId}, a)$ always yields the same $\nu$, regardless of blinding factor $\beta$ or proof randomness.</p>
+<ul>
+<li><strong>(G5) Signal binding.</strong> The <code>signalHash</code> is “dummy-squared” in the circuit (constrained to $h \cdot h = h^2$), preventing a proof from being reused with a different signal.</li>
+</ul>
+<p>An accepting proof guarantees the prover holds a valid credential for a leaf in the tree, the OPRF evaluation is correct, and $\nu$ is deterministically bound to $(i, \mathrm{rpId}, a)$. Distinct action values yield distinct nullifier domains.</p>
+<p>For keyring creation, <strong>(G4)</strong> binds $\nu_k$ to the triple (owner leaf, <code>WORLD_CHAIN_RP_ID</code>, <code>action(keyringNonce)</code>) — making <code>keyringNonce</code> the sole keyring selector per identity — and <strong>(G5)</strong> binds the Uniqueness Proof to the exact <code>Create</code> payload it authorizes. For later updates, <code>verifySession</code> binds the proof to the keyring’s stored <code>sessionId</code>; the accompanying <code>sessionNullifier</code> is a per-proof verifier input rather than persistent keyring state.</p>
+<h4 id="keyring-address"><a class="header" href="#keyring-address">Keyring Address</a></h4>
+<p>$$\mathrm{addr}(\nu_k) = \mathrm{bytes20}(\mathrm{keccak256}(\nu_k))$$</p>
+<p>The address is fixed for the lifetime of the keyring. Session key rotation does <strong>NOT</strong> change the address.</p>
+<h4 id="session-keys"><a class="header" href="#session-keys">Session Keys</a></h4>
+<pre><code class="language-solidity">enum KeyType { Secp256k1, P256, WebAuthn, EdDSA }
+
+struct SessionKey {
+    KeyType keyType;
+    bytes   keyData;
+}
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th><code>KeyType</code></th><th>Value</th><th>Elliptic Curve</th><th><code>keyData</code></th></tr>
+</thead>
+<tbody>
+<tr><td><code>Secp256k1</code></td><td><code>0x00</code></td><td><a href="https://en.bitcoin.it/wiki/Secp256k1">secp256k1</a></td><td>33 bytes — compressed public key</td></tr>
+<tr><td><code>P256</code></td><td><code>0x01</code></td><td><a href="https://neuromancer.sk/std/nist/P-256">secp256r1</a> (NIST P-256)</td><td>64 bytes — uncompressed <code>(x, y)</code></td></tr>
+<tr><td><code>WebAuthn</code></td><td><code>0x02</code></td><td><a href="https://neuromancer.sk/std/nist/P-256">secp256r1</a> (NIST P-256)</td><td>64 bytes — uncompressed <code>(x, y)</code> (P256 under <a href="https://www.w3.org/TR/webauthn-3/">WebAuthn</a>)</td></tr>
+<tr><td><code>EdDSA</code></td><td><code>0x03</code></td><td><a href="https://datatracker.ietf.org/doc/html/rfc8032#section-5.1">edwards25519</a></td><td>32 bytes — compressed public key (Ed25519)</td></tr>
+</tbody>
+</table>
+</div>
+<h4 id="signal-semantics"><a class="header" href="#signal-semantics">Signal Semantics</a></h4>
+<pre><code class="language-solidity">enum UpdateMode { Create, Add, Remove }
+
+struct KeyringUpdate {
+    UpdateMode   mode;
+    SessionKey[] keys;
+}
+</code></pre>
+<ul>
+<li><strong><code>Create</code></strong> — installs <code>keys</code> as the full session key set at $\mathrm{addr}(\nu_k)$ and associates a fresh <code>sessionId</code> with the keyring. Does <strong>NOT</strong> store any <code>sessionNullifier</code>. MUST revert if the keyring already exists, if <code>keys.length == 0</code>, or if <code>keys.length &gt; MAX_SESSION_KEYS</code>.</li>
+<li><strong><code>Add</code></strong> — appends <code>keys</code> to the existing set. MUST revert if the keyring does not exist, if any key is already present, or if the resulting set exceeds <code>MAX_SESSION_KEYS</code>.</li>
+<li><strong><code>Remove</code></strong> — removes each entry in <code>keys</code> from the existing set. MUST revert if the keyring does not exist or if any key is absent. The set MAY become empty; a keyring with zero session keys exists but cannot sign transactions until the next <code>Add</code>.</li>
+</ul>
+<h4 id="precompile-interface"><a class="header" href="#precompile-interface">Precompile Interface</a></h4>
+<pre><code class="language-solidity">interface IWorldIDKeyRing {
+    /// @notice Create a keyring authorized by a World ID 4.0 Uniqueness Proof.
+    function create(
+        uint256 keyringNullifier,            // ν_k
+        uint256 keyringNonce,                // keyring selector; recomputed into `action`
+        uint256 proofNonce,                  // verifier request nonce
+        uint256 sessionId,                   // fresh session for subsequent updates
+        uint64  issuerSchemaId,
+        uint64  expiresAtMin,
+        uint256 credentialGenesisIssuedAtMin,
+        uint256[5] calldata proof,           // compressed Groth16 proof
+        KeyringUpdate calldata createUpdate
+    ) external returns (address keyringAddress);
+
+    /// @notice Apply an Add/Remove update authorized by a World ID 4.0 Session Proof.
+    function update(
+        address keyring,
+        uint256 proofNonce,                  // verifier request nonce
+        uint64  issuerSchemaId,
+        uint64  expiresAtMin,
+        uint256 credentialGenesisIssuedAtMin,
+        uint256[2] calldata sessionNullifier, // ephemeral per-update verifier input; MUST NOT be stored
+        uint256[5] calldata proof,           // compressed Groth16 proof
+        KeyringUpdate calldata keyringUpdate
+    ) external;
+
+    function getSessionKeys(address keyring) external view returns (SessionKey[] memory);
+    function isAuthorized(address keyring, SessionKey calldata key) external view returns (bool);
+    function getKeyringNullifier(address keyring) external view returns (uint256);
+}
+</code></pre>
+<p>For <code>create</code>, the precompile MUST:</p>
+<ol>
+<li>Require <code>createUpdate.mode == Create</code>.</li>
+<li>Recompute <code>action = keccak256(abi.encodePacked(WORLD_ID_KEYRING_TAG, uint256(keyringNonce)))</code>.</li>
+<li>Recompute <code>signalHash = uint256(keccak256(abi.encode(createUpdate))) &gt;&gt; 8</code>.</li>
+<li>Invoke <code>WorldID.verify(keyringNullifier, action, WORLD_CHAIN_RP_ID, proofNonce, signalHash, …, proof)</code>.</li>
+<li>Derive <code>keyringAddress = bytes20(keccak256(keyringNullifier))</code>, associate the supplied <code>sessionId</code> with <code>keyringAddress</code>, and apply <code>createUpdate</code> immediately.</li>
+</ol>
+<p>For <code>update</code>, the precompile MUST:</p>
+<ol>
+<li>Require <code>update.mode != Create</code>.</li>
+<li>Load the stored <code>sessionId</code> for <code>keyring</code>.</li>
+<li>Recompute <code>signalHash = uint256(keccak256(abi.encode(update))) &gt;&gt; 8</code>.</li>
+<li>Invoke <code>WorldID.verifySession(WORLD_CHAIN_RP_ID, proofNonce, signalHash, …, sessionId, sessionNullifier, proof)</code>.</li>
+<li>Discard <code>sessionNullifier</code> after verification; it MUST NOT be persisted in keyring state.</li>
+<li>Apply <code>update</code>, queued behind the timelock for <code>Add</code> / <code>Remove</code> (see <a href="#timelock">Timelock</a>).</li>
+</ol>
+<p>The precompile DOES NOT enforce a one-keyring-per-WorldID constraint; distinct keyrings remain indexed by distinct <code>keyringNonce</code> values.</p>
+<blockquote>
+<p><strong>Note — Precompile gas accounting out of scope.</strong> The specific gas pricing schedule for interacting with <code>WORLD_ID_KEYRING_PRECOMPILE</code> — covering Groth16 verification cost, per-session-key storage mutation, timelock queue/cancel/execute operations, and the amortized cost of <code>isAuthorized</code> reads during <code>0x1D</code> validation — is <strong>NOT</strong> defined here. A follow-on revision MUST specify gas costs per operation.</p>
+</blockquote>
+<h3 id="recovery"><a class="header" href="#recovery">Recovery</a></h3>
+<p>Recovery is the degenerate case of an <code>Add</code> or <code>Remove</code> submitted after session keys are lost or compromised. Because post-creation authorization is a World ID 4.0 Session Proof bound to the keyring’s stored <code>sessionId</code>, recovery requires only a fresh Session Proof — the full session-key surface is reachable via the same mutation path. No separate recovery flow or state is introduced.</p>
+<p>A single WorldID MAY enable recovery for any number of keyrings; keyrings at distinct <code>keyringNonce</code> values remain unlinkable across the recovery event.</p>
+<h3 id="timelock"><a class="header" href="#timelock">Timelock</a></h3>
+<p>A compromised WorldID authenticator could otherwise rotate session keys in a single block and drain a keyring. Keyring updates are subject to a configurable delay:</p>
+<ul>
+<li><code>Create</code> executes immediately (no prior session keys exist to cancel).</li>
+<li><code>Add</code> and <code>Remove</code> are pending until the delay elapses.</li>
+<li>Existing session keys MAY cancel a pending update during the delay window.</li>
+<li>The revocation-then-add attack (a Session Proof removes all keys, then adds malicious ones with no incumbents left to cancel) MUST be mitigated — e.g., by delaying removals, or by allowing recently-removed keys to cancel pending adds.</li>
+</ul>
+<p>Queue / cancel / execute interface additions are TBD.</p>
+<h3 id="transaction-type-0x1d"><a class="header" href="#transaction-type-0x1d">Transaction Type <code>0x1D</code></a></h3>
+<p>A <code>0x1D</code> transaction is signed by a session key of a keyring and submitted directly to the mempool (no <a href="https://eips.ethereum.org/EIPS/eip-4337">ERC-4337</a> bundler required).</p>
+<h4 id="envelope"><a class="header" href="#envelope">Envelope</a></h4>
+<pre><code>0x1D || rlp([
+    chain_id,                    // 0
+    nonce,                       // 1
+    max_priority_fee_per_gas,    // 2
+    max_fee_per_gas,             // 3
+    gas_limit,                   // 4
+    to,                          // 5
+    value,                       // 6
+    data,                        // 7
+    access_list,                 // 8
+    keyring,                     // 9   ← signer's keyring address
+    signature_type,              // 10
+    session_key,                 // 11  ← `keyData` of the signing session key (per §Session Keys)
+    signature_payload,           // 12
+])
+</code></pre>
+<pre><code>signing_hash = keccak256(0x1D || rlp(fields[0..=11]))
+</code></pre>
+<p>The <code>signing_hash</code> covers every field except <code>signature_payload</code> itself, binding the
+declared <code>signature_type</code> and <code>session_key</code> to the signature and ruling out
+scheme-confusion or pubkey-substitution attacks at the consensus layer.</p>
+<p><code>session_key</code> is the <code>keyData</code> bytes of the <code>SessionKey</code> (§Session Keys) used to
+authenticate the transaction. Its <code>KeyType</code> is implied by <code>signature_type</code> —
+implementations MUST reject any transaction where the length of <code>session_key</code>
+does not match the byte length specified for the corresponding <code>KeyType</code>.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th><code>signature_type</code></th><th><code>signature_payload</code></th></tr>
+</thead>
+<tbody>
+<tr><td><code>0x00</code> <a href="https://en.bitcoin.it/wiki/Secp256k1">Secp256k1</a></td><td><code>rlp([y_parity, r, s])</code></td></tr>
+<tr><td><code>0x01</code> <a href="https://neuromancer.sk/std/nist/P-256">P256</a></td><td><code>rlp([r, s])</code></td></tr>
+<tr><td><code>0x02</code> <a href="https://www.w3.org/TR/webauthn-3/">WebAuthn</a></td><td><code>rlp([authenticator_data, client_data_json, r, s])</code></td></tr>
+<tr><td><code>0x03</code> <a href="https://en.wikipedia.org/wiki/EdDSA">EdDSA</a></td><td><code>rlp([R, s])</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>For <code>Secp256k1</code>, the <code>session_key</code> field is redundant with the recoverable public
+key; implementations MUST verify the recovered key matches the declared
+<code>session_key</code> (compressed-form encoding) before accepting the transaction.</p>
+<h4 id="validation"><a class="header" href="#validation">Validation</a></h4>
+<ol>
+<li>Verify <code>signature_payload</code> against <code>signing_hash</code> using <code>session_key</code> as the
+verifying key (for <code>Secp256k1</code>, equivalently: recover and assert equality
+with <code>session_key</code>).</li>
+<li>Assert <code>IWorldIDKeyRing.isAuthorized(keyring, SessionKey { signature_type, session_key })</code>.</li>
+</ol>
+<p>The envelope is extensible to 2D nonces, batched transactions, and native paymaster support in follow-on WIPs.</p>
+<h3 id="extensions"><a class="header" href="#extensions">Extensions</a></h3>
+<ul>
+<li><strong>Per-key permissions.</strong> Session keys MAY be extended with <code>(expiry, spendLimit, CallScope[])</code> metadata enforced by the precompile during <code>0x1D</code> validation. This extends <code>SessionKey</code> and the <code>KeyringUpdate</code> signal; the World ID proof continues to bind the full permission set via <strong>(G5)</strong>.</li>
+<li><strong>Session rotation.</strong> Replacing a keyring’s stored <code>sessionId</code> with a newly-created session without re-creating the keyring is deferred.</li>
+<li><strong>Bundling, 2D nonces, paymasters.</strong> Reserved for follow-on WIPs on the <code>0x1D</code> envelope.</li>
+</ul>
+<h2 id="rationale"><a class="header" href="#rationale">Rationale</a></h2>
+<p><strong>Keyring state as precompile.</strong> The session key set lives in a precompile because <code>0x1D</code> signature validation happens at the protocol level and must read the authorized set natively. The same precompile owns the creation Uniqueness Proof and Session Proof verification paths, ensuring the address-to-keyset map is only mutated under valid World ID 4.0 proofs.</p>
+<p><strong>World ID 4.0 Proofs as authorization.</strong> Keyring creation uses a Uniqueness Proof and provisions a fresh session; subsequent mutations use Session Proofs bound to the stored <code>sessionId</code>, so repeated keyring updates do not rely on reusing the creation action. No “super key” ever needs to be stored on-device. The <code>keyringNonce</code>-indexed creation action (<code>keccak256(WORLD_ID_KEYRING_TAG || keyringNonce)</code>) lets a single WorldID own unlinkably many keyrings, with each keyring’s address pinned for life by $\mathrm{addr}(\nu_k) = \mathrm{bytes20}(\mathrm{keccak256}(\nu_k))$.</p>
+<p><strong>No sybil constraint on keyrings.</strong> Unlinkability across <code>keyringNonce</code> values is a stronger property than one-keyring-per-identity, and sybil resistance at the account layer is not the right locus — it belongs to whatever system consumes keyring addresses (e.g., gas subsidy accounting, application-layer rate limits), which can bind its own per-WorldID limits via independent nullifier domains.</p>
+<p><strong>Recovery timelock.</strong> Without a delay, a compromised WorldID authenticator could instantly replace all session keys and drain the account. The timelock gives existing session key holders a window to detect and cancel malicious changes.</p>
+<h2 id="backwards-compatibility"><a class="header" href="#backwards-compatibility">Backwards Compatibility</a></h2>
+<p>This WIP introduces a new account type and transaction type. Existing EOAs and smart contract accounts are unaffected. Standard <a href="https://eips.ethereum.org/EIPS/eip-1559">EIP-1559</a> transactions continue to work for legacy accounts; the <code>0x1D</code> envelope is required only for keyring-authenticated execution.</p>
+<h3 id="existing-safe-accounts"><a class="header" href="#existing-safe-accounts">Existing Safe Accounts</a></h3>
+<p>Existing <a href="https://safe.global">Safe</a> accounts MAY adopt a WorldID Key Ring as an authenticator without migrating assets or changing the Safe address. The integration reduces to installing a module that gates execution on <code>msg.sender</code> matching a bound Key Ring address; because a <code>0x1D</code> transaction’s sender is the Key Ring itself, no additional signature verification is required at the Safe layer — protocol-level validation against <code>IWorldIDKeyRing.isAuthorized</code> already gates execution upstream.</p>
+<h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
+<h3 id="proof-replay"><a class="header" href="#proof-replay">Proof Replay</a></h3>
+<p>Because neither the creation proof nor later Session Proofs are bound to the submitting party, any party observing an in-flight proof in the mempool can re-submit it. Signal binding <strong>(G5)</strong> prevents substituting a different update, but a griefer can front-run the original submitter. Harm is limited to gas and ordering — the resulting state is identical. Implementations MAY bind proofs to <code>msg.sender</code> or a session-key-signed commitment if stronger guarantees are required.</p>
+<h3 id="keyring-unlinkability"><a class="header" href="#keyring-unlinkability">Keyring Unlinkability</a></h3>
+<p>Two keyrings owned by the same WorldID are unlinkable across distinct creation <code>keyringNonce</code> values by the ZK property of the OPRF proof. Subsequent updates no longer reuse the creation action; they are authorized via Session Proofs bound to the keyring’s stored <code>sessionId</code>. Updates to the same keyring remain linkable through the keyring address and its on-chain state transitions.</p>
+<h3 id="timelock-attacks"><a class="header" href="#timelock-attacks">Timelock Attacks</a></h3>
+<p>The revocation-then-add attack vector (a Session Proof removes all session keys, then adds malicious ones with no keys left to cancel) MUST be addressed in the timelock policy design. Possible mitigations include timelocking removals or allowing recently-removed keys to cancel pending adds.</p>
+<h3 id="session-key-deanonymization"><a class="header" href="#session-key-deanonymization">Session Key Deanonymization</a></h3>
+<p>A session key that is also used as an EOA or added to another keyring trivially links the keyring to that external identity. Clients SHOULD generate fresh session keys per keyring.</p>
+<h3 id="signature-key-ambiguity"><a class="header" href="#signature-key-ambiguity">Signature-key Ambiguity</a></h3>
+<p>A keyring may store up to <code>MAX_SESSION_KEYS</code> keys of mixed <code>KeyType</code>, but a <code>0x1D</code> transaction declares a single <code>signature_type</code>. The spec should define whether a key index is included in the envelope or whether the first matching key is authoritative.</p>
+<h3 id="webauthn-challenge-binding"><a class="header" href="#webauthn-challenge-binding">WebAuthn Challenge Binding</a></h3>
+<p>For <code>signature_type = 0x02</code>, the <code>0x1D</code> <code>signing_hash</code> MUST appear as the <code>challenge</code> field inside <code>client_data_json</code>; otherwise the signature could be replayed from a different WebAuthn context.</p>
+<h3 id="stale-merkle-root"><a class="header" href="#stale-merkle-root">Stale Merkle Root</a></h3>
+<p>The <code>WorldIDRegistry</code> accepts roots within a validity window. An attacker whose credential has been revoked could race to submit <code>create</code> or <code>update</code> against a still-valid but stale root before expiry. The <code>expiresAtMin + minExpirationThreshold ≥ block.timestamp</code> check bounds this window, but its duration is a trust parameter.</p>
+<h3 id="oprf-key-rotation"><a class="header" href="#oprf-key-rotation">OPRF Key Rotation</a></h3>
+<p>If the OPRF key in <code>OprfKeyRegistry[480]</code> is rotated, both creation nullifier derivations and session re-derivations change. Existing $\nu_k$ values become unreachable for new creation proofs, and existing <code>sessionId</code> values can no longer be used to derive valid Session Proofs; the keyring becomes frozen at its current session key set. The protocol MUST define migration semantics across OPRF key epochs.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../wips/index.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../wips/wip-1002.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../wips/index.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../wips/wip-1002.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-c2a407aa.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../specs/static/mermaid-3a6b472a.min.js"></script>
+        <script src="../specs/static/mermaid-init-025d9952.js"></script>
+        <script src="../specs/static/solidity-min-a44de257.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

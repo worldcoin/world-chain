@@ -1,0 +1,563 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>WIP-1002: WorldID Gas Accounting - World Chain Specs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-2459343d.css">
+        <link rel="stylesheet" href="../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex-a7a66d73.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-831b7506.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">World Chain Specs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h2 id="abstract"><a class="header" href="#abstract">Abstract</a></h2>
+<p>A <strong>WorldID Gas Accounting</strong> system enables per-credential gas subsidies for verified humans on World Chain. A <a href="https://worldcoin.org/world-id">World ID</a> opens a per-period subsidy record whose <code>nullifier</code> — derived from a <a href="https://github.com/worldcoin/world-id-protocol">World ID 4.0</a> Uniqueness Proof — is the record’s primary key for budget, authorization, and replay state. The initial claim is driven by a multi-item proof request authorized by a World-Chain-operated WIP-101 relying party contract (an <a href="https://eips.ethereum.org/EIPS/eip-1271">ERC-1271</a>-style smart-contract signer); the authenticator lists one <code>RequestItem</code> per credential the WorldID holds and emits one Uniqueness Proof per item, all sharing the same <code>nullifier</code>. Each proof’s signal carries the initial set of authorized accounts permitted to spend the budget. The first on-chain call also binds a World ID <code>sessionId</code> to the <code>nullifier</code> record; subsequent Session Proofs against that <code>sessionId</code> may claim credentials acquired later in the period or add / remove authorized addresses. Budgets are governance-configurable per <code>issuerSchemaId</code>, and subsidy records expire at period boundaries.</p>
+<p>Authorized addresses may be legacy EOAs, smart contract accounts, or <a href="./wip-1001.html">WIP-1001</a> <em>World ID Key Rings</em> — the subsidy system is orthogonal to the account type it funds.</p>
+<h2 id="motivation"><a class="header" href="#motivation">Motivation</a></h2>
+<p>World ID holders are currently already being subsidized for their gas usage on World Chain. Natively issued gas subsidies allow for a more fluid fee market, and enshrine gas allowances for World ID holders at the protocol (or builder) level rather than relying on off-chain paymasters.</p>
+<p>Per-credential budgeting lets subsidy weight reflect credential strength — a Proof-of-Human (Orb) credential carries more weight than a Phone credential, and governance can tune each independently via <code>issuerSchemaId</code>.</p>
+<h2 id="specification"><a class="header" href="#specification">Specification</a></h2>
+<p>The key words “MUST”, “MUST NOT”, “REQUIRED”, “SHALL”, “SHALL NOT”, “SHOULD”, “SHOULD NOT”, “RECOMMENDED”, “NOT RECOMMENDED”, “MAY”, and “OPTIONAL” in this document are to be interpreted as described in <a href="https://www.rfc-editor.org/rfc/rfc2119">RFC 2119</a> and <a href="https://www.rfc-editor.org/rfc/rfc8174">RFC 8174</a>.</p>
+<h3 id="deployment-model"><a class="header" href="#deployment-model">Deployment Model</a></h3>
+<p>The Gas Accounting component can be deployed as either:</p>
+<ul>
+<li><strong>A precompile</strong>, enabling the protocol to natively read gas accounting state during transaction validation and execution. This is required if gas subsidies are enforced at the protocol level (e.g., the EVM itself checks and deducts budget).</li>
+<li><strong>A standard contract</strong> (e.g., a predeploy), where the builder reads contract state via <code>eth_call</code> during block construction to determine subsidy eligibility and track budget consumption. This avoids protocol-level changes and allows iterating on subsidy logic without hard forks.</li>
+</ul>
+<p>The interface is identical in both cases. The choice of deployment model determines where enforcement happens (protocol vs. builder) but does not affect the accounting logic itself.</p>
+<h3 id="relying-party-signer"><a class="header" href="#relying-party-signer">Relying Party Signer</a></h3>
+<p>For <code>rpId = WORLD_CHAIN_RP_ID</code> the registered RP <code>signer</code> in the World ID <code>RpRegistry</code> is a stateless <a href="https://github.com/worldcoin/world-id-protocol">WIP-101</a>-style smart contract deployed on World Chain, rather than an off-chain EOA signer service. OPRF nodes detect the contract via <a href="https://eips.ethereum.org/EIPS/eip-165">ERC-165</a> <code>supportsInterface</code> at registry ingest and validate every incoming <code>ProofRequest</code> by performing a read-only <code>eth_call</code> to its <code>verifyRpRequest(...)</code> entry point before contributing their OPRF share. Framing the RP as an on-chain primitive removes the trusted off-chain key-holder dependency; all economic policy (authorised addresses, budget, replay) remains in the Gas Accounting component, not the signer.</p>
+<p>The signer conforms to the <a href="https://github.com/worldcoin/world-id-protocol">WIP-101</a> interface — an <a href="https://eips.ethereum.org/EIPS/eip-1271">ERC-1271</a>-style magic-value check specialised for proof-request approval:</p>
+<pre><code class="language-solidity">interface IRpSigner is IERC165 {
+    error RpInvalidRequest(uint256 code);
+
+    function verifyRpRequest(
+        uint8   version,
+        uint256 nonce,
+        uint64  createdAt,
+        uint64  expiresAt,
+        uint256 action,
+        bytes   calldata data
+    ) external view returns (bytes4 magicValue);
+}
+</code></pre>
+<p>Acceptance returns the magic value <code>0x35dbc8de</code>. Rejection reverts with <code>RpInvalidRequest(code)</code> (any other revert is treated by OPRF nodes as an incompatible signer).</p>
+<p>Validation branches on the most-significant byte of <code>action</code>, which the World ID 4.0 protocol uses to discriminate proof class:</p>
+<ul>
+<li><strong>Uniqueness Proofs (<code>action[0] == 0x00</code>).</strong> The contract MUST require <code>action</code> to equal the expected per-period claim action for some <code>periodNumber</code> that falls within the current boundary-window derived from <code>block.timestamp / PERIOD_LENGTH</code>. The contract SHOULD also validate <code>createdAt ≤ block.timestamp ≤ expiresAt</code> and bound <code>expiresAt - createdAt</code> to a reasonable <code>MAX_REQUEST_TTL</code>.</li>
+<li><strong>Session Proofs (<code>action[0] == 0x02</code>).</strong> Session Proof <code>action</code> values are random per-proof OPRF outputs and are NOT signed by the RP — the contract MUST accept them unconditionally once the class prefix is confirmed. Replay / authorization guarantees for Session-Proof-gated operations live on-chain in the claim component (nullifier-record existence, claimed-credentials bitmap, monotonic update nonce — see <a href="#signal-binding">Signal Binding</a> and <a href="#per-proof-behavior">Per-Proof Behavior</a>), not at the RP layer.</li>
+</ul>
+<p>The contract reads no subsidy, authorization, or per-user state. <code>data</code> (the request’s <code>wip101_data</code> field, capped at 1 KiB by the OPRF-node layer) is RESERVED and MUST either be required empty or ignored outright — deployments MAY revert on non-empty <code>data</code> to reduce attack surface.</p>
+<p>Operational invariants:</p>
+<ul>
+<li><strong>OPRF-node RPC target.</strong> WIP-101 verification is off-circuit: each OPRF node independently <code>eth_call</code>s the contract against its configured RPC. All participating nodes’ RPC endpoints MUST reach World Chain for this signer registration to function.</li>
+<li><strong>Monotone / reorg-safe.</strong> Because verification is quorum-trusted rather than π₁-bound, the contract MUST NOT depend on state that can flip between nodes’ observation windows. The stateless shape above trivially satisfies this.</li>
+<li><strong>Single-signer constraint.</strong> <code>RpRegistry.RelyingParty.signer</code> is scalar; multi-key registration is deferred by the registry. Multi-party RP policy (governance, rate-limiting, rotation) MUST therefore be embedded inside this single contract.</li>
+</ul>
+<p>Deployment preconditions:</p>
+<ul>
+<li><code>rpId = WORLD_CHAIN_RP_ID</code> registered in the World ID <code>RpRegistry</code> with this contract as <code>signer</code> and a matching <code>oprfKeyId</code>.</li>
+<li>OPRF DKG ceremony run for this <code>rpId</code> so nodes can contribute shares.</li>
+<li>Participating OPRF nodes’ RPC configuration updated to point at World Chain.</li>
+</ul>
+<h3 id="gas-accounting-interface"><a class="header" href="#gas-accounting-interface">Gas Accounting Interface</a></h3>
+<p>Manages all gas accounting state:</p>
+<ul>
+<li><strong>Authorization map:</strong> reverse index from authorized account address to the set of <code>nullifier</code> records the address may draw budget from. Used at transaction-execution time to select which record’s budget is charged; one address MAY be authorized under multiple records simultaneously.</li>
+<li><strong>Gas budget map:</strong> maps <code>nullifier</code> values to remaining budget in Gwei. Budget accumulates as additional credential proofs are submitted under that <code>nullifier</code>.</li>
+<li><strong>Claimed-credentials map:</strong> for each <code>nullifier</code>, tracks which <code>issuerSchemaId</code> values have already been claimed (e.g., as a bitmap or set). Prevents double-claiming a credential under the same <code>nullifier</code>.</li>
+<li><strong>Session bridge map:</strong> maps each <code>nullifier</code> to the <code>sessionId</code> established at initial claim, so Session Proofs for subsequent operations on that <code>nullifier</code> can be verified.</li>
+<li><strong>Credential budget configuration:</strong> maps <code>issuerSchemaId</code> to claimable budget amount (governance-configurable per credential type).</li>
+</ul>
+<p>Existence of a record in the gas budget map is itself the per-period replay guard: a Uniqueness Proof carrying a <code>nullifier</code> that already has a record in the current period is rejected as a replay.</p>
+<p>Exposes methods for:</p>
+<ul>
+<li>Initial subsidy claims (atomically verify the per-credential Uniqueness Proofs emitted from a multi-item <code>ProofRequest</code>, open the <code>nullifier</code> record with its <code>sessionId</code> and initial authorized addresses, and credit every supplied credential’s budget)</li>
+<li>Mid-period credential additions (verify a Session Proof against the stored <code>sessionId</code> and credit an additional credential’s budget)</li>
+<li>Address updates (verify a Session Proof against the stored <code>sessionId</code> and update the authorized addresses)</li>
+<li>Budget lookup (remaining budget for a <code>nullifier</code> or authorized address)</li>
+<li>Budget consumption (called by the protocol or builder during transaction execution)</li>
+</ul>
+<pre><code class="language-solidity">interface IGasAccounting {
+    /// @notice One per-credential Uniqueness Proof emitted by a single multi-item `ProofRequest`.
+    ///         All items of a `claimSubsidy` call MUST share the same `nullifier` and the same
+    ///         `signal_hash` public input (achieved by setting the same `signal` on every `RequestItem`).
+    struct ClaimItem {
+        uint256 issuerSchemaId;
+        bytes   proof;
+    }
+
+    /// @notice Atomic initial per-period claim. Accepts the full set of per-credential
+    ///         Uniqueness Proofs emitted from one multi-item `ProofRequest` for
+    ///         `"period_proof" || periodNumber`. Opens a subsidy record keyed by `nullifier`,
+    ///         stores `sessionId` and the initial `addAddresses` set, and credits every
+    ///         credential in `items`.
+    ///         The contract recomputes the expected `signalHash` from the call parameters and
+    ///         rejects any proof whose `signal_hash` public input does not match.
+    ///
+    ///         MUST revert if `items` is empty.
+    ///         MUST revert if `nullifier` already has a record in the current period.
+    ///         MUST revert on duplicate `issuerSchemaId` within `items`.
+    function claimSubsidy(
+        uint256 nullifier,
+        uint256 sessionId,
+        address[] calldata addAddresses,
+        ClaimItem[] calldata items
+    ) external;
+
+    /// @notice Adds budget for a credential acquired after the initial claim in the
+    ///         current period. Verifies a Session Proof against the `sessionId` stored
+    ///         for `nullifier`; the contract recomputes the expected `signalHash`.
+    ///         MUST revert if `nullifier` has no subsidy record in the current period.
+    ///         MUST revert if `issuerSchemaId` has already been claimed under `nullifier`.
+    function claimAdditionalCredential(
+        uint256 nullifier,
+        uint256 issuerSchemaId,
+        uint256 sessionNullifier,
+        bytes calldata proof
+    ) external;
+
+    /// @notice Updates the subsidized addresses for the subsidy record keyed by `nullifier`.
+    ///         Verifies a Session Proof against the `sessionId` stored for `nullifier`;
+    ///         the contract recomputes the expected `signalHash`.
+    ///         `nonce` MUST equal the record's monotonic update nonce (starts at 0); the contract
+    ///         bumps it on success. Prevents Session Proof replay of prior address updates.
+    function updateAddresses(
+        uint256 nullifier,
+        uint256 nonce,
+        address[] calldata addAddresses,
+        address[] calldata removeAddresses,
+        uint256 sessionNullifier,
+        bytes calldata proof
+    ) external;
+
+    /// @notice Get remaining gas budget for a subsidy record in the current period.
+    function getBudget(uint256 nullifier) external view returns (uint256 remainingGwei);
+
+    /// @notice Get remaining gas budget available to an address in the current period.
+    ///         If the address maps to multiple nullifiers, the same deterministic selection rule
+    ///         used during gas consumption applies here.
+    function getBudget(address account) external view returns (uint256 remainingGwei);
+
+    /// @notice Check whether an address is authorized under a given subsidy record.
+    function isAuthorized(address account, uint256 nullifier) external view returns (bool);
+
+    /// @notice Get all subsidy records associated with an address.
+    function getNullifiers(address account) external view returns (uint256[] memory);
+
+    /// @notice Check whether a credential has been claimed under `nullifier` this period.
+    function isClaimed(uint256 nullifier, uint256 issuerSchemaId) external view returns (bool);
+
+    /// @notice Consume budget for a subsidy record. Called during tx execution (by protocol or builder).
+    function consumeBudget(uint256 nullifier, uint256 gasUsed, uint256 baseFee) external;
+
+    /// @notice Set the claimable budget amount for a credential type. Governance only.
+    function setCredentialBudget(uint256 issuerSchemaId, uint256 budgetGwei) external;
+}
+</code></pre>
+<h4 id="authorization-map"><a class="header" href="#authorization-map">Authorization Map</a></h4>
+<p>Reverse index from authorized account address to the set of <code>nullifier</code> records the address may draw budget from. Populated on <code>claimSubsidy</code> from the <code>addAddresses</code> list; mutated throughout the period by <code>updateAddresses</code>. Authorized addresses MAY be EOAs, smart contract accounts, or <a href="./wip-1001.html">WIP-1001</a> <em>World ID Key Rings</em>.</p>
+<h4 id="gas-budget-map"><a class="header" href="#gas-budget-map">Gas Budget Map</a></h4>
+<p>Maps <code>nullifier</code> values to the per-period subsidy record — remaining budget in Gwei, the <code>sessionId</code> used to verify subsequent Session Proofs, the bitmap of claimed <code>issuerSchemaId</code> values, the authorized-address set, and a monotonic update nonce incremented on each successful <code>updateAddresses</code> (prevents Session Proof replay). Budget accumulates as the initial multi-item <code>claimSubsidy</code> and later <code>claimAdditionalCredential</code> calls add credentials. A helper lookup by authorized address MAY resolve the budget through the same deterministic nullifier-selection rule used during transaction execution.</p>
+<h4 id="claimed-credentials-map"><a class="header" href="#claimed-credentials-map">Claimed-Credentials Map</a></h4>
+<p>For each active <code>nullifier</code>, tracks which <code>issuerSchemaId</code> values have already been claimed. Prevents a caller from submitting two proofs for the same <code>(nullifier, issuerSchemaId)</code> pair. Together with nullifier-record existence, this is the full replay guard — no separate “used nullifier” set is required.</p>
+<h3 id="periods-nullifiers-and-sessions"><a class="header" href="#periods-nullifiers-and-sessions">Periods, Nullifiers, and Sessions</a></h3>
+<p>Subsidy claims are bound to a per-period nullifier derived from a World ID 4.0 Uniqueness Proof:</p>
+<ul>
+<li>Relying party is World Chain (e.g., <code>rpId = 480</code>)</li>
+<li>Action is <code>"period_proof" || periodNumber</code></li>
+<li>Signal is described under <a href="#signal-binding">Signal Binding</a></li>
+</ul>
+<p>Every Uniqueness Proof natively carries an <code>issuerSchemaId</code> (mandatory public input in the circuit). The nullifier is credential-independent: for a given World ID and period it does not depend on <code>issuerSchemaId</code>. To claim budget for multiple credentials against the same period nullifier, the authenticator builds a single <code>ProofRequest</code> containing one <code>RequestItem</code> per credential the WorldID holds; all <code>RequestItem</code>s MUST carry the same <code>signal</code> (the shared <code>claimSubsidy</code> signal described under <a href="#signal-binding">Signal Binding</a>) so every emitted proof has the same <code>signal_hash</code> public input. This yields one per-credential proof for each <code>issuerSchemaId</code>, all sharing the same <code>nullifier</code> and <code>signal_hash</code> (see <a href="https://github.com/worldcoin/world-id-protocol">World ID 4.0</a>). The full bundle is submitted in a single atomic <code>claimSubsidy</code> call.</p>
+<p>The <code>sessionId</code> associated with a <code>nullifier</code> is generated by the authenticator through an OPRF call at initial-claim time and is NOT a caller-chosen value. It is stored by the component on the first <code>claimSubsidy</code> call for a given <code>nullifier</code> and retained for Session Proof verification during the period.</p>
+<h4 id="session-proof-primer"><a class="header" href="#session-proof-primer">Session Proof Primer</a></h4>
+<p>A Session Proof proves continuity with the same stored <code>sessionId</code> without reusing the per-period claim action. The <code>sessionId</code> is the long-lived identifier retained for the subsidy record during the period. The <code>sessionNullifier</code> is fresh per proof, passed only to <code>verifySession</code>, and discarded after verification. Session Proofs are used for two distinct operations under a <code>nullifier</code>:</p>
+<ul>
+<li>Adding an additional credential’s budget (<code>claimAdditionalCredential</code>) when a credential is acquired after the initial claim</li>
+<li>Adding or removing authorized addresses (<code>updateAddresses</code>)</li>
+</ul>
+<p>A period could be e.g. one month. It likely makes sense to divide the period into multiple slots with sub-budgets for each slot to prevent traffic spikes (e.g., when all users claim their monthly budget at once after a token launch).</p>
+<h4 id="signal-binding"><a class="header" href="#signal-binding">Signal Binding</a></h4>
+<p>Each method’s proof(s) carry a <code>signal_hash</code> public input that commits the proof to its on-chain operation parameters. <code>signal_hash</code> is NOT a caller input: the contract recomputes the expected value from the call parameters and rejects any proof whose <code>signal_hash</code> public input does not match. For <code>claimSubsidy</code>, every proof in <code>items</code> MUST share the same <code>signal_hash</code> (the authenticator sets the same <code>signal</code> on every <code>RequestItem</code>, so one recomputed <code>signalHash</code> is checked against every proof).</p>
+<p>Each method has a dedicated signal struct. <code>signalHash</code> is computed by ABI-encoding an instance of that struct and Keccak-hashing; <code>&gt;&gt; 8</code> truncates to 248 bits so the value fits in the BN254 scalar field, mirroring the <a href="./wip-1001.html">WIP-1001</a> pattern. ABI encoding of <code>address[]</code> is the standard Solidity dynamic-array layout (<code>uint256</code> length followed by each element right-padded to 32 bytes); the struct definitions below pin the layout for off-chain reproducers.</p>
+<pre><code class="language-solidity">struct ClaimSubsidySignal {
+    bytes32   tag;              // == keccak256("WIP-1002/claimSubsidy")
+    uint256   sessionId;
+    address[] addAddresses;
+    address   msgSender;
+}
+
+struct ClaimAdditionalCredentialSignal {
+    bytes32 tag;                // == keccak256("WIP-1002/claimAdditionalCredential")
+    uint256 nullifier;
+    address msgSender;
+}
+
+struct UpdateAddressesSignal {
+    bytes32   tag;              // == keccak256("WIP-1002/updateAddresses")
+    uint256   nullifier;
+    uint256   nonce;
+    address[] addAddresses;
+    address[] removeAddresses;
+    address   msgSender;
+}
+</code></pre>
+<p>For each method:</p>
+<pre><code>signalHash = uint256(keccak256(abi.encode(signal))) &gt;&gt; 8
+</code></pre>
+<p>where <code>signal</code> is the corresponding struct populated from the call parameters and <code>msg.sender</code>.</p>
+<p><strong>Replay protection.</strong> For <code>claimSubsidy</code> — nullifier-record existence; the record cannot be re-opened in the same period. For <code>claimAdditionalCredential</code> — the per-record claimed-credentials bitmap; the same <code>issuerSchemaId</code> cannot be claimed twice under one <code>nullifier</code>. For <code>updateAddresses</code> — the supplied <code>nonce</code> MUST equal the subsidy record’s monotonic update nonce; the contract bumps it on success, invalidating any earlier Session Proof for an address update.</p>
+<h4 id="per-proof-behavior"><a class="header" href="#per-proof-behavior">Per-Proof Behavior</a></h4>
+<p>For <code>claimSubsidy</code> (atomic over all <code>items</code>):</p>
+<ol>
+<li>Require <code>items</code> to be non-empty and <code>items[*].issuerSchemaId</code> to be distinct.</li>
+<li>Require <code>nullifier</code> to have no record in the current period.</li>
+<li>Recompute <code>signalHash</code> from a populated <code>ClaimSubsidySignal</code>.</li>
+<li>Verify every <code>items[i].proof</code> as a Uniqueness Proof for <code>"period_proof" || periodNumber</code> against the recomputed <code>signalHash</code>; all proofs MUST share the same <code>nullifier</code> public input.</li>
+<li>Create the record: store <code>sessionId</code>, set the authorized-address set to <code>addAddresses</code>, mark every <code>items[i].issuerSchemaId</code> as claimed, sum their configured budgets into <code>remainingGwei</code>, set the update nonce to <code>0</code>.</li>
+</ol>
+<p>For <code>claimAdditionalCredential</code>:</p>
+<ol>
+<li>Require <code>nullifier</code> to have a record in the current period; load its <code>sessionId</code>.</li>
+<li>Recompute <code>signalHash</code> from a populated <code>ClaimAdditionalCredentialSignal</code>.</li>
+<li>Verify a Session Proof against <code>sessionId</code> with the recomputed <code>signalHash</code>.</li>
+<li>Require <code>issuerSchemaId</code> to not already be in the claimed-credentials bitmap for this <code>nullifier</code>; mark it claimed and add its configured budget.</li>
+</ol>
+<p>For <code>updateAddresses</code>:</p>
+<ol>
+<li>Require <code>nullifier</code> to have a record in the current period; load its <code>sessionId</code> and update nonce.</li>
+<li>Require the caller-supplied <code>nonce</code> to equal the stored update nonce.</li>
+<li>Recompute <code>signalHash</code> from a populated <code>UpdateAddressesSignal</code>.</li>
+<li>Verify a Session Proof against <code>sessionId</code> with the recomputed <code>signalHash</code>.</li>
+<li>Apply <code>addAddresses</code> and <code>removeAddresses</code> to the authorized-address set; bump the stored update nonce.</li>
+</ol>
+<p>A previously-claimed credential in the same period under the same <code>nullifier</code> MUST NOT be reused in either <code>claimSubsidy</code> or <code>claimAdditionalCredential</code>. <code>updateAddresses</code> changes authorization only; it does not mint additional budget.</p>
+<h4 id="example-authorization-and-budget-claim-flow"><a class="header" href="#example-authorization-and-budget-claim-flow">Example: Authorization and Budget Claim Flow</a></h4>
+<p>Assume governance has configured the following credential budgets:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Credential</th><th><code>issuerSchemaId</code></th><th>Budget</th></tr>
+</thead>
+<tbody>
+<tr><td>Proof-of-Human (Orb)</td><td><code>0x01</code></td><td>50,000 Gwei</td></tr>
+<tr><td>Phone</td><td><code>0x02</code></td><td>10,000 Gwei</td></tr>
+<tr><td>NFC</td><td><code>0x03</code></td><td>20,000 Gwei</td></tr>
+</tbody>
+</table>
+</div>
+<p>A user holds a World ID with PoH and Phone credentials at the start of period 7. Later in the period they acquire an NFC credential. They want to authorize two addresses (<code>0xAlice</code>, <code>0xBob</code>) initially and later revoke <code>0xBob</code>.</p>
+<p><strong>Step 1: Initial claim — bundle PoH + Phone in a single <code>ProofRequest</code> and one on-chain call.</strong></p>
+<p>The authenticator builds one <code>ProofRequest</code> for the user’s World ID with:</p>
+<ul>
+<li>Action: <code>"period_proof" || 7</code></li>
+<li>Two <code>RequestItem</code>s: one for PoH (<code>issuerSchemaId = 0x01</code>) and one for Phone (<code>issuerSchemaId = 0x02</code>)</li>
+<li>The same <code>signal</code> on both items (its bytes are the pre-image of the shared <code>claimSubsidy</code> signal binding)</li>
+<li>A fresh <code>sessionId</code> generated by the authenticator via OPRF</li>
+</ul>
+<p>This yields two per-credential Uniqueness Proofs sharing one <code>nullifier</code> and one <code>signal_hash</code>. The user submits them in a single atomic call:</p>
+<pre><code>claimSubsidy(
+    nullifier,
+    sessionId,
+    [0xAlice, 0xBob],
+    [ ClaimItem(0x01, proof_PoH), ClaimItem(0x02, proof_Phone) ]
+);
+</code></pre>
+<p>The component recomputes <code>signalHash</code>, verifies both proofs against it, creates the <code>nullifier</code> record, stores <code>sessionId</code>, authorizes <code>[0xAlice, 0xBob]</code>, marks <code>{0x01, 0x02}</code> claimed, sets update nonce to <code>0</code>, and credits 60,000 Gwei (PoH + Phone).</p>
+<p>State after step 1: budget = 60,000 Gwei, authorized = <code>[0xAlice, 0xBob]</code>, claimed = <code>{0x01, 0x02}</code>, update nonce = <code>0</code>.</p>
+<p><strong>Step 2: Mid-period — acquire NFC credential and claim its budget.</strong></p>
+<p>Later in period 7 the user obtains an NFC credential. The authenticator generates a Session Proof against the stored <code>sessionId</code> with a fresh <code>sessionNullifier2</code>, for <code>issuerSchemaId = 0x03</code>; the <code>signal</code> is set so the proof’s <code>signal_hash</code> equals the recomputed <code>claimAdditionalCredential</code> <code>signalHash</code>. The user calls:</p>
+<pre><code>claimAdditionalCredential(nullifier, 0x03, sessionNullifier2, proof);
+</code></pre>
+<p>The component verifies the Session Proof against the stored <code>sessionId</code>, marks <code>0x03</code> claimed under <code>nullifier</code>, and credits 20,000 Gwei.</p>
+<p>State after step 2: budget = 80,000 Gwei, authorized = <code>[0xAlice, 0xBob]</code>, claimed = <code>{0x01, 0x02, 0x03}</code>, update nonce = <code>0</code>.</p>
+<p><strong>Step 3: Session Proof — revoke an address.</strong></p>
+<p>The user wants to remove <code>0xBob</code>. They generate another Session Proof against <code>sessionId</code> with a fresh <code>sessionNullifier3</code>; the <code>signal</code> is set so the proof’s <code>signal_hash</code> equals the recomputed <code>updateAddresses</code> <code>signalHash</code> for <code>nonce = 0</code> and the address lists <code>[]</code> / <code>[0xBob]</code>:</p>
+<pre><code>updateAddresses(nullifier, 0, [], [0xBob], sessionNullifier3, proof);
+</code></pre>
+<p>The component verifies the Session Proof, removes <code>0xBob</code> from <code>nullifier</code>’s authorized set, and bumps the update nonce to <code>1</code>.</p>
+<p>State after step 3: budget = 80,000 Gwei (minus any consumed), authorized = <code>[0xAlice]</code>, claimed = <code>{0x01, 0x02, 0x03}</code>, update nonce = <code>1</code>.</p>
+<h3 id="budget-refresh"><a class="header" href="#budget-refresh">Budget Refresh</a></h3>
+<p>A subsidy record keyed by <code>nullifier</code> and its authorized accounts list is active for exactly one period. At the end of the period, all subsidies expire.</p>
+<p>To prevent congestion from all accounts submitting refresh proofs at the start of a new period, the next period’s initial <code>claimSubsidy</code> can be submitted during the current period.</p>
+<p>Note that the claim nullifiers of the same World ID across different periods cannot be linked. A user that wants a new on-chain pseudonym can simply authorize different addresses under the next period’s <code>nullifier</code>; if a World ID authorizes independent addresses in each period, it remains fully anonymous across periods.</p>
+<h3 id="gas-accounting-flow"><a class="header" href="#gas-accounting-flow">Gas Accounting Flow</a></h3>
+<p>For an incoming transaction:</p>
+<ol>
+<li>The protocol (or builder) looks up whether the sender address has an associated subsidy <code>nullifier</code> in the authorization map.</li>
+<li>If the address maps to more than one <code>nullifier</code>, a deterministic rule selects which record’s budget to use. A <a href="./wip-1001.html">WIP-1001</a> <code>0x1D</code> transaction MAY extend its envelope with an OPTIONAL <code>gas_nullifier</code> field; if present and the <code>keyring</code> is authorized under that <code>nullifier</code>, the declared budget is consumed.</li>
+<li>The budget is updated based on <code>gasUsed * baseFee</code> of the transaction.</li>
+</ol>
+<p><code>getBudget(address)</code> SHOULD apply the same deterministic nullifier-selection rule so off-chain callers observe the same effective budget that transaction execution would consume.</p>
+<p>A <code>0x1D</code> transaction MAY also explicitly opt out of budget consumption via the same extension path.</p>
+<h3 id="claim-transaction-subsidy"><a class="header" href="#claim-transaction-subsidy">Claim Transaction Subsidy</a></h3>
+<p>The claim-side mutations (<code>claimSubsidy</code>, <code>claimAdditionalCredential</code>, <code>updateAddresses</code>) themselves cost gas, and a user who has no native ETH on World Chain cannot pay for the very transaction that would mint their subsidy budget. The Gas Accounting component does not prescribe how this bootstrap gas is paid; deployments MAY adopt any of the following, or combine them:</p>
+<ul>
+<li><strong>User-paid.</strong> The claim transaction is paid in ETH by the caller like any ordinary transaction. Simplest; degenerates for users with zero ETH, which is the target population this system is designed to serve.</li>
+<li><strong>Self-subsidized.</strong> The protocol or builder simulates the claim, observes the resulting budget, and charges the claim transaction’s own gas against it. Most aligned with the “no native ETH required” goal; requires execution-layer support for speculative simulation or a predictable upper bound on the claim’s gas so the subsidy can be pre-deducted.</li>
+<li><strong>Protocol-funded bootstrap allowance.</strong> A small fixed allowance per <code>(rpId, nullifier, period)</code>, drawn from a protocol pool, covers just the claim transaction independently of the budget it ultimately mints. No simulation required; pool sizing and top-ups are a governance question.</li>
+<li><strong>Relayer-paid.</strong> An off-chain relayer (e.g. WorldApp infrastructure) submits and pays for the claim transaction and is reimbursed out of band. Orthogonal to on-chain accounting; decouples bootstrap from the protocol at the cost of a trusted or economically-incentivised relayer.</li>
+</ul>
+<p>Non-claim transactions consume budget through the <a href="#gas-accounting-flow">Gas Accounting Flow</a> above; for the virtual base-fee discount mechanism consumed by those transactions see the sibling <a href="./wip-1003.html">WIP-1003</a>.</p>
+<h2 id="rationale"><a class="header" href="#rationale">Rationale</a></h2>
+<p><strong>Gas accounting deployment flexibility.</strong> The component is designed with an identical interface whether deployed as a precompile or a standard contract (e.g., predeploy). As a contract with builder-level enforcement, it avoids protocol changes and allows faster iteration. As a precompile, it enables in-protocol enforcement. Starting with a contract is a pragmatic first step; migration to a precompile is straightforward if needed.</p>
+<p><strong>Nullifier-keyed budget records.</strong> Keying budget, authorization, and claimed-credentials state by the per-period <code>nullifier</code> collapses what would otherwise be two independent state objects (a budget record and a nullifier-used set) into a single map whose existence is itself the per-period replay guard. <code>(nullifier, issuerSchemaId)</code> in the claimed-credentials map prevents double-claiming a specific credential; nullifier-record existence prevents re-opening a record under the same <code>nullifier</code>.</p>
+<p><strong>Atomic multi-item initial claim + Session Proof additions.</strong> When the WorldID’s credentials and authorized addresses are known at the start of a period, bundling every held credential into one multi-item <code>ProofRequest</code> and submitting them via a single atomic <code>claimSubsidy</code> collapses the budget setup into one transaction — one record creation, one authorization-set write, one user confirmation — instead of N serial calls. Credentials acquired later in the period (or the rare case where the user deliberately spreads claims) are admitted via Session Proofs against the stored <code>sessionId</code>, which also sidesteps the <a href="https://github.com/worldcoin/world-id-protocol">World ID 4.0</a> authenticator’s refusal to reissue a <code>(rpId, action)</code> nullifier across separate <code>ProofRequest</code>s. The multi-item bundle is therefore an optimisation for the common up-front case, not a spec-compliance requirement — the Session Proof path alone would also work.</p>
+<p><strong>Authenticator-generated <code>sessionId</code>.</strong> For <code>rpId = WORLD_CHAIN_RP_ID</code>, <code>sessionId</code> is produced by the authenticator via OPRF at session-init time (<code>sessionId = encode(C, oprf_seed)</code> with <code>r = OPRF(pk_rpId, DS_C || leafIndex || oprf_seed)</code>). The component stores whatever <code>sessionId</code> the first <code>claimSubsidy</code> call supplies and never accepts a caller-chosen value that was not authenticator-issued for this World ID.</p>
+<p><strong>Per-credential budgets.</strong> Different credentials represent different levels of verification. Proof-of-Human from an Orb carries more weight than a phone credential. Allowing governance to configure budget amounts per <code>issuerSchemaId</code> enables fine-grained subsidy policy.</p>
+<p><strong>Signal binding against frontrunning.</strong> Each method binds its non-ZK-committed call parameters into <code>signalHash</code>. The contract recomputes the expected <code>signalHash</code> rather than accepting it from the caller. Mirrors the <a href="./wip-1001.html">WIP-1001</a> signal-binding pattern.</p>
+<p><strong>Periodic refresh with early submission.</strong> Fixed periods with expiring subsidies provide a clean budget lifecycle. Allowing early refresh prevents a thundering herd at period boundaries.</p>
+<p><strong>Orthogonality to Key Rings.</strong> <a href="./wip-1001.html">WIP-1001</a> <em>World ID Key Rings</em> are authorized here like any other address — no special coupling is required. Legacy EOAs can opt in to gas subsidies without migrating account types, and Key Rings can sign <code>0x1D</code> transactions that either do or do not consume subsidized gas.</p>
+<h2 id="backwards-compatibility"><a class="header" href="#backwards-compatibility">Backwards Compatibility</a></h2>
+<p>This WIP introduces a new protocol/builder-level accounting system. It does not modify the semantics of any existing transaction type. Any account type — legacy EOA, smart contract, or <a href="./wip-1001.html">WIP-1001</a> Key Ring — may be authorized under a subsidy <code>nullifier</code> and thereby consume subsidized gas. Whether <a href="https://eips.ethereum.org/EIPS/eip-1559">EIP-1559</a> transactions from authorized accounts can consume gas budgets is an open question (see optional requirements).</p>
+<h2 id="test-cases"><a class="header" href="#test-cases">Test Cases</a></h2>
+<blockquote>
+<p>TODO: Test cases to be defined before moving out of Draft status.</p>
+</blockquote>
+<h2 id="reference-implementation"><a class="header" href="#reference-implementation">Reference Implementation</a></h2>
+<blockquote>
+<p>TODO: Reference implementation to be added before moving out of Draft status.</p>
+</blockquote>
+<h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
+<p><strong>Anonymity.</strong> Claim nullifiers are unlinkable across periods by construction. A World ID that authorizes different addresses each period cannot be tracked. However, if the same addresses are reused across periods, on-chain observers can infer continuity — the address itself becomes the deanonymization vector.</p>
+<p><strong>Refresh congestion.</strong> Even with early refresh support, a significant fraction of users may refresh near period boundaries. Sub-period slots with proportional sub-budgets can mitigate traffic spikes.</p>
+<p><strong>Gas accounting trust boundary.</strong> The <code>consumeBudget</code> method must be access-controlled. As a precompile, it must only be callable by the protocol during transaction execution. As a contract, it must be restricted to the builder’s designated caller (e.g., via <code>onlyOwner</code> or a builder-specific access control mechanism).</p>
+<p><strong>Replay protection.</strong> Per-period replay is enforced by two layers: existence of a <code>nullifier</code> record blocks re-opening under the same <code>nullifier</code>, and the per-record claimed-credentials map blocks double-claiming any specific <code>issuerSchemaId</code>. No separate “used nullifiers” set is needed.</p>
+<p><strong>Signal binding.</strong> <code>signalHash</code> MUST commit to every non-ZK-committed call parameter — see the per-method schemas under <a href="#signal-binding">Signal Binding</a>. The contract recomputes <code>signalHash</code> from the call parameters rather than trusting any caller-supplied value, so a frontrunner cannot replay a witnessed proof with a substituted <code>msg.sender</code> or authorized-address list. For <code>updateAddresses</code>, the monotonic record-scoped <code>nonce</code> additionally prevents in-flight Session Proof replay; <code>claimSubsidy</code> replay is precluded by nullifier-record existence, and <code>claimAdditionalCredential</code> replay by the claimed-credentials bitmap.</p>
+<p><strong>Authenticator-generated <code>sessionId</code>.</strong> The <code>sessionId</code> stored for a <code>nullifier</code> is derived by the authenticator from an OPRF output keyed by <code>(rpId, leafIndex, oprf_seed)</code>. The component cannot distinguish on-chain between an authenticator-issued <code>sessionId</code> and an attacker-chosen value, so Session Proof verification is the enforcement layer: a Session Proof against an unissued <code>sessionId</code> will simply fail to verify. Implementations SHOULD document that clients MUST NOT supply <code>sessionId</code> values that were not produced by an authenticator session for <code>WORLD_CHAIN_RP_ID</code>.</p>
+<p><strong>Governance capture of budget parameters.</strong> <code>setCredentialBudget</code> is governance-controlled. Misuse (e.g. setting an extravagant budget for a cheap credential) could drain subsidy pools. Governance timelocks or caps SHOULD apply.</p>
+<h2 id="future-upgrades"><a class="header" href="#future-upgrades">Future Upgrades</a></h2>
+<h3 id="persistent-subsidies"><a class="header" href="#persistent-subsidies">Persistent Subsidies</a></h3>
+<p>The current design intentionally requires fresh <code>claimSubsidy</code> calls each period. A future upgrade could remove <code>periodNumber</code> from the action so each <code>(issuerSchemaId, World ID)</code> pair yields one stable <code>nullifier</code>, allowing long-lived subsidies without periodic re-claims.</p>
+<p>That change creates a privacy problem: if the stable subsidy were directly rebound to a different authorized account, observers could link all rotations for that credential. One way around this is to replace direct <code>nullifier</code> tracking with an on-chain Merkle tree of active subsidy commitments with a monotonic rotation nonce, e.g. <code>leaf = H(issuerSchemaId || nullifier || sessionID || rotationNonce)</code>.</p>
+<p>Under that model, the persistent subsidy would need to live behind the commitment lineage rather than the public <code>nullifier</code>; the <code>nullifier</code> would become only a revocable handle into that hidden subsidy state. Rotating to a fresh public record would then be a two-stage process:</p>
+<ol>
+<li>In a single proof and transaction, the user proves inclusion of the current leaf at rotation nonce <code>n</code>, deletes it, inserts the successor leaf at nonce <code>n + 1</code>, and simultaneously deletes the old <code>nullifier -&gt; subsidy</code> mapping.</li>
+<li>After a mandatory delay, the user proves inclusion of the successor leaf and creates a new <code>nullifier -&gt; subsidy</code> mapping for a fresh <code>nullifier</code>.</li>
+</ol>
+<p>The proof system and contract would need to enforce that the rotation nonce increments monotonically, that there is at most one active leaf for a given hidden <code>(issuerSchemaId, nullifier)</code>, and that the rebinding delay is measured from activation of the successor leaf before a new <code>nullifier</code> can be attached. This upgrade is out of scope for the current WIP, but it sketches a path toward persistent subsidies with unlinkable record and account rotation.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../wips/wip-1001.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../wips/wip-template.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../wips/wip-1001.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../wips/wip-template.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-c2a407aa.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../specs/static/mermaid-3a6b472a.min.js"></script>
+        <script src="../specs/static/mermaid-init-025d9952.js"></script>
+        <script src="../specs/static/solidity-min-a44de257.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

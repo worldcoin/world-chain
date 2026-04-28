@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Architecture - World Chain Specs</title>
+        <title>World Chain Improvement Proposals - World Chain Specs</title>
 
 
         <!-- Custom HTML head -->
@@ -174,204 +174,194 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="pbh-architecture"><a class="header" href="#pbh-architecture">PBH Architecture</a></h1>
-<p>World Chain is an OP Stack chain that enables Priority Blockspace for Humans (PBH) through the World Chain Builder. World Chain leverages <a href="https://github.com/flashbots/rollup-boost">rollup-boost</a> to support external block production, allowing the builder to propose PBH blocks to the sequencer while remaining fully compatible with the OP Stack.</p>
-<h2 id="block-production-on-the-op-stack"><a class="header" href="#block-production-on-the-op-stack">Block Production on the OP Stack</a></h2>
-<p>The <a href="https://specs.optimism.io/protocol/exec-engine.html#engine-api">Engine API</a> defines the communication protocol between the Consensus Layer (CL) and the Execution Layer (EL) and is responsible for orchestrating block production on the OP Stack. Periodically, the sequencer’s consensus client will send a fork choice update (FCU) to its execution client, signaling for a new block to be built. After a series of API calls between the CL and EL, the EL will return a new <code>ExecutionPayload</code> containing a newly constructed block. The CL will then advance the unsafe head of the chain and peer the new block to other nodes in the network.</p>
-<pre class="mermaid">sequenceDiagram
-    box OP Stack Sequencer
-        participant sequencer-cl as Sequencer CL
-        participant sequencer-el as Sequencer EL
-    end
-    box Network
-        participant peers-cl as Peers
-    end
-
-    Note over sequencer-cl: FCU with Attributes
-    sequencer-cl-&gt;&gt;sequencer-el: engine_forkChoiceUpdatedV3(ForkChoiceState, Attrs)
-    sequencer-el--&gt;&gt;sequencer-cl: {payloadStatus: {status: VALID, ...}, payloadId: PayloadId}
-    sequencer-el-&gt;&gt;sequencer-el: Build execution payload
-    sequencer-cl-&gt;&gt;sequencer-el: engine_getPayloadV3(PayloadId)
-    sequencer-el--&gt;&gt;sequencer-cl: {executionPayload, blockValue}
-    sequencer-cl-&gt;&gt;peers-cl: Propagate new block
-
-
-</pre>
-
-<p>For a detailed look at how block production works on the OP Stack, see the <a href="https://specs.optimism.io/protocol/exec-engine.html#engine-api">OP Stack specs</a>.</p>
-<h2 id="rollup-boost"><a class="header" href="#rollup-boost">Rollup Boost</a></h2>
-<p><code>rollup-boost</code> is a block building sidecar for OP Stack chains, enabling external block production while remaining fully compatible with the OP Stack. <code>rollup-boost</code> acts as an intermediary between the sequencer’s consensus and execution client. When <code>sequencer-cl</code> sends a new FCU to <code>rollup-boost</code>, the request will be multiplexed to both the sequencer’s execution client and external block builders signaling that a new block should be built.</p>
-<p>When the sequencer is ready to propose a new block, <code>op-node</code> will send an <code>engine_getPayload</code> request to <code>rollup-boost</code> which is forwarded to the default execution client and external block builders.</p>
-<p>Once <code>rollup-boost</code> receives the built block from external builder, it will then validate the block by sending it to the sequencer’s execution client via <code>engine_newPayload</code>. If the external block is valid, it is returned to the sequencer’s <code>op-node</code>, otherwise <code>rollup-boost</code> will return the fallback block. Note that <code>rollup-boost</code> will always fallback to the default execution client’s block in the case that the external builder does not respond in time or returns an invalid block.</p>
-<pre class="mermaid">sequenceDiagram
-    box Sequencer
-        participant sequencer-cl as Sequencer CL
-        participant rollup-boost
-        participant sequencer-el as Sequencer EL
-    end
-    box Builder
-        participant builder-el as Builder EL
-    end
-
-    Note over sequencer-cl: FCU with Attributes
-    sequencer-cl-&gt;&gt;rollup-boost: engine_forkChoiceUpdatedV3(..., Attrs)
-
-    Note over rollup-boost: Forward FCU
-    rollup-boost-&gt;&gt;builder-el: engine_forkChoiceUpdatedV3(..., Attrs)
-
-    rollup-boost-&gt;&gt;sequencer-el: engine_forkChoiceUpdatedV3(..., Attrs)
-    sequencer-el--&gt;&gt;rollup-boost: {payloadId: PayloadId}
-    rollup-boost--&gt;&gt;sequencer-cl: {payloadId: PayloadId}
-
-
-    Note over sequencer-cl: Get Payload
-    sequencer-cl-&gt;&gt;rollup-boost: engine_getPayloadV3(PayloadId)
-    Note over rollup-boost: Forward Get Payload
-    rollup-boost-&gt;&gt;sequencer-el: engine_getPayloadV3(PayloadId)
-    rollup-boost-&gt;&gt;builder-el: engine_getPayloadV3(PayloadId)
-    builder-el--&gt;&gt;rollup-boost: {executionPayload, blockValue}
-    sequencer-el--&gt;&gt;rollup-boost: {executionPayload, blockValue}
-
-
-
-    Note over rollup-boost, sequencer-el: Validate builder block
-    rollup-boost-&gt;&gt;sequencer-el: engine_newPayloadV3(ExecutionPayload)
-    sequencer-el-&gt;&gt;rollup-boost: {status: VALID, ...}
-
-    Note over rollup-boost: Propose execution payload
-    rollup-boost-&gt;&gt;sequencer-cl: {executionPayload, blockValue}
-    
-    Note over sequencer-cl: Propagate new block
-</pre>
-
-<p>In addition to Engine API requests, <code>rollup-boost</code> will proxy all RPC calls from the sequencer <code>op-node</code> to its local execution client. The following RPC calls will also be forwarded to external builders:</p>
+                        <h1 id="world-chain-improvement-proposals-wips"><a class="header" href="#world-chain-improvement-proposals-wips">World Chain Improvement Proposals (WIPs)</a></h1>
+<p>World Chain Improvement Proposals (WIPs) are design documents that describe new features, standards, or processes for the World Chain protocol. WIPs provide a structured way to propose changes, collect community feedback, and document design decisions.</p>
+<p>WIPs are modeled after <a href="https://github.com/ethereum/EIPs">Ethereum Improvement Proposals (EIPs)</a> and follow a similar format and workflow.</p>
+<hr>
+<h2 id="table-of-contents"><a class="header" href="#table-of-contents">Table of Contents</a></h2>
 <ul>
-<li><code>miner_*</code>
+<li><a href="#wip-index">WIP Index</a></li>
+<li><a href="#wip-types">WIP Types</a></li>
+<li><a href="#wip-statuses">WIP Statuses</a></li>
+<li><a href="#wip-format">WIP Format</a>
 <ul>
-<li>The Miner API is used to notify execution clients of changes in effective gas price, extra data, and DA throttling requests from the batcher.</li>
+<li><a href="#front-matter-preamble">Front Matter (Preamble)</a></li>
+<li><a href="#required-sections">Required Sections</a></li>
+<li><a href="#optional-sections">Optional Sections</a></li>
 </ul>
 </li>
-<li><code>eth_sendRawTransaction*</code>
-<ul>
-<li>Forwards transactions the sequencer receives to the builder for block building.</li>
+<li><a href="#numbering-convention">Numbering Convention</a></li>
+<li><a href="#how-to-contribute">How to Contribute</a></li>
+<li><a href="#assets">Assets</a></li>
 </ul>
-</li>
-</ul>
- 
-<h2 id="block-production-on-world-chain"><a class="header" href="#block-production-on-world-chain">Block Production on World Chain</a></h2>
-<p>World Chain leverages <code>rollup-boost</code> to enable external block production and integrates the World Chain Builder as a block builder in the network. The World Chain Builder implements a custom block ordering policy (ie. PBH) to provide priority inclusion for transactions with a valid World ID proof. Note that the custom ordering policy adheres to the OP Stack spec.</p>
-<p>Each block has a “PBH blockspace capacity”, which determines how many PBH transactions will be included in the block. Blocks on World Chain will always reserve a percentage of blockspace for non-PBH transactions to ensure inclusion for automated systems and non-verified users. If there are not enough pending PBH transactions to fill the entirety of PBH blockspace, standard transactions will be used to fill the remainder of the block.</p>
-<br>
-<div style="display: flex; justify-content: center; gap: 40px;">
-  
-<div style="border: 1px solid white; padding: 15px; width: 250px; text-align: center; color: white;">
-    
-<div style="color: #bbbbbb; font-weight: bold; padding-bottom: 5px;">Default Block</div>
-
-    
-<table style="width: 100%; margin-top: 10px;">
-      
-<tr>
-        <th style="width: 50%; border-bottom: 1px solid white;">Tx Hash</th>
-        <th style="width: 50%; border-bottom: 1px solid white;">Fee</th>
-      </tr>
-
-      
-<tr><td>0xaaaa</td><td>$0.04</td></tr>
-
-      
-<tr><td>0xbbbb</td><td>$0.04</td></tr>
-
-      
-<tr><td>0xcccc</td><td>$0.03</td></tr>
-
-      
-<tr><td>0xdddd</td><td>$0.03</td></tr>
-
-      
-<tr><td>0xeeee</td><td>$0.03</td></tr>
-
-      
-<tr><td>0x2222</td><td>$0.02</td></tr>
-
-      
-<tr><td>0x3333</td><td>$0.02</td></tr>
-
-      
-<tr><td>0x4444</td><td>$0.02</td></tr>
-
-      
-<tr><td>0x5555</td><td>$0.01</td></tr>
-
-      
-<tr><td>0x6666</td><td>$0.01</td></tr>
-
-    </table>
-
-  </div>
-
-  
-<div style="border: 1px solid white; padding: 15px; width: 250px; text-align: center; color: white;">
-    
-<div style="color: #bbbbbb; font-weight: bold; padding-bottom: 5px;">PBH Block</div>
-
-    
-<table style="width: 100%; margin-top: 10px;">
-      
-<tr>
-        <th style="width: 50%; border-bottom: 1px solid white;">Tx Hash</th>
-        <th style="width: 50%; border-bottom: 1px solid white;">Fee</th>
-      </tr>
-
-      
-<tr style="color: #33ff33;"><td>0x3333</td><td>$0.02</td></tr>
-
-      
-<tr style="color: #33ff33;"><td>0x4444</td><td>$0.02</td></tr>
-
-      
-<tr style="color: #33ff33;"><td>0x5555</td><td>$0.01</td></tr>
-
-      
-<tr style="color: #33ff33;"><td>0x6666</td><td>$0.01</td></tr>
-
-      
-<tr><td>0xaaaa</td><td>$0.04</td></tr>
-
-      
-<tr><td>0xbbbb</td><td>$0.04</td></tr>
-
-      
-<tr><td>0xcccc</td><td>$0.03</td></tr>
-
-      
-<tr><td>0xdddd</td><td>$0.03</td></tr>
-
-      
-<tr><td>0xeeee</td><td>$0.03</td></tr>
-
-      
-<tr><td>0x2222</td><td>$0.02</td></tr>
-
-    </table>
-
-  </div>
-
+<hr>
+<h2 id="wip-index"><a class="header" href="#wip-index">WIP Index</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>WIP</th><th>Title</th><th>Status</th><th>Category</th><th>Created</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="./wip-1001.html">1001</a></td><td>WorldID Native Account Abstraction</td><td>Draft</td><td>Core</td><td>2026-03-27</td></tr>
+<tr><td><a href="./wip-1002.html">1002</a></td><td>WorldID Gas Accounting</td><td>Draft</td><td>Core</td><td>2026-04-21</td></tr>
+</tbody>
+</table>
 </div>
-
-<br>
-<p>If the amount of pending PBH transactions exceed the PBH blockspace capacity, the remaining PBH transactions will carry over to the next block. PBH transactions aim to provide verified users with faster, cheaper transaction inclusion, especially during network congestion. Note that transactions within PBH blockspace are ordered by priority fee.</p>
-<p>In the event that the block builder is offline, <code>rollup-boost</code> will fallback to the block built by the default execution client with standard OP Stack ordering rules.</p>
+<hr>
+<h2 id="wip-types"><a class="header" href="#wip-types">WIP Types</a></h2>
+<p>Each WIP must declare one of the following types:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Standards Track</strong></td><td>Describes a change that affects most or all World Chain implementations, such as a change to the protocol, transaction format, or precompile behavior. Standards Track WIPs are further categorized as <code>Core</code>, <code>Networking</code>, or <code>Interface</code>.</td></tr>
+<tr><td><strong>Meta</strong></td><td>Describes a process surrounding World Chain or proposes a change to a process. Meta WIPs require community consensus but do not change the protocol itself.</td></tr>
+<tr><td><strong>Informational</strong></td><td>Provides general guidelines, information, or describes a World Chain design issue without proposing a protocol change. Informational WIPs do not necessarily represent community consensus.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="standards-track-categories"><a class="header" href="#standards-track-categories">Standards Track Categories</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Category</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Core</strong></td><td>Improvements requiring a consensus fork or changes to core protocol components (e.g., precompiles, transaction types, state).</td></tr>
+<tr><td><strong>Networking</strong></td><td>Improvements to the p2p networking layer or node communication protocols.</td></tr>
+<tr><td><strong>Interface</strong></td><td>Improvements around client API/RPC specifications and standards.</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="wip-statuses"><a class="header" href="#wip-statuses">WIP Statuses</a></h2>
+<p>WIPs follow this lifecycle:</p>
+<pre><code>Idea → Draft → Review → Last Call → Final
+                              ↓
+                           Stagnant
+                              ↓
+                          Withdrawn
+</code></pre>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Status</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Idea</strong></td><td>An idea that is not yet a formal WIP. Discussed informally before being formalized.</td></tr>
+<tr><td><strong>Draft</strong></td><td>The first formally tracked stage. The WIP is being actively developed and is not yet stable.</td></tr>
+<tr><td><strong>Review</strong></td><td>The WIP author has marked the WIP as ready for peer review. Reviewers may submit feedback via GitHub comments.</td></tr>
+<tr><td><strong>Last Call</strong></td><td>The final review window before finalization. The WIP will move to <code>Final</code> if no substantial objections are raised during this window.</td></tr>
+<tr><td><strong>Final</strong></td><td>The WIP has been finalized and represents an accepted standard. No further changes are expected other than errata corrections.</td></tr>
+<tr><td><strong>Stagnant</strong></td><td>A WIP in <code>Draft</code> or <code>Review</code> that has had no activity for 6 months. It may be resurrected by updating its status back to <code>Draft</code>.</td></tr>
+<tr><td><strong>Withdrawn</strong></td><td>The WIP author(s) have withdrawn the proposal. This state is final; the WIP number will not be reused.</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="wip-format"><a class="header" href="#wip-format">WIP Format</a></h2>
+<p>All WIPs are written in Markdown and stored as <code>wip-NNNN.md</code> in this directory. Each WIP begins with a YAML front matter block (preamble), followed by a set of standard sections.</p>
+<p>Use <a href="./wip-template.html"><code>wip-template.md</code></a> as your starting point.</p>
+<h3 id="front-matter-preamble"><a class="header" href="#front-matter-preamble">Front Matter (Preamble)</a></h3>
+<pre><code class="language-yaml">---
+wip: &lt;number&gt;
+title: &lt;Short title, 44 characters or less&gt;
+description: &lt;One-sentence description of the proposal&gt;
+author: &lt;FirstName LastName (@GitHubUsername), ...&gt;
+status: &lt;Draft | Review | Last Call | Final | Stagnant | Withdrawn&gt;
+type: &lt;Standards Track | Meta | Informational&gt;
+category: &lt;Core | Networking | Interface&gt;  # Standards Track only
+created: &lt;YYYY-MM-DD&gt;
+requires: &lt;WIP-NNNN, EIP-NNNN&gt;  # if applicable
+---
+</code></pre>
+<p><strong>Field descriptions:</strong></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Required</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>wip</code></td><td>✅</td><td>The unique WIP number (assigned by a maintainer).</td></tr>
+<tr><td><code>title</code></td><td>✅</td><td>A short, descriptive title. Must not repeat the WIP number.</td></tr>
+<tr><td><code>description</code></td><td>✅</td><td>A single full sentence summarizing the proposal.</td></tr>
+<tr><td><code>author</code></td><td>✅</td><td>Comma-separated list of authors. Each author listed as <code>Name (@GitHubHandle)</code> or <code>Name &lt;email@example.com&gt;</code>.</td></tr>
+<tr><td><code>status</code></td><td>✅</td><td>Current lifecycle status (see <a href="#wip-statuses">WIP Statuses</a>).</td></tr>
+<tr><td><code>type</code></td><td>✅</td><td>The WIP type (see <a href="#wip-types">WIP Types</a>).</td></tr>
+<tr><td><code>category</code></td><td>⚠️</td><td>Required for <code>Standards Track</code> WIPs only.</td></tr>
+<tr><td><code>created</code></td><td>✅</td><td>ISO 8601 date (<code>YYYY-MM-DD</code>) when the WIP was first submitted.</td></tr>
+<tr><td><code>requires</code></td><td>❌</td><td>Other WIPs or EIPs that this WIP depends on.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="required-sections"><a class="header" href="#required-sections">Required Sections</a></h3>
+<p>Every WIP must include the following sections in this order:</p>
+<ol>
+<li><strong>Abstract</strong> — A multi-sentence paragraph summarizing the proposal. Should be readable in isolation.</li>
+<li><strong>Specification</strong> — Detailed technical description of the proposed change. Must include the RFC 2119 keyword boilerplate if RFC 2119 terms are used.</li>
+<li><strong>Rationale</strong> — Explanation of design decisions, alternatives considered, and why this approach was chosen.</li>
+<li><strong>Security Considerations</strong> — Discussion of all relevant security implications. A WIP cannot advance to <code>Final</code> without this section being deemed sufficient by reviewers.</li>
+<li><strong>Copyright</strong> — All WIPs must end with: <code>Copyright and related rights waived via [CC0](https://creativecommons.org/publicdomain/zero/1.0/).</code></li>
+</ol>
+<h3 id="optional-sections"><a class="header" href="#optional-sections">Optional Sections</a></h3>
+<p>The following sections are optional but encouraged where applicable:</p>
+<ul>
+<li><strong>Motivation</strong> — Describe the problem this WIP solves. Include this section if the motivation is not immediately obvious.</li>
+<li><strong>Backwards Compatibility</strong> — Required if the proposal introduces breaking changes.</li>
+<li><strong>Test Cases</strong> — Expected input/output pairs or executable tests. Required for Core WIPs before <code>Final</code>.</li>
+<li><strong>Reference Implementation</strong> — A minimal implementation to aid understanding. Do not use this as a substitute for the Specification.</li>
+</ul>
+<hr>
+<h2 id="numbering-convention"><a class="header" href="#numbering-convention">Numbering Convention</a></h2>
+<p>WIP numbers are assigned sequentially by maintainers when a Draft PR is opened.</p>
+<ul>
+<li>WIPs in the <strong>1000–1999</strong> range cover <strong>Core</strong> protocol features for World Chain.</li>
+<li>Numbers below 1000 are reserved for future Meta and Informational WIPs.</li>
+</ul>
+<p>Do not self-assign a WIP number when initially opening a PR. Use a descriptive branch name (e.g., <code>wip/account-abstraction</code>) and a maintainer will assign a number upon review.</p>
+<hr>
+<h2 id="how-to-contribute"><a class="header" href="#how-to-contribute">How to Contribute</a></h2>
+<ol>
+<li>
+<p><strong>Discuss your idea first.</strong> Open a GitHub Discussion or reach out on the World Chain Discord before writing a full WIP. Early feedback saves time.</p>
+</li>
+<li>
+<p><strong>Fork and branch.</strong> Fork the <a href="https://github.com/worldcoin/world-chain"><code>worldcoin/world-chain</code></a> repository and create a branch named <code>wip/&lt;short-description&gt;</code>.</p>
+</li>
+<li>
+<p><strong>Use the template.</strong> Copy <a href="./wip-template.html"><code>wip-template.md</code></a> to a new file named <code>wip-draft_&lt;short_title&gt;.md</code> (you’ll rename it once a number is assigned).</p>
+</li>
+<li>
+<p><strong>Fill in the front matter and sections.</strong> Delete all HTML comment blocks before submitting.</p>
+</li>
+<li>
+<p><strong>Open a Pull Request.</strong> Target the <code>main</code> branch. A maintainer will review your WIP, suggest a number, and rename the file.</p>
+</li>
+<li>
+<p><strong>Iterate.</strong> Respond to review feedback. Once consensus is reached, the WIP status will be updated.</p>
+</li>
+<li>
+<p><strong>Assets.</strong> If your WIP requires diagrams, code, or other assets, add them to <code>assets/wip-&lt;number&gt;/</code>.</p>
+</li>
+</ol>
+<hr>
+<h2 id="assets"><a class="header" href="#assets">Assets</a></h2>
+<p>Large assets (diagrams, reference implementations, test vectors) that cannot reasonably be embedded in the WIP file itself should be placed in:</p>
+<pre><code>assets/wip-&lt;number&gt;/
+</code></pre>
+<p>Keep the WIP file focused on the specification; reference assets by relative path.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../pbh/overview.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../development.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../pbh/txs.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../wips/wip-1001.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -381,11 +371,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../pbh/overview.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../development.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../pbh/txs.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../wips/wip-1001.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
