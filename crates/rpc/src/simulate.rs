@@ -1079,6 +1079,11 @@ where
     evm_env.cfg_env.disable_block_gas_limit = true;
     evm_env.cfg_env.disable_eip3607 = true;
     evm_env.cfg_env.disable_base_fee = true;
+    // Required: we reuse one EVM across 3·N view calls all sent from
+    // `Address::ZERO`. The first transact bumps ZERO's cached nonce, so
+    // without this flag every subsequent call fails nonce validation and
+    // silently returns empty metadata.
+    evm_env.cfg_env.disable_nonce_check = true;
 
     let Ok(state_provider) = client.state_by_block_id(block_id) else {
         return Vec::new();
