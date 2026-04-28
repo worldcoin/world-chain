@@ -1,7 +1,7 @@
 use alloy_consensus::BlockHeader;
 use alloy_op_evm::{OpEvmFactory, OpTx};
 use alloy_primitives::{Address, B256, Bytes, U256};
-use alloy_rpc_types::BlockNumberOrTag;
+use alloy_rpc_types::{BlockId, BlockNumberOrTag};
 use jsonrpsee::{
     core::{RpcResult, async_trait},
     proc_macros::rpc,
@@ -41,9 +41,6 @@ pub struct SimulateUnsignedUserOpRequest {
     pub call_data: Bytes,
     /// The ERC-4337 EntryPoint address used as `msg.sender` in the simulation.
     pub entry_point: Address,
-    /// Block to simulate against. Defaults to `latest`.
-    #[serde(default)]
-    pub block: BlockNumberOrTag,
     /// Optional gas limit for the simulated call. Defaults to `MAX_SIMULATION_GAS`.
     /// Must not exceed `MAX_SIMULATION_GAS`.
     #[serde(default)]
@@ -372,21 +369,22 @@ where
         &self,
         request: SimulateUnsignedUserOpRequest,
     ) -> RpcResult<SimulateUnsignedUserOpResult> {
-        let block_id = request.block.into();
-
-        // 1. Resolve the sealed header for the target block
+        // 1. Resolve the latest sealed header. Subsequent lookups go by its
+        //    concrete hash so a new block arriving mid-request can't desync
+        //    the header from the state we read.
         let header = self
             .client
-            .sealed_header_by_id(block_id)
+            .sealed_header_by_id(BlockNumberOrTag::Latest.into())
             .map_err(internal_err)?
             .ok_or_else(|| {
                 jsonrpsee::types::ErrorObjectOwned::owned(
                     jsonrpsee::types::error::INVALID_PARAMS_CODE,
-                    "Block not found",
+                    "Latest block not found",
                     None::<String>,
                 )
             })?;
         let block_number = header.number();
+        let block_id = BlockId::Hash(header.hash().into());
 
         // 2. Build the EVM environment from the header (same as eth_call)
         let mut evm_env = self
