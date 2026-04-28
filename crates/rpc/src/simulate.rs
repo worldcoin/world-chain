@@ -923,8 +923,43 @@ pub fn parse_exposure_changes(logs: &[alloy_primitives::Log]) -> Vec<ExposureCha
 // Revert reason decoding
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// `Error(string)` selector — `keccak256("Error(string)")[..4]`.
+const ERROR_STRING_SELECTOR: [u8; 4] = [0x08, 0xc3, 0x79, 0xa0];
+
+/// `Panic(uint256)` selector — `keccak256("Panic(uint256)")[..4]`.
+const PANIC_UINT256_SELECTOR: [u8; 4] = [0x4e, 0x48, 0x7b, 0x71];
+
+/// Minimum payload length for a well-formed `Error(string)` revert:
+/// selector(4) + string-offset(32) + string-length(32).
+const MIN_ERROR_STRING_LEN: usize = 4 + 32 + 32;
+
+/// Minimum payload length for a well-formed `Panic(uint256)` revert:
+/// selector(4) + uint256(32).
+const MIN_PANIC_UINT256_LEN: usize = 4 + 32;
+
+/// Solidity panic codes — see the [Solidity docs][1] for the canonical list.
+/// Sentinel returned when the panic code is too large to fit in u64.
+///
+/// [1]: https://docs.soliditylang.org/en/latest/control-structures.html#panic-via-assert-and-error-via-require
+mod panic_code {
+    pub const GENERIC: u64 = 0x00;
+    pub const ASSERTION_FAILED: u64 = 0x01;
+    pub const ARITHMETIC_OVER_UNDERFLOW: u64 = 0x11;
+    pub const DIVISION_BY_ZERO: u64 = 0x12;
+    pub const INVALID_ENUM_VALUE: u64 = 0x21;
+    pub const INVALID_STORAGE_BYTE_ARRAY: u64 = 0x22;
+    pub const POP_ON_EMPTY_ARRAY: u64 = 0x31;
+    pub const ARRAY_INDEX_OUT_OF_BOUNDS: u64 = 0x32;
+    pub const OUT_OF_MEMORY: u64 = 0x41;
+    pub const UNINITIALIZED_FUNCTION_POINTER: u64 = 0x51;
+    /// Returned by `try_into` when the on-chain panic code exceeds u64::MAX.
+    /// Reusing 0xFF here is safe because Solidity never emits it.
+    pub const UNKNOWN_SENTINEL: u64 = 0xFF;
+}
+
 /// Decode revert data into a human-readable string.
-/// Handles `Error(string)` (0x08c379a0) and `Panic(uint256)` (0x4e487b71).
+/// Handles `Error(string)` and `Panic(uint256)`; falls back to hex for
+/// custom errors and other unknown payloads.
 pub fn decode_revert_reason(output: &Bytes) -> String {
     if output.len() < 4 {
         return format!("0x{}", hex::encode(output.as_ref()));
@@ -932,8 +967,7 @@ pub fn decode_revert_reason(output: &Bytes) -> String {
 
     let selector = &output[..4];
 
-    // Error(string) — 0x08c379a0
-    if selector == [0x08, 0xc3, 0x79, 0xa0] && output.len() >= 68 {
+    if selector == ERROR_STRING_SELECTOR && output.len() >= MIN_ERROR_STRING_LEN {
         let offset: usize = U256::from_be_slice(&output[4..36]).try_into().unwrap_or(0);
         let abs_offset = 4 + offset;
         if abs_offset + 32 <= output.len() {
@@ -949,20 +983,19 @@ pub fn decode_revert_reason(output: &Bytes) -> String {
         }
     }
 
-    // Panic(uint256) — 0x4e487b71
-    if selector == [0x4e, 0x48, 0x7b, 0x71] && output.len() >= 36 {
+    if selector == PANIC_UINT256_SELECTOR && output.len() >= MIN_PANIC_UINT256_LEN {
         let code = U256::from_be_slice(&output[4..36]);
-        let reason = match code.try_into().unwrap_or(0xFFu64) {
-            0x00 => "generic compiler panic",
-            0x01 => "assertion failed",
-            0x11 => "arithmetic overflow/underflow",
-            0x12 => "division by zero",
-            0x21 => "invalid enum value",
-            0x22 => "invalid storage byte array",
-            0x31 => "pop on empty array",
-            0x32 => "array index out of bounds",
-            0x41 => "out of memory",
-            0x51 => "uninitialized function pointer",
+        let reason = match code.try_into().unwrap_or(panic_code::UNKNOWN_SENTINEL) {
+            panic_code::GENERIC => "generic compiler panic",
+            panic_code::ASSERTION_FAILED => "assertion failed",
+            panic_code::ARITHMETIC_OVER_UNDERFLOW => "arithmetic overflow/underflow",
+            panic_code::DIVISION_BY_ZERO => "division by zero",
+            panic_code::INVALID_ENUM_VALUE => "invalid enum value",
+            panic_code::INVALID_STORAGE_BYTE_ARRAY => "invalid storage byte array",
+            panic_code::POP_ON_EMPTY_ARRAY => "pop on empty array",
+            panic_code::ARRAY_INDEX_OUT_OF_BOUNDS => "array index out of bounds",
+            panic_code::OUT_OF_MEMORY => "out of memory",
+            panic_code::UNINITIALIZED_FUNCTION_POINTER => "uninitialized function pointer",
             _ => "unknown panic",
         };
         return format!("Panic({reason})");
