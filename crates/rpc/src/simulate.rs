@@ -903,9 +903,20 @@ pub fn decode_revert_reason(output: &Bytes) -> String {
 // Selector-to-name mapping
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// Well-known ERC-20 metadata view selectors. Defined here so they're shared
+/// between trace decoding (`selector_to_name`) and the metadata resolver, which
+/// needs the raw bytes to make the calls.
+pub const NAME_SELECTOR: [u8; 4] = [0x06, 0xfd, 0xde, 0x03]; // name()
+pub const SYMBOL_SELECTOR: [u8; 4] = [0x95, 0xd8, 0x9b, 0x41]; // symbol()
+pub const DECIMALS_SELECTOR: [u8; 4] = [0x31, 0x3c, 0xe5, 0x67]; // decimals()
+
 /// Best-effort decode of a 4-byte function selector to a human-readable name.
 pub fn selector_to_name(selector: [u8; 4]) -> Option<&'static str> {
     match selector {
+        // ERC-20 metadata views
+        NAME_SELECTOR => Some("name"),
+        SYMBOL_SELECTOR => Some("symbol"),
+        DECIMALS_SELECTOR => Some("decimals"),
         // ERC-20
         [0xa9, 0x05, 0x9c, 0xbb] => Some("transfer"),
         [0x23, 0xb8, 0x72, 0xdd] => Some("transferFrom"),
@@ -941,11 +952,6 @@ pub fn selector_to_name(selector: [u8; 4]) -> Option<&'static str> {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Token metadata resolution
 // ═══════════════════════════════════════════════════════════════════════════════
-
-/// Well-known ERC-20 function selectors for metadata.
-const NAME_SELECTOR: [u8; 4] = [0x06, 0xfd, 0xde, 0x03]; // name()
-const SYMBOL_SELECTOR: [u8; 4] = [0x95, 0xd8, 0x9b, 0x41]; // symbol()
-const DECIMALS_SELECTOR: [u8; 4] = [0x31, 0x3c, 0xe5, 0x67]; // decimals()
 
 /// Resolve metadata (name, symbol, decimals) for every token in `tokens`
 /// against a single shared EVM instance and one state provider.
