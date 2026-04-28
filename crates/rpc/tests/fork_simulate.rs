@@ -1,12 +1,13 @@
 //! Fork-based integration tests for `worldchain_simulateUnsignedUserOp`.
 //!
 //! These tests fork World Chain mainnet via an RPC URL and run simulations
-//! against real deployed contracts (WLD, USDC.e, etc.).
+//! against real deployed contracts (WLD, USDC.e, etc.). CI reads the URL
+//! from the `WORLDCHAIN_PROVIDER` secret; locally, export it before running.
 //!
 //! Run with:
 //! ```sh
-//! WORLD_CHAIN_RPC_URL=https://worldchain-mainnet.g.alchemy.com/v2/<KEY> \
-//!   cargo test -p world-chain-rpc --test fork_simulate -- --ignored --nocapture
+//! WORLDCHAIN_PROVIDER=https://worldchain-mainnet.g.alchemy.com/v2/<KEY> \
+//!   cargo test -p world-chain-rpc --test fork_simulate -- --nocapture
 //! ```
 
 use alloy_op_evm::{OpEvmFactory, OpTx};
@@ -48,7 +49,7 @@ sol! {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 fn rpc_url() -> String {
-    std::env::var("WORLD_CHAIN_RPC_URL").expect("WORLD_CHAIN_RPC_URL not set")
+    std::env::var("WORLDCHAIN_PROVIDER").expect("WORLDCHAIN_PROVIDER not set")
 }
 
 fn evm_env() -> reth_evm::EvmEnv<OpSpecId> {
@@ -76,7 +77,6 @@ fn make_forked_db()
 
 /// Verify the fork works by calling WLD.name(), WLD.symbol(), WLD.decimals().
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_fork_view_calls() {
     let mut db = make_forked_db();
     let env = evm_env();
@@ -166,7 +166,6 @@ async fn test_fork_view_calls() {
 
 /// ERC-20 Transfer log is parsed into the correct AssetChange.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_erc20_transfer_log_parsing() {
     let from = address!("00000000000000000000000000000000000000AA");
     let to = address!("00000000000000000000000000000000000000BB");
@@ -196,7 +195,6 @@ async fn test_erc20_transfer_log_parsing() {
 
 /// ERC-721 Transfer (4 topics) is distinguished from ERC-20 (3 topics).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_erc721_transfer_log_parsing() {
     let contract = address!("0000000000000000000000000000000000000721");
     let from = Address::ZERO;
@@ -226,7 +224,6 @@ async fn test_erc721_transfer_log_parsing() {
 
 /// ERC-1155 TransferSingle log is parsed correctly.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_erc1155_transfer_single_log_parsing() {
     let contract = address!("0000000000000000000000000000000000001155");
     let operator = address!("00000000000000000000000000000000000000AA");
@@ -262,7 +259,6 @@ async fn test_erc1155_transfer_single_log_parsing() {
 
 /// ERC-20 Approval log is parsed into the correct ExposureChange.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_erc20_approval_log_parsing() {
     let owner = address!("00000000000000000000000000000000DeaDBeef");
     let spender = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
@@ -290,7 +286,6 @@ async fn test_erc20_approval_log_parsing() {
 
 /// ApprovalForAll log is parsed correctly.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_approval_for_all_log_parsing() {
     let owner = address!("00000000000000000000000000000000DeaDBeef");
     let operator = address!("00000000000000000000000000000000000000FF");
@@ -341,7 +336,6 @@ async fn test_approval_for_all_log_parsing() {
 
 /// Native ETH transfer is captured by the inspector.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_native_eth_transfer_inspector() {
     let mut db = make_forked_db();
     let sender = address!("00000000000000000000000000000000DeaDBeef");
@@ -395,7 +389,6 @@ async fn test_native_eth_transfer_inspector() {
 
 /// Reverting ERC-20 transfer returns a decoded revert reason.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_revert_with_reason() {
     let mut db = make_forked_db();
     let caller = address!("00000000000000000000000000ffffffffffffff");
@@ -443,7 +436,6 @@ async fn test_revert_with_reason() {
 /// decoded reason — enabling the consumer to ABI-decode each frame's payload
 /// independently. Single-frame case: WLD reverts directly with no wrapper.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_revert_chain_captures_reverted_frame() {
     let mut db = make_forked_db();
     let caller = address!("00000000000000000000000000ffffffffffffff");
@@ -496,7 +488,6 @@ async fn test_revert_chain_captures_reverted_frame() {
 /// must not appear on the revert chain — the top-level halt name is already
 /// surfaced via `revertReason`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_revert_chain_excludes_halt_frames() {
     let mut db = make_forked_db();
     let caller = address!("00000000000000000000000000ffffffffffffff");
@@ -551,7 +542,6 @@ async fn test_revert_chain_excludes_halt_frames() {
 
 /// Trace captures top-level calls from a simulated execution.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_trace_captures_calls() {
     let mut db = make_forked_db();
     db.insert_account_info(
@@ -602,7 +592,6 @@ async fn test_trace_captures_calls() {
 /// Verify that all forbidden Safe admin selectors are recognized by the selector map.
 /// The backend uses trace[].method to detect these and reject the operation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_forbidden_safe_selectors_recognized() {
     // Each entry: (4-byte selector, expected decoded name)
     let forbidden: &[([u8; 4], &str)] = &[
@@ -638,7 +627,6 @@ async fn test_forbidden_safe_selectors_recognized() {
 /// addOwnerWithThreshold selector, verifying the inspector captures it
 /// at the right depth.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires WORLD_CHAIN_RPC_URL"]
 async fn test_trace_detects_malicious_safe_call() {
     let mut db = make_forked_db();
     db.insert_account_info(
