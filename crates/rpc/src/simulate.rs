@@ -151,9 +151,10 @@ pub struct RevertFrame {
 pub struct SimulateUnsignedUserOpResult {
     pub status: SimulationStatus,
     pub revert_reason: Option<String>,
-    /// Reverted call frames, deepest first. Empty on success.
-    /// `revert_reason` matches the *outermost* frame's payload; deeper frames
-    /// are visible only here.
+    /// Reverted call frames, deepest first. Empty on success and on top-level
+    /// halts. `revert_reason` mirrors `revert_chain[0].reason` (the deepest
+    /// frame, i.e. the root cause). Wrapper frames — most importantly
+    /// EntryPoint's `FailedOp(...)` — are visible only here.
     pub revert_chain: Vec<RevertFrame>,
     pub block_number: u64,
     pub gas_used: String,
@@ -572,19 +573,13 @@ where
         let result_and_state =
             RethEvm::transact(&mut evm, tx).map_err(|e| internal_err(format!("{e}")))?;
 
-        // 8. Build the response
-        let (status, revert_reason, gas_used, logs) = match &result_and_state.result {
+        // 8. Pull captured logs and the gas/status for the response.
+        let (status, gas_used, logs, halt_reason) = match &result_and_state.result {
             ExecutionResult::Success { gas, logs, .. } => {
-                (SimulationStatus::Success, None, gas.used(), logs.clone())
+                (SimulationStatus::Success, gas.used(), logs.clone(), None)
             }
-            ExecutionResult::Revert { gas, logs, output } => {
-                let reason = decode_revert_reason(output);
-                (
-                    SimulationStatus::Revert,
-                    Some(reason),
-                    gas.used(),
-                    logs.clone(),
-                )
+            ExecutionResult::Revert { gas, logs, .. } => {
+                (SimulationStatus::Revert, gas.used(), logs.clone(), None)
             }
             ExecutionResult::Halt { gas, logs, reason } => {
                 // Halts (out-of-gas, stack overflow, invalid opcode, etc.) are
@@ -593,16 +588,15 @@ where
                 // between an EVM revert and an EVM halt isn't actionable on
                 // the caller side.
                 //
-                // `revertReason` is the Debug-format of revm's `HaltReason`
-                // variant — e.g. `"OutOfGas(BasicOutOfGas)"`, `"StackOverflow"`,
-                // `"InvalidJump"`, `"CallTooDeep"`,
+                // The Debug-format of revm's `HaltReason` variant is used as
+                // the revert reason — e.g. `"OutOfGas(BasicOutOfGas)"`,
+                // `"StackOverflow"`, `"InvalidJump"`, `"CallTooDeep"`,
                 // `"PrecompileErrorWithContext(\"...\")"`.
-                let reason_str = format!("{reason:?}");
                 (
                     SimulationStatus::Revert,
-                    Some(reason_str),
                     gas.used(),
                     logs.clone(),
+                    Some(format!("{reason:?}")),
                 )
             }
         };
@@ -623,13 +617,32 @@ where
         let trace = inspector.take_trace_entries();
         asset_changes.extend(inspector.take_native_asset_changes());
         // Only surface the chain on a top-level REVERT. A top-level halt
-        // (OOG, invalid opcode, etc.) sets `status = Revert` too, but its
-        // reason is already in `revert_reason` and there is nothing to
-        // ABI-decode per frame.
+        // sets `status = Revert` too, but its reason is conveyed via
+        // `revert_reason` and there is nothing to ABI-decode per frame.
         let revert_chain = if matches!(result_and_state.result, ExecutionResult::Revert { .. }) {
             inspector.take_revert_chain()
         } else {
             Vec::new()
+        };
+
+        // `revert_reason` is the *root cause* — the deepest reverted frame's
+        // payload — so consumers that don't iterate the chain still get the
+        // most informative error. For ERC-4337 this is the contract-specific
+        // custom error from the inner call rather than EntryPoint's
+        // `FailedOp(...)` wrapper that lives in the outermost frame.
+        let revert_reason = match status {
+            SimulationStatus::Success => None,
+            SimulationStatus::Revert => halt_reason.or_else(|| {
+                revert_chain
+                    .first()
+                    .map(|frame| frame.reason.clone())
+                    .or_else(|| match &result_and_state.result {
+                        ExecutionResult::Revert { output, .. } => {
+                            Some(decode_revert_reason(output))
+                        }
+                        _ => None,
+                    })
+            }),
         };
 
         // 11. Resolve on-chain token metadata (name, symbol, decimals) — cached
