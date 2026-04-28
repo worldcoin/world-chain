@@ -479,7 +479,11 @@ async fn test_revert_chain_captures_reverted_frame() {
 
     let (_, inspector, _) = evm.components_mut();
     let chain = inspector.take_revert_chain();
-    assert_eq!(chain.len(), 1, "expected single reverted frame, got {chain:?}");
+    assert_eq!(
+        chain.len(),
+        1,
+        "expected single reverted frame, got {chain:?}"
+    );
     assert_eq!(chain[0].contract, WLD);
     assert_eq!(chain[0].reason, "ERC20: transfer amount exceeds balance");
 }
@@ -537,7 +541,10 @@ async fn test_revert_chain_excludes_halt_frames() {
 
     let (_, inspector, _) = evm.components_mut();
     let chain = inspector.take_revert_chain();
-    assert!(chain.is_empty(), "halt frames should not be captured: {chain:?}");
+    assert!(
+        chain.is_empty(),
+        "halt frames should not be captured: {chain:?}"
+    );
 }
 
 /// Trace captures top-level calls from a simulated execution.
