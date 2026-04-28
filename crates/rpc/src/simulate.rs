@@ -774,8 +774,10 @@ pub fn parse_exposure_changes(logs: &[alloy_primitives::Log]) -> Vec<ExposureCha
             t if t == APPROVAL_FOR_ALL_TOPIC && topics.len() == 3 => {
                 let owner = address_from_topic(topics[1]);
                 let operator = address_from_topic(topics[2]);
-                // ABI: bool approved is encoded as 32 bytes, last byte != 0 means true
-                let approved = log.data.data.last().is_some_and(|&b| b != 0);
+                // ABI: bool approved is the first 32-byte word; the value byte
+                // is at the fixed offset 31. Reading log.data.last() would
+                // misclassify approvals when a contract emits trailing bytes.
+                let approved = log.data.data.get(31).is_some_and(|&b| b != 0);
                 changes.push(ExposureChange {
                     owner,
                     spender: operator,
