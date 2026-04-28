@@ -68,6 +68,7 @@ reqwest = { workspace = true, features = ["rustls-tls"] }
 serde_json.workspace = true
 thiserror.workspace = true
 eyre.workspace = true
+lru.workspace = true
 
 [dev-dependencies]
 alloy = { workspace = true, features = ["provider-http"] }

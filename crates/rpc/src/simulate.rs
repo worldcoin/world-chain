@@ -6,6 +6,7 @@ use jsonrpsee::{
     core::{RpcResult, async_trait},
     proc_macros::rpc,
 };
+use lru::LruCache;
 use reth_evm::{ConfigureEvm, Evm as RethEvm, EvmFactory, op_revm::OpTransaction};
 use reth_optimism_evm::OpEvmConfig;
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderFactory};
@@ -21,7 +22,7 @@ use revm::{
 use revm_primitives::TxKind;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    num::NonZeroUsize,
     sync::{Arc, Mutex},
 };
 
@@ -315,8 +316,14 @@ pub trait WorldChainSimulateApi {
 // Implementation
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Cross-request cache for resolved token metadata.
-type MetadataCache = Arc<Mutex<HashMap<Address, AssetInfo>>>;
+/// Maximum number of token metadata entries kept across requests.
+///
+/// Bounded to prevent unbounded memory growth from adversarial UserOps that
+/// emit Transfer events from many fresh token contracts.
+const METADATA_CACHE_CAPACITY: usize = 1000;
+
+/// Cross-request cache for resolved token metadata. LRU-bounded.
+type MetadataCache = Arc<Mutex<LruCache<Address, AssetInfo>>>;
 
 /// Implementation of the `worldchain_simulateUnsignedUserOp` RPC endpoint.
 #[derive(Debug, Clone)]
@@ -331,7 +338,9 @@ impl<Client> WorldChainSimulate<Client> {
         Self {
             client,
             evm_config,
-            metadata_cache: Arc::new(Mutex::new(HashMap::new())),
+            metadata_cache: Arc::new(Mutex::new(LruCache::new(
+                NonZeroUsize::new(METADATA_CACHE_CAPACITY).expect("non-zero capacity"),
+            ))),
         }
     }
 }
@@ -948,7 +957,7 @@ fn resolve_all_metadata<Client>(
         for change in asset_changes.iter() {
             if let Some(addr) = change.asset.address
                 && change.asset.symbol.is_empty()
-                && !cache_guard.contains_key(&addr)
+                && !cache_guard.contains(&addr)
                 && seen_this_call.insert(addr)
             {
                 to_resolve.push((addr, change.asset.asset_type));
@@ -957,7 +966,7 @@ fn resolve_all_metadata<Client>(
         for change in exposure_changes.iter() {
             if let Some(addr) = change.asset.address
                 && change.asset.symbol.is_empty()
-                && !cache_guard.contains_key(&addr)
+                && !cache_guard.contains(&addr)
                 && seen_this_call.insert(addr)
             {
                 to_resolve.push((addr, change.asset.asset_type));
@@ -971,12 +980,12 @@ fn resolve_all_metadata<Client>(
         for (addr, asset_type) in &to_resolve {
             let info =
                 resolve_metadata_with_evm(client, evm_config, header, block_id, *addr, *asset_type);
-            cache_guard.insert(*addr, info);
+            cache_guard.put(*addr, info);
         }
     }
 
-    // Apply cached metadata to all changes
-    let cache_guard = cache.lock().unwrap();
+    // Apply cached metadata to all changes (`get` bumps LRU recency).
+    let mut cache_guard = cache.lock().unwrap();
     for change in asset_changes.iter_mut() {
         if let Some(addr) = change.asset.address
             && let Some(info) = cache_guard.get(&addr)
