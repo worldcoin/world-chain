@@ -12,6 +12,7 @@ command = "python3 specs/strip-front-matter.py"
 command = "mdbook-mermaid"
 
 [output.html]
+mathjax-support = true
 additional-js = [
     "specs/static/mermaid.min.js",
     "specs/static/mermaid-init.js",
