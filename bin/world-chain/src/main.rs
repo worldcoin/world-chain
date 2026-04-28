@@ -56,17 +56,6 @@ fn main() {
                     ctx.modules
                         .replace_configured(FlashblocksOpApi.into_rpc())?;
 
-                    // Register worldchain_simulateUnsignedUserOp on the public
-                    // HTTP/WS/IPC RPC servers, but only when the operator opts
-                    // in via `--worldchain.simulate-enabled`. The endpoint
-                    // performs no application-level auth — it is intended for
-                    // nodes deployed behind infrastructure-level auth (e.g. an
-                    // internal-only ingress).
-                    //
-                    // Wire it onto the same blocking pool and tracing guard as
-                    // eth_call / debug_trace* so a slow simulation can't open
-                    // unbounded MDBX read transactions or contend with the
-                    // general tokio runtime.
                     if config.args.simulate_enabled {
                         let chain_spec = ctx.provider().chain_spec();
                         let evm_config =
