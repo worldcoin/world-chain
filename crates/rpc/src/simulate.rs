@@ -12,6 +12,8 @@ use reth_evm::{ConfigureEvm, Evm as RethEvm, EvmFactory};
 use reth_optimism_evm::OpEvmConfig;
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderFactory};
 use reth_revm::{State, database::StateProviderDatabase};
+use reth_rpc_eth_api::helpers::SpawnBlocking;
+use reth_tasks::pool::{BlockingTaskGuard, BlockingTaskPool};
 use revm::{
     Inspector,
     context::{
@@ -25,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     num::NonZeroUsize,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -293,12 +296,7 @@ impl<CTX> Inspector<CTX> for SimulationInspector {
         None
     }
 
-    fn call_end(
-        &mut self,
-        _context: &mut CTX,
-        _inputs: &CallInputs,
-        outcome: &mut CallOutcome,
-    ) {
+    fn call_end(&mut self, _context: &mut CTX, _inputs: &CallInputs, outcome: &mut CallOutcome) {
         let mut state = self.state.lock().unwrap();
         let Some(frame) = state.pending_frames.pop() else {
             return;
@@ -348,23 +346,59 @@ const METADATA_CACHE_CAPACITY: usize = 1000;
 /// Cross-request cache for resolved token metadata. LRU-bounded.
 type MetadataCache = Arc<Mutex<LruCache<Address, AssetInfo>>>;
 
+/// Hard wall-clock cap on a single simulation, observed by the client. Beyond
+/// this we return `internal error: simulation deadline exceeded`. The blocking
+/// task continues to drain on the rayon pool until the EVM finishes (bounded
+/// by `MAX_SIMULATION_GAS`), holding its concurrency permit until then so the
+/// guard correctly accounts for slow simulations.
+pub const SIMULATION_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Implementation of the `worldchain_simulateUnsignedUserOp` RPC endpoint.
 #[derive(Debug, Clone)]
 pub struct WorldChainSimulate<Client> {
     client: Client,
     evm_config: OpEvmConfig,
     metadata_cache: MetadataCache,
+    /// Shared with `eth_call` / `debug_*` so simulate inherits the same
+    /// CPU-bound rayon pool and doesn't compete with general tokio work.
+    task_pool: BlockingTaskPool,
+    /// Shared concurrency cap (semaphore) — bounds the number of simultaneous
+    /// long-lived MDBX read transactions across tracing-class RPCs.
+    task_guard: BlockingTaskGuard,
 }
 
 impl<Client> WorldChainSimulate<Client> {
-    pub fn new(client: Client, evm_config: OpEvmConfig) -> Self {
+    pub fn new(
+        client: Client,
+        evm_config: OpEvmConfig,
+        task_pool: BlockingTaskPool,
+        task_guard: BlockingTaskGuard,
+    ) -> Self {
         Self {
             client,
             evm_config,
             metadata_cache: Arc::new(Mutex::new(LruCache::new(
                 NonZeroUsize::new(METADATA_CACHE_CAPACITY).expect("non-zero capacity"),
             ))),
+            task_pool,
+            task_guard,
         }
+    }
+
+    /// Wire the simulate API to the same blocking pool and concurrency guard
+    /// the node uses for `eth_call` / `debug_trace*`, by pulling them off the
+    /// already-installed eth API.
+    pub fn from_eth_api<E: SpawnBlocking>(
+        client: Client,
+        evm_config: OpEvmConfig,
+        eth_api: &E,
+    ) -> Self {
+        Self::new(
+            client,
+            evm_config,
+            eth_api.tracing_task_pool().clone(),
+            eth_api.tracing_task_guard().clone(),
+        )
     }
 }
 
@@ -383,21 +417,43 @@ where
         &self,
         request: SimulateUnsignedUserOpRequest,
     ) -> RpcResult<SimulateUnsignedUserOpResult> {
-        // The simulation does multiple synchronous state-provider reads and a
-        // full EVM execution; running it directly on the Tokio reactor thread
-        // would block other RPC tasks. Move it to the blocking pool.
-        let this = self.clone();
-        tokio::task::spawn_blocking(move || this.simulate_blocking(request))
+        // Bound concurrent simulations against the shared tracing guard so a
+        // burst of slow callers can't open arbitrarily many long-lived MDBX
+        // readers (each pinning freelist pages until it closes).
+        let permit = self
+            .task_guard
+            .clone()
+            .acquire_owned()
             .await
-            .map_err(|e| internal_err(format!("simulation task panicked: {e}")))?
+            .map_err(|e| internal_err(format!("blocking task guard closed: {e}")))?;
+
+        // Run on the dedicated rayon pool shared with eth_call / debug_*. The
+        // permit moves into the closure so it's released exactly when the
+        // EVM-bound work finishes, not when the tokio future resolves.
+        let this = self.clone();
+        let handle = self.task_pool.spawn(move || {
+            let _permit = permit;
+            this.simulate_blocking(request)
+        });
+
+        // Wall-clock cap from the client's perspective. Combined with the 8M
+        // gas cap and bounded concurrency, this keeps reader lifetimes finite
+        // even under adversarial input.
+        match tokio::time::timeout(SIMULATION_TIMEOUT, handle).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_panic)) => Err(internal_err("simulation task panicked")),
+            Err(_) => Err(internal_err(format!(
+                "simulation exceeded {}s deadline",
+                SIMULATION_TIMEOUT.as_secs()
+            ))),
+        }
     }
 }
 
 impl<Client> WorldChainSimulate<Client>
 where
-    Client: BlockReaderIdExt
-        + StateProviderFactory
-        + HeaderProvider<Header = alloy_consensus::Header>,
+    Client:
+        BlockReaderIdExt + StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
 {
     fn simulate_blocking(
         &self,
@@ -497,7 +553,12 @@ where
             }
             ExecutionResult::Revert { gas, logs, output } => {
                 let reason = decode_revert_reason(output);
-                (SimulationStatus::Revert, Some(reason), gas.used(), logs.clone())
+                (
+                    SimulationStatus::Revert,
+                    Some(reason),
+                    gas.used(),
+                    logs.clone(),
+                )
             }
             ExecutionResult::Halt { gas, logs, reason } => {
                 let reason_str = format!("{reason:?}");
@@ -677,9 +738,7 @@ pub fn parse_asset_changes(
 /// - `Err(_)` if the encoded length exceeds [`MAX_BATCH_TRANSFERS`] — propagated
 ///   to the RPC caller rather than skipped, so a malicious log can't both poison
 ///   simulation results and avoid surfacing.
-fn decode_batch_transfer_data(
-    data: &[u8],
-) -> Result<Option<Vec<(U256, U256)>>, &'static str> {
+fn decode_batch_transfer_data(data: &[u8]) -> Result<Option<Vec<(U256, U256)>>, &'static str> {
     // ABI: offset_ids (32) | offset_values (32) | ids_len (32) | ids... | values_len (32) | values...
     if data.len() < 128 {
         return Ok(None);
@@ -723,7 +782,10 @@ fn decode_batch_transfer_data(
         let Some(val_slice) = data.get(val_start..val_start + 32) else {
             return Ok(None);
         };
-        pairs.push((U256::from_be_slice(id_slice), U256::from_be_slice(val_slice)));
+        pairs.push((
+            U256::from_be_slice(id_slice),
+            U256::from_be_slice(val_slice),
+        ));
     }
 
     Ok(Some(pairs))
@@ -1085,4 +1147,82 @@ fn internal_err(msg: impl std::fmt::Display) -> jsonrpsee::types::ErrorObjectOwn
         msg.to_string(),
         None::<String>,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    /// Stand-in "malicious payload": anything that pegs a worker for longer
+    /// than `SIMULATION_TIMEOUT`. Crafting bytecode that reliably blows
+    /// past 5s with the 8M gas cap is hardware-dependent and flaky in unit
+    /// tests, so we model the worst case directly with a blocking sleep.
+    /// The primitive under test is identical to the one in
+    /// `simulate_unsigned_user_op`: acquire a `BlockingTaskGuard` permit,
+    /// hand the work to `BlockingTaskPool`, wrap with `tokio::time::timeout`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn timeout_aborts_long_running_simulation() {
+        let pool = BlockingTaskPool::build().expect("build blocking pool");
+        let guard = BlockingTaskGuard::new(4);
+        let timeout = Duration::from_millis(100);
+
+        let permit = guard.clone().acquire_owned().await.expect("acquire permit");
+        let handle = pool.spawn(move || {
+            let _permit = permit;
+            std::thread::sleep(Duration::from_secs(10));
+            42_u64
+        });
+
+        let started = Instant::now();
+        let result = tokio::time::timeout(timeout, handle).await;
+        let elapsed = started.elapsed();
+
+        assert!(
+            result.is_err(),
+            "expected wall-clock timeout, got {result:?}"
+        );
+        // The future must resolve when the deadline expires, not wait for
+        // the rayon task to finish. The task itself keeps running and
+        // releases its permit on its own — that's the design.
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "timeout should resolve at the deadline, elapsed={elapsed:?}"
+        );
+    }
+
+    /// The blocking task keeps holding its concurrency permit until it
+    /// finishes naturally — even after the tokio future has timed out.
+    /// This is what bounds reader lifetimes under sustained adversarial
+    /// load: a slow caller continues to occupy a slot, so a flood of
+    /// "malicious" simulations can't open arbitrarily many readers.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn permit_is_held_until_blocking_task_finishes() {
+        let pool = BlockingTaskPool::build().expect("build blocking pool");
+        let guard = BlockingTaskGuard::new(1);
+
+        let permit = guard
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("acquire first permit");
+        let handle = pool.spawn(move || {
+            let _permit = permit;
+            std::thread::sleep(Duration::from_millis(300));
+        });
+
+        // Even after timing out, the rayon task is still running and
+        // holding the only permit, so a fresh acquire must wait.
+        let _ = tokio::time::timeout(Duration::from_millis(50), handle).await;
+
+        let acquire_started = Instant::now();
+        let _second_permit = guard.clone().acquire_owned().await.expect("second permit");
+        let waited = acquire_started.elapsed();
+
+        assert!(
+            waited >= Duration::from_millis(150),
+            "second acquire should block until the rayon task releases its \
+             permit; waited={waited:?}"
+        );
+    }
 }
