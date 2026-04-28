@@ -538,6 +538,16 @@ where
                 )
             }
             ExecutionResult::Halt { gas, logs, reason } => {
+                // Halts (out-of-gas, stack overflow, invalid opcode, etc.) are
+                // surfaced as `Revert` to the consumer: from their perspective
+                // both mean "this UserOp will not land", and the distinction
+                // between an EVM revert and an EVM halt isn't actionable on
+                // the caller side.
+                //
+                // `revertReason` is the Debug-format of revm's `HaltReason`
+                // variant — e.g. `"OutOfGas(BasicOutOfGas)"`, `"StackOverflow"`,
+                // `"InvalidJump"`, `"CallTooDeep"`,
+                // `"PrecompileErrorWithContext(\"...\")"`.
                 let reason_str = format!("{reason:?}");
                 (
                     SimulationStatus::Revert,
