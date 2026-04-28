@@ -25,10 +25,11 @@ remappings = [
   "@solady=lib/solady/src/utils/",
 ]
 
+[profile.ci]
+
 [fuzz]
 max_test_rejects = 150000
 runs = 100
 
 [fmt]
 ignore = ["lib"]
-

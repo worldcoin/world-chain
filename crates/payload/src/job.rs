@@ -1,15 +1,34 @@
 use std::{
     future::Future,
     pin::{Pin, pin},
-    task::{Context, Poll},
+    task::{Context, Poll, ready},
     time::Duration,
 };
 
+use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{B256, ruint::aliases::U256};
+use futures::FutureExt;
+use reth_basic_payload_builder::{
+    BuildArguments, BuildOutcome, HeaderForPayload, MissingPayloadBehaviour, PayloadBuilder,
+    PayloadConfig, PayloadState, PayloadTaskGuard, PendingPayload, ResolveBestPayload,
+};
+use reth_execution_cache::SavedCache;
+use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadAttrs};
+use reth_optimism_primitives::OpPrimitives;
+use reth_payload_builder::{KeepPayloadJobAlive, PayloadJob};
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderError, PayloadKind};
+use reth_primitives_traits::BlockBody;
+use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
+use reth_tasks::Runtime;
+use reth_trie_parallel::state_root_task::StateRootHandle;
+use tokio::{
+    sync::oneshot,
+    time::{Interval, Sleep},
+};
+use tracing::{debug, error, info, span, trace};
 use world_chain_builder::{
     coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
-
 use world_chain_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
 use world_chain_primitives::{
     access_list::{FlashblockAccessList, FlashblockAccessListData},
@@ -17,29 +36,6 @@ use world_chain_primitives::{
     p2p::{Authorization, AuthorizedPayload},
     primitives::FlashblocksPayloadV1,
 };
-
-use std::task::ready;
-
-use alloy_eips::eip2718::Encodable2718;
-use futures::FutureExt;
-use op_alloy_consensus::OpTxEnvelope;
-use reth_basic_payload_builder::{
-    BuildArguments, BuildOutcome, HeaderForPayload, MissingPayloadBehaviour, PayloadBuilder,
-    PayloadConfig, PayloadState, PayloadTaskGuard, PendingPayload, ResolveBestPayload,
-};
-use reth_optimism_node::OpPayloadBuilderAttributes;
-use reth_optimism_payload_builder::OpBuiltPayload;
-use reth_optimism_primitives::OpPrimitives;
-use reth_payload_builder::{KeepPayloadJobAlive, PayloadJob};
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderError, PayloadKind};
-use reth_primitives_traits::BlockBody;
-use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
-use reth_tasks::TaskSpawner;
-use tokio::{
-    sync::oneshot,
-    time::{Interval, Sleep},
-};
-use tracing::{debug, error, info, span, trace};
 
 /// A future that resolves to the result of the block building job.
 #[derive(Debug)]
@@ -219,11 +215,11 @@ where
 /// is marked as frozen: [`BuildOutcome::Freeze`]. Once a frozen payload is returned, no additional
 /// payloads will be built and this future will wait to be resolved: [`PayloadJob::resolve`] or
 /// terminated if the deadline is reached.
-pub struct FlashblocksPayloadJob<Tasks, Builder: PayloadBuilder> {
+pub struct FlashblocksPayloadJob<Builder: PayloadBuilder> {
     /// The configuration for how the payload will be created.
     pub(crate) config: PayloadConfig<Builder::Attributes, HeaderForPayload<Builder::BuiltPayload>>,
     /// How to spawn building tasks
-    pub(crate) executor: Tasks,
+    pub(crate) executor: Runtime,
     /// The best payload so far and its state.
     pub(crate) best_payload: (
         PayloadState<Builder::BuiltPayload>,
@@ -241,6 +237,10 @@ pub struct FlashblocksPayloadJob<Tasks, Builder: PayloadBuilder> {
     /// This is used to avoid reading the same state over and over again when new attempts are
     /// triggered, because during the building process we'll repeatedly execute the transactions.
     pub(crate) cached_reads: Option<CachedReads>,
+    /// Optional execution cache shared with the engine.
+    pub(crate) execution_cache: Option<SavedCache>,
+    /// Optional state root task handle, shared with the engine.
+    pub(crate) trie_handle: Option<StateRootHandle>,
     /// The type responsible for building payloads.
     ///
     /// See [`PayloadBuilder`]
@@ -264,13 +264,10 @@ pub struct FlashblocksPayloadJob<Tasks, Builder: PayloadBuilder> {
     pub(crate) block_index: u64,
 }
 
-impl<Tasks, Builder> FlashblocksPayloadJob<Tasks, Builder>
+impl<Builder> FlashblocksPayloadJob<Builder>
 where
-    Tasks: TaskSpawner + Clone + 'static,
-    Builder: PayloadBuilder<
-            BuiltPayload = OpBuiltPayload<OpPrimitives>,
-            Attributes = OpPayloadBuilderAttributes<OpTxEnvelope>,
-        > + FlashblockPayloadBuilder
+    Builder: PayloadBuilder<BuiltPayload = OpBuiltPayload<OpPrimitives>, Attributes = OpPayloadAttrs>
+        + FlashblockPayloadBuilder
         + Unpin
         + 'static,
     Builder::Attributes: Unpin + Clone,
@@ -291,6 +288,8 @@ where
         let committed_payload = self.committed_payload.clone();
 
         let cached_reads = self.cached_reads.take().unwrap_or_default();
+        let execution_cache = self.execution_cache.clone();
+        let trie_handle = self.trie_handle.take();
         let builder = self.builder.clone();
 
         self.executor.spawn_blocking_task(Box::pin(async move {
@@ -300,6 +299,8 @@ where
                 config: payload_config,
                 cancel,
                 best_payload,
+                execution_cache,
+                trie_handle,
             };
 
             trace!(
@@ -398,13 +399,10 @@ where
     }
 }
 
-impl<Tasks, Builder> Future for FlashblocksPayloadJob<Tasks, Builder>
+impl<Builder> Future for FlashblocksPayloadJob<Builder>
 where
-    Tasks: TaskSpawner + Clone + 'static,
-    Builder: PayloadBuilder<
-            BuiltPayload = OpBuiltPayload<OpPrimitives>,
-            Attributes = OpPayloadBuilderAttributes<OpTxEnvelope>,
-        > + FlashblockPayloadBuilder
+    Builder: PayloadBuilder<BuiltPayload = OpBuiltPayload<OpPrimitives>, Attributes = OpPayloadAttrs>
+        + FlashblockPayloadBuilder
         + Unpin
         + 'static,
     Builder::Attributes: Unpin + Clone,
@@ -592,13 +590,10 @@ where
     }
 }
 
-impl<Tasks, Builder> PayloadJob for FlashblocksPayloadJob<Tasks, Builder>
+impl<Builder> PayloadJob for FlashblocksPayloadJob<Builder>
 where
-    Tasks: TaskSpawner + Clone + 'static,
-    Builder: PayloadBuilder<
-            BuiltPayload = OpBuiltPayload<OpPrimitives>,
-            Attributes = OpPayloadBuilderAttributes<OpTxEnvelope>,
-        > + FlashblockPayloadBuilder
+    Builder: PayloadBuilder<BuiltPayload = OpBuiltPayload<OpPrimitives>, Attributes = OpPayloadAttrs>
+        + FlashblockPayloadBuilder
         + Unpin
         + 'static,
     Builder::Attributes: Unpin + Clone,
@@ -645,7 +640,7 @@ where
         // During syncing, it could happen that the CL sends the `getPayload` engine API request
         // before the EL has completed the execution of the block, therefore it's important to take
         // the `pending_block` so that EL can complete the execution and return the payload to the CL.
-        let maybe_better = if self.config.attributes.no_tx_pool {
+        let maybe_better = if self.config.attributes.no_tx_pool.unwrap_or(false) {
             self.pending_block.take().map(Into::into)
         } else {
             None
@@ -661,6 +656,8 @@ where
                 config: self.config.clone(),
                 cancel: CancelOnDrop::default(),
                 best_payload: None,
+                execution_cache: self.execution_cache.clone(),
+                trie_handle: None,
             };
 
             match self.builder.on_missing_payload(args) {

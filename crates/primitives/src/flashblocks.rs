@@ -14,14 +14,12 @@ use alloy_rpc_types_engine::PayloadId;
 use chrono::Utc;
 use eyre::eyre::{bail, eyre};
 use op_alloy_consensus::OpTxEnvelope;
-use reth_payload_primitives::PayloadBuilderAttributes;
-use reth_primitives_traits::{Block as _, BlockBody as _};
+use reth_primitives_traits::{Block as _, BlockBody as _, NodePrimitives, RecoveredBlock};
 
 use reth_basic_payload_builder::PayloadConfig;
 use reth_optimism_chainspec::{OpChainSpec, OpHardforks};
-use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
+use reth_optimism_node::{OpBuiltPayload, payload::OpPayloadAttrs};
 use reth_optimism_primitives::OpPrimitives;
-use reth_primitives::{NodePrimitives, RecoveredBlock};
 use serde::{Deserialize, Serialize};
 
 /// A type wrapper around a single flashblock payload.
@@ -33,7 +31,7 @@ pub struct Flashblock {
 impl Flashblock {
     pub fn new(
         payload: &OpBuiltPayload,
-        config: &PayloadConfig<OpPayloadBuilderAttributes<OpTxEnvelope>, Header>,
+        config: &PayloadConfig<OpPayloadAttrs, Header>,
         index: u64,
         transactions_offset: usize,
         withdrawal_offset: usize,
@@ -50,11 +48,8 @@ impl Flashblock {
                     .payload_attributes
                     .parent_beacon_block_root
                     .unwrap_or_default(),
-                parent_hash: config.attributes.parent(),
-                fee_recipient: config
-                    .attributes
-                    .payload_attributes
-                    .suggested_fee_recipient(),
+                parent_hash: config.parent_header.hash(),
+                fee_recipient: config.attributes.payload_attributes.suggested_fee_recipient,
                 prev_randao: config.attributes.payload_attributes.prev_randao,
                 block_number: block.number(),
                 gas_limit: block.gas_limit(),
@@ -106,7 +101,7 @@ impl Flashblock {
 
         Flashblock {
             flashblock: FlashblocksPayloadV1 {
-                payload_id: config.attributes.payload_id(),
+                payload_id: config.payload_id(),
                 index,
                 base: payload_base,
                 diff: ExecutionPayloadFlashblockDeltaV1 {

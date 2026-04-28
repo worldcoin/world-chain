@@ -16,6 +16,7 @@ use crate::{
 };
 use alloy_eips::Encodable2718;
 use alloy_primitives::TxHash;
+use op_revm::OpSpecId;
 use reth_evm::{
     Evm, EvmFactory,
     block::{BlockExecutor, BlockExecutorFactory},
@@ -34,11 +35,9 @@ use reth_basic_payload_builder::{
     PayloadConfig,
 };
 use reth_evm::{
-    ConfigureEvm, Database, EvmEnv, execute::BlockBuilderOutcome, op_revm::OpSpecId,
-    precompiles::PrecompilesMap,
+    ConfigureEvm, Database, EvmEnv, execute::BlockBuilderOutcome, precompiles::PrecompilesMap,
 };
-use reth_node_api::{BuiltPayloadExecutedBlock, PayloadBuilderAttributes, PayloadBuilderError};
-use reth_primitives::NodePrimitives;
+use reth_node_api::{BuiltPayloadExecutedBlock, NodePrimitives, PayloadBuilderError};
 use reth_revm::database::StateProviderDatabase;
 use revm_database::State;
 use tracing::trace;
@@ -52,7 +51,7 @@ use reth_optimism_node::{
 use reth_optimism_payload_builder::{
     builder::{ExecutionInfo, OpPayloadTransactions},
     config::OpBuilderConfig,
-    payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
+    payload::{OpBuiltPayload, OpPayloadAttrs, OpPayloadBuilderAttributes},
 };
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
@@ -120,6 +119,8 @@ where
             mut cached_reads,
             cancel,
             best_payload,
+            execution_cache: _,
+            trie_handle: _,
         } = args;
         self.metrics.increment_attempts();
         let build_started = Instant::now();
@@ -180,15 +181,16 @@ where
             PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
         >,
 {
-    type Attributes = OpPayloadBuilderAttributes<OpTxEnvelope>;
+    type Attributes = OpPayloadAttrs;
     type BuiltPayload = OpBuiltPayload;
 
     fn try_build(
         &self,
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
+        let converted_args = convert_build_args(args)?;
         self.build_payload(
-            args,
+            converted_args,
             |attrs| {
                 self.best_transactions
                     .best_transactions(self.pool.clone(), attrs)
@@ -216,9 +218,12 @@ where
             cached_reads: Default::default(),
             cancel: Default::default(),
             best_payload: None,
+            execution_cache: None,
+            trie_handle: None,
         };
+        let converted_args = convert_build_args(args)?;
         self.build_payload(
-            args,
+            converted_args,
             |_| NoopPayloadTransactions::<Pool::Transaction>::default(),
             None,
         )?
@@ -259,8 +264,9 @@ where
         ),
         PayloadBuilderError,
     > {
+        let converted_args = convert_build_args(args)?;
         self.build_payload(
-            args,
+            converted_args,
             |attrs| {
                 self.best_transactions
                     .best_transactions(self.pool.clone(), attrs)
@@ -268,6 +274,41 @@ where
             committed_payload,
         )
     }
+}
+
+/// Converts `BuildArguments` from [`OpPayloadAttrs`] to [`OpPayloadBuilderAttributes`], decoding
+/// the RPC transaction bytes into typed transactions.
+fn convert_build_args(
+    args: BuildArguments<OpPayloadAttrs, OpBuiltPayload>,
+) -> Result<
+    BuildArguments<OpPayloadBuilderAttributes<OpTxEnvelope>, OpBuiltPayload>,
+    PayloadBuilderError,
+> {
+    let BuildArguments {
+        config,
+        cached_reads,
+        execution_cache,
+        trie_handle,
+        cancel,
+        best_payload,
+    } = args;
+    let parent_hash = config.parent_header.hash();
+    let payload_id = config.payload_id;
+    let builder_attrs =
+        OpPayloadBuilderAttributes::from_rpc_attrs(parent_hash, payload_id, config.attributes.0)
+            .map_err(PayloadBuilderError::other)?;
+    Ok(BuildArguments {
+        config: PayloadConfig {
+            parent_header: config.parent_header,
+            attributes: builder_attrs,
+            payload_id,
+        },
+        cached_reads,
+        execution_cache,
+        trie_handle,
+        cancel,
+        best_payload,
+    })
 }
 
 /// Builds the payload on top of the state.
