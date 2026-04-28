@@ -80,7 +80,7 @@ impl From<Wip1001VerifyError> for RecoveryError {
 ///
 /// On success, returns the typed [`SessionKey`] that was bound to the
 /// signature. The caller is responsible for invoking
-/// `IWorldIDKeyRing.isAuthorized(keyring, session_key)` separately.
+/// `IWorldIDAccount.isAuthorized(world_id_account, session_key)` separately.
 pub fn verify_wip1001_signature(
     signature_type: u8,
     session_key: &[u8],
