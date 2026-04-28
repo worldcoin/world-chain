@@ -502,7 +502,11 @@ where
         let db = StateProviderDatabase::new(state_provider.as_ref());
         let mut state = State::builder().with_database(db).build();
 
-        // 5. Create the Optimism-aware EVM with our simulation inspector
+        // 5. Create the Optimism-aware EVM with our simulation inspector.
+        //    Capture chain_id first — it'd otherwise be unreachable after
+        //    `evm_env` moves into the EVM, and `TxEnv::default()` hardcodes
+        //    Some(1) which mismatches any non-mainnet chainspec.
+        let chain_id = evm_env.cfg_env.chain_id;
         let mut evm = OpEvmFactory::default().create_evm_with_inspector(
             &mut state,
             evm_env,
@@ -542,6 +546,7 @@ where
                 value: U256::ZERO,
                 gas_limit,
                 gas_price: 0,
+                chain_id: Some(chain_id),
                 ..Default::default()
             },
             ..Default::default()
@@ -1059,6 +1064,9 @@ where
     };
     let db = StateProviderDatabase::new(state_provider.as_ref());
     let mut state = State::builder().with_database(db).build();
+    // Capture chain_id before `evm_env` moves into the EVM — `TxEnv::default()`
+    // hardcodes Some(1), which would mismatch any non-mainnet chainspec.
+    let chain_id = evm_env.cfg_env.chain_id;
     let mut evm = OpEvmFactory::default().create_evm(&mut state, evm_env);
 
     let mut call_view = |to: Address, selector: &[u8; 4]| -> Option<Bytes> {
@@ -1070,6 +1078,7 @@ where
                 value: U256::ZERO,
                 gas_limit: 100_000,
                 gas_price: 0,
+                chain_id: Some(chain_id),
                 ..Default::default()
             },
             ..Default::default()
