@@ -48,23 +48,36 @@ fn main() {
             } = builder
                 .node(node)
                 .extend_rpc_modules(move |ctx| {
-                    let provider = ctx.provider().clone();
                     let pool = ctx.pool().clone();
                     let sequencer_client = config.args.rollup.sequencer.map(SequencerClient::new);
                     let eth_api_ext =
-                        WorldChainEthApiExt::new(pool, provider.clone(), sequencer_client);
+                        WorldChainEthApiExt::new(pool, ctx.provider().clone(), sequencer_client);
                     ctx.modules.replace_configured(eth_api_ext.into_rpc())?;
                     ctx.modules
                         .replace_configured(FlashblocksOpApi.into_rpc())?;
 
-                    // Register worldchain_simulateUnsignedUserOp on the JWT-protected
-                    // auth server (same as engine API) so only authenticated callers
-                    // (e.g. app-backend-main) can invoke it.
-                    let chain_spec = ctx.provider().chain_spec();
-                    let evm_config = OpEvmConfig::new(chain_spec, OpRethReceiptBuilder::default());
-                    let simulate_api = WorldChainSimulate::new(provider, evm_config);
-                    ctx.auth_module
-                        .merge_auth_methods(simulate_api.into_rpc())?;
+                    // Register worldchain_simulateUnsignedUserOp on the public
+                    // HTTP/WS/IPC RPC servers, but only when the operator opts
+                    // in via `--worldchain.simulate-enabled`. The endpoint
+                    // performs no application-level auth — it is intended for
+                    // nodes deployed behind infrastructure-level auth (e.g. an
+                    // internal-only ingress).
+                    //
+                    // Wire it onto the same blocking pool and tracing guard as
+                    // eth_call / debug_trace* so a slow simulation can't open
+                    // unbounded MDBX read transactions or contend with the
+                    // general tokio runtime.
+                    if config.args.simulate_enabled {
+                        let chain_spec = ctx.provider().chain_spec();
+                        let evm_config =
+                            OpEvmConfig::new(chain_spec, OpRethReceiptBuilder::default());
+                        let simulate_api = WorldChainSimulate::from_eth_api(
+                            ctx.provider().clone(),
+                            evm_config,
+                            ctx.registry.eth_api(),
+                        );
+                        ctx.modules.merge_configured(simulate_api.into_rpc())?;
+                    }
 
                     Ok(())
                 })
