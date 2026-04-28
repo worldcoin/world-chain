@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-9ead7d14.js";
+            window.path_to_searchindex_js = "../searchindex-ee123134.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-85576531.js"></script>
@@ -389,6 +389,11 @@ Flashblocks:
 
       --worldchain.disable-bootnodes
           Disable the default World Chain bootnodes
+
+      --worldchain.simulate-enabled
+          Enable the `worldchain_simulateUnsignedUserOp` RPC endpoint on the public HTTP/WS/IPC RPC servers. Disabled by default.
+          
+          The endpoint performs no application-level authentication. Only enable it on nodes that sit behind infrastructure-level auth (e.g. an internal-only ingress) — never on a publicly reachable RPC.
 
 </code></pre>
 
