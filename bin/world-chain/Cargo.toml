@@ -23,6 +23,9 @@ reth-tracing.workspace = true
 
 # op-reth
 reth-optimism-cli.workspace = true
+reth-optimism-evm.workspace = true
+
+reth-provider.workspace = true
 
 # misc
 dotenvy.workspace = true
