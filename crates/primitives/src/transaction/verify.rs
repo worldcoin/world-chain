@@ -1,12 +1,12 @@
 //! WIP-1001 signature verification.
 //!
-//! Generalized verification across the schemes defined in the
+//! Generalized verification across all schemes defined in the
 //! [WIP-1001](https://github.com/worldcoin/world-chain/blob/main/wips/wip-1001.md)
-//! envelope: secp256k1, P-256, and WebAuthn.
+//! envelope: secp256k1, P-256, WebAuthn, and Ed25519.
 //!
-//! For non-recoverable schemes (P-256, WebAuthn), the session pubkey is read
-//! from the transaction's `session_key` field; for secp256k1, the recovered
-//! pubkey is checked against `session_key`. EdDSA is reserved for a future PR.
+//! For non-recoverable schemes (P-256, WebAuthn, Ed25519), the session pubkey
+//! is read from the transaction's `session_key` field; for secp256k1, the
+//! recovered pubkey is checked against `session_key`.
 
 use alloy_consensus::crypto::RecoveryError;
 use alloy_primitives::{B256, U256, uint};
@@ -67,6 +67,9 @@ pub enum Wip1001VerifyError {
     /// WebAuthn `authenticatorData` / `clientDataJSON` failed validation.
     #[error("WebAuthn validation failed: {0}")]
     WebAuthnInvalid(&'static str),
+    /// Ed25519 EdDSA signature failed `verify_strict`.
+    #[error("EdDSA verification failed")]
+    EddsaVerificationFailed,
 }
 
 impl From<Wip1001VerifyError> for RecoveryError {
@@ -105,6 +108,9 @@ pub fn verify_wip1001_signature(
         }
         (SessionKey::WebAuthn { x, y }, Wip1001Signature::WebAuthn(sig)) => {
             verify_webauthn(sig, x, y, signing_hash)?;
+        }
+        (SessionKey::EdDSA(verifying_key), Wip1001Signature::EdDSA(sig)) => {
+            verify_eddsa(verifying_key, sig, signing_hash)?;
         }
         // Already covered by the discriminator equality check above.
         _ => unreachable!("signature_type was checked equal to session key type"),
@@ -203,6 +209,22 @@ pub fn verify_webauthn(
 
     let p256_sig = P256Signature { r: sig.r, s: sig.s };
     verify_p256(&p256_sig, pub_key_x, pub_key_y, &message_hash)
+}
+
+/// Verify an Ed25519 EdDSA signature against `signing_hash` using the supplied
+/// `verifying_key`.
+///
+/// Treats `signing_hash` as the *message* (not a prehash) — Ed25519 internally
+/// hashes its input via SHA-512 as part of the signing/verification equation.
+/// `verify_strict` rejects mixed-order public keys and small-subgroup signatures.
+pub fn verify_eddsa(
+    verifying_key: &ed25519_dalek::VerifyingKey,
+    sig: &ed25519_dalek::Signature,
+    signing_hash: &B256,
+) -> Result<(), Wip1001VerifyError> {
+    verifying_key
+        .verify_strict(signing_hash.as_slice(), sig)
+        .map_err(|_| Wip1001VerifyError::EddsaVerificationFailed)
 }
 
 fn compute_webauthn_message_hash(
@@ -439,5 +461,87 @@ mod tests {
         };
         let err = verify_webauthn(&webauthn, &x, &y, &signing_hash).unwrap_err();
         assert!(matches!(err, Wip1001VerifyError::WebAuthnInvalid(_)));
+    }
+
+    /// Deterministic Ed25519 keypair from a fixed seed (no RNG dependency).
+    fn ed25519_keypair() -> (ed25519_dalek::SigningKey, ed25519_dalek::VerifyingKey) {
+        let seed: [u8; 32] = [
+            0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec,
+            0x2c, 0xc4, 0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03,
+            0x1c, 0xae, 0x7f, 0x60,
+        ];
+        let sk = ed25519_dalek::SigningKey::from_bytes(&seed);
+        let vk = sk.verifying_key();
+        (sk, vk)
+    }
+
+    #[test]
+    fn eddsa_happy_path() {
+        use ed25519_dalek::Signer;
+        let (sk, vk) = ed25519_keypair();
+        let signing_hash = B256::from_slice(&[0x55; 32]);
+        let sig = sk.sign(signing_hash.as_slice());
+        verify_eddsa(&vk, &sig, &signing_hash).expect("valid eddsa signature");
+    }
+
+    #[test]
+    fn eddsa_rejects_tampered_hash() {
+        use ed25519_dalek::Signer;
+        let (sk, vk) = ed25519_keypair();
+        let signing_hash = B256::from_slice(&[0x55; 32]);
+        let other = B256::from_slice(&[0x66; 32]);
+        let sig = sk.sign(signing_hash.as_slice());
+        let err = verify_eddsa(&vk, &sig, &other).unwrap_err();
+        assert!(matches!(err, Wip1001VerifyError::EddsaVerificationFailed));
+    }
+
+    #[test]
+    fn eddsa_rejects_wrong_pubkey() {
+        use ed25519_dalek::Signer;
+        let (sk_a, _vk_a) = ed25519_keypair();
+        // Different seed -> different keypair.
+        let sk_b = ed25519_dalek::SigningKey::from_bytes(&[0xCD; 32]);
+        let vk_b = sk_b.verifying_key();
+        let signing_hash = B256::from_slice(&[0x55; 32]);
+        let sig = sk_a.sign(signing_hash.as_slice());
+        // Verifying with someone else's pubkey must fail.
+        let err = verify_eddsa(&vk_b, &sig, &signing_hash).unwrap_err();
+        assert!(matches!(err, Wip1001VerifyError::EddsaVerificationFailed));
+    }
+
+    #[test]
+    fn session_key_from_wire_rejects_wrong_length_eddsa() {
+        let too_short = [0xAAu8; 31];
+        let err = SessionKey::from_wire(Wip1001Signature::EDDSA_TYPE, &too_short);
+        assert!(matches!(
+            err,
+            Err(SessionKeyError::InvalidLength {
+                expected: 32,
+                got: 31
+            })
+        ));
+    }
+
+    #[test]
+    fn verify_wip1001_signature_eddsa_round_trip() {
+        use ed25519_dalek::Signer;
+        let (sk, vk) = ed25519_keypair();
+        let signing_hash = B256::from_slice(&[0x77; 32]);
+        let sig = sk.sign(signing_hash.as_slice());
+
+        let key_bytes = vk.to_bytes();
+        let signature = Wip1001Signature::EdDSA(sig);
+
+        let session_key = verify_wip1001_signature(
+            Wip1001Signature::EDDSA_TYPE,
+            &key_bytes,
+            &signature,
+            &signing_hash,
+        )
+        .expect("verify");
+        match session_key {
+            SessionKey::EdDSA(recovered_vk) => assert_eq!(recovered_vk, vk),
+            other => panic!("expected EdDSA SessionKey, got {other:?}"),
+        }
     }
 }

@@ -1,12 +1,10 @@
-//! Authorization lookup against the WIP-1001 Key Ring registry.
+//! Authorization lookup against the WIP-1001 keyring registry.
 //!
-//! A *Key Ring* is the set of session keys authorized to sign on behalf of a
-//! given *World ID Account* address. [`KeyringRegistry`] is the interface between
-//! the [signature verifier](super::verify) and whatever holds the
-//! precompile-managed Key Ring state — the pool's state provider, the
-//! builder, the RPC layer, or a test double. It deliberately mirrors
-//! `IWorldIDAccount.isAuthorized` from the spec so the eventual
-//! precompile-backed implementation is a thin adapter.
+//! [`KeyringRegistry`] is the interface between the [signature
+//! verifier](super::verify) and whatever holds the precompile-managed keyring
+//! state — the pool's state provider, the builder, the RPC layer, or a test
+//! double. It deliberately mirrors `IWorldIDKeyRing.isAuthorized` from the
+//! spec so the eventual precompile-backed implementation is a thin adapter.
 //!
 //! [`validate_wip1001`] is the one-stop entry point that callers (pool,
 //! builder, RPC) should use: it computes the signing hash, runs the per-scheme
@@ -19,8 +17,7 @@ use crate::transaction::{
     SessionKey, TxWip1001, Wip1001Signature, Wip1001VerifyError, verify_wip1001_signature,
 };
 
-/// Read-only view of the precompile-managed Key Ring state, indexed by
-/// World ID Account address.
+/// Read-only view of the precompile-managed keyring state.
 ///
 /// Implementors translate `is_authorized` into a state lookup at the current
 /// block height. The trait is sync because pool/builder admission paths are
@@ -32,11 +29,11 @@ pub trait KeyringRegistry {
     /// pending or rejected accordingly.
     type Error;
 
-    /// Returns `Ok(true)` iff `session_key` is currently in the Key Ring of
-    /// the World ID Account at `world_id_account`.
+    /// Returns `Ok(true)` iff `session_key` is currently in the authorized set
+    /// of `keyring`.
     fn is_authorized(
         &self,
-        world_id_account: Address,
+        keyring: Address,
         session_key: &SessionKey,
     ) -> Result<bool, Self::Error>;
 }
@@ -53,19 +50,18 @@ pub enum Wip1001ValidationError<E> {
     /// rejected or pending.
     #[error("keyring registry lookup failed: {0}")]
     Registry(E),
-    /// Signature is valid but the recovered session key is not in the Key
-    /// Ring of the declared World ID Account at the current state height.
-    #[error("session key is not authorized for world ID account {world_id_account}")]
+    /// Signature is valid but the recovered session key is not in the
+    /// keyring's authorized set at the current state height.
+    #[error("session key is not authorized for keyring {keyring}")]
     NotAuthorized {
-        /// The World ID Account address whose Key Ring did not contain the
-        /// recovered session key.
-        world_id_account: Address,
+        /// The keyring address that the unauthorized key was presented for.
+        keyring: Address,
     },
 }
 
 /// Verify a WIP-1001 transaction's signature against its embedded
 /// `session_key`, then assert that the registry authorizes the key for the
-/// declared World ID Account's Key Ring.
+/// declared keyring.
 ///
 /// On success returns the typed [`SessionKey`] that was bound to the
 /// signature, ready to be passed onward to gas/nonce accounting.
@@ -85,7 +81,7 @@ pub fn validate_wip1001<R: KeyringRegistry>(
     match registry.is_authorized(tx.world_id_account, &session_key) {
         Ok(true) => Ok(session_key),
         Ok(false) => Err(Wip1001ValidationError::NotAuthorized {
-            world_id_account: tx.world_id_account,
+            keyring: tx.world_id_account,
         }),
         Err(e) => Err(Wip1001ValidationError::Registry(e)),
     }
@@ -115,19 +111,15 @@ mod mock {
             Self::default()
         }
 
-        /// Authorizes `key` on the Key Ring of `world_id_account`. Idempotent.
-        pub fn authorize(&mut self, world_id_account: Address, key: SessionKey) {
-            self.authorized
-                .entry(world_id_account)
-                .or_default()
-                .insert(key);
+        /// Authorizes `key` on `keyring`. Idempotent.
+        pub fn authorize(&mut self, keyring: Address, key: SessionKey) {
+            self.authorized.entry(keyring).or_default().insert(key);
         }
 
-        /// Revokes `key` from the Key Ring of `world_id_account`. Returns `true`
-        /// if a removal occurred.
-        pub fn revoke(&mut self, world_id_account: Address, key: &SessionKey) -> bool {
+        /// Revokes `key` on `keyring`. Returns `true` if a removal occurred.
+        pub fn revoke(&mut self, keyring: Address, key: &SessionKey) -> bool {
             self.authorized
-                .get_mut(&world_id_account)
+                .get_mut(&keyring)
                 .map(|set| set.remove(key))
                 .unwrap_or(false)
         }
@@ -138,12 +130,12 @@ mod mock {
 
         fn is_authorized(
             &self,
-            world_id_account: Address,
+            keyring: Address,
             session_key: &SessionKey,
         ) -> Result<bool, Self::Error> {
             Ok(self
                 .authorized
-                .get(&world_id_account)
+                .get(&keyring)
                 .is_some_and(|set| set.contains(session_key)))
         }
     }
@@ -175,7 +167,7 @@ mod tests {
         type Error = LookupFailed;
         fn is_authorized(
             &self,
-            _world_id_account: Address,
+            _keyring: Address,
             _session_key: &SessionKey,
         ) -> Result<bool, Self::Error> {
             Err(LookupFailed)
@@ -244,25 +236,25 @@ mod tests {
     #[test]
     fn validate_rejects_unauthorized_key() {
         let (tx, sig, _key) = signed_p256();
-        // Empty registry — key is not in any Key Ring.
+        // Empty registry — key is not authorized.
         let registry = MockKeyringRegistry::new();
         let err = validate_wip1001(&tx, &sig, &registry).expect_err("must reject");
         assert!(matches!(
             err,
-            Wip1001ValidationError::NotAuthorized { world_id_account } if world_id_account == tx.world_id_account
+            Wip1001ValidationError::NotAuthorized { keyring } if keyring == tx.world_id_account
         ));
     }
 
     #[test]
-    fn validate_rejects_when_authorized_for_different_world_id_account() {
+    fn validate_rejects_when_authorized_for_different_keyring() {
         let (tx, sig, key) = signed_p256();
         let mut registry = MockKeyringRegistry::new();
-        // Authorize the key on a *different* World ID Account's Key Ring.
+        // Authorize the key on a *different* keyring.
         registry.authorize(Address::with_last_byte(0xAA), key);
         let err = validate_wip1001(&tx, &sig, &registry).expect_err("must reject");
         assert!(matches!(
             err,
-            Wip1001ValidationError::NotAuthorized { world_id_account } if world_id_account == tx.world_id_account
+            Wip1001ValidationError::NotAuthorized { keyring } if keyring == tx.world_id_account
         ));
     }
 
@@ -301,14 +293,14 @@ mod tests {
     #[test]
     fn mock_revoke_round_trip() {
         let (_, _, key) = signed_p256();
-        let acct = address!("00000000000000000000000000000000000000aa");
+        let kr = address!("00000000000000000000000000000000000000aa");
         let mut registry = MockKeyringRegistry::new();
-        registry.authorize(acct, key.clone());
-        assert!(registry.is_authorized(acct, &key).unwrap());
-        assert!(registry.revoke(acct, &key));
-        assert!(!registry.is_authorized(acct, &key).unwrap());
+        registry.authorize(kr, key.clone());
+        assert!(registry.is_authorized(kr, &key).unwrap());
+        assert!(registry.revoke(kr, &key));
+        assert!(!registry.is_authorized(kr, &key).unwrap());
         // Idempotent revoke.
-        assert!(!registry.revoke(acct, &key));
+        assert!(!registry.revoke(kr, &key));
     }
 
     use std::convert::Infallible;
