@@ -10,8 +10,7 @@ use world_chain_node::{
     FlashblocksOpApi, OpApiExtServer, context::WorldChainDefaultContext, node::WorldChainNode,
 };
 use world_chain_rpc::{
-    EthApiExtServer, SequencerClient, WorldChainEthApiExt, WorldChainSimulate,
-    WorldChainSimulateApiServer,
+    EthApiExtServer, SequencerClient, Simulate, SimulateApiServer, WorldChainEthApiExt,
 };
 
 #[cfg(all(feature = "jemalloc", unix))]
@@ -60,7 +59,7 @@ fn main() {
                         let chain_spec = ctx.provider().chain_spec();
                         let evm_config =
                             OpEvmConfig::new(chain_spec, OpRethReceiptBuilder::default());
-                        let simulate_api = WorldChainSimulate::from_eth_api(
+                        let simulate_api = Simulate::from_eth_api(
                             ctx.provider().clone(),
                             evm_config,
                             ctx.registry.eth_api(),

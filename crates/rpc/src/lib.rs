@@ -18,4 +18,4 @@ pub mod core;
 pub use core::{EthApiExtServer, WorldChainEthApiExt};
 
 pub mod simulate;
-pub use simulate::{WorldChainSimulate, WorldChainSimulateApiServer};
+pub use simulate::{Simulate, SimulateApiServer};

@@ -325,7 +325,7 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
 #[cfg_attr(not(test), rpc(server, namespace = "simulate"))]
 #[cfg_attr(test, rpc(server, client, namespace = "simulate"))]
 #[async_trait]
-pub trait WorldChainSimulateApi {
+pub trait SimulateApi {
     /// Simulates an unsigned ERC-4337 v0.7 PackedUserOperation against the
     /// specified block state. Returns asset transfers, approval changes,
     /// decoded trace, and warnings.
@@ -358,7 +358,7 @@ pub const SIMULATION_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Implementation of the `simulate_unsignedUserOp` RPC endpoint.
 #[derive(Debug, Clone)]
-pub struct WorldChainSimulate<Client> {
+pub struct Simulate<Client> {
     client: Client,
     evm_config: OpEvmConfig,
     metadata_cache: MetadataCache,
@@ -370,7 +370,7 @@ pub struct WorldChainSimulate<Client> {
     task_guard: BlockingTaskGuard,
 }
 
-impl<Client> WorldChainSimulate<Client> {
+impl<Client> Simulate<Client> {
     pub fn new(
         client: Client,
         evm_config: OpEvmConfig,
@@ -406,7 +406,7 @@ impl<Client> WorldChainSimulate<Client> {
 }
 
 #[async_trait]
-impl<Client> WorldChainSimulateApiServer for WorldChainSimulate<Client>
+impl<Client> SimulateApiServer for Simulate<Client>
 where
     Client: BlockReaderIdExt
         + StateProviderFactory
@@ -453,7 +453,7 @@ where
     }
 }
 
-impl<Client> WorldChainSimulate<Client>
+impl<Client> Simulate<Client>
 where
     Client:
         BlockReaderIdExt + StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
