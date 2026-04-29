@@ -55,16 +55,6 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
     mapping(address worldIDAccount => mapping(bytes32 keyHash => uint256 indexPlusOne)) public keyHashIndex;
 
     ///////////////////////////////////////////////////////////////////////////////
-    ///                                  EVENTS                                ///
-    ///////////////////////////////////////////////////////////////////////////////
-
-    /// @notice Emitted when the contract is initialized.
-    event WorldIDAccountManagerImplInitialized(IWorldIDVerifier indexed worldIDVerifier, address indexed owner);
-
-    /// @notice Emitted when the World ID verifier is set.
-    event WorldIDVerifierSet(address indexed worldIDVerifier);
-
-    ///////////////////////////////////////////////////////////////////////////////
     ///                              CONSTRUCTION                               ///
     ///////////////////////////////////////////////////////////////////////////////
 
@@ -201,18 +191,6 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
     ///////////////////////////////////////////////////////////////////////////////
     ///                                INTERNAL                                 ///
     ///////////////////////////////////////////////////////////////////////////////
-
-    /// @dev Memory-resident scalar inputs for `verifySession`. Bundling these into a struct
-    ///      keeps the call site's stack frame small enough to compile without `via_ir`.
-    struct SessionProofScalars {
-        uint64 rpId;
-        uint256 proofNonce;
-        uint256 signalHash;
-        uint64 expiresAtMin;
-        uint64 issuerSchemaId;
-        uint256 credentialGenesisIssuedAtMin;
-        uint256 sessionId;
-    }
 
     /// @dev Builds the session-proof signal hash and dispatches to the verifier.
     function _verifySessionProof(

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {IWorldIDVerifier} from "./IWorldIDVerifier.sol";
+
 /// @title IWorldIDAccountManager
 /// @author Worldcoin
 /// @notice Interface for the WIP-1001 World ID Account Manager.
@@ -36,9 +38,28 @@ interface IWorldIDAccountManager {
         bytes[] keys;
     }
 
+    /// @notice Memory-resident scalar inputs for the verifier's `verifySession` call.
+    /// @dev Used by the implementation to keep the call site's stack frame small enough to
+    ///      compile without `via_ir`.
+    struct SessionProofScalars {
+        uint64 rpId;
+        uint256 proofNonce;
+        uint256 signalHash;
+        uint64 expiresAtMin;
+        uint64 issuerSchemaId;
+        uint256 credentialGenesisIssuedAtMin;
+        uint256 sessionId;
+    }
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                                 EVENTS                                  ///
     ///////////////////////////////////////////////////////////////////////////////
+
+    /// @notice Emitted once when the implementation is initialized behind its proxy.
+    event WorldIDAccountManagerImplInitialized(IWorldIDVerifier indexed worldIDVerifier, address indexed owner);
+
+    /// @notice Emitted when the World ID verifier address is set or replaced.
+    event WorldIDVerifierSet(address indexed worldIDVerifier);
 
     /// @notice Emitted when a World ID Account is first created.
     event WorldIDAccountCreated(
