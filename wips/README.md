@@ -26,7 +26,7 @@ WIPs are modeled after [Ethereum Improvement Proposals (EIPs)](https://github.co
 | WIP    | Title                              | Status | Category | Created    |
 | ------ | ---------------------------------- | ------ | -------- | ---------- |
 | [1001](./wip-1001.md) | WorldID Native Account Abstraction | Draft  | Core     | 2026-03-27 |
-| [1002](./wip-1002.md) | WorldID Gas Accounting             | Draft  | Core     | 2026-04-21 |
+| [1002](./wip-1002.md) | WorldID Subsidy Accounting         | Draft  | Core     | 2026-04-21 |
 
 ---
 
