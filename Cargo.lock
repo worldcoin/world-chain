@@ -13116,7 +13116,6 @@ dependencies = [
  "world-chain-p2p",
  "world-chain-pool",
  "world-chain-primitives",
- "world-chain-rpc",
  "world-chain-test-utils",
 ]
 
