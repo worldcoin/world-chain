@@ -1046,7 +1046,7 @@ mod tests {
             value: U256::from(123u64),
             input: hex!("c0ffee").into(),
             access_list: AccessList::default(),
-            keyring,
+            world_id_account: keyring,
             signature_type: Wip1001Signature::EDDSA_TYPE,
             session_key: Bytes::copy_from_slice(&session_key_bytes),
         };

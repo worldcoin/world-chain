@@ -78,10 +78,10 @@ pub fn validate_wip1001<R: KeyringRegistry>(
         &signing_hash,
     )?;
 
-    match registry.is_authorized(tx.keyring, &session_key) {
+    match registry.is_authorized(tx.world_id_account, &session_key) {
         Ok(true) => Ok(session_key),
         Ok(false) => Err(Wip1001ValidationError::NotAuthorized {
-            keyring: tx.keyring,
+            keyring: tx.world_id_account,
         }),
         Err(e) => Err(Wip1001ValidationError::Registry(e)),
     }
@@ -215,7 +215,7 @@ mod tests {
             value: U256::ZERO,
             input: hex!("").into(),
             access_list: AccessList::default(),
-            keyring: address!("000000000000000000000000000000000000001d"),
+            world_id_account: address!("000000000000000000000000000000000000001d"),
             signature_type: Wip1001Signature::P256_TYPE,
             session_key: Bytes::copy_from_slice(&key_bytes),
         };
@@ -227,7 +227,7 @@ mod tests {
     fn validate_ok_when_authorized() {
         let (tx, sig, key) = signed_p256();
         let mut registry = MockKeyringRegistry::new();
-        registry.authorize(tx.keyring, key.clone());
+        registry.authorize(tx.world_id_account, key.clone());
 
         let recovered = validate_wip1001(&tx, &sig, &registry).expect("ok");
         assert_eq!(recovered, key);
@@ -241,7 +241,7 @@ mod tests {
         let err = validate_wip1001(&tx, &sig, &registry).expect_err("must reject");
         assert!(matches!(
             err,
-            Wip1001ValidationError::NotAuthorized { keyring } if keyring == tx.keyring
+            Wip1001ValidationError::NotAuthorized { keyring } if keyring == tx.world_id_account
         ));
     }
 
@@ -254,7 +254,7 @@ mod tests {
         let err = validate_wip1001(&tx, &sig, &registry).expect_err("must reject");
         assert!(matches!(
             err,
-            Wip1001ValidationError::NotAuthorized { keyring } if keyring == tx.keyring
+            Wip1001ValidationError::NotAuthorized { keyring } if keyring == tx.world_id_account
         ));
     }
 
