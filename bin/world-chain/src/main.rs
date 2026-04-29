@@ -65,7 +65,7 @@ fn main() {
                             evm_config,
                             ctx.registry.eth_api(),
                         );
-                        ctx.modules.merge_configured(simulate_api.into_rpc())?;
+                        ctx.modules.merge_http(simulate_api.into_rpc())?;
                     }
 
                     Ok(())

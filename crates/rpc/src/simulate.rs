@@ -34,7 +34,7 @@ use std::{
 // Request types
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Request for `worldchain_simulateUnsignedUserOp`.
+/// Request for `simulate_unsignedUserOp`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SimulateUnsignedUserOpRequest {
@@ -129,7 +129,7 @@ pub enum SimulationStatus {
     Revert,
 }
 
-/// Full response for `worldchain_simulateUnsignedUserOp`.
+/// Full response for `simulate_unsignedUserOp`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SimulateUnsignedUserOpResult {
@@ -322,14 +322,14 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
 // RPC trait
 // ═══════════════════════════════════════════════════════════════════════════════
 
-#[cfg_attr(not(test), rpc(server, namespace = "worldchain"))]
-#[cfg_attr(test, rpc(server, client, namespace = "worldchain"))]
+#[cfg_attr(not(test), rpc(server, namespace = "simulate"))]
+#[cfg_attr(test, rpc(server, client, namespace = "simulate"))]
 #[async_trait]
 pub trait WorldChainSimulateApi {
     /// Simulates an unsigned ERC-4337 v0.7 PackedUserOperation against the
     /// specified block state. Returns asset transfers, approval changes,
     /// decoded trace, and warnings.
-    #[method(name = "simulateUnsignedUserOp")]
+    #[method(name = "unsignedUserOp")]
     async fn simulate_unsigned_user_op(
         &self,
         request: SimulateUnsignedUserOpRequest,
@@ -356,7 +356,7 @@ type MetadataCache = Arc<Mutex<LruCache<Address, AssetInfo>>>;
 /// guard correctly accounts for slow simulations.
 pub const SIMULATION_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Implementation of the `worldchain_simulateUnsignedUserOp` RPC endpoint.
+/// Implementation of the `simulate_unsignedUserOp` RPC endpoint.
 #[derive(Debug, Clone)]
 pub struct WorldChainSimulate<Client> {
     client: Client,

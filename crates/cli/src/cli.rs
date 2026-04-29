@@ -8,6 +8,7 @@ use reth_node_builder::NodeConfig;
 use reth_optimism_chainspec::{OpChainSpec, OpHardfork};
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpGasLimitConfig};
+use reth_rpc_server_types::RethRpcModule;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -59,17 +60,15 @@ pub struct WorldChainArgs {
     )]
     pub disable_bootnodes: bool,
 
-    /// Enable the `worldchain_simulateUnsignedUserOp` RPC endpoint on the
-    /// public HTTP/WS/IPC RPC servers. Disabled by default.
+    /// Whether the `simulate_unsignedUserOp` RPC endpoint should be served on
+    /// HTTP. Derived from `--http.api`: enabled when the selection contains
+    /// the `simulate` namespace.
     ///
-    /// The endpoint performs no application-level authentication. Only enable
-    /// it on nodes that sit behind infrastructure-level auth (e.g. an
-    /// internal-only ingress) — never on a publicly reachable RPC.
-    #[arg(
-        long = "worldchain.simulate-enabled",
-        value_name = "WORLDCHAIN_SIMULATE_ENABLED",
-        default_value_t = false
-    )]
+    /// The endpoint performs no application-level authentication. Only include
+    /// `simulate` in `--http.api` on nodes that sit behind infrastructure-
+    /// level auth (e.g. an internal-only ingress) — never on a publicly
+    /// reachable RPC.
+    #[clap(skip)]
     pub simulate_enabled: bool,
 }
 
@@ -80,6 +79,12 @@ impl WorldChainArgs {
     ) -> eyre::Result<WorldChainNodeConfig> {
         // Perform arg validation here for things clap can't do.
         let spec = &config.chain;
+
+        self.simulate_enabled = config
+            .rpc
+            .http_api
+            .as_ref()
+            .is_some_and(|sel| sel.contains(&RethRpcModule::Other("simulate".to_string())));
 
         if let Some(peers) = &self.tx_peers {
             if self.rollup.disable_txpool_gossip {
