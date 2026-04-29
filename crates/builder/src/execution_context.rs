@@ -308,20 +308,6 @@ where
                 continue;
             }
 
-            if let Some(conditional_options) = pooled_tx.conditional_options()
-                && world_chain_rpc::transactions::validate_conditional_options(
-                    conditional_options,
-                    &self.client,
-                )
-                .is_err()
-            {
-                attempt_metrics
-                    .increment_rejection(PayloadBuildRejectionReason::ConditionalInvalid);
-                best_txs.mark_invalid(tx.signer(), tx.nonce());
-                invalid_txs.push(*pooled_tx.hash());
-                continue;
-            }
-
             // A sequencer's block should never contain blob or deposit transactions from the pool.
             if tx.is_eip4844() || tx.is_deposit() {
                 attempt_metrics.increment_rejection(PayloadBuildRejectionReason::BlobOrDeposit);
