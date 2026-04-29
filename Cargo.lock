@@ -13039,7 +13039,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain"
-version = "1.11.3"
+version = "2.0.0"
 dependencies = [
  "clap",
  "color-eyre",
@@ -13058,7 +13058,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-builder"
-version = "1.11.3"
+version = "2.0.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -13122,7 +13122,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-cli"
-version = "1.11.3"
+version = "2.0.0"
 dependencies = [
  "alloy-chains",
  "alloy-genesis",
@@ -13144,7 +13144,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-node"
-version = "1.11.3"
+version = "2.0.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -13193,7 +13193,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-p2p"
-version = "1.11.3"
+version = "2.0.0"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -13226,7 +13226,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-payload"
-version = "1.11.3"
+version = "2.0.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -13256,7 +13256,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-pbh"
-version = "1.11.3"
+version = "2.0.0"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -13273,7 +13273,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-pool"
-version = "1.11.3"
+version = "2.0.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -13309,7 +13309,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-primitives"
-version = "1.11.3"
+version = "2.0.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -13343,7 +13343,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-rpc"
-version = "1.11.3"
+version = "2.0.0"
 dependencies = [
  "alloy",
  "alloy-consensus",
@@ -13398,7 +13398,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-test-utils"
-version = "1.11.3"
+version = "2.0.0"
 dependencies = [
  "alloy-consensus",
  "alloy-contract",
@@ -13479,7 +13479,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-tests"
-version = "1.11.3"
+version = "2.0.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -13579,7 +13579,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "1.11.3"
+version = "2.0.0"
 dependencies = [
  "alloy-consensus",
  "alloy-contract",
