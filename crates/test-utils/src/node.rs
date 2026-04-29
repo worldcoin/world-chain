@@ -2,25 +2,33 @@ use crate::{
     DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
     utils::{pbh_bundle, pbh_multicall, signer, user_op},
 };
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
+use alloy_consensus::Header;
+use alloy_eips::{
+    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, eip2718::Encodable2718,
+};
 use alloy_primitives::{
     Address, B256, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, U256,
 };
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_sol_types::SolCall;
+use chrono::Datelike;
 use futures::future::join_all;
+use op_alloy_consensus::OpReceipt;
+use rand::Rng as _;
 use reth_chain_state::{
-    CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,
+    CanonStateNotifications, CanonStateSubscriptions, EthPrimitives, ForkChoiceNotifications,
     ForkChoiceSubscriptions,
 };
 use reth_chainspec::{ChainInfo, MAINNET};
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_e2e_test_utils::transaction::TransactionTestContext;
+use reth_network_peers::PeerId;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::OpEvmConfig;
-use reth_primitives::{
-    Account, Block, Bytecode, EthPrimitives, Header, Receipt, RecoveredBlock, SealedBlock,
-    SealedHeader, TransactionMeta, TransactionSigned,
+use reth_optimism_payload_builder::config::OpBuilderConfig;
+use reth_optimism_primitives::{OpBlock, OpTransactionSigned};
+use reth_primitives_traits::{
+    Account, Bytecode, RecoveredBlock, SealedBlock, SealedHeader, TransactionMeta,
 };
 use reth_provider::{
     AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
@@ -49,25 +57,15 @@ use std::{
 };
 use tokio::sync::{broadcast, watch};
 use world_chain_cli::{
-    FlashblocksPayloadBuilderConfig,
+    BuilderArgs, FlashblocksPayloadBuilderConfig, PbhArgs, WorldChainArgs, WorldChainNodeConfig,
     cli::{builder::FlashblocksArgs, p2p::FanoutArgs},
 };
 use world_chain_pbh::external_nullifier::ExternalNullifier;
-
-use alloy_eips::eip2718::Encodable2718;
-use chrono::Datelike;
 use world_chain_pool::{
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
     validator::WorldChainTransactionValidator,
 };
-
-use rand::Rng as _;
-use reth_network_peers::PeerId;
 use world_chain_primitives::ed25519_dalek::SigningKey;
-
-use reth_optimism_payload_builder::config::OpBuilderConfig;
-
-use world_chain_cli::{BuilderArgs, PbhArgs, WorldChainArgs, WorldChainNodeConfig};
 
 pub fn test_config() -> WorldChainNodeConfig {
     test_config_with_peers_and_gossip(None, false, true)
@@ -123,6 +121,7 @@ pub fn test_config_with_peers_and_gossip(
             flashblocks,
             tx_peers,
             disable_bootnodes: true,
+            simulate_enabled: false,
         },
         builder_config: FlashblocksPayloadBuilderConfig {
             inner: OpBuilderConfig::default(),
@@ -270,16 +269,16 @@ impl BlockNumReader for WorldChainNoopProvider {
 }
 
 impl BlockReader for WorldChainNoopProvider {
-    type Block = Block;
+    type Block = OpBlock;
     fn find_block_by_hash(
         &self,
         hash: B256,
         _source: BlockSource,
-    ) -> ProviderResult<Option<Block>> {
+    ) -> ProviderResult<Option<OpBlock>> {
         self.block(hash.into())
     }
 
-    fn block(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Block>> {
+    fn block(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<OpBlock>> {
         Ok(None)
     }
 
@@ -297,7 +296,7 @@ impl BlockReader for WorldChainNoopProvider {
         &self,
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<RecoveredBlock<Block>>> {
+    ) -> ProviderResult<Option<RecoveredBlock<OpBlock>>> {
         Ok(None)
     }
 
@@ -305,25 +304,25 @@ impl BlockReader for WorldChainNoopProvider {
         &self,
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<RecoveredBlock<Block>>> {
+    ) -> ProviderResult<Option<RecoveredBlock<OpBlock>>> {
         Ok(None)
     }
 
-    fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Block>> {
+    fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<OpBlock>> {
         Ok(vec![])
     }
 
     fn block_with_senders_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<RecoveredBlock<Block>>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<OpBlock>>> {
         Ok(vec![])
     }
 
     fn recovered_block_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<RecoveredBlock<Block>>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<OpBlock>>> {
         Ok(vec![])
     }
 
@@ -354,7 +353,7 @@ impl BlockBodyIndicesProvider for WorldChainNoopProvider {
 }
 
 impl BlockReaderIdExt for WorldChainNoopProvider {
-    fn block_by_id(&self, _id: BlockId) -> ProviderResult<Option<Block>> {
+    fn block_by_id(&self, _id: BlockId) -> ProviderResult<Option<OpBlock>> {
         Ok(None)
     }
 
@@ -382,7 +381,7 @@ impl BlockIdReader for WorldChainNoopProvider {
 }
 
 impl TransactionsProvider for WorldChainNoopProvider {
-    type Transaction = TransactionSigned;
+    type Transaction = OpTransactionSigned;
 
     fn transaction_by_id_unhashed(
         &self,
@@ -395,32 +394,32 @@ impl TransactionsProvider for WorldChainNoopProvider {
         Ok(None)
     }
 
-    fn transaction_by_id(&self, _id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_id(&self, _id: TxNumber) -> ProviderResult<Option<OpTransactionSigned>> {
         Ok(None)
     }
 
-    fn transaction_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<OpTransactionSigned>> {
         Ok(None)
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         _hash: TxHash,
-    ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(OpTransactionSigned, TransactionMeta)>> {
         Ok(None)
     }
 
     fn transactions_by_block(
         &self,
         _block_id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Option<Vec<OpTransactionSigned>>> {
         Ok(None)
     }
 
     fn transactions_by_block_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Vec<Vec<OpTransactionSigned>>> {
         Ok(Vec::default())
     }
 
@@ -444,23 +443,26 @@ impl TransactionsProvider for WorldChainNoopProvider {
 }
 
 impl ReceiptProvider for WorldChainNoopProvider {
-    type Receipt = Receipt;
-    fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Receipt>> {
+    type Receipt = OpReceipt;
+    fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<OpReceipt>> {
         Ok(None)
     }
 
-    fn receipt_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Receipt>> {
+    fn receipt_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<OpReceipt>> {
         Ok(None)
     }
 
-    fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
+    fn receipts_by_block(
+        &self,
+        _block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<OpReceipt>>> {
         Ok(None)
     }
 
     fn receipts_by_tx_range(
         &self,
         _range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Receipt>> {
+    ) -> ProviderResult<Vec<OpReceipt>> {
         Ok(vec![])
     }
 
@@ -529,10 +531,6 @@ impl ChangeSetReader for WorldChainNoopProvider {
         _range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         Ok(Vec::default())
-    }
-
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        Ok(0)
     }
 }
 
@@ -616,14 +614,6 @@ impl StateProvider for WorldChainNoopProvider {
         &self,
         _account: Address,
         _storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        Ok(None)
-    }
-
-    fn storage_by_hashed_key(
-        &self,
-        _address: Address,
-        _hashed_storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         Ok(None)
     }
@@ -711,7 +701,7 @@ impl NodePrimitivesProvider for WorldChainNoopProvider {
 }
 impl StaticFileProviderFactory for WorldChainNoopProvider {
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
-        StaticFileProvider::read_only(PathBuf::default(), false).unwrap()
+        StaticFileProvider::read_only(PathBuf::default()).unwrap()
     }
 
     fn get_static_file_writer(

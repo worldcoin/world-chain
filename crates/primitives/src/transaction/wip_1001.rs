@@ -22,17 +22,19 @@ use crate::transaction::{WIP_1001_TX_TYPE, Wip1001Signature};
 
 /// A WIP-1001 typed transaction (`0x1D`).
 ///
-/// The transaction is signed by a *session key* authorized on a *World ID Key
-/// Ring* — the [`keyring`](Self::keyring) field is the protocol-level sender.
+/// The transaction is signed by a *session key* in the *Key Ring* of a
+/// *World ID Account* — the [`world_id_account`](Self::world_id_account) field
+/// carries that account's 20-byte address and is the protocol-level sender.
 /// Protocol validation authorizes the recovered public key against the
-/// precompile-managed keyset of `keyring`.
+/// precompile-managed Key Ring of `world_id_account`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TxWip1001 {
     /// EIP-155 chain id.
     #[serde(with = "alloy_serde::quantity")]
     pub chain_id: ChainId,
-    /// Session-key nonce at the keyring.
+    /// Session-key nonce at the World ID Account.
+    /// (Per-Key-Ring counter incremented on each successful 0x1D execution.)
     #[serde(with = "alloy_serde::quantity")]
     pub nonce: u64,
     /// EIP-1559 priority fee (tip cap).
@@ -54,9 +56,10 @@ pub struct TxWip1001 {
     /// EIP-2930 access list.
     #[serde(default)]
     pub access_list: AccessList,
-    /// Address of the signing keyring. Protocol validation authorizes the
-    /// recovered session public key against the keyring's session key set.
-    pub keyring: Address,
+    /// 20-byte address of the signing *World ID Account*. Protocol validation
+    /// authorizes the recovered session public key against this account's
+    /// *Key Ring* (the precompile-managed set of authorized session keys).
+    pub world_id_account: Address,
     /// Wire `signature_type` byte. Must equal the accompanying
     /// [`Wip1001Signature`] variant's discriminator at signing/verification time.
     ///
@@ -87,7 +90,7 @@ impl TxWip1001 {
             + self.value.length()
             + self.input.0.length()
             + self.access_list.length()
-            + self.keyring.length()
+            + self.world_id_account.length()
             + self.signature_type.length()
             + self.session_key.0.length()
     }
@@ -103,7 +106,7 @@ impl TxWip1001 {
         self.value.encode(out);
         self.input.0.encode(out);
         self.access_list.encode(out);
-        self.keyring.encode(out);
+        self.world_id_account.encode(out);
         self.signature_type.encode(out);
         self.session_key.0.encode(out);
     }
@@ -121,7 +124,7 @@ impl TxWip1001 {
             value: Decodable::decode(buf)?,
             input: Decodable::decode(buf)?,
             access_list: Decodable::decode(buf)?,
-            keyring: Decodable::decode(buf)?,
+            world_id_account: Decodable::decode(buf)?,
             signature_type: Decodable::decode(buf)?,
             session_key: Decodable::decode(buf)?,
         })
@@ -702,7 +705,7 @@ mod tests {
             value: U256::from(1u64),
             input: hex!("a22cb465").into(),
             access_list: AccessList::default(),
-            keyring: address!("000000000000000000000000000000000000001d"),
+            world_id_account: address!("000000000000000000000000000000000000001d"),
             signature_type: Wip1001Signature::SECP256K1_TYPE,
             // 33-byte compressed secp256k1 placeholder.
             session_key: hex!("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")

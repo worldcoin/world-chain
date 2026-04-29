@@ -3,12 +3,12 @@ use std::sync::Arc;
 use alloy_primitives::{Address, B256, Bytes};
 use alloy_rpc_types_engine::PayloadAttributes as RpcPayloadAttributes;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use op_alloy_consensus::OpTxEnvelope;
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadConfig};
 use reth_optimism_node::{
-    OpPayloadAttributes, OpPayloadBuilderAttributes, utils::optimism_payload_attributes,
+    OpPayloadAttributes, payload::OpPayloadAttrs, utils::optimism_payload_attributes,
 };
 use reth_optimism_payload_builder::config::OpBuilderConfig;
+use reth_payload_primitives::PayloadAttributes as _;
 use reth_provider::{StateProvider, StateProviderFactory};
 use world_chain_builder::{
     WorldChainPayloadBuilderCtxBuilder, payload_builder::FlashblocksPayloadBuilder,
@@ -30,7 +30,6 @@ use world_chain_test_utils::{
 
 const TOTAL_TX_COUNTS: [usize; 3] = [50, 500, 1000];
 const WORLD_ID_TOTAL_TX_COUNTS: [usize; 3] = [10, 25, 50];
-const PAYLOAD_VERSION: u8 = 3;
 
 fn deterministic_payload_attributes(
     timestamp: u64,
@@ -141,14 +140,9 @@ fn bench_build_flashblock_case<F>(
         let parent_header = node.node.inner.chain_spec().sealed_genesis_header();
         let timestamp = parent_header.timestamp + 2; // 2s block time
         let rpc_attributes = deterministic_payload_attributes(timestamp, transactions);
-        let attributes =
-            <OpPayloadBuilderAttributes<OpTxEnvelope> as reth_payload_primitives::PayloadBuilderAttributes>::try_new(
-                parent_header.hash(),
-                rpc_attributes,
-                PAYLOAD_VERSION,
-            )
-            .expect("failed to decode payload attributes transactions");
-        let config = PayloadConfig::new(Arc::new(parent_header.clone()), attributes);
+        let attributes = OpPayloadAttrs::from(rpc_attributes);
+        let payload_id = attributes.payload_id(&parent_header.hash());
+        let config = PayloadConfig::new(Arc::new(parent_header.clone()), attributes, payload_id);
         let builder = build_live_payload_builder(
             node.node.inner.pool.clone(),
             provider,
@@ -163,6 +157,8 @@ fn bench_build_flashblock_case<F>(
                     cached_reads: Default::default(),
                     cancel: Default::default(),
                     best_payload: None,
+                    execution_cache: None,
+                    trie_handle: None,
                 };
 
                 let (outcome, access_list) = builder

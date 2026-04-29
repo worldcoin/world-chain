@@ -49,7 +49,7 @@ futures.workspace = true
 hex.workspace = true
 once_cell.workspace = true
 rand.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["json"] }
 semaphore-rs.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -12,7 +12,6 @@ world-chain-pbh.workspace = true
 
 reth-db.workspace = true
 reth-optimism-node.workspace = true
-reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-eth-wire-types.workspace = true
 reth-optimism-primitives.workspace = true

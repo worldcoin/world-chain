@@ -36,9 +36,7 @@ Rollup:
           Enable transaction conditional support on sequencer
 
       --rollup.supervisor-http <SUPERVISOR_HTTP_URL>
-          HTTP endpoint for the supervisor
-          
-          [default: http://localhost:1337/]
+          HTTP endpoint for the supervisor. When not set, interop transaction validation is disabled
 
       --rollup.supervisor-safety-level <SUPERVISOR_SAFETY_LEVEL>
           Safety level for the supervisor
@@ -216,5 +214,10 @@ Flashblocks:
 
       --worldchain.disable-bootnodes
           Disable the default World Chain bootnodes
+
+      --worldchain.simulate-enabled
+          Enable the `worldchain_simulateUnsignedUserOp` RPC endpoint on the public HTTP/WS/IPC RPC servers. Disabled by default.
+          
+          The endpoint performs no application-level authentication. Only enable it on nodes that sit behind infrastructure-level auth (e.g. an internal-only ingress) — never on a publicly reachable RPC.
 
 ```

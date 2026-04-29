@@ -18,6 +18,7 @@ use reth_node_builder::{
     components::{ComponentsBuilder, PayloadServiceBuilder},
     rpc::{BasicEngineValidatorBuilder, RpcAddOns},
 };
+use reth_node_core::primitives::Hardforks;
 use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
     OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
@@ -41,7 +42,6 @@ use crate::tx_propagation::WorldChainTransactionPropagationPolicy;
 use reth_network::PeersInfo;
 use reth_network_peers::PeerId;
 use reth_node_builder::{BuilderContext, components::NetworkBuilder};
-use reth_primitives::Hardforks;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 /// Network builder for World Chain that optionally applies custom transaction propagation policy

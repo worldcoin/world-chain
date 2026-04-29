@@ -1,4 +1,4 @@
-use alloy_consensus::{SignableTransaction, TxEip1559};
+use alloy_consensus::{InMemorySize, SignableTransaction, TxEip1559};
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_network::TxSigner;
 use alloy_primitives::{
@@ -12,8 +12,7 @@ use bon::builder;
 use op_alloy_consensus::OpTypedTransaction;
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::transaction::SignedTransaction;
-use reth_primitives_traits::size::InMemorySize;
+use reth_primitives_traits::SignedTransaction;
 use semaphore_rs::{Field, hash_to_field, identity::Identity, poseidon_tree::LazyPoseidonTree};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{str::FromStr, sync::LazyLock};

@@ -16,3 +16,6 @@ pub use transactions::EthTransactionsExt;
 
 pub mod core;
 pub use core::{EthApiExtServer, WorldChainEthApiExt};
+
+pub mod simulate;
+pub use simulate::{WorldChainSimulate, WorldChainSimulateApiServer};

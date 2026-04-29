@@ -1,24 +1,23 @@
 //! A block executor and builder for flashblocks that constructs a BAL (Block Access List) sidecar.
 
 use alloy_op_evm::{
-    OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory,
+    OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpTx,
     block::receipt_builder::OpReceiptBuilder,
 };
 use op_alloy_consensus::OpReceipt;
+use op_revm::{OpHaltReason, OpSpecId};
 use reth_evm::{
-    Database, Evm, FromRecoveredTx, FromTxWithEncoded,
+    Database, Evm,
     block::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
-    op_revm::{OpSpecId, OpTransaction},
 };
+use reth_node_api::NodePrimitives;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpRethReceiptBuilder;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_primitives::BuiltPayload;
-use revm::{
-    DatabaseCommit,
-    context::{BlockEnv, TxEnv},
-    database::BundleState,
-};
+use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader};
+use reth_trie_common::updates::TrieUpdates;
+use revm::{DatabaseCommit, context::BlockEnv, database::BundleState};
 use tracing::trace;
 
 use crate::{
@@ -29,14 +28,12 @@ use crate::{
     state_db::StateDB,
 };
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
-use alloy_primitives::{FixedBytes, U256};
+use alloy_primitives::{B256, FixedBytes, U256};
 use reth_evm::{
     block::CommitChanges,
     execute::{BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx},
-    op_revm::OpHaltReason,
 };
 use reth_optimism_node::{OpBlockAssembler, OpBuiltPayload};
-use reth_primitives::{NodePrimitives, Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
 use revm::{context::result::ExecutionResult, database::states::bundle_state::BundleRetention};
 use std::{sync::Arc, time::Instant};
@@ -107,8 +104,7 @@ impl<'a, DB, R, N: NodePrimitives, E> BalBlockBuilder<'a, R, N, E>
 where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     DB: StateDB + DatabaseCommit + Database + 'a,
-    E: Evm<DB = BalBuilderDb<DB>, Tx = OpTransaction<TxEnv>, Spec = OpSpecId, BlockEnv = BlockEnv>,
-    OpTransaction<TxEnv>: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+    E: Evm<DB = BalBuilderDb<DB>, Tx = OpTx, Spec = OpSpecId, BlockEnv = BlockEnv>,
 {
     /// Creates a new [`FlashblocksBlockBuilder`] with the given executor factory and assembler.
     pub fn new(
@@ -162,14 +158,12 @@ where
         >,
     E: Evm<
             DB = BalBuilderDb<DB>,
-            Tx = OpTransaction<TxEnv>,
+            Tx = OpTx,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,
             BlockEnv = BlockEnv,
         >,
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
-    OpTransaction<TxEnv>:
-        FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     type Primitives = N;
     type Executor = OpBlockExecutor<E, R, Arc<OpChainSpec>>;
@@ -205,6 +199,7 @@ where
     fn finish(
         self,
         _state: impl StateProvider,
+        _state_root_precomputed: Option<(B256, TrieUpdates)>,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         unimplemented!(
             "finish is not supported on FlashblocksBlockBuilder; use finish_with_bundle instead"
@@ -235,14 +230,12 @@ where
         >,
     E: Evm<
             DB = BalBuilderDb<DB>,
-            Tx = OpTransaction<TxEnv>,
+            Tx = OpTx,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,
             BlockEnv = BlockEnv,
         >,
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
-    OpTransaction<TxEnv>:
-        FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     fn finish_with_bundle(
         self,

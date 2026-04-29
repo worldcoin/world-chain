@@ -4,30 +4,32 @@ use std::{
 };
 
 use ::eyre::eyre::eyre;
+use alloy_consensus::Block;
 use alloy_primitives::B256;
 use op_alloy_consensus::OpTxEnvelope;
 use reth_basic_payload_builder::{
     HeaderForPayload, PayloadBuilder, PayloadConfig, PayloadState, PayloadTaskGuard, PrecachedState,
 };
-use reth_payload_builder::{PayloadJob, PayloadJobGenerator};
-use reth_payload_primitives::{PayloadBuilderAttributes, PayloadBuilderError};
+use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_node::OpBuiltPayload;
+use reth_optimism_payload_builder::OpPayloadAttrs;
+use reth_optimism_primitives::OpPrimitives;
+use reth_payload_builder::{BuildNewPayload, PayloadId, PayloadJobGenerator};
+use reth_payload_primitives::{PayloadAttributes, PayloadBuilderError};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
+use reth_provider::{
+    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory,
+};
 use reth_revm::cached::CachedReads;
-use reth_tasks::TaskSpawner;
+use reth_tasks::Runtime;
+use tokio::runtime::Handle;
+use tracing::{debug, warn};
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_primitives::{
     access_list::FlashblockAccessList, ed25519_dalek::SigningKey,
     flashblocks::recovered_block_from_flashblocks, p2p::Authorization,
+    payload_id::force_op_payload_id_v3,
 };
-
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
-use reth_optimism_primitives::OpPrimitives;
-use reth_primitives::{Block, NodePrimitives, RecoveredBlock};
-use reth_provider::{
-    BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory,
-};
-use tokio::runtime::Handle;
-use tracing::{debug, warn};
 
 use crate::job::{CommittedPayloadState, FlashblocksPayloadJob};
 use world_chain_builder::{
@@ -36,11 +38,11 @@ use world_chain_builder::{
 use world_chain_primitives::flashblocks::Flashblock;
 
 /// A type that initiates payload building jobs on the [`crate::builder::FlashblocksPayloadBuilder`].
-pub struct FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
+pub struct FlashblocksPayloadJobGenerator<Client, Builder> {
     /// The client that can interact with the chain.
     client: Client,
     /// The task executor to spawn payload building tasks on.
-    executor: Tasks,
+    executor: Runtime,
     /// The configuration for the job generator.
     config: FlashblocksJobGeneratorConfig,
     /// The type responsible for building payloads.
@@ -61,13 +63,13 @@ pub struct FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
     flashblocks_state: FlashblocksExecutionCoordinator,
 }
 
-impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client, Tasks, Builder> {
+impl<Client, Builder> FlashblocksPayloadJobGenerator<Client, Builder> {
     /// Creates a new [`WorldChainPayloadJobGenerator`] with the given config and custom
     /// [`PayloadBuilder`]
     #[allow(clippy::too_many_arguments)]
     pub fn with_builder(
         client: Client,
-        executor: Tasks,
+        executor: Runtime,
         config: FlashblocksJobGeneratorConfig,
         builder: Builder,
         p2p_handler: FlashblocksHandle,
@@ -116,7 +118,7 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
     }
 
     /// Returns a reference to the tasks type
-    pub const fn tasks(&self) -> &Tasks {
+    pub const fn tasks(&self) -> &Runtime {
         &self.executor
     }
 
@@ -130,8 +132,7 @@ impl<Client, Tasks: TaskSpawner, Builder> FlashblocksPayloadJobGenerator<Client,
     }
 }
 
-impl<Client, Tasks, Builder> PayloadJobGenerator
-    for FlashblocksPayloadJobGenerator<Client, Tasks, Builder>
+impl<Client, Builder> PayloadJobGenerator for FlashblocksPayloadJobGenerator<Client, Builder>
 where
     Client: StateProviderFactory
         + BlockReaderIdExt<Header = HeaderForPayload<Builder::BuiltPayload>>
@@ -139,24 +140,22 @@ where
         + Clone
         + Unpin
         + 'static,
-    Tasks: TaskSpawner + Clone + Unpin + 'static,
-    Builder: PayloadBuilder<
-            BuiltPayload = OpBuiltPayload<OpPrimitives>,
-            Attributes = OpPayloadBuilderAttributes<OpTxEnvelope>,
-        > + FlashblockPayloadBuilder
+    Builder: PayloadBuilder<BuiltPayload = OpBuiltPayload<OpPrimitives>, Attributes = OpPayloadAttrs>
+        + FlashblockPayloadBuilder
         + Unpin
         + Clone
         + 'static,
-    Builder::Attributes: Unpin + Clone,
-    Builder::BuiltPayload: Unpin + Clone,
 {
-    type Job = FlashblocksPayloadJob<Tasks, Builder>;
+    type Job = FlashblocksPayloadJob<Builder>;
 
     fn new_payload_job(
         &self,
-        attributes: <Self::Job as PayloadJob>::PayloadAttributes,
+        input: BuildNewPayload<Builder::Attributes>,
+        id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        let parent_header = if attributes.parent().is_zero() {
+        let id = force_op_payload_id_v3(id);
+
+        let parent_header = if input.parent_hash.is_zero() {
             // Use latest header for genesis block case
             self.client
                 .latest_header()
@@ -165,14 +164,12 @@ where
         } else {
             // Fetch specific header by hash
             self.client
-                .sealed_header_by_hash(attributes.parent())
+                .sealed_header_by_hash(input.parent_hash)
                 .map_err(PayloadBuilderError::from)?
-                .ok_or(PayloadBuilderError::MissingParentHeader(
-                    attributes.parent(),
-                ))?
+                .ok_or(PayloadBuilderError::MissingParentHeader(input.parent_hash))?
         };
 
-        let config = PayloadConfig::new(Arc::new(parent_header.clone()), attributes);
+        let config = PayloadConfig::new(Arc::new(parent_header.clone()), input.attributes, id);
 
         let timestamp = config.attributes.timestamp();
         let until = self.job_deadline(timestamp);
@@ -184,10 +181,9 @@ where
 
         let payload_task_guard = PayloadTaskGuard::new(self.config.max_payload_tasks);
 
-        let maybe_pre_state =
-            self.check_for_pre_state(self.client.chain_spec(), &config.attributes)?;
+        let maybe_pre_state = self.check_for_pre_state(self.client.chain_spec(), id)?;
 
-        let payload_id = config.attributes.payload_id();
+        let payload_id = config.payload_id();
         let mut authorization = self.authorizations.clone();
 
         let pending = async move {
@@ -295,6 +291,8 @@ where
             p2p_handler: self.p2p_handler.clone(),
             flashblocks_state: self.flashblocks_state.clone(),
             block_index: index,
+            execution_cache: input.cache,
+            trie_handle: input.trie_handle,
         };
 
         // start the first job right away
@@ -329,7 +327,7 @@ where
     }
 }
 
-impl<Builder, Client, Tasks> FlashblocksPayloadJobGenerator<Client, Tasks, Builder>
+impl<Builder, Client> FlashblocksPayloadJobGenerator<Client, Builder>
 where
     Builder: PayloadBuilder<BuiltPayload = OpBuiltPayload>,
 {
@@ -339,7 +337,7 @@ where
     fn check_for_pre_state(
         &self,
         chain_spec: Arc<OpChainSpec>,
-        attributes: &<Builder as PayloadBuilder>::Attributes,
+        id: PayloadId,
     ) -> Result<
         Option<(Builder::BuiltPayload, u64, Option<FlashblockAccessList>)>,
         PayloadBuilderError,
@@ -351,9 +349,9 @@ where
             PayloadBuilderError::Other(eyre!("Failed to reduce flashblocks: {}", e).into())
         })?;
 
-        if *flashblock.payload_id() == attributes.payload_id() {
+        if *flashblock.payload_id() == id {
             // If we have a pre-confirmed state, we can use it to build the payload
-            debug!(target: "flashblocks::payload_builder", payload_id = %attributes.payload_id(), "Using pre-confirmed state for payload");
+            debug!(target: "flashblocks::payload_builder", payload_id = %id, "Using pre-confirmed state for payload");
 
             let block: RecoveredBlock<Block<OpTxEnvelope>> =
                 recovered_block_from_flashblocks(chain_spec, flashblock.clone()).map_err(|e| {
@@ -364,7 +362,7 @@ where
             let sealed = block.into_sealed_block();
 
             let payload = OpBuiltPayload::new(
-                attributes.payload_id(),
+                id,
                 Arc::new(sealed),
                 flashblock.flashblock().metadata.fees,
                 None,

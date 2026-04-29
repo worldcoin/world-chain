@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.10
-FROM public.ecr.aws/docker/library/rust:1.92.0-bookworm AS base
+FROM public.ecr.aws/docker/library/rust:1.95.0-bookworm AS base
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
   --mount=type=cache,target=/usr/local/cargo/git \
@@ -84,7 +84,7 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/aws
   rm -rf /tmp/aws /tmp/awscliv2.zip
 
 # Install s3fcp
-RUN curl -L "https://github.com/Dzejkop/s3fcp/releases/download/v0.1.4/s3fcp-linux-x86_64" -o "/usr/local/bin/s3fcp" && \
+RUN curl -L "https://github.com/Dzejkop/s3fcp/releases/download/v0.3.0/s3fcp-linux-x86_64" -o "/usr/local/bin/s3fcp" && \
   chmod +x /usr/local/bin/s3fcp
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"

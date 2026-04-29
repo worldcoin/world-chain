@@ -13,15 +13,15 @@ use op_alloy_consensus::EIP1559ParamError;
 use op_alloy_rpc_types::OpTransactionRequest;
 
 use alloy_rpc_types_engine::PayloadId;
+use op_revm::OpSpecId;
 use reth_basic_payload_builder::PayloadConfig;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{
     ConfigureEvm, Database, Evm, EvmEnv,
     block::{BlockExecutionError, BlockValidationError},
     execute::{BlockBuilder, BlockExecutor},
-    op_revm::OpSpecId,
 };
-use reth_node_api::{PayloadBuilderAttributes, PayloadBuilderError};
+use reth_node_api::{NodePrimitives, PayloadBuilderError};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
@@ -34,7 +34,7 @@ use reth_optimism_payload_builder::{
 };
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{NodePrimitives, Recovered, SealedHeader, TxTy};
+use reth_primitives_traits::{Recovered, SealedHeader, TxTy};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_revm::cancelled::CancelOnDrop;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
