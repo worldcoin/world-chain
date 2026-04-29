@@ -1,3 +1,5 @@
+use core::hash::{Hash, Hasher};
+
 use alloy_primitives::{B256, Bytes, Signature, U256, bytes::BufMut};
 use alloy_rlp::{Decodable, Encodable, Header};
 
@@ -18,10 +20,7 @@ pub const ED25519_PUBKEY_LEN: usize = 32;
 /// Ed25519 key. The `signature_type` byte and `session_key` bytes live on
 /// [`TxWip1001`] (covered by `signing_hash`); this enum carries only the
 /// scheme-specific signature payload.
-///
-/// Ed25519 is intentionally not yet implemented — the wire format is reserved
-/// for a follow-on PR.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "signatureType", content = "signaturePayload")]
 #[non_exhaustive]
 pub enum Wip1001Signature {
@@ -40,6 +39,12 @@ pub enum Wip1001Signature {
     /// `signature_payload = rlp([authenticator_data, client_data_json, r, s])`.
     #[serde(rename = "0x2")]
     WebAuthn(WebAuthnSignature),
+    /// Ed25519 EdDSA over edwards25519, `signature_type = 0x03`.
+    ///
+    /// `signature_payload = rlp([R, s])` — where `R || s` is the canonical
+    /// 64-byte [`ed25519_dalek::Signature`].
+    #[serde(rename = "0x3")]
+    EdDSA(ed25519_dalek::Signature),
 }
 
 /// Raw P-256 ECDSA `(r, s)` signature pair.
@@ -75,7 +80,7 @@ impl Wip1001Signature {
     pub const P256_TYPE: u8 = 0x01;
     /// `signature_type` byte for the WebAuthn variant.
     pub const WEBAUTHN_TYPE: u8 = 0x02;
-    /// `signature_type` byte for the EdDSA variant (reserved).
+    /// `signature_type` byte for the EdDSA variant.
     pub const EDDSA_TYPE: u8 = 0x03;
 
     /// Returns the `signature_type` tag byte for this variant.
@@ -85,6 +90,7 @@ impl Wip1001Signature {
             Self::Secp256k1(_) => Self::SECP256K1_TYPE,
             Self::P256(_) => Self::P256_TYPE,
             Self::WebAuthn(_) => Self::WEBAUTHN_TYPE,
+            Self::EdDSA(_) => Self::EDDSA_TYPE,
         }
     }
 
@@ -108,6 +114,14 @@ impl Wip1001Signature {
     pub const fn as_webauthn(&self) -> Option<&WebAuthnSignature> {
         match self {
             Self::WebAuthn(sig) => Some(sig),
+            _ => None,
+        }
+    }
+
+    /// Returns the inner [`ed25519_dalek::Signature`] if this is the `EdDSA` variant.
+    pub const fn as_eddsa(&self) -> Option<&ed25519_dalek::Signature> {
+        match self {
+            Self::EdDSA(sig) => Some(sig),
             _ => None,
         }
     }
@@ -147,6 +161,17 @@ impl Wip1001Signature {
                 }
                 .length_with_payload()
             }
+            Self::EdDSA(sig) => {
+                let bytes = sig.to_bytes();
+                let r = U256::from_be_bytes::<32>(bytes[..32].try_into().expect("32 bytes"));
+                let s = U256::from_be_bytes::<32>(bytes[32..].try_into().expect("32 bytes"));
+                let list_payload_len = r.length() + s.length();
+                Header {
+                    list: true,
+                    payload_length: list_payload_len,
+                }
+                .length_with_payload()
+            }
         }
     }
 
@@ -156,6 +181,7 @@ impl Wip1001Signature {
     /// - secp256k1: `rlp([y_parity, r, s])`
     /// - P256: `rlp([r, s])`
     /// - WebAuthn: `rlp([authenticator_data, client_data_json, r, s])`
+    /// - EdDSA: `rlp([R, s])` where `R || s` is the canonical 64-byte signature
     pub(crate) fn encode_payload_raw(&self, out: &mut dyn BufMut) {
         match self {
             Self::Secp256k1(sig) => {
@@ -196,6 +222,19 @@ impl Wip1001Signature {
                 .encode(out);
                 sig.authenticator_data.0.encode(out);
                 sig.client_data_json.0.encode(out);
+                r.encode(out);
+                s.encode(out);
+            }
+            Self::EdDSA(sig) => {
+                let bytes = sig.to_bytes();
+                let r = U256::from_be_bytes::<32>(bytes[..32].try_into().expect("32 bytes"));
+                let s = U256::from_be_bytes::<32>(bytes[32..].try_into().expect("32 bytes"));
+                let list_payload_len = r.length() + s.length();
+                Header {
+                    list: true,
+                    payload_length: list_payload_len,
+                }
+                .encode(out);
                 r.encode(out);
                 s.encode(out);
             }
@@ -273,9 +312,46 @@ impl Wip1001Signature {
                     s: B256::from(s.to_be_bytes::<32>()),
                 }))
             }
+            Self::EDDSA_TYPE => {
+                let header = Header::decode(buf)?;
+                if !header.list {
+                    return Err(alloy_rlp::Error::UnexpectedString);
+                }
+                let start = buf.len();
+                let r: U256 = Decodable::decode(buf)?;
+                let s: U256 = Decodable::decode(buf)?;
+                let consumed = start - buf.len();
+                if consumed != header.payload_length {
+                    return Err(alloy_rlp::Error::ListLengthMismatch {
+                        expected: header.payload_length,
+                        got: consumed,
+                    });
+                }
+                let mut sig_bytes = [0u8; 64];
+                sig_bytes[..32].copy_from_slice(&r.to_be_bytes::<32>());
+                sig_bytes[32..].copy_from_slice(&s.to_be_bytes::<32>());
+                Ok(Self::EdDSA(ed25519_dalek::Signature::from_bytes(
+                    &sig_bytes,
+                )))
+            }
             _ => Err(alloy_rlp::Error::Custom(
                 "unsupported wip-1001 signature type",
             )),
+        }
+    }
+}
+
+// `ed25519_dalek::Signature` does not implement `Hash`. Hash via the canonical
+// 64-byte representation; tag the variant with `signature_type` so different
+// schemes don't collide.
+impl Hash for Wip1001Signature {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.signature_type().hash(state);
+        match self {
+            Self::Secp256k1(sig) => sig.hash(state),
+            Self::P256(sig) => sig.hash(state),
+            Self::WebAuthn(sig) => sig.hash(state),
+            Self::EdDSA(sig) => sig.to_bytes().hash(state),
         }
     }
 }
@@ -306,6 +382,8 @@ pub enum SessionKey {
         /// Affine y coordinate.
         y: B256,
     },
+    /// Compressed Ed25519 public key (32 bytes), validated on-curve at parse time.
+    EdDSA(ed25519_dalek::VerifyingKey),
 }
 
 /// Parse error for [`SessionKey::from_wire`].
@@ -322,6 +400,10 @@ pub enum SessionKeyError {
         /// Actual length in bytes.
         got: usize,
     },
+    /// `key_data` is the right length but does not decode to a valid public key
+    /// (e.g. Ed25519 point not on the curve).
+    #[error("malformed public key")]
+    MalformedKey,
 }
 
 impl SessionKey {
@@ -347,6 +429,19 @@ impl SessionKey {
                 let (x, y) = parse_p256_key_data(key_data)?;
                 Ok(Self::WebAuthn { x, y })
             }
+            Wip1001Signature::EDDSA_TYPE => {
+                if key_data.len() != ED25519_PUBKEY_LEN {
+                    return Err(SessionKeyError::InvalidLength {
+                        expected: ED25519_PUBKEY_LEN,
+                        got: key_data.len(),
+                    });
+                }
+                let mut buf = [0u8; ED25519_PUBKEY_LEN];
+                buf.copy_from_slice(key_data);
+                let vk = ed25519_dalek::VerifyingKey::from_bytes(&buf)
+                    .map_err(|_| SessionKeyError::MalformedKey)?;
+                Ok(Self::EdDSA(vk))
+            }
             other => Err(SessionKeyError::UnsupportedType(other)),
         }
     }
@@ -358,6 +453,7 @@ impl SessionKey {
             Self::Secp256k1(_) => Wip1001Signature::SECP256K1_TYPE,
             Self::P256 { .. } => Wip1001Signature::P256_TYPE,
             Self::WebAuthn { .. } => Wip1001Signature::WEBAUTHN_TYPE,
+            Self::EdDSA(_) => Wip1001Signature::EDDSA_TYPE,
         }
     }
 }
