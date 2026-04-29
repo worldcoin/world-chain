@@ -84,6 +84,11 @@ interface IWorldIDAccountManager {
     /// @notice Thrown when `create` targets a World ID Account that already exists.
     error WorldIDAccountAlreadyExists();
 
+    /// @notice Thrown when `create` is invoked with a zero `worldIDAccountNullifier_`.
+    /// @dev A zero nullifier would be persisted indistinguishably from "absent", letting the
+    ///      same account be created repeatedly and permanently breaking `update`.
+    error ZeroNullifier();
+
     /// @notice Thrown when `update` targets a World ID Account that has not been created.
     error WorldIDAccountDoesNotExist();
 

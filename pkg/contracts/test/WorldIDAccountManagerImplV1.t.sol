@@ -278,6 +278,16 @@ contract WorldIDAccountManagerImplV1Test is Test {
         assertTrue(manager.isAuthorized(acct, _key(0xAA, 33)));
     }
 
+    function test_create_revertIf_zeroNullifier() public {
+        CreateArgs memory a = _defaultCreateArgs();
+        a.nullifier = 0;
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
+            operation: IWorldIDAccountManager.Operation.Create, keys: _singleKey(_key(0x01, 33))
+        });
+        vm.expectRevert(IWorldIDAccountManager.ZeroNullifier.selector);
+        _doCreate(a, u);
+    }
+
     function test_create_revertIf_verifierRejects() public {
         verifier.setShouldAccept(false);
         CreateArgs memory a = _defaultCreateArgs();

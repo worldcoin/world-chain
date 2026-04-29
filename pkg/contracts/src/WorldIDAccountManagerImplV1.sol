@@ -81,6 +81,8 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
     ///////////////////////////////////////////////////////////////////////////////
 
     /// @inheritdoc IWorldIDAccountManager
+    /// @dev Follows checks-effects-interactions: state mutations and event emits complete before
+    ///      the verifier call. If the verifier reverts, the EVM rolls back all prior writes.
     function create(
         uint256 worldIDAccountNullifier_,
         uint256 worldIDAccountNonce_,
@@ -92,8 +94,14 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         uint256[5] calldata proof_,
         WorldIDAccountUpdate calldata createUpdate_
     ) external virtual onlyProxy nonReentrant returns (address worldIDAccount_) {
+        // CHECKS
         if (createUpdate_.operation != Operation.Create) {
             revert InvalidOperation();
+        }
+        // A zero nullifier would be indistinguishable from "absent" in `worldIDAccountNullifier`,
+        // letting the same account be re-created and permanently bricking `update`.
+        if (worldIDAccountNullifier_ == 0) {
+            revert ZeroNullifier();
         }
 
         worldIDAccount_ = address(uint160(uint256(keccak256(abi.encodePacked(worldIDAccountNullifier_)))));
@@ -104,6 +112,16 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         uint256 action = uint256(keccak256(abi.encodePacked(WORLD_ID_ACCOUNT_TAG, worldIDAccountNonce_))) >> 8;
         uint256 signalHash = uint256(keccak256(abi.encode(createUpdate_))) >> 8;
 
+        // EFFECTS
+        worldIDAccountNullifier[worldIDAccount_] = worldIDAccountNullifier_;
+        sessionIdOf[worldIDAccount_] = sessionId_;
+
+        _addKeys(worldIDAccount_, createUpdate_.keys);
+
+        emit WorldIDAccountCreated(worldIDAccount_, worldIDAccountNullifier_, sessionId_);
+        emit SessionKeysAdded(worldIDAccount_, createUpdate_.keys);
+
+        // INTERACTION
         worldIDVerifier.verify(
             worldIDAccountNullifier_,
             action,
@@ -115,17 +133,13 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
             credentialGenesisIssuedAtMin_,
             proof_
         );
-
-        worldIDAccountNullifier[worldIDAccount_] = worldIDAccountNullifier_;
-        sessionIdOf[worldIDAccount_] = sessionId_;
-
-        _addKeys(worldIDAccount_, createUpdate_.keys);
-
-        emit WorldIDAccountCreated(worldIDAccount_, worldIDAccountNullifier_, sessionId_);
-        emit SessionKeysAdded(worldIDAccount_, createUpdate_.keys);
     }
 
     /// @inheritdoc IWorldIDAccountManager
+    /// @dev Follows checks-effects-interactions: the signal hash is snapshotted from the current
+    ///      generation before the generation is bumped and key changes are applied; the verifier
+    ///      call happens last with that snapshotted hash. Revert in the verifier rolls back all
+    ///      preceding writes via the EVM.
     function update(
         address worldIDAccount_,
         uint256 proofNonce_,
@@ -136,6 +150,7 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         uint256[5] calldata proof_,
         WorldIDAccountUpdate calldata accountUpdate_
     ) external virtual onlyProxy nonReentrant {
+        // CHECKS
         if (accountUpdate_.operation == Operation.Create) {
             revert InvalidOperation();
         }
@@ -143,17 +158,11 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
             revert WorldIDAccountDoesNotExist();
         }
 
-        _verifySessionProof(
-            worldIDAccount_,
-            proofNonce_,
-            issuerSchemaId_,
-            expiresAtMin_,
-            credentialGenesisIssuedAtMin_,
-            sessionNullifier_,
-            proof_,
-            accountUpdate_
-        );
+        // Snapshot signal hash with the pre-bump generation so the verifier still validates
+        // the proof against the generation the caller signed over.
+        uint256 signalHash = uint256(keccak256(abi.encode(accountUpdate_, generationOf[worldIDAccount_]))) >> 8;
 
+        // EFFECTS
         ++generationOf[worldIDAccount_];
 
         if (accountUpdate_.operation == Operation.Add) {
@@ -163,6 +172,21 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
             _removeKeys(worldIDAccount_, accountUpdate_.keys);
             emit SessionKeysRemoved(worldIDAccount_, accountUpdate_.keys);
         }
+
+        // INTERACTION
+        _dispatchSessionProof(
+            SessionProofScalars({
+                rpId: WORLD_CHAIN_RP_ID,
+                proofNonce: proofNonce_,
+                signalHash: signalHash,
+                expiresAtMin: expiresAtMin_,
+                issuerSchemaId: issuerSchemaId_,
+                credentialGenesisIssuedAtMin: credentialGenesisIssuedAtMin_,
+                sessionId: sessionIdOf[worldIDAccount_]
+            }),
+            sessionNullifier_,
+            proof_
+        );
     }
 
     /// @inheritdoc IWorldIDAccountManager
@@ -192,31 +216,8 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
     ///                                INTERNAL                                 ///
     ///////////////////////////////////////////////////////////////////////////////
 
-    /// @dev Builds the session-proof signal hash and dispatches to the verifier.
-    function _verifySessionProof(
-        address worldIDAccount_,
-        uint256 proofNonce_,
-        uint64 issuerSchemaId_,
-        uint64 expiresAtMin_,
-        uint256 credentialGenesisIssuedAtMin_,
-        uint256[2] calldata sessionNullifier_,
-        uint256[5] calldata proof_,
-        WorldIDAccountUpdate calldata accountUpdate_
-    ) internal view {
-        SessionProofScalars memory s = SessionProofScalars({
-            rpId: WORLD_CHAIN_RP_ID,
-            proofNonce: proofNonce_,
-            signalHash: uint256(keccak256(abi.encode(accountUpdate_, generationOf[worldIDAccount_]))) >> 8,
-            expiresAtMin: expiresAtMin_,
-            issuerSchemaId: issuerSchemaId_,
-            credentialGenesisIssuedAtMin: credentialGenesisIssuedAtMin_,
-            sessionId: sessionIdOf[worldIDAccount_]
-        });
-
-        _dispatchSessionProof(s, sessionNullifier_, proof_);
-    }
-
-    /// @dev Inner dispatch — exists solely to break stack pressure at the verifier call site.
+    /// @dev Dispatches the session-proof verifier call. Inputs are bundled into a memory struct
+    ///      to keep `update`'s frame small enough to compile without `via_ir`.
     function _dispatchSessionProof(
         SessionProofScalars memory s_,
         uint256[2] calldata sessionNullifier_,
