@@ -413,27 +413,21 @@ mod tests {
 
     #[test]
     fn http_api_simulate_only_enables_simulate() {
-        let parsed =
-            CommandParserWithRpc::parse_from(["bin", "--http.api", "simulate"]);
+        let parsed = CommandParserWithRpc::parse_from(["bin", "--http.api", "simulate"]);
         let cfg = into_world_config(parsed);
         assert!(cfg.args.simulate_enabled);
     }
 
     #[test]
     fn http_api_with_simulate_among_others_enables_simulate() {
-        let parsed = CommandParserWithRpc::parse_from([
-            "bin",
-            "--http.api",
-            "eth,simulate,net",
-        ]);
+        let parsed = CommandParserWithRpc::parse_from(["bin", "--http.api", "eth,simulate,net"]);
         let cfg = into_world_config(parsed);
         assert!(cfg.args.simulate_enabled);
     }
 
     #[test]
     fn http_api_without_simulate_does_not_enable_simulate() {
-        let parsed =
-            CommandParserWithRpc::parse_from(["bin", "--http.api", "eth,net"]);
+        let parsed = CommandParserWithRpc::parse_from(["bin", "--http.api", "eth,net"]);
         let cfg = into_world_config(parsed);
         assert!(!cfg.args.simulate_enabled);
     }
@@ -458,8 +452,7 @@ mod tests {
 
     #[test]
     fn http_api_standard_does_not_enable_simulate() {
-        let parsed =
-            CommandParserWithRpc::parse_from(["bin", "--http.api", "standard"]);
+        let parsed = CommandParserWithRpc::parse_from(["bin", "--http.api", "standard"]);
         let cfg = into_world_config(parsed);
         assert!(!cfg.args.simulate_enabled);
     }
