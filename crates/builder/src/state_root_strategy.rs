@@ -86,8 +86,10 @@ impl StateRootStrategy for SyncStateRootStrategy {
         let state_root_provider = client
             .state_by_block_hash(parent_hash)
             .map_err(BlockExecutionError::other)?;
-        let result =
-            execution_strategy::compute_state_root(state_root_provider.into(), bundle_state.state.iter());
+        let result = execution_strategy::compute_state_root(
+            state_root_provider.into(),
+            bundle_state.state.iter(),
+        );
         Ok(SyncStateRootHandle(result))
     }
 }

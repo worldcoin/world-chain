@@ -1,7 +1,9 @@
 use std::{sync::Arc, time::Instant};
 
 use alloy_consensus::{BlockHeader, Header, Transaction};
-use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory, OpTx};
+use alloy_op_evm::{
+    OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory, OpTx,
+};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::PayloadId;
 use reth_evm::{
@@ -27,7 +29,6 @@ use world_chain_primitives::{
 
 use crate::{
     bal_executor::{BalExecutorError, BalValidationError, CommittedState},
-    state_db::StateDB,
     database::{
         bal_builder_db::{BalBuilderDb, NoOpCommitDB},
         bundle_db::BundleDb,
@@ -36,6 +37,7 @@ use crate::{
     executor::FlashblocksBlockBuilder,
     flashblock_validation_metrics::FlashblockValidationAttemptMetrics,
     metrics::PayloadBuildStage,
+    state_db::StateDB,
     state_root_strategy::{StateRootHandle, StateRootStrategy},
     validator::{BalBlockValidator, decode_transactions_with_indices},
 };
@@ -170,8 +172,11 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S> for FlashblocksBalE
             .state_by_block_hash(ctx.parent.hash())
             .map_err(BalExecutorError::other)?;
 
-        let (outcome, fees): (BlockBuilderOutcome<OpPrimitives>, u128) =
-            validator.execute_block(client.clone(), finish_state_provider.as_ref(), executor_transactions)?;
+        let (outcome, fees): (BlockBuilderOutcome<OpPrimitives>, u128) = validator.execute_block(
+            client.clone(),
+            finish_state_provider.as_ref(),
+            executor_transactions,
+        )?;
 
         let computed_access_list = access_list_receiver
             .recv()
@@ -281,7 +286,9 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S> for FlashblocksBalE
 
 pub struct FlashblocksLegacyExecutionStrategy;
 
-impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S> for FlashblocksLegacyExecutionStrategy {
+impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S>
+    for FlashblocksLegacyExecutionStrategy
+{
     fn execute(
         &self,
         ctx: ValidationCtx<'_, OpEvmConfig, S>,
@@ -369,7 +376,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S> for FlashblocksLega
 
         let finalize_started = Instant::now();
 
-        let (evm, executor_result) = builder.inner.executor.finish()?;
+        let (evm, execution_result) = builder.inner.executor.finish()?;
         let (db, evm_env) = evm.finish();
 
         let merge_started = Instant::now();
@@ -381,8 +388,8 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S> for FlashblocksLega
         db.bundle_state_mut().reverts = flattened;
 
         let state_root_started = Instant::now();
-        let state_root_handle = state_root_strategy
-            .prepare(client, parent_hash, db.bundle_state().clone())?;
+        let state_root_handle =
+            state_root_strategy.prepare(client, parent_hash, db.bundle_state().clone())?;
         let StateRootResult {
             state_root,
             trie_updates,
@@ -399,20 +406,23 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S> for FlashblocksLega
             .unzip();
 
         let block_assembly_started = Instant::now();
-        let block = builder.inner.assembler.assemble_block(BlockAssemblerInput::<
-            '_,
-            '_,
-            OpBlockExecutorFactory<OpRethReceiptBuilder>,
-        >::new(
-            evm_env,
-            builder.inner.ctx,
-            builder.inner.parent,
-            transactions,
-            &executor_result,
-            db.bundle_state(),
-            finish_state_provider.as_ref(),
-            state_root,
-        ))?;
+        let block = builder
+            .inner
+            .assembler
+            .assemble_block(BlockAssemblerInput::<
+                '_,
+                '_,
+                OpBlockExecutorFactory<OpRethReceiptBuilder>,
+            >::new(
+                evm_env,
+                builder.inner.ctx,
+                builder.inner.parent,
+                transactions,
+                &execution_result,
+                db.bundle_state(),
+                finish_state_provider.as_ref(),
+                state_root,
+            ))?;
         ctx.attempt_metrics.record_stage_duration(
             PayloadBuildStage::BlockAssembly,
             block_assembly_started.elapsed(),
@@ -420,22 +430,9 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S> for FlashblocksLega
 
         let bundle = db.take_bundle();
         let block = RecoveredBlock::new_unhashed(block, senders);
-        let outcome = BlockBuilderOutcome::<OpPrimitives> {
-            execution_result: executor_result,
-            hashed_state,
-            trie_updates,
-            block,
-        };
 
         ctx.attempt_metrics
             .record_stage_duration(PayloadBuildStage::Finalize, finalize_started.elapsed());
-
-        let BlockBuilderOutcome {
-            execution_result,
-            block,
-            hashed_state,
-            trie_updates,
-        } = outcome;
 
         let sealed_block = Arc::new(block.sealed_block().clone());
         let execution_output = BlockExecutionOutput {
