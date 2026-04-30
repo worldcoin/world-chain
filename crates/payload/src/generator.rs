@@ -28,7 +28,6 @@ use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_primitives::{
     access_list::FlashblockAccessList, ed25519_dalek::SigningKey,
     flashblocks::recovered_block_from_flashblocks, p2p::Authorization,
-    payload_id::force_op_payload_id_v3,
 };
 
 use crate::job::{CommittedPayloadState, FlashblocksPayloadJob};
@@ -153,8 +152,6 @@ where
         input: BuildNewPayload<Builder::Attributes>,
         id: PayloadId,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        let id = force_op_payload_id_v3(id);
-
         let parent_header = if input.parent_hash.is_zero() {
             // Use latest header for genesis block case
             self.client
