@@ -112,7 +112,6 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         uint256 action = uint256(keccak256(abi.encodePacked(WORLD_ID_ACCOUNT_TAG, worldIDAccountNonce_))) >> 8;
         uint256 signalHash = uint256(keccak256(abi.encode(createUpdate_))) >> 8;
 
-        // EFFECTS
         worldIDAccountNullifier[worldIDAccount_] = worldIDAccountNullifier_;
         sessionIdOf[worldIDAccount_] = sessionId_;
 
