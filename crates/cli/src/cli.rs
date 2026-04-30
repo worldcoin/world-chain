@@ -8,6 +8,7 @@ use reth_node_builder::NodeConfig;
 use reth_optimism_chainspec::{OpChainSpec, OpHardfork};
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpGasLimitConfig};
+use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -59,17 +60,15 @@ pub struct WorldChainArgs {
     )]
     pub disable_bootnodes: bool,
 
-    /// Enable the `worldchain_simulateUnsignedUserOp` RPC endpoint on the
-    /// public HTTP/WS/IPC RPC servers. Disabled by default.
+    /// Whether the `simulate_unsignedUserOp` RPC endpoint should be served on
+    /// HTTP. Derived from `--http.api`: enabled when the selection contains
+    /// the `simulate` namespace.
     ///
-    /// The endpoint performs no application-level authentication. Only enable
-    /// it on nodes that sit behind infrastructure-level auth (e.g. an
-    /// internal-only ingress) — never on a publicly reachable RPC.
-    #[arg(
-        long = "worldchain.simulate-enabled",
-        value_name = "WORLDCHAIN_SIMULATE_ENABLED",
-        default_value_t = false
-    )]
+    /// The endpoint performs no application-level authentication. Only include
+    /// `simulate` in `--http.api` on nodes that sit behind infrastructure-
+    /// level auth (e.g. an internal-only ingress) — never on a publicly
+    /// reachable RPC.
+    #[clap(skip)]
     pub simulate_enabled: bool,
 }
 
@@ -80,6 +79,16 @@ impl WorldChainArgs {
     ) -> eyre::Result<WorldChainNodeConfig> {
         // Perform arg validation here for things clap can't do.
         let spec = &config.chain;
+
+        // Require an explicit `Selection` containing `simulate` — `RpcModuleSelection::All`
+        // (i.e. `--http.api=all`) returns `true` from `contains` unconditionally, which
+        // would silently enable the unauthenticated simulate endpoint for operators who
+        // upgrade with that common configuration.
+        self.simulate_enabled = matches!(
+            config.rpc.http_api.as_ref(),
+            Some(RpcModuleSelection::Selection(s))
+                if s.contains(&RethRpcModule::Other("simulate".to_string()))
+        );
 
         if let Some(peers) = &self.tx_peers {
             if self.rollup.disable_txpool_gossip {
@@ -245,6 +254,21 @@ mod tests {
         world: WorldChainArgs,
     }
 
+    #[derive(Debug, Parser)]
+    struct CommandParserWithRpc {
+        #[command(flatten)]
+        rpc: reth_node_core::args::RpcServerArgs,
+        #[command(flatten)]
+        world: WorldChainArgs,
+    }
+
+    fn into_world_config(parsed: CommandParserWithRpc) -> WorldChainNodeConfig {
+        let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());
+        let mut node_config = NodeConfig::new(Arc::new(spec));
+        node_config.rpc = parsed.rpc;
+        parsed.world.into_config(&mut node_config).unwrap()
+    }
+
     #[test]
     fn flashblocks_both() {
         CommandParser::try_parse_from([
@@ -385,6 +409,52 @@ mod tests {
 
         // tx_peers should be set to None due to shadowing
         assert!(config.args.tx_peers.is_none());
+    }
+
+    #[test]
+    fn http_api_simulate_only_enables_simulate() {
+        let parsed = CommandParserWithRpc::parse_from(["bin", "--http.api", "simulate"]);
+        let cfg = into_world_config(parsed);
+        assert!(cfg.args.simulate_enabled);
+    }
+
+    #[test]
+    fn http_api_with_simulate_among_others_enables_simulate() {
+        let parsed = CommandParserWithRpc::parse_from(["bin", "--http.api", "eth,simulate,net"]);
+        let cfg = into_world_config(parsed);
+        assert!(cfg.args.simulate_enabled);
+    }
+
+    #[test]
+    fn http_api_without_simulate_does_not_enable_simulate() {
+        let parsed = CommandParserWithRpc::parse_from(["bin", "--http.api", "eth,net"]);
+        let cfg = into_world_config(parsed);
+        assert!(!cfg.args.simulate_enabled);
+    }
+
+    #[test]
+    fn no_http_api_does_not_enable_simulate() {
+        let parsed = CommandParserWithRpc::parse_from(["bin"]);
+        let cfg = into_world_config(parsed);
+        assert!(!cfg.args.simulate_enabled);
+    }
+
+    /// `--http.api=all` must NOT enable simulate. `RpcModuleSelection::All.contains(...)`
+    /// returns `true` for every module (including `Other("simulate")`), so a naive
+    /// `contains` check would silently turn on the unauthenticated endpoint for any
+    /// operator using the common `all` selection.
+    #[test]
+    fn http_api_all_does_not_enable_simulate() {
+        let parsed = CommandParserWithRpc::parse_from(["bin", "--http.api", "all"]);
+        let cfg = into_world_config(parsed);
+        assert!(!cfg.args.simulate_enabled);
+    }
+
+    #[test]
+    fn http_api_standard_does_not_enable_simulate() {
+        let parsed = CommandParserWithRpc::parse_from(["bin", "--http.api", "standard"]);
+        let cfg = into_world_config(parsed);
+        assert!(!cfg.args.simulate_enabled);
     }
 
     #[test]

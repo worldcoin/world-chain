@@ -1,4 +1,4 @@
-//! Fork-based integration tests for `worldchain_simulateUnsignedUserOp`.
+//! Fork-based integration tests for `simulate_unsignedUserOp`.
 //!
 //! These tests fork World Chain mainnet via an RPC URL and run simulations
 //! against real deployed contracts (WLD, USDC.e, etc.). CI reads the URL
