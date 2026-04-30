@@ -33,6 +33,7 @@ use reth_optimism_payload_builder::{
     config::OpBuilderConfig,
 };
 use reth_optimism_primitives::OpTransactionSigned;
+use reth_payload_primitives::BuildNextEnv;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives_traits::{Recovered, SealedHeader, TxTy};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
@@ -165,32 +166,11 @@ where
         DB::Error: Send + Sync + 'static,
         DB: Database + 'a,
     {
-        // Prepare attributes for next block environment.
-        let gas_limit = self
-            .inner
-            .attributes()
-            .gas_limit
-            .unwrap_or(self.inner.parent().gas_limit);
-        let attributes = OpNextBlockEnvAttributes {
-            timestamp: self.inner.attributes().timestamp(),
-            suggested_fee_recipient: self.inner.attributes().suggested_fee_recipient(),
-            prev_randao: self.inner.attributes().prev_randao(),
-            gas_limit,
-            parent_beacon_block_root: self.inner.attributes().parent_beacon_block_root(),
-            extra_data: if self
-                .spec()
-                .is_holocene_active_at_timestamp(self.attributes().timestamp())
-            {
-                self.attributes()
-                    .get_holocene_extra_data(
-                        self.spec()
-                            .base_fee_params_at_timestamp(self.attributes().timestamp()),
-                    )
-                    .map_err(PayloadBuilderError::other)?
-            } else {
-                Default::default()
-            }, // TODO: FIXME: Double check this against op-reth
-        };
+        let attributes = OpNextBlockEnvAttributes::build_next_env(
+            self.inner.attributes(),
+            self.inner.parent(),
+            self.spec(),
+        )?;
 
         // Prepare EVM environment.
         let evm_env = self

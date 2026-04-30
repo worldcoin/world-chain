@@ -38,6 +38,7 @@ use reth_evm::{
     ConfigureEvm, Database, EvmEnv, execute::BlockBuilderOutcome, precompiles::PrecompilesMap,
 };
 use reth_node_api::{BuiltPayloadExecutedBlock, NodePrimitives, PayloadBuilderError};
+use reth_payload_primitives::BuildNextEnv;
 use reth_revm::database::StateProviderDatabase;
 use revm_database::State;
 use tracing::trace;
@@ -345,28 +346,9 @@ where
     );
 
     let _enter = span.enter();
-    let gas_limit = ctx.attributes().gas_limit.unwrap_or(ctx.parent().gas_limit);
 
-    let attributes = OpNextBlockEnvAttributes {
-        timestamp: ctx.attributes().timestamp(),
-        suggested_fee_recipient: ctx.attributes().suggested_fee_recipient(),
-        prev_randao: ctx.attributes().prev_randao(),
-        gas_limit,
-        parent_beacon_block_root: ctx.attributes().parent_beacon_block_root(),
-        extra_data: if ctx
-            .spec()
-            .is_holocene_active_at_timestamp(ctx.attributes().timestamp())
-        {
-            ctx.attributes()
-                .get_holocene_extra_data(
-                    ctx.spec()
-                        .base_fee_params_at_timestamp(ctx.attributes().timestamp()),
-                )
-                .map_err(PayloadBuilderError::other)?
-        } else {
-            Default::default()
-        },
-    };
+    let attributes =
+        OpNextBlockEnvAttributes::build_next_env(ctx.attributes(), ctx.parent(), ctx.spec())?;
 
     // Prepare EVM environment.
     let evm_env = ctx
@@ -388,7 +370,7 @@ where
 
     trace!(
         target: "flashblocks::payload_builder",
-        gas_limit,
+        gas_limit = attributes.gas_limit,
         effective_gas_limit,
         committed_gas_used = committed_state.gas_used,
         timestamp = ctx.attributes().timestamp(),
