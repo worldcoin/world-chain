@@ -45,7 +45,6 @@ use tracing::trace;
 use world_chain_primitives::access_list::FlashblockAccessList;
 
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
     OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder, txpool::OpPooledTx,
 };
@@ -358,7 +357,7 @@ where
 
     let execution_conext = ctx
         .evm_config()
-        .context_for_next_block(ctx.parent(), attributes)
+        .context_for_next_block(ctx.parent(), attributes.clone())
         .map_err(PayloadBuilderError::other)?;
 
     let committed_state = CommittedState::<OpRethReceiptBuilder>::try_from(committed_payload)

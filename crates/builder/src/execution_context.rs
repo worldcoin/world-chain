@@ -15,7 +15,6 @@ use op_alloy_rpc_types::OpTransactionRequest;
 use alloy_rpc_types_engine::PayloadId;
 use op_revm::OpSpecId;
 use reth_basic_payload_builder::PayloadConfig;
-use reth_chainspec::EthChainSpec;
 use reth_evm::{
     ConfigureEvm, Database, Evm, EvmEnv,
     block::{BlockExecutionError, BlockValidationError},
