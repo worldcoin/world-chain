@@ -117,7 +117,6 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         emit WorldIDAccountCreated(worldIDAccount_, worldIDAccountNullifier_, sessionId_);
         emit SessionKeysAdded(worldIDAccount_, createUpdate_.keys);
 
-        // INTERACTION
         worldIDVerifier.verify(
             worldIDAccountNullifier_,
             action,
