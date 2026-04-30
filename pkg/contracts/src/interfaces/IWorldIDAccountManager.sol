@@ -7,7 +7,7 @@ import {IWorldIDVerifier} from "./IWorldIDVerifier.sol";
 /// @author Worldcoin
 /// @notice Interface for the WIP-1001 World ID Account Manager.
 ///
-///         A World ID Account is a precompile-managed account whose lifetime-stable address is
+///         A World ID Account is a predeploy-managed account whose lifetime-stable address is
 ///         `address(uint160(uint256(keccak256(worldIDAccountNullifier))))`. Creation is gated by a
 ///         World ID 4.0 Uniqueness Proof; subsequent mutations to the authenticator-key set are
 ///         gated by Session Proofs bound to a stored `sessionId`.
