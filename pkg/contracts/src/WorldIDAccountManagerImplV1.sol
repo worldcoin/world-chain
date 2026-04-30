@@ -131,10 +131,6 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
     }
 
     /// @inheritdoc IWorldIDAccountManager
-    /// @dev Follows checks-effects-interactions: the signal hash is snapshotted from the current
-    ///      generation before the generation is bumped and key changes are applied; the verifier
-    ///      call happens last with that snapshotted hash. Revert in the verifier rolls back all
-    ///      preceding writes via the EVM.
     function update(
         address worldIDAccount_,
         uint256 proofNonce_,
@@ -145,7 +141,6 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         uint256[5] calldata proof_,
         WorldIDAccountUpdate calldata accountUpdate_
     ) external virtual onlyProxy nonReentrant {
-        // CHECKS
         if (accountUpdate_.operation == Operation.Create) {
             revert InvalidOperation();
         }
@@ -157,7 +152,6 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         // the proof against the generation the caller signed over.
         uint256 signalHash = uint256(keccak256(abi.encode(accountUpdate_, generationOf[worldIDAccount_]))) >> 8;
 
-        // EFFECTS
         ++generationOf[worldIDAccount_];
 
         if (accountUpdate_.operation == Operation.Add) {
@@ -168,7 +162,6 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
             emit SessionKeysRemoved(worldIDAccount_, accountUpdate_.keys);
         }
 
-        // INTERACTION
         _dispatchSessionProof(
             SessionProofScalars({
                 rpId: WORLD_CHAIN_RP_ID,
