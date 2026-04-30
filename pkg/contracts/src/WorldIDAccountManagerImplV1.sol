@@ -93,7 +93,6 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         uint256[5] calldata proof_,
         WorldIDAccountUpdate calldata createUpdate_
     ) external virtual onlyProxy nonReentrant returns (address worldIDAccount_) {
-        // CHECKS
         if (createUpdate_.operation != Operation.Create) {
             revert InvalidOperation();
         }
