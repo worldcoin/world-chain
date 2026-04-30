@@ -81,7 +81,6 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
     ///////////////////////////////////////////////////////////////////////////////
 
     /// @inheritdoc IWorldIDAccountManager
-    ///      the verifier call. If the verifier reverts, the EVM rolls back all prior writes.
     function create(
         uint256 worldIDAccountNullifier_,
         uint256 worldIDAccountNonce_,
