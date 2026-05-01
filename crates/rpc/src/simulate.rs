@@ -372,6 +372,11 @@ pub fn relax_cfg_for_simulation(cfg_env: &mut CfgEnv<OpSpecId>) {
     cfg_env.disable_base_fee = true;
     cfg_env.disable_balance_check = true;
     cfg_env.disable_fee_charge = true;
+    // EntryPoint is a contract, so its account nonce on chain is non-zero.
+    // `TxEnv::default()` sets tx.nonce = 0, which revm would reject with
+    // `NonceTooLow`. Simulate is "what would happen if…", not a tx that will
+    // be mined — matches eth_call semantics.
+    cfg_env.disable_nonce_check = true;
 }
 
 /// Implementation of the `simulate_unsignedUserOp` RPC endpoint.
@@ -1065,11 +1070,6 @@ where
         return Vec::new();
     };
     relax_cfg_for_simulation(&mut evm_env.cfg_env);
-    // Required: we reuse one EVM across 3·N view calls all sent from
-    // `Address::ZERO`. The first transact bumps ZERO's cached nonce, so
-    // without this flag every subsequent call fails validation and silently
-    // returns empty metadata.
-    evm_env.cfg_env.disable_nonce_check = true;
 
     let Ok(state_provider) = client.state_by_block_id(block_id) else {
         return Vec::new();
