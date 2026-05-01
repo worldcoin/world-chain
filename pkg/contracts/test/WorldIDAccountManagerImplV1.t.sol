@@ -75,6 +75,30 @@ contract WorldIDAccountManagerImplV1Test is Test {
         arr[0] = k_;
     }
 
+    function _emptyKeys() internal pure returns (bytes[] memory arr) {
+        arr = new bytes[](0);
+    }
+
+    function _createUpdate(bytes[] memory addKeys_) internal pure returns (IWorldIDAccountManager.WorldIDAccountUpdate memory u) {
+        u = IWorldIDAccountManager.WorldIDAccountUpdate({
+            operation: IWorldIDAccountManager.Operation.Create,
+            addKeys: addKeys_,
+            removeKeys: _emptyKeys()
+        });
+    }
+
+    function _updatePayload(bytes[] memory addKeys_, bytes[] memory removeKeys_)
+        internal
+        pure
+        returns (IWorldIDAccountManager.WorldIDAccountUpdate memory u)
+    {
+        u = IWorldIDAccountManager.WorldIDAccountUpdate({
+            operation: IWorldIDAccountManager.Operation.Update,
+            addKeys: addKeys_,
+            removeKeys: removeKeys_
+        });
+    }
+
     function _proof() internal pure returns (uint256[5] memory p) {
         p[0] = 1;
         p[1] = 2;
@@ -127,9 +151,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
 
     function _newAccountWithKey(bytes memory firstKey_) internal returns (address acct, CreateArgs memory a) {
         a = _defaultCreateArgs();
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create, keys: _singleKey(firstKey_)
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _createUpdate(_singleKey(firstKey_));
         acct = _doCreate(a, u);
     }
 
@@ -140,9 +162,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
     function test_create_happyPath_storage_events_andVerifierCall() public {
         CreateArgs memory a = _defaultCreateArgs();
         bytes memory k = _key(0xAA, 33);
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create, keys: _singleKey(k)
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _createUpdate(_singleKey(k));
         address expectedAcct = _accountAddress(a.nullifier);
 
         vm.expectCall(
@@ -166,7 +186,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
         vm.expectEmit(true, true, true, true, address(manager));
         emit WorldIDAccountCreated(expectedAcct, a.nullifier, a.sessionId);
         vm.expectEmit(true, true, true, true, address(manager));
-        emit SessionKeysAdded(expectedAcct, u.keys);
+        emit SessionKeysAdded(expectedAcct, u.addKeys);
 
         address acct = _doCreate(a, u);
         assertEq(acct, expectedAcct, "derived address mismatch");
@@ -186,16 +206,24 @@ contract WorldIDAccountManagerImplV1Test is Test {
             assertEq(_action(nonce) >> 248, 0, "top byte must be zero for V2-verifier compat");
         }
         a.nonce = 1;
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create, keys: _singleKey(_key(0x01, 33))
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _createUpdate(_singleKey(_key(0x01, 33)));
         _doCreate(a, u);
     }
 
     function test_create_revertIf_wrongOperation() public {
         CreateArgs memory a = _defaultCreateArgs();
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u =
+            _updatePayload(_singleKey(_key(0x01, 33)), _emptyKeys());
+        vm.expectRevert(IWorldIDAccountManager.InvalidOperation.selector);
+        _doCreate(a, u);
+    }
+
+    function test_create_revertIf_removeKeysProvided() public {
+        CreateArgs memory a = _defaultCreateArgs();
         IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Add, keys: _singleKey(_key(0x01, 33))
+            operation: IWorldIDAccountManager.Operation.Create,
+            addKeys: _singleKey(_key(0x01, 33)),
+            removeKeys: _singleKey(_key(0x02, 33))
         });
         vm.expectRevert(IWorldIDAccountManager.InvalidOperation.selector);
         _doCreate(a, u);
@@ -203,9 +231,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
 
     function test_create_revertIf_emptyKeySet() public {
         CreateArgs memory a = _defaultCreateArgs();
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create, keys: new bytes[](0)
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _createUpdate(_emptyKeys());
         vm.expectRevert(IWorldIDAccountManager.EmptyKeySet.selector);
         _doCreate(a, u);
     }
@@ -216,9 +242,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
         for (uint256 i = 0; i < 21; ++i) {
             keys[i] = _key(uint8(i), 33);
         }
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create, keys: keys
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _createUpdate(keys);
         vm.expectRevert(abi.encodeWithSelector(IWorldIDAccountManager.TooManyKeys.selector, uint256(21), uint256(20)));
         _doCreate(a, u);
     }
@@ -227,9 +251,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
         CreateArgs memory a = _defaultCreateArgs();
         bytes[] memory keys = new bytes[](1);
         keys[0] = "";
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create, keys: keys
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _createUpdate(keys);
         vm.expectRevert(IWorldIDAccountManager.EmptyKey.selector);
         _doCreate(a, u);
     }
@@ -237,9 +259,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
     function test_create_revertIf_keyTooLarge() public {
         CreateArgs memory a = _defaultCreateArgs();
         bytes memory big = _key(0x01, 129);
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create, keys: _singleKey(big)
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _createUpdate(_singleKey(big));
         vm.expectRevert(abi.encodeWithSelector(IWorldIDAccountManager.KeyTooLarge.selector, uint256(129), uint256(128)));
         _doCreate(a, u);
     }
@@ -247,9 +267,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
     function test_create_acceptsKeyAtExactBound() public {
         CreateArgs memory a = _defaultCreateArgs();
         bytes memory exactlyMax = _key(0x01, 128);
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create, keys: _singleKey(exactlyMax)
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _createUpdate(_singleKey(exactlyMax));
         _doCreate(a, u);
     }
 
@@ -259,9 +277,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
         bytes[] memory keys = new bytes[](2);
         keys[0] = k;
         keys[1] = k;
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create, keys: keys
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _createUpdate(keys);
         vm.expectRevert(abi.encodeWithSelector(IWorldIDAccountManager.DuplicateSessionKey.selector, keccak256(k)));
         _doCreate(a, u);
     }
@@ -269,9 +285,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
     function test_create_revertIf_alreadyExists() public {
         (address acct,) = _newAccountWithKey(_key(0xAA, 33));
         CreateArgs memory a = _defaultCreateArgs();
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create, keys: _singleKey(_key(0xBB, 33))
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _createUpdate(_singleKey(_key(0xBB, 33)));
         vm.expectRevert(IWorldIDAccountManager.WorldIDAccountAlreadyExists.selector);
         _doCreate(a, u);
         // sanity: prior account is intact
@@ -281,9 +295,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
     function test_create_revertIf_zeroNullifier() public {
         CreateArgs memory a = _defaultCreateArgs();
         a.nullifier = 0;
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create, keys: _singleKey(_key(0x01, 33))
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _createUpdate(_singleKey(_key(0x01, 33)));
         vm.expectRevert(IWorldIDAccountManager.ZeroNullifier.selector);
         _doCreate(a, u);
     }
@@ -291,9 +303,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
     function test_create_revertIf_verifierRejects() public {
         verifier.setShouldAccept(false);
         CreateArgs memory a = _defaultCreateArgs();
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create, keys: _singleKey(_key(0x01, 33))
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _createUpdate(_singleKey(_key(0x01, 33)));
         vm.expectRevert(MockWorldIDVerifier.MockVerifierRejected.selector);
         _doCreate(a, u);
         // No state should be persisted on revert.
@@ -309,9 +319,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
         (address acct,) = _newAccountWithKey(_key(0x01, 33));
         bytes memory k2 = _key(0x02, 33);
 
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Add, keys: _singleKey(k2)
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _updatePayload(_singleKey(k2), _emptyKeys());
 
         vm.expectCall(
             address(verifier),
@@ -331,7 +339,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
             )
         );
         vm.expectEmit(true, true, true, true, address(manager));
-        emit SessionKeysAdded(acct, u.keys);
+        emit SessionKeysAdded(acct, u.addKeys);
 
         manager.update(acct, 777, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof(), u);
 
@@ -343,9 +351,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
     function test_update_add_revertIf_duplicate() public {
         bytes memory k1 = _key(0x01, 33);
         (address acct,) = _newAccountWithKey(k1);
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Add, keys: _singleKey(k1)
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _updatePayload(_singleKey(k1), _emptyKeys());
         vm.expectRevert(abi.encodeWithSelector(IWorldIDAccountManager.DuplicateSessionKey.selector, keccak256(k1)));
         manager.update(acct, 1, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof(), u);
     }
@@ -357,31 +363,25 @@ contract WorldIDAccountManagerImplV1Test is Test {
         for (uint256 i = 0; i < 20; ++i) {
             initialKeys[i] = _key(uint8(i), 33);
         }
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create, keys: initialKeys
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _createUpdate(initialKeys);
         address acct = _doCreate(a, u);
 
-        IWorldIDAccountManager.WorldIDAccountUpdate memory addOne = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Add, keys: _singleKey(_key(0xFF, 33))
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory addOne =
+            _updatePayload(_singleKey(_key(0xFF, 33)), _emptyKeys());
         vm.expectRevert(abi.encodeWithSelector(IWorldIDAccountManager.TooManyKeys.selector, uint256(21), uint256(20)));
         manager.update(acct, 1, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof(), addOne);
     }
 
     function test_update_revertIf_accountDoesNotExist() public {
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Add, keys: _singleKey(_key(0x01, 33))
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u =
+            _updatePayload(_singleKey(_key(0x01, 33)), _emptyKeys());
         vm.expectRevert(IWorldIDAccountManager.WorldIDAccountDoesNotExist.selector);
         manager.update(address(0xCAFE), 1, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof(), u);
     }
 
     function test_update_revertIf_operationCreate() public {
         (address acct,) = _newAccountWithKey(_key(0x01, 33));
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create, keys: _singleKey(_key(0x02, 33))
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _createUpdate(_singleKey(_key(0x02, 33)));
         vm.expectRevert(IWorldIDAccountManager.InvalidOperation.selector);
         manager.update(acct, 1, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof(), u);
     }
@@ -397,16 +397,12 @@ contract WorldIDAccountManagerImplV1Test is Test {
         initialKeys[0] = k1;
         initialKeys[1] = k2;
         initialKeys[2] = k3;
-        IWorldIDAccountManager.WorldIDAccountUpdate memory createPayload = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create, keys: initialKeys
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory createPayload = _createUpdate(initialKeys);
         address acct = _doCreate(a, createPayload);
 
-        IWorldIDAccountManager.WorldIDAccountUpdate memory rm = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Remove, keys: _singleKey(k2)
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory rm = _updatePayload(_emptyKeys(), _singleKey(k2));
         vm.expectEmit(true, true, true, true, address(manager));
-        emit SessionKeysRemoved(acct, rm.keys);
+        emit SessionKeysRemoved(acct, rm.removeKeys);
         manager.update(acct, 1, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof(), rm);
 
         bytes32[] memory hashes = manager.getSessionKeyHashes(acct);
@@ -418,12 +414,61 @@ contract WorldIDAccountManagerImplV1Test is Test {
         assertEq(manager.keyHashIndex(acct, keccak256(k3)), 2, "k3 should now sit at index 1 (1-indexed: 2)");
     }
 
+    function test_update_addAndRemove_happyPath_removeFirstThenAdd() public {
+        bytes memory k1 = _key(0x01, 33);
+        bytes memory k2 = _key(0x02, 33);
+        bytes memory k3 = _key(0x03, 33);
+        bytes memory k4 = _key(0x04, 33);
+
+        CreateArgs memory a = _defaultCreateArgs();
+        bytes[] memory initialKeys = new bytes[](3);
+        initialKeys[0] = k1;
+        initialKeys[1] = k2;
+        initialKeys[2] = k3;
+        address acct = _doCreate(a, _createUpdate(initialKeys));
+
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _updatePayload(_singleKey(k4), _singleKey(k2));
+
+        vm.expectEmit(true, true, true, true, address(manager));
+        emit SessionKeysRemoved(acct, u.removeKeys);
+        vm.expectEmit(true, true, true, true, address(manager));
+        emit SessionKeysAdded(acct, u.addKeys);
+
+        manager.update(acct, 1, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof(), u);
+
+        bytes32[] memory hashes = manager.getSessionKeyHashes(acct);
+        assertEq(hashes.length, 3);
+        assertTrue(manager.isAuthorized(acct, k1));
+        assertFalse(manager.isAuthorized(acct, k2));
+        assertTrue(manager.isAuthorized(acct, k3));
+        assertTrue(manager.isAuthorized(acct, k4));
+    }
+
+    function test_update_revertIf_addAndRemoveSameExistingKey() public {
+        bytes memory k1 = _key(0x01, 33);
+        (address acct,) = _newAccountWithKey(k1);
+
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _updatePayload(_singleKey(k1), _singleKey(k1));
+
+        vm.expectRevert(abi.encodeWithSelector(IWorldIDAccountManager.OverlappingUpdateKey.selector, keccak256(k1)));
+        manager.update(acct, 1, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof(), u);
+    }
+
+    function test_update_revertIf_addAndRemoveSameMissingKey() public {
+        bytes memory k1 = _key(0x01, 33);
+        bytes memory k2 = _key(0x02, 33);
+        (address acct,) = _newAccountWithKey(k1);
+
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _updatePayload(_singleKey(k2), _singleKey(k2));
+
+        vm.expectRevert(abi.encodeWithSelector(IWorldIDAccountManager.OverlappingUpdateKey.selector, keccak256(k2)));
+        manager.update(acct, 1, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof(), u);
+    }
+
     function test_update_remove_revertIf_unknownKey() public {
         (address acct,) = _newAccountWithKey(_key(0x01, 33));
         bytes memory k2 = _key(0x02, 33);
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Remove, keys: _singleKey(k2)
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _updatePayload(_emptyKeys(), _singleKey(k2));
         vm.expectRevert(abi.encodeWithSelector(IWorldIDAccountManager.UnknownSessionKey.selector, keccak256(k2)));
         manager.update(acct, 1, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof(), u);
     }
@@ -432,9 +477,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
         bytes memory k1 = _key(0x01, 33);
         (address acct,) = _newAccountWithKey(k1);
 
-        IWorldIDAccountManager.WorldIDAccountUpdate memory rm = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Remove, keys: _singleKey(k1)
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory rm = _updatePayload(_emptyKeys(), _singleKey(k1));
         manager.update(acct, 1, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof(), rm);
         assertEq(manager.getSessionKeyHashes(acct).length, 0);
         assertFalse(manager.isAuthorized(acct, k1));
@@ -442,9 +485,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
         // Account still exists.
         assertEq(manager.worldIDAccountNullifier(acct), 0x1234567890ABCDEF);
 
-        IWorldIDAccountManager.WorldIDAccountUpdate memory addBack = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Add, keys: _singleKey(k1)
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory addBack = _updatePayload(_singleKey(k1), _emptyKeys());
         manager.update(acct, 2, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof(), addBack);
         assertTrue(manager.isAuthorized(acct, k1));
     }
@@ -455,12 +496,8 @@ contract WorldIDAccountManagerImplV1Test is Test {
         bytes memory k2 = _key(0x02, 33);
         (address acct,) = _newAccountWithKey(k1);
 
-        IWorldIDAccountManager.WorldIDAccountUpdate memory addK2 = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Add, keys: _singleKey(k2)
-        });
-        IWorldIDAccountManager.WorldIDAccountUpdate memory removeK2 = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Remove, keys: _singleKey(k2)
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory addK2 = _updatePayload(_singleKey(k2), _emptyKeys());
+        IWorldIDAccountManager.WorldIDAccountUpdate memory removeK2 = _updatePayload(_emptyKeys(), _singleKey(k2));
 
         uint256 firstHash = _signalHashUpdate(addK2, 0);
         uint256 secondHash = _signalHashUpdate(addK2, 2);
@@ -489,6 +526,13 @@ contract WorldIDAccountManagerImplV1Test is Test {
             )
         );
         manager.update(acct, 3, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof(), addK2);
+    }
+
+    function test_update_revertIf_emptyDelta() public {
+        (address acct,) = _newAccountWithKey(_key(0x01, 33));
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _updatePayload(_emptyKeys(), _emptyKeys());
+        vm.expectRevert(IWorldIDAccountManager.EmptyKeySet.selector);
+        manager.update(acct, 1, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof(), u);
     }
 
     ///////////////////////////////////////////////////////////////////////////////
@@ -588,9 +632,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
         CreateArgs memory a = _defaultCreateArgs();
         a.nullifier = nullifier_;
         a.nonce = nonce_;
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create, keys: _singleKey(rawKey_)
-        });
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _createUpdate(_singleKey(rawKey_));
 
         address expected = _accountAddress(nullifier_);
         vm.assume(manager.worldIDAccountNullifier(expected) == 0); // collision guard for fuzz
