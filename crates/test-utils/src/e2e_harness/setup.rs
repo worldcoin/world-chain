@@ -29,8 +29,8 @@ use reth_e2e_test_utils::{
 use reth_engine_tree::tree::TreeConfig;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_api::{
-    EngineTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes, NodeTypesWithDBAdapter,
-    PayloadAttributes, PayloadTypes,
+    ConsensusEngineHandle, EngineTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
+    NodeTypesWithDBAdapter, PayloadAttributes, PayloadTypes,
 };
 use reth_node_builder::{
     EngineNodeLauncher, Node, NodeBuilder, NodeComponents, NodeComponentsBuilder, NodeConfig,
@@ -149,6 +149,7 @@ where
 {
     pub node: WorldChainNodeTestContext<T>,
     pub ext_context: WorldChainNodeExtContext<T>,
+    pub beacon_engine_handle: ConsensusEngineHandle<<WorldChainNode<T> as NodeTypes>::Payload>,
 }
 
 type WorldChainNodeExtContext<T> = <T as WorldChainNodeContext<
@@ -374,6 +375,7 @@ where
                 })
                 .await?;
 
+        let beacon_engine_handle = node.add_ons_handle.beacon_engine_handle.clone();
         let mut node = WorldChainNodeTestContext::new(node, attributes_generator).await?;
         let genesis = node.inner.chain_spec().sealed_genesis_header();
 
@@ -393,7 +395,11 @@ where
             node.connect(&mut first_node.node).await;
         }
 
-        let world_chain_test_node = WorldChainTestingNodeContext { node, ext_context };
+        let world_chain_test_node = WorldChainTestingNodeContext {
+            node,
+            ext_context,
+            beacon_engine_handle,
+        };
 
         node_contexts.push(world_chain_test_node);
     }
@@ -406,7 +412,8 @@ where
 
         let auth = node.auth_server_handle();
         let url = node.rpc_url();
-        let client = NodeClient::new(rpc, auth, url);
+        let client: NodeClient<<WorldChainNode<T> as NodeTypes>::Payload> =
+            NodeClient::new_with_beacon_engine(rpc, auth, url, n.beacon_engine_handle.clone());
 
         environment.node_clients.push(client.clone());
 
