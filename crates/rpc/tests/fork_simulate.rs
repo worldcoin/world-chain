@@ -27,7 +27,7 @@ use revm_primitives::TxKind;
 
 use world_chain_rpc::simulate::{
     AssetType, SimulationInspector, decode_revert_reason, parse_asset_changes,
-    parse_exposure_changes, selector_to_name,
+    parse_exposure_changes, relax_cfg_for_simulation, selector_to_name,
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -52,15 +52,13 @@ fn rpc_url() -> String {
     std::env::var("WORLDCHAIN_PROVIDER").expect("WORLDCHAIN_PROVIDER not set")
 }
 
-/// Mirrors the EVM envelope `simulate_blocking` configures in `simulate.rs`.
-/// Tests that exercise the main simulation path use this helper so any flag
-/// drift from prod is visible at the call site.
+/// Mirrors the EVM envelope `simulate_blocking` configures in `simulate.rs`
+/// by reusing the same `relax_cfg_for_simulation` helper — so any flag drift
+/// from prod is impossible.
 fn simulate_evm_env() -> reth_evm::EvmEnv<OpSpecId> {
     let mut cfg = CfgEnv::new_with_spec(OpSpecId::ISTHMUS);
     cfg.chain_id = CHAIN_ID;
-    cfg.disable_block_gas_limit = true;
-    cfg.disable_eip3607 = true;
-    cfg.disable_base_fee = true;
+    relax_cfg_for_simulation(&mut cfg);
     reth_evm::EvmEnv::new(cfg, BlockEnv::default())
 }
 
@@ -400,6 +398,52 @@ async fn test_native_eth_transfer_inspector() {
     assert_eq!(native[0].raw_amount, eth_value.to_string());
     assert_eq!(native[0].asset.symbol, "ETH");
     assert_eq!(native[0].asset.decimals, 18);
+}
+
+/// Production-shaped call: caller is `ENTRY_POINT` with **zero balance**,
+/// payload is a realistic ERC-20 `transfer` against forked WLD. Without the
+/// `disable_fee_charge` + `disable_balance_check` flags in `simulate_evm_env`,
+/// op-revm's handler computes the L1 data fee from `enveloped_tx` and aborts
+/// validation with `LackOfFundForMaxFee` before the call ever runs.
+///
+/// The inner call still reverts ("transfer amount exceeds balance") because
+/// EntryPoint holds no WLD — that's expected and asserted, the point is that
+/// the *simulation* completes and surfaces the contract revert rather than a
+/// validation error from the fee path.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_simulate_unfunded_caller_bypasses_l1_fee() {
+    let mut db = make_forked_db();
+    let mut evm = OpEvmFactory::default().create_evm(&mut db, simulate_evm_env());
+
+    let result = RethEvm::transact(
+        &mut evm,
+        OpTx(OpTransaction {
+            base: TxEnv {
+                caller: ENTRY_POINT, // 0 balance
+                kind: TxKind::Call(WLD),
+                data: transferCall {
+                    to: address!("000000000000000000000000000000000000dEaD"),
+                    amount: U256::from(1_000_000_000_000_000_000u128),
+                }
+                .abi_encode()
+                .into(),
+                gas_limit: 200_000,
+                gas_price: 0,
+                chain_id: Some(CHAIN_ID),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    )
+    .expect("validation must not fail — L1 fee bypass regressed?");
+
+    match &result.result {
+        ExecutionResult::Revert { output, .. } => {
+            let reason = decode_revert_reason(output);
+            assert_eq!(reason, "ERC20: transfer amount exceeds balance");
+        }
+        other => panic!("expected inner-call revert, got {other:?}"),
+    }
 }
 
 /// Reverting ERC-20 transfer returns a decoded revert reason.

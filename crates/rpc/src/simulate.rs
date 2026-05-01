@@ -7,7 +7,7 @@ use jsonrpsee::{
     proc_macros::rpc,
 };
 use lru::LruCache;
-use op_revm::OpTransaction;
+use op_revm::{OpSpecId, OpTransaction};
 use reth_evm::{ConfigureEvm, Evm as RethEvm, EvmFactory};
 use reth_optimism_evm::OpEvmConfig;
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderFactory};
@@ -17,7 +17,7 @@ use reth_tasks::pool::{BlockingTaskGuard, BlockingTaskPool};
 use revm::{
     Inspector,
     context::{
-        TxEnv,
+        CfgEnv, TxEnv,
         result::{ExecutionResult, Output},
     },
     interpreter::{CallInputs, CallOutcome, InstructionResult},
@@ -356,6 +356,24 @@ type MetadataCache = Arc<Mutex<LruCache<Address, AssetInfo>>>;
 /// guard correctly accounts for slow simulations.
 pub const SIMULATION_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Relax EVM rules so simulations succeed regardless of the caller's gas
+/// pricing, balance, or block limits — matching `eth_call` semantics. The
+/// `disable_fee_charge` flag is the critical one on Optimism: without it
+/// op-revm's handler computes the L1 data fee from `enveloped_tx` and
+/// rejects the tx with `LackOfFundForMaxFee` because the synthetic caller
+/// (EntryPoint, `Address::ZERO`) has no ETH. `disable_balance_check`
+/// covers the L2 path symmetrically.
+///
+/// Exposed so fork-based integration tests can mirror the exact prod cfg
+/// instead of redeclaring the flag list (which silently drifts).
+pub fn relax_cfg_for_simulation(cfg_env: &mut CfgEnv<OpSpecId>) {
+    cfg_env.disable_block_gas_limit = true;
+    cfg_env.disable_eip3607 = true;
+    cfg_env.disable_base_fee = true;
+    cfg_env.disable_balance_check = true;
+    cfg_env.disable_fee_charge = true;
+}
+
 /// Implementation of the `simulate_unsignedUserOp` RPC endpoint.
 #[derive(Debug, Clone)]
 pub struct Simulate<Client> {
@@ -485,11 +503,7 @@ where
             .evm_env(header.header())
             .map_err(internal_err)?;
 
-        // Relax EVM rules to match eth_call semantics: the simulation should
-        // succeed regardless of gas pricing, sender balance, or block limits.
-        evm_env.cfg_env.disable_block_gas_limit = true;
-        evm_env.cfg_env.disable_eip3607 = true;
-        evm_env.cfg_env.disable_base_fee = true;
+        relax_cfg_for_simulation(&mut evm_env.cfg_env);
 
         // 3. Get state at the target block (same as eth_call)
         let state_provider = self
@@ -1050,9 +1064,7 @@ where
     let Ok(mut evm_env) = evm_config.evm_env(header) else {
         return Vec::new();
     };
-    evm_env.cfg_env.disable_block_gas_limit = true;
-    evm_env.cfg_env.disable_eip3607 = true;
-    evm_env.cfg_env.disable_base_fee = true;
+    relax_cfg_for_simulation(&mut evm_env.cfg_env);
     // Required: we reuse one EVM across 3·N view calls all sent from
     // `Address::ZERO`. The first transact bumps ZERO's cached nonce, so
     // without this flag every subsequent call fails validation and silently
