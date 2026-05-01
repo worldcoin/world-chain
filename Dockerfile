@@ -28,7 +28,7 @@ FROM base AS builder
 WORKDIR /app
 
 RUN curl -L https://foundry.paradigm.xyz | bash && \
-  /root/.foundry/bin/foundryup --install 1.5.1-stable
+  /root/.foundry/bin/foundryup --install 1.5.1
 
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
