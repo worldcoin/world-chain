@@ -9,8 +9,7 @@ use reth_optimism_chainspec::{OpChainSpec, OpHardfork};
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpGasLimitConfig};
 use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection, RpcModuleValidator};
-use std::str::FromStr;
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 use tracing::{debug, info, warn};
 
 pub mod builder;
@@ -112,8 +111,8 @@ mod validator_tests {
     #[test]
     fn simulate_rejected_on_ws_api() {
         let selection = WorldChainRpcModuleValidator::parse_selection("eth,simulate").unwrap();
-        let err = WorldChainRpcModuleValidator::validate_selection(&selection, "ws.api")
-            .unwrap_err();
+        let err =
+            WorldChainRpcModuleValidator::validate_selection(&selection, "ws.api").unwrap_err();
         assert!(err.contains("simulate"), "got: {err}");
         assert!(err.contains("http.api"), "got: {err}");
     }
