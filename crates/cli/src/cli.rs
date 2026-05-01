@@ -8,7 +8,9 @@ use reth_node_builder::NodeConfig;
 use reth_optimism_chainspec::{OpChainSpec, OpHardfork};
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpGasLimitConfig};
-use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection, RpcModuleValidator};
+use reth_rpc_server_types::{
+    DefaultRpcModuleValidator, RethRpcModule, RpcModuleSelection, RpcModuleValidator,
+};
 use std::{str::FromStr, sync::Arc};
 use tracing::{debug, info, warn};
 
@@ -48,6 +50,14 @@ const WORLD_CHAIN_CUSTOM_MODULES: &[&str] = &["simulate"];
 
 impl RpcModuleValidator for WorldChainRpcModuleValidator {
     fn parse_selection(s: &str) -> Result<RpcModuleSelection, String> {
+        // Defer to reth's default validator first — it accepts every standard
+        // module and rejects anything else. If it succeeds, no `Other` was
+        // present and there is nothing for us to whitelist.
+        if let Ok(selection) = DefaultRpcModuleValidator::parse_selection(s) {
+            return Ok(selection);
+        }
+        // Default rejected: re-parse and let through only `Other` entries that
+        // match a World Chain custom namespace. Anything else stays an error.
         let selection = RpcModuleSelection::from_str(s)
             .map_err(|e| format!("Failed to parse RPC modules: {e}"))?;
         if let RpcModuleSelection::Selection(modules) = &selection {
