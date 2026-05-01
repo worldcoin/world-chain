@@ -5,7 +5,7 @@ use reth_optimism_cli::{Cli, chainspec::OpChainSpecParser};
 use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
 use reth_provider::ChainSpecProvider;
 use reth_tracing::tracing::info;
-use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
+use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig, WorldChainRpcModuleValidator};
 use world_chain_node::{
     FlashblocksOpApi, OpApiExtServer, context::WorldChainDefaultContext, node::WorldChainNode,
 };
@@ -35,7 +35,8 @@ fn main() {
     }
 
     if let Err(err) =
-        Cli::<OpChainSpecParser, WorldChainArgs>::parse().run(|mut builder, args| async move {
+        Cli::<OpChainSpecParser, WorldChainArgs, WorldChainRpcModuleValidator>::parse().run(
+            |mut builder, args| async move {
             info!(target: "reth::cli", "Launching node");
             let config: WorldChainNodeConfig = args.into_config(builder.config_mut())?;
 
