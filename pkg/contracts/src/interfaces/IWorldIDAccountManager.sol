@@ -26,16 +26,17 @@ interface IWorldIDAccountManager {
     /// @notice The mutation operation a `WorldIDAccountUpdate` payload requests.
     enum Operation {
         Create,
-        Add,
-        Remove
+        Update
     }
 
     /// @notice The signal payload bound into a World ID proof for an account action.
-    /// @param operation Mutation kind. `Create` is only valid in `create`; `Add`/`Remove` only in `update`.
-    /// @param keys Authenticator keys to install or remove. Each key MUST be 1..MAX_KEY_BYTES bytes.
+    /// @param operation Mutation kind. `Create` is only valid in `create`; `Update` only in `update`.
+    /// @param addKeys Authenticator keys to install. Each key MUST be 1..MAX_KEY_BYTES bytes.
+    /// @param removeKeys Authenticator keys to remove. Each key MUST be 1..MAX_KEY_BYTES bytes.
     struct WorldIDAccountUpdate {
         Operation operation;
-        bytes[] keys;
+        bytes[] addKeys;
+        bytes[] removeKeys;
     }
 
     /// @notice Memory-resident scalar inputs for the verifier's `verifySession` call.
@@ -92,7 +93,7 @@ interface IWorldIDAccountManager {
     /// @notice Thrown when `update` targets a World ID Account that has not been created.
     error WorldIDAccountDoesNotExist();
 
-    /// @notice Thrown when a payload contains zero keys.
+    /// @notice Thrown when a payload contains no keys.
     error EmptyKeySet();
 
     /// @notice Thrown when a payload would result in more than `MAX_SESSION_KEYS` authorized keys.
@@ -104,11 +105,14 @@ interface IWorldIDAccountManager {
     /// @notice Thrown when a key exceeds `MAX_KEY_BYTES`.
     error KeyTooLarge(uint256 actual, uint256 max);
 
-    /// @notice Thrown when an `Add` payload includes a key already authorized for the account.
+    /// @notice Thrown when an add payload includes a key already authorized for the account.
     error DuplicateSessionKey(bytes32 keyHash);
 
-    /// @notice Thrown when a `Remove` payload includes a key not authorized for the account.
+    /// @notice Thrown when a remove payload includes a key not authorized for the account.
     error UnknownSessionKey(bytes32 keyHash);
+
+    /// @notice Thrown when the same key appears in both `addKeys` and `removeKeys`.
+    error OverlappingUpdateKey(bytes32 keyHash);
 
     /// @notice Thrown when a required address parameter is the zero address.
     error AddressZero();
@@ -126,7 +130,7 @@ interface IWorldIDAccountManager {
     /// @param expiresAtMin_ Minimum credential expiration constraint.
     /// @param credentialGenesisIssuedAtMin_ Minimum credential `genesis_issued_at`.
     /// @param proof_ Compressed Groth16 proof `[a, b0, b1, c, merkle_root]`.
-    /// @param createUpdate_ Initial set of authenticator keys to install.
+    /// @param createUpdate_ Initial set of authenticator keys to install. `removeKeys` MUST be empty.
     /// @return worldIDAccount_ The deterministic address of the newly created account.
     function create(
         uint256 worldIDAccountNullifier_,
@@ -140,7 +144,7 @@ interface IWorldIDAccountManager {
         WorldIDAccountUpdate calldata createUpdate_
     ) external returns (address worldIDAccount_);
 
-    /// @notice Apply an `Add` or `Remove` update authorized by a World ID 4.0 Session Proof.
+    /// @notice Apply an update authorized by a World ID 4.0 Session Proof.
     /// @param worldIDAccount_ The address of the World ID Account being updated.
     /// @param proofNonce_ Verifier request nonce for the Session Proof.
     /// @param issuerSchemaId_ Credential schema/issuer identifier.
@@ -148,7 +152,8 @@ interface IWorldIDAccountManager {
     /// @param credentialGenesisIssuedAtMin_ Minimum credential `genesis_issued_at`.
     /// @param sessionNullifier_ Per-update verifier input `[nullifier, randomAction]`. Ephemeral.
     /// @param proof_ Compressed Groth16 proof `[a, b0, b1, c, merkle_root]`.
-    /// @param accountUpdate_ The Add/Remove payload.
+    /// @param accountUpdate_ The add/remove payload. At least one of `addKeys` or `removeKeys`
+    ///        MUST be non-empty.
     function update(
         address worldIDAccount_,
         uint256 proofNonce_,

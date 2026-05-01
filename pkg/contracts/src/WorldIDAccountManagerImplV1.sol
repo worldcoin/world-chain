@@ -112,10 +112,12 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         worldIDAccountNullifier[worldIDAccount_] = worldIDAccountNullifier_;
         sessionIdOf[worldIDAccount_] = sessionId_;
 
-        _addKeys(worldIDAccount_, createUpdate_.keys);
+        if (createUpdate_.removeKeys.length != 0) revert InvalidOperation();
+
+        _addKeys(worldIDAccount_, createUpdate_.addKeys);
 
         emit WorldIDAccountCreated(worldIDAccount_, worldIDAccountNullifier_, sessionId_);
-        emit SessionKeysAdded(worldIDAccount_, createUpdate_.keys);
+        emit SessionKeysAdded(worldIDAccount_, createUpdate_.addKeys);
 
         worldIDVerifier.verify(
             worldIDAccountNullifier_,
@@ -141,11 +143,14 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         uint256[5] calldata proof_,
         WorldIDAccountUpdate calldata accountUpdate_
     ) external virtual onlyProxy nonReentrant {
-        if (accountUpdate_.operation == Operation.Create) {
+        if (accountUpdate_.operation != Operation.Update) {
             revert InvalidOperation();
         }
         if (worldIDAccountNullifier[worldIDAccount_] == 0) {
             revert WorldIDAccountDoesNotExist();
+        }
+        if (accountUpdate_.addKeys.length == 0 && accountUpdate_.removeKeys.length == 0) {
+            revert EmptyKeySet();
         }
 
         // Snapshot signal hash with the pre-bump generation so the verifier still validates
@@ -154,12 +159,15 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
 
         ++generationOf[worldIDAccount_];
 
-        if (accountUpdate_.operation == Operation.Add) {
-            _addKeys(worldIDAccount_, accountUpdate_.keys);
-            emit SessionKeysAdded(worldIDAccount_, accountUpdate_.keys);
-        } else {
-            _removeKeys(worldIDAccount_, accountUpdate_.keys);
-            emit SessionKeysRemoved(worldIDAccount_, accountUpdate_.keys);
+        _revertIfOverlappingKey(accountUpdate_.addKeys, accountUpdate_.removeKeys);
+
+        if (accountUpdate_.removeKeys.length != 0) {
+            _removeKeys(worldIDAccount_, accountUpdate_.removeKeys);
+            emit SessionKeysRemoved(worldIDAccount_, accountUpdate_.removeKeys);
+        }
+        if (accountUpdate_.addKeys.length != 0) {
+            _addKeys(worldIDAccount_, accountUpdate_.addKeys);
+            emit SessionKeysAdded(worldIDAccount_, accountUpdate_.addKeys);
         }
 
         _dispatchSessionProof(
@@ -222,6 +230,19 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
             sessionNullifier_,
             proof_
         );
+    }
+
+    /// @dev Rejects a unified update that mentions the same key in both `addKeys_` and
+    ///      `removeKeys_`. Overlap is treated as a malformed payload rather than a billed no-op.
+    function _revertIfOverlappingKey(bytes[] calldata addKeys_, bytes[] calldata removeKeys_) internal pure {
+        for (uint256 i = 0; i < addKeys_.length; ++i) {
+            bytes32 addHash = keccak256(addKeys_[i]);
+            for (uint256 j = 0; j < removeKeys_.length; ++j) {
+                if (addHash == keccak256(removeKeys_[j])) {
+                    revert OverlappingUpdateKey(addHash);
+                }
+            }
+        }
     }
 
     /// @dev Validates and appends each key in `keys_` to the authorized set for `worldIDAccount_`.
