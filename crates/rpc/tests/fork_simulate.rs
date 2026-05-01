@@ -400,25 +400,43 @@ async fn test_native_eth_transfer_inspector() {
     assert_eq!(native[0].asset.decimals, 18);
 }
 
-/// Production-shaped call: caller is `ENTRY_POINT` with **zero ETH balance**,
-/// payload is a realistic ERC-20 `transfer` against forked WLD. Without the
-/// `disable_fee_charge` + `disable_balance_check` flags in `simulate_evm_env`,
-/// op-revm's handler computes the L1 data fee from `enveloped_tx` and aborts
-/// validation with `LackOfFundForMaxFee` before the call ever runs.
+/// Production-shaped call: synthetic caller with **zero ETH balance** and
+/// **non-zero nonce** (mirroring an EntryPoint contract), payload is a
+/// realistic ERC-20 `transfer` against forked WLD.
 ///
-/// The inner ERC-20 call's outcome (success vs. revert) depends on live
-/// EntryPoint state and isn't what we're testing — what matters is that
-/// `transact()` returned `Ok`, i.e. validation didn't bail on the fee path.
+/// Two bypasses are under test, both in `relax_cfg_for_simulation`:
+///
+/// 1. **L1 fee bypass** (`disable_fee_charge` + `disable_balance_check`) —
+///    without it, op-revm's handler computes the L1 data fee from
+///    `enveloped_tx` and aborts validation with `LackOfFundForMaxFee` because
+///    the caller has no ETH.
+/// 2. **Nonce bypass** (`disable_nonce_check`) — without it, the caller's
+///    on-chain nonce (5 here) wouldn't match `TxEnv::default().nonce = 0`
+///    and validation aborts with `NonceTooLow`.
+///
+/// Caller is synthetic (inserted into the CacheDB) instead of a real on-chain
+/// contract, so the test doesn't drift when chain state changes. Caller has
+/// no WLD balance, so the inner transfer reverts deterministically.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_simulate_unfunded_caller_bypasses_l1_fee() {
     let mut db = make_forked_db();
+    // Synthetic EntryPoint-shaped caller: 0 ETH, non-zero nonce, no WLD.
+    let caller = address!("00000000000000000000000000ffffffffffffff");
+    db.insert_account_info(
+        caller,
+        AccountInfo {
+            balance: U256::ZERO,
+            nonce: 5,
+            ..Default::default()
+        },
+    );
     let mut evm = OpEvmFactory::default().create_evm(&mut db, simulate_evm_env());
 
     let result = RethEvm::transact(
         &mut evm,
         OpTx(OpTransaction {
             base: TxEnv {
-                caller: ENTRY_POINT, // 0 balance
+                caller,
                 kind: TxKind::Call(WLD),
                 data: transferCall {
                     to: address!("000000000000000000000000000000000000dEaD"),
@@ -434,13 +452,15 @@ async fn test_simulate_unfunded_caller_bypasses_l1_fee() {
             ..Default::default()
         }),
     )
-    .expect("validation must not fail — L1 fee bypass regressed?");
+    .expect("validation must not fail — L1 fee or nonce bypass regressed?");
 
-    assert!(
-        matches!(result.result, ExecutionResult::Success { .. }),
-        "expected ERC-20 transfer to succeed against live WLD state, got {:?}",
-        result.result
-    );
+    match &result.result {
+        ExecutionResult::Revert { output, .. } => {
+            let reason = decode_revert_reason(output);
+            assert_eq!(reason, "ERC20: transfer amount exceeds balance");
+        }
+        other => panic!("expected inner-call revert (caller has no WLD), got {other:?}"),
+    }
 }
 
 /// Reverting ERC-20 transfer returns a decoded revert reason.
