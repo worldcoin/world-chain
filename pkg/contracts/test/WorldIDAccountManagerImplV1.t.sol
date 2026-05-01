@@ -79,11 +79,13 @@ contract WorldIDAccountManagerImplV1Test is Test {
         arr = new bytes[](0);
     }
 
-    function _createUpdate(bytes[] memory addKeys_) internal pure returns (IWorldIDAccountManager.WorldIDAccountUpdate memory u) {
+    function _createUpdate(bytes[] memory addKeys_)
+        internal
+        pure
+        returns (IWorldIDAccountManager.WorldIDAccountUpdate memory u)
+    {
         u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Create,
-            addKeys: addKeys_,
-            removeKeys: _emptyKeys()
+            operation: IWorldIDAccountManager.Operation.Create, addKeys: addKeys_, removeKeys: _emptyKeys()
         });
     }
 
@@ -93,9 +95,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
         returns (IWorldIDAccountManager.WorldIDAccountUpdate memory u)
     {
         u = IWorldIDAccountManager.WorldIDAccountUpdate({
-            operation: IWorldIDAccountManager.Operation.Update,
-            addKeys: addKeys_,
-            removeKeys: removeKeys_
+            operation: IWorldIDAccountManager.Operation.Update, addKeys: addKeys_, removeKeys: removeKeys_
         });
     }
 
@@ -212,8 +212,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
 
     function test_create_revertIf_wrongOperation() public {
         CreateArgs memory a = _defaultCreateArgs();
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u =
-            _updatePayload(_singleKey(_key(0x01, 33)), _emptyKeys());
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _updatePayload(_singleKey(_key(0x01, 33)), _emptyKeys());
         vm.expectRevert(IWorldIDAccountManager.InvalidOperation.selector);
         _doCreate(a, u);
     }
@@ -373,8 +372,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
     }
 
     function test_update_revertIf_accountDoesNotExist() public {
-        IWorldIDAccountManager.WorldIDAccountUpdate memory u =
-            _updatePayload(_singleKey(_key(0x01, 33)), _emptyKeys());
+        IWorldIDAccountManager.WorldIDAccountUpdate memory u = _updatePayload(_singleKey(_key(0x01, 33)), _emptyKeys());
         vm.expectRevert(IWorldIDAccountManager.WorldIDAccountDoesNotExist.selector);
         manager.update(address(0xCAFE), 1, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof(), u);
     }
