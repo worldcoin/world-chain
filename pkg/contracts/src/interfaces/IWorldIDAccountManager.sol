@@ -26,7 +26,8 @@ interface IWorldIDAccountManager {
     /// @notice The mutation operation a `WorldIDAccountUpdate` payload requests.
     enum Operation {
         Create,
-        Update
+        Update,
+        Revert
     }
 
     /// @notice The signal payload bound into a World ID proof for an account action.
@@ -75,6 +76,19 @@ interface IWorldIDAccountManager {
     /// @dev `keys` carries the raw authenticator bytes — on-chain state stores only their hashes.
     event SessionKeysRemoved(address indexed worldIDAccount, bytes[] keys);
 
+    /// @notice Emitted when an authenticated key-set update is scheduled behind the cooldown.
+    /// @dev The post-update key hashes are written into primary storage immediately, but these raw
+    ///      keys are not yet effective until `validAfter`.
+    event SessionKeyUpdateScheduled(
+        address indexed worldIDAccount, bytes[] addKeys, bytes[] removeKeys, uint256 validAfter
+    );
+
+    /// @notice Emitted when a pending key-set update is reverted before it becomes effective.
+    event SessionKeyUpdateReverted(address indexed worldIDAccount);
+
+    /// @notice Emitted when the session-key update cooldown is set or replaced.
+    event SessionKeyUpdateCooldownSet(uint256 cooldown);
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                                 ERRORS                                  ///
     ///////////////////////////////////////////////////////////////////////////////
@@ -117,9 +131,24 @@ interface IWorldIDAccountManager {
     /// @notice Thrown when a required address parameter is the zero address.
     error AddressZero();
 
+    /// @notice Thrown when the configured session-key update cooldown is zero.
+    error ZeroCooldown();
+
+    /// @notice Thrown when `update` is attempted while another update is still pending.
+    error PendingSessionKeyUpdate(uint256 validAfter);
+
+    /// @notice Thrown when `revert` is called but no pending update exists.
+    error NoPendingSessionKeyUpdate();
+
+    /// @notice Thrown when `revert` is called after the pending update's window elapsed.
+    error PendingSessionKeyUpdateExpired(uint256 validAfter);
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                              EXTERNAL API                               ///
     ///////////////////////////////////////////////////////////////////////////////
+
+    /// @notice Returns the configured cooldown for pending key-set updates.
+    function sessionKeyUpdateCooldown() external view returns (uint256);
 
     /// @notice Create a World ID Account authorized by a World ID 4.0 Uniqueness Proof.
     /// @param worldIDAccountNullifier_ The creation nullifier `ν_k`.
@@ -165,12 +194,41 @@ interface IWorldIDAccountManager {
         WorldIDAccountUpdate calldata accountUpdate_
     ) external;
 
-    /// @notice Returns the hashes of all currently authorized authenticator keys for `worldIDAccount_`.
-    /// @dev Raw key bytes are not stored on-chain; reconstruct from `SessionKeysAdded` /
-    ///      `SessionKeysRemoved` events if needed.
+    /// @notice Revert a pending key-set update authorized by a World ID 4.0 Session Proof.
+    /// @dev Reverts the pending window and restores the previous effective key set into primary
+    ///      storage. Reverts if no pending update exists or if the pending window already elapsed.
+    function revert(
+        address worldIDAccount_,
+        uint256 proofNonce_,
+        uint64 issuerSchemaId_,
+        uint64 expiresAtMin_,
+        uint256 credentialGenesisIssuedAtMin_,
+        uint256[2] calldata sessionNullifier_,
+        uint256[5] calldata proof_
+    ) external;
+
+    /// @notice Returns the hashes of the currently effective authenticator keys for `worldIDAccount_`.
+    /// @dev During an active pending update this returns the previous key set, not the newly stored
+    ///      one. Raw key bytes are not stored on-chain.
     function getSessionKeyHashes(address worldIDAccount_) external view returns (bytes32[] memory);
+
+    /// @notice Returns the hashes written into primary storage for `worldIDAccount_`.
+    /// @dev During an active pending update this is the future post-cooldown key set.
+    function getStoredSessionKeyHashes(address worldIDAccount_) external view returns (bytes32[] memory);
+
+    /// @notice Returns the previous key-set snapshot for an active pending update.
+    /// @dev Returns an empty array once the pending update is no longer active.
+    function getPreviousSessionKeyHashes(address worldIDAccount_) external view returns (bytes32[] memory);
+
+    /// @notice Returns the timestamp at which a pending update becomes effective.
+    /// @dev Returns `0` when there is no active pending update.
+    function getPendingValidAfter(address worldIDAccount_) external view returns (uint256);
 
     /// @notice Returns whether `key_` is currently authorized for `worldIDAccount_`.
     /// @dev Returns `false` (not revert) for malformed key lengths.
     function isAuthorized(address worldIDAccount_, bytes calldata key_) external view returns (bool);
+
+    /// @notice Updates the cooldown used for future key-set updates.
+    /// @param sessionKeyUpdateCooldown_ The new cooldown in seconds. Must be non-zero.
+    function setSessionKeyUpdateCooldown(uint256 sessionKeyUpdateCooldown_) external;
 }

@@ -38,21 +38,32 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
     /// @notice The World ID verifier proxy address.
     IWorldIDVerifier public worldIDVerifier;
 
+    /// @inheritdoc IWorldIDAccountManager
+    uint256 public sessionKeyUpdateCooldown;
+
     /// @notice A map from World ID accounts to their single use creation nullifier.
     mapping(address worldIDAccount => uint256 nullifier) public worldIDAccountNullifier;
 
     /// @notice The session identifier installed at creation, used to scope subsequent Session Proofs.
     mapping(address worldIDAccount => uint256 sessionId) public sessionIdOf;
 
-    /// @notice Per-account monotonic counter folded into update signal hashes so identical
-    ///         payloads still yield distinct signals across updates.
+    /// @notice Per-account monotonic counter folded into update and revert signal hashes.
     mapping(address worldIDAccount => uint256 generation) public generationOf;
 
-    /// @notice Hashes of the currently authorized authenticator keys for each account.
+    /// @notice Hashes of the post-cooldown authenticator keys for each account.
     mapping(address worldIDAccount => bytes32[] keyHashes) public sessionKeyHashes;
 
     /// @notice 1-indexed position in `sessionKeyHashes[acct]` of each key hash. `0` means absent.
     mapping(address worldIDAccount => mapping(bytes32 keyHash => uint256 indexPlusOne)) public keyHashIndex;
+
+    /// @notice Hashes of the effective pre-update authenticator keys during an active pending window.
+    mapping(address worldIDAccount => bytes32[] keyHashes) public previousSessionKeyHashes;
+
+    /// @notice 1-indexed position in `previousSessionKeyHashes[acct]` of each key hash.
+    mapping(address worldIDAccount => mapping(bytes32 keyHash => uint256 indexPlusOne)) public previousKeyHashIndex;
+
+    /// @notice Timestamp at which the stored key set becomes effective. `0` means no pending update.
+    mapping(address worldIDAccount => uint256 validAfter) public pendingValidAfter;
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                              CONSTRUCTION                               ///
@@ -66,14 +77,21 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
     /// @notice Initializes the proxy.
     /// @param worldIDVerifier_ The World ID 4.0 verifier address. Must not be zero.
     /// @param owner_ The owner that will gain admin privileges via `Ownable2Step`.
-    function initialize(IWorldIDVerifier worldIDVerifier_, address owner_) external reinitializer(1) {
+    /// @param sessionKeyUpdateCooldown_ The delay applied to future key-set updates. Must be non-zero.
+    function initialize(IWorldIDVerifier worldIDVerifier_, address owner_, uint256 sessionKeyUpdateCooldown_)
+        external
+        reinitializer(1)
+    {
         if (address(worldIDVerifier_) == address(0)) revert AddressZero();
         if (owner_ == address(0)) revert AddressZero();
+        if (sessionKeyUpdateCooldown_ == 0) revert ZeroCooldown();
 
         __Base_init(owner_);
         worldIDVerifier = worldIDVerifier_;
+        sessionKeyUpdateCooldown = sessionKeyUpdateCooldown_;
 
         emit WorldIDAccountManagerImplInitialized(worldIDVerifier_, owner_);
+        emit SessionKeyUpdateCooldownSet(sessionKeyUpdateCooldown_);
     }
 
     ///////////////////////////////////////////////////////////////////////////////
@@ -92,32 +110,17 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         uint256[5] calldata proof_,
         WorldIDAccountUpdate calldata createUpdate_
     ) external virtual onlyProxy nonReentrant returns (address worldIDAccount_) {
-        if (createUpdate_.operation != Operation.Create) {
-            revert InvalidOperation();
-        }
+        if (createUpdate_.operation != Operation.Create) revert InvalidOperation();
         // A zero nullifier would be indistinguishable from "absent" in `worldIDAccountNullifier`,
-        // letting the same account be re-created and permanently bricking `update`.
-        if (worldIDAccountNullifier_ == 0) {
-            revert ZeroNullifier();
-        }
+        // letting the same account be re-created and permanently bricking future updates.
+        if (worldIDAccountNullifier_ == 0) revert ZeroNullifier();
 
         worldIDAccount_ = address(uint160(uint256(keccak256(abi.encodePacked(worldIDAccountNullifier_)))));
-        if (worldIDAccountNullifier[worldIDAccount_] != 0) {
-            revert WorldIDAccountAlreadyExists();
-        }
+        if (worldIDAccountNullifier[worldIDAccount_] != 0) revert WorldIDAccountAlreadyExists();
+        if (createUpdate_.removeKeys.length != 0) revert InvalidOperation();
 
         uint256 action = uint256(keccak256(abi.encodePacked(WORLD_ID_ACCOUNT_TAG, worldIDAccountNonce_))) >> 8;
         uint256 signalHash = uint256(keccak256(abi.encode(createUpdate_))) >> 8;
-
-        worldIDAccountNullifier[worldIDAccount_] = worldIDAccountNullifier_;
-        sessionIdOf[worldIDAccount_] = sessionId_;
-
-        if (createUpdate_.removeKeys.length != 0) revert InvalidOperation();
-
-        _addKeys(worldIDAccount_, createUpdate_.addKeys);
-
-        emit WorldIDAccountCreated(worldIDAccount_, worldIDAccountNullifier_, sessionId_);
-        emit SessionKeysAdded(worldIDAccount_, createUpdate_.addKeys);
 
         worldIDVerifier.verify(
             worldIDAccountNullifier_,
@@ -130,6 +133,14 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
             credentialGenesisIssuedAtMin_,
             proof_
         );
+
+        worldIDAccountNullifier[worldIDAccount_] = worldIDAccountNullifier_;
+        sessionIdOf[worldIDAccount_] = sessionId_;
+
+        _addKeys(worldIDAccount_, createUpdate_.addKeys);
+
+        emit WorldIDAccountCreated(worldIDAccount_, worldIDAccountNullifier_, sessionId_);
+        emit SessionKeysAdded(worldIDAccount_, createUpdate_.addKeys);
     }
 
     /// @inheritdoc IWorldIDAccountManager
@@ -146,29 +157,14 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         if (accountUpdate_.operation != Operation.Update) {
             revert InvalidOperation();
         }
-        if (worldIDAccountNullifier[worldIDAccount_] == 0) {
-            revert WorldIDAccountDoesNotExist();
-        }
-        if (accountUpdate_.addKeys.length == 0 && accountUpdate_.removeKeys.length == 0) {
-            revert EmptyKeySet();
-        }
+        if (worldIDAccountNullifier[worldIDAccount_] == 0) revert WorldIDAccountDoesNotExist();
+        if (accountUpdate_.addKeys.length == 0 && accountUpdate_.removeKeys.length == 0) revert EmptyKeySet();
 
-        // Snapshot signal hash with the pre-bump generation so the verifier still validates
-        // the proof against the generation the caller signed over.
-        uint256 signalHash = uint256(keccak256(abi.encode(accountUpdate_, generationOf[worldIDAccount_]))) >> 8;
+        uint256 activeValidAfter = _activePendingValidAfter(worldIDAccount_);
+        if (activeValidAfter != 0) revert PendingSessionKeyUpdate(activeValidAfter);
 
-        ++generationOf[worldIDAccount_];
-
-        _revertIfOverlappingKey(accountUpdate_.addKeys, accountUpdate_.removeKeys);
-
-        if (accountUpdate_.removeKeys.length != 0) {
-            _removeKeys(worldIDAccount_, accountUpdate_.removeKeys);
-            emit SessionKeysRemoved(worldIDAccount_, accountUpdate_.removeKeys);
-        }
-        if (accountUpdate_.addKeys.length != 0) {
-            _addKeys(worldIDAccount_, accountUpdate_.addKeys);
-            emit SessionKeysAdded(worldIDAccount_, accountUpdate_.addKeys);
-        }
+        uint256 generation_ = generationOf[worldIDAccount_];
+        uint256 signalHash = uint256(keccak256(abi.encode(accountUpdate_, generation_))) >> 8;
 
         _dispatchSessionProof(
             SessionProofScalars({
@@ -183,17 +179,109 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
             sessionNullifier_,
             proof_
         );
+
+        _revertIfOverlappingKey(accountUpdate_.addKeys, accountUpdate_.removeKeys);
+        _snapshotCurrentKeys(worldIDAccount_);
+
+        if (accountUpdate_.removeKeys.length != 0) _removeKeys(worldIDAccount_, accountUpdate_.removeKeys);
+        if (accountUpdate_.addKeys.length != 0) _addKeys(worldIDAccount_, accountUpdate_.addKeys);
+
+        uint256 validAfter_ = block.timestamp + sessionKeyUpdateCooldown;
+        pendingValidAfter[worldIDAccount_] = validAfter_;
+        generationOf[worldIDAccount_] = generation_ + 1;
+
+        emit SessionKeyUpdateScheduled(worldIDAccount_, accountUpdate_.addKeys, accountUpdate_.removeKeys, validAfter_);
+    }
+
+    /// @inheritdoc IWorldIDAccountManager
+    function revert(
+        address worldIDAccount_,
+        uint256 proofNonce_,
+        uint64 issuerSchemaId_,
+        uint64 expiresAtMin_,
+        uint256 credentialGenesisIssuedAtMin_,
+        uint256[2] calldata sessionNullifier_,
+        uint256[5] calldata proof_
+    ) external virtual onlyProxy nonReentrant {
+        if (worldIDAccountNullifier[worldIDAccount_] == 0) {
+            revert WorldIDAccountDoesNotExist();
+        }
+
+        uint256 validAfter_ = pendingValidAfter[worldIDAccount_];
+        if (validAfter_ == 0) revert NoPendingSessionKeyUpdate();
+        if (block.timestamp >= validAfter_) revert PendingSessionKeyUpdateExpired(validAfter_);
+
+        uint256 generation_ = generationOf[worldIDAccount_];
+        uint256 signalHash = uint256(keccak256(abi.encode(Operation.Revert, validAfter_, generation_))) >> 8;
+
+        _dispatchSessionProof(
+            SessionProofScalars({
+                rpId: WORLD_CHAIN_RP_ID,
+                proofNonce: proofNonce_,
+                signalHash: signalHash,
+                expiresAtMin: expiresAtMin_,
+                issuerSchemaId: issuerSchemaId_,
+                credentialGenesisIssuedAtMin: credentialGenesisIssuedAtMin_,
+                sessionId: sessionIdOf[worldIDAccount_]
+            }),
+            sessionNullifier_,
+            proof_
+        );
+
+        _restorePreviousKeys(worldIDAccount_);
+        delete pendingValidAfter[worldIDAccount_];
+        generationOf[worldIDAccount_] = generation_ + 1;
+
+        emit SessionKeyUpdateReverted(worldIDAccount_);
     }
 
     /// @inheritdoc IWorldIDAccountManager
     function getSessionKeyHashes(address worldIDAccount_) external view virtual onlyProxy returns (bytes32[] memory) {
+        if (_activePendingValidAfter(worldIDAccount_) != 0) {
+            return previousSessionKeyHashes[worldIDAccount_];
+        }
         return sessionKeyHashes[worldIDAccount_];
+    }
+
+    /// @inheritdoc IWorldIDAccountManager
+    function getStoredSessionKeyHashes(address worldIDAccount_)
+        external
+        view
+        virtual
+        onlyProxy
+        returns (bytes32[] memory)
+    {
+        return sessionKeyHashes[worldIDAccount_];
+    }
+
+    /// @inheritdoc IWorldIDAccountManager
+    function getPreviousSessionKeyHashes(address worldIDAccount_)
+        external
+        view
+        virtual
+        onlyProxy
+        returns (bytes32[] memory)
+    {
+        if (_activePendingValidAfter(worldIDAccount_) == 0) {
+            return new bytes32[](0);
+        }
+        return previousSessionKeyHashes[worldIDAccount_];
+    }
+
+    /// @inheritdoc IWorldIDAccountManager
+    function getPendingValidAfter(address worldIDAccount_) external view virtual onlyProxy returns (uint256) {
+        return _activePendingValidAfter(worldIDAccount_);
     }
 
     /// @inheritdoc IWorldIDAccountManager
     function isAuthorized(address worldIDAccount_, bytes calldata key_) external view virtual onlyProxy returns (bool) {
         if (key_.length == 0 || key_.length > MAX_KEY_BYTES) return false;
-        return keyHashIndex[worldIDAccount_][keccak256(key_)] != 0;
+
+        bytes32 keyHash = keccak256(key_);
+        if (_activePendingValidAfter(worldIDAccount_) != 0) {
+            return previousKeyHashIndex[worldIDAccount_][keyHash] != 0;
+        }
+        return keyHashIndex[worldIDAccount_][keyHash] != 0;
     }
 
     ///////////////////////////////////////////////////////////////////////////////
@@ -208,12 +296,26 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         emit WorldIDVerifierSet(address(worldIDVerifier_));
     }
 
+    /// @inheritdoc IWorldIDAccountManager
+    function setSessionKeyUpdateCooldown(uint256 sessionKeyUpdateCooldown_) external virtual onlyProxy onlyOwner {
+        if (sessionKeyUpdateCooldown_ == 0) revert ZeroCooldown();
+        sessionKeyUpdateCooldown = sessionKeyUpdateCooldown_;
+        emit SessionKeyUpdateCooldownSet(sessionKeyUpdateCooldown_);
+    }
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                                INTERNAL                                 ///
     ///////////////////////////////////////////////////////////////////////////////
 
+    /// @dev Returns `pendingValidAfter[worldIDAccount_]` while the pending update is active.
+    function _activePendingValidAfter(address worldIDAccount_) internal view returns (uint256) {
+        uint256 validAfter_ = pendingValidAfter[worldIDAccount_];
+        if (validAfter_ == 0 || block.timestamp >= validAfter_) return 0;
+        return validAfter_;
+    }
+
     /// @dev Dispatches the session-proof verifier call. Inputs are bundled into a memory struct
-    ///      to keep `update`'s frame small enough to compile without `via_ir`.
+    ///      to keep call sites small enough to compile without `via_ir`.
     function _dispatchSessionProof(
         SessionProofScalars memory s_,
         uint256[2] calldata sessionNullifier_,
@@ -245,8 +347,7 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         }
     }
 
-    /// @dev Validates and appends each key in `keys_` to the authorized set for `worldIDAccount_`.
-    ///      Reverts on length violations, payload duplicates, or set-size overflow.
+    /// @dev Validates and appends each key in `keys_` to the stored set for `worldIDAccount_`.
     function _addKeys(address worldIDAccount_, bytes[] calldata keys_) internal {
         uint256 keysLen = keys_.length;
         if (keysLen == 0) revert EmptyKeySet();
@@ -255,9 +356,7 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         mapping(bytes32 => uint256) storage idxMap = keyHashIndex[worldIDAccount_];
 
         uint256 newTotal = hashArr.length + keysLen;
-        if (newTotal > MAX_SESSION_KEYS) {
-            revert TooManyKeys(newTotal, MAX_SESSION_KEYS);
-        }
+        if (newTotal > MAX_SESSION_KEYS) revert TooManyKeys(newTotal, MAX_SESSION_KEYS);
 
         for (uint256 i = 0; i < keysLen; ++i) {
             bytes calldata key = keys_[i];
@@ -270,8 +369,7 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         }
     }
 
-    /// @dev Removes each key in `keys_` from the authorized set via swap-and-pop.
-    ///      Reverts on length violations, in-payload duplicates, or unknown keys.
+    /// @dev Removes each key in `keys_` from the stored set via swap-and-pop.
     function _removeKeys(address worldIDAccount_, bytes[] calldata keys_) internal {
         uint256 keysLen = keys_.length;
         if (keysLen == 0) revert EmptyKeySet();
@@ -298,11 +396,64 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         }
     }
 
+    /// @dev Copies the currently stored key set into the previous-key snapshot, replacing any
+    ///      stale snapshot from an expired or reverted update window.
+    function _snapshotCurrentKeys(address worldIDAccount_) internal {
+        _clearPreviousKeys(worldIDAccount_);
+
+        bytes32[] storage current = sessionKeyHashes[worldIDAccount_];
+        bytes32[] storage previous = previousSessionKeyHashes[worldIDAccount_];
+        mapping(bytes32 => uint256) storage previousIdx = previousKeyHashIndex[worldIDAccount_];
+
+        for (uint256 i = 0; i < current.length; ++i) {
+            bytes32 hash = current[i];
+            previous.push(hash);
+            previousIdx[hash] = previous.length;
+        }
+    }
+
+    /// @dev Restores the previous-key snapshot into primary storage, then clears the snapshot.
+    function _restorePreviousKeys(address worldIDAccount_) internal {
+        _clearCurrentKeys(worldIDAccount_);
+
+        bytes32[] storage previous = previousSessionKeyHashes[worldIDAccount_];
+        bytes32[] storage current = sessionKeyHashes[worldIDAccount_];
+        mapping(bytes32 => uint256) storage currentIdx = keyHashIndex[worldIDAccount_];
+
+        for (uint256 i = 0; i < previous.length; ++i) {
+            bytes32 hash = previous[i];
+            current.push(hash);
+            currentIdx[hash] = current.length;
+        }
+
+        _clearPreviousKeys(worldIDAccount_);
+    }
+
+    /// @dev Clears the primary stored key set and its index map.
+    function _clearCurrentKeys(address worldIDAccount_) internal {
+        bytes32[] storage current = sessionKeyHashes[worldIDAccount_];
+        mapping(bytes32 => uint256) storage currentIdx = keyHashIndex[worldIDAccount_];
+
+        for (uint256 i = 0; i < current.length; ++i) {
+            delete currentIdx[current[i]];
+        }
+        delete sessionKeyHashes[worldIDAccount_];
+    }
+
+    /// @dev Clears the previous-key snapshot and its index map.
+    function _clearPreviousKeys(address worldIDAccount_) internal {
+        bytes32[] storage previous = previousSessionKeyHashes[worldIDAccount_];
+        mapping(bytes32 => uint256) storage previousIdx = previousKeyHashIndex[worldIDAccount_];
+
+        for (uint256 i = 0; i < previous.length; ++i) {
+            delete previousIdx[previous[i]];
+        }
+        delete previousSessionKeyHashes[worldIDAccount_];
+    }
+
     /// @dev Reverts if `key_` violates the per-key length bounds.
     function _validateKey(bytes calldata key_) internal pure {
         if (key_.length == 0) revert EmptyKey();
-        if (key_.length > MAX_KEY_BYTES) {
-            revert KeyTooLarge(key_.length, MAX_KEY_BYTES);
-        }
+        if (key_.length > MAX_KEY_BYTES) revert KeyTooLarge(key_.length, MAX_KEY_BYTES);
     }
 }
