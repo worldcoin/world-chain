@@ -27,7 +27,7 @@ use revm_primitives::TxKind;
 
 use world_chain_rpc::simulate::{
     AssetType, SimulationInspector, decode_revert_reason, parse_asset_changes,
-    parse_exposure_changes, selector_to_name,
+    parse_exposure_changes, relax_cfg_for_simulation, selector_to_name,
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -52,15 +52,13 @@ fn rpc_url() -> String {
     std::env::var("WORLDCHAIN_PROVIDER").expect("WORLDCHAIN_PROVIDER not set")
 }
 
-/// Mirrors the EVM envelope `simulate_blocking` configures in `simulate.rs`.
-/// Tests that exercise the main simulation path use this helper so any flag
-/// drift from prod is visible at the call site.
+/// Mirrors the EVM envelope `simulate_blocking` configures in `simulate.rs`
+/// by reusing the same `relax_cfg_for_simulation` helper — so any flag drift
+/// from prod is impossible.
 fn simulate_evm_env() -> reth_evm::EvmEnv<OpSpecId> {
     let mut cfg = CfgEnv::new_with_spec(OpSpecId::ISTHMUS);
     cfg.chain_id = CHAIN_ID;
-    cfg.disable_block_gas_limit = true;
-    cfg.disable_eip3607 = true;
-    cfg.disable_base_fee = true;
+    relax_cfg_for_simulation(&mut cfg);
     reth_evm::EvmEnv::new(cfg, BlockEnv::default())
 }
 
@@ -400,6 +398,69 @@ async fn test_native_eth_transfer_inspector() {
     assert_eq!(native[0].raw_amount, eth_value.to_string());
     assert_eq!(native[0].asset.symbol, "ETH");
     assert_eq!(native[0].asset.decimals, 18);
+}
+
+/// Production-shaped call: synthetic caller with **zero ETH balance** and
+/// **non-zero nonce** (mirroring an EntryPoint contract), payload is a
+/// realistic ERC-20 `transfer` against forked WLD.
+///
+/// Two bypasses are under test, both in `relax_cfg_for_simulation`:
+///
+/// 1. **L1 fee bypass** (`disable_fee_charge` + `disable_balance_check`) —
+///    without it, op-revm's handler computes the L1 data fee from
+///    `enveloped_tx` and aborts validation with `LackOfFundForMaxFee` because
+///    the caller has no ETH.
+/// 2. **Nonce bypass** (`disable_nonce_check`) — without it, the caller's
+///    on-chain nonce (5 here) wouldn't match `TxEnv::default().nonce = 0`
+///    and validation aborts with `NonceTooLow`.
+///
+/// Caller is synthetic (inserted into the CacheDB) instead of a real on-chain
+/// contract, so the test doesn't drift when chain state changes. Caller has
+/// no WLD balance, so the inner transfer reverts deterministically.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_simulate_unfunded_caller_bypasses_l1_fee() {
+    let mut db = make_forked_db();
+    // Synthetic EntryPoint-shaped caller: 0 ETH, non-zero nonce, no WLD.
+    let caller = address!("00000000000000000000000000ffffffffffffff");
+    db.insert_account_info(
+        caller,
+        AccountInfo {
+            balance: U256::ZERO,
+            nonce: 5,
+            ..Default::default()
+        },
+    );
+    let mut evm = OpEvmFactory::default().create_evm(&mut db, simulate_evm_env());
+
+    let result = RethEvm::transact(
+        &mut evm,
+        OpTx(OpTransaction {
+            base: TxEnv {
+                caller,
+                kind: TxKind::Call(WLD),
+                data: transferCall {
+                    to: address!("000000000000000000000000000000000000dEaD"),
+                    amount: U256::from(1_000_000_000_000_000_000u128),
+                }
+                .abi_encode()
+                .into(),
+                gas_limit: 200_000,
+                gas_price: 0,
+                chain_id: Some(CHAIN_ID),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    )
+    .expect("validation must not fail — L1 fee or nonce bypass regressed?");
+
+    match &result.result {
+        ExecutionResult::Revert { output, .. } => {
+            let reason = decode_revert_reason(output);
+            assert_eq!(reason, "ERC20: transfer amount exceeds balance");
+        }
+        other => panic!("expected inner-call revert (caller has no WLD), got {other:?}"),
+    }
 }
 
 /// Reverting ERC-20 transfer returns a decoded revert reason.
