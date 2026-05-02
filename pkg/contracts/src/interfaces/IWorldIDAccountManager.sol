@@ -26,8 +26,7 @@ interface IWorldIDAccountManager {
     /// @notice The mutation operation a `WorldIDAccountUpdate` payload requests.
     enum Operation {
         Create,
-        Update,
-        Revert
+        Update
     }
 
     /// @notice The signal payload bound into a World ID proof for an account action.
@@ -68,13 +67,9 @@ interface IWorldIDAccountManager {
         address indexed worldIDAccount, uint256 indexed worldIDAccountNullifier, uint256 indexed sessionId
     );
 
-    /// @notice Emitted when one or more authenticator keys are added to a World ID Account.
+    /// @notice Emitted when a World ID Account is created with its initial authenticator keys.
     /// @dev `keys` carries the raw authenticator bytes — on-chain state stores only their hashes.
     event SessionKeysAdded(address indexed worldIDAccount, bytes[] keys);
-
-    /// @notice Emitted when one or more authenticator keys are removed from a World ID Account.
-    /// @dev `keys` carries the raw authenticator bytes — on-chain state stores only their hashes.
-    event SessionKeysRemoved(address indexed worldIDAccount, bytes[] keys);
 
     /// @notice Emitted when an authenticated key-set update is scheduled behind the cooldown.
     /// @dev The post-update key hashes are written into primary storage immediately, but these raw
@@ -137,10 +132,10 @@ interface IWorldIDAccountManager {
     /// @notice Thrown when `update` is attempted while another update is still pending.
     error PendingSessionKeyUpdate(uint256 validAfter);
 
-    /// @notice Thrown when `revert` is called but no pending update exists.
+    /// @notice Thrown when `revertUpdate` is called but no pending update exists.
     error NoPendingSessionKeyUpdate();
 
-    /// @notice Thrown when `revert` is called after the pending update's window elapsed.
+    /// @notice Thrown when `revertUpdate` is called after the pending update's window elapsed.
     error PendingSessionKeyUpdateExpired(uint256 validAfter);
 
     ///////////////////////////////////////////////////////////////////////////////
@@ -197,7 +192,7 @@ interface IWorldIDAccountManager {
     /// @notice Revert a pending key-set update authorized by a World ID 4.0 Session Proof.
     /// @dev Reverts the pending window and restores the previous effective key set into primary
     ///      storage. Reverts if no pending update exists or if the pending window already elapsed.
-    function revert(
+    function revertUpdate(
         address worldIDAccount_,
         uint256 proofNonce_,
         uint64 issuerSchemaId_,

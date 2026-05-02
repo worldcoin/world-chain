@@ -22,6 +22,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
     uint256 internal constant COOLDOWN = 3 days;
 
     bytes16 internal constant WORLD_ID_ACCOUNT_TAG = "WORLD_ID_ACCOUNT";
+    bytes16 internal constant WORLD_ID_ACCOUNT_REVERT_TAG = "WORLD_ID_REVERT";
     uint64 internal constant WORLD_CHAIN_RP_ID = 480;
 
     event WorldIDAccountCreated(
@@ -66,8 +67,12 @@ contract WorldIDAccountManagerImplV1Test is Test {
         return uint256(keccak256(abi.encode(u_, generation_))) >> 8;
     }
 
-    function _signalHashRevert(uint256 validAfter_, uint256 generation_) internal pure returns (uint256) {
-        return uint256(keccak256(abi.encode(IWorldIDAccountManager.Operation.Revert, validAfter_, generation_))) >> 8;
+    function _signalHashRevert(address account_, uint256 validAfter_, uint256 generation_)
+        internal
+        pure
+        returns (uint256)
+    {
+        return uint256(keccak256(abi.encode(WORLD_ID_ACCOUNT_REVERT_TAG, account_, validAfter_, generation_))) >> 8;
     }
 
     function _key(uint8 seed_, uint256 len_) internal pure returns (bytes memory k) {
@@ -433,7 +438,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
                 (
                     WORLD_CHAIN_RP_ID,
                     2,
-                    _signalHashRevert(validAfter, 1),
+                    _signalHashRevert(acct, validAfter, 1),
                     uint64(block.timestamp + 1 days),
                     uint64(1),
                     0,
@@ -446,7 +451,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
         vm.expectEmit(true, true, true, true, address(manager));
         emit SessionKeyUpdateReverted(acct);
 
-        manager.revert(acct, 2, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof());
+        manager.revertUpdate(acct, 2, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof());
 
         bytes32[] memory expected = new bytes32[](2);
         expected[0] = keccak256(k1);
@@ -465,7 +470,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
     function test_revert_revertIf_noPending() public {
         (address acct,) = _newAccountWithKey(_key(0x01, 33));
         vm.expectRevert(IWorldIDAccountManager.NoPendingSessionKeyUpdate.selector);
-        manager.revert(acct, 1, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof());
+        manager.revertUpdate(acct, 1, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof());
     }
 
     function test_revert_revertIf_windowExpired() public {
@@ -490,7 +495,7 @@ contract WorldIDAccountManagerImplV1Test is Test {
         vm.expectRevert(
             abi.encodeWithSelector(IWorldIDAccountManager.PendingSessionKeyUpdateExpired.selector, validAfter)
         );
-        manager.revert(acct, 2, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof());
+        manager.revertUpdate(acct, 2, 1, uint64(block.timestamp + 1 days), 0, _sessionNullifier(), _proof());
     }
 
     ///////////////////////////////////////////////////////////////////////////////

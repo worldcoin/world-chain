@@ -25,6 +25,9 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
     /// @notice Domain tag folded into the action for World ID Account Uniqueness Proofs.
     bytes16 public constant WORLD_ID_ACCOUNT_TAG = "WORLD_ID_ACCOUNT";
 
+    /// @notice Domain tag used to separate revert proofs from key-set update proofs.
+    bytes16 public constant WORLD_ID_ACCOUNT_REVERT_TAG = "WORLD_ID_REVERT";
+
     /// @notice Maximum authorized authenticator keys per World ID Account.
     uint256 public constant MAX_SESSION_KEYS = 20;
 
@@ -194,7 +197,7 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
     }
 
     /// @inheritdoc IWorldIDAccountManager
-    function revert(
+    function revertUpdate(
         address worldIDAccount_,
         uint256 proofNonce_,
         uint64 issuerSchemaId_,
@@ -212,7 +215,8 @@ contract WorldIDAccountManagerImplV1 is IWorldIDAccountManager, Base, Reentrancy
         if (block.timestamp >= validAfter_) revert PendingSessionKeyUpdateExpired(validAfter_);
 
         uint256 generation_ = generationOf[worldIDAccount_];
-        uint256 signalHash = uint256(keccak256(abi.encode(Operation.Revert, validAfter_, generation_))) >> 8;
+        uint256 signalHash =
+            uint256(keccak256(abi.encode(WORLD_ID_ACCOUNT_REVERT_TAG, worldIDAccount_, validAfter_, generation_))) >> 8;
 
         _dispatchSessionProof(
             SessionProofScalars({
