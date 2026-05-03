@@ -15,7 +15,7 @@ alloy-primitives = { workspace = true }
 reth-revm.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-optimism-primitives.workspace = true
-reth-optimism-node = { workspace = true, features = ["test-utils"] }
+reth-optimism-node.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-rpc.workspace = true
 reth-optimism-evm.workspace = true

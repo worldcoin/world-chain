@@ -21,7 +21,6 @@ pub use reth_optimism_node::{
         conditional::MaybeConditionalTransaction, estimated_da_size::DataAvailabilitySized,
         interop::MaybeInteropTransaction, OpPooledTransaction, OpPooledTx, OpTransactionValidator,
     },
-    utils::optimism_payload_attributes,
     OpEngineTypes, OpNodeTypes, OpStorage, OP_NAME_CLIENT,
 };
 pub use reth_optimism_payload_builder::{
@@ -43,3 +42,21 @@ pub type OpBlock = alloy_consensus::Block<OpTransactionSigned>;
 
 /// Optimism-specific block body type.
 pub type OpBlockBody = <OpBlock as reth_primitives_traits::Block>::Body;
+
+/// Helper function to create new OP-stack payload attributes.
+pub const fn optimism_payload_attributes(timestamp: u64) -> OpPayloadAttrs {
+    OpPayloadAttrs(OpPayloadAttributes {
+        payload_attributes: alloy_rpc_types_engine::PayloadAttributes {
+            timestamp,
+            prev_randao: alloy_primitives::B256::ZERO,
+            suggested_fee_recipient: alloy_primitives::Address::ZERO,
+            withdrawals: Some(vec![]),
+            parent_beacon_block_root: Some(alloy_primitives::B256::ZERO),
+        },
+        transactions: None,
+        no_tx_pool: None,
+        gas_limit: Some(30_000_000),
+        eip_1559_params: None,
+        min_base_fee: None,
+    })
+}

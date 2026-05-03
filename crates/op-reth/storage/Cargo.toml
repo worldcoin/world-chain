@@ -1,0 +1,33 @@
+[package]
+workspace = "../../.."
+autotests = false
+name = "world-chain-op-storage"
+version = "1.11.3"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage = "https://paradigmxyz.github.io/reth"
+repository = "https://github.com/paradigmxyz/reth"
+
+
+[lib]
+test = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-optimism-primitives = { workspace = true, features = ["serde", "reth-codec"] }
+reth-storage-api = { workspace = true, features = ["db-api"] }
+
+# ethereum
+alloy-consensus.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "reth-storage-api/std",
+    "alloy-consensus/std",
+    "reth-optimism-primitives/std",
+]
