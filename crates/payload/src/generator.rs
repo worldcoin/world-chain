@@ -10,10 +10,10 @@ use op_alloy_consensus::OpTxEnvelope;
 use reth_basic_payload_builder::{
     HeaderForPayload, PayloadBuilder, PayloadConfig, PayloadState, PayloadTaskGuard, PrecachedState,
 };
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::OpBuiltPayload;
-use reth_optimism_payload_builder::OpPayloadAttrs;
-use reth_optimism_primitives::OpPrimitives;
+use world_chain_primitives::OpChainSpec;
+use world_chain_primitives::OpBuiltPayload;
+use world_chain_primitives::OpPayloadAttrs;
+use world_chain_primitives::OpPrimitives;
 use reth_payload_builder::{BuildNewPayload, PayloadId, PayloadJobGenerator};
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderError};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};

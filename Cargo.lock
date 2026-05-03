@@ -4082,13 +4082,12 @@ dependencies = [
 
 [[package]]
 name = "icu_collections"
-version = "2.2.0"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2984d1cd16c883d7935b9e07e44071dca8d917fd52ecc02c04d5fa0b5a3f191c"
+checksum = "200072f5d0e3614556f94a9930d5dc3e0662a652823904c3a75dc3b0af7fee47"
 dependencies = [
  "displaydoc",
  "potential_utf",
- "utf8_iter",
  "yoke",
  "zerofrom",
  "zerovec",
@@ -4102,6 +4101,7 @@ checksum = "92219b62b3e2b4d88ac5119f8904c10f8f61bf7e95b640d25ba3075e6cac2c29"
 dependencies = [
  "displaydoc",
  "litemap",
+ "serde",
  "tinystr",
  "writeable",
  "zerovec",
@@ -4109,10 +4109,11 @@ dependencies = [
 
 [[package]]
 name = "icu_normalizer"
-version = "2.2.0"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c56e5ee99d6e3d33bd91c5d85458b6005a22140021cc324cea84dd0e72cff3b4"
+checksum = "8b24a59706036ba941c9476a55cd57b82b77f38a3c667d637ee7cabbc85eaedc"
 dependencies = [
+ "displaydoc",
  "icu_collections",
  "icu_normalizer_data",
  "icu_properties",
@@ -4123,29 +4124,31 @@ dependencies = [
 
 [[package]]
 name = "icu_normalizer_data"
-version = "2.2.0"
+version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da3be0ae77ea334f4da67c12f149704f19f81d1adf7c51cf482943e84a2bad38"
+checksum = "00210d6893afc98edb752b664b8890f0ef174c8adbb8d0be9710fa66fbbf72d3"
 
 [[package]]
 name = "icu_properties"
-version = "2.2.0"
+version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bee3b67d0ea5c2cca5003417989af8996f8604e34fb9ddf96208a033901e70de"
+checksum = "f5a97b8ac6235e69506e8dacfb2adf38461d2ce6d3e9bd9c94c4cbc3cd4400a4"
 dependencies = [
+ "displaydoc",
  "icu_collections",
  "icu_locale_core",
  "icu_properties_data",
  "icu_provider",
+ "potential_utf",
  "zerotrie",
  "zerovec",
 ]
 
 [[package]]
 name = "icu_properties_data"
-version = "2.2.0"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e2bbb201e0c04f7b4b3e14382af113e17ba4f63e2c9d2ee626b720cbce54a14"
+checksum = "298459143998310acd25ffe6810ed544932242d3f07083eee1084d83a71bd632"
 
 [[package]]
 name = "icu_provider"
@@ -4155,6 +4158,8 @@ checksum = "139c4cf31c8b5f33d7e199446eff9c1e02decfc2f0eec2c8d71f65befa45b421"
 dependencies = [
  "displaydoc",
  "icu_locale_core",
+ "serde",
+ "stable_deref_trait",
  "writeable",
  "yoke",
  "zerofrom",
@@ -5558,7 +5563,6 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-eth",
  "alloy-serde",
- "arbitrary",
  "bytes",
  "derive_more",
  "modular-bitfield",
@@ -8349,470 +8353,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-optimism-chainspec"
-version = "1.11.3"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
-dependencies = [
- "alloy-chains",
- "alloy-consensus",
- "alloy-eips",
- "alloy-genesis",
- "alloy-hardforks",
- "alloy-primitives",
- "derive_more",
- "miniz_oxide 0.9.1",
- "op-alloy-consensus",
- "op-alloy-rpc-types",
- "paste",
- "reth-chainspec",
- "reth-ethereum-forks",
- "reth-network-peers",
- "reth-optimism-forks",
- "reth-optimism-primitives",
- "reth-primitives-traits",
- "serde",
- "serde_json",
- "tar-no-std",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "reth-optimism-cli"
-version = "1.11.3"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-primitives",
- "alloy-rlp",
- "clap",
- "derive_more",
- "eyre",
- "futures-util",
- "op-alloy-consensus",
- "reth-chainspec",
- "reth-cli",
- "reth-cli-commands",
- "reth-cli-runner",
- "reth-consensus",
- "reth-db",
- "reth-db-api",
- "reth-db-common",
- "reth-downloaders",
- "reth-execution-types",
- "reth-fs-util",
- "reth-node-builder",
- "reth-node-core",
- "reth-node-events",
- "reth-node-metrics",
- "reth-optimism-chainspec",
- "reth-optimism-consensus",
- "reth-optimism-evm",
- "reth-optimism-node",
- "reth-optimism-primitives",
- "reth-optimism-trie",
- "reth-primitives-traits",
- "reth-provider",
- "reth-prune",
- "reth-rpc-server-types",
- "reth-stages",
- "reth-static-file",
- "reth-static-file-types",
- "reth-tasks",
- "reth-tracing",
- "serde",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "reth-optimism-consensus"
-version = "1.11.3"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-primitives",
- "alloy-trie",
- "reth-chainspec",
- "reth-consensus",
- "reth-consensus-common",
- "reth-execution-types",
- "reth-optimism-chainspec",
- "reth-optimism-forks",
- "reth-optimism-primitives",
- "reth-primitives-traits",
- "reth-storage-api",
- "reth-storage-errors",
- "reth-trie-common",
- "revm",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "reth-optimism-evm"
-version = "1.11.3"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-evm",
- "alloy-op-evm",
- "alloy-primitives",
- "op-alloy-consensus",
- "op-alloy-rpc-types",
- "op-alloy-rpc-types-engine",
- "op-revm",
- "reth-chainspec",
- "reth-evm",
- "reth-execution-errors",
- "reth-execution-types",
- "reth-optimism-chainspec",
- "reth-optimism-consensus",
- "reth-optimism-forks",
- "reth-optimism-primitives",
- "reth-primitives-traits",
- "reth-rpc-eth-api",
- "reth-storage-errors",
- "revm",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "reth-optimism-exex"
-version = "1.11.3"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "eyre",
- "futures-util",
- "reth-execution-types",
- "reth-exex",
- "reth-node-api",
- "reth-optimism-trie",
- "reth-provider",
- "reth-trie",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "reth-optimism-flashblocks"
-version = "1.11.3"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-primitives",
- "alloy-rpc-types",
- "alloy-rpc-types-engine",
- "brotli",
- "derive_more",
- "eyre",
- "futures-util",
- "metrics",
- "op-alloy-rpc-types-engine",
- "reth-chain-state",
- "reth-engine-primitives",
- "reth-errors",
- "reth-evm",
- "reth-execution-types",
- "reth-metrics",
- "reth-optimism-payload-builder",
- "reth-optimism-primitives",
- "reth-payload-primitives",
- "reth-primitives-traits",
- "reth-revm",
- "reth-rpc-eth-types",
- "reth-storage-api",
- "reth-tasks",
- "ringbuffer",
- "serde_json",
- "tokio",
- "tokio-tungstenite",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "reth-optimism-forks"
-version = "1.11.3"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
-dependencies = [
- "alloy-op-hardforks",
- "alloy-primitives",
- "once_cell",
- "reth-ethereum-forks",
-]
-
-[[package]]
-name = "reth-optimism-node"
-version = "1.11.3"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
-dependencies = [
- "alloy-consensus",
- "alloy-genesis",
- "alloy-primitives",
- "alloy-rpc-types-engine",
- "alloy-rpc-types-eth",
- "clap",
- "eyre",
- "futures-util",
- "humantime",
- "op-alloy-consensus",
- "op-alloy-rpc-types-engine",
- "op-revm",
- "reth-chainspec",
- "reth-consensus",
- "reth-db",
- "reth-db-api",
- "reth-e2e-test-utils",
- "reth-evm",
- "reth-network",
- "reth-node-api",
- "reth-node-builder",
- "reth-node-core",
- "reth-optimism-chainspec",
- "reth-optimism-consensus",
- "reth-optimism-evm",
- "reth-optimism-exex",
- "reth-optimism-forks",
- "reth-optimism-payload-builder",
- "reth-optimism-primitives",
- "reth-optimism-rpc",
- "reth-optimism-storage",
- "reth-optimism-trie",
- "reth-optimism-txpool",
- "reth-payload-builder",
- "reth-primitives-traits",
- "reth-provider",
- "reth-rpc-api",
- "reth-rpc-engine-api",
- "reth-rpc-server-types",
- "reth-tasks",
- "reth-tracing",
- "reth-transaction-pool",
- "reth-trie-common",
- "revm",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "reth-optimism-payload-builder"
-version = "1.11.3"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-evm",
- "alloy-primitives",
- "alloy-rlp",
- "alloy-rpc-types-debug",
- "alloy-rpc-types-engine",
- "derive_more",
- "either",
- "op-alloy-consensus",
- "op-alloy-rpc-types-engine",
- "op-revm",
- "reth-basic-payload-builder",
- "reth-chainspec",
- "reth-evm",
- "reth-execution-types",
- "reth-optimism-evm",
- "reth-optimism-forks",
- "reth-optimism-primitives",
- "reth-optimism-txpool",
- "reth-payload-builder-primitives",
- "reth-payload-primitives",
- "reth-payload-util",
- "reth-payload-validator",
- "reth-primitives-traits",
- "reth-revm",
- "reth-storage-api",
- "reth-transaction-pool",
- "revm",
- "serde",
- "sha2",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "reth-optimism-primitives"
-version = "1.11.3"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-primitives",
- "alloy-rlp",
- "op-alloy-consensus",
- "reth-primitives-traits",
- "serde",
- "serde_with",
-]
-
-[[package]]
-name = "reth-optimism-rpc"
-version = "1.11.3"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-json-rpc",
- "alloy-op-evm",
- "alloy-primitives",
- "alloy-rlp",
- "alloy-rpc-client",
- "alloy-rpc-types-debug",
- "alloy-rpc-types-engine",
- "alloy-rpc-types-eth",
- "alloy-serde",
- "alloy-transport",
- "alloy-transport-http",
- "async-trait",
- "derive_more",
- "eyre",
- "futures",
- "jsonrpsee",
- "jsonrpsee-core",
- "jsonrpsee-types",
- "metrics",
- "op-alloy-consensus",
- "op-alloy-network",
- "op-alloy-rpc-jsonrpsee",
- "op-alloy-rpc-types",
- "op-alloy-rpc-types-engine",
- "op-revm",
- "reqwest 0.13.2",
- "reth-basic-payload-builder",
- "reth-chain-state",
- "reth-chainspec",
- "reth-evm",
- "reth-metrics",
- "reth-node-api",
- "reth-node-builder",
- "reth-optimism-evm",
- "reth-optimism-flashblocks",
- "reth-optimism-forks",
- "reth-optimism-payload-builder",
- "reth-optimism-primitives",
- "reth-optimism-trie",
- "reth-optimism-txpool",
- "reth-payload-util",
- "reth-primitives-traits",
- "reth-provider",
- "reth-revm",
- "reth-rpc",
- "reth-rpc-api",
- "reth-rpc-engine-api",
- "reth-rpc-eth-api",
- "reth-rpc-eth-types",
- "reth-rpc-server-types",
- "reth-storage-api",
- "reth-tasks",
- "reth-transaction-pool",
- "revm",
- "serde",
- "serde_json",
- "strum",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "tower",
- "tracing",
-]
-
-[[package]]
-name = "reth-optimism-storage"
-version = "1.11.3"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
-dependencies = [
- "alloy-consensus",
- "reth-optimism-primitives",
- "reth-storage-api",
-]
-
-[[package]]
-name = "reth-optimism-trie"
-version = "1.11.3"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
-dependencies = [
- "alloy-eips",
- "alloy-primitives",
- "auto_impl",
- "bincode 2.0.1",
- "bytes",
- "derive_more",
- "eyre",
- "metrics",
- "parking_lot",
- "reth-codecs",
- "reth-db",
- "reth-ethereum-primitives",
- "reth-evm",
- "reth-execution-errors",
- "reth-metrics",
- "reth-primitives-traits",
- "reth-provider",
- "reth-revm",
- "reth-tasks",
- "reth-trie",
- "reth-trie-common",
- "serde",
- "strum",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "reth-optimism-txpool"
-version = "1.11.3"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.1.0#6de21d0f81036bc76f14a7bdec89304c60c97f14"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-json-rpc",
- "alloy-primitives",
- "alloy-rpc-client",
- "alloy-rpc-types-eth",
- "alloy-serde",
- "c-kzg",
- "derive_more",
- "futures-util",
- "metrics",
- "op-alloy-consensus",
- "op-alloy-flz",
- "op-alloy-rpc-types",
- "op-revm",
- "parking_lot",
- "reth-chain-state",
- "reth-chainspec",
- "reth-eth-wire-types",
- "reth-evm",
- "reth-execution-types",
- "reth-metrics",
- "reth-optimism-evm",
- "reth-optimism-forks",
- "reth-optimism-primitives",
- "reth-primitives-traits",
- "reth-storage-api",
- "reth-transaction-pool",
- "serde",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "reth-payload-builder"
 version = "2.0.0"
 source = "git+https://github.com/paradigmxyz/reth?tag=v2.0.0#eb4c15e5e36d8776d46629beae4c0a69af7ab04f"
@@ -11420,6 +10960,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8323304221c2a851516f22236c5722a72eaa19749016521d6dff0824447d96d"
 dependencies = [
  "displaydoc",
+ "serde_core",
  "zerovec",
 ]
 
@@ -13046,13 +12587,12 @@ dependencies = [
  "dotenvy",
  "reth-cli-util",
  "reth-node-builder",
- "reth-optimism-cli",
- "reth-optimism-evm",
  "reth-provider",
  "reth-tracing",
  "tikv-jemallocator",
  "world-chain-cli",
  "world-chain-node",
+ "world-chain-primitives",
  "world-chain-rpc",
 ]
 
@@ -13064,6 +12604,7 @@ dependencies = [
  "alloy-eips",
  "alloy-network",
  "alloy-op-evm",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-signer-local",
@@ -13088,12 +12629,6 @@ dependencies = [
  "reth-evm",
  "reth-node-api",
  "reth-node-builder",
- "reth-optimism-chainspec",
- "reth-optimism-evm",
- "reth-optimism-forks",
- "reth-optimism-node",
- "reth-optimism-payload-builder",
- "reth-optimism-primitives",
  "reth-payload-primitives",
  "reth-payload-util",
  "reth-primitives-traits",
@@ -13125,6 +12660,7 @@ version = "2.0.0"
 dependencies = [
  "alloy-chains",
  "alloy-genesis",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-signer-local",
  "clap",
@@ -13135,11 +12671,9 @@ dependencies = [
  "reth-network-peers",
  "reth-node-builder",
  "reth-node-core",
- "reth-optimism-chainspec",
- "reth-optimism-node",
- "reth-optimism-payload-builder",
  "reth-rpc-server-types",
  "tracing",
+ "world-chain-primitives",
 ]
 
 [[package]]
@@ -13148,6 +12682,7 @@ version = "2.0.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
@@ -13167,12 +12702,6 @@ dependencies = [
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
- "reth-optimism-chainspec",
- "reth-optimism-evm",
- "reth-optimism-forks",
- "reth-optimism-node",
- "reth-optimism-primitives",
- "reth-optimism-rpc",
  "reth-payload-builder",
  "reth-primitives-traits",
  "reth-provider",
@@ -13189,6 +12718,454 @@ dependencies = [
  "world-chain-primitives",
  "world-chain-rpc",
  "world-chain-test-utils",
+]
+
+[[package]]
+name = "world-chain-op-chainspec"
+version = "1.11.3"
+dependencies = [
+ "alloy-chains",
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-genesis",
+ "alloy-hardforks",
+ "alloy-primitives",
+ "derive_more",
+ "miniz_oxide 0.9.1",
+ "op-alloy-consensus",
+ "op-alloy-rpc-types",
+ "paste",
+ "reth-chainspec",
+ "reth-ethereum-forks",
+ "reth-network-peers",
+ "reth-primitives-traits",
+ "serde",
+ "serde_json",
+ "tar-no-std",
+ "thiserror 2.0.18",
+ "world-chain-op-forks",
+ "world-chain-op-primitives",
+]
+
+[[package]]
+name = "world-chain-op-cli"
+version = "1.11.3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rlp",
+ "clap",
+ "derive_more",
+ "eyre",
+ "futures-util",
+ "op-alloy-consensus",
+ "reth-chainspec",
+ "reth-cli",
+ "reth-cli-commands",
+ "reth-cli-runner",
+ "reth-consensus",
+ "reth-db",
+ "reth-db-api",
+ "reth-db-common",
+ "reth-downloaders",
+ "reth-execution-types",
+ "reth-fs-util",
+ "reth-node-builder",
+ "reth-node-core",
+ "reth-node-events",
+ "reth-node-metrics",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-prune",
+ "reth-rpc-server-types",
+ "reth-stages",
+ "reth-static-file",
+ "reth-static-file-types",
+ "reth-tasks",
+ "reth-tracing",
+ "serde",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "world-chain-op-chainspec",
+ "world-chain-op-consensus",
+ "world-chain-op-evm",
+ "world-chain-op-node",
+ "world-chain-op-primitives",
+ "world-chain-op-trie",
+]
+
+[[package]]
+name = "world-chain-op-consensus"
+version = "1.11.3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-trie",
+ "reth-chainspec",
+ "reth-consensus",
+ "reth-consensus-common",
+ "reth-execution-types",
+ "reth-primitives-traits",
+ "reth-storage-api",
+ "reth-storage-errors",
+ "reth-trie-common",
+ "revm",
+ "thiserror 2.0.18",
+ "tracing",
+ "world-chain-op-chainspec",
+ "world-chain-op-forks",
+ "world-chain-op-primitives",
+]
+
+[[package]]
+name = "world-chain-op-evm"
+version = "1.11.3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-evm",
+ "alloy-op-evm",
+ "alloy-primitives",
+ "op-alloy-consensus",
+ "op-alloy-rpc-types",
+ "op-alloy-rpc-types-engine",
+ "op-revm",
+ "reth-chainspec",
+ "reth-evm",
+ "reth-execution-errors",
+ "reth-execution-types",
+ "reth-primitives-traits",
+ "reth-rpc-eth-api",
+ "reth-storage-errors",
+ "revm",
+ "thiserror 2.0.18",
+ "world-chain-op-chainspec",
+ "world-chain-op-consensus",
+ "world-chain-op-forks",
+ "world-chain-op-primitives",
+]
+
+[[package]]
+name = "world-chain-op-exex"
+version = "1.11.3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "eyre",
+ "futures-util",
+ "reth-execution-types",
+ "reth-exex",
+ "reth-node-api",
+ "reth-provider",
+ "reth-trie",
+ "tokio",
+ "tracing",
+ "world-chain-op-trie",
+]
+
+[[package]]
+name = "world-chain-op-flashblocks"
+version = "1.11.3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rpc-types",
+ "alloy-rpc-types-engine",
+ "brotli",
+ "derive_more",
+ "eyre",
+ "futures-util",
+ "metrics",
+ "op-alloy-rpc-types-engine",
+ "reth-chain-state",
+ "reth-engine-primitives",
+ "reth-errors",
+ "reth-evm",
+ "reth-execution-types",
+ "reth-metrics",
+ "reth-payload-primitives",
+ "reth-primitives-traits",
+ "reth-revm",
+ "reth-rpc-eth-types",
+ "reth-storage-api",
+ "reth-tasks",
+ "ringbuffer",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "url",
+ "world-chain-op-payload",
+ "world-chain-op-primitives",
+]
+
+[[package]]
+name = "world-chain-op-forks"
+version = "1.11.3"
+dependencies = [
+ "alloy-op-hardforks",
+ "alloy-primitives",
+ "once_cell",
+ "reth-ethereum-forks",
+]
+
+[[package]]
+name = "world-chain-op-node"
+version = "1.11.3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rpc-types-engine",
+ "alloy-rpc-types-eth",
+ "clap",
+ "eyre",
+ "futures-util",
+ "humantime",
+ "op-alloy-consensus",
+ "op-alloy-rpc-types-engine",
+ "op-revm",
+ "reth-chainspec",
+ "reth-consensus",
+ "reth-db",
+ "reth-db-api",
+ "reth-evm",
+ "reth-network",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-node-core",
+ "reth-payload-builder",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-rpc-api",
+ "reth-rpc-engine-api",
+ "reth-rpc-server-types",
+ "reth-tasks",
+ "reth-tracing",
+ "reth-transaction-pool",
+ "reth-trie-common",
+ "revm",
+ "serde",
+ "tokio",
+ "tracing",
+ "url",
+ "world-chain-op-chainspec",
+ "world-chain-op-consensus",
+ "world-chain-op-evm",
+ "world-chain-op-exex",
+ "world-chain-op-forks",
+ "world-chain-op-payload",
+ "world-chain-op-primitives",
+ "world-chain-op-rpc",
+ "world-chain-op-storage",
+ "world-chain-op-trie",
+ "world-chain-op-txpool",
+]
+
+[[package]]
+name = "world-chain-op-payload"
+version = "1.11.3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-evm",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types-debug",
+ "alloy-rpc-types-engine",
+ "derive_more",
+ "op-alloy-consensus",
+ "op-alloy-rpc-types-engine",
+ "op-revm",
+ "reth-basic-payload-builder",
+ "reth-chainspec",
+ "reth-evm",
+ "reth-payload-builder-primitives",
+ "reth-payload-primitives",
+ "reth-payload-util",
+ "reth-payload-validator",
+ "reth-primitives-traits",
+ "reth-revm",
+ "reth-transaction-pool",
+ "revm",
+ "serde",
+ "sha2",
+ "thiserror 2.0.18",
+ "tracing",
+ "world-chain-op-evm",
+ "world-chain-op-forks",
+ "world-chain-op-primitives",
+ "world-chain-op-txpool",
+]
+
+[[package]]
+name = "world-chain-op-primitives"
+version = "1.11.3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rlp",
+ "bytes",
+ "op-alloy-consensus",
+ "reth-codecs",
+ "reth-primitives-traits",
+ "reth-zstd-compressors",
+ "serde",
+ "serde_with",
+]
+
+[[package]]
+name = "world-chain-op-rpc"
+version = "1.11.3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-json-rpc",
+ "alloy-op-evm",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-client",
+ "alloy-rpc-types-debug",
+ "alloy-rpc-types-engine",
+ "alloy-rpc-types-eth",
+ "alloy-serde",
+ "alloy-transport",
+ "alloy-transport-http",
+ "async-trait",
+ "derive_more",
+ "eyre",
+ "futures",
+ "jsonrpsee",
+ "jsonrpsee-core",
+ "jsonrpsee-types",
+ "metrics",
+ "op-alloy-consensus",
+ "op-alloy-network",
+ "op-alloy-rpc-jsonrpsee",
+ "op-alloy-rpc-types",
+ "op-alloy-rpc-types-engine",
+ "op-revm",
+ "reqwest 0.12.28",
+ "reth-basic-payload-builder",
+ "reth-chain-state",
+ "reth-chainspec",
+ "reth-evm",
+ "reth-metrics",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-payload-util",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-revm",
+ "reth-rpc",
+ "reth-rpc-api",
+ "reth-rpc-engine-api",
+ "reth-rpc-eth-api",
+ "reth-rpc-eth-types",
+ "reth-rpc-server-types",
+ "reth-storage-api",
+ "reth-tasks",
+ "reth-transaction-pool",
+ "revm",
+ "serde",
+ "serde_json",
+ "strum",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tower",
+ "tracing",
+ "world-chain-op-evm",
+ "world-chain-op-flashblocks",
+ "world-chain-op-forks",
+ "world-chain-op-payload",
+ "world-chain-op-primitives",
+ "world-chain-op-trie",
+ "world-chain-op-txpool",
+]
+
+[[package]]
+name = "world-chain-op-storage"
+version = "1.11.3"
+dependencies = [
+ "alloy-consensus",
+ "reth-storage-api",
+ "world-chain-op-primitives",
+]
+
+[[package]]
+name = "world-chain-op-trie"
+version = "1.11.3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "auto_impl",
+ "bincode 2.0.1",
+ "bytes",
+ "derive_more",
+ "eyre",
+ "metrics",
+ "parking_lot",
+ "reth-codecs",
+ "reth-db",
+ "reth-ethereum-primitives",
+ "reth-evm",
+ "reth-execution-errors",
+ "reth-metrics",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-revm",
+ "reth-tasks",
+ "reth-trie",
+ "reth-trie-common",
+ "serde",
+ "strum",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "world-chain-op-txpool"
+version = "1.11.3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-json-rpc",
+ "alloy-primitives",
+ "alloy-rpc-client",
+ "alloy-rpc-types-eth",
+ "alloy-serde",
+ "c-kzg",
+ "derive_more",
+ "futures-util",
+ "metrics",
+ "op-alloy-consensus",
+ "op-alloy-flz",
+ "op-alloy-rpc-types",
+ "op-revm",
+ "parking_lot",
+ "reth-chain-state",
+ "reth-chainspec",
+ "reth-eth-wire-types",
+ "reth-evm",
+ "reth-execution-types",
+ "reth-metrics",
+ "reth-primitives-traits",
+ "reth-storage-api",
+ "reth-transaction-pool",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "world-chain-op-evm",
+ "world-chain-op-forks",
+ "world-chain-op-primitives",
 ]
 
 [[package]]
@@ -13236,10 +13213,6 @@ dependencies = [
  "op-alloy-consensus",
  "reth-basic-payload-builder",
  "reth-execution-cache",
- "reth-optimism-chainspec",
- "reth-optimism-node",
- "reth-optimism-payload-builder",
- "reth-optimism-primitives",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-primitives-traits",
@@ -13277,6 +13250,7 @@ version = "2.0.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
@@ -13290,9 +13264,6 @@ dependencies = [
  "reth-eth-wire-types",
  "reth-evm",
  "reth-node-api",
- "reth-optimism-forks",
- "reth-optimism-node",
- "reth-optimism-primitives",
  "reth-primitives-traits",
  "reth-provider",
  "reth-transaction-pool",
@@ -13304,6 +13275,7 @@ dependencies = [
  "tokio",
  "tracing",
  "world-chain-pbh",
+ "world-chain-primitives",
  "world-chain-test-utils",
 ]
 
@@ -13314,6 +13286,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
  "alloy-eips",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
@@ -13330,15 +13303,19 @@ dependencies = [
  "op-alloy-network",
  "p256",
  "reth-basic-payload-builder",
- "reth-optimism-chainspec",
- "reth-optimism-node",
- "reth-optimism-primitives",
  "reth-primitives-traits",
  "reth-revm",
  "serde",
  "serde_json",
  "sha2",
  "thiserror 2.0.18",
+ "world-chain-op-chainspec",
+ "world-chain-op-cli",
+ "world-chain-op-evm",
+ "world-chain-op-node",
+ "world-chain-op-payload",
+ "world-chain-op-primitives",
+ "world-chain-op-rpc",
 ]
 
 [[package]]
@@ -13349,6 +13326,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-op-evm",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
@@ -13369,11 +13347,6 @@ dependencies = [
  "reth-evm",
  "reth-node-api",
  "reth-node-builder",
- "reth-optimism-evm",
- "reth-optimism-forks",
- "reth-optimism-node",
- "reth-optimism-primitives",
- "reth-optimism-rpc",
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
@@ -13406,6 +13379,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-network",
  "alloy-op-evm",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-types",
@@ -13442,12 +13416,6 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-node-ethereum",
- "reth-optimism-chainspec",
- "reth-optimism-evm",
- "reth-optimism-forks",
- "reth-optimism-node",
- "reth-optimism-payload-builder",
- "reth-optimism-primitives",
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune-types",
@@ -13507,11 +13475,6 @@ dependencies = [
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
- "reth-optimism-chainspec",
- "reth-optimism-evm",
- "reth-optimism-node",
- "reth-optimism-payload-builder",
- "reth-optimism-primitives",
  "reth-provider",
  "reth-rpc-api",
  "reth-tasks",
@@ -13605,8 +13568,6 @@ dependencies = [
  "rand 0.9.4",
  "reqwest 0.12.28",
  "reth-node-api",
- "reth-optimism-node",
- "reth-optimism-payload-builder",
  "reth-rpc-layer",
  "semaphore-rs",
  "serde",
@@ -13720,6 +13681,7 @@ dependencies = [
  "displaydoc",
  "yoke",
  "zerofrom",
+ "zerovec",
 ]
 
 [[package]]
@@ -13728,6 +13690,7 @@ version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90f911cbc359ab6af17377d242225f4d75119aec87ea711a880987b18cd7b239"
 dependencies = [
+ "serde",
  "yoke",
  "zerofrom",
  "zerovec-derive",

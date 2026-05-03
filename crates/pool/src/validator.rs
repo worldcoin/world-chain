@@ -20,9 +20,9 @@ use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
-use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::txpool::OpTransactionValidator;
-use reth_optimism_primitives::OpTransactionSigned;
+use alloy_op_hardforks::OpHardforks;
+use world_chain_primitives::OpTransactionValidator;
+use world_chain_primitives::OpTransactionSigned;
 use reth_primitives_traits::SealedBlock;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::{
@@ -314,8 +314,8 @@ pub mod tests {
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_primitives::{Address, address};
     use alloy_sol_types::SolCall;
-    use reth_optimism_node::OpEvmConfig;
-    use reth_optimism_primitives::OpTransactionSigned;
+    use world_chain_primitives::OpEvmConfig;
+    use world_chain_primitives::OpTransactionSigned;
     use reth_primitives_traits::SealedBlock;
     use reth_transaction_pool::{
         Pool, TransactionPool, TransactionValidator, blobstore::InMemoryBlobStore,
@@ -347,7 +347,7 @@ pub mod tests {
     fn world_chain_validator() -> TestValidator {
         use super::{MAX_U16, PBH_GAS_LIMIT_SLOT, PBH_NONCE_LIMIT_SLOT};
         use crate::root::WorldChainRootValidator;
-        use reth_optimism_node::txpool::OpTransactionValidator;
+        use world_chain_primitives::OpTransactionValidator;
         use reth_transaction_pool::{
             blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         };

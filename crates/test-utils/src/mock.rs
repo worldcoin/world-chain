@@ -21,8 +21,8 @@ use reth_db::{
 };
 use reth_node_api::NodeTypes;
 use reth_node_ethereum::EthEngineTypes;
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_primitives::OpTransactionSigned;
+use world_chain_primitives::OpChainSpec;
+use world_chain_primitives::OpTransactionSigned;
 use reth_primitives_traits::{
     Account, Bytecode, GotExpected, RecoveredBlock, SealedHeader, SignerRecoverable,
 };

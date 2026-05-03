@@ -7,10 +7,10 @@ use reth_chain_state::ExecutedBlock;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodePrimitives, NodeTypes};
 use reth_node_builder::BuilderContext;
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::OpNextBlockEnvAttributes;
-use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig};
-use reth_optimism_primitives::OpPrimitives;
+use world_chain_primitives::OpChainSpec;
+use world_chain_primitives::OpNextBlockEnvAttributes;
+use world_chain_primitives::{OpBuiltPayload, OpEngineTypes, OpEvmConfig};
+use world_chain_primitives::OpPrimitives;
 use world_chain_p2p::protocol::{
     event::{ChainEvent, WorldChainEvent, WorldChainEventsStream},
     handler::FlashblocksHandle,

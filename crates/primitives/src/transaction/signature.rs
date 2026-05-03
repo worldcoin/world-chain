@@ -1,6 +1,6 @@
 use core::hash::{Hash, Hasher};
 
-use alloy_primitives::{B256, Bytes, Signature, U256, bytes::BufMut};
+use alloy_primitives::{bytes::BufMut, Bytes, Signature, B256, U256};
 use alloy_rlp::{Decodable, Encodable, Header};
 
 /// The EIP-2718 transaction type byte for WIP-1001 transactions.

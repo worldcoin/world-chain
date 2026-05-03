@@ -1,7 +1,7 @@
 use reth_db::test_utils::create_test_rw_db;
 use reth_node_api::{FullNodeComponents, NodeTypesWithDBAdapter};
 use reth_node_builder::{NodeBuilder, NodeConfig};
-use reth_optimism_chainspec::BASE_MAINNET;
+use world_chain_primitives::BASE_MAINNET;
 use reth_provider::providers::BlockchainProvider;
 use world_chain_node::{context::WorldChainDefaultContext, node::WorldChainNode};
 use world_chain_test_utils::node::test_config;

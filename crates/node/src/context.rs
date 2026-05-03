@@ -19,12 +19,12 @@ use reth_node_builder::{
     rpc::{BasicEngineValidatorBuilder, RpcAddOns},
 };
 use reth_node_core::primitives::Hardforks;
-use reth_optimism_evm::OpEvmConfig;
-use reth_optimism_node::{
+use world_chain_primitives::OpEvmConfig;
+use world_chain_primitives::{
     OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
-    args::RollupArgs,
+    RollupArgs,
 };
-use reth_optimism_rpc::OpEthApiBuilder;
+use world_chain_primitives::OpEthApiBuilder;
 use world_chain_builder::coordinator::FlashblocksExecutionCoordinator;
 use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
 use world_chain_p2p::{

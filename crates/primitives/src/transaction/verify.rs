@@ -9,16 +9,16 @@
 //! recovered pubkey is checked against `session_key`.
 
 use alloy_consensus::crypto::RecoveryError;
-use alloy_primitives::{B256, U256, uint};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use alloy_primitives::{uint, B256, U256};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use p256::{
+    ecdsa::{signature::hazmat::PrehashVerifier, Signature as P256EcdsaSignature, VerifyingKey},
     EncodedPoint,
-    ecdsa::{Signature as P256EcdsaSignature, VerifyingKey, signature::hazmat::PrehashVerifier},
 };
 use sha2::{Digest, Sha256};
 
 use crate::transaction::{
-    P256Signature, SessionKey, WebAuthnSignature, Wip1001Signature, signature::SessionKeyError,
+    signature::SessionKeyError, P256Signature, SessionKey, WebAuthnSignature, Wip1001Signature,
 };
 
 /// The P-256 (secp256r1) curve order n.
@@ -298,7 +298,7 @@ mod tests {
     use super::*;
     use alloy_primitives::Bytes;
     use p256::{
-        ecdsa::{SigningKey as P256SigningKey, signature::hazmat::PrehashSigner},
+        ecdsa::{signature::hazmat::PrehashSigner, SigningKey as P256SigningKey},
         elliptic_curve::rand_core::OsRng,
     };
 

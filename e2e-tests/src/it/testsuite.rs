@@ -10,7 +10,7 @@ use reth_chainspec::EthChainSpec;
 use reth_e2e_test_utils::testsuite::actions::Action;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_node_api::PayloadAttributes;
-use reth_optimism_node::utils::optimism_payload_attributes;
+use world_chain_primitives::optimism_payload_attributes;
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
 use revm_primitives::{Address, B256, U256};
@@ -1279,7 +1279,7 @@ async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
         .verifying_key();
 
     let authorization_gen =
-        move |parent_hash: B256, attrs: reth_optimism_payload_builder::OpPayloadAttrs| {
+        move |parent_hash: B256, attrs: world_chain_primitives::OpPayloadAttrs| {
             let authorizer_sk = ed25519_dalek::SigningKey::from_bytes(&[0; 32]);
             let payload_id = attrs.payload_id(&parent_hash);
             world_chain_primitives::p2p::Authorization::new(
@@ -1362,7 +1362,7 @@ async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
                             alloy_rpc_types_eth::Block,
                             alloy_consensus::Receipt,
                             alloy_consensus::Header,
-                            reth_optimism_primitives::OpTransactionSigned,
+                            world_chain_primitives::OpTransactionSigned,
                         >::block_by_number(
                             &builder_rpc, BlockNumberOrTag::Pending, false
                         )
@@ -1473,7 +1473,7 @@ async fn test_eth_api_assertions() -> eyre::Result<()> {
         .verifying_key();
 
     let authorization_gen =
-        move |parent_hash: B256, attrs: reth_optimism_payload_builder::OpPayloadAttrs| {
+        move |parent_hash: B256, attrs: world_chain_primitives::OpPayloadAttrs| {
             let authorizer_sk = ed25519_dalek::SigningKey::from_bytes(&[0; 32]);
             let payload_id = attrs.payload_id(&parent_hash);
             world_chain_primitives::p2p::Authorization::new(
@@ -1707,7 +1707,7 @@ async fn test_assertion_driven_event_stream() -> eyre::Result<()> {
         .verifying_key();
 
     let authorization_gen =
-        move |parent_hash: B256, attrs: reth_optimism_payload_builder::OpPayloadAttrs| {
+        move |parent_hash: B256, attrs: world_chain_primitives::OpPayloadAttrs| {
             let authorizer_sk = ed25519_dalek::SigningKey::from_bytes(&[0; 32]);
             let payload_id = attrs.payload_id(&parent_hash);
             world_chain_primitives::p2p::Authorization::new(
@@ -2216,7 +2216,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
         reth_network_peers::NodeRecord,
         reth_network::NetworkHandle<
             reth_eth_wire::BasicNetworkPrimitives<
-                reth_optimism_primitives::OpPrimitives,
+                world_chain_primitives::OpPrimitives,
                 op_alloy_consensus::OpPooledTransaction,
                 reth_network::types::NewBlock<
                     alloy_consensus::Block<op_alloy_consensus::OpTxEnvelope>,
@@ -2226,7 +2226,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
         reth_node_core::exit::NodeExitFuture,
         Box<dyn std::any::Any + Sync + Send>,
     )> {
-        let op_chain_spec: Arc<reth_optimism_chainspec::OpChainSpec> = Arc::new(CHAIN_SPEC.clone());
+        let op_chain_spec: Arc<world_chain_primitives::OpChainSpec> = Arc::new(CHAIN_SPEC.clone());
 
         let mut network_config = NetworkArgs {
             discovery: DiscoveryArgs {

@@ -25,9 +25,9 @@ use reth_evm::{
     ConfigureEvm, EvmEnv, EvmFactory,
     execute::{BlockBuilder, BlockBuilderOutcome},
 };
-use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
-use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
-use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
+use world_chain_primitives::{OpChainSpec, OpChainSpecBuilder};
+use world_chain_primitives::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
+use world_chain_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_primitives_traits::{Account, Bytecode, Recovered, SealedHeader, SignedTransaction};
 use reth_provider::{
     BlockIdReader, BlockNumReader, BytecodeReader, CanonStateSubscriptions, ChainSpecProvider,

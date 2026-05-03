@@ -1,31 +1,30 @@
 use std::sync::Arc;
 
-use alloy_primitives::{Address, B256, Bytes};
+use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types_engine::PayloadAttributes as RpcPayloadAttributes;
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadConfig};
-use reth_optimism_node::{
-    OpPayloadAttributes, payload::OpPayloadAttrs, utils::optimism_payload_attributes,
-};
-use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_payload_primitives::PayloadAttributes as _;
 use reth_provider::{StateProvider, StateProviderFactory};
 use world_chain_builder::{
-    WorldChainPayloadBuilderCtxBuilder, payload_builder::FlashblocksPayloadBuilder,
-    traits::payload_builder::FlashblockPayloadBuilder,
+    payload_builder::FlashblocksPayloadBuilder, traits::payload_builder::FlashblockPayloadBuilder,
+    WorldChainPayloadBuilderCtxBuilder,
 };
 use world_chain_node::context::WorldChainDefaultContext;
+use world_chain_primitives::{
+    optimism_payload_attributes, OpBuilderConfig, OpPayloadAttributes, OpPayloadAttrs,
+};
 use world_chain_test_utils::{
-    PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
     builder::{
-        CHAIN_SPEC, build_flashblock_fixture_eth_transfers_with_provider,
+        build_flashblock_fixture_eth_transfers_with_provider,
         build_flashblock_fixture_fib_with_provider,
-        build_flashblock_fixture_world_id_like_bn254_with_provider,
+        build_flashblock_fixture_world_id_like_bn254_with_provider, CHAIN_SPEC,
     },
     e2e_harness::setup::{
-        TX_SET_L1_BLOCK, encode_eip1559_params, setup_with_block_uncompressed_size_limit,
+        encode_eip1559_params, setup_with_block_uncompressed_size_limit, TX_SET_L1_BLOCK,
     },
     utils::signer,
+    PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
 };
 
 const TOTAL_TX_COUNTS: [usize; 3] = [50, 500, 1000];
@@ -81,7 +80,7 @@ where
 fn build_live_payload_builder<Pool, Client>(
     pool: Pool,
     client: Client,
-    evm_config: reth_optimism_node::OpEvmConfig,
+    evm_config: world_chain_primitives::OpEvmConfig,
     bal_enabled: bool,
 ) -> FlashblocksPayloadBuilder<Pool, Client, WorldChainPayloadBuilderCtxBuilder, ()>
 where

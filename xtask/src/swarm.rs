@@ -14,8 +14,8 @@ use alloy_primitives::B256;
 use clap::Parser;
 use eyre::Result;
 use reth_node_api::PayloadAttributes;
-use reth_optimism_node::utils::optimism_payload_attributes;
-use reth_optimism_payload_builder::OpPayloadAttrs;
+use world_chain_primitives::optimism_payload_attributes;
+use world_chain_primitives::OpPayloadAttrs;
 use tracing::info;
 
 use world_chain_node::context::WorldChainDefaultContext;

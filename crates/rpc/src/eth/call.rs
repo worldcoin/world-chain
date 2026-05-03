@@ -1,5 +1,5 @@
-use reth_optimism_primitives::OpPrimitives;
-use reth_optimism_rpc::{OpEthApi, OpEthApiError};
+use world_chain_primitives::OpPrimitives;
+use world_chain_primitives::{OpEthApi, OpEthApiError};
 use reth_rpc_eth_api::{
     EthApiTypes, FromEvmError, RpcConvert, RpcNodeCore,
     helpers::{Call, EthCall, estimate::EstimateCall},

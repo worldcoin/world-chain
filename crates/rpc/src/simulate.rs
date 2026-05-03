@@ -9,7 +9,7 @@ use jsonrpsee::{
 use lru::LruCache;
 use op_revm::{OpSpecId, OpTransaction};
 use reth_evm::{ConfigureEvm, Evm as RethEvm, EvmFactory};
-use reth_optimism_evm::OpEvmConfig;
+use world_chain_primitives::OpEvmConfig;
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderFactory};
 use reth_revm::{State, database::StateProviderDatabase};
 use reth_rpc_eth_api::helpers::SpawnBlocking;

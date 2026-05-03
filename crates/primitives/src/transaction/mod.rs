@@ -10,10 +10,10 @@ pub use envelope::{WorldChainTxEnvelope, WorldChainTxType, WorldChainTypedTransa
 #[cfg(any(test, feature = "test-utils"))]
 pub use keyring::MockKeyringRegistry;
 
-pub use keyring::{KeyringRegistry, Wip1001ValidationError, validate_wip1001};
+pub use keyring::{validate_wip1001, KeyringRegistry, Wip1001ValidationError};
 pub use signature::{
-    P256Signature, SessionKey, SessionKeyError, WIP_1001_TX_TYPE, WebAuthnSignature,
-    Wip1001Signature,
+    P256Signature, SessionKey, SessionKeyError, WebAuthnSignature, Wip1001Signature,
+    WIP_1001_TX_TYPE,
 };
-pub use verify::{Wip1001VerifyError, verify_wip1001_signature};
+pub use verify::{verify_wip1001_signature, Wip1001VerifyError};
 pub use wip_1001::{SignedWip1001, TxWip1001};

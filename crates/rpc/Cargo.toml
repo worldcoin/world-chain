@@ -31,11 +31,7 @@ reth-tasks.workspace = true
 reth-chain-state.workspace = true
 
 # op-reth
-reth-optimism-rpc.workspace = true
-reth-optimism-node.workspace = true
-reth-optimism-forks.workspace = true
-reth-optimism-primitives.workspace = true
-reth-optimism-evm.workspace = true
+alloy-op-hardforks.workspace = true
 reth-revm.workspace = true
 
 # alloy

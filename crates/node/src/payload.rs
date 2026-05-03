@@ -9,10 +9,8 @@ use world_chain_cli::FlashblocksPayloadBuilderConfig;
 use op_alloy_consensus::OpTxEnvelope;
 use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
 use reth_node_builder::{BuilderContext, components::PayloadBuilderBuilder};
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::{
-    OpBuiltPayload, OpEvmConfig, payload::OpPayloadAttrs, txpool::OpPooledTx,
-};
+use world_chain_primitives::OpChainSpec;
+use world_chain_primitives::{OpBuiltPayload, OpEvmConfig, OpPayloadAttrs, OpPooledTx};
 use reth_provider::{
     ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, StateProviderFactory,
 };

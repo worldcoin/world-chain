@@ -17,9 +17,9 @@ use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, HeaderTy, NodeTypes, PayloadTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
-use reth_optimism_node::payload::OpExecData;
-use reth_optimism_primitives::OpPrimitives;
-use reth_optimism_rpc::{OpEthApi, OpEthApiBuilder, OpEthApiError, eth::OpRpcConvert};
+use world_chain_primitives::OpExecData;
+use world_chain_primitives::OpPrimitives;
+use world_chain_primitives::{OpEthApi, OpEthApiBuilder, OpEthApiError, OpRpcConvert};
 use reth_rpc_eth_api::{
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcNodeCore, RpcNodeCoreExt, RpcTypes,
     helpers::{

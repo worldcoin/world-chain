@@ -3,8 +3,8 @@ use op_alloy_consensus::OpTxEnvelope;
 use reth_basic_payload_builder::PayloadConfig;
 use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
-use reth_optimism_node::{OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes};
-use reth_optimism_payload_builder::config::OpBuilderConfig;
+use world_chain_primitives::{OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes};
+use world_chain_primitives::OpBuilderConfig;
 use reth_revm::cancelled::CancelOnDrop;
 
 /// Builder trait for creating [`PayloadBuilderCtx`] instances with specific configurations.
@@ -14,7 +14,7 @@ use reth_revm::cancelled::CancelOnDrop;
 ///
 /// ```rust,ignore
 /// use reth_basic_payload_builder::PayloadConfig;
-/// use reth_optimism_node::OpBuiltPayload;
+/// use world_chain_primitives::OpBuiltPayload;
 /// use std::sync::Arc;
 ///
 /// // Example implementation

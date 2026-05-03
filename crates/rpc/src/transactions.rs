@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use jsonrpsee::core::async_trait;
-use reth_optimism_node::txpool::OpPooledTransaction;
+use world_chain_primitives::OpPooledTransaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_rpc_eth_api::{AsEthApiError, FromEthApiError};
 use reth_rpc_eth_types::{EthApiError, utils::recover_raw_transaction};

@@ -7,8 +7,8 @@ use reth_node_builder::{
     BuilderContext,
     components::{PayloadBuilderBuilder, PayloadServiceBuilder},
 };
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpNodeTypes, payload::OpPayloadAttrs};
+use world_chain_primitives::OpChainSpec;
+use world_chain_primitives::{OpBuiltPayload, OpEngineTypes, OpNodeTypes, OpPayloadAttrs};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{
     CanonStateSubscriptions, ChainSpecProvider, DatabaseProviderFactory, HeaderProvider,

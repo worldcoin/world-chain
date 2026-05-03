@@ -23,10 +23,10 @@ use reth_chainspec::{ChainInfo, MAINNET};
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_e2e_test_utils::transaction::TransactionTestContext;
 use reth_network_peers::PeerId;
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::OpEvmConfig;
-use reth_optimism_payload_builder::config::OpBuilderConfig;
-use reth_optimism_primitives::{OpBlock, OpTransactionSigned};
+use world_chain_primitives::OpChainSpec;
+use world_chain_primitives::OpEvmConfig;
+use world_chain_primitives::OpBuilderConfig;
+use world_chain_primitives::{OpBlock, OpTransactionSigned};
 use reth_primitives_traits::{
     Account, Bytecode, RecoveredBlock, SealedBlock, SealedHeader, TransactionMeta,
 };
@@ -77,7 +77,7 @@ pub fn test_config_with_peers_and_gossip(
     disable_txpool_gossip: bool,
     flashblocks_enabled: bool,
 ) -> WorldChainNodeConfig {
-    use reth_optimism_node::args::RollupArgs;
+    use world_chain_primitives::RollupArgs;
 
     let builder = BuilderArgs {
         enabled: true,
@@ -759,7 +759,7 @@ where
     Tx: WorldChainPoolTransaction,
 {
     type Transaction = Tx;
-    type Block = reth_optimism_primitives::OpBlock;
+    type Block = world_chain_primitives::OpBlock;
 
     async fn validate_transaction(
         &self,

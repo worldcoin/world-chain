@@ -6,19 +6,19 @@
 //! to the additional variants defined in the spec (P256, WebAuthn, EdDSA) — and
 //! the RLP / EIP-2718 codecs required to wire `Signed<TxWip1001, Wip1001Signature>`
 //! into [`WorldChainTxEnvelope`](crate::transaction::WorldChainTxEnvelope).
-use alloy_consensus::{SignableTransaction, Signed, Transaction, transaction::TxHashable};
+use alloy_consensus::{transaction::TxHashable, SignableTransaction, Signed, Transaction};
 use alloy_eips::{
-    Decodable2718, Encodable2718, Typed2718,
     eip2718::{Eip2718Error, Eip2718Result, IsTyped2718},
     eip2930::AccessList,
     eip7702::SignedAuthorization,
+    Decodable2718, Encodable2718, Typed2718,
 };
 use alloy_primitives::{
-    Address, B256, Bytes, ChainId, Signature, TxHash, TxKind, U256, bytes::BufMut, keccak256,
+    bytes::BufMut, keccak256, Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable, Header};
 
-use crate::transaction::{WIP_1001_TX_TYPE, Wip1001Signature};
+use crate::transaction::{Wip1001Signature, WIP_1001_TX_TYPE};
 
 /// A WIP-1001 typed transaction (`0x1D`).
 ///

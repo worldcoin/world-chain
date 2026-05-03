@@ -2,25 +2,24 @@ use std::sync::Arc;
 
 use alloy_consensus::BlobTransactionValidationError;
 use alloy_eips::{
-    Typed2718, eip4844::c_kzg::KzgSettings, eip7594::BlobTransactionSidecarVariant,
-    eip7702::SignedAuthorization,
+    eip4844::c_kzg::KzgSettings, eip7594::BlobTransactionSidecarVariant,
+    eip7702::SignedAuthorization, Typed2718,
 };
 use alloy_primitives::{Bytes, TxHash};
-use alloy_rpc_types::{AccessList, erc4337::TransactionConditional};
-use reth_optimism_node::txpool::{
-    OpPooledTransaction, OpPooledTx, conditional::MaybeConditionalTransaction,
-    estimated_da_size::DataAvailabilitySized, interop::MaybeInteropTransaction,
-};
-use reth_optimism_primitives::OpTransactionSigned;
+use alloy_rpc_types::{erc4337::TransactionConditional, AccessList};
 use reth_primitives_traits::{InMemorySize, Recovered};
 use reth_transaction_pool::{
-    EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
     error::{InvalidPoolTransactionError, PoolTransactionError},
+    EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
 };
-use revm_primitives::{Address, B256, TxKind, U256};
+use revm_primitives::{Address, TxKind, B256, U256};
 use std::borrow::Cow;
 use thiserror::Error;
 use world_chain_pbh::payload::{PBHPayload, PBHValidationError};
+use world_chain_primitives::{
+    DataAvailabilitySized, MaybeConditionalTransaction, MaybeInteropTransaction,
+    OpPooledTransaction, OpPooledTx, OpTransactionSigned,
+};
 
 #[derive(Debug, Clone)]
 pub struct WorldChainPooledTransaction {

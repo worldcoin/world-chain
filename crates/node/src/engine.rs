@@ -8,8 +8,8 @@ use reth_node_core::{
     primitives::EthereumHardforks,
     version::{CLIENT_CODE, version_metadata},
 };
-use reth_optimism_node::{OP_NAME_CLIENT, payload::OpExecData};
-use reth_optimism_rpc::{OP_ENGINE_CAPABILITIES, OpEngineApi};
+use world_chain_primitives::{OP_NAME_CLIENT, OpExecData};
+use world_chain_primitives::{OP_ENGINE_CAPABILITIES, OpEngineApi};
 use reth_payload_builder::PayloadStore;
 use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
 use world_chain_p2p::protocol::handler::FlashblocksHandle;

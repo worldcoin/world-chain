@@ -4,8 +4,8 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::{B256, Bytes, TxHash};
 use reth_node_api::BlockBody;
-use reth_optimism_primitives::OpPrimitives;
-use reth_optimism_rpc::{OpEthApi, OpEthApiError};
+use world_chain_primitives::OpPrimitives;
+use world_chain_primitives::{OpEthApi, OpEthApiError};
 use reth_primitives_traits::{Recovered, SignerRecoverable, TransactionMeta};
 use reth_provider::{ProviderReceipt, ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_api::{

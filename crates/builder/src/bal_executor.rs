@@ -11,9 +11,9 @@ use reth_evm::{
     block::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
 };
 use reth_node_api::NodePrimitives;
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::OpRethReceiptBuilder;
-use reth_optimism_primitives::OpTransactionSigned;
+use world_chain_primitives::OpChainSpec;
+use world_chain_primitives::OpRethReceiptBuilder;
+use world_chain_primitives::OpTransactionSigned;
 use reth_payload_primitives::BuiltPayload;
 use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader};
 use reth_trie_common::updates::TrieUpdates;
@@ -33,7 +33,7 @@ use reth_evm::{
     block::CommitChanges,
     execute::{BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx},
 };
-use reth_optimism_node::{OpBlockAssembler, OpBuiltPayload};
+use world_chain_primitives::{OpBlockAssembler, OpBuiltPayload};
 use reth_provider::StateProvider;
 use revm::{context::result::ExecutionResult, database::states::bundle_state::BundleRetention};
 use std::{sync::Arc, time::Instant};

@@ -7,26 +7,21 @@ use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeTypes, NodeAddOns, NodeTypes, PayloadAttributesBuilder};
 use reth_node_builder::{
-    DebugNode, FullNodeComponents, Node, NodeAdapter, NodeComponents, NodeComponentsBuilder,
-    PayloadTypes, PrimitivesTy,
     components::{ComponentsBuilder, NetworkBuilder, PayloadServiceBuilder},
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
+    DebugNode, FullNodeComponents, Node, NodeAdapter, NodeComponents, NodeComponentsBuilder,
+    PayloadTypes, PrimitivesTy,
 };
 use reth_node_core::primitives::EthereumHardforks;
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::OpNextBlockEnvAttributes;
-use reth_optimism_node::{
-    OpEngineTypes, OpStorage,
-    node::{OpConsensusBuilder, OpExecutorBuilder},
-    payload::OpPayloadAttrs,
-    txpool::OpPooledTx,
-};
-use reth_optimism_primitives::OpPrimitives;
 use reth_primitives_traits::SealedHeader;
 use reth_rpc_eth_api::EthApiTypes;
-use reth_transaction_pool::{TransactionPool, blobstore::DiskFileBlobStore};
+use reth_transaction_pool::{blobstore::DiskFileBlobStore, TransactionPool};
 use world_chain_cli::WorldChainNodeConfig;
-use world_chain_pool::{WorldChainTransactionPool, tx::WorldChainPoolTransaction};
+use world_chain_pool::{tx::WorldChainPoolTransaction, WorldChainTransactionPool};
+use world_chain_primitives::{
+    OpChainSpec, OpConsensusBuilder, OpEngineTypes, OpExecutorBuilder, OpNextBlockEnvAttributes,
+    OpPayloadAttrs, OpPooledTx, OpPrimitives, OpStorage,
+};
 
 /// Context trait for World Chain node implementations.
 ///
@@ -57,23 +52,23 @@ pub trait WorldChainNodeContext<N: FullNodeTypes<Types = WorldChainNode<Self>>>:
     /// Responsible for constructing execution payloads, managing the transaction pool,
     /// and coordinating with the consensus layer for block production.
     type PayloadServiceBuilder: PayloadServiceBuilder<
-            N,
-            WorldChainTransactionPool<N::Provider, DiskFileBlobStore>,
-            Self::Evm,
-        >;
+        N,
+        WorldChainTransactionPool<N::Provider, DiskFileBlobStore>,
+        Self::Evm,
+    >;
 
     /// Builder for the core node components.
     ///
     /// Constructs essential node services including the RPC server, transaction pool,
     /// block executor, and other fundamental components required for node operation.
     type ComponentsBuilder: NodeComponentsBuilder<
+        N,
+        Components: NodeComponents<
             N,
-            Components: NodeComponents<
-                N,
-                Pool: TransactionPool<Transaction: WorldChainPoolTransaction + OpPooledTx>,
-                Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-            >,
-        >;
+            Pool: TransactionPool<Transaction: WorldChainPoolTransaction + OpPooledTx>,
+            Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+        >,
+    >;
 
     /// Customizable add-on types for extending node functionality.
     ///
@@ -205,7 +200,7 @@ impl<T: Unpin + Send + Clone + Sync + Debug + 'static> NodeTypes for WorldChainN
 
 /// Builds [`OpPayloadAttrs`] for local/dev-mode payload generation.
 ///
-/// Mirrors `reth_optimism_node::node::OpLocalPayloadAttributesBuilder`, which is
+/// Mirrors `world_chain_primitives::node::OpLocalPayloadAttributesBuilder`, which is
 /// not re-exported by upstream. Used by [`DebugNode`] when running in dev mode.
 struct OpLocalPayloadAttributesBuilder {
     chain_spec: Arc<OpChainSpec>,

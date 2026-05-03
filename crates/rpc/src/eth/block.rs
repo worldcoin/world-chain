@@ -1,8 +1,8 @@
 //! Loads and formats OP block RPC response.
 
 use alloy_eips::BlockId;
-use reth_optimism_primitives::OpPrimitives;
-use reth_optimism_rpc::{OpEthApi, OpEthApiError};
+use world_chain_primitives::OpPrimitives;
+use world_chain_primitives::{OpEthApi, OpEthApiError};
 use reth_primitives_traits::RecoveredBlock;
 use reth_provider::{BlockIdReader, BlockReader};
 use reth_rpc_eth_api::{
