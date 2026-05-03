@@ -3173,7 +3173,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4068,7 +4068,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -5344,7 +5344,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6328,7 +6328,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -10210,7 +10210,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -10290,7 +10290,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.7",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11234,7 +11234,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -12409,7 +12409,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -13046,13 +13046,12 @@ dependencies = [
  "dotenvy",
  "reth-cli-util",
  "reth-node-builder",
- "reth-optimism-cli",
- "reth-optimism-evm",
  "reth-provider",
  "reth-tracing",
  "tikv-jemallocator",
  "world-chain-cli",
  "world-chain-node",
+ "world-chain-primitives",
  "world-chain-rpc",
 ]
 
@@ -13064,6 +13063,7 @@ dependencies = [
  "alloy-eips",
  "alloy-network",
  "alloy-op-evm",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-signer-local",
@@ -13088,12 +13088,6 @@ dependencies = [
  "reth-evm",
  "reth-node-api",
  "reth-node-builder",
- "reth-optimism-chainspec",
- "reth-optimism-evm",
- "reth-optimism-forks",
- "reth-optimism-node",
- "reth-optimism-payload-builder",
- "reth-optimism-primitives",
  "reth-payload-primitives",
  "reth-payload-util",
  "reth-primitives-traits",
@@ -13125,6 +13119,7 @@ version = "2.0.0"
 dependencies = [
  "alloy-chains",
  "alloy-genesis",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-signer-local",
  "clap",
@@ -13135,11 +13130,9 @@ dependencies = [
  "reth-network-peers",
  "reth-node-builder",
  "reth-node-core",
- "reth-optimism-chainspec",
- "reth-optimism-node",
- "reth-optimism-payload-builder",
  "reth-rpc-server-types",
  "tracing",
+ "world-chain-primitives",
 ]
 
 [[package]]
@@ -13148,6 +13141,7 @@ version = "2.0.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
@@ -13167,12 +13161,6 @@ dependencies = [
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
- "reth-optimism-chainspec",
- "reth-optimism-evm",
- "reth-optimism-forks",
- "reth-optimism-node",
- "reth-optimism-primitives",
- "reth-optimism-rpc",
  "reth-payload-builder",
  "reth-primitives-traits",
  "reth-provider",
@@ -13236,10 +13224,6 @@ dependencies = [
  "op-alloy-consensus",
  "reth-basic-payload-builder",
  "reth-execution-cache",
- "reth-optimism-chainspec",
- "reth-optimism-node",
- "reth-optimism-payload-builder",
- "reth-optimism-primitives",
  "reth-payload-builder",
  "reth-payload-primitives",
  "reth-primitives-traits",
@@ -13277,6 +13261,7 @@ version = "2.0.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types",
@@ -13290,9 +13275,6 @@ dependencies = [
  "reth-eth-wire-types",
  "reth-evm",
  "reth-node-api",
- "reth-optimism-forks",
- "reth-optimism-node",
- "reth-optimism-primitives",
  "reth-primitives-traits",
  "reth-provider",
  "reth-transaction-pool",
@@ -13304,6 +13286,7 @@ dependencies = [
  "tokio",
  "tracing",
  "world-chain-pbh",
+ "world-chain-primitives",
  "world-chain-test-utils",
 ]
 
@@ -13314,6 +13297,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
  "alloy-eips",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
@@ -13331,8 +13315,12 @@ dependencies = [
  "p256",
  "reth-basic-payload-builder",
  "reth-optimism-chainspec",
+ "reth-optimism-cli",
+ "reth-optimism-evm",
  "reth-optimism-node",
+ "reth-optimism-payload-builder",
  "reth-optimism-primitives",
+ "reth-optimism-rpc",
  "reth-primitives-traits",
  "reth-revm",
  "serde",
@@ -13349,6 +13337,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-op-evm",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
@@ -13369,11 +13358,6 @@ dependencies = [
  "reth-evm",
  "reth-node-api",
  "reth-node-builder",
- "reth-optimism-evm",
- "reth-optimism-forks",
- "reth-optimism-node",
- "reth-optimism-primitives",
- "reth-optimism-rpc",
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
@@ -13406,6 +13390,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-network",
  "alloy-op-evm",
+ "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-types",
@@ -13442,12 +13427,6 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-node-ethereum",
- "reth-optimism-chainspec",
- "reth-optimism-evm",
- "reth-optimism-forks",
- "reth-optimism-node",
- "reth-optimism-payload-builder",
- "reth-optimism-primitives",
  "reth-primitives-traits",
  "reth-provider",
  "reth-prune-types",
@@ -13507,11 +13486,6 @@ dependencies = [
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
- "reth-optimism-chainspec",
- "reth-optimism-evm",
- "reth-optimism-node",
- "reth-optimism-payload-builder",
- "reth-optimism-primitives",
  "reth-provider",
  "reth-rpc-api",
  "reth-tasks",
@@ -13605,8 +13579,6 @@ dependencies = [
  "rand 0.9.4",
  "reqwest 0.12.28",
  "reth-node-api",
- "reth-optimism-node",
- "reth-optimism-payload-builder",
  "reth-rpc-layer",
  "semaphore-rs",
  "serde",

@@ -2,7 +2,7 @@
 
 use ordering::WorldChainOrdering;
 use reth_node_api::FullNodeTypes;
-use reth_optimism_node::OpEvmConfig;
+use world_chain_primitives::OpEvmConfig;
 use reth_transaction_pool::{
     Pool, TransactionValidationTaskExecutor, blobstore::DiskFileBlobStore,
 };

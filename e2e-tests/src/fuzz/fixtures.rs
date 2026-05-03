@@ -54,7 +54,7 @@ pub fn arb_execution_payload(
         world_chain_primitives::primitives::ExecutionPayloadFlashblockDeltaV1,
         Option<
             world_chain_builder::bal_executor::CommittedState<
-                reth_optimism_evm::OpRethReceiptBuilder,
+                world_chain_primitives::OpRethReceiptBuilder,
             >,
         >,
     ),
@@ -70,7 +70,7 @@ pub fn arb_execution_payload_sequence(
         world_chain_primitives::primitives::ExecutionPayloadFlashblockDeltaV1,
         Option<
             world_chain_builder::bal_executor::CommittedState<
-                reth_optimism_evm::OpRethReceiptBuilder,
+                world_chain_primitives::OpRethReceiptBuilder,
             >,
         >,
     )>,

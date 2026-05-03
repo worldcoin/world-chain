@@ -1,4 +1,4 @@
-use reth_optimism_payload_builder::config::OpBuilderConfig;
+use world_chain_primitives::OpBuilderConfig;
 use revm_database::states::reverts::{AccountInfoRevert, Reverts};
 use std::collections::{HashMap, hash_map::Entry};
 
@@ -74,7 +74,7 @@ mod tests {
     };
 
     use crate::utils::{effective_gas_limit, flatten_reverts};
-    use reth_optimism_payload_builder::config::OpBuilderConfig;
+    use world_chain_primitives::OpBuilderConfig;
 
     #[bon::builder]
     fn revert(

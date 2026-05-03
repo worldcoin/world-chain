@@ -13,8 +13,8 @@ use reth_basic_payload_builder::{
     PayloadConfig, PayloadState, PayloadTaskGuard, PendingPayload, ResolveBestPayload,
 };
 use reth_execution_cache::SavedCache;
-use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadAttrs};
-use reth_optimism_primitives::OpPrimitives;
+use world_chain_primitives::{OpBuiltPayload, OpPayloadAttrs};
+use world_chain_primitives::OpPrimitives;
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadJob};
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderError, PayloadKind};
 use reth_primitives_traits::BlockBody;

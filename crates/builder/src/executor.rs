@@ -14,10 +14,10 @@ use reth_evm::{
     },
 };
 use reth_node_api::NodePrimitives;
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::OpRethReceiptBuilder;
-use reth_optimism_node::OpBlockAssembler;
-use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use world_chain_primitives::OpChainSpec;
+use world_chain_primitives::OpRethReceiptBuilder;
+use world_chain_primitives::OpBlockAssembler;
+use world_chain_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
 use reth_trie_common::updates::TrieUpdates;

@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
-use reth_optimism_evm::OpRethReceiptBuilder;
-use reth_optimism_node::OpBuiltPayload;
+use world_chain_primitives::OpRethReceiptBuilder;
+use world_chain_primitives::OpBuiltPayload;
 use revm::database::BundleState;
 use world_chain_builder::{
     bal_executor::CommittedState,

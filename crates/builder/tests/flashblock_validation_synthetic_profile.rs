@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use reth_chain_state::ExecutedBlock;
-use reth_optimism_primitives::OpPrimitives;
+use world_chain_primitives::OpPrimitives;
 use world_chain_builder::{
     coordinator::{FlashblocksExecutionCoordinator, process_flashblock},
     flashblock_validation_metrics::FlashblockValidationMetrics,

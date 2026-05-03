@@ -5,10 +5,10 @@ use crate::{
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
 use alloy_consensus::{
-    Block, BlockBody, BlockHeader, EMPTY_OMMER_ROOT_HASH, Header,
-    proofs::ordered_trie_root_with_encoder,
+    proofs::ordered_trie_root_with_encoder, Block, BlockBody, BlockHeader, Header,
+    EMPTY_OMMER_ROOT_HASH,
 };
-use alloy_eips::{Decodable2718, Encodable2718, eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
+use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE, Decodable2718, Encodable2718};
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
 use chrono::Utc;
@@ -16,10 +16,9 @@ use eyre::eyre::{bail, eyre};
 use op_alloy_consensus::OpTxEnvelope;
 use reth_primitives_traits::{Block as _, BlockBody as _, NodePrimitives, RecoveredBlock};
 
+use crate::{OpBuiltPayload, OpChainSpec, OpPayloadAttrs, OpPrimitives};
+use alloy_op_hardforks::OpHardforks;
 use reth_basic_payload_builder::PayloadConfig;
-use reth_optimism_chainspec::{OpChainSpec, OpHardforks};
-use reth_optimism_node::{OpBuiltPayload, payload::OpPayloadAttrs};
-use reth_optimism_primitives::OpPrimitives;
 use serde::{Deserialize, Serialize};
 
 /// A type wrapper around a single flashblock payload.
@@ -373,12 +372,12 @@ impl Flashblocks {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::OpChainSpecBuilder;
     use alloy_consensus::TxEip1559;
-    use alloy_primitives::{Address, B256, Bloom, Bytes, TxKind};
+    use alloy_primitives::{Address, Bloom, Bytes, TxKind, B256};
     use alloy_signer_local::PrivateKeySigner;
     use op_alloy_consensus::OpTypedTransaction;
     use op_alloy_network::TxSignerSync;
-    use reth_optimism_chainspec::OpChainSpecBuilder;
     use std::sync::Arc;
 
     /// Creates a signed EIP-1559 transaction encoded as 2718 bytes.

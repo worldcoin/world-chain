@@ -1,4 +1,4 @@
-use reth_optimism_payload_builder::config::OpBuilderConfig;
+use world_chain_primitives::OpBuilderConfig;
 
 use crate::cli::WorldChainArgs;
 

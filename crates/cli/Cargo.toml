@@ -5,11 +5,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+world-chain-primitives.workspace = true
 reth-node-builder.workspace = true
 reth-chainspec.workspace = true
-reth-optimism-chainspec.workspace = true
-reth-optimism-node.workspace = true
-reth-optimism-payload-builder.workspace = true
+alloy-op-hardforks.workspace = true
 reth-rpc-server-types.workspace = true
 alloy-chains.workspace = true
 alloy-signer-local.workspace = true

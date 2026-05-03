@@ -1,13 +1,13 @@
 use alloy_eip7928::{
     AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
 };
-use alloy_primitives::{Address, B256, Bytes, FixedBytes, U256};
+use alloy_primitives::{Address, Bytes, FixedBytes, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 
 use reth_revm::{
-    DatabaseRef,
-    db::{AccountStatus, BundleAccount, BundleState, states::StorageSlot},
+    db::{states::StorageSlot, AccountStatus, BundleAccount, BundleState},
     state::{AccountInfo, Bytecode},
+    DatabaseRef,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

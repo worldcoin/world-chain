@@ -34,8 +34,6 @@ alloy-transport-http.workspace = true
 
 # reth
 reth-node-api.workspace = true
-reth-optimism-node = { workspace = true, features = ["test-utils"] }
-reth-optimism-payload-builder.workspace = true
 reth-rpc-layer.workspace = true
 
 # 3rd party

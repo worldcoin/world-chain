@@ -44,16 +44,12 @@ use revm_database::State;
 use tracing::trace;
 use world_chain_primitives::access_list::FlashblockAccessList;
 
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::{
-    OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder, txpool::OpPooledTx,
+use world_chain_primitives::OpChainSpec;
+use world_chain_primitives::{OpEvmConfig, OpNextBlockEnvAttributes, OpPooledTx, OpRethReceiptBuilder};
+use world_chain_primitives::{
+    ExecutionInfo, OpBuilderConfig, OpBuiltPayload, OpPayloadAttrs, OpPayloadBuilderAttributes,
+    OpPayloadTransactions, OpPrimitives, OpReceipt, OpTransactionSigned,
 };
-use reth_optimism_payload_builder::{
-    builder::{ExecutionInfo, OpPayloadTransactions},
-    config::OpBuilderConfig,
-    payload::{OpBuiltPayload, OpPayloadAttrs, OpPayloadBuilderAttributes},
-};
-use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, ProviderError, StateProviderFactory};
 

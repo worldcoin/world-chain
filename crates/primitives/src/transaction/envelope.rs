@@ -3,18 +3,18 @@
 //! [EIP-2718]: https://eips.ethereum.org/EIPS/eip-2718
 
 use alloy_consensus::{
-    EthereumTxEnvelope, Sealable, Sealed, SignableTransaction, Signed, TransactionEnvelope,
-    TxEip1559, TxEip2930, TxEip7702, TxEnvelope, TxLegacy, Typed2718,
     error::ValueError,
     transaction::{RlpEcdsaEncodableTx, TxHashRef},
+    EthereumTxEnvelope, Sealable, Sealed, SignableTransaction, Signed, TransactionEnvelope,
+    TxEip1559, TxEip2930, TxEip7702, TxEnvelope, TxLegacy, Typed2718,
 };
 use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{B256, Bytes, ChainId, Signature, TxHash, bytes::BufMut};
+use alloy_primitives::{bytes::BufMut, Bytes, ChainId, Signature, TxHash, B256};
 use op_alloy_consensus::{OpTransaction, OpTxEnvelope, TxDeposit, TxPostExec};
 
 use crate::transaction::{
-    Wip1001Signature,
     wip_1001::{SignedWip1001, TxWip1001},
+    Wip1001Signature,
 };
 
 /// The World Chain [EIP-2718] transaction envelope.
@@ -777,8 +777,8 @@ fn deposit_rlp_encode_fields(tx: &TxDeposit, out: &mut dyn alloy_rlp::BufMut) {
 mod tests {
     use super::*;
     use alloy_consensus::transaction::SignerRecoverable;
-    use alloy_eips::{Decodable2718, eip2930::AccessList};
-    use alloy_primitives::{Address, U256, address, hex};
+    use alloy_eips::{eip2930::AccessList, Decodable2718};
+    use alloy_primitives::{address, hex, Address, U256};
     use alloy_rlp::Encodable as _;
     use alloy_signer_local::PrivateKeySigner;
     use op_alloy_network::TxSignerSync;
@@ -962,7 +962,7 @@ mod tests {
     fn envelope_wip1001_p256_round_trip_and_recover() {
         use alloy_primitives::B256;
         use p256::{
-            ecdsa::{SigningKey as P256SigningKey, signature::hazmat::PrehashSigner},
+            ecdsa::{signature::hazmat::PrehashSigner, SigningKey as P256SigningKey},
             elliptic_curve::rand_core::OsRng,
         };
 

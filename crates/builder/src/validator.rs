@@ -28,10 +28,10 @@ use reth_evm::{
     },
 };
 use reth_node_api::{BuiltPayload, BuiltPayloadExecutedBlock};
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::{OpBlockAssembler, OpEvmConfig, OpRethReceiptBuilder};
-use reth_optimism_node::OpBuiltPayload;
-use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
+use world_chain_primitives::OpChainSpec;
+use world_chain_primitives::{OpBlockAssembler, OpEvmConfig, OpRethReceiptBuilder};
+use world_chain_primitives::OpBuiltPayload;
+use world_chain_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};

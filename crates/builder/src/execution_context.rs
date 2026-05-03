@@ -3,7 +3,7 @@ use crate::{
     state_db::StateDB,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
-use alloy_consensus::{Block, SignableTransaction, Transaction, transaction::SignerRecoverable};
+use alloy_consensus::{transaction::SignerRecoverable, Block, SignableTransaction, Transaction};
 use alloy_eips::{Encodable2718, Typed2718};
 use alloy_network::{TransactionBuilder, TxSignerSync};
 use alloy_primitives::{Address, U256};
@@ -12,33 +12,23 @@ use eyre::eyre::eyre;
 use op_alloy_consensus::EIP1559ParamError;
 use op_alloy_rpc_types::OpTransactionRequest;
 
+use alloy_op_hardforks::OpHardforks;
 use alloy_rpc_types_engine::PayloadId;
 use op_revm::OpSpecId;
 use reth_basic_payload_builder::PayloadConfig;
 use reth_evm::{
-    ConfigureEvm, Database, Evm, EvmEnv,
     block::{BlockExecutionError, BlockValidationError},
     execute::{BlockBuilder, BlockExecutor},
+    ConfigureEvm, Database, Evm, EvmEnv,
 };
 use reth_node_api::{NodePrimitives, PayloadBuilderError};
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::{
-    OpBuiltPayload, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
-    txpool::estimated_da_size::DataAvailabilitySized,
-};
-use reth_optimism_payload_builder::{
-    builder::{ExecutionInfo, OpPayloadBuilderCtx},
-    config::OpBuilderConfig,
-};
-use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_primitives::BuildNextEnv;
 use reth_payload_util::PayloadTransactions;
 use reth_primitives_traits::{Recovered, SealedHeader, TxTy};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_revm::cancelled::CancelOnDrop;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::{DatabaseCommit, context::BlockEnv};
+use revm::{context::BlockEnv, DatabaseCommit};
 use revm_database::State;
 use semaphore_rs::Field;
 use std::{collections::HashSet, fmt::Debug, sync::Arc, time::Instant};
@@ -46,6 +36,11 @@ use tracing::{error, trace};
 use world_chain_pool::{
     bindings::IPBHEntryPoint::spendNullifierHashesCall,
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
+};
+use world_chain_primitives::{
+    DataAvailabilitySized, ExecutionInfo, OpBuilderConfig, OpBuiltPayload, OpChainSpec,
+    OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes, OpPayloadBuilderCtx,
+    OpTransactionSigned,
 };
 
 /// Container type that holds all necessities to build a new payload.
@@ -156,9 +151,9 @@ where
         db: &'a mut State<DB>,
     ) -> Result<
         impl BlockBuilder<
-            Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
-            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-        > + 'a,
+                Executor: BlockExecutor<Evm: Evm<DB = &'a mut State<DB>, BlockEnv = BlockEnv>>,
+                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            > + 'a,
         PayloadBuilderError,
     >
     where
@@ -221,14 +216,11 @@ where
     where
         Pool: TransactionPool,
         Builder: BlockBuilder<
-                Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-                Executor: BlockExecutor<
-                    Evm: Evm<
-                        DB: StateDB + DatabaseCommit + reth_evm::Database,
-                        BlockEnv = BlockEnv,
-                    >,
-                >,
+            Primitives = <Self::Evm as ConfigureEvm>::Primitives,
+            Executor: BlockExecutor<
+                Evm: Evm<DB: StateDB + DatabaseCommit + reth_evm::Database, BlockEnv = BlockEnv>,
             >,
+        >,
         Txs: PayloadTransactions<
             Transaction: WorldChainPoolTransaction<Consensus = OpTransactionSigned>,
         >,

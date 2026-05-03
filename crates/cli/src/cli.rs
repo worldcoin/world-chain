@@ -5,9 +5,10 @@ use alloy_primitives::{Address, address};
 use reth_chainspec::{EthChainSpec, ForkCondition};
 use reth_network_peers::PeerId;
 use reth_node_builder::NodeConfig;
-use reth_optimism_chainspec::{OpChainSpec, OpHardfork};
-use reth_optimism_node::args::RollupArgs;
-use reth_optimism_payload_builder::config::{OpBuilderConfig, OpGasLimitConfig};
+use alloy_op_hardforks::OpHardfork;
+use world_chain_primitives::OpChainSpec;
+use world_chain_primitives::RollupArgs;
+use world_chain_primitives::{OpBuilderConfig, OpGasLimitConfig};
 use reth_rpc_server_types::{
     DefaultRpcModuleValidator, RethRpcModule, RpcModuleSelection, RpcModuleValidator,
 };
@@ -367,7 +368,7 @@ mod tests {
     }
 
     fn into_world_config(parsed: CommandParserWithRpc) -> WorldChainNodeConfig {
-        let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());
+        let spec = world_chain_primitives::OpChainSpec::from_genesis(Genesis::default());
         let mut node_config = NodeConfig::new(Arc::new(spec));
         node_config.rpc = parsed.rpc;
         parsed.world.into_config(&mut node_config).unwrap()
@@ -426,7 +427,7 @@ mod tests {
 
         assert_eq!(args.builder.gas_limit, Some(25_000_000));
 
-        let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());
+        let spec = world_chain_primitives::OpChainSpec::from_genesis(Genesis::default());
         let mut node_config = NodeConfig::new(Arc::new(spec));
 
         node_config.builder = args.builder;
@@ -507,7 +508,7 @@ mod tests {
             simulate_enabled: false,
         };
 
-        let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());
+        let spec = world_chain_primitives::OpChainSpec::from_genesis(Genesis::default());
         let mut node_config = NodeConfig::new(Arc::new(spec));
         let config = args.into_config(&mut node_config).unwrap();
 

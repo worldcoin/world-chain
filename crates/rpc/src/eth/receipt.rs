@@ -3,9 +3,9 @@ use std::sync::Arc;
 use alloy_consensus::TxReceipt;
 use op_alloy_rpc_types::OpTransactionReceipt;
 use reth_chainspec::ChainSpecProvider;
-use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::OpPrimitives;
-use reth_optimism_rpc::{OpEthApi, OpEthApiError, OpReceiptBuilder};
+use alloy_op_hardforks::OpHardforks;
+use world_chain_primitives::OpPrimitives;
+use world_chain_primitives::{OpEthApi, OpEthApiError, OpReceiptBuilder};
 use reth_primitives_traits::{Recovered, TransactionMeta};
 use reth_provider::{ProviderReceipt, ProviderTx};
 use reth_rpc_eth_api::{
@@ -103,7 +103,7 @@ where
                 .pop()
                 .unwrap()),
             Some(block) => {
-                let mut l1_block_info = match reth_optimism_evm::extract_l1_info(block.body()) {
+                let mut l1_block_info = match world_chain_primitives::extract_l1_info(block.body()) {
                     Ok(l1_block_info) => l1_block_info,
                     Err(err) => Err(err)?,
                 };

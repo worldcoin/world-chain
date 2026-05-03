@@ -3,7 +3,7 @@ use std::sync::Arc;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use futures::StreamExt;
 use reth_chain_state::ExecutedBlock;
-use reth_optimism_primitives::OpPrimitives;
+use world_chain_primitives::OpPrimitives;
 use world_chain_test_utils::builder::{
     BenchProvider, CHAIN_SPEC, EVM_CONFIG, build_flashblock_fixture_eth_transfers,
     build_flashblock_fixture_fib, build_flashblock_fixture_world_id_like_bn254,

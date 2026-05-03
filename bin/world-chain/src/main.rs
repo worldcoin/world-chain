@@ -1,8 +1,8 @@
 use clap::Parser;
 use eyre::config::HookBuilder;
 use reth_node_builder::NodeHandle;
-use reth_optimism_cli::{Cli, chainspec::OpChainSpecParser};
-use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
+use world_chain_primitives::{Cli, OpChainSpecParser};
+use world_chain_primitives::{OpEvmConfig, OpRethReceiptBuilder};
 use reth_provider::ChainSpecProvider;
 use reth_tracing::tracing::info;
 use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig, WorldChainRpcModuleValidator};

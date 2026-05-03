@@ -14,16 +14,13 @@ workspace = true
 # world-chain
 world-chain-cli.workspace = true
 world-chain-node.workspace = true
+world-chain-primitives.workspace = true
 world-chain-rpc.workspace = true
 
 # reth
 reth-cli-util.workspace = true
 reth-node-builder.workspace = true
 reth-tracing.workspace = true
-
-# op-reth
-reth-optimism-cli.workspace = true
-reth-optimism-evm.workspace = true
 
 reth-provider.workspace = true
 

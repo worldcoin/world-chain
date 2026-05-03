@@ -1,8 +1,8 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use futures::StreamExt;
 use reth_chain_state::ExecutedBlock;
-use reth_optimism_node::utils::optimism_payload_attributes;
-use reth_optimism_primitives::OpPrimitives;
+use world_chain_primitives::optimism_payload_attributes;
+use world_chain_primitives::OpPrimitives;
 use reth_provider::{StateProvider, StateProviderFactory};
 use std::sync::Arc;
 use world_chain_node::context::WorldChainDefaultContext;

@@ -110,25 +110,25 @@ reth-rpc-layer = { git = "https://github.com/paradigmxyz/reth", tag = "v2.0.0", 
 reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth", tag = "v2.0.0", default-features = false }
 reth-storage-api = { git = "https://github.com/paradigmxyz/reth", tag = "v2.0.0", default-features = false }
 
-# reth-optimism
+# reth-optimism (centralized through world-chain-primitives)
 reth-optimism-evm = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
 reth-optimism-node = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
 reth-optimism-cli = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
 reth-optimism-rpc = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
-reth-optimism-consensus = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
 reth-optimism-chainspec = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
 reth-optimism-payload-builder = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
-reth-optimism-forks = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
 reth-optimism-primitives = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
-reth-optimism-storage = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
-reth-optimism-flashblocks = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
+proptest-arbitrary-interop = "0.1"
+rand_08 = { package = "rand", version = "0.8", default-features = false }
+rstest = "0.23"
+secp256k1 = { version = "0.30", default-features = false }
 
 # alloy op
 op-alloy-consensus = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
 op-alloy-rpc-types = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
 op-alloy-rpc-types-engine = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
 op-alloy-network = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
-alloy-op-hardforks = { version = "0.4.7", default-features = false }
+alloy-op-hardforks = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
 op-alloy-provider = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.1.0", default-features = false }
 
 # alloy

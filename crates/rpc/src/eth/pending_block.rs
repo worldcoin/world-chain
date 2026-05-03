@@ -1,8 +1,8 @@
 //! Loads OP pending block for a RPC response.
 
 use alloy_eips::BlockNumberOrTag;
-use reth_optimism_primitives::OpPrimitives;
-use reth_optimism_rpc::{OpEthApi, OpEthApiError};
+use world_chain_primitives::OpPrimitives;
+use world_chain_primitives::{OpEthApi, OpEthApiError};
 use reth_provider::{BlockReader, BlockReaderIdExt, ReceiptProvider};
 use reth_rpc_eth_api::{
     EthApiTypes, FromEvmError, RpcConvert, RpcNodeCore,

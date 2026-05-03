@@ -11,13 +11,12 @@ repository.workspace = true
 world-chain-pbh.workspace = true
 
 reth-db.workspace = true
-reth-optimism-node.workspace = true
 reth-provider.workspace = true
 reth-eth-wire-types.workspace = true
-reth-optimism-primitives.workspace = true
+world-chain-primitives.workspace = true
 revm-primitives.workspace = true
 reth-primitives-traits.workspace = true
-reth-optimism-forks.workspace = true
+alloy-op-hardforks.workspace = true
 reth-transaction-pool.workspace = true
 reth-node-api.workspace = true
 reth-evm.workspace = true

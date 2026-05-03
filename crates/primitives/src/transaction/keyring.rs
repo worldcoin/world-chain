@@ -14,7 +14,7 @@
 use alloy_primitives::Address;
 
 use crate::transaction::{
-    SessionKey, TxWip1001, Wip1001Signature, Wip1001VerifyError, verify_wip1001_signature,
+    verify_wip1001_signature, SessionKey, TxWip1001, Wip1001Signature, Wip1001VerifyError,
 };
 
 /// Read-only view of the precompile-managed keyring state.
@@ -147,11 +147,11 @@ pub use mock::MockKeyringRegistry;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transaction::{P256Signature, signature::P256_PUBKEY_LEN, verify::P256N_HALF};
+    use crate::transaction::{signature::P256_PUBKEY_LEN, verify::P256N_HALF, P256Signature};
     use alloy_eips::eip2930::AccessList;
-    use alloy_primitives::{B256, Bytes, U256, address, hex};
+    use alloy_primitives::{address, hex, Bytes, B256, U256};
     use p256::{
-        ecdsa::{SigningKey as P256SigningKey, signature::hazmat::PrehashSigner},
+        ecdsa::{signature::hazmat::PrehashSigner, SigningKey as P256SigningKey},
         elliptic_curve::rand_core::OsRng,
     };
 

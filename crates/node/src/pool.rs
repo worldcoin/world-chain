@@ -4,10 +4,10 @@ use reth_node_builder::{
     BuilderContext,
     components::{PoolBuilder, PoolBuilderConfigOverrides},
 };
-use reth_optimism_evm::OpEvmConfig;
-use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::txpool::OpTransactionValidator;
-use reth_optimism_primitives::OpPrimitives;
+use world_chain_primitives::OpEvmConfig;
+use alloy_op_hardforks::OpHardforks;
+use world_chain_primitives::OpTransactionValidator;
+use world_chain_primitives::OpPrimitives;
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::{TransactionValidationTaskExecutor, blobstore::DiskFileBlobStore};
 use tracing::{debug, info};
