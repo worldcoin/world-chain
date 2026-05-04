@@ -348,6 +348,8 @@ impl BlockAccessIndexCounter {
 /// for which we are executing on top of.
 #[derive(Default, Debug, Clone)]
 pub struct CommittedState<R: OpReceiptBuilder + Default = OpRethReceiptBuilder> {
+    /// True when there is no prior committed payload (i.e. this is the first flashblock).
+    pub is_first: bool,
     /// The total gas used in previous committed transactions.
     pub gas_used: u64,
     /// The total fees accumulated in previous committed transactions.
@@ -427,6 +429,7 @@ where
                 .collect();
 
             Ok(Self {
+                is_first: false,
                 transactions,
                 receipts,
                 gas_used,
@@ -435,6 +438,7 @@ where
             })
         } else {
             Ok(Self {
+                is_first: true,
                 transactions: vec![],
                 receipts: vec![],
                 gas_used: 0,

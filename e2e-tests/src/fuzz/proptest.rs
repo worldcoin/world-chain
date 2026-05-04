@@ -1,7 +1,5 @@
 //! Property tests for chaos contract interactions and BAL validation.
 
-use std::sync::Arc;
-
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
 use reth_optimism_evm::OpRethReceiptBuilder;
@@ -9,42 +7,41 @@ use reth_optimism_node::OpBuiltPayload;
 use revm::database::BundleState;
 use world_chain_builder::{
     bal_executor::CommittedState,
-    flashblock_validation_metrics::{
-        FlashblockValidationAttemptMetrics, FlashblockValidationMetrics,
-    },
-    validator::FlashblocksBlockValidator,
+    execution_strategy::{ExecutionStrategy, FlashblocksBalExecutionStrategy, ValidationCtx},
+    flashblock_validation_metrics::FlashblockValidationAttemptMetrics,
+    state_root_strategy::AsyncStateRootStrategy,
 };
 use world_chain_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 
 use super::fixtures::{
-    BLOCK_EXECUTION_CTX, CHAIN_SPEC, EVM_CONFIG, EVM_ENV, SEALED_HEADER, create_test_state_provider,
+    BLOCK_EXECUTION_CTX, CHAIN_SPEC, EVM_ENV, SEALED_HEADER, create_test_state_provider,
 };
 
-/// Execute transactions in parallel using FlashblocksBlockValidator
+/// Execute transactions in parallel using FlashblocksBalExecutionStrategy
 pub fn validate(
     diff: &ExecutionPayloadFlashblockDeltaV1,
     committed_state: CommittedState<OpRethReceiptBuilder>,
 ) -> Result<OpBuiltPayload, Box<dyn std::error::Error + Send + Sync>> {
     let state_provider = create_test_state_provider();
 
-    let validator = FlashblocksBlockValidator {
-        chain_spec: CHAIN_SPEC.clone(),
-        evm_config: EVM_CONFIG.clone(),
-        execution_context: BLOCK_EXECUTION_CTX.clone(),
-        evm_env: EVM_ENV.clone(),
-        header: std::sync::Arc::new(SEALED_HEADER.clone()),
-        flashblock_validation_metrics: Arc::new(FlashblockValidationMetrics::default()),
-    };
+    let strategy = FlashblocksBalExecutionStrategy;
 
-    let mut flashblock_validatoin_metrics_attempt = FlashblockValidationAttemptMetrics::default();
+    let mut attempt_metrics = FlashblockValidationAttemptMetrics::default();
     let payload_id = PayloadId::default();
-    let payload = validator.validate_flashblock_parallel(
+
+    let payload = strategy.execute(
+        ValidationCtx {
+            parent: &SEALED_HEADER,
+            attempt_metrics: &mut attempt_metrics,
+            chain_spec: CHAIN_SPEC.clone(),
+            evm_env: EVM_ENV.clone(),
+            execution_context: BLOCK_EXECUTION_CTX.clone(),
+            state_root_strategy: AsyncStateRootStrategy,
+        },
         state_provider,
         diff.clone(),
-        &SEALED_HEADER,
-        payload_id,
         committed_state,
-        &mut flashblock_validatoin_metrics_attempt,
+        payload_id,
     )?;
 
     Ok(payload)
@@ -55,6 +52,7 @@ fn unwrap_committed_state(
     state: Option<CommittedState<OpRethReceiptBuilder>>,
 ) -> CommittedState<OpRethReceiptBuilder> {
     state.unwrap_or_else(|| CommittedState {
+        is_first: true,
         gas_used: 0,
         fees: U256::ZERO,
         receipts: vec![],
