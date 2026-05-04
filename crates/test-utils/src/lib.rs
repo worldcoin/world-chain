@@ -350,11 +350,7 @@ pub mod builder;
 pub mod utils;
 
 pub mod e2e_harness;
-pub use e2e_harness::contexts::{
-    WorldChainTestBlock, WorldChainTestBlockBody, WorldChainTestContext, WorldChainTestNode,
-    WorldChainTestNodeTypes, WorldChainTestPayload, WorldChainTestPrimitives,
-    WorldChainTestProvider, WorldChainTestStorage,
-};
+pub use e2e_harness::context::{Wip1001NodeContext, Wip1001Primitives};
 
 pub mod mock;
 

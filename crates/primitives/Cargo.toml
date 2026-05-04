@@ -22,12 +22,19 @@ reth-optimism-chainspec.workspace = true
 alloy-eips.workspace = true
 alloy-eip7928.workspace = true
 alloy-consensus.workspace = true
+alloy-evm.workspace = true
+alloy-op-evm.workspace = true
+alloy-network.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-serde.workspace = true
 alloy-rlp.workspace = true
 
 op-alloy-consensus.workspace = true
+op-alloy-rpc-types.workspace = true
+op-revm.workspace = true
+reth-rpc-api.workspace = true
+revm.workspace = true
 
 blake3.workspace = true
 ed25519-dalek.workspace = true

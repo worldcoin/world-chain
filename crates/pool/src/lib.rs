@@ -19,15 +19,13 @@ pub mod tx;
 pub mod validator;
 
 /// Type alias for World Chain transaction pool
-pub type WorldChainTransactionPool<Client, S, T = WorldChainPooledTransaction> = Pool<
-    TransactionValidationTaskExecutor<WorldChainTransactionValidator<Client, T, OpEvmConfig>>,
-    WorldChainOrdering<WorldChainPooledTransaction>,
-    S,
->;
+pub type WorldChainTransactionPool<Client, S, T = WorldChainPooledTransaction, Evm = OpEvmConfig> =
+    Pool<
+        TransactionValidationTaskExecutor<WorldChainTransactionValidator<Client, T, Evm>>,
+        WorldChainOrdering<T>,
+        S,
+    >;
 
 /// A wrapper type with sensible defaults for the World Chain transaction pool.
-pub type BasicWorldChainPool<N> = WorldChainTransactionPool<
-    <N as FullNodeTypes>::Provider,
-    DiskFileBlobStore,
-    WorldChainPooledTransaction,
->;
+pub type BasicWorldChainPool<N, T = WorldChainPooledTransaction, Evm = OpEvmConfig> =
+    WorldChainTransactionPool<<N as FullNodeTypes>::Provider, DiskFileBlobStore, T, Evm>;

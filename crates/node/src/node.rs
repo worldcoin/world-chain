@@ -1,13 +1,13 @@
 use std::{fmt::Debug, sync::Arc};
 
 use crate::pool::WorldChainPoolBuilder;
-use alloy_consensus::Header;
+use alloy_consensus::{Block, BlockBody, Header};
 use alloy_eips::eip1559::BaseFeeParams;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{
-    FullNodeTypes, NodeAddOns, NodePrimitives, NodeTypes, PayloadAttributesBuilder,
+    BuiltPayload, FullNodeTypes, NodeAddOns, NodePrimitives, NodeTypes, PayloadAttributesBuilder,
 };
 use reth_node_builder::{
     DebugNode, FullNodeComponents, Node, NodeAdapter, NodeComponents, NodeComponentsBuilder,
@@ -19,7 +19,7 @@ use reth_node_core::primitives::EthereumHardforks;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_node::{
-    OpEngineTypes, OpPayloadTypes, OpStorage,
+    OpStorage,
     node::{OpConsensusBuilder, OpExecutorBuilder},
     payload::OpPayloadAttrs,
 };
@@ -36,11 +36,23 @@ use world_chain_cli::WorldChainNodeConfig;
 /// use Optimism primitives, while native account-abstraction tests can provide
 /// a primitive set whose signed transaction type is
 /// `WorldChainTxEnvelope`.
-pub trait WorldChainNodeTypes:
+pub trait WorldChainNodePrimitiveTypes:
     Sized + From<WorldChainNodeConfig> + Clone + Debug + Unpin + Send + Sync + 'static
 {
     /// Primitive block, receipt, and signed transaction types used by the node.
-    type Primitives: NodePrimitives<BlockHeader = Header>;
+    type Primitives: NodePrimitives<
+            BlockHeader = Header,
+            Block = Block<<Self::Primitives as NodePrimitives>::SignedTx>,
+            BlockBody = BlockBody<<Self::Primitives as NodePrimitives>::SignedTx>,
+            SignedTx: reth_codecs::Compress + reth_codecs::Decompress,
+            Receipt: reth_codecs::Compress + reth_codecs::Decompress,
+        >;
+
+    /// Engine payload types used by the node.
+    type Payload: PayloadTypes<
+            PayloadAttributes = OpPayloadAttrs,
+            BuiltPayload: BuiltPayload<Primitives = Self::Primitives>,
+        >;
 }
 
 /// Context trait for World Chain node implementations.
@@ -53,7 +65,7 @@ pub trait WorldChainNodeTypes:
 /// The trait is parameterized by `N`, which must be a `FullNodeTypes` with `Types = WorldChainNode<Self>`,
 /// ensuring type safety between the context and the node it configures.
 pub trait WorldChainNodeContext<N: FullNodeTypes<Types = WorldChainNode<Self>>>:
-    WorldChainNodeTypes
+    WorldChainNodePrimitiveTypes
 {
     /// The EVM configuration used for this World Chain node.
     ///
@@ -214,11 +226,11 @@ where
     }
 }
 
-impl<T: WorldChainNodeTypes> NodeTypes for WorldChainNode<T> {
+impl<T: WorldChainNodePrimitiveTypes> NodeTypes for WorldChainNode<T> {
     type Primitives = T::Primitives;
     type ChainSpec = OpChainSpec;
     type Storage = OpStorage<<T::Primitives as NodePrimitives>::SignedTx>;
-    type Payload = OpEngineTypes<OpPayloadTypes<T::Primitives>>;
+    type Payload = T::Payload;
 }
 
 /// Builds [`OpPayloadAttrs`] for local/dev-mode payload generation.

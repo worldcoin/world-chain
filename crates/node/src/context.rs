@@ -5,7 +5,8 @@ use std::time::Duration;
 use crate::{
     engine::FlashblocksEngineApiBuilder,
     node::{
-        WorldChainNode, WorldChainNodeComponentBuilder, WorldChainNodeContext, WorldChainNodeTypes,
+        WorldChainNode, WorldChainNodeComponentBuilder, WorldChainNodeContext,
+        WorldChainNodePrimitiveTypes,
     },
     payload::FlashblocksPayloadBuilderBuilder,
     payload_service::FlashblocksPayloadServiceBuilder,
@@ -174,8 +175,9 @@ pub struct WorldChainDefaultContext {
     components_context: Option<FlashblocksComponentsContext>,
 }
 
-impl WorldChainNodeTypes for WorldChainDefaultContext {
+impl WorldChainNodePrimitiveTypes for WorldChainDefaultContext {
     type Primitives = OpPrimitives;
+    type Payload = reth_optimism_node::OpEngineTypes;
 }
 
 impl<N: FullNodeTypes<Types = WorldChainNode<WorldChainDefaultContext>>> WorldChainNodeContext<N>
