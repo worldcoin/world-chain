@@ -29,13 +29,11 @@ use reth_rpc_eth_api::EthApiTypes;
 use reth_transaction_pool::TransactionPool;
 use world_chain_cli::WorldChainNodeConfig;
 
-/// Type-level configuration shared by every World Chain node context.
-///
-/// `WorldChainNode<T>` is a generic node marker, but the concrete primitive
-/// types it exposes to reth must come from the context `T`. Production contexts
-/// use Optimism primitives, while native account-abstraction tests can provide
-/// a primitive set whose signed transaction type is
-/// `WorldChainTxEnvelope`.
+/// Primitive types for a World Chain node implementation. 
+/// 
+/// This trait parameterizes `NodeTypes` inherited via `WorldChainNode<T>`.
+/// Allows `WorldChainNode<T>` to be fully generic over the Engine, Transaction, Block, and Receipt primitives
+/// while inheriting a unified testing harness generic over `T: WorldChainNodeContext`.
 pub trait WorldChainNodePrimitiveTypes:
     Sized + From<WorldChainNodeConfig> + Clone + Debug + Unpin + Send + Sync + 'static
 {
