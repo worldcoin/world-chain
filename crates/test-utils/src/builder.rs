@@ -598,6 +598,7 @@ where
         payloads.push((
             payload,
             prev_outcome.as_ref().map(|(o, state)| CommittedState {
+                is_first: false,
                 gas_used: o.block.gas_used(),
                 fees: U256::ZERO,
                 bundle: state.clone(),

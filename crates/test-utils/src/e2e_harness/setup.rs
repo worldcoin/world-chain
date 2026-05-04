@@ -54,7 +54,9 @@ use world_chain_node::{
     FlashblocksOpApi, OpApiExtServer,
     node::{WorldChainNode, WorldChainNodeContext},
 };
-use world_chain_primitives::{flashblocks::Flashblock, p2p::Authorization};
+use world_chain_primitives::{
+    flashblocks::Flashblock, p2p::Authorization, payload_id::force_op_payload_id_v3,
+};
 
 use world_chain_pool::{
     BasicWorldChainPool,
@@ -432,7 +434,7 @@ pub fn create_authorization_generator(
 ) -> impl Fn(OpPayloadAttrs) -> Authorization + Clone {
     move |attrs: OpPayloadAttrs| {
         let authorizer_sk = SigningKey::from_bytes(&[0; 32]);
-        let payload_id = attrs.payload_id(&block_hash);
+        let payload_id = force_op_payload_id_v3(attrs.payload_id(&block_hash));
         Authorization::new(
             payload_id,
             attrs.payload_attributes.timestamp,

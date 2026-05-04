@@ -325,7 +325,7 @@ impl TransactionsProvider for MockEthProvider {
     ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
         // init btreemap so we can return in order
         let mut map = BTreeMap::new();
-        for (_, block) in self.blocks.lock().iter() {
+        for block in self.blocks.lock().values() {
             if range.contains(&block.number) {
                 map.insert(block.number, block.body.transactions.clone());
             }

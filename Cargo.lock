@@ -13138,6 +13138,7 @@ dependencies = [
  "reth-optimism-chainspec",
  "reth-optimism-node",
  "reth-optimism-payload-builder",
+ "reth-rpc-server-types",
  "tracing",
 ]
 

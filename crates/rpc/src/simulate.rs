@@ -7,7 +7,7 @@ use jsonrpsee::{
     proc_macros::rpc,
 };
 use lru::LruCache;
-use op_revm::OpTransaction;
+use op_revm::{OpSpecId, OpTransaction};
 use reth_evm::{ConfigureEvm, Evm as RethEvm, EvmFactory};
 use reth_optimism_evm::OpEvmConfig;
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderFactory};
@@ -17,7 +17,7 @@ use reth_tasks::pool::{BlockingTaskGuard, BlockingTaskPool};
 use revm::{
     Inspector,
     context::{
-        TxEnv,
+        CfgEnv, TxEnv,
         result::{ExecutionResult, Output},
     },
     interpreter::{CallInputs, CallOutcome, InstructionResult},
@@ -34,7 +34,7 @@ use std::{
 // Request types
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Request for `worldchain_simulateUnsignedUserOp`.
+/// Request for `simulate_unsignedUserOp`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SimulateUnsignedUserOpRequest {
@@ -129,7 +129,7 @@ pub enum SimulationStatus {
     Revert,
 }
 
-/// Full response for `worldchain_simulateUnsignedUserOp`.
+/// Full response for `simulate_unsignedUserOp`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SimulateUnsignedUserOpResult {
@@ -322,14 +322,14 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
 // RPC trait
 // ═══════════════════════════════════════════════════════════════════════════════
 
-#[cfg_attr(not(test), rpc(server, namespace = "worldchain"))]
-#[cfg_attr(test, rpc(server, client, namespace = "worldchain"))]
+#[cfg_attr(not(test), rpc(server, namespace = "simulate"))]
+#[cfg_attr(test, rpc(server, client, namespace = "simulate"))]
 #[async_trait]
-pub trait WorldChainSimulateApi {
+pub trait SimulateApi {
     /// Simulates an unsigned ERC-4337 v0.7 PackedUserOperation against the
     /// specified block state. Returns asset transfers, approval changes,
     /// decoded trace, and warnings.
-    #[method(name = "simulateUnsignedUserOp")]
+    #[method(name = "unsignedUserOp")]
     async fn simulate_unsigned_user_op(
         &self,
         request: SimulateUnsignedUserOpRequest,
@@ -356,9 +356,32 @@ type MetadataCache = Arc<Mutex<LruCache<Address, AssetInfo>>>;
 /// guard correctly accounts for slow simulations.
 pub const SIMULATION_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Implementation of the `worldchain_simulateUnsignedUserOp` RPC endpoint.
+/// Relax EVM rules so simulations succeed regardless of the caller's gas
+/// pricing, balance, or block limits — matching `eth_call` semantics. The
+/// `disable_fee_charge` flag is the critical one on Optimism: without it
+/// op-revm's handler computes the L1 data fee from `enveloped_tx` and
+/// rejects the tx with `LackOfFundForMaxFee` because the synthetic caller
+/// (EntryPoint, `Address::ZERO`) has no ETH. `disable_balance_check`
+/// covers the L2 path symmetrically.
+///
+/// Exposed so fork-based integration tests can mirror the exact prod cfg
+/// instead of redeclaring the flag list (which silently drifts).
+pub fn relax_cfg_for_simulation(cfg_env: &mut CfgEnv<OpSpecId>) {
+    cfg_env.disable_block_gas_limit = true;
+    cfg_env.disable_eip3607 = true;
+    cfg_env.disable_base_fee = true;
+    cfg_env.disable_balance_check = true;
+    cfg_env.disable_fee_charge = true;
+    // EntryPoint is a contract, so its account nonce on chain is non-zero.
+    // `TxEnv::default()` sets tx.nonce = 0, which revm would reject with
+    // `NonceTooLow`. Simulate is "what would happen if…", not a tx that will
+    // be mined — matches eth_call semantics.
+    cfg_env.disable_nonce_check = true;
+}
+
+/// Implementation of the `simulate_unsignedUserOp` RPC endpoint.
 #[derive(Debug, Clone)]
-pub struct WorldChainSimulate<Client> {
+pub struct Simulate<Client> {
     client: Client,
     evm_config: OpEvmConfig,
     metadata_cache: MetadataCache,
@@ -370,7 +393,7 @@ pub struct WorldChainSimulate<Client> {
     task_guard: BlockingTaskGuard,
 }
 
-impl<Client> WorldChainSimulate<Client> {
+impl<Client> Simulate<Client> {
     pub fn new(
         client: Client,
         evm_config: OpEvmConfig,
@@ -406,7 +429,7 @@ impl<Client> WorldChainSimulate<Client> {
 }
 
 #[async_trait]
-impl<Client> WorldChainSimulateApiServer for WorldChainSimulate<Client>
+impl<Client> SimulateApiServer for Simulate<Client>
 where
     Client: BlockReaderIdExt
         + StateProviderFactory
@@ -453,7 +476,7 @@ where
     }
 }
 
-impl<Client> WorldChainSimulate<Client>
+impl<Client> Simulate<Client>
 where
     Client:
         BlockReaderIdExt + StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
@@ -485,11 +508,7 @@ where
             .evm_env(header.header())
             .map_err(internal_err)?;
 
-        // Relax EVM rules to match eth_call semantics: the simulation should
-        // succeed regardless of gas pricing, sender balance, or block limits.
-        evm_env.cfg_env.disable_block_gas_limit = true;
-        evm_env.cfg_env.disable_eip3607 = true;
-        evm_env.cfg_env.disable_base_fee = true;
+        relax_cfg_for_simulation(&mut evm_env.cfg_env);
 
         // 3. Get state at the target block (same as eth_call)
         let state_provider = self
@@ -1050,14 +1069,7 @@ where
     let Ok(mut evm_env) = evm_config.evm_env(header) else {
         return Vec::new();
     };
-    evm_env.cfg_env.disable_block_gas_limit = true;
-    evm_env.cfg_env.disable_eip3607 = true;
-    evm_env.cfg_env.disable_base_fee = true;
-    // Required: we reuse one EVM across 3·N view calls all sent from
-    // `Address::ZERO`. The first transact bumps ZERO's cached nonce, so
-    // without this flag every subsequent call fails validation and silently
-    // returns empty metadata.
-    evm_env.cfg_env.disable_nonce_check = true;
+    relax_cfg_for_simulation(&mut evm_env.cfg_env);
 
     let Ok(state_provider) = client.state_by_block_id(block_id) else {
         return Vec::new();

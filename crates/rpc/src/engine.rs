@@ -15,7 +15,10 @@ use reth_provider::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_transaction_pool::TransactionPool;
 use tracing::trace;
-use world_chain_primitives::p2p::Authorization;
+use world_chain_primitives::{
+    p2p::Authorization,
+    payload_id::{force_op_payload_id_v3, op_reth_payload_id_v4_lookup},
+};
 
 #[derive(Debug, Clone)]
 pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
@@ -115,9 +118,12 @@ where
             to_jobs_gen.send_modify(|b| *b = None)
         }
 
-        self.inner
+        let mut response = self
+            .inner
             .fork_choice_updated_v3(fork_choice_state, payload_attributes)
-            .await
+            .await?;
+        response.payload_id = response.payload_id.map(force_op_payload_id_v3);
+        Ok(response)
     }
 
     async fn get_payload_v2(
@@ -131,14 +137,20 @@ where
         &self,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV3> {
-        Ok(self.inner.get_payload_v3(payload_id).await?)
+        Ok(self
+            .inner
+            .get_payload_v3(op_reth_payload_id_v4_lookup(payload_id))
+            .await?)
     }
 
     async fn get_payload_v4(
         &self,
         payload_id: PayloadId,
     ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV4> {
-        Ok(self.inner.get_payload_v4(payload_id).await?)
+        Ok(self
+            .inner
+            .get_payload_v4(op_reth_payload_id_v4_lookup(payload_id))
+            .await?)
     }
 
     async fn get_payload_bodies_by_hash_v1(
@@ -245,8 +257,11 @@ where
             to_jobs_gen.send_modify(|b| *b = Some(a))
         }
 
-        self.inner
+        let mut response = self
+            .inner
             .fork_choice_updated_v3(fork_choice_state, payload_attributes)
-            .await
+            .await?;
+        response.payload_id = response.payload_id.map(force_op_payload_id_v3);
+        Ok(response)
     }
 }
