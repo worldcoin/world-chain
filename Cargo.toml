@@ -57,6 +57,7 @@ world-chain-pool = { path = "crates/pool", default-features = false }
 world-chain-test-utils = { path = "crates/test-utils", default-features = false }
 
 # reth crates.io
+reth-codecs = { version = "0.1.1", default-features = false }
 reth-primitives-traits = { version = "0.1.0", default-features = false }
 
 # reth github

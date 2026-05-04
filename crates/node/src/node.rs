@@ -1,14 +1,17 @@
 use std::{fmt::Debug, sync::Arc};
 
 use crate::pool::WorldChainPoolBuilder;
+use alloy_consensus::Header;
 use alloy_eips::eip1559::BaseFeeParams;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeTypes, NodeAddOns, NodeTypes, PayloadAttributesBuilder};
+use reth_node_api::{
+    FullNodeTypes, NodeAddOns, NodePrimitives, NodeTypes, PayloadAttributesBuilder,
+};
 use reth_node_builder::{
     DebugNode, FullNodeComponents, Node, NodeAdapter, NodeComponents, NodeComponentsBuilder,
-    PayloadTypes, PrimitivesTy,
+    PayloadTypes,
     components::{ComponentsBuilder, NetworkBuilder, PayloadServiceBuilder},
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
 };
@@ -16,17 +19,29 @@ use reth_node_core::primitives::EthereumHardforks;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_node::{
-    OpEngineTypes, OpStorage,
+    OpEngineTypes, OpPayloadTypes, OpStorage,
     node::{OpConsensusBuilder, OpExecutorBuilder},
     payload::OpPayloadAttrs,
-    txpool::OpPooledTx,
 };
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives_traits::SealedHeader;
 use reth_rpc_eth_api::EthApiTypes;
-use reth_transaction_pool::{TransactionPool, blobstore::DiskFileBlobStore};
+use reth_transaction_pool::TransactionPool;
 use world_chain_cli::WorldChainNodeConfig;
-use world_chain_pool::{WorldChainTransactionPool, tx::WorldChainPoolTransaction};
+
+/// Type-level configuration shared by every World Chain node context.
+///
+/// `WorldChainNode<T>` is a generic node marker, but the concrete primitive
+/// types it exposes to reth must come from the context `T`. Production contexts
+/// use Optimism primitives, while native account-abstraction tests can provide
+/// a primitive set whose signed transaction type is
+/// `WorldChainTxEnvelope`.
+pub trait WorldChainNodeTypes:
+    Sized + From<WorldChainNodeConfig> + Clone + Debug + Unpin + Send + Sync + 'static
+{
+    /// Primitive block, receipt, and signed transaction types used by the node.
+    type Primitives: NodePrimitives<BlockHeader = Header>;
+}
 
 /// Context trait for World Chain node implementations.
 ///
@@ -38,29 +53,32 @@ use world_chain_pool::{WorldChainTransactionPool, tx::WorldChainPoolTransaction}
 /// The trait is parameterized by `N`, which must be a `FullNodeTypes` with `Types = WorldChainNode<Self>`,
 /// ensuring type safety between the context and the node it configures.
 pub trait WorldChainNodeContext<N: FullNodeTypes<Types = WorldChainNode<Self>>>:
-    Sized + From<WorldChainNodeConfig> + Clone + Debug + Unpin + Send + Sync + 'static
+    WorldChainNodeTypes
 {
     /// The EVM configuration used for this World Chain node.
     ///
     /// Provides the execution environment configuration, including gas settings,
     /// precompiles, and other EVM-specific parameters for World Chain.
-    type Evm: ConfigureEvm<Primitives = PrimitivesTy<N::Types>> + 'static;
+    type Evm: ConfigureEvm<Primitives = Self::Primitives> + 'static;
+
+    /// The transaction pool type used by this node context.
+    ///
+    /// Production nodes use the existing World Chain pool. Native-AA test
+    /// contexts can introduce a pool parameterized over `WorldChainTxEnvelope`
+    /// in a stacked change without changing the node type itself.
+    type Pool: TransactionPool + Unpin + 'static;
 
     /// The network builder for establishing P2P connections and protocol handling.
     ///
     /// Configures the networking layer, including peer discovery, message propagation,
     /// and transaction pool synchronization for the World Chain network.
-    type Net: NetworkBuilder<N, WorldChainTransactionPool<N::Provider, DiskFileBlobStore>> + 'static;
+    type Net: NetworkBuilder<N, Self::Pool> + 'static;
 
     /// Builder for the payload service that handles block building and validation.
     ///
     /// Responsible for constructing execution payloads, managing the transaction pool,
     /// and coordinating with the consensus layer for block production.
-    type PayloadServiceBuilder: PayloadServiceBuilder<
-            N,
-            WorldChainTransactionPool<N::Provider, DiskFileBlobStore>,
-            Self::Evm,
-        >;
+    type PayloadServiceBuilder: PayloadServiceBuilder<N, Self::Pool, Self::Evm>;
 
     /// Builder for the core node components.
     ///
@@ -70,7 +88,7 @@ pub trait WorldChainNodeContext<N: FullNodeTypes<Types = WorldChainNode<Self>>>:
             N,
             Components: NodeComponents<
                 N,
-                Pool: TransactionPool<Transaction: WorldChainPoolTransaction + OpPooledTx>,
+                Pool = Self::Pool,
                 Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
             >,
         >;
@@ -178,7 +196,7 @@ where
 impl<N, T> DebugNode<N> for WorldChainNode<T>
 where
     N: FullNodeComponents<Types = Self>,
-    T: WorldChainNodeContext<N> + From<WorldChainNodeConfig>,
+    T: WorldChainNodeContext<N, Primitives = OpPrimitives> + From<WorldChainNodeConfig>,
     WorldChainNodeComponentBuilder<N, T>: NodeComponentsBuilder<N>,
 {
     type RpcBlock = alloy_rpc_types_eth::Block<OpTxEnvelope>;
@@ -196,11 +214,11 @@ where
     }
 }
 
-impl<T: Unpin + Send + Clone + Sync + Debug + 'static> NodeTypes for WorldChainNode<T> {
-    type Primitives = OpPrimitives;
+impl<T: WorldChainNodeTypes> NodeTypes for WorldChainNode<T> {
+    type Primitives = T::Primitives;
     type ChainSpec = OpChainSpec;
-    type Storage = OpStorage;
-    type Payload = OpEngineTypes;
+    type Storage = OpStorage<<T::Primitives as NodePrimitives>::SignedTx>;
+    type Payload = OpEngineTypes<OpPayloadTypes<T::Primitives>>;
 }
 
 /// Builds [`OpPayloadAttrs`] for local/dev-mode payload generation.

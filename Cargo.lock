@@ -13330,6 +13330,7 @@ dependencies = [
  "op-alloy-network",
  "p256",
  "reth-basic-payload-builder",
+ "reth-codecs",
  "reth-optimism-chainspec",
  "reth-optimism-node",
  "reth-optimism-primitives",

@@ -8,9 +8,10 @@ use alloy_consensus::{
     error::ValueError,
     transaction::{RlpEcdsaEncodableTx, TxHashRef},
 };
-use alloy_eips::eip2718::Encodable2718;
+use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{B256, Bytes, ChainId, Signature, TxHash, bytes::BufMut};
 use op_alloy_consensus::{OpTransaction, OpTxEnvelope, TxDeposit, TxPostExec};
+use reth_primitives_traits::InMemorySize;
 
 use crate::transaction::{
     Wip1001Signature,
@@ -65,6 +66,51 @@ impl OpTransaction for WorldChainTxEnvelope {
 
     fn as_post_exec(&self) -> Option<&Sealed<op_alloy_consensus::TxPostExec>> {
         self.as_post_exec()
+    }
+}
+
+impl InMemorySize for WorldChainTxEnvelope {
+    fn size(&self) -> usize {
+        core::mem::size_of::<Self>() + self.eip2718_encoded_length()
+    }
+}
+
+impl reth_codecs::Compact for WorldChainTxEnvelope {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let encoded = self.encoded_2718();
+        let len = encoded.len();
+        buf.put_slice(&encoded);
+        len
+    }
+
+    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
+        let mut encoded = &buf[..len];
+        let tx = Self::decode_2718(&mut encoded).expect("valid compact World Chain transaction");
+        buf.advance(len);
+        (tx, buf)
+    }
+}
+
+impl reth_codecs::Compress for WorldChainTxEnvelope {
+    type Compressed = Vec<u8>;
+
+    fn compress_to_buf<B>(&self, buf: &mut B)
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let _ = reth_codecs::Compact::to_compact(self, buf);
+    }
+}
+
+impl reth_codecs::Decompress for WorldChainTxEnvelope {
+    fn decompress(value: &[u8]) -> Result<Self, reth_codecs::DecompressError> {
+        let (tx, _) = reth_codecs::Compact::from_compact(value, value.len());
+        Ok(tx)
     }
 }
 

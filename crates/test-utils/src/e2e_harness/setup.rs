@@ -1,12 +1,15 @@
 use crate::{
-    DEV_WORLD_ID, PBH_DEV_ENTRYPOINT,
+    DEV_WORLD_ID, ERC1967_IMPLEMENTATION_SLOT, GENESIS, L1_BLOCK_PREDEPLOY, PBH_DEV_ENTRYPOINT,
+    SET_L1_BLOCK_SELECTOR, SYSTEM_DEPOSITOR, WORLD_ID_ACCOUNT_MANAGER,
+    WORLD_ID_ACCOUNT_MANAGER_IMPL_V1, WORLD_ID_ACCOUNT_MANAGER_IMPL_V1_RUNTIME_BYTECODE,
+    WORLD_ID_ACCOUNT_MANAGER_RUNTIME_BYTECODE,
     node::{test_config_with_peers_and_gossip, tx},
     utils::{account, signer, tree_root},
 };
 use alloy_eips::{eip2718::Encodable2718, eip7685::EMPTY_REQUESTS_HASH};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
-use alloy_primitives::{Address, B64, Sealed, address};
+use alloy_primitives::{Address, B64, Sealed, hex};
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
@@ -52,7 +55,7 @@ use std::{
 use tracing::{info, span};
 use world_chain_node::{
     FlashblocksOpApi, OpApiExtServer,
-    node::{WorldChainNode, WorldChainNodeContext},
+    node::{WorldChainNode, WorldChainNodeContext, WorldChainNodeTypes},
 };
 use world_chain_primitives::{flashblocks::Flashblock, p2p::Authorization};
 
@@ -65,15 +68,50 @@ use world_chain_rpc::{EthApiExtServer, SequencerClient, WorldChainEthApiExt};
 
 use super::spammer::{TxSpammer, TxType};
 
-const GENESIS: &str = include_str!("../../res/genesis.json");
+/// Decode a static hex constant into raw bytecode for genesis allocation.
+///
+/// The bytecode constants are formatted with `concat!` for readability, so this
+/// helper accepts whitespace and an optional `0x` prefix while still failing
+/// fast if the checked-in constant is malformed.
+fn bytes_from_hex(hex_str: &str) -> Bytes {
+    let normalized: String = hex_str
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace())
+        .collect();
+    Bytes::from(hex::decode(normalized.trim_start_matches("0x")).expect("valid bytecode hex"))
+}
 
-// Optimism protocol constants - these addresses are defined by the Optimism specification
-const L1_BLOCK_PREDEPLOY: Address = address!("4200000000000000000000000000000000000015");
-const SYSTEM_DEPOSITOR: Address = address!("DeaDDEaDDeAdDeAdDEAdDEaddeAddEAdDEAd0001");
+/// Encode an address as a 32-byte storage word.
+///
+/// Solidity stores `address` values right-aligned in a full EVM word. The
+/// ERC-1967 implementation slot therefore needs the proxy implementation
+/// address left-padded with zeros.
+fn address_word(address: Address) -> B256 {
+    let mut word = [0u8; 32];
+    word[12..32].copy_from_slice(address.as_slice());
+    B256::from(word)
+}
+
+/// Decode a fixed 32-byte hex constant used as a storage key.
+fn b256_from_hex(hex_str: &str) -> B256 {
+    B256::from_slice(&hex::decode(hex_str).expect("valid B256 hex"))
+}
+
+/// Build the storage injected into the preloaded account-manager proxy.
+///
+/// Genesis preloading installs runtime bytecode directly, so the proxy
+/// constructor never gets a chance to set its implementation. This storage map
+/// performs exactly that constructor side effect by writing the ERC-1967
+/// implementation slot. Initialization data is intentionally not modeled here.
+fn world_id_account_manager_proxy_storage() -> BTreeMap<B256, B256> {
+    BTreeMap::from_iter([(
+        b256_from_hex(ERC1967_IMPLEMENTATION_SLOT),
+        address_word(WORLD_ID_ACCOUNT_MANAGER_IMPL_V1),
+    )])
+}
 
 fn create_l1_attributes_deposit_tx() -> Bytes {
-    const SELECTOR: [u8; 4] = [0x44, 0x0a, 0x5e, 0x20];
-    let mut calldata = SELECTOR.to_vec();
+    let mut calldata = SET_L1_BLOCK_SELECTOR.to_vec();
     calldata.extend_from_slice(&[0u8; 32]);
     calldata.extend_from_slice(&[0u8; 32]);
     calldata.extend_from_slice(&[0u8; 32]);
@@ -98,7 +136,11 @@ fn create_l1_attributes_deposit_tx() -> Bytes {
     buf.into()
 }
 
-/// L1 attributes deposit transaction - required as the first transaction in Optimism blocks
+/// Encoded Optimism L1 attributes deposit transaction.
+///
+/// Optimism payloads require this system transaction as the first transaction in
+/// every block. The harness uses a single zero-valued fixture because tests only
+/// need the transaction to satisfy block-shape rules.
 pub static TX_SET_L1_BLOCK: LazyLock<Bytes> = LazyLock::new(create_l1_attributes_deposit_tx);
 
 pub struct WorldChainTestingNodeContext<T: WorldChainTestContextBounds>
@@ -404,6 +446,22 @@ pub static CHAIN_SPEC: LazyLock<OpChainSpec> = LazyLock::new(|| {
                     ),
                 ]))),
             )])
+            .extend_accounts(vec![
+                (
+                    WORLD_ID_ACCOUNT_MANAGER_IMPL_V1,
+                    GenesisAccount::default().with_code(Some(bytes_from_hex(
+                        WORLD_ID_ACCOUNT_MANAGER_IMPL_V1_RUNTIME_BYTECODE,
+                    ))),
+                ),
+                (
+                    WORLD_ID_ACCOUNT_MANAGER,
+                    GenesisAccount::default()
+                        .with_code(Some(bytes_from_hex(
+                            WORLD_ID_ACCOUNT_MANAGER_RUNTIME_BYTECODE,
+                        )))
+                        .with_storage(Some(world_id_account_manager_proxy_storage())),
+                ),
+            ])
             .extend_accounts(vec![(
                 account(0),
                 GenesisAccount::default().with_balance(U256::from(100_000_000_000_000_000u64)),
@@ -562,7 +620,8 @@ pub fn execution_data_from_from_reduced_flashblock(
 
 /// Consolidated trait bound for WorldChainNode testing context
 pub trait WorldChainTestContextBounds:
-    WorldChainNodeContext<
+    WorldChainNodeTypes<Primitives = OpPrimitives>
+    + WorldChainNodeContext<
         FullNodeTypesAdapter<
             WorldChainNode<Self>,
             TmpDB,
@@ -613,6 +672,7 @@ where
     WorldChainNode<Self>: NodeTypes<
             Primitives = OpPrimitives,
             ChainSpec = OpChainSpec,
+            Payload = OpEngineTypes,
             Storage: ChainStorage<OpPrimitives>,
         > + Node<
             FullNodeTypesAdapter<
@@ -656,7 +716,8 @@ where
 // Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
 impl<T> WorldChainTestContextBounds for T
 where
-    T: WorldChainNodeContext<
+    T: WorldChainNodeTypes<Primitives = OpPrimitives>
+        + WorldChainNodeContext<
             FullNodeTypesAdapter<
                 WorldChainNode<T>,
                 TmpDB,
@@ -704,6 +765,7 @@ where
     WorldChainNode<T>: NodeTypes<
             Primitives = OpPrimitives,
             ChainSpec = OpChainSpec,
+            Payload = OpEngineTypes,
             Storage: ChainStorage<OpPrimitives>,
         > + Node<
             FullNodeTypesAdapter<
@@ -749,6 +811,7 @@ pub trait WorldChainNodeTestBounds<T>:
     NodeTypes<
         Primitives = OpPrimitives,
         ChainSpec = OpChainSpec,
+        Payload = OpEngineTypes,
         Storage: ChainStorage<OpPrimitives>,
     > + Node<
         FullNodeTypesAdapter<Self, TmpDB, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
@@ -756,7 +819,7 @@ pub trait WorldChainNodeTestBounds<T>:
         ComponentsBuilder = T::ComponentsBuilder,
     >
 where
-    T: WorldChainTestContextBounds,
+    T: WorldChainTestContextBounds + WorldChainNodeTypes<Primitives = OpPrimitives>,
 {
 }
 
@@ -765,12 +828,13 @@ where
     T: NodeTypes<
             Primitives = OpPrimitives,
             ChainSpec = OpChainSpec,
+            Payload = OpEngineTypes,
             Storage: ChainStorage<OpPrimitives>,
         > + Node<
             FullNodeTypesAdapter<T, TmpDB, BlockchainProvider<NodeTypesWithDBAdapter<T, TmpDB>>>,
             AddOns = Ctx::AddOns,
             ComponentsBuilder = Ctx::ComponentsBuilder,
         >,
-    Ctx: WorldChainTestContextBounds,
+    Ctx: WorldChainTestContextBounds + WorldChainNodeTypes<Primitives = OpPrimitives>,
 {
 }
