@@ -105,7 +105,7 @@ impl Flashblock {
 
         Flashblock {
             flashblock: FlashblocksPayloadV1 {
-                payload_id: config.payload_id(),
+                payload_id: config.payload_id,
                 index,
                 base: payload_base,
                 diff: ExecutionPayloadFlashblockDeltaV1 {
