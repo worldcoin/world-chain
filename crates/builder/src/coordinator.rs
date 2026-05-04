@@ -35,6 +35,8 @@ use tokio::{
 use tracing::{error, trace};
 
 use crate::{
+    execution_strategy::{FlashblocksBalExecutionStrategy, FlashblocksLegacyExecutionStrategy},
+    flashblock_types::{BalFlashblockTypes, LegacyFlashblockTypes},
     flashblock_validation_metrics::FlashblockValidationMetrics,
     validator::FlashblocksBlockValidator,
 };
@@ -420,22 +422,39 @@ where
 
     let sealed_header = Arc::new(sealed_header);
 
-    let block_validator = FlashblocksBlockValidator {
-        chain_spec: chain_spec.clone(),
-        evm_config: evm_config.clone(),
-        execution_context: execution_context.clone(),
-        evm_env: evm_env.clone(),
-        header: sealed_header.clone(),
-        flashblock_validation_metrics: flashblock_validation_metrics.clone(),
-    };
+    let has_bal = diff.access_list_data.is_some();
 
-    let next_payload = block_validator.validate_flashblock_with_state(
-        provider,
-        diff.clone(),
-        &sealed_header,
-        flashblock.flashblock.payload_id,
-        latest_payload.as_ref(),
-    )?;
+    let next_payload = if has_bal {
+        FlashblocksBlockValidator::<_, BalFlashblockTypes>::new(
+            chain_spec.clone(),
+            evm_env.clone(),
+            execution_context.clone(),
+            flashblock_validation_metrics.clone(),
+            FlashblocksBalExecutionStrategy,
+        )
+        .validate_flashblock_with_state(
+            provider,
+            diff,
+            &sealed_header,
+            flashblock.flashblock.payload_id,
+            latest_payload.as_ref(),
+        )?
+    } else {
+        FlashblocksBlockValidator::<_, LegacyFlashblockTypes>::new(
+            chain_spec.clone(),
+            evm_env.clone(),
+            execution_context.clone(),
+            flashblock_validation_metrics.clone(),
+            FlashblocksLegacyExecutionStrategy,
+        )
+        .validate_flashblock_with_state(
+            provider,
+            diff,
+            &sealed_header,
+            flashblock.flashblock.payload_id,
+            latest_payload.as_ref(),
+        )?
+    };
 
     {
         let mut inner = coordinator.inner.write();

@@ -59,6 +59,7 @@ use world_chain_primitives::{
         Authorization, Authorized, AuthorizedMsg, AuthorizedPayload, FlashblocksP2PMsg,
         StartPublish,
     },
+    payload_id::force_op_payload_id_v3,
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
     transaction::{SignedWip1001, TxWip1001, Wip1001Signature, WorldChainTxEnvelope},
 };
@@ -1342,7 +1343,7 @@ async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
     let authorization_gen =
         move |parent_hash: B256, attrs: reth_optimism_payload_builder::OpPayloadAttrs| {
             let authorizer_sk = ed25519_dalek::SigningKey::from_bytes(&[0; 32]);
-            let payload_id = attrs.payload_id(&parent_hash);
+            let payload_id = force_op_payload_id_v3(attrs.payload_id(&parent_hash));
             world_chain_primitives::p2p::Authorization::new(
                 payload_id,
                 attrs.payload_attributes.timestamp,
@@ -1536,7 +1537,7 @@ async fn test_eth_api_assertions() -> eyre::Result<()> {
     let authorization_gen =
         move |parent_hash: B256, attrs: reth_optimism_payload_builder::OpPayloadAttrs| {
             let authorizer_sk = ed25519_dalek::SigningKey::from_bytes(&[0; 32]);
-            let payload_id = attrs.payload_id(&parent_hash);
+            let payload_id = force_op_payload_id_v3(attrs.payload_id(&parent_hash));
             world_chain_primitives::p2p::Authorization::new(
                 payload_id,
                 attrs.payload_attributes.timestamp,
@@ -1770,7 +1771,7 @@ async fn test_assertion_driven_event_stream() -> eyre::Result<()> {
     let authorization_gen =
         move |parent_hash: B256, attrs: reth_optimism_payload_builder::OpPayloadAttrs| {
             let authorizer_sk = ed25519_dalek::SigningKey::from_bytes(&[0; 32]);
-            let payload_id = attrs.payload_id(&parent_hash);
+            let payload_id = force_op_payload_id_v3(attrs.payload_id(&parent_hash));
             world_chain_primitives::p2p::Authorization::new(
                 payload_id,
                 attrs.payload_attributes.timestamp,
