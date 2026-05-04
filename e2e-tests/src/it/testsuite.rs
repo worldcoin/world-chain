@@ -5,9 +5,9 @@ use alloy_primitives::{Bytes, b64};
 use alloy_provider::ProviderBuilder;
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_engine::PayloadStatusEnum;
+use alloy_signer::SignerSync;
 use eyre::eyre::eyre;
 use op_alloy_consensus::OpTxEnvelope;
-use op_alloy_network::TxSignerSync;
 use reth_chainspec::EthChainSpec;
 use reth_e2e_test_utils::testsuite::actions::Action;
 use reth_network::{NetworkSyncUpdater, SyncState};
@@ -64,12 +64,12 @@ use world_chain_primitives::{
     transaction::{SignedWip1001, TxWip1001, Wip1001Signature, WorldChainTxEnvelope},
 };
 use world_chain_test_utils::{
+    Wip1001NodeContext,
     e2e_harness::setup::{
         CHAIN_SPEC, create_test_transaction, encode_eip1559_params, setup,
         setup_with_block_uncompressed_size_limit, setup_with_tx_peers,
     },
     utils::{eip1559, raw_tx},
-    Wip1001NodeContext,
 };
 
 async fn create_priority_transaction(
@@ -104,7 +104,7 @@ fn create_wip1001_transaction() -> eyre::Result<(Bytes, B256)> {
         .verifying_key()
         .to_encoded_point(true);
 
-    let mut tx = TxWip1001 {
+    let tx = TxWip1001 {
         chain_id: CHAIN_SPEC.chain.id(),
         nonce: 0,
         max_priority_fee_per_gas: 1_000_000_000,
@@ -119,7 +119,7 @@ fn create_wip1001_transaction() -> eyre::Result<(Bytes, B256)> {
         session_key: Bytes::copy_from_slice(session_key.as_bytes()),
     };
 
-    let signature = session_signer.sign_transaction_sync(&mut tx)?;
+    let signature = session_signer.sign_hash_sync(&tx.signing_hash())?;
     let envelope = WorldChainTxEnvelope::from(SignedWip1001::new_signed(
         tx,
         Wip1001Signature::Secp256k1(signature),

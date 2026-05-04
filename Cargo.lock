@@ -13500,6 +13500,7 @@ dependencies = [
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
+ "alloy-signer",
  "alloy-signer-local",
  "color-eyre",
  "ed25519-dalek",

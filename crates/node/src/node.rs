@@ -29,8 +29,8 @@ use reth_rpc_eth_api::EthApiTypes;
 use reth_transaction_pool::TransactionPool;
 use world_chain_cli::WorldChainNodeConfig;
 
-/// Primitive types for a World Chain node implementation. 
-/// 
+/// Primitive types for a World Chain node implementation.
+///
 /// This trait parameterizes `NodeTypes` inherited via `WorldChainNode<T>`.
 /// Allows `WorldChainNode<T>` to be fully generic over the Engine, Transaction, Block, and Receipt primitives
 /// while inheriting a unified testing harness generic over `T: WorldChainNodeContext`.
