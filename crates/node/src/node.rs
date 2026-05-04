@@ -236,6 +236,10 @@ impl PayloadAttributesBuilder<OpPayloadAttrs> for OpLocalPayloadAttributesBuilde
                 .chain_spec
                 .is_cancun_active_at_timestamp(timestamp)
                 .then(alloy_primitives::B256::random),
+            slot_number: self
+                .chain_spec
+                .is_amsterdam_active_at_timestamp(timestamp)
+                .then_some(0),
         };
 
         // Dummy system transaction for dev mode.

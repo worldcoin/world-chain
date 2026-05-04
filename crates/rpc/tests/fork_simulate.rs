@@ -73,9 +73,12 @@ fn metadata_evm_env() -> reth_evm::EvmEnv<OpSpecId> {
 
 /// Create a forked CacheDB backed by an AlloyDB hitting the World Chain RPC.
 /// Uses `RootProvider` directly (which implements Debug, satisfying revm bounds).
-fn make_forked_db()
--> CacheDB<WrapDatabaseAsync<AlloyDB<alloy::network::Ethereum, alloy::providers::RootProvider>>> {
-    let provider = alloy::providers::RootProvider::new_http(rpc_url().parse().unwrap());
+fn make_forked_db() -> CacheDB<
+    WrapDatabaseAsync<
+        AlloyDB<alloy_provider_v1::network::Ethereum, alloy_provider_v1::RootProvider>,
+    >,
+> {
+    let provider = alloy_provider_v1::RootProvider::new_http(rpc_url().parse().unwrap());
     let alloy_db = AlloyDB::new(provider, revm_database::BlockId::latest());
     let handle = tokio::runtime::Handle::current();
     let wrapped = WrapDatabaseAsync::with_handle(alloy_db, handle);

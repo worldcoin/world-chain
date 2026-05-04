@@ -35,7 +35,7 @@ use reth_evm::{
 };
 use reth_optimism_node::{OpBlockAssembler, OpBuiltPayload};
 use reth_provider::StateProvider;
-use revm::{context::result::ExecutionResult, database::states::bundle_state::BundleRetention};
+use revm::database::states::bundle_state::BundleRetention;
 use std::{sync::Arc, time::Instant};
 use world_chain_primitives::access_list::FlashblockAccessList;
 
@@ -178,9 +178,7 @@ where
     fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(
-            &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
-        ) -> CommitChanges,
+        f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
         let (tx_env, recovered) = tx.into_parts();
         if let Some(gas_used) = self
@@ -190,7 +188,7 @@ where
             self.transactions.push(recovered);
             // only prepare the database index for the next transaction if this one was committed
             self.prepare_database()?;
-            Ok(Some(gas_used))
+            Ok(Some(gas_used.tx_gas_used()))
         } else {
             Ok(None)
         }

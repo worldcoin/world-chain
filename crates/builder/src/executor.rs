@@ -21,11 +21,7 @@ use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
 use reth_trie_common::updates::TrieUpdates;
-use revm::{
-    DatabaseCommit,
-    context::{BlockEnv, result::ExecutionResult},
-    database::states::bundle_state::BundleRetention,
-};
+use revm::{DatabaseCommit, context::BlockEnv, database::states::bundle_state::BundleRetention};
 use revm_database::BundleState;
 use std::{sync::Arc, time::Instant};
 
@@ -97,9 +93,7 @@ where
     fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(
-            &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
-        ) -> CommitChanges,
+        f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
         if let Some(gas_used) = self
@@ -108,7 +102,7 @@ where
             .execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
             self.inner.transactions.push(tx);
-            Ok(Some(gas_used))
+            Ok(Some(gas_used.tx_gas_used()))
         } else {
             Ok(None)
         }

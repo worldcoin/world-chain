@@ -6,7 +6,7 @@ use alloy_rpc_types_engine::{
 };
 use jsonrpsee::{proc_macros::rpc, types::ErrorObject};
 use jsonrpsee_core::{RpcResult, async_trait, server::RpcModule};
-use op_alloy_rpc_types_engine::{OpExecutionPayloadV4, ProtocolVersion, SuperchainSignal};
+use op_alloy_rpc_types_engine::OpExecutionPayloadV4;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{EngineApiValidator, EngineTypes};
 use reth_optimism_node::payload::OpExecData;
@@ -172,10 +172,6 @@ where
             .inner
             .get_payload_bodies_by_range_v1(start, count)
             .await?)
-    }
-
-    async fn signal_superchain_v1(&self, signal: SuperchainSignal) -> RpcResult<ProtocolVersion> {
-        Ok(self.inner.signal_superchain_v1(signal).await?)
     }
 
     async fn get_client_version_v1(
