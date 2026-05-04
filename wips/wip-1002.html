@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-4cf58acd.js";
+            window.path_to_searchindex_js = "../searchindex-97b46de7.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-85576531.js"></script>
@@ -178,7 +178,7 @@
                     <main>
                         <h2 id="abstract"><a class="header" href="#abstract">Abstract</a></h2>
 <p>A <strong>WorldID Subsidy Accounting</strong> system enables per-credential, ETH-denominated transaction-fee subsidies for verified humans on World Chain. A <a href="https://worldcoin.org/world-id">World ID</a> opens a per-period subsidy record whose <code>nullifier</code> — derived from a <a href="https://github.com/worldcoin/world-id-protocol">World ID 4.0</a> Uniqueness Proof — is the record’s primary key for budget, authorization, and replay state. The initial claim is driven by a multi-item proof request authorized by a World-Chain-operated WIP-101 relying party contract (an <a href="https://eips.ethereum.org/EIPS/eip-1271">ERC-1271</a>-style smart-contract signer); the authenticator lists one <code>RequestItem</code> per credential the WorldID holds and emits one Uniqueness Proof per item, all sharing the same <code>nullifier</code>. Each proof’s signal carries the initial set of authorized accounts permitted to spend the budget. The first on-chain call also binds a World ID <code>sessionId</code> to the <code>nullifier</code> record; subsequent Session Proofs against that <code>sessionId</code> may claim credentials acquired later in the period or add / remove authorized addresses. Budgets are governance-configurable per <code>issuerSchemaId</code>, and subsidy records expire at period boundaries.</p>
-<p>Authorized addresses may be legacy EOAs, smart contract accounts, or <a href="./wip-1001.html">WIP-1001</a> <em>World ID Accounts</em> — the subsidy system is orthogonal to the account type it funds.</p>
+<p>Authorized addresses may be legacy EOAs, smart contract accounts, or <a href="./wip-1001.html">WIP-1001</a> <em>World Chain Accounts</em> — the subsidy system is orthogonal to the account type it funds.</p>
 <h2 id="motivation"><a class="header" href="#motivation">Motivation</a></h2>
 <p>World ID holders are currently already being subsidized for their transaction fees on World Chain. Native, ETH-denominated subsidies allow for a more fluid fee market, and enshrine fee allowances for World ID holders at the protocol (or builder) level rather than relying on off-chain paymasters. Denominating in ETH (rather than gas units) gives governance more flexibility to fold in factors like the L1 blob-fee price or DeFi congestion when sizing budgets.</p>
 <p>Per-credential budgeting lets subsidy weight reflect credential strength — a Proof-of-Human (Orb) credential carries more weight than a Phone credential, and governance can tune each independently via <code>issuerSchemaId</code>.</p>
@@ -322,7 +322,7 @@
 }
 </code></pre>
 <h4 id="authorization-map"><a class="header" href="#authorization-map">Authorization Map</a></h4>
-<p>Reverse index from authorized account address to the set of <code>nullifier</code> records the address may draw budget from. Populated on <code>claimSubsidy</code> from the <code>addAddresses</code> list; mutated throughout the period by <code>updateAddresses</code>. Authorized addresses MAY be EOAs, smart contract accounts, or <a href="./wip-1001.html">WIP-1001</a> <em>World ID Accounts</em>.</p>
+<p>Reverse index from authorized account address to the set of <code>nullifier</code> records the address may draw budget from. Populated on <code>claimSubsidy</code> from the <code>addAddresses</code> list; mutated throughout the period by <code>updateAddresses</code>. Authorized addresses MAY be EOAs, smart contract accounts, or <a href="./wip-1001.html">WIP-1001</a> <em>World Chain Accounts</em>.</p>
 <h4 id="subsidy-budget-map"><a class="header" href="#subsidy-budget-map">Subsidy Budget Map</a></h4>
 <p>Maps <code>nullifier</code> values to the per-period subsidy record — remaining ETH-denominated budget (in Wei), the <code>sessionId</code> used to verify subsequent Session Proofs, the bitmap of claimed <code>issuerSchemaId</code> values, the authorized-address set, and a monotonic update nonce incremented on each successful <code>updateAddresses</code> (prevents Session Proof replay). Budget accumulates as the initial multi-item <code>claimSubsidy</code> and later <code>claimAdditionalCredential</code> calls add credentials. A helper lookup by authorized address MAY resolve the budget through the same deterministic nullifier-selection rule used during transaction execution.</p>
 <h4 id="claimed-credentials-map"><a class="header" href="#claimed-credentials-map">Claimed-Credentials Map</a></h4>
@@ -451,7 +451,7 @@ struct UpdateAddressesSignal {
 <p>For an incoming transaction:</p>
 <ol>
 <li>The protocol (or builder) looks up whether the sender address has an associated subsidy <code>nullifier</code> in the authorization map.</li>
-<li>If the address maps to more than one <code>nullifier</code>, a deterministic rule selects which record’s budget to use. A <a href="./wip-1001.html">WIP-1001</a> <code>0x1D</code> transaction MAY extend its envelope with an OPTIONAL <code>subsidy_nullifier</code> field; if present and the <code>world_id_account</code> is authorized under that <code>nullifier</code>, the declared budget is consumed.</li>
+<li>If the address maps to more than one <code>nullifier</code>, a deterministic rule selects which record’s budget to use. A <a href="./wip-1001.html">WIP-1001</a> <code>0x1D</code> transaction MAY extend its envelope with an OPTIONAL <code>subsidy_nullifier</code> field; if present and the <code>account</code> is authorized under that <code>nullifier</code>, the declared budget is consumed.</li>
 <li>The remaining ETH-denominated budget (<code>remainingWei</code>) is decremented by <code>gasUsed * baseFee</code> (Wei) of the transaction.</li>
 </ol>
 <p><code>getBudget(address)</code> SHOULD apply the same deterministic nullifier-selection rule so off-chain callers observe the same effective budget that transaction execution would consume.</p>
@@ -473,9 +473,9 @@ struct UpdateAddressesSignal {
 <p><strong>Per-credential budgets.</strong> Different credentials represent different levels of verification. Proof-of-Human from an Orb carries more weight than a phone credential. Allowing governance to configure budget amounts per <code>issuerSchemaId</code> enables fine-grained subsidy policy.</p>
 <p><strong>Signal binding against frontrunning.</strong> Each method binds its non-ZK-committed call parameters into <code>signalHash</code>. The contract recomputes the expected <code>signalHash</code> rather than accepting it from the caller. Mirrors the <a href="./wip-1001.html">WIP-1001</a> signal-binding pattern.</p>
 <p><strong>Periodic refresh with early submission.</strong> Fixed periods with expiring subsidies provide a clean budget lifecycle. Allowing early refresh prevents a thundering herd at period boundaries.</p>
-<p><strong>Orthogonality to World ID Accounts.</strong> <a href="./wip-1001.html">WIP-1001</a> <em>World ID Accounts</em> are authorized here like any other address — no special coupling is required. Legacy EOAs can opt in to fee subsidies without migrating account types, and World ID Accounts can sign <code>0x1D</code> transactions that either do or do not consume subsidy budget.</p>
+<p><strong>Orthogonality to World Chain Accounts.</strong> <a href="./wip-1001.html">WIP-1001</a> <em>World Chain Accounts</em> are authorized here like any other address — no special coupling is required, and the subsidy system is agnostic to the account’s admin type (WorldID, Secp256k1, P256). Legacy EOAs can opt in to fee subsidies without migrating account types, and World Chain Accounts can sign <code>0x1D</code> transactions that either do or do not consume subsidy budget.</p>
 <h2 id="backwards-compatibility"><a class="header" href="#backwards-compatibility">Backwards Compatibility</a></h2>
-<p>This WIP introduces a new protocol/builder-level accounting system. It does not modify the semantics of any existing transaction type. Any account type — legacy EOA, smart contract, or <a href="./wip-1001.html">WIP-1001</a> World ID Account — may be authorized under a subsidy <code>nullifier</code> and thereby have its transaction fees subsidized. Whether <a href="https://eips.ethereum.org/EIPS/eip-1559">EIP-1559</a> transactions from authorized accounts can consume subsidy budgets is an open question (see optional requirements).</p>
+<p>This WIP introduces a new protocol/builder-level accounting system. It does not modify the semantics of any existing transaction type. Any account type — legacy EOA, smart contract, or <a href="./wip-1001.html">WIP-1001</a> World Chain Account — may be authorized under a subsidy <code>nullifier</code> and thereby have its transaction fees subsidized. Whether <a href="https://eips.ethereum.org/EIPS/eip-1559">EIP-1559</a> transactions from authorized accounts can consume subsidy budgets is an open question (see optional requirements).</p>
 <h2 id="test-cases"><a class="header" href="#test-cases">Test Cases</a></h2>
 <blockquote>
 <p>TODO: Test cases to be defined before moving out of Draft status.</p>
