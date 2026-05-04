@@ -577,12 +577,18 @@ where
 
         // 8. Pull captured logs and the gas/status for the response.
         let (status, gas_used, logs, halt_reason) = match &result_and_state.result {
-            ExecutionResult::Success { gas, logs, .. } => {
-                (SimulationStatus::Success, gas.used(), logs.clone(), None)
-            }
-            ExecutionResult::Revert { gas, logs, .. } => {
-                (SimulationStatus::Revert, gas.used(), logs.clone(), None)
-            }
+            ExecutionResult::Success { gas, logs, .. } => (
+                SimulationStatus::Success,
+                gas.tx_gas_used(),
+                logs.clone(),
+                None,
+            ),
+            ExecutionResult::Revert { gas, logs, .. } => (
+                SimulationStatus::Revert,
+                gas.tx_gas_used(),
+                logs.clone(),
+                None,
+            ),
             ExecutionResult::Halt { gas, logs, reason } => {
                 // Halts (out-of-gas, stack overflow, invalid opcode, etc.) are
                 // surfaced as `Revert` to the consumer: from their perspective
@@ -596,7 +602,7 @@ where
                 // `"PrecompileErrorWithContext(\"...\")"`.
                 (
                     SimulationStatus::Revert,
-                    gas.used(),
+                    gas.tx_gas_used(),
                     logs.clone(),
                     Some(format!("{reason:?}")),
                 )

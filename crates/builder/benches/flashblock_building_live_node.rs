@@ -45,6 +45,7 @@ fn deterministic_payload_attributes(
             suggested_fee_recipient: Address::ZERO,
             withdrawals: Some(vec![]),
             parent_beacon_block_root: Some(B256::ZERO),
+            slot_number: None,
         },
         transactions: Some(transactions),
         no_tx_pool: Some(true),

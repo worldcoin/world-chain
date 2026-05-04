@@ -1535,7 +1535,7 @@ mod tests {
         fn add_peer_kind(
             &self,
             _peer: PeerId,
-            _kind: PeerKind,
+            _kind: Option<PeerKind>,
             _tcp_addr: SocketAddr,
             _udp_addr: Option<SocketAddr>,
         ) {
