@@ -13401,7 +13401,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "world-chain-pool",
  "world-chain-primitives",
 ]
 

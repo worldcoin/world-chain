@@ -21,6 +21,7 @@ use world_chain_pool::{
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
     validator::WorldChainTransactionValidator,
 };
+use world_chain_primitives::transaction::WIP_1001_TX_TYPE;
 /// A basic World Chain transaction pool.
 ///
 /// This contains various settings that can be configured and take precedence over the node's
@@ -93,6 +94,7 @@ where
 
         let validator =
             TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone(), evm_config)
+                .with_custom_tx_type(WIP_1001_TX_TYPE)
                 .no_eip4844()
                 .kzg_settings(ctx.kzg_settings()?)
                 .with_additional_tasks(

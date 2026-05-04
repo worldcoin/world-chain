@@ -12,7 +12,6 @@ workspace = true
 
 [dependencies]
 # internal
-world-chain-pool.workspace = true
 world-chain-primitives.workspace = true
 
 # reth
