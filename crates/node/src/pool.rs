@@ -1,34 +1,42 @@
+use std::marker::PhantomData;
+
 use alloy_primitives::Address;
-use reth_node_api::{FullNodeTypes, NodeTypes};
+use reth_evm::ConfigureEvm;
+use reth_node_api::{FullNodeTypes, NodePrimitives, NodeTypes, PrimitivesTy, TxTy};
 use reth_node_builder::{
     BuilderContext,
     components::{PoolBuilder, PoolBuilderConfigOverrides},
 };
-use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
-use reth_optimism_primitives::OpPrimitives;
-use reth_provider::CanonStateSubscriptions;
-use reth_transaction_pool::{TransactionValidationTaskExecutor, blobstore::DiskFileBlobStore};
+use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions};
+use reth_transaction_pool::{
+    TransactionValidationTaskExecutor, TransactionValidator, blobstore::DiskFileBlobStore,
+};
 use tracing::{debug, info};
 use world_chain_pool::{
-    WorldChainTransactionPool, ordering::WorldChainOrdering, root::WorldChainRootValidator,
+    WorldChainTransactionPool,
+    ordering::WorldChainOrdering,
+    root::WorldChainRootValidator,
+    tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
     validator::WorldChainTransactionValidator,
 };
+use world_chain_primitives::transaction::WIP_1001_TX_TYPE;
 /// A basic World Chain transaction pool.
 ///
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
 #[derive(Debug, Clone)]
-pub struct WorldChainPoolBuilder {
+pub struct WorldChainPoolBuilder<T = WorldChainPooledTransaction> {
     pub pbh_entrypoint: Address,
     pub pbh_signature_aggregator: Address,
     pub world_id: Address,
     /// Enforced overrides that are applied to the pool config.
     pub pool_config_overrides: PoolBuilderConfigOverrides,
+    _pd: PhantomData<fn() -> T>,
 }
 
-impl WorldChainPoolBuilder {
+impl<T> WorldChainPoolBuilder<T> {
     pub fn new(
         pbh_entrypoint: Address,
         pbh_signature_aggregator: Address,
@@ -39,11 +47,12 @@ impl WorldChainPoolBuilder {
             pbh_signature_aggregator,
             world_id,
             pool_config_overrides: Default::default(),
+            _pd: PhantomData,
         }
     }
 }
 
-impl WorldChainPoolBuilder {
+impl<T> WorldChainPoolBuilder<T> {
     /// Sets the [`PoolBuilderConfigOverrides`] on the pool builder.
     pub fn with_pool_config_overrides(
         mut self,
@@ -54,16 +63,23 @@ impl WorldChainPoolBuilder {
     }
 }
 
-impl<Node> PoolBuilder<Node, OpEvmConfig> for WorldChainPoolBuilder
+impl<Node, T, Evm> PoolBuilder<Node, Evm> for WorldChainPoolBuilder<T>
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks, Primitives = OpPrimitives>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks>>,
+    Node::Provider: BlockReaderIdExt<Block = <PrimitivesTy<Node::Types> as NodePrimitives>::Block>,
+    T: WorldChainPoolTransaction<Consensus = TxTy<Node::Types>>,
+    Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + Clone + 'static,
+    WorldChainTransactionValidator<Node::Provider, T, Evm>: TransactionValidator<
+            Transaction = T,
+            Block = <PrimitivesTy<Node::Types> as NodePrimitives>::Block,
+        >,
 {
-    type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore>;
+    type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore, T, Evm>;
 
     async fn build_pool(
         self,
         ctx: &BuilderContext<Node>,
-        evm_config: OpEvmConfig,
+        evm_config: Evm,
     ) -> eyre::Result<Self::Pool> {
         let Self {
             pbh_entrypoint,
@@ -78,6 +94,7 @@ where
 
         let validator =
             TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone(), evm_config)
+                .with_custom_tx_type(WIP_1001_TX_TYPE)
                 .no_eip4844()
                 .kzg_settings(ctx.kzg_settings()?)
                 .with_additional_tasks(

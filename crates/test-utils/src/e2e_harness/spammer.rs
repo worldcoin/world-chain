@@ -11,6 +11,7 @@ use futures::{StreamExt, stream::FuturesOrdered};
 use reqwest::Url;
 use reth_chainspec::EthChainSpec;
 use reth_e2e_test_utils::testsuite::NodeClient;
+use reth_node_api::EngineTypes;
 use reth_optimism_node::OpEngineTypes;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_rpc_api::EthApiClient;
@@ -98,12 +99,18 @@ impl TxType {
 const MAX_SIGNERS: u32 = 19;
 
 #[derive(Debug)]
-pub struct TxSpammer {
-    pub rpc: Vec<NodeClient<OpEngineTypes>>,
+pub struct TxSpammer<P = OpEngineTypes>
+where
+    P: EngineTypes,
+{
+    pub rpc: Vec<NodeClient<P>>,
     pub sequence: Vec<TxType>,
 }
 
-impl TxSpammer {
+impl<P> TxSpammer<P>
+where
+    P: EngineTypes + Send + Sync + 'static,
+{
     /// Spawns a background task that continuously sends transactions.
     ///
     /// Deploys test contracts on startup, then sends batches of `tpf` transactions per flashblock.

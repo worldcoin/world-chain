@@ -1,13 +1,12 @@
 use std::error::Error;
 
 use jsonrpsee::core::async_trait;
-use reth_optimism_node::txpool::OpPooledTransaction;
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_rpc_eth_api::{AsEthApiError, FromEthApiError};
 use reth_rpc_eth_types::{EthApiError, utils::recover_raw_transaction};
-use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
+use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionOrigin, TransactionPool};
 use revm_primitives::{B256, Bytes};
-use world_chain_pool::tx::WorldChainPooledTransaction;
 
 use crate::{core::WorldChainEthApiExt, sequencer::SequencerClient};
 
@@ -27,15 +26,16 @@ pub trait EthTransactionsExt {
 #[async_trait]
 impl<Pool, Client> EthTransactionsExt for WorldChainEthApiExt<Pool, Client>
 where
-    Pool: TransactionPool<Transaction = WorldChainPooledTransaction> + Clone + 'static,
+    Pool: TransactionPool + Clone + 'static,
+    Pool::Transaction: PoolTransaction,
+    PoolPooledTx<Pool>: SignedTransaction,
     Client: BlockReaderIdExt + StateProviderFactory + 'static,
 {
     type Error = EthApiError;
 
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
-        let recovered = recover_raw_transaction(&tx)?;
-        let pool_transaction: WorldChainPooledTransaction =
-            OpPooledTransaction::from_pooled(recovered).into();
+        let recovered = recover_raw_transaction::<PoolPooledTx<Pool>>(&tx)?;
+        let pool_transaction = Pool::Transaction::from_pooled(recovered);
 
         // submit the transaction to the pool with a `Local` origin
         let outcome = self
@@ -56,7 +56,7 @@ where
 
 impl<Pool, Client> WorldChainEthApiExt<Pool, Client>
 where
-    Pool: TransactionPool<Transaction = WorldChainPooledTransaction> + Clone + 'static,
+    Pool: TransactionPool + Clone + 'static,
     Client: BlockReaderIdExt + StateProviderFactory + 'static,
 {
     pub fn new(pool: Pool, client: Client, sequencer_client: Option<SequencerClient>) -> Self {

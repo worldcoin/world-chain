@@ -4,7 +4,10 @@ use std::time::Duration;
 
 use crate::{
     engine::FlashblocksEngineApiBuilder,
-    node::{WorldChainNode, WorldChainNodeComponentBuilder, WorldChainNodeContext},
+    node::{
+        WorldChainNode, WorldChainNodeComponentBuilder, WorldChainNodeContext,
+        WorldChainNodePrimitiveTypes,
+    },
     payload::FlashblocksPayloadBuilderBuilder,
     payload_service::FlashblocksPayloadServiceBuilder,
     pool::WorldChainPoolBuilder,
@@ -24,6 +27,7 @@ use reth_optimism_node::{
     OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
     args::RollupArgs,
 };
+use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApiBuilder;
 use world_chain_builder::coordinator::FlashblocksExecutionCoordinator;
 use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
@@ -171,6 +175,11 @@ pub struct WorldChainDefaultContext {
     components_context: Option<FlashblocksComponentsContext>,
 }
 
+impl WorldChainNodePrimitiveTypes for WorldChainDefaultContext {
+    type Primitives = OpPrimitives;
+    type Payload = reth_optimism_node::OpEngineTypes;
+}
+
 impl<N: FullNodeTypes<Types = WorldChainNode<WorldChainDefaultContext>>> WorldChainNodeContext<N>
     for WorldChainDefaultContext
 where
@@ -178,6 +187,7 @@ where
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
     >: PayloadServiceBuilder<N, BasicWorldChainPool<N>, OpEvmConfig>,
 {
+    type Pool = BasicWorldChainPool<N>;
     type Net = WorldChainNetworkBuilder;
     type Evm = OpEvmConfig;
     type PayloadServiceBuilder = FlashblocksPayloadServiceBuilder<

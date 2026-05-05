@@ -1,9 +1,11 @@
 use alloy_consensus::BlockHeader;
+use alloy_eips::eip2930::AccessList;
 use alloy_network::{Ethereum, EthereumWallet, NetworkTransactionBuilder, eip2718::Encodable2718};
 use alloy_primitives::{Bytes, b64};
 use alloy_provider::ProviderBuilder;
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_engine::PayloadStatusEnum;
+use alloy_signer::SignerSync;
 use eyre::eyre::eyre;
 use op_alloy_consensus::OpTxEnvelope;
 use reth_chainspec::EthChainSpec;
@@ -13,7 +15,7 @@ use reth_node_api::PayloadAttributes;
 use reth_optimism_node::utils::optimism_payload_attributes;
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::{Address, B256, U256};
+use revm_primitives::{Address, B256, TxKind, U256};
 use std::{
     sync::{
         Arc,
@@ -59,8 +61,10 @@ use world_chain_primitives::{
     },
     payload_id::force_op_payload_id_v3,
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
+    transaction::{SignedWip1001, TxWip1001, Wip1001Signature, WorldChainTxEnvelope},
 };
 use world_chain_test_utils::{
+    Wip1001NodeContext,
     e2e_harness::setup::{
         CHAIN_SPEC, create_test_transaction, encode_eip1559_params, setup,
         setup_with_block_uncompressed_size_limit, setup_with_tx_peers,
@@ -92,6 +96,63 @@ async fn create_priority_transaction(
             .await?;
 
     Ok((signed.encoded_2718().into(), *signed.tx_hash()))
+}
+
+fn create_wip1001_transaction() -> eyre::Result<(Bytes, B256)> {
+    let session_signer = signer(0);
+    let session_key = session_signer
+        .credential()
+        .verifying_key()
+        .to_encoded_point(true);
+
+    let tx = TxWip1001 {
+        chain_id: CHAIN_SPEC.chain.id(),
+        nonce: 0,
+        max_priority_fee_per_gas: 1_000_000_000,
+        max_fee_per_gas: 2_000_000_000,
+        gas_limit: 21_000,
+        to: TxKind::Call(Address::default()),
+        value: U256::from(1),
+        input: Bytes::new(),
+        access_list: AccessList::default(),
+        world_id_account: account(0),
+        signature_type: Wip1001Signature::SECP256K1_TYPE,
+        session_key: Bytes::copy_from_slice(session_key.as_bytes()),
+    };
+
+    let signature = session_signer.sign_hash_sync(&tx.signing_hash())?;
+    let envelope = WorldChainTxEnvelope::from(SignedWip1001::new_signed(
+        tx,
+        Wip1001Signature::Secp256k1(signature),
+    ));
+    let tx_hash = envelope.tx_hash();
+
+    Ok((envelope.encoded_2718().into(), tx_hash))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_wip1001_node_accepts_wip1001_transaction() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (_, mut nodes, _tasks, _, _) =
+        setup::<Wip1001NodeContext>(1, optimism_payload_attributes, false).await?;
+    let node = &mut nodes[0].node;
+
+    let (raw_tx, tx_hash) = create_wip1001_transaction()?;
+    assert_eq!(node.rpc.inject_tx(raw_tx).await?, tx_hash);
+
+    let payload = node.advance_block().await?;
+    assert!(
+        payload
+            .block()
+            .body()
+            .transactions
+            .iter()
+            .any(|tx| tx.hash() == &tx_hash),
+        "WIP-1001 transaction should be included"
+    );
+
+    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]

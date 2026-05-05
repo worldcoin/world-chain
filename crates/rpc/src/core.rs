@@ -6,7 +6,6 @@ use jsonrpsee::{
 };
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
-use world_chain_pool::tx::WorldChainPooledTransaction;
 
 /// WorldChainEthApi Extension for `sendRawTransactionConditional` and `sendRawTransaction`
 #[derive(Clone, Debug)]
@@ -28,7 +27,7 @@ pub trait EthApiExt {
 #[async_trait]
 impl<Pool, Client> EthApiExtServer for WorldChainEthApiExt<Pool, Client>
 where
-    Pool: TransactionPool<Transaction = WorldChainPooledTransaction> + Clone + 'static,
+    Pool: TransactionPool + Clone + 'static,
     Client: BlockReaderIdExt + StateProviderFactory + 'static,
 {
     async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256> {

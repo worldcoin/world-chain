@@ -50,6 +50,21 @@ impl WorldChainPoolTransaction for WorldChainPooledTransaction {
     }
 }
 
+impl<Cons, Pooled> WorldChainPoolTransaction for OpPooledTransaction<Cons, Pooled>
+where
+    Self: EthPoolTransaction + MaybeInteropTransaction + OpPooledTx,
+{
+    fn conditional_options(&self) -> Option<&TransactionConditional> {
+        self.conditional()
+    }
+
+    fn set_pbh_payloads(&mut self, _payload: Vec<PBHPayload>) {}
+
+    fn pbh_payload(&self) -> Option<&Vec<PBHPayload>> {
+        None
+    }
+}
+
 impl OpPooledTx for WorldChainPooledTransaction {
     fn encoded_2718(&self) -> std::borrow::Cow<'_, Bytes> {
         Cow::Borrowed(self.inner.encoded_2718())

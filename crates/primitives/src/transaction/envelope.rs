@@ -8,9 +8,17 @@ use alloy_consensus::{
     error::ValueError,
     transaction::{RlpEcdsaEncodableTx, TxHashRef},
 };
-use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{B256, Bytes, ChainId, Signature, TxHash, bytes::BufMut};
+use alloy_eips::eip2718::{Decodable2718, Encodable2718};
+use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
+use alloy_network::TxSigner;
+use alloy_op_evm::OpTx;
+use alloy_primitives::{Address, B256, Bytes, ChainId, Signature, TxHash, bytes::BufMut};
 use op_alloy_consensus::{OpTransaction, OpTxEnvelope, TxDeposit, TxPostExec};
+use op_alloy_rpc_types::OpTransactionRequest;
+use op_revm::OpTransaction as EvmOpTransaction;
+use reth_primitives_traits::InMemorySize;
+use reth_rpc_api::eth::{SignTxRequestError, SignableTxRequest, TryIntoSimTx};
+use revm::context::TxEnv;
 
 use crate::transaction::{
     Wip1001Signature,
@@ -65,6 +73,96 @@ impl OpTransaction for WorldChainTxEnvelope {
 
     fn as_post_exec(&self) -> Option<&Sealed<op_alloy_consensus::TxPostExec>> {
         self.as_post_exec()
+    }
+}
+
+impl FromRecoveredTx<WorldChainTxEnvelope> for OpTx {
+    fn from_recovered_tx(tx: &WorldChainTxEnvelope, sender: Address) -> Self {
+        let encoded = tx.encoded_2718();
+        Self::from_encoded_tx(tx, sender, encoded.into())
+    }
+}
+
+impl FromTxWithEncoded<WorldChainTxEnvelope> for OpTx {
+    fn from_encoded_tx(tx: &WorldChainTxEnvelope, caller: Address, encoded: Bytes) -> Self {
+        match tx {
+            WorldChainTxEnvelope::Legacy(tx) => Self::from_encoded_tx(tx, caller, encoded),
+            WorldChainTxEnvelope::Eip2930(tx) => Self::from_encoded_tx(tx, caller, encoded),
+            WorldChainTxEnvelope::Eip1559(tx) => Self::from_encoded_tx(tx, caller, encoded),
+            WorldChainTxEnvelope::Eip7702(tx) => Self::from_encoded_tx(tx, caller, encoded),
+            WorldChainTxEnvelope::Wip1001(tx) => {
+                let tx = tx.tx();
+                let base = TxEnv {
+                    tx_type: tx.ty(),
+                    caller,
+                    gas_limit: tx.gas_limit,
+                    gas_price: tx.max_fee_per_gas,
+                    kind: tx.to,
+                    value: tx.value,
+                    data: tx.input.clone(),
+                    nonce: tx.nonce,
+                    chain_id: Some(tx.chain_id),
+                    access_list: tx.access_list.clone(),
+                    gas_priority_fee: Some(tx.max_priority_fee_per_gas),
+                    ..Default::default()
+                };
+
+                Self(EvmOpTransaction {
+                    base,
+                    enveloped_tx: Some(encoded),
+                    deposit: Default::default(),
+                })
+            }
+            WorldChainTxEnvelope::Deposit(tx) => Self::from_encoded_tx(tx.inner(), caller, encoded),
+            WorldChainTxEnvelope::PostExec(tx) => {
+                Self::from_encoded_tx(tx.inner(), caller, encoded)
+            }
+        }
+    }
+}
+
+impl InMemorySize for WorldChainTxEnvelope {
+    fn size(&self) -> usize {
+        core::mem::size_of::<Self>() + self.eip2718_encoded_length()
+    }
+}
+
+impl reth_codecs::Compact for WorldChainTxEnvelope {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let encoded = self.encoded_2718();
+        let len = encoded.len();
+        buf.put_slice(&encoded);
+        len
+    }
+
+    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
+        let mut encoded = &buf[..len];
+        let tx = Self::decode_2718(&mut encoded).expect("valid compact World Chain transaction");
+        buf.advance(len);
+        (tx, buf)
+    }
+}
+
+impl reth_codecs::Compress for WorldChainTxEnvelope {
+    type Compressed = Vec<u8>;
+
+    fn compress_to_buf<B>(&self, buf: &mut B)
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let _ = reth_codecs::Compact::to_compact(self, buf);
+    }
+}
+
+impl reth_codecs::Decompress for WorldChainTxEnvelope {
+    fn decompress(value: &[u8]) -> Result<Self, reth_codecs::DecompressError> {
+        let (tx, _) = reth_codecs::Compact::from_compact(value, value.len());
+        Ok(tx)
     }
 }
 
@@ -215,6 +313,25 @@ impl TryFrom<WorldChainTxEnvelope> for OpTxEnvelope {
                 "WIP-1001 transactions cannot be converted to an Optimism transaction",
             )),
         }
+    }
+}
+
+impl TryIntoSimTx<WorldChainTxEnvelope> for OpTransactionRequest {
+    fn try_into_sim_tx(self) -> Result<WorldChainTxEnvelope, ValueError<Self>> {
+        Ok(WorldChainTxEnvelope::from(
+            TryIntoSimTx::<OpTxEnvelope>::try_into_sim_tx(self)?,
+        ))
+    }
+}
+
+impl SignableTxRequest<WorldChainTxEnvelope> for OpTransactionRequest {
+    async fn try_build_and_sign(
+        self,
+        signer: impl TxSigner<Signature> + Send,
+    ) -> Result<WorldChainTxEnvelope, SignTxRequestError> {
+        Ok(WorldChainTxEnvelope::from(
+            SignableTxRequest::<OpTxEnvelope>::try_build_and_sign(self, signer).await?,
+        ))
     }
 }
 
