@@ -15,6 +15,7 @@ use reth_node_builder::{
 use reth_node_core::primitives::EthereumHardforks;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
+use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
     OpEngineTypes, OpStorage,
     node::{OpConsensusBuilder, OpExecutorBuilder},
@@ -271,7 +272,10 @@ impl PayloadAttributesBuilder<OpPayloadAttrs> for OpLocalPayloadAttributesBuilde
             no_tx_pool: None,
             gas_limit,
             eip_1559_params: Some(B64::from(eip1559_bytes)),
-            min_base_fee: Some(0),
+            min_base_fee: self
+                .chain_spec
+                .is_jovian_active_at_timestamp(timestamp)
+                .then_some(0),
         })
     }
 }

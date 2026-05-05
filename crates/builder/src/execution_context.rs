@@ -2,6 +2,7 @@ use crate::{
     payload_builder_metrics::{PayloadBuildRejectionReason, PayloadBuildTaskOutcome},
     state_db::StateDB,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
+    utils::estimated_da_size_bytes,
 };
 use alloy_consensus::{Block, SignableTransaction, Transaction, transaction::SignerRecoverable};
 use alloy_eips::{Encodable2718, Typed2718};
@@ -13,10 +14,10 @@ use op_alloy_consensus::EIP1559ParamError;
 use op_alloy_rpc_types::OpTransactionRequest;
 
 use alloy_rpc_types_engine::PayloadId;
-use op_revm::OpSpecId;
+use op_revm::{L1BlockInfo, OpSpecId, constants::L1_BLOCK_CONTRACT};
 use reth_basic_payload_builder::PayloadConfig;
 use reth_evm::{
-    ConfigureEvm, Database, Evm, EvmEnv,
+    ConfigureEvm, Database as RethDatabase, Evm, EvmEnv,
     block::{BlockExecutionError, BlockValidationError},
     execute::{BlockBuilder, BlockExecutor},
 };
@@ -38,7 +39,7 @@ use reth_primitives_traits::{Recovered, SealedHeader, TxTy};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_revm::cancelled::CancelOnDrop;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::{DatabaseCommit, context::BlockEnv};
+use revm::{Database as RevmDatabase, DatabaseCommit, context::BlockEnv};
 use revm_database::State;
 use semaphore_rs::Field;
 use std::{collections::HashSet, fmt::Debug, sync::Arc, time::Instant};
@@ -82,12 +83,13 @@ where
         info: &mut ExecutionInfo,
         base_fee: u64,
         gas_used: u64,
+        tx_da_size: u64,
         tx: Recovered<OpTransactionSigned>,
     ) {
         // add gas used by the transaction to cumulative gas used, before creating the
         // receipt
         info.cumulative_gas_used += gas_used;
-        info.cumulative_da_bytes_used += tx.network_len() as u64;
+        info.cumulative_da_bytes_used += tx_da_size;
 
         // update add to total fees
         let miner_fee = tx
@@ -163,7 +165,7 @@ where
     >
     where
         DB::Error: Send + Sync + 'static,
-        DB: Database + 'a,
+        DB: RethDatabase + 'a,
     {
         let attributes = OpNextBlockEnvAttributes::build_next_env(
             self.inner.attributes(),
@@ -236,6 +238,20 @@ where
         let block_da_limit = self.inner.builder_config.da_config.max_da_block_size();
         let tx_da_limit = self.inner.builder_config.da_config.max_da_tx_size();
         let base_fee = builder.evm_mut().block().basefee;
+        let da_footprint_gas_scalar = if self
+            .spec()
+            .is_jovian_active_at_timestamp(self.attributes().timestamp)
+        {
+            let db = builder.evm_mut().db_mut();
+            db.basic(L1_BLOCK_CONTRACT)
+                .map_err(PayloadBuilderError::other)?;
+            Some(
+                L1BlockInfo::fetch_da_footprint_gas_scalar(db)
+                    .map_err(PayloadBuilderError::other)?,
+            )
+        } else {
+            None
+        };
         let mut transactions_considered = 0;
         let mut transactions_executed = 0;
         let mut invalid_txs = vec![];
@@ -277,7 +293,7 @@ where
                 tx_da_limit,
                 block_da_limit,
                 tx.gas_limit(),
-                None, // TODO: related to Jovian
+                da_footprint_gas_scalar,
             ) {
                 attempt_metrics.increment_rejection(PayloadBuildRejectionReason::OverLimits);
                 // we can't fit this transaction into the block, so we need to mark it as
@@ -368,7 +384,7 @@ where
 
             attempt_metrics.record_transaction_gas_used(gas_used);
             transactions_executed += 1;
-            self.commit_changes(info, base_fee, gas_used, tx);
+            self.commit_changes(info, base_fee, gas_used, tx_da_size, tx);
         }
 
         if !spent_nullifier_hashes.is_empty() {
@@ -392,7 +408,8 @@ where
             // is not spent rather than sitting in the default execution client's mempool.
             match builder.execute_transaction(tx.clone()) {
                 Ok(gas_used) => {
-                    self.commit_changes(info, base_fee, gas_used, tx);
+                    let tx_da_size = estimated_da_size_bytes(&tx);
+                    self.commit_changes(info, base_fee, gas_used, tx_da_size, tx);
                     attempt_metrics
                         .record_spend_nullifiers_outcome(PayloadBuildTaskOutcome::Success);
                 }

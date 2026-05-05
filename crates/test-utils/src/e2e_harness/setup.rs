@@ -463,7 +463,9 @@ pub fn build_payload_attributes(
         no_tx_pool: Some(false),
         eip_1559_params: Some(eip1559_params),
         gas_limit: Some(200_000_000), // 200MGas
-        min_base_fee: Some(0),
+        min_base_fee: CHAIN_SPEC
+            .is_fork_active_at_timestamp(OpHardfork::Jovian, timestamp)
+            .then_some(0),
     }
     .into()
 }

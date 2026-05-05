@@ -4,6 +4,7 @@ use alloy_primitives::{Address, B256, Bytes};
 use alloy_rpc_types_engine::PayloadAttributes as RpcPayloadAttributes;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadConfig};
+use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
     OpPayloadAttributes, payload::OpPayloadAttrs, utils::optimism_payload_attributes,
 };
@@ -51,7 +52,9 @@ fn deterministic_payload_attributes(
         no_tx_pool: Some(true),
         eip_1559_params: Some(eip1559_params),
         gas_limit: Some(CHAIN_SPEC.genesis_header().gas_limit),
-        min_base_fee: Some(0),
+        min_base_fee: CHAIN_SPEC
+            .is_jovian_active_at_timestamp(timestamp)
+            .then_some(0),
     }
 }
 
