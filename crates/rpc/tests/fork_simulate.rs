@@ -906,9 +906,8 @@ async fn test_parse_atomic_double_transfer_same_token() {
     let bob = address!("000000000000000000000000000000000000bbbb");
     let carol = address!("000000000000000000000000000000000000cccc");
     let amount = U256::from(1_000_000u64);
-    let transfer_topic = alloy_primitives::b256!(
-        "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-    );
+    let transfer_topic =
+        alloy_primitives::b256!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef");
 
     let make_log = |from: Address, to: Address| {
         alloy_primitives::Log::new(
@@ -946,9 +945,8 @@ async fn test_parse_batch_nft_transfers() {
     let collection = address!("000000000000000000000000000000000000721a");
     let from = address!("000000000000000000000000000000000000aaaa");
     let to = address!("000000000000000000000000000000000000bbbb");
-    let transfer_topic = alloy_primitives::b256!(
-        "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-    );
+    let transfer_topic =
+        alloy_primitives::b256!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef");
 
     let logs: Vec<_> = (73u64..=77)
         .map(|id| {
@@ -989,12 +987,10 @@ async fn test_parse_mixed_token_types_in_one_response() {
     let from = address!("000000000000000000000000000000000000aaaa");
     let to = address!("000000000000000000000000000000000000bbbb");
     let operator = address!("000000000000000000000000000000000000ccCC");
-    let transfer_topic = alloy_primitives::b256!(
-        "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
-    );
-    let erc1155_topic = alloy_primitives::b256!(
-        "c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"
-    );
+    let transfer_topic =
+        alloy_primitives::b256!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef");
+    let erc1155_topic =
+        alloy_primitives::b256!("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62");
 
     let erc20_log = alloy_primitives::Log::new(
         erc20,
@@ -1055,9 +1051,8 @@ async fn test_parse_multiple_approvals_yields_exposures() {
     let token_b = address!("00000000000000000000000000000000000000Bb");
     let spender_a = address!("0c892815f0B058E69987920A23FBb33c834289cf");
     let spender_b = address!("Ef1c6E67703c7BD7107eed8303Fbe6EC2554BF6B");
-    let approval_topic = alloy_primitives::b256!(
-        "8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
-    );
+    let approval_topic =
+        alloy_primitives::b256!("8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925");
 
     let make = |contract: Address, spender: Address, amount: U256| {
         alloy_primitives::Log::new(
