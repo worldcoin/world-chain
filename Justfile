@@ -8,6 +8,9 @@ build:
     docker buildx build \
         -t world-chain:latest .
 
+devnet-up: build
+    @just ./pkg/devnet/devnet-up
+
 deploy-contracts:
     @just ./pkg/contracts/deploy-contracts
 
