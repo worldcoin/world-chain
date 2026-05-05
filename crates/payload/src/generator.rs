@@ -26,9 +26,11 @@ use tokio::runtime::Handle;
 use tracing::{debug, warn};
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_primitives::{
-    access_list::FlashblockAccessList, ed25519_dalek::SigningKey,
-    flashblocks::recovered_block_from_flashblocks, p2p::Authorization,
-    payload_id::force_op_payload_id_v3,
+    access_list::FlashblockAccessList,
+    ed25519_dalek::SigningKey,
+    flashblocks::recovered_block_from_flashblocks,
+    p2p::Authorization,
+    payload_id::{force_op_payload_id_v3, op_reth_payload_id_v4_lookup, payload_id_with_version},
 };
 
 use crate::job::{CommittedPayloadState, FlashblocksPayloadJob};
@@ -199,15 +201,14 @@ where
                 .await
                 .map_err(PayloadBuilderError::other)?;
 
-            let v3 = force_op_payload_id_v3(payload_id);
-            let v4 = payload_id;
-
             // Wait for either an authorization which matches our payload id or for a negative authorization
             Result::<_, PayloadBuilderError>::Ok(
                 *authorization
                     .wait_for(|a| match a {
                         Some(auth) => {
-                            if auth.payload_id == v3 || auth.payload_id == v4 {
+                            if auth.payload_id == payload_id_with_version(payload_id, 4)
+                                || auth.payload_id == payload_id_with_version(payload_id, 3)
+                            {
                                 true
                             } else {
                                 warn!(
