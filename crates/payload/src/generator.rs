@@ -206,6 +206,7 @@ where
                 *authorization
                     .wait_for(|a| match a {
                         Some(auth) => {
+                            // TODO: FIXME: Change Payload ID to be derived from Engine API Message Version
                             if auth.payload_id == payload_id_with_version(payload_id, 4)
                                 || auth.payload_id == payload_id_with_version(payload_id, 3)
                             {
