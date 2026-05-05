@@ -25,6 +25,7 @@ use revm::{
 use revm_primitives::TxKind;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     num::NonZeroUsize,
     sync::{Arc, Mutex},
     time::Duration,
@@ -121,6 +122,38 @@ pub struct TraceEntry {
     pub value: String,
 }
 
+/// Type of contract-management state change detected during simulation.
+/// Wire values match Blockaid's `contract_management[].type`, so app-backend
+/// can consume our response and Blockaid's interchangeably.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ContractManagementType {
+    ContractCreation,
+    SelfDestruct,
+    ProxyUpgrade,
+    OwnershipChange,
+    ModuleChange,
+    /// EIP-7702 delegation. Reserved — not yet detected.
+    Authorization,
+}
+
+/// One contract-management action against a single target contract.
+///
+/// The `target` (the contract that was created/destroyed/upgraded/etc.) is
+/// the **map key** in `SimulateUnsignedUserOpResult.contract_management` —
+/// not a field on this struct. App-backend's `checkContractManagementActions`
+/// guard only reads `type` and (for creations) `deployer_address`. Field
+/// names mirror Blockaid's wire format (snake_case).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractManagementAction {
+    #[serde(rename = "type")]
+    pub action_type: ContractManagementType,
+    /// Address that initiated the CREATE/CREATE2 — populated only for
+    /// `CONTRACT_CREATION`. Omitted from JSON otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployer_address: Option<Address>,
+}
+
 /// Outcome of the simulation execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -144,6 +177,12 @@ pub struct SimulateUnsignedUserOpResult {
     pub asset_changes: Vec<AssetChange>,
     pub exposure_changes: Vec<ExposureChange>,
     pub trace: Vec<TraceEntry>,
+    /// Contract-management state changes detected during execution, keyed
+    /// by the **target contract address** (the contract created, destroyed,
+    /// upgraded, or whose ownership/modules changed). Field name and key
+    /// shape mirror Blockaid's `contract_management`.
+    #[serde(rename = "contract_management")]
+    pub contract_management: HashMap<Address, Vec<ContractManagementAction>>,
     /// Warning generation is not yet implemented. Always serialized as `[]`;
     /// reserved so callers can rely on the field being present.
     pub warnings: Vec<serde_json::Value>,
@@ -168,6 +207,23 @@ struct NativeTransfer {
     value: U256,
 }
 
+/// `(deployer, deployed_address)` for a successful CREATE/CREATE2.
+type ContractCreation = (Address, Address);
+
+/// One frame's tentative side-effects. Each CALL or CREATE pushes a fresh
+/// frame on entry; on successful exit it's merged into the parent (or
+/// committed to the inspector's final lists if outermost). On revert/halt
+/// it's dropped — exactly mirroring the EVM's own state-revert semantics
+/// so we never report effects that didn't actually land.
+#[derive(Debug, Default)]
+struct PendingFrame {
+    native_transfers: Vec<NativeTransfer>,
+    /// CREATE/CREATE2 deployments inside this frame.
+    contract_creations: Vec<ContractCreation>,
+    /// Addresses that executed SELFDESTRUCT inside this frame.
+    self_destructs: Vec<Address>,
+}
+
 /// Captures the call stack and native ETH transfers of a single simulation.
 ///
 /// Single-threaded by construction — the EVM drives it from one call site,
@@ -178,14 +234,15 @@ pub struct SimulationInspector {
     /// Full call stack trace — every CALL/STATICCALL/DELEGATECALL at every depth.
     /// Includes reverted calls so debug consumers can see what was attempted.
     traces: Vec<RawTrace>,
-    /// Native ETH transfers from successfully completed call frames only.
-    /// Reverted/halted frames don't actually move ETH, so their tentative
-    /// entries in `pending_frames` are dropped instead of being committed here.
+    /// Native ETH transfers committed by successful frames.
     native_transfers: Vec<NativeTransfer>,
-    /// One entry per active call frame, holding tentative native transfers
-    /// recorded on entry. On `call_end` the frame is popped: committed (or
-    /// merged into the parent frame) on success, dropped on revert/halt.
-    pending_frames: Vec<Vec<NativeTransfer>>,
+    /// CREATE/CREATE2 deployments committed by successful frames.
+    contract_creations: Vec<ContractCreation>,
+    /// SELFDESTRUCT calls committed by successful frames.
+    self_destructs: Vec<Address>,
+    /// Active frame stack. Each CALL or CREATE pushes a new entry; the
+    /// matching `*_end` pops it. See [`PendingFrame`].
+    pending_frames: Vec<PendingFrame>,
     /// Raw payload of the deepest frame that exited via REVERT. Set on the
     /// first non-ok `call_end` whose `InstructionResult` is `Revert` — since
     /// `call_end` fires bottom-up, that's the innermost reverter and so the
@@ -235,6 +292,34 @@ impl SimulationInspector {
             .take()
             .map(|output| decode_revert_reason(&output))
     }
+
+    /// Drain captured CREATE/CREATE2 deployments. Each entry is
+    /// `(deployer_address, deployed_address)`. Only successful, committed
+    /// creates are returned — frames that locally succeeded but were rolled
+    /// back by a reverting parent are dropped.
+    pub fn take_contract_creations(&mut self) -> Vec<ContractCreation> {
+        std::mem::take(&mut self.contract_creations)
+    }
+
+    /// Drain captured SELFDESTRUCT calls. Same commit semantics as
+    /// [`Self::take_contract_creations`].
+    pub fn take_self_destructs(&mut self) -> Vec<Address> {
+        std::mem::take(&mut self.self_destructs)
+    }
+
+    /// Merge a successful frame into its parent's pending list, or commit
+    /// it to the inspector's final lists if there's no parent.
+    fn commit_or_bubble(&mut self, frame: PendingFrame) {
+        if let Some(parent) = self.pending_frames.last_mut() {
+            parent.native_transfers.extend(frame.native_transfers);
+            parent.contract_creations.extend(frame.contract_creations);
+            parent.self_destructs.extend(frame.self_destructs);
+        } else {
+            self.native_transfers.extend(frame.native_transfers);
+            self.contract_creations.extend(frame.contract_creations);
+            self.self_destructs.extend(frame.self_destructs);
+        }
+    }
 }
 
 impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspector {
@@ -272,14 +357,14 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
             value,
         });
 
-        // Open a new frame for tentative native transfers. If this call frame
-        // reverts, `call_end` will drop the frame; only successful frames
-        // commit their transfers.
-        let mut frame = Vec::new();
+        // Open a new frame. If this call reverts, `call_end` will drop the
+        // frame and all its tentative effects (native transfers, creates,
+        // selfdestructs). Only successful frames commit.
+        let mut frame = PendingFrame::default();
         if let Some(value) = inputs.value.transfer()
             && value > U256::ZERO
         {
-            frame.push(NativeTransfer {
+            frame.native_transfers.push(NativeTransfer {
                 from: inputs.caller,
                 to: inputs.target_address,
                 value,
@@ -296,24 +381,65 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
         };
         let result = outcome.instruction_result();
         if !result.is_ok() {
-            // Frame reverted or halted — drop tentative native transfers
-            // either way. For explicit REVERTs, capture the deepest payload
-            // (the first one we see, since `call_end` fires bottom-up) so
-            // wrappers like EntryPoint's `FailedOp(...)` don't mask the
-            // root cause. Halts and the other `is_revert()` variants
-            // (CallTooDeep, OutOfFunds, EOF init-code) have empty outputs.
+            // Frame reverted or halted — drop everything tentative inside it.
+            // For explicit REVERTs, capture the deepest payload (the first
+            // one we see, since `call_end` fires bottom-up) so wrappers like
+            // EntryPoint's `FailedOp(...)` don't mask the root cause. Halts
+            // and the other `is_revert()` variants (CallTooDeep, OutOfFunds,
+            // EOF init-code) have empty outputs.
             if matches!(result, InstructionResult::Revert) && self.deepest_revert_payload.is_none()
             {
                 self.deepest_revert_payload = Some(outcome.output().clone());
             }
             return;
         }
-        // Successful frame: bubble transfers up to the parent's tentative list,
-        // or commit them as final if this was the outermost frame.
-        if let Some(parent) = self.pending_frames.last_mut() {
-            parent.extend(frame);
+        self.commit_or_bubble(frame);
+    }
+
+    fn create(
+        &mut self,
+        _context: &mut CTX,
+        _inputs: &mut revm::interpreter::CreateInputs,
+    ) -> Option<revm::interpreter::CreateOutcome> {
+        // Mirror `call`: each CREATE/CREATE2 gets its own frame so a parent
+        // revert rolls the deployment back atomically with everything else
+        // that ran inside its constructor.
+        self.pending_frames.push(PendingFrame::default());
+        None
+    }
+
+    fn create_end(
+        &mut self,
+        _context: &mut CTX,
+        inputs: &revm::interpreter::CreateInputs,
+        outcome: &mut revm::interpreter::CreateOutcome,
+    ) {
+        let Some(mut frame) = self.pending_frames.pop() else {
+            return;
+        };
+        if !outcome.instruction_result().is_ok() {
+            // CREATE itself failed — drop the frame.
+            return;
+        }
+        // Successful create: record `(deployer, deployed)` *into the parent
+        // frame's list* (creations are an effect of the parent), then bubble
+        // any inner side-effects up alongside it.
+        if let Some(addr) = outcome.address {
+            frame.contract_creations.push((inputs.caller(), addr));
+        }
+        self.commit_or_bubble(frame);
+    }
+
+    fn selfdestruct(&mut self, contract: Address, _target: Address, _value: U256) {
+        // SELFDESTRUCT runs inside the current call frame and is rolled
+        // back along with it on revert. Record into the topmost pending
+        // frame so the existing commit-or-drop machinery handles rollback.
+        if let Some(top) = self.pending_frames.last_mut() {
+            top.self_destructs.push(contract);
         } else {
-            self.native_transfers.extend(frame);
+            // No frame — outermost transact direct to a SELFDESTRUCTing
+            // contract (rare but legal). Commit immediately.
+            self.self_destructs.push(contract);
         }
     }
 }
@@ -619,11 +745,14 @@ where
         })?;
         let mut exposure_changes = parse_exposure_changes(&logs);
 
-        // 10. Extract trace and native transfers from the inspector. The EVM
-        //     owns it; recover a `&mut` via `components_mut()` and drain.
+        // 10. Extract trace, native transfers, and contract-management
+        //     side-effects from the inspector. The EVM owns it; recover a
+        //     `&mut` via `components_mut()` and drain.
         let (_, inspector, _) = evm.components_mut();
         let trace = inspector.take_trace_entries();
         asset_changes.extend(inspector.take_native_asset_changes());
+        let inspector_creations = inspector.take_contract_creations();
+        let inspector_destructs = inspector.take_self_destructs();
 
         // `revert_reason` is the *root cause* — the deepest reverted frame's
         // payload — so consumers see the contract-specific custom error from
@@ -656,6 +785,35 @@ where
             &mut exposure_changes,
         );
 
+        // 12. Assemble `contract_management` from inspector-captured
+        //     CREATE/SELFDESTRUCT plus event-derived proxy / ownership /
+        //     module changes. The map is keyed by the **target** contract
+        //     address (the one whose state changed) — wire shape mirrors
+        //     Blockaid's `contract_management`.
+        let mut contract_management: HashMap<Address, Vec<ContractManagementAction>> =
+            HashMap::new();
+        for (deployer, deployed) in inspector_creations {
+            contract_management
+                .entry(deployed)
+                .or_default()
+                .push(ContractManagementAction {
+                    action_type: ContractManagementType::ContractCreation,
+                    deployer_address: Some(deployer),
+                });
+        }
+        for destroyed in inspector_destructs {
+            contract_management
+                .entry(destroyed)
+                .or_default()
+                .push(ContractManagementAction {
+                    action_type: ContractManagementType::SelfDestruct,
+                    deployer_address: None,
+                });
+        }
+        for (target, action) in parse_contract_management_events(&logs) {
+            contract_management.entry(target).or_default().push(action);
+        }
+
         Ok(SimulateUnsignedUserOpResult {
             status,
             revert_reason,
@@ -664,6 +822,7 @@ where
             asset_changes,
             exposure_changes,
             trace,
+            contract_management,
             warnings: vec![],
         })
     }
@@ -692,6 +851,36 @@ const APPROVAL_TOPIC: B256 =
 /// `ApprovalForAll(address,address,bool)` — ERC-721 / ERC-1155
 const APPROVAL_FOR_ALL_TOPIC: B256 =
     alloy_primitives::b256!("17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31");
+
+// ─── Contract management ─────────────────────────────────────────────────────
+
+/// `Upgraded(address)` — EIP-1967 / UUPS implementation upgrade.
+const UPGRADED_TOPIC: B256 =
+    alloy_primitives::b256!("bc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b");
+
+/// `OwnershipTransferred(address,address)` — OpenZeppelin `Ownable`.
+const OWNERSHIP_TRANSFERRED_TOPIC: B256 =
+    alloy_primitives::b256!("8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0");
+
+/// Safe `AddedOwner(address)`.
+const SAFE_ADDED_OWNER_TOPIC: B256 =
+    alloy_primitives::b256!("9465fa0c962cc76958e6373a993326400c1c94f8be2fe3a952adfa7f60b2ea26");
+
+/// Safe `RemovedOwner(address)`.
+const SAFE_REMOVED_OWNER_TOPIC: B256 =
+    alloy_primitives::b256!("f8d49fc529812e9a7c5c50e69c20f0dccc0db8fa95c98bc58cc9a4f1c1299eaf");
+
+/// Safe `ChangedThreshold(uint256)`.
+const SAFE_CHANGED_THRESHOLD_TOPIC: B256 =
+    alloy_primitives::b256!("610f7ff2b304ae8903c3de74c60c6ab1f7d6226b3f52c5161905bb5ad4039c93");
+
+/// Safe `EnabledModule(address)`.
+const SAFE_ENABLED_MODULE_TOPIC: B256 =
+    alloy_primitives::b256!("ecdf3a3effea5783a3c4c2140e677577666428d44ed9d474a0b3a4c9943f8440");
+
+/// Safe `DisabledModule(address)`.
+const SAFE_DISABLED_MODULE_TOPIC: B256 =
+    alloy_primitives::b256!("aab4fa2b463f581b2b32cb3b7e3b704b9ce37cc209b5fb4d77e593ace4054276");
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Log parsing — asset changes
@@ -916,6 +1105,49 @@ pub fn parse_exposure_changes(logs: &[alloy_primitives::Log]) -> Vec<ExposureCha
     }
 
     changes
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Log parsing — contract management
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Detect proxy upgrades, ownership changes, and Safe module changes from
+/// emitted events. Returns `(target_contract, action)` pairs — the caller
+/// merges these with inspector-captured CONTRACT_CREATION / SELF_DESTRUCT
+/// entries into the response's `contract_management` map.
+///
+/// The map key on the wire is the address of the **target** (i.e. the
+/// proxy / owned contract / Safe), which is just `log.address` for every
+/// event we care about here.
+pub fn parse_contract_management_events(
+    logs: &[alloy_primitives::Log],
+) -> Vec<(Address, ContractManagementAction)> {
+    let mut out = Vec::new();
+    for log in logs {
+        let topics = log.topics();
+        let Some(topic0) = topics.first() else {
+            continue;
+        };
+        let action_type = match *topic0 {
+            UPGRADED_TOPIC => ContractManagementType::ProxyUpgrade,
+            OWNERSHIP_TRANSFERRED_TOPIC
+            | SAFE_ADDED_OWNER_TOPIC
+            | SAFE_REMOVED_OWNER_TOPIC
+            | SAFE_CHANGED_THRESHOLD_TOPIC => ContractManagementType::OwnershipChange,
+            SAFE_ENABLED_MODULE_TOPIC | SAFE_DISABLED_MODULE_TOPIC => {
+                ContractManagementType::ModuleChange
+            }
+            _ => continue,
+        };
+        out.push((
+            log.address,
+            ContractManagementAction {
+                action_type,
+                deployer_address: None,
+            },
+        ));
+    }
+    out
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
