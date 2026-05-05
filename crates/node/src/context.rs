@@ -22,10 +22,11 @@ use reth_node_builder::{
     rpc::{BasicEngineValidatorBuilder, RpcAddOns},
 };
 use reth_node_core::primitives::Hardforks;
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
-    OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
-    args::RollupArgs,
+    OpAddOns, OpConsensusBuilder, OpEngineTypes, OpEngineValidatorBuilder, OpExecutorBuilder,
+    OpNetworkBuilder, args::RollupArgs,
 };
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApiBuilder;
@@ -175,8 +176,8 @@ pub struct WorldChainDefaultContext {
 
 impl WorldChainNodePrimitiveTypes for WorldChainDefaultContext {
     type Primitives = OpPrimitives;
-    type Payload = reth_optimism_node::OpEngineTypes;
-    type ChainSpec = reth_optimism_chainspec::OpChainSpec;
+    type Payload = OpEngineTypes;
+    type ChainSpec = OpChainSpec;
 }
 
 impl<N: FullNodeTypes<Types = WorldChainNode<WorldChainDefaultContext>>> WorldChainNodeContext<N>
