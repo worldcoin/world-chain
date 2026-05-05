@@ -103,6 +103,8 @@ pub fn test_config_with_peers_and_gossip(
             recommit_interval: 200,
             flashblocks_interval: 200,
             access_list: true,
+            store: false,
+            store_path: None,
             fanout: FanoutArgs::default(),
         })
     } else {
@@ -128,6 +130,7 @@ pub fn test_config_with_peers_and_gossip(
             inner: OpBuilderConfig::default(),
             bal_enabled: true,
         },
+        flashblocks_store: None,
     }
 }
 

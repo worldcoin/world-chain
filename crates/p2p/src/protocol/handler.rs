@@ -3,6 +3,7 @@ use crate::protocol::{
     error::FlashblocksP2PError,
     event::{ChainEvent, WorldChainEvent, WorldChainEventsStream, world_chain_events_stream},
     metrics::FlashblocksP2PMetrics,
+    recorder::{FlashblocksRecorder, FlashblocksRecorderConfig},
 };
 use alloy_rlp::BytesMut;
 use alloy_rpc_types_engine::PayloadId;
@@ -651,6 +652,8 @@ pub struct FlashblocksP2PCtx {
     /// Broadcast sender for verified and strictly ordered flashblock payloads.
     /// Used by RPC overlays and other consumers of flashblock data.
     pub flashblock_tx: broadcast::Sender<FlashblocksPayloadV1>,
+    /// Optional persistent recorder for accepted ordered flashblocks.
+    pub recorder: Option<FlashblocksRecorder>,
 }
 
 /// Handle for the flashblocks P2P protocol.
@@ -678,14 +681,25 @@ impl FlashblocksHandle {
         builder_sk: Option<SigningKey>,
         fanout_args: FanoutArgs,
     ) -> Self {
+        Self::with_fanout_args_and_recorder(authorizer_vk, builder_sk, fanout_args, None)
+    }
+
+    pub fn with_fanout_args_and_recorder(
+        authorizer_vk: VerifyingKey,
+        builder_sk: Option<SigningKey>,
+        fanout_args: FanoutArgs,
+        recorder_config: Option<FlashblocksRecorderConfig>,
+    ) -> Self {
         let flashblock_tx = broadcast::Sender::new(BROADCAST_BUFFER_CAPACITY);
         let state = Arc::new(Mutex::new(FlashblocksP2PState::default()));
         let metrics = FlashblocksP2PMetrics::default();
+        let recorder = recorder_config.map(FlashblocksRecorder::spawn);
         let ctx = FlashblocksP2PCtx {
             authorizer_vk,
             fanout_args,
             metrics,
             flashblock_tx,
+            recorder,
         };
         let handle = Self {
             ctx,
@@ -1340,15 +1354,15 @@ impl FlashblocksP2PCtx {
         state
             .flashblocks
             .resize_with(len.max(payload.index as usize + 1), || None);
-        let flashblock = &mut state.flashblocks[payload.index as usize];
+        let flashblock_index = payload.index as usize;
 
         // If we've already seen this index, skip it
         // Otherwise, add it to the list
-        if flashblock.is_none() {
+        if state.flashblocks[flashblock_index].is_none() {
             // We haven't seen this index yet
             // Add the flashblock to our cache
 
-            *flashblock = Some(payload.clone());
+            state.flashblocks[flashblock_index] = Some(payload.clone());
             tracing::trace!(
                 target: "flashblocks::p2p",
                 payload_id = %payload.payload_id,
@@ -1391,7 +1405,15 @@ impl FlashblocksP2PCtx {
                 .expect("time went backwards");
 
             // Broadcast any flashblocks in the cache that are in order
-            while let Some(Some(flashblock_event)) = state.flashblocks.get(state.flashblock_index) {
+            while let Some(Some(flashblock_event)) =
+                state.flashblocks.get(state.flashblock_index).cloned()
+            {
+                if let Some(recorder) = &self.recorder {
+                    // Record from the ordered stream so the sqlite db mirrors what
+                    // downstream flashblocks consumers observe.
+                    recorder.record(&flashblock_event);
+                }
+
                 // Publish the flashblock
                 tracing::debug!(
                     target: "flashblocks::p2p",
@@ -1399,7 +1421,7 @@ impl FlashblocksP2PCtx {
                     flashblock_index = %state.flashblock_index,
                     "publishing flashblock"
                 );
-                self.flashblock_tx.send(flashblock_event.clone()).ok();
+                self.flashblock_tx.send(flashblock_event).ok();
 
                 // Don't measure the interval at the block boundary
                 if state.flashblock_index != 0 {
@@ -1606,6 +1628,7 @@ mod tests {
             fanout_args,
             metrics: FlashblocksP2PMetrics::default(),
             flashblock_tx: broadcast::Sender::new(16),
+            recorder: None,
         }
     }
 
