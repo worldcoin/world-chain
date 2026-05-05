@@ -21,7 +21,7 @@ use reth_evm::{
     block::{BlockExecutionError, BlockValidationError},
     execute::{BlockBuilder, BlockExecutor},
 };
-use reth_node_api::{NodePrimitives, PayloadBuilderError};
+use reth_node_api::PayloadBuilderError;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
@@ -35,7 +35,7 @@ use reth_optimism_payload_builder::{
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_primitives::BuildNextEnv;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives_traits::{Recovered, SealedHeader, TxTy};
+use reth_primitives_traits::{HeaderTy, Recovered, SealedHeader, TxTy};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_revm::cancelled::CancelOnDrop;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
@@ -453,10 +453,8 @@ where
         evm_config: OpEvmConfig,
         builder_config: OpBuilderConfig,
         config: PayloadConfig<
-            OpPayloadBuilderAttributes<
-                <<OpEvmConfig as ConfigureEvm>::Primitives as NodePrimitives>::SignedTx,
-            >,
-            <<OpEvmConfig as ConfigureEvm>::Primitives as NodePrimitives>::BlockHeader,
+            OpPayloadBuilderAttributes<TxTy<<OpEvmConfig as ConfigureEvm>::Primitives>>,
+            HeaderTy<<OpEvmConfig as ConfigureEvm>::Primitives>,
         >,
         cancel: &CancelOnDrop,
         best_payload: Option<OpBuiltPayload<<OpEvmConfig as ConfigureEvm>::Primitives>>,

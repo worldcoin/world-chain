@@ -1,14 +1,17 @@
 use std::{fmt::Debug, sync::Arc};
 
 use crate::pool::WorldChainPoolBuilder;
-use alloy_consensus::{Block, BlockBody, Header};
+use alloy_consensus::{Block, BlockBody, BlockHeader, Header};
 use alloy_eips::eip1559::BaseFeeParams;
+use alloy_primitives::{Address, B64};
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
+use reth_chainspec::EthChainSpec;
 use reth_codecs::{Compress, Decompress};
 use reth_evm::ConfigureEvm;
 use reth_node_api::{
-    BuiltPayload, FullNodeTypes, NodeAddOns, NodePrimitives, NodeTypes, PayloadAttributesBuilder,
+    BlockTy, BuiltPayload, FullNodeTypes, NodeAddOns, NodePrimitives, NodeTypes,
+    PayloadAttributesBuilder,
 };
 use reth_node_builder::{
     DebugNode, FullNodeComponents, Node, NodeAdapter, NodeComponents, NodeComponentsBuilder,
@@ -17,7 +20,6 @@ use reth_node_builder::{
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
 };
 use reth_node_core::primitives::EthereumHardforks;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
@@ -26,7 +28,7 @@ use reth_optimism_node::{
     payload::OpPayloadAttrs,
 };
 use reth_optimism_primitives::OpPrimitives;
-use reth_primitives_traits::{SealedHeader, TxTy};
+use reth_primitives_traits::{ReceiptTy, SealedHeader, TxTy};
 use reth_rpc_eth_api::EthApiTypes;
 use reth_transaction_pool::TransactionPool;
 use world_chain_cli::WorldChainNodeConfig;
@@ -38,14 +40,15 @@ use world_chain_cli::WorldChainNodeConfig;
 /// while inheriting a unified testing harness generic over `T: WorldChainNodeContext`.
 pub trait WorldChainNodePrimitiveTypes:
     Sized + From<WorldChainNodeConfig> + Clone + Debug + Unpin + Send + Sync + 'static
+where
+    TxTy<Self::Primitives>: Compress + Decompress,
+    ReceiptTy<Self::Primitives>: Compress + Decompress,
 {
     /// Primitive block, receipt, and signed transaction types used by the node.
     type Primitives: NodePrimitives<
             BlockHeader = Header,
             Block = Block<TxTy<Self::Primitives>>,
             BlockBody = BlockBody<TxTy<Self::Primitives>>,
-            SignedTx: Compress + Decompress,
-            Receipt: Compress + Decompress,
         >;
 
     /// Engine payload types used by the node.
@@ -53,6 +56,9 @@ pub trait WorldChainNodePrimitiveTypes:
             PayloadAttributes = OpPayloadAttrs,
             BuiltPayload: BuiltPayload<Primitives = Self::Primitives>,
         >;
+
+    /// Chain specification type used by the node.
+    type ChainSpec: EthChainSpec<Header = Header> + 'static;
 }
 
 /// Context trait for World Chain node implementations.
@@ -209,11 +215,12 @@ impl<N, T> DebugNode<N> for WorldChainNode<T>
 where
     N: FullNodeComponents<Types = Self>,
     T: WorldChainNodeContext<N, Primitives = OpPrimitives> + From<WorldChainNodeConfig>,
+    T::ChainSpec: Clone + EthereumHardforks + OpHardforks,
     WorldChainNodeComponentBuilder<N, T>: NodeComponentsBuilder<N>,
 {
     type RpcBlock = alloy_rpc_types_eth::Block<OpTxEnvelope>;
 
-    fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_node_api::BlockTy<Self> {
+    fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> BlockTy<Self> {
         rpc_block.into_consensus()
     }
 
@@ -228,7 +235,7 @@ where
 
 impl<T: WorldChainNodePrimitiveTypes> NodeTypes for WorldChainNode<T> {
     type Primitives = T::Primitives;
-    type ChainSpec = OpChainSpec;
+    type ChainSpec = T::ChainSpec;
     type Storage = OpStorage<TxTy<T::Primitives>>;
     type Payload = T::Payload;
 }
@@ -237,15 +244,16 @@ impl<T: WorldChainNodePrimitiveTypes> NodeTypes for WorldChainNode<T> {
 ///
 /// Mirrors `reth_optimism_node::node::OpLocalPayloadAttributesBuilder`, which is
 /// not re-exported by upstream. Used by [`DebugNode`] when running in dev mode.
-struct OpLocalPayloadAttributesBuilder {
-    chain_spec: Arc<OpChainSpec>,
+struct OpLocalPayloadAttributesBuilder<ChainSpec> {
+    chain_spec: Arc<ChainSpec>,
 }
 
-impl PayloadAttributesBuilder<OpPayloadAttrs> for OpLocalPayloadAttributesBuilder {
-    fn build(&self, parent: &SealedHeader<alloy_consensus::Header>) -> OpPayloadAttrs {
-        use alloy_consensus::BlockHeader;
-        use alloy_primitives::{Address, B64};
-
+impl<ChainSpec> PayloadAttributesBuilder<OpPayloadAttrs>
+    for OpLocalPayloadAttributesBuilder<ChainSpec>
+where
+    ChainSpec: EthereumHardforks + OpHardforks + Send + Sync + 'static,
+{
+    fn build(&self, parent: &SealedHeader<Header>) -> OpPayloadAttrs {
         let timestamp = std::cmp::max(
             parent.timestamp().saturating_add(1),
             std::time::SystemTime::now()

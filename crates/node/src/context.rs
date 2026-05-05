@@ -15,7 +15,7 @@ use crate::{
 use ed25519_dalek::VerifyingKey;
 use hex::ToHex;
 use reth_network::protocol::IntoRlpxSubProtocol;
-use reth_node_api::{FullNodeTypes, NodeTypes};
+use reth_node_api::{FullNodeTypes, NodeTypes, TxTy};
 use reth_node_builder::{
     NodeAdapter, NodeComponentsBuilder,
     components::{ComponentsBuilder, PayloadServiceBuilder},
@@ -84,11 +84,8 @@ impl WorldChainNetworkBuilder {
 impl<Node, Pool> NetworkBuilder<Node, Pool> for WorldChainNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
-    Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Consensus = <<Node::Types as NodeTypes>::Primitives as reth_node_api::NodePrimitives>::SignedTx,
-            >,
-        > + Unpin
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
         + 'static,
 {
     type Network = <OpNetworkBuilder as NetworkBuilder<Node, Pool>>::Network;
@@ -106,9 +103,10 @@ where
 
         let mut network_config = op_network_builder.network_config(ctx)?;
         let local_peer_id = network_config.hello_message.id;
-        network_config.peers_config.trusted_nodes.retain(|peer| {
-            peer.id != local_peer_id
-        });
+        network_config
+            .peers_config
+            .trusted_nodes
+            .retain(|peer| peer.id != local_peer_id);
 
         let mut trusted_peer_ids: Vec<_> = network_config
             .peers_config
@@ -178,6 +176,7 @@ pub struct WorldChainDefaultContext {
 impl WorldChainNodePrimitiveTypes for WorldChainDefaultContext {
     type Primitives = OpPrimitives;
     type Payload = reth_optimism_node::OpEngineTypes;
+    type ChainSpec = reth_optimism_chainspec::OpChainSpec;
 }
 
 impl<N: FullNodeTypes<Types = WorldChainNode<WorldChainDefaultContext>>> WorldChainNodeContext<N>

@@ -18,10 +18,9 @@ use alloy_primitives::Address;
 use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
 use reth_evm::ConfigureEvm;
-use reth_node_api::NodePrimitives;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
-use reth_primitives_traits::SealedBlock;
+use reth_primitives_traits::{BlockTy, SealedBlock, TxTy};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::{
     TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
@@ -67,8 +66,8 @@ impl<Client, Tx, Evm> WorldChainTransactionValidator<Client, Tx, Evm>
 where
     Client: ChainSpecProvider<ChainSpec: OpHardforks>
         + StateProviderFactory
-        + BlockReaderIdExt<Block = <Evm::Primitives as NodePrimitives>::Block>,
-    Tx: WorldChainPoolTransaction<Consensus = <Evm::Primitives as NodePrimitives>::SignedTx>,
+        + BlockReaderIdExt<Block = BlockTy<Evm::Primitives>>,
+    Tx: WorldChainPoolTransaction<Consensus = TxTy<Evm::Primitives>>,
     Evm: ConfigureEvm,
 {
     /// Create a new [`WorldChainTransactionValidator`].
@@ -260,13 +259,13 @@ impl<Client, Tx, Evm> TransactionValidator for WorldChainTransactionValidator<Cl
 where
     Client: ChainSpecProvider<ChainSpec: OpHardforks>
         + StateProviderFactory
-        + BlockReaderIdExt<Block = <Evm::Primitives as NodePrimitives>::Block>,
-    Tx: WorldChainPoolTransaction<Consensus = <Evm::Primitives as NodePrimitives>::SignedTx>,
+        + BlockReaderIdExt<Block = BlockTy<Evm::Primitives>>,
+    Tx: WorldChainPoolTransaction<Consensus = TxTy<Evm::Primitives>>,
     Evm: ConfigureEvm,
 {
     type Transaction = Tx;
 
-    type Block = <Evm::Primitives as NodePrimitives>::Block;
+    type Block = BlockTy<Evm::Primitives>;
 
     async fn validate_transaction(
         &self,

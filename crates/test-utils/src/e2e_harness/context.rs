@@ -210,6 +210,7 @@ impl From<WorldChainNodeConfig> for Wip1001NodeContext {
 impl WorldChainNodePrimitiveTypes for Wip1001NodeContext {
     type Primitives = Wip1001Primitives;
     type Payload = Wip1001EngineTypes;
+    type ChainSpec = OpChainSpec;
 }
 
 impl<N> WorldChainNodeContext<N> for Wip1001NodeContext
