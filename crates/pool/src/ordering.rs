@@ -1,5 +1,5 @@
 use super::tx::WorldChainPoolTransaction;
-use reth::transaction_pool::{CoinbaseTipOrdering, Priority, TransactionOrdering};
+use reth_transaction_pool::{CoinbaseTipOrdering, Priority, TransactionOrdering};
 use revm_primitives::U256;
 
 /// Default ordering for the pool.

@@ -18,6 +18,9 @@ just devnet-up
 just e2e-test -n
 
 # Run stress tests with contender (requires contender is installed)
+# By default the script resolves the builder and tx-proxy URLs from the
+# running `world-chain` Kurtosis enclave. Override with `BUILDER=...`,
+# `TX_PROXY=...`, or `KURTOSIS_ENCLAVE=...` when needed.
 just stress-test <stress | stress-precompile>
 
 # Generate a performance report
@@ -31,8 +34,14 @@ provision a custom World Chain dashboard into that Grafana automatically, so imp
 JSON manually from:
 
 ```text
-devnet/grafana/dashboards/flashblocks-payload-builder.json
+pkg/devnet/grafana/dashboards/flashblocks-payload-builder.json
+pkg/devnet/grafana/dashboards/flashblocks-validation-pipeline.json
+pkg/devnet/grafana/dashboards/flashblocks-p2p.json
 ```
 
-It is built for the `reth_flashblocks_payload_build_*` metrics exposed by the flashblocks-enabled
-payload builder.
+Available dashboards:
+
+- `flashblocks-payload-builder.json` for `reth_flashblocks_payload_build_*`.
+- `flashblocks-validation-pipeline.json` for `reth_flashblocks_validation_*`.
+- `flashblocks-p2p.json` for `reth_flashblocks_p2p*` P2P metrics, including peer-scoped `peer_id`
+  series.

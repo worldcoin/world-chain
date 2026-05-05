@@ -1,5 +1,6 @@
 use crate::{
-    metrics::{PayloadBuildRejectionReason, PayloadBuildTaskOutcome},
+    payload_builder_metrics::{PayloadBuildRejectionReason, PayloadBuildTaskOutcome},
+    state_db::StateDB,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
 use alloy_consensus::{Block, SignableTransaction, Transaction, transaction::SignerRecoverable};
@@ -12,15 +13,14 @@ use op_alloy_consensus::EIP1559ParamError;
 use op_alloy_rpc_types::OpTransactionRequest;
 
 use alloy_rpc_types_engine::PayloadId;
+use op_revm::OpSpecId;
 use reth_basic_payload_builder::PayloadConfig;
-use reth_chainspec::EthChainSpec;
 use reth_evm::{
     ConfigureEvm, Database, Evm, EvmEnv,
-    block::{BlockExecutionError, BlockValidationError, StateDB},
+    block::{BlockExecutionError, BlockValidationError},
     execute::{BlockBuilder, BlockExecutor},
-    op_revm::OpSpecId,
 };
-use reth_node_api::{PayloadBuilderAttributes, PayloadBuilderError};
+use reth_node_api::{NodePrimitives, PayloadBuilderError};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
@@ -32,8 +32,9 @@ use reth_optimism_payload_builder::{
     config::OpBuilderConfig,
 };
 use reth_optimism_primitives::OpTransactionSigned;
+use reth_payload_primitives::BuildNextEnv;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{NodePrimitives, Recovered, SealedHeader, TxTy};
+use reth_primitives_traits::{Recovered, SealedHeader, TxTy};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_revm::cancelled::CancelOnDrop;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
@@ -164,32 +165,11 @@ where
         DB::Error: Send + Sync + 'static,
         DB: Database + 'a,
     {
-        // Prepare attributes for next block environment.
-        let gas_limit = self
-            .inner
-            .attributes()
-            .gas_limit
-            .unwrap_or(self.inner.parent().gas_limit);
-        let attributes = OpNextBlockEnvAttributes {
-            timestamp: self.inner.attributes().timestamp(),
-            suggested_fee_recipient: self.inner.attributes().suggested_fee_recipient(),
-            prev_randao: self.inner.attributes().prev_randao(),
-            gas_limit,
-            parent_beacon_block_root: self.inner.attributes().parent_beacon_block_root(),
-            extra_data: if self
-                .spec()
-                .is_holocene_active_at_timestamp(self.attributes().timestamp())
-            {
-                self.attributes()
-                    .get_holocene_extra_data(
-                        self.spec()
-                            .base_fee_params_at_timestamp(self.attributes().timestamp()),
-                    )
-                    .map_err(PayloadBuilderError::other)?
-            } else {
-                Default::default()
-            }, // TODO: FIXME: Double check this against op-reth
-        };
+        let attributes = OpNextBlockEnvAttributes::build_next_env(
+            self.inner.attributes(),
+            self.inner.parent(),
+            self.spec(),
+        )?;
 
         // Prepare EVM environment.
         let evm_env = self
@@ -234,7 +214,7 @@ where
         info: &mut ExecutionInfo,
         builder: &mut Builder,
         mut best_txs: Txs,
-        attempt_metrics: &mut crate::metrics::PayloadBuildAttemptMetrics,
+        attempt_metrics: &mut crate::payload_builder_metrics::PayloadBuildAttemptMetrics,
         mut effective_gas_limit: u64,
         mut cumulative_uncompressed_bytes: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
@@ -304,20 +284,6 @@ where
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue;
-            }
-
-            if let Some(conditional_options) = pooled_tx.conditional_options()
-                && world_chain_rpc::transactions::validate_conditional_options(
-                    conditional_options,
-                    &self.client,
-                )
-                .is_err()
-            {
-                attempt_metrics
-                    .increment_rejection(PayloadBuildRejectionReason::ConditionalInvalid);
-                best_txs.mark_invalid(tx.signer(), tx.nonce());
-                invalid_txs.push(*pooled_tx.hash());
                 continue;
             }
 

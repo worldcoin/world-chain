@@ -4,31 +4,28 @@ use std::{
     sync::Arc,
 };
 
-use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
+use alloy_consensus::{Header, constants::EMPTY_ROOT_HASH, transaction::TransactionMeta};
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_genesis::Genesis;
 use alloy_primitives::{
     Address, B256, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, U256,
     keccak256, map::HashMap,
 };
-
-use alloy_consensus::{Header, constants::EMPTY_ROOT_HASH, transaction::TransactionMeta};
-use alloy_eips::BlockId;
+use op_alloy_consensus::{OpBlock, OpReceipt};
 use parking_lot::Mutex;
-use reth::{
-    api::NodeTypes,
-    chainspec::{ChainInfo, ChainSpec},
-};
+use reth_chain_state::EthPrimitives;
+use reth_chainspec::{ChainInfo, ChainSpec};
 use reth_db::{
     mock::{DatabaseMock, TxMock},
     models::{AccountBeforeTx, StoredBlockBodyIndices},
 };
+use reth_node_api::NodeTypes;
 use reth_node_ethereum::EthEngineTypes;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::{
-    Account, Block, Bytecode, EthPrimitives, GotExpected, Receipt, RecoveredBlock, SealedHeader,
+use reth_primitives_traits::{
+    Account, Bytecode, GotExpected, RecoveredBlock, SealedHeader, SignerRecoverable,
 };
-use reth_primitives_traits::SignerRecoverable;
 use reth_provider::{
     AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader, ChainSpecProvider, ChangeSetReader,
@@ -44,12 +41,13 @@ use reth_trie::{
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput, updates::TrieUpdates,
 };
+use reth_trie_common::ExecutionWitnessMode;
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug, Clone)]
-pub struct MockEthProvider<T = OpTransactionSigned> {
+pub struct MockEthProvider {
     /// Local block store
-    pub blocks: Arc<Mutex<HashMap<B256, Block<T>>>>,
+    pub blocks: Arc<Mutex<HashMap<B256, OpBlock>>>,
     /// Local header store
     pub headers: Arc<Mutex<HashMap<B256, Header>>>,
     /// Local account store
@@ -123,16 +121,13 @@ impl ExtendedAccount {
 
 impl MockEthProvider {
     /// Add block to local block store
-    pub fn add_block(&self, hash: B256, block: Block<OpTransactionSigned>) {
+    pub fn add_block(&self, hash: B256, block: OpBlock) {
         self.add_header(hash, block.header.clone());
         self.blocks.lock().insert(hash, block);
     }
 
     /// Add multiple blocks to local block store
-    pub fn extend_blocks(
-        &self,
-        iter: impl IntoIterator<Item = (B256, Block<OpTransactionSigned>)>,
-    ) {
+    pub fn extend_blocks(&self, iter: impl IntoIterator<Item = (B256, OpBlock)>) {
         for (hash, block) in iter {
             self.add_header(hash, block.header.clone());
             self.add_block(hash, block)
@@ -331,7 +326,7 @@ impl TransactionsProvider for MockEthProvider {
     ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
         // init btreemap so we can return in order
         let mut map = BTreeMap::new();
-        for (_, block) in self.blocks.lock().iter() {
+        for block in self.blocks.lock().values() {
             if range.contains(&block.number) {
                 map.insert(block.number, block.body.transactions.clone());
             }
@@ -383,24 +378,27 @@ impl TransactionsProvider for MockEthProvider {
 }
 
 impl ReceiptProvider for MockEthProvider {
-    type Receipt = Receipt;
+    type Receipt = OpReceipt;
 
-    fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Receipt>> {
+    fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<OpReceipt>> {
         Ok(None)
     }
 
-    fn receipt_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Receipt>> {
+    fn receipt_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<OpReceipt>> {
         Ok(None)
     }
 
-    fn receipts_by_block(&self, _block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>> {
+    fn receipts_by_block(
+        &self,
+        _block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<OpReceipt>>> {
         Ok(None)
     }
 
     fn receipts_by_tx_range(
         &self,
         _range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Receipt>> {
+    ) -> ProviderResult<Vec<OpReceipt>> {
         Ok(vec![])
     }
 
@@ -493,17 +491,17 @@ impl BlockIdReader for MockEthProvider {
 }
 
 impl BlockReader for MockEthProvider {
-    type Block = Block<OpTransactionSigned>;
+    type Block = OpBlock;
 
     fn find_block_by_hash(
         &self,
         hash: B256,
         _source: BlockSource,
-    ) -> ProviderResult<Option<Block<OpTransactionSigned>>> {
+    ) -> ProviderResult<Option<OpBlock>> {
         self.block(hash.into())
     }
 
-    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Block<OpTransactionSigned>>> {
+    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<OpBlock>> {
         let lock = self.blocks.lock();
         match id {
             BlockHashOrNumber::Hash(hash) => Ok(lock.get(&hash).cloned()),
@@ -527,7 +525,7 @@ impl BlockReader for MockEthProvider {
         &self,
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<RecoveredBlock<Block<OpTransactionSigned>>>> {
+    ) -> ProviderResult<Option<RecoveredBlock<OpBlock>>> {
         Ok(None)
     }
 
@@ -535,14 +533,11 @@ impl BlockReader for MockEthProvider {
         &self,
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<RecoveredBlock<Block<OpTransactionSigned>>>> {
+    ) -> ProviderResult<Option<RecoveredBlock<OpBlock>>> {
         Ok(None)
     }
 
-    fn block_range(
-        &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<Block<OpTransactionSigned>>> {
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<OpBlock>> {
         let lock = self.blocks.lock();
 
         let mut blocks: Vec<_> = lock
@@ -558,14 +553,14 @@ impl BlockReader for MockEthProvider {
     fn block_with_senders_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<RecoveredBlock<Block<OpTransactionSigned>>>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<OpBlock>>> {
         Ok(vec![])
     }
 
     fn recovered_block_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<RecoveredBlock<Block<OpTransactionSigned>>>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<OpBlock>>> {
         Ok(vec![])
     }
 
@@ -575,7 +570,7 @@ impl BlockReader for MockEthProvider {
 }
 
 impl BlockReaderIdExt for MockEthProvider {
-    fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Block<OpTransactionSigned>>> {
+    fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<OpBlock>> {
         match id {
             BlockId::Number(num) => self.block_by_number_or_tag(num),
             BlockId::Hash(hash) => self.block_by_hash(hash.block_hash),
@@ -692,7 +687,12 @@ impl StateProofProvider for MockEthProvider {
         Ok(MultiProof::default())
     }
 
-    fn witness(&self, _input: TrieInput, _target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+    fn witness(
+        &self,
+        _input: TrieInput,
+        _target: HashedPostState,
+        _mode: ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::default())
     }
 }
@@ -730,18 +730,6 @@ impl StateProvider for MockEthProvider {
         Ok(lock
             .get(&account)
             .and_then(|account| account.storage.get(&storage_key))
-            .copied())
-    }
-
-    fn storage_by_hashed_key(
-        &self,
-        address: Address,
-        hashed_storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        let lock = self.accounts.lock();
-        Ok(lock
-            .get(&address)
-            .and_then(|account| account.storage.get(&hashed_storage_key))
             .copied())
     }
 }
@@ -840,16 +828,15 @@ impl ChangeSetReader for MockEthProvider {
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
         Ok(Vec::default())
     }
-
-    fn account_changeset_count(&self) -> ProviderResult<usize> {
-        Ok(0)
-    }
 }
 
 impl StateReader for MockEthProvider {
-    type Receipt = Receipt;
+    type Receipt = OpReceipt;
 
-    fn get_state(&self, _block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>> {
+    fn get_state(
+        &self,
+        _block: BlockNumber,
+    ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>> {
         Ok(None)
     }
 }

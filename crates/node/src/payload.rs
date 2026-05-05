@@ -1,17 +1,17 @@
 use world_chain_builder::{
     coordinator::FlashblocksExecutionCoordinator,
-    metrics::PayloadBuildMetrics,
     payload_builder::FlashblocksPayloadBuilder,
+    payload_builder_metrics::PayloadBuildMetrics,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
 use world_chain_cli::FlashblocksPayloadBuilderConfig;
 
 use op_alloy_consensus::OpTxEnvelope;
-use reth::builder::{BuilderContext, FullNodeTypes, components::PayloadBuilderBuilder};
-use reth_node_api::{NodeTypes, PayloadTypes};
+use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
+use reth_node_builder::{BuilderContext, components::PayloadBuilderBuilder};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{
-    OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes, txpool::OpPooledTx,
+    OpBuiltPayload, OpEvmConfig, payload::OpPayloadAttrs, txpool::OpPooledTx,
 };
 use reth_provider::{
     ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, StateProviderFactory,
@@ -55,9 +55,7 @@ where
             ChainSpec = OpChainSpec,
             Payload: PayloadTypes<
                 BuiltPayload = OpBuiltPayload,
-                PayloadBuilderAttributes = OpPayloadBuilderAttributes<
-                    op_alloy_consensus::OpTxEnvelope,
-                >,
+                PayloadAttributes = OpPayloadAttrs,
             >,
         >,
     Pool: TransactionPool<Transaction: OpPooledTx + PoolTransaction<Consensus = OpTxEnvelope>>

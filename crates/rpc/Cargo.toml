@@ -16,13 +16,13 @@ world-chain-pool.workspace = true
 world-chain-primitives.workspace = true
 
 # reth
-reth.workspace = true
 reth-chainspec.workspace = true
 reth-provider.workspace = true
-reth-primitives.workspace = true
 reth-transaction-pool.workspace = true
 reth-evm.workspace = true
 reth-node-api.workspace = true
+reth-primitives-traits.workspace = true
+reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-storage-api.workspace = true
@@ -36,8 +36,10 @@ reth-optimism-node.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-evm.workspace = true
+reth-revm.workspace = true
 
 # alloy
+alloy-op-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
@@ -49,17 +51,32 @@ op-alloy-network.workspace = true
 op-alloy-rpc-types-engine.workspace = true
 
 # revm
+revm.workspace = true
 revm-primitives.workspace = true
+op-revm.workspace = true
 
 # tokio
 tokio.workspace = true
 
 # misc
+hex.workspace = true
+serde.workspace = true
 tracing.workspace = true
 jsonrpsee.workspace = true
 jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["rustls-tls"] }
 serde_json.workspace = true
 thiserror.workspace = true
 eyre.workspace = true
+lru.workspace = true
+
+[dev-dependencies]
+alloy = { workspace = true, features = ["provider-http"] }
+alloy-provider-v1 = { package = "alloy-provider", version = "1.8.3", default-features = false, features = [
+    "reqwest",
+] }
+alloy-sol-types.workspace = true
+revm-database = { workspace = true, features = ["alloydb"] }
+revm-database-interface.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

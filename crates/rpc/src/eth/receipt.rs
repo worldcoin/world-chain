@@ -1,18 +1,19 @@
-use alloy_consensus::{TxReceipt, transaction::SignerRecoverable};
+use std::sync::Arc;
+
+use alloy_consensus::TxReceipt;
 use op_alloy_rpc_types::OpTransactionReceipt;
-use reth::rpc::{compat::RpcReceipt, server_types::eth::block::BlockAndReceipts};
 use reth_chainspec::ChainSpecProvider;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{OpEthApi, OpEthApiError, OpReceiptBuilder};
-use reth_primitives::TransactionMeta;
+use reth_primitives_traits::{Recovered, TransactionMeta};
 use reth_provider::{ProviderReceipt, ProviderTx};
 use reth_rpc_eth_api::{
-    EthApiTypes, FromEthApiError, RpcConvert, RpcNodeCore, RpcNodeCoreExt, RpcTypes,
+    EthApiTypes, RpcConvert, RpcNodeCore, RpcNodeCoreExt, RpcReceipt, RpcTypes,
     helpers::{LoadPendingBlock, LoadReceipt},
     transaction::ConvertReceiptInput,
 };
-use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_types::{EthApiError, block::BlockAndReceipts};
 use tracing::trace;
 
 use crate::eth::FlashblocksEthApi;
@@ -36,26 +37,32 @@ where
     /// Helper method for `eth_getBlockReceipts` and `eth_getTransactionReceipt`.
     async fn build_transaction_receipt(
         &self,
-        tx: ProviderTx<Self::Provider>,
+        tx: Recovered<ProviderTx<Self::Provider>>,
         meta: TransactionMeta,
         receipt: ProviderReceipt<Self::Provider>,
+        all_receipts: Option<Arc<Vec<ProviderReceipt<Self::Provider>>>>,
     ) -> Result<RpcReceipt<Self::NetworkTypes>, Self::Error> {
         let hash = meta.block_hash;
 
         // get all receipts for the block
-        let all_receipts = if let Ok(Some(receipts)) = self.cache().get_receipts(hash).await {
-            Some((receipts, None))
-        } else {
-            // try the pending block
-            let pending_block = self.local_pending_block().await?;
-            if let Some(BlockAndReceipts { block, receipts }) = pending_block {
-                if block.hash_slow() == hash {
-                    Some((receipts, Some(block)))
+        let all_receipts = match all_receipts {
+            Some(all_receipts) => Some((all_receipts, None)),
+            None => {
+                if let Ok(Some(receipts)) = self.cache().get_receipts(hash).await {
+                    Some((receipts, None))
                 } else {
-                    None
+                    // try the pending block
+                    let pending_block = self.local_pending_block().await?;
+                    if let Some(BlockAndReceipts { block, receipts }) = pending_block {
+                        if block.hash_slow() == hash {
+                            Some((receipts, Some(block)))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
                 }
-            } else {
-                None
             }
         };
 
@@ -71,9 +78,6 @@ where
                 next_log_index += receipt.logs().len();
             }
         }
-        let tx = tx
-            .try_into_recovered_unchecked()
-            .map_err(Self::Error::from_eth_err)?;
         let hash = tx.hash();
         trace!(
             target: "flashblocks",
@@ -109,14 +113,13 @@ where
                 // new transaction input has changed, since otherwise the L1 cost wouldn't.
                 l1_block_info.clear_tx_l1_cost();
 
-                Ok(
-                    OpReceiptBuilder::new(
-                        &self.provider().chain_spec(),
-                        input,
-                        &mut l1_block_info,
-                    )?
-                    .build(),
-                )
+                Ok(OpReceiptBuilder::new(
+                    &self.provider().chain_spec(),
+                    input,
+                    &mut l1_block_info,
+                    None,
+                )?
+                .build())
             }
         }
     }

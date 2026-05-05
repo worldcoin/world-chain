@@ -12,16 +12,23 @@ world-chain-builder.workspace = true
 world-chain-p2p.workspace = true
 
 # reth
-reth.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-optimism-primitives.workspace = true
-reth-primitives.workspace = true
+reth-payload-primitives.workspace = true
+reth-payload-builder.workspace = true
+reth-primitives-traits.workspace = true
 reth-provider.workspace = true
+reth-revm.workspace = true
+reth-tasks.workspace = true
+reth-execution-cache.workspace = true
+reth-trie-parallel.workspace = true
 
 # alloy
+alloy-eips.workspace = true
+alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 op-alloy-consensus.workspace = true
 
@@ -33,7 +40,3 @@ tracing.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
-alloy-sol-types.workspace = true
-alloy-signer-local.workspace = true
-alloy-signer.workspace = true
-alloy-network.workspace = true

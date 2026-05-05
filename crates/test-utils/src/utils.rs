@@ -1,4 +1,4 @@
-use alloy_consensus::{SignableTransaction, TxEip1559};
+use alloy_consensus::{InMemorySize, SignableTransaction, TxEip1559};
 use alloy_eips::{eip2718::Encodable2718, eip2930::AccessList};
 use alloy_network::TxSigner;
 use alloy_primitives::{
@@ -12,8 +12,7 @@ use bon::builder;
 use op_alloy_consensus::OpTypedTransaction;
 use reth_optimism_node::txpool::OpPooledTransaction;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::transaction::SignedTransaction;
-use reth_primitives_traits::size::InMemorySize;
+use reth_primitives_traits::SignedTransaction;
 use semaphore_rs::{Field, hash_to_field, identity::Identity, poseidon_tree::LazyPoseidonTree};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{str::FromStr, sync::LazyLock};
@@ -700,7 +699,6 @@ mod tests {
     use super::*;
     use alloy_primitives::address;
     use test_case::test_case;
-
     #[test_case(0, "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266")]
     #[test_case(1, "0x70997970C51812dc3A010C7d01b50e0d17dc79C8")]
     #[test_case(2, "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC")]

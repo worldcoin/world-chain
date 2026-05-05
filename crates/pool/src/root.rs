@@ -3,8 +3,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use alloy_consensus::{BlockHeader, Sealable};
 use alloy_primitives::{Address, U256};
 use parking_lot::RwLock;
-use reth::api::Block;
-use reth_primitives::SealedBlock;
+use reth_primitives_traits::{Block, SealedBlock};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 
 use semaphore_rs::Field;
@@ -182,14 +181,13 @@ where
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Address, address};
-    use reth_primitives::Header;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     /// Devnet World ID for testing
     const DEV_WORLD_ID: Address = address!("5FbDB2315678afecb367f032d93F642f64180aa3");
 
     use super::*;
-    use alloy_consensus::Block as AlloyBlock;
+    use alloy_consensus::{Block as AlloyBlock, Header};
 
     pub fn world_chain_root_validator() -> eyre::Result<WorldChainRootValidator<MockEthProvider>> {
         let client = MockEthProvider::default();

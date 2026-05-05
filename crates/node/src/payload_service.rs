@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use ed25519_dalek::SigningKey;
-use reth::payload::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
 use reth_node_builder::{
@@ -9,7 +8,8 @@ use reth_node_builder::{
     components::{PayloadBuilderBuilder, PayloadServiceBuilder},
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpNodeTypes, OpPayloadBuilderAttributes};
+use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpNodeTypes, payload::OpPayloadAttrs};
+use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{
     CanonStateSubscriptions, ChainSpecProvider, DatabaseProviderFactory, HeaderProvider,
     StateProviderFactory,
@@ -75,9 +75,7 @@ where
             ChainSpec = OpChainSpec,
             Payload: PayloadTypes<
                 BuiltPayload = OpBuiltPayload,
-                PayloadBuilderAttributes = OpPayloadBuilderAttributes<
-                    op_alloy_consensus::OpTxEnvelope,
-                >,
+                PayloadAttributes = OpPayloadAttrs,
             >,
         >,
     Pool: TransactionPool,
@@ -132,7 +130,7 @@ where
 
             Ok(payload_service_handle)
         } else {
-            // flahsblocks disabled
+            // flashblocks disabled
             let payload_job_config = BasicPayloadJobGeneratorConfig::default()
                 .interval(conf.interval)
                 .deadline(conf.deadline)

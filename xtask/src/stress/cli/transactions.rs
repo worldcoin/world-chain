@@ -4,22 +4,19 @@ use alloy_primitives::{
 };
 use alloy_provider::{
     Provider, ProviderBuilder,
-    network::{EthereumWallet, TransactionBuilder},
+    network::{EthereumWallet, NetworkTransactionBuilder},
 };
 use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInput, TransactionRequest};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{SolCall, SolInterface, SolValue, sol};
-use alloy_transport_http::Http;
+use alloy_transport_http::{Client as HttpClient, Http};
 use eyre::eyre::{Context, bail};
 use futures::{StreamExt, TryStreamExt, stream};
 use once_cell::sync::Lazy;
 use rand::Rng;
-use reqwest::{
-    Client,
-    header::{AUTHORIZATION, HeaderMap},
-};
+use reqwest::header::{AUTHORIZATION, HeaderMap};
 use reth_rpc_layer::secret_to_bearer_header;
 use semaphore_rs::{Field, hash_to_field, identity::Identity};
 use serde::{Deserialize, Serialize};
@@ -480,7 +477,7 @@ pub async fn send_bundle(args: SendArgs) -> eyre::Result<()> {
         headers.insert(AUTHORIZATION, secret_to_bearer_header(&secret));
     }
 
-    let client = Client::builder().default_headers(headers).build()?;
+    let client = HttpClient::builder().default_headers(headers).build()?;
 
     // Create the HTTP transport.
     let http = Http::with_client(client, args.rpc_url.parse()?);

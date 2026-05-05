@@ -5,11 +5,13 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-reth.workspace = true
 reth-node-builder.workspace = true
+reth-chainspec.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-payload-builder.workspace = true
+reth-rpc-server-types.workspace = true
+alloy-chains.workspace = true
 alloy-signer-local.workspace = true
 alloy-primitives.workspace = true
 ed25519-dalek.workspace = true
@@ -22,6 +24,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 alloy-genesis.workspace = true
+reth-node-core.workspace = true
 
 [[example]]
 name = "sk-to-vk"

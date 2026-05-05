@@ -18,6 +18,7 @@ use reth_node_builder::{
     components::{ComponentsBuilder, PayloadServiceBuilder},
     rpc::{BasicEngineValidatorBuilder, RpcAddOns},
 };
+use reth_node_core::primitives::Hardforks;
 use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
     OpAddOns, OpConsensusBuilder, OpEngineValidatorBuilder, OpExecutorBuilder, OpNetworkBuilder,
@@ -38,7 +39,6 @@ use world_chain_builder::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_pool::BasicWorldChainPool;
 
 use crate::tx_propagation::WorldChainTransactionPropagationPolicy;
-use reth::primitives::Hardforks;
 use reth_network::PeersInfo;
 use reth_network_peers::PeerId;
 use reth_node_builder::{BuilderContext, components::NetworkBuilder};
@@ -339,6 +339,7 @@ where
             Default::default(),
             engine_api_builder,
             engine_validator_builder,
+            Default::default(),
             Default::default(),
         );
 

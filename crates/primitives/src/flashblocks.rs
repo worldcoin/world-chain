@@ -8,21 +8,22 @@ use alloy_consensus::{
     Block, BlockBody, BlockHeader, EMPTY_OMMER_ROOT_HASH, Header,
     proofs::ordered_trie_root_with_encoder,
 };
-use alloy_eips::{Decodable2718, Encodable2718, eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
+use alloy_eips::{
+    Decodable2718, Encodable2718, eip7685::EMPTY_REQUESTS_HASH,
+    eip7928::EMPTY_BLOCK_ACCESS_LIST_HASH, merge::BEACON_NONCE,
+};
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
 use chrono::Utc;
 use eyre::eyre::{bail, eyre};
 use op_alloy_consensus::OpTxEnvelope;
-use reth::{
-    api::{Block as _, BlockBody as _},
-    payload::PayloadBuilderAttributes,
-};
+use reth_chainspec::EthereumHardforks;
+use reth_primitives_traits::{Block as _, BlockBody as _, NodePrimitives, RecoveredBlock};
+
 use reth_basic_payload_builder::PayloadConfig;
 use reth_optimism_chainspec::{OpChainSpec, OpHardforks};
-use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
+use reth_optimism_node::{OpBuiltPayload, payload::OpPayloadAttrs};
 use reth_optimism_primitives::OpPrimitives;
-use reth_primitives::{NodePrimitives, RecoveredBlock};
 use serde::{Deserialize, Serialize};
 
 /// A type wrapper around a single flashblock payload.
@@ -34,7 +35,7 @@ pub struct Flashblock {
 impl Flashblock {
     pub fn new(
         payload: &OpBuiltPayload,
-        config: &PayloadConfig<OpPayloadBuilderAttributes<OpTxEnvelope>, Header>,
+        config: &PayloadConfig<OpPayloadAttrs, Header>,
         index: u64,
         transactions_offset: usize,
         withdrawal_offset: usize,
@@ -51,11 +52,8 @@ impl Flashblock {
                     .payload_attributes
                     .parent_beacon_block_root
                     .unwrap_or_default(),
-                parent_hash: config.attributes.parent(),
-                fee_recipient: config
-                    .attributes
-                    .payload_attributes
-                    .suggested_fee_recipient(),
+                parent_hash: config.parent_header.hash(),
+                fee_recipient: config.attributes.payload_attributes.suggested_fee_recipient,
                 prev_randao: config.attributes.payload_attributes.prev_randao,
                 block_number: block.number(),
                 gas_limit: block.gas_limit(),
@@ -107,7 +105,7 @@ impl Flashblock {
 
         Flashblock {
             flashblock: FlashblocksPayloadV1 {
-                payload_id: config.attributes.payload_id(),
+                payload_id: config.payload_id,
                 index,
                 base: payload_base,
                 diff: ExecutionPayloadFlashblockDeltaV1 {
@@ -216,9 +214,14 @@ pub fn recovered_block_from_flashblocks(
     } else {
         None
     };
+    let is_amsterdam_active = chain_spec.is_amsterdam_active_at_timestamp(timestamp);
+    let block_access_list_hash = is_amsterdam_active.then_some(EMPTY_BLOCK_ACCESS_LIST_HASH);
+    let slot_number = is_amsterdam_active.then_some(0);
 
     let header = Header {
         parent_beacon_block_root: None,
+        block_access_list_hash,
+        slot_number,
         state_root: diff.state_root,
         receipts_root: diff.receipts_root,
         logs_bloom: diff.logs_bloom,

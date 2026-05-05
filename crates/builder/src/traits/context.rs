@@ -1,18 +1,14 @@
 use crate::{
-    metrics::PayloadBuildAttemptMetrics, traits::context_builder::PayloadBuilderCtxBuilder,
-    utils::effective_gas_limit,
+    payload_builder_metrics::PayloadBuildAttemptMetrics, state_db::StateDB,
+    traits::context_builder::PayloadBuilderCtxBuilder, utils::effective_gas_limit,
 };
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
 use op_alloy_consensus::EIP1559ParamError;
+use op_revm::OpSpecId;
 use reth_chainspec::EthereumHardforks;
-use reth_evm::{
-    ConfigureEvm, Evm, EvmEnv,
-    block::{BlockExecutor, StateDB},
-    execute::BlockBuilder,
-    op_revm::OpSpecId,
-};
+use reth_evm::{ConfigureEvm, Evm, EvmEnv, block::BlockExecutor, execute::BlockBuilder};
 use reth_node_api::PayloadBuilderError;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -27,7 +23,7 @@ use reth_optimism_payload_builder::{
 };
 use reth_payload_primitives::BuildNextEnv;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{SealedHeader, TxTy};
+use reth_primitives_traits::{SealedHeader, TxTy};
 use reth_provider::ChainSpecProvider;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{DatabaseCommit, context::BlockEnv};
@@ -184,8 +180,8 @@ pub trait PayloadBuilderCtx: Send + Sync {
     /// represent validator stake withdrawals that must be processed automatically.
     fn withdrawals(&self) -> Option<&Withdrawals> {
         self.spec()
-            .is_shanghai_active_at_timestamp(self.attributes().payload_attributes.timestamp)
-            .then(|| &self.attributes().payload_attributes.withdrawals)
+            .is_shanghai_active_at_timestamp(self.attributes().timestamp)
+            .then(|| &self.attributes().withdrawals)
     }
 }
 
@@ -304,8 +300,8 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
     /// represent validator stake withdrawals that must be processed automatically.
     fn withdrawals(&self) -> Option<&Withdrawals> {
         self.spec()
-            .is_shanghai_active_at_timestamp(self.attributes().payload_attributes.timestamp)
-            .then(|| &self.attributes().payload_attributes.withdrawals)
+            .is_shanghai_active_at_timestamp(self.attributes().timestamp)
+            .then(|| &self.attributes().withdrawals)
     }
 
     fn block_builder<'a, DB>(

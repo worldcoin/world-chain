@@ -1,12 +1,12 @@
 use std::thread::JoinHandle;
 
+use crate::state_db::StateDB;
 use alloy_primitives::{Address, B256};
 use crossbeam_channel::Sender;
-use reth_evm::block::StateDB;
 use revm::{
     Database, DatabaseCommit, DatabaseRef,
     database::{BundleState, states::bundle_state::BundleRetention},
-    primitives::{HashMap, StorageKey, StorageValue},
+    primitives::{AddressMap, StorageKey, StorageValue},
     state::{AccountInfo, Bytecode},
 };
 use tracing::error;
@@ -16,7 +16,7 @@ use crate::access_list::FlashblockAccessListConstruction;
 /// Messages sent to the background builder for recording reads/writes.
 enum BalBuilderMsg {
     StorageRead(Address, StorageKey),
-    Commit(HashMap<Address, revm::state::Account>),
+    Commit(AddressMap<revm::state::Account>),
     SetIndex(u16),
     MergeAcccessList(FlashblockAccessListConstruction),
 }
@@ -88,7 +88,7 @@ where
     /// capture only new values in the access list.
     fn try_commit(
         &mut self,
-        changes: HashMap<Address, revm::state::Account>,
+        changes: AddressMap<revm::state::Account>,
     ) -> Result<(), <DB as Database>::Error> {
         // When we commit new account state we must first load the previous account state. Only
         // what's changed should be published to the access list.
@@ -216,7 +216,7 @@ impl<DB: DatabaseCommit> DatabaseCommit for BalBuilderDb<DB>
 where
     DB: DatabaseCommit + Database,
 {
-    fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
+    fn commit(&mut self, changes: AddressMap<revm::state::Account>) {
         if let Err(e) = self.try_commit(changes) {
             error!("Error committing to BalBuilderDb: {:?}", e);
             self.error = Some(e);
@@ -238,6 +238,10 @@ where
 
     fn merge_transitions(&mut self, retention: BundleRetention) {
         self.db.merge_transitions(retention);
+    }
+
+    fn take_bundle(&mut self) -> BundleState {
+        self.db.take_bundle()
     }
 
     fn set_state_clear_flag(&mut self, has_state_clear: bool) {
@@ -356,7 +360,7 @@ impl<DB: Database> Database for AsyncBalBuilderDb<DB> {
 }
 
 impl<DB: Database + DatabaseCommit> DatabaseCommit for AsyncBalBuilderDb<DB> {
-    fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
+    fn commit(&mut self, changes: AddressMap<revm::state::Account>) {
         // Ignore errors from the builder channel.
         // relevent errors will be propagated through `finish()`.
         self.tx.send(BalBuilderMsg::Commit(changes.clone())).ok();
@@ -375,6 +379,10 @@ impl<DB: StateDB> StateDB for AsyncBalBuilderDb<DB> {
 
     fn merge_transitions(&mut self, retention: BundleRetention) {
         self.db.merge_transitions(retention);
+    }
+
+    fn take_bundle(&mut self) -> BundleState {
+        self.db.take_bundle()
     }
 
     fn set_state_clear_flag(&mut self, has_state_clear: bool) {
@@ -426,7 +434,7 @@ impl<DB: DatabaseRef> Database for NoOpCommitDB<DB> {
 }
 
 impl<DB: DatabaseRef> DatabaseCommit for NoOpCommitDB<DB> {
-    fn commit(&mut self, _changes: HashMap<Address, revm::state::Account>) {
+    fn commit(&mut self, _changes: AddressMap<revm::state::Account>) {
         // No-op
     }
 }
@@ -442,6 +450,10 @@ impl<DB: DatabaseRef + std::fmt::Debug> StateDB for NoOpCommitDB<DB> {
 
     fn merge_transitions(&mut self, _retention: BundleRetention) {
         // No-op
+    }
+
+    fn take_bundle(&mut self) -> BundleState {
+        unimplemented!()
     }
 
     fn set_state_clear_flag(&mut self, _has_state_clear: bool) {

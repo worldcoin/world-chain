@@ -1,12 +1,11 @@
 use crate::{EthTransactionsExt, sequencer::SequencerClient};
 use alloy_primitives::{B256, Bytes};
-use alloy_rpc_types::erc4337::TransactionConditional;
 use jsonrpsee::{
     core::{RpcResult, async_trait},
     proc_macros::rpc,
 };
-use reth::transaction_pool::TransactionPool;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
+use reth_transaction_pool::TransactionPool;
 use world_chain_pool::tx::WorldChainPooledTransaction;
 
 /// WorldChainEthApi Extension for `sendRawTransactionConditional` and `sendRawTransaction`
@@ -24,14 +23,6 @@ pub trait EthApiExt {
     /// Sends a raw transaction to the pool
     #[method(name = "sendRawTransaction")]
     async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256>;
-
-    /// Sends a raw conditional transaction to the pool
-    #[method(name = "sendRawTransactionConditional")]
-    async fn send_raw_transaction_conditional(
-        &self,
-        tx: Bytes,
-        options: TransactionConditional,
-    ) -> RpcResult<B256>;
 }
 
 #[async_trait]
@@ -42,13 +33,5 @@ where
 {
     async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256> {
         Ok(EthTransactionsExt::send_raw_transaction(self, tx).await?)
-    }
-
-    async fn send_raw_transaction_conditional(
-        &self,
-        tx: Bytes,
-        options: TransactionConditional,
-    ) -> RpcResult<B256> {
-        Ok(EthTransactionsExt::send_raw_transaction_conditional(self, tx, options).await?)
     }
 }

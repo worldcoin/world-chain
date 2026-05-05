@@ -13,22 +13,22 @@ use crate::{
     error::WorldChainTransactionPoolError,
     tx::WorldChainPoolTransactionError,
 };
+use alloy_consensus::Block;
 use alloy_eips::BlockId;
 use alloy_primitives::Address;
 use alloy_sol_types::{SolCall, SolValue};
 use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-use reth::{
-    api::ConfigureEvm,
-    transaction_pool::{
-        TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
-        validate::ValidTransaction,
-    },
-};
+use reth_evm::ConfigureEvm;
+use reth_node_api::NodePrimitives;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::{Block, NodePrimitives, SealedBlock};
+use reth_primitives_traits::SealedBlock;
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
+use reth_transaction_pool::{
+    TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
+    validate::ValidTransaction,
+};
 use revm_primitives::U256;
 use tracing::info;
 use world_chain_pbh::payload::{PBHPayload as PbhPayload, PBHValidationError};
@@ -69,7 +69,7 @@ impl<Client, Tx, Evm> WorldChainTransactionValidator<Client, Tx, Evm>
 where
     Client: ChainSpecProvider<ChainSpec: OpHardforks>
         + StateProviderFactory
-        + BlockReaderIdExt<Block = reth_primitives::Block<OpTransactionSigned>>,
+        + BlockReaderIdExt<Block = Block<OpTransactionSigned>>,
     Tx: WorldChainPoolTransaction,
     Evm: ConfigureEvm,
 {
@@ -311,15 +311,15 @@ where
 
 #[cfg(test)]
 pub mod tests {
-    use alloy_consensus::{Block, Header};
+    use alloy_consensus::{Block, BlockBody, Header};
     use alloy_primitives::{Address, address};
     use alloy_sol_types::SolCall;
-    use reth::transaction_pool::{
-        Pool, TransactionPool, TransactionValidator, blobstore::InMemoryBlobStore,
-    };
     use reth_optimism_node::OpEvmConfig;
     use reth_optimism_primitives::OpTransactionSigned;
-    use reth_primitives::{BlockBody, SealedBlock};
+    use reth_primitives_traits::SealedBlock;
+    use reth_transaction_pool::{
+        Pool, TransactionPool, TransactionValidator, blobstore::InMemoryBlobStore,
+    };
     use world_chain_pbh::{date_marker::DateMarker, external_nullifier::ExternalNullifier};
     use world_chain_test_utils::{
         PBH_DEV_ENTRYPOINT,

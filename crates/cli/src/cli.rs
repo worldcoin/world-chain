@@ -1,12 +1,17 @@
 use crate::config::FlashblocksPayloadBuilderConfig;
 use ::eyre::eyre::bail;
+use alloy_chains::NamedChain;
 use alloy_primitives::{Address, address};
-use reth::chainspec::{EthChainSpec, NamedChain};
+use reth_chainspec::{EthChainSpec, ForkCondition};
 use reth_network_peers::PeerId;
 use reth_node_builder::NodeConfig;
-use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_chainspec::{OpChainSpec, OpHardfork};
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpGasLimitConfig};
+use reth_rpc_server_types::{
+    DefaultRpcModuleValidator, RethRpcModule, RpcModuleSelection, RpcModuleValidator,
+};
+use std::{str::FromStr, sync::Arc};
 use tracing::{debug, info, warn};
 
 pub mod builder;
@@ -17,9 +22,117 @@ pub use builder::*;
 pub use p2p::*;
 pub use pbh::*;
 
+const JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA: u64 = 1777161600;
+
+const JOVIAN_UPGRADE_TIMESTAMP_MAINNET: u64 = 1777593600;
+
 pub const DEFAULT_FLASHBLOCKS_BOOTNODES: &str = "enode://78ca7daeb63956cbc3985853d5699a6404d976a2612575563f46876968fdca2383a195ee7db40de348757b2256195996933708f351169ca3f3fe93ab2a774608@16.62.98.53:30303,enode://c96dcadf4cdea4c39ec3fd775637d9e67d455b856b1514cfcf55b72f873a34b96d69e47ccea9fc797a446d4e6948aa80f6b9d479a1727ca166758a900b08f422@16.63.14.166:30303,enode://15688a7b281c32a4da633252dcc5019d60f037ee9eb46d05093dd3023bdd688b9b207d10a39e054a5ed87db666b2cb75696f6537de74d1e1f8dcabc53dc8d2ab@16.63.123.160:30303";
 
+pub const DEFAULT_FLASHBLOCKS_BOOTNODES_SEPOLIA: &str = "enode://08f6bec85b85908cc0bf09fb26fba7e5c53c4e924aae795784aa002a18afd7d1e0be5f9bb8c71fbad9b86c00b27fd45b654e234ef4b7eff2432acd6cddc256d3@51.34.157.154:30303,enode://444a4af7a46f668f8f1abf3863caa72cbe773e6830083a493cc43e9996b4e3017013605bfddb779b2494a3f9cf75961b70ad35a347bc055969a3744e1738de6d@16.18.61.93:30303,enode://ae8e652ad611d0276427ecc751c5effacdb6a9dcf8080b9380f24db7a0770ff657ded924d45805fb3eef21159f7294316b0e6dc51101f92b86c955509a3e8cc0@51.96.83.177:30303";
+
 use crate::config::WorldChainNodeConfig;
+
+/// Custom RPC module validator for World Chain.
+///
+/// Behaves like reth's `DefaultRpcModuleValidator` (typos and unknown
+/// modules are rejected), but additionally accepts the World Chain custom
+/// namespaces. Currently:
+///
+/// - `simulate` — gates the `worldchain_simulateUnsignedUserOp` endpoint.
+///   Only valid in `--http.api` (the endpoint is registered on the HTTP
+///   server only, so allowing it on `--ws.api` would silently do nothing).
+#[derive(Debug, Clone, Copy)]
+pub struct WorldChainRpcModuleValidator;
+
+/// World Chain custom RPC namespaces accepted by the validator. All entries
+/// here are HTTP-only — they're rejected in `--ws.api`.
+const WORLD_CHAIN_CUSTOM_MODULES: &[&str] = &["simulate"];
+
+impl RpcModuleValidator for WorldChainRpcModuleValidator {
+    fn parse_selection(s: &str) -> Result<RpcModuleSelection, String> {
+        // Defer to reth's default validator first — it accepts every standard
+        // module and rejects anything else. If it succeeds, no `Other` was
+        // present and there is nothing for us to whitelist.
+        if let Ok(selection) = DefaultRpcModuleValidator::parse_selection(s) {
+            return Ok(selection);
+        }
+        // Default rejected: re-parse and let through only `Other` entries that
+        // match a World Chain custom namespace. Anything else stays an error.
+        let selection = RpcModuleSelection::from_str(s)
+            .map_err(|e| format!("Failed to parse RPC modules: {e}"))?;
+        if let RpcModuleSelection::Selection(modules) = &selection {
+            for module in modules {
+                if let RethRpcModule::Other(name) = module
+                    && !WORLD_CHAIN_CUSTOM_MODULES.contains(&name.as_str())
+                {
+                    return Err(format!("Unknown RPC module: '{name}'"));
+                }
+            }
+        }
+        Ok(selection)
+    }
+
+    fn validate_selection(modules: &RpcModuleSelection, arg_name: &str) -> Result<(), String> {
+        let RpcModuleSelection::Selection(set) = modules else {
+            // `All` / `Standard` never include custom modules.
+            return Ok(());
+        };
+        for module in set {
+            let RethRpcModule::Other(name) = module else {
+                continue;
+            };
+            if !WORLD_CHAIN_CUSTOM_MODULES.contains(&name.as_str()) {
+                return Err(format!(
+                    "Invalid RPC module '{name}' in {arg_name}: Unknown RPC module: '{name}'"
+                ));
+            }
+            // All custom modules are HTTP-only.
+            if arg_name != "http.api" {
+                return Err(format!(
+                    "RPC module '{name}' is only supported in --http.api, not --{arg_name}"
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod validator_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_simulate_alongside_standard() {
+        assert!(WorldChainRpcModuleValidator::parse_selection("eth,simulate").is_ok());
+    }
+
+    #[test]
+    fn rejects_typos() {
+        let err = WorldChainRpcModuleValidator::parse_selection("eth,simualte").unwrap_err();
+        assert!(err.contains("Unknown RPC module: 'simualte'"), "got: {err}");
+    }
+
+    #[test]
+    fn simulate_allowed_on_http_api() {
+        let selection = WorldChainRpcModuleValidator::parse_selection("eth,simulate").unwrap();
+        WorldChainRpcModuleValidator::validate_selection(&selection, "http.api").unwrap();
+    }
+
+    #[test]
+    fn simulate_rejected_on_ws_api() {
+        let selection = WorldChainRpcModuleValidator::parse_selection("eth,simulate").unwrap();
+        let err =
+            WorldChainRpcModuleValidator::validate_selection(&selection, "ws.api").unwrap_err();
+        assert!(err.contains("simulate"), "got: {err}");
+        assert!(err.contains("http.api"), "got: {err}");
+    }
+
+    #[test]
+    fn all_selection_passes_validation() {
+        let selection = WorldChainRpcModuleValidator::parse_selection("all").unwrap();
+        WorldChainRpcModuleValidator::validate_selection(&selection, "ws.api").unwrap();
+    }
+}
 
 #[derive(Debug, Clone, clap::Args)]
 pub struct WorldChainArgs {
@@ -50,6 +163,17 @@ pub struct WorldChainArgs {
         default_value_t = false
     )]
     pub disable_bootnodes: bool,
+
+    /// Whether the `simulate_unsignedUserOp` RPC endpoint should be served on
+    /// HTTP. Derived from `--http.api`: enabled when the selection contains
+    /// the `simulate` namespace.
+    ///
+    /// The endpoint performs no application-level authentication. Only include
+    /// `simulate` in `--http.api` on nodes that sit behind infrastructure-
+    /// level auth (e.g. an internal-only ingress) — never on a publicly
+    /// reachable RPC.
+    #[clap(skip)]
+    pub simulate_enabled: bool,
 }
 
 impl WorldChainArgs {
@@ -59,6 +183,16 @@ impl WorldChainArgs {
     ) -> eyre::Result<WorldChainNodeConfig> {
         // Perform arg validation here for things clap can't do.
         let spec = &config.chain;
+
+        // Require an explicit `Selection` containing `simulate` — `RpcModuleSelection::All`
+        // (i.e. `--http.api=all`) returns `true` from `contains` unconditionally, which
+        // would silently enable the unauthenticated simulate endpoint for operators who
+        // upgrade with that common configuration.
+        self.simulate_enabled = matches!(
+            config.rpc.http_api.as_ref(),
+            Some(RpcModuleSelection::Selection(s))
+                if s.contains(&RethRpcModule::Other("simulate".to_string()))
+        );
 
         if let Some(peers) = &self.tx_peers {
             if self.rollup.disable_txpool_gossip {
@@ -105,6 +239,17 @@ impl WorldChainArgs {
                     self.pbh.signature_aggregator =
                         address!("d21306C75C956142c73c0C3BAb282Be68595081E");
                 }
+
+                let chain_spec = Arc::make_mut(&mut config.chain);
+                chain_spec.inner.hardforks.insert(
+                    OpHardfork::Jovian,
+                    ForkCondition::Timestamp(JOVIAN_UPGRADE_TIMESTAMP_MAINNET),
+                );
+                info!(
+                    target: "reth::cli",
+                    timestamp = JOVIAN_UPGRADE_TIMESTAMP_MAINNET,
+                    "Overriding Jovian activation timestamp for World mainnet"
+                );
             }
             Some(NamedChain::WorldSepolia) => {
                 if let Some(flashblocks) = &mut self.flashblocks
@@ -114,6 +259,13 @@ impl WorldChainArgs {
                     flashblocks.authorizer_vk = Some(parse_vk(
                         "3b24dba9803930d6b31c85d9809e03f565b05eba0dd59cfd248e4cc95ebd3492",
                     )?);
+                }
+
+                if self.flashblocks.is_some() && !self.disable_bootnodes {
+                    let bootnodes = parse_trusted_peer(DEFAULT_FLASHBLOCKS_BOOTNODES_SEPOLIA)?;
+                    debug!(target: "world_chain::network", ?bootnodes, "Setting default flashblocks bootnodes");
+                    // dedup happens later
+                    config.network.trusted_peers.extend(bootnodes);
                 }
 
                 if self.pbh.entrypoint == Address::default() {
@@ -126,6 +278,17 @@ impl WorldChainArgs {
                     self.pbh.signature_aggregator =
                         address!("0x8af27Ee9AF538C48C7D2a2c8BD6a40eF830e2489");
                 }
+
+                let chain_spec = Arc::make_mut(&mut config.chain);
+                chain_spec.inner.hardforks.insert(
+                    OpHardfork::Jovian,
+                    ForkCondition::Timestamp(JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA),
+                );
+                info!(
+                    target: "reth::cli",
+                    timestamp = JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA,
+                    "Overriding Jovian activation timestamp for World Sepolia"
+                );
             }
             _ => {
                 if let Some(flashblocks) = &mut self.flashblocks
@@ -190,9 +353,24 @@ mod tests {
     #[derive(Debug, Parser)]
     struct CommandParserWithPayloadBuilder {
         #[command(flatten)]
-        builder: reth::args::PayloadBuilderArgs,
+        builder: reth_node_core::args::PayloadBuilderArgs,
         #[command(flatten)]
         world: WorldChainArgs,
+    }
+
+    #[derive(Debug, Parser)]
+    struct CommandParserWithRpc {
+        #[command(flatten)]
+        rpc: reth_node_core::args::RpcServerArgs,
+        #[command(flatten)]
+        world: WorldChainArgs,
+    }
+
+    fn into_world_config(parsed: CommandParserWithRpc) -> WorldChainNodeConfig {
+        let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());
+        let mut node_config = NodeConfig::new(Arc::new(spec));
+        node_config.rpc = parsed.rpc;
+        parsed.world.into_config(&mut node_config).unwrap()
     }
 
     #[test]
@@ -326,6 +504,7 @@ mod tests {
             flashblocks: None,
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
             disable_bootnodes: true,
+            simulate_enabled: false,
         };
 
         let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());
@@ -334,6 +513,52 @@ mod tests {
 
         // tx_peers should be set to None due to shadowing
         assert!(config.args.tx_peers.is_none());
+    }
+
+    #[test]
+    fn http_api_simulate_only_enables_simulate() {
+        let parsed = CommandParserWithRpc::parse_from(["bin", "--http.api", "simulate"]);
+        let cfg = into_world_config(parsed);
+        assert!(cfg.args.simulate_enabled);
+    }
+
+    #[test]
+    fn http_api_with_simulate_among_others_enables_simulate() {
+        let parsed = CommandParserWithRpc::parse_from(["bin", "--http.api", "eth,simulate,net"]);
+        let cfg = into_world_config(parsed);
+        assert!(cfg.args.simulate_enabled);
+    }
+
+    #[test]
+    fn http_api_without_simulate_does_not_enable_simulate() {
+        let parsed = CommandParserWithRpc::parse_from(["bin", "--http.api", "eth,net"]);
+        let cfg = into_world_config(parsed);
+        assert!(!cfg.args.simulate_enabled);
+    }
+
+    #[test]
+    fn no_http_api_does_not_enable_simulate() {
+        let parsed = CommandParserWithRpc::parse_from(["bin"]);
+        let cfg = into_world_config(parsed);
+        assert!(!cfg.args.simulate_enabled);
+    }
+
+    /// `--http.api=all` must NOT enable simulate. `RpcModuleSelection::All.contains(...)`
+    /// returns `true` for every module (including `Other("simulate")`), so a naive
+    /// `contains` check would silently turn on the unauthenticated endpoint for any
+    /// operator using the common `all` selection.
+    #[test]
+    fn http_api_all_does_not_enable_simulate() {
+        let parsed = CommandParserWithRpc::parse_from(["bin", "--http.api", "all"]);
+        let cfg = into_world_config(parsed);
+        assert!(!cfg.args.simulate_enabled);
+    }
+
+    #[test]
+    fn http_api_standard_does_not_enable_simulate() {
+        let parsed = CommandParserWithRpc::parse_from(["bin", "--http.api", "standard"]);
+        let cfg = into_world_config(parsed);
+        assert!(!cfg.args.simulate_enabled);
     }
 
     #[test]

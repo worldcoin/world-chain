@@ -145,6 +145,9 @@ use reth_evm::{
 use reth_provider::StateProvider;
 use revm_database::BundleState;
 
+/// Local `StateDB` trait abstracting over `revm::database::State<DB>`.
+pub mod state_db;
+
 mod execution_context;
 
 /// Utilities for constructing and serializing Block Access Lists (BAL).
@@ -187,16 +190,29 @@ pub mod executor;
 /// Block building utilities
 pub mod utils;
 
-/// Metric name constants.
+/// General metrics traits.
 pub mod metrics;
 
+/// Payload builder metrics.
+pub mod payload_builder_metrics;
+
+/// Execution and state-root strategy traits and concrete implementations.
+pub mod execution_strategy;
+
+mod flashblock_types;
+/// Flashblock validation metrics.
+pub mod flashblock_validation_metrics;
+pub mod state_root_strategy;
+
 pub use execution_context::{WorldChainPayloadBuilderCtx, WorldChainPayloadBuilderCtxBuilder};
+
+use crate::metrics::FlashblockExecutionMetrics;
 
 pub trait BlockBuilderExt: BlockBuilder {
     /// Completes the block building process and returns the [`BlockBuilderOutcome`], and [`BundleState`].
     fn finish_with_bundle(
         self,
         state_provider: impl StateProvider,
-        metrics: Option<&mut metrics::PayloadBuildAttemptMetrics>,
+        metrics: impl FlashblockExecutionMetrics,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError>;
 }
