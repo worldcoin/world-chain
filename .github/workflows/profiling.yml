@@ -38,6 +38,8 @@ jobs:
     name: Build (${{ inputs.profile }})
     runs-on: arc-public-8xlarge-amd64-runner
     timeout-minutes: 120
+    env:
+      PROFILE: ${{ inputs.profile }}
     steps:
       - uses: actions/checkout@v6
 
@@ -56,16 +58,21 @@ jobs:
 
       - name: Build profiling binary
         run: |
+          case "${PROFILE}" in
+            profiling|maxperf) ;;
+            *) echo "invalid profile: ${PROFILE}" >&2; exit 1 ;;
+          esac
+
           RUSTFLAGS="-C target-cpu=native" \
-            cargo build --profile ${{ inputs.profile }} \
+            cargo build --profile "${PROFILE}" \
               --features jemalloc \
               --bin world-chain
 
       - name: Upload profiling binary
         uses: actions/upload-artifact@v7
         with:
-          name: world-chain-${{ inputs.profile }}-x86_64-linux
-          path: target/${{ inputs.profile }}/world-chain
+          name: world-chain-${{ env.PROFILE }}-x86_64-linux
+          path: target/${{ env.PROFILE }}/world-chain
           retention-days: 7
 
   build-pgo:
