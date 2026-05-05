@@ -1,3 +1,5 @@
+use alloy_eips::Encodable2718;
+use op_revm::estimate_tx_compressed_size;
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use revm_database::states::reverts::{AccountInfoRevert, Reverts};
 use std::collections::{HashMap, hash_map::Entry};
@@ -60,6 +62,11 @@ pub(crate) fn effective_gas_limit(
         .map_or(protocol_gas_limit, |configured_gas_limit| {
             configured_gas_limit.min(protocol_gas_limit)
         })
+}
+
+/// Returns the Fjord estimated compressed transaction size in DA bytes.
+pub(crate) fn estimated_da_size_bytes(tx: &impl Encodable2718) -> u64 {
+    estimate_tx_compressed_size(tx.encoded_2718().as_ref()).saturating_div(1_000_000)
 }
 
 #[cfg(test)]

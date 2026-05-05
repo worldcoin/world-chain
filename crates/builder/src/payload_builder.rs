@@ -13,6 +13,7 @@ use crate::{
         context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder,
         payload_builder::FlashblockPayloadBuilder,
     },
+    utils::estimated_da_size_bytes,
 };
 use alloy_eips::Encodable2718;
 use alloy_primitives::TxHash;
@@ -35,7 +36,8 @@ use reth_basic_payload_builder::{
     PayloadConfig,
 };
 use reth_evm::{
-    ConfigureEvm, Database, EvmEnv, execute::BlockBuilderOutcome, precompiles::PrecompilesMap,
+    ConfigureEvm, Database, EvmEnv, RecoveredTx, execute::BlockBuilderOutcome,
+    precompiles::PrecompilesMap,
 };
 use reth_node_api::{BuiltPayloadExecutedBlock, NodePrimitives, PayloadBuilderError};
 use reth_payload_primitives::BuildNextEnv;
@@ -53,7 +55,9 @@ use reth_optimism_payload_builder::{
     config::OpBuilderConfig,
     payload::{OpBuiltPayload, OpPayloadAttrs, OpPayloadBuilderAttributes},
 };
-use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{
+    OpPrimitives, OpReceipt, OpTransactionSigned, transaction::OpTransaction,
+};
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, ProviderError, StateProviderFactory};
 
@@ -493,6 +497,7 @@ fn build_inner<'a, Txs, Ctx, Pool, R>(
 >
 where
     R: OpReceiptBuilder + Default,
+    R::Transaction: Encodable2718 + OpTransaction,
     Pool: TransactionPool,
     Txs: PayloadTransactions,
     Txs::Transaction: OpPooledTx,
@@ -534,7 +539,11 @@ where
         committed_payload.map_or(ExecutionInfo::default(), |p| ExecutionInfo {
             total_fees: p.fees(),
             cumulative_gas_used: p.block().gas_used(),
-            ..Default::default()
+            cumulative_da_bytes_used: committed_state
+                .transactions_iter()
+                .filter(|tx| !tx.tx().is_deposit())
+                .map(estimated_da_size_bytes)
+                .sum(),
         })
     };
 
