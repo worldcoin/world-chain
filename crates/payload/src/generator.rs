@@ -199,12 +199,15 @@ where
                 .await
                 .map_err(PayloadBuilderError::other)?;
 
+            let v3 = force_op_payload_id_v3(payload_id);
+            let v4 = payload_id;
+
             // Wait for either an authorization which matches our payload id or for a negative authorization
             Result::<_, PayloadBuilderError>::Ok(
                 *authorization
                     .wait_for(|a| match a {
                         Some(auth) => {
-                            if auth.payload_id == payload_id {
+                            if auth.payload_id == v3 || auth.payload_id == v4 {
                                 true
                             } else {
                                 warn!(
