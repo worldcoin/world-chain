@@ -1,6 +1,6 @@
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip2930::AccessList;
-use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder, eip2718::Encodable2718};
+use alloy_network::{Ethereum, EthereumWallet, NetworkTransactionBuilder, eip2718::Encodable2718};
 use alloy_primitives::{Bytes, b64};
 use alloy_provider::ProviderBuilder;
 use alloy_rpc_types::TransactionRequest;

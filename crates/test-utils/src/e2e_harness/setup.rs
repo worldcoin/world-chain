@@ -8,7 +8,7 @@ use crate::{
 };
 use alloy_eips::{eip2718::Encodable2718, eip7685::EMPTY_REQUESTS_HASH};
 use alloy_genesis::{Genesis, GenesisAccount};
-use alloy_network::{Ethereum, EthereumWallet, TransactionBuilder};
+use alloy_network::{Ethereum, EthereumWallet, NetworkTransactionBuilder};
 use alloy_primitives::{Address, B64, Sealed, hex};
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_engine::{

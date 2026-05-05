@@ -58,8 +58,8 @@ world-chain-pool = { path = "crates/pool", default-features = false }
 world-chain-test-utils = { path = "crates/test-utils", default-features = false }
 
 # reth crates.io
-reth-codecs = { version = "0.1.1", default-features = false }
-reth-primitives-traits = { version = "0.1.0", default-features = false }
+reth-codecs = { version = "0.3.1", default-features = false }
+reth-primitives-traits = { version = "0.3.1", default-features = false }
 
 # reth github
 reth-trie-parallel = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
