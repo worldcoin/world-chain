@@ -30,7 +30,7 @@ use world_chain_primitives::{
     ed25519_dalek::SigningKey,
     flashblocks::recovered_block_from_flashblocks,
     p2p::Authorization,
-    payload_id::{force_op_payload_id_v3, op_reth_payload_id_v4_lookup, payload_id_with_version},
+    payload_id::{force_op_payload_id_v3, payload_id_with_version},
 };
 
 use crate::job::{CommittedPayloadState, FlashblocksPayloadJob};
