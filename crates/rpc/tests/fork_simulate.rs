@@ -4,6 +4,10 @@
 //! against real deployed contracts (WLD, USDC.e, etc.). CI reads the URL
 //! from the `WORLDCHAIN_PROVIDER` secret; locally, export it before running.
 //!
+//! State is **pinned** to `FORK_BLOCK_NUMBER`. Without a pin, every run sees
+//! a different head and assertions about balances / metadata become flaky.
+//! The endpoint must be an archive node that serves state at this height.
+//!
 //! Run with:
 //! ```sh
 //! WORLDCHAIN_PROVIDER=https://worldchain-mainnet.g.alchemy.com/v2/<KEY> \
@@ -35,6 +39,11 @@ use world_chain_rpc::simulate::{
 const WLD: Address = address!("2cFc85d8E48F8EAB294be644d9E25C3030863003");
 const ENTRY_POINT: Address = address!("0000000071727De22E5E9d8BAf0edAc6f37da032");
 const CHAIN_ID: u64 = 480;
+
+/// Pin every fork-backed lookup to this height so storage slots, balances,
+/// and contract bytecode are stable across runs. Update only when a test
+/// genuinely needs newer state — and re-verify the existing assertions.
+const FORK_BLOCK_NUMBER: u64 = 29_001_024;
 
 // ─── ABI fragments ───────────────────────────────────────────────────────────
 
@@ -79,7 +88,7 @@ fn make_forked_db() -> CacheDB<
     >,
 > {
     let provider = alloy_provider_v1::RootProvider::new_http(rpc_url().parse().unwrap());
-    let alloy_db = AlloyDB::new(provider, revm_database::BlockId::latest());
+    let alloy_db = AlloyDB::new(provider, revm_database::BlockId::from(FORK_BLOCK_NUMBER));
     let handle = tokio::runtime::Handle::current();
     let wrapped = WrapDatabaseAsync::with_handle(alloy_db, handle);
     CacheDB::new(wrapped)
@@ -821,5 +830,260 @@ async fn test_trace_detects_malicious_safe_call() {
                 }
             }
         }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Blockaid scenario coverage
+//
+// The five tests below mirror scenarios from `app-backend-main`'s Blockaid
+// suite (`blockaid.service.unit.spec.ts`). We're asserting on the *raw*
+// detection output (`assetChanges` / `exposureChanges`) — Blockaid's IN/OUT
+// classification, humanReadableDiff formatting, and Permit2 filtering are
+// downstream concerns the consumer applies on top of this response.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Blockaid: `simple-permit.ts` / `consists-exposures.ts` — an `approve()`
+/// call must produce one `ExposureChange` and **zero** `AssetChange`s. The
+/// EVM also reports a successful execution (no revert).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_simulate_real_approve_emits_only_exposure() {
+    let mut db = make_forked_db();
+    let caller = address!("00000000000000000000000000ffffffffffffff");
+    db.insert_account_info(
+        caller,
+        AccountInfo {
+            balance: U256::from(10u128.pow(21)),
+            ..Default::default()
+        },
+    );
+    let mut evm = OpEvmFactory::default().create_evm(&mut db, simulate_evm_env());
+
+    let spender = address!("000000000022D473030F116dDEE9F6B43aC78BA3");
+    let result = RethEvm::transact(
+        &mut evm,
+        OpTx(OpTransaction {
+            base: TxEnv {
+                caller,
+                kind: TxKind::Call(WLD),
+                data: approveCall {
+                    spender,
+                    amount: U256::MAX,
+                }
+                .abi_encode()
+                .into(),
+                gas_limit: 200_000,
+                gas_price: 0,
+                chain_id: Some(CHAIN_ID),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    )
+    .expect("approve must not fail validation");
+
+    let logs = match &result.result {
+        ExecutionResult::Success { logs, .. } => logs.clone(),
+        other => panic!("expected approve to succeed, got {other:?}"),
+    };
+    let asset_changes = parse_asset_changes(&logs).unwrap();
+    let exposure_changes = parse_exposure_changes(&logs);
+    assert_eq!(asset_changes.len(), 0, "approval emits no transfer");
+    assert_eq!(exposure_changes.len(), 1);
+    assert_eq!(exposure_changes[0].owner, caller);
+    assert_eq!(exposure_changes[0].spender, spender);
+    assert_eq!(exposure_changes[0].raw_amount, U256::MAX.to_string());
+    assert!(!exposure_changes[0].is_approved_for_all);
+}
+
+/// Blockaid: `atomic-vault-withdraw-send.ts` — a single tx emits two
+/// `Transfer` events on the same token (`vault → user`, `user → final`).
+/// Both must surface as independent `AssetChange`s so the consumer sees the
+/// full hop chain.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_parse_atomic_double_transfer_same_token() {
+    let alice = address!("000000000000000000000000000000000000aaaa");
+    let bob = address!("000000000000000000000000000000000000bbbb");
+    let carol = address!("000000000000000000000000000000000000cccc");
+    let amount = U256::from(1_000_000u64);
+    let transfer_topic = alloy_primitives::b256!(
+        "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+    );
+
+    let make_log = |from: Address, to: Address| {
+        alloy_primitives::Log::new(
+            WLD,
+            vec![
+                transfer_topic,
+                alloy_primitives::B256::left_padding_from(from.as_slice()),
+                alloy_primitives::B256::left_padding_from(to.as_slice()),
+            ],
+            amount.to_be_bytes_vec().into(),
+        )
+        .unwrap()
+    };
+
+    let logs = vec![make_log(alice, bob), make_log(bob, carol)];
+    let changes = parse_asset_changes(&logs).unwrap();
+    assert_eq!(changes.len(), 2, "two hops, two AssetChanges");
+    assert_eq!(changes[0].from, alice);
+    assert_eq!(changes[0].to, bob);
+    assert_eq!(changes[1].from, bob);
+    assert_eq!(changes[1].to, carol);
+    for c in &changes {
+        assert_eq!(c.change_type, AssetType::Erc20);
+        assert_eq!(c.raw_amount, amount.to_string());
+        assert!(c.token_id.is_none());
+    }
+}
+
+/// Blockaid: `multiple-nfts.ts` — five ERC-721 Transfer events (token IDs
+/// 73..=77) inside one tx surface as five distinct `AssetChange`s with
+/// `Erc721` type, identical from/to, but each carrying a distinct
+/// `tokenId`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_parse_batch_nft_transfers() {
+    let collection = address!("000000000000000000000000000000000000721a");
+    let from = address!("000000000000000000000000000000000000aaaa");
+    let to = address!("000000000000000000000000000000000000bbbb");
+    let transfer_topic = alloy_primitives::b256!(
+        "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+    );
+
+    let logs: Vec<_> = (73u64..=77)
+        .map(|id| {
+            alloy_primitives::Log::new(
+                collection,
+                vec![
+                    transfer_topic,
+                    alloy_primitives::B256::left_padding_from(from.as_slice()),
+                    alloy_primitives::B256::left_padding_from(to.as_slice()),
+                    U256::from(id).into(),
+                ],
+                Bytes::new(),
+            )
+            .unwrap()
+        })
+        .collect();
+
+    let changes = parse_asset_changes(&logs).unwrap();
+    assert_eq!(changes.len(), 5);
+    for (idx, change) in changes.iter().enumerate() {
+        let expected_id = (73 + idx as u64).to_string();
+        assert_eq!(change.change_type, AssetType::Erc721);
+        assert_eq!(change.from, from);
+        assert_eq!(change.to, to);
+        assert_eq!(change.raw_amount, "1");
+        assert_eq!(change.token_id.as_deref(), Some(expected_id.as_str()));
+    }
+}
+
+/// Blockaid: `non-standard-tokens.ts` — one tx mixes ERC-20, ERC-721, and
+/// ERC-1155 movements. The parser classifies each independently from its
+/// log topic count / event signature.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_parse_mixed_token_types_in_one_response() {
+    let erc20 = WLD;
+    let erc721 = address!("0000000000000000000000000000000000000721");
+    let erc1155 = address!("0000000000000000000000000000000000001155");
+    let from = address!("000000000000000000000000000000000000aaaa");
+    let to = address!("000000000000000000000000000000000000bbbb");
+    let operator = address!("000000000000000000000000000000000000ccCC");
+    let transfer_topic = alloy_primitives::b256!(
+        "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+    );
+    let erc1155_topic = alloy_primitives::b256!(
+        "c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"
+    );
+
+    let erc20_log = alloy_primitives::Log::new(
+        erc20,
+        vec![
+            transfer_topic,
+            alloy_primitives::B256::left_padding_from(from.as_slice()),
+            alloy_primitives::B256::left_padding_from(to.as_slice()),
+        ],
+        U256::from(1_000u64).to_be_bytes_vec().into(),
+    )
+    .unwrap();
+    let erc721_log = alloy_primitives::Log::new(
+        erc721,
+        vec![
+            transfer_topic,
+            alloy_primitives::B256::left_padding_from(from.as_slice()),
+            alloy_primitives::B256::left_padding_from(to.as_slice()),
+            U256::from(99u64).into(),
+        ],
+        Bytes::new(),
+    )
+    .unwrap();
+    let mut erc1155_data = Vec::with_capacity(64);
+    erc1155_data.extend_from_slice(&U256::from(5u64).to_be_bytes::<32>());
+    erc1155_data.extend_from_slice(&U256::from(10u64).to_be_bytes::<32>());
+    let erc1155_log = alloy_primitives::Log::new(
+        erc1155,
+        vec![
+            erc1155_topic,
+            alloy_primitives::B256::left_padding_from(operator.as_slice()),
+            alloy_primitives::B256::left_padding_from(from.as_slice()),
+            alloy_primitives::B256::left_padding_from(to.as_slice()),
+        ],
+        erc1155_data.into(),
+    )
+    .unwrap();
+
+    let changes = parse_asset_changes(&[erc20_log, erc721_log, erc1155_log]).unwrap();
+    assert_eq!(changes.len(), 3);
+    assert_eq!(changes[0].change_type, AssetType::Erc20);
+    assert_eq!(changes[0].raw_amount, "1000");
+    assert!(changes[0].token_id.is_none());
+    assert_eq!(changes[1].change_type, AssetType::Erc721);
+    assert_eq!(changes[1].token_id.as_deref(), Some("99"));
+    assert_eq!(changes[1].raw_amount, "1");
+    assert_eq!(changes[2].change_type, AssetType::Erc1155);
+    assert_eq!(changes[2].token_id.as_deref(), Some("5"));
+    assert_eq!(changes[2].raw_amount, "10");
+}
+
+/// Blockaid: `consists-exposures.ts` — one tx grants approvals on two
+/// different tokens to two different spenders. Asset diffs stay empty;
+/// both approvals surface as `ExposureChange`s with their own amounts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_parse_multiple_approvals_yields_exposures() {
+    let owner = address!("00000000000000000000000000000000DeaDBeef");
+    let token_a = address!("79A02482A880bCE3B13e09Da970dC34db4CD24d1");
+    let token_b = address!("00000000000000000000000000000000000000Bb");
+    let spender_a = address!("0c892815f0B058E69987920A23FBb33c834289cf");
+    let spender_b = address!("Ef1c6E67703c7BD7107eed8303Fbe6EC2554BF6B");
+    let approval_topic = alloy_primitives::b256!(
+        "8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925"
+    );
+
+    let make = |contract: Address, spender: Address, amount: U256| {
+        alloy_primitives::Log::new(
+            contract,
+            vec![
+                approval_topic,
+                alloy_primitives::B256::left_padding_from(owner.as_slice()),
+                alloy_primitives::B256::left_padding_from(spender.as_slice()),
+            ],
+            amount.to_be_bytes_vec().into(),
+        )
+        .unwrap()
+    };
+    let log_a = make(token_a, spender_a, U256::from(123_000u64));
+    let log_b = make(token_b, spender_b, U256::ZERO);
+
+    let asset_changes = parse_asset_changes(&[log_a.clone(), log_b.clone()]).unwrap();
+    let exposure_changes = parse_exposure_changes(&[log_a, log_b]);
+    assert_eq!(asset_changes.len(), 0, "approvals emit no transfers");
+    assert_eq!(exposure_changes.len(), 2);
+    assert_eq!(exposure_changes[0].spender, spender_a);
+    assert_eq!(exposure_changes[0].raw_amount, "123000");
+    assert_eq!(exposure_changes[1].spender, spender_b);
+    assert_eq!(exposure_changes[1].raw_amount, "0");
+    for c in &exposure_changes {
+        assert_eq!(c.owner, owner);
+        assert!(!c.is_approved_for_all);
     }
 }
