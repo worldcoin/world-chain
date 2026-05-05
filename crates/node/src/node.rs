@@ -5,6 +5,7 @@ use alloy_consensus::{Block, BlockBody, Header};
 use alloy_eips::eip1559::BaseFeeParams;
 use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
+use reth_codecs::{Compress, Decompress};
 use reth_evm::ConfigureEvm;
 use reth_node_api::{
     BuiltPayload, FullNodeTypes, NodeAddOns, NodePrimitives, NodeTypes, PayloadAttributesBuilder,
@@ -25,7 +26,7 @@ use reth_optimism_node::{
     payload::OpPayloadAttrs,
 };
 use reth_optimism_primitives::OpPrimitives;
-use reth_primitives_traits::SealedHeader;
+use reth_primitives_traits::{SealedHeader, TxTy};
 use reth_rpc_eth_api::EthApiTypes;
 use reth_transaction_pool::TransactionPool;
 use world_chain_cli::WorldChainNodeConfig;
@@ -41,10 +42,10 @@ pub trait WorldChainNodePrimitiveTypes:
     /// Primitive block, receipt, and signed transaction types used by the node.
     type Primitives: NodePrimitives<
             BlockHeader = Header,
-            Block = Block<<Self::Primitives as NodePrimitives>::SignedTx>,
-            BlockBody = BlockBody<<Self::Primitives as NodePrimitives>::SignedTx>,
-            SignedTx: reth_codecs::Compress + reth_codecs::Decompress,
-            Receipt: reth_codecs::Compress + reth_codecs::Decompress,
+            Block = Block<TxTy<Self::Primitives>>,
+            BlockBody = BlockBody<TxTy<Self::Primitives>>,
+            SignedTx: Compress + Decompress,
+            Receipt: Compress + Decompress,
         >;
 
     /// Engine payload types used by the node.
@@ -228,7 +229,7 @@ where
 impl<T: WorldChainNodePrimitiveTypes> NodeTypes for WorldChainNode<T> {
     type Primitives = T::Primitives;
     type ChainSpec = OpChainSpec;
-    type Storage = OpStorage<<T::Primitives as NodePrimitives>::SignedTx>;
+    type Storage = OpStorage<TxTy<T::Primitives>>;
     type Payload = T::Payload;
 }
 
