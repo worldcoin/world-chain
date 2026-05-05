@@ -4,7 +4,7 @@ use alloy_primitives::{
 };
 use alloy_provider::{
     Provider, ProviderBuilder,
-    network::{EthereumWallet, TransactionBuilder},
+    network::{EthereumWallet, NetworkTransactionBuilder},
 };
 use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInput, TransactionRequest};

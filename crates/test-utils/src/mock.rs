@@ -41,6 +41,7 @@ use reth_trie::{
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput, updates::TrieUpdates,
 };
+use reth_trie_common::ExecutionWitnessMode;
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug, Clone)]
@@ -686,7 +687,12 @@ impl StateProofProvider for MockEthProvider {
         Ok(MultiProof::default())
     }
 
-    fn witness(&self, _input: TrieInput, _target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
+    fn witness(
+        &self,
+        _input: TrieInput,
+        _target: HashedPostState,
+        _mode: ExecutionWitnessMode,
+    ) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::default())
     }
 }

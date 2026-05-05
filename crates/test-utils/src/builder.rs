@@ -35,7 +35,7 @@ use reth_provider::{
     StateProviderFactory,
 };
 use reth_revm::{State, database::StateProviderDatabase};
-use reth_trie_common::HashedPostState;
+use reth_trie_common::{ExecutionWitnessMode, HashedPostState};
 use revm::{
     DatabaseRef,
     database::{BundleState, InMemoryDB},
@@ -1102,6 +1102,7 @@ impl reth_provider::StateProofProvider for TestStateProvider {
         &self,
         _input: reth_trie_common::TrieInput,
         _target: reth_trie_common::HashedPostState,
+        _mode: ExecutionWitnessMode,
     ) -> reth_provider::ProviderResult<Vec<Bytes>> {
         unimplemented!()
     }
@@ -1357,8 +1358,9 @@ impl reth_provider::StateProofProvider for BenchProvider {
         &self,
         input: reth_trie_common::TrieInput,
         target: reth_trie_common::HashedPostState,
+        mode: ExecutionWitnessMode,
     ) -> ProviderResult<Vec<Bytes>> {
-        self.inner.witness(input, target)
+        self.inner.witness(input, target, mode)
     }
 }
 

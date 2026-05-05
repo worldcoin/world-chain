@@ -72,6 +72,9 @@ lru.workspace = true
 
 [dev-dependencies]
 alloy = { workspace = true, features = ["provider-http"] }
+alloy-provider-v1 = { package = "alloy-provider", version = "1.8.3", default-features = false, features = [
+    "reqwest",
+] }
 alloy-sol-types.workspace = true
 revm-database = { workspace = true, features = ["alloydb"] }
 revm-database-interface.workspace = true

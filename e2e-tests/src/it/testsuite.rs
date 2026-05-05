@@ -92,7 +92,8 @@ async fn create_priority_transaction(
 
     let wallet = EthereumWallet::from(signer(signer_index));
     let signed =
-        <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx_request, &wallet).await?;
+        <TransactionRequest as NetworkTransactionBuilder<Ethereum>>::build(tx_request, &wallet)
+            .await?;
 
     Ok((signed.encoded_2718().into(), *signed.tx_hash()))
 }
@@ -195,10 +196,12 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     let non_pbh_tx = tx(CHAIN_SPEC.chain.id(), None, 0, Address::default(), 210_000);
     let wallet = signer(0);
     let signer_wallet = EthereumWallet::from(wallet);
-    let signed =
-        <TransactionRequest as TransactionBuilder<Ethereum>>::build(non_pbh_tx, &signer_wallet)
-            .await
-            .unwrap();
+    let signed = <TransactionRequest as NetworkTransactionBuilder<Ethereum>>::build(
+        non_pbh_tx,
+        &signer_wallet,
+    )
+    .await
+    .unwrap();
     let non_pbh_hash = node.rpc.inject_tx(signed.encoded_2718().into()).await?;
     let mut pbh_tx_hashes = vec![];
     let signers = signers.clone();
@@ -1576,7 +1579,6 @@ async fn test_eth_api_assertions() -> eyre::Result<()> {
                     use alloy_provider::Provider;
                     let provider = ProviderBuilder::<_, _, op_alloy_network::Optimism>::default()
                         .network::<op_alloy_network::Optimism>()
-                        .with_recommended_fillers()
                         .connect_http(url);
 
                     let pending = provider
@@ -1620,7 +1622,6 @@ async fn test_eth_api_assertions() -> eyre::Result<()> {
                 Box::pin(async move {
                     let provider = ProviderBuilder::<_, _, op_alloy_network::Optimism>::default()
                         .network::<op_alloy_network::Optimism>()
-                        .with_recommended_fillers()
                         .connect_http(url);
 
                     // --- fetch_block!(Pending) ---

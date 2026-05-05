@@ -513,6 +513,7 @@ pub fn build_payload_attributes(
             suggested_fee_recipient: Address::random(),
             withdrawals: Some(vec![]),
             parent_beacon_block_root: Some(B256::ZERO),
+            slot_number: None,
         },
         transactions,
         no_tx_pool: Some(false),
@@ -535,9 +536,10 @@ pub fn encode_eip1559_params<C: EthChainSpec>(chain_spec: &C, timestamp: u64) ->
 
 /// Sign a transaction request and return the raw encoded bytes
 pub async fn sign_transaction(tx_request: TransactionRequest, wallet: &EthereumWallet) -> Bytes {
-    let signed = <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx_request, wallet)
-        .await
-        .unwrap();
+    let signed =
+        <TransactionRequest as NetworkTransactionBuilder<Ethereum>>::build(tx_request, wallet)
+            .await
+            .unwrap();
     signed.encoded_2718().into()
 }
 
@@ -551,9 +553,10 @@ pub async fn create_test_transaction(signer_index: u32, nonce: u64) -> (Bytes, B
         210_000,
     );
     let wallet = EthereumWallet::from(signer(signer_index));
-    let signed = <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx_request, &wallet)
-        .await
-        .unwrap();
+    let signed =
+        <TransactionRequest as NetworkTransactionBuilder<Ethereum>>::build(tx_request, &wallet)
+            .await
+            .unwrap();
     (signed.encoded_2718().into(), *signed.tx_hash())
 }
 
