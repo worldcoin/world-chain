@@ -18,12 +18,18 @@ import {IWorldIDVerifier} from "./IWorldIDVerifier.sol";
 ///         updates use Session Proofs verified against the stored `sessionId`. Records
 ///         lazily expire when their `periodNumber` no longer matches the current period.
 ///
-/// @dev Public-ABI deviation from WIP-1002 spec § "Subsidy Accounting Interface": session-
-///      proof and Uniqueness-proof inputs are surfaced as `uint256[2] sessionNullifier`
-///      and `uint256[5] proof` to match `IWorldIDVerifier`. The verifier-required scalar
-///      inputs (`proofNonce`, `expiresAtMin`, `credentialGenesisIssuedAtMin`) are part of
-///      every entry-point signature; the spec's compact `bytes proof` form is purely
-///      illustrative. Consistent with the WIP-1001 `WorldIDAccountManager` stand-in.
+/// @dev Public-ABI deviations from WIP-1002 spec § "Subsidy Accounting Interface":
+///      (1) session-proof and Uniqueness-proof inputs are surfaced as
+///      `uint256[2] sessionNullifier` and `uint256[5] proof` to match `IWorldIDVerifier`;
+///      (2) verifier-required scalars `expiresAtMin` and `credentialGenesisIssuedAtMin` are
+///      added to every entry-point signature; the spec's compact `bytes proof` form is
+///      purely illustrative;
+///      (3) the verifier's per-request `nonce` (a.k.a. `proofNonce`) is fixed to the
+///      contract-side `PROOF_NONCE` constant and NOT surfaced in the ABI. Contract-level
+///      replay protection is exhaustive (record-existence for `claimSubsidy`, claimed-map
+///      for `claimAdditionalCredential`, monotonic `updateNonce` bound into `signalHash`
+///      for `updateAddresses`), and `WorldChainRpSigner` is explicitly stateless w.r.t.
+///      request-nonce tracking per WIP-1002. This deviation is tracked in the task file.
 ///
 /// @custom:security-contact security@toolsforhumanity.com
 interface ISubsidyAccounting {
@@ -36,13 +42,12 @@ interface ISubsidyAccounting {
     ///         `nullifier` public output and the same recomputed `signalHash`.
     /// @param issuerSchemaId Credential schema/issuer identifier. `uint256` for spec-fidelity;
     ///        bounds-checked against `type(uint64).max` before downcast for verifier dispatch.
-    /// @param proofNonce Verifier request nonce for this proof.
     /// @param expiresAtMin Minimum credential expiration the proof asserts.
     /// @param credentialGenesisIssuedAtMin Minimum credential `genesis_issued_at`.
-    /// @param proof Compressed Groth16 proof `[a, b0, b1, c, merkle_root]`.
+    /// @param proof Compressed Groth16 proof `[a, b0, b1, c, merkle_root]`. Generated against
+    ///        the constant `PROOF_NONCE` public input — see contract-level @dev.
     struct ClaimItem {
         uint256 issuerSchemaId;
-        uint256 proofNonce;
         uint64 expiresAtMin;
         uint256 credentialGenesisIssuedAtMin;
         uint256[5] proof;
@@ -154,7 +159,6 @@ interface ISubsidyAccounting {
     function claimAdditionalCredential(
         uint256 nullifier,
         uint256 issuerSchemaId,
-        uint256 proofNonce,
         uint64 expiresAtMin,
         uint256 credentialGenesisIssuedAtMin,
         uint256[2] calldata sessionNullifier,
@@ -170,7 +174,6 @@ interface ISubsidyAccounting {
         uint256 nonce,
         address[] calldata addAddresses,
         address[] calldata removeAddresses,
-        uint256 proofNonce,
         uint64 expiresAtMin,
         uint256 credentialGenesisIssuedAtMin,
         uint256[2] calldata sessionNullifier,
