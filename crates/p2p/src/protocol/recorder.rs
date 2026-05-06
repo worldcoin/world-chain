@@ -31,6 +31,7 @@ type RecorderResult<T> = Result<T, FlashblocksRecorderError>;
 
 /// Dedicated libmdbx tables used by the flashblocks recorder.
 pub mod tables {
+    use super::{StoredFlashblock, StoredPayloadId};
     use alloy_primitives::BlockNumber;
     use reth_db_api::{
         TableSet,
@@ -39,7 +40,6 @@ pub mod tables {
         tables::{TableType, TableViewer},
     };
     use std::fmt;
-    use super::{StoredFlashblock, StoredPayloadId};
 
     tables! {
         /// Stores accepted flashblocks by payload id and flashblock index.
@@ -526,7 +526,8 @@ mod tests {
 
         insert_record(&db, &record(Some(42), 0)).expect("insert first");
         let second_flashblock = record(None, 1);
-        let expected_second_payload_rlp = Bytes::from(alloy_rlp::encode(&second_flashblock.payload));
+        let expected_second_payload_rlp =
+            Bytes::from(alloy_rlp::encode(&second_flashblock.payload));
         insert_record(&db, &second_flashblock).expect("insert second flashblock");
 
         let replacement = record_with_hash(Some(42), 0, B256::from([9; 32]));
@@ -559,7 +560,10 @@ mod tests {
         assert_eq!(stored_payload.index, 0);
         assert_eq!(stored_payload.payload_rlp, expected_payload_rlp);
         assert_eq!(stored_second_payload.index, 1);
-        assert_eq!(stored_second_payload.payload_rlp, expected_second_payload_rlp);
+        assert_eq!(
+            stored_second_payload.payload_rlp,
+            expected_second_payload_rlp
+        );
         assert_eq!(stored_payload_id, payload_id);
         assert_eq!(flashblocks_len, 2);
         assert_eq!(block_index_len, 1);
