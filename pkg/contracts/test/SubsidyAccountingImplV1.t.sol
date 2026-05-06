@@ -29,6 +29,15 @@ contract SubsidyAccountingImplV1Test is Test {
     event WorldIDVerifierSet(address indexed worldIDVerifier);
     event BudgetConsumerSet(address indexed budgetConsumer);
     event CredentialBudgetSet(uint64 indexed issuerSchemaId, uint256 budgetWei);
+    event SubsidyClaimed(
+        uint256 indexed nullifier, uint256 indexed sessionId, uint64 periodNumber, uint256 totalBudgetWei
+    );
+
+    uint64 internal constant WORLD_CHAIN_RP_ID = 480;
+    uint64 internal constant PERIOD_LENGTH = 30 days;
+    uint256 internal constant PROOF_NONCE = 0;
+    uint256 internal constant CREDENTIAL_GENESIS_ISSUED_AT_MIN = 0;
+    bytes32 internal constant CLAIM_SUBSIDY_TAG = "CLAIM_SUBSIDY";
 
     function setUp() public {
         // Move beyond the first period so currentPeriod() > 0 and unset records (period 0)
@@ -236,13 +245,6 @@ contract SubsidyAccountingImplV1Test is Test {
     ///                       ENTRY-POINT STUBS (NotImplemented)                ///
     ///////////////////////////////////////////////////////////////////////////////
 
-    function test_claimSubsidy_revertsNotImplemented() public {
-        ISubsidyAccounting.ClaimItem[] memory items = new ISubsidyAccounting.ClaimItem[](0);
-        address[] memory addrs = new address[](0);
-        vm.expectRevert(ISubsidyAccounting.NotImplemented.selector);
-        subsidy.claimSubsidy(0, 0, addrs, items);
-    }
-
     function test_claimAdditionalCredential_revertsNotImplemented() public {
         uint256[2] memory sessionNullifier;
         uint256[5] memory proof;
@@ -275,5 +277,283 @@ contract SubsidyAccountingImplV1Test is Test {
         vm.prank(ATTACKER);
         vm.expectRevert(ISubsidyAccounting.NotBudgetConsumer.selector);
         subsidy.consumeBudget(address(0x1234), 21000, 1 gwei);
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////
+    ///                              CLAIM SUBSIDY                              ///
+    ///////////////////////////////////////////////////////////////////////////////
+
+    address internal constant ALICE = address(0xA11CE);
+    address internal constant BOB = address(0xB0B);
+    uint64 internal constant SCHEMA_POH = 1;
+    uint64 internal constant SCHEMA_PHONE = 2;
+    uint64 internal constant SCHEMA_NFC = 3;
+
+    function _proof(uint256 seed) internal pure returns (uint256[5] memory p) {
+        p[0] = seed;
+        p[1] = seed + 1;
+        p[2] = seed + 2;
+        p[3] = seed + 3;
+        p[4] = seed + 4;
+    }
+
+    function _signalHash(uint256 sessionId, address[] memory addrs, address sender) internal pure returns (uint256) {
+        SubsidyAccountingImplV1.ClaimSubsidySignal memory s = SubsidyAccountingImplV1.ClaimSubsidySignal({
+            tag: CLAIM_SUBSIDY_TAG,
+            sessionId: sessionId,
+            addAddresses: addrs,
+            msgSender: sender
+        });
+        return uint256(keccak256(abi.encode(s))) >> 8;
+    }
+
+    function _action(uint64 period) internal pure returns (uint256) {
+        return uint256(keccak256(abi.encodePacked("period_proof", period))) >> 8;
+    }
+
+    function _addrs1(address a) internal pure returns (address[] memory out) {
+        out = new address[](1);
+        out[0] = a;
+    }
+
+    function _addrs2(address a, address b) internal pure returns (address[] memory out) {
+        out = new address[](2);
+        out[0] = a;
+        out[1] = b;
+    }
+
+    function _items1(uint64 schemaId, uint256 seed) internal pure returns (ISubsidyAccounting.ClaimItem[] memory out) {
+        out = new ISubsidyAccounting.ClaimItem[](1);
+        out[0] = ISubsidyAccounting.ClaimItem({issuerSchemaId: schemaId, proof: _proof(seed)});
+    }
+
+    function _items2(uint64 schemaA, uint64 schemaB, uint256 seedA, uint256 seedB)
+        internal
+        pure
+        returns (ISubsidyAccounting.ClaimItem[] memory out)
+    {
+        out = new ISubsidyAccounting.ClaimItem[](2);
+        out[0] = ISubsidyAccounting.ClaimItem({issuerSchemaId: schemaA, proof: _proof(seedA)});
+        out[1] = ISubsidyAccounting.ClaimItem({issuerSchemaId: schemaB, proof: _proof(seedB)});
+    }
+
+    function _setBudgets() internal {
+        vm.startPrank(OWNER);
+        subsidy.setCredentialBudget(SCHEMA_POH, 50_000 gwei);
+        subsidy.setCredentialBudget(SCHEMA_PHONE, 10_000 gwei);
+        subsidy.setCredentialBudget(SCHEMA_NFC, 20_000 gwei);
+        vm.stopPrank();
+    }
+
+    function test_claimSubsidy_happyPath_singleCredential_emitsAndStores() public {
+        _setBudgets();
+        uint256 nullifier = 0xA001;
+        uint256 sessionId = 0x5E5510;
+        address[] memory addrs = _addrs1(ALICE);
+        ISubsidyAccounting.ClaimItem[] memory items = _items1(SCHEMA_POH, 1000);
+        uint64 period = uint64(block.timestamp / PERIOD_LENGTH);
+        uint64 expiresAtMin = period * PERIOD_LENGTH;
+        uint256 sigHash = _signalHash(sessionId, addrs, address(this));
+
+        vm.expectCall(
+            address(verifier),
+            abi.encodeCall(
+                IWorldIDVerifier.verify,
+                (
+                    nullifier,
+                    _action(period),
+                    WORLD_CHAIN_RP_ID,
+                    PROOF_NONCE,
+                    sigHash,
+                    expiresAtMin,
+                    SCHEMA_POH,
+                    CREDENTIAL_GENESIS_ISSUED_AT_MIN,
+                    _proof(1000)
+                )
+            )
+        );
+
+        vm.expectEmit(true, true, true, true, address(subsidy));
+        emit SubsidyClaimed(nullifier, sessionId, period, 50_000 gwei);
+
+        subsidy.claimSubsidy(nullifier, sessionId, addrs, items);
+
+        assertEq(subsidy.getBudget(nullifier), 50_000 gwei, "budget stored");
+        assertTrue(subsidy.isAuthorized(ALICE, nullifier), "alice authorized");
+        assertTrue(subsidy.isClaimed(nullifier, SCHEMA_POH), "schema marked claimed");
+        uint256[] memory ns = subsidy.getNullifiers(ALICE);
+        assertEq(ns.length, 1);
+        assertEq(ns[0], nullifier);
+        assertEq(subsidy.getBudget(ALICE), 50_000 gwei, "address-side budget matches");
+    }
+
+    function test_claimSubsidy_happyPath_multiCredential_summedBudget() public {
+        _setBudgets();
+        uint256 nullifier = 0xA002;
+        uint256 sessionId = 0xABC;
+        address[] memory addrs = _addrs2(ALICE, BOB);
+        ISubsidyAccounting.ClaimItem[] memory items = _items2(SCHEMA_POH, SCHEMA_PHONE, 1, 2);
+        uint64 period = uint64(block.timestamp / PERIOD_LENGTH);
+        uint64 expiresAtMin = period * PERIOD_LENGTH;
+        uint256 sigHash = _signalHash(sessionId, addrs, address(this));
+
+        vm.expectCall(
+            address(verifier),
+            abi.encodeCall(
+                IWorldIDVerifier.verify,
+                (
+                    nullifier,
+                    _action(period),
+                    WORLD_CHAIN_RP_ID,
+                    PROOF_NONCE,
+                    sigHash,
+                    expiresAtMin,
+                    SCHEMA_POH,
+                    CREDENTIAL_GENESIS_ISSUED_AT_MIN,
+                    _proof(1)
+                )
+            )
+        );
+        vm.expectCall(
+            address(verifier),
+            abi.encodeCall(
+                IWorldIDVerifier.verify,
+                (
+                    nullifier,
+                    _action(period),
+                    WORLD_CHAIN_RP_ID,
+                    PROOF_NONCE,
+                    sigHash,
+                    expiresAtMin,
+                    SCHEMA_PHONE,
+                    CREDENTIAL_GENESIS_ISSUED_AT_MIN,
+                    _proof(2)
+                )
+            )
+        );
+
+        vm.expectEmit(true, true, true, true, address(subsidy));
+        emit SubsidyClaimed(nullifier, sessionId, period, 60_000 gwei);
+
+        subsidy.claimSubsidy(nullifier, sessionId, addrs, items);
+
+        assertEq(subsidy.getBudget(nullifier), 60_000 gwei, "summed budget");
+        assertTrue(subsidy.isAuthorized(ALICE, nullifier));
+        assertTrue(subsidy.isAuthorized(BOB, nullifier));
+        assertTrue(subsidy.isClaimed(nullifier, SCHEMA_POH));
+        assertTrue(subsidy.isClaimed(nullifier, SCHEMA_PHONE));
+    }
+
+    function test_claimSubsidy_happyPath_emptyAddAddresses_allowed() public {
+        _setBudgets();
+        uint256 nullifier = 0xA003;
+        address[] memory addrs = new address[](0);
+        ISubsidyAccounting.ClaimItem[] memory items = _items1(SCHEMA_POH, 7);
+
+        subsidy.claimSubsidy(nullifier, 1, addrs, items);
+
+        assertEq(subsidy.getBudget(nullifier), 50_000 gwei);
+        assertFalse(subsidy.isAuthorized(ALICE, nullifier));
+        assertEq(subsidy.getNullifiers(ALICE).length, 0, "no reverse-index entries");
+    }
+
+    function test_claimSubsidy_happyPath_zeroBudgetItems() public {
+        // No setCredentialBudget call — schema budgets default to zero.
+        uint256 nullifier = 0xA004;
+        ISubsidyAccounting.ClaimItem[] memory items = _items1(SCHEMA_POH, 7);
+
+        uint64 period = uint64(block.timestamp / PERIOD_LENGTH);
+        vm.expectEmit(true, true, true, true, address(subsidy));
+        emit SubsidyClaimed(nullifier, 1, period, 0);
+
+        subsidy.claimSubsidy(nullifier, 1, _addrs1(ALICE), items);
+        assertEq(subsidy.getBudget(nullifier), 0, "zero-budget record opens");
+        assertTrue(subsidy.isClaimed(nullifier, SCHEMA_POH), "still marked claimed");
+    }
+
+    function test_claimSubsidy_revertIf_emptyItems() public {
+        ISubsidyAccounting.ClaimItem[] memory items = new ISubsidyAccounting.ClaimItem[](0);
+        vm.expectRevert(ISubsidyAccounting.EmptyItems.selector);
+        subsidy.claimSubsidy(0xA005, 1, _addrs1(ALICE), items);
+    }
+
+    function test_claimSubsidy_revertIf_recordAlreadyExists_samePeriod() public {
+        _setBudgets();
+        uint256 nullifier = 0xA006;
+        subsidy.claimSubsidy(nullifier, 1, _addrs1(ALICE), _items1(SCHEMA_POH, 1));
+
+        vm.expectRevert(ISubsidyAccounting.RecordAlreadyExists.selector);
+        subsidy.claimSubsidy(nullifier, 2, _addrs1(BOB), _items1(SCHEMA_PHONE, 2));
+    }
+
+    function test_claimSubsidy_revertIf_duplicateIssuerSchemaId_inPayload() public {
+        _setBudgets();
+        ISubsidyAccounting.ClaimItem[] memory items = _items2(SCHEMA_POH, SCHEMA_POH, 1, 2);
+        vm.expectRevert(abi.encodeWithSelector(ISubsidyAccounting.DuplicateIssuerSchemaId.selector, SCHEMA_POH));
+        subsidy.claimSubsidy(0xA008, 1, _addrs1(ALICE), items);
+    }
+
+    function test_claimSubsidy_revertIf_issuerSchemaIdOverflow() public {
+        uint256 oversized = uint256(type(uint64).max) + 1;
+        ISubsidyAccounting.ClaimItem[] memory items = new ISubsidyAccounting.ClaimItem[](1);
+        items[0] = ISubsidyAccounting.ClaimItem({issuerSchemaId: oversized, proof: _proof(1)});
+        vm.expectRevert(abi.encodeWithSelector(ISubsidyAccounting.IssuerSchemaIdOverflow.selector, oversized));
+        subsidy.claimSubsidy(0xA009, 1, _addrs1(ALICE), items);
+    }
+
+    function test_claimSubsidy_revertIf_duplicateAuthorizedAddress() public {
+        _setBudgets();
+        address[] memory addrs = _addrs2(ALICE, ALICE);
+        vm.expectRevert(abi.encodeWithSelector(ISubsidyAccounting.DuplicateAuthorizedAddress.selector, ALICE));
+        subsidy.claimSubsidy(0xA00A, 1, addrs, _items1(SCHEMA_POH, 1));
+    }
+
+    function test_claimSubsidy_revertIf_zeroAuthorizedAddress() public {
+        _setBudgets();
+        address[] memory addrs = _addrs2(ALICE, address(0));
+        vm.expectRevert(ISubsidyAccounting.AddressZero.selector);
+        subsidy.claimSubsidy(0xA00B, 1, addrs, _items1(SCHEMA_POH, 1));
+    }
+
+    function test_claimSubsidy_revertIf_tooManyNullifiers() public {
+        _setBudgets();
+        // Authorise ALICE under MAX_NULLIFIERS_PER_ADDRESS = 16 records, then attempt the 17th.
+        for (uint256 i = 0; i < 16; ++i) {
+            uint256 nullifier = 0xC0DE0000 + i;
+            // Each call needs a distinct schemaId to avoid DuplicateIssuerSchemaId carrying
+            // across periods within the same nullifier — but here nullifiers differ, so reuse
+            // is fine. Bind to SCHEMA_POH each time.
+            subsidy.claimSubsidy(nullifier, i + 1, _addrs1(ALICE), _items1(SCHEMA_POH, i));
+        }
+        vm.expectRevert(abi.encodeWithSelector(ISubsidyAccounting.TooManyNullifiers.selector, ALICE));
+        subsidy.claimSubsidy(0xC0DE0010, 99, _addrs1(ALICE), _items1(SCHEMA_POH, 99));
+    }
+
+    function test_claimSubsidy_revertIf_verifierRejects_atomicRollback() public {
+        _setBudgets();
+        verifier.setShouldAccept(false);
+        uint256 nullifier = 0xA00F;
+
+        vm.expectRevert(MockWorldIDVerifier.MockVerifierRejected.selector);
+        subsidy.claimSubsidy(nullifier, 1, _addrs1(ALICE), _items1(SCHEMA_POH, 1));
+
+        // Atomic rollback: state untouched.
+        assertEq(subsidy.getBudget(nullifier), 0, "no record opened");
+        assertFalse(subsidy.isAuthorized(ALICE, nullifier));
+        assertFalse(subsidy.isClaimed(nullifier, SCHEMA_POH));
+        assertEq(subsidy.getNullifiers(ALICE).length, 0);
+    }
+
+    function test_claimSubsidy_revertIf_budgetOverflow() public {
+        // Two items each at max uint128 budget overflow uint128 when summed.
+        uint256 huge = uint256(type(uint128).max);
+        vm.startPrank(OWNER);
+        subsidy.setCredentialBudget(SCHEMA_POH, huge);
+        subsidy.setCredentialBudget(SCHEMA_PHONE, huge);
+        vm.stopPrank();
+
+        ISubsidyAccounting.ClaimItem[] memory items = _items2(SCHEMA_POH, SCHEMA_PHONE, 1, 2);
+        vm.expectRevert(abi.encodeWithSelector(ISubsidyAccounting.BudgetOverflow.selector, huge + huge));
+        subsidy.claimSubsidy(0xA011, 1, _addrs1(ALICE), items);
     }
 }
