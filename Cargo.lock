@@ -338,6 +338,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-eip7928"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1031f4cbbf83817c1c8c63bd2f561f9ac7fd790c81534ed8741eb5bd9b896770"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "once_cell",
+ "serde",
+]
+
+[[package]]
 name = "alloy-eips"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -346,7 +358,7 @@ dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
  "alloy-eip7702",
- "alloy-eip7928",
+ "alloy-eip7928 0.3.5",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-serde 1.8.3",
@@ -369,7 +381,7 @@ dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
  "alloy-eip7702",
- "alloy-eip7928",
+ "alloy-eip7928 0.3.5",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-serde 2.0.4",
@@ -7708,7 +7720,7 @@ version = "2.0.0"
 source = "git+https://github.com/paradigmxyz/reth?rev=27bfddeada3953edc22759080a3659ccea62ca1f#27bfddeada3953edc22759080a3659ccea62ca1f"
 dependencies = [
  "alloy-consensus 2.0.4",
- "alloy-eip7928",
+ "alloy-eip7928 0.3.5",
  "alloy-eips 2.0.4",
  "alloy-evm",
  "alloy-primitives",
@@ -7886,7 +7898,7 @@ source = "git+https://github.com/paradigmxyz/reth?rev=27bfddeada3953edc22759080a
 dependencies = [
  "alloy-chains",
  "alloy-consensus 2.0.4",
- "alloy-eip7928",
+ "alloy-eip7928 0.3.5",
  "alloy-eips 2.0.4",
  "alloy-hardforks",
  "alloy-primitives",
@@ -9589,7 +9601,7 @@ source = "git+https://github.com/paradigmxyz/reth?rev=27bfddeada3953edc22759080a
 dependencies = [
  "alloy-consensus 2.0.4",
  "alloy-dyn-abi",
- "alloy-eip7928",
+ "alloy-eip7928 0.3.5",
  "alloy-eips 2.0.4",
  "alloy-evm",
  "alloy-json-rpc 2.0.4",
@@ -10094,7 +10106,7 @@ name = "reth-trie-parallel"
 version = "2.0.0"
 source = "git+https://github.com/paradigmxyz/reth?rev=27bfddeada3953edc22759080a3659ccea62ca1f#27bfddeada3953edc22759080a3659ccea62ca1f"
 dependencies = [
- "alloy-eip7928",
+ "alloy-eip7928 0.3.5",
  "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
@@ -10355,7 +10367,7 @@ version = "11.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c32490ed687dba31c3c882beb8c20408bdd30ef96690d8f145b0ee9a87040bfe"
 dependencies = [
- "alloy-eip7928",
+ "alloy-eip7928 0.3.5",
  "bitflags 2.11.1",
  "revm-bytecode",
  "revm-primitives",
@@ -13691,7 +13703,7 @@ name = "world-chain-primitives"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus 2.0.4",
- "alloy-eip7928",
+ "alloy-eip7928 0.4.0",
  "alloy-eips 2.0.4",
  "alloy-evm",
  "alloy-network 2.0.4",
