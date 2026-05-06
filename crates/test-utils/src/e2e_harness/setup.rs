@@ -21,7 +21,7 @@ use op_alloy_consensus::{OpTxEnvelope, TxDeposit, encode_holocene_extra_data};
 use op_alloy_rpc_types_engine::{
     OpExecutionData, OpExecutionPayload, OpExecutionPayloadSidecar, OpExecutionPayloadV4,
 };
-use reth_chainspec::EthChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_e2e_test_utils::{
     Adapter, NodeHelperType, TmpDB,
     testsuite::{BlockInfo, Environment, NodeClient, NodeState},
@@ -177,7 +177,7 @@ pub async fn setup<T>(
     TxSpammer<<WorldChainNode<T> as NodeTypes>::Payload>,
 )>
 where
-    T: WorldChainTestContextBounds,
+    T: WorldChainTestContextBounds<ChainSpec = OpChainSpec>,
     WorldChainNode<T>: WorldChainNodeTestBounds<T>,
 {
     setup_inner::<T>(
@@ -206,7 +206,7 @@ pub async fn setup_with_block_uncompressed_size_limit<T>(
     TxSpammer<<WorldChainNode<T> as NodeTypes>::Payload>,
 )>
 where
-    T: WorldChainTestContextBounds,
+    T: WorldChainTestContextBounds<ChainSpec = OpChainSpec>,
     WorldChainNode<T>: WorldChainNodeTestBounds<T>,
 {
     setup_inner::<T>(
@@ -237,7 +237,7 @@ pub async fn setup_with_tx_peers<T>(
     TxSpammer<<WorldChainNode<T> as NodeTypes>::Payload>,
 )>
 where
-    T: WorldChainTestContextBounds,
+    T: WorldChainTestContextBounds<ChainSpec = OpChainSpec>,
     WorldChainNode<T>: WorldChainNodeTestBounds<T>,
 {
     setup_inner::<T>(
@@ -268,7 +268,7 @@ async fn setup_inner<T>(
     TxSpammer<<WorldChainNode<T> as NodeTypes>::Payload>,
 )>
 where
-    T: WorldChainTestContextBounds,
+    T: WorldChainTestContextBounds<ChainSpec = OpChainSpec>,
     WorldChainNode<T>: WorldChainNodeTestBounds<T>,
 {
     unsafe {
@@ -632,7 +632,7 @@ pub fn execution_data_from_from_reduced_flashblock(
 
 /// Consolidated trait bound for a World Chain testing context.
 pub trait WorldChainTestContextBounds:
-    WorldChainNodePrimitiveTypes<Payload: EngineTypes>
+    WorldChainNodePrimitiveTypes<Payload: EngineTypes, ChainSpec: EthereumHardforks>
     + WorldChainNodeContext<
         FullNodeTypesAdapter<
             WorldChainNode<Self>,
@@ -676,7 +676,7 @@ pub trait WorldChainTestContextBounds:
 where
     WorldChainNode<Self>: NodeTypes<
             Primitives = <Self as WorldChainNodePrimitiveTypes>::Primitives,
-            ChainSpec = OpChainSpec,
+            ChainSpec = <Self as WorldChainNodePrimitiveTypes>::ChainSpec,
             Payload = <Self as WorldChainNodePrimitiveTypes>::Payload,
             Storage: ChainStorage<<Self as WorldChainNodePrimitiveTypes>::Primitives>,
         > + Node<
@@ -713,7 +713,7 @@ where
 
 impl<T> WorldChainTestContextBounds for T
 where
-    T: WorldChainNodePrimitiveTypes<Payload: EngineTypes>
+    T: WorldChainNodePrimitiveTypes<Payload: EngineTypes, ChainSpec: EthereumHardforks>
         + WorldChainNodeContext<
             FullNodeTypesAdapter<
                 WorldChainNode<T>,
@@ -754,7 +754,7 @@ where
         >,
     WorldChainNode<T>: NodeTypes<
             Primitives = <T as WorldChainNodePrimitiveTypes>::Primitives,
-            ChainSpec = OpChainSpec,
+            ChainSpec = <T as WorldChainNodePrimitiveTypes>::ChainSpec,
             Payload = <T as WorldChainNodePrimitiveTypes>::Payload,
             Storage: ChainStorage<<T as WorldChainNodePrimitiveTypes>::Primitives>,
         > + Node<
@@ -793,7 +793,7 @@ where
 pub trait WorldChainNodeTestBounds<T>:
     NodeTypes<
         Primitives = <T as WorldChainNodePrimitiveTypes>::Primitives,
-        ChainSpec = OpChainSpec,
+        ChainSpec = <T as WorldChainNodePrimitiveTypes>::ChainSpec,
         Payload = <T as WorldChainNodePrimitiveTypes>::Payload,
         Storage: ChainStorage<<T as WorldChainNodePrimitiveTypes>::Primitives>,
     > + Node<
@@ -810,7 +810,7 @@ impl<T, Ctx> WorldChainNodeTestBounds<Ctx> for T
 where
     T: NodeTypes<
             Primitives = <Ctx as WorldChainNodePrimitiveTypes>::Primitives,
-            ChainSpec = OpChainSpec,
+            ChainSpec = <Ctx as WorldChainNodePrimitiveTypes>::ChainSpec,
             Payload = <Ctx as WorldChainNodePrimitiveTypes>::Payload,
             Storage: ChainStorage<<Ctx as WorldChainNodePrimitiveTypes>::Primitives>,
         > + Node<

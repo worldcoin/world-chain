@@ -18,7 +18,7 @@ use chrono::Utc;
 use eyre::eyre::{bail, eyre};
 use op_alloy_consensus::OpTxEnvelope;
 use reth_chainspec::EthereumHardforks;
-use reth_primitives_traits::{Block as _, BlockBody as _, NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::{Block as _, BlockBody as _, RecoveredBlock, TxTy};
 
 use reth_basic_payload_builder::PayloadConfig;
 use reth_optimism_chainspec::{OpChainSpec, OpHardforks};
@@ -249,7 +249,7 @@ pub fn recovered_block_from_flashblocks(
     let transactions_encoded = diff
         .transactions
         .iter()
-        .map(|t| <OpPrimitives as NodePrimitives>::SignedTx::decode_2718(&mut t.as_ref()))
+        .map(|t| TxTy::<OpPrimitives>::decode_2718(&mut t.as_ref()))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| eyre!("Failed to decode transaction: {:?}", e))?;
 
