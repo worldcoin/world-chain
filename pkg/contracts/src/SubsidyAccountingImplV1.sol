@@ -69,6 +69,15 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
         uint256 sessionId;
     }
 
+    /// @dev Pre-image of `claimSubsidy`'s `signalHash` public input. ABI-encoded layout is
+    ///      pinned by WIP-1002 § "Signal Binding"; off-chain reproducers must match.
+    struct ClaimSubsidySignal {
+        bytes32 tag;
+        uint256 sessionId;
+        address[] addAddresses;
+        address msgSender;
+    }
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                             STATE VARIABLES                             ///
     ///////////////////////////////////////////////////////////////////////////////
@@ -134,13 +143,45 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     ///////////////////////////////////////////////////////////////////////////////
 
     /// @inheritdoc ISubsidyAccounting
-    function claimSubsidy(uint256, uint256, address[] calldata, ClaimItem[] calldata)
-        external
-        virtual
-        onlyProxy
-        nonReentrant
-    {
-        revert NotImplemented();
+    function claimSubsidy(
+        uint256 nullifier,
+        uint256 sessionId,
+        address[] calldata addAddresses,
+        ClaimItem[] calldata items
+    ) external virtual onlyProxy nonReentrant {
+        if (items.length == 0) revert EmptyItems();
+
+        uint64 period = currentPeriod();
+        if (records[nullifier].periodNumber == period) revert RecordAlreadyExists();
+
+        uint256 signalHash = uint256(
+            keccak256(
+                abi.encode(
+                    ClaimSubsidySignal({
+                        tag: CLAIM_SUBSIDY_TAG,
+                        sessionId: sessionId,
+                        addAddresses: addAddresses,
+                        msgSender: msg.sender
+                    })
+                )
+            )
+        ) >> 8;
+
+        uint256 totalBudget = _accrueClaimedCredentials(nullifier, items);
+        if (totalBudget > type(uint128).max) revert BudgetOverflow(totalBudget);
+
+        records[nullifier] = SubsidyRecord({
+            periodNumber: period,
+            remainingWei: uint128(totalBudget),
+            updateNonce: 0,
+            sessionId: sessionId
+        });
+
+        _addAddresses(nullifier, addAddresses);
+
+        emit SubsidyClaimed(nullifier, sessionId, period, totalBudget);
+
+        _verifyClaimItems(nullifier, period, signalHash, items);
     }
 
     /// @inheritdoc ISubsidyAccounting
@@ -243,5 +284,71 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     /// @dev Current subsidy period derived from `block.timestamp`.
     function currentPeriod() internal view returns (uint64) {
         return uint64(block.timestamp / PERIOD_LENGTH);
+    }
+
+    /// @dev Validate every `items[i].issuerSchemaId`, mark each as claimed under `nullifier`,
+    ///      and return the summed configured budget. Reverts on overflow, duplicates, or an
+    ///      already-claimed credential. Pulled out of `claimSubsidy` to keep its frame within
+    ///      the 16-local stack limit.
+    function _accrueClaimedCredentials(uint256 nullifier, ClaimItem[] calldata items)
+        internal
+        returns (uint256 totalBudget)
+    {
+        uint256 itemsLen = items.length;
+        for (uint256 i = 0; i < itemsLen; ++i) {
+            uint256 rawSchemaId = items[i].issuerSchemaId;
+            if (rawSchemaId > type(uint64).max) revert IssuerSchemaIdOverflow(rawSchemaId);
+            uint64 schemaId = uint64(rawSchemaId);
+            if (claimed[nullifier][schemaId]) revert DuplicateIssuerSchemaId(schemaId);
+            claimed[nullifier][schemaId] = true;
+            totalBudget += credentialBudget[schemaId];
+        }
+    }
+
+    /// @dev Verify every `items[i].proof` as a Uniqueness Proof for `period_proof || period`
+    ///      against the shared `signalHash`. Reverts atomically if any item is rejected.
+    ///      Verifier inputs `nonce`, `expiresAtMin`, `credentialGenesisIssuedAtMin` are supplied
+    ///      deterministically from `PROOF_NONCE`, `period * PERIOD_LENGTH`, and
+    ///      `CREDENTIAL_GENESIS_ISSUED_AT_MIN`.
+    function _verifyClaimItems(uint256 nullifier, uint64 period, uint256 signalHash, ClaimItem[] calldata items)
+        internal
+        view
+    {
+        uint256 action = uint256(keccak256(abi.encodePacked("period_proof", period))) >> 8;
+        uint64 expiresAtMin = period * PERIOD_LENGTH;
+        uint256 itemsLen = items.length;
+        for (uint256 i = 0; i < itemsLen; ++i) {
+            worldIDVerifier.verify(
+                nullifier,
+                action,
+                WORLD_CHAIN_RP_ID,
+                PROOF_NONCE,
+                signalHash,
+                expiresAtMin,
+                uint64(items[i].issuerSchemaId),
+                CREDENTIAL_GENESIS_ISSUED_AT_MIN,
+                items[i].proof
+            );
+        }
+    }
+
+    /// @dev Add `addrs` to the authorized set of `nullifier` and the reverse index.
+    ///      Reverts on zero address, duplicate within the existing authorised set, or when
+    ///      adding the new authorisation would push an account past
+    ///      `MAX_NULLIFIERS_PER_ADDRESS`. Shared by `claimSubsidy` and `updateAddresses`.
+    function _addAddresses(uint256 nullifier, address[] calldata addrs) internal {
+        EnumerableSet.AddressSet storage authSet = authorized[nullifier];
+        uint256 len = addrs.length;
+        for (uint256 i = 0; i < len; ++i) {
+            address acct = addrs[i];
+            if (acct == address(0)) revert AddressZero();
+            if (!authSet.add(acct)) revert DuplicateAuthorizedAddress(acct);
+
+            EnumerableSet.UintSet storage owned = nullifiersOf[acct];
+            if (!owned.contains(nullifier) && owned.length() >= MAX_NULLIFIERS_PER_ADDRESS) {
+                revert TooManyNullifiers(acct);
+            }
+            owned.add(nullifier);
+        }
     }
 }
