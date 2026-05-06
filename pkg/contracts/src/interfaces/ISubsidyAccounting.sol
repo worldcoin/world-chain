@@ -112,6 +112,14 @@ interface ISubsidyAccounting {
     ///         `MAX_NULLIFIERS_PER_ADDRESS` simultaneous authorisations.
     error TooManyNullifiers(address account);
 
+    /// @notice Thrown when an `addAddresses` payload contains a duplicate of an address
+    ///         already authorised under the same record (or a duplicate within the payload).
+    error DuplicateAuthorizedAddress(address account);
+
+    /// @notice Thrown when the summed per-credential budget for a `claimSubsidy` call
+    ///         exceeds `type(uint128).max`, which is the on-chain `remainingWei` width.
+    error BudgetOverflow(uint256 totalWei);
+
     /// @notice Thrown when `consumeBudget` is called for an account with no current-period
     ///         records (or only zero-budget records).
     error NoBudget(address account);
