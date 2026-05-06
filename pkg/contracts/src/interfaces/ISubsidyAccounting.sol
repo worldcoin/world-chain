@@ -79,6 +79,10 @@ interface ISubsidyAccounting {
     /// @notice Thrown when an `updateAddresses` `nonce` exceeds `type(uint64).max`.
     error UpdateNonceOverflow(uint256 value);
 
+    /// @notice Thrown by entry points whose body has not yet been ported in. Skeleton-entry
+    ///         placeholder; replaced by real bodies in follow-up entries on the shared PR.
+    error NotImplemented();
+
     /// @notice Thrown when `consumeBudget` is called by an address other than `budgetConsumer`.
     error NotBudgetConsumer();
 
