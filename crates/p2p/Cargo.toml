@@ -33,8 +33,9 @@ pin-project.workspace = true
 chrono.workspace = true
 reth-provider.workspace = true
 reth-tasks = { workspace = true }
+reth-db = { workspace = true, features = ["mdbx"] }
+reth-db-api.workspace = true
 rand.workspace = true
-rusqlite.workspace = true
 
 [dev-dependencies]
 reth-network-api.workspace = true

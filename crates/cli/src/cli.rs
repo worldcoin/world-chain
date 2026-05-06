@@ -335,7 +335,7 @@ impl WorldChainArgs {
                         .datadir()
                         .data_dir()
                         .join("flashblocks")
-                        .join("flashblocks.sqlite")
+                        .join("flashblocks.mdbx")
                 });
 
                 FlashblocksStoreConfig { path }
@@ -495,7 +495,7 @@ mod tests {
             .datadir()
             .data_dir()
             .join("flashblocks")
-            .join("flashblocks.sqlite");
+            .join("flashblocks.mdbx");
 
         let config = args.into_config(&mut node_config).unwrap();
         let store = config

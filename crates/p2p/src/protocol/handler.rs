@@ -1409,7 +1409,7 @@ impl FlashblocksP2PCtx {
                 state.flashblocks.get(state.flashblock_index).cloned()
             {
                 if let Some(recorder) = &self.recorder {
-                    // Record from the ordered stream so the sqlite db mirrors what
+                    // Record from the ordered stream so the recorder database mirrors what
                     // downstream flashblocks consumers observe.
                     recorder.record(&flashblock_event);
                 }

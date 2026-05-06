@@ -138,7 +138,7 @@ pub struct FlashblocksArgs {
     )]
     pub access_list: bool,
 
-    /// Store accepted flashblocks to a separate SQLite database.
+    /// Store accepted flashblocks to a separate libmdbx database.
     #[arg(
         long = "flashblocks.store",
         id = "flashblocks.store",
@@ -148,9 +148,9 @@ pub struct FlashblocksArgs {
     )]
     pub store: bool,
 
-    /// Path to the SQLite database used by --flashblocks.store.
+    /// Path to the libmdbx database directory used by --flashblocks.store.
     ///
-    /// Defaults to <datadir>/flashblocks/flashblocks.sqlite.
+    /// Defaults to <datadir>/flashblocks/flashblocks.mdbx.
     #[arg(
         long = "flashblocks.store-path",
         alias = "flashblocks.store_path",

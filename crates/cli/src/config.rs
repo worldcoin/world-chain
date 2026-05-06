@@ -16,10 +16,10 @@ pub struct FlashblocksPayloadBuilderConfig {
 /// Configuration for optional flashblocks persistence.
 ///
 /// When configured, accepted ordered flashblocks are written to a standalone
-/// SQLite database outside the main node database.
+/// libmdbx database outside the main node database.
 #[derive(Debug, Clone)]
 pub struct FlashblocksStoreConfig {
-    /// SQLite database path used by the flashblocks recorder.
+    /// libmdbx database directory used by the flashblocks recorder.
     pub path: PathBuf,
 }
 

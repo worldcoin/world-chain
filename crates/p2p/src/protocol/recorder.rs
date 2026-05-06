@@ -1,83 +1,102 @@
 //! Best-effort persistence for accepted flashblocks.
 //!
-//! This module intentionally keeps the stored representation small. The recorder
-//! persists the exact [`FlashblocksPayloadV1`] blob plus only the metadata needed
-//! to query it later: payload id, flashblock index, and the block number when it
-//! is present on the base flashblock.
+//! The recorder uses a separate libmdbx database environment from the node's
+//! canonical state database. It stores the exact [`FlashblocksPayloadV1`] RLP
+//! bytes as the source of truth and keeps a small secondary index from block
+//! number to payload id for later benchmark replay.
 
+use alloy_primitives::Bytes;
+use reth_db::{
+    Database, DatabaseEnv,
+    mdbx::{DatabaseArguments, create_db},
+};
+use reth_db_api::{
+    DatabaseError,
+    transaction::{DbTx, DbTxMut},
+};
 use std::{fs, path::PathBuf, time::Duration};
-
-use rusqlite::{Connection, params};
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 use world_chain_primitives::primitives::FlashblocksPayloadV1;
 
 const STORE_CHANNEL_CAPACITY: usize = 1_024;
 const DB_RETRY_DELAY: Duration = Duration::from_secs(1);
-const DB_BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 type RecorderResult<T> = Result<T, FlashblocksRecorderError>;
 
+/// Dedicated libmdbx tables used by the flashblocks recorder.
+pub mod tables {
+    use alloy_primitives::{BlockNumber, Bytes};
+    use reth_db_api::{
+        TableSet,
+        table::TableInfo,
+        tables,
+        tables::{TableType, TableViewer},
+    };
+    use std::fmt;
+
+    tables! {
+        /// Stores accepted flashblocks by `(payload_id || flashblock_index_be)`.
+        table Flashblocks {
+            type Key = Vec<u8>;
+            type Value = Bytes;
+        }
+
+        /// Maps a block number to the payload id observed on that block's base flashblock.
+        table BlockNumberToPayloadId {
+            type Key = BlockNumber;
+            type Value = Bytes;
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 enum FlashblocksRecorderError {
-    #[error("failed to create flashblocks recorder directory {path}: {source}")]
-    CreateDirectory {
+    #[error("failed to create flashblocks recorder parent directory {path}: {source}")]
+    CreateParentDirectory {
         path: PathBuf,
         #[source]
         source: std::io::Error,
     },
-    #[error("failed to open flashblocks recorder database {path}: {source}")]
-    OpenDatabase {
-        path: PathBuf,
+    #[error("failed to open flashblocks recorder database {path}: {message}")]
+    OpenDatabase { path: PathBuf, message: String },
+    #[error("failed to create flashblocks recorder tables: {source}")]
+    CreateTables {
         #[source]
-        source: rusqlite::Error,
+        source: DatabaseError,
     },
-    #[error("failed to configure flashblocks recorder database busy timeout {path}: {source}")]
-    ConfigureBusyTimeout {
-        path: PathBuf,
+    #[error("failed to begin flashblocks recorder transaction: {source}")]
+    BeginTransaction {
         #[source]
-        source: rusqlite::Error,
-    },
-    #[error("failed to configure flashblocks recorder database journal mode {path}: {source}")]
-    ConfigureJournalMode {
-        path: PathBuf,
-        #[source]
-        source: rusqlite::Error,
-    },
-    #[error("failed to configure flashblocks recorder database synchronous mode {path}: {source}")]
-    ConfigureSynchronousMode {
-        path: PathBuf,
-        #[source]
-        source: rusqlite::Error,
-    },
-    #[error("failed to create flashblocks recorder schema {path}: {source}")]
-    CreateSchema {
-        path: PathBuf,
-        #[source]
-        source: rusqlite::Error,
+        source: DatabaseError,
     },
     #[error(
-        "failed to insert flashblock record payload_id={payload_id} flashblock_index={flashblock_index}: {source}"
+        "failed to insert flashblock payload_id={payload_id} flashblock_index={flashblock_index}: {source}"
     )]
-    InsertRecord {
+    InsertFlashblock {
         payload_id: String,
         flashblock_index: u64,
         #[source]
-        source: rusqlite::Error,
+        source: DatabaseError,
     },
-    #[error("{field} value {value} cannot be stored as sqlite INTEGER: {source}")]
-    IntegerOutOfRange {
-        field: &'static str,
-        value: u64,
+    #[error("failed to insert block_number={block_number} to payload_id={payload_id}: {source}")]
+    InsertBlockNumberIndex {
+        block_number: u64,
+        payload_id: String,
         #[source]
-        source: std::num::TryFromIntError,
+        source: DatabaseError,
+    },
+    #[error("failed to commit flashblocks recorder transaction: {source}")]
+    CommitTransaction {
+        #[source]
+        source: DatabaseError,
     },
 }
 
-/// Config for the flashblocks recorder.
+/// Configuration for the flashblocks recorder database.
 #[derive(Clone, Debug)]
 pub struct FlashblocksRecorderConfig {
-    /// SQLite database path used to persist flashblocks.
+    /// Directory path for the dedicated libmdbx database environment.
     pub path: PathBuf,
 }
 
@@ -100,7 +119,6 @@ pub struct FlashblocksRecorder {
 
 #[derive(Debug)]
 struct FlashblocksRecord {
-    block_number: Option<u64>,
     payload: FlashblocksPayloadV1,
 }
 
@@ -114,12 +132,8 @@ impl FlashblocksRecorder {
     }
 
     /// Queues an accepted flashblock payload for persistence.
-    ///
-    /// Only base flashblocks carry execution-payload base data and therefore a
-    /// block number. Delta flashblocks are stored with `NULL` block number.
     pub fn record(&self, payload: &FlashblocksPayloadV1) {
         let record = FlashblocksRecord {
-            block_number: payload.base.as_ref().map(|base| base.block_number),
             payload: payload.clone(),
         };
 
@@ -160,7 +174,7 @@ async fn run_writer(config: FlashblocksRecorderConfig, mut rx: mpsc::Receiver<Fl
             }
         }
 
-        let conn = db.as_mut().expect("connection is initialized above");
+        let conn = db.as_ref().expect("connection is initialized above");
         if let Err(err) = insert_record(conn, &record) {
             error!(
                 target: "flashblocks::recorder",
@@ -168,122 +182,92 @@ async fn run_writer(config: FlashblocksRecorderConfig, mut rx: mpsc::Receiver<Fl
                 %err,
                 "failed to store flashblock; dropping record"
             );
+            // Reopen on the next record in case the connection entered a bad state
+            // or the database directory was replaced while the node was running.
             db = None;
             tokio::time::sleep(DB_RETRY_DELAY).await;
         }
     }
 }
 
-fn open_db(config: &FlashblocksRecorderConfig) -> RecorderResult<Connection> {
+fn open_db(config: &FlashblocksRecorderConfig) -> RecorderResult<DatabaseEnv> {
     if let Some(parent) = config
         .path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
     {
-        fs::create_dir_all(parent).map_err(|source| FlashblocksRecorderError::CreateDirectory {
-            path: parent.to_path_buf(),
-            source,
+        fs::create_dir_all(parent).map_err(|source| {
+            FlashblocksRecorderError::CreateParentDirectory {
+                path: parent.to_path_buf(),
+                source,
+            }
         })?;
     }
 
-    let conn = Connection::open(&config.path).map_err(|source| {
+    let mut db = create_db(&config.path, DatabaseArguments::default()).map_err(|source| {
         FlashblocksRecorderError::OpenDatabase {
             path: config.path.clone(),
-            source,
-        }
-    })?;
-    // Set the busy timeout to handle situations where the database is locked due to other reads/writes,
-    // allowing this connection to wait up to DB_BUSY_TIMEOUT before erroring.
-    conn.busy_timeout(DB_BUSY_TIMEOUT).map_err(|source| {
-        FlashblocksRecorderError::ConfigureBusyTimeout {
-            path: config.path.clone(),
-            source,
+            message: source.to_string(),
         }
     })?;
 
-    // Switch the SQLite database to use write-ahead logging (WAL) mode.
-    // WAL mode allows for concurrent reads and writes, improving performance and reliability
-    // for append-heavy usage patterns like flashblock recording.
-    conn.pragma_update(None, "journal_mode", "WAL")
-        .map_err(|source| FlashblocksRecorderError::ConfigureJournalMode {
-            path: config.path.clone(),
+    db.create_and_track_tables_for::<tables::Tables>()
+        .map_err(|source| FlashblocksRecorderError::CreateTables { source })?;
+
+    Ok(db)
+}
+
+fn insert_record(db: &DatabaseEnv, record: &FlashblocksRecord) -> RecorderResult<()> {
+    let payload = &record.payload;
+    let payload_id = payload.payload_id.0;
+    let payload_key = flashblock_key(payload_id, payload.index);
+    let payload_id_value = Bytes::copy_from_slice(payload_id.as_slice());
+    let payload_value = Bytes::from(alloy_rlp::encode(payload));
+
+    let tx = db
+        .tx_mut()
+        .map_err(|source| FlashblocksRecorderError::BeginTransaction { source })?;
+
+    tx.put::<tables::Flashblocks>(payload_key, payload_value)
+        .map_err(|source| FlashblocksRecorderError::InsertFlashblock {
+            payload_id: payload.payload_id.to_string(),
+            flashblock_index: payload.index,
             source,
         })?;
 
-    // Set the synchronous pragma to "NORMAL" to strike a balance between durability
-    // and performance. This means the OS-level write cache is not flushed on every transaction,
-    // but durability should remain sufficient for most flashblock persistence needs.
-    conn.pragma_update(None, "synchronous", "NORMAL")
-        .map_err(
-            |source| FlashblocksRecorderError::ConfigureSynchronousMode {
-                path: config.path.clone(),
+    if let Some(base) = &payload.base {
+        tx.put::<tables::BlockNumberToPayloadId>(base.block_number, payload_id_value)
+            .map_err(|source| FlashblocksRecorderError::InsertBlockNumberIndex {
+                block_number: base.block_number,
+                payload_id: payload.payload_id.to_string(),
                 source,
-            },
-        )?;
-    conn.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS flashblocks (
-            payload_id BLOB NOT NULL,
-            flashblock_index INTEGER NOT NULL,
-            block_number INTEGER,
-            flashblock_payload_rlp BLOB NOT NULL,
-            PRIMARY KEY (payload_id, flashblock_index)
-        );
-        "#,
-    )
-    .map_err(|source| FlashblocksRecorderError::CreateSchema {
-        path: config.path.clone(),
-        source,
-    })?;
-    Ok(conn)
+            })?;
+    }
+
+    tx.commit()
+        .map_err(|source| FlashblocksRecorderError::CommitTransaction { source })
 }
 
-fn insert_record(conn: &mut Connection, record: &FlashblocksRecord) -> RecorderResult<()> {
-    let payload = &record.payload;
-    let flashblock_payload_rlp = alloy_rlp::encode(payload);
-    let block_number = record
-        .block_number
-        .map(|block_number| to_i64("block_number", block_number))
-        .transpose()?;
+/// Encodes the primary key as `payload_id || flashblock_index_be`.
+///
+/// Big-endian index encoding preserves natural index ordering during libmdbx
+/// lexicographic iteration.
+pub fn flashblock_key(payload_id: impl AsRef<[u8]>, index: u64) -> Vec<u8> {
+    let payload_id = payload_id.as_ref();
+    debug_assert_eq!(payload_id.len(), 8, "payload ids must be 8 bytes");
 
-    conn.execute(
-        r#"
-        INSERT OR REPLACE INTO flashblocks (
-            payload_id,
-            flashblock_index,
-            block_number,
-            flashblock_payload_rlp
-        ) VALUES (?1, ?2, ?3, ?4)
-        "#,
-        params![
-            payload.payload_id.0.to_vec(),
-            to_i64("flashblock_index", payload.index)?,
-            block_number,
-            flashblock_payload_rlp,
-        ],
-    )
-    .map_err(|source| FlashblocksRecorderError::InsertRecord {
-        payload_id: payload.payload_id.to_string(),
-        flashblock_index: payload.index,
-        source,
-    })?;
-
-    Ok(())
-}
-
-fn to_i64(field: &'static str, value: u64) -> RecorderResult<i64> {
-    i64::try_from(value).map_err(|source| FlashblocksRecorderError::IntegerOutOfRange {
-        field,
-        value,
-        source,
-    })
+    let mut key = Vec::with_capacity(16);
+    key.extend_from_slice(payload_id);
+    key.extend_from_slice(index.to_be_bytes().as_slice());
+    key
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{Address, B256, Bytes};
+    use alloy_primitives::{Address, B256};
     use alloy_rpc_types_engine::PayloadId;
+    use reth_db_api::transaction::DbTx;
     use tempfile::tempdir;
     use world_chain_primitives::primitives::{
         ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1,
@@ -292,70 +276,88 @@ mod tests {
     #[test]
     fn stores_and_overwrites_flashblock_records() {
         let dir = tempdir().expect("tempdir");
-        let path = dir.path().join("flashblocks.sqlite");
-        let config = FlashblocksRecorderConfig::new(path);
-        let mut conn = open_db(&config).expect("open db");
+        let config = FlashblocksRecorderConfig::new(dir.path().join("flashblocks.mdbx"));
+        let db = open_db(&config).expect("open db");
 
-        insert_record(&mut conn, &record(1, Some(42), 0)).expect("insert first");
+        insert_record(&db, &record(Some(42), 0)).expect("insert first");
 
-        let replacement = record(2, Some(42), 0);
-        let expected_payload_rlp = alloy_rlp::encode(&replacement.payload);
-        insert_record(&mut conn, &replacement).expect("replace duplicate key");
+        let replacement = record(Some(42), 0);
+        let expected_payload_rlp = Bytes::from(alloy_rlp::encode(&replacement.payload));
+        insert_record(&db, &replacement).expect("replace duplicate key");
 
-        let columns = table_columns(&conn);
+        let tx = db.tx().expect("read tx");
+        let payload_id = replacement.payload.payload_id.0;
+        let stored_payload = tx
+            .get::<tables::Flashblocks>(flashblock_key(payload_id, 0))
+            .expect("read flashblock")
+            .expect("flashblock exists");
+        let stored_payload_id = tx
+            .get::<tables::BlockNumberToPayloadId>(42)
+            .expect("read block number index")
+            .expect("block number index exists");
+        let flashblocks_len = tx.entries::<tables::Flashblocks>().expect("entries");
+        let block_index_len = tx
+            .entries::<tables::BlockNumberToPayloadId>()
+            .expect("entries");
+        tx.commit().expect("commit read tx");
+
+        assert_eq!(stored_payload, expected_payload_rlp);
         assert_eq!(
-            columns,
-            vec![
-                "payload_id",
-                "flashblock_index",
-                "block_number",
-                "flashblock_payload_rlp"
-            ]
+            stored_payload_id,
+            Bytes::copy_from_slice(payload_id.as_slice())
         );
-
-        let (rows, block_number, flashblock_payload_rlp): (i64, i64, Vec<u8>) = conn
-            .query_row(
-                "SELECT COUNT(*), block_number, flashblock_payload_rlp FROM flashblocks",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .expect("query row");
-
-        assert_eq!(rows, 1);
-        assert_eq!(block_number, 42);
-        assert_eq!(flashblock_payload_rlp, expected_payload_rlp);
+        assert_eq!(flashblocks_len, 1);
+        assert_eq!(block_index_len, 1);
     }
 
     #[test]
-    fn stores_null_block_number_for_delta_flashblocks() {
+    fn only_base_flashblocks_index_block_number() {
         let dir = tempdir().expect("tempdir");
-        let config = FlashblocksRecorderConfig::new(dir.path().join("flashblocks.sqlite"));
-        let mut conn = open_db(&config).expect("open db");
+        let config = FlashblocksRecorderConfig::new(dir.path().join("flashblocks.mdbx"));
+        let db = open_db(&config).expect("open db");
 
-        insert_record(&mut conn, &record(1, None, 1)).expect("insert delta");
+        insert_record(&db, &record(None, 1)).expect("insert delta");
 
-        let block_number: Option<i64> = conn
-            .query_row("SELECT block_number FROM flashblocks", [], |row| row.get(0))
-            .expect("query row");
+        let tx = db.tx().expect("read tx");
+        let payload = tx
+            .get::<tables::Flashblocks>(flashblock_key(PayloadId::new([3; 8]).0, 1))
+            .expect("read flashblock");
+        let block_index_len = tx
+            .entries::<tables::BlockNumberToPayloadId>()
+            .expect("entries");
+        tx.commit().expect("commit read tx");
 
-        assert_eq!(block_number, None);
+        assert!(payload.is_some());
+        assert_eq!(block_index_len, 0);
     }
 
-    fn record(tx_count: usize, block_number: Option<u64>, index: u64) -> FlashblocksRecord {
+    #[test]
+    fn flashblock_key_checks() {
+        let payload_id = [3; 8];
+
+        assert_eq!(flashblock_key(payload_id, 1), vec![3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 1]);
+    }
+
+    #[test]
+    fn flashblock_key_orders_by_payload_then_index() {
+        let payload_id = [3; 8];
+
+        assert!(flashblock_key(payload_id, 1) < flashblock_key(payload_id, 2));
+        assert!(flashblock_key([2; 8], 10) < flashblock_key([3; 8], 0));
+    }
+
+    fn record(block_number: Option<u64>, index: u64) -> FlashblocksRecord {
         FlashblocksRecord {
-            block_number,
-            payload: payload(tx_count, block_number, index),
+            payload: payload(block_number, index),
         }
     }
 
-    fn payload(tx_count: usize, block_number: Option<u64>, index: u64) -> FlashblocksPayloadV1 {
+    fn payload(block_number: Option<u64>, index: u64) -> FlashblocksPayloadV1 {
         FlashblocksPayloadV1 {
             payload_id: PayloadId::new([3; 8]),
             index,
             diff: ExecutionPayloadFlashblockDeltaV1 {
                 block_hash: B256::from([5; 32]),
-                transactions: vec![Bytes::from(vec![0u8]); tx_count],
-                gas_used: 21_000 * tx_count as u64,
                 ..Default::default()
             },
             base: block_number.map(|block_number| ExecutionPayloadBaseV1 {
@@ -366,13 +368,5 @@ mod tests {
             }),
             ..Default::default()
         }
-    }
-
-    fn table_columns(conn: &Connection) -> Vec<String> {
-        let mut stmt = conn.prepare("PRAGMA table_info(flashblocks)").unwrap();
-        stmt.query_map([], |row| row.get::<_, String>(1))
-            .unwrap()
-            .map(|column| column.unwrap())
-            .collect()
     }
 }
