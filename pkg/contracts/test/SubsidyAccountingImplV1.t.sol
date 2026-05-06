@@ -299,10 +299,7 @@ contract SubsidyAccountingImplV1Test is Test {
 
     function _signalHash(uint256 sessionId, address[] memory addrs, address sender) internal pure returns (uint256) {
         SubsidyAccountingImplV1.ClaimSubsidySignal memory s = SubsidyAccountingImplV1.ClaimSubsidySignal({
-            tag: CLAIM_SUBSIDY_TAG,
-            sessionId: sessionId,
-            addAddresses: addrs,
-            msgSender: sender
+            tag: CLAIM_SUBSIDY_TAG, sessionId: sessionId, addAddresses: addrs, msgSender: sender
         });
         return uint256(keccak256(abi.encode(s))) >> 8;
     }

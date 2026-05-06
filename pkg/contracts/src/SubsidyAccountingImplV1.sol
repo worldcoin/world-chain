@@ -158,10 +158,7 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
             keccak256(
                 abi.encode(
                     ClaimSubsidySignal({
-                        tag: CLAIM_SUBSIDY_TAG,
-                        sessionId: sessionId,
-                        addAddresses: addAddresses,
-                        msgSender: msg.sender
+                        tag: CLAIM_SUBSIDY_TAG, sessionId: sessionId, addAddresses: addAddresses, msgSender: msg.sender
                     })
                 )
             )
@@ -171,10 +168,7 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
         if (totalBudget > type(uint128).max) revert BudgetOverflow(totalBudget);
 
         records[nullifier] = SubsidyRecord({
-            periodNumber: period,
-            remainingWei: uint128(totalBudget),
-            updateNonce: 0,
-            sessionId: sessionId
+            periodNumber: period, remainingWei: uint128(totalBudget), updateNonce: 0, sessionId: sessionId
         });
 
         _addAddresses(nullifier, addAddresses);
