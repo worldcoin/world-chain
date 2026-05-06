@@ -25,10 +25,12 @@ use revm::{
 use revm_primitives::TxKind;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     num::NonZeroUsize,
     sync::{Arc, Mutex},
-    time::Duration,
 };
+
+use crate::simulate_consts::*;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Request types
@@ -49,9 +51,6 @@ pub struct SimulateUnsignedUserOpRequest {
     #[serde(default)]
     pub call_gas_limit: Option<U256>,
 }
-
-/// Maximum gas limit accepted for a simulated call.
-pub const MAX_SIMULATION_GAS: u64 = 8_000_000;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Response types
@@ -121,6 +120,34 @@ pub struct TraceEntry {
     pub value: String,
 }
 
+/// Type of contract-management state change detected during simulation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ContractManagementType {
+    ContractCreation,
+    SelfDestruct,
+    ProxyUpgrade,
+    OwnershipChange,
+    ModuleChange,
+    /// EIP-7702 delegation. Reserved — not yet detected.
+    Authorization,
+}
+
+/// One contract-management action against a single target contract.
+///
+/// The `target` (the contract that was created/destroyed/upgraded/etc.) is
+/// the **map key** in `SimulateUnsignedUserOpResult.contract_management` —
+/// not a field on this struct.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContractManagementAction {
+    #[serde(rename = "type")]
+    pub action_type: ContractManagementType,
+    /// Address that initiated the CREATE/CREATE2 — populated only for
+    /// `CONTRACT_CREATION`. Omitted from JSON otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployer_address: Option<Address>,
+}
+
 /// Outcome of the simulation execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -144,6 +171,13 @@ pub struct SimulateUnsignedUserOpResult {
     pub asset_changes: Vec<AssetChange>,
     pub exposure_changes: Vec<ExposureChange>,
     pub trace: Vec<TraceEntry>,
+    /// Contract-management state changes detected during execution, keyed
+    /// by the **target contract address** (the contract created, destroyed,
+    /// upgraded, or whose ownership/modules changed).
+    #[serde(rename = "contract_management")]
+    // BTreeMap so JSON key order is deterministic — snapshot tests, response
+    // signing, and debugging all benefit from stable ordering.
+    pub contract_management: BTreeMap<Address, Vec<ContractManagementAction>>,
     /// Warning generation is not yet implemented. Always serialized as `[]`;
     /// reserved so callers can rely on the field being present.
     pub warnings: Vec<serde_json::Value>,
@@ -168,6 +202,23 @@ struct NativeTransfer {
     value: U256,
 }
 
+/// `(deployer, deployed_address)` for a successful CREATE/CREATE2.
+type ContractCreation = (Address, Address);
+
+/// One frame's tentative side-effects. Each CALL or CREATE pushes a fresh
+/// frame on entry; on successful exit it's merged into the parent (or
+/// committed to the inspector's final lists if outermost). On revert/halt
+/// it's dropped — exactly mirroring the EVM's own state-revert semantics
+/// so we never report effects that didn't actually land.
+#[derive(Debug, Default)]
+struct PendingFrame {
+    native_transfers: Vec<NativeTransfer>,
+    /// CREATE/CREATE2 deployments inside this frame.
+    contract_creations: Vec<ContractCreation>,
+    /// Addresses that executed SELFDESTRUCT inside this frame.
+    self_destructs: Vec<Address>,
+}
+
 /// Captures the call stack and native ETH transfers of a single simulation.
 ///
 /// Single-threaded by construction — the EVM drives it from one call site,
@@ -178,14 +229,15 @@ pub struct SimulationInspector {
     /// Full call stack trace — every CALL/STATICCALL/DELEGATECALL at every depth.
     /// Includes reverted calls so debug consumers can see what was attempted.
     traces: Vec<RawTrace>,
-    /// Native ETH transfers from successfully completed call frames only.
-    /// Reverted/halted frames don't actually move ETH, so their tentative
-    /// entries in `pending_frames` are dropped instead of being committed here.
+    /// Native ETH transfers committed by successful frames.
     native_transfers: Vec<NativeTransfer>,
-    /// One entry per active call frame, holding tentative native transfers
-    /// recorded on entry. On `call_end` the frame is popped: committed (or
-    /// merged into the parent frame) on success, dropped on revert/halt.
-    pending_frames: Vec<Vec<NativeTransfer>>,
+    /// CREATE/CREATE2 deployments committed by successful frames.
+    contract_creations: Vec<ContractCreation>,
+    /// SELFDESTRUCT calls committed by successful frames.
+    self_destructs: Vec<Address>,
+    /// Active frame stack. Each CALL or CREATE pushes a new entry; the
+    /// matching `*_end` pops it. See [`PendingFrame`].
+    pending_frames: Vec<PendingFrame>,
     /// Raw payload of the deepest frame that exited via REVERT. Set on the
     /// first non-ok `call_end` whose `InstructionResult` is `Revert` — since
     /// `call_end` fires bottom-up, that's the innermost reverter and so the
@@ -235,6 +287,34 @@ impl SimulationInspector {
             .take()
             .map(|output| decode_revert_reason(&output))
     }
+
+    /// Drain captured CREATE/CREATE2 deployments. Each entry is
+    /// `(deployer_address, deployed_address)`. Only successful, committed
+    /// creates are returned — frames that locally succeeded but were rolled
+    /// back by a reverting parent are dropped.
+    pub fn take_contract_creations(&mut self) -> Vec<ContractCreation> {
+        std::mem::take(&mut self.contract_creations)
+    }
+
+    /// Drain captured SELFDESTRUCT calls. Same commit semantics as
+    /// [`Self::take_contract_creations`].
+    pub fn take_self_destructs(&mut self) -> Vec<Address> {
+        std::mem::take(&mut self.self_destructs)
+    }
+
+    /// Merge a successful frame into its parent's pending list, or commit
+    /// it to the inspector's final lists if there's no parent.
+    fn commit_or_bubble(&mut self, frame: PendingFrame) {
+        if let Some(parent) = self.pending_frames.last_mut() {
+            parent.native_transfers.extend(frame.native_transfers);
+            parent.contract_creations.extend(frame.contract_creations);
+            parent.self_destructs.extend(frame.self_destructs);
+        } else {
+            self.native_transfers.extend(frame.native_transfers);
+            self.contract_creations.extend(frame.contract_creations);
+            self.self_destructs.extend(frame.self_destructs);
+        }
+    }
 }
 
 impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspector {
@@ -272,14 +352,14 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
             value,
         });
 
-        // Open a new frame for tentative native transfers. If this call frame
-        // reverts, `call_end` will drop the frame; only successful frames
-        // commit their transfers.
-        let mut frame = Vec::new();
+        // Open a new frame. If this call reverts, `call_end` will drop the
+        // frame and all its tentative effects (native transfers, creates,
+        // selfdestructs). Only successful frames commit.
+        let mut frame = PendingFrame::default();
         if let Some(value) = inputs.value.transfer()
             && value > U256::ZERO
         {
-            frame.push(NativeTransfer {
+            frame.native_transfers.push(NativeTransfer {
                 from: inputs.caller,
                 to: inputs.target_address,
                 value,
@@ -296,24 +376,65 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
         };
         let result = outcome.instruction_result();
         if !result.is_ok() {
-            // Frame reverted or halted — drop tentative native transfers
-            // either way. For explicit REVERTs, capture the deepest payload
-            // (the first one we see, since `call_end` fires bottom-up) so
-            // wrappers like EntryPoint's `FailedOp(...)` don't mask the
-            // root cause. Halts and the other `is_revert()` variants
-            // (CallTooDeep, OutOfFunds, EOF init-code) have empty outputs.
+            // Frame reverted or halted — drop everything tentative inside it.
+            // For explicit REVERTs, capture the deepest payload (the first
+            // one we see, since `call_end` fires bottom-up) so wrappers like
+            // EntryPoint's `FailedOp(...)` don't mask the root cause. Halts
+            // and the other `is_revert()` variants (CallTooDeep, OutOfFunds,
+            // EOF init-code) have empty outputs.
             if matches!(result, InstructionResult::Revert) && self.deepest_revert_payload.is_none()
             {
                 self.deepest_revert_payload = Some(outcome.output().clone());
             }
             return;
         }
-        // Successful frame: bubble transfers up to the parent's tentative list,
-        // or commit them as final if this was the outermost frame.
-        if let Some(parent) = self.pending_frames.last_mut() {
-            parent.extend(frame);
+        self.commit_or_bubble(frame);
+    }
+
+    fn create(
+        &mut self,
+        _context: &mut CTX,
+        _inputs: &mut revm::interpreter::CreateInputs,
+    ) -> Option<revm::interpreter::CreateOutcome> {
+        // Mirror `call`: each CREATE/CREATE2 gets its own frame so a parent
+        // revert rolls the deployment back atomically with everything else
+        // that ran inside its constructor.
+        self.pending_frames.push(PendingFrame::default());
+        None
+    }
+
+    fn create_end(
+        &mut self,
+        _context: &mut CTX,
+        inputs: &revm::interpreter::CreateInputs,
+        outcome: &mut revm::interpreter::CreateOutcome,
+    ) {
+        let Some(mut frame) = self.pending_frames.pop() else {
+            return;
+        };
+        if !outcome.instruction_result().is_ok() {
+            // CREATE itself failed — drop the frame.
+            return;
+        }
+        // Successful create: record `(deployer, deployed)` into the create
+        // frame so it rolls back atomically with anything its constructor did,
+        // then bubble the frame up to the parent.
+        if let Some(addr) = outcome.address {
+            frame.contract_creations.push((inputs.caller(), addr));
+        }
+        self.commit_or_bubble(frame);
+    }
+
+    fn selfdestruct(&mut self, contract: Address, _target: Address, _value: U256) {
+        // SELFDESTRUCT runs inside the current call frame and is rolled
+        // back along with it on revert. Record into the topmost pending
+        // frame so the existing commit-or-drop machinery handles rollback.
+        if let Some(top) = self.pending_frames.last_mut() {
+            top.self_destructs.push(contract);
         } else {
-            self.native_transfers.extend(frame);
+            // No frame — outermost transact direct to a SELFDESTRUCTing
+            // contract (rare but legal). Commit immediately.
+            self.self_destructs.push(contract);
         }
     }
 }
@@ -342,19 +463,8 @@ pub trait SimulateApi {
 
 /// Maximum number of token metadata entries kept across requests.
 ///
-/// Bounded to prevent unbounded memory growth from adversarial UserOps that
-/// emit Transfer events from many fresh token contracts.
-const METADATA_CACHE_CAPACITY: usize = 1000;
-
 /// Cross-request cache for resolved token metadata. LRU-bounded.
 type MetadataCache = Arc<Mutex<LruCache<Address, AssetInfo>>>;
-
-/// Hard wall-clock cap on a single simulation, observed by the client. Beyond
-/// this we return `internal error: simulation deadline exceeded`. The blocking
-/// task continues to drain on the rayon pool until the EVM finishes (bounded
-/// by `MAX_SIMULATION_GAS`), holding its concurrency permit until then so the
-/// guard correctly accounts for slow simulations.
-pub const SIMULATION_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Relax EVM rules so simulations succeed regardless of the caller's gas
 /// pricing, balance, or block limits — matching `eth_call` semantics. The
@@ -619,11 +729,14 @@ where
         })?;
         let mut exposure_changes = parse_exposure_changes(&logs);
 
-        // 10. Extract trace and native transfers from the inspector. The EVM
-        //     owns it; recover a `&mut` via `components_mut()` and drain.
+        // 10. Extract trace, native transfers, and contract-management
+        //     side-effects from the inspector. The EVM owns it; recover a
+        //     `&mut` via `components_mut()` and drain.
         let (_, inspector, _) = evm.components_mut();
         let trace = inspector.take_trace_entries();
         asset_changes.extend(inspector.take_native_asset_changes());
+        let inspector_creations = inspector.take_contract_creations();
+        let inspector_destructs = inspector.take_self_destructs();
 
         // `revert_reason` is the *root cause* — the deepest reverted frame's
         // payload — so consumers see the contract-specific custom error from
@@ -656,6 +769,38 @@ where
             &mut exposure_changes,
         );
 
+        // 12. Assemble `contract_management` from inspector-captured
+        //     CREATE/SELFDESTRUCT plus event-derived proxy / ownership /
+        //     module changes. The map is keyed by the **target** contract
+        //     address (the one whose state changed).
+        // BTreeMap for deterministic JSON key order (see field doc).
+        let mut contract_management: BTreeMap<Address, Vec<ContractManagementAction>> =
+            BTreeMap::new();
+        for (deployer, deployed) in inspector_creations {
+            contract_management
+                .entry(deployed)
+                .or_default()
+                .push(ContractManagementAction {
+                    action_type: ContractManagementType::ContractCreation,
+                    deployer_address: Some(deployer),
+                });
+        }
+        for destroyed in inspector_destructs {
+            contract_management
+                .entry(destroyed)
+                .or_default()
+                .push(ContractManagementAction {
+                    action_type: ContractManagementType::SelfDestruct,
+                    deployer_address: None,
+                });
+        }
+        for (target, action) in parse_contract_management_events(&logs) {
+            contract_management.entry(target).or_default().push(action);
+        }
+        for (target, action) in parse_contract_management_state_diff(&result_and_state.state) {
+            contract_management.entry(target).or_default().push(action);
+        }
+
         Ok(SimulateUnsignedUserOpResult {
             status,
             revert_reason,
@@ -664,44 +809,15 @@ where
             asset_changes,
             exposure_changes,
             trace,
+            contract_management,
             warnings: vec![],
         })
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Event signatures (keccak256 of canonical event strings)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/// `Transfer(address,address,uint256)` — ERC-20 and ERC-721
-const TRANSFER_TOPIC: B256 =
-    alloy_primitives::b256!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef");
-
-/// `TransferSingle(address,address,address,uint256,uint256)` — ERC-1155
-const TRANSFER_SINGLE_TOPIC: B256 =
-    alloy_primitives::b256!("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62");
-
-/// `TransferBatch(address,address,address,uint256[],uint256[])` — ERC-1155
-const TRANSFER_BATCH_TOPIC: B256 =
-    alloy_primitives::b256!("4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb");
-
-/// `Approval(address,address,uint256)` — ERC-20 and ERC-721
-const APPROVAL_TOPIC: B256 =
-    alloy_primitives::b256!("8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925");
-
-/// `ApprovalForAll(address,address,bool)` — ERC-721 / ERC-1155
-const APPROVAL_FOR_ALL_TOPIC: B256 =
-    alloy_primitives::b256!("17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31");
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // Log parsing — asset changes
 // ═══════════════════════════════════════════════════════════════════════════════
-
-/// Maximum number of (id, value) pairs accepted in a single ERC-1155 TransferBatch log.
-///
-/// Bounded to prevent adversarially crafted logs from forcing huge allocations
-/// in `decode_batch_transfer_data`.
-pub const MAX_BATCH_TRANSFERS: usize = 1000;
 
 pub fn parse_asset_changes(
     logs: &[alloy_primitives::Log],
@@ -919,22 +1035,104 @@ pub fn parse_exposure_changes(logs: &[alloy_primitives::Log]) -> Vec<ExposureCha
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Revert reason decoding
+// Log parsing — contract management
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// `Error(string)` selector — `keccak256("Error(string)")[..4]`.
-const ERROR_STRING_SELECTOR: [u8; 4] = [0x08, 0xc3, 0x79, 0xa0];
+/// Detect proxy upgrades, ownership changes, and Safe module changes from
+/// emitted events. Returns `(target_contract, action)` pairs — the caller
+/// merges these with inspector-captured CONTRACT_CREATION / SELF_DESTRUCT
+/// entries into the response's `contract_management` map.
+///
+/// The map key on the wire is the address of the **target** (i.e. the
+/// proxy / owned contract / Safe), which is just `log.address` for every
+/// event we care about here.
+pub fn parse_contract_management_events(
+    logs: &[alloy_primitives::Log],
+) -> Vec<(Address, ContractManagementAction)> {
+    let mut out = Vec::new();
+    for log in logs {
+        let topics = log.topics();
+        let Some(topic0) = topics.first() else {
+            continue;
+        };
+        let action_type = match *topic0 {
+            UPGRADED_TOPIC | BEACON_UPGRADED_TOPIC | DIAMOND_CUT_TOPIC => {
+                ContractManagementType::ProxyUpgrade
+            }
+            // AdminChanged is admin-slot rotation; a new admin can swap the
+            // implementation, so we surface it as an ownership-class change.
+            ADMIN_CHANGED_TOPIC => ContractManagementType::OwnershipChange,
+            OWNERSHIP_TRANSFERRED_TOPIC => {
+                // OZ `Ownable` constructors emit `OwnershipTransferred(0x0, deployer)`
+                // on every deployment. Suppress the constructor case so newly
+                // deployed contracts don't surface a phantom OWNERSHIP_CHANGE.
+                if topics.len() >= 2 && address_from_topic(topics[1]) == Address::ZERO {
+                    continue;
+                }
+                ContractManagementType::OwnershipChange
+            }
+            SAFE_ADDED_OWNER_TOPIC | SAFE_REMOVED_OWNER_TOPIC | SAFE_CHANGED_THRESHOLD_TOPIC => {
+                ContractManagementType::OwnershipChange
+            }
+            SAFE_ENABLED_MODULE_TOPIC | SAFE_DISABLED_MODULE_TOPIC => {
+                ContractManagementType::ModuleChange
+            }
+            _ => continue,
+        };
+        out.push((
+            log.address,
+            ContractManagementAction {
+                action_type,
+                deployer_address: None,
+            },
+        ));
+    }
+    out
+}
 
-/// `Panic(uint256)` selector — `keccak256("Panic(uint256)")[..4]`.
-const PANIC_UINT256_SELECTOR: [u8; 4] = [0x4e, 0x48, 0x7b, 0x71];
+/// Detect proxy upgrades from raw storage-slot writes — signature-agnostic, so
+/// it catches custom or non-emitting proxies that event matching misses.
+///
+/// Walks the post-execution state diff and yields `(target, action)` for each
+/// account that wrote to a recognised proxy slot with a value different from
+/// pre-state. Admin-slot writes surface as `OWNERSHIP_CHANGE` (privilege
+/// rotation); all other recognised slots surface as `PROXY_UPGRADE`.
+pub fn parse_contract_management_state_diff<S>(
+    state: &std::collections::HashMap<Address, revm::state::Account, S>,
+) -> Vec<(Address, ContractManagementAction)>
+where
+    S: std::hash::BuildHasher,
+{
+    let mut out = Vec::new();
+    for (addr, account) in state {
+        for (slot_key, slot) in &account.storage {
+            if slot.original_value() == slot.present_value() {
+                continue;
+            }
+            let key_b256: B256 = (*slot_key).into();
+            let action_type = match key_b256 {
+                EIP1967_IMPLEMENTATION_SLOT
+                | EIP1967_BEACON_SLOT
+                | EIP1822_PROXIABLE_SLOT
+                | OZ_LEGACY_IMPLEMENTATION_SLOT => ContractManagementType::ProxyUpgrade,
+                EIP1967_ADMIN_SLOT => ContractManagementType::OwnershipChange,
+                _ => continue,
+            };
+            out.push((
+                *addr,
+                ContractManagementAction {
+                    action_type,
+                    deployer_address: None,
+                },
+            ));
+        }
+    }
+    out
+}
 
-/// Minimum payload length for a well-formed `Error(string)` revert:
-/// selector(4) + string-offset(32) + string-length(32).
-const MIN_ERROR_STRING_LEN: usize = 4 + 32 + 32;
-
-/// Minimum payload length for a well-formed `Panic(uint256)` revert:
-/// selector(4) + uint256(32).
-const MIN_PANIC_UINT256_LEN: usize = 4 + 32;
+// ═══════════════════════════════════════════════════════════════════════════════
+// Revert reason decoding
+// ═══════════════════════════════════════════════════════════════════════════════
 
 /// Solidity panic codes — see the [Solidity docs][1] for the canonical list.
 /// Sentinel returned when the panic code is too large to fit in u64.
@@ -1006,13 +1204,6 @@ pub fn decode_revert_reason(output: &Bytes) -> String {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Selector-to-name mapping
 // ═══════════════════════════════════════════════════════════════════════════════
-
-/// Well-known ERC-20 metadata view selectors. Defined here so they're shared
-/// between trace decoding (`selector_to_name`) and the metadata resolver, which
-/// needs the raw bytes to make the calls.
-pub const NAME_SELECTOR: [u8; 4] = [0x06, 0xfd, 0xde, 0x03]; // name()
-pub const SYMBOL_SELECTOR: [u8; 4] = [0x95, 0xd8, 0x9b, 0x41]; // symbol()
-pub const DECIMALS_SELECTOR: [u8; 4] = [0x31, 0x3c, 0xe5, 0x67]; // decimals()
 
 /// Best-effort decode of a 4-byte function selector to a human-readable name.
 pub fn selector_to_name(selector: [u8; 4]) -> Option<&'static str> {
@@ -1252,7 +1443,7 @@ fn internal_err(msg: impl std::fmt::Display) -> jsonrpsee::types::ErrorObjectOwn
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     /// Stand-in "malicious payload": anything that pegs a worker for longer
     /// than `SIMULATION_TIMEOUT`. Crafting bytecode that reliably blows

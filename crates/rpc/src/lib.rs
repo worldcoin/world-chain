@@ -19,3 +19,5 @@ pub use core::{EthApiExtServer, WorldChainEthApiExt};
 
 pub mod simulate;
 pub use simulate::{Simulate, SimulateApiServer};
+
+pub mod simulate_consts;

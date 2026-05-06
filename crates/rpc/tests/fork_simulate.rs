@@ -20,6 +20,7 @@ use alloy_sol_types::{SolCall, sol};
 use op_revm::{OpSpecId, OpTransaction};
 use reth_evm::{Evm as RethEvm, EvmFactory};
 use revm::{
+    bytecode::Bytecode,
     context::{
         BlockEnv, CfgEnv, TxEnv,
         result::{ExecutionResult, Output},
@@ -30,8 +31,9 @@ use revm_database::{AlloyDB, CacheDB, WrapDatabaseAsync};
 use revm_primitives::TxKind;
 
 use world_chain_rpc::simulate::{
-    AssetType, SimulationInspector, decode_revert_reason, parse_asset_changes,
-    parse_exposure_changes, relax_cfg_for_simulation, selector_to_name,
+    AssetType, ContractManagementType, SimulationInspector, decode_revert_reason,
+    parse_asset_changes, parse_contract_management_events, parse_exposure_changes,
+    relax_cfg_for_simulation, selector_to_name,
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -834,18 +836,15 @@ async fn test_trace_detects_malicious_safe_call() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Blockaid scenario coverage
+// Detection scenario coverage
 //
-// The five tests below mirror scenarios from `app-backend-main`'s Blockaid
-// suite (`blockaid.service.unit.spec.ts`). We're asserting on the *raw*
-// detection output (`assetChanges` / `exposureChanges`) — Blockaid's IN/OUT
-// classification, humanReadableDiff formatting, and Permit2 filtering are
-// downstream concerns the consumer applies on top of this response.
+// Asserts on the raw detection output (`assetChanges` / `exposureChanges`).
+// IN/OUT classification, humanReadableDiff formatting, and Permit2 filtering
+// are downstream concerns the consumer applies on top of this response.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Blockaid: `simple-permit.ts` / `consists-exposures.ts` — an `approve()`
-/// call must produce one `ExposureChange` and **zero** `AssetChange`s. The
-/// EVM also reports a successful execution (no revert).
+/// `approve()` call must produce one `ExposureChange` and **zero**
+/// `AssetChange`s. The EVM also reports a successful execution (no revert).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_simulate_real_approve_emits_only_exposure() {
     let mut db = make_forked_db();
@@ -896,8 +895,8 @@ async fn test_simulate_real_approve_emits_only_exposure() {
     assert!(!exposure_changes[0].is_approved_for_all);
 }
 
-/// Blockaid: `atomic-vault-withdraw-send.ts` — a single tx emits two
-/// `Transfer` events on the same token (`vault → user`, `user → final`).
+/// A single tx emits two `Transfer` events on the same token
+/// (`vault → user`, `user → final`).
 /// Both must surface as independent `AssetChange`s so the consumer sees the
 /// full hop chain.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -936,10 +935,9 @@ async fn test_parse_atomic_double_transfer_same_token() {
     }
 }
 
-/// Blockaid: `multiple-nfts.ts` — five ERC-721 Transfer events (token IDs
-/// 73..=77) inside one tx surface as five distinct `AssetChange`s with
-/// `Erc721` type, identical from/to, but each carrying a distinct
-/// `tokenId`.
+/// Five ERC-721 Transfer events (token IDs 73..=77) inside one tx surface as
+/// five distinct `AssetChange`s with `Erc721` type, identical from/to, but
+/// each carrying a distinct `tokenId`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_parse_batch_nft_transfers() {
     let collection = address!("000000000000000000000000000000000000721a");
@@ -976,9 +974,8 @@ async fn test_parse_batch_nft_transfers() {
     }
 }
 
-/// Blockaid: `non-standard-tokens.ts` — one tx mixes ERC-20, ERC-721, and
-/// ERC-1155 movements. The parser classifies each independently from its
-/// log topic count / event signature.
+/// One tx mixes ERC-20, ERC-721, and ERC-1155 movements. The parser
+/// classifies each independently from its log topic count / event signature.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_parse_mixed_token_types_in_one_response() {
     let erc20 = WLD;
@@ -1041,9 +1038,9 @@ async fn test_parse_mixed_token_types_in_one_response() {
     assert_eq!(changes[2].raw_amount, "10");
 }
 
-/// Blockaid: `consists-exposures.ts` — one tx grants approvals on two
-/// different tokens to two different spenders. Asset diffs stay empty;
-/// both approvals surface as `ExposureChange`s with their own amounts.
+/// One tx grants approvals on two different tokens to two different
+/// spenders. Asset diffs stay empty; both approvals surface as
+/// `ExposureChange`s with their own amounts.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_parse_multiple_approvals_yields_exposures() {
     let owner = address!("00000000000000000000000000000000DeaDBeef");
@@ -1081,4 +1078,321 @@ async fn test_parse_multiple_approvals_yields_exposures() {
         assert_eq!(c.owner, owner);
         assert!(!c.is_approved_for_all);
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Contract management
+//
+// Five action types — CONTRACT_CREATION, SELF_DESTRUCT, PROXY_UPGRADE,
+// OWNERSHIP_CHANGE, MODULE_CHANGE.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// `Upgraded(address)` event (EIP-1967 / UUPS) → `PROXY_UPGRADE` keyed on the
+/// proxy address.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_parse_proxy_upgrade_event() {
+    let proxy = address!("0000000000000000000000000000000000000abc");
+    let new_impl = address!("000000000000000000000000000000000000beef");
+    let log = alloy_primitives::Log::new(
+        proxy,
+        vec![
+            alloy_primitives::b256!(
+                "bc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b"
+            ),
+            alloy_primitives::B256::left_padding_from(new_impl.as_slice()),
+        ],
+        Bytes::new(),
+    )
+    .unwrap();
+
+    let actions = parse_contract_management_events(&[log]);
+    assert_eq!(actions.len(), 1);
+    assert_eq!(actions[0].0, proxy);
+    assert_eq!(
+        actions[0].1.action_type,
+        ContractManagementType::ProxyUpgrade
+    );
+    assert!(actions[0].1.deployer_address.is_none());
+}
+
+/// All four ownership-change topics (OZ `OwnershipTransferred`, Safe
+/// `AddedOwner` / `RemovedOwner` / `ChangedThreshold`) collapse to
+/// `OWNERSHIP_CHANGE` keyed on the emitter.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_parse_ownership_change_events() {
+    let oz_owned = address!("000000000000000000000000000000000000a0a0");
+    let safe = address!("000000000000000000000000000000000000ffff");
+    let prev = address!("00000000000000000000000000000000000000aa");
+    let next = address!("00000000000000000000000000000000000000bb");
+
+    let oz_log = alloy_primitives::Log::new(
+        oz_owned,
+        vec![
+            alloy_primitives::b256!(
+                "8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0"
+            ),
+            alloy_primitives::B256::left_padding_from(prev.as_slice()),
+            alloy_primitives::B256::left_padding_from(next.as_slice()),
+        ],
+        Bytes::new(),
+    )
+    .unwrap();
+    let added = alloy_primitives::Log::new(
+        safe,
+        vec![
+            alloy_primitives::b256!(
+                "9465fa0c962cc76958e6373a993326400c1c94f8be2fe3a952adfa7f60b2ea26"
+            ),
+            alloy_primitives::B256::left_padding_from(next.as_slice()),
+        ],
+        Bytes::new(),
+    )
+    .unwrap();
+    let removed = alloy_primitives::Log::new(
+        safe,
+        vec![
+            alloy_primitives::b256!(
+                "f8d49fc529812e9a7c5c50e69c20f0dccc0db8fa95c98bc58cc9a4f1c1299eaf"
+            ),
+            alloy_primitives::B256::left_padding_from(prev.as_slice()),
+        ],
+        Bytes::new(),
+    )
+    .unwrap();
+    let changed = alloy_primitives::Log::new(
+        safe,
+        vec![alloy_primitives::b256!(
+            "610f7ff2b304ae8903c3de74c60c6ab1f7d6226b3f52c5161905bb5ad4039c93"
+        )],
+        U256::from(2u64).to_be_bytes_vec().into(),
+    )
+    .unwrap();
+
+    let actions = parse_contract_management_events(&[oz_log, added, removed, changed]);
+    assert_eq!(actions.len(), 4);
+    for (target, action) in &actions {
+        assert!(*target == oz_owned || *target == safe);
+        assert_eq!(action.action_type, ContractManagementType::OwnershipChange);
+    }
+}
+
+/// Safe `EnabledModule` / `DisabledModule` → `MODULE_CHANGE`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_parse_module_change_events() {
+    let safe = address!("000000000000000000000000000000000000ffff");
+    let module = address!("0000000000000000000000000000000000000d01");
+
+    let enabled = alloy_primitives::Log::new(
+        safe,
+        vec![
+            alloy_primitives::b256!(
+                "ecdf3a3effea5783a3c4c2140e677577666428d44ed9d474a0b3a4c9943f8440"
+            ),
+            alloy_primitives::B256::left_padding_from(module.as_slice()),
+        ],
+        Bytes::new(),
+    )
+    .unwrap();
+    let disabled = alloy_primitives::Log::new(
+        safe,
+        vec![
+            alloy_primitives::b256!(
+                "aab4fa2b463f581b2b32cb3b7e3b704b9ce37cc209b5fb4d77e593ace4054276"
+            ),
+            alloy_primitives::B256::left_padding_from(module.as_slice()),
+        ],
+        Bytes::new(),
+    )
+    .unwrap();
+
+    let actions = parse_contract_management_events(&[enabled, disabled]);
+    assert_eq!(actions.len(), 2);
+    for (target, action) in &actions {
+        assert_eq!(*target, safe);
+        assert_eq!(action.action_type, ContractManagementType::ModuleChange);
+    }
+}
+
+/// Non-management logs (Transfer/Approval/etc.) are ignored.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_parse_contract_management_ignores_unrelated_logs() {
+    let log = alloy_primitives::Log::new(
+        WLD,
+        vec![
+            alloy_primitives::b256!(
+                "ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+            ),
+            alloy_primitives::B256::ZERO,
+            alloy_primitives::B256::ZERO,
+        ],
+        U256::from(1u64).to_be_bytes_vec().into(),
+    )
+    .unwrap();
+    assert!(parse_contract_management_events(&[log]).is_empty());
+}
+
+// ─── Inspector hooks (CREATE / SELFDESTRUCT) ─────────────────────────────────
+
+/// Runtime bytecode that, when CALLed, executes a single CREATE with empty
+/// init code. Decoded:
+///
+/// ```text
+/// PUSH1 0x00 PUSH1 0x00 PUSH1 0x00 CREATE STOP
+/// ```
+///
+/// Deploys an empty contract, leaves its address on the stack, then halts.
+const CREATE_TRAMPOLINE_BYTECODE: &[u8] = &[0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0xf0, 0x00];
+
+/// Runtime bytecode that does CREATE then REVERTs the parent frame. Used to
+/// verify the inspector rolls back the captured creation when the surrounding
+/// call frame reverts (rather than reporting a phantom deployment).
+///
+/// `PUSH1 0 PUSH1 0 PUSH1 0 CREATE POP PUSH1 0 PUSH1 0 REVERT`
+const CREATE_THEN_REVERT_BYTECODE: &[u8] = &[
+    0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0xf0, 0x50, 0x60, 0x00, 0x60, 0x00, 0xfd,
+];
+
+fn install_runtime_code(
+    db: &mut CacheDB<
+        WrapDatabaseAsync<
+            AlloyDB<alloy_provider_v1::network::Ethereum, alloy_provider_v1::RootProvider>,
+        >,
+    >,
+    addr: Address,
+    code: &'static [u8],
+) {
+    let bytecode = Bytecode::new_raw(Bytes::from_static(code));
+    let info = AccountInfo {
+        balance: U256::ZERO,
+        nonce: 1,
+        code_hash: bytecode.hash_slow(),
+        code: Some(bytecode),
+        ..Default::default()
+    };
+    db.insert_account_info(addr, info);
+}
+
+/// CALL → contract that does CREATE → inspector records
+/// `(deployer = trampoline, deployed = some_address)`. Verifies the CREATE
+/// hook fires inside a parent call frame.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_inspector_captures_create_via_call_frame() {
+    let mut db = make_forked_db();
+    let caller = address!("00000000000000000000000000ffffffffffffff");
+    let trampoline = address!("000000000000000000000000000000000000c0de");
+    db.insert_account_info(
+        caller,
+        AccountInfo {
+            balance: U256::from(10u128.pow(21)),
+            ..Default::default()
+        },
+    );
+    install_runtime_code(&mut db, trampoline, CREATE_TRAMPOLINE_BYTECODE);
+
+    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+        &mut db,
+        simulate_evm_env(),
+        SimulationInspector::default(),
+    );
+    let result = RethEvm::transact(
+        &mut evm,
+        OpTx(OpTransaction {
+            base: TxEnv {
+                caller,
+                kind: TxKind::Call(trampoline),
+                data: Bytes::new(),
+                gas_limit: 200_000,
+                gas_price: 0,
+                chain_id: Some(CHAIN_ID),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    )
+    .expect("call must succeed");
+    assert!(matches!(result.result, ExecutionResult::Success { .. }));
+
+    let (_, inspector, _) = evm.components_mut();
+    let creations = inspector.take_contract_creations();
+    assert_eq!(creations.len(), 1, "exactly one CREATE captured");
+    let (deployer, deployed) = creations[0];
+    assert_eq!(deployer, trampoline, "deployer is the trampoline contract");
+    assert_ne!(deployed, Address::ZERO, "deployed address populated");
+}
+
+/// CREATE inside a frame that subsequently REVERTs is rolled back: the
+/// inspector reports zero creations even though the CREATE opcode itself
+/// succeeded. Mirrors the EVM's own atomicity guarantee.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_inspector_drops_create_on_parent_revert() {
+    let mut db = make_forked_db();
+    let caller = address!("00000000000000000000000000ffffffffffffff");
+    let trampoline = address!("000000000000000000000000000000000000dead");
+    db.insert_account_info(
+        caller,
+        AccountInfo {
+            balance: U256::from(10u128.pow(21)),
+            ..Default::default()
+        },
+    );
+    install_runtime_code(&mut db, trampoline, CREATE_THEN_REVERT_BYTECODE);
+
+    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+        &mut db,
+        simulate_evm_env(),
+        SimulationInspector::default(),
+    );
+    let result = RethEvm::transact(
+        &mut evm,
+        OpTx(OpTransaction {
+            base: TxEnv {
+                caller,
+                kind: TxKind::Call(trampoline),
+                data: Bytes::new(),
+                gas_limit: 200_000,
+                gas_price: 0,
+                chain_id: Some(CHAIN_ID),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    )
+    .expect("transact returns Ok even on inner REVERT");
+    assert!(matches!(result.result, ExecutionResult::Revert { .. }));
+
+    let (_, inspector, _) = evm.components_mut();
+    let creations = inspector.take_contract_creations();
+    assert!(
+        creations.is_empty(),
+        "create must be rolled back with the parent frame, got {creations:?}"
+    );
+}
+
+/// JSON wire shape: `type` is SCREAMING_SNAKE_CASE, `deployer_address` uses
+/// snake_case, and is omitted for non-CREATION actions.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_contract_management_action_serialization() {
+    use world_chain_rpc::simulate::ContractManagementAction;
+
+    let creation = ContractManagementAction {
+        action_type: ContractManagementType::ContractCreation,
+        deployer_address: Some(address!("000000000000000000000000000000000000aaaa")),
+    };
+    let json = serde_json::to_value(&creation).unwrap();
+    assert_eq!(json["type"], "CONTRACT_CREATION");
+    assert_eq!(
+        json["deployer_address"],
+        "0x000000000000000000000000000000000000aaaa"
+    );
+
+    let upgrade = ContractManagementAction {
+        action_type: ContractManagementType::ProxyUpgrade,
+        deployer_address: None,
+    };
+    let json = serde_json::to_value(&upgrade).unwrap();
+    assert_eq!(json["type"], "PROXY_UPGRADE");
+    assert!(
+        json.get("deployer_address").is_none(),
+        "deployer_address must be omitted when None"
+    );
 }
