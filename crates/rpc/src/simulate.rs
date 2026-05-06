@@ -28,8 +28,9 @@ use std::{
     collections::BTreeMap,
     num::NonZeroUsize,
     sync::{Arc, Mutex},
-    time::Duration,
 };
+
+use crate::simulate_consts::*;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Request types
@@ -50,9 +51,6 @@ pub struct SimulateUnsignedUserOpRequest {
     #[serde(default)]
     pub call_gas_limit: Option<U256>,
 }
-
-/// Maximum gas limit accepted for a simulated call.
-pub const MAX_SIMULATION_GAS: u64 = 8_000_000;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Response types
@@ -465,19 +463,8 @@ pub trait SimulateApi {
 
 /// Maximum number of token metadata entries kept across requests.
 ///
-/// Bounded to prevent unbounded memory growth from adversarial UserOps that
-/// emit Transfer events from many fresh token contracts.
-const METADATA_CACHE_CAPACITY: usize = 1000;
-
 /// Cross-request cache for resolved token metadata. LRU-bounded.
 type MetadataCache = Arc<Mutex<LruCache<Address, AssetInfo>>>;
-
-/// Hard wall-clock cap on a single simulation, observed by the client. Beyond
-/// this we return `internal error: simulation deadline exceeded`. The blocking
-/// task continues to drain on the rayon pool until the EVM finishes (bounded
-/// by `MAX_SIMULATION_GAS`), holding its concurrency permit until then so the
-/// guard correctly accounts for slow simulations.
-pub const SIMULATION_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Relax EVM rules so simulations succeed regardless of the caller's gas
 /// pricing, balance, or block limits — matching `eth_call` semantics. The
@@ -810,6 +797,9 @@ where
         for (target, action) in parse_contract_management_events(&logs) {
             contract_management.entry(target).or_default().push(action);
         }
+        for (target, action) in parse_contract_management_state_diff(&result_and_state.state) {
+            contract_management.entry(target).or_default().push(action);
+        }
 
         Ok(SimulateUnsignedUserOpResult {
             status,
@@ -826,77 +816,8 @@ where
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Event signatures (keccak256 of canonical event strings)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/// `Transfer(address,address,uint256)` — ERC-20 and ERC-721
-const TRANSFER_TOPIC: B256 =
-    alloy_primitives::b256!("ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef");
-
-/// `TransferSingle(address,address,address,uint256,uint256)` — ERC-1155
-const TRANSFER_SINGLE_TOPIC: B256 =
-    alloy_primitives::b256!("c3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62");
-
-/// `TransferBatch(address,address,address,uint256[],uint256[])` — ERC-1155
-const TRANSFER_BATCH_TOPIC: B256 =
-    alloy_primitives::b256!("4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb");
-
-/// `Approval(address,address,uint256)` — ERC-20 and ERC-721
-const APPROVAL_TOPIC: B256 =
-    alloy_primitives::b256!("8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925");
-
-/// `ApprovalForAll(address,address,bool)` — ERC-721 / ERC-1155
-const APPROVAL_FOR_ALL_TOPIC: B256 =
-    alloy_primitives::b256!("17307eab39ab6107e8899845ad3d59bd9653f200f220920489ca2b5937696c31");
-
-// ─── Contract management ─────────────────────────────────────────────────────
-
-/// `Upgraded(address)` — EIP-1967 / UUPS implementation upgrade.
-const UPGRADED_TOPIC: B256 =
-    alloy_primitives::b256!("bc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b");
-
-/// `BeaconUpgraded(address)` — EIP-1967 beacon proxy upgrade.
-const BEACON_UPGRADED_TOPIC: B256 =
-    alloy_primitives::b256!("1cf3b03a6cf19fa2baba4df148e9dcabedea7f8a5c07840e207e5c089be95d3e");
-
-/// `AdminChanged(address,address)` — EIP-1967 proxy admin rotation. A
-/// privilege-escalation vector: the new admin can swap the implementation.
-const ADMIN_CHANGED_TOPIC: B256 =
-    alloy_primitives::b256!("7e644d79422f17c01e4894b5f4f588d331ebfa28653d42ae832dc59e38c9798f");
-
-/// `OwnershipTransferred(address,address)` — OpenZeppelin `Ownable`.
-const OWNERSHIP_TRANSFERRED_TOPIC: B256 =
-    alloy_primitives::b256!("8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0");
-
-/// Safe `AddedOwner(address)`.
-const SAFE_ADDED_OWNER_TOPIC: B256 =
-    alloy_primitives::b256!("9465fa0c962cc76958e6373a993326400c1c94f8be2fe3a952adfa7f60b2ea26");
-
-/// Safe `RemovedOwner(address)`.
-const SAFE_REMOVED_OWNER_TOPIC: B256 =
-    alloy_primitives::b256!("f8d49fc529812e9a7c5c50e69c20f0dccc0db8fa95c98bc58cc9a4f1c1299eaf");
-
-/// Safe `ChangedThreshold(uint256)`.
-const SAFE_CHANGED_THRESHOLD_TOPIC: B256 =
-    alloy_primitives::b256!("610f7ff2b304ae8903c3de74c60c6ab1f7d6226b3f52c5161905bb5ad4039c93");
-
-/// Safe `EnabledModule(address)`.
-const SAFE_ENABLED_MODULE_TOPIC: B256 =
-    alloy_primitives::b256!("ecdf3a3effea5783a3c4c2140e677577666428d44ed9d474a0b3a4c9943f8440");
-
-/// Safe `DisabledModule(address)`.
-const SAFE_DISABLED_MODULE_TOPIC: B256 =
-    alloy_primitives::b256!("aab4fa2b463f581b2b32cb3b7e3b704b9ce37cc209b5fb4d77e593ace4054276");
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // Log parsing — asset changes
 // ═══════════════════════════════════════════════════════════════════════════════
-
-/// Maximum number of (id, value) pairs accepted in a single ERC-1155 TransferBatch log.
-///
-/// Bounded to prevent adversarially crafted logs from forcing huge allocations
-/// in `decode_batch_transfer_data`.
-pub const MAX_BATCH_TRANSFERS: usize = 1000;
 
 pub fn parse_asset_changes(
     logs: &[alloy_primitives::Log],
@@ -1135,7 +1056,9 @@ pub fn parse_contract_management_events(
             continue;
         };
         let action_type = match *topic0 {
-            UPGRADED_TOPIC | BEACON_UPGRADED_TOPIC => ContractManagementType::ProxyUpgrade,
+            UPGRADED_TOPIC | BEACON_UPGRADED_TOPIC | DIAMOND_CUT_TOPIC => {
+                ContractManagementType::ProxyUpgrade
+            }
             // AdminChanged is admin-slot rotation; a new admin can swap the
             // implementation, so we surface it as an ownership-class change.
             ADMIN_CHANGED_TOPIC => ContractManagementType::OwnershipChange,
@@ -1167,23 +1090,49 @@ pub fn parse_contract_management_events(
     out
 }
 
+/// Detect proxy upgrades from raw storage-slot writes — signature-agnostic, so
+/// it catches custom or non-emitting proxies that event matching misses.
+///
+/// Walks the post-execution state diff and yields `(target, action)` for each
+/// account that wrote to a recognised proxy slot with a value different from
+/// pre-state. Admin-slot writes surface as `OWNERSHIP_CHANGE` (privilege
+/// rotation); all other recognised slots surface as `PROXY_UPGRADE`.
+pub fn parse_contract_management_state_diff<S>(
+    state: &std::collections::HashMap<Address, revm::state::Account, S>,
+) -> Vec<(Address, ContractManagementAction)>
+where
+    S: std::hash::BuildHasher,
+{
+    let mut out = Vec::new();
+    for (addr, account) in state {
+        for (slot_key, slot) in &account.storage {
+            if slot.original_value() == slot.present_value() {
+                continue;
+            }
+            let key_b256: B256 = (*slot_key).into();
+            let action_type = match key_b256 {
+                EIP1967_IMPLEMENTATION_SLOT
+                | EIP1967_BEACON_SLOT
+                | EIP1822_PROXIABLE_SLOT
+                | OZ_LEGACY_IMPLEMENTATION_SLOT => ContractManagementType::ProxyUpgrade,
+                EIP1967_ADMIN_SLOT => ContractManagementType::OwnershipChange,
+                _ => continue,
+            };
+            out.push((
+                *addr,
+                ContractManagementAction {
+                    action_type,
+                    deployer_address: None,
+                },
+            ));
+        }
+    }
+    out
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Revert reason decoding
 // ═══════════════════════════════════════════════════════════════════════════════
-
-/// `Error(string)` selector — `keccak256("Error(string)")[..4]`.
-const ERROR_STRING_SELECTOR: [u8; 4] = [0x08, 0xc3, 0x79, 0xa0];
-
-/// `Panic(uint256)` selector — `keccak256("Panic(uint256)")[..4]`.
-const PANIC_UINT256_SELECTOR: [u8; 4] = [0x4e, 0x48, 0x7b, 0x71];
-
-/// Minimum payload length for a well-formed `Error(string)` revert:
-/// selector(4) + string-offset(32) + string-length(32).
-const MIN_ERROR_STRING_LEN: usize = 4 + 32 + 32;
-
-/// Minimum payload length for a well-formed `Panic(uint256)` revert:
-/// selector(4) + uint256(32).
-const MIN_PANIC_UINT256_LEN: usize = 4 + 32;
 
 /// Solidity panic codes — see the [Solidity docs][1] for the canonical list.
 /// Sentinel returned when the panic code is too large to fit in u64.
@@ -1255,13 +1204,6 @@ pub fn decode_revert_reason(output: &Bytes) -> String {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Selector-to-name mapping
 // ═══════════════════════════════════════════════════════════════════════════════
-
-/// Well-known ERC-20 metadata view selectors. Defined here so they're shared
-/// between trace decoding (`selector_to_name`) and the metadata resolver, which
-/// needs the raw bytes to make the calls.
-pub const NAME_SELECTOR: [u8; 4] = [0x06, 0xfd, 0xde, 0x03]; // name()
-pub const SYMBOL_SELECTOR: [u8; 4] = [0x95, 0xd8, 0x9b, 0x41]; // symbol()
-pub const DECIMALS_SELECTOR: [u8; 4] = [0x31, 0x3c, 0xe5, 0x67]; // decimals()
 
 /// Best-effort decode of a 4-byte function selector to a human-readable name.
 pub fn selector_to_name(selector: [u8; 4]) -> Option<&'static str> {
@@ -1501,7 +1443,7 @@ fn internal_err(msg: impl std::fmt::Display) -> jsonrpsee::types::ErrorObjectOwn
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     /// Stand-in "malicious payload": anything that pegs a worker for longer
     /// than `SIMULATION_TIMEOUT`. Crafting bytecode that reliably blows
