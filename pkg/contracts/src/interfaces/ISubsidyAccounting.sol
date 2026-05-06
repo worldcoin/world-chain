@@ -64,9 +64,6 @@ interface ISubsidyAccounting {
         uint256 indexed nullifier, uint64 newUpdateNonce, address[] addedAddresses, address[] removedAddresses
     );
 
-    /// @notice Emitted when budget is consumed against a record.
-    event BudgetConsumed(uint256 indexed nullifier, uint256 amountWei, uint256 remainingWei);
-
     ///////////////////////////////////////////////////////////////////////////////
     ///                                 ERRORS                                  ///
     ///////////////////////////////////////////////////////////////////////////////
