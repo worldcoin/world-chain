@@ -90,7 +90,7 @@ pub(crate) const SAFE_DISABLED_MODULE_TOPIC: B256 =
 
 /// `DiamondCut((address,uint8,bytes4[])[],address,bytes)` — EIP-2535 facet changes.
 pub(crate) const DIAMOND_CUT_TOPIC: B256 =
-    alloy_primitives::b256!("8faa70878671ccd212d20771b795c50af8fd3ff6cf27f4bde57e5d4c0aab23a5");
+    alloy_primitives::b256!("8faa70878671ccd212d20771b795c50af8fd3ff6cf27f4bde57e5d4de0aeb673");
 
 // ─── Proxy storage slots (signature-agnostic upgrade detection) ──────────────
 
