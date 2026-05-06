@@ -18,22 +18,6 @@ import {IWorldIDVerifier} from "./IWorldIDVerifier.sol";
 ///         updates use Session Proofs verified against the stored `sessionId`. Records
 ///         lazily expire when their `periodNumber` no longer matches the current period.
 ///
-/// @dev Public-ABI deviations from WIP-1002 spec § "Subsidy Accounting Interface" — all
-///      tracked in the task file's `Changes to the WIP` section:
-///      (1) Session-proof and Uniqueness-proof inputs surfaced as `uint256[2] sessionNullifier`
-///      and `uint256[5] proof` to match `IWorldIDVerifier` (vs spec's `bytes proof`).
-///      (2) Verifier's per-request `nonce` (a.k.a. `proofNonce`) fixed to `PROOF_NONCE = 0`
-///      and removed from the ABI. Contract-level replay protection is exhaustive: record-
-///      existence (`claimSubsidy`), claimed-map (`claimAdditionalCredential`), monotonic
-///      `updateNonce` bound into `signalHash` (`updateAddresses`). `WorldChainRpSigner` is
-///      explicitly stateless w.r.t. request-nonce tracking per WIP-1002.
-///      (3) Verifier's `expiresAtMin` derived as `currentPeriod() * PERIOD_LENGTH` (period
-///      start) and removed from the ABI. Authenticators MUST commit this exact value as the
-///      proof's `expires_at_min` public input. Subsidy semantics: credential's `expires_at`
-///      must be ≥ start of the period in which the subsidy is claimed.
-///      (4) Verifier's `credentialGenesisIssuedAtMin` fixed to `0` and removed from the ABI.
-///      Subsidy has no recency requirement on credential issuance.
-///
 /// @custom:security-contact security@toolsforhumanity.com
 interface ISubsidyAccounting {
     ///////////////////////////////////////////////////////////////////////////////
@@ -43,11 +27,8 @@ interface ISubsidyAccounting {
     /// @notice One per-credential Uniqueness Proof emitted from a single multi-item
     ///         `ProofRequest`. All items in a `claimSubsidy` call MUST share the same
     ///         `nullifier` public output and the same recomputed `signalHash`.
-    /// @param issuerSchemaId Credential schema/issuer identifier. `uint256` for spec-fidelity;
-    ///        bounds-checked against `type(uint64).max` before downcast for verifier dispatch.
-    /// @param proof Compressed Groth16 proof `[a, b0, b1, c, merkle_root]`. The proof's
-    ///        public inputs `nonce`, `expiresAtMin`, `credentialGenesisIssuedAtMin` are fixed
-    ///        / contract-derived — see contract-level @dev.
+    /// @param issuerSchemaId Credential schema/issuer identifier.
+    /// @param proof Compressed Groth16 proof `[a, b0, b1, c, merkle_root]`.
     struct ClaimItem {
         uint256 issuerSchemaId;
         uint256[5] proof;
