@@ -35,7 +35,10 @@ reth-provider.workspace = true
 reth-tasks = { workspace = true }
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
+reth-codecs.workspace = true
+reth-primitives-traits.workspace = true
 rand.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 reth-network-api.workspace = true
