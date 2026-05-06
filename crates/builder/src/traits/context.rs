@@ -23,7 +23,7 @@ use reth_optimism_payload_builder::{
 };
 use reth_payload_primitives::BuildNextEnv;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives_traits::{SealedHeader, TxTy};
+use reth_primitives_traits::{HeaderTy, SealedHeader, TxTy};
 use reth_provider::ChainSpecProvider;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{DatabaseCommit, context::BlockEnv};
@@ -202,7 +202,7 @@ where
         builder_config: OpBuilderConfig,
         config: reth_basic_payload_builder::PayloadConfig<
             OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
-            <<OpEvmConfig as ConfigureEvm>::Primitives as reth_node_api::NodePrimitives>::BlockHeader,
+            HeaderTy<<OpEvmConfig as ConfigureEvm>::Primitives>,
         >,
         cancel: &reth_revm::cancelled::CancelOnDrop,
         best_payload: Option<reth_optimism_node::OpBuiltPayload>,

@@ -20,6 +20,7 @@ world-chain-cli.workspace = true
 world-chain-payload.workspace = true
 
 reth-node-builder.workspace = true
+reth-chainspec.workspace = true
 reth-evm.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-primitives.workspace = true
