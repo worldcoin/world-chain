@@ -25,7 +25,7 @@ use revm::{
 use revm_primitives::TxKind;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     num::NonZeroUsize,
     sync::{Arc, Mutex},
     time::Duration,
@@ -123,8 +123,6 @@ pub struct TraceEntry {
 }
 
 /// Type of contract-management state change detected during simulation.
-/// Wire values match Blockaid's `contract_management[].type`, so app-backend
-/// can consume our response and Blockaid's interchangeably.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ContractManagementType {
@@ -141,9 +139,7 @@ pub enum ContractManagementType {
 ///
 /// The `target` (the contract that was created/destroyed/upgraded/etc.) is
 /// the **map key** in `SimulateUnsignedUserOpResult.contract_management` —
-/// not a field on this struct. App-backend's `checkContractManagementActions`
-/// guard only reads `type` and (for creations) `deployer_address`. Field
-/// names mirror Blockaid's wire format (snake_case).
+/// not a field on this struct.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractManagementAction {
     #[serde(rename = "type")]
@@ -179,10 +175,11 @@ pub struct SimulateUnsignedUserOpResult {
     pub trace: Vec<TraceEntry>,
     /// Contract-management state changes detected during execution, keyed
     /// by the **target contract address** (the contract created, destroyed,
-    /// upgraded, or whose ownership/modules changed). Field name and key
-    /// shape mirror Blockaid's `contract_management`.
+    /// upgraded, or whose ownership/modules changed).
     #[serde(rename = "contract_management")]
-    pub contract_management: HashMap<Address, Vec<ContractManagementAction>>,
+    // BTreeMap so JSON key order is deterministic — snapshot tests, response
+    // signing, and debugging all benefit from stable ordering.
+    pub contract_management: BTreeMap<Address, Vec<ContractManagementAction>>,
     /// Warning generation is not yet implemented. Always serialized as `[]`;
     /// reserved so callers can rely on the field being present.
     pub warnings: Vec<serde_json::Value>,
@@ -421,9 +418,9 @@ impl<CTX: revm::context_interface::ContextTr> Inspector<CTX> for SimulationInspe
             // CREATE itself failed — drop the frame.
             return;
         }
-        // Successful create: record `(deployer, deployed)` *into the parent
-        // frame's list* (creations are an effect of the parent), then bubble
-        // any inner side-effects up alongside it.
+        // Successful create: record `(deployer, deployed)` into the create
+        // frame so it rolls back atomically with anything its constructor did,
+        // then bubble the frame up to the parent.
         if let Some(addr) = outcome.address {
             frame.contract_creations.push((inputs.caller(), addr));
         }
@@ -788,10 +785,10 @@ where
         // 12. Assemble `contract_management` from inspector-captured
         //     CREATE/SELFDESTRUCT plus event-derived proxy / ownership /
         //     module changes. The map is keyed by the **target** contract
-        //     address (the one whose state changed) — wire shape mirrors
-        //     Blockaid's `contract_management`.
-        let mut contract_management: HashMap<Address, Vec<ContractManagementAction>> =
-            HashMap::new();
+        //     address (the one whose state changed).
+        // BTreeMap for deterministic JSON key order (see field doc).
+        let mut contract_management: BTreeMap<Address, Vec<ContractManagementAction>> =
+            BTreeMap::new();
         for (deployer, deployed) in inspector_creations {
             contract_management
                 .entry(deployed)
@@ -857,6 +854,15 @@ const APPROVAL_FOR_ALL_TOPIC: B256 =
 /// `Upgraded(address)` — EIP-1967 / UUPS implementation upgrade.
 const UPGRADED_TOPIC: B256 =
     alloy_primitives::b256!("bc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b");
+
+/// `BeaconUpgraded(address)` — EIP-1967 beacon proxy upgrade.
+const BEACON_UPGRADED_TOPIC: B256 =
+    alloy_primitives::b256!("1cf3b03a6cf19fa2baba4df148e9dcabedea7f8a5c07840e207e5c089be95d3e");
+
+/// `AdminChanged(address,address)` — EIP-1967 proxy admin rotation. A
+/// privilege-escalation vector: the new admin can swap the implementation.
+const ADMIN_CHANGED_TOPIC: B256 =
+    alloy_primitives::b256!("7e644d79422f17c01e4894b5f4f588d331ebfa28653d42ae832dc59e38c9798f");
 
 /// `OwnershipTransferred(address,address)` — OpenZeppelin `Ownable`.
 const OWNERSHIP_TRANSFERRED_TOPIC: B256 =
@@ -1129,11 +1135,22 @@ pub fn parse_contract_management_events(
             continue;
         };
         let action_type = match *topic0 {
-            UPGRADED_TOPIC => ContractManagementType::ProxyUpgrade,
-            OWNERSHIP_TRANSFERRED_TOPIC
-            | SAFE_ADDED_OWNER_TOPIC
-            | SAFE_REMOVED_OWNER_TOPIC
-            | SAFE_CHANGED_THRESHOLD_TOPIC => ContractManagementType::OwnershipChange,
+            UPGRADED_TOPIC | BEACON_UPGRADED_TOPIC => ContractManagementType::ProxyUpgrade,
+            // AdminChanged is admin-slot rotation; a new admin can swap the
+            // implementation, so we surface it as an ownership-class change.
+            ADMIN_CHANGED_TOPIC => ContractManagementType::OwnershipChange,
+            OWNERSHIP_TRANSFERRED_TOPIC => {
+                // OZ `Ownable` constructors emit `OwnershipTransferred(0x0, deployer)`
+                // on every deployment. Suppress the constructor case so newly
+                // deployed contracts don't surface a phantom OWNERSHIP_CHANGE.
+                if topics.len() >= 2 && address_from_topic(topics[1]) == Address::ZERO {
+                    continue;
+                }
+                ContractManagementType::OwnershipChange
+            }
+            SAFE_ADDED_OWNER_TOPIC | SAFE_REMOVED_OWNER_TOPIC | SAFE_CHANGED_THRESHOLD_TOPIC => {
+                ContractManagementType::OwnershipChange
+            }
             SAFE_ENABLED_MODULE_TOPIC | SAFE_DISABLED_MODULE_TOPIC => {
                 ContractManagementType::ModuleChange
             }

@@ -836,18 +836,15 @@ async fn test_trace_detects_malicious_safe_call() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Blockaid scenario coverage
+// Detection scenario coverage
 //
-// The five tests below mirror scenarios from `app-backend-main`'s Blockaid
-// suite (`blockaid.service.unit.spec.ts`). We're asserting on the *raw*
-// detection output (`assetChanges` / `exposureChanges`) — Blockaid's IN/OUT
-// classification, humanReadableDiff formatting, and Permit2 filtering are
-// downstream concerns the consumer applies on top of this response.
+// Asserts on the raw detection output (`assetChanges` / `exposureChanges`).
+// IN/OUT classification, humanReadableDiff formatting, and Permit2 filtering
+// are downstream concerns the consumer applies on top of this response.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Blockaid: `simple-permit.ts` / `consists-exposures.ts` — an `approve()`
-/// call must produce one `ExposureChange` and **zero** `AssetChange`s. The
-/// EVM also reports a successful execution (no revert).
+/// `approve()` call must produce one `ExposureChange` and **zero**
+/// `AssetChange`s. The EVM also reports a successful execution (no revert).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_simulate_real_approve_emits_only_exposure() {
     let mut db = make_forked_db();
@@ -898,8 +895,8 @@ async fn test_simulate_real_approve_emits_only_exposure() {
     assert!(!exposure_changes[0].is_approved_for_all);
 }
 
-/// Blockaid: `atomic-vault-withdraw-send.ts` — a single tx emits two
-/// `Transfer` events on the same token (`vault → user`, `user → final`).
+/// A single tx emits two `Transfer` events on the same token
+/// (`vault → user`, `user → final`).
 /// Both must surface as independent `AssetChange`s so the consumer sees the
 /// full hop chain.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -938,10 +935,9 @@ async fn test_parse_atomic_double_transfer_same_token() {
     }
 }
 
-/// Blockaid: `multiple-nfts.ts` — five ERC-721 Transfer events (token IDs
-/// 73..=77) inside one tx surface as five distinct `AssetChange`s with
-/// `Erc721` type, identical from/to, but each carrying a distinct
-/// `tokenId`.
+/// Five ERC-721 Transfer events (token IDs 73..=77) inside one tx surface as
+/// five distinct `AssetChange`s with `Erc721` type, identical from/to, but
+/// each carrying a distinct `tokenId`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_parse_batch_nft_transfers() {
     let collection = address!("000000000000000000000000000000000000721a");
@@ -978,9 +974,8 @@ async fn test_parse_batch_nft_transfers() {
     }
 }
 
-/// Blockaid: `non-standard-tokens.ts` — one tx mixes ERC-20, ERC-721, and
-/// ERC-1155 movements. The parser classifies each independently from its
-/// log topic count / event signature.
+/// One tx mixes ERC-20, ERC-721, and ERC-1155 movements. The parser
+/// classifies each independently from its log topic count / event signature.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_parse_mixed_token_types_in_one_response() {
     let erc20 = WLD;
@@ -1043,9 +1038,9 @@ async fn test_parse_mixed_token_types_in_one_response() {
     assert_eq!(changes[2].raw_amount, "10");
 }
 
-/// Blockaid: `consists-exposures.ts` — one tx grants approvals on two
-/// different tokens to two different spenders. Asset diffs stay empty;
-/// both approvals surface as `ExposureChange`s with their own amounts.
+/// One tx grants approvals on two different tokens to two different
+/// spenders. Asset diffs stay empty; both approvals surface as
+/// `ExposureChange`s with their own amounts.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_parse_multiple_approvals_yields_exposures() {
     let owner = address!("00000000000000000000000000000000DeaDBeef");
@@ -1088,10 +1083,8 @@ async fn test_parse_multiple_approvals_yields_exposures() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Contract management
 //
-// Mirrors Blockaid's `simulation.contract_management`. We surface five action
-// types — CONTRACT_CREATION, SELF_DESTRUCT, PROXY_UPGRADE, OWNERSHIP_CHANGE,
-// MODULE_CHANGE — so app-backend's `checkContractManagementActions` guard can
-// run identically against our simulate response.
+// Five action types — CONTRACT_CREATION, SELF_DESTRUCT, PROXY_UPGRADE,
+// OWNERSHIP_CHANGE, MODULE_CHANGE.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// `Upgraded(address)` event (EIP-1967 / UUPS) → `PROXY_UPGRADE` keyed on the
@@ -1376,7 +1369,7 @@ async fn test_inspector_drops_create_on_parent_revert() {
 }
 
 /// JSON wire shape: `type` is SCREAMING_SNAKE_CASE, `deployer_address` uses
-/// snake_case (matching Blockaid), and is omitted for non-CREATION actions.
+/// snake_case, and is omitted for non-CREATION actions.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_contract_management_action_serialization() {
     use world_chain_rpc::simulate::ContractManagementAction;

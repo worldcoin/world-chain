@@ -26,9 +26,11 @@ use tokio::runtime::Handle;
 use tracing::{debug, warn};
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_primitives::{
-    access_list::FlashblockAccessList, ed25519_dalek::SigningKey,
-    flashblocks::recovered_block_from_flashblocks, p2p::Authorization,
-    payload_id::force_op_payload_id_v3,
+    access_list::FlashblockAccessList,
+    ed25519_dalek::SigningKey,
+    flashblocks::recovered_block_from_flashblocks,
+    p2p::Authorization,
+    payload_id::{force_op_payload_id_v3, payload_id_with_version},
 };
 
 use crate::job::{CommittedPayloadState, FlashblocksPayloadJob};
@@ -204,7 +206,10 @@ where
                 *authorization
                     .wait_for(|a| match a {
                         Some(auth) => {
-                            if auth.payload_id == payload_id {
+                            // TODO: FIXME: Change Payload ID to be derived from Engine API Message Version
+                            if auth.payload_id == payload_id_with_version(payload_id, 4)
+                                || auth.payload_id == payload_id_with_version(payload_id, 3)
+                            {
                                 true
                             } else {
                                 warn!(

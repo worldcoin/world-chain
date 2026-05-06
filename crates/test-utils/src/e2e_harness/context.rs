@@ -37,9 +37,9 @@ use reth_optimism_node::{
     OpAddOns, OpBuiltPayload, OpConsensusBuilder, OpEngineValidatorBuilder, node::OpPayloadBuilder,
     rpc::OpEthApiBuilder, txpool::OpPooledTransaction,
 };
-use reth_optimism_payload_builder::OpExecData;
+use reth_optimism_payload_builder::{OpExecData, OpPayloadAttrs};
 use reth_optimism_primitives::OpReceipt;
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, BlockTy, SealedBlock};
 use reth_rpc_api::eth::RpcTypes;
 use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
 use world_chain_node::{
@@ -80,12 +80,10 @@ pub struct Wip1001EngineTypes;
 impl PayloadTypes for Wip1001EngineTypes {
     type ExecutionData = OpExecData;
     type BuiltPayload = OpBuiltPayload<Wip1001Primitives>;
-    type PayloadAttributes = reth_optimism_node::payload::OpPayloadAttrs;
+    type PayloadAttributes = OpPayloadAttrs;
 
     fn block_to_payload(
-        block: reth_primitives_traits::SealedBlock<
-            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
-        >,
+        block: SealedBlock<BlockTy<<Self::BuiltPayload as BuiltPayload>::Primitives>>,
     ) -> Self::ExecutionData {
         OpExecData::from(OpExecutionData::from_block_unchecked(
             block.hash(),
@@ -212,6 +210,7 @@ impl From<WorldChainNodeConfig> for Wip1001NodeContext {
 impl WorldChainNodePrimitiveTypes for Wip1001NodeContext {
     type Primitives = Wip1001Primitives;
     type Payload = Wip1001EngineTypes;
+    type ChainSpec = OpChainSpec;
 }
 
 impl<N> WorldChainNodeContext<N> for Wip1001NodeContext
