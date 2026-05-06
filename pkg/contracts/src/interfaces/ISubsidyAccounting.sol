@@ -155,9 +155,11 @@ interface ISubsidyAccounting {
     ) external;
 
     /// @notice Consume budget for a record at transaction-execution time.
-    /// @dev Restricted to `budgetConsumer`. Decrement `remainingWei` by `gasUsed * baseFee`,
-    ///      saturating at 0.
-    function consumeBudget(uint256 nullifier, uint256 gasUsed, uint256 baseFee) external;
+    /// @dev Restricted to `budgetConsumer`. Decrement `remainingWei` by
+    ///      `gasUsed * effectiveGasPrice`, saturating at 0. `effectiveGasPrice` is the full
+    ///      per-gas fee paid (EIP-1559: `min(maxFeePerGas, baseFee + maxPriorityFeePerGas)`),
+    ///      so both base and priority components are subsidised.
+    function consumeBudget(uint256 nullifier, uint256 gasUsed, uint256 effectiveGasPrice) external;
 
     /// @notice Get remaining subsidy budget (in Wei) for a record in the current period.
     /// @return remainingWei Returns 0 if the record is absent or expired.
