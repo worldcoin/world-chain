@@ -108,6 +108,14 @@ interface ISubsidyAccounting {
     /// @notice Thrown when the supplied `nonce` does not match the record's `updateNonce`.
     error StaleUpdateNonce(uint64 supplied, uint64 expected);
 
+    /// @notice Thrown when an `addAddresses` operation would push an account above
+    ///         `MAX_NULLIFIERS_PER_ADDRESS` simultaneous authorisations.
+    error TooManyNullifiers(address account);
+
+    /// @notice Thrown when `consumeBudget` is called for an account with no current-period
+    ///         records (or only zero-budget records).
+    error NoBudget(address account);
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                              EXTERNAL API                               ///
     ///////////////////////////////////////////////////////////////////////////////
@@ -154,20 +162,28 @@ interface ISubsidyAccounting {
         uint256[5] calldata proof
     ) external;
 
-    /// @notice Consume budget for a record at transaction-execution time.
-    /// @dev Restricted to `budgetConsumer`. Decrement `remainingWei` by
-    ///      `gasUsed * effectiveGasPrice`, saturating at 0. `effectiveGasPrice` is the full
-    ///      per-gas fee paid (EIP-1559: `min(maxFeePerGas, baseFee + maxPriorityFeePerGas)`),
-    ///      so both base and priority components are subsidised.
-    function consumeBudget(uint256 nullifier, uint256 gasUsed, uint256 effectiveGasPrice) external;
+    /// @notice Consume budget for `account` at transaction-execution time, drawing from
+    ///         every current-period record the account is authorized under.
+    /// @dev Restricted to `budgetConsumer`. Computes `charge = gasUsed * effectiveGasPrice`,
+    ///      picks a starting record via `start = block.number % n` over the account's
+    ///      authorised nullifier set (size `n`), and walks circularly from `start`,
+    ///      charging each non-empty current-period record until `charge` is fully consumed
+    ///      or every record is exhausted. `effectiveGasPrice` is the full per-gas fee paid
+    ///      (EIP-1559: `min(maxFeePerGas, baseFee + maxPriorityFeePerGas)`), so both base
+    ///      and priority components are subsidised.
+    /// @dev Per-block-rotated start gives even drain in expectation across the period
+    ///      while keeping the common case (N=1, or first record has budget) at O(1) gas.
+    ///      Worst case is bounded by `MAX_NULLIFIERS_PER_ADDRESS`.
+    function consumeBudget(address account, uint256 gasUsed, uint256 effectiveGasPrice) external;
 
     /// @notice Get remaining subsidy budget (in Wei) for a record in the current period.
     /// @return remainingWei Returns 0 if the record is absent or expired.
     function getBudget(uint256 nullifier) external view returns (uint256 remainingWei);
 
-    /// @notice Get remaining subsidy budget (in Wei) available to an address in the current
-    ///         period. Resolved via the same deterministic nullifier-selection rule as
-    ///         `consumeBudget`.
+    /// @notice Get the total remaining subsidy budget (in Wei) available to an address —
+    ///         the SUM of `remainingWei` across every current-period record the account is
+    ///         authorized under. Mirrors the pool that `consumeBudget(account, ...)` draws
+    ///         from.
     function getBudget(address account) external view returns (uint256 remainingWei);
 
     /// @notice Whether `account` is authorized under the record keyed by `nullifier` in the
