@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use alloy_primitives::Address;
 use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeTypes, NodePrimitives, NodeTypes, PrimitivesTy, TxTy};
+use reth_node_api::{BlockTy, FullNodeTypes, NodeTypes, PrimitivesTy, TxTy};
 use reth_node_builder::{
     BuilderContext,
     components::{PoolBuilder, PoolBuilderConfigOverrides},
@@ -66,13 +66,11 @@ impl<T> WorldChainPoolBuilder<T> {
 impl<Node, T, Evm> PoolBuilder<Node, Evm> for WorldChainPoolBuilder<T>
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks>>,
-    Node::Provider: BlockReaderIdExt<Block = <PrimitivesTy<Node::Types> as NodePrimitives>::Block>,
+    Node::Provider: BlockReaderIdExt<Block = BlockTy<Node::Types>>,
     T: WorldChainPoolTransaction<Consensus = TxTy<Node::Types>>,
     Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + Clone + 'static,
-    WorldChainTransactionValidator<Node::Provider, T, Evm>: TransactionValidator<
-            Transaction = T,
-            Block = <PrimitivesTy<Node::Types> as NodePrimitives>::Block,
-        >,
+    WorldChainTransactionValidator<Node::Provider, T, Evm>:
+        TransactionValidator<Transaction = T, Block = BlockTy<Node::Types>>,
 {
     type Pool = WorldChainTransactionPool<Node::Provider, DiskFileBlobStore, T, Evm>;
 

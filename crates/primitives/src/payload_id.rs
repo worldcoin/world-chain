@@ -20,7 +20,7 @@ pub fn op_reth_payload_id_v4_lookup(id: PayloadId) -> PayloadId {
     }
 }
 
-fn payload_id_with_version(id: PayloadId, version: u8) -> PayloadId {
+pub fn payload_id_with_version(id: PayloadId, version: u8) -> PayloadId {
     let mut bytes = payload_id_bytes(id);
     bytes[0] = version;
     PayloadId::new(bytes)
