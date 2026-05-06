@@ -235,7 +235,6 @@ rand = { version = "0.9", features = ["small_rng"] }
 reqwest = { version = "0.12", default-features = false }
 bon = "3.3.0"
 rayon = "1.12.0"
-rusqlite = { version = "0.32", features = ["bundled"] }
 auto_impl = "1"
 async-trait = "0.1.88"
 dashmap = { version = "6.1.0", features = ["rayon"] }
