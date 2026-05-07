@@ -173,15 +173,13 @@ interface ISubsidyAccounting {
     /// @notice Consume budget for `account` at transaction-execution time, drawing from
     ///         every current-period record the account is authorized under.
     /// @dev Restricted to `budgetConsumer`. Computes `charge = gasUsed * effectiveGasPrice`,
-    ///      picks a starting record via `start = block.number % n` over the account's
-    ///      authorised nullifier set (size `n`), and walks circularly from `start`,
-    ///      charging each non-empty current-period record until `charge` is fully consumed
-    ///      or every record is exhausted. `effectiveGasPrice` is the full per-gas fee paid
-    ///      (EIP-1559: `min(maxFeePerGas, baseFee + maxPriorityFeePerGas)`), so both base
-    ///      and priority components are subsidised.
-    /// @dev Per-block-rotated start gives even drain in expectation across the period
-    ///      while keeping the common case (N=1, or first record has budget) at O(1) gas.
-    ///      Worst case is bounded by `MAX_NULLIFIERS_PER_ADDRESS`.
+    ///      walks the account's authorised nullifier set in insertion order from index 0,
+    ///      and charges each non-empty current-period record in turn until `charge` is
+    ///      fully consumed or every record is exhausted. `effectiveGasPrice` is the full
+    ///      per-gas fee paid (EIP-1559: `min(maxFeePerGas, baseFee + maxPriorityFeePerGas)`),
+    ///      so both base and priority components are subsidised.
+    /// @dev Worst case is bounded by `MAX_NULLIFIERS_PER_ADDRESS`. Insertion order is
+    ///      determined entirely by claim sequence — no per-tx selection knob.
     function consumeBudget(address account, uint256 gasUsed, uint256 effectiveGasPrice) external;
 
     /// @notice Get remaining subsidy budget (in Wei) for a record in the current period.
