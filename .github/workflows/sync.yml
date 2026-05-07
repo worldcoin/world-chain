@@ -20,7 +20,7 @@ jobs:
   sync:
     if: github.repository == 'worldcoin/world-chain'
     name: sync (${{ matrix.chain.bin }})
-    runs-on: arc-public-8xlarge-amd64-runner
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     env:
