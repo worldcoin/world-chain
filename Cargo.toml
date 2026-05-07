@@ -251,7 +251,7 @@ brotli = "8.0.2"
 once_cell = "1.19"
 lru = "0.16"
 either = { version = "1.15.0", default-features = false }
-pin-project = "1.0.1"
+pin-project = "1.1.12"
 
 # Test
 testcontainers = "0.27"
