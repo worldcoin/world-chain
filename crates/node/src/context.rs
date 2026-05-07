@@ -34,7 +34,10 @@ use world_chain_builder::coordinator::FlashblocksExecutionCoordinator;
 use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
 use world_chain_p2p::{
     monitor::PeerMonitor,
-    protocol::handler::{FlashblocksHandle, FlashblocksP2PProtocol},
+    protocol::{
+        handler::{FlashblocksHandle, FlashblocksP2PProtocol},
+        recorder::FlashblocksRecorderConfig,
+    },
 };
 use world_chain_primitives::p2p::Authorization;
 use world_chain_rpc::eth::FlashblocksEthApiBuilder;
@@ -219,6 +222,7 @@ where
                             ..
                         },
                     builder_config,
+                    ..
                 },
             components_context,
         } = self.clone();
@@ -398,6 +402,9 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             .args
             .flashblocks
             .expect("Flashblocks args must be present");
+        let recorder_config = value
+            .flashblocks_store
+            .map(|store| FlashblocksRecorderConfig::new(store.path));
 
         let authorizer_vk = flashblocks.authorizer_vk.unwrap_or_else(|| {
             flashblocks
@@ -412,10 +419,11 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             authorizer_vk.as_bytes().encode_hex::<String>()
         );
 
-        let flashblocks_handle = FlashblocksHandle::with_fanout_args(
+        let flashblocks_handle = FlashblocksHandle::with_fanout_args_and_recorder(
             authorizer_vk,
             flashblocks.builder_sk.clone(),
             flashblocks.fanout.clone(),
+            recorder_config,
         );
 
         let (pending_block, _) = tokio::sync::watch::channel(None);

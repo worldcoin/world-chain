@@ -1,4 +1,4 @@
-use crate::config::FlashblocksPayloadBuilderConfig;
+use crate::config::{FlashblocksPayloadBuilderConfig, FlashblocksStoreConfig};
 use ::eyre::eyre::bail;
 use alloy_chains::NamedChain;
 use alloy_primitives::{Address, address};
@@ -326,12 +326,29 @@ impl WorldChainArgs {
             inner_builder_config.gas_limit_config = OpGasLimitConfig::new(gas_limit);
         }
 
+        let flashblocks_store = self
+            .flashblocks
+            .as_ref()
+            .filter(|flashblocks| flashblocks.store)
+            .map(|flashblocks| {
+                let path = flashblocks.store_path.clone().unwrap_or_else(|| {
+                    config
+                        .datadir()
+                        .data_dir()
+                        .join("flashblocks")
+                        .join("flashblocks.mdbx")
+                });
+
+                FlashblocksStoreConfig { path }
+            });
+
         Ok(WorldChainNodeConfig {
             args: self,
             builder_config: FlashblocksPayloadBuilderConfig {
                 inner: inner_builder_config,
                 bal_enabled,
             },
+            flashblocks_store,
         })
     }
 }
@@ -460,6 +477,33 @@ mod tests {
             args.flashblocks.expect("just asserted").enabled,
             "expected parsed flashblocks args to have enabled=true"
         );
+    }
+
+    #[test]
+    fn flashblocks_store_config_defaults_under_datadir() {
+        let args = CommandParser::parse_from([
+            "bin",
+            "--flashblocks.enabled",
+            "--flashblocks.store",
+            "--flashblocks.authorizer-vk",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        ])
+        .world;
+
+        let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());
+        let mut node_config = NodeConfig::new(Arc::new(spec));
+        let expected_path = node_config
+            .datadir()
+            .data_dir()
+            .join("flashblocks")
+            .join("flashblocks.mdbx");
+
+        let config = args.into_config(&mut node_config).unwrap();
+        let store = config
+            .flashblocks_store
+            .expect("store config should be populated");
+
+        assert_eq!(store.path, expected_path);
     }
 
     #[test]

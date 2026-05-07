@@ -33,9 +33,15 @@ pin-project.workspace = true
 chrono.workspace = true
 reth-provider.workspace = true
 reth-tasks = { workspace = true }
+reth-db = { workspace = true, features = ["mdbx"] }
+reth-db-api.workspace = true
+reth-codecs.workspace = true
+reth-primitives-traits.workspace = true
 rand.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 reth-network-api.workspace = true
 reth-network-peers.workspace = true
 enr = { version = "0.13.0", default-features = false, features = ["rust-secp256k1"] }
+tempfile.workspace = true
