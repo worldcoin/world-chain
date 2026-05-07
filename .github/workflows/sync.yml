@@ -20,6 +20,8 @@ jobs:
   sync:
     if: github.repository == 'worldcoin/world-chain'
     name: sync (${{ matrix.chain.bin }})
+    # we use ubuntu-latest and not our self-hosted runners because with our runners the node is not
+    # able to reach external peers therefore it cannot sync at all and the job fails after 1 hour.
     runs-on: ubuntu-latest
     permissions:
       contents: read
