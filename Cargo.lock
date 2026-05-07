@@ -567,7 +567,7 @@ dependencies = [
  "alloy-primitives",
  "auto_impl",
  "op-alloy",
- "op-revm",
+ "op-revm 19.0.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.0)",
  "revm",
  "thiserror 2.0.18",
 ]
@@ -6013,6 +6013,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "op-revm"
+version = "19.0.0"
+source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.1#1852be216f45a942321b440da4d92cfb3055f3c1"
+dependencies = [
+ "auto_impl",
+ "revm",
+]
+
+[[package]]
 name = "opaque-debug"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8814,7 +8823,7 @@ dependencies = [
  "op-alloy-consensus",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
- "op-revm",
+ "op-revm 19.0.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.0)",
  "reth-chainspec",
  "reth-evm",
  "reth-execution-errors",
@@ -8914,7 +8923,7 @@ dependencies = [
  "humantime",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
- "op-revm",
+ "op-revm 19.0.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.0)",
  "reth-chainspec",
  "reth-consensus",
  "reth-db",
@@ -8970,7 +8979,7 @@ dependencies = [
  "either",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
- "op-revm",
+ "op-revm 19.0.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.0)",
  "reth-basic-payload-builder",
  "reth-chainspec",
  "reth-evm",
@@ -9040,7 +9049,7 @@ dependencies = [
  "op-alloy-rpc-jsonrpsee",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
- "op-revm",
+ "op-revm 19.0.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.0)",
  "reqwest 0.13.3",
  "reth-basic-payload-builder",
  "reth-chain-state",
@@ -9142,7 +9151,7 @@ dependencies = [
  "op-alloy-consensus",
  "op-alloy-flz",
  "op-alloy-rpc-types",
- "op-revm",
+ "op-revm 19.0.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.0)",
  "parking_lot",
  "reth-chain-state",
  "reth-chainspec",
@@ -13456,7 +13465,7 @@ dependencies = [
  "metrics-derive",
  "op-alloy-consensus",
  "op-alloy-rpc-types",
- "op-revm",
+ "op-revm 19.0.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.1)",
  "parking_lot",
  "rayon",
  "reth-basic-payload-builder",
@@ -13711,7 +13720,7 @@ dependencies = [
  "op-alloy-consensus",
  "op-alloy-network",
  "op-alloy-rpc-types",
- "op-revm",
+ "op-revm 19.0.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.1)",
  "p256",
  "reth-basic-payload-builder",
  "reth-chainspec",
@@ -13751,7 +13760,7 @@ dependencies = [
  "op-alloy-network",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
- "op-revm",
+ "op-revm 19.0.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.1)",
  "reqwest 0.12.28",
  "reth-chain-state",
  "reth-chainspec",
@@ -13815,7 +13824,7 @@ dependencies = [
  "op-alloy-network",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
- "op-revm",
+ "op-revm 19.0.0 (git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.1)",
  "parking_lot",
  "rand 0.9.4",
  "reqwest 0.12.28",
