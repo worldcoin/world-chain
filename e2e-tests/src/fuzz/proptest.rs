@@ -58,6 +58,7 @@ fn unwrap_committed_state(
         receipts: vec![],
         transactions: vec![],
         bundle: BundleState::default(),
+        blob_gas_used: 0
     })
 }
 
