@@ -687,6 +687,7 @@ where
         R::default(),
     );
     executor.gas_used = committed_state.gas_used;
+    executor.da_footprint_used = committed_state.blob_gas_used;
     executor.receipts = committed_state.receipts_iter().cloned().collect();
 
     let builder = BalBlockBuilder::new(
@@ -739,6 +740,7 @@ where
     );
 
     executor.gas_used = committed_state.gas_used;
+    executor.da_footprint_used = committed_state.blob_gas_used;
     executor.receipts = committed_state.receipts_iter().cloned().collect();
 
     let builder = FlashblocksBlockBuilder::new(

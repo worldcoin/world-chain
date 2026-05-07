@@ -147,6 +147,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S> for FlashblocksBalE
             );
 
         executor.gas_used = committed_state.gas_used;
+        executor.da_footprint_used = committed_state.blob_gas_used;
         executor.receipts = committed_state.receipts_iter().cloned().collect();
 
         let (validator, access_list_receiver) = BalBlockValidator::new(
@@ -319,6 +320,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S>
         );
 
         executor.gas_used = committed_state.gas_used;
+        executor.da_footprint_used = committed_state.blob_gas_used;
         executor.receipts = committed_state.receipts_iter().cloned().collect();
 
         let mut builder = FlashblocksBlockBuilder::<OpPrimitives, _>::new(

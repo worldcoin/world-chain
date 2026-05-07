@@ -198,6 +198,8 @@ pub struct ParallelExecutionResult {
     pub receipts: Vec<OpReceipt>,
     /// Gas consumed by this transaction
     pub gas_used: u64,
+    /// DA footprint consumed by this transaction, stored as blob gas post-Jovian.
+    pub blob_gas_used: u64,
     /// Fees earned from this transaction
     pub fees: u128,
     /// Access list entries from this transaction
@@ -461,6 +463,7 @@ where
         let execution_context = self.inner.ctx.clone();
         let evm_env = self.evm_env.clone();
         let gas_used = self.inner.executor.gas_used;
+        let blob_gas_used = self.inner.executor.da_footprint_used;
 
         let db_factory = self.temporal_db_factory.clone();
         let fallback_bundle_state = self.fallback_bundle_state.clone();
@@ -521,7 +524,7 @@ where
             txs_execution_started.elapsed(),
         );
 
-        let merged_result = merge_transaction_results(results, gas_used);
+        let merged_result = merge_transaction_results(results, gas_used, blob_gas_used);
         let database = self.inner.executor.evm_mut().db_mut();
 
         // merge the aggregated access list into the AsyncBalBuilderDb
@@ -533,6 +536,7 @@ where
             .receipts
             .extend_from_slice(&merged_result.receipts);
         self.inner.executor.gas_used = merged_result.gas_used;
+        self.inner.executor.da_footprint_used = merged_result.blob_gas_used;
 
         // append the _executed_ transactions into the executor
         self.inner.transactions.extend_from_slice(
@@ -556,14 +560,17 @@ where
 fn merge_transaction_results(
     results: Vec<ParallelExecutionResult>,
     initial_gas_used: u64,
+    initial_blob_gas_used: u64,
 ) -> ParallelExecutionResult {
     results.into_iter().fold(
         ParallelExecutionResult {
             gas_used: initial_gas_used,
+            blob_gas_used: initial_blob_gas_used,
             ..Default::default()
         },
         |mut acc, mut res| {
             acc.gas_used += res.gas_used;
+            acc.blob_gas_used += res.blob_gas_used;
             if let Some(mut receipt) = res.receipts.pop() {
                 receipt.as_receipt_mut().cumulative_gas_used = acc.gas_used;
                 acc.receipts.push(receipt);
@@ -639,6 +646,7 @@ where
     Ok(ParallelExecutionResult {
         receipts: result.receipts,
         gas_used: result.gas_used,
+        blob_gas_used: result.blob_gas_used,
         fees,
         access_list,
         index,

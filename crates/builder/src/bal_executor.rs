@@ -350,6 +350,10 @@ pub struct CommittedState<R: OpReceiptBuilder + Default = OpRethReceiptBuilder> 
     pub is_first: bool,
     /// The total gas used in previous committed transactions.
     pub gas_used: u64,
+    /// The total DA footprint in previous committed transactions.
+    ///
+    /// Post-Jovian this is stored in the block header's `blob_gas_used` field.
+    pub blob_gas_used: u64,
     /// The total fees accumulated in previous committed transactions.
     pub fees: U256,
     /// The bundle state accumulated so far from the State Transitions
@@ -399,6 +403,10 @@ where
                 .ok_or(BalExecutorError::MissingExecutedBlock)?;
 
             let gas_used = executed_block.recovered_block.gas_used();
+            let blob_gas_used = executed_block
+                .recovered_block
+                .blob_gas_used()
+                .unwrap_or_default();
 
             let bundle = value
                 .executed_block()
@@ -431,6 +439,7 @@ where
                 transactions,
                 receipts,
                 gas_used,
+                blob_gas_used,
                 fees,
                 bundle,
             })
@@ -440,6 +449,7 @@ where
                 transactions: vec![],
                 receipts: vec![],
                 gas_used: 0,
+                blob_gas_used: 0,
                 fees: U256::ZERO,
                 bundle: BundleState::default(),
             })
