@@ -600,6 +600,7 @@ where
             prev_outcome.as_ref().map(|(o, state)| CommittedState {
                 is_first: false,
                 gas_used: o.block.gas_used(),
+                blob_gas_used: o.block.blob_gas_used().unwrap_or_default(),
                 fees: U256::ZERO,
                 bundle: state.clone(),
                 receipts: o
