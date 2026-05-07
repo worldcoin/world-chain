@@ -10,3 +10,10 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      - dependency-name: "reth*"
+      - dependency-name: "op-reth*"
+      - dependency-name: "alloy*"
+      - dependency-name: "op-alloy*"
+      - dependency-name: "revm*"
+      - dependency-name: "op-revm*"
