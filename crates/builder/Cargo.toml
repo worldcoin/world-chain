@@ -71,7 +71,23 @@ eyre.workspace = true
 reth-tracing.workspace = true
 criterion.workspace = true
 tokio.workspace = true
+alloy-rlp.workspace = true
+reth-db.workspace = true
+reth-db-api.workspace = true
+reth-node-core.workspace = true
+
+[[bench]]
+name = "flashblock_validation_synthetic"
+harness = false
+
+[[bench]]
+name = "flashblock_validation_live_node"
+harness = false
 
 [[bench]]
 name = "flashblock_building_live_node"
+harness = false
+
+[[bench]]
+name = "flashblock_validation_mainnet"
 harness = false
