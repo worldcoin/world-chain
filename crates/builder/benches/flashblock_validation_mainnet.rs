@@ -31,11 +31,19 @@ use world_chain_primitives::{ed25519_dalek::SigningKey, primitives::FlashblocksP
 /// Block loaded from the default flashblocks recorder database.
 ///
 /// Change this constant locally when switching the captured mainnet block used
-/// by the bench. There are intentionally no CLI flags or environment variables
-/// so Criterion runs are deterministic and easy to compare.
+/// by the bench. The block selection is intentionally not configurable at
+/// runtime so Criterion runs are deterministic and easy to compare.
 const BENCH_BLOCK_NUMBER: u64 = 29453083;
 const SAMPLE_SIZE: usize = 10;
 const JOVIAN_UPGRADE_TIMESTAMP_MAINNET: u64 = 1777593600;
+
+/// Optional override for the World Chain mainnet datadir root.
+///
+/// When set, the bench resolves all on-disk paths (node DB, static files,
+/// rocksdb, flashblocks recorder DB) underneath this directory, mirroring the
+/// layout reth produces under the platform-default datadir. When unset, the
+/// platform-default datadir for World Chain mainnet is used.
+const DATADIR_ENV: &str = "WC_BENCH_DATADIR";
 
 type MainnetNode = WorldChainNode<WorldChainDefaultContext>;
 type MainnetProvider = BlockchainProvider<NodeTypesWithDBAdapter<MainnetNode, DatabaseEnv>>;
@@ -90,7 +98,17 @@ fn world_chain_mainnet_spec() -> Arc<OpChainSpec> {
     chain_spec
 }
 
-fn default_bench_paths(chain_spec: Arc<OpChainSpec>) -> BenchPaths {
+fn bench_paths(chain_spec: Arc<OpChainSpec>) -> BenchPaths {
+    if let Some(root) = std::env::var_os(DATADIR_ENV) {
+        let root = PathBuf::from(root);
+        return BenchPaths {
+            node_db: root.join("db"),
+            static_files: root.join("static_files"),
+            rocksdb: root.join("rocksdb"),
+            flashblocks_db: root.join("flashblocks").join("flashblocks.mdbx"),
+        };
+    }
+
     let datadir = NodeConfig::new(chain_spec).datadir();
     let chain_data_dir = datadir.data_dir();
 
@@ -222,7 +240,7 @@ fn assert_parent_header_is_available(
 fn bench_process_flashblock_mainnet_block(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().expect("failed to build tokio runtime");
     let chain_spec = world_chain_mainnet_spec();
-    let paths = default_bench_paths(chain_spec.clone());
+    let paths = bench_paths(chain_spec.clone());
     let evm_config = OpEvmConfig::new(chain_spec.clone(), OpRethReceiptBuilder::default());
     let provider = open_mainnet_provider(chain_spec.clone(), &paths)
         .expect("failed to open default World Chain mainnet node database");
