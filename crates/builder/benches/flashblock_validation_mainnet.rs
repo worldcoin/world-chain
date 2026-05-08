@@ -33,7 +33,7 @@ use world_chain_primitives::{ed25519_dalek::SigningKey, primitives::FlashblocksP
 /// Change this constant locally when switching the captured mainnet block used
 /// by the bench. There are intentionally no CLI flags or environment variables
 /// so Criterion runs are deterministic and easy to compare.
-const BENCH_BLOCK_NUMBER: u64 = 100;
+const BENCH_BLOCK_NUMBER: u64 = 29453083;
 const SAMPLE_SIZE: usize = 10;
 const JOVIAN_UPGRADE_TIMESTAMP_MAINNET: u64 = 1777593600;
 
