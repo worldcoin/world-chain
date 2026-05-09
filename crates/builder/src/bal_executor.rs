@@ -11,7 +11,6 @@ use reth_evm::{
     block::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
 };
 use reth_node_api::NodePrimitives;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpRethReceiptBuilder;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_primitives::BuiltPayload;
@@ -37,6 +36,7 @@ use reth_optimism_node::{OpBlockAssembler, OpBuiltPayload};
 use reth_provider::StateProvider;
 use revm::database::states::bundle_state::BundleRetention;
 use std::{sync::Arc, time::Instant};
+use world_chain_chainspec::WorldChainSpec;
 use world_chain_primitives::access_list::FlashblockAccessList;
 
 #[derive(thiserror::Error, Debug, serde::Serialize)]
@@ -91,11 +91,11 @@ impl BalExecutorError {
 
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
 pub struct BalBlockBuilder<'a, R: OpReceiptBuilder, N: NodePrimitives, Evm> {
-    pub executor: OpBlockExecutor<Evm, R, Arc<OpChainSpec>>,
+    pub executor: OpBlockExecutor<Evm, R, Arc<WorldChainSpec>>,
     pub ctx: OpBlockExecutionCtx,
     pub transactions: Vec<Recovered<N::SignedTx>>,
     pub parent: &'a SealedHeader<N::BlockHeader>,
-    pub assembler: OpBlockAssembler<OpChainSpec>,
+    pub assembler: OpBlockAssembler<WorldChainSpec>,
     pub access_list_sender: crossbeam_channel::Sender<FlashblockAccessList>,
     pub counter: BlockAccessIndexCounter,
 }
@@ -110,9 +110,9 @@ where
     pub fn new(
         ctx: OpBlockExecutionCtx,
         parent: &'a SealedHeader<N::BlockHeader>,
-        mut executor: OpBlockExecutor<E, R, Arc<OpChainSpec>>,
+        mut executor: OpBlockExecutor<E, R, Arc<WorldChainSpec>>,
         transactions: Vec<Recovered<N::SignedTx>>,
-        chain_spec: Arc<OpChainSpec>,
+        chain_spec: Arc<WorldChainSpec>,
         tx: crossbeam_channel::Sender<FlashblockAccessList>,
     ) -> Self {
         let start_index = if transactions.is_empty() {
@@ -166,7 +166,7 @@ where
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
 {
     type Primitives = N;
-    type Executor = OpBlockExecutor<E, R, Arc<OpChainSpec>>;
+    type Executor = OpBlockExecutor<E, R, Arc<WorldChainSpec>>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         let res = self.executor.apply_pre_execution_changes();
@@ -277,7 +277,7 @@ where
         let block = self.assembler.assemble_block(BlockAssemblerInput::<
             '_,
             '_,
-            OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
+            OpBlockExecutorFactory<OpRethReceiptBuilder, WorldChainSpec>,
         >::new(
             evm_env,
             self.ctx,
@@ -350,6 +350,10 @@ pub struct CommittedState<R: OpReceiptBuilder + Default = OpRethReceiptBuilder> 
     pub is_first: bool,
     /// The total gas used in previous committed transactions.
     pub gas_used: u64,
+    /// The total DA footprint in previous committed transactions.
+    ///
+    /// Post-Jovian this is stored in the block header's `blob_gas_used` field.
+    pub blob_gas_used: u64,
     /// The total fees accumulated in previous committed transactions.
     pub fees: U256,
     /// The bundle state accumulated so far from the State Transitions
@@ -399,6 +403,10 @@ where
                 .ok_or(BalExecutorError::MissingExecutedBlock)?;
 
             let gas_used = executed_block.recovered_block.gas_used();
+            let blob_gas_used = executed_block
+                .recovered_block
+                .blob_gas_used()
+                .unwrap_or_default();
 
             let bundle = value
                 .executed_block()
@@ -431,6 +439,7 @@ where
                 transactions,
                 receipts,
                 gas_used,
+                blob_gas_used,
                 fees,
                 bundle,
             })
@@ -440,6 +449,7 @@ where
                 transactions: vec![],
                 receipts: vec![],
                 gas_used: 0,
+                blob_gas_used: 0,
                 fees: U256::ZERO,
                 bundle: BundleState::default(),
             })

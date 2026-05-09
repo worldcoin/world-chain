@@ -22,7 +22,6 @@ use reth_node_builder::{
     rpc::{BasicEngineValidatorBuilder, RpcAddOns},
 };
 use reth_node_core::primitives::Hardforks;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
     OpAddOns, OpConsensusBuilder, OpEngineTypes, OpEngineValidatorBuilder, OpExecutorBuilder,
@@ -31,6 +30,7 @@ use reth_optimism_node::{
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApiBuilder;
 use world_chain_builder::coordinator::FlashblocksExecutionCoordinator;
+use world_chain_chainspec::WorldChainSpec;
 use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
 use world_chain_p2p::{
     monitor::PeerMonitor,
@@ -177,7 +177,7 @@ pub struct WorldChainDefaultContext {
 impl WorldChainNodePrimitiveTypes for WorldChainDefaultContext {
     type Primitives = OpPrimitives;
     type Payload = OpEngineTypes;
-    type ChainSpec = OpChainSpec;
+    type ChainSpec = WorldChainSpec;
 }
 
 impl<N: FullNodeTypes<Types = WorldChainNode<WorldChainDefaultContext>>> WorldChainNodeContext<N>
@@ -185,11 +185,11 @@ impl<N: FullNodeTypes<Types = WorldChainNode<WorldChainDefaultContext>>> WorldCh
 where
     FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
-    >: PayloadServiceBuilder<N, BasicWorldChainPool<N>, OpEvmConfig>,
+    >: PayloadServiceBuilder<N, BasicWorldChainPool<N>, OpEvmConfig<WorldChainSpec>>,
 {
     type Pool = BasicWorldChainPool<N>;
     type Net = WorldChainNetworkBuilder;
-    type Evm = OpEvmConfig;
+    type Evm = OpEvmConfig<WorldChainSpec>;
     type PayloadServiceBuilder = FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
     >;

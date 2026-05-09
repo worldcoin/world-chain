@@ -5,7 +5,6 @@ use alloy_primitives::{Address, address};
 use reth_chainspec::{EthChainSpec, ForkCondition};
 use reth_network_peers::PeerId;
 use reth_node_builder::NodeConfig;
-use reth_optimism_chainspec::{OpChainSpec, OpHardfork};
 use reth_optimism_node::args::RollupArgs;
 use reth_optimism_payload_builder::config::{OpBuilderConfig, OpGasLimitConfig};
 use reth_rpc_server_types::{
@@ -13,6 +12,10 @@ use reth_rpc_server_types::{
 };
 use std::{str::FromStr, sync::Arc};
 use tracing::{debug, info, warn};
+use world_chain_chainspec::{
+    JOVIAN_UPGRADE_TIMESTAMP_MAINNET, JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA, WorldChainHardfork,
+    WorldChainSpec,
+};
 
 pub mod builder;
 pub mod p2p;
@@ -21,10 +24,6 @@ pub mod pbh;
 pub use builder::*;
 pub use p2p::*;
 pub use pbh::*;
-
-const JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA: u64 = 1777161600;
-
-const JOVIAN_UPGRADE_TIMESTAMP_MAINNET: u64 = 1777593600;
 
 pub const DEFAULT_FLASHBLOCKS_BOOTNODES: &str = "enode://78ca7daeb63956cbc3985853d5699a6404d976a2612575563f46876968fdca2383a195ee7db40de348757b2256195996933708f351169ca3f3fe93ab2a774608@16.62.98.53:30303,enode://c96dcadf4cdea4c39ec3fd775637d9e67d455b856b1514cfcf55b72f873a34b96d69e47ccea9fc797a446d4e6948aa80f6b9d479a1727ca166758a900b08f422@16.63.14.166:30303,enode://15688a7b281c32a4da633252dcc5019d60f037ee9eb46d05093dd3023bdd688b9b207d10a39e054a5ed87db666b2cb75696f6537de74d1e1f8dcabc53dc8d2ab@16.63.123.160:30303";
 
@@ -179,7 +178,7 @@ pub struct WorldChainArgs {
 impl WorldChainArgs {
     pub fn into_config(
         mut self,
-        config: &mut NodeConfig<OpChainSpec>,
+        config: &mut NodeConfig<WorldChainSpec>,
     ) -> eyre::Result<WorldChainNodeConfig> {
         // Perform arg validation here for things clap can't do.
         let spec = &config.chain;
@@ -241,8 +240,8 @@ impl WorldChainArgs {
                 }
 
                 let chain_spec = Arc::make_mut(&mut config.chain);
-                chain_spec.inner.hardforks.insert(
-                    OpHardfork::Jovian,
+                chain_spec.set_fork(
+                    WorldChainHardfork::Jovian,
                     ForkCondition::Timestamp(JOVIAN_UPGRADE_TIMESTAMP_MAINNET),
                 );
                 info!(
@@ -280,8 +279,8 @@ impl WorldChainArgs {
                 }
 
                 let chain_spec = Arc::make_mut(&mut config.chain);
-                chain_spec.inner.hardforks.insert(
-                    OpHardfork::Jovian,
+                chain_spec.set_fork(
+                    WorldChainHardfork::Jovian,
                     ForkCondition::Timestamp(JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA),
                 );
                 info!(
@@ -367,7 +366,7 @@ mod tests {
     }
 
     fn into_world_config(parsed: CommandParserWithRpc) -> WorldChainNodeConfig {
-        let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());
+        let spec = WorldChainSpec::from_genesis(Genesis::default());
         let mut node_config = NodeConfig::new(Arc::new(spec));
         node_config.rpc = parsed.rpc;
         parsed.world.into_config(&mut node_config).unwrap()
@@ -426,7 +425,7 @@ mod tests {
 
         assert_eq!(args.builder.gas_limit, Some(25_000_000));
 
-        let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());
+        let spec = WorldChainSpec::from_genesis(Genesis::default());
         let mut node_config = NodeConfig::new(Arc::new(spec));
 
         node_config.builder = args.builder;
@@ -507,7 +506,7 @@ mod tests {
             simulate_enabled: false,
         };
 
-        let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());
+        let spec = WorldChainSpec::from_genesis(Genesis::default());
         let mut node_config = NodeConfig::new(Arc::new(spec));
         let config = args.into_config(&mut node_config).unwrap();
 

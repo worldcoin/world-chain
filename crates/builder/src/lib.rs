@@ -207,6 +207,10 @@ pub mod state_root_strategy;
 pub use execution_context::{WorldChainPayloadBuilderCtx, WorldChainPayloadBuilderCtxBuilder};
 
 use crate::metrics::FlashblockExecutionMetrics;
+use world_chain_chainspec::WorldChainSpec;
+
+/// Concrete OP EVM configuration used by the World Chain node.
+pub type WorldChainEvmConfig = reth_optimism_evm::OpEvmConfig<WorldChainSpec>;
 
 pub trait BlockBuilderExt: BlockBuilder {
     /// Completes the block building process and returns the [`BlockBuilderOutcome`], and [`BundleState`].

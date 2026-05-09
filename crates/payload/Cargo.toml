@@ -10,10 +10,10 @@ license.workspace = true
 world-chain-primitives.workspace = true
 world-chain-builder.workspace = true
 world-chain-p2p.workspace = true
+world-chain-chainspec.workspace = true
 
 # reth
 reth-basic-payload-builder.workspace = true
-reth-optimism-chainspec.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-optimism-primitives.workspace = true

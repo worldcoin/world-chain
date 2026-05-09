@@ -12,8 +12,7 @@ use reth_evm::{
     execute::{BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, BlockExecutor},
 };
 use reth_node_api::BuiltPayloadExecutedBlock;
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
+use reth_optimism_evm::OpRethReceiptBuilder;
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives_traits::{RecoveredBlock, SealedHeader};
@@ -28,6 +27,7 @@ use world_chain_primitives::{
 };
 
 use crate::{
+    WorldChainEvmConfig,
     bal_executor::{BalExecutorError, BalValidationError, CommittedState},
     database::{
         bal_builder_db::{BalBuilderDb, NoOpCommitDB},
@@ -41,6 +41,7 @@ use crate::{
     state_root_strategy::{StateRootHandle, StateRootStrategy},
     validator::{BalBlockValidator, decode_transactions_with_indices},
 };
+use world_chain_chainspec::WorldChainSpec;
 
 /// Result of computing the state root from a bundle state.
 pub struct StateRootResult {
@@ -68,7 +69,7 @@ pub fn compute_state_root<'a>(
 pub struct ValidationCtx<'a, Evm: ConfigureEvm, S: StateRootStrategy> {
     pub parent: &'a SealedHeader<Header>,
     pub attempt_metrics: &'a mut FlashblockValidationAttemptMetrics,
-    pub chain_spec: Arc<OpChainSpec>,
+    pub chain_spec: Arc<WorldChainSpec>,
     pub evm_env: EvmEnvFor<Evm>,
     pub execution_context: OpBlockExecutionCtx,
     /// State root strategy for this flashblock execution.
@@ -93,10 +94,12 @@ pub trait ExecutionStrategy<Evm: ConfigureEvm, S: StateRootStrategy>: Send + Syn
 /// BAL execution strategy: parallel transaction execution with an external state root handle.
 pub struct FlashblocksBalExecutionStrategy;
 
-impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S> for FlashblocksBalExecutionStrategy {
+impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
+    for FlashblocksBalExecutionStrategy
+{
     fn execute(
         &self,
-        ctx: ValidationCtx<'_, OpEvmConfig, S>,
+        ctx: ValidationCtx<'_, WorldChainEvmConfig, S>,
         client: impl StateProviderFactory + Clone + Sync + 'static,
         diff: ExecutionPayloadFlashblockDeltaV1,
         committed_state: CommittedState<OpRethReceiptBuilder>,
@@ -138,7 +141,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S> for FlashblocksBalE
 
         let evm = OpEvmFactory::<OpTx>::default().create_evm(database, ctx.evm_env.clone());
 
-        let mut executor: OpBlockExecutor<_, OpRethReceiptBuilder, Arc<OpChainSpec>> =
+        let mut executor: OpBlockExecutor<_, OpRethReceiptBuilder, Arc<WorldChainSpec>> =
             OpBlockExecutor::new(
                 evm,
                 ctx.execution_context.clone(),
@@ -147,6 +150,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S> for FlashblocksBalE
             );
 
         executor.gas_used = committed_state.gas_used;
+        executor.da_footprint_used = committed_state.blob_gas_used;
         executor.receipts = committed_state.receipts_iter().cloned().collect();
 
         let (validator, access_list_receiver) = BalBlockValidator::new(
@@ -286,12 +290,12 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S> for FlashblocksBalE
 
 pub struct FlashblocksLegacyExecutionStrategy;
 
-impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S>
+impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
     for FlashblocksLegacyExecutionStrategy
 {
     fn execute(
         &self,
-        ctx: ValidationCtx<'_, OpEvmConfig, S>,
+        ctx: ValidationCtx<'_, WorldChainEvmConfig, S>,
         client: impl StateProviderFactory + Clone + Sync + 'static,
         diff: ExecutionPayloadFlashblockDeltaV1,
         committed_state: CommittedState<OpRethReceiptBuilder>,
@@ -319,6 +323,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<OpEvmConfig, S>
         );
 
         executor.gas_used = committed_state.gas_used;
+        executor.da_footprint_used = committed_state.blob_gas_used;
         executor.receipts = committed_state.receipts_iter().cloned().collect();
 
         let mut builder = FlashblocksBlockBuilder::<OpPrimitives, _>::new(

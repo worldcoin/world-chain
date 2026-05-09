@@ -1,4 +1,5 @@
 use crate::{
+    WorldChainEvmConfig,
     payload_builder_metrics::{PayloadBuildRejectionReason, PayloadBuildTaskOutcome},
     state_db::StateDB,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
@@ -22,10 +23,9 @@ use reth_evm::{
     execute::{BlockBuilder, BlockExecutor},
 };
 use reth_node_api::PayloadBuilderError;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    OpBuiltPayload, OpEvmConfig, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
+    OpBuiltPayload, OpNextBlockEnvAttributes, OpPayloadBuilderAttributes,
     txpool::estimated_da_size::DataAvailabilitySized,
 };
 use reth_optimism_payload_builder::{
@@ -44,6 +44,7 @@ use revm_database::State;
 use semaphore_rs::Field;
 use std::{collections::HashSet, fmt::Debug, sync::Arc, time::Instant};
 use tracing::{error, trace};
+use world_chain_chainspec::WorldChainSpec;
 use world_chain_pool::{
     bindings::IPBHEntryPoint::spendNullifierHashesCall,
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
@@ -52,7 +53,8 @@ use world_chain_pool::{
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug, Clone)]
 pub struct WorldChainPayloadBuilderCtx<Client: ChainSpecProvider> {
-    pub inner: Arc<OpPayloadBuilderCtx<OpEvmConfig, <Client as ChainSpecProvider>::ChainSpec>>,
+    pub inner:
+        Arc<OpPayloadBuilderCtx<WorldChainEvmConfig, <Client as ChainSpecProvider>::ChainSpec>>,
     pub verified_blockspace_capacity: u8,
     pub pbh_entry_point: Address,
     pub pbh_signature_aggregator: Address,
@@ -106,7 +108,7 @@ where
         + ChainSpecProvider<ChainSpec: OpHardforks>
         + Clone,
 {
-    type Evm = OpEvmConfig;
+    type Evm = WorldChainEvmConfig;
     type ChainSpec = <Client as ChainSpecProvider>::ChainSpec;
     type Transaction = WorldChainPooledTransaction;
 
@@ -435,11 +437,11 @@ where
     }
 }
 
-impl<Provider> PayloadBuilderCtxBuilder<Provider, OpEvmConfig, OpChainSpec>
+impl<Provider> PayloadBuilderCtxBuilder<Provider, WorldChainEvmConfig, WorldChainSpec>
     for WorldChainPayloadBuilderCtxBuilder
 where
     Provider: StateProviderFactory
-        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + ChainSpecProvider<ChainSpec = WorldChainSpec>
         + Send
         + Sync
         + BlockReaderIdExt<Block = Block<OpTransactionSigned>>
@@ -450,14 +452,14 @@ where
     fn build(
         &self,
         provider: Provider,
-        evm_config: OpEvmConfig,
+        evm_config: WorldChainEvmConfig,
         builder_config: OpBuilderConfig,
         config: PayloadConfig<
-            OpPayloadBuilderAttributes<TxTy<<OpEvmConfig as ConfigureEvm>::Primitives>>,
-            HeaderTy<<OpEvmConfig as ConfigureEvm>::Primitives>,
+            OpPayloadBuilderAttributes<TxTy<<WorldChainEvmConfig as ConfigureEvm>::Primitives>>,
+            HeaderTy<<WorldChainEvmConfig as ConfigureEvm>::Primitives>,
         >,
         cancel: &CancelOnDrop,
-        best_payload: Option<OpBuiltPayload<<OpEvmConfig as ConfigureEvm>::Primitives>>,
+        best_payload: Option<OpBuiltPayload<<WorldChainEvmConfig as ConfigureEvm>::Primitives>>,
     ) -> Self::PayloadBuilderCtx
     where
         Self: Sized,

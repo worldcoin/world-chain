@@ -31,13 +31,13 @@ use reth_evm::{
     },
 };
 use reth_node_api::BuiltPayload;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::{OpBlockAssembler, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_provider::{StateProvider, StateProviderFactory};
 use revm::{DatabaseRef, context::BlockEnv, database::BundleState};
 use tracing::{error, info, trace};
+use world_chain_chainspec::WorldChainSpec;
 
 use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
@@ -60,7 +60,7 @@ use crate::{
 pub type ValidatorDb<'a, DB> = BalBuilderDb<&'a mut NoOpCommitDB<TemporalDb<DB>>>;
 
 pub struct FlashblocksBlockValidator<Evm: ConfigureEvm, T: FlashblockTypes<Evm>> {
-    pub chain_spec: Arc<OpChainSpec>,
+    pub chain_spec: Arc<WorldChainSpec>,
     pub evm_env: EvmEnvFor<Evm>,
     pub execution_context: OpBlockExecutionCtx,
     pub flashblock_validation_metrics: Arc<FlashblockValidationMetrics>,
@@ -70,7 +70,7 @@ pub struct FlashblocksBlockValidator<Evm: ConfigureEvm, T: FlashblockTypes<Evm>>
 
 impl<Evm: ConfigureEvm + Clone, T: FlashblockTypes<Evm>> FlashblocksBlockValidator<Evm, T> {
     pub fn new(
-        chain_spec: Arc<OpChainSpec>,
+        chain_spec: Arc<WorldChainSpec>,
         evm_env: EvmEnvFor<Evm>,
         execution_context: OpBlockExecutionCtx,
         flashblock_validation_metrics: Arc<FlashblockValidationMetrics>,
@@ -198,6 +198,8 @@ pub struct ParallelExecutionResult {
     pub receipts: Vec<OpReceipt>,
     /// Gas consumed by this transaction
     pub gas_used: u64,
+    /// DA footprint consumed by this transaction, stored as blob gas post-Jovian.
+    pub blob_gas_used: u64,
     /// Fees earned from this transaction
     pub fees: u128,
     /// Access list entries from this transaction
@@ -216,9 +218,9 @@ pub struct BalBlockValidator<
 > {
     pub inner: BasicBlockBuilder<
         'a,
-        OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
-        OpBlockExecutor<Evm, R, Arc<OpChainSpec>>,
-        OpBlockAssembler<OpChainSpec>,
+        OpBlockExecutorFactory<OpRethReceiptBuilder, WorldChainSpec>,
+        OpBlockExecutor<Evm, R, Arc<WorldChainSpec>>,
+        OpBlockAssembler<WorldChainSpec>,
         OpPrimitives,
     >,
     pub bundle_state: Arc<BundleState>,
@@ -244,11 +246,11 @@ where
     pub fn new(
         ctx: OpBlockExecutionCtx,
         parent: &'a SealedHeader<Header>,
-        executor: OpBlockExecutor<E, R, Arc<OpChainSpec>>,
+        executor: OpBlockExecutor<E, R, Arc<WorldChainSpec>>,
         bundle_state: Arc<BundleState>,
         fallback_bundle_state: Arc<BundleState>,
         transactions: Vec<Recovered<OpTransactionSigned>>,
-        chain_spec: Arc<OpChainSpec>,
+        chain_spec: Arc<WorldChainSpec>,
         temporal_db_factory: &'a TemporalDbFactory,
         state_root_handle: H,
         evm_env: EvmEnv<OpSpecId>,
@@ -306,7 +308,7 @@ where
     OpTx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     type Primitives = OpPrimitives;
-    type Executor = OpBlockExecutor<E, R, Arc<OpChainSpec>>;
+    type Executor = OpBlockExecutor<E, R, Arc<WorldChainSpec>>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.executor.apply_pre_execution_changes()
@@ -366,7 +368,7 @@ where
         let block = self.inner.assembler.assemble_block(BlockAssemblerInput::<
             '_,
             '_,
-            OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
+            OpBlockExecutorFactory<OpRethReceiptBuilder, WorldChainSpec>,
         >::new(
             evm_env,
             self.inner.ctx,
@@ -461,6 +463,7 @@ where
         let execution_context = self.inner.ctx.clone();
         let evm_env = self.evm_env.clone();
         let gas_used = self.inner.executor.gas_used;
+        let blob_gas_used = self.inner.executor.da_footprint_used;
 
         let db_factory = self.temporal_db_factory.clone();
         let fallback_bundle_state = self.fallback_bundle_state.clone();
@@ -521,7 +524,7 @@ where
             txs_execution_started.elapsed(),
         );
 
-        let merged_result = merge_transaction_results(results, gas_used);
+        let merged_result = merge_transaction_results(results, gas_used, blob_gas_used);
         let database = self.inner.executor.evm_mut().db_mut();
 
         // merge the aggregated access list into the AsyncBalBuilderDb
@@ -533,6 +536,7 @@ where
             .receipts
             .extend_from_slice(&merged_result.receipts);
         self.inner.executor.gas_used = merged_result.gas_used;
+        self.inner.executor.da_footprint_used = merged_result.blob_gas_used;
 
         // append the _executed_ transactions into the executor
         self.inner.transactions.extend_from_slice(
@@ -556,14 +560,17 @@ where
 fn merge_transaction_results(
     results: Vec<ParallelExecutionResult>,
     initial_gas_used: u64,
+    initial_blob_gas_used: u64,
 ) -> ParallelExecutionResult {
     results.into_iter().fold(
         ParallelExecutionResult {
             gas_used: initial_gas_used,
+            blob_gas_used: initial_blob_gas_used,
             ..Default::default()
         },
         |mut acc, mut res| {
             acc.gas_used += res.gas_used;
+            acc.blob_gas_used += res.blob_gas_used;
             if let Some(mut receipt) = res.receipts.pop() {
                 receipt.as_receipt_mut().cumulative_gas_used = acc.gas_used;
                 acc.receipts.push(receipt);
@@ -580,7 +587,7 @@ fn merge_transaction_results(
 pub fn execute_transaction<R, DBRef>(
     (index, tx): (BlockAccessIndex, Recovered<OpTransactionSigned>),
     receipt_builder: R,
-    spec: Arc<OpChainSpec>,
+    spec: Arc<WorldChainSpec>,
     execution_context: OpBlockExecutionCtx,
     evm_env: EvmEnv<OpSpecId>,
     db_factory: &TemporalDbFactory,
@@ -639,6 +646,7 @@ where
     Ok(ParallelExecutionResult {
         receipts: result.receipts,
         gas_used: result.gas_used,
+        blob_gas_used: result.blob_gas_used,
         fees,
         access_list,
         index,
