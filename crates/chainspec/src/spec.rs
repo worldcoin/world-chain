@@ -443,11 +443,19 @@ impl WorldGenesisInfo {
 }
 
 fn extra_timestamp(genesis: &Genesis, key: &str) -> Option<u64> {
-    genesis
-        .config
-        .extra_fields
-        .get_deserialized::<u64>(key)
-        .and_then(Result::ok)
+    match genesis.config.extra_fields.get_deserialized::<u64>(key) {
+        Some(Ok(ts)) => Some(ts),
+        Some(Err(err)) => {
+            tracing::warn!(
+                target: "world_chain::chainspec",
+                %err,
+                key,
+                "ignoring genesis extra field: failed to deserialize as u64 timestamp"
+            );
+            None
+        }
+        None => None,
+    }
 }
 
 fn convert_op_hardforks(hardforks: &ChainHardforks) -> ChainHardforks {
