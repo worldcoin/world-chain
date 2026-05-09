@@ -7,7 +7,6 @@ use reth_node_builder::{
     BuilderContext,
     components::{PayloadBuilderBuilder, PayloadServiceBuilder},
 };
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpNodeTypes, payload::OpPayloadAttrs};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{
@@ -18,6 +17,7 @@ use reth_transaction_pool::TransactionPool;
 use world_chain_builder::{
     coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
 };
+use world_chain_chainspec::WorldChainSpec;
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_payload::generator::{
     FlashblocksJobGeneratorConfig, FlashblocksPayloadJobGenerator,
@@ -67,12 +67,12 @@ impl<Node, Pool, PB, EvmConfig> PayloadServiceBuilder<Node, Pool, EvmConfig>
 where
     Node: FullNodeTypes<Types: OpNodeTypes<Payload = OpEngineTypes>>,
     Node::Provider: StateProviderFactory
-        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + ChainSpecProvider<ChainSpec = WorldChainSpec>
         + HeaderProvider<Header = alloy_consensus::Header>
         + Clone
         + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>,
     Node::Types: NodeTypes<
-            ChainSpec = OpChainSpec,
+            ChainSpec = WorldChainSpec,
             Payload: PayloadTypes<
                 BuiltPayload = OpBuiltPayload,
                 PayloadAttributes = OpPayloadAttrs,

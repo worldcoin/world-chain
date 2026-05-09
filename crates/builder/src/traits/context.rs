@@ -1,5 +1,5 @@
 use crate::{
-    payload_builder_metrics::PayloadBuildAttemptMetrics, state_db::StateDB,
+    WorldChainEvmConfig, payload_builder_metrics::PayloadBuildAttemptMetrics, state_db::StateDB,
     traits::context_builder::PayloadBuilderCtxBuilder, utils::effective_gas_limit,
 };
 use alloy_eips::eip4895::Withdrawals;
@@ -10,12 +10,8 @@ use op_revm::OpSpecId;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::{ConfigureEvm, Evm, EvmEnv, block::BlockExecutor, execute::BlockBuilder};
 use reth_node_api::PayloadBuilderError;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::{
-    OpEvmConfig,
-    txpool::{OpPooledTransaction, OpPooledTx},
-};
+use reth_optimism_node::txpool::{OpPooledTransaction, OpPooledTx};
 use reth_optimism_payload_builder::{
     builder::{ExecutionInfo, OpPayloadBuilderCtx},
     config::OpBuilderConfig,
@@ -28,6 +24,7 @@ use reth_provider::ChainSpecProvider;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{DatabaseCommit, context::BlockEnv};
 use revm_database::State;
+use world_chain_chainspec::WorldChainSpec;
 
 /// Context trait for building payloads with flashblock support.
 ///
@@ -188,21 +185,21 @@ pub trait PayloadBuilderCtx: Send + Sync {
 #[derive(Debug, Default, Clone)]
 pub struct OpPayloadBuilderCtxBuilder;
 
-impl<Provider> PayloadBuilderCtxBuilder<Provider, OpEvmConfig, OpChainSpec>
+impl<Provider> PayloadBuilderCtxBuilder<Provider, WorldChainEvmConfig, WorldChainSpec>
     for OpPayloadBuilderCtxBuilder
 where
-    Provider: ChainSpecProvider<ChainSpec = OpChainSpec>,
+    Provider: ChainSpecProvider<ChainSpec = WorldChainSpec>,
 {
-    type PayloadBuilderCtx = OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec>;
+    type PayloadBuilderCtx = OpPayloadBuilderCtx<WorldChainEvmConfig, WorldChainSpec>;
 
     fn build(
         &self,
         provider: Provider,
-        evm: OpEvmConfig,
+        evm: WorldChainEvmConfig,
         builder_config: OpBuilderConfig,
         config: reth_basic_payload_builder::PayloadConfig<
             OpPayloadBuilderAttributes<op_alloy_consensus::OpTxEnvelope>,
-            HeaderTy<<OpEvmConfig as ConfigureEvm>::Primitives>,
+            HeaderTy<<WorldChainEvmConfig as ConfigureEvm>::Primitives>,
         >,
         cancel: &reth_revm::cancelled::CancelOnDrop,
         best_payload: Option<reth_optimism_node::OpBuiltPayload>,
@@ -221,9 +218,9 @@ where
     }
 }
 
-impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
-    type Evm = OpEvmConfig;
-    type ChainSpec = OpChainSpec;
+impl PayloadBuilderCtx for OpPayloadBuilderCtx<WorldChainEvmConfig, WorldChainSpec> {
+    type Evm = WorldChainEvmConfig;
+    type ChainSpec = WorldChainSpec;
     type Transaction = OpPooledTransaction;
 
     fn evm_config(&self) -> &Self::Evm {
@@ -323,12 +320,13 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<OpEvmConfig, OpChainSpec> {
             // opaque types don't have sufficient functionality
             let this = &self;
             let parent = this.parent();
-            let attributes = <OpEvmConfig as ConfigureEvm>::NextBlockEnvCtx::build_next_env(
-                this.attributes(),
-                this.parent(),
-                this.chain_spec.as_ref(),
-            )
-            .map_err(PayloadBuilderError::other)?;
+            let attributes =
+                <WorldChainEvmConfig as ConfigureEvm>::NextBlockEnvCtx::build_next_env(
+                    this.attributes(),
+                    this.parent(),
+                    this.chain_spec.as_ref(),
+                )
+                .map_err(PayloadBuilderError::other)?;
 
             let evm_env = this
                 .evm_config

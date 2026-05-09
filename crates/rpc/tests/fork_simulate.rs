@@ -59,8 +59,23 @@ sol! {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-fn rpc_url() -> String {
-    std::env::var("WORLDCHAIN_PROVIDER").expect("WORLDCHAIN_PROVIDER not set")
+fn rpc_url() -> Option<String> {
+    match std::env::var("WORLDCHAIN_PROVIDER") {
+        Ok(url) if !url.trim().is_empty() => Some(url),
+        _ => None,
+    }
+}
+
+macro_rules! forked_db {
+    () => {
+        match make_forked_db() {
+            Some(db) => db,
+            None => {
+                eprintln!("skipping fork-backed test: WORLDCHAIN_PROVIDER is not set");
+                return;
+            }
+        }
+    };
 }
 
 /// Mirrors the EVM envelope `simulate_blocking` configures in `simulate.rs`
@@ -84,16 +99,22 @@ fn metadata_evm_env() -> reth_evm::EvmEnv<OpSpecId> {
 
 /// Create a forked CacheDB backed by an AlloyDB hitting the World Chain RPC.
 /// Uses `RootProvider` directly (which implements Debug, satisfying revm bounds).
-fn make_forked_db() -> CacheDB<
-    WrapDatabaseAsync<
-        AlloyDB<alloy_provider_v1::network::Ethereum, alloy_provider_v1::RootProvider>,
+fn make_forked_db() -> Option<
+    CacheDB<
+        WrapDatabaseAsync<
+            AlloyDB<alloy_provider_v1::network::Ethereum, alloy_provider_v1::RootProvider>,
+        >,
     >,
 > {
-    let provider = alloy_provider_v1::RootProvider::new_http(rpc_url().parse().unwrap());
+    let provider = alloy_provider_v1::RootProvider::new_http(
+        rpc_url()?
+            .parse()
+            .expect("WORLDCHAIN_PROVIDER must be a valid HTTP RPC URL"),
+    );
     let alloy_db = AlloyDB::new(provider, revm_database::BlockId::from(FORK_BLOCK_NUMBER));
     let handle = tokio::runtime::Handle::current();
     let wrapped = WrapDatabaseAsync::with_handle(alloy_db, handle);
-    CacheDB::new(wrapped)
+    Some(CacheDB::new(wrapped))
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -105,7 +126,7 @@ fn make_forked_db() -> CacheDB<
 /// against the same EVM, so it uses `metadata_evm_env`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_fork_view_calls() {
-    let mut db = make_forked_db();
+    let mut db = forked_db!();
     let env = metadata_evm_env();
     let mut evm = OpEvmFactory::default().create_evm(&mut db, env);
 
@@ -364,7 +385,7 @@ async fn test_approval_for_all_log_parsing() {
 /// Native ETH transfer is captured by the inspector.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_native_eth_transfer_inspector() {
-    let mut db = make_forked_db();
+    let mut db = forked_db!();
     let sender = address!("00000000000000000000000000000000DeaDBeef");
     let recipient = address!("000000000000000000000000000000000000dEaD");
     let eth_value = U256::from(50_000_000_000_000_000u128);
@@ -433,7 +454,7 @@ async fn test_native_eth_transfer_inspector() {
 /// no WLD balance, so the inner transfer reverts deterministically.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_simulate_unfunded_caller_bypasses_l1_fee() {
-    let mut db = make_forked_db();
+    let mut db = forked_db!();
     // Synthetic EntryPoint-shaped caller: 0 ETH, non-zero nonce, no WLD.
     let caller = address!("00000000000000000000000000ffffffffffffff");
     db.insert_account_info(
@@ -480,7 +501,7 @@ async fn test_simulate_unfunded_caller_bypasses_l1_fee() {
 /// Reverting ERC-20 transfer returns a decoded revert reason.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_revert_with_reason() {
-    let mut db = make_forked_db();
+    let mut db = forked_db!();
     let caller = address!("00000000000000000000000000ffffffffffffff");
     db.insert_account_info(
         caller,
@@ -528,7 +549,7 @@ async fn test_revert_with_reason() {
 /// directly with no wrapper.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_deepest_revert_reason_decodes_payload() {
-    let mut db = make_forked_db();
+    let mut db = forked_db!();
     let caller = address!("00000000000000000000000000ffffffffffffff");
     db.insert_account_info(
         caller,
@@ -580,7 +601,7 @@ async fn test_deepest_revert_reason_decodes_payload() {
 /// `HaltReason` debug name for `revertReason`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_deepest_revert_reason_skips_halts() {
-    let mut db = make_forked_db();
+    let mut db = forked_db!();
     let caller = address!("00000000000000000000000000ffffffffffffff");
     db.insert_account_info(
         caller,
@@ -633,7 +654,7 @@ async fn test_deepest_revert_reason_skips_halts() {
 /// Trace captures top-level calls from a simulated execution.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_trace_captures_calls() {
-    let mut db = make_forked_db();
+    let mut db = forked_db!();
     db.insert_account_info(
         ENTRY_POINT,
         AccountInfo {
@@ -718,7 +739,7 @@ async fn test_forbidden_safe_selectors_recognized() {
 /// at the right depth.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_trace_detects_malicious_safe_call() {
-    let mut db = make_forked_db();
+    let mut db = forked_db!();
     db.insert_account_info(
         ENTRY_POINT,
         AccountInfo {
@@ -847,7 +868,7 @@ async fn test_trace_detects_malicious_safe_call() {
 /// `AssetChange`s. The EVM also reports a successful execution (no revert).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_simulate_real_approve_emits_only_exposure() {
-    let mut db = make_forked_db();
+    let mut db = forked_db!();
     let caller = address!("00000000000000000000000000ffffffffffffff");
     db.insert_account_info(
         caller,
@@ -1277,7 +1298,7 @@ fn install_runtime_code(
 /// hook fires inside a parent call frame.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_inspector_captures_create_via_call_frame() {
-    let mut db = make_forked_db();
+    let mut db = forked_db!();
     let caller = address!("00000000000000000000000000ffffffffffffff");
     let trampoline = address!("000000000000000000000000000000000000c0de");
     db.insert_account_info(
@@ -1325,7 +1346,7 @@ async fn test_inspector_captures_create_via_call_frame() {
 /// succeeded. Mirrors the EVM's own atomicity guarantee.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_inspector_drops_create_on_parent_revert() {
-    let mut db = make_forked_db();
+    let mut db = forked_db!();
     let caller = address!("00000000000000000000000000ffffffffffffff");
     let trampoline = address!("000000000000000000000000000000000000dead");
     db.insert_account_info(

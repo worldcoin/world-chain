@@ -29,8 +29,11 @@ use std::{
     num::NonZeroUsize,
     sync::{Arc, Mutex},
 };
+use world_chain_chainspec::WorldChainSpec;
 
 use crate::simulate_consts::*;
+
+type WorldChainEvmConfig = OpEvmConfig<WorldChainSpec>;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Request types
@@ -493,7 +496,7 @@ pub fn relax_cfg_for_simulation(cfg_env: &mut CfgEnv<OpSpecId>) {
 #[derive(Debug, Clone)]
 pub struct Simulate<Client> {
     client: Client,
-    evm_config: OpEvmConfig,
+    evm_config: WorldChainEvmConfig,
     metadata_cache: MetadataCache,
     /// Shared with `eth_call` / `debug_*` so simulate inherits the same
     /// CPU-bound rayon pool and doesn't compete with general tokio work.
@@ -506,7 +509,7 @@ pub struct Simulate<Client> {
 impl<Client> Simulate<Client> {
     pub fn new(
         client: Client,
-        evm_config: OpEvmConfig,
+        evm_config: WorldChainEvmConfig,
         task_pool: BlockingTaskPool,
         task_guard: BlockingTaskGuard,
     ) -> Self {
@@ -526,7 +529,7 @@ impl<Client> Simulate<Client> {
     /// already-installed eth API.
     pub fn from_eth_api<E: SpawnBlocking>(
         client: Client,
-        evm_config: OpEvmConfig,
+        evm_config: WorldChainEvmConfig,
         eth_api: &E,
     ) -> Self {
         Self::new(
@@ -1255,7 +1258,7 @@ pub fn selector_to_name(selector: [u8; 4]) -> Option<&'static str> {
 /// cycles; this batches all 3·N calls onto the same warm state cache.
 fn run_metadata_calls<Client>(
     client: &Client,
-    evm_config: &OpEvmConfig,
+    evm_config: &WorldChainEvmConfig,
     header: &alloy_consensus::Header,
     block_id: alloy_rpc_types::BlockId,
     tokens: &[(Address, AssetType)],
@@ -1348,7 +1351,7 @@ fn decode_abi_string(data: &[u8]) -> Option<String> {
 /// Resolve metadata for all unique token addresses, using a persistent cache.
 fn resolve_all_metadata<Client>(
     client: &Client,
-    evm_config: &OpEvmConfig,
+    evm_config: &WorldChainEvmConfig,
     header: &alloy_consensus::Header,
     block_id: alloy_rpc_types::BlockId,
     cache: &MetadataCache,
