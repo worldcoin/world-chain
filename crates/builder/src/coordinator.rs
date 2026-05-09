@@ -7,9 +7,8 @@ use reth_chain_state::ExecutedBlock;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodePrimitives, NodeTypes};
 use reth_node_builder::BuilderContext;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
-use reth_optimism_node::{OpBuiltPayload, OpEngineTypes, OpEvmConfig};
+use reth_optimism_node::{OpBuiltPayload, OpEngineTypes};
 use reth_optimism_primitives::OpPrimitives;
 use world_chain_p2p::protocol::{
     event::{ChainEvent, WorldChainEvent, WorldChainEventsStream},
@@ -35,11 +34,13 @@ use tokio::{
 use tracing::{error, trace};
 
 use crate::{
+    WorldChainEvmConfig,
     execution_strategy::{FlashblocksBalExecutionStrategy, FlashblocksLegacyExecutionStrategy},
     flashblock_types::{BalFlashblockTypes, LegacyFlashblockTypes},
     flashblock_validation_metrics::FlashblockValidationMetrics,
     validator::FlashblocksBlockValidator,
 };
+use world_chain_chainspec::WorldChainSpec;
 use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};
 
 /// Task-level permit to ensure only one flashblock is processed at a time.
@@ -135,13 +136,13 @@ impl FlashblocksExecutionCoordinator {
     ///
     /// Uses a canon-aware event stream that gates flashblock delivery on canonical
     /// tip matching, preventing stale flashblocks from being processed.
-    pub fn launch<Node>(self, ctx: &BuilderContext<Node>, evm_config: OpEvmConfig)
+    pub fn launch<Node>(self, ctx: &BuilderContext<Node>, evm_config: WorldChainEvmConfig)
     where
         Node: FullNodeTypes,
         Node::Provider: StateProviderFactory
             + HeaderProvider<Header = alloy_consensus::Header>
             + CanonStateSubscriptions,
-        Node::Types: NodeTypes<ChainSpec = OpChainSpec>,
+        Node::Types: NodeTypes<ChainSpec = WorldChainSpec>,
     {
         let provider = ctx.provider().clone();
         let pending_block = self.pending_block.clone();
@@ -237,14 +238,14 @@ pub async fn run_flashblock_processor<T, S, Provider>(
     coordinator: Arc<FlashblocksExecutionCoordinator>,
     stream: S,
     provider: Provider,
-    evm_config: OpEvmConfig,
-    chain_spec: Arc<OpChainSpec>,
+    evm_config: WorldChainEvmConfig,
+    chain_spec: Arc<WorldChainSpec>,
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
 ) where
     S: futures::Stream<Item = WorldChainEvent<T>> + Unpin,
     Provider: StateProviderFactory
         + HeaderProvider<Header = alloy_consensus::Header>
-        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + ChainSpecProvider<ChainSpec = WorldChainSpec>
         + Clone
         + Sync
         + 'static,
@@ -320,9 +321,9 @@ pub async fn run_flashblock_processor<T, S, Provider>(
 
 pub fn process_flashblock<Provider>(
     provider: Provider,
-    evm_config: &OpEvmConfig,
+    evm_config: &WorldChainEvmConfig,
     coordinator: &FlashblocksExecutionCoordinator,
-    chain_spec: Arc<OpChainSpec>,
+    chain_spec: Arc<WorldChainSpec>,
     flashblock: FlashblocksPayloadV1,
     pending_block: tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
     flashblock_validation_metrics: Arc<FlashblockValidationMetrics>,
@@ -330,7 +331,7 @@ pub fn process_flashblock<Provider>(
 where
     Provider: StateProviderFactory
         + HeaderProvider<Header = alloy_consensus::Header>
-        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + ChainSpecProvider<ChainSpec = WorldChainSpec>
         + Clone
         + Sync
         + 'static,

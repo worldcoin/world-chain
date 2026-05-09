@@ -1,0 +1,32 @@
+[package]
+name = "world-chain-chainspec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-chains.workspace = true
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
+alloy-genesis.workspace = true
+alloy-hardforks.workspace = true
+alloy-primitives.workspace = true
+auto_impl.workspace = true
+derive_more.workspace = true
+op-alloy-rpc-types.workspace = true
+reth-chainspec.workspace = true
+reth-network-peers.workspace = true
+reth-optimism-chainspec = { workspace = true, features = ["superchain-configs"] }
+reth-optimism-forks.workspace = true
+reth-primitives-traits.workspace = true
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]

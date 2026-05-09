@@ -31,13 +31,13 @@ use reth_evm::{
     },
 };
 use reth_node_api::BuiltPayload;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::{OpBlockAssembler, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_provider::{StateProvider, StateProviderFactory};
 use revm::{DatabaseRef, context::BlockEnv, database::BundleState};
 use tracing::{error, info, trace};
+use world_chain_chainspec::WorldChainSpec;
 
 use crate::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
@@ -60,7 +60,7 @@ use crate::{
 pub type ValidatorDb<'a, DB> = BalBuilderDb<&'a mut NoOpCommitDB<TemporalDb<DB>>>;
 
 pub struct FlashblocksBlockValidator<Evm: ConfigureEvm, T: FlashblockTypes<Evm>> {
-    pub chain_spec: Arc<OpChainSpec>,
+    pub chain_spec: Arc<WorldChainSpec>,
     pub evm_env: EvmEnvFor<Evm>,
     pub execution_context: OpBlockExecutionCtx,
     pub flashblock_validation_metrics: Arc<FlashblockValidationMetrics>,
@@ -70,7 +70,7 @@ pub struct FlashblocksBlockValidator<Evm: ConfigureEvm, T: FlashblockTypes<Evm>>
 
 impl<Evm: ConfigureEvm + Clone, T: FlashblockTypes<Evm>> FlashblocksBlockValidator<Evm, T> {
     pub fn new(
-        chain_spec: Arc<OpChainSpec>,
+        chain_spec: Arc<WorldChainSpec>,
         evm_env: EvmEnvFor<Evm>,
         execution_context: OpBlockExecutionCtx,
         flashblock_validation_metrics: Arc<FlashblockValidationMetrics>,
@@ -218,9 +218,9 @@ pub struct BalBlockValidator<
 > {
     pub inner: BasicBlockBuilder<
         'a,
-        OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
-        OpBlockExecutor<Evm, R, Arc<OpChainSpec>>,
-        OpBlockAssembler<OpChainSpec>,
+        OpBlockExecutorFactory<OpRethReceiptBuilder, WorldChainSpec>,
+        OpBlockExecutor<Evm, R, Arc<WorldChainSpec>>,
+        OpBlockAssembler<WorldChainSpec>,
         OpPrimitives,
     >,
     pub bundle_state: Arc<BundleState>,
@@ -246,11 +246,11 @@ where
     pub fn new(
         ctx: OpBlockExecutionCtx,
         parent: &'a SealedHeader<Header>,
-        executor: OpBlockExecutor<E, R, Arc<OpChainSpec>>,
+        executor: OpBlockExecutor<E, R, Arc<WorldChainSpec>>,
         bundle_state: Arc<BundleState>,
         fallback_bundle_state: Arc<BundleState>,
         transactions: Vec<Recovered<OpTransactionSigned>>,
-        chain_spec: Arc<OpChainSpec>,
+        chain_spec: Arc<WorldChainSpec>,
         temporal_db_factory: &'a TemporalDbFactory,
         state_root_handle: H,
         evm_env: EvmEnv<OpSpecId>,
@@ -308,7 +308,7 @@ where
     OpTx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
 {
     type Primitives = OpPrimitives;
-    type Executor = OpBlockExecutor<E, R, Arc<OpChainSpec>>;
+    type Executor = OpBlockExecutor<E, R, Arc<WorldChainSpec>>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.executor.apply_pre_execution_changes()
@@ -368,7 +368,7 @@ where
         let block = self.inner.assembler.assemble_block(BlockAssemblerInput::<
             '_,
             '_,
-            OpBlockExecutorFactory<OpRethReceiptBuilder, OpChainSpec>,
+            OpBlockExecutorFactory<OpRethReceiptBuilder, WorldChainSpec>,
         >::new(
             evm_env,
             self.inner.ctx,
@@ -587,7 +587,7 @@ fn merge_transaction_results(
 pub fn execute_transaction<R, DBRef>(
     (index, tx): (BlockAccessIndex, Recovered<OpTransactionSigned>),
     receipt_builder: R,
-    spec: Arc<OpChainSpec>,
+    spec: Arc<WorldChainSpec>,
     execution_context: OpBlockExecutionCtx,
     evm_env: EvmEnv<OpSpecId>,
     db_factory: &TemporalDbFactory,

@@ -2,7 +2,7 @@ use crate::traits::context::PayloadBuilderCtx;
 use op_alloy_consensus::OpTxEnvelope;
 use reth_basic_payload_builder::PayloadConfig;
 use reth_evm::ConfigureEvm;
-use reth_optimism_node::{OpBuiltPayload, OpEvmConfig, OpPayloadBuilderAttributes};
+use reth_optimism_node::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_primitives_traits::HeaderTy;
 use reth_revm::cancelled::CancelOnDrop;
@@ -25,14 +25,14 @@ use reth_revm::cancelled::CancelOnDrop;
 ///     // ...
 /// }
 ///
-/// impl PayloadBuilderCtxBuilder<OpEvmConfig, OpChainSpec, MyTransaction> for MyCtxBuilder {
+/// impl PayloadBuilderCtxBuilder<WorldChainEvmConfig, WorldChainSpec, MyTransaction> for MyCtxBuilder {
 ///     type PayloadBuilderCtx = MyPayloadBuilderCtx;
 ///
 ///     fn build<Txs>(
 ///         &self,
-///         evm: OpEvmConfig,
+///         evm: WorldChainEvmConfig,
 ///         da_config: OpDAConfig,
-///         chain_spec: Arc<OpChainSpec>,
+///         chain_spec: Arc<WorldChainSpec>,
 ///         config: PayloadConfig<OpPayloadBuilderAttributes<OpTxEnvelope>, Header>,
 ///         cancel: &CancelOnDrop,
 ///         best_payload: Option<OpBuiltPayload>,
@@ -86,10 +86,10 @@ pub trait PayloadBuilderCtxBuilder<Provider, EvmConfig: ConfigureEvm, ChainSpec>
         builder_config: OpBuilderConfig,
         config: PayloadConfig<
             OpPayloadBuilderAttributes<OpTxEnvelope>,
-            HeaderTy<<OpEvmConfig as ConfigureEvm>::Primitives>,
+            HeaderTy<<EvmConfig as ConfigureEvm>::Primitives>,
         >,
         cancel: &CancelOnDrop,
-        best_payload: Option<OpBuiltPayload>,
+        best_payload: Option<OpBuiltPayload<<EvmConfig as ConfigureEvm>::Primitives>>,
     ) -> Self::PayloadBuilderCtx
     where
         Self: Sized;

@@ -14,7 +14,6 @@ use reth_evm::{
     },
 };
 use reth_node_api::NodePrimitives;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpRethReceiptBuilder;
 use reth_optimism_node::OpBlockAssembler;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
@@ -30,13 +29,14 @@ use crate::{
     metrics::{FlashblockExecutionMetrics, PayloadBuildStage},
     state_db::StateDB,
 };
+use world_chain_chainspec::WorldChainSpec;
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
 pub struct FlashblocksBlockBuilder<'a, N: NodePrimitives, Evm, R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>  + 'static = OpRethReceiptBuilder> {
     pub inner: BasicBlockBuilder<
         'a,
         OpBlockExecutorFactory<R>,
-        OpBlockExecutor<Evm, R, OpChainSpec>,
-        OpBlockAssembler<OpChainSpec>,
+        OpBlockExecutor<Evm, R, WorldChainSpec>,
+        OpBlockAssembler<WorldChainSpec>,
         N,
     >,
 }
@@ -46,9 +46,9 @@ impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, N, Evm> {
     pub fn new(
         ctx: OpBlockExecutionCtx,
         parent: &'a SealedHeader<N::BlockHeader>,
-        executor: OpBlockExecutor<Evm, OpRethReceiptBuilder, OpChainSpec>,
+        executor: OpBlockExecutor<Evm, OpRethReceiptBuilder, WorldChainSpec>,
         transactions: Vec<Recovered<N::SignedTx>>,
-        chain_spec: Arc<OpChainSpec>,
+        chain_spec: Arc<WorldChainSpec>,
     ) -> Self {
         Self {
             inner: BasicBlockBuilder {
@@ -80,11 +80,11 @@ where
             HaltReason = OpHaltReason,
             BlockEnv = BlockEnv,
         >,
-    OpBlockExecutor<E, R, OpChainSpec>:
+    OpBlockExecutor<E, R, WorldChainSpec>:
         BlockExecutor<Evm = E, Transaction = OpTransactionSigned, Receipt = OpReceipt>,
 {
     type Primitives = N;
-    type Executor = OpBlockExecutor<E, R, OpChainSpec>;
+    type Executor = OpBlockExecutor<E, R, WorldChainSpec>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         self.inner.executor.apply_pre_execution_changes()
@@ -149,7 +149,7 @@ where
             HaltReason = OpHaltReason,
             BlockEnv = BlockEnv,
         >,
-    OpBlockExecutor<E, R, OpChainSpec>:
+    OpBlockExecutor<E, R, WorldChainSpec>:
         BlockExecutor<Evm = E, Transaction = OpTransactionSigned, Receipt = OpReceipt>,
 {
     fn finish_with_bundle(

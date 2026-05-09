@@ -18,11 +18,11 @@ world-chain-rpc.workspace = true
 world-chain-builder.workspace = true
 world-chain-cli.workspace = true
 world-chain-payload.workspace = true
+world-chain-chainspec.workspace = true
 
 reth-node-builder.workspace = true
 reth-chainspec.workspace = true
 reth-evm.workspace = true
-reth-optimism-chainspec.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-rpc.workspace = true
 reth-optimism-evm.workspace = true
@@ -61,7 +61,6 @@ hex.workspace = true
 [dev-dependencies]
 world-chain-test-utils.workspace = true
 reth-eth-wire.workspace = true
-reth-optimism-chainspec.workspace = true
 reth-provider.workspace = true
 reth-node-api.workspace = true
 reth-node-builder.workspace = true

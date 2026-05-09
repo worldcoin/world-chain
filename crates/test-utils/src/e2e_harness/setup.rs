@@ -38,7 +38,6 @@ use reth_node_builder::{
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
 };
 use reth_node_core::args::{PayloadBuilderArgs, RpcServerArgs};
-use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_forks::OpHardfork;
 use reth_optimism_node::OpPayloadAttributes;
 use reth_optimism_payload_builder::OpPayloadAttrs;
@@ -52,6 +51,7 @@ use std::{
     time::Duration,
 };
 use tracing::{info, span};
+use world_chain_chainspec::{WorldChainSpec, WorldChainSpecBuilder};
 use world_chain_node::{
     FlashblocksOpApi, OpApiExtServer,
     node::{WorldChainNode, WorldChainNodeContext, WorldChainNodePrimitiveTypes},
@@ -177,7 +177,7 @@ pub async fn setup<T>(
     TxSpammer<<WorldChainNode<T> as NodeTypes>::Payload>,
 )>
 where
-    T: WorldChainTestContextBounds<ChainSpec = OpChainSpec>,
+    T: WorldChainTestContextBounds<ChainSpec = WorldChainSpec>,
     WorldChainNode<T>: WorldChainNodeTestBounds<T>,
 {
     setup_inner::<T>(
@@ -197,7 +197,7 @@ pub async fn setup_with_block_uncompressed_size_limit<T>(
     attributes_generator: impl Fn(u64) -> <<WorldChainNode<T> as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes + Send + Sync + Copy + 'static,
     flashblocks_enabled: bool,
     block_uncompressed_size_limit: Option<u64>,
-    chain_spec: Arc<OpChainSpec>,
+    chain_spec: Arc<WorldChainSpec>,
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
@@ -206,7 +206,7 @@ pub async fn setup_with_block_uncompressed_size_limit<T>(
     TxSpammer<<WorldChainNode<T> as NodeTypes>::Payload>,
 )>
 where
-    T: WorldChainTestContextBounds<ChainSpec = OpChainSpec>,
+    T: WorldChainTestContextBounds<ChainSpec = WorldChainSpec>,
     WorldChainNode<T>: WorldChainNodeTestBounds<T>,
 {
     setup_inner::<T>(
@@ -228,7 +228,7 @@ pub async fn setup_with_tx_peers<T>(
     enable_tx_peers: bool,
     disable_gossip: bool,
     flashblocks_enabled: bool,
-    chain_spec: Arc<OpChainSpec>,
+    chain_spec: Arc<WorldChainSpec>,
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
@@ -237,7 +237,7 @@ pub async fn setup_with_tx_peers<T>(
     TxSpammer<<WorldChainNode<T> as NodeTypes>::Payload>,
 )>
 where
-    T: WorldChainTestContextBounds<ChainSpec = OpChainSpec>,
+    T: WorldChainTestContextBounds<ChainSpec = WorldChainSpec>,
     WorldChainNode<T>: WorldChainNodeTestBounds<T>,
 {
     setup_inner::<T>(
@@ -259,7 +259,7 @@ async fn setup_inner<T>(
     disable_gossip: bool,
     flashblocks_enabled: bool,
     block_uncompressed_size_limit: Option<u64>,
-    chain_spec: Arc<OpChainSpec>,
+    chain_spec: Arc<WorldChainSpec>,
 ) -> eyre::Result<(
     Range<u8>,
     Vec<WorldChainTestingNodeContext<T>>,
@@ -268,7 +268,7 @@ async fn setup_inner<T>(
     TxSpammer<<WorldChainNode<T> as NodeTypes>::Payload>,
 )>
 where
-    T: WorldChainTestContextBounds<ChainSpec = OpChainSpec>,
+    T: WorldChainTestContextBounds<ChainSpec = WorldChainSpec>,
     WorldChainNode<T>: WorldChainNodeTestBounds<T>,
 {
     unsafe {
@@ -277,7 +277,7 @@ where
 
     let exec = Runtime::test();
 
-    let mut node_config: NodeConfig<OpChainSpec> = NodeConfig::new(chain_spec.clone())
+    let mut node_config: NodeConfig<WorldChainSpec> = NodeConfig::new(chain_spec.clone())
         .with_chain(chain_spec)
         .with_rpc(
             RpcServerArgs::default()
@@ -432,9 +432,10 @@ where
     Ok((0..5, node_contexts, exec, environment, spammer))
 }
 
-pub static CHAIN_SPEC: LazyLock<OpChainSpec> = LazyLock::new(|| {
+pub static CHAIN_SPEC: LazyLock<WorldChainSpec> = LazyLock::new(|| {
     let spec: Genesis = serde_json::from_str(GENESIS).expect("genesis should parse");
-    OpChainSpecBuilder::base_mainnet()
+    WorldChainSpecBuilder::default()
+        .chain(spec.config.chain_id.into())
         .genesis(
             spec.extend_accounts(vec![(
                 DEV_WORLD_ID,
@@ -474,7 +475,7 @@ pub static CHAIN_SPEC: LazyLock<OpChainSpec> = LazyLock::new(|| {
                 GenesisAccount::default().with_balance(U256::from(100_000_000_000_000_000u64)),
             )]),
         )
-        .ecotone_activated()
+        .jovian_activated()
         .build()
 });
 
@@ -533,6 +534,13 @@ pub fn build_payload_attributes(
     .into()
 }
 
+/// Build default World Chain payload attributes for e2e block production.
+pub fn world_chain_payload_attributes(timestamp: u64) -> OpPayloadAttrs {
+    let eip1559_params =
+        encode_eip1559_params(&*CHAIN_SPEC, timestamp).expect("eip1559 params should encode");
+    build_payload_attributes(timestamp, eip1559_params, None)
+}
+
 /// Encode EIP-1559 parameters for Holocene from a chain spec at a given timestamp
 pub fn encode_eip1559_params<C: EthChainSpec>(chain_spec: &C, timestamp: u64) -> eyre::Result<B64> {
     let eip1559 = encode_holocene_extra_data(
@@ -571,7 +579,7 @@ pub async fn create_test_transaction(signer_index: u32, nonce: u64) -> (Bytes, B
 
 pub fn execution_data_from_from_reduced_flashblock(
     flashblock: Flashblock,
-    spec: Arc<OpChainSpec>,
+    spec: Arc<WorldChainSpec>,
 ) -> OpExecutionData {
     let base = flashblock.base().unwrap();
     let delta = flashblock.diff();
