@@ -205,7 +205,6 @@ impl OpHardforks for WorldChainSpec {
             OpHardfork::Holocene => self.fork(WorldChainHardfork::Holocene),
             OpHardfork::Isthmus => self.fork(WorldChainHardfork::Isthmus),
             OpHardfork::Jovian => self.fork(WorldChainHardfork::Jovian),
-            OpHardfork::Karst | OpHardfork::Interop => self.fork(fork),
             _ => self.fork(fork),
         }
     }
