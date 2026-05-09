@@ -75,8 +75,15 @@ impl WorldChainSpec {
     }
 
     /// Applies World Chain defaults that are not yet represented in the upstream OP stack chain
-    /// specs.
+    /// specs. Only fills in forks that have no explicit activation; an operator-supplied
+    /// timestamp (e.g. `jovianTime` in genesis) is preserved.
     pub fn apply_world_chain_defaults(&mut self) {
+        if !matches!(
+            self.inner.fork(WorldChainHardfork::Jovian),
+            ForkCondition::Never
+        ) {
+            return;
+        }
         match self.chain().named() {
             Some(NamedChain::World) => self.set_fork(
                 WorldChainHardfork::Jovian,
