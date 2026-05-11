@@ -1,9 +1,11 @@
 [alias]
 xtask = "run --package xtask --"
 docs = "doc --workspace --all-features --no-deps"
-b = "bench --package builder --bench coordinator --"
-bs = "bench --package builder --bench coordinator -- --save-baseline"
-bc = "bench --package builder --bench coordinator -- --baseline main --save-baseline pr"
+bench = "bench --package builder --bench coordinator --"
+bench-save = "bench --package builder --bench coordinator -- --save-baseline"
+bench-cmp = "bench --package builder --bench coordinator -- --baseline main --save-baseline pr"
+prof-build = "build --profile profiling --features jemalloc --bin world-chain"
+prof-bench = "bench --profile profiling --package world-chain-builder --bench coordinator"
 
 [env]
 DEBUG = "info,flashblocks=debug,world_chain=info"
