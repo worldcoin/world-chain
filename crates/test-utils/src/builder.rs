@@ -25,7 +25,6 @@ use reth_evm::{
     ConfigureEvm, EvmEnv, EvmFactory,
     execute::{BlockBuilder, BlockBuilderOutcome},
 };
-use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
 use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_primitives_traits::{Account, Bytecode, Recovered, SealedHeader, SignedTransaction};
@@ -53,6 +52,7 @@ use world_chain_builder::{
     database::bal_builder_db::BalBuilderDb,
     payload_builder_metrics::PayloadBuildAttemptMetrics,
 };
+use world_chain_chainspec::{WorldChainSpec, WorldChainSpecBuilder};
 use world_chain_primitives::{
     access_list::{FlashblockAccessListData, access_list_hash},
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
@@ -231,8 +231,8 @@ lazy_static::lazy_static! {
         .with_gas_limit(200_000_000); // 200MGas
 
     /// Chain spec for tests
-    pub static ref CHAIN_SPEC: Arc<OpChainSpec> = Arc::new(
-        OpChainSpecBuilder::default()
+    pub static ref CHAIN_SPEC: Arc<WorldChainSpec> = Arc::new(
+        WorldChainSpecBuilder::default()
             .chain(GENESIS.config.chain_id.into())
             .genesis(GENESIS.clone())
             .isthmus_activated()
@@ -240,7 +240,7 @@ lazy_static::lazy_static! {
     );
 
     /// EVM configuration for tests
-    pub static ref EVM_CONFIG: OpEvmConfig =
+    pub static ref EVM_CONFIG: OpEvmConfig<WorldChainSpec> =
         OpEvmConfig::new(CHAIN_SPEC.clone(), OpRethReceiptBuilder::default());
 
     pub static ref BLOCK_EXECUTION_CTX: OpBlockExecutionCtx = OpBlockExecutionCtx {
@@ -1227,7 +1227,7 @@ impl StateProviderFactory for TestStateProvider {
 pub struct BenchProvider {
     pub inner: TestStateProvider,
     pub sealed_header: SealedHeader,
-    pub chain_spec: Arc<OpChainSpec>,
+    pub chain_spec: Arc<WorldChainSpec>,
 }
 
 impl Default for BenchProvider {
@@ -1509,9 +1509,9 @@ impl HeaderProvider for BenchProvider {
 
 // ChainSpecProvider — returns the test chain spec
 impl ChainSpecProvider for BenchProvider {
-    type ChainSpec = OpChainSpec;
+    type ChainSpec = WorldChainSpec;
 
-    fn chain_spec(&self) -> Arc<OpChainSpec> {
+    fn chain_spec(&self) -> Arc<WorldChainSpec> {
         self.chain_spec.clone()
     }
 }

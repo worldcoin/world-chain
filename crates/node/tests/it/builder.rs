@@ -1,15 +1,15 @@
 use reth_db::test_utils::create_test_rw_db;
 use reth_node_api::{FullNodeComponents, NodeTypesWithDBAdapter};
 use reth_node_builder::{NodeBuilder, NodeConfig};
-use reth_optimism_chainspec::BASE_MAINNET;
 use reth_provider::providers::BlockchainProvider;
+use world_chain_chainspec::WorldChainSpec;
 use world_chain_node::{context::WorldChainDefaultContext, node::WorldChainNode};
 use world_chain_test_utils::node::test_config;
 
 #[tokio::test]
 async fn test_basic_flashblocks_setup() {
     // parse CLI -> config
-    let config = NodeConfig::new(BASE_MAINNET.clone());
+    let config = NodeConfig::new(WorldChainSpec::mainnet());
     let db = create_test_rw_db();
     let node = WorldChainNode::<WorldChainDefaultContext>::new(test_config());
     let _builder = NodeBuilder::new(config)

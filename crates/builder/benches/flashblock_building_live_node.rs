@@ -85,7 +85,7 @@ where
 fn build_live_payload_builder<Pool, Client>(
     pool: Pool,
     client: Client,
-    evm_config: reth_optimism_node::OpEvmConfig,
+    evm_config: world_chain_builder::WorldChainEvmConfig,
     bal_enabled: bool,
 ) -> FlashblocksPayloadBuilder<Pool, Client, WorldChainPayloadBuilderCtxBuilder, ()>
 where

@@ -11,7 +11,7 @@ use revm_primitives::{Address, address};
 ///
 /// The fixture stays in JSON form so the harness can start from the same
 /// baseline accounts and fork configuration as the devnet, then layer test-only
-/// accounts on top before sealing the `OpChainSpec`.
+/// accounts on top before sealing the `WorldChainSpec`.
 pub(crate) const GENESIS: &str = include_str!("../res/genesis.json");
 
 /// Optimism L1 block info predeploy.

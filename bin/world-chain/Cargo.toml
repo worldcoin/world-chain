@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 # world-chain
 world-chain-cli.workspace = true
+world-chain-chainspec.workspace = true
 world-chain-node.workspace = true
 world-chain-rpc.workspace = true
 
@@ -22,7 +23,7 @@ reth-node-builder.workspace = true
 reth-tracing.workspace = true
 
 # op-reth
-reth-optimism-cli.workspace = true
+reth-optimism-consensus.workspace = true
 reth-optimism-evm.workspace = true
 
 reth-provider.workspace = true

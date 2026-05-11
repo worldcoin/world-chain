@@ -14,7 +14,6 @@ use op_alloy_rpc_types::OpTransactionReceipt;
 use op_alloy_rpc_types_engine::OpExecutionPayloadEnvelopeV4;
 use reth_e2e_test_utils::testsuite::{Environment, actions::Action};
 use reth_node_api::ConsensusEngineHandle;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::OpEngineTypes;
 use reth_optimism_payload_builder::OpPayloadAttrs;
 use reth_optimism_primitives::OpTransactionSigned;
@@ -23,6 +22,7 @@ use revm_primitives::{Address, B256, Bytes, U256};
 use std::{pin::Pin, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 use tracing::{error, info};
+use world_chain_chainspec::WorldChainSpec;
 use world_chain_primitives::{
     flashblocks::{Flashblock, Flashblocks},
     p2p::Authorization,
@@ -352,7 +352,7 @@ pub struct FlashblocksValidatonStream {
     pub flashblocks_stream:
         Pin<Box<dyn Stream<Item = FlashblocksPayloadV1> + Unpin + Send + Sync + 'static>>,
     pub validation_hook: Option<Hook<PayloadStatusEnum>>,
-    pub chain_spec: Arc<OpChainSpec>,
+    pub chain_spec: Arc<WorldChainSpec>,
 }
 
 impl Action<OpEngineTypes> for FlashblocksValidatonStream {

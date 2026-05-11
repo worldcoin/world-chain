@@ -1,5 +1,5 @@
 use crate::{
-    BlockBuilderExt,
+    BlockBuilderExt, WorldChainEvmConfig,
     bal_executor::{BalBlockBuilder, CommittedState},
     database::bal_builder_db::BalBuilderDb,
     executor::FlashblocksBlockBuilder,
@@ -46,10 +46,7 @@ use revm_database::State;
 use tracing::trace;
 use world_chain_primitives::access_list::FlashblockAccessList;
 
-use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_node::{
-    OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder, txpool::OpPooledTx,
-};
+use reth_optimism_node::{OpNextBlockEnvAttributes, OpRethReceiptBuilder, txpool::OpPooledTx};
 use reth_optimism_payload_builder::{
     builder::{ExecutionInfo, OpPayloadTransactions},
     config::OpBuilderConfig,
@@ -65,6 +62,7 @@ use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, Transac
 use revm::{DatabaseCommit, context::BlockEnv, inspector::NoOpInspector};
 use std::{fmt::Debug, sync::Arc, time::Instant};
 use tracing::span;
+use world_chain_chainspec::WorldChainSpec;
 
 /// Flashblocks Payload builder
 ///
@@ -72,7 +70,7 @@ use tracing::span;
 #[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
     /// The type responsible for creating the evm.
-    pub evm_config: OpEvmConfig,
+    pub evm_config: WorldChainEvmConfig,
     /// Transaction pool.
     pub pool: Pool,
     /// Node client.
@@ -91,13 +89,13 @@ pub struct FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs = ()> {
 
 impl<Pool, Client, CtxBuilder, Txs> FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs>
 where
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + Clone,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = WorldChainSpec> + Clone,
     Txs: OpPayloadTransactions<Pool::Transaction>,
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = OpTxEnvelope>>,
     CtxBuilder: PayloadBuilderCtxBuilder<
             Client,
-            OpEvmConfig,
-            OpChainSpec,
+            WorldChainEvmConfig,
+            WorldChainSpec,
             PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
         >,
 {
@@ -175,13 +173,13 @@ where
 impl<Pool, Client, CtxBuilder, Txs> PayloadBuilder
     for FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs>
 where
-    Client: Clone + StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
+    Client: Clone + StateProviderFactory + ChainSpecProvider<ChainSpec = WorldChainSpec>,
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = OpTxEnvelope>>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
     CtxBuilder: PayloadBuilderCtxBuilder<
             Client,
-            OpEvmConfig,
-            OpChainSpec,
+            WorldChainEvmConfig,
+            WorldChainSpec,
             PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
         >,
 {
@@ -240,13 +238,13 @@ where
 impl<Pool, Client, CtxBuilder, Txs> FlashblockPayloadBuilder
     for FlashblocksPayloadBuilder<Pool, Client, CtxBuilder, Txs>
 where
-    Client: Clone + StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
+    Client: Clone + StateProviderFactory + ChainSpecProvider<ChainSpec = WorldChainSpec>,
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = OpTxEnvelope>>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
     CtxBuilder: PayloadBuilderCtxBuilder<
             Client,
-            OpEvmConfig,
-            OpChainSpec,
+            WorldChainEvmConfig,
+            WorldChainSpec,
             PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
         >,
 {
@@ -337,9 +335,9 @@ where
     Txs: PayloadTransactions,
     Txs::Transaction: OpPooledTx,
     Ctx: PayloadBuilderCtx<
-            Evm = OpEvmConfig,
+            Evm = WorldChainEvmConfig,
             Transaction = Txs::Transaction,
-            ChainSpec = OpChainSpec,
+            ChainSpec = WorldChainSpec,
         >,
 {
     let span = span!(
@@ -502,9 +500,9 @@ where
     Txs: PayloadTransactions,
     Txs::Transaction: OpPooledTx,
     Ctx: PayloadBuilderCtx<
-            Evm = OpEvmConfig,
+            Evm = WorldChainEvmConfig,
             Transaction = Txs::Transaction,
-            ChainSpec = OpChainSpec,
+            ChainSpec = WorldChainSpec,
         >,
 {
     // Only execute the sequencer transactions on the first payload. The sequencer transactions
@@ -672,14 +670,14 @@ where
         >,
     DB: StateDB + DatabaseCommit + Database<Error: Send + Sync + 'a> + 'a,
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + Default,
-    Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
+    Ctx: PayloadBuilderCtx<Evm = WorldChainEvmConfig, Transaction = Tx, ChainSpec = WorldChainSpec>,
 {
     let evm = OpEvmFactory::default().create_evm(state, evm_env);
 
     let mut executor = OpBlockExecutor::<
         OpEvm<BalBuilderDb<&'a mut DB>, NoOpInspector, PrecompilesMap>,
         R,
-        Arc<OpChainSpec>,
+        Arc<WorldChainSpec>,
     >::new(
         evm,
         execution_context.clone(),
@@ -714,7 +712,7 @@ pub fn flashblocks_block_builder<'a, Ctx, DB, Tx>(
         Executor = OpBlockExecutor<
             OpEvm<&'a mut DB, NoOpInspector, PrecompilesMap>,
             OpRethReceiptBuilder,
-            OpChainSpec,
+            WorldChainSpec,
         >,
     > + 'a,
     PayloadBuilderError,
@@ -728,7 +726,7 @@ where
         + DatabaseCommit
         + reth_evm::Database<Error: Send + Sync + 'a>
         + 'a,
-    Ctx: PayloadBuilderCtx<Evm = OpEvmConfig, Transaction = Tx, ChainSpec = OpChainSpec>,
+    Ctx: PayloadBuilderCtx<Evm = WorldChainEvmConfig, Transaction = Tx, ChainSpec = WorldChainSpec>,
 {
     let evm = OpEvmFactory::default().create_evm(state, evm_env);
 

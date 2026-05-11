@@ -18,6 +18,7 @@ world-chain-p2p = { workspace = true, features = ["test-utils"] }
 
 world-chain-primitives.workspace = true
 world-chain-builder.workspace = true
+world-chain-chainspec.workspace = true
 world-chain-cli.workspace = true
 world-chain-rpc.workspace = true
 

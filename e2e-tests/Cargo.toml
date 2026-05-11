@@ -18,6 +18,7 @@ world-chain-primitives.workspace = true
 world-chain-builder.workspace = true
 world-chain-p2p = { workspace = true, features = ["test-utils"] }
 world-chain-cli.workspace = true
+world-chain-chainspec.workspace = true
 
 # reth
 reth-e2e-test-utils.workspace = true
@@ -25,7 +26,6 @@ reth-node-api.workspace = true
 reth-node-builder.workspace = true
 reth-node-core.workspace = true
 reth-optimism-node = { workspace = true, features = ["test-utils"] }
-reth-optimism-chainspec.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-transaction-pool.workspace = true

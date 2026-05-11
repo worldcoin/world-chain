@@ -31,7 +31,6 @@ use reth_node_builder::{
     },
     rpc::{BasicEngineValidatorBuilder, RpcAddOns},
 };
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
     OpAddOns, OpBuiltPayload, OpConsensusBuilder, OpEngineValidatorBuilder, node::OpPayloadBuilder,
@@ -41,6 +40,7 @@ use reth_optimism_payload_builder::{OpExecData, OpPayloadAttrs};
 use reth_optimism_primitives::OpReceipt;
 use reth_primitives_traits::{Block as _, BlockTy, SealedBlock};
 use reth_rpc_api::eth::RpcTypes;
+use world_chain_chainspec::WorldChainSpec;
 use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
 use world_chain_node::{
     context::{FlashblocksComponentsContext, WorldChainNetworkBuilder},
@@ -151,9 +151,10 @@ pub struct Wip1001ExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for Wip1001ExecutorBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = Wip1001Primitives>>,
+    Node:
+        FullNodeTypes<Types: NodeTypes<ChainSpec = WorldChainSpec, Primitives = Wip1001Primitives>>,
 {
-    type EVM = OpEvmConfig<OpChainSpec, Wip1001Primitives, Wip1001ReceiptBuilder>;
+    type EVM = OpEvmConfig<WorldChainSpec, Wip1001Primitives, Wip1001ReceiptBuilder>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         Ok(OpEvmConfig::new(ctx.chain_spec(), Wip1001ReceiptBuilder))
@@ -210,7 +211,7 @@ impl From<WorldChainNodeConfig> for Wip1001NodeContext {
 impl WorldChainNodePrimitiveTypes for Wip1001NodeContext {
     type Primitives = Wip1001Primitives;
     type Payload = Wip1001EngineTypes;
-    type ChainSpec = OpChainSpec;
+    type ChainSpec = WorldChainSpec;
 }
 
 impl<N> WorldChainNodeContext<N> for Wip1001NodeContext
@@ -221,12 +222,12 @@ where
             BasicWorldChainPool<
                 N,
                 OpPooledTransaction<WorldChainTxEnvelope, WorldChainTxEnvelope>,
-                OpEvmConfig<OpChainSpec, Wip1001Primitives, Wip1001ReceiptBuilder>,
+                OpEvmConfig<WorldChainSpec, Wip1001Primitives, Wip1001ReceiptBuilder>,
             >,
-            OpEvmConfig<OpChainSpec, Wip1001Primitives, Wip1001ReceiptBuilder>,
+            OpEvmConfig<WorldChainSpec, Wip1001Primitives, Wip1001ReceiptBuilder>,
         >,
 {
-    type Evm = OpEvmConfig<OpChainSpec, Wip1001Primitives, Wip1001ReceiptBuilder>;
+    type Evm = OpEvmConfig<WorldChainSpec, Wip1001Primitives, Wip1001ReceiptBuilder>;
     type Pool = BasicWorldChainPool<
         N,
         OpPooledTransaction<WorldChainTxEnvelope, WorldChainTxEnvelope>,

@@ -135,7 +135,9 @@ checksum = "84e0378e959aa6a885897522080a990e80eb317f1e9a222a604492ea50e13096"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
+ "arbitrary",
  "num_enum",
+ "proptest",
  "serde",
  "strum",
 ]
@@ -639,7 +641,7 @@ dependencies = [
  "either",
  "futures",
  "futures-utils-wasm",
- "lru",
+ "lru 0.16.4",
  "parking_lot",
  "pin-project",
  "reqwest 0.13.3",
@@ -683,7 +685,7 @@ dependencies = [
  "either",
  "futures",
  "futures-utils-wasm",
- "lru",
+ "lru 0.16.4",
  "parking_lot",
  "pin-project",
  "reqwest 0.13.3",
@@ -4075,6 +4077,11 @@ name = "hashbrown"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f467dd6dccf739c208452f8014c75c18bb8301b050ad1cfb27153803edb0f51"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash 0.2.0",
+]
 
 [[package]]
 name = "hashlink"
@@ -5283,6 +5290,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lru"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a860605968fce16869fd239cf4237a82f3ac470723415db603b0e8b6c8d4fb9"
+dependencies = [
+ "hashbrown 0.17.0",
+]
+
+[[package]]
 name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6281,18 +6297,18 @@ dependencies = [
 
 [[package]]
 name = "pin-project"
-version = "1.1.11"
+version = "1.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1749c7ed4bcaf4c3d0a3efc28538844fb29bcdd7d2b67b2be7e20ba861ff517"
+checksum = "cbf0d9e68100b3a7989b4901972f265cd542e560a3a8a724e1e20322f4d06ce9"
 dependencies = [
  "pin-project-internal",
 ]
 
 [[package]]
 name = "pin-project-internal"
-version = "1.1.11"
+version = "1.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9b20ed30f105399776b9c883e68e536ef602a16ae6f596d2c473591d6ad64c6"
+checksum = "a990e22f43e84855daf260dded30524ef4a9021cc7541c26540500a50b624389"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6819,7 +6835,7 @@ dependencies = [
  "indoc",
  "itertools 0.14.0",
  "kasuari",
- "lru",
+ "lru 0.16.4",
  "strum",
  "thiserror 2.0.18",
  "unicode-segmentation",
@@ -7162,6 +7178,7 @@ dependencies = [
  "alloy-eips 2.0.4",
  "alloy-primitives",
  "alloy-rlp",
+ "arbitrary",
  "backon",
  "blake3",
  "clap",
@@ -7176,6 +7193,8 @@ dependencies = [
  "lz4",
  "metrics",
  "parking_lot",
+ "proptest",
+ "proptest-arbitrary-interop",
  "ratatui",
  "rayon",
  "reqwest 0.13.3",
@@ -7197,6 +7216,7 @@ dependencies = [
  "reth-era-downloader",
  "reth-era-utils",
  "reth-eth-wire",
+ "reth-ethereum-primitives",
  "reth-etl",
  "reth-evm",
  "reth-exex",
@@ -7222,6 +7242,7 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-trie",
+ "reth-trie-common",
  "reth-trie-db",
  "secp256k1 0.30.0",
  "serde",
@@ -7859,6 +7880,7 @@ dependencies = [
  "alloy-chains",
  "alloy-primitives",
  "alloy-rlp",
+ "arbitrary",
  "bytes",
  "derive_more",
  "futures",
@@ -7891,8 +7913,11 @@ dependencies = [
  "alloy-hardforks",
  "alloy-primitives",
  "alloy-rlp",
+ "arbitrary",
  "bytes",
  "derive_more",
+ "proptest",
+ "proptest-arbitrary-interop",
  "reth-chainspec",
  "reth-codecs-derive",
  "reth-ethereum-primitives",
@@ -7955,6 +7980,7 @@ dependencies = [
  "alloy-eip2124",
  "alloy-hardforks",
  "alloy-primitives",
+ "arbitrary",
  "auto_impl",
  "once_cell",
  "rustc-hash",
@@ -8740,6 +8766,7 @@ dependencies = [
  "eyre",
  "futures-util",
  "op-alloy-consensus",
+ "proptest",
  "reth-chainspec",
  "reth-cli",
  "reth-cli-commands",
@@ -13423,11 +13450,12 @@ dependencies = [
  "dotenvy",
  "reth-cli-util",
  "reth-node-builder",
- "reth-optimism-cli",
+ "reth-optimism-consensus",
  "reth-optimism-evm",
  "reth-provider",
  "reth-tracing",
  "tikv-jemallocator",
+ "world-chain-chainspec",
  "world-chain-cli",
  "world-chain-node",
  "world-chain-rpc",
@@ -13465,7 +13493,6 @@ dependencies = [
  "reth-evm",
  "reth-node-api",
  "reth-node-builder",
- "reth-optimism-chainspec",
  "reth-optimism-evm",
  "reth-optimism-forks",
  "reth-optimism-node",
@@ -13489,11 +13516,34 @@ dependencies = [
  "tokio",
  "tracing",
  "world-chain-builder",
+ "world-chain-chainspec",
  "world-chain-node",
  "world-chain-p2p",
  "world-chain-pool",
  "world-chain-primitives",
  "world-chain-test-utils",
+]
+
+[[package]]
+name = "world-chain-chainspec"
+version = "2.2.0"
+dependencies = [
+ "alloy-chains",
+ "alloy-consensus 2.0.4",
+ "alloy-eips 2.0.4",
+ "alloy-genesis",
+ "alloy-hardforks",
+ "alloy-primitives",
+ "auto_impl",
+ "derive_more",
+ "op-alloy-rpc-types",
+ "reth-chainspec",
+ "reth-network-peers",
+ "reth-optimism-chainspec",
+ "reth-optimism-forks",
+ "reth-primitives-traits",
+ "serde",
+ "tracing",
 ]
 
 [[package]]
@@ -13507,16 +13557,27 @@ dependencies = [
  "clap",
  "color-eyre",
  "ed25519-dalek",
+ "futures-util",
  "hex",
  "reth-chainspec",
+ "reth-cli",
+ "reth-cli-commands",
+ "reth-cli-runner",
+ "reth-db",
  "reth-network-peers",
  "reth-node-builder",
  "reth-node-core",
+ "reth-node-metrics",
  "reth-optimism-chainspec",
+ "reth-optimism-cli",
+ "reth-optimism-consensus",
+ "reth-optimism-evm",
  "reth-optimism-node",
  "reth-optimism-payload-builder",
  "reth-rpc-server-types",
+ "reth-tracing",
  "tracing",
+ "world-chain-chainspec",
 ]
 
 [[package]]
@@ -13546,7 +13607,6 @@ dependencies = [
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
- "reth-optimism-chainspec",
  "reth-optimism-evm",
  "reth-optimism-forks",
  "reth-optimism-node",
@@ -13561,6 +13621,7 @@ dependencies = [
  "tokio",
  "tracing",
  "world-chain-builder",
+ "world-chain-chainspec",
  "world-chain-cli",
  "world-chain-p2p",
  "world-chain-payload",
@@ -13615,7 +13676,6 @@ dependencies = [
  "op-alloy-consensus",
  "reth-basic-payload-builder",
  "reth-execution-cache",
- "reth-optimism-chainspec",
  "reth-optimism-node",
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
@@ -13629,6 +13689,7 @@ dependencies = [
  "tokio",
  "tracing",
  "world-chain-builder",
+ "world-chain-chainspec",
  "world-chain-p2p",
  "world-chain-primitives",
 ]
@@ -13682,6 +13743,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "world-chain-chainspec",
  "world-chain-pbh",
  "world-chain-test-utils",
 ]
@@ -13727,6 +13789,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror 2.0.18",
+ "world-chain-chainspec",
 ]
 
 [[package]]
@@ -13747,7 +13810,7 @@ dependencies = [
  "jsonrpsee",
  "jsonrpsee-core",
  "jsonrpsee-types",
- "lru",
+ "lru 0.18.0",
  "op-alloy-network",
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
@@ -13781,6 +13844,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "world-chain-chainspec",
  "world-chain-primitives",
 ]
 
@@ -13857,6 +13921,7 @@ dependencies = [
  "tokio",
  "tracing",
  "world-chain-builder",
+ "world-chain-chainspec",
  "world-chain-cli",
  "world-chain-node",
  "world-chain-p2p",
@@ -13897,7 +13962,6 @@ dependencies = [
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
- "reth-optimism-chainspec",
  "reth-optimism-evm",
  "reth-optimism-node",
  "reth-optimism-payload-builder",
@@ -13916,6 +13980,7 @@ dependencies = [
  "tracing",
  "url",
  "world-chain-builder",
+ "world-chain-chainspec",
  "world-chain-cli",
  "world-chain-node",
  "world-chain-p2p",

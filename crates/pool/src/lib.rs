@@ -8,6 +8,7 @@ use reth_transaction_pool::{
 };
 use tx::WorldChainPooledTransaction;
 use validator::WorldChainTransactionValidator;
+use world_chain_chainspec::WorldChainSpec;
 
 pub mod bindings;
 pub mod eip4337;
@@ -19,13 +20,20 @@ pub mod tx;
 pub mod validator;
 
 /// Type alias for World Chain transaction pool
-pub type WorldChainTransactionPool<Client, S, T = WorldChainPooledTransaction, Evm = OpEvmConfig> =
-    Pool<
-        TransactionValidationTaskExecutor<WorldChainTransactionValidator<Client, T, Evm>>,
-        WorldChainOrdering<T>,
-        S,
-    >;
+pub type WorldChainTransactionPool<
+    Client,
+    S,
+    T = WorldChainPooledTransaction,
+    Evm = OpEvmConfig<WorldChainSpec>,
+> = Pool<
+    TransactionValidationTaskExecutor<WorldChainTransactionValidator<Client, T, Evm>>,
+    WorldChainOrdering<T>,
+    S,
+>;
 
 /// A wrapper type with sensible defaults for the World Chain transaction pool.
-pub type BasicWorldChainPool<N, T = WorldChainPooledTransaction, Evm = OpEvmConfig> =
-    WorldChainTransactionPool<<N as FullNodeTypes>::Provider, DiskFileBlobStore, T, Evm>;
+pub type BasicWorldChainPool<
+    N,
+    T = WorldChainPooledTransaction,
+    Evm = OpEvmConfig<WorldChainSpec>,
+> = WorldChainTransactionPool<<N as FullNodeTypes>::Provider, DiskFileBlobStore, T, Evm>;

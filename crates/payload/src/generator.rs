@@ -10,7 +10,6 @@ use op_alloy_consensus::OpTxEnvelope;
 use reth_basic_payload_builder::{
     HeaderForPayload, PayloadBuilder, PayloadConfig, PayloadState, PayloadTaskGuard, PrecachedState,
 };
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_payload_builder::OpPayloadAttrs;
 use reth_optimism_primitives::OpPrimitives;
@@ -24,6 +23,7 @@ use reth_revm::cached::CachedReads;
 use reth_tasks::Runtime;
 use tokio::runtime::Handle;
 use tracing::{debug, warn};
+use world_chain_chainspec::WorldChainSpec;
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_primitives::{
     access_list::FlashblockAccessList,
@@ -138,7 +138,7 @@ impl<Client, Builder> PayloadJobGenerator for FlashblocksPayloadJobGenerator<Cli
 where
     Client: StateProviderFactory
         + BlockReaderIdExt<Header = HeaderForPayload<Builder::BuiltPayload>>
-        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + ChainSpecProvider<ChainSpec = WorldChainSpec>
         + Clone
         + Unpin
         + 'static,
@@ -341,7 +341,7 @@ where
     /// next flashblock index to build on top of.
     fn check_for_pre_state(
         &self,
-        chain_spec: Arc<OpChainSpec>,
+        chain_spec: Arc<WorldChainSpec>,
         id: PayloadId,
     ) -> Result<
         Option<(Builder::BuiltPayload, u64, Option<FlashblockAccessList>)>,

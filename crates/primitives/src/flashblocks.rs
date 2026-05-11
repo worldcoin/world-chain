@@ -21,10 +21,11 @@ use reth_chainspec::EthereumHardforks;
 use reth_primitives_traits::{Block as _, BlockBody as _, RecoveredBlock, TxTy};
 
 use reth_basic_payload_builder::PayloadConfig;
-use reth_optimism_chainspec::{OpChainSpec, OpHardforks};
+use reth_optimism_chainspec::OpHardforks;
 use reth_optimism_node::{OpBuiltPayload, payload::OpPayloadAttrs};
 use reth_optimism_primitives::OpPrimitives;
 use serde::{Deserialize, Serialize};
+use world_chain_chainspec::WorldChainSpec;
 
 /// A type wrapper around a single flashblock payload.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Eq)]
@@ -198,7 +199,7 @@ impl Flashblock {
 
 /// Converts a reduced collection of flashblocks into a [`RecoveredBlock`]
 pub fn recovered_block_from_flashblocks(
-    chain_spec: Arc<OpChainSpec>,
+    chain_spec: Arc<WorldChainSpec>,
     flashblock: Flashblock,
 ) -> eyre::Result<RecoveredBlock<Block<OpTxEnvelope>>> {
     let base = flashblock
@@ -387,8 +388,8 @@ mod tests {
     use alloy_signer_local::PrivateKeySigner;
     use op_alloy_consensus::OpTypedTransaction;
     use op_alloy_network::TxSignerSync;
-    use reth_optimism_chainspec::OpChainSpecBuilder;
     use std::sync::Arc;
+    use world_chain_chainspec::WorldChainSpecBuilder;
 
     /// Creates a signed EIP-1559 transaction encoded as 2718 bytes.
     fn signed_tx_bytes(signer: &PrivateKeySigner, nonce: u64, chain_id: u64) -> Bytes {
@@ -443,11 +444,7 @@ mod tests {
 
     #[test]
     fn recovered_block_from_flashblocks_roundtrip() {
-        let chain_spec = Arc::new(
-            OpChainSpecBuilder::base_mainnet()
-                .ecotone_activated()
-                .build(),
-        );
+        let chain_spec = Arc::new(WorldChainSpecBuilder::mainnet().ecotone_activated().build());
 
         let signer = PrivateKeySigner::from_bytes(&[1u8; 32].into()).expect("valid private key");
         let chain_id = chain_spec.chain().id();

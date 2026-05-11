@@ -23,7 +23,6 @@ use reth_chainspec::{ChainInfo, MAINNET};
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_e2e_test_utils::transaction::TransactionTestContext;
 use reth_network_peers::PeerId;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_node::OpEvmConfig;
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_primitives::{OpBlock, OpTransactionSigned};
@@ -57,6 +56,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::{broadcast, watch};
+use world_chain_chainspec::WorldChainSpec;
 use world_chain_cli::{
     BuilderArgs, FlashblocksPayloadBuilderConfig, PbhArgs, WorldChainArgs, WorldChainNodeConfig,
     cli::{builder::FlashblocksArgs, p2p::FanoutArgs},
@@ -222,11 +222,11 @@ pub fn tx(
 pub struct WorldChainNoopProvider;
 
 impl ChainSpecProvider for WorldChainNoopProvider {
-    type ChainSpec = OpChainSpec;
+    type ChainSpec = WorldChainSpec;
 
-    fn chain_spec(&self) -> Arc<OpChainSpec> {
+    fn chain_spec(&self) -> Arc<WorldChainSpec> {
         let inner = MAINNET.clone().as_ref().to_owned();
-        Arc::new(OpChainSpec::new(inner))
+        Arc::new(WorldChainSpec::new(inner))
     }
 }
 
