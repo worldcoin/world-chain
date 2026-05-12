@@ -1,8 +1,11 @@
 //! World Chain node add-ons.
 
+use core::marker::PhantomData;
+
 use alloy_consensus::{Block, BlockBody, Header};
+use op_alloy_consensus::OpTransaction;
 use reth_chainspec::ChainSpecProvider;
-use reth_evm::ConfigureEvm;
+use reth_evm::{ConfigureEvm, EvmFactory, block::BlockExecutorFactory};
 use reth_node_api::{BuildNextEnv, FullNodeComponents, NodeAddOns, NodeTypes, PrimitivesTy};
 use reth_node_builder::rpc::{
     BasicEngineValidatorBuilder, EngineApiBuilder, EngineValidatorAddOn, EngineValidatorBuilder,
@@ -24,7 +27,7 @@ use reth_optimism_rpc::{
     miner::{MinerApiExtServer, OpMinerExtApi},
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
 };
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{FullSignedTx, NodePrimitives};
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::{
     DebugApiServer, EthConfigApiServer, L2EthApiExtServer, eth::helpers::config::EthConfigHandler,
@@ -33,7 +36,7 @@ use reth_rpc_server_types::RethRpcModule;
 use reth_transaction_pool::TransactionPool;
 use tracing::{debug, info};
 use world_chain_chainspec::WorldChainSpec;
-use world_chain_evm::{OpRethReceiptBuilder, WorldChainEvmConfig};
+use world_chain_evm::OpTx;
 use world_chain_rpc::{
     EthApiExtServer, SequencerClient as WorldChainSequencerClient, Simulate, SimulateApiServer,
     WorldChainEthApiExt,
@@ -41,27 +44,31 @@ use world_chain_rpc::{
 };
 
 /// Primitive bounds required by the OP RPC extensions used by World Chain.
-pub trait WorldChainRpcPrimitives:
-    OpPayloadPrimitives<_Header = Header, _TX = OpTransactionSigned>
+pub trait WorldChainRpcPrimitives<Tx>:
+    OpPayloadPrimitives<_Header = Header, _TX = Tx>
     + NodePrimitives<
         Receipt = OpReceipt,
-        SignedTx = OpTransactionSigned,
+        SignedTx = Tx,
         BlockHeader = Header,
-        BlockBody = BlockBody<OpTransactionSigned>,
-        Block = Block<OpTransactionSigned>,
+        BlockBody = BlockBody<Tx>,
+        Block = Block<Tx>,
     >
+where
+    Tx: FullSignedTx + OpTransaction,
 {
 }
 
-impl<T> WorldChainRpcPrimitives for T where
-    T: OpPayloadPrimitives<_Header = Header, _TX = OpTransactionSigned>
+impl<T, Tx> WorldChainRpcPrimitives<Tx> for T
+where
+    Tx: FullSignedTx + OpTransaction,
+    T: OpPayloadPrimitives<_Header = Header, _TX = Tx>
         + NodePrimitives<
             Receipt = OpReceipt,
-            SignedTx = OpTransactionSigned,
+            SignedTx = Tx,
             BlockHeader = Header,
-            BlockBody = BlockBody<OpTransactionSigned>,
-            Block = Block<OpTransactionSigned>,
-        >
+            BlockBody = BlockBody<Tx>,
+            Block = Block<Tx>,
+        >,
 {
 }
 
@@ -77,6 +84,7 @@ pub struct WorldChainAddOns<
     EB = OpEngineApiBuilder<PVB>,
     EVB = BasicEngineValidatorBuilder<PVB>,
     RpcMiddleware = Identity,
+    Tx = OpTransactionSigned,
 > {
     /// Rpc add-ons responsible for launching the RPC servers and instantiating the RPC handlers
     /// and eth-api.
@@ -100,9 +108,12 @@ pub struct WorldChainAddOns<
     min_suggested_priority_fee: u64,
     /// Enables the World Chain simulate namespace.
     simulate_enabled: bool,
+    /// Transaction type carried by the node primitives.
+    _tx: PhantomData<fn() -> Tx>,
 }
 
-impl<N, EthB, PVB, EB, EVB, RpcMiddleware> WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
+    WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
@@ -130,11 +141,13 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            _tx: PhantomData,
         }
     }
 }
 
-impl<N, EthB, PVB, EB, EVB, RpcMiddleware> WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
+    WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
@@ -143,7 +156,7 @@ where
     pub fn with_engine_api<T>(
         self,
         engine_api_builder: T,
-    ) -> WorldChainAddOns<N, EthB, PVB, T, EVB, RpcMiddleware> {
+    ) -> WorldChainAddOns<N, EthB, PVB, T, EVB, RpcMiddleware, Tx> {
         let Self {
             rpc_add_ons,
             da_config,
@@ -154,6 +167,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            ..
         } = self;
         WorldChainAddOns::new(
             rpc_add_ons.with_engine_api(engine_api_builder),
@@ -172,7 +186,7 @@ where
     pub fn with_payload_validator<T>(
         self,
         payload_validator_builder: T,
-    ) -> WorldChainAddOns<N, EthB, T, EB, EVB, RpcMiddleware> {
+    ) -> WorldChainAddOns<N, EthB, T, EB, EVB, RpcMiddleware, Tx> {
         let Self {
             rpc_add_ons,
             da_config,
@@ -183,6 +197,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            ..
         } = self;
         WorldChainAddOns::new(
             rpc_add_ons.with_payload_validator(payload_validator_builder),
@@ -201,7 +216,7 @@ where
     pub fn with_engine_validator<T>(
         self,
         engine_validator_builder: T,
-    ) -> WorldChainAddOns<N, EthB, PVB, EB, T, RpcMiddleware> {
+    ) -> WorldChainAddOns<N, EthB, PVB, EB, T, RpcMiddleware, Tx> {
         let Self {
             rpc_add_ons,
             da_config,
@@ -212,6 +227,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            ..
         } = self;
         WorldChainAddOns::new(
             rpc_add_ons.with_engine_validator(engine_validator_builder),
@@ -230,7 +246,7 @@ where
     pub fn with_rpc_middleware<T>(
         self,
         rpc_middleware: T,
-    ) -> WorldChainAddOns<N, EthB, PVB, EB, EVB, T> {
+    ) -> WorldChainAddOns<N, EthB, PVB, EB, EVB, T, Tx> {
         let Self {
             rpc_add_ons,
             da_config,
@@ -241,6 +257,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            ..
         } = self;
         WorldChainAddOns::new(
             rpc_add_ons.with_rpc_middleware(rpc_middleware),
@@ -276,21 +293,21 @@ where
     }
 }
 
-impl<N, EthB, PVB, EB, EVB, RpcMiddleware> NodeAddOns<N>
-    for WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx> NodeAddOns<N>
+    for WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
 where
     N: FullNodeComponents<
             Types: NodeTypes<ChainSpec = WorldChainSpec>,
             Evm: ConfigureEvm<
                 NextBlockEnvCtx: BuildNextEnv<
-                    OpPayloadBuilderAttributes<OpTransactionSigned>,
+                    OpPayloadBuilderAttributes<Tx>,
                     Header,
                     WorldChainSpec,
                 >,
             >,
-            Pool: TransactionPool<Transaction: OpPooledTx<Consensus = OpTransactionSigned>>,
+            Pool: TransactionPool<Transaction: OpPooledTx<Consensus = Tx>>,
         >,
-    PrimitivesTy<N::Types>: WorldChainRpcPrimitives,
+    PrimitivesTy<N::Types>: WorldChainRpcPrimitives<Tx>,
     N::Provider: BlockReaderIdExt
         + ChainSpecProvider<ChainSpec = WorldChainSpec>
         + HeaderProvider<Header = Header>
@@ -304,6 +321,9 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
+    Tx: FullSignedTx + OpTransaction,
+    <<N::Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory:
+        EvmFactory<Tx = OpTx>,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
@@ -352,12 +372,11 @@ where
             ctx.node.provider().clone(),
             ctx.node.evm_config().clone(),
         );
-        let debug_ext =
-            OpDebugWitnessApi::<_, _, _, OpPayloadBuilderAttributes<OpTransactionSigned>>::new(
-                ctx.node.provider().clone(),
-                ctx.node.task_executor().clone(),
-                builder,
-            );
+        let debug_ext = OpDebugWitnessApi::<_, _, _, OpPayloadBuilderAttributes<Tx>>::new(
+            ctx.node.provider().clone(),
+            ctx.node.task_executor().clone(),
+            builder,
+        );
         let miner_ext = OpMinerExtApi::new(da_config, gas_limit_config);
 
         let world_chain_sequencer_url = sequencer_url.clone();
@@ -380,10 +399,7 @@ where
         );
         let flashblocks_op_api = FlashblocksOpApi;
         let provider = ctx.node.provider().clone();
-        let evm_config = WorldChainEvmConfig::<PrimitivesTy<N::Types>>::new(
-            provider.chain_spec(),
-            OpRethReceiptBuilder::default(),
-        );
+        let evm_config = ctx.node.evm_config().clone();
 
         rpc_add_ons
             .launch_add_ons_with(ctx, move |container| {
@@ -435,21 +451,21 @@ where
     }
 }
 
-impl<N, EthB, PVB, EB, EVB, RpcMiddleware> RethRpcAddOns<N>
-    for WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx> RethRpcAddOns<N>
+    for WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
 where
     N: FullNodeComponents<
             Types: NodeTypes<ChainSpec = WorldChainSpec>,
             Evm: ConfigureEvm<
                 NextBlockEnvCtx: BuildNextEnv<
-                    OpPayloadBuilderAttributes<OpTransactionSigned>,
+                    OpPayloadBuilderAttributes<Tx>,
                     Header,
                     WorldChainSpec,
                 >,
             >,
-            Pool: TransactionPool<Transaction: OpPooledTx<Consensus = OpTransactionSigned>>,
+            Pool: TransactionPool<Transaction: OpPooledTx<Consensus = Tx>>,
         >,
-    PrimitivesTy<N::Types>: WorldChainRpcPrimitives,
+    PrimitivesTy<N::Types>: WorldChainRpcPrimitives<Tx>,
     N::Provider: BlockReaderIdExt
         + ChainSpecProvider<ChainSpec = WorldChainSpec>
         + HeaderProvider<Header = Header>
@@ -463,6 +479,9 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
+    Tx: FullSignedTx + OpTransaction,
+    <<N::Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory:
+        EvmFactory<Tx = OpTx>,
 {
     type EthApi = EthB::EthApi;
 
@@ -471,8 +490,8 @@ where
     }
 }
 
-impl<N, EthB, PVB, EB, EVB, RpcMiddleware> EngineValidatorAddOn<N>
-    for WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx> EngineValidatorAddOn<N>
+    for WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
