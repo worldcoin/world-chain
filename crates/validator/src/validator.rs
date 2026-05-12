@@ -40,20 +40,23 @@ use tracing::{error, info, trace};
 use world_chain_chainspec::WorldChainSpec;
 
 use crate::{
+    execution_strategy::{ExecutionStrategy, StateRootResult, ValidationCtx},
+    flashblock_validation_metrics::{
+        FlashblockValidationAttemptMetrics, FlashblockValidationMetrics, metered_fn,
+    },
+    state_root_strategy::{FlashblockTypes, StateRootHandle},
+};
+use world_chain_evm::{
+    PayloadBuildStage,
+    execution::bal::{BalExecutorError, CommittedState},
+};
+use world_chain_state::{
     access_list::{BlockAccessIndex, FlashblockAccessListConstruction},
-    bal_executor::{BalExecutorError, CommittedState},
     database::{
         bal_builder_db::{BalBuilderDb, NoOpCommitDB},
         bundle_db::BundleDb,
         temporal_db::{TemporalDb, TemporalDbFactory},
     },
-    execution_strategy::{ExecutionStrategy, StateRootResult, ValidationCtx},
-    flashblock_validation_metrics::{
-        FlashblockValidationAttemptMetrics, FlashblockValidationMetrics,
-    },
-    metrics::PayloadBuildStage,
-    payload_builder_metrics::metered_fn,
-    state_root_strategy::{FlashblockTypes, StateRootHandle},
 };
 
 /// A type alias for the BAL builder database with a cache layer.

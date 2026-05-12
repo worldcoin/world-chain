@@ -17,8 +17,11 @@ members = [
     "crates/cli",
     "crates/p2p",
     "crates/builder",
+    "crates/validator",
     "crates/payload",
     "crates/pool",
+    "crates/evm",
+    "crates/state",
     "crates/pbh",
     "crates/test-utils",
     "e2e-tests",
@@ -52,11 +55,14 @@ world-chain-primitives = { path = "crates/primitives", default-features = false 
 world-chain-cli = { path = "crates/cli", default-features = false }
 world-chain-p2p = { path = "crates/p2p", default-features = false }
 world-chain-builder = { path = "crates/builder", default-features = false }
+world-chain-validator = { path = "crates/validator", default-features = false }
 world-chain-payload = { path = "crates/payload", default-features = false }
 world-chain-node = { path = "crates/node", default-features = false }
 world-chain-pbh = { path = "crates/pbh", default-features = false }
 world-chain-rpc = { path = "crates/rpc", default-features = false }
 world-chain-pool = { path = "crates/pool", default-features = false }
+world-chain-evm = { path = "crates/evm", default-features = false }
+world-chain-state = { path = "crates/state", default-features = false }
 world-chain-test-utils = { path = "crates/test-utils", default-features = false }
 
 # reth crates.io
@@ -116,6 +122,7 @@ reth-tracing = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3
 reth-rpc-layer = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
 reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
 reth-storage-api = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
+reth-storage-errors = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
 
 # reth-optimism
 reth-optimism-evm = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }

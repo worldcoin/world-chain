@@ -1,9 +1,6 @@
 use crate::{
-    WorldChainEvmConfig,
     payload_builder_metrics::{PayloadBuildRejectionReason, PayloadBuildTaskOutcome},
-    state_db::StateDB,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
-    utils::estimated_da_size_bytes,
 };
 use alloy_consensus::{Block, SignableTransaction, Transaction, transaction::SignerRecoverable};
 use alloy_eips::{Encodable2718, Typed2718};
@@ -45,10 +42,12 @@ use semaphore_rs::Field;
 use std::{collections::HashSet, fmt::Debug, sync::Arc, time::Instant};
 use tracing::{error, trace};
 use world_chain_chainspec::WorldChainSpec;
+use world_chain_evm::{WorldChainEvmConfig, utils::estimated_da_size_bytes};
 use world_chain_pool::{
     bindings::IPBHEntryPoint::spendNullifierHashesCall,
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
 };
+use world_chain_state::StateDB;
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug, Clone)]

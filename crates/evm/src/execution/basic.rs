@@ -14,8 +14,6 @@ use reth_evm::{
     },
 };
 use reth_node_api::NodePrimitives;
-use reth_optimism_evm::OpRethReceiptBuilder;
-use reth_optimism_node::OpBlockAssembler;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
@@ -25,11 +23,11 @@ use revm_database::BundleState;
 use std::{sync::Arc, time::Instant};
 
 use crate::{
-    BlockBuilderExt,
-    metrics::{FlashblockExecutionMetrics, PayloadBuildStage},
-    state_db::StateDB,
+    BlockBuilderExt, FlashblockExecutionMetrics, OpBlockAssembler, OpRethReceiptBuilder,
+    PayloadBuildStage,
 };
 use world_chain_chainspec::WorldChainSpec;
+use world_chain_state::StateDB;
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
 pub struct FlashblocksBlockBuilder<'a, N: NodePrimitives, Evm, R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>  + 'static = OpRethReceiptBuilder> {
     pub inner: BasicBlockBuilder<

@@ -20,7 +20,9 @@ world-chain-primitives.workspace = true
 world-chain-builder.workspace = true
 world-chain-chainspec.workspace = true
 world-chain-cli.workspace = true
+world-chain-evm.workspace = true
 world-chain-rpc.workspace = true
+world-chain-state.workspace = true
 
 reth-optimism-node.workspace = true
 reth-optimism-primitives.workspace = true
@@ -28,7 +30,6 @@ reth-optimism-payload-builder.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-chainspec.workspace = true
-reth-optimism-chainspec.workspace = true
 reth-transaction-pool.workspace = true
 reth-node-ethereum.workspace = true
 reth-revm.workspace = true

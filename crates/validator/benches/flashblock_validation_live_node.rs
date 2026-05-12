@@ -18,7 +18,7 @@ use world_chain_test_utils::{
     e2e_harness::setup::setup_with_block_uncompressed_size_limit,
 };
 
-use world_chain_builder::{
+use world_chain_validator::{
     coordinator::{FlashblocksExecutionCoordinator, process_flashblock, run_flashblock_processor},
     flashblock_validation_metrics::FlashblockValidationMetrics,
 };

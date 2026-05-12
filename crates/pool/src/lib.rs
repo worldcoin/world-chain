@@ -2,13 +2,12 @@
 
 use ordering::WorldChainOrdering;
 use reth_node_api::FullNodeTypes;
-use reth_optimism_node::OpEvmConfig;
 use reth_transaction_pool::{
     Pool, TransactionValidationTaskExecutor, blobstore::DiskFileBlobStore,
 };
 use tx::WorldChainPooledTransaction;
 use validator::WorldChainTransactionValidator;
-use world_chain_chainspec::WorldChainSpec;
+use world_chain_evm::WorldChainEvmConfig;
 
 pub mod bindings;
 pub mod eip4337;
@@ -24,7 +23,7 @@ pub type WorldChainTransactionPool<
     Client,
     S,
     T = WorldChainPooledTransaction,
-    Evm = OpEvmConfig<WorldChainSpec>,
+    Evm = WorldChainEvmConfig,
 > = Pool<
     TransactionValidationTaskExecutor<WorldChainTransactionValidator<Client, T, Evm>>,
     WorldChainOrdering<T>,
@@ -32,8 +31,5 @@ pub type WorldChainTransactionPool<
 >;
 
 /// A wrapper type with sensible defaults for the World Chain transaction pool.
-pub type BasicWorldChainPool<
-    N,
-    T = WorldChainPooledTransaction,
-    Evm = OpEvmConfig<WorldChainSpec>,
-> = WorldChainTransactionPool<<N as FullNodeTypes>::Provider, DiskFileBlobStore, T, Evm>;
+pub type BasicWorldChainPool<N, T = WorldChainPooledTransaction, Evm = WorldChainEvmConfig> =
+    WorldChainTransactionPool<<N as FullNodeTypes>::Provider, DiskFileBlobStore, T, Evm>;

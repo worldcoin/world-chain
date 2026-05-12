@@ -11,7 +11,7 @@ use world_chain_test_utils::builder::{
     build_flashblock_sequence_fixture_world_id_like_bn254,
 };
 
-use world_chain_builder::{
+use world_chain_validator::{
     coordinator::{FlashblocksExecutionCoordinator, process_flashblock, run_flashblock_processor},
     flashblock_validation_metrics::FlashblockValidationMetrics,
 };

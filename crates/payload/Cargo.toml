@@ -9,6 +9,7 @@ license.workspace = true
 # internal
 world-chain-primitives.workspace = true
 world-chain-builder.workspace = true
+world-chain-validator.workspace = true
 world-chain-p2p.workspace = true
 world-chain-chainspec.workspace = true
 

@@ -1,0 +1,47 @@
+[package]
+name = "world-chain-evm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+world-chain-chainspec.workspace = true
+world-chain-primitives.workspace = true
+world-chain-state.workspace = true
+
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
+alloy-op-evm.workspace = true
+alloy-primitives.workspace = true
+
+auto_impl.workspace = true
+crossbeam-channel.workspace = true
+eyre.workspace = true
+op-alloy-consensus.workspace = true
+op-revm.workspace = true
+
+reth-evm.workspace = true
+reth-node-api.workspace = true
+reth-node-builder.workspace = true
+reth-optimism-evm.workspace = true
+reth-optimism-payload-builder.workspace = true
+reth-optimism-primitives.workspace = true
+reth-payload-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-provider.workspace = true
+reth-trie-common.workspace = true
+
+revm.workspace = true
+revm-database.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+bon.workspace = true
+
+[lints]
+workspace = true

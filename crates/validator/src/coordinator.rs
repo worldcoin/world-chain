@@ -34,13 +34,13 @@ use tokio::{
 use tracing::{error, trace};
 
 use crate::{
-    WorldChainEvmConfig,
     execution_strategy::{FlashblocksBalExecutionStrategy, FlashblocksLegacyExecutionStrategy},
     flashblock_types::{BalFlashblockTypes, LegacyFlashblockTypes},
     flashblock_validation_metrics::FlashblockValidationMetrics,
     validator::FlashblocksBlockValidator,
 };
 use world_chain_chainspec::WorldChainSpec;
+use world_chain_evm::WorldChainEvmConfig;
 use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};
 
 /// Task-level permit to ensure only one flashblock is processed at a time.

@@ -11,7 +11,7 @@ use reth_evm::{
     block::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
 };
 use reth_node_api::NodePrimitives;
-use reth_optimism_evm::OpRethReceiptBuilder;
+use reth_optimism_payload_builder::OpBuiltPayload;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_primitives::BuiltPayload;
 use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader};
@@ -20,11 +20,8 @@ use revm::{DatabaseCommit, context::BlockEnv, database::BundleState};
 use tracing::trace;
 
 use crate::{
-    BlockBuilderExt,
-    access_list::BlockAccessIndex,
-    database::bal_builder_db::BalBuilderDb,
-    metrics::{FlashblockExecutionMetrics, PayloadBuildStage},
-    state_db::StateDB,
+    BlockBuilderExt, FlashblockExecutionMetrics, OpBlockAssembler, OpRethReceiptBuilder,
+    PayloadBuildStage,
 };
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
 use alloy_primitives::{B256, FixedBytes, U256};
@@ -32,12 +29,14 @@ use reth_evm::{
     block::CommitChanges,
     execute::{BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx},
 };
-use reth_optimism_node::{OpBlockAssembler, OpBuiltPayload};
 use reth_provider::StateProvider;
 use revm::database::states::bundle_state::BundleRetention;
 use std::{sync::Arc, time::Instant};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_primitives::access_list::FlashblockAccessList;
+use world_chain_state::{
+    StateDB, access_list::BlockAccessIndex, database::bal_builder_db::BalBuilderDb,
+};
 
 #[derive(thiserror::Error, Debug, serde::Serialize)]
 pub enum BalValidationError {
@@ -459,7 +458,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::bal_executor::BlockAccessIndexCounter;
+    use super::BlockAccessIndexCounter;
 
     #[test]
     fn test_block_access_index_counter_finish() {

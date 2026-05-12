@@ -1,19 +1,12 @@
 use crate::{
-    BlockBuilderExt, WorldChainEvmConfig,
-    bal_executor::{BalBlockBuilder, CommittedState},
-    database::bal_builder_db::BalBuilderDb,
-    executor::FlashblocksBlockBuilder,
-    metrics::PayloadBuildStage,
     payload_builder_metrics::{
         PayloadBuildAttemptMetrics, PayloadBuildMetrics, PayloadBuildOutcome,
     },
     payload_txns::BestPayloadTxns,
-    state_db::StateDB,
     traits::{
         context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder,
         payload_builder::FlashblockPayloadBuilder,
     },
-    utils::estimated_da_size_bytes,
 };
 use alloy_eips::Encodable2718;
 use alloy_primitives::TxHash;
@@ -22,6 +15,15 @@ use reth_evm::{
     Evm, EvmFactory,
     block::{BlockExecutor, BlockExecutorFactory},
 };
+use world_chain_evm::{
+    BlockBuilderExt, PayloadBuildStage, WorldChainEvmConfig,
+    execution::{
+        bal::{BalBlockBuilder, CommittedState},
+        basic::FlashblocksBlockBuilder,
+    },
+    utils::estimated_da_size_bytes,
+};
+use world_chain_state::{StateDB, database::bal_builder_db::BalBuilderDb};
 
 use alloy_consensus::{BlockHeader, Header};
 

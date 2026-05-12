@@ -13451,12 +13451,12 @@ dependencies = [
  "reth-cli-util",
  "reth-node-builder",
  "reth-optimism-consensus",
- "reth-optimism-evm",
  "reth-provider",
  "reth-tracing",
  "tikv-jemallocator",
  "world-chain-chainspec",
  "world-chain-cli",
+ "world-chain-evm",
  "world-chain-node",
  "world-chain-rpc",
 ]
@@ -13472,28 +13472,19 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-signer-local",
- "auto_impl",
- "bon",
  "color-eyre",
  "criterion",
  "crossbeam-channel",
- "dashmap",
  "either",
- "futures",
  "metrics",
  "metrics-derive",
  "op-alloy-consensus",
  "op-alloy-rpc-types",
  "op-revm",
- "parking_lot",
- "rayon",
  "reth-basic-payload-builder",
- "reth-chain-state",
  "reth-chainspec",
  "reth-evm",
  "reth-node-api",
- "reth-node-builder",
- "reth-optimism-evm",
  "reth-optimism-forks",
  "reth-optimism-node",
  "reth-optimism-payload-builder",
@@ -13506,21 +13497,20 @@ dependencies = [
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
- "reth-trie-common",
  "revm",
  "revm-database",
  "semaphore-rs",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
  "tokio",
  "tracing",
  "world-chain-builder",
  "world-chain-chainspec",
+ "world-chain-evm",
  "world-chain-node",
- "world-chain-p2p",
  "world-chain-pool",
  "world-chain-primitives",
+ "world-chain-state",
  "world-chain-test-utils",
 ]
 
@@ -13581,6 +13571,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-evm"
+version = "2.2.0"
+dependencies = [
+ "alloy-consensus 2.0.4",
+ "alloy-eips 2.0.4",
+ "alloy-op-evm",
+ "alloy-primitives",
+ "auto_impl",
+ "bon",
+ "color-eyre",
+ "crossbeam-channel",
+ "op-alloy-consensus",
+ "op-revm",
+ "reth-evm",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-optimism-evm",
+ "reth-optimism-payload-builder",
+ "reth-optimism-primitives",
+ "reth-payload-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-trie-common",
+ "revm",
+ "revm-database",
+ "serde",
+ "thiserror 2.0.18",
+ "tracing",
+ "world-chain-chainspec",
+ "world-chain-primitives",
+ "world-chain-state",
+]
+
+[[package]]
 name = "world-chain-node"
 version = "2.2.0"
 dependencies = [
@@ -13623,12 +13647,14 @@ dependencies = [
  "world-chain-builder",
  "world-chain-chainspec",
  "world-chain-cli",
+ "world-chain-evm",
  "world-chain-p2p",
  "world-chain-payload",
  "world-chain-pool",
  "world-chain-primitives",
  "world-chain-rpc",
  "world-chain-test-utils",
+ "world-chain-validator",
 ]
 
 [[package]]
@@ -13692,6 +13718,7 @@ dependencies = [
  "world-chain-chainspec",
  "world-chain-p2p",
  "world-chain-primitives",
+ "world-chain-validator",
 ]
 
 [[package]]
@@ -13743,7 +13770,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "world-chain-chainspec",
+ "world-chain-evm",
  "world-chain-pbh",
  "world-chain-test-utils",
 ]
@@ -13844,7 +13871,26 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
- "world-chain-chainspec",
+ "world-chain-evm",
+ "world-chain-primitives",
+]
+
+[[package]]
+name = "world-chain-state"
+version = "2.2.0"
+dependencies = [
+ "alloy-eips 2.0.4",
+ "alloy-primitives",
+ "color-eyre",
+ "crossbeam-channel",
+ "dashmap",
+ "rayon",
+ "reth-revm",
+ "reth-tracing",
+ "revm",
+ "revm-database",
+ "serde_json",
+ "tracing",
  "world-chain-primitives",
 ]
 
@@ -13895,7 +13941,6 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-node-ethereum",
- "reth-optimism-chainspec",
  "reth-optimism-evm",
  "reth-optimism-forks",
  "reth-optimism-node",
@@ -13923,12 +13968,14 @@ dependencies = [
  "world-chain-builder",
  "world-chain-chainspec",
  "world-chain-cli",
+ "world-chain-evm",
  "world-chain-node",
  "world-chain-p2p",
  "world-chain-pbh",
  "world-chain-pool",
  "world-chain-primitives",
  "world-chain-rpc",
+ "world-chain-state",
 ]
 
 [[package]]
@@ -13979,12 +14026,58 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
- "world-chain-builder",
  "world-chain-chainspec",
  "world-chain-cli",
+ "world-chain-evm",
  "world-chain-node",
  "world-chain-p2p",
  "world-chain-primitives",
+ "world-chain-test-utils",
+ "world-chain-validator",
+]
+
+[[package]]
+name = "world-chain-validator"
+version = "2.2.0"
+dependencies = [
+ "alloy-consensus 2.0.4",
+ "alloy-eips 2.0.4",
+ "alloy-op-evm",
+ "alloy-primitives",
+ "alloy-rpc-types-engine",
+ "color-eyre",
+ "criterion",
+ "crossbeam-channel",
+ "either",
+ "futures",
+ "metrics",
+ "metrics-derive",
+ "op-alloy-consensus",
+ "op-revm",
+ "parking_lot",
+ "rayon",
+ "reth-chain-state",
+ "reth-evm",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-optimism-evm",
+ "reth-optimism-node",
+ "reth-optimism-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-revm",
+ "reth-tasks",
+ "reth-trie-common",
+ "revm",
+ "revm-database",
+ "tokio",
+ "tracing",
+ "world-chain-chainspec",
+ "world-chain-evm",
+ "world-chain-node",
+ "world-chain-p2p",
+ "world-chain-primitives",
+ "world-chain-state",
  "world-chain-test-utils",
 ]
 

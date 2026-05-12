@@ -22,14 +22,12 @@ use reth_node_builder::{
     rpc::{BasicEngineValidatorBuilder, RpcAddOns},
 };
 use reth_node_core::primitives::Hardforks;
-use reth_optimism_evm::OpEvmConfig;
 use reth_optimism_node::{
-    OpAddOns, OpConsensusBuilder, OpEngineTypes, OpEngineValidatorBuilder, OpExecutorBuilder,
-    OpNetworkBuilder, args::RollupArgs,
+    OpAddOns, OpConsensusBuilder, OpEngineTypes, OpEngineValidatorBuilder, OpNetworkBuilder,
+    args::RollupArgs,
 };
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApiBuilder;
-use world_chain_builder::coordinator::FlashblocksExecutionCoordinator;
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
 use world_chain_p2p::{
@@ -41,7 +39,9 @@ use world_chain_rpc::eth::FlashblocksEthApiBuilder;
 
 use tracing::info;
 use world_chain_builder::WorldChainPayloadBuilderCtxBuilder;
+use world_chain_evm::{WorldChainEvmConfig, WorldChainExecutorBuilder};
 use world_chain_pool::BasicWorldChainPool;
+use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
 
 use crate::tx_propagation::WorldChainTransactionPropagationPolicy;
 use reth_network::PeersInfo;
@@ -185,11 +185,11 @@ impl<N: FullNodeTypes<Types = WorldChainNode<WorldChainDefaultContext>>> WorldCh
 where
     FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
-    >: PayloadServiceBuilder<N, BasicWorldChainPool<N>, OpEvmConfig<WorldChainSpec>>,
+    >: PayloadServiceBuilder<N, BasicWorldChainPool<N>, WorldChainEvmConfig>,
 {
     type Pool = BasicWorldChainPool<N>;
     type Net = WorldChainNetworkBuilder;
-    type Evm = OpEvmConfig<WorldChainSpec>;
+    type Evm = WorldChainEvmConfig;
     type PayloadServiceBuilder = FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
     >;
@@ -274,7 +274,7 @@ where
                 pbh.signature_aggregator,
                 pbh.world_id,
             ))
-            .executor(OpExecutorBuilder::default())
+            .executor(WorldChainExecutorBuilder)
             .payload(FlashblocksPayloadServiceBuilder::new(
                 FlashblocksPayloadBuilderBuilder::new(
                     ctx_builder,
