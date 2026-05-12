@@ -9,7 +9,6 @@ use jsonrpsee::{
 use lru::LruCache;
 use op_revm::{OpSpecId, OpTransaction};
 use reth_evm::{ConfigureEvm, Evm as RethEvm, EvmFactory};
-use reth_optimism_evm::OpEvmConfig;
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderFactory};
 use reth_revm::{State, database::StateProviderDatabase};
 use reth_rpc_eth_api::helpers::SpawnBlocking;
@@ -29,11 +28,9 @@ use std::{
     num::NonZeroUsize,
     sync::{Arc, Mutex},
 };
-use world_chain_chainspec::WorldChainSpec;
+use world_chain_evm::WorldChainEvmConfig;
 
 use crate::simulate_consts::*;
-
-type WorldChainEvmConfig = OpEvmConfig<WorldChainSpec>;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Request types

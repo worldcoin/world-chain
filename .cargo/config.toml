@@ -1,9 +1,12 @@
 [alias]
 xtask = "run --package xtask --"
 docs = "doc --workspace --all-features --no-deps"
-b = "bench --package builder --bench coordinator --"
-bs = "bench --package builder --bench coordinator -- --save-baseline"
-bc = "bench --package builder --bench coordinator -- --baseline main --save-baseline pr"
+b = "bench --workspace --all-targets --"
+bs = "bench --package world-chain-validator --bench flashblock_validation_synthetic -- --save-baseline"
+bc = "bench --package world-chain-validator --bench flashblock_validation_synthetic -- --baseline main --save-baseline pr"
+bb = "bench --package world-chain-builder --bench flashblock_building_live_node --"
+bv = "bench --package world-chain-validator --bench flashblock_validation_synthetic --"
+bvl = "bench --package world-chain-validator --bench flashblock_validation_live_node --"
 
 [env]
 DEBUG = "info,flashblocks=debug,world_chain=info"

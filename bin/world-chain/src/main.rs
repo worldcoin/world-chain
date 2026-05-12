@@ -2,7 +2,6 @@ use clap::Parser;
 use eyre::config::HookBuilder;
 use reth_node_builder::NodeHandle;
 use reth_optimism_consensus::OpBeaconConsensus;
-use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
 use reth_provider::ChainSpecProvider;
 use reth_tracing::tracing::info;
 use std::sync::Arc;
@@ -10,6 +9,7 @@ use world_chain_chainspec::WorldChainSpec;
 use world_chain_cli::{
     Cli, WorldChainArgs, WorldChainNodeConfig, WorldChainRpcModuleValidator, WorldChainSpecParser,
 };
+use world_chain_evm::{OpRethReceiptBuilder, WorldChainEvmConfig};
 use world_chain_node::{
     FlashblocksOpApi, OpApiExtServer, context::WorldChainDefaultContext, node::WorldChainNode,
 };
@@ -66,8 +66,10 @@ fn main() {
 
                         if config.args.simulate_enabled {
                             let chain_spec = ctx.provider().chain_spec();
-                            let evm_config =
-                                OpEvmConfig::new(chain_spec, OpRethReceiptBuilder::default());
+                            let evm_config = WorldChainEvmConfig::new(
+                                chain_spec,
+                                OpRethReceiptBuilder::default(),
+                            );
                             let simulate_api = Simulate::from_eth_api(
                                 ctx.provider().clone(),
                                 evm_config,
@@ -86,7 +88,7 @@ fn main() {
             },
             |chain_spec: Arc<WorldChainSpec>| {
                 (
-                    OpEvmConfig::optimism(chain_spec.clone()),
+                    WorldChainEvmConfig::optimism(chain_spec.clone()),
                     Arc::new(OpBeaconConsensus::new(chain_spec)),
                 )
             },

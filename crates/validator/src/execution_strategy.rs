@@ -27,21 +27,26 @@ use world_chain_primitives::{
 };
 
 use crate::{
-    WorldChainEvmConfig,
-    bal_executor::{BalExecutorError, BalValidationError, CommittedState},
+    flashblock_validation_metrics::FlashblockValidationAttemptMetrics,
+    state_root_strategy::{StateRootHandle, StateRootStrategy},
+    validator::{BalBlockValidator, decode_transactions_with_indices},
+};
+use world_chain_chainspec::WorldChainSpec;
+use world_chain_evm::{
+    PayloadBuildStage, WorldChainEvmConfig,
+    execution::{
+        bal::{BalExecutorError, BalValidationError, CommittedState},
+        basic::FlashblocksBlockBuilder,
+    },
+};
+use world_chain_state::{
+    StateDB,
     database::{
         bal_builder_db::{BalBuilderDb, NoOpCommitDB},
         bundle_db::BundleDb,
         temporal_db::TemporalDbFactory,
     },
-    executor::FlashblocksBlockBuilder,
-    flashblock_validation_metrics::FlashblockValidationAttemptMetrics,
-    metrics::PayloadBuildStage,
-    state_db::StateDB,
-    state_root_strategy::{StateRootHandle, StateRootStrategy},
-    validator::{BalBlockValidator, decode_transactions_with_indices},
 };
-use world_chain_chainspec::WorldChainSpec;
 
 /// Result of computing the state root from a bundle state.
 pub struct StateRootResult {
@@ -389,7 +394,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
         ctx.attempt_metrics
             .record_stage_duration(PayloadBuildStage::MergeTransitions, merge_started.elapsed());
 
-        let flattened = crate::utils::flatten_reverts(&db.bundle_state().reverts);
+        let flattened = world_chain_evm::utils::flatten_reverts(&db.bundle_state().reverts);
         db.bundle_state_mut().reverts = flattened;
 
         let state_root_started = Instant::now();

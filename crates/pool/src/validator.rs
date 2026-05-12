@@ -311,12 +311,12 @@ pub mod tests {
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_primitives::{Address, address};
     use alloy_sol_types::SolCall;
-    use reth_optimism_node::OpEvmConfig;
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_primitives_traits::SealedBlock;
     use reth_transaction_pool::{
         Pool, TransactionPool, TransactionValidator, blobstore::InMemoryBlobStore,
     };
+    use world_chain_evm::WorldChainEvmConfig;
     use world_chain_pbh::{date_marker::DateMarker, external_nullifier::ExternalNullifier};
     use world_chain_test_utils::{
         PBH_DEV_ENTRYPOINT,
@@ -337,8 +337,11 @@ pub mod tests {
     const PBH_DEV_SIGNATURE_AGGREGATOR: Address =
         address!("Cf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9");
 
-    type TestValidator =
-        WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction, OpEvmConfig>;
+    type TestValidator = WorldChainTransactionValidator<
+        MockEthProvider,
+        WorldChainPooledTransaction,
+        WorldChainEvmConfig,
+    >;
 
     /// Create a World Chain validator for testing
     fn world_chain_validator() -> TestValidator {
@@ -360,7 +363,7 @@ pub mod tests {
                 body: Default::default(),
             },
         );
-        let evm = OpEvmConfig::optimism(client.chain_spec.clone());
+        let evm = WorldChainEvmConfig::optimism(client.chain_spec.clone());
 
         let validator = EthTransactionValidatorBuilder::new(client.clone(), evm)
             .no_shanghai()

@@ -1,11 +1,12 @@
 use crate::{DEV_WORLD_ID, PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR};
 use alloy_consensus::{Block, Header};
-use reth_optimism_node::{OpEvmConfig, txpool::OpTransactionValidator};
+use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
 };
 use revm_primitives::U256;
+use world_chain_evm::WorldChainEvmConfig;
 
 use crate::mock::{ExtendedAccount, MockEthProvider};
 use world_chain_pool::{
@@ -17,7 +18,8 @@ use world_chain_pool::{
 };
 
 pub fn world_chain_validator()
--> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction, OpEvmConfig> {
+-> WorldChainTransactionValidator<MockEthProvider, WorldChainPooledTransaction, WorldChainEvmConfig>
+{
     let client = MockEthProvider::default();
     let header = Header::default();
     let hash = header.hash_slow();
@@ -29,7 +31,7 @@ pub fn world_chain_validator()
         },
     );
 
-    let evm_config = OpEvmConfig::optimism(client.chain_spec.clone());
+    let evm_config = WorldChainEvmConfig::optimism(client.chain_spec.clone());
     let validator = EthTransactionValidatorBuilder::new(client.clone(), evm_config)
         .no_shanghai()
         .no_cancun()

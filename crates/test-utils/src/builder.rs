@@ -25,7 +25,7 @@ use reth_evm::{
     ConfigureEvm, EvmEnv, EvmFactory,
     execute::{BlockBuilder, BlockBuilderOutcome},
 };
-use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
+use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_primitives_traits::{Account, Bytecode, Recovered, SealedHeader, SignedTransaction};
 use reth_provider::{
@@ -46,17 +46,17 @@ use std::{
     sync::Arc,
 };
 use tracing::error;
-use world_chain_builder::{
-    BlockBuilderExt,
-    bal_executor::{BalBlockBuilder, CommittedState},
-    database::bal_builder_db::BalBuilderDb,
-    payload_builder_metrics::PayloadBuildAttemptMetrics,
-};
+use world_chain_builder::payload_builder_metrics::PayloadBuildAttemptMetrics;
 use world_chain_chainspec::{WorldChainSpec, WorldChainSpecBuilder};
+use world_chain_evm::{
+    BlockBuilderExt, OpRethReceiptBuilder, WorldChainEvmConfig,
+    execution::bal::{BalBlockBuilder, CommittedState},
+};
 use world_chain_primitives::{
     access_list::{FlashblockAccessListData, access_list_hash},
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
+use world_chain_state::database::bal_builder_db::BalBuilderDb;
 
 const WORLD_ID_ALT_INPUT_INTERVAL: usize = 5;
 const WORLD_ID_TREE_DEPTH: u64 = 30;
@@ -240,8 +240,8 @@ lazy_static::lazy_static! {
     );
 
     /// EVM configuration for tests
-    pub static ref EVM_CONFIG: OpEvmConfig<WorldChainSpec> =
-        OpEvmConfig::new(CHAIN_SPEC.clone(), OpRethReceiptBuilder::default());
+    pub static ref EVM_CONFIG: WorldChainEvmConfig =
+        WorldChainEvmConfig::new(CHAIN_SPEC.clone(), OpRethReceiptBuilder::default());
 
     pub static ref BLOCK_EXECUTION_CTX: OpBlockExecutionCtx = OpBlockExecutionCtx {
         parent_beacon_block_root: Some(FixedBytes::ZERO),

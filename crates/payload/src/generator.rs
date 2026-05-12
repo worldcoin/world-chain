@@ -34,10 +34,9 @@ use world_chain_primitives::{
 };
 
 use crate::job::{CommittedPayloadState, FlashblocksPayloadJob};
-use world_chain_builder::{
-    coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
-};
+use world_chain_builder::traits::payload_builder::FlashblockPayloadBuilder;
 use world_chain_primitives::flashblocks::Flashblock;
+use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
 
 /// A type that initiates payload building jobs on the [`crate::builder::FlashblocksPayloadBuilder`].
 pub struct FlashblocksPayloadJobGenerator<Client, Builder> {

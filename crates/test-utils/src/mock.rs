@@ -21,7 +21,6 @@ use reth_db::{
 };
 use reth_node_api::NodeTypes;
 use reth_node_ethereum::EthEngineTypes;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::{
     Account, Bytecode, GotExpected, RecoveredBlock, SealedHeader, SignerRecoverable,
@@ -42,6 +41,7 @@ use reth_trie::{
     StorageProof, TrieInput, updates::TrieUpdates,
 };
 use reth_trie_common::ExecutionWitnessMode;
+use world_chain_chainspec::WorldChainSpec;
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug, Clone)]
@@ -53,13 +53,13 @@ pub struct MockEthProvider {
     /// Local account store
     pub accounts: Arc<Mutex<HashMap<Address, ExtendedAccount>>>,
     /// Local chain spec
-    pub chain_spec: Arc<OpChainSpec>,
+    pub chain_spec: Arc<WorldChainSpec>,
     /// Local state roots
     pub state_roots: Arc<Mutex<Vec<B256>>>,
 }
 
 impl ChainSpecProvider for MockEthProvider {
-    type ChainSpec = OpChainSpec;
+    type ChainSpec = WorldChainSpec;
 
     fn chain_spec(&self) -> Arc<Self::ChainSpec> {
         self.chain_spec.clone()
@@ -72,7 +72,7 @@ impl Default for MockEthProvider {
             blocks: Default::default(),
             headers: Default::default(),
             accounts: Default::default(),
-            chain_spec: Arc::new(OpChainSpec::from_genesis(Genesis::default())),
+            chain_spec: Arc::new(WorldChainSpec::from_genesis(Genesis::default())),
             state_roots: Default::default(),
         }
     }

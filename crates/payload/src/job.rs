@@ -26,9 +26,7 @@ use tokio::{
     time::{Interval, Sleep},
 };
 use tracing::{debug, error, info, span, trace};
-use world_chain_builder::{
-    coordinator::FlashblocksExecutionCoordinator, traits::payload_builder::FlashblockPayloadBuilder,
-};
+use world_chain_builder::traits::payload_builder::FlashblockPayloadBuilder;
 use world_chain_p2p::protocol::{error::FlashblocksP2PError, handler::FlashblocksHandle};
 use world_chain_primitives::{
     access_list::{FlashblockAccessList, FlashblockAccessListData},
@@ -36,6 +34,7 @@ use world_chain_primitives::{
     p2p::{Authorization, AuthorizedPayload},
     primitives::FlashblocksPayloadV1,
 };
+use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
 
 /// A future that resolves to the result of the block building job.
 #[derive(Debug)]
