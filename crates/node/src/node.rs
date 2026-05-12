@@ -22,16 +22,13 @@ use reth_node_builder::{
 use reth_node_core::primitives::EthereumHardforks;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::{
-    OpStorage,
-    node::{OpConsensusBuilder, OpExecutorBuilder},
-    payload::OpPayloadAttrs,
-};
+use reth_optimism_node::{OpStorage, node::OpConsensusBuilder, payload::OpPayloadAttrs};
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives_traits::{ReceiptTy, SealedHeader, TxTy};
 use reth_rpc_eth_api::EthApiTypes;
 use reth_transaction_pool::TransactionPool;
 use world_chain_cli::WorldChainNodeConfig;
+use world_chain_evm::WorldChainExecutorBuilder;
 
 /// Primitive types for a World Chain node implementation.
 ///
@@ -154,7 +151,7 @@ pub type WorldChainNodeComponentBuilder<Node, T> = ComponentsBuilder<
     WorldChainPoolBuilder,
     <T as WorldChainNodeContext<Node>>::PayloadServiceBuilder,
     <T as WorldChainNodeContext<Node>>::Net,
-    OpExecutorBuilder,
+    WorldChainExecutorBuilder,
     OpConsensusBuilder,
 >;
 

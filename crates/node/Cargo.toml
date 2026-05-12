@@ -16,9 +16,11 @@ world-chain-p2p.workspace = true
 world-chain-primitives.workspace = true
 world-chain-rpc.workspace = true
 world-chain-builder.workspace = true
+world-chain-validator.workspace = true
 world-chain-cli.workspace = true
 world-chain-payload.workspace = true
 world-chain-chainspec.workspace = true
+world-chain-evm.workspace = true
 
 reth-node-builder.workspace = true
 reth-chainspec.workspace = true

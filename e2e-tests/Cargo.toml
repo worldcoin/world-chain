@@ -15,7 +15,8 @@ workspace = true
 world-chain-node.workspace = true
 world-chain-test-utils = { workspace = true}
 world-chain-primitives.workspace = true
-world-chain-builder.workspace = true
+world-chain-validator.workspace = true
+world-chain-evm.workspace = true
 world-chain-p2p = { workspace = true, features = ["test-utils"] }
 world-chain-cli.workspace = true
 world-chain-chainspec.workspace = true

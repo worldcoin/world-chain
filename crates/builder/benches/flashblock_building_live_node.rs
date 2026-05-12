@@ -15,6 +15,7 @@ use world_chain_builder::{
     WorldChainPayloadBuilderCtxBuilder, payload_builder::FlashblocksPayloadBuilder,
     traits::payload_builder::FlashblockPayloadBuilder,
 };
+use world_chain_evm::WorldChainEvmConfig;
 use world_chain_node::context::WorldChainDefaultContext;
 use world_chain_test_utils::{
     PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
@@ -85,7 +86,7 @@ where
 fn build_live_payload_builder<Pool, Client>(
     pool: Pool,
     client: Client,
-    evm_config: world_chain_builder::WorldChainEvmConfig,
+    evm_config: WorldChainEvmConfig,
     bal_enabled: bool,
 ) -> FlashblocksPayloadBuilder<Pool, Client, WorldChainPayloadBuilderCtxBuilder, ()>
 where

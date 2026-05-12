@@ -1,23 +1,22 @@
 use world_chain_builder::{
-    coordinator::FlashblocksExecutionCoordinator,
     payload_builder::FlashblocksPayloadBuilder,
     payload_builder_metrics::PayloadBuildMetrics,
     traits::{context::PayloadBuilderCtx, context_builder::PayloadBuilderCtxBuilder},
 };
 use world_chain_cli::FlashblocksPayloadBuilderConfig;
+use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
 
 use op_alloy_consensus::OpTxEnvelope;
 use reth_node_api::{FullNodeTypes, NodeTypes, PayloadTypes};
 use reth_node_builder::{BuilderContext, components::PayloadBuilderBuilder};
-use reth_optimism_node::{
-    OpBuiltPayload, OpEvmConfig, payload::OpPayloadAttrs, txpool::OpPooledTx,
-};
+use reth_optimism_node::{OpBuiltPayload, payload::OpPayloadAttrs, txpool::OpPooledTx};
 use reth_provider::{
     ChainSpecProvider, DatabaseProviderFactory, HeaderProvider, StateProviderFactory,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::sync::Arc;
 use world_chain_chainspec::WorldChainSpec;
+use world_chain_evm::WorldChainEvmConfig;
 #[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     pub ctx_builder: CtxBuilder,
@@ -42,7 +41,7 @@ impl<CtxBuilder> FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     }
 }
 
-impl<Node, Pool, CtxBuilder> PayloadBuilderBuilder<Node, Pool, OpEvmConfig<WorldChainSpec>>
+impl<Node, Pool, CtxBuilder> PayloadBuilderBuilder<Node, Pool, WorldChainEvmConfig>
     for FlashblocksPayloadBuilderBuilder<CtxBuilder>
 where
     Node: FullNodeTypes,
@@ -63,7 +62,7 @@ where
         + 'static,
     CtxBuilder: PayloadBuilderCtxBuilder<
             Node::Provider,
-            OpEvmConfig<WorldChainSpec>,
+            WorldChainEvmConfig,
             WorldChainSpec,
             PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
         > + 'static,
@@ -74,7 +73,7 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-        evm_config: OpEvmConfig<WorldChainSpec>,
+        evm_config: WorldChainEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
         if let Some(flashblocks_state) = self.flashblocks_state {
             flashblocks_state.launch(ctx, evm_config.clone());

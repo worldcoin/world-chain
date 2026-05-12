@@ -4,7 +4,7 @@ use metrics::{Counter, Gauge, Histogram};
 use metrics_derive::Metrics;
 use std::time::{Duration, Instant};
 
-use crate::metrics::{FlashblockExecutionMetrics, PayloadBuildStage};
+use world_chain_evm::{FlashblockExecutionMetrics, PayloadBuildStage};
 
 #[derive(Debug, Default)]
 pub struct PayloadBuildAttemptMetrics {

@@ -23,7 +23,6 @@ use reth_chainspec::{ChainInfo, MAINNET};
 use reth_db::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_e2e_test_utils::transaction::TransactionTestContext;
 use reth_network_peers::PeerId;
-use reth_optimism_node::OpEvmConfig;
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_optimism_primitives::{OpBlock, OpTransactionSigned};
 use reth_primitives_traits::{
@@ -61,6 +60,7 @@ use world_chain_cli::{
     BuilderArgs, FlashblocksPayloadBuilderConfig, PbhArgs, WorldChainArgs, WorldChainNodeConfig,
     cli::{builder::FlashblocksArgs, p2p::FanoutArgs},
 };
+use world_chain_evm::WorldChainEvmConfig;
 use world_chain_pbh::external_nullifier::ExternalNullifier;
 use world_chain_pool::{
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
@@ -744,7 +744,7 @@ pub struct WorldChainNoopValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt + Debug,
 {
-    _inner: WorldChainTransactionValidator<Client, Tx, OpEvmConfig>,
+    _inner: WorldChainTransactionValidator<Client, Tx, WorldChainEvmConfig>,
 }
 
 impl WorldChainNoopValidator<WorldChainNoopProvider, WorldChainPooledTransaction> {
@@ -752,7 +752,7 @@ impl WorldChainNoopValidator<WorldChainNoopProvider, WorldChainPooledTransaction
         inner: WorldChainTransactionValidator<
             WorldChainNoopProvider,
             WorldChainPooledTransaction,
-            OpEvmConfig,
+            WorldChainEvmConfig,
         >,
     ) -> Self {
         Self { _inner: inner }

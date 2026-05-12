@@ -2,15 +2,15 @@ use std::sync::Arc;
 
 use reth_chain_state::ExecutedBlock;
 use reth_optimism_primitives::OpPrimitives;
-use world_chain_builder::{
-    coordinator::{FlashblocksExecutionCoordinator, process_flashblock},
-    flashblock_validation_metrics::FlashblockValidationMetrics,
-};
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_primitives::{ed25519_dalek::SigningKey, primitives::FlashblocksPayloadV1};
 use world_chain_test_utils::builder::{
     BenchProvider, CHAIN_SPEC, EVM_CONFIG, build_flashblock_fixture_eth_transfers,
     build_flashblock_fixture_fib, build_flashblock_fixture_world_id_like_bn254,
+};
+use world_chain_validator::{
+    coordinator::{FlashblocksExecutionCoordinator, process_flashblock},
+    flashblock_validation_metrics::FlashblockValidationMetrics,
 };
 
 const MAX_DEFAULT_TX_COUNT: usize = 1000;

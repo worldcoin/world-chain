@@ -4,10 +4,6 @@ use reth_chain_state::ExecutedBlock;
 use reth_optimism_node::utils::optimism_payload_attributes;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{StateProvider, StateProviderFactory};
-use world_chain_builder::{
-    coordinator::{FlashblocksExecutionCoordinator, process_flashblock},
-    flashblock_validation_metrics::FlashblockValidationMetrics,
-};
 use world_chain_node::context::WorldChainDefaultContext;
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_primitives::{ed25519_dalek::SigningKey, primitives::FlashblocksPayloadV1};
@@ -18,6 +14,10 @@ use world_chain_test_utils::{
         build_flashblock_fixture_world_id_like_bn254_with_provider,
     },
     e2e_harness::setup::setup_with_block_uncompressed_size_limit,
+};
+use world_chain_validator::{
+    coordinator::{FlashblocksExecutionCoordinator, process_flashblock},
+    flashblock_validation_metrics::FlashblockValidationMetrics,
 };
 
 const MAX_DEFAULT_TX_COUNT: usize = 1000;

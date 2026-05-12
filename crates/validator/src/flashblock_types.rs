@@ -1,8 +1,8 @@
 use crate::{
-    WorldChainEvmConfig,
     execution_strategy::{FlashblocksBalExecutionStrategy, FlashblocksLegacyExecutionStrategy},
     state_root_strategy::{AsyncStateRootStrategy, FlashblockTypes, SyncStateRootStrategy},
 };
+use world_chain_evm::WorldChainEvmConfig;
 
 /// BAL-enabled flashblock types: parallel execution with async state root.
 pub struct BalFlashblockTypes;

@@ -11,7 +11,7 @@ use std::collections::{HashMap, hash_map::Entry};
 /// - For each account, keep the **earliest non-`DoNothing`** account-info revert.
 /// - For each account+slot, keep the **earliest** `RevertToSlot`.
 /// - For each account, OR `wipe_storage`.
-pub(crate) fn flatten_reverts(reverts: &Reverts) -> Reverts {
+pub fn flatten_reverts(reverts: &Reverts) -> Reverts {
     let mut per_account = HashMap::new();
 
     for (addr, acc_revert) in reverts.iter().flatten() {
@@ -52,10 +52,7 @@ pub(crate) fn flatten_reverts(reverts: &Reverts) -> Reverts {
 ///
 /// This applies the optional `--builder.gaslimit` cap without changing the protocol gas limit in
 /// the block header.
-pub(crate) fn effective_gas_limit(
-    protocol_gas_limit: u64,
-    builder_config: &OpBuilderConfig,
-) -> u64 {
+pub fn effective_gas_limit(protocol_gas_limit: u64, builder_config: &OpBuilderConfig) -> u64 {
     builder_config
         .gas_limit_config
         .gas_limit()
@@ -65,7 +62,7 @@ pub(crate) fn effective_gas_limit(
 }
 
 /// Returns the Fjord estimated compressed transaction size in DA bytes.
-pub(crate) fn estimated_da_size_bytes(tx: &impl Encodable2718) -> u64 {
+pub fn estimated_da_size_bytes(tx: &impl Encodable2718) -> u64 {
     estimate_tx_compressed_size(tx.encoded_2718().as_ref()).saturating_div(1_000_000)
 }
 

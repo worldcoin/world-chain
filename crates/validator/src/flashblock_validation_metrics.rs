@@ -1,7 +1,7 @@
-use crate::metrics::{FlashblockExecutionMetrics, PayloadBuildStage};
 use metrics::{Counter, Gauge, Histogram};
 use metrics_derive::Metrics;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use world_chain_evm::{FlashblockExecutionMetrics, PayloadBuildStage};
 
 #[derive(Debug, Default)]
 pub struct FlashblockValidationAttemptMetrics {
@@ -184,4 +184,43 @@ impl FlashblockExecutionMetrics for FlashblockValidationAttemptMetrics {
     fn record_stage_duration(&mut self, stage: PayloadBuildStage, duration: Duration) {
         self.record_stage_duration(stage, duration);
     }
+}
+
+pub struct MetricsSpan {
+    inner: tracing::Span,
+    start: Instant,
+    histogram: Histogram,
+}
+
+impl MetricsSpan {
+    pub fn new(inner: tracing::Span, histogram: Histogram) -> Self {
+        Self {
+            inner,
+            start: Instant::now(),
+            histogram,
+        }
+    }
+
+    /// Record a field on the underlying tracing span.
+    pub fn record<V: tracing::field::Value>(&self, field: &str, value: V) {
+        self.inner.record(field, value);
+    }
+}
+
+impl Drop for MetricsSpan {
+    fn drop(&mut self) {
+        let elapsed = self.start.elapsed();
+        self.inner.record("duration_ms", elapsed.as_millis() as u64);
+        self.histogram.record(elapsed.as_millis() as f64);
+    }
+}
+
+/// Execute `f` inside a metered tracing span.
+pub fn metered_fn<F, R>(span: tracing::Span, histogram: Histogram, f: F) -> R
+where
+    F: FnOnce(&MetricsSpan) -> R,
+{
+    let guard = MetricsSpan::new(span, histogram);
+    let _enter = guard.inner.enter();
+    f(&guard)
 }
