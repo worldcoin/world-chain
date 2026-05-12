@@ -2,6 +2,8 @@
 
 These tests are for profiling node's performances using `samply`.
 
+These profiling targets moved from `world-chain-builder` to `world-chain-validator`.
+
 ## Requirements
 
 1. Install [samply](https://github.com/mstange/samply)

@@ -1,7 +1,7 @@
 [alias]
 xtask = "run --package xtask --"
 docs = "doc --workspace --all-features --no-deps"
-b = "bench --workspace --all-targets --"
+b = "bench --workspace --all-targets"
 bs = "bench --package world-chain-validator --bench flashblock_validation_synthetic -- --save-baseline"
 bc = "bench --package world-chain-validator --bench flashblock_validation_synthetic -- --baseline main --save-baseline pr"
 bb = "bench --package world-chain-builder --bench flashblock_building_live_node --"
