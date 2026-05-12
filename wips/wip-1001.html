@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-97b46de7.js";
+            window.path_to_searchindex_js = "../searchindex-3aca3613.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-85576531.js"></script>
@@ -177,455 +177,489 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h2 id="abstract"><a class="header" href="#abstract">Abstract</a></h2>
-<p>A <em>World Chain Account</em> is a precompile-managed account whose 20-byte address is deterministic and lifetime-stable. Each account has a single <em>admin authority</em> fixed at creation, which gates mutation of the account’s <em>Keyring</em> — the set of session keys authorized to sign on its behalf. We extend <a href="https://eips.ethereum.org/EIPS/eip-2718">EIP-2718</a> with a typed transaction envelope (<code>0x1D</code>) signed by any session key in a <em>World Chain Account</em>’s keyring.</p>
-<p>This WIP specifies three admin authority instantiations:</p>
-<ul>
-<li><strong>WorldID admin.</strong> Creation gated by a <a href="https://github.com/worldcoin/world-id-protocol">World ID 4.0</a> Uniqueness Proof; subsequent keyring mutations gated by Session Proofs against a stored <code>sessionId</code>. Recovery from lost or compromised session keys is the degenerate case of the same upgrade path, protected by a configurable timelock. A single WorldID <code>MAY</code> manage any number of WorldID-admin accounts indexed by a user-chosen <code>worldIDAccountNonce</code>; accounts owned by the same WorldID are unlinkable across distinct values.</li>
-<li><strong>Secp256k1 admin.</strong> Creation and keyring mutations gated by ECDSA signatures over a uniform <code>signalHash</code> from a single secp256k1 admin key fixed at creation. No recovery — admin-key loss is terminal.</li>
-<li><strong>P256 admin.</strong> Same shape as Secp256k1 with a P256 (<code>secp256r1</code>) admin key.</li>
-</ul>
-<p>Account state lives natively in the <code>WORLD_CHAIN_ACCOUNT_PRECOMPILE</code>. The account address is a public identifier for an admin-authority-managed set of session keys, not an identity anchor; per-instantiation rules govern how many accounts a given admin authority may own.</p>
+<p>We define a native World Chain account type managed by the <code>WORLD_CHAIN_ACCOUNT_MANAGER</code> predeploy. Each account has one immutable <a href="https://eips.ethereum.org/EIPS/eip-1271">EIP-1271</a> compliant admin signer and one active key ring of <a href="https://eips.ethereum.org/EIPS/eip-1271">EIP-1271</a> compliant session verifiers.</p>
+<p>We extend <a href="https://eips.ethereum.org/EIPS/eip-2718">EIP-2718</a> with a new typed transaction envelope with type flag <code>0x1D</code>. <code>0x1D</code> transactions are executed with the World Chain account <em>framed</em> as the sender. Session verifiers act as the transaction level signatories via programmable <a href="https://eips.ethereum.org/EIPS/eip-1271">EIP-1271</a> smart contracts. Session verifiers dually function as signature verifiers, and session key policy evaluators.</p>
+<p>We design with the principle of not defining signer-specific authentication as native execution paths. Signature schemes, proof systems, recovery policies, and spending policies are fully programmable. The protocol only prescribes deterministic transaction context, validation frames, and reusable precompiles for cryptographic operations.</p>
 <h2 id="motivation"><a class="header" href="#motivation">Motivation</a></h2>
-<h3 id="computational-sustainability--world-chain-ux"><a class="header" href="#computational-sustainability--world-chain-ux">Computational Sustainability &amp; World Chain UX</a></h3>
-<p>Enshrining smart-account authenticators as protocol-level signature verification algorithms lets us jointly optimize transaction gas, expose a simple multi-auth API over familiar authenticators (<a href="https://www.w3.org/TR/webauthn-3/">Passkey</a> / <a href="https://www.w3.org/TR/webauthn-3/">WebAuthn</a>, <a href="https://neuromancer.sk/std/nist/P-256">P256</a>, <a href="https://en.wikipedia.org/wiki/Elliptic_Curve_Digital_Signature_Algorithm">ECDSA</a>, <a href="https://en.wikipedia.org/wiki/EdDSA">EdDSA</a>), minimize confirmation time, and remove the need for bundler infrastructure.</p>
-<h3 id="pluggable-admin-authorities"><a class="header" href="#pluggable-admin-authorities">Pluggable Admin Authorities</a></h3>
-<p>A pluggable admin model lets a single account abstraction serve multiple user populations from one precompile. <strong>WorldID admin</strong> converges key rotation and recovery onto a single proof-verification path after enrollment: a fresh Session Proof. No “super key” is ever stored on-device; recovery is the degenerate case of the same upgrade path. <strong>Key admin</strong> (Secp256k1 / P256) lets accounts be owned by users without a WorldID, by hot/cold-separated wallets, or by integrations driven by existing key-management infrastructure; the trade-off is that admin-key loss is terminal.</p>
-<p>Sharing a single keyring + transaction surface (<code>0x1D</code>, session keys, signal binding, timelock) across instantiations means session-key UX and integration surface are uniform regardless of admin type. A new admin instantiation reduces to specifying one verification primitive and one address-derivation rule.</p>
+<p>World Chain accounts need programmable authentication without adding a protocol branch for every signature scheme, or session key policy. Smart contracts allow us to converge protocol level authentication over a single authorization boundary with determinism enforced via protocol level restrictions on programmable validation frames.</p>
+<p>Programmable policies over Session Keys unlock many capabilities that simply are not possible on traditional accounts. Some examples include account subscription models, delegated agent payments with scoped permissions enforced by the VM, social recovery, policy based authentication (e.g. Multi Factor authentication for high value transactions). World Chain accounts are unique in that the policies constraining a Session Key are fully programmable. This allows for expressive policies, and authentication strategies to be composed and updated dynamically without prescriptive standards enforced by the protocol.</p>
 <h2 id="specification"><a class="header" href="#specification">Specification</a></h2>
 <p>The key words “MUST”, “MUST NOT”, “REQUIRED”, “SHALL”, “SHALL NOT”, “SHOULD”, “SHOULD NOT”, “RECOMMENDED”, “NOT RECOMMENDED”, “MAY”, and “OPTIONAL” in this document are to be interpreted as described in <a href="https://www.rfc-editor.org/rfc/rfc2119">RFC 2119</a> and <a href="https://www.rfc-editor.org/rfc/rfc8174">RFC 8174</a>.</p>
-<h3 id="constants"><a class="header" href="#constants">Constants</a></h3>
+<h3 id="protocol-constants"><a class="header" href="#protocol-constants">Protocol Constants</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Name</th><th>Value</th><th>Description</th></tr>
+<tr><th>Name</th><th>Type</th><th>Value</th><th>Meaning</th></tr>
 </thead>
 <tbody>
-<tr><td><code>WORLD_TX_TYPE</code></td><td><code>0x1D</code></td><td><a href="https://eips.ethereum.org/EIPS/eip-2718">EIP-2718</a> tx type</td></tr>
-<tr><td><code>WORLD_CHAIN_ACCOUNT_PRECOMPILE</code></td><td><code>0x000000000000000000000000000000000000001D</code></td><td>Stateful precompile managing the World Chain Account registry</td></tr>
-<tr><td><code>MAX_SESSION_KEYS</code></td><td><code>20</code></td><td>Maximum authorized session keys per account</td></tr>
-<tr><td><code>ADMIN_TYPE_WORLD_ID</code></td><td><code>0x00</code></td><td>Admin type discriminator: WorldID admin</td></tr>
-<tr><td><code>ADMIN_TYPE_SECP256K1</code></td><td><code>0x01</code></td><td>Admin type discriminator: Secp256k1 admin</td></tr>
-<tr><td><code>ADMIN_TYPE_P256</code></td><td><code>0x02</code></td><td>Admin type discriminator: P256 admin</td></tr>
+<tr><td><code>WORLD_TX_TYPE</code></td><td><code>uint8</code></td><td><code>0x1D</code></td><td>EIP-2718 transaction type for World Chain account transactions.</td></tr>
+<tr><td><code>MAX_SESSION_VERIFIERS</code></td><td><code>uint256</code></td><td><code>20</code></td><td>Maximum active session verifiers per account.</td></tr>
+<tr><td><code>WORLD_CHAIN_ACCOUNT_DOMAIN</code></td><td><code>bytes32</code></td><td><code>keccak256("WIP1001_ACCOUNT")</code></td><td>Domain for account address derivation.</td></tr>
+<tr><td><code>WORLD_CHAIN_ADMIN_CREATE_DOMAIN</code></td><td><code>bytes32</code></td><td><code>keccak256("WIP1001_ADMIN_CREATE")</code></td><td>Domain for account creation authorization.</td></tr>
+<tr><td><code>WORLD_CHAIN_SET_KEY_RING_DOMAIN</code></td><td><code>bytes32</code></td><td><code>keccak256("WIP1001_SET_KEY_RING")</code></td><td>Domain for key ring replacement authorization.</td></tr>
+<tr><td><code>WIP1001_SIGNER_DOMAIN</code></td><td><code>bytes32</code></td><td><code>keccak256("WIP1001_SIGNER")</code></td><td>Domain for default factory <code>CREATE2</code> salts.</td></tr>
 </tbody>
 </table>
 </div>
-<p>Per-instantiation constants are defined in their respective sections.</p>
-<h3 id="abstract-account-model"><a class="header" href="#abstract-account-model">Abstract Account Model</a></h3>
-<p>An <em>account</em> is created by an admin-authorized <code>Create</code> operation that fixes an <em>admin type</em> <code>T</code> and an <em>admin authority</em> <code>A</code> of type <code>T</code>. After creation, <code>T</code> and <code>A</code> are immutable for the lifetime of the account. The keyring is mutated by admin-authorized <code>Add</code> or <code>Remove</code> operations. All admin authorizations bind the operation to a uniform <code>signalHash</code> defined below; replay protection across operations is provided by a per-account monotonic <code>adminNonce</code>.</p>
-<h4 id="account-state"><a class="header" href="#account-state">Account State</a></h4>
-<p>Per-account state stored in the precompile:</p>
-<pre><code>struct Account {
-    uint8        adminType;             // ADMIN_TYPE_*
-    bytes        verificationPublicId;  // variable length per admin type
-    SessionKey[] sessionKeys;           // see Session Keys
-    uint64       adminNonce;            // monotonic; replay protection
-    // pendingUpdates: see Timelock
+<h3 id="activation-parameters"><a class="header" href="#activation-parameters">Activation Parameters</a></h3>
+<p>WIP-1001 MUST NOT activate until every parameter below is assigned in fork configuration.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Name</th><th>Type</th><th>Value</th><th>Requirement</th></tr>
+</thead>
+<tbody>
+<tr><td><code>WORLD_CHAIN_ACCOUNT_MANAGER</code></td><td><code>address</code></td><td>TBD</td><td>Predeploy address for the account manager.</td></tr>
+<tr><td><code>EIP1271_VALIDATION_GAS_LIMIT</code></td><td><code>uint64</code></td><td>TBD</td><td>Fixed gas forwarded to <code>isValidSignature</code>.</td></tr>
+<tr><td><code>EXECUTION_TRACE_VALIDATION_GAS_LIMIT</code></td><td><code>uint64</code></td><td>TBD</td><td>Fixed gas forwarded to <code>evaluateSessionPolicy</code>.</td></tr>
+<tr><td><code>BLOCK_VALIDATION_GAS_BUDGET</code></td><td><code>uint64</code></td><td>TBD</td><td>Per-block gas budget reserved for <code>0x1D</code> validation calls.</td></tr>
+<tr><td><code>MIN_VALIDATION_FAILURE_FEE</code></td><td><code>uint256</code></td><td>TBD</td><td>Minimum wei charged to the account on validation failure.</td></tr>
+<tr><td><code>MAX_EXECUTION_TRACE_BYTES</code></td><td><code>uint32</code></td><td>TBD</td><td>Maximum ABI-encoded trace size passed to a session verifier.</td></tr>
+<tr><td><code>MAX_PAYLOAD_DATA_BYTES</code></td><td><code>uint32</code></td><td>TBD</td><td>Maximum length of <code>data</code> in a <code>0x1D</code> envelope.</td></tr>
+<tr><td><code>MAX_ACCESS_LIST_ENTRIES</code></td><td><code>uint32</code></td><td>TBD</td><td>Maximum number of <a href="https://eips.ethereum.org/EIPS/eip-2930">EIP-2930</a> access-list entries in a <code>0x1D</code> envelope.</td></tr>
+<tr><td><code>MAX_SESSION_SIGNATURE_BYTES</code></td><td><code>uint32</code></td><td>TBD</td><td>Maximum length of the session <code>signature</code> field.</td></tr>
+<tr><td><code>MAX_ADMIN_AUTHORIZATION_BYTES</code></td><td><code>uint32</code></td><td>TBD</td><td>Maximum length of <code>adminAuthorization</code> calldata.</td></tr>
+<tr><td><code>WORLD_ID_1271_SIGNER_FACTORY</code></td><td><code>address</code></td><td>TBD</td><td>Default World ID EIP-1271 signer factory.</td></tr>
+<tr><td><code>EDDSA_PRECOMPILE</code></td><td><code>address</code></td><td>TBD</td><td>EdDSA verification precompile address and ABI.</td></tr>
+<tr><td><code>BLS12_381_PRECOMPILE</code></td><td><code>address</code></td><td>TBD</td><td>BLS12-381 verification precompile address and ABI.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="reusable-crypto-precompiles"><a class="header" href="#reusable-crypto-precompiles">Reusable Crypto Precompiles</a></h3>
+<p>Signer contracts MAY call protocol-supported cryptographic precompiles from restricted validation frames.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Primitive</th><th>Source</th></tr>
+</thead>
+<tbody>
+<tr><td><code>ecrecover</code></td><td>Ethereum precompile</td></tr>
+<tr><td><code>sha256</code></td><td>Ethereum precompile</td></tr>
+<tr><td><code>ripemd160</code></td><td>Ethereum precompile</td></tr>
+<tr><td><code>identity</code></td><td>Ethereum precompile</td></tr>
+<tr><td><code>modexp</code></td><td>Ethereum precompile</td></tr>
+<tr><td><code>bn254 add</code></td><td>Ethereum precompile</td></tr>
+<tr><td><code>bn254 scalar multiplication</code></td><td>Ethereum precompile</td></tr>
+<tr><td><code>bn254 pairing</code></td><td>Ethereum precompile</td></tr>
+<tr><td><code>secp256r1 verify</code></td><td><a href="https://github.com/ethereum/RIPs/blob/master/RIPS/rip-7212.md">RIP-7212</a></td></tr>
+<tr><td><code>EdDSA verify</code></td><td>Activation parameter</td></tr>
+<tr><td><code>BLS12-381 verify</code></td><td>Activation parameter</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="account-state"><a class="header" href="#account-state">Account State</a></h3>
+<p>World Chain accounts are created and managed by <code>WORLD_CHAIN_ACCOUNT_MANAGER</code>.</p>
+<pre><code class="language-solidity">struct Account {
+    address adminSigner;
+    bytes32 accountSalt;
+    SessionVerifier[] sessionVerifiers;
+    bytes32 keyRingHash;
+    uint64 adminNonce;
+    uint64 transactionNonce;
+}
+
+struct SessionVerifier {
+    address verifier;
 }
 </code></pre>
-<p><code>verificationPublicId</code> is the persistent public material the admin authority uses to verify subsequent updates. Its encoding is per-instantiation (e.g., <code>sessionId</code> for WorldID admin, a compressed pubkey for Secp256k1 admin). It is set at creation and is not directly mutable by this WIP — see <a href="#extensions">Extensions</a> for admin rotation.</p>
-<h4 id="admin-authority-interface"><a class="header" href="#admin-authority-interface">Admin Authority Interface</a></h4>
-<p>The abstract operation each admin authority provides is:</p>
-<pre><code>verifyAdmin(signalHash, signature, verificationPublicId) → bool
-</code></pre>
-<p><code>signature</code> and <code>verificationPublicId</code> are byte strings whose encoding is per-instantiation. The precompile invokes this operation during <code>update</code>. Each instantiation specifies how the operation is realized — see <a href="#admin-instantiations">Admin Instantiations</a>.</p>
-<p>Admin authorization at creation is also instantiation-specific. Some instantiations (key admins) take the address-defining material directly as a creation input that coincides with <code>verificationPublicId</code>; others (WorldID admin) take additional address-defining material (a creation nullifier <code>ν_k</code>) that is bound by the verifier to <code>verificationPublicId</code> (<code>sessionId</code>) but stored only as the address — <code>ν_k</code> is not retained as account state.</p>
+<p>For every existing account:</p>
+<ul>
+<li><code>adminSigner</code> MUST be deployed as an EIP-1271 contract and is immutable for the life of the account address.</li>
+<li><code>sessionVerifiers.length</code> MUST be in <code>[1, MAX_SESSION_VERIFIERS]</code>.</li>
+<li>each <code>SessionVerifier.verifier</code> MUST be a deployed contract adhering to EIP-1271 and <code>IWorldChainSessionVerifier</code>;</li>
+<li><code>sessionVerifiers</code> MUST NOT contain duplicate verifier addresses;</li>
+<li><code>keyRingHash == keccak256(abi.encode(sessionVerifiers))</code>;</li>
+<li><code>adminNonce</code> is consumed only by admin operations;</li>
+<li><code>transactionNonce</code> is consumed only by successful <code>0x1D</code> transaction execution attempts;</li>
+</ul>
+<p>After account creation, <code>setKeyRing</code> is the only execution path that mutates <code>sessionVerifiers</code> or <code>keyRingHash</code>.</p>
 <h4 id="address-derivation"><a class="header" href="#address-derivation">Address Derivation</a></h4>
-<pre><code>addr = bytes20(keccak256(abi.encodePacked(adminTypeTag, addressDefiningMaterial)))
+<p>The manager derives an account address as:</p>
+<pre><code class="language-solidity">account = address(uint160(uint256(keccak256(abi.encode(
+    WORLD_CHAIN_ACCOUNT_DOMAIN,
+    chainId,
+    WORLD_CHAIN_ACCOUNT_MANAGER,
+    adminSigner,
+    accountSalt
+)))));
 </code></pre>
-<p><code>adminTypeTag</code> is the one-byte <code>ADMIN_TYPE_*</code> discriminator. <code>addressDefiningMaterial</code> is per-instantiation:</p>
-<ul>
-<li>WorldID admin: <code>ν_k</code>, the creation Uniqueness Proof’s nullifier (32 bytes).</li>
-<li>Secp256k1 admin: the 33-byte compressed admin pubkey (= <code>verificationPublicId</code>).</li>
-<li>P256 admin: the 64-byte uncompressed admin pubkey (= <code>verificationPublicId</code>).</li>
-</ul>
-<p>The address is fixed for the lifetime of the account; session-key rotation does <strong>NOT</strong> change the address.</p>
-<h4 id="session-keys"><a class="header" href="#session-keys">Session Keys</a></h4>
-<pre><code class="language-solidity">enum KeyType { Secp256k1, P256, WebAuthn, EdDSA }
+<p>The address binds the account to the manager instance, chain, admin signer, and salt. WIP-1001 defines no operation that rotates <code>adminSigner</code> for an existing account.</p>
+<h4 id="admin-operation-hashes"><a class="header" href="#admin-operation-hashes">Admin Operation Hashes</a></h4>
+<p>For every admin authorization, the manager computes a domain-separated <code>adminOperationHash</code> and calls:</p>
+<pre><code class="language-solidity">adminSigner.isValidSignature(adminOperationHash, adminAuthorization)
+</code></pre>
+<p>The hash for each operation is:</p>
+<pre><code class="language-solidity">createHash = keccak256(abi.encode(
+    WORLD_CHAIN_ADMIN_CREATE_DOMAIN,
+    chainId,
+    WORLD_CHAIN_ACCOUNT_MANAGER,
+    account,
+    adminSigner,
+    accountSalt,
+    keyRingHash
+));
 
-struct SessionKey {
-    KeyType keyType;
-    bytes   keyData;
-}
+setKeyRingHash = keccak256(abi.encode(
+    WORLD_CHAIN_SET_KEY_RING_DOMAIN,
+    chainId,
+    WORLD_CHAIN_ACCOUNT_MANAGER,
+    account,
+    adminNonce,
+    expectedCurrentKeyRingHash,
+    newKeyRingHash
+));
 </code></pre>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th><code>KeyType</code></th><th>Value</th><th>Elliptic Curve</th><th><code>keyData</code></th></tr>
-</thead>
-<tbody>
-<tr><td><code>Secp256k1</code></td><td><code>0x00</code></td><td><a href="https://en.bitcoin.it/wiki/Secp256k1">secp256k1</a></td><td>33 bytes — compressed public key</td></tr>
-<tr><td><code>P256</code></td><td><code>0x01</code></td><td><a href="https://neuromancer.sk/std/nist/P-256">secp256r1</a> (NIST P-256)</td><td>64 bytes — uncompressed <code>(x, y)</code></td></tr>
-<tr><td><code>WebAuthn</code></td><td><code>0x02</code></td><td><a href="https://neuromancer.sk/std/nist/P-256">secp256r1</a> (NIST P-256)</td><td>64 bytes — uncompressed <code>(x, y)</code> (P256 under <a href="https://www.w3.org/TR/webauthn-3/">WebAuthn</a>)</td></tr>
-<tr><td><code>EdDSA</code></td><td><code>0x03</code></td><td><a href="https://datatracker.ietf.org/doc/html/rfc8032#section-5.1">edwards25519</a></td><td>32 bytes — compressed public key (Ed25519)</td></tr>
-</tbody>
-</table>
-</div>
-<p><code>KeyType</code> and <code>adminType</code> occupy disjoint domains: their numeric values are defined in different enums and MUST NOT be used interchangeably in the precompile interface or the address-derivation preimage. Session keys carry no intrinsic privileges beyond signing <code>0x1D</code> transactions; per-key permissions (expiry, spend limits, call scopes) are out of scope for this WIP (see <a href="#extensions">Extensions</a>).</p>
-<h4 id="signal-semantics"><a class="header" href="#signal-semantics">Signal Semantics</a></h4>
-<pre><code class="language-solidity">enum UpdateMode { Create, Add, Remove }
+<h3 id="signer-interfaces"><a class="header" href="#signer-interfaces">Signer Interfaces</a></h3>
+<p>The admin signer has no protocol ABI beyond EIP-1271:</p>
+<pre><code class="language-solidity">interface IWorldChainAdminSigner is IERC1271 {}
+</code></pre>
+<p>Session verifier contracts MUST implement EIP-1271 and:</p>
+<pre><code class="language-solidity">interface IWorldChainSessionVerifier is IERC1271 {
+    struct AccessListEntry {
+        address account;
+        bytes32[] storageKeys;
+    }
 
-struct KeyringUpdate {
-    UpdateMode   mode;
-    SessionKey[] keys;
-}
-</code></pre>
-<ul>
-<li><strong><code>Create</code></strong> — installs <code>keys</code> as the full keyring at the account’s address and initializes the account with the supplied admin authority. MUST revert if the account already exists, if <code>keys.length == 0</code>, or if <code>keys.length &gt; MAX_SESSION_KEYS</code>.</li>
-<li><strong><code>Add</code></strong> — appends <code>keys</code> to the existing keyring. MUST revert if the account does not exist, if any key is already present, or if the resulting keyring would exceed <code>MAX_SESSION_KEYS</code>.</li>
-<li><strong><code>Remove</code></strong> — removes each entry in <code>keys</code> from the existing keyring. MUST revert if the account does not exist or if any key is absent. The keyring MAY become empty; an account with zero session keys exists but cannot sign transactions until the next <code>Add</code>.</li>
-</ul>
-<p>The <code>signalHash</code> an admin authority binds to is uniform across instantiations.</p>
-<pre><code class="language-solidity">struct CreateSignal {
-    bytes32       tag;             // == keccak256("WORLD_CHAIN_ACCOUNT_CREATE")
-    address       msgSender;
-    KeyringUpdate keyringUpdate;
-}
+    struct WorldChainTransactionContext {
+        bytes32 signingHash;
+        uint256 chainId;
+        address account;
+        address sessionVerifier;
+        uint64 nonce;
+        uint256 maxPriorityFeePerGas;
+        uint256 maxFeePerGas;
+        uint64 gasLimit;
+        bool isCreate;
+        address target;
+        uint256 value;
+        bytes data;
+        bytes4 selector;
+        AccessListEntry[] accessList;
+        bytes32 keyRingHash;
+    }
 
-struct UpdateSignal {
-    bytes32       tag;             // == keccak256("WORLD_CHAIN_ACCOUNT_UPDATE")
-    address       accountAddress;
-    uint64        adminNonce;
-    address       msgSender;
-    KeyringUpdate keyringUpdate;
+    enum TraceCallKind {
+        Call,
+        StaticCall,
+        DelegateCall,
+        Create,
+        Create2
+    }
+
+    struct CallTrace {
+        uint32 depth;
+        TraceCallKind kind;
+        address caller;
+        address target;
+        uint256 value;
+        bytes4 selector;
+        bytes32 inputHash;
+        bytes32 outputHash;
+        bool success;
+        uint64 gasUsed;
+    }
+
+    struct LogTrace {
+        address emitter;
+        bytes32[] topics;
+        bytes32 dataHash;
+        uint32 callIndex;
+    }
+
+    struct WorldChainExecutionTrace {
+        bool success;
+        uint64 gasUsed;
+        bytes32 outputHash;
+        CallTrace[] calls;
+        LogTrace[] logs;
+    }
+
+    struct ExecutionTraceContext {
+        WorldChainTransactionContext transaction;
+        WorldChainExecutionTrace trace;
+    }
+
+    function evaluateSessionPolicy(
+        ExecutionTraceContext calldata context
+    ) external view returns (bool allowed);
 }
 </code></pre>
-<pre><code>signalHash = uint256(keccak256(abi.encode(signal))) &gt;&gt; 8
-</code></pre>
-<p>where <code>signal</code> is a populated <code>CreateSignal</code> for <code>Create</code> and an <code>UpdateSignal</code> for <code>Add</code> / <code>Remove</code>.</p>
-<p><code>msgSender</code> is the EVM <code>msg.sender</code> of the precompile call — binding it prevents an in-flight admin authorization observed in the mempool from being replayed by a different submitter. For <code>Create</code>, <code>accountAddress</code> is omitted because it is not knowable to the admin authority at the time the authorization is produced (it is derived from <code>Create</code>’s outputs); the domain tag, <code>msgSender</code>, and the keyring payload together suffice to bind the authorization to its intended creation. For updates, <code>accountAddress</code> distinguishes admin authorizations across accounts the same admin might control on different domains.</p>
-<p>The <code>&gt;&gt; 8</code> truncation reduces the digest to 248 bits so it fits within the BN254 scalar field (matching the WorldID 4.0 proof system’s signal field width). Truncation is uniform across instantiations even when the verification primitive does not require the BN254 fit, so the same <code>signalHash</code> value is canonical across all admin types.</p>
-<h4 id="replay-protection"><a class="header" href="#replay-protection">Replay Protection</a></h4>
-<p>The precompile stores a per-account monotonic <code>adminNonce</code>, initialized to <code>0</code> at creation and incremented by <code>1</code> on every successful <code>Add</code> or <code>Remove</code>. Admin authorizations for updates are verified against <code>signalHash</code> containing the current value of <code>adminNonce</code>; an admin authorization that was valid for <code>adminNonce = n</code> is no longer valid once the precompile has incremented past <code>n</code>.</p>
-<p>For <code>Create</code>, replay is precluded by account-existence: the precompile MUST revert if the account address is already occupied. A creation authorization can only be applied once because the post-condition (account exists at <code>addr</code>) blocks any subsequent attempt at the same address.</p>
-<p>This is the abstract replay-protection contract; each instantiation realizes it via its own verification primitive. Instantiations MUST NOT introduce additional bespoke replay machinery — <code>adminNonce</code> + account-existence is sufficient and uniform.</p>
-<h4 id="timelock"><a class="header" href="#timelock">Timelock</a></h4>
-<p>A compromised admin authority could otherwise rotate session keys in a single block and drain an account. Account updates are subject to a configurable delay:</p>
-<ul>
-<li><code>Create</code> executes immediately (no prior session keys exist to cancel).</li>
-<li><code>Add</code> and <code>Remove</code> are pending until the delay elapses.</li>
-<li>Existing session keys MAY cancel a pending update during the delay window.</li>
-<li>The revocation-then-add attack (an admin-authorized update removes all keys, then adds malicious ones with no incumbents left to cancel) MUST be mitigated — e.g., by delaying removals, or by allowing recently-removed keys to cancel pending adds.</li>
-</ul>
-<p>Queue / cancel / execute interface additions are TBD. Timelock semantics apply uniformly across admin instantiations.</p>
-<h4 id="precompile-interface"><a class="header" href="#precompile-interface">Precompile Interface</a></h4>
-<pre><code class="language-solidity">interface IWorldChainAccount {
-    /// @notice Create an account. `adminCreationData` layout is admin-type-specific.
+<h3 id="manager-interface"><a class="header" href="#manager-interface">Manager Interface</a></h3>
+<p><code>WORLD_CHAIN_ACCOUNT_MANAGER</code> exposes:</p>
+<pre><code class="language-solidity">interface IWorldChainAccountManager {
     function create(
-        uint8 adminType,
-        bytes calldata adminCreationData,
-        KeyringUpdate calldata keyringUpdate          // mode == Create
+        address adminSigner,
+        bytes32 accountSalt,
+        SessionVerifier[] calldata initialSessionVerifiers,
+        bytes calldata adminAuthorization
     ) external returns (address account);
 
-    /// @notice Apply an Add/Remove update. `adminAuthorization` layout is admin-type-specific.
-    function update(
+    function setKeyRing(
         address account,
-        KeyringUpdate calldata keyringUpdate,         // mode != Create
+        bytes32 expectedCurrentKeyRingHash,
+        SessionVerifier[] calldata sessionVerifiers,
         bytes calldata adminAuthorization
     ) external;
 
-    // Reads
-    function getAdminType(address account) external view returns (uint8);
-    function getVerificationPublicId(address account) external view returns (bytes memory);
+    function getAdminSigner(address account) external view returns (address);
     function getAdminNonce(address account) external view returns (uint64);
-    function getSessionKeys(address account) external view returns (SessionKey[] memory);
-    function isAuthorized(address account, SessionKey calldata key) external view returns (bool);
+    function getTransactionNonce(address account) external view returns (uint64);
+    function getKeyRingHash(address account) external view returns (bytes32);
+    function getSessionVerifiers(address account) external view returns (SessionVerifier[] memory);
+    function isAuthorizedSessionVerifier(address account, address sessionVerifier) external view returns (bool);
+    function getAuthorizedSessionVerifier(address account, address sessionVerifier) external view returns (SessionVerifier memory);
 }
 </code></pre>
-<p><code>adminCreationData</code> and <code>adminAuthorization</code> are opaque bytes blobs; each admin instantiation specifies the ABI-encoded tuple they decode to.</p>
-<p>For <code>create</code>, the precompile MUST:</p>
+<h3 id="manager-events"><a class="header" href="#manager-events">Manager Events</a></h3>
+<p>Each successful state transition MUST emit exactly one matching event in the same transaction that mutates state.</p>
+<pre><code class="language-solidity">interface IWorldChainAccountManagerEvents {
+    event AccountCreated(
+        address indexed account,
+        address indexed adminSigner,
+        bytes32 accountSalt,
+        bytes32 keyRingHash
+    );
+
+    event KeyRingSet(
+        address indexed account,
+        bytes32 indexed previousKeyRingHash,
+        bytes32 indexed newKeyRingHash,
+        uint64 adminNonce
+    );
+}
+</code></pre>
+<h3 id="manager-state-transitions"><a class="header" href="#manager-state-transitions">Manager State Transitions</a></h3>
+<p>Every admin-mutating method MUST reject <code>adminAuthorization.length &gt; MAX_ADMIN_AUTHORIZATION_BYTES</code>. If any requirement in a manager state transition fails, the method MUST revert without changing account state, incrementing <code>adminNonce</code>, or emitting its state-transition event.</p>
+<p>Admin authorization is valid only when <code>adminSigner.isValidSignature(adminOperationHash, adminAuthorization)</code> succeeds in a restricted validation frame and returns <code>EIP1271_MAGIC_VALUE</code>.</p>
+<h4 id="create"><a class="header" href="#create"><code>create</code></a></h4>
+<p><code>create</code> MUST:</p>
 <ol>
-<li>Require <code>keyringUpdate.mode == Create</code>.</li>
-<li>Decode <code>adminCreationData</code> per the instantiation specified by <code>adminType</code>.</li>
-<li>Recompute the <code>Create</code> <code>signalHash</code> over <code>(msg.sender, keyringUpdate)</code>.</li>
-<li>Verify the admin authorization per the instantiation, against <code>signalHash</code> and the instantiation’s <code>verificationPublicId</code> (or, for WorldID admin, the equivalent verifier public-input set).</li>
-<li>Determine <code>addressDefiningMaterial</code> per the instantiation (directly from <code>adminCreationData</code> for key admins; from the proof’s <code>ν_k</code> public input for WorldID admin).</li>
-<li>Derive <code>accountAddress = bytes20(keccak256(abi.encodePacked(adminTypeTag, addressDefiningMaterial)))</code>.</li>
-<li>Require the account does not already exist at <code>accountAddress</code>.</li>
-<li>Initialize the account: store <code>adminType</code>, <code>verificationPublicId</code>, <code>sessionKeys = keyringUpdate.keys</code>, <code>adminNonce = 0</code>.</li>
+<li>reject <code>adminSigner == address(0)</code>;</li>
+<li>require <code>adminSigner</code> and each initial session verifier to have deployed code;</li>
+<li>require <code>initialSessionVerifiers.length</code> to be in <code>[1, MAX_SESSION_VERIFIERS]</code>;</li>
+<li>reject duplicate or zero session verifier addresses;</li>
+<li>derive <code>account</code>;</li>
+<li>reject if <code>account</code> already exists;</li>
+<li>compute <code>keyRingHash = keccak256(abi.encode(initialSessionVerifiers))</code>;</li>
+<li>verify <code>createHash</code> through <code>adminSigner</code>;</li>
+<li>if <code>WORLD_ID_1271_SIGNER_FACTORY.isFactorySigner(adminSigner) == true</code>, require <code>IWorldIDAdminSigner(adminSigner).account() == account</code>;</li>
+<li>initialize account state with <code>adminNonce = 0</code>, <code>transactionNonce = 0</code>, <code>sessionVerifiers = initialSessionVerifiers</code>, and <code>keyRingHash</code>;</li>
+<li>emit <code>AccountCreated(account, adminSigner, accountSalt, keyRingHash)</code>.</li>
 </ol>
-<p>For <code>update</code>, the precompile MUST:</p>
+<h4 id="setkeyring"><a class="header" href="#setkeyring"><code>setKeyRing</code></a></h4>
+<p><code>setKeyRing</code> is the only post-creation method that mutates the key ring and MUST:</p>
 <ol>
-<li>Require <code>keyringUpdate.mode != Create</code>.</li>
-<li>Load the account’s stored <code>adminType</code>, <code>verificationPublicId</code>, and <code>adminNonce</code>.</li>
-<li>Recompute the <code>Update</code> <code>signalHash</code> over <code>(accountAddress, adminNonce, msg.sender, keyringUpdate)</code>.</li>
-<li>Verify <code>adminAuthorization</code> per <code>adminType</code> against <code>signalHash</code> and <code>verificationPublicId</code>.</li>
-<li>Increment <code>adminNonce</code>.</li>
-<li>Apply <code>keyringUpdate</code>, queued behind the timelock.</li>
+<li>require <code>account</code> to exist;</li>
+<li>require <code>expectedCurrentKeyRingHash == keyRingHash</code>;</li>
+<li>require <code>sessionVerifiers.length</code> to be in <code>[1, MAX_SESSION_VERIFIERS]</code>;</li>
+<li>reject duplicate, zero, or undeployed session verifier addresses;</li>
+<li>compute <code>newKeyRingHash = keccak256(abi.encode(sessionVerifiers))</code>;</li>
+<li>reject <code>newKeyRingHash == keyRingHash</code>;</li>
+<li>compute <code>setKeyRingHash</code> using the current <code>adminNonce</code>;</li>
+<li>verify <code>setKeyRingHash</code> through <code>adminSigner</code>;</li>
+<li>set <code>previousKeyRingHash = keyRingHash</code>;</li>
+<li>replace the account’s full <code>sessionVerifiers</code> set with the supplied <code>sessionVerifiers</code>;</li>
+<li>set <code>keyRingHash = newKeyRingHash</code>;</li>
+<li>increment <code>adminNonce</code> by one;</li>
+<li>emit <code>KeyRingSet(account, previousKeyRingHash, newKeyRingHash, adminNonce)</code>.</li>
 </ol>
-<blockquote>
-<p><strong>Note — Precompile gas accounting out of scope.</strong> The specific gas pricing schedule for interacting with <code>WORLD_CHAIN_ACCOUNT_PRECOMPILE</code> — covering admin verification cost (Groth16 / ECDSA / P256), per-session-key storage mutation, timelock queue/cancel/execute operations, and the amortized cost of <code>isAuthorized</code> reads during <code>0x1D</code> validation — is <strong>NOT</strong> defined here. A follow-on revision MUST specify gas costs per operation per admin type.</p>
-</blockquote>
-<h3 id="admin-instantiations"><a class="header" href="#admin-instantiations">Admin Instantiations</a></h3>
-<p>Each instantiation specifies:</p>
-<ol>
-<li>The <code>verificationPublicId</code> encoding.</li>
-<li>The address-defining material.</li>
-<li>The <code>adminCreationData</code> layout for <code>create()</code>.</li>
-<li>The creation flow.</li>
-<li>The <code>adminAuthorization</code> layout for <code>update()</code>.</li>
-<li>The verification primitive.</li>
-<li>Recovery semantics.</li>
-</ol>
-<p>Future instantiations (EdDSA, WebAuthn-as-admin, EIP-1271 contract admins, multi-sig) slot in as additional sub-sections without changing the abstract account model.</p>
-<h4 id="worldid-admin"><a class="header" href="#worldid-admin">WorldID Admin</a></h4>
-<p><code>adminType = ADMIN_TYPE_WORLD_ID = 0x00</code>.</p>
-<p>Per-instantiation constants:</p>
+<h3 id="restricted-validation-frames"><a class="header" href="#restricted-validation-frames">Restricted Validation Frames</a></h3>
+<p>The protocol uses restricted validation frames for admin authorization, session signature verification, and session policy evaluation.</p>
+<p>For each EIP-1271 signature check, the protocol MUST perform a <code>STATICCALL</code> from <code>WORLD_CHAIN_ACCOUNT_MANAGER</code> to the signer with value <code>0</code>, gas exactly <code>EIP1271_VALIDATION_GAS_LIMIT</code>, and calldata <code>IERC1271.isValidSignature.selector || abi.encode(hash, signature)</code>. The call succeeds only if it returns <code>EIP1271_MAGIC_VALUE</code> and triggers no tracer rule violation.</p>
+<p>For each session policy check, the protocol MUST perform a <code>STATICCALL</code> from <code>WORLD_CHAIN_ACCOUNT_MANAGER</code> to the session verifier with value <code>0</code>, gas exactly <code>EXECUTION_TRACE_VALIDATION_GAS_LIMIT</code>, and calldata <code>IWorldChainSessionVerifier.evaluateSessionPolicy.selector || abi.encode(context)</code>. The call succeeds only if it returns <code>true</code> and triggers no tracer rule violation.</p>
+<p>Failure, revert, out-of-gas, malformed return data, or a tracer violation MUST be treated as signature or policy failure.</p>
+<p>Restricted frames are enforced by a runtime opcode-and-target tracer derived from <a href="https://eips.ethereum.org/EIPS/eip-7562">ERC-7562</a>. Runtime enforcement is authoritative.</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Name</th><th>Value</th><th>Description</th></tr>
+<tr><th>Rule ID</th><th>ERC-7562 ref</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>WORLD_CHAIN_RP_ID</code></td><td><code>480</code></td><td>World Chain’s registered RP ID</td></tr>
-<tr><td><code>WORLD_ID_ACCOUNT_TAG</code></td><td><code>"WORLD_ID_ACCOUNT"</code> (UTF-8, 16 bytes)</td><td>Domain tag for WorldID-admin account creation actions</td></tr>
+<tr><td><code>WIP1001-VR-1</code></td><td>OP-011</td><td>Forbid block-context opcodes: <code>BLOCKHASH</code>, <code>COINBASE</code>, <code>TIMESTAMP</code>, <code>NUMBER</code>, <code>PREVRANDAO</code>/<code>DIFFICULTY</code>, <code>GASLIMIT</code>, <code>BASEFEE</code>, <code>BLOBHASH</code>, <code>BLOBBASEFEE</code>.</td></tr>
+<tr><td><code>WIP1001-VR-2</code></td><td>OP-011</td><td>Forbid transaction-context opcodes: <code>GASPRICE</code>, <code>ORIGIN</code>.</td></tr>
+<tr><td><code>WIP1001-VR-3</code></td><td>OP-020</td><td>Forbid external account inspection: <code>BALANCE</code>, <code>SELFBALANCE</code>, <code>EXTCODESIZE</code>, <code>EXTCODECOPY</code>, <code>EXTCODEHASH</code>.</td></tr>
+<tr><td><code>WIP1001-VR-4</code></td><td>OP-031, OP-032</td><td>Forbid persistent and transient state mutation: <code>SSTORE</code>, <code>TLOAD</code>, <code>TSTORE</code>.</td></tr>
+<tr><td><code>WIP1001-VR-5</code></td><td>OP-031</td><td>Forbid log emission: <code>LOG0</code>, <code>LOG1</code>, <code>LOG2</code>, <code>LOG3</code>, <code>LOG4</code>.</td></tr>
+<tr><td><code>WIP1001-VR-6</code></td><td>OP-031, OP-040</td><td>Forbid <code>CALL</code>, <code>CALLCODE</code>, <code>CREATE</code>, <code>CREATE2</code>.</td></tr>
+<tr><td><code>WIP1001-VR-7</code></td><td>OP-051</td><td>Forbid <code>SELFDESTRUCT</code>.</td></tr>
+<tr><td><code>WIP1001-VR-8</code></td><td>OP-061</td><td>Permit <code>STATICCALL</code> only to allowlisted precompiles.</td></tr>
+<tr><td><code>WIP1001-VR-9</code></td><td>OP-052</td><td>Permit <code>DELEGATECALL</code> only when the delegatee bytecode satisfies the same rule set. The tracer MUST validate delegatees recursively.</td></tr>
+<tr><td><code>WIP1001-VR-10</code></td><td>-</td><td>Precompile execution does not create an additional EVM code frame.</td></tr>
+<tr><td><code>WIP1001-VR-11</code></td><td>-</td><td>Permit reads of the signer contract’s own bytecode via <code>CODECOPY</code> and <code>CODESIZE</code>.</td></tr>
+<tr><td><code>WIP1001-VR-12</code></td><td>-</td><td>Permit reads of the signer contract’s own storage via <code>SLOAD</code>.</td></tr>
+<tr><td><code>WIP1001-VR-13</code></td><td>-</td><td>Permit <code>KECCAK256</code>, <code>CHAINID</code>, <code>GAS</code>, stack, memory, calldata, and deterministic arithmetic opcodes.</td></tr>
 </tbody>
 </table>
 </div>
-<p><code>verificationPublicId</code> is <code>sessionId</code> (uint256), provisioned by the caller at creation and supplied by the WorldID authenticator via OPRF.</p>
-<p>Address-defining material is <code>ν_k</code>, the creation Uniqueness Proof’s nullifier:</p>
-<pre><code>addr = bytes20(keccak256(abi.encodePacked(ADMIN_TYPE_WORLD_ID, ν_k)))
-</code></pre>
-<p>A single WorldID <code>MAY</code> manage any number of WorldID-admin accounts by variation over a user-chosen <code>worldIDAccountNonce</code>; accounts owned by the same WorldID are unlinkable across distinct values by the ZK property of the OPRF proof.</p>
-<h5 id="creation"><a class="header" href="#creation">Creation</a></h5>
-<p><code>adminCreationData</code> layout (conceptual; ABI-encoded as a tuple):</p>
-<pre><code>WorldIDAdminCreationData {
-    uint256       worldIDAccountNullifier;      // ν_k (public input to verify)
-    uint256       worldIDAccountNonce;          // recomputed into action
-    uint256       sessionId;                    // freshly provisioned by authenticator
-    uint256       proofNonce;                   // verifier request nonce
-    uint64        issuerSchemaId;
-    uint64        expiresAtMin;
-    uint256       credentialGenesisIssuedAtMin;
-    uint256[5]    proof;                        // compressed Groth16 proof
-}
-</code></pre>
-<p>The Uniqueness Proof is parameterized by:</p>
-<ul>
-<li><code>rpId = WORLD_CHAIN_RP_ID</code></li>
-<li><code>action = keccak256(abi.encodePacked(WORLD_ID_ACCOUNT_TAG, uint256(worldIDAccountNonce)))</code></li>
-<li><code>signalHash</code> per the abstract <code>Create</code> formula</li>
-</ul>
-<p>Creation flow:</p>
-<ol>
-<li>Decode <code>adminCreationData</code>.</li>
-<li>Compute <code>action</code>.</li>
-<li>Recompute the <code>Create</code> <code>signalHash</code> over <code>(msg.sender, keyringUpdate)</code>.</li>
-<li>Invoke <code>WorldID.verify(worldIDAccountNullifier, action, WORLD_CHAIN_RP_ID, proofNonce, signalHash, issuerSchemaId, expiresAtMin, credentialGenesisIssuedAtMin, proof)</code>. The verifier asserts the proof commits to the supplied <code>(ν_k, action, signalHash)</code> tuple under the relying party’s public inputs.</li>
-<li>Set <code>addressDefiningMaterial = worldIDAccountNullifier</code> and derive <code>addr</code> per the abstract address formula.</li>
-<li>Require account does not exist at <code>addr</code>.</li>
-<li>Store <code>adminType = ADMIN_TYPE_WORLD_ID</code>, <code>verificationPublicId = abi.encode(sessionId)</code>, <code>sessionKeys = keyringUpdate.keys</code>, <code>adminNonce = 0</code>.</li>
-</ol>
-<p>The creation nullifier <code>ν_k</code> is consumed once to instantiate the account. Because WorldID authenticators do not issue the same <code>(rpId, action)</code> nullifier twice, a later mutation MUST NOT attempt to reuse the creation action. <code>ν_k</code> is not retained as account state after creation — its only role is address derivation, which is reproducible from any subsequent update’s calldata via the precompile’s stored <code>addr</code>.</p>
-<h5 id="updates"><a class="header" href="#updates">Updates</a></h5>
-<p><code>adminAuthorization</code> layout (conceptual; ABI-encoded as a tuple):</p>
-<pre><code>WorldIDAdminAuth {
-    uint256    proofNonce;
-    uint64     issuerSchemaId;
-    uint64     expiresAtMin;
-    uint256    credentialGenesisIssuedAtMin;
-    uint256[2] sessionNullifier;                // ephemeral per-update verifier input
-    uint256[5] proof;                           // compressed Groth16 proof
-}
-</code></pre>
-<p>Update flow (realizes the abstract <code>update</code> MUST list):</p>
-<ol>
-<li>Decode <code>verificationPublicId</code> to recover <code>sessionId</code>.</li>
-<li>Recompute the <code>Update</code> <code>signalHash</code> over <code>(accountAddress, adminNonce, msg.sender, keyringUpdate)</code>.</li>
-<li>Invoke <code>WorldID.verifySession(WORLD_CHAIN_RP_ID, proofNonce, signalHash, issuerSchemaId, expiresAtMin, credentialGenesisIssuedAtMin, sessionId, sessionNullifier, proof)</code>.</li>
-<li>Discard <code>sessionNullifier</code> after verification; it MUST NOT be persisted in account state.</li>
-<li>Increment <code>adminNonce</code>.</li>
-<li>Apply <code>keyringUpdate</code>, queued behind the timelock.</li>
-</ol>
-<h5 id="session-proof-primer"><a class="header" href="#session-proof-primer">Session Proof Primer</a></h5>
-<p>A Session Proof proves that the caller controls the same WorldID that previously established the stored <code>sessionId</code>, without reusing the account creation action. The <code>sessionId</code> is the long-lived verification public identifier retained for the account across updates. The <code>sessionNullifier</code> is fresh per proof, passed only to <code>verifySession</code>, and discarded after verification.</p>
-<h5 id="oprf-nullifier-proof-primer"><a class="header" href="#oprf-nullifier-proof-primer">OPRF Nullifier Proof Primer</a></h5>
-<p>An <code>OPRFNullifierProof</code> is a <a href="https://eprint.iacr.org/2016/260">Groth16</a> proof over <a href="https://hackmd.io/@jpw/bn254">BN254</a> submitted on-chain as <code>uint256[5] = [a, b₀, b₁, c, merkle_root]</code>. The <code>WorldIDVerifier</code> reconstructs the 15 public inputs from calldata and on-chain registry lookups (notably <code>merkle_root</code> via <code>WorldIDRegistry.isValidRoot()</code> and <code>oprfPublicKey</code> via <code>OprfKeyRegistry[rpId]</code>) and invokes the Groth16 verifier.</p>
-<p>The circuit proves knowledge of a private witness $w = (s, k, p, \beta, R_{\mathrm{oprf}}, \mathit{cred}, \sigma_{\mathit{cred}})$ satisfying:</p>
-<ul>
-<li><strong>(G1) Merkle membership.</strong> The authenticator key $k$ is a leaf in the <code>WorldIDRegistry</code> tree at the declared root.</li>
-<li><strong>(G2) Credential validity.</strong> $\mathit{cred}$ bears a valid EdDSA-Poseidon2 signature over <a href="https://eips.ethereum.org/EIPS/eip-2494">BabyJubJub</a> from the issuer identified by <code>issuerSchemaId</code>, and has not expired.</li>
-<li><strong>(G3) OPRF correctness.</strong> The OPRF response $R_{\mathrm{oprf}}$ was evaluated under the registered key for <code>rpId</code>, with a DLog equality proof binding blinded and unblinded responses.</li>
-<li><strong>(G4) Deterministic nullifier derivation.</strong></li>
-</ul>
-<p>$$q = \mathrm{Poseidon2}(\text{“World ID Query”}, ; i, ; \mathrm{rpId}, ; a)$$</p>
-<p>$$\nu = \mathrm{Poseidon2}(\text{“World ID Proof”}, ; q, ; R_{\mathrm{oprf}}.x, ; R_{\mathrm{oprf}}.y)$$</p>
-<p>$\nu$ is deterministic per $(i, \mathrm{rpId}, a)$: the same identity proving under the same $(\mathrm{rpId}, a)$ always yields the same $\nu$, regardless of blinding factor $\beta$ or proof randomness.</p>
-<ul>
-<li><strong>(G5) Signal binding.</strong> The <code>signalHash</code> is “dummy-squared” in the circuit (constrained to $h \cdot h = h^2$), preventing a proof from being reused with a different signal.</li>
-</ul>
-<p>For account creation, <strong>(G4)</strong> binds $\nu_k$ to the triple (owner leaf, <code>WORLD_CHAIN_RP_ID</code>, <code>action(worldIDAccountNonce)</code>) — making <code>worldIDAccountNonce</code> the sole account selector per identity — and <strong>(G5)</strong> binds the Uniqueness Proof to the exact <code>Create</code> payload it authorizes. For later updates, <code>verifySession</code> binds the proof to the account’s stored <code>sessionId</code>; the accompanying <code>sessionNullifier</code> is a per-proof verifier input rather than persistent account state.</p>
-<h5 id="recovery"><a class="header" href="#recovery">Recovery</a></h5>
-<p>Recovery is the degenerate case of an <code>Add</code> or <code>Remove</code> submitted after session keys are lost or compromised. Because post-creation authorization is a Session Proof bound to the account’s stored <code>sessionId</code>, recovery requires only a fresh Session Proof — the full session-key surface is reachable via the same mutation path. No separate recovery flow or state is introduced.</p>
-<p>A single WorldID MAY enable recovery for any number of WorldID-admin accounts; accounts at distinct <code>worldIDAccountNonce</code> values remain unlinkable across the recovery event.</p>
-<h4 id="secp256k1-admin"><a class="header" href="#secp256k1-admin">Secp256k1 Admin</a></h4>
-<p><code>adminType = ADMIN_TYPE_SECP256K1 = 0x01</code>.</p>
-<p><code>verificationPublicId</code> is the 33-byte compressed secp256k1 admin public key. Address-defining material is the same key:</p>
-<pre><code>addr = bytes20(keccak256(abi.encodePacked(ADMIN_TYPE_SECP256K1, adminPubkey)))
-</code></pre>
-<p>One admin key controls exactly one Secp256k1-admin account address.</p>
-<h5 id="creation-1"><a class="header" href="#creation-1">Creation</a></h5>
-<p><code>adminCreationData</code> layout (conceptual):</p>
-<pre><code>Secp256k1AdminCreationData {
-    bytes adminPubkey;    // 33 bytes — compressed secp256k1 pubkey
-    bytes ecdsaSig;       // (r, s, v) over signalHash
-}
-</code></pre>
-<p>Creation flow:</p>
-<ol>
-<li>Decode <code>adminPubkey</code> and <code>ecdsaSig</code>.</li>
-<li>Recompute the <code>Create</code> <code>signalHash</code> over <code>(msg.sender, keyringUpdate)</code>.</li>
-<li>Verify <code>ecdsaSig</code> is a valid secp256k1 ECDSA signature over <code>signalHash</code> for the public key <code>adminPubkey</code>. Implementations MUST enforce low-<code>s</code> to reject malleable signatures.</li>
-<li>Set <code>addressDefiningMaterial = adminPubkey</code> and derive <code>addr</code> per the abstract address formula.</li>
-<li>Require account does not exist at <code>addr</code>.</li>
-<li>Store <code>adminType = ADMIN_TYPE_SECP256K1</code>, <code>verificationPublicId = adminPubkey</code>, <code>sessionKeys = keyringUpdate.keys</code>, <code>adminNonce = 0</code>.</li>
-</ol>
-<h5 id="updates-1"><a class="header" href="#updates-1">Updates</a></h5>
-<p><code>adminAuthorization</code> is the byte-encoding of a single secp256k1 ECDSA signature <code>(r, s, v)</code> over the <code>Update</code> <code>signalHash</code>.</p>
-<p>Update flow:</p>
-<ol>
-<li>Load <code>adminPubkey</code> from <code>verificationPublicId</code> and <code>adminNonce</code>.</li>
-<li>Recompute the <code>Update</code> <code>signalHash</code> over <code>(accountAddress, adminNonce, msg.sender, keyringUpdate)</code>.</li>
-<li>Verify the signature is valid for <code>(signalHash, adminPubkey)</code>; enforce low-<code>s</code>.</li>
-<li>Increment <code>adminNonce</code>.</li>
-<li>Apply <code>keyringUpdate</code>, queued behind the timelock.</li>
-</ol>
-<h5 id="recovery-1"><a class="header" href="#recovery-1">Recovery</a></h5>
-<p><strong>Not supported.</strong> Loss of the admin key is terminal — the account’s keyring can no longer be mutated. Users who require recoverability MUST choose a WorldID-admin account.</p>
-<h4 id="p256-admin"><a class="header" href="#p256-admin">P256 Admin</a></h4>
-<p><code>adminType = ADMIN_TYPE_P256 = 0x02</code>.</p>
-<p><code>verificationPublicId</code> is the 64-byte uncompressed P256 (<code>secp256r1</code>) admin public key, encoding <code>(x, y)</code> as 32-byte big-endian coordinates concatenated. Address-defining material is the same key:</p>
-<pre><code>addr = bytes20(keccak256(abi.encodePacked(ADMIN_TYPE_P256, adminPubkey)))
-</code></pre>
-<p>One admin key controls exactly one P256-admin account address.</p>
-<h5 id="creation-2"><a class="header" href="#creation-2">Creation</a></h5>
-<p><code>adminCreationData</code> layout (conceptual):</p>
-<pre><code>P256AdminCreationData {
-    bytes adminPubkey;    // 64 bytes — uncompressed P256 pubkey (x || y)
-    bytes p256Sig;        // (r, s) over signalHash
-}
-</code></pre>
-<p>Creation flow:</p>
-<ol>
-<li>Decode <code>adminPubkey</code> and <code>p256Sig</code>.</li>
-<li>Recompute the <code>Create</code> <code>signalHash</code>.</li>
-<li>Verify <code>p256Sig</code> is a valid P256 ECDSA signature over <code>signalHash</code> for the public key <code>adminPubkey</code>, via the <a href="https://github.com/ethereum/RIPs/blob/master/RIPS/rip-7212.md">RIP-7212</a> precompile or equivalent host function. Implementations MUST reject off-curve points and enforce low-<code>s</code>.</li>
-<li>Set <code>addressDefiningMaterial = adminPubkey</code> and derive <code>addr</code> per the abstract address formula.</li>
-<li>Require account does not exist at <code>addr</code>.</li>
-<li>Store <code>adminType = ADMIN_TYPE_P256</code>, <code>verificationPublicId = adminPubkey</code>, <code>sessionKeys = keyringUpdate.keys</code>, <code>adminNonce = 0</code>.</li>
-</ol>
-<h5 id="updates-2"><a class="header" href="#updates-2">Updates</a></h5>
-<p><code>adminAuthorization</code> is the byte-encoding of a P256 ECDSA signature <code>(r, s)</code> over the <code>Update</code> <code>signalHash</code>.</p>
-<p>Update flow:</p>
-<ol>
-<li>Load <code>adminPubkey</code> from <code>verificationPublicId</code> and <code>adminNonce</code>.</li>
-<li>Recompute the <code>Update</code> <code>signalHash</code>.</li>
-<li>Verify the signature is valid for <code>(signalHash, adminPubkey)</code>; enforce low-<code>s</code>.</li>
-<li>Increment <code>adminNonce</code>.</li>
-<li>Apply <code>keyringUpdate</code>, queued behind the timelock.</li>
-</ol>
-<h5 id="recovery-2"><a class="header" href="#recovery-2">Recovery</a></h5>
-<p><strong>Not supported.</strong> Same warning as Secp256k1 admin.</p>
-<h3 id="recovery-3"><a class="header" href="#recovery-3">Recovery</a></h3>
-<p>Recovery semantics are per-instantiation:</p>
-<ul>
-<li><strong>WorldID admin.</strong> Recovery is the degenerate case of an <code>Add</code> or <code>Remove</code> submitted via Session Proof — see the WorldID admin instantiation. Lost or compromised session keys are recovered by any fresh Session Proof bound to the account’s stored <code>sessionId</code>.</li>
-<li><strong>Secp256k1 admin.</strong> <strong>NOT supported.</strong> Loss of the admin key is terminal.</li>
-<li><strong>P256 admin.</strong> <strong>NOT supported.</strong> Loss of the admin key is terminal.</li>
-</ul>
-<p>Users requiring recoverability MUST choose the WorldID admin instantiation.</p>
+<p>Adding a new precompile to the validation allowlist is a hard-fork change.</p>
 <h3 id="transaction-type-0x1d"><a class="header" href="#transaction-type-0x1d">Transaction Type <code>0x1D</code></a></h3>
-<p>A <code>0x1D</code> transaction is signed by a session key of a World Chain Account and submitted directly to the mempool (no <a href="https://eips.ethereum.org/EIPS/eip-4337">ERC-4337</a> bundler required). <code>0x1D</code> transactions are admin-type-agnostic: they are signed by session keys regardless of which admin authority controls the account, and the validation path reads only the account’s keyring.</p>
-<h4 id="envelope"><a class="header" href="#envelope">Envelope</a></h4>
-<pre><code>0x1D || rlp([
-    chain_id,                    // 0
-    nonce,                       // 1
-    max_priority_fee_per_gas,    // 2
-    max_fee_per_gas,             // 3
-    gas_limit,                   // 4
-    to,                          // 5
-    value,                       // 6
-    data,                        // 7
-    access_list,                 // 8
-    account,                     // 9   ← signer's World Chain Account address
-    signature_type,              // 10
-    session_key,                 // 11  ← `keyData` of the signing session key (per §Session Keys)
-    signature_payload,           // 12
+<p>The wire encoding is:</p>
+<pre><code class="language-solidity">0x1D || rlp([
+    chainId,
+    nonce,
+    maxPriorityFeePerGas,
+    maxFeePerGas,
+    gasLimit,
+    account,
+    sessionVerifier,
+    to,
+    value,
+    data,
+    accessList,
+    signature
 ])
 </code></pre>
-<pre><code>signing_hash = keccak256(0x1D || rlp(fields[0..=11]))
+<p>The signing hash is:</p>
+<pre><code class="language-solidity">signingHash = keccak256(
+    0x1D ||
+    rlp([
+        chainId,
+        nonce,
+        maxPriorityFeePerGas,
+        maxFeePerGas,
+        gasLimit,
+        account,
+        sessionVerifier,
+        to,
+        value,
+        data,
+        accessList
+    ])
+);
 </code></pre>
-<p>The <code>signing_hash</code> covers every field except <code>signature_payload</code> itself, binding the declared <code>signature_type</code> and <code>session_key</code> to the signature and ruling out scheme-confusion or pubkey-substitution attacks at the consensus layer.</p>
-<p><code>session_key</code> is the <code>keyData</code> bytes of the <code>SessionKey</code> (§Session Keys) used to authenticate the transaction. Its <code>KeyType</code> is implied by <code>signature_type</code> — implementations MUST reject any transaction where the length of <code>session_key</code> does not match the byte length specified for the corresponding <code>KeyType</code>.</p>
+<p>The transaction hash is:</p>
+<pre><code class="language-solidity">txHash = keccak256(
+    0x1D ||
+    rlp([
+        chainId,
+        nonce,
+        maxPriorityFeePerGas,
+        maxFeePerGas,
+        gasLimit,
+        account,
+        sessionVerifier,
+        to,
+        value,
+        data,
+        accessList,
+        signature
+    ])
+);
+</code></pre>
+<p>Envelope validity requirements:</p>
+<ul>
+<li><code>chainId</code> MUST equal the executing chain ID;</li>
+<li><code>nonce</code> MUST equal <code>Account.transactionNonce</code>;</li>
+<li><code>to</code> MUST be the empty byte string for contract creation or exactly 20 bytes for a call;</li>
+<li><code>data.length &lt;= MAX_PAYLOAD_DATA_BYTES</code>;</li>
+<li><code>accessList.length &lt;= MAX_ACCESS_LIST_ENTRIES</code>;</li>
+<li><code>signature.length &lt;= MAX_SESSION_SIGNATURE_BYTES</code>;</li>
+<li><code>accessList</code> MUST use EIP-2930 encoding;</li>
+<li><code>maxFeePerGas</code> and <code>maxPriorityFeePerGas</code> follow <a href="https://eips.ethereum.org/EIPS/eip-1559">EIP-1559</a> validity rules.</li>
+</ul>
+<h3 id="validation-execution-and-failure-semantics"><a class="header" href="#validation-execution-and-failure-semantics">Validation, Execution, and Failure Semantics</a></h3>
+<p>Block builders MUST reserve <code>EIP1271_VALIDATION_GAS_LIMIT + EXECUTION_TRACE_VALIDATION_GAS_LIMIT</code> from <code>BLOCK_VALIDATION_GAS_BUDGET</code> before including a <code>0x1D</code> transaction. If the remaining budget is insufficient, the transaction MUST be deferred; deferral is not a validation failure and MUST NOT mutate account state.</p>
+<p>To include a <code>0x1D</code> transaction, the protocol MUST:</p>
+<ol>
+<li>decode and validate the envelope;</li>
+<li>load <code>account</code> from <code>WORLD_CHAIN_ACCOUNT_MANAGER</code>;</li>
+<li>require <code>sessionVerifier</code> to be authorized for <code>account</code> in the current <code>sessionVerifiers</code> set and load the current <code>keyRingHash</code>;</li>
+<li>require the account balance to cover the worst-case payload gas charge and <code>MIN_VALIDATION_FAILURE_FEE</code>;</li>
+<li>compute <code>signingHash</code>;</li>
+<li>call <code>sessionVerifier.isValidSignature(signingHash, signature)</code> in a restricted validation frame;</li>
+<li>if signature validation fails, apply validation-failure semantics and stop;</li>
+<li>increment <code>Account.transactionNonce</code> by one;</li>
+<li>execute the payload tentatively with <code>account</code> as the EVM sender and gas charged against envelope <code>gasLimit</code>;</li>
+<li>construct <code>ExecutionTraceContext</code> with <code>context.transaction.keyRingHash</code> set to the current account <code>keyRingHash</code>;</li>
+<li>if <code>abi.encode(context.trace).length &gt; MAX_EXECUTION_TRACE_BYTES</code>, discard tentative payload state, apply trace-overflow semantics, and stop;</li>
+<li>call <code>sessionVerifier.evaluateSessionPolicy(context)</code> in a restricted validation frame;</li>
+<li>if policy validation fails, discard tentative payload state, apply validation-failure semantics, and stop;</li>
+<li>otherwise commit the normal payload result, including a reverted payload result if the target call reverted.</li>
+</ol>
+<p>Failure classes are:</p>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th><code>signature_type</code></th><th><code>signature_payload</code></th></tr>
+<tr><th>Failure</th><th>Nonce</th><th>Payload state/logs</th><th>Fee behavior</th></tr>
 </thead>
 <tbody>
-<tr><td><code>0x00</code> <a href="https://en.bitcoin.it/wiki/Secp256k1">Secp256k1</a></td><td><code>rlp([y_parity, r, s])</code></td></tr>
-<tr><td><code>0x01</code> <a href="https://neuromancer.sk/std/nist/P-256">P256</a></td><td><code>rlp([r, s])</code></td></tr>
-<tr><td><code>0x02</code> <a href="https://www.w3.org/TR/webauthn-3/">WebAuthn</a></td><td><code>rlp([authenticator_data, client_data_json, r, s])</code></td></tr>
-<tr><td><code>0x03</code> <a href="https://en.wikipedia.org/wiki/EdDSA">EdDSA</a></td><td><code>rlp([R, s])</code></td></tr>
+<tr><td>Envelope, account, balance, nonce, or authorization precheck failure</td><td>unchanged</td><td>none</td><td>transaction is invalid and not included</td></tr>
+<tr><td>Validation budget exhausted</td><td>unchanged</td><td>none</td><td>transaction is deferred</td></tr>
+<tr><td>Signature validation failure</td><td>incremented</td><td>none</td><td>charge <code>max(MIN_VALIDATION_FAILURE_FEE, baseFee * EIP1271_VALIDATION_GAS_LIMIT)</code></td></tr>
+<tr><td>Trace exceeds <code>MAX_EXECUTION_TRACE_BYTES</code></td><td>incremented</td><td>discarded</td><td>charge as a failed payload execution under the envelope gas rules</td></tr>
+<tr><td>Session policy failure</td><td>incremented</td><td>discarded</td><td>charge <code>max(MIN_VALIDATION_FAILURE_FEE, baseFee * EIP1271_VALIDATION_GAS_LIMIT)</code>; payload gas is not additionally charged</td></tr>
+<tr><td>Payload execution revert with accepted policy</td><td>incremented</td><td>EVM revert result committed</td><td>charge normal payload gas</td></tr>
 </tbody>
 </table>
 </div>
-<p>For <code>Secp256k1</code>, the <code>session_key</code> field is redundant with the recoverable public key; implementations MUST verify the recovered key matches the declared <code>session_key</code> (compressed-form encoding) before accepting the transaction.</p>
-<h4 id="validation"><a class="header" href="#validation">Validation</a></h4>
-<ol>
-<li>Verify <code>signature_payload</code> against <code>signing_hash</code> using <code>session_key</code> as the verifying key (for <code>Secp256k1</code>, equivalently: recover and assert equality with <code>session_key</code>).</li>
-<li>Assert <code>IWorldChainAccount.isAuthorized(account, SessionKey { signature_type, session_key })</code>.</li>
-</ol>
-<p>The envelope is extensible to 2D nonces, batched transactions, and native paymaster support in follow-on WIPs.</p>
-<h3 id="extensions"><a class="header" href="#extensions">Extensions</a></h3>
+<p>All validation gas consumed by signature and policy checks MUST count against <code>BLOCK_VALIDATION_GAS_BUDGET</code>. Validation gas is not deducted from the envelope <code>gasLimit</code>.</p>
+<h3 id="txpool-revalidation"><a class="header" href="#txpool-revalidation">Txpool Revalidation</a></h3>
+<p>World Chain clients MUST revalidate every pooled <code>0x1D</code> transaction at least once per block until inclusion or eviction.</p>
+<p>On pool admission or successful revalidation, the client MUST record <code>account</code>, <code>sessionVerifier</code>, <code>nonce</code>, <code>signingHash</code>, <code>signature</code>, and the account’s active <code>keyRingHash</code>. A transaction is eligible to remain pooled only while all conditions hold:</p>
 <ul>
-<li><strong>Per-key permissions.</strong> Session keys MAY be extended with <code>(expiry, spendLimit, CallScope[])</code> metadata enforced by the precompile during <code>0x1D</code> validation. This extends <code>SessionKey</code> and the <code>KeyringUpdate</code> signal; the admin authorization continues to bind the full permission set via <code>signalHash</code>.</li>
-<li><strong>Admin rotation.</strong> Replacing an account’s stored <code>verificationPublicId</code> (or <code>adminType</code>) under admin authorization, with timelock. Deferred — admin type and authority are pinned at creation in this WIP.</li>
-<li><strong>Multi-admin.</strong> M-of-N admin authorization for a single account. Deferred.</li>
-<li><strong>Additional admin instantiations.</strong> EdDSA-admin, WebAuthn-as-admin, <a href="https://eips.ethereum.org/EIPS/eip-1271">EIP-1271</a>-admin (contract-controlled accounts).</li>
-<li><strong>WorldID-recovery escape hatch for key-admin accounts.</strong> A Secp256k1 / P256 admin account MAY enroll a WorldID at creation as a recovery-only authority that, after a long timelock, can rotate the admin key.</li>
-<li><strong>Session rotation.</strong> Replacing a WorldID-admin account’s stored <code>sessionId</code> with a newly-provisioned session without re-creating the account.</li>
-<li><strong>Bundling, 2D nonces, paymasters.</strong> Reserved for follow-on WIPs on the <code>0x1D</code> envelope.</li>
+<li><code>account</code> exists;</li>
+<li>the account balance can cover <code>MIN_VALIDATION_FAILURE_FEE</code> at the current <code>baseFee</code>;</li>
+<li>the transaction nonce can still become executable under the account nonce ordering rules;</li>
+<li><code>sessionVerifier</code> is a member of the account’s current <code>sessionVerifiers</code> set;</li>
+<li>the current account <code>keyRingHash</code> equals the hash recorded when the transaction was admitted or last revalidated.</li>
 </ul>
+<p>A client MAY reuse a prior successful signature-validation result only when the cached <code>(account, sessionVerifier, signingHash, signature, keyRingHash)</code> tuple exactly matches the current transaction and account state. Block builders MAY rely on such a cache to avoid repeating signature verification before block construction; if the active <code>keyRingHash</code> changes, the cached result MUST be discarded and the signature MUST be revalidated.</p>
+<p>The <code>keyRingHash</code> comparison is the deterministic anchor for block validation: a verifier MAY accept a cached signature result only if the active account hash equals the recorded hash; otherwise it MUST execute signature validation again.</p>
+<h3 id="signer-state-determinism"><a class="header" href="#signer-state-determinism">Signer-State Determinism</a></h3>
+<p>Session verifier behavior that can change <code>isValidSignature</code> or <code>evaluateSessionPolicy</code> for already accepted transactions MUST be immutable for a verifier address. Validation-affecting updates MUST be represented by deploying or selecting a different session verifier address and installing a replacement set through <code>setKeyRing</code>, which updates <code>keyRingHash</code>.</p>
+<p>This applies to root rotations, verification-key rotations, signer recovery changes, signer revocation lists, account binding changes, and policy configuration changes. State that cannot affect validation MAY update in place.</p>
 <h2 id="rationale"><a class="header" href="#rationale">Rationale</a></h2>
-<p><strong>Account state as precompile.</strong> The keyring lives in a precompile because <code>0x1D</code> signature validation happens at the protocol level and must read the authorized set natively. The same precompile owns the admin verification paths, ensuring the address-to-keyset map is only mutated under valid admin authorizations.</p>
-<p><strong>Pluggable admin authorities.</strong> Decoupling the keyring + transaction surface from the admin verification primitive lets a single account abstraction serve users with a WorldID, users with hardware-secured root keys, and integrations driven by existing key-management infrastructure. Sharing <code>0x1D</code>, session keys, signal binding, and timelock across instantiations means session-key UX and integration surface are uniform regardless of admin type. Each new instantiation reduces to one verification primitive plus one address-derivation rule.</p>
-<p><strong>Single admin authority.</strong> Each account has exactly one admin authority. M-of-N admin authorization is a useful generalization but is deferred — it adds quorum-management state and protocol surface that this WIP does not require for its initial use cases. Multi-admin can be added as an Extension without changing the abstract account model.</p>
-<p><strong>Admin type pinned at creation.</strong> Address determinism: <code>adminType</code> and the address-defining material are part of the address preimage, so changing either mid-lifetime would change the address. Rotation within the same admin type is also deferred to keep v1 minimal.</p>
-<p><strong>No recovery for key-admin accounts.</strong> Key-admin accounts are owned exclusively by their admin key; there is no underlying identity anchor to bootstrap recovery from. Users requiring recoverability choose the WorldID admin instantiation. This matches existing precedent (Tempo root keys, Ethereum EOAs) and avoids smuggling a second admin tier into the spec.</p>
-<p><strong>Uniform replay protection.</strong> All admin authorizations bind to a <code>signalHash</code> containing a per-account monotonic <code>adminNonce</code>; the precompile increments <code>adminNonce</code> on every successful update and rejects authorizations against stale values. Across instantiations, this gives one replay-protection contract — no instantiation-specific bespoke replay machinery, and no ambiguity around what “fresh” means per instantiation.</p>
-<p><strong>Domain-separated address derivation.</strong> Prefixing the address preimage with <code>adminTypeTag</code> prevents accidental cross-type collisions even when the address-defining material from two instantiations might coincidentally produce identical bytes under different encodings. Domain separation costs nothing and is standard practice for keccak-based identifier schemes.</p>
-<p><strong><code>msg.sender</code> binding in <code>signalHash</code>.</strong> Including <code>msg.sender</code> in both <code>Create</code> and <code>Update</code> <code>signalHash</code> definitions kills cross-submitter replay of in-flight admin authorizations: a witnessed authorization with <code>msg.sender = X</code> will not verify if resubmitted by a different account. Self-replay by <code>X</code> is a no-op (the resulting state is identical). This subsumes the <code>MAY bind proofs to msg.sender</code> mitigation noted in earlier drafts of this WIP.</p>
-<p><strong>WorldID 4.0 Proofs as authorization.</strong> Within the WorldID admin instantiation, account creation uses a Uniqueness Proof and provisions a fresh session; subsequent mutations use Session Proofs bound to the stored <code>sessionId</code>, so repeated account updates do not rely on reusing the creation action. No “super key” ever needs to be stored on-device. The <code>worldIDAccountNonce</code>-indexed creation action lets a single WorldID own unlinkably many WorldID-admin accounts.</p>
-<p><strong>No sybil constraint on accounts.</strong> Unlinkability across <code>worldIDAccountNonce</code> values is a stronger property than one-account-per-identity, and sybil resistance at the account layer is not the right locus — it belongs to whatever system consumes account addresses (e.g., gas subsidy accounting, application-layer rate limits), which can bind its own per-WorldID limits via independent nullifier domains.</p>
-<p><strong>Recovery timelock.</strong> Without a delay, a compromised admin authority could instantly replace all session keys and drain the account. The timelock gives existing session key holders a window to detect and cancel malicious changes. The same timelock applies regardless of admin type — a Secp256k1 admin compromise is no less serious than a WorldID compromise, and the cancellation surface (existing session keys) is the same.</p>
+<p>EIP-1271 gives World Chain one protocol boundary for all authorization schemes. The protocol verifies a signer contract; the signer contract decides how to authenticate.</p>
+<p>Execution policy belongs inside the session verifier. The protocol supplies the canonical transaction context and execution trace, then asks the verifier for a boolean decision.</p>
+<p>Validation gas limits are protocol constants, not signer-selected values. This gives clients a fixed resource bound for mempool validation and block execution.</p>
+<p>Validation gas is supplied from a per-block budget rather than the envelope <code>gasLimit</code>. This keeps the payload gas model close to EIP-1559 transactions while bounding validation work per block.</p>
+<p>Whole-set <code>setKeyRing</code> updates make the account’s session authorization state a single ordered set with one deterministic <code>keyRingHash</code>. Clients can bind cached signature validation to that hash and must revalidate when it changes.</p>
+<p>Restricted validation frames prevent validation from depending on mutable external state, block metadata, or arbitrary external contract calls.</p>
 <h2 id="backwards-compatibility"><a class="header" href="#backwards-compatibility">Backwards Compatibility</a></h2>
-<p>This WIP introduces a new account type and transaction type. Existing EOAs and smart contract accounts are unaffected. Standard <a href="https://eips.ethereum.org/EIPS/eip-1559">EIP-1559</a> transactions continue to work for legacy accounts; the <code>0x1D</code> envelope is required only for World-Chain-Account-authenticated execution.</p>
-<p>This WIP is Draft. The address-derivation prefix (<code>adminTypeTag</code>) and the unified <code>signalHash</code> (now including <code>msg.sender</code> and <code>adminNonce</code>) are breaking changes relative to earlier drafts of this WIP — implementations targeting prior drafts MUST update address derivation and <code>signalHash</code> recomputation accordingly. No production accounts exist.</p>
-<h3 id="existing-safe-accounts-worldid-admin"><a class="header" href="#existing-safe-accounts-worldid-admin">Existing Safe Accounts (WorldID admin)</a></h3>
-<p>Existing <a href="https://safe.global">Safe</a> accounts MAY adopt a WorldID-admin account as an authenticator without migrating assets or changing the Safe address. The integration reduces to installing a module that gates execution on <code>msg.sender</code> matching a bound WorldID-admin account address; because a <code>0x1D</code> transaction’s sender is the account itself, no additional signature verification is required at the Safe layer — protocol-level validation against <code>IWorldChainAccount.isAuthorized</code> already gates execution upstream. Key-admin accounts (Secp256k1, P256) integrate with Safe via Safe’s existing native-key support; no module is required.</p>
+<p>WIP-1001 introduces a new EIP-2718 transaction type and a new account manager predeploy. Existing Ethereum transaction types, EOAs, contracts, and Safe accounts are unchanged.</p>
+<p>Existing Safe accounts MAY deploy or delegate to EIP-1271 signer contracts that satisfy this specification, but WIP-1001 does not require Safe migration.</p>
+<h2 id="test-cases"><a class="header" href="#test-cases">Test Cases</a></h2>
+<p>Conforming implementations MUST pass vectors for:</p>
+<ul>
+<li>address derivation across multiple <code>(chainId, manager, adminSigner, accountSalt)</code> tuples;</li>
+<li><code>keyRingHash = keccak256(abi.encode(sessionVerifiers))</code> for empty-forbidden, single-verifier, multi-verifier, and reordered verifier sets;</li>
+<li><code>create</code> validation, including deployed-code checks, duplicate and zero verifier rejection, account-exists rejection, initial nonce values, initial <code>keyRingHash</code>, <code>AccountCreated</code>, and default World ID admin signer account binding;</li>
+<li><code>setKeyRing</code> validation, including stale <code>expectedCurrentKeyRingHash</code>, duplicate, zero, undeployed, empty, oversized, and no-op verifier set rejection;</li>
+<li><code>setKeyRing</code> success behavior, including full-set replacement, <code>newKeyRingHash</code>, <code>adminNonce</code> increment, <code>KeyRingSet</code>, authorization lookup updates, and failure atomicity;</li>
+<li><code>createHash</code> and <code>setKeyRingHash</code> domain separation, parameter binding, nonce binding, and negative replay cases across accounts, chains, managers, hashes, and operation types;</li>
+<li><code>0x1D</code> RLP encoding, signing hash, and transaction hash;</li>
+<li>malformed envelope rejection for <code>chainId</code>, <code>nonce</code>, <code>to</code>, <code>data</code>, <code>accessList</code>, <code>signature</code>, and EIP-1559 fee bounds;</li>
+<li>transaction validation against the current verifier set, including unauthorized verifier rejection and <code>ExecutionTraceContext.transaction.keyRingHash</code>;</li>
+<li>failure semantics for envelope/precheck failures, validation-budget exhaustion, signature failures, trace overflow, policy failures, and payload reverts;</li>
+<li>txpool revalidation, signature-validation cache reuse, and cache invalidation when <code>keyRingHash</code>, verifier membership, account balance, or nonce eligibility changes;</li>
+<li>signer-state determinism, including rejection of validation-affecting session verifier updates behind an unchanged verifier address;</li>
+<li>restricted-frame positive cases and each forbidden opcode or call target;</li>
+<li>default signer factory <code>CREATE2</code> address computation, idempotency, metadata, and incompatible-code rejection;</li>
+<li>World ID <code>worldIdField</code>, <code>worldIdAction</code>, admin proof, and session proof inputs;</li>
+<li>default secp256k1 low-s, <code>v</code>, owner, and signature-length checks;</li>
+<li>block validation budget exhaustion and validation-failure fee charging.</li>
+</ul>
+<p>Complete golden vectors and a conformance test suite MUST be published before this WIP advances to Review.</p>
 <h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
-<h3 id="front-running-admin-authorizations"><a class="header" href="#front-running-admin-authorizations">Front-Running Admin Authorizations</a></h3>
-<p>Both <code>Create</code> and <code>Update</code> <code>signalHash</code> definitions bind <code>msg.sender</code>, so a witnessed admin authorization observed in the mempool cannot be replayed by a different submitter — its <code>signalHash</code> would not match. This applies to all instantiations. A griefer can still re-submit an authorization unchanged from the original <code>msg.sender</code>, but the resulting state is identical; harm is limited to gas and ordering.</p>
-<h3 id="timelock-attacks"><a class="header" href="#timelock-attacks">Timelock Attacks</a></h3>
-<p>The revocation-then-add attack vector (an admin authorization removes all session keys, then adds malicious ones with no keys left to cancel) MUST be addressed in the timelock policy design. Possible mitigations include timelocking removals or allowing recently-removed keys to cancel pending adds. This applies regardless of admin type.</p>
-<h3 id="session-key-deanonymization"><a class="header" href="#session-key-deanonymization">Session Key Deanonymization</a></h3>
-<p>A session key that is also used as an EOA, or added to a different World Chain Account, trivially links the account to that external identity. Clients SHOULD generate fresh session keys per account.</p>
-<h3 id="signature-key-ambiguity"><a class="header" href="#signature-key-ambiguity">Signature-key Ambiguity</a></h3>
-<p>A World Chain Account may store up to <code>MAX_SESSION_KEYS</code> session keys of mixed <code>KeyType</code>, but a <code>0x1D</code> transaction declares a single <code>signature_type</code>. The spec should define whether a key index is included in the envelope or whether the first matching key is authoritative.</p>
-<h3 id="webauthn-challenge-binding"><a class="header" href="#webauthn-challenge-binding">WebAuthn Challenge Binding</a></h3>
-<p>For session-key <code>signature_type = 0x02</code>, the <code>0x1D</code> <code>signing_hash</code> MUST appear as the <code>challenge</code> field inside <code>client_data_json</code>; otherwise the signature could be replayed from a different WebAuthn context.</p>
-<h3 id="worldid-admin-account-unlinkability"><a class="header" href="#worldid-admin-account-unlinkability">WorldID-admin: Account Unlinkability</a></h3>
-<p>Two WorldID-admin accounts owned by the same WorldID are unlinkable across distinct creation <code>worldIDAccountNonce</code> values by the ZK property of the OPRF proof. Subsequent updates no longer reuse the creation action; they are authorized via Session Proofs bound to the account’s stored <code>sessionId</code>. Updates to the same account remain linkable through the account address and its on-chain state transitions.</p>
-<h3 id="worldid-admin-stale-merkle-root"><a class="header" href="#worldid-admin-stale-merkle-root">WorldID-admin: Stale Merkle Root</a></h3>
-<p>The <code>WorldIDRegistry</code> accepts roots within a validity window. An attacker whose credential has been revoked could race to submit <code>create</code> or <code>update</code> against a still-valid but stale root before expiry. The <code>expiresAtMin + minExpirationThreshold ≥ block.timestamp</code> check bounds this window, but its duration is a trust parameter.</p>
-<h3 id="worldid-admin-oprf-key-rotation"><a class="header" href="#worldid-admin-oprf-key-rotation">WorldID-admin: OPRF Key Rotation</a></h3>
-<p>If the OPRF key in <code>OprfKeyRegistry[480]</code> is rotated, both creation nullifier derivations and session re-derivations change. Existing $\nu_k$ values become unreachable for new creation proofs, and existing <code>sessionId</code> values can no longer be used to derive valid Session Proofs; affected accounts become frozen at their current keyring. The protocol MUST define migration semantics across OPRF key epochs.</p>
-<h3 id="key-admin-admin-key-loss-is-terminal"><a class="header" href="#key-admin-admin-key-loss-is-terminal">Key-admin: Admin Key Loss Is Terminal</a></h3>
-<p>For Secp256k1 and P256 admin instantiations, loss of the admin key permanently bricks the account — the keyring cannot be mutated, recovered, or rotated. Wallets implementing key-admin accounts MUST surface this risk to users and SHOULD encourage hardware-backed key custody. Users who require recoverability MUST choose the WorldID admin instantiation.</p>
-<h3 id="key-admin-linkability"><a class="header" href="#key-admin-linkability">Key-admin: Linkability</a></h3>
-<p>A Secp256k1 or P256 admin pubkey is recoverable from any creation transaction’s calldata. Unlike WorldID-admin accounts, key-admin accounts carry no unlinkability guarantees: anyone observing the admin pubkey can identify the (single) account derived from it. Cross-chain reuse of an admin key is a deanonymization vector.</p>
-<h3 id="key-admin-no-liveness-check"><a class="header" href="#key-admin-no-liveness-check">Key-admin: No Liveness Check</a></h3>
-<p>A key-admin account has no protocol-level liveness check on session-key-signed transactions. Session-key compromise can drain account-controlled value at the rate session keys can sign, bounded only by per-key limits (if any) and the timelock on keyring mutation. Sibling WIPs that require WorldID liveness above a value threshold do NOT apply to key-admin accounts.</p>
+<ul>
+<li>Admin authorization hashes bind domain, chain ID, manager, account, operation parameters, and nonce where applicable. A signature valid for <code>create</code> MUST NOT be valid for <code>setKeyRing</code>, another account, another chain, another manager, or another key ring hash.</li>
+<li>The admin signer is immutable in the account address. A broken or lost admin signer requires migrating assets to a new account; applications that need recovery SHOULD use admin signers with recovery or multisig logic from account creation.</li>
+<li><code>setKeyRing</code> is the only post-creation key ring mutation path. A compromised session verifier remains authorized until an admin-authorized replacement set is included.</li>
+<li><code>expectedCurrentKeyRingHash</code> protects <code>setKeyRing</code> authorizations from applying to an unexpected current set. Admin tooling SHOULD surface the complete replacement set before signing because omitted verifiers are removed atomically.</li>
+<li><code>keyRingHash</code> binds cached validation to the ordered <code>SessionVerifier[]</code> set. Clients MUST discard cached signature results when the active hash changes, even if the transaction’s <code>sessionVerifier</code> remains present in the new set.</li>
+<li><code>keyRingHash</code> does not commit to mutable verifier behavior by itself. Session verifier state that can affect <code>isValidSignature</code> or <code>evaluateSessionPolicy</code> MUST be immutable for that verifier address; upgrades that affect validation require a new verifier address installed through <code>setKeyRing</code>.</li>
+<li>The protocol MUST verify that <code>sessionVerifier</code> is authorized for <code>account</code> before calling EIP-1271. Unauthorized verifiers MUST fail as a precheck rather than receiving a validation call.</li>
+<li>Fixed validation gas limits bound signer execution. Signers that exceed the limit fail validation, and all signature and policy validation gas counts against <code>BLOCK_VALIDATION_GAS_BUDGET</code>.</li>
+<li><code>BLOCK_VALIDATION_GAS_BUDGET</code> is scarce. <code>MIN_VALIDATION_FAILURE_FEE</code> MUST be tuned so validation spam is costly, and clients MUST reject pooled transactions that cannot pay it.</li>
+<li>Builders may prefer transactions with cheaper validation profiles. Fixed validation gas bounds the worst-case bias but does not eliminate ordering incentives.</li>
+<li><code>MAX_EXECUTION_TRACE_BYTES</code>, <code>MAX_PAYLOAD_DATA_BYTES</code>, <code>MAX_ACCESS_LIST_ENTRIES</code>, <code>MAX_SESSION_SIGNATURE_BYTES</code>, and <code>MAX_ADMIN_AUTHORIZATION_BYTES</code> bound calldata, decoding, memory, and ABI-encoding costs.</li>
+<li>Restricted frames forbid mutable external-state reads and block-context opcodes. Signers that need time, block, or external-state constraints MUST bind them into the signature or proof input.</li>
+<li><code>DELEGATECALL</code> inside restricted validation frames is safe only when the delegatee bytecode satisfies the same tracer rules recursively.</li>
+<li>The <code>0x1D</code> envelope exposes <code>account</code> and <code>sessionVerifier</code>. Applications that need stronger privacy should use verifier contracts that aggregate or rotate credentials.</li>
+<li>World ID signers MUST bind <code>block.chainid</code> into <code>worldIdAction</code> or session nonce inputs to prevent cross-chain proof replay.</li>
+<li>The default World ID admin signer self-reports <code>account()</code>. The manager checks this only for default-factory-deployed World ID admin signers; custom signers are responsible for their own consistency.</li>
+<li><code>create</code> does not bind <code>msg.sender</code>, so a copied call can be front-run. The resulting account state is identical because the authorization commits to all state-determining parameters.</li>
+</ul>
 
                     </main>
 
