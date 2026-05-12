@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use crate::{
+    add_ons::WorldChainAddOns,
     engine::FlashblocksEngineApiBuilder,
     node::{
         WorldChainNode, WorldChainNodeComponentBuilder, WorldChainNodeContext,
@@ -23,8 +24,7 @@ use reth_node_builder::{
 };
 use reth_node_core::primitives::Hardforks;
 use reth_optimism_node::{
-    OpAddOns, OpConsensusBuilder, OpEngineTypes, OpEngineValidatorBuilder, OpNetworkBuilder,
-    args::RollupArgs,
+    OpConsensusBuilder, OpEngineTypes, OpEngineValidatorBuilder, OpNetworkBuilder, args::RollupArgs,
 };
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApiBuilder;
@@ -196,7 +196,7 @@ where
 
     type ComponentsBuilder = WorldChainNodeComponentBuilder<N, Self>;
 
-    type AddOns = OpAddOns<
+    type AddOns = WorldChainAddOns<
         NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
         FlashblocksEthApiBuilder,
         OpEngineValidatorBuilder,
@@ -353,7 +353,7 @@ where
             Default::default(),
         );
 
-        OpAddOns::new(
+        WorldChainAddOns::new(
             rpc_add_ons,
             self.config.builder_config.inner.da_config.clone(),
             self.config.builder_config.inner.gas_limit_config.clone(),
@@ -362,6 +362,7 @@ where
             Default::default(),
             false,
             1_000_000,
+            self.config.args.simulate_enabled,
         )
     }
 
