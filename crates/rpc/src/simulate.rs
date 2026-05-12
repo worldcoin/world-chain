@@ -1,4 +1,4 @@
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{Block, BlockBody, BlockHeader, Header};
 use alloy_op_evm::{OpEvmFactory, OpTx};
 use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_rpc_types::{BlockId, BlockNumberOrTag};
@@ -9,6 +9,8 @@ use jsonrpsee::{
 use lru::LruCache;
 use op_revm::{OpSpecId, OpTransaction};
 use reth_evm::{ConfigureEvm, Evm as RethEvm, EvmFactory};
+use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderFactory};
 use reth_revm::{State, database::StateProviderDatabase};
 use reth_rpc_eth_api::helpers::SpawnBlocking;
@@ -491,9 +493,9 @@ pub fn relax_cfg_for_simulation(cfg_env: &mut CfgEnv<OpSpecId>) {
 
 /// Implementation of the `simulate_unsignedUserOp` RPC endpoint.
 #[derive(Debug, Clone)]
-pub struct Simulate<Client> {
+pub struct Simulate<Client, N: NodePrimitives = OpPrimitives> {
     client: Client,
-    evm_config: WorldChainEvmConfig,
+    evm_config: WorldChainEvmConfig<N>,
     metadata_cache: MetadataCache,
     /// Shared with `eth_call` / `debug_*` so simulate inherits the same
     /// CPU-bound rayon pool and doesn't compete with general tokio work.
@@ -503,10 +505,13 @@ pub struct Simulate<Client> {
     task_guard: BlockingTaskGuard,
 }
 
-impl<Client> Simulate<Client> {
+impl<Client, N> Simulate<Client, N>
+where
+    N: NodePrimitives,
+{
     pub fn new(
         client: Client,
-        evm_config: WorldChainEvmConfig,
+        evm_config: WorldChainEvmConfig<N>,
         task_pool: BlockingTaskPool,
         task_guard: BlockingTaskGuard,
     ) -> Self {
@@ -526,7 +531,7 @@ impl<Client> Simulate<Client> {
     /// already-installed eth API.
     pub fn from_eth_api<E: SpawnBlocking>(
         client: Client,
-        evm_config: WorldChainEvmConfig,
+        evm_config: WorldChainEvmConfig<N>,
         eth_api: &E,
     ) -> Self {
         Self::new(
@@ -539,14 +544,24 @@ impl<Client> Simulate<Client> {
 }
 
 #[async_trait]
-impl<Client> SimulateApiServer for Simulate<Client>
+impl<Client, N> SimulateApiServer for Simulate<Client, N>
 where
     Client: BlockReaderIdExt
         + StateProviderFactory
-        + HeaderProvider<Header = alloy_consensus::Header>
+        + HeaderProvider<Header = Header>
         + Clone
         + Send
         + Sync
+        + 'static,
+    N: NodePrimitives<
+            Receipt = OpReceipt,
+            SignedTx = OpTransactionSigned,
+            BlockHeader = Header,
+            BlockBody = BlockBody<OpTransactionSigned>,
+            Block = Block<OpTransactionSigned>,
+        > + Send
+        + Sync
+        + Unpin
         + 'static,
 {
     async fn simulate_unsigned_user_op(
@@ -586,10 +601,16 @@ where
     }
 }
 
-impl<Client> Simulate<Client>
+impl<Client, N> Simulate<Client, N>
 where
-    Client:
-        BlockReaderIdExt + StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
+    Client: BlockReaderIdExt + StateProviderFactory + HeaderProvider<Header = Header>,
+    N: NodePrimitives<
+            Receipt = OpReceipt,
+            SignedTx = OpTransactionSigned,
+            BlockHeader = Header,
+            BlockBody = BlockBody<OpTransactionSigned>,
+            Block = Block<OpTransactionSigned>,
+        >,
 {
     fn simulate_blocking(
         &self,
@@ -1253,15 +1274,22 @@ pub fn selector_to_name(selector: [u8; 4]) -> Option<&'static str> {
 ///
 /// Each token previously paid for 3 separate state-provider open + EVM build
 /// cycles; this batches all 3·N calls onto the same warm state cache.
-fn run_metadata_calls<Client>(
+fn run_metadata_calls<Client, N>(
     client: &Client,
-    evm_config: &WorldChainEvmConfig,
-    header: &alloy_consensus::Header,
+    evm_config: &WorldChainEvmConfig<N>,
+    header: &Header,
     block_id: alloy_rpc_types::BlockId,
     tokens: &[(Address, AssetType)],
 ) -> Vec<(Address, AssetInfo)>
 where
-    Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
+    Client: StateProviderFactory + HeaderProvider<Header = Header>,
+    N: NodePrimitives<
+            Receipt = OpReceipt,
+            SignedTx = OpTransactionSigned,
+            BlockHeader = Header,
+            BlockBody = BlockBody<OpTransactionSigned>,
+            Block = Block<OpTransactionSigned>,
+        >,
 {
     let Ok(mut evm_env) = evm_config.evm_env(header) else {
         return Vec::new();
@@ -1346,16 +1374,23 @@ fn decode_abi_string(data: &[u8]) -> Option<String> {
 }
 
 /// Resolve metadata for all unique token addresses, using a persistent cache.
-fn resolve_all_metadata<Client>(
+fn resolve_all_metadata<Client, N>(
     client: &Client,
-    evm_config: &WorldChainEvmConfig,
-    header: &alloy_consensus::Header,
+    evm_config: &WorldChainEvmConfig<N>,
+    header: &Header,
     block_id: alloy_rpc_types::BlockId,
     cache: &MetadataCache,
     asset_changes: &mut [AssetChange],
     exposure_changes: &mut [ExposureChange],
 ) where
-    Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
+    Client: StateProviderFactory + HeaderProvider<Header = Header>,
+    N: NodePrimitives<
+            Receipt = OpReceipt,
+            SignedTx = OpTransactionSigned,
+            BlockHeader = Header,
+            BlockBody = BlockBody<OpTransactionSigned>,
+            Block = Block<OpTransactionSigned>,
+        >,
 {
     // Collect unique addresses that need resolution (not in cache and not yet resolved).
     let mut to_resolve: Vec<(Address, AssetType)> = Vec::new();

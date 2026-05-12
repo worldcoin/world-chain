@@ -1,5 +1,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+pub mod add_ons;
 pub mod context;
 pub mod engine;
 pub mod node;
