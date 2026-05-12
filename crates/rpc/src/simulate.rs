@@ -1,5 +1,5 @@
-use alloy_consensus::BlockHeader;
-use alloy_op_evm::{OpEvmFactory, OpTx};
+use alloy_consensus::{Block, BlockBody, BlockHeader, Header};
+use alloy_op_evm::OpTx;
 use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_rpc_types::{BlockId, BlockNumberOrTag};
 use jsonrpsee::{
@@ -7,8 +7,10 @@ use jsonrpsee::{
     proc_macros::rpc,
 };
 use lru::LruCache;
-use op_revm::{OpSpecId, OpTransaction};
-use reth_evm::{ConfigureEvm, Evm as RethEvm, EvmFactory};
+use op_revm::OpTransaction;
+use reth_evm::{ConfigureEvm, Evm as RethEvm, EvmFactory, block::BlockExecutorFactory};
+use reth_optimism_primitives::{OpPrimitives, OpReceipt};
+use reth_primitives_traits::{FullSignedTx, NodePrimitives};
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderFactory};
 use reth_revm::{State, database::StateProviderDatabase};
 use reth_rpc_eth_api::helpers::SpawnBlocking;
@@ -476,7 +478,7 @@ type MetadataCache = Arc<Mutex<LruCache<Address, AssetInfo>>>;
 ///
 /// Exposed so fork-based integration tests can mirror the exact prod cfg
 /// instead of redeclaring the flag list (which silently drifts).
-pub fn relax_cfg_for_simulation(cfg_env: &mut CfgEnv<OpSpecId>) {
+pub fn relax_cfg_for_simulation<Spec>(cfg_env: &mut CfgEnv<Spec>) {
     cfg_env.disable_block_gas_limit = true;
     cfg_env.disable_eip3607 = true;
     cfg_env.disable_base_fee = true;
@@ -491,9 +493,9 @@ pub fn relax_cfg_for_simulation(cfg_env: &mut CfgEnv<OpSpecId>) {
 
 /// Implementation of the `simulate_unsignedUserOp` RPC endpoint.
 #[derive(Debug, Clone)]
-pub struct Simulate<Client> {
+pub struct Simulate<Client, EvmConfig = WorldChainEvmConfig<OpPrimitives>> {
     client: Client,
-    evm_config: WorldChainEvmConfig,
+    evm_config: EvmConfig,
     metadata_cache: MetadataCache,
     /// Shared with `eth_call` / `debug_*` so simulate inherits the same
     /// CPU-bound rayon pool and doesn't compete with general tokio work.
@@ -503,10 +505,10 @@ pub struct Simulate<Client> {
     task_guard: BlockingTaskGuard,
 }
 
-impl<Client> Simulate<Client> {
+impl<Client, EvmConfig> Simulate<Client, EvmConfig> {
     pub fn new(
         client: Client,
-        evm_config: WorldChainEvmConfig,
+        evm_config: EvmConfig,
         task_pool: BlockingTaskPool,
         task_guard: BlockingTaskGuard,
     ) -> Self {
@@ -526,7 +528,7 @@ impl<Client> Simulate<Client> {
     /// already-installed eth API.
     pub fn from_eth_api<E: SpawnBlocking>(
         client: Client,
-        evm_config: WorldChainEvmConfig,
+        evm_config: EvmConfig,
         eth_api: &E,
     ) -> Self {
         Self::new(
@@ -539,15 +541,28 @@ impl<Client> Simulate<Client> {
 }
 
 #[async_trait]
-impl<Client> SimulateApiServer for Simulate<Client>
+impl<Client, EvmConfig, N, Tx> SimulateApiServer for Simulate<Client, EvmConfig>
 where
     Client: BlockReaderIdExt
         + StateProviderFactory
-        + HeaderProvider<Header = alloy_consensus::Header>
+        + HeaderProvider<Header = Header>
         + Clone
         + Send
         + Sync
         + 'static,
+    EvmConfig: ConfigureEvm<Primitives = N> + Clone + Send + Sync + Unpin + 'static,
+    <EvmConfig::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory: EvmFactory<Tx = OpTx>,
+    N: NodePrimitives<
+            Receipt = OpReceipt,
+            SignedTx = Tx,
+            BlockHeader = Header,
+            BlockBody = BlockBody<Tx>,
+            Block = Block<Tx>,
+        > + Send
+        + Sync
+        + Unpin
+        + 'static,
+    Tx: FullSignedTx,
 {
     async fn simulate_unsigned_user_op(
         &self,
@@ -586,10 +601,19 @@ where
     }
 }
 
-impl<Client> Simulate<Client>
+impl<Client, EvmConfig, N, Tx> Simulate<Client, EvmConfig>
 where
-    Client:
-        BlockReaderIdExt + StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
+    Client: BlockReaderIdExt + StateProviderFactory + HeaderProvider<Header = Header>,
+    EvmConfig: ConfigureEvm<Primitives = N>,
+    <EvmConfig::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory: EvmFactory<Tx = OpTx>,
+    N: NodePrimitives<
+            Receipt = OpReceipt,
+            SignedTx = Tx,
+            BlockHeader = Header,
+            BlockBody = BlockBody<Tx>,
+            Block = Block<Tx>,
+        >,
+    Tx: FullSignedTx,
 {
     fn simulate_blocking(
         &self,
@@ -636,7 +660,7 @@ where
         //    `evm_env` moves into the EVM, and `TxEnv::default()` hardcodes
         //    Some(1) which mismatches any non-mainnet chainspec.
         let chain_id = evm_env.cfg_env.chain_id;
-        let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+        let mut evm = self.evm_config.evm_factory().create_evm_with_inspector(
             &mut state,
             evm_env,
             SimulationInspector::default(),
@@ -1253,15 +1277,25 @@ pub fn selector_to_name(selector: [u8; 4]) -> Option<&'static str> {
 ///
 /// Each token previously paid for 3 separate state-provider open + EVM build
 /// cycles; this batches all 3·N calls onto the same warm state cache.
-fn run_metadata_calls<Client>(
+fn run_metadata_calls<Client, EvmConfig, N, Tx>(
     client: &Client,
-    evm_config: &WorldChainEvmConfig,
-    header: &alloy_consensus::Header,
+    evm_config: &EvmConfig,
+    header: &Header,
     block_id: alloy_rpc_types::BlockId,
     tokens: &[(Address, AssetType)],
 ) -> Vec<(Address, AssetInfo)>
 where
-    Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
+    Client: StateProviderFactory + HeaderProvider<Header = Header>,
+    EvmConfig: ConfigureEvm<Primitives = N>,
+    <EvmConfig::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory: EvmFactory<Tx = OpTx>,
+    N: NodePrimitives<
+            Receipt = OpReceipt,
+            SignedTx = Tx,
+            BlockHeader = Header,
+            BlockBody = BlockBody<Tx>,
+            Block = Block<Tx>,
+        >,
+    Tx: FullSignedTx,
 {
     let Ok(mut evm_env) = evm_config.evm_env(header) else {
         return Vec::new();
@@ -1276,7 +1310,7 @@ where
     // Capture chain_id before `evm_env` moves into the EVM — `TxEnv::default()`
     // hardcodes Some(1), which would mismatch any non-mainnet chainspec.
     let chain_id = evm_env.cfg_env.chain_id;
-    let mut evm = OpEvmFactory::default().create_evm(&mut state, evm_env);
+    let mut evm = evm_config.evm_factory().create_evm(&mut state, evm_env);
 
     let mut call_view = |to: Address, selector: &[u8; 4]| -> Option<Bytes> {
         let tx = OpTx(OpTransaction {
@@ -1346,16 +1380,26 @@ fn decode_abi_string(data: &[u8]) -> Option<String> {
 }
 
 /// Resolve metadata for all unique token addresses, using a persistent cache.
-fn resolve_all_metadata<Client>(
+fn resolve_all_metadata<Client, EvmConfig, N, Tx>(
     client: &Client,
-    evm_config: &WorldChainEvmConfig,
-    header: &alloy_consensus::Header,
+    evm_config: &EvmConfig,
+    header: &Header,
     block_id: alloy_rpc_types::BlockId,
     cache: &MetadataCache,
     asset_changes: &mut [AssetChange],
     exposure_changes: &mut [ExposureChange],
 ) where
-    Client: StateProviderFactory + HeaderProvider<Header = alloy_consensus::Header>,
+    Client: StateProviderFactory + HeaderProvider<Header = Header>,
+    EvmConfig: ConfigureEvm<Primitives = N>,
+    <EvmConfig::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory: EvmFactory<Tx = OpTx>,
+    N: NodePrimitives<
+            Receipt = OpReceipt,
+            SignedTx = Tx,
+            BlockHeader = Header,
+            BlockBody = BlockBody<Tx>,
+            Block = Block<Tx>,
+        >,
+    Tx: FullSignedTx,
 {
     // Collect unique addresses that need resolution (not in cache and not yet resolved).
     let mut to_resolve: Vec<(Address, AssetType)> = Vec::new();
