@@ -633,7 +633,7 @@ where
             .ok_or_else(|| {
                 jsonrpsee::types::ErrorObjectOwned::owned(
                     jsonrpsee::types::error::INVALID_PARAMS_CODE,
-                    format!("Block not found: {requested_block:?}"),
+                    format!("Block not found: {requested_block}"),
                     None::<String>,
                 )
             })?;
