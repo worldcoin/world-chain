@@ -196,10 +196,10 @@ contract SubsidyAccountingImplV1Test is Test {
     ///                       ENTRY-POINT STUBS (NotImplemented)                ///
     ///////////////////////////////////////////////////////////////////////////////
 
-    function test_claimAdditionalCredential_revertsNotImplemented() public {
+    function test_claimAdditionalCredential_revertsRecordDoesNotExist_whenAbsent() public {
         uint256[5] memory proof;
-        vm.expectRevert(ISubsidyAccounting.NotImplemented.selector);
-        subsidy.claimAdditionalCredential(0, 0, 0, 0, proof);
+        vm.expectRevert(ISubsidyAccounting.RecordDoesNotExist.selector);
+        subsidy.claimAdditionalCredential(0xBEEF, 1, 0, 0, proof);
     }
 
     function test_setAuthorized_revertsRecordDoesNotExist_whenAbsent() public {

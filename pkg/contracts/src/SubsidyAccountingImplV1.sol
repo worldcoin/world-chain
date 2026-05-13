@@ -194,13 +194,50 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     }
 
     /// @inheritdoc ISubsidyAccounting
-    function claimAdditionalCredential(uint256, uint64, uint256, uint256, uint256[5] calldata)
-        external
-        virtual
-        onlyProxy
-        nonReentrant
-    {
-        revert NotImplemented();
+    function claimAdditionalCredential(
+        uint256 nullifier,
+        uint64 issuerSchemaId,
+        uint256 sessionNullifier,
+        uint256 sessionAction,
+        uint256[5] calldata proof
+    ) external virtual onlyProxy nonReentrant {
+        uint64 period = currentPeriod();
+        uint256 action = _actionForPeriod(period);
+        SubsidyRecord storage r = records[action][nullifier];
+        if (r.periodNumber != period) revert RecordDoesNotExist();
+        if (claimed[action][nullifier][issuerSchemaId]) revert CredentialAlreadyClaimed(issuerSchemaId);
+
+        uint256 signalHash = uint256(
+            keccak256(
+                abi.encode(
+                    ClaimAdditionalCredentialSignal({
+                        tag: CLAIM_ADDITIONAL_CREDENTIAL_TAG,
+                        nullifier: nullifier,
+                        msgSender: msg.sender
+                    })
+                )
+            )
+        ) >> 8;
+
+        uint256[2] memory sessionInputs = [sessionNullifier, sessionAction];
+        worldIDVerifier.verifySession(
+            WORLD_CHAIN_RP_ID,
+            PROOF_NONCE,
+            signalHash,
+            period * PERIOD_LENGTH,
+            issuerSchemaId,
+            CREDENTIAL_GENESIS_ISSUED_AT_MIN,
+            r.sessionId,
+            sessionInputs,
+            proof
+        );
+
+        claimed[action][nullifier][issuerSchemaId] = true;
+        uint256 added = credentialBudget[issuerSchemaId];
+        uint256 newTotal = uint256(r.remainingWei) + added;
+        if (newTotal > type(uint128).max) revert BudgetOverflow(newTotal);
+        r.remainingWei = uint128(newTotal);
+        emit AdditionalCredentialClaimed(nullifier, issuerSchemaId, added);
     }
 
     /// @inheritdoc ISubsidyAccounting
