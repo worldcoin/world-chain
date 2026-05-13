@@ -32,7 +32,7 @@ use world_chain_validator::{
 /// Change this constant locally when switching the captured mainnet block used
 /// by the bench. The block selection is intentionally not configurable at
 /// runtime so Criterion runs are deterministic and easy to compare.
-const BENCH_BLOCK_NUMBER: u64 = 29453083;
+const BENCH_BLOCK_NUMBER: u64 = 29669201;
 const SAMPLE_SIZE: usize = 10;
 
 /// Optional override for the World Chain mainnet datadir root.
