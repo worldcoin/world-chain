@@ -235,7 +235,10 @@ contract SubsidyAccountingImplV1Test is Test {
     }
 
     function _action(uint64 period) internal pure returns (uint256) {
-        return uint256(keccak256(abi.encodePacked("period_proof", period))) >> 8;
+        // `_registrationVersion` is 0 at deploy and the verifier-swap tests don't run claim
+        // paths after a swap, so 0 is the correct mixer value for proof-action expectations.
+        uint64 registrationVersion = 0;
+        return uint256(keccak256(abi.encodePacked("period_proof", period, registrationVersion))) >> 8;
     }
 
     function _addrs1(address a) internal pure returns (address[] memory out) {
@@ -432,20 +435,6 @@ contract SubsidyAccountingImplV1Test is Test {
         address[] memory addrs = _addrs2(ALICE, address(0));
         vm.expectRevert(ISubsidyAccounting.AddressZero.selector);
         subsidy.claimSubsidy(0xA00B, 1, addrs, _items1(SCHEMA_POH, 1));
-    }
-
-    function test_claimSubsidy_revertIf_tooManyNullifiers() public {
-        _setBudgets();
-        // Authorise ALICE under MAX_NULLIFIERS_PER_ADDRESS = 16 records, then attempt the 17th.
-        for (uint256 i = 0; i < 16; ++i) {
-            uint256 nullifier = 0xC0DE0000 + i;
-            // Each call needs a distinct schemaId to avoid DuplicateIssuerSchemaId carrying
-            // across periods within the same nullifier — but here nullifiers differ, so reuse
-            // is fine. Bind to SCHEMA_POH each time.
-            subsidy.claimSubsidy(nullifier, i + 1, _addrs1(ALICE), _items1(SCHEMA_POH, i));
-        }
-        vm.expectRevert(abi.encodeWithSelector(ISubsidyAccounting.TooManyNullifiers.selector, ALICE));
-        subsidy.claimSubsidy(0xC0DE0010, 99, _addrs1(ALICE), _items1(SCHEMA_POH, 99));
     }
 
     function test_claimSubsidy_revertIf_verifierRejects_atomicRollback() public {

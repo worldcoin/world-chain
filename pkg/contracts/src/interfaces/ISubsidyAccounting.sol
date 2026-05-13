@@ -92,12 +92,8 @@ interface ISubsidyAccounting {
     /// @notice Thrown when the supplied `nonce` does not match the record's `updateNonce`.
     error StaleUpdateNonce(uint64 supplied, uint64 expected);
 
-    /// @notice Thrown when an `addAddresses` operation would push an account above
-    ///         `MAX_NULLIFIERS_PER_ADDRESS` simultaneous authorisations.
-    error TooManyNullifiers(address account);
-
-    /// @notice Thrown when an `addAddresses` payload contains a duplicate of an address
-    ///         already authorised under the same record (or a duplicate within the payload).
+    /// @notice Thrown when a `setAuthorized` payload contains a duplicate address (either of
+    ///         an address already in the running set or a duplicate within the payload).
     error DuplicateAuthorizedAddress(address account);
 
     /// @notice Thrown when the summed per-credential budget for a `claimSubsidy` call

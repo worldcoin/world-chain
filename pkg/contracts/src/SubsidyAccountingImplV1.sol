@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
-import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 import {Base} from "./abstract/Base.sol";
@@ -19,9 +18,6 @@ import {IWorldIDVerifier} from "./interfaces/IWorldIDVerifier.sol";
 ///      collisions. Storage variables MUST NOT be reordered after deployment.
 /// @custom:security-contact security@toolsforhumanity.com
 contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTransient {
-    using EnumerableSet for EnumerableSet.AddressSet;
-    using EnumerableSet for EnumerableSet.UintSet;
-
     ///////////////////////////////////////////////////////////////////////////////
     ///                                CONSTANTS                                ///
     ///////////////////////////////////////////////////////////////////////////////
@@ -29,14 +25,9 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     /// @notice World Chain's registered RP ID (per WIP-1001).
     uint64 public constant WORLD_CHAIN_RP_ID = 480;
 
-    /// @notice Period length in seconds. Constant; subsidy records expire when
-    ///         `block.timestamp / PERIOD_LENGTH` no longer matches the stored period.
+    /// @notice Period length in seconds. Subsidy records are per-period and expire
+    ///         structurally via the action key derivation; see `currentAction`.
     uint64 public constant PERIOD_LENGTH = 30 days;
-
-    /// @notice Maximum number of distinct subsidy records (nullifiers) an address may be
-    ///         simultaneously authorized under. Bounds the worst-case `consumeBudget` /
-    ///         `getBudget(address)` cost and griefing surface.
-    uint256 public constant MAX_NULLIFIERS_PER_ADDRESS = 16;
 
     /// @notice Verifier `nonce` public input committed by every proof.
     /// @dev Fixed value — see contract notes for the rationale (replay protection lives
@@ -62,6 +53,10 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
 
     /// @dev Per-period subsidy record. First three fields pack into a single storage slot
     ///      (64 + 128 + 64 = 256 bits); `sessionId` occupies the next slot.
+    /// @custom:pinned This struct is part of the WIP-1002 protocol commitment. The revm
+    ///                debit hook reads and writes `records[action][nullifier]` via the
+    ///                pinned slot derivation, so field offsets, types, and packing MUST NOT
+    ///                change on upgrade. Append-only on the underlying mapping slot too.
     struct SubsidyRecord {
         uint64 periodNumber;
         uint128 remainingWei;
@@ -78,6 +73,22 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
         address msgSender;
     }
 
+    /// @dev Pre-image of `claimAdditionalCredential`'s `signalHash` public input.
+    struct ClaimAdditionalCredentialSignal {
+        bytes32 tag;
+        uint256 nullifier;
+        address msgSender;
+    }
+
+    /// @dev Pre-image of `setAuthorized`'s `signalHash` public input.
+    struct SetAuthorizedSignal {
+        bytes32 tag;
+        uint256 nullifier;
+        uint64 nonce;
+        address[] newSet;
+        address msgSender;
+    }
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                             STATE VARIABLES                             ///
     ///////////////////////////////////////////////////////////////////////////////
@@ -85,23 +96,33 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     /// @notice The World ID verifier proxy address.
     IWorldIDVerifier public worldIDVerifier;
 
+    /// @notice Monotonic mixer bumped on `setWorldIDVerifier`. Folded into `currentAction`
+    ///         so a verifier swap structurally invalidates every in-flight per-period record
+    ///         without touching any individual slot.
+    uint64 internal _registrationVersion;
+
     /// @notice Per-credential governance-set budget allocation in Wei.
     mapping(uint64 issuerSchemaId => uint256 budgetWei) public credentialBudget;
 
-    /// @notice Subsidy records keyed by per-period nullifier. Records lazily expire when
-    ///         `periodNumber != currentPeriod()`.
-    mapping(uint256 nullifier => SubsidyRecord record) internal records;
+    /// @notice Subsidy records keyed by `(action, nullifier)`. Per-period reset is structural —
+    ///         `action` folds in `currentPeriod()` and `_registrationVersion`, so old-period
+    ///         and pre-verifier-swap slots are unreachable from current-action lookups.
+    /// @custom:pinned This mapping slot is part of the WIP-1002 protocol commitment.
+    mapping(uint256 action => mapping(uint256 nullifier => SubsidyRecord record)) internal records;
 
     /// @notice Per-record claimed-credentials map. `issuerSchemaId` cannot be claimed twice
-    ///         under the same nullifier.
-    mapping(uint256 nullifier => mapping(uint64 issuerSchemaId => bool)) internal claimed;
+    ///         under the same `(action, nullifier)`.
+    mapping(uint256 action => mapping(uint256 nullifier => mapping(uint64 issuerSchemaId => bool))) internal claimed;
 
-    /// @notice Per-record authorized-address set.
-    mapping(uint256 nullifier => EnumerableSet.AddressSet) internal authorized;
+    /// @notice Per-record authorized-address set, ordered by insertion. Plain `address[]`
+    ///         (not `EnumerableSet`) to avoid coupling the protocol-relevant layout to an
+    ///         OpenZeppelin library version.
+    mapping(uint256 action => mapping(uint256 nullifier => address[])) internal authorized;
 
-    /// @notice Reverse index from authorized account address to the set of `nullifier`
-    ///         records it may draw budget from. Capped at `MAX_NULLIFIERS_PER_ADDRESS`.
-    mapping(address account => EnumerableSet.UintSet) internal nullifiersOf;
+    /// @notice Reverse index from authorized account to its authorised nullifiers, ordered by
+    ///         insertion. The revm debit hook walks this slot.
+    /// @custom:pinned This mapping slot is part of the WIP-1002 protocol commitment.
+    mapping(uint256 action => mapping(address account => uint256[])) internal nullifiersOf;
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                              CONSTRUCTION                               ///
@@ -139,7 +160,8 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
         if (items.length == 0) revert EmptyItems();
 
         uint64 period = currentPeriod();
-        if (records[nullifier].periodNumber == period) revert RecordAlreadyExists();
+        uint256 action = _actionForPeriod(period);
+        if (records[action][nullifier].periodNumber == period) revert RecordAlreadyExists();
 
         uint256 signalHash = uint256(
             keccak256(
@@ -151,18 +173,18 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
             )
         ) >> 8;
 
-        uint256 totalBudget = _accrueClaimedCredentials(nullifier, items);
+        uint256 totalBudget = _accrueClaimedCredentials(action, nullifier, items);
         if (totalBudget > type(uint128).max) revert BudgetOverflow(totalBudget);
 
-        records[nullifier] = SubsidyRecord({
+        records[action][nullifier] = SubsidyRecord({
             periodNumber: period, remainingWei: uint128(totalBudget), updateNonce: 0, sessionId: sessionId
         });
 
-        _addAddresses(nullifier, addAddresses);
+        _addAddresses(action, nullifier, addAddresses);
 
         emit SubsidyClaimed(nullifier, sessionId, period, totalBudget);
 
-        _verifyClaimItems(nullifier, period, signalHash, items);
+        _verifyClaimItems(nullifier, period, action, signalHash, items);
     }
 
     /// @inheritdoc ISubsidyAccounting
@@ -191,38 +213,37 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
 
     /// @inheritdoc ISubsidyAccounting
     function getBudget(uint256 nullifier) external view virtual onlyProxy returns (uint256 remainingWei) {
-        SubsidyRecord storage r = records[nullifier];
-        if (r.periodNumber != currentPeriod()) return 0;
-        return r.remainingWei;
+        return records[currentAction()][nullifier].remainingWei;
     }
 
     /// @inheritdoc ISubsidyAccounting
     function getBudget(address account) external view virtual onlyProxy returns (uint256 remainingWei) {
-        EnumerableSet.UintSet storage nullifiers = nullifiersOf[account];
-        uint64 period = currentPeriod();
-        uint256 len = nullifiers.length();
+        uint256 action = currentAction();
+        uint256[] storage nullifiers = nullifiersOf[action][account];
+        uint256 len = nullifiers.length;
         for (uint256 i = 0; i < len; ++i) {
-            SubsidyRecord storage r = records[nullifiers.at(i)];
-            if (r.periodNumber == period) {
-                remainingWei += r.remainingWei;
-            }
+            remainingWei += records[action][nullifiers[i]].remainingWei;
         }
     }
 
     /// @inheritdoc ISubsidyAccounting
     function isAuthorized(address account, uint256 nullifier) external view virtual onlyProxy returns (bool) {
-        if (records[nullifier].periodNumber != currentPeriod()) return false;
-        return authorized[nullifier].contains(account);
+        address[] storage authSet = authorized[currentAction()][nullifier];
+        uint256 len = authSet.length;
+        for (uint256 i = 0; i < len; ++i) {
+            if (authSet[i] == account) return true;
+        }
+        return false;
     }
 
     /// @inheritdoc ISubsidyAccounting
     function getNullifiers(address account) external view virtual onlyProxy returns (uint256[] memory) {
-        return nullifiersOf[account].values();
+        return nullifiersOf[currentAction()][account];
     }
 
     /// @inheritdoc ISubsidyAccounting
     function isClaimed(uint256 nullifier, uint64 issuerSchemaId) external view virtual onlyProxy returns (bool) {
-        return claimed[nullifier][issuerSchemaId];
+        return claimed[currentAction()][nullifier][issuerSchemaId];
     }
 
     ///////////////////////////////////////////////////////////////////////////////
@@ -230,9 +251,13 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     ///////////////////////////////////////////////////////////////////////////////
 
     /// @inheritdoc ISubsidyAccounting
+    /// @dev Bumps `_registrationVersion`, which structurally invalidates every in-flight
+    ///      per-period record under the previous verifier — `currentAction()` changes value,
+    ///      so prior-action slots are unreachable from any view or hot-path lookup.
     function setWorldIDVerifier(IWorldIDVerifier worldIDVerifier_) external virtual onlyProxy onlyOwner {
         if (address(worldIDVerifier_) == address(0)) revert AddressZero();
         worldIDVerifier = worldIDVerifier_;
+        ++_registrationVersion;
         emit WorldIDVerifierSet(address(worldIDVerifier_));
     }
 
@@ -251,33 +276,47 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
         return uint64(block.timestamp / PERIOD_LENGTH);
     }
 
-    /// @dev Validate every `items[i].issuerSchemaId`, mark each as claimed under `nullifier`,
-    ///      and return the summed configured budget. Reverts on overflow, duplicates, or an
-    ///      already-claimed credential. Pulled out of `claimSubsidy` to keep its frame within
-    ///      the 16-local stack limit.
-    function _accrueClaimedCredentials(uint256 nullifier, ClaimItem[] calldata items)
+    /// @dev Action key folding `period` and `_registrationVersion` — outer key for every
+    ///      period-scoped storage map. Mirrored bit-for-bit by the revm debit hook, so the
+    ///      derivation is part of the WIP-1002 protocol commitment and MUST NOT change.
+    function _actionForPeriod(uint64 period) internal view returns (uint256) {
+        return uint256(keccak256(abi.encodePacked("period_proof", period, _registrationVersion))) >> 8;
+    }
+
+    /// @dev Action for the current block timestamp.
+    function currentAction() internal view returns (uint256) {
+        return _actionForPeriod(currentPeriod());
+    }
+
+    /// @dev Validate every `items[i].issuerSchemaId`, mark each as claimed under
+    ///      `(action, nullifier)`, and return the summed configured budget. Reverts on
+    ///      duplicates or an already-claimed credential. Pulled out of `claimSubsidy` to
+    ///      keep its frame within the 16-local stack limit.
+    function _accrueClaimedCredentials(uint256 action, uint256 nullifier, ClaimItem[] calldata items)
         internal
         returns (uint256 totalBudget)
     {
         uint256 itemsLen = items.length;
         for (uint256 i = 0; i < itemsLen; ++i) {
             uint64 schemaId = items[i].issuerSchemaId;
-            if (claimed[nullifier][schemaId]) revert DuplicateIssuerSchemaId(schemaId);
-            claimed[nullifier][schemaId] = true;
+            if (claimed[action][nullifier][schemaId]) revert DuplicateIssuerSchemaId(schemaId);
+            claimed[action][nullifier][schemaId] = true;
             totalBudget += credentialBudget[schemaId];
         }
     }
 
-    /// @dev Verify every `items[i].proof` as a Uniqueness Proof for `period_proof || period`
+    /// @dev Verify every `items[i].proof` as a Uniqueness Proof for the current `action`
     ///      against the shared `signalHash`. Reverts atomically if any item is rejected.
-    ///      Verifier inputs `nonce`, `expiresAtMin`, `credentialGenesisIssuedAtMin` are supplied
-    ///      deterministically from `PROOF_NONCE`, `period * PERIOD_LENGTH`, and
+    ///      Verifier inputs `nonce`, `expiresAtMin`, `credentialGenesisIssuedAtMin` are
+    ///      supplied deterministically from `PROOF_NONCE`, `period * PERIOD_LENGTH`, and
     ///      `CREDENTIAL_GENESIS_ISSUED_AT_MIN`.
-    function _verifyClaimItems(uint256 nullifier, uint64 period, uint256 signalHash, ClaimItem[] calldata items)
-        internal
-        view
-    {
-        uint256 action = uint256(keccak256(abi.encodePacked("period_proof", period))) >> 8;
+    function _verifyClaimItems(
+        uint256 nullifier,
+        uint64 period,
+        uint256 action,
+        uint256 signalHash,
+        ClaimItem[] calldata items
+    ) internal view {
         uint64 expiresAtMin = period * PERIOD_LENGTH;
         uint256 itemsLen = items.length;
         for (uint256 i = 0; i < itemsLen; ++i) {
@@ -295,23 +334,21 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
         }
     }
 
-    /// @dev Add `addrs` to the authorized set of `nullifier` and the reverse index.
-    ///      Reverts on zero address, duplicate within the existing authorised set, or when
-    ///      adding the new authorisation would push an account past
-    ///      `MAX_NULLIFIERS_PER_ADDRESS`. Shared by `claimSubsidy` and `updateAddresses`.
-    function _addAddresses(uint256 nullifier, address[] calldata addrs) internal {
-        EnumerableSet.AddressSet storage authSet = authorized[nullifier];
+    /// @dev Append `addrs` to the authorized set under `(action, nullifier)` and to each
+    ///      address's reverse index. Reverts on zero address or any duplicate (against
+    ///      either the existing set or earlier entries in the payload).
+    function _addAddresses(uint256 action, uint256 nullifier, address[] calldata addrs) internal {
+        address[] storage authSet = authorized[action][nullifier];
         uint256 len = addrs.length;
         for (uint256 i = 0; i < len; ++i) {
             address acct = addrs[i];
             if (acct == address(0)) revert AddressZero();
-            if (!authSet.add(acct)) revert DuplicateAuthorizedAddress(acct);
-
-            EnumerableSet.UintSet storage owned = nullifiersOf[acct];
-            if (!owned.contains(nullifier) && owned.length() >= MAX_NULLIFIERS_PER_ADDRESS) {
-                revert TooManyNullifiers(acct);
+            uint256 alen = authSet.length;
+            for (uint256 j = 0; j < alen; ++j) {
+                if (authSet[j] == acct) revert DuplicateAuthorizedAddress(acct);
             }
-            owned.add(nullifier);
+            authSet.push(acct);
+            nullifiersOf[action][acct].push(nullifier);
         }
     }
 }
