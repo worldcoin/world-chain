@@ -464,4 +464,245 @@ contract SubsidyAccountingImplV1Test is Test {
         vm.expectRevert(abi.encodeWithSelector(ISubsidyAccounting.BudgetOverflow.selector, huge + huge));
         subsidy.claimSubsidy(0xA011, 1, _addrs1(ALICE), items);
     }
+
+    function test_claimSubsidy_emptyAddAddresses_dormantRecord() public {
+        _setBudgets();
+        uint256 nullifier = 0xD0001;
+        address[] memory empty = new address[](0);
+        subsidy.claimSubsidy(nullifier, 1, empty, _items1(SCHEMA_POH, 1));
+        assertEq(subsidy.getBudget(nullifier), 50_000 gwei, "budget credited even without authorisers");
+        assertFalse(subsidy.isAuthorized(ALICE, nullifier), "no one is authorised");
+        assertEq(subsidy.getNullifiers(ALICE).length, 0, "alice has no reverse-index entry");
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////
+    ///                            SET AUTHORIZED                               ///
+    ///////////////////////////////////////////////////////////////////////////////
+
+    bytes32 internal constant SET_AUTHORIZED_TAG = "SET_AUTHORIZED";
+    bytes32 internal constant CLAIM_ADDITIONAL_CREDENTIAL_TAG = "CLAIM_ADDITIONAL_CREDENTIAL";
+
+    event AuthorizedSetUpdated(uint256 indexed nullifier, address[] newSet);
+    event AdditionalCredentialClaimed(uint256 indexed nullifier, uint64 indexed issuerSchemaId, uint256 budgetWei);
+
+    function _setAuthorizedSignal(uint256 nullifier, uint64 nonce, address[] memory newSet, address sender)
+        internal
+        pure
+        returns (uint256)
+    {
+        SubsidyAccountingImplV1.SetAuthorizedSignal memory s = SubsidyAccountingImplV1.SetAuthorizedSignal({
+            tag: SET_AUTHORIZED_TAG, nullifier: nullifier, nonce: nonce, newSet: newSet, msgSender: sender
+        });
+        return uint256(keccak256(abi.encode(s))) >> 8;
+    }
+
+    function _claimAdditionalCredentialSignal(uint256 nullifier, address sender) internal pure returns (uint256) {
+        SubsidyAccountingImplV1.ClaimAdditionalCredentialSignal memory s = SubsidyAccountingImplV1
+            .ClaimAdditionalCredentialSignal({
+            tag: CLAIM_ADDITIONAL_CREDENTIAL_TAG, nullifier: nullifier, msgSender: sender
+        });
+        return uint256(keccak256(abi.encode(s))) >> 8;
+    }
+
+    function _seedClaim(uint256 nullifier, uint256 sessionId, address[] memory addrs) internal {
+        _setBudgets();
+        subsidy.claimSubsidy(nullifier, sessionId, addrs, _items1(SCHEMA_POH, 1));
+    }
+
+    function test_setAuthorized_happyPath_replacesSetAndBumpsNonce() public {
+        uint256 nullifier = 0xB001;
+        uint256 sessionId = 0x5E5510;
+        _seedClaim(nullifier, sessionId, _addrs1(ALICE));
+
+        address[] memory newSet = _addrs1(BOB);
+        uint64 period = uint64(block.timestamp / PERIOD_LENGTH);
+        uint256 sigHash = _setAuthorizedSignal(nullifier, 0, newSet, address(this));
+        uint256[2] memory sn = [uint256(0xAA), uint256(0xBB)];
+
+        vm.expectCall(
+            address(verifier),
+            abi.encodeCall(
+                IWorldIDVerifier.verifySession,
+                (
+                    WORLD_CHAIN_RP_ID,
+                    PROOF_NONCE,
+                    sigHash,
+                    period * PERIOD_LENGTH,
+                    uint64(0),
+                    CREDENTIAL_GENESIS_ISSUED_AT_MIN,
+                    sessionId,
+                    sn,
+                    _proof(7)
+                )
+            )
+        );
+        vm.expectEmit(true, true, true, true, address(subsidy));
+        emit AuthorizedSetUpdated(nullifier, newSet);
+
+        subsidy.setAuthorized(nullifier, 0, newSet, sn[0], sn[1], _proof(7));
+
+        assertFalse(subsidy.isAuthorized(ALICE, nullifier), "alice removed");
+        assertTrue(subsidy.isAuthorized(BOB, nullifier), "bob added");
+        assertEq(subsidy.getNullifiers(ALICE).length, 0, "alice reverse-index cleared");
+        uint256[] memory bobNs = subsidy.getNullifiers(BOB);
+        assertEq(bobNs.length, 1);
+        assertEq(bobNs[0], nullifier);
+        // Nonce bump: a second call with the same nonce 0 must now revert StaleUpdateNonce.
+        vm.expectRevert(abi.encodeWithSelector(ISubsidyAccounting.StaleUpdateNonce.selector, uint64(0), uint64(1)));
+        subsidy.setAuthorized(nullifier, 0, newSet, sn[0], sn[1], _proof(7));
+    }
+
+    function test_setAuthorized_emptyNewSet_revokesAll() public {
+        uint256 nullifier = 0xB002;
+        _seedClaim(nullifier, 1, _addrs2(ALICE, BOB));
+        address[] memory empty = new address[](0);
+
+        subsidy.setAuthorized(nullifier, 0, empty, 1, 2, _proof(3));
+
+        assertFalse(subsidy.isAuthorized(ALICE, nullifier));
+        assertFalse(subsidy.isAuthorized(BOB, nullifier));
+        assertEq(subsidy.getNullifiers(ALICE).length, 0);
+        assertEq(subsidy.getNullifiers(BOB).length, 0);
+    }
+
+    function test_setAuthorized_revertIf_duplicateInNewSet() public {
+        uint256 nullifier = 0xB003;
+        _seedClaim(nullifier, 1, _addrs1(ALICE));
+        address[] memory dup = _addrs2(BOB, BOB);
+
+        vm.expectRevert(abi.encodeWithSelector(ISubsidyAccounting.DuplicateAuthorizedAddress.selector, BOB));
+        subsidy.setAuthorized(nullifier, 0, dup, 1, 2, _proof(3));
+    }
+
+    function test_setAuthorized_revertIf_staleNonce() public {
+        uint256 nullifier = 0xB004;
+        _seedClaim(nullifier, 1, _addrs1(ALICE));
+        address[] memory s = _addrs1(BOB);
+
+        vm.expectRevert(abi.encodeWithSelector(ISubsidyAccounting.StaleUpdateNonce.selector, uint64(7), uint64(0)));
+        subsidy.setAuthorized(nullifier, 7, s, 1, 2, _proof(3));
+    }
+
+    function test_setAuthorized_revertIf_verifierRejects() public {
+        uint256 nullifier = 0xB005;
+        _seedClaim(nullifier, 1, _addrs1(ALICE));
+        verifier.setShouldAccept(false);
+        address[] memory s = _addrs1(BOB);
+
+        vm.expectRevert(MockWorldIDVerifier.MockVerifierRejected.selector);
+        subsidy.setAuthorized(nullifier, 0, s, 1, 2, _proof(3));
+        // State must be untouched after revert.
+        assertTrue(subsidy.isAuthorized(ALICE, nullifier), "alice still authorised");
+        assertFalse(subsidy.isAuthorized(BOB, nullifier));
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////
+    ///                       CLAIM ADDITIONAL CREDENTIAL                       ///
+    ///////////////////////////////////////////////////////////////////////////////
+
+    function test_claimAdditionalCredential_happyPath_addsBudgetAndMarksClaimed() public {
+        uint256 nullifier = 0xC001;
+        uint256 sessionId = 0x5E5511;
+        _seedClaim(nullifier, sessionId, _addrs1(ALICE));
+
+        uint64 period = uint64(block.timestamp / PERIOD_LENGTH);
+        uint256 sigHash = _claimAdditionalCredentialSignal(nullifier, address(this));
+        uint256[2] memory sn = [uint256(0xCC), uint256(0xDD)];
+
+        vm.expectCall(
+            address(verifier),
+            abi.encodeCall(
+                IWorldIDVerifier.verifySession,
+                (
+                    WORLD_CHAIN_RP_ID,
+                    PROOF_NONCE,
+                    sigHash,
+                    period * PERIOD_LENGTH,
+                    SCHEMA_NFC,
+                    CREDENTIAL_GENESIS_ISSUED_AT_MIN,
+                    sessionId,
+                    sn,
+                    _proof(9)
+                )
+            )
+        );
+        vm.expectEmit(true, true, true, true, address(subsidy));
+        emit AdditionalCredentialClaimed(nullifier, SCHEMA_NFC, 20_000 gwei);
+
+        subsidy.claimAdditionalCredential(nullifier, SCHEMA_NFC, sn[0], sn[1], _proof(9));
+
+        assertEq(subsidy.getBudget(nullifier), 50_000 gwei + 20_000 gwei, "budget summed");
+        assertTrue(subsidy.isClaimed(nullifier, SCHEMA_NFC));
+    }
+
+    function test_claimAdditionalCredential_revertIf_alreadyClaimed() public {
+        uint256 nullifier = 0xC002;
+        _seedClaim(nullifier, 1, _addrs1(ALICE));
+
+        vm.expectRevert(abi.encodeWithSelector(ISubsidyAccounting.CredentialAlreadyClaimed.selector, SCHEMA_POH));
+        subsidy.claimAdditionalCredential(nullifier, SCHEMA_POH, 1, 2, _proof(3));
+    }
+
+    function test_claimAdditionalCredential_revertIf_verifierRejects() public {
+        uint256 nullifier = 0xC003;
+        _seedClaim(nullifier, 1, _addrs1(ALICE));
+        verifier.setShouldAccept(false);
+
+        vm.expectRevert(MockWorldIDVerifier.MockVerifierRejected.selector);
+        subsidy.claimAdditionalCredential(nullifier, SCHEMA_NFC, 1, 2, _proof(3));
+        assertFalse(subsidy.isClaimed(nullifier, SCHEMA_NFC));
+        assertEq(subsidy.getBudget(nullifier), 50_000 gwei, "budget unchanged");
+    }
+
+    function test_claimAdditionalCredential_revertIf_budgetOverflow() public {
+        uint256 nullifier = 0xC004;
+        uint256 huge = uint256(type(uint128).max);
+        vm.startPrank(OWNER);
+        subsidy.setCredentialBudget(SCHEMA_POH, huge);
+        subsidy.setCredentialBudget(SCHEMA_NFC, huge);
+        vm.stopPrank();
+        subsidy.claimSubsidy(nullifier, 1, _addrs1(ALICE), _items1(SCHEMA_POH, 1));
+
+        vm.expectRevert(abi.encodeWithSelector(ISubsidyAccounting.BudgetOverflow.selector, huge + huge));
+        subsidy.claimAdditionalCredential(nullifier, SCHEMA_NFC, 1, 2, _proof(3));
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////
+    ///                  REGISTRATION VERSION + PERIOD RESET                    ///
+    ///////////////////////////////////////////////////////////////////////////////
+
+    function test_setWorldIDVerifier_invalidatesExistingRecords_structurally() public {
+        uint256 nullifier = 0xE001;
+        _seedClaim(nullifier, 1, _addrs1(ALICE));
+        assertEq(subsidy.getBudget(nullifier), 50_000 gwei, "pre-swap budget present");
+        assertTrue(subsidy.isAuthorized(ALICE, nullifier));
+
+        IWorldIDVerifier newVerifier = IWorldIDVerifier(address(new MockWorldIDVerifier(true)));
+        vm.prank(OWNER);
+        subsidy.setWorldIDVerifier(newVerifier);
+
+        // The pre-swap record lives under the prior `_registrationVersion`; currentAction() now
+        // resolves to a different outer key, so all current-action views see an empty slot.
+        assertEq(subsidy.getBudget(nullifier), 0, "post-swap budget structurally absent");
+        assertEq(subsidy.getBudget(ALICE), 0, "address-side budget also gone");
+        assertFalse(subsidy.isAuthorized(ALICE, nullifier));
+        assertEq(subsidy.getNullifiers(ALICE).length, 0);
+        assertFalse(subsidy.isClaimed(nullifier, SCHEMA_POH));
+    }
+
+    function test_period_structuralReset_acrossBoundary() public {
+        uint256 nullifier = 0xF001;
+        _seedClaim(nullifier, 1, _addrs1(ALICE));
+        assertEq(subsidy.getBudget(nullifier), 50_000 gwei, "claim period budget present");
+
+        vm.warp(block.timestamp + PERIOD_LENGTH);
+
+        assertEq(subsidy.getBudget(nullifier), 0, "next period sees no record");
+        assertFalse(subsidy.isAuthorized(ALICE, nullifier));
+        assertEq(subsidy.getNullifiers(ALICE).length, 0);
+
+        // Same nullifier may be re-claimed under the new action key without RecordAlreadyExists.
+        subsidy.claimSubsidy(nullifier, 2, _addrs1(BOB), _items1(SCHEMA_PHONE, 9));
+        assertEq(subsidy.getBudget(nullifier), 10_000 gwei);
+    }
 }
