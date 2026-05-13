@@ -804,6 +804,17 @@ where
         // BTreeMap for deterministic JSON key order (see field doc).
         let mut contract_management: BTreeMap<Address, Vec<ContractManagementAction>> =
             BTreeMap::new();
+        // Addresses created in this same tx. Used to suppress phantom
+        // proxy/ownership entries from event-based and state-diff detection:
+        // a fresh proxy's constructor writes its EIP-1967 implementation slot
+        // (0 → impl) and may emit `Upgraded(impl)`, both of which look
+        // identical to a real upgrade but are initialization. The CREATION
+        // entry already covers the contract; anything else targeting it in
+        // the same tx is part of construction.
+        let created_in_tx: std::collections::HashSet<Address> = inspector_creations
+            .iter()
+            .map(|(_, deployed)| *deployed)
+            .collect();
         for (deployer, deployed) in inspector_creations {
             contract_management
                 .entry(deployed)
@@ -823,9 +834,23 @@ where
                 });
         }
         for (target, action) in parse_contract_management_events(&logs) {
+            if created_in_tx.contains(&target) {
+                continue;
+            }
             contract_management.entry(target).or_default().push(action);
         }
         for (target, action) in parse_contract_management_state_diff(&result_and_state.state) {
+            if created_in_tx.contains(&target) {
+                continue;
+            }
+            // State-diff exists as a fallback for non-emitting proxies — if
+            // the event path already flagged this `(target, action_type)`,
+            // the slot write is the same upgrade and would double-count.
+            if let Some(existing) = contract_management.get(&target)
+                && existing.iter().any(|a| a.action_type == action.action_type)
+            {
+                continue;
+            }
             contract_management.entry(target).or_default().push(action);
         }
 
