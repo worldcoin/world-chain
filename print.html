@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3aca3613.js";
+            window.path_to_searchindex_js = "searchindex-c3f25647.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-85576531.js"></script>
@@ -1349,9 +1349,8 @@ requires: &lt;WIP-NNNN, EIP-NNNN&gt;  # if applicable
 <tr><td><code>WORLD_TX_TYPE</code></td><td><code>uint8</code></td><td><code>0x1D</code></td><td>EIP-2718 transaction type for World Chain account transactions.</td></tr>
 <tr><td><code>MAX_SESSION_VERIFIERS</code></td><td><code>uint256</code></td><td><code>20</code></td><td>Maximum active session verifiers per account.</td></tr>
 <tr><td><code>WORLD_CHAIN_ACCOUNT_DOMAIN</code></td><td><code>bytes32</code></td><td><code>keccak256("WIP1001_ACCOUNT")</code></td><td>Domain for account address derivation.</td></tr>
-<tr><td><code>WORLD_CHAIN_ADMIN_CREATE_DOMAIN</code></td><td><code>bytes32</code></td><td><code>keccak256("WIP1001_ADMIN_CREATE")</code></td><td>Domain for account creation authorization.</td></tr>
-<tr><td><code>WORLD_CHAIN_SET_KEY_RING_DOMAIN</code></td><td><code>bytes32</code></td><td><code>keccak256("WIP1001_SET_KEY_RING")</code></td><td>Domain for key ring replacement authorization.</td></tr>
-<tr><td><code>WIP1001_SIGNER_DOMAIN</code></td><td><code>bytes32</code></td><td><code>keccak256("WIP1001_SIGNER")</code></td><td>Domain for default factory <code>CREATE2</code> salts.</td></tr>
+<tr><td><code>WORLD_CHAIN_ACCOUNT_CREATE_DOMAIN</code></td><td><code>bytes32</code></td><td><code>keccak256("WORLD_CHAIN_ACCOUNT_CREATE")</code></td><td>Domain for account creation authorization.</td></tr>
+<tr><td><code>WORLD_CHAIN_ACCOUNT_SET_DOMAIN</code></td><td><code>bytes32</code></td><td><code>keccak256("WORLD_CHAIN_ACCOUNT_SET")</code></td><td>Domain for key ring replacement authorization.</td></tr>
 </tbody>
 </table>
 </div>
@@ -1364,6 +1363,7 @@ requires: &lt;WIP-NNNN, EIP-NNNN&gt;  # if applicable
 </thead>
 <tbody>
 <tr><td><code>WORLD_CHAIN_ACCOUNT_MANAGER</code></td><td><code>address</code></td><td>TBD</td><td>Predeploy address for the account manager.</td></tr>
+<tr><td><code>WORLD_CHAIN_ACCOUNT_ROUTER_CODE_HASH</code></td><td><code>bytes32</code></td><td>TBD</td><td>Runtime code hash required at every World Chain account address.</td></tr>
 <tr><td><code>EIP1271_VALIDATION_GAS_LIMIT</code></td><td><code>uint64</code></td><td>TBD</td><td>Fixed gas forwarded to <code>isValidSignature</code>.</td></tr>
 <tr><td><code>EXECUTION_TRACE_VALIDATION_GAS_LIMIT</code></td><td><code>uint64</code></td><td>TBD</td><td>Fixed gas forwarded to <code>evaluateSessionPolicy</code>.</td></tr>
 <tr><td><code>BLOCK_VALIDATION_GAS_BUDGET</code></td><td><code>uint64</code></td><td>TBD</td><td>Per-block gas budget reserved for <code>0x1D</code> validation calls.</td></tr>
@@ -1373,7 +1373,7 @@ requires: &lt;WIP-NNNN, EIP-NNNN&gt;  # if applicable
 <tr><td><code>MAX_ACCESS_LIST_ENTRIES</code></td><td><code>uint32</code></td><td>TBD</td><td>Maximum number of <a href="https://eips.ethereum.org/EIPS/eip-2930">EIP-2930</a> access-list entries in a <code>0x1D</code> envelope.</td></tr>
 <tr><td><code>MAX_SESSION_SIGNATURE_BYTES</code></td><td><code>uint32</code></td><td>TBD</td><td>Maximum length of the session <code>signature</code> field.</td></tr>
 <tr><td><code>MAX_ADMIN_AUTHORIZATION_BYTES</code></td><td><code>uint32</code></td><td>TBD</td><td>Maximum length of <code>adminAuthorization</code> calldata.</td></tr>
-<tr><td><code>WORLD_ID_1271_SIGNER_FACTORY</code></td><td><code>address</code></td><td>TBD</td><td>Default World ID EIP-1271 signer factory.</td></tr>
+<tr><td><code>MAX_VERIFIER_INSTALL_DATA_BYTES</code></td><td><code>uint32</code></td><td>TBD</td><td>Maximum length of <code>installation</code> in an admin or session verifier configuration.</td></tr>
 <tr><td><code>EDDSA_PRECOMPILE</code></td><td><code>address</code></td><td>TBD</td><td>EdDSA verification precompile address and ABI.</td></tr>
 <tr><td><code>BLS12_381_PRECOMPILE</code></td><td><code>address</code></td><td>TBD</td><td>BLS12-381 verification precompile address and ABI.</td></tr>
 </tbody>
@@ -1404,57 +1404,68 @@ requires: &lt;WIP-NNNN, EIP-NNNN&gt;  # if applicable
 <h3 id="account-state"><a class="header" href="#account-state">Account State</a></h3>
 <p>World Chain accounts are created and managed by <code>WORLD_CHAIN_ACCOUNT_MANAGER</code>.</p>
 <pre><code class="language-solidity">struct Account {
-    address adminSigner;
+    WorldChainAccountVerifier admin;
     bytes32 accountSalt;
-    SessionVerifier[] sessionVerifiers;
+    WorldChainAccountVerifier[] sessionVerifiers;
     bytes32 keyRingHash;
     uint64 adminNonce;
     uint64 transactionNonce;
 }
 
-struct SessionVerifier {
+struct WorldChainAccountVerifier {
     address verifier;
+    bytes installation;
 }
 </code></pre>
 <p>For every existing account:</p>
 <ul>
-<li><code>adminSigner</code> MUST be deployed as an EIP-1271 contract and is immutable for the life of the account address.</li>
-<li><code>sessionVerifiers.length</code> MUST be in <code>[1, MAX_SESSION_VERIFIERS]</code>.</li>
-<li>each <code>SessionVerifier.verifier</code> MUST be a deployed contract adhering to EIP-1271 and <code>IWorldChainSessionVerifier</code>;</li>
+<li>the account address MUST have deployed runtime bytecode whose hash equals <code>WORLD_CHAIN_ACCOUNT_ROUTER_CODE_HASH</code>;</li>
+<li><code>admin.verifier</code> MUST be a deployed EIP-1271 verifier implementation and the full <code>admin</code> value is immutable for the life of the account address;</li>
+<li><code>sessionVerifiers.length</code> MUST be in <code>[1, MAX_SESSION_VERIFIERS]</code>;</li>
+<li>each <code>installation.length</code> in <code>admin</code> and <code>sessionVerifiers</code> MUST be at most <code>MAX_VERIFIER_INSTALL_DATA_BYTES</code>;</li>
+<li>each <code>sessionVerifiers[i].verifier</code> MUST be a deployed EIP-1271 verifier implementation adhering to <code>IWorldChainSessionVerifier</code>;</li>
 <li><code>sessionVerifiers</code> MUST NOT contain duplicate verifier addresses;</li>
 <li><code>keyRingHash == keccak256(abi.encode(sessionVerifiers))</code>;</li>
 <li><code>adminNonce</code> is consumed only by admin operations;</li>
 <li><code>transactionNonce</code> is consumed only by successful <code>0x1D</code> transaction execution attempts;</li>
 </ul>
-<p>After account creation, <code>setKeyRing</code> is the only execution path that mutates <code>sessionVerifiers</code> or <code>keyRingHash</code>.</p>
+<p>Verifier behavior is selected by verifier implementation address, not by a protocol-level enum. <code>installation</code> is opaque to the protocol and is interpreted only by the selected verifier implementation.</p>
+<p>After account creation, <code>setKeyRing</code> is the only execution path that mutates <code>sessionVerifiers</code>, <code>keyRingHash</code>, or validation-affecting account storage for active session verifiers. WIP-1001 defines no operation that mutates <code>admin</code> or the account router runtime code.</p>
 <h4 id="address-derivation"><a class="header" href="#address-derivation">Address Derivation</a></h4>
 <p>The manager derives an account address as:</p>
-<pre><code class="language-solidity">account = address(uint160(uint256(keccak256(abi.encode(
+<pre><code class="language-solidity">adminHash = keccak256(abi.encode(admin));
+
+account = address(uint160(uint256(keccak256(abi.encode(
     WORLD_CHAIN_ACCOUNT_DOMAIN,
     chainId,
     WORLD_CHAIN_ACCOUNT_MANAGER,
-    adminSigner,
+    WORLD_CHAIN_ACCOUNT_ROUTER_CODE_HASH,
+    adminHash,
     accountSalt
 )))));
 </code></pre>
-<p>The address binds the account to the manager instance, chain, admin signer, and salt. WIP-1001 defines no operation that rotates <code>adminSigner</code> for an existing account.</p>
+<p>The address binds the account to the manager instance, chain, account router runtime code, full admin verifier configuration, and salt. WIP-1001 defines no operation that rotates or reinstalls <code>admin</code> for an existing account.</p>
 <h4 id="admin-operation-hashes"><a class="header" href="#admin-operation-hashes">Admin Operation Hashes</a></h4>
 <p>For every admin authorization, the manager computes a domain-separated <code>adminOperationHash</code> and calls:</p>
-<pre><code class="language-solidity">adminSigner.isValidSignature(adminOperationHash, adminAuthorization)
+<pre><code class="language-solidity">IWorldChainAccountRouter(account).isValidSignatureForAdmin(
+    adminOperationHash,
+    adminAuthorization
+)
 </code></pre>
 <p>The hash for each operation is:</p>
 <pre><code class="language-solidity">createHash = keccak256(abi.encode(
-    WORLD_CHAIN_ADMIN_CREATE_DOMAIN,
+    WORLD_CHAIN_ACCOUNT_CREATE_DOMAIN,
     chainId,
     WORLD_CHAIN_ACCOUNT_MANAGER,
+    WORLD_CHAIN_ACCOUNT_ROUTER_CODE_HASH,
     account,
-    adminSigner,
+    adminHash,
     accountSalt,
     keyRingHash
 ));
 
 setKeyRingHash = keccak256(abi.encode(
-    WORLD_CHAIN_SET_KEY_RING_DOMAIN,
+    WORLD_CHAIN_ACCOUNT_SET_DOMAIN,
     chainId,
     WORLD_CHAIN_ACCOUNT_MANAGER,
     account,
@@ -1463,12 +1474,42 @@ setKeyRingHash = keccak256(abi.encode(
     newKeyRingHash
 ));
 </code></pre>
-<h3 id="signer-interfaces"><a class="header" href="#signer-interfaces">Signer Interfaces</a></h3>
-<p>The admin signer has no protocol ABI beyond EIP-1271:</p>
-<pre><code class="language-solidity">interface IWorldChainAdminSigner is IERC1271 {}
+<h3 id="account-router-and-verifier-interfaces"><a class="header" href="#account-router-and-verifier-interfaces">Account Router and Verifier Interfaces</a></h3>
+<p>The account router is the only validation target called by the manager. It dispatches to configured verifier implementations using a single controlled <code>DELEGATECALL</code>, so verifier implementations execute against the account’s storage.</p>
+<pre><code class="language-solidity">interface IWorldChainAccountRouter {
+    function installAdmin(WorldChainAccountVerifier calldata admin) external;
+
+    function installKeyRing(
+        WorldChainAccountVerifier[] calldata sessionVerifiers
+    ) external;
+
+    function isValidSignatureForAdmin(
+        bytes32 hash,
+        bytes calldata signature
+    ) external view returns (bytes4 magicValue);
+
+    function isValidSignatureForVerifier(
+        address verifier,
+        bytes32 hash,
+        bytes calldata signature
+    ) external view returns (bytes4 magicValue);
+
+    function evaluateSessionPolicyForVerifier(
+        address verifier,
+        IWorldChainSessionVerifier.ExecutionTraceContext calldata context
+    ) external view returns (bool allowed);
+}
 </code></pre>
-<p>Session verifier contracts MUST implement EIP-1271 and:</p>
-<pre><code class="language-solidity">interface IWorldChainSessionVerifier is IERC1271 {
+<p><code>installAdmin</code> and <code>installKeyRing</code> MUST reject any caller other than <code>WORLD_CHAIN_ACCOUNT_MANAGER</code>. The account router MUST expose no non-manager path that can mutate validation-affecting verifier storage. <code>isValidSignatureForAdmin</code>, <code>isValidSignatureForVerifier</code>, and <code>evaluateSessionPolicyForVerifier</code> MUST be callable by <code>WORLD_CHAIN_ACCOUNT_MANAGER</code> in restricted validation frames.</p>
+<p>The account router MUST dispatch admin validation only to its installed <code>admin.verifier</code>. It MUST dispatch session validation only to an installed session verifier address; unknown session verifier addresses MUST fail without executing verifier implementation code.</p>
+<p><code>isValidSignatureForAdmin</code> and <code>isValidSignatureForVerifier</code> MUST dispatch using calldata <code>IERC1271.isValidSignature.selector || abi.encode(hash, signature)</code>. <code>evaluateSessionPolicyForVerifier</code> MUST dispatch using calldata <code>IWorldChainSessionVerifier.evaluateSessionPolicy.selector || abi.encode(context)</code>.</p>
+<p>Verifier implementations install scoped storage through the following installation hook:</p>
+<pre><code class="language-solidity">interface IWorldChainAccountHooks {
+    function install(bytes calldata installation) external;
+}
+</code></pre>
+<p>Admin verifier implementations MUST implement EIP-1271 and <code>IWorldChainAccountHooks</code>. Session verifier implementations MUST implement <code>IWorldChainSessionVerifier</code>:</p>
+<pre><code class="language-solidity">interface IWorldChainSessionVerifier is IERC1271, IWorldChainAccountHooks {
     struct AccessListEntry {
         address account;
         bytes32[] storageKeys;
@@ -1538,30 +1579,32 @@ setKeyRingHash = keccak256(abi.encode(
     ) external view returns (bool allowed);
 }
 </code></pre>
+<p><code>installation</code> is verifier-defined. The protocol does not parse it, but it commits to it through <code>adminHash</code>, <code>createHash</code>, and <code>keyRingHash</code>. A verifier implementation’s <code>install</code> function MUST fully write all validation-affecting state implied by <code>installation</code> into the verifier’s own deterministic account-storage namespace. Removed verifier state MAY remain in account storage, but it MUST be unreachable unless that verifier address is installed again through a later <code>setKeyRing</code>.</p>
+<p>Verifier implementations MUST NOT rely on validation-affecting state stored at the verifier implementation address. Validation-affecting state MUST live in account storage installed through the account router.</p>
 <h3 id="manager-interface"><a class="header" href="#manager-interface">Manager Interface</a></h3>
 <p><code>WORLD_CHAIN_ACCOUNT_MANAGER</code> exposes:</p>
 <pre><code class="language-solidity">interface IWorldChainAccountManager {
     function create(
-        address adminSigner,
+        WorldChainAccountVerifier calldata admin,
         bytes32 accountSalt,
-        SessionVerifier[] calldata initialSessionVerifiers,
+        WorldChainAccountVerifier[] calldata initialSessionVerifiers,
         bytes calldata adminAuthorization
     ) external returns (address account);
 
     function setKeyRing(
         address account,
         bytes32 expectedCurrentKeyRingHash,
-        SessionVerifier[] calldata sessionVerifiers,
+        WorldChainAccountVerifier[] calldata sessionVerifiers,
         bytes calldata adminAuthorization
     ) external;
 
-    function getAdminSigner(address account) external view returns (address);
+    function getAdmin(address account) external view returns (WorldChainAccountVerifier memory);
     function getAdminNonce(address account) external view returns (uint64);
     function getTransactionNonce(address account) external view returns (uint64);
     function getKeyRingHash(address account) external view returns (bytes32);
-    function getSessionVerifiers(address account) external view returns (SessionVerifier[] memory);
+    function getSessionVerifiers(address account) external view returns (WorldChainAccountVerifier[] memory);
     function isAuthorizedSessionVerifier(address account, address sessionVerifier) external view returns (bool);
-    function getAuthorizedSessionVerifier(address account, address sessionVerifier) external view returns (SessionVerifier memory);
+    function getAuthorizedSessionVerifier(address account, address sessionVerifier) external view returns (WorldChainAccountVerifier memory);
 }
 </code></pre>
 <h3 id="manager-events"><a class="header" href="#manager-events">Manager Events</a></h3>
@@ -1569,7 +1612,8 @@ setKeyRingHash = keccak256(abi.encode(
 <pre><code class="language-solidity">interface IWorldChainAccountManagerEvents {
     event AccountCreated(
         address indexed account,
-        address indexed adminSigner,
+        address indexed adminVerifier,
+        bytes32 indexed adminHash,
         bytes32 accountSalt,
         bytes32 keyRingHash
     );
@@ -1583,22 +1627,27 @@ setKeyRingHash = keccak256(abi.encode(
 }
 </code></pre>
 <h3 id="manager-state-transitions"><a class="header" href="#manager-state-transitions">Manager State Transitions</a></h3>
-<p>Every admin-mutating method MUST reject <code>adminAuthorization.length &gt; MAX_ADMIN_AUTHORIZATION_BYTES</code>. If any requirement in a manager state transition fails, the method MUST revert without changing account state, incrementing <code>adminNonce</code>, or emitting its state-transition event.</p>
-<p>Admin authorization is valid only when <code>adminSigner.isValidSignature(adminOperationHash, adminAuthorization)</code> succeeds in a restricted validation frame and returns <code>EIP1271_MAGIC_VALUE</code>.</p>
+<p>Every admin-mutating method MUST reject <code>adminAuthorization.length &gt; MAX_ADMIN_AUTHORIZATION_BYTES</code>. It MUST also reject any <code>installation.length &gt; MAX_VERIFIER_INSTALL_DATA_BYTES</code>. If any requirement in a manager state transition fails, the method MUST revert without changing account state, account code, account storage, incrementing <code>adminNonce</code>, or emitting its state-transition event.</p>
+<p>Admin authorization is valid only when <code>IWorldChainAccountRouter(account).isValidSignatureForAdmin(adminOperationHash, adminAuthorization)</code> succeeds in a restricted validation frame and returns <code>EIP1271_MAGIC_VALUE</code>.</p>
+<p>Installing canonical account-router runtime bytecode is a native manager state transition. It MUST NOT execute account-supplied init code and MUST NOT be represented as an EVM <code>CREATE</code> or <code>CREATE2</code> from the manager.</p>
 <h4 id="create"><a class="header" href="#create"><code>create</code></a></h4>
 <p><code>create</code> MUST:</p>
 <ol>
-<li>reject <code>adminSigner == address(0)</code>;</li>
-<li>require <code>adminSigner</code> and each initial session verifier to have deployed code;</li>
+<li>reject <code>admin.verifier == address(0)</code>;</li>
+<li>require <code>admin.verifier</code> and each initial session verifier to have deployed code;</li>
 <li>require <code>initialSessionVerifiers.length</code> to be in <code>[1, MAX_SESSION_VERIFIERS]</code>;</li>
 <li>reject duplicate or zero session verifier addresses;</li>
+<li>reject oversized <code>admin.installation</code> or session verifier <code>installation</code>;</li>
+<li>compute <code>adminHash = keccak256(abi.encode(admin))</code>;</li>
 <li>derive <code>account</code>;</li>
-<li>reject if <code>account</code> already exists;</li>
+<li>reject if <code>account</code> already exists or already has deployed code;</li>
 <li>compute <code>keyRingHash = keccak256(abi.encode(initialSessionVerifiers))</code>;</li>
-<li>verify <code>createHash</code> through <code>adminSigner</code>;</li>
-<li>if <code>WORLD_ID_1271_SIGNER_FACTORY.isFactorySigner(adminSigner) == true</code>, require <code>IWorldIDAdminSigner(adminSigner).account() == account</code>;</li>
-<li>initialize account state with <code>adminNonce = 0</code>, <code>transactionNonce = 0</code>, <code>sessionVerifiers = initialSessionVerifiers</code>, and <code>keyRingHash</code>;</li>
-<li>emit <code>AccountCreated(account, adminSigner, accountSalt, keyRingHash)</code>.</li>
+<li>atomically install canonical account-router runtime bytecode at <code>account</code>;</li>
+<li>call <code>IWorldChainAccountRouter(account).installAdmin(admin)</code>;</li>
+<li>call <code>IWorldChainAccountRouter(account).installKeyRing(initialSessionVerifiers)</code>;</li>
+<li>verify <code>createHash</code> through the account router’s admin validation path;</li>
+<li>initialize manager state with <code>admin</code>, <code>adminNonce = 0</code>, <code>transactionNonce = 0</code>, <code>sessionVerifiers = initialSessionVerifiers</code>, and <code>keyRingHash</code>;</li>
+<li>emit <code>AccountCreated(account, admin.verifier, adminHash, accountSalt, keyRingHash)</code>.</li>
 </ol>
 <h4 id="setkeyring"><a class="header" href="#setkeyring"><code>setKeyRing</code></a></h4>
 <p><code>setKeyRing</code> is the only post-creation method that mutates the key ring and MUST:</p>
@@ -1606,11 +1655,12 @@ setKeyRingHash = keccak256(abi.encode(
 <li>require <code>account</code> to exist;</li>
 <li>require <code>expectedCurrentKeyRingHash == keyRingHash</code>;</li>
 <li>require <code>sessionVerifiers.length</code> to be in <code>[1, MAX_SESSION_VERIFIERS]</code>;</li>
-<li>reject duplicate, zero, or undeployed session verifier addresses;</li>
+<li>reject duplicate, zero, undeployed, or oversized session verifier entries;</li>
 <li>compute <code>newKeyRingHash = keccak256(abi.encode(sessionVerifiers))</code>;</li>
 <li>reject <code>newKeyRingHash == keyRingHash</code>;</li>
 <li>compute <code>setKeyRingHash</code> using the current <code>adminNonce</code>;</li>
-<li>verify <code>setKeyRingHash</code> through <code>adminSigner</code>;</li>
+<li>verify <code>setKeyRingHash</code> through the account router’s admin validation path;</li>
+<li>call <code>IWorldChainAccountRouter(account).installKeyRing(sessionVerifiers)</code>;</li>
 <li>set <code>previousKeyRingHash = keyRingHash</code>;</li>
 <li>replace the account’s full <code>sessionVerifiers</code> set with the supplied <code>sessionVerifiers</code>;</li>
 <li>set <code>keyRingHash = newKeyRingHash</code>;</li>
