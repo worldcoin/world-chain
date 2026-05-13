@@ -38,6 +38,12 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     /// @dev Fixed at zero — subsidy has no recency requirement on credential issuance.
     uint256 public constant CREDENTIAL_GENESIS_ISSUED_AT_MIN = 0;
 
+    /// @notice Verifier `issuerSchemaId` public input bound into Session Proofs that are not
+    ///         claiming a credential (currently `setAuthorized`). Session Proofs prove
+    ///         continuity with the stored `sessionId`; the schema field is committed-but-unused
+    ///         and pinned here to a deterministic sentinel so authenticator and contract agree.
+    uint64 public constant SESSION_PROOF_SCHEMA_ID = 0;
+
     /// @notice Domain tag bound into the `claimSubsidy` signal struct.
     bytes32 public constant CLAIM_SUBSIDY_TAG = "CLAIM_SUBSIDY";
 
@@ -198,13 +204,50 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     }
 
     /// @inheritdoc ISubsidyAccounting
-    function setAuthorized(uint256, uint64, address[] calldata, uint256, uint256, uint256[5] calldata)
-        external
-        virtual
-        onlyProxy
-        nonReentrant
-    {
-        revert NotImplemented();
+    function setAuthorized(
+        uint256 nullifier,
+        uint64 nonce,
+        address[] calldata newSet,
+        uint256 sessionNullifier,
+        uint256 sessionAction,
+        uint256[5] calldata proof
+    ) external virtual onlyProxy nonReentrant {
+        uint64 period = currentPeriod();
+        uint256 action = _actionForPeriod(period);
+        SubsidyRecord storage r = records[action][nullifier];
+        if (r.periodNumber != period) revert RecordDoesNotExist();
+        if (nonce != r.updateNonce) revert StaleUpdateNonce(nonce, r.updateNonce);
+
+        uint256 signalHash = uint256(
+            keccak256(
+                abi.encode(
+                    SetAuthorizedSignal({
+                        tag: SET_AUTHORIZED_TAG,
+                        nullifier: nullifier,
+                        nonce: nonce,
+                        newSet: newSet,
+                        msgSender: msg.sender
+                    })
+                )
+            )
+        ) >> 8;
+
+        uint256[2] memory sessionInputs = [sessionNullifier, sessionAction];
+        worldIDVerifier.verifySession(
+            WORLD_CHAIN_RP_ID,
+            PROOF_NONCE,
+            signalHash,
+            period * PERIOD_LENGTH,
+            SESSION_PROOF_SCHEMA_ID,
+            CREDENTIAL_GENESIS_ISSUED_AT_MIN,
+            r.sessionId,
+            sessionInputs,
+            proof
+        );
+
+        _replaceAuthorized(action, nullifier, newSet);
+        ++r.updateNonce;
+        emit AuthorizedSetUpdated(nullifier, newSet);
     }
 
     ///////////////////////////////////////////////////////////////////////////////
@@ -332,6 +375,28 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
                 items[i].proof
             );
         }
+    }
+
+    /// @dev Full-replace the authorized set under `(action, nullifier)` with `newSet`.
+    ///      Drops `nullifier` from every old address's reverse index via swap-pop, deletes
+    ///      the old forward set, then appends `newSet` with the same checks as `_addAddresses`.
+    function _replaceAuthorized(uint256 action, uint256 nullifier, address[] calldata newSet) internal {
+        address[] storage authSet = authorized[action][nullifier];
+        uint256 oldLen = authSet.length;
+        for (uint256 i = 0; i < oldLen; ++i) {
+            address oldAddr = authSet[i];
+            uint256[] storage rev = nullifiersOf[action][oldAddr];
+            uint256 rlen = rev.length;
+            for (uint256 j = 0; j < rlen; ++j) {
+                if (rev[j] == nullifier) {
+                    rev[j] = rev[rlen - 1];
+                    rev.pop();
+                    break;
+                }
+            }
+        }
+        delete authorized[action][nullifier];
+        _addAddresses(action, nullifier, newSet);
     }
 
     /// @dev Append `addrs` to the authorized set under `(action, nullifier)` and to each

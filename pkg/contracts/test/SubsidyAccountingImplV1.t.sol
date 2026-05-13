@@ -202,11 +202,11 @@ contract SubsidyAccountingImplV1Test is Test {
         subsidy.claimAdditionalCredential(0, 0, 0, 0, proof);
     }
 
-    function test_setAuthorized_revertsNotImplemented() public {
+    function test_setAuthorized_revertsRecordDoesNotExist_whenAbsent() public {
         address[] memory empty = new address[](0);
         uint256[5] memory proof;
-        vm.expectRevert(ISubsidyAccounting.NotImplemented.selector);
-        subsidy.setAuthorized(0, 0, empty, 0, 0, proof);
+        vm.expectRevert(ISubsidyAccounting.RecordDoesNotExist.selector);
+        subsidy.setAuthorized(0xDEAD, 0, empty, 0, 0, proof);
     }
 
     ///////////////////////////////////////////////////////////////////////////////
