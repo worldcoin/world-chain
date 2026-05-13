@@ -10,7 +10,7 @@ use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_core::node_config::NodeConfig;
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{
-    HeaderProvider, ProviderFactory,
+    BlockNumReader, HeaderProvider, ProviderFactory,
     providers::{BlockchainProvider, RocksDBProvider, StaticFileProviderBuilder},
 };
 use reth_tasks::Runtime as RethRuntime;
@@ -32,6 +32,14 @@ use world_chain_validator::{
 /// Change this constant locally when switching the captured mainnet block used
 /// by the bench. The block selection is intentionally not configurable at
 /// runtime so Criterion runs are deterministic and easy to compare.
+///
+/// IMPORTANT: the node database referenced by [`DATADIR_ENV`] (or the platform
+/// default datadir) MUST be unwound to exactly `BENCH_BLOCK_NUMBER - 1` before
+/// running this bench. Otherwise state lookups go through
+/// `HistoricalStateProvider` instead of the latest in-memory canonical state,
+/// which can inflate measurements by an order of magnitude and makes results
+/// not comparable to live validator timings. The bench asserts this at
+/// startup.
 const BENCH_BLOCK_NUMBER: u64 = 29669201;
 const SAMPLE_SIZE: usize = 10;
 
@@ -215,7 +223,7 @@ fn decode_stored_flashblock(
     Ok(flashblock)
 }
 
-fn assert_parent_header_is_available(
+fn assert_node_is_unwound_to_bench_parent(
     provider: &MainnetProvider,
     flashblocks: &[FlashblocksPayloadV1],
 ) -> eyre::Result<()> {
@@ -224,13 +232,32 @@ fn assert_parent_header_is_available(
         .and_then(|flashblock| flashblock.base.as_ref())
         .ok_or_else(|| eyre!("first stored flashblock has no base"))?;
 
-    // This is the most useful early failure: the benchmark requires the node DB
-    // to already contain the parent state of the measured block.
+    // The benchmark requires the node DB to already contain the parent state
+    // of the measured block.
     ensure!(
         provider.sealed_header_by_hash(base.parent_hash)?.is_some(),
         "node database does not contain parent header {} for block {}",
         base.parent_hash,
         base.block_number
+    );
+
+    // The canonical tip MUST be exactly `BENCH_BLOCK_NUMBER - 1`. If the node
+    // is ahead of the bench block, `BlockchainProvider` serves state reads
+    // through `HistoricalStateProvider`, which skips the in-memory canonical
+    // state cache and performs significantly more trie work per read. Empirically
+    // this inflates the bench by ~10x and makes results incomparable to a live
+    // validator that always sees the bench block's parent as the canonical tip.
+    let tip = provider.best_block_number()?;
+    let expected_tip = base
+        .block_number
+        .checked_sub(1)
+        .ok_or_else(|| eyre!("bench block number {} has no parent", base.block_number))?;
+    ensure!(
+        tip == expected_tip,
+        "node is at block {tip}, but the bench requires it to be unwound to exactly \
+         block {expected_tip} (parent of bench block {}). Run \
+         `reth stage unwind to-block {expected_tip}` (or equivalent) and retry.",
+        base.block_number,
     );
 
     Ok(())
@@ -245,8 +272,8 @@ fn bench_process_flashblock_mainnet_block(c: &mut Criterion) {
         .expect("failed to open default World Chain mainnet node database");
     let stored = load_flashblocks_for_block(paths.flashblocks_db, BENCH_BLOCK_NUMBER)
         .expect("failed to load stored flashblocks from default flashblocks database");
-    assert_parent_header_is_available(&provider, &stored.flashblocks)
-        .expect("node database is not synced to the measured block parent");
+    assert_node_is_unwound_to_bench_parent(&provider, &stored.flashblocks)
+        .expect("node database is not unwound to the parent of the measured block");
 
     println!(
         "flashblock_validation_mainnet: block {BENCH_BLOCK_NUMBER} contains {} flashblocks",
