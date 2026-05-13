@@ -53,8 +53,8 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     /// @notice Domain tag bound into the `claimAdditionalCredential` signal struct.
     bytes32 public constant CLAIM_ADDITIONAL_CREDENTIAL_TAG = "CLAIM_ADDITIONAL_CREDENTIAL";
 
-    /// @notice Domain tag bound into the `updateAddresses` signal struct.
-    bytes32 public constant UPDATE_ADDRESSES_TAG = "UPDATE_ADDRESSES";
+    /// @notice Domain tag bound into the `setAuthorized` signal struct.
+    bytes32 public constant SET_AUTHORIZED_TAG = "SET_AUTHORIZED";
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  TYPES                                  ///
@@ -176,14 +176,12 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     }
 
     /// @inheritdoc ISubsidyAccounting
-    function updateAddresses(
-        uint256,
-        uint256,
-        address[] calldata,
-        address[] calldata,
-        uint256[2] calldata,
-        uint256[5] calldata
-    ) external virtual onlyProxy nonReentrant {
+    function setAuthorized(uint256, uint64, address[] calldata, uint256, uint256, uint256[5] calldata)
+        external
+        virtual
+        onlyProxy
+        nonReentrant
+    {
         revert NotImplemented();
     }
 

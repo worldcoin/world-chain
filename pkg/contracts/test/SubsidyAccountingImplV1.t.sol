@@ -216,12 +216,11 @@ contract SubsidyAccountingImplV1Test is Test {
         subsidy.claimAdditionalCredential(0, 0, sessionNullifier, proof);
     }
 
-    function test_updateAddresses_revertsNotImplemented() public {
+    function test_setAuthorized_revertsNotImplemented() public {
         address[] memory empty = new address[](0);
-        uint256[2] memory sessionNullifier;
         uint256[5] memory proof;
         vm.expectRevert(ISubsidyAccounting.NotImplemented.selector);
-        subsidy.updateAddresses(0, 0, empty, empty, sessionNullifier, proof);
+        subsidy.setAuthorized(0, 0, empty, 0, 0, proof);
     }
 
     ///////////////////////////////////////////////////////////////////////////////

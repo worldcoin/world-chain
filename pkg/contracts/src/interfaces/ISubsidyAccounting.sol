@@ -55,10 +55,9 @@ interface ISubsidyAccounting {
     /// @notice Emitted when an additional credential is claimed under an existing record.
     event AdditionalCredentialClaimed(uint256 indexed nullifier, uint64 indexed issuerSchemaId, uint256 budgetWei);
 
-    /// @notice Emitted when the authorized-address set of a record is mutated.
-    event AddressesUpdated(
-        uint256 indexed nullifier, uint64 newUpdateNonce, address[] addedAddresses, address[] removedAddresses
-    );
+    /// @notice Emitted when the authorized-address set of a record is replaced. Carries the
+    ///         post-update set in full; consumers SHOULD NOT diff against prior state.
+    event AuthorizedSetUpdated(uint256 indexed nullifier, address[] newSet);
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                                 ERRORS                                  ///
@@ -71,9 +70,6 @@ interface ISubsidyAccounting {
     /// @dev The verifier interface and storage use `uint64`; oversized values are rejected
     ///      at the public boundary rather than silently truncated.
     error IssuerSchemaIdOverflow(uint256 value);
-
-    /// @notice Thrown when an `updateAddresses` `nonce` exceeds `type(uint64).max`.
-    error UpdateNonceOverflow(uint256 value);
 
     /// @notice Thrown by entry points whose body has not yet been ported in. Skeleton-entry
     ///         placeholder; replaced by real bodies in follow-up entries on the shared PR.
@@ -146,16 +142,19 @@ interface ISubsidyAccounting {
         uint256[5] calldata proof
     ) external;
 
-    /// @notice Mutates the authorized-address set for an existing record. Verifies a
-    ///         Session Proof against the stored `sessionId` for `nullifier`.
+    /// @notice Full-replaces the authorized-address set for an existing record. Idempotent at
+    ///         the API level. Empty `newSet` revokes all addresses. Verifies a Session Proof
+    ///         against the stored `sessionId` for `nullifier`.
     /// @dev `nonce` MUST equal the record's monotonic `updateNonce`; the record's nonce is
-    ///      bumped on success, invalidating any earlier Session Proof for an address update.
-    function updateAddresses(
+    ///      bumped on success, invalidating any earlier Session Proof for a set replacement.
+    ///      `sessionNullifier` and `sessionAction` are the two per-proof public inputs
+    ///      `verifySession` consumes; both flow through unmodified.
+    function setAuthorized(
         uint256 nullifier,
-        uint256 nonce,
-        address[] calldata addAddresses,
-        address[] calldata removeAddresses,
-        uint256[2] calldata sessionNullifier,
+        uint64 nonce,
+        address[] calldata newSet,
+        uint256 sessionNullifier,
+        uint256 sessionAction,
         uint256[5] calldata proof
     ) external;
 
