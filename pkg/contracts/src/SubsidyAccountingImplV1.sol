@@ -85,9 +85,6 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     /// @notice The World ID verifier proxy address.
     IWorldIDVerifier public worldIDVerifier;
 
-    /// @notice Address authorized to call `consumeBudget`. Zero address disables consumption.
-    address public budgetConsumer;
-
     /// @notice Per-credential governance-set budget allocation in Wei.
     mapping(uint64 issuerSchemaId => uint256 budgetWei) public credentialBudget;
 
@@ -105,16 +102,6 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     /// @notice Reverse index from authorized account address to the set of `nullifier`
     ///         records it may draw budget from. Capped at `MAX_NULLIFIERS_PER_ADDRESS`.
     mapping(address account => EnumerableSet.UintSet) internal nullifiersOf;
-
-    ///////////////////////////////////////////////////////////////////////////////
-    ///                                MODIFIERS                                ///
-    ///////////////////////////////////////////////////////////////////////////////
-
-    /// @dev Restricts the caller to the configured `budgetConsumer`.
-    modifier onlyBudgetConsumer() {
-        if (msg.sender != budgetConsumer) revert NotBudgetConsumer();
-        _;
-    }
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                              CONSTRUCTION                               ///
@@ -200,11 +187,6 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
         revert NotImplemented();
     }
 
-    /// @inheritdoc ISubsidyAccounting
-    function consumeBudget(address, uint256, uint256) external virtual onlyProxy nonReentrant onlyBudgetConsumer {
-        revert NotImplemented();
-    }
-
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  VIEWS                                  ///
     ///////////////////////////////////////////////////////////////////////////////
@@ -255,12 +237,6 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
         if (address(worldIDVerifier_) == address(0)) revert AddressZero();
         worldIDVerifier = worldIDVerifier_;
         emit WorldIDVerifierSet(address(worldIDVerifier_));
-    }
-
-    /// @inheritdoc ISubsidyAccounting
-    function setBudgetConsumer(address budgetConsumer_) external virtual onlyProxy onlyOwner {
-        budgetConsumer = budgetConsumer_;
-        emit BudgetConsumerSet(budgetConsumer_);
     }
 
     /// @inheritdoc ISubsidyAccounting

@@ -23,11 +23,9 @@ contract SubsidyAccountingImplV1Test is Test {
 
     address internal constant OWNER = address(0xC0FFEE);
     address internal constant ATTACKER = address(0xBAD);
-    address internal constant CONSUMER = address(0xC0);
 
     event SubsidyAccountingImplInitialized(IWorldIDVerifier indexed worldIDVerifier, address indexed owner);
     event WorldIDVerifierSet(address indexed worldIDVerifier);
-    event BudgetConsumerSet(address indexed budgetConsumer);
     event CredentialBudgetSet(uint64 indexed issuerSchemaId, uint256 budgetWei);
     event SubsidyClaimed(
         uint256 indexed nullifier, uint256 indexed sessionId, uint64 periodNumber, uint256 totalBudgetWei
@@ -66,7 +64,6 @@ contract SubsidyAccountingImplV1Test is Test {
 
         assertEq(address(fresh.worldIDVerifier()), address(verifier), "verifier persisted");
         assertEq(fresh.owner(), OWNER, "owner persisted");
-        assertEq(fresh.budgetConsumer(), address(0), "consumer defaults to zero");
     }
 
     function test_initialize_revertIf_zeroVerifier() public {
@@ -122,39 +119,6 @@ contract SubsidyAccountingImplV1Test is Test {
         vm.prank(OWNER);
         vm.expectRevert(ISubsidyAccounting.AddressZero.selector);
         subsidy.setWorldIDVerifier(IWorldIDVerifier(address(0)));
-    }
-
-    ///////////////////////////////////////////////////////////////////////////////
-    ///                          ADMIN: setBudgetConsumer                       ///
-    ///////////////////////////////////////////////////////////////////////////////
-
-    function test_setBudgetConsumer_byOwner_persists_andEmits() public {
-        vm.expectEmit(true, true, true, true, address(subsidy));
-        emit BudgetConsumerSet(CONSUMER);
-
-        vm.prank(OWNER);
-        subsidy.setBudgetConsumer(CONSUMER);
-
-        assertEq(subsidy.budgetConsumer(), CONSUMER);
-    }
-
-    function test_setBudgetConsumer_zeroAddressAllowed() public {
-        vm.prank(OWNER);
-        subsidy.setBudgetConsumer(CONSUMER);
-        assertEq(subsidy.budgetConsumer(), CONSUMER);
-
-        vm.expectEmit(true, true, true, true, address(subsidy));
-        emit BudgetConsumerSet(address(0));
-
-        vm.prank(OWNER);
-        subsidy.setBudgetConsumer(address(0));
-        assertEq(subsidy.budgetConsumer(), address(0), "deprovisioning is permitted");
-    }
-
-    function test_setBudgetConsumer_revertIf_notOwner() public {
-        vm.prank(ATTACKER);
-        vm.expectRevert(abi.encodeWithSelector(OwnableUpgradeable.OwnableUnauthorizedAccount.selector, ATTACKER));
-        subsidy.setBudgetConsumer(CONSUMER);
     }
 
     ///////////////////////////////////////////////////////////////////////////////
@@ -258,25 +222,6 @@ contract SubsidyAccountingImplV1Test is Test {
         uint256[5] memory proof;
         vm.expectRevert(ISubsidyAccounting.NotImplemented.selector);
         subsidy.updateAddresses(0, 0, empty, empty, sessionNullifier, proof);
-    }
-
-    function test_consumeBudget_revertsNotImplemented_whenCalledByConsumer() public {
-        // Authorize a consumer first so we hit the NotImplemented stub, not the ACL.
-        vm.prank(OWNER);
-        subsidy.setBudgetConsumer(CONSUMER);
-
-        vm.prank(CONSUMER);
-        vm.expectRevert(ISubsidyAccounting.NotImplemented.selector);
-        subsidy.consumeBudget(address(0x1234), 21000, 1 gwei);
-    }
-
-    function test_consumeBudget_revertsNotBudgetConsumer_whenCalledByOther() public {
-        vm.prank(OWNER);
-        subsidy.setBudgetConsumer(CONSUMER);
-
-        vm.prank(ATTACKER);
-        vm.expectRevert(ISubsidyAccounting.NotBudgetConsumer.selector);
-        subsidy.consumeBudget(address(0x1234), 21000, 1 gwei);
     }
 
     ///////////////////////////////////////////////////////////////////////////////

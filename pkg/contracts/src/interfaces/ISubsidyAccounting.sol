@@ -44,10 +44,6 @@ interface ISubsidyAccounting {
     /// @notice Emitted when the World ID verifier address is set or replaced.
     event WorldIDVerifierSet(address indexed worldIDVerifier);
 
-    /// @notice Emitted when the budget-consumer address is set or replaced.
-    /// @dev Zero address is a valid value — used to deprovision the consumer role.
-    event BudgetConsumerSet(address indexed budgetConsumer);
-
     /// @notice Emitted when the per-credential budget is configured.
     event CredentialBudgetSet(uint64 indexed issuerSchemaId, uint256 budgetWei);
 
@@ -83,9 +79,6 @@ interface ISubsidyAccounting {
     ///         placeholder; replaced by real bodies in follow-up entries on the shared PR.
     error NotImplemented();
 
-    /// @notice Thrown when `consumeBudget` is called by an address other than `budgetConsumer`.
-    error NotBudgetConsumer();
-
     /// @notice Thrown when `claimSubsidy` is called with an empty `items` array.
     error EmptyItems();
 
@@ -119,10 +112,6 @@ interface ISubsidyAccounting {
     /// @notice Thrown when the summed per-credential budget for a `claimSubsidy` call
     ///         exceeds `type(uint128).max`, which is the on-chain `remainingWei` width.
     error BudgetOverflow(uint256 totalWei);
-
-    /// @notice Thrown when `consumeBudget` is called for an account with no current-period
-    ///         records (or only zero-budget records).
-    error NoBudget(address account);
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                              EXTERNAL API                               ///
@@ -170,18 +159,6 @@ interface ISubsidyAccounting {
         uint256[5] calldata proof
     ) external;
 
-    /// @notice Consume budget for `account` at transaction-execution time, drawing from
-    ///         every current-period record the account is authorized under.
-    /// @dev Restricted to `budgetConsumer`. Computes `charge = gasUsed * effectiveGasPrice`,
-    ///      walks the account's authorised nullifier set in insertion order from index 0,
-    ///      and charges each non-empty current-period record in turn until `charge` is
-    ///      fully consumed or every record is exhausted. `effectiveGasPrice` is the full
-    ///      per-gas fee paid (EIP-1559: `min(maxFeePerGas, baseFee + maxPriorityFeePerGas)`),
-    ///      so both base and priority components are subsidised.
-    /// @dev Worst case is bounded by `MAX_NULLIFIERS_PER_ADDRESS`. Insertion order is
-    ///      determined entirely by claim sequence — no per-tx selection knob.
-    function consumeBudget(address account, uint256 gasUsed, uint256 effectiveGasPrice) external;
-
     /// @notice Get remaining subsidy budget (in Wei) for a record in the current period.
     /// @return remainingWei Returns 0 if the record is absent or expired.
     function getBudget(uint256 nullifier) external view returns (uint256 remainingWei);
@@ -209,10 +186,6 @@ interface ISubsidyAccounting {
 
     /// @notice Set the claimable budget for a credential type. Owner-only.
     function setCredentialBudget(uint256 issuerSchemaId, uint256 budgetWei) external;
-
-    /// @notice Set the address authorized to call `consumeBudget`. Owner-only.
-    /// @dev Zero address is valid — disables consumption until set again.
-    function setBudgetConsumer(address budgetConsumer) external;
 
     /// @notice Replace the World ID verifier. Owner-only. MUST revert on zero address.
     function setWorldIDVerifier(IWorldIDVerifier worldIDVerifier) external;
