@@ -22,7 +22,9 @@ use world_chain_node::context::WorldChainDefaultContext;
 use world_chain_primitives::{p2p::Authorization, payload_id::force_op_payload_id_v3};
 use world_chain_test_utils::e2e_harness::{
     actions::EngineDriver,
-    setup::{TX_SET_L1_BLOCK, build_payload_attributes, encode_eip1559_params, setup},
+    setup::{
+        TX_SET_L1_BLOCK, WorldChainTestBuilder, build_payload_attributes, encode_eip1559_params,
+    },
 };
 
 /// Launch a local World Chain playground.
@@ -63,12 +65,12 @@ pub async fn run(args: Args) -> Result<()> {
     );
 
     // Spawn node swarm
-    let (_, nodes, _tasks, mut env, tx_spammer) = setup::<WorldChainDefaultContext>(
-        args.nodes,
-        optimism_payload_attributes,
-        args.flashblocks,
-    )
-    .await?;
+    let (_, nodes, _tasks, mut env, tx_spammer) = WorldChainTestBuilder::builder()
+        .nodes(args.nodes)
+        .flashblocks(args.flashblocks)
+        .build()
+        .setup_with::<WorldChainDefaultContext, _>(optimism_payload_attributes)
+        .await?;
 
     // Print RPC endpoints
     for (i, node) in nodes.iter().enumerate() {
