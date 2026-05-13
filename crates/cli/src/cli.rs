@@ -489,7 +489,7 @@ mod tests {
         ])
         .world;
 
-        let spec = reth_optimism_chainspec::OpChainSpec::from_genesis(Genesis::default());
+        let spec = WorldChainSpec::from_genesis(Genesis::default());
         let mut node_config = NodeConfig::new(Arc::new(spec));
         let expected_path = node_config
             .datadir()
