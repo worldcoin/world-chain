@@ -13689,7 +13689,6 @@ dependencies = [
  "reth-network",
  "reth-network-api",
  "reth-network-peers",
- "reth-primitives-traits",
  "reth-provider",
  "reth-tasks",
  "serde",

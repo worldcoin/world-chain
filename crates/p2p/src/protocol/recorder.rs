@@ -14,11 +14,9 @@ use reth_db::{
 };
 use reth_db_api::{
     DatabaseError,
-    cursor::{DbCursorRW, DbDupCursorRO},
     table::{Compress, Decode, Decompress, Encode},
     transaction::{DbTx, DbTxMut},
 };
-use reth_primitives_traits::ValueWithSubKey;
 use std::{fmt, fs, path::PathBuf, time::Duration};
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
@@ -31,11 +29,11 @@ type RecorderResult<T> = Result<T, FlashblocksRecorderError>;
 
 /// Dedicated libmdbx tables used by the flashblocks recorder.
 pub mod tables {
-    use super::{StoredFlashblock, StoredPayloadId};
+    use super::{StoredFlashblockKey, StoredFlashblockPayload, StoredPayloadId};
     use alloy_primitives::BlockNumber;
     use reth_db_api::{
         TableSet,
-        table::{DupSort, TableInfo},
+        table::TableInfo,
         tables,
         tables::{TableType, TableViewer},
     };
@@ -43,10 +41,13 @@ pub mod tables {
 
     tables! {
         /// Stores accepted flashblocks by payload id and flashblock index.
-        table Flashblocks {
-            type Key = StoredPayloadId;
-            type Value = StoredFlashblock;
-            type SubKey = u64;
+        ///
+        /// This intentionally uses a normal table rather than a dupsort table:
+        /// MDBX applies key-like size limits to duplicate values, while real
+        /// mainnet flashblock payloads can be much larger than that.
+        table FlashblocksByPayloadIdAndIndex {
+            type Key = StoredFlashblockKey;
+            type Value = StoredFlashblockPayload;
         }
 
         /// Maps a block number to the payload id observed on that block's base flashblock.
@@ -77,35 +78,9 @@ enum FlashblocksRecorderError {
         #[source]
         source: DatabaseError,
     },
-    #[error("failed to open flashblocks recorder dupsort cursor: {source}")]
-    OpenFlashblocksCursor {
-        #[source]
-        source: DatabaseError,
-    },
-    #[error(
-        "failed to seek existing flashblock payload_id={payload_id} flashblock_index={flashblock_index}: {source}"
-    )]
-    SeekExistingFlashblock {
-        payload_id: StoredPayloadId,
-        flashblock_index: u64,
-        #[source]
-        source: DatabaseError,
-    },
-    #[error(
-        "failed to delete existing flashblock payload_id={payload_id} flashblock_index={flashblock_index}: {source}"
-    )]
-    DeleteExistingFlashblock {
-        payload_id: StoredPayloadId,
-        flashblock_index: u64,
-        #[source]
-        source: DatabaseError,
-    },
-    #[error(
-        "failed to insert flashblock payload_id={payload_id} flashblock_index={flashblock_index}: {source}"
-    )]
+    #[error("failed to insert flashblock {key}: {source}")]
     InsertFlashblock {
-        payload_id: StoredPayloadId,
-        flashblock_index: u64,
+        key: StoredFlashblockKey,
         #[source]
         source: DatabaseError,
     },
@@ -253,28 +228,127 @@ impl Decompress for StoredPayloadId {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum StoredFlashblockDecodeError {
-    #[error("stored flashblock value is too short: expected at least 8 bytes, got {len}")]
-    TooShort { len: usize },
+enum StoredFlashblockKeyDecodeError {
+    #[error("stored flashblock key must be 16 bytes, got {len}")]
+    InvalidLength { len: usize },
 }
 
-/// Value stored in the [`tables::Flashblocks`] dupsort table.
+/// Database key for a stored flashblock.
 ///
-/// libmdbx sorts and seeks duplicate entries by the duplicate value bytes. The
-/// encoded representation therefore starts with the flashblock index in
-/// big-endian order, followed by the RLP-encoded [`FlashblocksPayloadV1`].
+/// The encoded representation is `payload_id || index_be`, which keeps all
+/// flashblocks for the same payload adjacent and ordered by flashblock index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct StoredFlashblockKey {
+    payload_id: StoredPayloadId,
+    index: u64,
+}
+
+impl StoredFlashblockKey {
+    /// Creates a stored flashblock key.
+    pub const fn new(payload_id: StoredPayloadId, index: u64) -> Self {
+        Self { payload_id, index }
+    }
+
+    /// Returns the payload id component.
+    pub const fn payload_id(self) -> StoredPayloadId {
+        self.payload_id
+    }
+
+    /// Returns the flashblock index component.
+    pub const fn index(self) -> u64 {
+        self.index
+    }
+}
+
+impl fmt::Display for StoredFlashblockKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "payload_id={} flashblock_index={}",
+            self.payload_id, self.index
+        )
+    }
+}
+
+impl PartialOrd for StoredFlashblockKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for StoredFlashblockKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.payload_id
+            .cmp(&other.payload_id)
+            .then_with(|| self.index.cmp(&other.index))
+    }
+}
+
+impl Encode for StoredFlashblockKey {
+    type Encoded = [u8; 16];
+
+    fn encode(self) -> Self::Encoded {
+        let mut encoded = [0u8; 16];
+        encoded[..8].copy_from_slice(self.payload_id.as_slice());
+        encoded[8..].copy_from_slice(&self.index.to_be_bytes());
+        encoded
+    }
+}
+
+impl Decode for StoredFlashblockKey {
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        let bytes = <[u8; 16]>::try_from(value).map_err(|_| DatabaseError::Decode)?;
+        let payload_id = StoredPayloadId::from(
+            <[u8; 8]>::try_from(&bytes[..8]).expect("slice length checked above"),
+        );
+        let index = u64::from_be_bytes(bytes[8..].try_into().expect("slice length checked above"));
+
+        Ok(Self { payload_id, index })
+    }
+}
+
+impl Compress for StoredFlashblockKey {
+    type Compressed = Vec<u8>;
+
+    fn uncompressable_ref(&self) -> Option<&[u8]> {
+        None
+    }
+
+    fn compress_to_buf<B: BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
+        buf.put_slice(&self.encode());
+    }
+}
+
+impl Decompress for StoredFlashblockKey {
+    fn decompress(value: &[u8]) -> Result<Self, DecompressError> {
+        let bytes = <[u8; 16]>::try_from(value).map_err(|_| {
+            DecompressError::new(StoredFlashblockKeyDecodeError::InvalidLength { len: value.len() })
+        })?;
+
+        Ok(Self {
+            payload_id: StoredPayloadId::from(
+                <[u8; 8]>::try_from(&bytes[..8]).expect("slice length checked above"),
+            ),
+            index: u64::from_be_bytes(bytes[8..].try_into().expect("slice length checked above")),
+        })
+    }
+}
+
+/// Value stored in [`tables::FlashblocksByPayloadIdAndIndex`].
+///
+/// The value is only the RLP-encoded [`FlashblocksPayloadV1`]. The payload id
+/// and flashblock index live in the table key so MDBX never treats this large
+/// byte blob as a dupsort duplicate value.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
-pub struct StoredFlashblock {
-    /// Flashblock index within the payload.
-    pub index: u64,
+pub struct StoredFlashblockPayload {
     /// RLP bytes for the original [`FlashblocksPayloadV1`].
     pub payload_rlp: Bytes,
 }
 
-impl StoredFlashblock {
-    /// Creates a stored flashblock value.
-    pub const fn new(index: u64, payload_rlp: Bytes) -> Self {
-        Self { index, payload_rlp }
+impl StoredFlashblockPayload {
+    /// Creates a stored flashblock payload value.
+    pub const fn new(payload_rlp: Bytes) -> Self {
+        Self { payload_rlp }
     }
 
     /// Returns the RLP bytes for the original [`FlashblocksPayloadV1`].
@@ -283,32 +357,23 @@ impl StoredFlashblock {
     }
 }
 
-impl ValueWithSubKey for StoredFlashblock {
-    type SubKey = u64;
-
-    fn get_subkey(&self) -> Self::SubKey {
-        self.index
-    }
-}
-
-impl Compress for StoredFlashblock {
+impl Compress for StoredFlashblockPayload {
     type Compressed = Vec<u8>;
 
+    fn uncompressable_ref(&self) -> Option<&[u8]> {
+        Some(self.payload_rlp.as_ref())
+    }
+
     fn compress_to_buf<B: BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
-        buf.put_slice(self.index.to_be_bytes().as_slice());
         buf.put_slice(self.payload_rlp.as_ref());
     }
 }
 
-impl Decompress for StoredFlashblock {
+impl Decompress for StoredFlashblockPayload {
     fn decompress(value: &[u8]) -> Result<Self, reth_codecs::DecompressError> {
-        let index_bytes = value.get(..8).ok_or_else(|| {
-            DecompressError::new(StoredFlashblockDecodeError::TooShort { len: value.len() })
-        })?;
-        let index = u64::from_be_bytes(index_bytes.try_into().expect("slice length checked above"));
-        let payload_rlp = Bytes::copy_from_slice(&value[8..]);
-
-        Ok(Self { index, payload_rlp })
+        Ok(Self {
+            payload_rlp: Bytes::copy_from_slice(value),
+        })
     }
 }
 
@@ -439,14 +504,14 @@ fn open_db(config: &FlashblocksRecorderConfig) -> RecorderResult<DatabaseEnv> {
 fn insert_record(db: &DatabaseEnv, record: &FlashblocksRecord) -> RecorderResult<()> {
     let payload = &record.payload;
     let payload_id = StoredPayloadId::from(payload.payload_id);
-    let payload_value =
-        StoredFlashblock::new(payload.index, Bytes::from(alloy_rlp::encode(payload)));
+    let key = StoredFlashblockKey::new(payload_id, payload.index);
+    let payload_value = StoredFlashblockPayload::new(Bytes::from(alloy_rlp::encode(payload)));
 
     let tx = db
         .tx_mut()
         .map_err(|source| FlashblocksRecorderError::BeginTransaction { source })?;
 
-    upsert_flashblock(&tx, payload_id, payload_value)?;
+    upsert_flashblock(&tx, key, payload_value)?;
 
     if let Some(base) = &payload.base {
         tx.put::<tables::BlockNumberToPayloadId>(base.block_number, payload_id)
@@ -463,48 +528,14 @@ fn insert_record(db: &DatabaseEnv, record: &FlashblocksRecord) -> RecorderResult
 
 fn upsert_flashblock<Tx>(
     tx: &Tx,
-    payload_id: StoredPayloadId,
-    payload_value: StoredFlashblock,
+    key: StoredFlashblockKey,
+    payload_value: StoredFlashblockPayload,
 ) -> RecorderResult<()>
 where
     Tx: DbTxMut,
 {
-    let mut cursor = tx
-        .cursor_dup_write::<tables::Flashblocks>()
-        .map_err(|source| FlashblocksRecorderError::OpenFlashblocksCursor { source })?;
-
-    // Duplicate values are sorted by `index_be || payload_rlp`. Remove any
-    // previous value with this index before inserting so duplicate writes replace
-    // instead of accumulating stale payload bytes.
-    loop {
-        let existing = cursor
-            .seek_by_key_subkey(payload_id, payload_value.index)
-            .map_err(|source| FlashblocksRecorderError::SeekExistingFlashblock {
-                payload_id,
-                flashblock_index: payload_value.index,
-                source,
-            })?;
-
-        if existing.is_none_or(|existing| existing.index != payload_value.index) {
-            break;
-        }
-
-        cursor.delete_current().map_err(|source| {
-            FlashblocksRecorderError::DeleteExistingFlashblock {
-                payload_id,
-                flashblock_index: payload_value.index,
-                source,
-            }
-        })?;
-    }
-
-    cursor.upsert(payload_id, &payload_value).map_err(|source| {
-        FlashblocksRecorderError::InsertFlashblock {
-            payload_id,
-            flashblock_index: payload_value.index,
-            source,
-        }
-    })
+    tx.put::<tables::FlashblocksByPayloadIdAndIndex>(key, payload_value)
+        .map_err(|source| FlashblocksRecorderError::InsertFlashblock { key, source })
 }
 
 #[cfg(test)]
@@ -512,7 +543,7 @@ mod tests {
     use super::*;
     use alloy_primitives::{Address, B256};
     use alloy_rpc_types_engine::PayloadId;
-    use reth_db_api::{cursor::DbDupCursorRO, transaction::DbTx};
+    use reth_db_api::transaction::DbTx;
     use tempfile::tempdir;
     use world_chain_primitives::primitives::{
         ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1,
@@ -536,33 +567,34 @@ mod tests {
 
         let tx = db.tx().expect("read tx");
         let payload_id = StoredPayloadId::from(replacement.payload.payload_id);
-        let mut flashblocks = tx
-            .cursor_dup_read::<tables::Flashblocks>()
-            .expect("flashblocks cursor");
-        let stored_payload = flashblocks
-            .seek_by_key_subkey(payload_id, 0)
+        let stored_payload = tx
+            .get::<tables::FlashblocksByPayloadIdAndIndex>(StoredFlashblockKey::new(payload_id, 0))
             .expect("read flashblock")
             .expect("flashblock exists");
-        let stored_second_payload = flashblocks
-            .seek_by_key_subkey(payload_id, 1)
+        let stored_second_payload = tx
+            .get::<tables::FlashblocksByPayloadIdAndIndex>(StoredFlashblockKey::new(payload_id, 1))
             .expect("read second flashblock")
             .expect("second flashblock exists");
         let stored_payload_id = tx
             .get::<tables::BlockNumberToPayloadId>(42)
             .expect("read block number index")
             .expect("block number index exists");
-        let flashblocks_len = tx.entries::<tables::Flashblocks>().expect("entries");
+        let flashblocks_len = tx
+            .entries::<tables::FlashblocksByPayloadIdAndIndex>()
+            .expect("entries");
         let block_index_len = tx
             .entries::<tables::BlockNumberToPayloadId>()
             .expect("entries");
         tx.commit().expect("commit read tx");
 
-        assert_eq!(stored_payload.index, 0);
-        assert_eq!(stored_payload.payload_rlp, expected_payload_rlp);
-        assert_eq!(stored_second_payload.index, 1);
         assert_eq!(
-            stored_second_payload.payload_rlp,
-            expected_second_payload_rlp
+            stored_payload.payload_rlp(),
+            &expected_payload_rlp,
+            "replacement should overwrite the original index 0 payload"
+        );
+        assert_eq!(
+            stored_second_payload.payload_rlp(),
+            &expected_second_payload_rlp
         );
         assert_eq!(stored_payload_id, payload_id);
         assert_eq!(flashblocks_len, 2);
@@ -578,11 +610,11 @@ mod tests {
         insert_record(&db, &record(None, 1)).expect("insert delta");
 
         let tx = db.tx().expect("read tx");
-        let mut flashblocks = tx
-            .cursor_dup_read::<tables::Flashblocks>()
-            .expect("flashblocks cursor");
-        let payload = flashblocks
-            .seek_by_key_subkey(StoredPayloadId::from(PayloadId::new([3; 8])), 1)
+        let payload = tx
+            .get::<tables::FlashblocksByPayloadIdAndIndex>(StoredFlashblockKey::new(
+                StoredPayloadId::from(PayloadId::new([3; 8])),
+                1,
+            ))
             .expect("read flashblock")
             .expect("flashblock exists");
         let block_index_len = tx
@@ -590,7 +622,10 @@ mod tests {
             .expect("entries");
         tx.commit().expect("commit read tx");
 
-        assert_eq!(payload.index, 1);
+        assert_eq!(
+            payload.payload_rlp(),
+            &Bytes::from(alloy_rlp::encode(&record(None, 1).payload))
+        );
         assert_eq!(block_index_len, 0);
     }
 
@@ -611,13 +646,31 @@ mod tests {
     }
 
     #[test]
-    fn stored_flashblock_value_prefixes_index() {
-        let stored = StoredFlashblock::new(1, Bytes::from_static(&[7, 8]));
+    fn stored_flashblock_key_codecs_roundtrip() {
+        let key = StoredFlashblockKey::new(StoredPayloadId::from(PayloadId::new([3; 8])), 1);
+        let encoded = key.encode();
+
+        assert_eq!(encoded, [3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 1]);
+        assert_eq!(
+            StoredFlashblockKey::decode(&encoded).expect("decode stored flashblock key"),
+            key
+        );
+        assert_eq!(
+            StoredFlashblockKey::decompress(&key.compress())
+                .expect("decompress stored flashblock key"),
+            key
+        );
+    }
+
+    #[test]
+    fn stored_flashblock_payload_codecs_roundtrip() {
+        let stored = StoredFlashblockPayload::new(Bytes::from_static(&[7, 8]));
         let encoded = stored.clone().compress();
 
-        assert_eq!(encoded, vec![0, 0, 0, 0, 0, 0, 0, 1, 7, 8]);
+        assert_eq!(encoded, vec![7, 8]);
         assert_eq!(
-            StoredFlashblock::decompress(&encoded).expect("decode stored flashblock"),
+            StoredFlashblockPayload::decompress(&encoded)
+                .expect("decode stored flashblock payload"),
             stored
         );
     }

@@ -6,7 +6,7 @@ use eyre::eyre::{bail, ensure, eyre};
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::ForkCondition;
 use reth_db::{ClientVersion, Database, DatabaseEnv, mdbx::DatabaseArguments, open_db_read_only};
-use reth_db_api::{cursor::DbDupCursorRO, transaction::DbTx};
+use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_core::node_config::NodeConfig;
 use reth_optimism_chainspec::{OpChainSpec, OpHardfork, WORLDCHAIN_MAINNET};
@@ -24,7 +24,7 @@ use world_chain_builder::{
 use world_chain_node::{context::WorldChainDefaultContext, node::WorldChainNode};
 use world_chain_p2p::protocol::{
     handler::FlashblocksHandle,
-    recorder::{StoredFlashblock, tables},
+    recorder::{StoredFlashblockKey, StoredFlashblockPayload, tables},
 };
 use world_chain_primitives::{ed25519_dalek::SigningKey, primitives::FlashblocksPayloadV1};
 
@@ -150,22 +150,33 @@ fn load_flashblocks_for_block(path: PathBuf, block_number: u64) -> eyre::Result<
     let payload_id = tx
         .get::<tables::BlockNumberToPayloadId>(block_number)?
         .ok_or_else(|| eyre!("no payload id stored for block {block_number}"))?;
-    let mut cursor = tx.cursor_dup_read::<tables::Flashblocks>()?;
+    let mut cursor = tx.cursor_read::<tables::FlashblocksByPayloadIdAndIndex>()?;
 
     let mut stored = cursor
-        .walk_dup(Some(payload_id), None)?
-        .map(|row| row.map(|(_, value)| value).map_err(|err| eyre!(err)))
+        .walk(Some(StoredFlashblockKey::new(payload_id, 0)))?
+        .take_while(|row| {
+            row.as_ref()
+                .map_or(true, |(key, _)| key.payload_id() == payload_id)
+        })
+        .map(|row| row.map_err(|err| eyre!(err)))
         .collect::<eyre::Result<Vec<_>>>()?;
 
     if stored.is_empty() {
         bail!("no flashblocks stored for payload id {payload_id}");
     }
 
-    stored.sort_unstable_by_key(|stored| stored.index);
+    stored.sort_unstable_by_key(|(key, _)| key.index());
 
     let mut flashblocks = Vec::with_capacity(stored.len());
-    for (expected_index, stored_flashblock) in stored.into_iter().enumerate() {
-        let flashblock = decode_stored_flashblock(stored_flashblock)?;
+    for (expected_index, (key, stored_flashblock)) in stored.into_iter().enumerate() {
+        ensure!(
+            key.index() == expected_index as u64,
+            "flashblock sequence for payload id {payload_id} is not contiguous: expected key index {}, got {}",
+            expected_index,
+            key.index()
+        );
+
+        let flashblock = decode_stored_flashblock(key.index(), stored_flashblock)?;
 
         ensure!(
             flashblock.payload_id == payload_id.payload_id(),
@@ -197,9 +208,9 @@ fn load_flashblocks_for_block(path: PathBuf, block_number: u64) -> eyre::Result<
 }
 
 fn decode_stored_flashblock(
-    stored_flashblock: StoredFlashblock,
+    stored_index: u64,
+    stored_flashblock: StoredFlashblockPayload,
 ) -> eyre::Result<FlashblocksPayloadV1> {
-    let stored_index = stored_flashblock.index;
     let mut payload_rlp = stored_flashblock.payload_rlp().as_ref();
     let flashblock = FlashblocksPayloadV1::decode(&mut payload_rlp)?;
 
