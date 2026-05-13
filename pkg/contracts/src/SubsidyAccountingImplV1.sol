@@ -334,9 +334,10 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     ///      so prior-action slots are unreachable from any view or hot-path lookup.
     function setWorldIDVerifier(IWorldIDVerifier worldIDVerifier_) external virtual onlyProxy onlyOwner {
         if (address(worldIDVerifier_) == address(0)) revert AddressZero();
+        address previousVerifier = address(worldIDVerifier);
         worldIDVerifier = worldIDVerifier_;
         ++_registrationVersion;
-        emit WorldIDVerifierSet(address(worldIDVerifier_));
+        emit WorldIDVerifierSet(previousVerifier, address(worldIDVerifier_));
     }
 
     /// @inheritdoc ISubsidyAccounting

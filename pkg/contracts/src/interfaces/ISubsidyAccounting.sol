@@ -41,8 +41,11 @@ interface ISubsidyAccounting {
     /// @notice Emitted once when the implementation is initialized behind its proxy.
     event SubsidyAccountingImplInitialized(IWorldIDVerifier indexed worldIDVerifier, address indexed owner);
 
-    /// @notice Emitted when the World ID verifier address is set or replaced.
-    event WorldIDVerifierSet(address indexed worldIDVerifier);
+    /// @notice Emitted when the World ID verifier address is set or replaced. Pairs with the
+    ///         internal `_registrationVersion` bump that structurally invalidates every record
+    ///         under the previous verifier — off-chain consumers MUST treat any cached
+    ///         action-keyed state as dead on receipt.
+    event WorldIDVerifierSet(address indexed previousVerifier, address indexed newVerifier);
 
     /// @notice Emitted when the per-credential budget is configured.
     event CredentialBudgetSet(uint64 indexed issuerSchemaId, uint256 budgetWei);

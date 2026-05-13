@@ -25,7 +25,7 @@ contract SubsidyAccountingImplV1Test is Test {
     address internal constant ATTACKER = address(0xBAD);
 
     event SubsidyAccountingImplInitialized(IWorldIDVerifier indexed worldIDVerifier, address indexed owner);
-    event WorldIDVerifierSet(address indexed worldIDVerifier);
+    event WorldIDVerifierSet(address indexed previousVerifier, address indexed newVerifier);
     event CredentialBudgetSet(uint64 indexed issuerSchemaId, uint256 budgetWei);
     event SubsidyClaimed(
         uint256 indexed nullifier, uint256 indexed sessionId, uint64 periodNumber, uint256 totalBudgetWei
@@ -98,9 +98,10 @@ contract SubsidyAccountingImplV1Test is Test {
 
     function test_setWorldIDVerifier_byOwner_persists_andEmits() public {
         IWorldIDVerifier newVerifier = IWorldIDVerifier(address(new MockWorldIDVerifier(true)));
+        address previousVerifier = address(subsidy.worldIDVerifier());
 
         vm.expectEmit(true, true, true, true, address(subsidy));
-        emit WorldIDVerifierSet(address(newVerifier));
+        emit WorldIDVerifierSet(previousVerifier, address(newVerifier));
 
         vm.prank(OWNER);
         subsidy.setWorldIDVerifier(newVerifier);
