@@ -211,9 +211,7 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
             keccak256(
                 abi.encode(
                     ClaimAdditionalCredentialSignal({
-                        tag: CLAIM_ADDITIONAL_CREDENTIAL_TAG,
-                        nullifier: nullifier,
-                        msgSender: msg.sender
+                        tag: CLAIM_ADDITIONAL_CREDENTIAL_TAG, nullifier: nullifier, msgSender: msg.sender
                     })
                 )
             )

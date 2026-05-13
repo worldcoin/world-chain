@@ -497,10 +497,10 @@ contract SubsidyAccountingImplV1Test is Test {
     }
 
     function _claimAdditionalCredentialSignal(uint256 nullifier, address sender) internal pure returns (uint256) {
-        SubsidyAccountingImplV1.ClaimAdditionalCredentialSignal memory s = SubsidyAccountingImplV1
-            .ClaimAdditionalCredentialSignal({
-            tag: CLAIM_ADDITIONAL_CREDENTIAL_TAG, nullifier: nullifier, msgSender: sender
-        });
+        SubsidyAccountingImplV1.ClaimAdditionalCredentialSignal memory s =
+            SubsidyAccountingImplV1.ClaimAdditionalCredentialSignal({
+                tag: CLAIM_ADDITIONAL_CREDENTIAL_TAG, nullifier: nullifier, msgSender: sender
+            });
         return uint256(keccak256(abi.encode(s))) >> 8;
     }
 
