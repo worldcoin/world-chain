@@ -30,7 +30,7 @@ interface ISubsidyAccounting {
     /// @param issuerSchemaId Credential schema/issuer identifier.
     /// @param proof Compressed Groth16 proof `[a, b0, b1, c, merkle_root]`.
     struct ClaimItem {
-        uint256 issuerSchemaId;
+        uint64 issuerSchemaId;
         uint256[5] proof;
     }
 
@@ -65,11 +65,6 @@ interface ISubsidyAccounting {
 
     /// @notice Thrown when a required address parameter is the zero address.
     error AddressZero();
-
-    /// @notice Thrown when an `issuerSchemaId` exceeds `type(uint64).max`.
-    /// @dev The verifier interface and storage use `uint64`; oversized values are rejected
-    ///      at the public boundary rather than silently truncated.
-    error IssuerSchemaIdOverflow(uint256 value);
 
     /// @notice Thrown by entry points whose body has not yet been ported in. Skeleton-entry
     ///         placeholder; replaced by real bodies in follow-up entries on the shared PR.
@@ -134,11 +129,14 @@ interface ISubsidyAccounting {
     /// @notice Adds budget for a credential acquired after the initial claim. Verifies a
     ///         Session Proof against the stored `sessionId` for `nullifier`.
     /// @dev MUST revert if `nullifier` has no record in the current period or if
-    ///      `issuerSchemaId` is already claimed.
+    ///      `issuerSchemaId` is already claimed. `sessionNullifier` and `sessionAction` are
+    ///      the two per-proof public inputs `verifySession` consumes; both flow through
+    ///      unmodified.
     function claimAdditionalCredential(
         uint256 nullifier,
-        uint256 issuerSchemaId,
-        uint256[2] calldata sessionNullifier,
+        uint64 issuerSchemaId,
+        uint256 sessionNullifier,
+        uint256 sessionAction,
         uint256[5] calldata proof
     ) external;
 
@@ -177,14 +175,14 @@ interface ISubsidyAccounting {
 
     /// @notice Whether `issuerSchemaId` has been claimed under `nullifier` in the current
     ///         period.
-    function isClaimed(uint256 nullifier, uint256 issuerSchemaId) external view returns (bool);
+    function isClaimed(uint256 nullifier, uint64 issuerSchemaId) external view returns (bool);
 
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  ADMIN                                  ///
     ///////////////////////////////////////////////////////////////////////////////
 
     /// @notice Set the claimable budget for a credential type. Owner-only.
-    function setCredentialBudget(uint256 issuerSchemaId, uint256 budgetWei) external;
+    function setCredentialBudget(uint64 issuerSchemaId, uint256 budgetWei) external;
 
     /// @notice Replace the World ID verifier. Owner-only. MUST revert on zero address.
     function setWorldIDVerifier(IWorldIDVerifier worldIDVerifier) external;

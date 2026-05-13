@@ -166,7 +166,7 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     }
 
     /// @inheritdoc ISubsidyAccounting
-    function claimAdditionalCredential(uint256, uint256, uint256[2] calldata, uint256[5] calldata)
+    function claimAdditionalCredential(uint256, uint64, uint256, uint256, uint256[5] calldata)
         external
         virtual
         onlyProxy
@@ -221,9 +221,8 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     }
 
     /// @inheritdoc ISubsidyAccounting
-    function isClaimed(uint256 nullifier, uint256 issuerSchemaId) external view virtual onlyProxy returns (bool) {
-        if (issuerSchemaId > type(uint64).max) return false;
-        return claimed[nullifier][uint64(issuerSchemaId)];
+    function isClaimed(uint256 nullifier, uint64 issuerSchemaId) external view virtual onlyProxy returns (bool) {
+        return claimed[nullifier][issuerSchemaId];
     }
 
     ///////////////////////////////////////////////////////////////////////////////
@@ -238,11 +237,9 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     }
 
     /// @inheritdoc ISubsidyAccounting
-    function setCredentialBudget(uint256 issuerSchemaId, uint256 budgetWei) external virtual onlyProxy onlyOwner {
-        if (issuerSchemaId > type(uint64).max) revert IssuerSchemaIdOverflow(issuerSchemaId);
-        uint64 schemaId = uint64(issuerSchemaId);
-        credentialBudget[schemaId] = budgetWei;
-        emit CredentialBudgetSet(schemaId, budgetWei);
+    function setCredentialBudget(uint64 issuerSchemaId, uint256 budgetWei) external virtual onlyProxy onlyOwner {
+        credentialBudget[issuerSchemaId] = budgetWei;
+        emit CredentialBudgetSet(issuerSchemaId, budgetWei);
     }
 
     ///////////////////////////////////////////////////////////////////////////////
@@ -264,9 +261,7 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     {
         uint256 itemsLen = items.length;
         for (uint256 i = 0; i < itemsLen; ++i) {
-            uint256 rawSchemaId = items[i].issuerSchemaId;
-            if (rawSchemaId > type(uint64).max) revert IssuerSchemaIdOverflow(rawSchemaId);
-            uint64 schemaId = uint64(rawSchemaId);
+            uint64 schemaId = items[i].issuerSchemaId;
             if (claimed[nullifier][schemaId]) revert DuplicateIssuerSchemaId(schemaId);
             claimed[nullifier][schemaId] = true;
             totalBudget += credentialBudget[schemaId];
@@ -293,7 +288,7 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
                 PROOF_NONCE,
                 signalHash,
                 expiresAtMin,
-                uint64(items[i].issuerSchemaId),
+                items[i].issuerSchemaId,
                 CREDENTIAL_GENESIS_ISSUED_AT_MIN,
                 items[i].proof
             );

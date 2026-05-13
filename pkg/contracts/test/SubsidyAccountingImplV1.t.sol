@@ -152,13 +152,6 @@ contract SubsidyAccountingImplV1Test is Test {
         subsidy.setCredentialBudget(7, 1 ether);
     }
 
-    function test_setCredentialBudget_revertIf_overflowsUint64() public {
-        uint256 oversized = uint256(type(uint64).max) + 1;
-        vm.prank(OWNER);
-        vm.expectRevert(abi.encodeWithSelector(ISubsidyAccounting.IssuerSchemaIdOverflow.selector, oversized));
-        subsidy.setCredentialBudget(oversized, 1 ether);
-    }
-
     ///////////////////////////////////////////////////////////////////////////////
     ///                          OWNERSHIP TRANSFER                             ///
     ///////////////////////////////////////////////////////////////////////////////
@@ -199,21 +192,14 @@ contract SubsidyAccountingImplV1Test is Test {
         assertFalse(subsidy.isClaimed(nullifier, 1), "no claimed credentials");
     }
 
-    function test_isClaimed_returnsFalse_forOversizedSchemaId() public view {
-        // Permissive view path: oversized issuerSchemaId returns false rather than reverts.
-        uint256 oversized = uint256(type(uint64).max) + 1;
-        assertFalse(subsidy.isClaimed(0xDEADBEEF, oversized));
-    }
-
     ///////////////////////////////////////////////////////////////////////////////
     ///                       ENTRY-POINT STUBS (NotImplemented)                ///
     ///////////////////////////////////////////////////////////////////////////////
 
     function test_claimAdditionalCredential_revertsNotImplemented() public {
-        uint256[2] memory sessionNullifier;
         uint256[5] memory proof;
         vm.expectRevert(ISubsidyAccounting.NotImplemented.selector);
-        subsidy.claimAdditionalCredential(0, 0, sessionNullifier, proof);
+        subsidy.claimAdditionalCredential(0, 0, 0, 0, proof);
     }
 
     function test_setAuthorized_revertsNotImplemented() public {
@@ -432,14 +418,6 @@ contract SubsidyAccountingImplV1Test is Test {
         ISubsidyAccounting.ClaimItem[] memory items = _items2(SCHEMA_POH, SCHEMA_POH, 1, 2);
         vm.expectRevert(abi.encodeWithSelector(ISubsidyAccounting.DuplicateIssuerSchemaId.selector, SCHEMA_POH));
         subsidy.claimSubsidy(0xA008, 1, _addrs1(ALICE), items);
-    }
-
-    function test_claimSubsidy_revertIf_issuerSchemaIdOverflow() public {
-        uint256 oversized = uint256(type(uint64).max) + 1;
-        ISubsidyAccounting.ClaimItem[] memory items = new ISubsidyAccounting.ClaimItem[](1);
-        items[0] = ISubsidyAccounting.ClaimItem({issuerSchemaId: oversized, proof: _proof(1)});
-        vm.expectRevert(abi.encodeWithSelector(ISubsidyAccounting.IssuerSchemaIdOverflow.selector, oversized));
-        subsidy.claimSubsidy(0xA009, 1, _addrs1(ALICE), items);
     }
 
     function test_claimSubsidy_revertIf_duplicateAuthorizedAddress() public {
