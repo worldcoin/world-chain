@@ -248,6 +248,11 @@ fn bench_process_flashblock_mainnet_block(c: &mut Criterion) {
     assert_parent_header_is_available(&provider, &stored.flashblocks)
         .expect("node database is not synced to the measured block parent");
 
+    println!(
+        "flashblock_validation_mainnet: block {BENCH_BLOCK_NUMBER} contains {} flashblocks",
+        stored.flashblocks.len()
+    );
+
     let mut group = c.benchmark_group("flashblock_validation_process_flashblock_mainnet");
     group.sample_size(SAMPLE_SIZE);
 
