@@ -14255,6 +14255,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-proof-client"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "world-chain-proof-protocol",
+]
+
+[[package]]
+name = "world-chain-proof-host"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "world-chain-proof-protocol",
+]
+
+[[package]]
+name = "world-chain-proof-protocol"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "op-revm",
+ "reth-chainspec",
+ "reth-optimism-forks",
+ "revm-primitives",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "world-chain-chainspec",
+]
+
+[[package]]
 name = "world-chain-rpc"
 version = "2.2.0"
 dependencies = [

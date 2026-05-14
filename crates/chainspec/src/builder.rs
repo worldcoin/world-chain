@@ -7,7 +7,10 @@ use reth_chainspec::{ChainHardforks, ChainSpecBuilder, EthereumHardfork, ForkCon
 use reth_optimism_chainspec::make_op_genesis_header;
 use reth_primitives_traits::SealedHeader;
 
-use crate::{WorldChainHardfork, WorldChainSpec};
+use crate::{
+    WorldChainHardfork, WorldChainSpec,
+    spec::{convert_op_hardfork, convert_op_hardforks},
+};
 
 /// Chain spec builder for a World Chain stack chain.
 #[derive(Debug, Default, From)]
@@ -53,12 +56,16 @@ impl WorldChainSpecBuilder {
 
     /// Add the given fork with the given activation condition to the spec.
     pub fn with_fork<H: Hardfork>(mut self, fork: H, condition: ForkCondition) -> Self {
+        let Some(fork) = convert_op_hardfork(&fork) else {
+            return self;
+        };
         self.inner = self.inner.with_fork(fork, condition);
         self
     }
 
     /// Add the given forks with the given activation condition to the spec.
     pub fn with_forks(mut self, forks: ChainHardforks) -> Self {
+        let forks = convert_op_hardforks(&forks);
         self.inner = self.inner.with_forks(forks);
         self
     }
@@ -184,6 +191,7 @@ impl WorldChainSpecBuilder {
     /// Panics if chain ID or genesis is not set.
     pub fn build(self) -> WorldChainSpec {
         let mut inner = self.inner.build();
+        inner.hardforks = convert_op_hardforks(&inner.hardforks);
         inner.genesis_header =
             SealedHeader::seal_slow(make_op_genesis_header(&inner.genesis, &inner.hardforks));
         inner

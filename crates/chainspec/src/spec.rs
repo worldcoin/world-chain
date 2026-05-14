@@ -17,7 +17,7 @@ use reth_optimism_chainspec::{
     OpChainSpec, compute_jovian_base_fee, decode_holocene_base_fee, generated_chain_value_parser,
     make_op_genesis_header,
 };
-use reth_optimism_forks::{OP_MAINNET_HARDFORKS, OpHardfork, OpHardforks};
+use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_primitives_traits::SealedHeader;
 
 use crate::{WorldChainHardfork, WorldChainHardforks};
@@ -67,6 +67,9 @@ impl WorldChainSpec {
 
     /// Adds or replaces a hardfork activation and recomputes the genesis header.
     pub fn set_fork<H: Hardfork>(&mut self, fork: H, condition: ForkCondition) {
+        let Some(fork) = convert_op_hardfork(&fork) else {
+            return;
+        };
         self.inner.hardforks.insert(fork, condition);
         self.inner.genesis_header = SealedHeader::seal_slow(make_op_genesis_header(
             &self.inner.genesis,
@@ -212,7 +215,8 @@ impl OpHardforks for WorldChainSpec {
             OpHardfork::Holocene => self.fork(WorldChainHardfork::Holocene),
             OpHardfork::Isthmus => self.fork(WorldChainHardfork::Isthmus),
             OpHardfork::Jovian => self.fork(WorldChainHardfork::Jovian),
-            _ => self.fork(fork),
+            OpHardfork::Karst | OpHardfork::Interop => ForkCondition::Never,
+            _ => ForkCondition::Never,
         }
     }
 }
@@ -465,36 +469,35 @@ fn extra_timestamp(genesis: &Genesis, key: &str) -> Option<u64> {
     }
 }
 
-fn convert_op_hardforks(hardforks: &ChainHardforks) -> ChainHardforks {
+pub(crate) fn convert_op_hardforks(hardforks: &ChainHardforks) -> ChainHardforks {
     ChainHardforks::new(
         hardforks
             .forks_iter()
-            .map(|(fork, condition)| (convert_op_hardfork(fork), condition))
+            .filter_map(|(fork, condition)| convert_op_hardfork(fork).map(|fork| (fork, condition)))
             .collect(),
     )
 }
 
-fn convert_op_hardfork(fork: &dyn Hardfork) -> Box<dyn Hardfork> {
+pub(crate) fn convert_op_hardfork(fork: &dyn Hardfork) -> Option<Box<dyn Hardfork>> {
     match fork.name() {
-        "Bedrock" => WorldChainHardfork::Bedrock.boxed(),
-        "Regolith" => WorldChainHardfork::Regolith.boxed(),
-        "Canyon" => WorldChainHardfork::Canyon.boxed(),
-        "Ecotone" => WorldChainHardfork::Ecotone.boxed(),
-        "Fjord" => WorldChainHardfork::Fjord.boxed(),
-        "Granite" => WorldChainHardfork::Granite.boxed(),
-        "Holocene" => WorldChainHardfork::Holocene.boxed(),
-        "Isthmus" => WorldChainHardfork::Isthmus.boxed(),
-        "Jovian" => WorldChainHardfork::Jovian.boxed(),
-        "Karst" => OpHardfork::Karst.boxed(),
-        "Interop" => OpHardfork::Interop.boxed(),
-        other if other.eq_ignore_ascii_case("tropo") => WorldChainHardfork::Tropo.boxed(),
-        other if other.eq_ignore_ascii_case("strato") => WorldChainHardfork::Strato.boxed(),
+        "Bedrock" => Some(WorldChainHardfork::Bedrock.boxed()),
+        "Regolith" => Some(WorldChainHardfork::Regolith.boxed()),
+        "Canyon" => Some(WorldChainHardfork::Canyon.boxed()),
+        "Ecotone" => Some(WorldChainHardfork::Ecotone.boxed()),
+        "Fjord" => Some(WorldChainHardfork::Fjord.boxed()),
+        "Granite" => Some(WorldChainHardfork::Granite.boxed()),
+        "Holocene" => Some(WorldChainHardfork::Holocene.boxed()),
+        "Isthmus" => Some(WorldChainHardfork::Isthmus.boxed()),
+        "Jovian" => Some(WorldChainHardfork::Jovian.boxed()),
+        "Karst" | "Interop" => None,
+        other if other.eq_ignore_ascii_case("tropo") => Some(WorldChainHardfork::Tropo.boxed()),
+        other if other.eq_ignore_ascii_case("strato") => Some(WorldChainHardfork::Strato.boxed()),
         _ => EthereumHardfork::VARIANTS
             .iter()
             .find(|hardfork| hardfork.name() == fork.name())
             .map_or_else(
-                || Box::new(UnknownHardfork(fork.name())) as Box<dyn Hardfork>,
-                |hardfork| hardfork.boxed(),
+                || Some(Box::new(UnknownHardfork(fork.name())) as Box<dyn Hardfork>),
+                |hardfork| Some(hardfork.boxed()),
             ),
     }
 }
@@ -511,16 +514,22 @@ impl Hardfork for UnknownHardfork {
 fn order_world_hardforks(
     mut configured: Vec<(Box<dyn Hardfork>, ForkCondition)>,
 ) -> ChainHardforks {
-    let order = OP_MAINNET_HARDFORKS
-        .forks_iter()
-        .map(|(fork, _)| convert_op_hardfork(fork))
-        .chain([
-            WorldChainHardfork::Tropo.boxed(),
-            WorldChainHardfork::Strato.boxed(),
-        ]);
+    let order = [
+        WorldChainHardfork::Bedrock.boxed(),
+        WorldChainHardfork::Regolith.boxed(),
+        WorldChainHardfork::Canyon.boxed(),
+        WorldChainHardfork::Ecotone.boxed(),
+        WorldChainHardfork::Fjord.boxed(),
+        WorldChainHardfork::Granite.boxed(),
+        WorldChainHardfork::Holocene.boxed(),
+        WorldChainHardfork::Isthmus.boxed(),
+        WorldChainHardfork::Jovian.boxed(),
+        WorldChainHardfork::Tropo.boxed(),
+        WorldChainHardfork::Strato.boxed(),
+    ];
 
     let mut ordered_hardforks = Vec::with_capacity(configured.len());
-    for hardfork in order {
+    for hardfork in order.into_iter() {
         if let Some(pos) = configured
             .iter()
             .position(|(candidate, _)| **candidate == *hardfork)
@@ -537,6 +546,9 @@ fn order_world_hardforks(
 mod tests {
     use alloy_genesis::Genesis;
     use reth_chainspec::Hardforks;
+    use reth_optimism_forks::OpHardforks;
+
+    use crate::WorldChainSpecBuilder;
 
     use super::*;
 
@@ -554,5 +566,75 @@ mod tests {
         let spec = WorldChainSpec::from_genesis(Genesis::default());
         assert_eq!(spec.fork(WorldChainHardfork::Tropo), ForkCondition::Never);
         assert_eq!(spec.fork(WorldChainHardfork::Strato), ForkCondition::Never);
+    }
+
+    #[test]
+    fn world_specific_hardforks_do_not_activate_post_jovian_op_forks() {
+        let spec = WorldChainSpecBuilder::mainnet()
+            .jovian_activated()
+            .tropo_activated()
+            .strato_activated()
+            .build();
+
+        assert_eq!(
+            spec.op_fork_activation(OpHardfork::Karst),
+            ForkCondition::Never
+        );
+        assert_eq!(
+            spec.op_fork_activation(OpHardfork::Interop),
+            ForkCondition::Never
+        );
+    }
+
+    #[test]
+    fn converting_op_specs_drops_post_jovian_op_forks() {
+        let mut spec = WorldChainSpec::from_genesis(Genesis::default());
+        spec.set_fork(OpHardfork::Karst, ForkCondition::Timestamp(10));
+        spec.set_fork(OpHardfork::Interop, ForkCondition::Timestamp(20));
+
+        let converted = WorldChainSpec::from(spec.inner);
+
+        assert_eq!(converted.fork(OpHardfork::Karst), ForkCondition::Never);
+        assert_eq!(converted.fork(OpHardfork::Interop), ForkCondition::Never);
+    }
+
+    #[test]
+    fn world_hardfork_order_skips_post_jovian_op_forks() {
+        let hardforks = order_world_hardforks(vec![
+            (
+                WorldChainHardfork::Strato.boxed(),
+                ForkCondition::Timestamp(30),
+            ),
+            (
+                WorldChainHardfork::Tropo.boxed(),
+                ForkCondition::Timestamp(20),
+            ),
+            (
+                WorldChainHardfork::Jovian.boxed(),
+                ForkCondition::Timestamp(10),
+            ),
+        ]);
+        let names = hardforks
+            .forks_iter()
+            .map(|(fork, _)| fork.name())
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["Jovian", "Tropo", "Strato"]);
+    }
+
+    #[test]
+    fn builder_drops_post_jovian_op_forks_from_generic_inputs() {
+        let spec = WorldChainSpecBuilder::mainnet()
+            .with_fork(OpHardfork::Karst, ForkCondition::Timestamp(10))
+            .with_fork(OpHardfork::Interop, ForkCondition::Timestamp(20))
+            .with_fork(OpHardfork::Jovian, ForkCondition::Timestamp(5))
+            .build();
+
+        assert_eq!(spec.fork(OpHardfork::Karst), ForkCondition::Never);
+        assert_eq!(spec.fork(OpHardfork::Interop), ForkCondition::Never);
+        assert_eq!(
+            spec.fork(WorldChainHardfork::Jovian),
+            ForkCondition::Timestamp(5)
+        );
     }
 }
