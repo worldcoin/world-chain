@@ -511,7 +511,8 @@ fn insert_record(db: &DatabaseEnv, record: &FlashblocksRecord) -> RecorderResult
         .tx_mut()
         .map_err(|source| FlashblocksRecorderError::BeginTransaction { source })?;
 
-    upsert_flashblock(&tx, key, payload_value)?;
+    tx.put::<tables::FlashblocksByPayloadIdAndIndex>(key, payload_value)
+        .map_err(|source| FlashblocksRecorderError::InsertFlashblock { key, source })?;
 
     if let Some(base) = &payload.base {
         tx.put::<tables::BlockNumberToPayloadId>(base.block_number, payload_id)
@@ -524,18 +525,6 @@ fn insert_record(db: &DatabaseEnv, record: &FlashblocksRecord) -> RecorderResult
 
     tx.commit()
         .map_err(|source| FlashblocksRecorderError::CommitTransaction { source })
-}
-
-fn upsert_flashblock<Tx>(
-    tx: &Tx,
-    key: StoredFlashblockKey,
-    payload_value: StoredFlashblockPayload,
-) -> RecorderResult<()>
-where
-    Tx: DbTxMut,
-{
-    tx.put::<tables::FlashblocksByPayloadIdAndIndex>(key, payload_value)
-        .map_err(|source| FlashblocksRecorderError::InsertFlashblock { key, source })
 }
 
 #[cfg(test)]
