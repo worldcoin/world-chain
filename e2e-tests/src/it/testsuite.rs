@@ -2651,6 +2651,8 @@ fn test_flashblocks_args(authorizer_sk: &SigningKey, builder_sk: &SigningKey) ->
         flashblocks_interval: 200,
         recommit_interval: 200,
         access_list: true,
+        store: false,
+        store_path: None,
         fanout: Default::default(),
     }
 }
