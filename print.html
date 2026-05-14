@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-c3f25647.js";
+            window.path_to_searchindex_js = "searchindex-7c6f2602.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-85576531.js"></script>
@@ -1110,6 +1110,18 @@ Flashblocks:
           Will create access lists when building flashblocks payloads. and will use access lists for parallel transaction execution when verifying flashblocks payloads.
           
           [env: FLASHBLOCKS_ACCESS_LIST=]
+
+      --flashblocks.store
+          Store accepted flashblocks to a separate libmdbx database
+          
+          [env: FLASHBLOCKS_STORE=]
+
+      --flashblocks.store-path &lt;STORE_PATH&gt;
+          Path to the libmdbx database directory used by --flashblocks.store.
+          
+          Defaults to &lt;datadir&gt;/flashblocks/flashblocks.mdbx.
+          
+          [env: FLASHBLOCKS_STORE_PATH=]
 
       --flashblocks.max-send-peers &lt;MAX_SEND_PEERS&gt;
           Override the flashblocks send-set size
