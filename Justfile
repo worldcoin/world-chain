@@ -1,4 +1,10 @@
 set positional-arguments := true
+set dotenv-load := true
+
+world_mainnet_l2_rpc := env_var_or_default("WORLD_CHAIN_MAINNET_L2_RPC_URL", "https://worldchain-mainnet.g.alchemy.com/public")
+world_mainnet_l1_rpc := env_var_or_default("WORLD_CHAIN_MAINNET_L1_RPC_URL", "https://ethereum-rpc.publicnode.com")
+world_mainnet_l1_beacon_rpc := env_var_or_default("WORLD_CHAIN_MAINNET_L1_BEACON_RPC_URL", "https://ethereum-beacon-api.publicnode.com")
+world_mainnet_rollup_config_hash := env_var_or_default("WORLD_CHAIN_MAINNET_ROLLUP_CONFIG_HASH", "0xbe498a239de7182d4d5e64ab2ea9af34258975650d4f54dc95d685ca22d8cc79")
 
 # default recipe to display help information
 default:
@@ -84,6 +90,61 @@ stress *args='':
 # Prove a PBH transaction
 prove *args='':
     cargo run -p xtask -- prove $@
+
+# Deterministically build the World range SP1 ELF with cargo-prove/Docker
+build-proof-range-elf:
+    cd crates/proof/succinct/programs/range/ethereum && cargo prove build --docker --workspace-directory ../../.. --tag v6.1.0 --ignore-rust-version --elf-name world-chain-range-ethereum --output-directory ../../../elf
+
+# Deterministically build the World aggregation SP1 ELF with cargo-prove/Docker
+build-proof-aggregation-elf:
+    cd crates/proof/succinct/programs/aggregation && cargo prove build --docker --workspace-directory ../.. --tag v6.1.0 --ignore-rust-version --elf-name world-chain-aggregation --output-directory ../../elf
+
+# Build the World range SP1 ELF with the local SP1 toolchain instead of Docker
+build-proof-range-elf-local:
+    cd crates/proof/succinct/programs/range/ethereum && cargo prove build --ignore-rust-version --elf-name world-chain-range-ethereum --output-directory ../../../elf
+
+# Build the World aggregation SP1 ELF with the local SP1 toolchain instead of Docker
+build-proof-aggregation-elf-local:
+    cd crates/proof/succinct/programs/aggregation && cargo prove build --ignore-rust-version --elf-name world-chain-aggregation --output-directory ../../elf
+
+# Build all World SP1 proof ELFs
+build-proof-elfs: build-proof-range-elf build-proof-aggregation-elf
+
+# Print local SP1 verifying key metadata for built World proof ELFs
+proof-vkeys:
+    cargo run --manifest-path crates/proof/succinct/scripts/local-prover/Cargo.toml --features sp1 --release -- vkeys
+
+# Build a read-only World mainnet witness for a finalized L2 block
+witness-mainnet-block block output='':
+    @out="{{output}}"; \
+    if [ -z "$out" ]; then out="proofs/world-mainnet-block-{{block}}.witness.bin"; fi; \
+    WORLD_CHAIN_MAINNET_L2_RPC_URL="{{world_mainnet_l2_rpc}}" \
+    WORLD_CHAIN_MAINNET_L1_RPC_URL="{{world_mainnet_l1_rpc}}" \
+    WORLD_CHAIN_MAINNET_L1_BEACON_RPC_URL="{{world_mainnet_l1_beacon_rpc}}" \
+    WORLD_CHAIN_MAINNET_ROLLUP_CONFIG_HASH="{{world_mainnet_rollup_config_hash}}" \
+    cargo run --manifest-path crates/proof/succinct/scripts/local-prover/Cargo.toml --release -- witness --block {{block}} --output "$out"
+
+# Prove a finalized World mainnet L2 block locally; modes: core, compressed, plonk, groth16
+prove-mainnet-block block mode='core' output='':
+    @out="{{output}}"; \
+    if [ -z "$out" ]; then out="proofs/world-mainnet-block-{{block}}-{{mode}}.bin"; fi; \
+    WORLD_CHAIN_MAINNET_L2_RPC_URL="{{world_mainnet_l2_rpc}}" \
+    WORLD_CHAIN_MAINNET_L1_RPC_URL="{{world_mainnet_l1_rpc}}" \
+    WORLD_CHAIN_MAINNET_L1_BEACON_RPC_URL="{{world_mainnet_l1_beacon_rpc}}" \
+    WORLD_CHAIN_MAINNET_ROLLUP_CONFIG_HASH="{{world_mainnet_rollup_config_hash}}" \
+    cargo run --manifest-path crates/proof/succinct/scripts/local-prover/Cargo.toml --features sp1 --release -- prove --block {{block}} --mode {{mode}} --output "$out"
+
+# Prove a World mainnet L2 block locally, verify the generated proof, and write proof artifacts
+prove-and-verify-mainnet-block block mode='core' output='' allow_unfinalized='false':
+    @out="{{output}}"; \
+    extra=""; \
+    if [ "{{allow_unfinalized}}" = "true" ]; then extra="--allow-unfinalized"; fi; \
+    if [ -z "$out" ]; then out="proofs/world-mainnet-block-{{block}}-{{mode}}.bin"; fi; \
+    WORLD_CHAIN_MAINNET_L2_RPC_URL="{{world_mainnet_l2_rpc}}" \
+    WORLD_CHAIN_MAINNET_L1_RPC_URL="{{world_mainnet_l1_rpc}}" \
+    WORLD_CHAIN_MAINNET_L1_BEACON_RPC_URL="{{world_mainnet_l1_beacon_rpc}}" \
+    WORLD_CHAIN_MAINNET_ROLLUP_CONFIG_HASH="{{world_mainnet_rollup_config_hash}}" \
+    cargo run --manifest-path crates/proof/succinct/scripts/local-prover/Cargo.toml --features sp1 --release -- prove --block {{block}} --mode {{mode}} --output "$out" $extra
 
 # Generate CLI reference docs for the mdbook
 docs:

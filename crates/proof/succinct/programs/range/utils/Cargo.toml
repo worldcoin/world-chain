@@ -7,4 +7,22 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
+alloy-primitives.workspace = true
+kona-proof.workspace = true
+sp1-zkvm.workspace = true
 world-chain-proof-succinct-client-utils.workspace = true
+
+[features]
+tracing-subscriber = ["dep:anyhow", "dep:tracing", "dep:tracing-subscriber"]
+
+[dependencies.tracing]
+workspace = true
+optional = true
+
+[dependencies.tracing-subscriber]
+workspace = true
+optional = true
+
+[dependencies.anyhow]
+workspace = true
+optional = true

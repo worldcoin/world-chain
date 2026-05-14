@@ -8,5 +8,12 @@ repository.workspace = true
 
 [dependencies]
 alloy-sol-types.workspace = true
+kona-proof.workspace = true
+rkyv.workspace = true
 sp1-zkvm.workspace = true
+world-chain-proof-succinct-client-utils.workspace = true
+world-chain-proof-succinct-ethereum-client-utils.workspace = true
 world-chain-proof-succinct-range-utils.workspace = true
+
+[features]
+tracing-subscriber = ["world-chain-proof-succinct-range-utils/tracing-subscriber"]

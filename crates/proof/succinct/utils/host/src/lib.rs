@@ -1,11 +1,17 @@
 //! Host-side helpers for preparing World Chain OP Succinct Lite proof requests.
 
+pub mod witness_generation;
+
 use alloy_primitives::{Address, B256};
 use serde::{Deserialize, Serialize};
 use world_chain_proof_client::{WorldProofInput, WorldProofPublicValues};
 use world_chain_proof_host::{RangeSplitCount, WorldFaultProofServiceConfig};
+use world_chain_proof_protocol::{WorldChainHardfork, WorldSpecId};
 use world_chain_proof_succinct_client_utils::{
-    WorldRangeWitness, boot::BootInfoStruct, types::AggregationInputs,
+    WorldRangeHardfork, WorldRangeHardforkConfig, WorldRangeProofClaim, WorldRangeProofInput,
+    WorldRangeProofPublicValues, WorldRangeSpecId, WorldRangeWitness,
+    boot::{BootInfoPublicValues, BootInfoStruct},
+    types::AggregationInputs,
 };
 use world_chain_proof_succinct_proof_utils::{AggregationProofRequest, RangeProofRequest};
 
@@ -73,8 +79,10 @@ impl WorldSuccinctHost {
 
         Ok(RangeProofRequest {
             witness: WorldRangeWitness {
-                input,
-                expected_public_values,
+                input: range_proof_input(input),
+                pre_state: None,
+                post_state: None,
+                expected_public_values: expected_public_values.map(range_public_values),
             },
         })
     }
@@ -106,6 +114,79 @@ impl WorldSuccinctHost {
     ) -> Result<Vec<L2BlockRange>, WorldSuccinctHostError> {
         let split_count = self.config.range_split_count.get() as u64;
         split_range(range, split_count)
+    }
+}
+
+fn range_proof_input(input: WorldProofInput) -> WorldRangeProofInput {
+    WorldRangeProofInput {
+        schedule: WorldRangeHardforkConfig {
+            bedrock_block: input.schedule.bedrock_block,
+            regolith_time: input.schedule.regolith_time,
+            canyon_time: input.schedule.canyon_time,
+            ecotone_time: input.schedule.ecotone_time,
+            fjord_time: input.schedule.fjord_time,
+            granite_time: input.schedule.granite_time,
+            holocene_time: input.schedule.holocene_time,
+            isthmus_time: input.schedule.isthmus_time,
+            jovian_time: input.schedule.jovian_time,
+            tropo_time: input.schedule.tropo_time,
+            strato_time: input.schedule.strato_time,
+        },
+        claim: WorldRangeProofClaim {
+            l1_head: input.claim.l1_head,
+            agreed_l2_output_root: input.claim.agreed_l2_output_root,
+            claimed_l2_output_root: input.claim.claimed_l2_output_root,
+            claimed_l2_block_number: input.claim.claimed_l2_block_number,
+        },
+        claimed_l2_timestamp: input.claimed_l2_timestamp,
+        rollup_config_hash: input.rollup_config_hash,
+    }
+}
+
+fn range_public_values(values: WorldProofPublicValues) -> WorldRangeProofPublicValues {
+    WorldRangeProofPublicValues {
+        boot_info: BootInfoPublicValues {
+            l1_head: values.boot_info.l1_head,
+            l2_pre_root: values.boot_info.l2_pre_root,
+            l2_post_root: values.boot_info.l2_post_root,
+            l2_block_number: values.boot_info.l2_block_number,
+            rollup_config_hash: values.boot_info.rollup_config_hash,
+        },
+        active_fork: range_hardfork(values.active_fork),
+        world_spec_id: range_spec_id(values.world_spec_id),
+    }
+}
+
+fn range_hardfork(hardfork: WorldChainHardfork) -> WorldRangeHardfork {
+    match hardfork {
+        WorldChainHardfork::Bedrock => WorldRangeHardfork::Bedrock,
+        WorldChainHardfork::Regolith => WorldRangeHardfork::Regolith,
+        WorldChainHardfork::Canyon => WorldRangeHardfork::Canyon,
+        WorldChainHardfork::Ecotone => WorldRangeHardfork::Ecotone,
+        WorldChainHardfork::Fjord => WorldRangeHardfork::Fjord,
+        WorldChainHardfork::Granite => WorldRangeHardfork::Granite,
+        WorldChainHardfork::Holocene => WorldRangeHardfork::Holocene,
+        WorldChainHardfork::Isthmus => WorldRangeHardfork::Isthmus,
+        WorldChainHardfork::Jovian => WorldRangeHardfork::Jovian,
+        WorldChainHardfork::Tropo => WorldRangeHardfork::Tropo,
+        WorldChainHardfork::Strato => WorldRangeHardfork::Strato,
+        _ => WorldRangeHardfork::Strato,
+    }
+}
+
+fn range_spec_id(spec_id: WorldSpecId) -> WorldRangeSpecId {
+    match spec_id {
+        WorldSpecId::BEDROCK => WorldRangeSpecId::BEDROCK,
+        WorldSpecId::REGOLITH => WorldRangeSpecId::REGOLITH,
+        WorldSpecId::CANYON => WorldRangeSpecId::CANYON,
+        WorldSpecId::ECOTONE => WorldRangeSpecId::ECOTONE,
+        WorldSpecId::FJORD => WorldRangeSpecId::FJORD,
+        WorldSpecId::GRANITE => WorldRangeSpecId::GRANITE,
+        WorldSpecId::HOLOCENE => WorldRangeSpecId::HOLOCENE,
+        WorldSpecId::ISTHMUS => WorldRangeSpecId::ISTHMUS,
+        WorldSpecId::JOVIAN => WorldRangeSpecId::JOVIAN,
+        WorldSpecId::TROPO => WorldRangeSpecId::TROPO,
+        WorldSpecId::STRATO => WorldRangeSpecId::STRATO,
     }
 }
 

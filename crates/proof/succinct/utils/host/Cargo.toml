@@ -8,10 +8,21 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
+alloy-consensus.workspace = true
+alloy-eips = { workspace = true, features = ["kzg"] }
 alloy-primitives = { workspace = true, features = ["serde"] }
+anyhow.workspace = true
+async-trait.workspace = true
+c-kzg.workspace = true
+kona-derive.workspace = true
+kona-preimage.workspace = true
+kona-proof.workspace = true
+kona-protocol.workspace = true
+kzg-rs.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 world-chain-proof-client.workspace = true
 world-chain-proof-host.workspace = true
+world-chain-proof-protocol.workspace = true
 world-chain-proof-succinct-client-utils.workspace = true
 world-chain-proof-succinct-proof-utils.workspace = true

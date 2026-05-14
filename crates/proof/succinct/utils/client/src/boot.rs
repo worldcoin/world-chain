@@ -2,8 +2,44 @@
 
 use alloy_sol_types::sol;
 use serde::{Deserialize, Serialize};
-use world_chain_proof_client::WorldProofPublicValues;
-use world_chain_proof_protocol::BootInfoPublicValues;
+
+use alloy_primitives::B256;
+use kona_proof::BootInfo;
+
+/// Public boot values committed by the range proof.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootInfoPublicValues {
+    /// L1 head used by the derivation pipeline.
+    pub l1_head: B256,
+    /// Agreed pre-state L2 output root.
+    pub l2_pre_root: B256,
+    /// Claimed post-state L2 output root.
+    pub l2_post_root: B256,
+    /// Claimed post-state L2 block number.
+    pub l2_block_number: u64,
+    /// OP Succinct rollup config hash.
+    pub rollup_config_hash: B256,
+}
+
+impl BootInfoPublicValues {
+    /// Creates boot public values from proof roots and an already computed rollup config hash.
+    pub const fn new(
+        l1_head: B256,
+        l2_pre_root: B256,
+        l2_post_root: B256,
+        l2_block_number: u64,
+        rollup_config_hash: B256,
+    ) -> Self {
+        Self {
+            l1_head,
+            l2_pre_root,
+            l2_post_root,
+            l2_block_number,
+            rollup_config_hash,
+        }
+    }
+}
 
 sol! {
     /// OP Succinct-compatible range proof public values.
@@ -29,6 +65,19 @@ impl From<BootInfoPublicValues> for BootInfoStruct {
     }
 }
 
+impl BootInfoStruct {
+    /// Converts Kona boot info into the on-chain public values using the World rollup config hash.
+    pub fn from_kona_boot_info(boot_info: BootInfo, rollup_config_hash: B256) -> Self {
+        Self {
+            l1Head: boot_info.l1_head,
+            l2PreRoot: boot_info.agreed_l2_output_root,
+            l2PostRoot: boot_info.claimed_l2_output_root,
+            l2BlockNumber: boot_info.claimed_l2_block_number,
+            rollupConfigHash: rollup_config_hash,
+        }
+    }
+}
+
 impl From<&BootInfoPublicValues> for BootInfoStruct {
     fn from(value: &BootInfoPublicValues) -> Self {
         Self {
@@ -50,12 +99,6 @@ impl From<BootInfoStruct> for BootInfoPublicValues {
             value.l2BlockNumber,
             value.rollupConfigHash,
         )
-    }
-}
-
-impl From<&WorldProofPublicValues> for BootInfoStruct {
-    fn from(value: &WorldProofPublicValues) -> Self {
-        Self::from(&value.boot_info)
     }
 }
 

@@ -29,6 +29,7 @@ members = [
     "crates/proof/succinct/utils/build",
     "crates/proof/succinct/utils/client",
     "crates/proof/succinct/utils/elfs",
+    "crates/proof/succinct/utils/ethereum/client",
     "crates/proof/succinct/utils/host",
     "crates/proof/succinct/utils/proof",
     "crates/devnet",
@@ -81,6 +82,7 @@ world-chain-proof-host = { path = "crates/proof/host", default-features = false 
 world-chain-proof-succinct-build-utils = { path = "crates/proof/succinct/utils/build", default-features = false }
 world-chain-proof-succinct-client-utils = { path = "crates/proof/succinct/utils/client", default-features = false }
 world-chain-proof-succinct-elfs = { path = "crates/proof/succinct/utils/elfs", default-features = false }
+world-chain-proof-succinct-ethereum-client-utils = { path = "crates/proof/succinct/utils/ethereum/client", default-features = false }
 world-chain-proof-succinct-host-utils = { path = "crates/proof/succinct/utils/host", default-features = false }
 world-chain-proof-succinct-proof-utils = { path = "crates/proof/succinct/utils/proof", default-features = false }
 
@@ -212,6 +214,7 @@ alloy-trie = { version = "0.9.4", default-features = false, features = [
 
 # revm
 revm = { version = "38.0.0", default-features = false }
+revm-precompile = { version = "34.0.0", default-features = false }
 revm-bytecode = { version = "10.0.0", default-features = false }
 revm-database = { version = "13.0.0", default-features = false }
 revm-state = { version = "11.0.0", default-features = false }
@@ -223,6 +226,18 @@ revm-inspectors = "0.39.0"
 
 alloy-op-evm = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
 alloy-evm = { version = "0.33.0", default-features = false }
+
+# kona
+kona-derive = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
+kona-driver = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+kona-executor = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+kona-genesis = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
+kona-preimage = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", features = [
+    "rkyv",
+    "serde",
+] }
+kona-proof = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+kona-protocol = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
 
 # rpc
 jsonrpsee = { version = "0.26.0", features = ["server", "client", "macros"] }
@@ -242,8 +257,10 @@ crossbeam-channel = "0.5"
 futures = "0.3"
 futures-util = "0.3"
 chrono = "0.4"
+anyhow = { version = "1.0.86", default-features = false }
 thiserror = "2"
 strum = { version = "0.28", features = ["derive"] }
+cfg-if = "1"
 bytemuck = "1"
 semaphore-rs = { version = "0.5", features = ["depth_30"] }
 semaphore-rs-proof = "0.5"
@@ -270,12 +287,16 @@ rayon = "1.12.0"
 auto_impl = "1"
 async-trait = "0.1.88"
 dashmap = { version = "6.2.1", features = ["rayon"] }
+spin = "0.10"
+rkyv = { version = "0.8", features = ["hashbrown-0_15", "std"] }
 tower = "0.5.0"
 backon = "1"
 arbitrary = { version = "=1.4.2", features = ["derive"] }
 blake3 = "1.8.4"
 ed25519-dalek = { version = "2", features = ["serde"] }
 sha2 = "0.10.9"
+kzg-rs = { version = "0.2.8", features = ["rkyv", "serde"] }
+c-kzg = { version = "2.0.0", default-features = false }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 url = "2.5.7"

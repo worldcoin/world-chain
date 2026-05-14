@@ -1,4 +1,4 @@
-//! SP1 range program for World Chain OP Succinct Lite fault proofs.
+//! SP1 range program for World Chain OP Succinct Lite fault proofs with Ethereum DA.
 
 #![cfg_attr(target_os = "zkvm", no_main)]
 
@@ -6,11 +6,37 @@
 sp1_zkvm::entrypoint!(main);
 
 use alloy_sol_types::SolValue;
-use world_chain_proof_succinct_range_utils::{WorldRangeWitness, run_range_program};
+use rkyv::rancor::Error;
+use world_chain_proof_succinct_client_utils::witness::{WitnessData, WorldRangeWitnessData};
+use world_chain_proof_succinct_ethereum_client_utils::executor::ETHDAWitnessExecutor;
+use world_chain_proof_succinct_range_utils::run_range_program;
+#[cfg(feature = "tracing-subscriber")]
+use world_chain_proof_succinct_range_utils::setup_tracing;
 
 pub fn main() {
-    let witness = sp1_zkvm::io::read::<WorldRangeWitness>();
-    let boot_info = run_range_program(witness).expect("failed to build World range public values");
+    #[cfg(feature = "tracing-subscriber")]
+    setup_tracing();
 
-    sp1_zkvm::io::commit_slice(&boot_info.abi_encode());
+    kona_proof::block_on(async move {
+        let witness_rkyv_bytes: Vec<u8> = sp1_zkvm::io::read_vec();
+        let witness_data =
+            rkyv::from_bytes::<WorldRangeWitnessData, Error>(&witness_rkyv_bytes)
+                .expect("failed to deserialize World range witness data");
+        let world_schedule = witness_data.schedule.clone();
+        let rollup_config_hash = witness_data.rollup_config_hash();
+        let (oracle, beacon) = witness_data
+            .get_oracle_and_blob_provider()
+            .await
+            .expect("failed to load oracle and blob provider");
+        let boot_info = run_range_program(
+            ETHDAWitnessExecutor::new(),
+            oracle,
+            beacon,
+            world_schedule,
+            rollup_config_hash,
+        )
+        .await;
+
+        sp1_zkvm::io::commit_slice(&boot_info.abi_encode());
+    });
 }
