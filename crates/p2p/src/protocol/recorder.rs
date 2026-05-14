@@ -428,17 +428,21 @@ impl FlashblocksRecorder {
 
     /// Queues an accepted flashblock payload for persistence.
     pub fn record(&self, payload: &FlashblocksPayloadV1) {
-        let record = FlashblocksRecord {
-            payload: payload.clone(),
+        let permit = match self.tx.try_reserve() {
+            Ok(permit) => permit,
+            Err(err) => {
+                warn!(
+                    target: "flashblocks::recorder",
+                    %err,
+                    "dropping flashblock record because recorder channel is unavailable"
+                );
+                return;
+            }
         };
 
-        if let Err(err) = self.tx.try_send(record) {
-            warn!(
-                target: "flashblocks::recorder",
-                %err,
-                "dropping flashblock record because recorder channel is unavailable"
-            );
-        }
+        permit.send(FlashblocksRecord {
+            payload: payload.clone(),
+        });
     }
 }
 
