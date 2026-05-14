@@ -15,7 +15,7 @@ use world_chain_test_utils::{
         build_flashblock_sequence_fixture_fib_with_provider,
         build_flashblock_sequence_fixture_world_id_like_bn254_with_provider,
     },
-    e2e_harness::setup::setup_with_block_uncompressed_size_limit,
+    e2e_harness::setup::WorldChainTestBuilder,
 };
 
 use world_chain_validator::{
@@ -76,15 +76,13 @@ fn bench_process_flashblock_case<F>(
         // later execute against. Using the mock `TestStateProvider` here would
         // produce state roots that disagree with what the live node computes.
         let (_, nodes, _, _, _) = rt
-            .block_on(setup_with_block_uncompressed_size_limit::<
-                WorldChainDefaultContext,
-            >(
-                1,
-                optimism_payload_attributes,
-                true,
-                None,
-                CHAIN_SPEC.clone(),
-            ))
+            .block_on(
+                WorldChainTestBuilder::builder()
+                    .nodes(1)
+                    .flashblocks(true)
+                    .build()
+                    .setup_with::<WorldChainDefaultContext, _>(optimism_payload_attributes),
+            )
             .unwrap();
         let node = &nodes[0];
         let provider = node.node.inner.provider().clone();
@@ -135,15 +133,13 @@ fn bench_launch_flashblock_sequence_case<F>(
         // what the live node computes and would make this bench duplicate the
         // synthetic one in `coordinator.rs`.
         let (_, nodes, _, _, _) = rt
-            .block_on(setup_with_block_uncompressed_size_limit::<
-                WorldChainDefaultContext,
-            >(
-                1,
-                optimism_payload_attributes,
-                true,
-                None,
-                CHAIN_SPEC.clone(),
-            ))
+            .block_on(
+                WorldChainTestBuilder::builder()
+                    .nodes(1)
+                    .flashblocks(true)
+                    .build()
+                    .setup_with::<WorldChainDefaultContext, _>(optimism_payload_attributes),
+            )
             .unwrap();
         let node = &nodes[0];
         let provider = node.node.inner.provider().clone();

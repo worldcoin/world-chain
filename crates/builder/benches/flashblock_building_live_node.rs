@@ -24,9 +24,7 @@ use world_chain_test_utils::{
         build_flashblock_fixture_fib_with_provider,
         build_flashblock_fixture_world_id_like_bn254_with_provider,
     },
-    e2e_harness::setup::{
-        TX_SET_L1_BLOCK, encode_eip1559_params, setup_with_block_uncompressed_size_limit,
-    },
+    e2e_harness::setup::{TX_SET_L1_BLOCK, WorldChainTestBuilder, encode_eip1559_params},
     utils::signer,
 };
 
@@ -126,15 +124,13 @@ fn bench_build_flashblock_case<F>(
 
     for &tx_count in tx_counts {
         let (_, nodes, _, _, _) = rt
-            .block_on(setup_with_block_uncompressed_size_limit::<
-                WorldChainDefaultContext,
-            >(
-                1,
-                optimism_payload_attributes,
-                true,
-                None,
-                CHAIN_SPEC.clone(),
-            ))
+            .block_on(
+                WorldChainTestBuilder::builder()
+                    .nodes(1)
+                    .flashblocks(true)
+                    .build()
+                    .setup_with::<WorldChainDefaultContext, _>(optimism_payload_attributes),
+            )
             .unwrap();
         let node = &nodes[0];
         let provider = node.node.inner.provider.clone();
