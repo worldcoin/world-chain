@@ -3,6 +3,7 @@ use clap::ArgGroup;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use hex::FromHex;
 use reth_network_peers::TrustedPeer;
+use std::path::PathBuf;
 
 use crate::cli::p2p::FanoutArgs;
 
@@ -137,6 +138,28 @@ pub struct FlashblocksArgs {
     )]
     pub access_list: bool,
 
+    /// Store accepted flashblocks to a separate libmdbx database.
+    #[arg(
+        long = "flashblocks.store",
+        id = "flashblocks.store",
+        env = "FLASHBLOCKS_STORE",
+        requires = "flashblocks.enabled",
+        default_value_t = false
+    )]
+    pub store: bool,
+
+    /// Path to the libmdbx database directory used by --flashblocks.store.
+    ///
+    /// Defaults to <datadir>/flashblocks/flashblocks.mdbx.
+    #[arg(
+        long = "flashblocks.store-path",
+        alias = "flashblocks.store_path",
+        env = "FLASHBLOCKS_STORE_PATH",
+        requires = "flashblocks.store",
+        required = false
+    )]
+    pub store_path: Option<PathBuf>,
+
     #[command(flatten)]
     pub fanout: FanoutArgs,
 }
@@ -183,6 +206,8 @@ mod tests {
             recommit_interval: 200,
             flashblocks_interval: 200,
             access_list: true,
+            store: false,
+            store_path: None,
             fanout: FanoutArgs::default(),
         };
 
@@ -214,6 +239,8 @@ mod tests {
             recommit_interval: 200,
             flashblocks_interval: 200,
             access_list: false,
+            store: false,
+            store_path: None,
             fanout: FanoutArgs::default(),
         };
 
@@ -242,5 +269,10 @@ mod tests {
             "0000000000000000000000000000000000000000000000000000000000000000",
         ])
         .unwrap_err();
+    }
+
+    #[test]
+    fn flashblocks_store_requires_flashblocks_enabled() {
+        CommandParser::try_parse_from(["bin", "--flashblocks.store"]).unwrap_err();
     }
 }

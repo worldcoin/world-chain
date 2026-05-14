@@ -178,6 +178,18 @@ Flashblocks:
           
           [env: FLASHBLOCKS_ACCESS_LIST=]
 
+      --flashblocks.store
+          Store accepted flashblocks to a separate libmdbx database
+          
+          [env: FLASHBLOCKS_STORE=]
+
+      --flashblocks.store-path <STORE_PATH>
+          Path to the libmdbx database directory used by --flashblocks.store.
+          
+          Defaults to <datadir>/flashblocks/flashblocks.mdbx.
+          
+          [env: FLASHBLOCKS_STORE_PATH=]
+
       --flashblocks.max-send-peers <MAX_SEND_PEERS>
           Override the flashblocks send-set size
           
