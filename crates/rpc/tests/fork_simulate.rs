@@ -31,9 +31,9 @@ use revm_database::{AlloyDB, CacheDB, WrapDatabaseAsync};
 use revm_primitives::TxKind;
 
 use world_chain_rpc::simulate::{
-    AssetType, ContractManagementType, SimulationInspector, decode_revert_reason,
-    parse_asset_changes, parse_contract_management_events, parse_exposure_changes,
-    relax_cfg_for_simulation, selector_to_name,
+    AssetType, ContractManagementType, SimulationInspector, assemble_contract_management,
+    decode_revert_reason, parse_asset_changes, parse_contract_management_events,
+    parse_exposure_changes, relax_cfg_for_simulation, selector_to_name,
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -76,6 +76,15 @@ macro_rules! forked_db {
             }
         }
     };
+    ($block:expr) => {
+        match make_forked_db_at($block) {
+            Some(db) => db,
+            None => {
+                eprintln!("skipping fork-backed test: WORLDCHAIN_PROVIDER is not set");
+                return;
+            }
+        }
+    };
 }
 
 /// Mirrors the EVM envelope `simulate_blocking` configures in `simulate.rs`
@@ -106,12 +115,27 @@ fn make_forked_db() -> Option<
         >,
     >,
 > {
+    make_forked_db_at(FORK_BLOCK_NUMBER)
+}
+
+/// Same as [`make_forked_db`] but pinned to a caller-provided block. Use when
+/// a test needs state that didn't exist (or had different shape) at the
+/// default `FORK_BLOCK_NUMBER`.
+fn make_forked_db_at(
+    block: u64,
+) -> Option<
+    CacheDB<
+        WrapDatabaseAsync<
+            AlloyDB<alloy_provider_v1::network::Ethereum, alloy_provider_v1::RootProvider>,
+        >,
+    >,
+> {
     let provider = alloy_provider_v1::RootProvider::new_http(
         rpc_url()?
             .parse()
             .expect("WORLDCHAIN_PROVIDER must be a valid HTTP RPC URL"),
     );
-    let alloy_db = AlloyDB::new(provider, revm_database::BlockId::from(FORK_BLOCK_NUMBER));
+    let alloy_db = AlloyDB::new(provider, revm_database::BlockId::from(block));
     let handle = tokio::runtime::Handle::current();
     let wrapped = WrapDatabaseAsync::with_handle(alloy_db, handle);
     Some(CacheDB::new(wrapped))
@@ -1416,4 +1440,110 @@ async fn test_contract_management_action_serialization() {
         json.get("deployer_address").is_none(),
         "deployer_address must be omitted when None"
     );
+}
+
+// ─── End-to-end dedup (assemble_contract_management) ─────────────────────────
+
+/// End-to-end: a real Worldchain Safe deployment that previously surfaced one
+/// CONTRACT_CREATION **plus** two phantom PROXY_UPGRADE entries — the
+/// constructor's EIP-1967 `Upgraded` event and its implementation-slot write
+/// both fired, double-counted on top of the inspector-captured creation.
+///
+/// Asserts the dedup property address-agnostically: every newly-created
+/// contract in the trace must carry exactly one CONTRACT_CREATION and zero
+/// phantom proxy/ownership entries. We don't pin the deployed address because
+/// the fork EVM here uses `BlockEnv::default()` instead of the real sealed
+/// header — initialization paths that read `block.number` / `block.timestamp`
+/// can produce a different `CREATE2` outcome than prod. The bug being fixed
+/// is contract_management *shape*, not the address itself.
+///
+/// Pinned to block 29_722_416 (not the default `FORK_BLOCK_NUMBER`) because
+/// this sender + calldata reproduces the duplicate-entry bug against state at
+/// that height.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_fresh_deploy_emits_only_contract_creation() {
+    let mut db = forked_db!(29_722_416u64);
+
+    let sender = address!("e3e5dd70abcccc67fce203608cef7fab4d7d07d7");
+    let call_data: Bytes = "0x7bb3742800000000000000000000000038869bf66a61cf6bdb996a6ae40d5853fd43b52600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000004448d80ff0a000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000003f900c301bace6e9409b1876347a3dc94ec24d18c1fe4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003a4855700fd00000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001e0000000000000000000000000000000000000000000000000000000000000022000000000000000000000000000000000000000000000000000000000000002a00000000000000000000000000000000000000000000000000000000000000340000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003600000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003800000000000000000000000000000000000000000000000000000000000000008546875674c696665000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000326544c0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004968747470733a2f2f63646e2e7075662e776f726c642f697066732f516d574c57724d51526b41706b555044363832785635636a47764c456e3148773966314d53476e655759594241520000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006cc389206469666572656e74652c2070656e7361646f20656d20746f646f73206f73207175652071756572656d2067616e686172206d6173206e616f20706f64656d20696e766573746972206d7569746f2e0a556d20746f6b656e206469666572656e7465206520756e69636f00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000".parse().expect("valid hex");
+
+    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+        &mut db,
+        simulate_evm_env(),
+        SimulationInspector::default(),
+    );
+
+    let result_and_state = RethEvm::transact(
+        &mut evm,
+        OpTx(OpTransaction {
+            base: TxEnv {
+                caller: ENTRY_POINT,
+                kind: TxKind::Call(sender),
+                data: call_data,
+                value: U256::ZERO,
+                // Match prod's MAX_SIMULATION_GAS so this exercises the same
+                // envelope a live request would.
+                gas_limit: 8_000_000,
+                gas_price: 0,
+                chain_id: Some(CHAIN_ID),
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+    )
+    .expect("transact must succeed against the fork");
+
+    // Same logs the prod path passes to `assemble_contract_management`.
+    let logs = match &result_and_state.result {
+        ExecutionResult::Success { logs, .. }
+        | ExecutionResult::Revert { logs, .. }
+        | ExecutionResult::Halt { logs, .. } => logs.clone(),
+    };
+
+    let (_, inspector, _) = evm.components_mut();
+    let inspector_creations = inspector.take_contract_creations();
+    let inspector_destructs = inspector.take_self_destructs();
+
+    let cm = assemble_contract_management(
+        inspector_creations,
+        inspector_destructs,
+        &logs,
+        &result_and_state.state,
+    );
+
+    // The trace must contain at least one fresh deploy — otherwise the test
+    // isn't exercising the dedup path at all and a future calldata/fork
+    // change could silently turn it into a no-op.
+    let fresh_targets: Vec<_> = cm
+        .iter()
+        .filter(|(_, actions)| {
+            actions
+                .iter()
+                .any(|a| a.action_type == ContractManagementType::ContractCreation)
+        })
+        .collect();
+    assert!(
+        !fresh_targets.is_empty(),
+        "expected at least one CONTRACT_CREATION in trace; got cm={cm:#?}"
+    );
+
+    // The dedup property: for every newly-created contract, the only action
+    // is the CREATION itself — no phantom PROXY_UPGRADE / OWNERSHIP_CHANGE
+    // from the constructor's slot writes or `Upgraded(impl)` event.
+    for (addr, actions) in &fresh_targets {
+        assert_eq!(
+            actions.len(),
+            1,
+            "fresh deploy at {addr} must surface only CONTRACT_CREATION; got {actions:#?}"
+        );
+        assert_eq!(
+            actions[0].action_type,
+            ContractManagementType::ContractCreation
+        );
+        assert!(
+            actions[0].deployer_address.is_some(),
+            "CONTRACT_CREATION carries the deployer; got {:#?}",
+            actions[0]
+        );
+    }
 }
