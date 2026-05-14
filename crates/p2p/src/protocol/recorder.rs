@@ -17,7 +17,7 @@ use reth_db_api::{
     table::{Compress, Decode, Decompress, Encode},
     transaction::{DbTx, DbTxMut},
 };
-use std::{fmt, fs, path::PathBuf, time::Duration};
+use std::{fmt, fs, path::PathBuf, thread, time::Duration};
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 use world_chain_primitives::primitives::FlashblocksPayloadV1;
@@ -409,10 +409,19 @@ struct FlashblocksRecord {
 }
 
 impl FlashblocksRecorder {
-    /// Spawns the background writer task and returns a lightweight recorder handle.
+    /// Spawns the background writer thread and returns a lightweight recorder handle.
     pub fn spawn(config: FlashblocksRecorderConfig) -> Self {
         let (tx, rx) = mpsc::channel(STORE_CHANNEL_CAPACITY);
-        tokio::spawn(run_writer(config, rx));
+        if let Err(err) = thread::Builder::new()
+            .name("flashblocks-recorder".to_string())
+            .spawn(move || run_writer(config, rx))
+        {
+            error!(
+                target: "flashblocks::recorder",
+                %err,
+                "failed to spawn flashblocks recorder thread; records will be dropped"
+            );
+        }
 
         Self { tx }
     }
@@ -433,10 +442,10 @@ impl FlashblocksRecorder {
     }
 }
 
-async fn run_writer(config: FlashblocksRecorderConfig, mut rx: mpsc::Receiver<FlashblocksRecord>) {
+fn run_writer(config: FlashblocksRecorderConfig, mut rx: mpsc::Receiver<FlashblocksRecord>) {
     let mut db = None;
 
-    while let Some(record) = rx.recv().await {
+    while let Some(record) = rx.blocking_recv() {
         if db.is_none() {
             match open_db(&config) {
                 Ok(conn) => {
@@ -454,7 +463,7 @@ async fn run_writer(config: FlashblocksRecorderConfig, mut rx: mpsc::Receiver<Fl
                         %err,
                         "failed to open flashblocks recorder database; dropping record"
                     );
-                    tokio::time::sleep(DB_RETRY_DELAY).await;
+                    thread::sleep(DB_RETRY_DELAY);
                     continue;
                 }
             }
@@ -471,7 +480,7 @@ async fn run_writer(config: FlashblocksRecorderConfig, mut rx: mpsc::Receiver<Fl
             // Reopen on the next record in case the connection entered a bad state
             // or the database directory was replaced while the node was running.
             db = None;
-            tokio::time::sleep(DB_RETRY_DELAY).await;
+            thread::sleep(DB_RETRY_DELAY);
         }
     }
 }
