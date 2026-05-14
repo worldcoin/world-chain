@@ -10,7 +10,7 @@ use alloy_rpc_types_engine::PayloadId;
 use reth_codecs::DecompressError;
 use reth_db::{
     Database, DatabaseEnv,
-    mdbx::{DatabaseArguments, create_db},
+    mdbx::{DatabaseArguments, SyncMode, create_db},
 };
 use reth_db_api::{
     DatabaseError,
@@ -26,6 +26,10 @@ use world_chain_primitives::primitives::FlashblocksPayloadV1;
 // avoid unbounded memory growth when the DB writer stalls.
 const STORE_CHANNEL_CAPACITY: usize = 64;
 const DB_RETRY_DELAY: Duration = Duration::from_secs(1);
+const MEBIBYTE: usize = 1024 * 1024;
+const GIBIBYTE: usize = 1024 * MEBIBYTE;
+const RECORDER_DB_MAX_SIZE: usize = 512 * GIBIBYTE;
+const RECORDER_DB_GROWTH_STEP: usize = 64 * MEBIBYTE;
 
 type RecorderResult<T> = Result<T, FlashblocksRecorderError>;
 
@@ -503,7 +507,7 @@ fn open_db(config: &FlashblocksRecorderConfig) -> RecorderResult<DatabaseEnv> {
         })?;
     }
 
-    let mut db = create_db(&config.path, DatabaseArguments::default()).map_err(|source| {
+    let mut db = create_db(&config.path, recorder_database_args()).map_err(|source| {
         FlashblocksRecorderError::OpenDatabase {
             path: config.path.clone(),
             message: source.to_string(),
@@ -514,6 +518,16 @@ fn open_db(config: &FlashblocksRecorderConfig) -> RecorderResult<DatabaseEnv> {
         .map_err(|source| FlashblocksRecorderError::CreateTables { source })?;
 
     Ok(db)
+}
+
+fn recorder_database_args() -> DatabaseArguments {
+    // The recorder DB is best-effort capture data, not consensus state. Relax
+    // fsyncs and use smaller map growth than the main node DB so slow storage is
+    // less likely to make the bounded writer queue fall behind.
+    DatabaseArguments::default()
+        .with_sync_mode(Some(SyncMode::SafeNoSync))
+        .with_geometry_max_size(Some(RECORDER_DB_MAX_SIZE))
+        .with_growth_step(Some(RECORDER_DB_GROWTH_STEP))
 }
 
 fn insert_record(db: &DatabaseEnv, record: &FlashblocksRecord) -> RecorderResult<()> {
