@@ -14293,6 +14293,55 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-proof-succinct-build-utils"
+version = "2.2.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "world-chain-proof-succinct-client-utils"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-sol-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "world-chain-proof-client",
+ "world-chain-proof-protocol",
+]
+
+[[package]]
+name = "world-chain-proof-succinct-elfs"
+version = "2.2.0"
+dependencies = [
+ "thiserror 2.0.18",
+ "world-chain-proof-succinct-build-utils",
+]
+
+[[package]]
+name = "world-chain-proof-succinct-host-utils"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "serde",
+ "thiserror 2.0.18",
+ "world-chain-proof-client",
+ "world-chain-proof-host",
+ "world-chain-proof-succinct-client-utils",
+ "world-chain-proof-succinct-proof-utils",
+]
+
+[[package]]
+name = "world-chain-proof-succinct-proof-utils"
+version = "2.2.0"
+dependencies = [
+ "serde",
+ "world-chain-proof-succinct-client-utils",
+]
+
+[[package]]
 name = "world-chain-rpc"
 version = "2.2.0"
 dependencies = [

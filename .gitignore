@@ -1,5 +1,6 @@
 book
 /target
+/crates/proof/succinct/programs/target
 .env
 .vscode
 .report
