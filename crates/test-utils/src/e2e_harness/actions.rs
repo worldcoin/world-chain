@@ -1359,20 +1359,57 @@ where
                     OpExecutionData, OpExecutionPayload, OpExecutionPayloadSidecar,
                 };
 
-                // Canonicalize on builder via FCU only (it already has the payload)
+                let execution_data = OpExecutionData {
+                    payload: OpExecutionPayload::V4(payload.execution_payload.clone()),
+                    sidecar: OpExecutionPayloadSidecar::v4(
+                        CancunPayloadFields::new(payload.parent_beacon_block_root, vec![]),
+                        alloy_rpc_types_engine::PraguePayloadFields {
+                            requests: alloy_eips::eip7685::RequestsOrHash::Hash(
+                                alloy_eips::eip7685::EMPTY_REQUESTS_HASH,
+                            ),
+                        },
+                    ),
+                };
+
+                // Canonicalize on builder with the same Engine API sequence used by followers.
+                // `getPayload` returns the block body, but the consensus engine may still need
+                // `newPayload` before it can accept the block hash as the forkchoice head.
                 {
-                    let builder_engine = env.node_clients[self.builder_idx].engine.http_client();
+                    let beacon_handle = env.node_clients[self.builder_idx]
+                        .beacon_engine_handle
+                        .as_ref()
+                        .ok_or_else(|| {
+                            eyre!(
+                                "block {block_num}: builder {} has no beacon_engine_handle",
+                                self.builder_idx
+                            )
+                        })?;
+
+                    let status = beacon_handle
+                        .new_payload(execution_data.clone().into())
+                        .await
+                        .map_err(|e| {
+                            eyre!("block {block_num}: builder newPayload failed: {e:?}")
+                        })?;
+
+                    if !matches!(status.status, PayloadStatusEnum::Valid) {
+                        return Err(eyre!(
+                            "block {block_num}: builder newPayload invalid: {:?}",
+                            status
+                        ));
+                    }
+
                     let head_fcu = ForkchoiceState {
                         head_block_hash: block_hash,
                         safe_block_hash: block_hash,
                         finalized_block_hash: block_hash,
                     };
-                    let fcu_result = EngineApiClient::<OpEngineTypes>::fork_choice_updated_v3(
-                        &builder_engine,
-                        head_fcu,
-                        None,
-                    )
-                    .await?;
+                    let fcu_result = beacon_handle
+                        .fork_choice_updated(head_fcu, None)
+                        .await
+                        .map_err(|e| {
+                            eyre!("block {block_num}: builder FCU to head failed: {e:?}")
+                        })?;
 
                     if !matches!(fcu_result.payload_status.status, PayloadStatusEnum::Valid) {
                         return Err(eyre!(
@@ -1404,20 +1441,8 @@ where
                             })?;
 
                         // newPayload
-                        let execution_data = OpExecutionData {
-                            payload: OpExecutionPayload::V4(payload.execution_payload.clone()),
-                            sidecar: OpExecutionPayloadSidecar::v4(
-                                CancunPayloadFields::new(payload.parent_beacon_block_root, vec![]),
-                                alloy_rpc_types_engine::PraguePayloadFields {
-                                    requests: alloy_eips::eip7685::RequestsOrHash::Hash(
-                                        alloy_eips::eip7685::EMPTY_REQUESTS_HASH,
-                                    ),
-                                },
-                            ),
-                        };
-
                         let status = beacon_handle
-                            .new_payload(execution_data.into())
+                            .new_payload(execution_data.clone().into())
                             .await
                             .map_err(|e| {
                                 eyre!("block {block_num}: newPayload failed on follower {follower_idx}: {e:?}")

@@ -52,6 +52,9 @@ pub struct SimulateUnsignedUserOpRequest {
     /// Must not exceed `MAX_SIMULATION_GAS`.
     #[serde(default)]
     pub call_gas_limit: Option<U256>,
+    /// Block to simulate against. Defaults to `latest` when omitted.
+    #[serde(default)]
+    pub block: Option<BlockId>,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -619,17 +622,18 @@ where
         &self,
         request: SimulateUnsignedUserOpRequest,
     ) -> RpcResult<SimulateUnsignedUserOpResult> {
-        // 1. Resolve the latest sealed header. Subsequent lookups go by its
-        //    concrete hash so a new block arriving mid-request can't desync
-        //    the header from the state we read.
+        // 1. Resolve the requested sealed header (defaulting to latest).
+        //    Subsequent lookups go by its concrete hash so a new block arriving
+        //    mid-request can't desync the header from the state we read.
+        let requested_block = request.block.unwrap_or(BlockNumberOrTag::Latest.into());
         let header = self
             .client
-            .sealed_header_by_id(BlockNumberOrTag::Latest.into())
+            .sealed_header_by_id(requested_block)
             .map_err(internal_err)?
             .ok_or_else(|| {
                 jsonrpsee::types::ErrorObjectOwned::owned(
                     jsonrpsee::types::error::INVALID_PARAMS_CODE,
-                    "Latest block not found",
+                    format!("Block not found: {requested_block}"),
                     None::<String>,
                 )
             })?;
