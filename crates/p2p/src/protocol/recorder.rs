@@ -22,7 +22,9 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 use world_chain_primitives::primitives::FlashblocksPayloadV1;
 
-const STORE_CHANNEL_CAPACITY: usize = 1_024;
+// Records own full flashblock payloads, so keep the best-effort queue modest to
+// avoid unbounded memory growth when the DB writer stalls.
+const STORE_CHANNEL_CAPACITY: usize = 64;
 const DB_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 type RecorderResult<T> = Result<T, FlashblocksRecorderError>;
