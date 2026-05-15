@@ -14002,6 +14002,8 @@ dependencies = [
  "alloy-rpc-types-eth 2.0.4",
  "alloy-signer 2.0.4",
  "alloy-signer-local",
+ "alloy-transport 2.0.4",
+ "alloy-transport-http 2.0.4",
  "color-eyre",
  "ed25519-dalek",
  "futures",
