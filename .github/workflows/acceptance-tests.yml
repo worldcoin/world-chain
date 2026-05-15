@@ -54,7 +54,10 @@ jobs:
     steps:
       - name: Skip unselected network
         if: ${{ inputs.network != 'all' && inputs.network != matrix.network }}
-        run: echo 'Skipping ${{ matrix.network }} because ${{ inputs.network }} was selected.'
+        env:
+          MATRIX_NETWORK: ${{ matrix.network }}
+          SELECTED_NETWORK: ${{ inputs.network }}
+        run: printf 'Skipping %s because %s was selected.\n' "$MATRIX_NETWORK" "$SELECTED_NETWORK"
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.02
         if: ${{ inputs.network == 'all' || inputs.network == matrix.network }}
