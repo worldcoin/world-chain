@@ -283,7 +283,6 @@ contract WorldChainRpSignerImplV1Test is Test {
         signer.addVerifier(IActionVerifier(address(subsidy)));
     }
 
-
     function test_removeVerifier_byOwner_emitsAndShrinks() public {
         vm.expectEmit(true, true, true, true, address(signer));
         emit ActionVerifierRemoved(IActionVerifier(address(subsidy)));
