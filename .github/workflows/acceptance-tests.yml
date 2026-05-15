@@ -2,6 +2,17 @@ name: Acceptance Tests
 
 on:
   workflow_dispatch:
+    inputs:
+      network:
+        description: Network to test
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - stage
+          - dev-us-east-1
+          - dev-eu-central-2
 
 permissions:
   contents: read
@@ -41,11 +52,21 @@ jobs:
             expected_chain_id: "69420"
             allow_failure: true
     steps:
+      - name: Skip unselected network
+        if: ${{ inputs.network != 'all' && inputs.network != matrix.network }}
+        env:
+          MATRIX_NETWORK: ${{ matrix.network }}
+          SELECTED_NETWORK: ${{ inputs.network }}
+        run: printf 'Skipping %s because %s was selected.\n' "$MATRIX_NETWORK" "$SELECTED_NETWORK"
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.02
+        if: ${{ inputs.network == 'all' || inputs.network == matrix.network }}
 
       - uses: dtolnay/rust-toolchain@stable
+        if: ${{ inputs.network == 'all' || inputs.network == matrix.network }}
 
       - name: Cache
+        if: ${{ inputs.network == 'all' || inputs.network == matrix.network }}
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.05
         with:
           path: |
@@ -56,17 +77,19 @@ jobs:
           restore-keys: cargo-acceptance-tests-
 
       - uses: taiki-e/install-action@184183c2401be73c3bf42c2e61268aa5855379c1 # v2.78.1
+        if: ${{ inputs.network == 'all' || inputs.network == matrix.network }}
         with:
           tool: nextest@0.9.135
 
       - name: Build acceptance tests
         id: build
+        if: ${{ inputs.network == 'all' || inputs.network == matrix.network }}
         continue-on-error: ${{ matrix.allow_failure }}
         run: cargo nextest run --profile ci -p world-chain-tests -E 'package(world-chain-tests) & binary(world-chain-tests) & test(/acceptance_tests::test_network/)' --no-run
 
       - name: Run acceptance tests
         id: run
-        if: ${{ steps.build.outcome == 'success' }}
+        if: ${{ (inputs.network == 'all' || inputs.network == matrix.network) && steps.build.outcome == 'success' }}
         continue-on-error: ${{ matrix.allow_failure }}
         env:
           ACCEPTANCE_NETWORK: ${{ matrix.network }}
@@ -79,9 +102,13 @@ jobs:
         run: cargo nextest run --profile ci -p world-chain-tests -E 'package(world-chain-tests) & binary(world-chain-tests) & test(/acceptance_tests::test_network/)'
 
       - name: Report allowed build failure
-        if: ${{ matrix.allow_failure && steps.build.outcome == 'failure' }}
-        run: echo '::warning::Acceptance test build failed for ${{ matrix.network }}, but this network is allowed to fail.'
+        if: ${{ (inputs.network == 'all' || inputs.network == matrix.network) && matrix.allow_failure && steps.build.outcome == 'failure' }}
+        env:
+          NETWORK: ${{ matrix.network }}
+        run: printf '::warning::Acceptance test build failed for %s, but this network is allowed to fail.\n' "$NETWORK"
 
       - name: Report allowed test failure
-        if: ${{ matrix.allow_failure && steps.run.outcome == 'failure' }}
-        run: echo '::warning::Acceptance tests failed for ${{ matrix.network }}, but this network is allowed to fail.'
+        if: ${{ (inputs.network == 'all' || inputs.network == matrix.network) && matrix.allow_failure && steps.run.outcome == 'failure' }}
+        env:
+          NETWORK: ${{ matrix.network }}
+        run: printf '::warning::Acceptance tests failed for %s, but this network is allowed to fail.\n' "$NETWORK"
