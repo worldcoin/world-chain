@@ -194,6 +194,38 @@ contract SubsidyAccountingImplV1Test is Test {
     }
 
     ///////////////////////////////////////////////////////////////////////////////
+    ///                            isValidAction                                ///
+    ///////////////////////////////////////////////////////////////////////////////
+
+    function test_isValidAction_acceptsCurrentPeriod() public view {
+        uint64 period = uint64(block.timestamp / PERIOD_LENGTH);
+        assertTrue(subsidy.isValidAction(subsidy.actionForPeriod(period)));
+    }
+
+    function test_isValidAction_acceptsNextPeriod() public view {
+        uint64 period = uint64(block.timestamp / PERIOD_LENGTH);
+        assertTrue(subsidy.isValidAction(subsidy.actionForPeriod(period + 1)));
+    }
+
+    function test_isValidAction_rejectsPreviousPeriod() public view {
+        uint64 period = uint64(block.timestamp / PERIOD_LENGTH);
+        assertFalse(subsidy.isValidAction(subsidy.actionForPeriod(period - 1)));
+    }
+
+    function test_isValidAction_invalidatedByVerifierSwap() public {
+        uint64 period = uint64(block.timestamp / PERIOD_LENGTH);
+        uint256 actionBefore = subsidy.actionForPeriod(period);
+        assertTrue(subsidy.isValidAction(actionBefore), "valid before swap");
+
+        IWorldIDVerifier newVerifier = IWorldIDVerifier(address(new MockWorldIDVerifier(true)));
+        vm.prank(OWNER);
+        subsidy.setWorldIDVerifier(newVerifier);
+
+        assertFalse(subsidy.isValidAction(actionBefore), "old action rejected after swap");
+        assertTrue(subsidy.isValidAction(subsidy.actionForPeriod(period)), "new action accepted");
+    }
+
+    ///////////////////////////////////////////////////////////////////////////////
     ///                       ENTRY-POINT STUBS (NotImplemented)                ///
     ///////////////////////////////////////////////////////////////////////////////
 
