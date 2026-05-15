@@ -5,11 +5,11 @@ import {TestSetup} from "./TestSetup.sol";
 import {console} from "@forge-std/console.sol";
 import {TestUtils} from "./TestUtils.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
-import {IPBHEntryPoint} from "../src/pbh/interfaces/IPBHEntryPoint.sol";
+import {IPBHEntryPoint} from "../src/interfaces/IPBHEntryPoint.sol";
 import "@account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
 import "@pbh-lib/PBHExternalNullifier.sol";
-import {PBHSignatureAggregator} from "../src/pbh/PBHSignatureAggregator.sol";
+import {PBHSignatureAggregator} from "../src/PBHSignatureAggregator.sol";
 import {SafeModuleSignatures} from "@pbh-lib/SafeModuleSignatures.sol";
 
 /// @title PBHSignatureAggregator Tests
