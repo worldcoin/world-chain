@@ -211,10 +211,10 @@ jsonrpsee-core = { version = "0.26.0" }
 jsonrpsee-types = "0.26.0"
 
 # metrics
-metrics = "0.24.0"
+metrics = "0.24.6"
 metrics-derive = "0.1"
 
-tokio = { version = "1.52.1", features = ["full"] }
+tokio = { version = "1.52.3", features = ["full"] }
 tokio-util = "0.7.15"
 tokio-stream = "0.1.17"
 tokio-tungstenite = "0.28.0"
@@ -263,7 +263,7 @@ brotli = "8.0.2"
 once_cell = "1.19"
 lru = "0.18"
 either = { version = "1.15.0", default-features = false }
-pin-project = "1.1.12"
+pin-project = "1.1.13"
 
 # Test
 testcontainers = "0.27"
