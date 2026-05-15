@@ -1,3 +1,3 @@
 #[cfg(test)]
-pub mod acceptance_tests;
-pub mod testsuite;
+mod acceptance_tests;
+mod testsuite;

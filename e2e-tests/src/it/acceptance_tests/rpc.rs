@@ -1,10 +1,7 @@
 use alloy_eips::BlockNumberOrTag;
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_client::RpcClient;
-use alloy_transport::{
-    TransportError,
-    layers::{RateLimitRetryPolicy, RetryBackoffLayer},
-};
+use alloy_transport::layers::RetryBackoffLayer;
 use alloy_transport_http::reqwest::{
     Client,
     header::{HeaderMap, HeaderName, HeaderValue},
@@ -26,13 +23,7 @@ impl RpcEnv {
         let Some(config) = Config::from_env()? else {
             return Ok(None);
         };
-        let policy = RateLimitRetryPolicy::default().or(|err: &TransportError| {
-            let msg = err.to_string();
-            msg.contains("connection error")
-                || msg.contains("SendRequest")
-                || msg.contains("error sending request")
-        });
-        let retry = RetryBackoffLayer::new_with_policy(4, 100, 330, policy);
+        let retry = RetryBackoffLayer::new(4, 100, 330);
         let http_client = http_client(config.cloudflare_access.as_ref())?;
         let client = RpcClient::builder()
             .layer(retry)

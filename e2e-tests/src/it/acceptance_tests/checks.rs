@@ -47,7 +47,6 @@ pub(super) async fn block_number_advances(env: &RpcEnv) -> eyre::Result<()> {
     let mut last = start;
 
     while Instant::now() < deadline {
-        sleep(env.config().block_poll_interval).await;
         last = env.latest_block_number().await?;
 
         if last >= target {
@@ -60,6 +59,7 @@ pub(super) async fn block_number_advances(env: &RpcEnv) -> eyre::Result<()> {
             );
             return Ok(());
         }
+        sleep(env.config().block_poll_interval).await;
     }
 
     bail!(
