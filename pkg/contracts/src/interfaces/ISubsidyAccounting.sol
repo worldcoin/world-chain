@@ -176,6 +176,13 @@ interface ISubsidyAccounting {
     ///         period.
     function isClaimed(uint256 nullifier, uint64 issuerSchemaId) external view returns (bool);
 
+    /// @notice The OPRF action key for `period`. Folds in the contract's internal
+    ///         `_registrationVersion`, so a verifier swap structurally changes this value for
+    ///         the same `period`. Mirrored bit-for-bit by the revm debit hook and consumed by
+    ///         `WorldChainRpSigner.verifyRpRequest` to validate Uniqueness actions.
+    /// @dev Equal to `uint256(keccak256(abi.encodePacked("period_proof", period, _registrationVersion))) >> 8`.
+    function actionForPeriod(uint64 period) external view returns (uint256);
+
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  ADMIN                                  ///
     ///////////////////////////////////////////////////////////////////////////////

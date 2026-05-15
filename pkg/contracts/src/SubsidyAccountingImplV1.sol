@@ -166,7 +166,7 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
         if (items.length == 0) revert EmptyItems();
 
         uint64 period = currentPeriod();
-        uint256 action = _actionForPeriod(period);
+        uint256 action = actionForPeriod(period);
         if (records[action][nullifier].periodNumber == period) revert RecordAlreadyExists();
 
         uint256 signalHash = uint256(
@@ -202,7 +202,7 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
         uint256[5] calldata proof
     ) external virtual onlyProxy nonReentrant {
         uint64 period = currentPeriod();
-        uint256 action = _actionForPeriod(period);
+        uint256 action = actionForPeriod(period);
         SubsidyRecord storage r = records[action][nullifier];
         if (r.periodNumber != period) revert RecordDoesNotExist();
         if (claimed[action][nullifier][issuerSchemaId]) revert CredentialAlreadyClaimed(issuerSchemaId);
@@ -248,7 +248,7 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
         uint256[5] calldata proof
     ) external virtual onlyProxy nonReentrant {
         uint64 period = currentPeriod();
-        uint256 action = _actionForPeriod(period);
+        uint256 action = actionForPeriod(period);
         SubsidyRecord storage r = records[action][nullifier];
         if (r.periodNumber != period) revert RecordDoesNotExist();
         if (nonce != r.updateNonce) revert StaleUpdateNonce(nonce, r.updateNonce);
@@ -355,16 +355,18 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
         return uint64(block.timestamp / PERIOD_LENGTH);
     }
 
-    /// @dev Action key folding `period` and `_registrationVersion` — outer key for every
-    ///      period-scoped storage map. Mirrored bit-for-bit by the revm debit hook, so the
-    ///      derivation is part of the WIP-1002 protocol commitment and MUST NOT change.
-    function _actionForPeriod(uint64 period) internal view returns (uint256) {
+    /// @notice Action key folding `period` and `_registrationVersion` — outer key for every
+    ///         period-scoped storage map. Mirrored bit-for-bit by the revm debit hook, so the
+    ///         derivation is part of the WIP-1002 protocol commitment and MUST NOT change.
+    ///         Public so `WorldChainRpSigner.verifyRpRequest` can resolve the expected
+    ///         Uniqueness action for the current or next period through `ISubsidyAccounting`.
+    function actionForPeriod(uint64 period) public view returns (uint256) {
         return uint256(keccak256(abi.encodePacked("period_proof", period, _registrationVersion))) >> 8;
     }
 
     /// @dev Action for the current block timestamp.
     function currentAction() internal view returns (uint256) {
-        return _actionForPeriod(currentPeriod());
+        return actionForPeriod(currentPeriod());
     }
 
     /// @dev Validate every `items[i].issuerSchemaId`, mark each as claimed under
