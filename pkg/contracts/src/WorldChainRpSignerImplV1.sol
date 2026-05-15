@@ -109,11 +109,7 @@ contract WorldChainRpSignerImplV1 is Base, ERC165Upgradeable, IRpSigner {
     ///         until `addVerifier` is called).
     /// @param owner_ Owner of the proxy. Authorized for `addVerifier`, `removeVerifier`, and
     ///         UUPS upgrades.
-    function initialize(IActionVerifier[] calldata initialVerifiers, address owner_)
-        external
-        virtual
-        reinitializer(1)
-    {
+    function initialize(IActionVerifier[] calldata initialVerifiers, address owner_) external virtual reinitializer(1) {
         if (owner_ == address(0)) revert AddressZero();
         __Base_init(owner_);
         __ERC165_init();

@@ -54,8 +54,7 @@ contract WorldChainRpSignerImplV1Test is Test {
         signerImpl = new WorldChainRpSignerImplV1();
         IActionVerifier[] memory initialVerifiers = new IActionVerifier[](1);
         initialVerifiers[0] = IActionVerifier(address(subsidy));
-        bytes memory signerInit =
-            abi.encodeCall(WorldChainRpSignerImplV1.initialize, (initialVerifiers, OWNER));
+        bytes memory signerInit = abi.encodeCall(WorldChainRpSignerImplV1.initialize, (initialVerifiers, OWNER));
         signer = WorldChainRpSignerImplV1(address(new WorldChainRpSigner(address(signerImpl), signerInit)));
     }
 
@@ -143,7 +142,7 @@ contract WorldChainRpSignerImplV1Test is Test {
     }
 
     function test_verify_rejects_expired() public {
-        (uint8 v, uint256 n,, , bytes memory d) = _wellFormed();
+        (uint8 v, uint256 n,,, bytes memory d) = _wellFormed();
         uint64 c = uint64(block.timestamp - 5 minutes);
         uint64 e = uint64(block.timestamp - 1);
         vm.expectRevert(abi.encodeWithSelector(IRpSigner.RpInvalidRequest.selector, CODE_EXPIRED));
@@ -151,7 +150,7 @@ contract WorldChainRpSignerImplV1Test is Test {
     }
 
     function test_verify_rejects_notYetValid() public {
-        (uint8 v, uint256 n,, , bytes memory d) = _wellFormed();
+        (uint8 v, uint256 n,,, bytes memory d) = _wellFormed();
         uint64 c = uint64(block.timestamp + 1);
         uint64 e = uint64(block.timestamp + 10 minutes);
         vm.expectRevert(abi.encodeWithSelector(IRpSigner.RpInvalidRequest.selector, CODE_NOT_YET_VALID));
@@ -159,7 +158,7 @@ contract WorldChainRpSignerImplV1Test is Test {
     }
 
     function test_verify_rejects_ttlTooLong() public {
-        (uint8 v, uint256 n,, , bytes memory d) = _wellFormed();
+        (uint8 v, uint256 n,,, bytes memory d) = _wellFormed();
         uint64 c = uint64(block.timestamp);
         uint64 e = c + MAX_REQUEST_TTL + 1;
         vm.expectRevert(abi.encodeWithSelector(IRpSigner.RpInvalidRequest.selector, CODE_TTL_TOO_LONG));
@@ -167,7 +166,7 @@ contract WorldChainRpSignerImplV1Test is Test {
     }
 
     function test_verify_rejects_badTimestampOrder() public {
-        (uint8 v, uint256 n,, , bytes memory d) = _wellFormed();
+        (uint8 v, uint256 n,,, bytes memory d) = _wellFormed();
         uint64 c = uint64(block.timestamp + 10);
         uint64 e = uint64(block.timestamp + 5);
         vm.expectRevert(abi.encodeWithSelector(IRpSigner.RpInvalidRequest.selector, CODE_BAD_TIMESTAMP_ORDER));
@@ -284,6 +283,7 @@ contract WorldChainRpSignerImplV1Test is Test {
         signer.addVerifier(IActionVerifier(address(subsidy)));
     }
 
+
     function test_removeVerifier_byOwner_emitsAndShrinks() public {
         vm.expectEmit(true, true, true, true, address(signer));
         emit ActionVerifierRemoved(IActionVerifier(address(subsidy)));
@@ -303,9 +303,7 @@ contract WorldChainRpSignerImplV1Test is Test {
         MockActionVerifier mock = new MockActionVerifier(true);
         vm.prank(OWNER);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                WorldChainRpSignerImplV1.VerifierNotFound.selector, IActionVerifier(address(mock))
-            )
+            abi.encodeWithSelector(WorldChainRpSignerImplV1.VerifierNotFound.selector, IActionVerifier(address(mock)))
         );
         signer.removeVerifier(IActionVerifier(address(mock)));
     }
