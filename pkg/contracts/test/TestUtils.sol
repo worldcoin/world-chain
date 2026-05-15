@@ -10,7 +10,7 @@ import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint
 import {IAggregator} from "@account-abstraction/contracts/interfaces/IAggregator.sol";
 import {Mock4337Module} from "./mocks/Mock4337Module.sol";
 import {Safe4337Module} from "@4337/Safe4337Module.sol";
-import {IPBHEntryPoint} from "../src/pbh/interfaces/IPBHEntryPoint.sol";
+import {IPBHEntryPoint} from "../src/interfaces/IPBHEntryPoint.sol";
 import {Safe} from "@safe-global/safe-contracts/contracts/Safe.sol";
 
 library TestUtils {

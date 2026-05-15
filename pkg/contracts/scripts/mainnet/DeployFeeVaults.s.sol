@@ -3,8 +3,8 @@ pragma solidity ^0.8.26;
 
 import {Script} from "forge-std/Script.sol";
 import {console2} from "forge-std/console2.sol";
-import {FeeEscrow} from "../../src/fees/FeeEscrow.sol";
-import {FeeRecipient} from "../../src/fees/FeeRecipient.sol";
+import {FeeEscrow} from "../../src/FeeEscrow.sol";
+import {FeeRecipient} from "../../src/FeeRecipient.sol";
 
 contract DeployScript is Script {
     bool deployFeeEscrow = true;

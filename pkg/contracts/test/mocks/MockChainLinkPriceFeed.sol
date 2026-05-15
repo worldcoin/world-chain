@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {IChainLinkPriceFeed} from "../../src/fees/FeeEscrow.sol";
+import {IChainLinkPriceFeed} from "../../src/FeeEscrow.sol";
 
 /// @title MockChainLinkPriceFeed
 /// @notice Mock price feed for devnet testing

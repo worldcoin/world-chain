@@ -10,7 +10,7 @@ import {ByteHasher} from "./libraries/ByteHasher.sol";
 import {PBHExternalNullifier} from "./libraries/PBHExternalNullifier.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import "@BokkyPooBahsDateTimeLibrary/BokkyPooBahsDateTimeLibrary.sol";
-import {Base} from "../abstract/Base.sol";
+import {Base} from "./abstract/Base.sol";
 
 /// @title PBH Entry Point Implementation V1
 /// @author Worldcoin
