@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import {IActionVerifier} from "./IActionVerifier.sol";
 import {IWorldIDVerifier} from "./IWorldIDVerifier.sol";
 
 /// @title ISubsidyAccounting
@@ -19,7 +20,7 @@ import {IWorldIDVerifier} from "./IWorldIDVerifier.sol";
 ///         lazily expire when their `periodNumber` no longer matches the current period.
 ///
 /// @custom:security-contact security@toolsforhumanity.com
-interface ISubsidyAccounting {
+interface ISubsidyAccounting is IActionVerifier {
     ///////////////////////////////////////////////////////////////////////////////
     ///                                  TYPES                                  ///
     ///////////////////////////////////////////////////////////////////////////////

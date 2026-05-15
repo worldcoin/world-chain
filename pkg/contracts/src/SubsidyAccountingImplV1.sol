@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
 import {Base} from "./abstract/Base.sol";
+import {IActionVerifier} from "./interfaces/IActionVerifier.sol";
 import {ISubsidyAccounting} from "./interfaces/ISubsidyAccounting.sol";
 import {IWorldIDVerifier} from "./interfaces/IWorldIDVerifier.sol";
 
@@ -322,6 +323,16 @@ contract SubsidyAccountingImplV1 is ISubsidyAccounting, Base, ReentrancyGuardTra
     /// @inheritdoc ISubsidyAccounting
     function isClaimed(uint256 nullifier, uint64 issuerSchemaId) external view virtual onlyProxy returns (bool) {
         return claimed[currentAction()][nullifier][issuerSchemaId];
+    }
+
+    /// @inheritdoc IActionVerifier
+    /// @dev Accepts `action` for the current period and the next period — clients MAY pre-sign
+    ///      a `claimSubsidy` request shortly before a period boundary so the OPRF round
+    ///      completes against the about-to-be-current action. Old periods reject (would fail
+    ///      downstream in `claimSubsidy` anyway, since records are keyed by `currentAction()`).
+    function isValidAction(uint256 action) external view virtual onlyProxy returns (bool) {
+        uint64 period = currentPeriod();
+        return action == actionForPeriod(period) || action == actionForPeriod(period + 1);
     }
 
     ///////////////////////////////////////////////////////////////////////////////
