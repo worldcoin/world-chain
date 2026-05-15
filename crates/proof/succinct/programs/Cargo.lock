@@ -4075,6 +4075,7 @@ dependencies = [
  "libm",
  "rand 0.8.6",
  "sha2",
+ "slop-algebra",
  "sp1-lib",
  "sp1-primitives",
 ]

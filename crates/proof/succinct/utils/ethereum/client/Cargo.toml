@@ -1,19 +1,22 @@
 [package]
 name = "world-chain-proof-succinct-ethereum-client-utils"
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
-homepage.workspace = true
-repository.workspace = true
+version = "2.2.0"
+edition = "2024"
+rust-version = "1.95.0"
+license = "MIT"
+homepage = "https://world.org/world-chain"
+repository = "https://github.com/worldcoin/world-chain/"
 
 [dependencies]
-anyhow.workspace = true
-async-trait.workspace = true
-kona-derive.workspace = true
-kona-driver.workspace = true
-kona-genesis.workspace = true
-kona-preimage.workspace = true
-kona-proof.workspace = true
-spin.workspace = true
-world-chain-proof-succinct-client-utils.workspace = true
+anyhow = { version = "1.0.86", default-features = false }
+async-trait = "0.1.88"
+kona-derive = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
+kona-driver = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+kona-genesis = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
+kona-preimage = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", features = [
+    "rkyv",
+    "serde",
+] }
+kona-proof = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+spin = "0.10"
+world-chain-proof-succinct-client-utils = { path = "../../client", default-features = false }

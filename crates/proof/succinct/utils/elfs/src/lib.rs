@@ -4,6 +4,12 @@ use std::{env, fs, io, path::PathBuf};
 
 pub use world_chain_proof_succinct_build_utils::WorldSuccinctProgram;
 
+/// Embedded World aggregation guest ELF.
+pub const AGGREGATION_ELF: &[u8] = include_bytes!("../../../elf/world-chain-aggregation");
+
+/// Embedded World range guest ELF.
+pub const RANGE_ELF_EMBEDDED: &[u8] = include_bytes!("../../../elf/world-chain-range-ethereum");
+
 /// Error returned when a compiled SP1 ELF cannot be loaded.
 #[derive(Debug, thiserror::Error)]
 pub enum ElfLoadError {
@@ -59,5 +65,11 @@ mod tests {
                 env_var: "WORLD_CHAIN_RANGE_ELF"
             })
         ));
+    }
+
+    #[test]
+    fn embedded_elfs_are_present() {
+        assert!(RANGE_ELF_EMBEDDED.starts_with(b"\x7fELF"));
+        assert!(AGGREGATION_ELF.starts_with(b"\x7fELF"));
     }
 }

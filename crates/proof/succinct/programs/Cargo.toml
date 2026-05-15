@@ -25,7 +25,7 @@ serde = { version = "1", features = ["derive"] }
 serde_cbor = "0.11"
 sha2 = "0.10.9"
 sp1-lib = { version = "=6.1.0", features = ["verify"] }
-sp1-zkvm = "=6.1.0"
+sp1-zkvm = { version = "=6.1.0", features = ["verify"] }
 thiserror = "2"
 tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3.18", features = ["fmt"] }

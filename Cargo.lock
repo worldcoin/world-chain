@@ -15126,6 +15126,7 @@ version = "2.2.0"
 dependencies = [
  "serde",
  "world-chain-proof-succinct-client-utils",
+ "world-chain-proof-succinct-elfs",
 ]
 
 [[package]]

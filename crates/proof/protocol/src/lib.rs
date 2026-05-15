@@ -16,8 +16,8 @@ use sha2::{Digest, Sha256};
 pub use world_chain_chainspec::WorldChainHardfork;
 use world_chain_chainspec::WorldChainHardforks;
 
-/// ABI encoding of OP Succinct aggregation outputs is 6 * 32 bytes.
-pub const AGGREGATION_OUTPUTS_SIZE: usize = 6 * 32;
+/// ABI encoding of OP Succinct aggregation outputs is 7 * 32 bytes.
+pub const AGGREGATION_OUTPUTS_SIZE: usize = 7 * 32;
 
 /// Error returned when a rollup config cannot be serialized for hashing.
 #[derive(Debug, thiserror::Error)]
@@ -39,6 +39,22 @@ pub fn hash_rollup_config<T: Serialize + ?Sized>(
     Ok(sha256_b256(serialized_config.as_bytes()))
 }
 
+/// Hashes a rollup config plus World-only fork schedule fields.
+///
+/// OP Succinct hashes Kona's rollup config as pretty JSON. World range proofs execute with the
+/// upstream Kona `RollupConfig`, so Tropo/Strato must be appended separately to match the guest.
+pub fn hash_world_rollup_config<T: Serialize + ?Sized>(
+    rollup_config: &T,
+    schedule: &WorldHardforkConfig,
+) -> Result<B256, RollupConfigHashError> {
+    let serialized_config = serde_json::to_string_pretty(&WorldRollupConfigHashInput {
+        rollup_config,
+        tropo_time: schedule.tropo_time,
+        strato_time: schedule.strato_time,
+    })?;
+    Ok(sha256_b256(serialized_config.as_bytes()))
+}
+
 /// Hashes already serialized rollup-config bytes with SHA-256.
 pub fn hash_rollup_config_bytes(serialized_config: impl AsRef<[u8]>) -> B256 {
     sha256_b256(serialized_config.as_ref())
@@ -49,6 +65,16 @@ fn sha256_b256(bytes: &[u8]) -> B256 {
     hasher.update(bytes);
     let hash = hasher.finalize();
     B256::from_slice(hash.as_ref())
+}
+
+#[derive(Serialize)]
+struct WorldRollupConfigHashInput<'a, T: Serialize + ?Sized> {
+    #[serde(flatten)]
+    rollup_config: &'a T,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tropo_time: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    strato_time: Option<u64>,
 }
 
 /// World hardfork activation schedule carried by World proof inputs.
@@ -550,6 +576,32 @@ mod tests {
         assert_ne!(
             hash_rollup_config(&before).unwrap(),
             hash_rollup_config(&after).unwrap()
+        );
+    }
+
+    #[test]
+    fn world_rollup_config_hash_appends_world_only_fork_times() {
+        let rollup_config = json!({
+            "jovian_time": 10
+        });
+        let no_world_forks = WorldHardforkConfig {
+            jovian_time: Some(10),
+            ..Default::default()
+        };
+        let with_world_forks = WorldHardforkConfig {
+            jovian_time: Some(10),
+            tropo_time: Some(20),
+            strato_time: Some(30),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            hash_world_rollup_config(&rollup_config, &no_world_forks).unwrap(),
+            hash_rollup_config(&rollup_config).unwrap()
+        );
+        assert_ne!(
+            hash_world_rollup_config(&rollup_config, &no_world_forks).unwrap(),
+            hash_world_rollup_config(&rollup_config, &with_world_forks).unwrap()
         );
     }
 

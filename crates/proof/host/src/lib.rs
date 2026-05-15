@@ -6,7 +6,9 @@
 
 use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
-use world_chain_proof_protocol::{RollupConfigHashError, hash_rollup_config};
+use world_chain_proof_protocol::{
+    RollupConfigHashError, WorldHardforkConfig, hash_rollup_config, hash_world_rollup_config,
+};
 
 /// Error returned while constructing host-side proof config.
 #[derive(Debug, thiserror::Error)]
@@ -105,6 +107,20 @@ impl WorldProverIdentity {
         ))
     }
 
+    /// Creates an identity from the upstream rollup config plus World-only fork schedule.
+    pub fn from_world_rollup_config<T: Serialize + ?Sized>(
+        aggregation_vkey: B256,
+        range_vkey_commitment: B256,
+        rollup_config: &T,
+        schedule: &WorldHardforkConfig,
+    ) -> Result<Self, RollupConfigHashError> {
+        Ok(Self::new(
+            aggregation_vkey,
+            range_vkey_commitment,
+            hash_world_rollup_config(rollup_config, schedule)?,
+        ))
+    }
+
     /// Returns `true` when this local identity matches the deployed game config.
     pub fn matches_game(self, game: &WorldFaultDisputeGameConfig) -> bool {
         self == game.identity()
@@ -174,6 +190,16 @@ impl WorldFaultDisputeGameConfig {
         rollup_config: &T,
     ) -> Result<Self, RollupConfigHashError> {
         self.rollup_config_hash = hash_rollup_config(rollup_config)?;
+        Ok(self)
+    }
+
+    /// Recomputes and updates the rollup config hash from a rollup config plus World schedule.
+    pub fn with_world_rollup_config<T: Serialize + ?Sized>(
+        mut self,
+        rollup_config: &T,
+        schedule: &WorldHardforkConfig,
+    ) -> Result<Self, RollupConfigHashError> {
+        self.rollup_config_hash = hash_world_rollup_config(rollup_config, schedule)?;
         Ok(self)
     }
 }
@@ -289,6 +315,47 @@ mod tests {
             aggregation_vkey,
             range_vkey_commitment,
             &second,
+        )
+        .unwrap();
+
+        assert_ne!(
+            first_identity.rollup_config_hash,
+            second_identity.rollup_config_hash
+        );
+    }
+
+    #[test]
+    fn identity_hash_can_append_world_schedule_to_upstream_rollup_config() {
+        let rollup_config = json!({
+            "jovian_time": 10
+        });
+        let first_schedule = WorldHardforkConfig {
+            jovian_time: Some(10),
+            tropo_time: Some(20),
+            strato_time: Some(30),
+            ..Default::default()
+        };
+        let second_schedule = WorldHardforkConfig {
+            jovian_time: Some(10),
+            tropo_time: Some(21),
+            strato_time: Some(30),
+            ..Default::default()
+        };
+        let aggregation_vkey = B256::from([1; 32]);
+        let range_vkey_commitment = B256::from([2; 32]);
+
+        let first_identity = WorldProverIdentity::from_world_rollup_config(
+            aggregation_vkey,
+            range_vkey_commitment,
+            &rollup_config,
+            &first_schedule,
+        )
+        .unwrap();
+        let second_identity = WorldProverIdentity::from_world_rollup_config(
+            aggregation_vkey,
+            range_vkey_commitment,
+            &rollup_config,
+            &second_schedule,
         )
         .unwrap();
 

@@ -6,6 +6,17 @@ use world_chain_proof_succinct_client_utils::{
     boot::BootInfoStruct,
     types::{AggregationInputs, AggregationOutputs},
 };
+use world_chain_proof_succinct_elfs::{AGGREGATION_ELF, RANGE_ELF_EMBEDDED};
+
+/// Returns the embedded World range ELF.
+pub const fn get_range_elf_embedded() -> &'static [u8] {
+    RANGE_ELF_EMBEDDED
+}
+
+/// Returns the embedded World aggregation ELF.
+pub const fn get_aggregation_elf_embedded() -> &'static [u8] {
+    AGGREGATION_ELF
+}
 
 /// Host request for a single SP1 range proof.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,4 +65,15 @@ pub trait WorldSuccinctProver {
         &self,
         request: AggregationProofRequest,
     ) -> Result<AggregationProofArtifact, Self::Error>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exposes_world_elfs() {
+        assert!(get_range_elf_embedded().starts_with(b"\x7fELF"));
+        assert!(get_aggregation_elf_embedded().starts_with(b"\x7fELF"));
+    }
 }

@@ -10,3 +10,4 @@ repository.workspace = true
 [dependencies]
 serde.workspace = true
 world-chain-proof-succinct-client-utils.workspace = true
+world-chain-proof-succinct-elfs.workspace = true
