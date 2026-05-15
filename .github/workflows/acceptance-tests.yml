@@ -103,8 +103,12 @@ jobs:
 
       - name: Report allowed build failure
         if: ${{ (inputs.network == 'all' || inputs.network == matrix.network) && matrix.allow_failure && steps.build.outcome == 'failure' }}
-        run: echo '::warning::Acceptance test build failed for ${{ matrix.network }}, but this network is allowed to fail.'
+        env:
+          NETWORK: ${{ matrix.network }}
+        run: printf '::warning::Acceptance test build failed for %s, but this network is allowed to fail.\n' "$NETWORK"
 
       - name: Report allowed test failure
         if: ${{ (inputs.network == 'all' || inputs.network == matrix.network) && matrix.allow_failure && steps.run.outcome == 'failure' }}
-        run: echo '::warning::Acceptance tests failed for ${{ matrix.network }}, but this network is allowed to fail.'
+        env:
+          NETWORK: ${{ matrix.network }}
+        run: printf '::warning::Acceptance tests failed for %s, but this network is allowed to fail.\n' "$NETWORK"
