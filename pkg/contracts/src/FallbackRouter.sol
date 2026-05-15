@@ -9,13 +9,6 @@ import {IWorldChainSessionVerifier} from "./interfaces/IWorldChainSessionVerifie
 
 /// @title FallbackRouter
 /// @author 0xOsiris, World Contributors
-/// @notice Templated outline of the WIP-1001 account router. The `fallback` decodes the leading
-///         4-byte selector in inline assembly, matches it against the five router selectors
-///         (`isValidSignatureForAdmin`, `isValidSignatureForVerifier`,
-///         `evaluateSessionPolicyForVerifier`, `installAdmin`, `installKeyRing`), looks up the
-///         target verifier address — admin slot for the admin paths, session-verifier mapping
-///         for the session paths — and performs a low-level `DELEGATECALL` to the verifier
-///         implementation so the verifier executes against the account's own storage.
 /// @custom:security-contact security@toolsforhumanity.com
 abstract contract FallbackRouter {
     /// @notice Thrown when a selector dispatched to the fallback is unknown.
