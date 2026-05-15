@@ -801,33 +801,12 @@ where
         //     CREATE/SELFDESTRUCT plus event-derived proxy / ownership /
         //     module changes. The map is keyed by the **target** contract
         //     address (the one whose state changed).
-        // BTreeMap for deterministic JSON key order (see field doc).
-        let mut contract_management: BTreeMap<Address, Vec<ContractManagementAction>> =
-            BTreeMap::new();
-        for (deployer, deployed) in inspector_creations {
-            contract_management
-                .entry(deployed)
-                .or_default()
-                .push(ContractManagementAction {
-                    action_type: ContractManagementType::ContractCreation,
-                    deployer_address: Some(deployer),
-                });
-        }
-        for destroyed in inspector_destructs {
-            contract_management
-                .entry(destroyed)
-                .or_default()
-                .push(ContractManagementAction {
-                    action_type: ContractManagementType::SelfDestruct,
-                    deployer_address: None,
-                });
-        }
-        for (target, action) in parse_contract_management_events(&logs) {
-            contract_management.entry(target).or_default().push(action);
-        }
-        for (target, action) in parse_contract_management_state_diff(&result_and_state.state) {
-            contract_management.entry(target).or_default().push(action);
-        }
+        let contract_management = assemble_contract_management(
+            inspector_creations,
+            inspector_destructs,
+            &logs,
+            &result_and_state.state,
+        );
 
         Ok(SimulateUnsignedUserOpResult {
             status,
@@ -1156,6 +1135,76 @@ where
         }
     }
     out
+}
+
+/// Merge inspector-captured CREATE/SELFDESTRUCT with event- and state-diff-
+/// derived proxy/ownership/module changes into a single deduped map keyed by
+/// target contract address. BTreeMap for deterministic JSON key order.
+///
+/// Two suppressions, both about not double-counting:
+///
+/// 1. **Fresh-deploy filter.** A new EIP-1967 proxy's constructor writes its
+///    implementation slot (0 → impl) and may emit `Upgraded(impl)` — both look
+///    identical to a real upgrade but are initialization. The CREATION entry
+///    already covers the contract; entries from event or state-diff detectors
+///    targeting an address created in this same tx are dropped.
+///
+/// 2. **Event/state-diff overlap.** State-diff is a fallback for non-emitting
+///    proxies. When an EIP-1967 proxy is upgraded, both the `Upgraded` event
+///    fires and the implementation slot is written — without dedup the
+///    response would carry two PROXY_UPGRADE entries for the same action.
+///    State-diff entries are dropped when an event-path entry of the same
+///    `(target, action_type)` was already recorded.
+pub fn assemble_contract_management<S>(
+    inspector_creations: Vec<(Address, Address)>,
+    inspector_destructs: Vec<Address>,
+    logs: &[alloy_primitives::Log],
+    state: &std::collections::HashMap<Address, revm::state::Account, S>,
+) -> BTreeMap<Address, Vec<ContractManagementAction>>
+where
+    S: std::hash::BuildHasher,
+{
+    let mut contract_management: BTreeMap<Address, Vec<ContractManagementAction>> = BTreeMap::new();
+    let created_in_tx: std::collections::HashSet<Address> = inspector_creations
+        .iter()
+        .map(|(_, deployed)| *deployed)
+        .collect();
+    for (deployer, deployed) in inspector_creations {
+        contract_management
+            .entry(deployed)
+            .or_default()
+            .push(ContractManagementAction {
+                action_type: ContractManagementType::ContractCreation,
+                deployer_address: Some(deployer),
+            });
+    }
+    for destroyed in inspector_destructs {
+        contract_management
+            .entry(destroyed)
+            .or_default()
+            .push(ContractManagementAction {
+                action_type: ContractManagementType::SelfDestruct,
+                deployer_address: None,
+            });
+    }
+    for (target, action) in parse_contract_management_events(logs) {
+        if created_in_tx.contains(&target) {
+            continue;
+        }
+        contract_management.entry(target).or_default().push(action);
+    }
+    for (target, action) in parse_contract_management_state_diff(state) {
+        if created_in_tx.contains(&target) {
+            continue;
+        }
+        if let Some(existing) = contract_management.get(&target)
+            && existing.iter().any(|a| a.action_type == action.action_type)
+        {
+            continue;
+        }
+        contract_management.entry(target).or_default().push(action);
+    }
+    contract_management
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

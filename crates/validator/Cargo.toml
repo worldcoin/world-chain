@@ -61,10 +61,15 @@ metrics-derive.workspace = true
 world-chain-test-utils.workspace = true
 world-chain-p2p = { workspace = true, features = ["test-utils"] }
 world-chain-node.workspace = true
+world-chain-validator.workspace = true
 reth-optimism-node = { workspace = true, features = ["test-utils"] }
 reth-tasks.workspace = true
 eyre.workspace = true
 criterion.workspace = true
+alloy-rlp.workspace = true
+reth-db.workspace = true
+reth-db-api.workspace = true
+reth-node-core.workspace = true
 
 [[bench]]
 name = "flashblock_validation_synthetic"
@@ -72,6 +77,10 @@ harness = false
 
 [[bench]]
 name = "flashblock_validation_live_node"
+harness = false
+
+[[bench]]
+name = "flashblock_validation_mainnet"
 harness = false
 
 [lints]

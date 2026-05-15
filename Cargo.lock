@@ -14002,6 +14002,8 @@ dependencies = [
  "alloy-rpc-types-eth 2.0.4",
  "alloy-signer 2.0.4",
  "alloy-signer-local",
+ "alloy-transport 2.0.4",
+ "alloy-transport-http 2.0.4",
  "color-eyre",
  "ed25519-dalek",
  "futures",
@@ -14053,6 +14055,7 @@ dependencies = [
  "alloy-eips 2.0.4",
  "alloy-op-evm",
  "alloy-primitives",
+ "alloy-rlp",
  "alloy-rpc-types-engine",
  "color-eyre",
  "criterion",
@@ -14066,9 +14069,12 @@ dependencies = [
  "parking_lot",
  "rayon",
  "reth-chain-state",
+ "reth-db",
+ "reth-db-api",
  "reth-evm",
  "reth-node-api",
  "reth-node-builder",
+ "reth-node-core",
  "reth-optimism-evm",
  "reth-optimism-node",
  "reth-optimism-primitives",
@@ -14088,6 +14094,7 @@ dependencies = [
  "world-chain-primitives",
  "world-chain-state",
  "world-chain-test-utils",
+ "world-chain-validator",
 ]
 
 [[package]]
