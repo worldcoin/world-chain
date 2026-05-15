@@ -23,7 +23,6 @@ import {IRpSigner} from "./interfaces/IRpSigner.sol";
 ///        103 TTL_TOO_LONG
 ///        104 BAD_TIMESTAMP_ORDER
 ///        105 NON_EMPTY_DATA
-///        200 BAD_ACTION_CLASS
 ///        201 BAD_UNIQUENESS_ACTION
 /// @custom:security-contact security@toolsforhumanity.com
 contract WorldChainRpSignerImplV1 is Base, ERC165Upgradeable, IRpSigner {
@@ -42,12 +41,13 @@ contract WorldChainRpSignerImplV1 is Base, ERC165Upgradeable, IRpSigner {
     ///         "WorldChainRpSigner request TTL bound" for rationale.
     uint64 public constant MAX_REQUEST_TTL = 1 hours;
 
-    /// @notice Action class prefixes (high byte of the 248-bit action). The class byte is the
-    ///         only structural distinction between Uniqueness (per-verifier `isValidAction`
-    ///         check) and Session (unconditional accept post-envelope checks) proofs at the
-    ///         RP layer; spec-level replay protection for Session-gated operations lives in
-    ///         the per-consumer claim component, not here.
-    uint8 internal constant CLASS_UNIQUENESS = 0x00;
+    /// @notice Session-Proof class prefix. Session Proof `action` values are per-proof random
+    ///         OPRF outputs and are NOT signed by the RP — once the prefix is confirmed the
+    ///         signer accepts unconditionally. All other actions fall through to verifier
+    ///         iteration, which is equality-based and strictly stronger than any class-byte
+    ///         check would be (Uniqueness actions are `keccak >> 8` derivations with an
+    ///         effectively random top byte, so a strict `class == 0x00` gate would
+    ///         spuriously reject legitimate requests).
     uint8 internal constant CLASS_SESSION = 0x02;
 
     uint256 internal constant CODE_BAD_VERSION = 100;
@@ -56,7 +56,6 @@ contract WorldChainRpSignerImplV1 is Base, ERC165Upgradeable, IRpSigner {
     uint256 internal constant CODE_TTL_TOO_LONG = 103;
     uint256 internal constant CODE_BAD_TIMESTAMP_ORDER = 104;
     uint256 internal constant CODE_NON_EMPTY_DATA = 105;
-    uint256 internal constant CODE_BAD_ACTION_CLASS = 200;
     uint256 internal constant CODE_BAD_UNIQUENESS_ACTION = 201;
 
     ///////////////////////////////////////////////////////////////////////////////
@@ -130,11 +129,11 @@ contract WorldChainRpSignerImplV1 is Base, ERC165Upgradeable, IRpSigner {
     ///////////////////////////////////////////////////////////////////////////////
 
     /// @inheritdoc IRpSigner
-    /// @dev Envelope checks → class extraction → Session unconditional → Uniqueness iterates
-    ///      `_verifiers` for any acceptance. The class-byte gate is informational on the
-    ///      Uniqueness branch: verifier-side equality against `keccak >> 8` derivations is
-    ///      strictly stronger than the class prefix and the prefix's only structural job is
-    ///      to fast-route Session traffic.
+    /// @dev Envelope checks → Session fast-route → verifier iteration. Anything that isn't
+    ///      class `0x02` (Session) falls through to verifier iteration, where each verifier
+    ///      decides via equality against its own action derivation. Verifier equality is
+    ///      strictly stronger than any class-prefix check would be, so the class byte is
+    ///      used only to short-circuit unconditional Session acceptance.
     function verifyRpRequest(
         uint8 version,
         uint256, /*nonce*/
@@ -150,9 +149,7 @@ contract WorldChainRpSignerImplV1 is Base, ERC165Upgradeable, IRpSigner {
         if (expiresAt < block.timestamp) revert RpInvalidRequest(CODE_EXPIRED);
         if (expiresAt - createdAt > MAX_REQUEST_TTL) revert RpInvalidRequest(CODE_TTL_TOO_LONG);
 
-        uint8 class = uint8(action >> 240);
-        if (class == CLASS_SESSION) return MAGICVALUE;
-        if (class != CLASS_UNIQUENESS) revert RpInvalidRequest(CODE_BAD_ACTION_CLASS);
+        if (uint8(action >> 240) == CLASS_SESSION) return MAGICVALUE;
 
         uint256 n = _verifiers.length;
         for (uint256 i = 0; i < n; ++i) {
