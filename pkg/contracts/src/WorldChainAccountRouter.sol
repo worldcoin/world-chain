@@ -13,28 +13,38 @@ import {IWorldChainSessionVerifier} from "./interfaces/IWorldChainSessionVerifie
 /// @custom:security-contact security@toolsforhumanity.com
 contract WorldChainAccountRouter is IWorldChainAccountRouter {
     /// @inheritdoc IWorldChainAccountRouter
-    function installAdmin(WorldChainAccountVerifier calldata admin) external {}
+    function installAdmin(WorldChainAccountVerifier calldata admin) external {
+        // TODO: FIXME
+    }
 
     /// @inheritdoc IWorldChainAccountRouter
-    function installKeyRing(WorldChainAccountVerifier[] calldata sessionVerifiers) external {}
+    function installKeyRing(WorldChainAccountVerifier[] calldata sessionVerifiers) external {
+        // TODO: FIXME
+    }
 
     /// @inheritdoc IWorldChainAccountRouter
     function isValidSignatureForAdmin(bytes32 hash, bytes calldata signature)
         external
         view
         returns (bytes4 magicValue)
-    {}
+    {
+        // TODO: FIXME
+    }
 
     /// @inheritdoc IWorldChainAccountRouter
     function isValidSignatureForVerifier(address verifier, bytes32 hash, bytes calldata signature)
         external
         view
         returns (bytes4 magicValue)
-    {}
+    {
+        // TODO: FIXME
+    }
 
     /// @inheritdoc IWorldChainAccountRouter
     function evaluateSessionPolicyForVerifier(
         address verifier,
         IWorldChainSessionVerifier.ExecutionTraceContext calldata context
-    ) external view returns (bool allowed) {}
+    ) external view returns (bool allowed) {
+        // TODO: FIXME
+    }
 }

@@ -14,11 +14,17 @@ import {IWorldChainSessionVerifier} from "./interfaces/IWorldChainSessionVerifie
 /// @custom:security-contact security@toolsforhumanity.com
 contract WorldChainSessionVerifier is IWorldChainSessionVerifier {
     /// @inheritdoc IWorldChainAccountHooks
-    function install(bytes calldata installation) external {}
+    function install(bytes calldata installation) external {
+        // TODO: FIXME
+    }
 
     /// @inheritdoc IERC1271
-    function isValidSignature(bytes32 hash, bytes memory signature) external view returns (bytes4 magicValue) {}
+    function isValidSignature(bytes32 hash, bytes memory signature) external view returns (bytes4 magicValue) {
+        // TODO: FIXME
+    }
 
     /// @inheritdoc IWorldChainSessionVerifier
-    function evaluateSessionPolicy(ExecutionTraceContext calldata context) external view returns (bool allowed) {}
+    function evaluateSessionPolicy(ExecutionTraceContext calldata context) external view returns (bool allowed) {
+        // TODO: FIXME
+    }
 }

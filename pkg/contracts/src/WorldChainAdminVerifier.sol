@@ -13,8 +13,12 @@ import {IWorldChainAccountHooks} from "./interfaces/IWorldChainAccountHooks.sol"
 /// @custom:security-contact security@toolsforhumanity.com
 contract WorldChainAdminVerifier is IERC1271, IWorldChainAccountHooks {
     /// @inheritdoc IWorldChainAccountHooks
-    function install(bytes calldata installation) external {}
+    function install(bytes calldata installation) external {
+        // TODO: FIXME
+    }
 
     /// @inheritdoc IERC1271
-    function isValidSignature(bytes32 hash, bytes memory signature) external view returns (bytes4 magicValue) {}
+    function isValidSignature(bytes32 hash, bytes memory signature) external view returns (bytes4 magicValue) {
+        // TODO: FIXME
+    }
 }

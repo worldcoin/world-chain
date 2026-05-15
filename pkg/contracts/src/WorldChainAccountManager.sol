@@ -16,7 +16,9 @@ contract WorldChainAccountManager is IWorldChainAccountManager, IWorldChainAccou
         bytes32 accountSalt,
         WorldChainAccountVerifier[] calldata initialSessionVerifiers,
         bytes calldata adminAuthorization
-    ) external returns (address account) {}
+    ) external returns (address account) {
+        // TODO: FIXME
+    }
 
     /// @inheritdoc IWorldChainAccountManager
     function setKeyRing(
@@ -24,30 +26,46 @@ contract WorldChainAccountManager is IWorldChainAccountManager, IWorldChainAccou
         bytes32 expectedCurrentKeyRingHash,
         WorldChainAccountVerifier[] calldata sessionVerifiers,
         bytes calldata adminAuthorization
-    ) external {}
+    ) external {
+        // TODO: FIXME
+    }
 
     /// @inheritdoc IWorldChainAccountManager
-    function getAdmin(address account) external view returns (WorldChainAccountVerifier memory) {}
+    function getAdmin(address account) external view returns (WorldChainAccountVerifier memory) {
+        // TODO: FIXME
+    }
 
     /// @inheritdoc IWorldChainAccountManager
-    function getAdminNonce(address account) external view returns (uint64) {}
+    function getAdminNonce(address account) external view returns (uint64) {
+        // TODO: FIXME
+    }
 
     /// @inheritdoc IWorldChainAccountManager
-    function getTransactionNonce(address account) external view returns (uint64) {}
+    function getTransactionNonce(address account) external view returns (uint64) {
+        // TODO: FIXME
+    }
 
     /// @inheritdoc IWorldChainAccountManager
-    function getKeyRingHash(address account) external view returns (bytes32) {}
+    function getKeyRingHash(address account) external view returns (bytes32) {
+        // TODO: FIXME
+    }
 
     /// @inheritdoc IWorldChainAccountManager
-    function getSessionVerifiers(address account) external view returns (WorldChainAccountVerifier[] memory) {}
+    function getSessionVerifiers(address account) external view returns (WorldChainAccountVerifier[] memory) {
+        // TODO: FIXME
+    }
 
     /// @inheritdoc IWorldChainAccountManager
-    function isAuthorizedSessionVerifier(address account, address sessionVerifier) external view returns (bool) {}
+    function isAuthorizedSessionVerifier(address account, address sessionVerifier) external view returns (bool) {
+        // TODO: FIXME
+    }
 
     /// @inheritdoc IWorldChainAccountManager
     function getAuthorizedSessionVerifier(address account, address sessionVerifier)
         external
         view
         returns (WorldChainAccountVerifier memory)
-    {}
+    {
+        // TODO: FIXME
+    }
 }
