@@ -5,7 +5,6 @@
 #[cfg(target_os = "zkvm")]
 sp1_zkvm::entrypoint!(main);
 
-use alloy_sol_types::SolValue;
 use rkyv::rancor::Error;
 use world_chain_proof_succinct_client_utils::witness::{WitnessData, WorldRangeWitnessData};
 use world_chain_proof_succinct_ethereum_client_utils::executor::ETHDAWitnessExecutor;
@@ -23,7 +22,6 @@ pub fn main() {
             rkyv::from_bytes::<WorldRangeWitnessData, Error>(&witness_rkyv_bytes)
                 .expect("failed to deserialize World range witness data");
         let world_schedule = witness_data.schedule.clone();
-        let rollup_config_hash = witness_data.rollup_config_hash();
         let (oracle, beacon) = witness_data
             .get_oracle_and_blob_provider()
             .await
@@ -33,10 +31,9 @@ pub fn main() {
             oracle,
             beacon,
             world_schedule,
-            rollup_config_hash,
         )
         .await;
 
-        sp1_zkvm::io::commit_slice(&boot_info.abi_encode());
+        sp1_zkvm::io::commit(&boot_info);
     });
 }

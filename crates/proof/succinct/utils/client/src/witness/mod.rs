@@ -3,7 +3,6 @@ pub mod preimage_store;
 
 use std::{fmt::Debug, sync::Arc};
 
-use alloy_primitives::B256;
 use anyhow::Result;
 use async_trait::async_trait;
 use kzg_rs::{Blob, Bytes48};
@@ -69,7 +68,6 @@ pub struct WorldRangeWitnessData {
     pub preimage_store: PreimageStore,
     pub blob_data: BlobData,
     pub schedule: WorldRangeHardforkConfig,
-    pub rollup_config_hash: [u8; 32],
 }
 
 #[async_trait]
@@ -79,7 +77,6 @@ impl WitnessData for WorldRangeWitnessData {
             preimage_store,
             blob_data,
             schedule: WorldRangeHardforkConfig::default(),
-            rollup_config_hash: [0; 32],
         }
     }
 
@@ -93,18 +90,12 @@ impl WorldRangeWitnessData {
         preimage_store: PreimageStore,
         blob_data: BlobData,
         schedule: WorldRangeHardforkConfig,
-        rollup_config_hash: B256,
     ) -> Self {
         Self {
             preimage_store,
             blob_data,
             schedule,
-            rollup_config_hash: *rollup_config_hash,
         }
-    }
-
-    pub fn rollup_config_hash(&self) -> B256 {
-        B256::from(self.rollup_config_hash)
     }
 }
 

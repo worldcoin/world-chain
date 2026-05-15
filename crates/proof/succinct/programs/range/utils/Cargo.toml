@@ -7,7 +7,6 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-alloy-primitives.workspace = true
 kona-proof.workspace = true
 sp1-zkvm.workspace = true
 world-chain-proof-succinct-client-utils.workspace = true

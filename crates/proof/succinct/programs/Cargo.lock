@@ -4773,7 +4773,6 @@ dependencies = [
 name = "world-chain-proof-succinct-range-ethereum"
 version = "2.2.0"
 dependencies = [
- "alloy-sol-types",
  "kona-proof",
  "rkyv",
  "sp1-zkvm",
@@ -4786,7 +4785,6 @@ dependencies = [
 name = "world-chain-proof-succinct-range-utils"
 version = "2.2.0"
 dependencies = [
- "alloy-primitives",
  "anyhow",
  "kona-proof",
  "sp1-zkvm",

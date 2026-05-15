@@ -33,7 +33,6 @@ pub async fn run_range_program<E>(
     oracle: Arc<PreimageStore>,
     beacon: BlobStore,
     world_schedule: WorldRangeHardforkConfig,
-    rollup_config_hash: alloy_primitives::B256,
 ) -> BootInfoStruct
 where
     E: WitnessExecutor<
@@ -69,7 +68,7 @@ where
                     pipeline,
                     cursor,
                     l2_provider,
-                    Some(world_schedule),
+                    Some(world_schedule.clone()),
                 )
                 .await
                 .unwrap()
@@ -77,5 +76,5 @@ where
         None => boot_info,
     };
 
-    BootInfoStruct::from_kona_boot_info(boot_info, rollup_config_hash)
+    BootInfoStruct::from_kona_boot_info(boot_info, &world_schedule)
 }
