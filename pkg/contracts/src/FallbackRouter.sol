@@ -21,8 +21,6 @@ abstract contract FallbackRouter {
     error Unauthorized();
 
     /// @notice The installed admin verifier implementation address.
-    /// @dev WIP-1001: the admin slot is immutable for the life of the account address; only
-    ///      `installAdmin` (called once during account creation by the manager) MAY write here.
     address internal _adminVerifier;
 
     /// @notice Mapping of authorized session verifier address → installation payload.
@@ -84,3 +82,5 @@ abstract contract FallbackRouter {
         }
     }
 }
+
+
