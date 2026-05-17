@@ -27,10 +27,13 @@ interface IWorldChainAccountRouter {
     ///         using a single controlled `DELEGATECALL` with calldata
     ///         `IERC1271.isValidSignature.selector || abi.encode(hash, signature)`. MUST be
     ///         callable by `WORLD_CHAIN_ACCOUNT_MANAGER` in a restricted validation frame.
+    /// @dev    Not declared `view` because Solidity treats inline-assembly `DELEGATECALL` as
+    ///         potentially state-modifying. Read-only semantics are enforced by the manager
+    ///         issuing the outer call via `STATICCALL`, per WIP-1001.
     /// @param hash The domain-separated admin operation hash being authorized.
     /// @param signature The admin authorization payload.
     /// @return magicValue `EIP1271_MAGIC_VALUE` when the admin verifier accepts the signature.
-    function isValidSignatureForAdmin(bytes32 hash, bytes calldata signature) external view returns (bytes4 magicValue);
+    function isValidSignatureForAdmin(bytes32 hash, bytes calldata signature) external returns (bytes4 magicValue);
 
     /// @notice EIP-1271 session signature dispatch. Dispatches to an installed session verifier
     ///         using a single controlled `DELEGATECALL` with calldata
@@ -38,13 +41,15 @@ interface IWorldChainAccountRouter {
     ///         session verifier addresses MUST fail without executing verifier implementation
     ///         code. MUST be callable by `WORLD_CHAIN_ACCOUNT_MANAGER` in a restricted validation
     ///         frame.
+    /// @dev    Not declared `view` because Solidity treats inline-assembly `DELEGATECALL` as
+    ///         potentially state-modifying. Read-only semantics are enforced by the manager
+    ///         issuing the outer call via `STATICCALL`, per WIP-1001.
     /// @param verifier The session verifier address; MUST be installed in the current key ring.
     /// @param hash The signing hash being authorized.
     /// @param signature The session signature payload.
     /// @return magicValue `EIP1271_MAGIC_VALUE` when the session verifier accepts the signature.
     function isValidSignatureForVerifier(address verifier, bytes32 hash, bytes calldata signature)
         external
-        view
         returns (bytes4 magicValue);
 
     /// @notice Session-policy dispatch. Dispatches to an installed session verifier using a single
@@ -53,11 +58,14 @@ interface IWorldChainAccountRouter {
     ///         Unknown session verifier addresses MUST fail without executing verifier
     ///         implementation code. MUST be callable by `WORLD_CHAIN_ACCOUNT_MANAGER` in a
     ///         restricted validation frame.
+    /// @dev    Not declared `view` because Solidity treats inline-assembly `DELEGATECALL` as
+    ///         potentially state-modifying. Read-only semantics are enforced by the manager
+    ///         issuing the outer call via `STATICCALL`, per WIP-1001.
     /// @param verifier The session verifier address; MUST be installed in the current key ring.
     /// @param context The canonical transaction context paired with the tentative execution trace.
     /// @return allowed `true` iff the session verifier permits the transaction.
     function evaluateSessionPolicyForVerifier(
         address verifier,
         IWorldChainSessionVerifier.ExecutionTraceContext calldata context
-    ) external view returns (bool allowed);
+    ) external returns (bool allowed);
 }
