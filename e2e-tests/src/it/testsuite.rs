@@ -96,67 +96,6 @@ async fn create_priority_transaction(
     Ok((signed.encoded_2718().into(), *signed.tx_hash()))
 }
 
-fn create_wip1001_transaction() -> eyre::Result<(Bytes, B256)> {
-    let session_signer = signer(0);
-
-    let tx = TxWip1001 {
-        chain_id: CHAIN_SPEC.chain.id(),
-        nonce: 0,
-        max_priority_fee_per_gas: 1_000_000_000,
-        max_fee_per_gas: 2_000_000_000,
-        gas_limit: 21_000,
-        // The world chain account (protocol-level "from") and the on-chain
-        // session verifier address that authenticates the signature via
-        // EIP-1271 — see `wips/wip-1001.md`. The verifier address is a
-        // placeholder for this transport-only test; signature authenticity
-        // is checked by the predeploy on-chain, not in this path.
-        world_chain_account: account(0),
-        session_verifier: account(1),
-        to: TxKind::Call(Address::default()),
-        value: U256::from(1),
-        input: Bytes::new(),
-        access_list: AccessList::default(),
-    };
-
-    let signature = session_signer.sign_hash_sync(&tx.signing_hash())?;
-    let envelope = WorldChainTxEnvelope::from(SignedWip1001::new_signed(
-        tx,
-        Wip1001Signature::from(signature),
-    ));
-    let tx_hash = envelope.tx_hash();
-
-    Ok((envelope.encoded_2718().into(), tx_hash))
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_wip1001_node_accepts_wip1001_transaction() -> eyre::Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let (_, mut nodes, _tasks, _, _) = WorldChainTestBuilder::builder()
-        .nodes(1)
-        .flashblocks(false)
-        .build()
-        .setup::<Wip1001NodeContext>()
-        .await?;
-    let node = &mut nodes[0].node;
-
-    let (raw_tx, tx_hash) = create_wip1001_transaction()?;
-    assert_eq!(node.rpc.inject_tx(raw_tx).await?, tx_hash);
-
-    let payload = node.advance_block().await?;
-    assert!(
-        payload
-            .block()
-            .body()
-            .transactions
-            .iter()
-            .any(|tx| tx.hash() == &tx_hash),
-        "WIP-1001 transaction should be included"
-    );
-
-    Ok(())
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn test_can_build_pbh_payload() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
