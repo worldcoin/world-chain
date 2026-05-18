@@ -98,10 +98,6 @@ async fn create_priority_transaction(
 
 fn create_wip1001_transaction() -> eyre::Result<(Bytes, B256)> {
     let session_signer = signer(0);
-    let session_key = session_signer
-        .credential()
-        .verifying_key()
-        .to_encoded_point(true);
 
     let tx = TxWip1001 {
         chain_id: CHAIN_SPEC.chain.id(),
@@ -109,19 +105,23 @@ fn create_wip1001_transaction() -> eyre::Result<(Bytes, B256)> {
         max_priority_fee_per_gas: 1_000_000_000,
         max_fee_per_gas: 2_000_000_000,
         gas_limit: 21_000,
+        // The world chain account (protocol-level "from") and the on-chain
+        // session verifier address that authenticates the signature via
+        // EIP-1271 — see `wips/wip-1001.md`. The verifier address is a
+        // placeholder for this transport-only test; signature authenticity
+        // is checked by the predeploy on-chain, not in this path.
+        world_chain_account: account(0),
+        session_verifier: account(1),
         to: TxKind::Call(Address::default()),
         value: U256::from(1),
         input: Bytes::new(),
         access_list: AccessList::default(),
-        world_id_account: account(0),
-        signature_type: Wip1001Signature::SECP256K1_TYPE,
-        session_key: Bytes::copy_from_slice(session_key.as_bytes()),
     };
 
     let signature = session_signer.sign_hash_sync(&tx.signing_hash())?;
     let envelope = WorldChainTxEnvelope::from(SignedWip1001::new_signed(
         tx,
-        Wip1001Signature::Secp256k1(signature),
+        Wip1001Signature::from(signature),
     ));
     let tx_hash = envelope.tx_hash();
 
