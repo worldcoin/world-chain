@@ -13,7 +13,7 @@
 
 use crate::transaction::{
     TxWip1001, Wip1001Signature,
-    verify::{SessionVerifier, Wip1001VerifyError},
+    verify::{SessionVerifier, Wip1001VerifyError, verify_wip1001_signature},
 };
 use alloy_primitives::Address;
 
@@ -79,14 +79,14 @@ where
     {
         Ok(true) => {
             let signing_hash = tx.signing_hash();
-            session_verifier
-                .is_valid_signature(
-                    world_chain_account_addr,
-                    session_verifier_addr,
-                    signing_hash,
-                    sig,
-                )
-                .map_err(|_| Wip1001VerifyError::Invalid)?;
+            verify_wip1001_signature(
+                session_verifier,
+                world_chain_account_addr,
+                session_verifier_addr,
+                signing_hash,
+                sig,
+            )
+            .map_err(|_| Wip1001VerifyError::Invalid)?;
             Ok(())
         }
         Ok(false) => Err(Wip1001ValidationError::NotAuthorized {
