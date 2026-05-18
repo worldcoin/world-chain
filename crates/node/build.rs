@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             &Git2Builder::default()
                 .describe(false, true, None)
                 .dirty(true)
-                .sha(false)
+                .sha(true)
                 .build()?,
         )?;
     }
