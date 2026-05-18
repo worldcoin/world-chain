@@ -1,11 +1,9 @@
 use alloy_consensus::BlockHeader;
-use alloy_eips::eip2930::AccessList;
 use alloy_network::{Ethereum, EthereumWallet, NetworkTransactionBuilder, eip2718::Encodable2718};
 use alloy_primitives::{Bytes, b64};
 use alloy_provider::ProviderBuilder;
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_engine::PayloadStatusEnum;
-use alloy_signer::SignerSync;
 use eyre::eyre::eyre;
 use op_alloy_consensus::OpTxEnvelope;
 use reth_chainspec::EthChainSpec;
@@ -14,7 +12,7 @@ use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_node_api::PayloadAttributes;
 use reth_tasks::Runtime;
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::{Address, B256, TxKind, U256};
+use revm_primitives::{Address, B256, U256};
 use std::{
     sync::{
         Arc,
@@ -60,10 +58,8 @@ use world_chain_primitives::{
     },
     payload_id::force_op_payload_id_v3,
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
-    transaction::{SignedWip1001, TxWip1001, Wip1001Signature, WorldChainTxEnvelope},
 };
 use world_chain_test_utils::{
-    Wip1001NodeContext,
     e2e_harness::setup::{
         CHAIN_SPEC, WorldChainTestBuilder, create_test_transaction, encode_eip1559_params,
     },
