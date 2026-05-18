@@ -34,6 +34,7 @@ RUN curl -L https://foundry.paradigm.xyz | bash && \
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 ARG PROFILE="maxperf"
 ARG FEATURES="jemalloc"
+ARG VERGEN_GIT_SHA
 ARG SCCACHE_BUCKET
 ARG SCCACHE_REGION
 ARG SCCACHE_S3_KEY_PREFIX
