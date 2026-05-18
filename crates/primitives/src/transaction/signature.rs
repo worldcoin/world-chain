@@ -1,5 +1,5 @@
 use alloy_primitives::{Bytes, Signature, bytes::BufMut};
-use alloy_rlp::{Decodable, Encodable, Header};
+use alloy_rlp::{Decodable, Encodable};
 use core::hash::Hash;
 
 /// The EIP-2718 transaction type byte for WIP-1001 transactions.
@@ -17,43 +17,20 @@ pub struct Wip1001Signature {
 }
 
 impl Wip1001Signature {
-    /// Length of the RLP-encoded `signature_payload` bytes (no outer string header).
+    /// Length of the RLP encoding of the signature as a single byte-string item
+    /// (byte-string head + body).
     pub(crate) fn payload_encoded_len(&self) -> usize {
-        Header {
-            list: true,
-            payload_length: self.signature.length(),
-        }
-        .length_with_payload()
+        self.signature.length()
     }
 
-    /// Encodes the `signature_payload` into `out` without an outer RLP string header.
+    /// RLP-encodes the signature as a single byte-string item (no extra wrapping).
     pub(crate) fn encode_payload_raw(&self, out: &mut dyn BufMut) {
-        Header {
-            list: true,
-            payload_length: self.signature.length(),
-        }
-        .encode(out);
         self.signature.encode(out);
     }
 
-    /// Decodes a `signature_payload` byte string.
-    ///
-    /// The caller has already consumed the outer RLP string header around
-    /// `signature_payload`; this reads the raw payload bytes.
+    /// RLP-decodes the signature from a single byte-string item.
     pub(crate) fn decode_payload_raw(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let header = Header::decode(buf)?;
-        if !header.list {
-            return Err(alloy_rlp::Error::UnexpectedString);
-        }
-        let start = buf.len();
         let signature: Bytes = Decodable::decode(buf)?;
-        let consumed = start - buf.len();
-        if consumed != header.payload_length {
-            return Err(alloy_rlp::Error::ListLengthMismatch {
-                expected: header.payload_length,
-                got: consumed,
-            });
-        }
         Ok(Self { signature })
     }
 }
