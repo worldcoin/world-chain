@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-7c6f2602.js";
+            window.path_to_searchindex_js = "searchindex-a1729d88.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-85576531.js"></script>
@@ -1514,7 +1514,7 @@ setKeyRingHash = keccak256(abi.encode(
 </code></pre>
 <p><code>installAdmin</code> and <code>installKeyRing</code> MUST reject any caller other than <code>WORLD_CHAIN_ACCOUNT_MANAGER</code>. The account router MUST expose no non-manager path that can mutate validation-affecting verifier storage. <code>isValidSignatureForAdmin</code>, <code>isValidSignatureForVerifier</code>, and <code>evaluateSessionPolicyForVerifier</code> MUST be callable by <code>WORLD_CHAIN_ACCOUNT_MANAGER</code> in restricted validation frames.</p>
 <p>The account router MUST dispatch admin validation only to its installed <code>admin.verifier</code>. It MUST dispatch session validation only to an installed session verifier address; unknown session verifier addresses MUST fail without executing verifier implementation code.</p>
-<p><code>isValidSignatureForAdmin</code> and <code>isValidSignatureForVerifier</code> MUST dispatch using calldata <code>IERC1271.isValidSignature.selector || abi.encode(hash, signature)</code>. <code>evaluateSessionPolicyForVerifier</code> MUST dispatch using calldata <code>IWorldChainSessionVerifier.evaluateSessionPolicy.selector || abi.encode(context)</code>.</p>
+<p>When the account router handles a manager-issued admin signature check (<code>isValidSignatureForAdmin</code>) or session signature check (<code>isValidSignatureForVerifier</code>), it MUST <code>DELEGATECALL</code> the selected verifier implementation with calldata <code>IERC1271.isValidSignature.selector || abi.encode(hash, signature)</code>. When the router handles <code>evaluateSessionPolicyForVerifier</code>, it MUST <code>DELEGATECALL</code> the selected session verifier implementation with calldata <code>IWorldChainSessionVerifier.evaluateSessionPolicy.selector || abi.encode(context)</code>.</p>
 <p>Verifier implementations install scoped storage through the following installation hook:</p>
 <pre><code class="language-solidity">interface IWorldChainAccountHooks {
     function install(bytes calldata installation) external;
@@ -1681,8 +1681,13 @@ setKeyRingHash = keccak256(abi.encode(
 </ol>
 <h3 id="restricted-validation-frames"><a class="header" href="#restricted-validation-frames">Restricted Validation Frames</a></h3>
 <p>The protocol uses restricted validation frames for admin authorization, session signature verification, and session policy evaluation.</p>
-<p>For each EIP-1271 signature check, the protocol MUST perform a <code>STATICCALL</code> from <code>WORLD_CHAIN_ACCOUNT_MANAGER</code> to the signer with value <code>0</code>, gas exactly <code>EIP1271_VALIDATION_GAS_LIMIT</code>, and calldata <code>IERC1271.isValidSignature.selector || abi.encode(hash, signature)</code>. The call succeeds only if it returns <code>EIP1271_MAGIC_VALUE</code> and triggers no tracer rule violation.</p>
-<p>For each session policy check, the protocol MUST perform a <code>STATICCALL</code> from <code>WORLD_CHAIN_ACCOUNT_MANAGER</code> to the session verifier with value <code>0</code>, gas exactly <code>EXECUTION_TRACE_VALIDATION_GAS_LIMIT</code>, and calldata <code>IWorldChainSessionVerifier.evaluateSessionPolicy.selector || abi.encode(context)</code>. The call succeeds only if it returns <code>true</code> and triggers no tracer rule violation.</p>
+<p>For each EIP-1271 signature check, the protocol MUST perform a <code>STATICCALL</code> from <code>WORLD_CHAIN_ACCOUNT_MANAGER</code> to the account router at <code>account</code> with value <code>0</code>, gas exactly <code>EIP1271_VALIDATION_GAS_LIMIT</code>, and calldata:</p>
+<ul>
+<li><code>IWorldChainAccountRouter.isValidSignatureForAdmin.selector || abi.encode(hash, signature)</code> for admin authorization checks; or</li>
+<li><code>IWorldChainAccountRouter.isValidSignatureForVerifier.selector || abi.encode(sessionVerifier, hash, signature)</code> for session signature checks.</li>
+</ul>
+<p>The call succeeds only if it returns <code>EIP1271_MAGIC_VALUE</code> and triggers no tracer rule violation. The account router is responsible for <code>DELEGATECALL</code>ing the configured verifier implementation per the dispatch rules in “Account Router and Verifier Interfaces”; the manager never calls a verifier implementation directly.</p>
+<p>For each session policy check, the protocol MUST perform a <code>STATICCALL</code> from <code>WORLD_CHAIN_ACCOUNT_MANAGER</code> to the account router at <code>account</code> with value <code>0</code>, gas exactly <code>EXECUTION_TRACE_VALIDATION_GAS_LIMIT</code>, and calldata <code>IWorldChainAccountRouter.evaluateSessionPolicyForVerifier.selector || abi.encode(sessionVerifier, context)</code>. The call succeeds only if it returns <code>true</code> and triggers no tracer rule violation. The account router is responsible for <code>DELEGATECALL</code>ing the configured session verifier implementation.</p>
 <p>Failure, revert, out-of-gas, malformed return data, or a tracer violation MUST be treated as signature or policy failure.</p>
 <p>Restricted frames are enforced by a runtime opcode-and-target tracer derived from <a href="https://eips.ethereum.org/EIPS/eip-7562">ERC-7562</a>. Runtime enforcement is authoritative.</p>
 <div class="table-wrapper">
@@ -1782,13 +1787,13 @@ setKeyRingHash = keccak256(abi.encode(
 <li>require <code>sessionVerifier</code> to be authorized for <code>account</code> in the current <code>sessionVerifiers</code> set and load the current <code>keyRingHash</code>;</li>
 <li>require the account balance to cover the worst-case payload gas charge and <code>MIN_VALIDATION_FAILURE_FEE</code>;</li>
 <li>compute <code>signingHash</code>;</li>
-<li>call <code>sessionVerifier.isValidSignature(signingHash, signature)</code> in a restricted validation frame;</li>
+<li>call <code>IWorldChainAccountRouter(account).isValidSignatureForVerifier(sessionVerifier, signingHash, signature)</code> in a restricted validation frame;</li>
 <li>if signature validation fails, apply validation-failure semantics and stop;</li>
 <li>increment <code>Account.transactionNonce</code> by one;</li>
 <li>execute the payload tentatively with <code>account</code> as the EVM sender and gas charged against envelope <code>gasLimit</code>;</li>
 <li>construct <code>ExecutionTraceContext</code> with <code>context.transaction.keyRingHash</code> set to the current account <code>keyRingHash</code>;</li>
 <li>if <code>abi.encode(context.trace).length &gt; MAX_EXECUTION_TRACE_BYTES</code>, discard tentative payload state, apply trace-overflow semantics, and stop;</li>
-<li>call <code>sessionVerifier.evaluateSessionPolicy(context)</code> in a restricted validation frame;</li>
+<li>call <code>IWorldChainAccountRouter(account).evaluateSessionPolicyForVerifier(sessionVerifier, context)</code> in a restricted validation frame;</li>
 <li>if policy validation fails, discard tentative payload state, apply validation-failure semantics, and stop;</li>
 <li>otherwise commit the normal payload result, including a reverted payload result if the target call reverted.</li>
 </ol>
