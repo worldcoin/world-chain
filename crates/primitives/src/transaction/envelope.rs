@@ -2,9 +2,11 @@
 //!
 //! [EIP-2718]: https://eips.ethereum.org/EIPS/eip-2718
 
+use crate::transaction::verify::verify_wip1001_signature;
 use alloy_consensus::{
     EthereumTxEnvelope, Sealable, Sealed, SignableTransaction, Signed, TransactionEnvelope,
     TxEip1559, TxEip2930, TxEip7702, TxEnvelope, TxLegacy, Typed2718,
+    crypto::RecoveryError,
     error::ValueError,
     transaction::{RlpEcdsaEncodableTx, TxHashRef},
 };
@@ -249,9 +251,12 @@ impl From<Signed<WorldChainTypedTransaction>> for WorldChainTxEnvelope {
                 Self::Eip7702(Signed::new_unchecked(tx_eip7702, sig, hash))
             }
             // Default `Signature` is secp256k1; wrap it into the WIP-1001 signature enum.
-            WorldChainTypedTransaction::Wip1001(tx_wip) => Self::Wip1001(SignedWip1001::new(
-                Signed::new_unchecked(tx_wip, Wip1001Signature::Secp256k1(sig), hash),
-            )),
+            WorldChainTypedTransaction::Wip1001(tx_wip) => {
+                let wip_sig: Wip1001Signature = sig.into();
+                Self::Wip1001(SignedWip1001::new(Signed::new_unchecked(
+                    tx_wip, wip_sig, hash,
+                )))
+            }
             WorldChainTypedTransaction::Deposit(tx) => {
                 Self::Deposit(Sealed::new_unchecked(tx, hash))
             }
@@ -585,7 +590,7 @@ impl alloy_consensus::transaction::SignerRecoverable for WorldChainTxEnvelope {
             Self::Eip2930(tx) => (tx.signature(), tx.signature_hash()),
             Self::Eip1559(tx) => (tx.signature(), tx.signature_hash()),
             Self::Eip7702(tx) => (tx.signature(), tx.signature_hash()),
-            Self::Wip1001(tx) => return recover_wip1001_signer(tx),
+            Self::Wip1001(tx) => return Ok(tx.tx().session_verifier),
             // Optimism's Deposit transaction does not have a signature. Directly return the
             // `from` address.
             Self::Deposit(tx) => return Ok(tx.from),
@@ -602,7 +607,7 @@ impl alloy_consensus::transaction::SignerRecoverable for WorldChainTxEnvelope {
             Self::Eip2930(tx) => (tx.signature(), tx.signature_hash()),
             Self::Eip1559(tx) => (tx.signature(), tx.signature_hash()),
             Self::Eip7702(tx) => (tx.signature(), tx.signature_hash()),
-            Self::Wip1001(tx) => return recover_wip1001_signer(tx),
+            Self::Wip1001(tx) => return Ok(tx.tx().session_verifier),
             // Optimism's Deposit transaction does not have a signature. Directly return the
             // `from` address.
             Self::Deposit(tx) => return Ok(tx.from),
@@ -628,30 +633,11 @@ impl alloy_consensus::transaction::SignerRecoverable for WorldChainTxEnvelope {
             Self::Eip7702(tx) => {
                 alloy_consensus::transaction::SignerRecoverable::recover_unchecked_with_buf(tx, buf)
             }
-            Self::Wip1001(tx) => recover_wip1001_signer(tx),
+            Self::Wip1001(tx) => Ok(tx.tx().session_verifier),
             Self::Deposit(tx) => Ok(tx.from),
             Self::PostExec(tx) => Ok(tx.inner().signer_address()),
         }
     }
-}
-
-/// Verifies the WIP-1001 signature against the embedded `session_key` and
-/// returns the World ID Account address (the protocol-level "from" per WIP-1001).
-///
-/// The precompile-managed Key Ring lookup —
-/// `IWorldIDAccount.isAuthorized(world_id_account, session_key)` — is performed
-/// downstream and is **not** part of this verification.
-fn recover_wip1001_signer(
-    tx: &SignedWip1001,
-) -> Result<alloy_primitives::Address, alloy_consensus::crypto::RecoveryError> {
-    let body = tx.tx();
-    crate::transaction::verify_wip1001_signature(
-        body.signature_type,
-        body.session_key.as_ref(),
-        tx.signature(),
-        &body.signing_hash(),
-    )?;
-    Ok(body.world_id_account)
 }
 
 impl WorldChainTypedTransaction {
@@ -680,7 +666,10 @@ impl WorldChainTypedTransaction {
             Self::Eip2930(tx) => tx.tx_hash(signature),
             Self::Eip1559(tx) => tx.tx_hash(signature),
             Self::Eip7702(tx) => tx.tx_hash(signature),
-            Self::Wip1001(tx) => tx.tx_hash(&Wip1001Signature::Secp256k1(*signature)),
+            Self::Wip1001(tx) => {
+                let wip_sig: Wip1001Signature = signature.into();
+                tx.tx_hash(&wip_sig)
+            }
             Self::Deposit(tx) => tx.tx_hash(),
             Self::PostExec(tx) => tx.tx_hash(),
         }
@@ -726,7 +715,10 @@ impl RlpEcdsaEncodableTx for WorldChainTypedTransaction {
             Self::Eip2930(tx) => tx.eip2718_encode_with_type(signature, tx.ty(), out),
             Self::Eip1559(tx) => tx.eip2718_encode_with_type(signature, tx.ty(), out),
             Self::Eip7702(tx) => tx.eip2718_encode_with_type(signature, tx.ty(), out),
-            Self::Wip1001(tx) => tx.eip2718_encode(&Wip1001Signature::Secp256k1(*signature), out),
+            Self::Wip1001(tx) => {
+                let wip_sig: Wip1001Signature = signature.into();
+                tx.eip2718_encode(&wip_sig, out)
+            }
             Self::Deposit(tx) => tx.encode_2718(out),
             Self::PostExec(tx) => tx.encode_2718(out),
         }
@@ -738,7 +730,10 @@ impl RlpEcdsaEncodableTx for WorldChainTypedTransaction {
             Self::Eip2930(tx) => tx.eip2718_encode(signature, out),
             Self::Eip1559(tx) => tx.eip2718_encode(signature, out),
             Self::Eip7702(tx) => tx.eip2718_encode(signature, out),
-            Self::Wip1001(tx) => tx.eip2718_encode(&Wip1001Signature::Secp256k1(*signature), out),
+            Self::Wip1001(tx) => {
+                let wip_sig: Wip1001Signature = signature.into();
+                tx.eip2718_encode(&wip_sig, out)
+            }
             Self::Deposit(tx) => tx.encode_2718(out),
             Self::PostExec(tx) => tx.encode_2718(out),
         }
@@ -751,7 +746,8 @@ impl RlpEcdsaEncodableTx for WorldChainTypedTransaction {
             Self::Eip1559(tx) => tx.network_encode_with_type(signature, tx.ty(), out),
             Self::Eip7702(tx) => tx.network_encode_with_type(signature, tx.ty(), out),
             Self::Wip1001(tx) => {
-                wip1001_network_encode(tx, &Wip1001Signature::Secp256k1(*signature), out)
+                let wip_sig: Wip1001Signature = signature.into();
+                wip1001_network_encode(tx, &wip_sig, out)
             }
             Self::Deposit(tx) => tx.network_encode(out),
             Self::PostExec(tx) => tx.network_encode(out),
@@ -765,7 +761,8 @@ impl RlpEcdsaEncodableTx for WorldChainTypedTransaction {
             Self::Eip1559(tx) => tx.network_encode(signature, out),
             Self::Eip7702(tx) => tx.network_encode(signature, out),
             Self::Wip1001(tx) => {
-                wip1001_network_encode(tx, &Wip1001Signature::Secp256k1(*signature), out)
+                let wip_sig: Wip1001Signature = signature.into();
+                wip1001_network_encode(tx, &wip_sig, out)
             }
             Self::Deposit(tx) => tx.network_encode(out),
             Self::PostExec(tx) => tx.network_encode(out),
@@ -778,7 +775,10 @@ impl RlpEcdsaEncodableTx for WorldChainTypedTransaction {
             Self::Eip2930(tx) => tx.tx_hash_with_type(signature, tx.ty()),
             Self::Eip1559(tx) => tx.tx_hash_with_type(signature, tx.ty()),
             Self::Eip7702(tx) => tx.tx_hash_with_type(signature, tx.ty()),
-            Self::Wip1001(tx) => tx.tx_hash(&Wip1001Signature::Secp256k1(*signature)),
+            Self::Wip1001(tx) => {
+                let wip_sig: Wip1001Signature = signature.into();
+                tx.tx_hash(&wip_sig)
+            }
             Self::Deposit(tx) => tx.tx_hash(),
             Self::PostExec(tx) => tx.tx_hash(),
         }
@@ -790,7 +790,10 @@ impl RlpEcdsaEncodableTx for WorldChainTypedTransaction {
             Self::Eip2930(tx) => tx.tx_hash(signature),
             Self::Eip1559(tx) => tx.tx_hash(signature),
             Self::Eip7702(tx) => tx.tx_hash(signature),
-            Self::Wip1001(tx) => tx.tx_hash(&Wip1001Signature::Secp256k1(*signature)),
+            Self::Wip1001(tx) => {
+                let wip_sig: Wip1001Signature = signature.into();
+                tx.tx_hash(&wip_sig)
+            }
             Self::Deposit(tx) => tx.tx_hash(),
             Self::PostExec(tx) => tx.tx_hash(),
         }

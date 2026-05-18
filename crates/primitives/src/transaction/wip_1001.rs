@@ -46,6 +46,10 @@ pub struct TxWip1001 {
     /// Gas limit.
     #[serde(with = "alloy_serde::quantity", rename = "gas", alias = "gasLimit")]
     pub gas_limit: u64,
+    /// The World Chain Account.
+    pub world_chain_account: Address,
+    /// The session verifier.
+    pub session_verifier: Address,
     /// Target of the message call, or `Create` for contract creation.
     #[serde(default)]
     pub to: TxKind,
@@ -56,25 +60,6 @@ pub struct TxWip1001 {
     /// EIP-2930 access list.
     #[serde(default)]
     pub access_list: AccessList,
-    /// 20-byte address of the signing *World ID Account*. Protocol validation
-    /// authorizes the recovered session public key against this account's
-    /// *Key Ring* (the precompile-managed set of authorized session keys).
-    pub world_id_account: Address,
-    /// Wire `signature_type` byte. Must equal the accompanying
-    /// [`Wip1001Signature`] variant's discriminator at signing/verification time.
-    ///
-    /// Stored on the transaction (not solely on the signature) because it is
-    /// covered by `signing_hash`, binding the chosen scheme to the message.
-    #[serde(with = "alloy_serde::quantity")]
-    pub signature_type: u8,
-    /// `keyData` of the [`SessionKey`](crate::transaction::SessionKey) used to
-    /// authenticate this transaction.
-    ///
-    /// The `KeyType` is implied by [`signature_type`](Self::signature_type) —
-    /// implementations MUST reject transactions where the length of
-    /// `session_key` does not match the byte length specified for that key
-    /// type (see WIP-1001 §Session Keys).
-    pub session_key: Bytes,
 }
 
 impl TxWip1001 {
@@ -86,13 +71,12 @@ impl TxWip1001 {
             + self.max_priority_fee_per_gas.length()
             + self.max_fee_per_gas.length()
             + self.gas_limit.length()
+            + self.world_chain_account.length()
+            + self.session_verifier.length()
             + self.to.length()
             + self.value.length()
             + self.input.0.length()
             + self.access_list.length()
-            + self.world_id_account.length()
-            + self.signature_type.length()
-            + self.session_key.0.length()
     }
 
     /// Encodes the fields (positions 0..=11) into `out`, without a list header.
@@ -102,13 +86,12 @@ impl TxWip1001 {
         self.max_priority_fee_per_gas.encode(out);
         self.max_fee_per_gas.encode(out);
         self.gas_limit.encode(out);
+        self.world_chain_account.encode(out);
+        self.session_verifier.encode(out);
         self.to.encode(out);
         self.value.encode(out);
         self.input.0.encode(out);
         self.access_list.encode(out);
-        self.world_id_account.encode(out);
-        self.signature_type.encode(out);
-        self.session_key.0.encode(out);
     }
 
     /// Decodes the unsigned fields (positions 0..=11) from RLP bytes, without a
@@ -120,13 +103,12 @@ impl TxWip1001 {
             max_priority_fee_per_gas: Decodable::decode(buf)?,
             max_fee_per_gas: Decodable::decode(buf)?,
             gas_limit: Decodable::decode(buf)?,
+            world_chain_account: Decodable::decode(buf)?,
+            session_verifier: Decodable::decode(buf)?,
             to: Decodable::decode(buf)?,
             value: Decodable::decode(buf)?,
             input: Decodable::decode(buf)?,
             access_list: Decodable::decode(buf)?,
-            world_id_account: Decodable::decode(buf)?,
-            signature_type: Decodable::decode(buf)?,
-            session_key: Decodable::decode(buf)?,
         })
     }
 
@@ -209,7 +191,7 @@ impl TxWip1001 {
         }
         let (mut payload_slice, rest) = buf.split_at(payload_header.payload_length);
         *buf = rest;
-        let sig = Wip1001Signature::decode_payload_raw(tx.signature_type, &mut payload_slice)?;
+        let sig = Wip1001Signature::decode_payload_raw(&mut payload_slice)?;
         if !payload_slice.is_empty() {
             return Err(alloy_rlp::Error::Custom(
                 "trailing bytes in signature_payload",
@@ -437,7 +419,7 @@ impl SignableTransaction<Signature> for TxWip1001 {
     }
 
     fn into_signed(self, signature: Signature) -> Signed<Self, Signature> {
-        let wip_sig = Wip1001Signature::Secp256k1(signature);
+        let wip_sig: Wip1001Signature = signature.into();
         let hash = self.tx_hash(&wip_sig);
         Signed::new_unchecked(self, signature, hash)
     }

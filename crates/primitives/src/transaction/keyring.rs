@@ -1,40 +1,40 @@
 //! Authorization lookup against the WIP-1001 keyring registry.
 //!
-//! [`KeyringRegistry`] is the interface between the [signature
-//! verifier](super::verify) and whatever holds the precompile-managed keyring
+//! [`WorldChainAccountManager`] is the interface between the [signature
+//! verifier](super::verify) and whatever holds the predeploy-managed keyring
 //! state — the pool's state provider, the builder, the RPC layer, or a test
-//! double. It deliberately mirrors `IWorldIDKeyRing.isAuthorized` from the
-//! spec so the eventual precompile-backed implementation is a thin adapter.
+//! double. It deliberately mirrors `IWorldChainAccountManager.isAuthorizedSessionVerifier`
+//! from the spec so the eventual predeploy-backed implementation is a thin adapter.
 //!
 //! [`validate_wip1001`] is the one-stop entry point that callers (pool,
 //! builder, RPC) should use: it computes the signing hash, runs the per-scheme
 //! cryptographic verification, and gates the result on the registry's
-//! `is_authorized` answer.
-
-use alloy_primitives::Address;
+//! `isAuthorizedSessionVerifier` answer.
 
 use crate::transaction::{
-    SessionKey, TxWip1001, Wip1001Signature, Wip1001VerifyError, verify_wip1001_signature,
+    TxWip1001, Wip1001Signature,
+    verify::{SessionVerifier, Wip1001VerifyError},
 };
+use alloy_primitives::Address;
 
-/// Read-only view of the precompile-managed keyring state.
+/// Read-only view of the predeploy-managed world chain account manager.
 ///
-/// Implementors translate `is_authorized` into a state lookup at the current
-/// block height. The trait is sync because pool/builder admission paths are
+/// Implementors translate `isAuthorizedSessionVerifier` into a state lookup at the
+/// current block height. The trait is sync because pool/builder admission paths are
 /// sync; async callers can wrap a sync registry behind their own boundary.
-pub trait KeyringRegistry {
+pub trait WorldChainAccountManager {
     /// Backend-specific lookup error (e.g. database failure). Returning
     /// `Ok(false)` denotes "key is not authorized"; an `Err` denotes "the
     /// answer is not available" and callers should treat the transaction as
     /// pending or rejected accordingly.
     type Error;
 
-    /// Returns `Ok(true)` iff `session_key` is currently in the authorized set
-    /// of `keyring`.
-    fn is_authorized(
+    /// Returns `Ok(true)` iff `sessionVerifier` is currently in the authorized set
+    /// of `world_chain_account`.
+    fn is_authorized_session_verifier(
         &self,
-        keyring: Address,
-        session_key: &SessionKey,
+        world_chain_account: Address,
+        session_verifier: Address,
     ) -> Result<bool, Self::Error>;
 }
 
@@ -50,38 +50,47 @@ pub enum Wip1001ValidationError<E> {
     /// rejected or pending.
     #[error("keyring registry lookup failed: {0}")]
     Registry(E),
-    /// Signature is valid but the recovered session key is not in the
-    /// keyring's authorized set at the current state height.
-    #[error("session key is not authorized for keyring {keyring}")]
+    /// Signature is valid but the session verifier is not in the
+    /// world chain account's authorized set at the current state height.
+    #[error("session key is not authorized for world chain account {world_chain_account}")]
     NotAuthorized {
-        /// The keyring address that the unauthorized key was presented for.
-        keyring: Address,
+        /// The world chain account address that the unauthorized key was presented for.
+        world_chain_account: Address,
     },
 }
 
 /// Verify a WIP-1001 transaction's signature against its embedded
-/// `session_key`, then assert that the registry authorizes the key for the
-/// declared keyring.
-///
-/// On success returns the typed [`SessionKey`] that was bound to the
-/// signature, ready to be passed onward to gas/nonce accounting.
-pub fn validate_wip1001<R: KeyringRegistry>(
+/// `session_verifier`, then assert that the registry authorizes the key for the
+/// declared world chain account.
+pub fn validate_wip1001<M, V>(
     tx: &TxWip1001,
     sig: &Wip1001Signature,
-    registry: &R,
-) -> Result<SessionKey, Wip1001ValidationError<R::Error>> {
-    let signing_hash = tx.signing_hash();
-    let session_key = verify_wip1001_signature(
-        tx.signature_type,
-        tx.session_key.as_ref(),
-        sig,
-        &signing_hash,
-    )?;
-
-    match registry.is_authorized(tx.world_id_account, &session_key) {
-        Ok(true) => Ok(session_key),
+    world_chain_account_manager: &M,
+    session_verifier: &V,
+) -> Result<(), Wip1001ValidationError<M::Error>>
+where
+    M: WorldChainAccountManager,
+    V: SessionVerifier,
+{
+    let world_chain_account_addr = tx.world_chain_account;
+    let session_verifier_addr = tx.session_verifier;
+    match world_chain_account_manager
+        .is_authorized_session_verifier(world_chain_account_addr, session_verifier_addr)
+    {
+        Ok(true) => {
+            let signing_hash = tx.signing_hash();
+            session_verifier
+                .is_valid_signature(
+                    world_chain_account_addr,
+                    session_verifier_addr,
+                    signing_hash,
+                    sig,
+                )
+                .map_err(|_| Wip1001VerifyError::Invalid)?;
+            Ok(())
+        }
         Ok(false) => Err(Wip1001ValidationError::NotAuthorized {
-            keyring: tx.world_id_account,
+            world_chain_account: world_chain_account_addr,
         }),
         Err(e) => Err(Wip1001ValidationError::Registry(e)),
     }
@@ -125,10 +134,10 @@ mod mock {
         }
     }
 
-    impl KeyringRegistry for MockKeyringRegistry {
+    impl WorldChainAccountManager for MockKeyringRegistry {
         type Error = Infallible;
 
-        fn is_authorized(
+        fn is_authorized_session_verifier(
             &self,
             keyring: Address,
             session_key: &SessionKey,
@@ -163,9 +172,9 @@ mod tests {
     /// Registry that always errors. Useful for asserting we propagate
     /// `Registry(...)` instead of silently treating it as "not authorized".
     struct FailingRegistry;
-    impl KeyringRegistry for FailingRegistry {
+    impl WorldChainAccountManager for FailingRegistry {
         type Error = LookupFailed;
-        fn is_authorized(
+        fn is_authorized_session_verifier(
             &self,
             _keyring: Address,
             _session_key: &SessionKey,
@@ -241,7 +250,7 @@ mod tests {
         let err = validate_wip1001(&tx, &sig, &registry).expect_err("must reject");
         assert!(matches!(
             err,
-            Wip1001ValidationError::NotAuthorized { keyring } if keyring == tx.world_id_account
+            Wip1001ValidationError::NotAuthorized { world_chain_account } if keyring == tx.world_id_account
         ));
     }
 
@@ -254,7 +263,7 @@ mod tests {
         let err = validate_wip1001(&tx, &sig, &registry).expect_err("must reject");
         assert!(matches!(
             err,
-            Wip1001ValidationError::NotAuthorized { keyring } if keyring == tx.world_id_account
+            Wip1001ValidationError::NotAuthorized { world_chain_account } if keyring == tx.world_id_account
         ));
     }
 
@@ -277,9 +286,13 @@ mod tests {
         // Registry that would PANIC if called — proves we error out before
         // touching it on a verification failure.
         struct PanicRegistry;
-        impl KeyringRegistry for PanicRegistry {
+        impl WorldChainAccountManager for PanicRegistry {
             type Error = Infallible;
-            fn is_authorized(&self, _: Address, _: &SessionKey) -> Result<bool, Infallible> {
+            fn is_authorized_session_verifier(
+                &self,
+                _: Address,
+                _: &SessionKey,
+            ) -> Result<bool, Infallible> {
                 panic!("registry must not be consulted on verify failure");
             }
         }
@@ -296,9 +309,9 @@ mod tests {
         let kr = address!("00000000000000000000000000000000000000aa");
         let mut registry = MockKeyringRegistry::new();
         registry.authorize(kr, key.clone());
-        assert!(registry.is_authorized(kr, &key).unwrap());
+        assert!(registry.is_authorized_session_verifier(kr, &key).unwrap());
         assert!(registry.revoke(kr, &key));
-        assert!(!registry.is_authorized(kr, &key).unwrap());
+        assert!(!registry.is_authorized_session_verifier(kr, &key).unwrap());
         // Idempotent revoke.
         assert!(!registry.revoke(kr, &key));
     }
