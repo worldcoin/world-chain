@@ -2,7 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {Test, console2} from "forge-std/Test.sol";
-import {FeeEscrow, IChainLinkPriceFeed, IBurnCallback} from "../src/fees/FeeEscrow.sol";
+import {FeeEscrow, IChainLinkPriceFeed, IBurnCallback} from "../src/FeeEscrow.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
