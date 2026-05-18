@@ -99,37 +99,43 @@ where
 #[cfg(any(test, feature = "test-utils"))]
 mod mock {
     use super::*;
+    use alloy_primitives::B256;
     use std::{
         collections::{HashMap, HashSet},
         convert::Infallible,
     };
 
-    /// In-memory [`KeyringRegistry`] for tests and downstream development.
+    /// In-memory [`WorldChainAccountManager`] for tests and downstream development.
     ///
-    /// Authorizations are stored explicitly; lookups never fail (`Error =
+    /// Authorizations are stored explicitly as `(world_chain_account ->
+    /// {session_verifier_addresses})`; lookups never fail (`Error =
     /// Infallible`). For richer scenarios (e.g. simulating a state-lookup
     /// failure) write a bespoke mock in the calling crate.
     #[derive(Debug, Default, Clone)]
     pub struct MockKeyringRegistry {
-        authorized: HashMap<Address, HashSet<SessionKey>>,
+        authorized: HashMap<Address, HashSet<Address>>,
     }
 
     impl MockKeyringRegistry {
-        /// Creates an empty registry with no authorized session keys.
+        /// Creates an empty registry with no authorized session verifiers.
         pub fn new() -> Self {
             Self::default()
         }
 
-        /// Authorizes `key` on `keyring`. Idempotent.
-        pub fn authorize(&mut self, keyring: Address, key: SessionKey) {
-            self.authorized.entry(keyring).or_default().insert(key);
+        /// Authorizes `session_verifier` on `world_chain_account`. Idempotent.
+        pub fn authorize(&mut self, world_chain_account: Address, session_verifier: Address) {
+            self.authorized
+                .entry(world_chain_account)
+                .or_default()
+                .insert(session_verifier);
         }
 
-        /// Revokes `key` on `keyring`. Returns `true` if a removal occurred.
-        pub fn revoke(&mut self, keyring: Address, key: &SessionKey) -> bool {
+        /// Revokes `session_verifier` on `world_chain_account`. Returns `true`
+        /// if a removal occurred.
+        pub fn revoke(&mut self, world_chain_account: Address, session_verifier: &Address) -> bool {
             self.authorized
-                .get_mut(&keyring)
-                .map(|set| set.remove(key))
+                .get_mut(&world_chain_account)
+                .map(|set| set.remove(session_verifier))
                 .unwrap_or(false)
         }
     }
@@ -139,30 +145,71 @@ mod mock {
 
         fn is_authorized_session_verifier(
             &self,
-            keyring: Address,
-            session_key: &SessionKey,
+            world_chain_account: Address,
+            session_verifier: Address,
         ) -> Result<bool, Self::Error> {
             Ok(self
                 .authorized
-                .get(&keyring)
-                .is_some_and(|set| set.contains(session_key)))
+                .get(&world_chain_account)
+                .is_some_and(|set| set.contains(&session_verifier)))
+        }
+    }
+
+    /// In-memory [`SessionVerifier`] for tests and downstream development.
+    ///
+    /// Returns a fixed verdict (`accept` or reject) for every call; the
+    /// real backend is an EVM-driven STATICCALL through the account router
+    /// (see [`SessionVerifier`] and WIP-1001 §"Restricted Validation Frames").
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct MockSessionVerifier {
+        accept: bool,
+    }
+
+    impl MockSessionVerifier {
+        /// Returns a verifier that accepts every signature.
+        pub fn accept_all() -> Self {
+            Self { accept: true }
+        }
+
+        /// Returns a verifier that rejects every signature.
+        pub fn reject_all() -> Self {
+            Self { accept: false }
+        }
+    }
+
+    /// Error returned by [`MockSessionVerifier::reject_all`].
+    #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone, Copy)]
+    #[error("mock session verifier rejected the signature")]
+    pub struct MockSessionVerifierRejected;
+
+    impl SessionVerifier for MockSessionVerifier {
+        type Error = MockSessionVerifierRejected;
+
+        fn is_valid_signature(
+            &self,
+            _world_chain_account: Address,
+            _session_verifier: Address,
+            _signing_hash: B256,
+            _signature: &Wip1001Signature,
+        ) -> Result<(), Self::Error> {
+            if self.accept {
+                Ok(())
+            } else {
+                Err(MockSessionVerifierRejected)
+            }
         }
     }
 }
 
 #[cfg(any(test, feature = "test-utils"))]
-pub use mock::MockKeyringRegistry;
+pub use mock::{MockKeyringRegistry, MockSessionVerifier, MockSessionVerifierRejected};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transaction::{P256Signature, signature::P256_PUBKEY_LEN, verify::P256N_HALF};
     use alloy_eips::eip2930::AccessList;
-    use alloy_primitives::{B256, Bytes, U256, address, hex};
-    use p256::{
-        ecdsa::{SigningKey as P256SigningKey, signature::hazmat::PrehashSigner},
-        elliptic_curve::rand_core::OsRng,
-    };
+    use alloy_primitives::{Bytes, U256, address, hex};
+    use std::convert::Infallible;
 
     /// Lookup error stand-in for tests that need to simulate registry failures.
     #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone, Copy)]
@@ -176,101 +223,86 @@ mod tests {
         type Error = LookupFailed;
         fn is_authorized_session_verifier(
             &self,
-            _keyring: Address,
-            _session_key: &SessionKey,
+            _world_chain_account: Address,
+            _session_verifier: Address,
         ) -> Result<bool, Self::Error> {
             Err(LookupFailed)
         }
     }
 
-    fn p256_keypair() -> (P256SigningKey, [u8; P256_PUBKEY_LEN]) {
-        let sk = P256SigningKey::random(&mut OsRng);
-        let vk = sk.verifying_key().to_encoded_point(false);
-        let mut bytes = [0u8; P256_PUBKEY_LEN];
-        bytes[..32].copy_from_slice(vk.x().expect("x").as_ref());
-        bytes[32..].copy_from_slice(vk.y().expect("y").as_ref());
-        (sk, bytes)
-    }
-
-    fn p256_sign(sk: &P256SigningKey, hash: &B256) -> P256Signature {
-        let raw: p256::ecdsa::Signature = sk.sign_prehash(hash.as_slice()).expect("sign");
-        let bytes = raw.to_bytes();
-        let r = B256::from_slice(&bytes[..32]);
-        let s_u = U256::from_be_slice(&bytes[32..]);
-        let s_norm = if s_u > P256N_HALF {
-            crate::transaction::verify::P256_ORDER - s_u
-        } else {
-            s_u
-        };
-        P256Signature {
-            r,
-            s: B256::from(s_norm.to_be_bytes::<32>()),
-        }
-    }
-
-    /// Builds a P-256-signed `(tx, signature)` pair plus the typed session key.
-    fn signed_p256() -> (TxWip1001, Wip1001Signature, SessionKey) {
-        let (sk, key_bytes) = p256_keypair();
-        let session_key = SessionKey::from_wire(Wip1001Signature::P256_TYPE, &key_bytes)
-            .expect("typed session key");
-
+    /// Builds a fixed `(tx, signature)` pair. The signature payload is opaque
+    /// to the protocol (verification is delegated to the on-chain session
+    /// verifier via EIP-1271) so we use a constant blob.
+    fn signed_tx() -> (TxWip1001, Wip1001Signature) {
         let tx = TxWip1001 {
             chain_id: 480,
             nonce: 0,
             max_priority_fee_per_gas: 1,
             max_fee_per_gas: 2,
             gas_limit: 21_000,
+            world_chain_account: address!("000000000000000000000000000000000000001d"),
+            session_verifier: address!("00000000000000000000000000000000000000aa"),
             to: address!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into(),
             value: U256::ZERO,
-            input: hex!("").into(),
+            input: Bytes::default(),
             access_list: AccessList::default(),
-            world_id_account: address!("000000000000000000000000000000000000001d"),
-            signature_type: Wip1001Signature::P256_TYPE,
-            session_key: Bytes::copy_from_slice(&key_bytes),
         };
-        let sig = Wip1001Signature::P256(p256_sign(&sk, &tx.signing_hash()));
-        (tx, sig, session_key)
+        let sig = Wip1001Signature {
+            signature: hex!("deadbeefcafef00d").into(),
+        };
+        (tx, sig)
     }
 
     #[test]
-    fn validate_ok_when_authorized() {
-        let (tx, sig, key) = signed_p256();
+    fn validate_ok_when_authorized_and_session_verifier_accepts() {
+        let (tx, sig) = signed_tx();
         let mut registry = MockKeyringRegistry::new();
-        registry.authorize(tx.world_id_account, key.clone());
+        registry.authorize(tx.world_chain_account, tx.session_verifier);
 
-        let recovered = validate_wip1001(&tx, &sig, &registry).expect("ok");
-        assert_eq!(recovered, key);
+        validate_wip1001(&tx, &sig, &registry, &MockSessionVerifier::accept_all()).expect("ok");
     }
 
     #[test]
-    fn validate_rejects_unauthorized_key() {
-        let (tx, sig, _key) = signed_p256();
-        // Empty registry — key is not authorized.
+    fn validate_rejects_unauthorized_verifier() {
+        let (tx, sig) = signed_tx();
+        // Empty registry — session verifier is not authorized.
         let registry = MockKeyringRegistry::new();
-        let err = validate_wip1001(&tx, &sig, &registry).expect_err("must reject");
+
+        let err = validate_wip1001(&tx, &sig, &registry, &MockSessionVerifier::accept_all())
+            .expect_err("must reject");
         assert!(matches!(
             err,
-            Wip1001ValidationError::NotAuthorized { world_chain_account } if keyring == tx.world_id_account
+            Wip1001ValidationError::NotAuthorized { world_chain_account }
+                if world_chain_account == tx.world_chain_account
         ));
     }
 
     #[test]
-    fn validate_rejects_when_authorized_for_different_keyring() {
-        let (tx, sig, key) = signed_p256();
+    fn validate_rejects_when_authorized_for_different_account() {
+        let (tx, sig) = signed_tx();
         let mut registry = MockKeyringRegistry::new();
-        // Authorize the key on a *different* keyring.
-        registry.authorize(Address::with_last_byte(0xAA), key);
-        let err = validate_wip1001(&tx, &sig, &registry).expect_err("must reject");
+        // Authorize the verifier on a *different* world chain account.
+        registry.authorize(Address::with_last_byte(0xAA), tx.session_verifier);
+
+        let err = validate_wip1001(&tx, &sig, &registry, &MockSessionVerifier::accept_all())
+            .expect_err("must reject");
         assert!(matches!(
             err,
-            Wip1001ValidationError::NotAuthorized { world_chain_account } if keyring == tx.world_id_account
+            Wip1001ValidationError::NotAuthorized { world_chain_account }
+                if world_chain_account == tx.world_chain_account
         ));
     }
 
     #[test]
     fn validate_propagates_registry_error() {
-        let (tx, sig, _key) = signed_p256();
-        let err = validate_wip1001(&tx, &sig, &FailingRegistry).expect_err("must propagate");
+        let (tx, sig) = signed_tx();
+        let err = validate_wip1001(
+            &tx,
+            &sig,
+            &FailingRegistry,
+            &MockSessionVerifier::accept_all(),
+        )
+        .expect_err("must propagate");
         assert!(matches!(
             err,
             Wip1001ValidationError::Registry(LookupFailed)
@@ -278,43 +310,67 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_tampered_signature_without_registry_call() {
-        let (mut tx, sig, key) = signed_p256();
-        // Mutate `input` so the cached signature no longer covers the message.
-        tx.input = Bytes::from_static(b"tampered");
+    fn validate_returns_verify_when_session_verifier_rejects() {
+        let (tx, sig) = signed_tx();
+        let mut registry = MockKeyringRegistry::new();
+        registry.authorize(tx.world_chain_account, tx.session_verifier);
 
-        // Registry that would PANIC if called — proves we error out before
-        // touching it on a verification failure.
-        struct PanicRegistry;
-        impl WorldChainAccountManager for PanicRegistry {
-            type Error = Infallible;
-            fn is_authorized_session_verifier(
-                &self,
-                _: Address,
-                _: &SessionKey,
-            ) -> Result<bool, Infallible> {
-                panic!("registry must not be consulted on verify failure");
-            }
-        }
-
-        let err = validate_wip1001(&tx, &sig, &PanicRegistry).expect_err("verify must fail");
+        let err = validate_wip1001(&tx, &sig, &registry, &MockSessionVerifier::reject_all())
+            .expect_err("must reject signature");
         assert!(matches!(err, Wip1001ValidationError::Verify(_)));
-        // Silence unused-binding warnings on the original key.
-        let _ = key;
     }
 
     #[test]
-    fn mock_revoke_round_trip() {
-        let (_, _, key) = signed_p256();
-        let kr = address!("00000000000000000000000000000000000000aa");
-        let mut registry = MockKeyringRegistry::new();
-        registry.authorize(kr, key.clone());
-        assert!(registry.is_authorized_session_verifier(kr, &key).unwrap());
-        assert!(registry.revoke(kr, &key));
-        assert!(!registry.is_authorized_session_verifier(kr, &key).unwrap());
-        // Idempotent revoke.
-        assert!(!registry.revoke(kr, &key));
+    fn validate_skips_session_verifier_when_unauthorized() {
+        // Asserts the spec-mandated ordering: the authorization precheck
+        // (WIP-1001 step 3) runs *before* the EIP-1271 signature call (step 6).
+        let (tx, sig) = signed_tx();
+        let registry = MockKeyringRegistry::new();
+
+        struct PanicVerifier;
+        impl SessionVerifier for PanicVerifier {
+            type Error = Infallible;
+            fn is_valid_signature(
+                &self,
+                _: Address,
+                _: Address,
+                _: alloy_primitives::B256,
+                _: &Wip1001Signature,
+            ) -> Result<(), Self::Error> {
+                panic!("session verifier must not be consulted on unauthorized verifier");
+            }
+        }
+
+        let err = validate_wip1001(&tx, &sig, &registry, &PanicVerifier)
+            .expect_err("authorization precheck must fail first");
+        assert!(matches!(
+            err,
+            Wip1001ValidationError::NotAuthorized { world_chain_account }
+                if world_chain_account == tx.world_chain_account
+        ));
     }
 
-    use std::convert::Infallible;
+    #[test]
+    fn mock_authorize_and_revoke_round_trip() {
+        let account = address!("00000000000000000000000000000000000000aa");
+        let session_verifier = address!("00000000000000000000000000000000000000bb");
+        let mut registry = MockKeyringRegistry::new();
+
+        registry.authorize(account, session_verifier);
+        assert!(
+            registry
+                .is_authorized_session_verifier(account, session_verifier)
+                .unwrap()
+        );
+
+        assert!(registry.revoke(account, &session_verifier));
+        assert!(
+            !registry
+                .is_authorized_session_verifier(account, session_verifier)
+                .unwrap()
+        );
+
+        // Idempotent revoke.
+        assert!(!registry.revoke(account, &session_verifier));
+    }
 }

@@ -13800,7 +13800,6 @@ dependencies = [
  "alloy-rpc-types-eth 2.0.4",
  "alloy-serde 2.0.4",
  "alloy-signer-local",
- "base64 0.22.1",
  "blake3",
  "bytes",
  "chrono",
@@ -13810,7 +13809,6 @@ dependencies = [
  "op-alloy-network",
  "op-alloy-rpc-types",
  "op-revm",
- "p256",
  "reth-basic-payload-builder",
  "reth-chainspec",
  "reth-codecs",
@@ -13823,7 +13821,6 @@ dependencies = [
  "revm",
  "serde",
  "serde_json",
- "sha2",
  "thiserror 2.0.18",
  "world-chain-chainspec",
 ]

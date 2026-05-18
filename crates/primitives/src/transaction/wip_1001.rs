@@ -674,7 +674,7 @@ impl Decodable for SignedWip1001 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, b256, hex};
+    use alloy_primitives::{address, hex};
 
     fn sample_tx() -> TxWip1001 {
         TxWip1001 {
@@ -683,28 +683,25 @@ mod tests {
             max_priority_fee_per_gas: 0x3b9aca00,
             max_fee_per_gas: 0x4a817c800,
             gas_limit: 44386,
+            world_chain_account: address!("000000000000000000000000000000000000001d"),
+            session_verifier: address!("00000000000000000000000000000000000000aa"),
             to: address!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into(),
             value: U256::from(1u64),
             input: hex!("a22cb465").into(),
             access_list: AccessList::default(),
-            world_id_account: address!("000000000000000000000000000000000000001d"),
-            signature_type: Wip1001Signature::SECP256K1_TYPE,
-            // 33-byte compressed secp256k1 placeholder.
-            session_key: hex!("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
-                .into(),
         }
     }
 
     fn sample_sig() -> Wip1001Signature {
-        Wip1001Signature::Secp256k1(Signature::new(
-            U256::from_be_slice(
-                &b256!("840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca90058565")[..],
-            ),
-            U256::from_be_slice(
-                &b256!("25e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1")[..],
-            ),
-            false,
-        ))
+        // The WIP-1001 envelope does not interpret signature bytes; verification
+        // is delegated to the on-chain session verifier contract via EIP-1271
+        // (see `wips/wip-1001.md`). Use an arbitrary opaque payload here.
+        Wip1001Signature {
+            signature: hex!(
+                "840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca9005856525e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1"
+            )
+            .into(),
+        }
     }
 
     #[test]
@@ -715,8 +712,7 @@ mod tests {
         assert_eq!(buf.len(), sig.payload_encoded_len());
 
         let mut slice = buf.as_slice();
-        let decoded = Wip1001Signature::decode_payload_raw(sig.signature_type(), &mut slice)
-            .expect("decode payload");
+        let decoded = Wip1001Signature::decode_payload_raw(&mut slice).expect("decode payload");
         assert!(slice.is_empty());
         assert_eq!(decoded, sig);
     }
@@ -809,8 +805,9 @@ mod tests {
     fn wip1001_signing_hash_excludes_signature() {
         let tx = sample_tx();
         let sig1 = sample_sig();
-        let sig2 =
-            Wip1001Signature::Secp256k1(Signature::new(U256::from(7u64), U256::from(9u64), true));
+        let sig2 = Wip1001Signature {
+            signature: hex!("aabbccddeeff").into(),
+        };
         assert_eq!(tx.signing_hash(), tx.signing_hash());
         let h1 = tx.tx_hash(&sig1);
         let h2 = tx.tx_hash(&sig2);
