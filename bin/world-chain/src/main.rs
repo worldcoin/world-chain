@@ -32,6 +32,8 @@ fn main() {
         }
     }
 
+    world_chain_node::init_version_metadata();
+
     let result = Cli::<WorldChainSpecParser, WorldChainArgs, WorldChainRpcModuleValidator>::parse()
         .run::<WorldChainNode<WorldChainDefaultContext>, _, _, _>(
             |mut builder, args| async move {

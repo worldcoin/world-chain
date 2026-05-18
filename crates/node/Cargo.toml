@@ -64,6 +64,10 @@ tracing.workspace = true
 ed25519-dalek.workspace = true
 hex.workspace = true
 
+[build-dependencies]
+vergen.workspace = true
+vergen-git2.workspace = true
+
 [dev-dependencies]
 world-chain-test-utils.workspace = true
 reth-eth-wire.workspace = true

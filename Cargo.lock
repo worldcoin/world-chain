@@ -13648,6 +13648,8 @@ dependencies = [
  "reth-transaction-pool",
  "tokio",
  "tracing",
+ "vergen",
+ "vergen-git2",
  "world-chain-builder",
  "world-chain-chainspec",
  "world-chain-cli",
