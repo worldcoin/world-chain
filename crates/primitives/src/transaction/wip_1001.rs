@@ -22,11 +22,11 @@ use crate::transaction::{WIP_1001_TX_TYPE, Wip1001Signature};
 
 /// A WIP-1001 typed transaction (`0x1D`).
 ///
-/// The transaction is signed by a *session key* in the *Key Ring* of a
-/// *World ID Account* — the [`world_id_account`](Self::world_id_account) field
+/// The transaction is signed by a *session verifier* in the *Key Ring* of a
+/// *World Chain Account* — the [`world_chain_account`](Self::world_chain_account) field
 /// carries that account's 20-byte address and is the protocol-level sender.
 /// Protocol validation authorizes the recovered public key against the
-/// precompile-managed Key Ring of `world_id_account`.
+/// predeploy-managed Key Ring of `world_chain_account`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TxWip1001 {

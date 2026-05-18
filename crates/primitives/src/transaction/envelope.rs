@@ -248,7 +248,7 @@ impl From<Signed<WorldChainTypedTransaction>> for WorldChainTxEnvelope {
             WorldChainTypedTransaction::Eip7702(tx_eip7702) => {
                 Self::Eip7702(Signed::new_unchecked(tx_eip7702, sig, hash))
             }
-            // Default `Signature` is secp256k1; wrap it into the WIP-1001 signature enum.
+            // Default `Signature` is secp256k1; wrap it into WIP-1001 signature.
             WorldChainTypedTransaction::Wip1001(tx_wip) => {
                 let wip_sig: Wip1001Signature = sig.into();
                 Self::Wip1001(SignedWip1001::new(Signed::new_unchecked(
@@ -592,7 +592,7 @@ impl alloy_consensus::transaction::SignerRecoverable for WorldChainTxEnvelope {
             // (the payload executes with this address as the EVM sender — see
             // WIP-1001 "Validation, Execution, and Failure Semantics" step 9).
             // Signature authenticity is verified out-of-band via EIP-1271
-            // through the account router (`isValidSignatureForVerifier`).
+            // through the world chain account (`isValidSignatureForVerifier`).
             Self::Wip1001(tx) => return Ok(tx.tx().world_chain_account),
             // Optimism's Deposit transaction does not have a signature. Directly return the
             // `from` address.
