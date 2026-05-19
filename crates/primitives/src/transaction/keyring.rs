@@ -174,10 +174,7 @@ mod mock {
                 .is_some_and(|set| set.contains(&session_verifier)))
         }
 
-        fn get_transaction_nonce(
-            &self,
-            world_chain_account: Address,
-        ) -> Result<u64, Self::Error> {
+        fn get_transaction_nonce(&self, world_chain_account: Address) -> Result<u64, Self::Error> {
             Ok(self
                 .transaction_nonces
                 .get(&world_chain_account)
@@ -259,10 +256,7 @@ mod tests {
         ) -> Result<bool, Self::Error> {
             Err(LookupFailed)
         }
-        fn get_transaction_nonce(
-            &self,
-            _world_chain_account: Address,
-        ) -> Result<u64, Self::Error> {
+        fn get_transaction_nonce(&self, _world_chain_account: Address) -> Result<u64, Self::Error> {
             Err(LookupFailed)
         }
     }

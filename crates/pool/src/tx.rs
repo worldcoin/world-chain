@@ -21,10 +21,13 @@ use revm_primitives::{Address, B256, TxKind, U256};
 use std::borrow::Cow;
 use thiserror::Error;
 use world_chain_pbh::payload::{PBHPayload, PBHValidationError};
+use world_chain_primitives::transaction::{
+    WorldChainPooledTransaction as PrimitivesWorldChainPooledTransaction, WorldChainTxEnvelope,
+};
 
 #[derive(Debug, Clone)]
 pub struct WorldChainPooledTransaction {
-    pub inner: OpPooledTransaction,
+    pub inner: OpPooledTransaction<WorldChainTxEnvelope, PrimitivesWorldChainPooledTransaction>,
     pub payload: Option<Vec<PBHPayload>>,
 }
 

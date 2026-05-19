@@ -109,8 +109,7 @@ pub const U64_MASK: U256 = U256::from_limbs([u64::MAX, 0, 0, 0]);
 /// Computes the storage slot holding `accounts[world_chain_account].adminNonce`
 /// and `.transactionNonce` (both packed in the same slot).
 fn world_chain_account_nonce_slot(world_chain_account: Address) -> U256 {
-    let key_encoded =
-        (world_chain_account, WORLD_CHAIN_ACCOUNTS_MAPPING_SLOT).abi_encode();
+    let key_encoded = (world_chain_account, WORLD_CHAIN_ACCOUNTS_MAPPING_SLOT).abi_encode();
     let base_slot = U256::from_be_bytes::<32>(keccak256(&key_encoded).0);
     base_slot + U256::from(WORLD_CHAIN_ACCOUNT_NONCE_PACKED_SLOT_OFFSET)
 }
@@ -374,15 +373,14 @@ where
         // tx nonce should be greater or equal to the account.transactionNonce
         let tx_nonce = tx.nonce();
         let nonce_slot = world_chain_account_nonce_slot(world_chain_account_addr);
-        let account_tx_nonce: u64 = match state
-            .storage(WORLD_CHAIN_ACCOUNT_MANAGER, nonce_slot.into())
-        {
-            Ok(maybe_slot) => ((maybe_slot.unwrap_or_default()
-                >> WORLD_CHAIN_ACCOUNT_TX_NONCE_BIT_OFFSET)
-                & U64_MASK)
-                .to(),
-            Err(err) => return TransactionValidationOutcome::Error(*tx.hash(), Box::new(err)),
-        };
+        let account_tx_nonce: u64 =
+            match state.storage(WORLD_CHAIN_ACCOUNT_MANAGER, nonce_slot.into()) {
+                Ok(maybe_slot) => ((maybe_slot.unwrap_or_default()
+                    >> WORLD_CHAIN_ACCOUNT_TX_NONCE_BIT_OFFSET)
+                    & U64_MASK)
+                    .to(),
+                Err(err) => return TransactionValidationOutcome::Error(*tx.hash(), Box::new(err)),
+            };
         if tx_nonce < account_tx_nonce {
             return WorldChainPoolTransactionError::StaleTransactionNonce {
                 got: tx_nonce,
@@ -390,6 +388,8 @@ where
             }
             .to_outcome(tx);
         }
+        // check whether session verifier is included in the authorized set
+        let session_verifier = 4;
 
         todo!()
     }
@@ -483,8 +483,14 @@ mod storage_layout_tests {
     fn account_nonce_slot_is_deterministic_per_address() {
         let a = address!("000000000000000000000000000000000000001d");
         let b = address!("00000000000000000000000000000000000000aa");
-        assert_eq!(world_chain_account_nonce_slot(a), world_chain_account_nonce_slot(a));
-        assert_ne!(world_chain_account_nonce_slot(a), world_chain_account_nonce_slot(b));
+        assert_eq!(
+            world_chain_account_nonce_slot(a),
+            world_chain_account_nonce_slot(a)
+        );
+        assert_ne!(
+            world_chain_account_nonce_slot(a),
+            world_chain_account_nonce_slot(b)
+        );
     }
 
     #[test]
@@ -495,10 +501,11 @@ mod storage_layout_tests {
         let admin_nonce: u64 = 0x1122_3344_5566_7788;
         let tx_nonce: u64 = 0xaabb_ccdd_eeff_0011;
 
-        let slot_value =
-            (U256::from(tx_nonce) << WORLD_CHAIN_ACCOUNT_TX_NONCE_BIT_OFFSET) | U256::from(admin_nonce);
+        let slot_value = (U256::from(tx_nonce) << WORLD_CHAIN_ACCOUNT_TX_NONCE_BIT_OFFSET)
+            | U256::from(admin_nonce);
 
-        let extracted: u64 = ((slot_value >> WORLD_CHAIN_ACCOUNT_TX_NONCE_BIT_OFFSET) & U64_MASK).to();
+        let extracted: u64 =
+            ((slot_value >> WORLD_CHAIN_ACCOUNT_TX_NONCE_BIT_OFFSET) & U64_MASK).to();
         assert_eq!(extracted, tx_nonce);
 
         // Sanity-check the `adminNonce` half too (low 64 bits).
