@@ -49,6 +49,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     if [ -z "$SCCACHE_BUCKET" ]; then unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; fi && \
     cargo chef cook --locked --profile ${PROFILE} --bin ${WORLD_CHAIN_BUILDER_BIN} --features ${FEATURES} --recipe-path recipe.json
 
+ARG VERGEN_GIT_SHA
 COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

@@ -6,6 +6,7 @@ default:
 
 build:
     docker buildx build \
+        --build-arg VERGEN_GIT_SHA="$(git rev-parse HEAD)" \
         -t world-chain:latest .
 
 devnet-up: build
