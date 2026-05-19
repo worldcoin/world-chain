@@ -280,6 +280,10 @@ pub enum WorldChainPoolTransactionError {
     PBH(#[from] PBHValidationError),
     #[error("World Chain Account {0} does not exist.")]
     WorldChainAccountDoesNotExist(Address),
+    #[error(
+        "Stale WIP-1001 transaction nonce: got {got}, expected >= {expected} (Account.transactionNonce)."
+    )]
+    StaleTransactionNonce { got: u64, expected: u64 },
 }
 
 impl WorldChainPoolTransactionError {

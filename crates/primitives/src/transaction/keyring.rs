@@ -36,6 +36,19 @@ pub trait WorldChainAccountManager {
         world_chain_account: Address,
         session_verifier: Address,
     ) -> Result<bool, Self::Error>;
+
+    /// Returns the current `Account.transactionNonce` for `world_chain_account`
+    /// as exposed by `IWorldChainAccountManager.getTransactionNonce`.
+    ///
+    /// Per WIP-1001 §"Transaction Type 0x1D", a `0x1D` envelope's `nonce` MUST
+    /// equal this value at execution time. Pool-admission callers SHOULD reject
+    /// only strictly smaller envelope nonces (stale) and allow `>=` so future
+    /// nonces can park as queued, mirroring standard EOA nonce ordering.
+    ///
+    /// Returns `0` for an address that does not have a managed account (the
+    /// mapping default). Callers that need to distinguish "no account" from
+    /// "account with nonce 0" MUST anchor on a separate existence check.
+    fn get_transaction_nonce(&self, world_chain_account: Address) -> Result<u64, Self::Error>;
 }
 
 /// Errors returned by [`validate_wip1001`].
@@ -114,6 +127,7 @@ mod mock {
     #[derive(Debug, Default, Clone)]
     pub struct MockKeyringRegistry {
         authorized: HashMap<Address, HashSet<Address>>,
+        transaction_nonces: HashMap<Address, u64>,
     }
 
     impl MockKeyringRegistry {
@@ -138,6 +152,12 @@ mod mock {
                 .map(|set| set.remove(session_verifier))
                 .unwrap_or(false)
         }
+
+        /// Sets the `transactionNonce` reported for `world_chain_account`.
+        /// Unset accounts default to `0`, mirroring the predeploy mapping.
+        pub fn set_transaction_nonce(&mut self, world_chain_account: Address, nonce: u64) {
+            self.transaction_nonces.insert(world_chain_account, nonce);
+        }
     }
 
     impl WorldChainAccountManager for MockKeyringRegistry {
@@ -152,6 +172,17 @@ mod mock {
                 .authorized
                 .get(&world_chain_account)
                 .is_some_and(|set| set.contains(&session_verifier)))
+        }
+
+        fn get_transaction_nonce(
+            &self,
+            world_chain_account: Address,
+        ) -> Result<u64, Self::Error> {
+            Ok(self
+                .transaction_nonces
+                .get(&world_chain_account)
+                .copied()
+                .unwrap_or(0))
         }
     }
 
@@ -226,6 +257,12 @@ mod tests {
             _world_chain_account: Address,
             _session_verifier: Address,
         ) -> Result<bool, Self::Error> {
+            Err(LookupFailed)
+        }
+        fn get_transaction_nonce(
+            &self,
+            _world_chain_account: Address,
+        ) -> Result<u64, Self::Error> {
             Err(LookupFailed)
         }
     }
@@ -348,6 +385,22 @@ mod tests {
             Wip1001ValidationError::NotAuthorized { world_chain_account }
                 if world_chain_account == tx.world_chain_account
         ));
+    }
+
+    #[test]
+    fn mock_transaction_nonce_default_and_override() {
+        let account = address!("00000000000000000000000000000000000000aa");
+        let mut registry = MockKeyringRegistry::new();
+
+        // Unset accounts default to 0 (matches the predeploy mapping default).
+        assert_eq!(registry.get_transaction_nonce(account).unwrap(), 0);
+
+        registry.set_transaction_nonce(account, 7);
+        assert_eq!(registry.get_transaction_nonce(account).unwrap(), 7);
+
+        // Unrelated account remains at 0.
+        let other = address!("00000000000000000000000000000000000000bb");
+        assert_eq!(registry.get_transaction_nonce(other).unwrap(), 0);
     }
 
     #[test]
