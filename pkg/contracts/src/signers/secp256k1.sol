@@ -20,14 +20,13 @@ contract SekP256K1Signer is IERC1271, IWorldChainAccountHooks {
     ///         `address`.
     error InvalidInstallation();
 
+    /// @notice Thrown when a signature is invalid according to the installed signer.
+    error InvalidSignature(string reason);
+
     /// @dev Namespaced storage slot for the installed secp256k1 signer. Sized to a single word
     ///      (`address signer`) and unique to this verifier implementation, so it cannot collide
     ///      with the router's own state or with any other verifier installed against the account.
     bytes32 private constant SIGNER_SLOT = keccak256("worldchain.admin.verifier.secp256k1.v1.signer");
-
-    /// @dev ERC-1271 rejection sentinel. Any non-magic `bytes4` is a rejection; we return a fixed
-    ///      `0xffffffff` for caller clarity and parity with common implementations.
-    bytes4 private constant ERC1271_FAILURE = 0xffffffff;
 
     /// @inheritdoc IWorldChainAccountHooks
     /// @dev `installation` MUST be `abi.encode(address signer)` with `signer != address(0)`.
@@ -58,11 +57,11 @@ contract SekP256K1Signer is IERC1271, IWorldChainAccountHooks {
         assembly ("memory-safe") {
             signer := sload(slot)
         }
-        if (signer == address(0)) return ERC1271_FAILURE;
+        if (signer == address(0)) revert InvalidSignature("No signer installed");
 
         (address recovered, ECDSA.RecoverError err,) = ECDSA.tryRecover(hash, signature);
-        if (err != ECDSA.RecoverError.NoError) return ERC1271_FAILURE;
-        if (recovered != signer) return ERC1271_FAILURE;
+        if (err != ECDSA.RecoverError.NoError) revert InvalidSignature("ECDSA recovery failed");
+        if (recovered != signer) revert InvalidSignature("Signature signer does not match installed signer");
 
         return IERC1271.isValidSignature.selector;
     }
