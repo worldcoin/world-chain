@@ -13,8 +13,8 @@ import {IWorldChainSessionVerifier} from "./interfaces/IWorldChainSessionVerifie
 
 /// @title WorldChainAccount
 /// @author 0xOsiris, World Contributors
-/// @notice Implementation behind `WorldChainAccountBeacon` and reached at every account address
-///         through `WorldChainAccountProxy`
+/// @notice Implementation behind `WorldChainAccountUpgradeableBeacon` and reached at every account address
+///         through `WorldChainAccountBeaconProxy`
 /// @custom:security-contact security@toolsforhumanity.com
 contract WorldChainAccount is KeyRingStore, Dispatch, IWorldChainAccount, IWorldChainAccountRouterErrors {
     using Address for address;
