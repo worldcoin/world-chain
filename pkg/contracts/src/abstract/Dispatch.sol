@@ -5,11 +5,6 @@ import {IWorldChainAccountRouterErrors} from "../interfaces/IWorldChainAccountRo
 
 /// @title Dispatch
 /// @author 0xOsiris, World Contributors
-/// @notice Diamond-style fallback entry point. The router's system selectors are bound at compile
-///         time via Solidity's native function dispatcher on the derived router; only calls whose
-///         selector matches none of those system selectors arrive here. The dispatch entry decodes
-///         the leading 4 bytes of `msg.data` and forwards control to the virtual
-///         `_onUnknownSelector(bytes4)` extension point.
 /// @custom:security-contact security@toolsforhumanity.com
 abstract contract Dispatch {
     /// @notice Accepts plain ETH transfers. Calls with empty calldata short-circuit dispatch so
@@ -29,11 +24,7 @@ abstract contract Dispatch {
         _onUnknownSelector(selector);
     }
 
-    /// @notice Extension hook invoked for every selector that misses Solidity's native dispatch.
-    ///         Default behavior reverts. Override to plug a per-account fallback handler. An
-    ///         override that returns control to the caller will yield empty returndata; an
-    ///         override that wants to forward the callee's returndata MUST terminate the call
-    ///         frame itself (via inline assembly `return`/`revert`).
+    /// @notice Handles unknown selectors that miss the derived contracts `external` entry points.
     /// @param selector The leading 4 bytes of the inbound calldata.
     function _onUnknownSelector(bytes4 selector) internal virtual {
         revert IWorldChainAccountRouterErrors.UnknownSelector(selector);
