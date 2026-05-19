@@ -13783,6 +13783,7 @@ dependencies = [
  "tracing",
  "world-chain-evm",
  "world-chain-pbh",
+ "world-chain-primitives",
  "world-chain-test-utils",
 ]
 

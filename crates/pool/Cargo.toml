@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 world-chain-evm.workspace = true
 world-chain-pbh.workspace = true
+world-chain-primitives.workspace = true
 
 reth-db.workspace = true
 reth-optimism-node.workspace = true

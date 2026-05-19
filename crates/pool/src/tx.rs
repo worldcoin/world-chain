@@ -278,6 +278,8 @@ pub enum WorldChainPoolTransactionError {
     ConditionalValidationFailed(B256),
     #[error("PBH Transaction Validation Failed: {0}")]
     PBH(#[from] PBHValidationError),
+    #[error("World Chain Account {0} does not exist.")]
+    WorldChainAccountDoesNotExist(Address),
 }
 
 impl WorldChainPoolTransactionError {

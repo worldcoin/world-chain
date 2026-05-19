@@ -20,7 +20,9 @@ use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterato
 use reth_evm::ConfigureEvm;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
-use reth_primitives_traits::{BlockTy, SealedBlock, TxTy};
+use reth_primitives_traits::{
+    BlockTy, GotExpected, SealedBlock, TxTy, transaction::error::InvalidTransactionError,
+};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::{
     TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
@@ -29,6 +31,7 @@ use reth_transaction_pool::{
 use revm_primitives::U256;
 use tracing::info;
 use world_chain_pbh::payload::{PBHPayload as PbhPayload, PBHValidationError};
+use world_chain_primitives::transaction::WIP_1001_TX_TYPE;
 
 /// The slot of the `pbh_gas_limit` in the PBHEntryPoint contract.
 pub const PBH_GAS_LIMIT_SLOT: U256 = U256::from_limbs([53, 0, 0, 0]);
@@ -41,6 +44,11 @@ pub const PBH_NONCE_LIMIT_OFFSET: u32 = 160;
 
 /// Max u16
 pub const MAX_U16: U256 = U256::from_limbs([0xFFFF, 0, 0, 0]);
+
+/// The min validation failure fee that world chain account MUST have for
+/// a WIP-1001 tx to be considered valid and inserted into the mempool.
+// TODO: change this value to an appropriate one!!!
+pub const MIN_VALIDATION_FAILURE_FEE: U256 = U256::from_limbs([0xFFFF, 0, 0, 0]);
 
 /// Validator for World Chain transactions.
 #[derive(Debug, Clone)]
@@ -253,6 +261,49 @@ where
             _ => self.inner.validate_one(origin, tx.clone()).await,
         }
     }
+
+    pub async fn validate_wip1001(
+        &self,
+        origin: TransactionOrigin,
+        tx: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        let state = match self.inner.client().latest() {
+            Ok(new_state) => Box::new(new_state),
+            Err(err) => return TransactionValidationOutcome::Error(*tx.hash(), Box::new(err)),
+        };
+        let world_chain_account_addr = tx.sender();
+        let world_chain_account = match state.basic_account(&world_chain_account_addr) {
+            Ok(maybe_account) => match maybe_account {
+                Some(account) => account,
+                None => {
+                    return TransactionValidationOutcome::Error(
+                        *tx.hash(),
+                        Box::new(
+                            WorldChainPoolTransactionError::WorldChainAccountDoesNotExist(
+                                world_chain_account_addr,
+                            ),
+                        ),
+                    );
+                }
+            },
+            Err(err) => return TransactionValidationOutcome::Error(*tx.hash(), Box::new(err)),
+        };
+        if world_chain_account.balance < MIN_VALIDATION_FAILURE_FEE {
+            return TransactionValidationOutcome::Error(
+                *tx.hash(),
+                InvalidTransactionError::InsufficientFunds(
+                    GotExpected {
+                        got: world_chain_account.balance,
+                        expected: MIN_VALIDATION_FAILURE_FEE,
+                    }
+                    .into(),
+                )
+                .into(),
+            );
+        }
+        let tx_nonce = tx.nonce();
+        todo!()
+    }
 }
 
 impl<Client, Tx, Evm> TransactionValidator for WorldChainTransactionValidator<Client, Tx, Evm>
@@ -272,6 +323,9 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
+        if transaction.ty() == WIP_1001_TX_TYPE {
+            return self.validate_wip1001(origin, transaction.clone()).await;
+        }
         if transaction.to().unwrap_or_default() != self.pbh_entrypoint {
             return self.inner.validate_one(origin, transaction.clone()).await;
         }

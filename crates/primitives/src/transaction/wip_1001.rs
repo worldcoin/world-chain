@@ -33,7 +33,7 @@ pub struct TxWip1001 {
     /// EIP-155 chain id.
     #[serde(with = "alloy_serde::quantity")]
     pub chain_id: ChainId,
-    /// Session-key nonce at the World ID Account.
+    /// Session-verifier nonce at the World Chain Account.
     /// (Per-Key-Ring counter incremented on each successful 0x1D execution.)
     #[serde(with = "alloy_serde::quantity")]
     pub nonce: u64,
