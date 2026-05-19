@@ -24,4 +24,8 @@ interface IWorldChainAccountRouterErrors {
     ///         that unknown session verifier addresses MUST fail without executing verifier
     ///         implementation code.
     error VerifierNotInstalled(address verifier);
+
+    /// @notice Thrown when an inbound call's leading selector matches none of the router's
+    ///         system selectors and no fallback handler is installed for this account.
+    error UnknownSelector(bytes4 selector);
 }

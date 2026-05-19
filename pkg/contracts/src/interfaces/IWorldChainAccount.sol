@@ -4,14 +4,66 @@ pragma solidity ^0.8.28;
 import {WorldChainAccountVerifier} from "./IWorldChainAccountManager.sol";
 import {IWorldChainSessionVerifier} from "./IWorldChainSessionVerifier.sol";
 
-/// @title IWorldChainAccountRouter
+/// @title IWorldChainAccount
 /// @author 0xOsiris, World Contributors
-/// @notice Interface for the account router. The account router is the only validation target
-///         called by the manager. It dispatches to configured verifier implementations using a
-///         single controlled `DELEGATECALL`, so verifier implementations execute against the
-///         account's storage.
+/// @notice Public interface of the WIP-1001 account router contract deployed (via beacon proxy)
+///         at every World Chain account address. The router is the only validation target called
+///         by `WORLD_CHAIN_ACCOUNT_MANAGER`. It dispatches to configured verifier implementations
+///         using a single controlled `DELEGATECALL`, so verifier implementations execute against
+///         the account's storage.
 /// @custom:security-contact security@toolsforhumanity.com
-interface IWorldChainAccountRouter {
+interface IWorldChainAccount {
+    // ─── Storage layout ───────────────────────────────────────────────────────
+
+    /// @custom:storage-location erc7201:worldchain.account.keyring
+    /// @dev EIP-7201 style storage for the account router. DO __NOT__ REORDER THIS STRUCT.
+    /// @param adminVerifier The immutable admin verifier implementation address. Set by the
+    ///                      single permitted `installAdmin` invocation and never overwritten.
+    /// @param keyRingHash The active key ring's canonical hash,
+    ///                    `keccak256(abi.encode(sessionVerifiers))`. Matches the WIP-1001
+    ///                    manager-side `keyRingHash` and serves as the per-account generation
+    ///                    marker for session-verifier membership.
+    /// @param sessionKeyRing Per-verifier installation marker — the `keyRingHash` at the time the
+    ///                      verifier was installed. A verifier `v` is a member of the active key
+    ///                      ring iff `sessionKeyRing[v] == keyRingHash != 0`.
+    struct KeyRingStorage {
+        address adminVerifier;
+        bytes32 keyRingHash;
+        mapping(address verifier => bytes32 keyRingHash) sessionKeyRing;
+    }
+
+    // ─── Versioning ───────────────────────────────────────────────────────────
+
+    /// @notice The contract version.
+    /// @custom:semver v1.0.0
+    function VERSION() external view returns (uint8);
+
+    // ─── View-only state (router storage) ─────────────────────────────────────
+
+    /// @notice The `WORLD_CHAIN_ACCOUNT_MANAGER` predeploy address authorized to call every
+    ///         state-mutating entry point on this account.
+    // solhint-disable-next-line func-name-mixedcase
+    function MANAGER() external view returns (address);
+
+    /// @notice Returns the installed admin verifier address, or `address(0)` if `installAdmin` has
+    ///         not been called.
+    // solhint-disable-next-line func-name-mixedcase
+    function ADMIN_VERIFIER() external view returns (address);
+
+    /// @notice Returns the canonical `keyRingHash` of the active session verifier set,
+    ///         `keccak256(abi.encode(sessionVerifiers))`. A zero hash means no key ring has been
+    ///         installed.
+    // solhint-disable-next-line func-name-mixedcase
+    function KEYRING_HASH() external view returns (bytes32);
+
+    /// @notice Per-verifier installation marker. Returns the `keyRingHash` recorded at the time
+    ///         `verifier` was installed. The verifier is a member of the active key ring iff this
+    ///         value equals the current `KEYRING_HASH()` and is non-zero.
+    /// @param verifier The verifier address to query.
+    function sessionKeyRing(address verifier) external view returns (bytes32);
+
+    // ─── State-mutating entry points ──────────────────────────────────────────
+
     /// @notice Installs the immutable admin verifier into the account router. MUST reject any
     ///         caller other than `WORLD_CHAIN_ACCOUNT_MANAGER`.
     /// @param admin The admin verifier descriptor to install.
