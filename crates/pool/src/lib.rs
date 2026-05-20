@@ -17,6 +17,7 @@ pub mod ordering;
 pub mod root;
 pub mod tx;
 pub mod validator;
+pub mod world_chain_tx;
 
 /// Type alias for World Chain transaction pool
 pub type WorldChainTransactionPool<

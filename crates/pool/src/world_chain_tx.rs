@@ -1,4 +1,9 @@
-use std::sync::Arc;
+//! This file will replace the tx.rs file once I create the WorldChainPrimitives type and
+//! wire it everywhere it's needed. This also makes it possible to keep our existent codebase
+//! unaltered so that we don't change our current functionalities while developing wip1001 features.
+//!
+//! Therefore, the `WorldChainPooledTransaction` defined here is not used right now, this is
+//! expected and on purpose!
 
 use alloy_consensus::BlobTransactionValidationError;
 use alloy_eips::{
@@ -11,58 +16,33 @@ use reth_optimism_node::txpool::{
     OpPooledTransaction, OpPooledTx, conditional::MaybeConditionalTransaction,
     estimated_da_size::DataAvailabilitySized, interop::MaybeInteropTransaction,
 };
-use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::{InMemorySize, Recovered};
 use reth_transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
     error::{InvalidPoolTransactionError, PoolTransactionError},
 };
 use revm_primitives::{Address, B256, TxKind, U256};
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::Arc};
 use thiserror::Error;
-use world_chain_pbh::payload::{PBHPayload, PBHValidationError};
+use world_chain_primitives::transaction::{
+    WorldChainPooledTransaction as PrimitivesWorldChainPooledTransaction, WorldChainTxEnvelope,
+};
 
 #[derive(Debug, Clone)]
 pub struct WorldChainPooledTransaction {
-    pub inner: OpPooledTransaction,
-    pub payload: Option<Vec<PBHPayload>>,
+    pub inner: OpPooledTransaction<WorldChainTxEnvelope, PrimitivesWorldChainPooledTransaction>,
 }
 
 pub trait WorldChainPoolTransaction:
     EthPoolTransaction + MaybeInteropTransaction + OpPooledTx
 {
-    fn set_pbh_payloads(&mut self, payload: Vec<PBHPayload>);
-    fn conditional_options(&self) -> Option<&TransactionConditional>;
-    fn pbh_payload(&self) -> Option<&Vec<PBHPayload>>;
 }
 
-impl WorldChainPoolTransaction for WorldChainPooledTransaction {
-    fn conditional_options(&self) -> Option<&TransactionConditional> {
-        self.inner.conditional()
-    }
+impl WorldChainPoolTransaction for WorldChainPooledTransaction {}
 
-    fn set_pbh_payloads(&mut self, payload: Vec<PBHPayload>) {
-        self.payload = Some(payload);
-    }
-
-    fn pbh_payload(&self) -> Option<&Vec<PBHPayload>> {
-        self.payload.as_ref()
-    }
-}
-
-impl<Cons, Pooled> WorldChainPoolTransaction for OpPooledTransaction<Cons, Pooled>
-where
-    Self: EthPoolTransaction + MaybeInteropTransaction + OpPooledTx,
+impl<Cons, Pooled> WorldChainPoolTransaction for OpPooledTransaction<Cons, Pooled> where
+    Self: EthPoolTransaction + MaybeInteropTransaction + OpPooledTx
 {
-    fn conditional_options(&self) -> Option<&TransactionConditional> {
-        self.conditional()
-    }
-
-    fn set_pbh_payloads(&mut self, _payload: Vec<PBHPayload>) {}
-
-    fn pbh_payload(&self) -> Option<&Vec<PBHPayload>> {
-        None
-    }
 }
 
 impl OpPooledTx for WorldChainPooledTransaction {
@@ -227,9 +207,9 @@ impl MaybeConditionalTransaction for WorldChainPooledTransaction {
 
 impl PoolTransaction for WorldChainPooledTransaction {
     type TryFromConsensusError =
-        <op_alloy_consensus::OpPooledTransaction as TryFrom<OpTransactionSigned>>::Error;
-    type Consensus = OpTransactionSigned;
-    type Pooled = op_alloy_consensus::OpPooledTransaction;
+        <PrimitivesWorldChainPooledTransaction as TryFrom<WorldChainTxEnvelope>>::Error;
+    type Consensus = WorldChainTxEnvelope;
+    type Pooled = PrimitivesWorldChainPooledTransaction;
 
     fn clone_into_consensus(&self) -> Recovered<Self::Consensus> {
         self.inner.clone_into_consensus()
@@ -241,10 +221,7 @@ impl PoolTransaction for WorldChainPooledTransaction {
 
     fn from_pooled(tx: Recovered<Self::Pooled>) -> Self {
         let inner = OpPooledTransaction::from_pooled(tx);
-        Self {
-            inner,
-            payload: None,
-        }
+        Self { inner }
     }
 
     fn hash(&self) -> &TxHash {
@@ -274,10 +251,6 @@ impl PoolTransaction for WorldChainPooledTransaction {
 
 #[derive(Debug, Error)]
 pub enum WorldChainPoolTransactionError {
-    #[error("Conditional Validation Failed: {0}")]
-    ConditionalValidationFailed(B256),
-    #[error("PBH Transaction Validation Failed: {0}")]
-    PBH(#[from] PBHValidationError),
     #[error("World Chain Account {0} does not exist.")]
     WorldChainAccountDoesNotExist(Address),
     #[error(
@@ -311,11 +284,12 @@ impl PoolTransactionError for WorldChainPoolTransactionError {
     }
 }
 
-impl From<OpPooledTransaction> for WorldChainPooledTransaction {
-    fn from(tx: OpPooledTransaction) -> Self {
-        Self {
-            inner: tx,
-            payload: None,
-        }
+impl From<OpPooledTransaction<WorldChainTxEnvelope, PrimitivesWorldChainPooledTransaction>>
+    for WorldChainPooledTransaction
+{
+    fn from(
+        tx: OpPooledTransaction<WorldChainTxEnvelope, PrimitivesWorldChainPooledTransaction>,
+    ) -> Self {
+        Self { inner: tx }
     }
 }
