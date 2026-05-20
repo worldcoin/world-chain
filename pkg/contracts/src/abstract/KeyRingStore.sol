@@ -10,16 +10,6 @@ import {IWorldChainAccountRouterErrors} from "../interfaces/IWorldChainAccountRo
 
 /// @title KeyRingStore
 /// @author 0xOsiris, World Contributors
-/// @notice Account-scoped storage for the admin verifier, the canonical key-ring hash, and the
-///         per-verifier installation marker. Encapsulates the WIP-1001 membership invariant:
-///
-///             v ∈ active key ring  ⇔  sessionKeyRing[v] == keyRingHash ≠ 0
-///
-///         and exposes installation hooks that DELEGATECALL into each verifier's
-///         `IWorldChainAccountHooks.install`. Storage lives under an ERC-7201 namespaced slot so
-///         verifier-installed state cannot collide with router-owned state. The
-///         `IWorldChainAccount.KeyRingStorage` layout is declared on the public interface so
-///         off-chain consumers can introspect the slot layout from the ABI.
 /// @custom:security-contact security@toolsforhumanity.com
 abstract contract KeyRingStore {
     using Address for address;
@@ -27,6 +17,12 @@ abstract contract KeyRingStore {
     /// @dev `keccak256(abi.encode(uint256(keccak256("worldchain.account.keyring")) - 1)) & ~bytes32(uint256(0xff))`
     bytes32 private constant KEY_RING_STORAGE_LOCATION =
         0xb754a00ef4e1c0ba493e01b1f93db435f9393d01bd0f7554a936d77311120300;
+
+    /// @notice The maximum allowed size of the session key ring.
+    uint8 public constant MAX_KEYRING_SIZE = 20;
+
+    /// @notice Thrown when attempting to install a key ring with an invalid size.
+    error InvalidKeyRingSize(uint256 size);
 
     /// @notice Requires `verifier` to be a member of the active key ring. Reverts BEFORE any
     ///         verifier code executes, satisfying the WIP-1001 requirement that unknown session
@@ -70,6 +66,7 @@ abstract contract KeyRingStore {
     ///         and running each verifier's installation hook. The hash rotation atomically retires
     ///         every entry from the prior key ring without an explicit per-element wipe.
     function _installKeyRing(WorldChainAccountVerifier[] calldata sessionVerifiers) internal {
+        if (sessionVerifiers.length > MAX_KEYRING_SIZE) revert InvalidKeyRingSize(sessionVerifiers.length);
         IWorldChainAccount.KeyRingStorage storage $ = _keyRingStorage();
         bytes32 hash = keccak256(abi.encode(sessionVerifiers));
         $.keyRingHash = hash;
