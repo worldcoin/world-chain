@@ -328,7 +328,7 @@ where
 
     pub async fn validate_wip1001(
         &self,
-        origin: TransactionOrigin,
+        _origin: TransactionOrigin,
         tx: Tx,
     ) -> TransactionValidationOutcome<Tx> {
         let state = match self.inner.client().latest() {
@@ -389,7 +389,7 @@ where
             .to_outcome(tx);
         }
         // check whether session verifier is included in the authorized set
-        let session_verifier = 4;
+        let _session_verifier = 4;
 
         todo!()
     }
