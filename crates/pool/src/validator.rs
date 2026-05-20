@@ -389,8 +389,6 @@ where
             .to_outcome(tx);
         }
         // check whether session verifier is included in the authorized set
-        let _session_verifier = 4;
-
         todo!()
     }
 }
