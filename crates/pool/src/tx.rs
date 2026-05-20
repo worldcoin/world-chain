@@ -40,8 +40,6 @@ pub trait WorldChainPoolTransaction:
 
 impl WorldChainPoolTransaction for WorldChainPooledTransaction {
     fn conditional_options(&self) -> Option<&TransactionConditional> {
-        let t = self.inner.transaction.as_wip1001().unwrap();
-        let tt = t.tx().session_verifier;
         self.inner.conditional()
     }
 
