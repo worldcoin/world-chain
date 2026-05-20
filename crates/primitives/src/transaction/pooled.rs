@@ -68,6 +68,10 @@ impl WorldChainPooledTransaction {
     }
 
     /// Returns the signature of the transaction.
+    ///
+    /// # Panics
+    /// 
+    /// This function panics if the transaction is a WIP1001 tx type.
     pub fn signature(&self) -> &Signature {
         match self {
             Self::Legacy(tx) => tx.signature(),
@@ -75,6 +79,8 @@ impl WorldChainPooledTransaction {
             Self::Eip1559(tx) => tx.signature(),
             Self::Eip7702(tx) => tx.signature(),
             Self::Wip1001(_tx) => {
+                // this should never be reached! Note that every time we call this
+                // fn, we MUST ensure the tx type is NOT wip1001.
                 unreachable!("WIP1001 txs don't have a standard ECDSA signature!")
             }
         }
