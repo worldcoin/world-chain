@@ -134,22 +134,18 @@ where
             Ok(maybe_account) => match maybe_account {
                 Some(account) => account,
                 None => {
-                    return TransactionValidationOutcome::Error(
-                        *tx.hash(),
-                        Box::new(
-                            WorldChainPoolTransactionError::WorldChainAccountDoesNotExist(
-                                world_chain_account_addr,
-                            ),
-                        ),
-                    );
+                    return WorldChainPoolTransactionError::WorldChainAccountDoesNotExist(
+                        world_chain_account_addr,
+                    )
+                    .to_outcome(tx);
                 }
             },
             Err(err) => return TransactionValidationOutcome::Error(*tx.hash(), Box::new(err)),
         };
         // world chain account balance must cover `MIN_VALIDATION_FAILURE_FEE`
         if world_chain_account.balance < MIN_VALIDATION_FAILURE_FEE {
-            return TransactionValidationOutcome::Error(
-                *tx.hash(),
+            return TransactionValidationOutcome::Invalid(
+                tx,
                 InvalidTransactionError::InsufficientFunds(
                     GotExpected {
                         got: world_chain_account.balance,
