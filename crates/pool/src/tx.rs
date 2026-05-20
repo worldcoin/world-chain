@@ -11,7 +11,6 @@ use reth_optimism_node::txpool::{
     OpPooledTransaction, OpPooledTx, conditional::MaybeConditionalTransaction,
     estimated_da_size::DataAvailabilitySized, interop::MaybeInteropTransaction,
 };
-use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::{InMemorySize, Recovered};
 use reth_transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, PoolTransaction, TransactionValidationOutcome,
@@ -41,6 +40,8 @@ pub trait WorldChainPoolTransaction:
 
 impl WorldChainPoolTransaction for WorldChainPooledTransaction {
     fn conditional_options(&self) -> Option<&TransactionConditional> {
+        let t = self.inner.transaction.as_wip1001().unwrap();
+        let tt = t.tx().session_verifier;
         self.inner.conditional()
     }
 
@@ -230,9 +231,9 @@ impl MaybeConditionalTransaction for WorldChainPooledTransaction {
 
 impl PoolTransaction for WorldChainPooledTransaction {
     type TryFromConsensusError =
-        <op_alloy_consensus::OpPooledTransaction as TryFrom<OpTransactionSigned>>::Error;
-    type Consensus = OpTransactionSigned;
-    type Pooled = op_alloy_consensus::OpPooledTransaction;
+        <PrimitivesWorldChainPooledTransaction as TryFrom<WorldChainTxEnvelope>>::Error;
+    type Consensus = WorldChainTxEnvelope;
+    type Pooled = PrimitivesWorldChainPooledTransaction;
 
     fn clone_into_consensus(&self) -> Recovered<Self::Consensus> {
         self.inner.clone_into_consensus()
@@ -314,8 +315,12 @@ impl PoolTransactionError for WorldChainPoolTransactionError {
     }
 }
 
-impl From<OpPooledTransaction> for WorldChainPooledTransaction {
-    fn from(tx: OpPooledTransaction) -> Self {
+impl From<OpPooledTransaction<WorldChainTxEnvelope, PrimitivesWorldChainPooledTransaction>>
+    for WorldChainPooledTransaction
+{
+    fn from(
+        tx: OpPooledTransaction<WorldChainTxEnvelope, PrimitivesWorldChainPooledTransaction>,
+    ) -> Self {
         Self {
             inner: tx,
             payload: None,

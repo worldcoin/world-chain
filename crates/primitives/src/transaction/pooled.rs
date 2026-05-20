@@ -3,15 +3,15 @@
 
 use crate::transaction::{SignedWip1001, TxWip1001, WorldChainTxEnvelope};
 use alloy_consensus::{
-    Extended, SignableTransaction, Signed, TransactionEnvelope, TxEip7702,
+    Extended, InMemorySize, SignableTransaction, Signed, TransactionEnvelope, TxEip7702,
     crypto::RecoveryError,
     error::ValueError,
     transaction::{TxEip1559, TxEip2930, TxHashRef, TxLegacy},
 };
 use alloy_eips::{Typed2718, eip2718::Encodable2718};
 use alloy_primitives::{Address, B256, Signature, TxHash, bytes};
-use reth_primitives_traits::SignedTransaction;
 use core::hash::Hash;
+use reth_primitives_traits::SignedTransaction;
 
 /// All possible transactions that can be included in a response to `GetPooledTransactions`.
 /// A response to `GetPooledTransactions`. This can include a typed signed transaction, but cannot
@@ -189,6 +189,12 @@ impl From<SignedWip1001> for WorldChainPooledTransaction {
 impl TxHashRef for WorldChainPooledTransaction {
     fn tx_hash(&self) -> &B256 {
         Self::hash(self)
+    }
+}
+
+impl InMemorySize for WorldChainPooledTransaction {
+    fn size(&self) -> usize {
+        core::mem::size_of::<Self>() + self.encode_2718_len()
     }
 }
 
