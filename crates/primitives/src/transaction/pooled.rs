@@ -70,7 +70,7 @@ impl WorldChainPooledTransaction {
     /// Returns the signature of the transaction.
     ///
     /// # Panics
-    /// 
+    ///
     /// This function panics if the transaction is a WIP1001 tx type.
     pub fn signature(&self) -> &Signature {
         match self {

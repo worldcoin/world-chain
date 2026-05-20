@@ -3083,13 +3083,9 @@ async fn test_coordinator_payload_matches_builder() -> eyre::Result<()> {
 /// and never reaches `WorldChainTransactionValidator::validate_transaction`
 /// (and therefore never reaches the WIP-1001 dispatch branch in the validator).
 ///
-/// When `crates/pool/src/world_chain_tx.rs` (whose `Pooled` is the
-/// WIP-1001-aware envelope from `world_chain_primitives`) replaces
-/// `crates/pool/src/tx.rs`, this test SHOULD start failing, the RPC submit
-/// will then succeed (and the tx will get routed to `validate_wip1001`), which
-/// is the signal that the WIP-1001 path is wired end-to-end.
-// TODO: remove this test once  we add WorldChainPrimitives that wires the
-// new world chain tx envelope into the node's primitives.
+/// This test makes sure the current node doesn't accept WIP1001 transactions,
+/// enforcing that we don't mix the new wip1001 features with the current (legacy)
+/// node architecture.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_wip1001_tx_rejected_at_rpc_decode() -> eyre::Result<()> {
     use alloy_eips::eip2930::AccessList;
