@@ -245,4 +245,55 @@ contract WorldChainAccountBeaconTest is WorldChainAccountTestSetup {
         vm.prank(BEACON_OWNER);
         beacon.upgradeTo(address(v2));
     }
+
+    // ─── Fuzz ────────────────────────────────────────────────────────────────
+
+    function testFuzz_upgradeTo_revertsForAnyNonOwner(address caller) public {
+        vm.assume(caller != BEACON_OWNER);
+        MockWorldChainAccountV2 v2 = new MockWorldChainAccountV2(MANAGER);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, caller));
+        vm.prank(caller);
+        beacon.upgradeTo(address(v2));
+        assertEq(beacon.implementation(), address(accountImpl), "impl pointer must not move");
+    }
+
+    function testFuzz_upgradeTo_revertsForAnyNonContract(address newImpl) public {
+        // Restrict the fuzz domain to EOAs / unused addresses, i.e. code length 0.
+        vm.assume(newImpl.code.length == 0);
+        vm.expectRevert(abi.encodeWithSelector(UpgradeableBeacon.BeaconInvalidImplementation.selector, newImpl));
+        vm.prank(BEACON_OWNER);
+        beacon.upgradeTo(newImpl);
+        assertEq(beacon.implementation(), address(accountImpl));
+    }
+
+    function testFuzz_upgradeTo_acceptsAnyContractImplementation(address candidate) public {
+        // Avoid colliding with addresses that already host code in the test environment (cheat
+        // codes, console, the existing impl/beacon/proxy, etc.) so etching is safe.
+        vm.assume(candidate != address(0));
+        vm.assume(uint160(candidate) > 0xff); // skip precompiles
+        vm.assume(candidate.code.length == 0);
+        vm.assume(candidate != BEACON_PREDEPLOY);
+        vm.assume(candidate != address(accountImpl));
+        vm.assume(candidate != address(account));
+        vm.assume(candidate != address(this));
+        vm.assume(candidate != address(vm));
+
+        // Etch a real V2 runtime at the fuzzed address so the beacon's contract-check passes and
+        // V2 selectors are reachable through every proxy after `upgradeTo`.
+        MockWorldChainAccountV2 v2 = new MockWorldChainAccountV2(MANAGER);
+        vm.etch(candidate, address(v2).code);
+
+        vm.prank(BEACON_OWNER);
+        beacon.upgradeTo(candidate);
+        assertEq(beacon.implementation(), candidate);
+        assertEq(MockWorldChainAccountV2(payable(address(account))).v2Version(), 2);
+    }
+
+    function testFuzz_transferOwnership_revertsForAnyNonOwner(address caller, address newOwner) public {
+        vm.assume(caller != BEACON_OWNER);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, caller));
+        vm.prank(caller);
+        beacon.transferOwnership(newOwner);
+        assertEq(beacon.owner(), BEACON_OWNER);
+    }
 }

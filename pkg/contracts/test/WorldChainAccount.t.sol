@@ -394,9 +394,154 @@ contract WorldChainAccountTest is WorldChainAccountTestSetup {
         assertEq(account.ADMIN_VERIFIER(), address(happyVerifier), "first account untouched");
     }
 
+    // ─── Fuzz: constructor & install paths ────────────────────────────────────
+
+    function testFuzz_constructor_anyNonZeroManager(address manager) public {
+        vm.assume(manager != address(0));
+        WorldChainAccount impl = new WorldChainAccount(manager);
+        assertEq(impl.MANAGER(), manager);
+        assertEq(impl.VERSION(), 1);
+    }
+
+    function testFuzz_installAdmin_anyNonZeroVerifier(address verifier, bytes memory installation) public {
+        _assumeEtchable(verifier);
+        // Etch the happy-verifier runtime at the fuzzed address so the install hook delegatecall
+        // can resolve a contract — any non-zero verifier must be acceptable from the router's POV.
+        vm.etch(verifier, address(happyVerifier).code);
+
+        vm.prank(MANAGER);
+        account.installAdmin(descriptorWithData(verifier, installation));
+        assertEq(account.ADMIN_VERIFIER(), verifier);
+
+        // The witness in the account's storage matches the fuzzed installation payload, proving
+        // the install hook ran via DELEGATECALL with the fuzzed bytes.
+        bytes32 witness = vm.load(address(account), MockVerifierStorage.INSTALL_EVIDENCE_SLOT);
+        assertEq(witness, keccak256(installation));
+    }
+
+    function testFuzz_installAdmin_revertsForAnyNonManagerCaller(address caller) public {
+        vm.assume(caller != MANAGER);
+        vm.expectRevert(IWorldChainAccountRouterErrors.CallerNotManager.selector);
+        vm.prank(caller);
+        account.installAdmin(descriptor(address(happyVerifier)));
+    }
+
+    function testFuzz_installKeyRing_revertsForAnyNonManagerCaller(address caller) public {
+        vm.assume(caller != MANAGER);
+        WorldChainAccountVerifier[] memory ring = new WorldChainAccountVerifier[](1);
+        ring[0] = descriptor(address(happyVerifier));
+        vm.expectRevert(IWorldChainAccountRouterErrors.CallerNotManager.selector);
+        vm.prank(caller);
+        account.installKeyRing(ring);
+    }
+
+    function testFuzz_installKeyRing_hashIsKeccakOfEncoding(uint8 size, bytes32 entropy) public {
+        size = uint8(bound(size, 1, MAX_KEYRING_SIZE));
+        WorldChainAccountVerifier[] memory ring = new WorldChainAccountVerifier[](size);
+        bytes memory verifierCode = address(happyVerifier).code;
+        for (uint256 i; i < size; ++i) {
+            // Derive a unique pseudo-random etchable address per slot from the fuzzed entropy.
+            address derived;
+            for (uint256 tweak; tweak < 32; ++tweak) {
+                address candidate = address(uint160(uint256(keccak256(abi.encode(entropy, i, tweak)))));
+                if (_isEtchable(candidate)) {
+                    derived = candidate;
+                    break;
+                }
+            }
+            require(derived != address(0), "fuzz entropy degenerate");
+            vm.etch(derived, verifierCode);
+            ring[i] = descriptorWithData(derived, abi.encode(entropy, i));
+        }
+
+        vm.prank(MANAGER);
+        account.installKeyRing(ring);
+
+        bytes32 expected = keccak256(abi.encode(ring));
+        assertEq(account.KEYRING_HASH(), expected);
+        for (uint256 i; i < size; ++i) {
+            assertEq(account.sessionKeyRing(ring[i].verifier), expected, "missing member");
+        }
+    }
+
+    // ─── Fuzz: dispatch helpers ───────────────────────────────────────────────
+
+    function testFuzz_isValidSignatureForAdmin_preservesMagic(bytes32 hash, bytes memory signature) public {
+        installAdminAs(account, address(happyVerifier));
+        assertEq(account.isValidSignatureForAdmin(hash, signature), ERC1271_MAGIC);
+    }
+
+    function testFuzz_isValidSignatureForVerifier_preservesMagic(bytes32 hash, bytes memory signature) public {
+        installSingleSessionKeyRing(account, address(happyVerifier));
+        assertEq(account.isValidSignatureForVerifier(address(happyVerifier), hash, signature), ERC1271_MAGIC);
+    }
+
+    function testFuzz_isValidSignatureForVerifier_revertsForAnyNonMember(address probe) public {
+        installSingleSessionKeyRing(account, address(happyVerifier));
+        vm.assume(probe != address(happyVerifier));
+        vm.expectRevert(abi.encodeWithSelector(IWorldChainAccountRouterErrors.VerifierNotInstalled.selector, probe));
+        account.isValidSignatureForVerifier(probe, bytes32(0), hex"");
+    }
+
+    /// @notice The dispatch fallback must revert for every non-system selector. We pin the
+    ///         expected revert via the leading 4 bytes of returndata only (the `UnknownSelector`
+    ///         error selector) rather than the embedded byte4 payload, because the byte4 payload
+    ///         depends on `Dispatch.sol`'s inline-assembly bytes4 alignment — a property fully
+    ///         exercised by `test_dispatch_unknownSelectorReverts` and out of scope here.
+    function testFuzz_dispatch_unknownSelectorReverts(bytes4 selector) public {
+        // Filter out the router's known external selectors — those are valid entry points and
+        // would not route through the fallback.
+        vm.assume(selector != IWorldChainAccount.VERSION.selector);
+        vm.assume(selector != IWorldChainAccount.MANAGER.selector);
+        vm.assume(selector != IWorldChainAccount.ADMIN_VERIFIER.selector);
+        vm.assume(selector != IWorldChainAccount.KEYRING_HASH.selector);
+        vm.assume(selector != IWorldChainAccount.sessionKeyRing.selector);
+        vm.assume(selector != IWorldChainAccount.installAdmin.selector);
+        vm.assume(selector != IWorldChainAccount.installKeyRing.selector);
+        vm.assume(selector != IWorldChainAccount.isValidSignatureForAdmin.selector);
+        vm.assume(selector != IWorldChainAccount.isValidSignatureForVerifier.selector);
+        vm.assume(selector != IWorldChainAccount.evaluateSessionPolicyForVerifier.selector);
+
+        (bool ok, bytes memory ret) = address(account).call(abi.encodePacked(selector));
+        assertFalse(ok, "fallback MUST revert");
+        // Leading 4 bytes of revert data are the `UnknownSelector` error selector.
+        assertTrue(ret.length >= 4, "returndata MUST carry the error selector");
+        bytes4 errorSelector;
+        assembly ("memory-safe") {
+            errorSelector := mload(add(ret, 0x20))
+        }
+        assertEq(errorSelector, IWorldChainAccountRouterErrors.UnknownSelector.selector);
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     function emptyContext() internal pure returns (IWorldChainSessionVerifier.ExecutionTraceContext memory ctx) {
         // All fields default-initialized; only enough to satisfy ABI decoding of the struct.
+    }
+
+    /// @dev Returns true iff `addr` is safe to `vm.etch` into without corrupting the test harness
+    ///      (rules out the zero address, EVM precompiles, forge cheatcode addresses, and the
+    ///      contracts we provisioned in `setUp`).
+    function _isEtchable(address addr) internal view returns (bool) {
+        if (addr == address(0)) return false;
+        if (uint160(addr) <= 0xff) return false; // precompiles
+        if (addr == BEACON_PREDEPLOY) return false;
+        if (addr == address(accountImpl)) return false;
+        if (addr == address(account)) return false;
+        if (addr == address(beacon)) return false;
+        if (addr == address(this)) return false;
+        if (addr == address(vm)) return false;
+        if (addr == address(happyVerifier)) return false;
+        if (addr == address(secondHappyVerifier)) return false;
+        if (addr == address(rejectingVerifier)) return false;
+        if (addr == address(revertingInstallVerifier)) return false;
+        if (addr == address(revertingSignatureVerifier)) return false;
+        if (addr == address(reentrantAdminInstaller)) return false;
+        if (addr == address(storageWriter)) return false;
+        return true;
+    }
+
+    function _assumeEtchable(address addr) internal view {
+        vm.assume(_isEtchable(addr));
     }
 }
