@@ -68,13 +68,15 @@ impl WorldChainPooledTransaction {
     }
 
     /// Returns the signature of the transaction.
-    pub const fn signature(&self) -> &Signature {
+    pub fn signature(&self) -> &Signature {
         match self {
             Self::Legacy(tx) => tx.signature(),
             Self::Eip2930(tx) => tx.signature(),
             Self::Eip1559(tx) => tx.signature(),
             Self::Eip7702(tx) => tx.signature(),
-            Self::Wip1001(_tx) => panic!("we should not reach this!!"),
+            Self::Wip1001(_tx) => {
+                unreachable!("WIP1001 txs don't have a standard ECDSA signature!")
+            }
         }
     }
 
