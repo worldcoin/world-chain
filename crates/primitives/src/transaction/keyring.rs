@@ -40,11 +40,6 @@ pub trait WorldChainAccountManager {
     /// Returns the current `Account.transactionNonce` for `world_chain_account`
     /// as exposed by `IWorldChainAccountManager.getTransactionNonce`.
     ///
-    /// Per WIP-1001 §"Transaction Type 0x1D", a `0x1D` envelope's `nonce` MUST
-    /// equal this value at execution time. Pool-admission callers SHOULD reject
-    /// only strictly smaller envelope nonces (stale) and allow `>=` so future
-    /// nonces can park as queued, mirroring standard EOA nonce ordering.
-    ///
     /// Returns `0` for an address that does not have a managed account (the
     /// mapping default). Callers that need to distinguish "no account" from
     /// "account with nonce 0" MUST anchor on a separate existence check.
