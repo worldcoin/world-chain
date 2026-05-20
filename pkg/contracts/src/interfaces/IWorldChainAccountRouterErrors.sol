@@ -28,4 +28,7 @@ interface IWorldChainAccountRouterErrors {
     /// @notice Thrown when an inbound call's leading selector matches none of the router's
     ///         system selectors and no fallback handler is installed for this account.
     error UnknownSelector(bytes4 selector);
+
+    /// @notice Thrown when an address is initialized to be the zero address.
+    error AddressZero();
 }

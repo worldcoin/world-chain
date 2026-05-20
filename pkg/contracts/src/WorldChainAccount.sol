@@ -29,6 +29,8 @@ contract WorldChainAccount is KeyRingStore, Dispatch, IWorldChainAccount, IWorld
     address public immutable override MANAGER;
 
     constructor(address manager) {
+        if (manager == address(0)) revert AddressZero();
+
         MANAGER = manager;
     }
 
