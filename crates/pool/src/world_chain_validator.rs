@@ -2,8 +2,7 @@
 //! wire it everywhere it's needed. This also makes it possible to keep our existent codebase
 //! unaltered so that we don't change our current functionalities while developing wip1001 features.
 
-use super::tx::WorldChainPoolTransaction;
-use crate::tx::WorldChainPoolTransactionError;
+use crate::world_chain_tx::{WorldChainPoolTransaction, WorldChainPoolTransactionError};
 use alloy_primitives::{Address, keccak256};
 use alloy_sol_types::SolValue;
 use reth_evm::ConfigureEvm;
