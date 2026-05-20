@@ -9,7 +9,7 @@ use reth_evm::ConfigureEvm;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
 use reth_primitives_traits::{
-    BlockTy, GotExpected, TxTy, transaction::error::InvalidTransactionError,
+    BlockTy, GotExpected, SealedBlock, TxTy, transaction::error::InvalidTransactionError,
 };
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::{
@@ -203,6 +203,10 @@ where
             return self.validate_wip1001(origin, transaction.clone()).await;
         }
         return self.inner.validate_one(origin, transaction.clone()).await;
+    }
+
+    fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {
+        self.inner.on_new_head_block(new_tip_block);
     }
 }
 
