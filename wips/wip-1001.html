@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-ec66897d.js";
+            window.path_to_searchindex_js = "../searchindex-9766bcf3.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-1f034a07.js"></script>
@@ -254,6 +254,7 @@
     WorldChainAccountVerifier admin;
     bytes32 accountSalt;
     WorldChainAccountVerifier[] sessionVerifiers;
+    mapping(bytes32 sessionVerifierInstance =&gt; InstalledSessionVerifier) sessionVerifierInstances;
     bytes32 keyRingHash;
     uint64 adminNonce;
     uint64 transactionNonce;
@@ -262,6 +263,11 @@
 struct WorldChainAccountVerifier {
     address verifier;
     bytes installation;
+}
+
+struct InstalledSessionVerifier {
+    address verifier;
+    bytes32 keyRingHash;
 }
 </code></pre>
 <p>For every existing account:</p>
@@ -272,6 +278,7 @@ struct WorldChainAccountVerifier {
 <li>each <code>installation.length</code> in <code>admin</code> and <code>sessionVerifiers</code> MUST be at most <code>MAX_VERIFIER_INSTALL_DATA_BYTES</code>;</li>
 <li>each <code>sessionVerifiers[i].verifier</code> MUST be a deployed EIP-1271 verifier implementation adhering to <code>IWorldChainSessionVerifier</code>;</li>
 <li><code>sessionVerifiers</code> MUST NOT contain duplicate session verifier instances;</li>
+<li>for each active <code>sessionVerifiers[i]</code>, the corresponding derived <code>sessionVerifierInstance</code> MUST resolve to <code>sessionVerifiers[i].verifier</code> and the current <code>keyRingHash</code>;</li>
 <li><code>keyRingHash == keccak256(abi.encode(sessionVerifiers))</code>;</li>
 <li><code>adminNonce</code> is consumed only by admin operations;</li>
 <li><code>transactionNonce</code> is consumed only by successful <code>0x1D</code> transaction execution attempts;</li>
@@ -286,7 +293,8 @@ struct WorldChainAccountVerifier {
 ));
 </code></pre>
 <p>A session verifier implementation is the contract address whose code is executed by the account router. A session verifier instance is one installed use of that implementation for a specific account and installation payload. Multiple session verifier instances MAY reference the same verifier implementation address, provided their installation hashes differ and therefore their <code>sessionVerifierInstance</code> identifiers are distinct. <code>installation</code> is opaque to the protocol and is interpreted only by the selected verifier implementation.</p>
-<p>After account creation, <code>setKeyRing</code> is the only execution path that mutates <code>sessionVerifiers</code>, <code>keyRingHash</code>, or validation-affecting account storage for active session verifier instances. WIP-1001 defines no operation that mutates <code>admin</code> or the account router runtime code.</p>
+<p><code>sessionVerifierInstances</code> is account-router resolver state. It maps each installed session verifier instance to the verifier implementation address to <code>DELEGATECALL</code> and the <code>keyRingHash</code> for which that resolver entry is active. A session verifier instance is active iff <code>sessionVerifierInstances[sessionVerifierInstance].keyRingHash == keyRingHash != 0</code> and <code>sessionVerifierInstances[sessionVerifierInstance].verifier != address(0)</code>. Entries from previous key rings MAY remain in storage, but MUST NOT authorize after <code>keyRingHash</code> changes.</p>
+<p>After account creation, <code>setKeyRing</code> is the only execution path that mutates <code>sessionVerifiers</code>, <code>sessionVerifierInstances</code>, <code>keyRingHash</code>, or validation-affecting account storage for active session verifier instances. WIP-1001 defines no operation that mutates <code>admin</code> or the account router runtime code.</p>
 <h4 id="address-derivation"><a class="header" href="#address-derivation">Address Derivation</a></h4>
 <p>The manager derives an account address as:</p>
 <pre><code class="language-solidity">adminHash = keccak256(abi.encode(admin));
@@ -357,7 +365,7 @@ setKeyRingHash = keccak256(abi.encode(
 }
 </code></pre>
 <p><code>installAdmin</code> and <code>installKeyRing</code> MUST reject any caller other than <code>WORLD_CHAIN_ACCOUNT_MANAGER</code>. The account router MUST expose no non-manager path that can mutate validation-affecting verifier storage. <code>isValidSignatureForAdmin</code>, <code>isValidSignatureForVerifier</code>, and <code>evaluateSessionPolicyForVerifier</code> MUST be callable by <code>WORLD_CHAIN_ACCOUNT_MANAGER</code> in restricted validation frames.</p>
-<p>The account router MUST dispatch admin validation only to its installed <code>admin.verifier</code>. It MUST dispatch session validation only to an installed session verifier instance; unknown session verifier instances MUST fail without executing verifier implementation code. For session validation, the router MUST resolve <code>sessionVerifierInstance</code> to the corresponding verifier implementation address before performing the controlled <code>DELEGATECALL</code>.</p>
+<p>The account router MUST dispatch admin validation only to its installed <code>admin.verifier</code>. It MUST dispatch session validation only to an active session verifier instance; unknown or stale session verifier instances MUST fail without executing verifier implementation code. For session validation, the router MUST resolve <code>sessionVerifierInstance</code> through <code>sessionVerifierInstances</code>, require the stored <code>keyRingHash</code> to equal the account’s current <code>keyRingHash</code>, and then use the stored <code>verifier</code> address for the controlled <code>DELEGATECALL</code>.</p>
 <p>When the account router handles a manager-issued admin signature check (<code>isValidSignatureForAdmin</code>), it MUST <code>DELEGATECALL</code> the selected admin verifier implementation with calldata <code>IERC1271.isValidSignature.selector || abi.encode(hash, signature)</code>. When the router handles a session signature check (<code>isValidSignatureForVerifier</code>), it MUST <code>DELEGATECALL</code> the selected session verifier implementation with calldata <code>IERC1271.isValidSignature.selector || abi.encode(hash, abi.encode(sessionVerifierInstance, signature))</code>. When the router handles <code>evaluateSessionPolicyForVerifier</code>, it MUST <code>DELEGATECALL</code> the selected session verifier implementation with calldata <code>IWorldChainSessionVerifier.evaluateSessionPolicy.selector || abi.encode(context)</code>.</p>
 <p>For session signature checks, the <code>signature</code> bytes visible to the session verifier’s ERC-1271 entrypoint are router-encoded as <code>abi.encode(sessionVerifierInstance, signature)</code>, where the second field is the <code>0x1D</code> envelope’s verifier-defined signature field. The <code>0x1D</code> transaction sender supplies only the envelope <code>sessionVerifierInstance</code> and verifier-defined <code>signature</code>; the account router performs this wrapping before dispatching to the verifier implementation.</p>
 <p>Verifier implementations install scoped storage through the following installation hook:</p>
@@ -436,7 +444,7 @@ setKeyRingHash = keccak256(abi.encode(
     ) external view returns (bool allowed);
 }
 </code></pre>
-<p><code>installation</code> is verifier-defined. The protocol does not parse it, but it commits to it through <code>adminHash</code>, <code>createHash</code>, and <code>keyRingHash</code>. For session verifier installs, the account router MUST call <code>install</code> with <code>abi.encode(sessionVerifierInstance, installation)</code>. A session verifier implementation’s <code>install</code> function MUST fully write all validation-affecting state implied by <code>installation</code> into a deterministic account-storage namespace derived from <code>sessionVerifierInstance</code>. Because <code>sessionVerifierInstance</code> includes <code>keccak256(installation)</code>, two installs of the same implementation with different installation bytes MUST use different validation-affecting storage slots. Removed verifier state MAY remain in account storage, but it MUST be unreachable unless the same session verifier instance is installed again through a later <code>setKeyRing</code>.</p>
+<p><code>installation</code> is verifier-defined. The protocol does not parse it, but it commits to it through <code>adminHash</code>, <code>createHash</code>, and <code>keyRingHash</code>. For session verifier installs, the account router MUST derive each <code>sessionVerifierInstance</code>, store <code>sessionVerifierInstances[sessionVerifierInstance] = InstalledSessionVerifier(verifier, keyRingHash)</code>, and call <code>install</code> with <code>abi.encode(sessionVerifierInstance, installation)</code>. A session verifier implementation’s <code>install</code> function MUST fully write all validation-affecting state implied by <code>installation</code> into a deterministic account-storage namespace derived from <code>sessionVerifierInstance</code>. Because <code>sessionVerifierInstance</code> includes <code>keccak256(installation)</code>, two installs of the same implementation with different installation bytes MUST use different validation-affecting storage slots. Removed verifier state MAY remain in account storage, but it MUST be unreachable unless the same session verifier instance is installed again through a later <code>setKeyRing</code>.</p>
 <p>Verifier implementations MUST NOT rely on validation-affecting state stored at the verifier implementation address. Validation-affecting state MUST live in account storage installed through the account router.</p>
 <h3 id="manager-interface"><a class="header" href="#manager-interface">Manager Interface</a></h3>
 <p><code>WORLD_CHAIN_ACCOUNT_MANAGER</code> exposes:</p>
@@ -464,6 +472,7 @@ setKeyRingHash = keccak256(abi.encode(
     function getAuthorizedSessionVerifier(address account, bytes32 sessionVerifierInstance) external view returns (WorldChainAccountVerifier memory);
 }
 </code></pre>
+<p><code>isAuthorizedSessionVerifier</code> MUST return <code>true</code> only when <code>sessionVerifierInstance</code> resolves to an <code>InstalledSessionVerifier</code> whose <code>keyRingHash</code> equals the account’s current <code>keyRingHash</code>. <code>getAuthorizedSessionVerifier</code> MUST return the matching current <code>sessionVerifiers</code> entry and MUST fail for an absent or stale <code>sessionVerifierInstance</code>.</p>
 <h3 id="manager-events"><a class="header" href="#manager-events">Manager Events</a></h3>
 <p>Each successful state transition MUST emit exactly one matching event in the same transaction that mutates state.</p>
 <pre><code class="language-solidity">interface IWorldChainAccountManagerEvents {
@@ -504,7 +513,7 @@ setKeyRingHash = keccak256(abi.encode(
 <li>call <code>IWorldChainAccountRouter(account).installAdmin(admin)</code>;</li>
 <li>call <code>IWorldChainAccountRouter(account).installKeyRing(initialSessionVerifiers)</code>;</li>
 <li>verify <code>createHash</code> through the account router’s admin validation path;</li>
-<li>initialize manager state with <code>admin</code>, <code>adminNonce = 0</code>, <code>transactionNonce = 0</code>, <code>sessionVerifiers = initialSessionVerifiers</code>, and <code>keyRingHash</code>;</li>
+<li>initialize manager state with <code>admin</code>, <code>adminNonce = 0</code>, <code>transactionNonce = 0</code>, <code>sessionVerifiers = initialSessionVerifiers</code>, active <code>sessionVerifierInstances</code>, and <code>keyRingHash</code>;</li>
 <li>emit <code>AccountCreated(account, admin.verifier, adminHash, accountSalt, keyRingHash)</code>.</li>
 </ol>
 <h4 id="setkeyring"><a class="header" href="#setkeyring"><code>setKeyRing</code></a></h4>
@@ -521,6 +530,7 @@ setKeyRingHash = keccak256(abi.encode(
 <li>call <code>IWorldChainAccountRouter(account).installKeyRing(sessionVerifiers)</code>;</li>
 <li>set <code>previousKeyRingHash = keyRingHash</code>;</li>
 <li>replace the account’s full <code>sessionVerifiers</code> set with the supplied <code>sessionVerifiers</code>;</li>
+<li>write active <code>sessionVerifierInstances</code> entries for the supplied set under <code>newKeyRingHash</code>;</li>
 <li>set <code>keyRingHash = newKeyRingHash</code>;</li>
 <li>increment <code>adminNonce</code> by one;</li>
 <li>emit <code>KeyRingSet(account, previousKeyRingHash, newKeyRingHash, adminNonce)</code>.</li>
@@ -631,7 +641,7 @@ setKeyRingHash = keccak256(abi.encode(
 <ol>
 <li>decode and validate the envelope;</li>
 <li>load <code>account</code> from <code>WORLD_CHAIN_ACCOUNT_MANAGER</code>;</li>
-<li>require <code>sessionVerifierInstance</code> to be authorized for <code>account</code> in the current <code>sessionVerifiers</code> set and load the current <code>keyRingHash</code>;</li>
+<li>load the current <code>keyRingHash</code>, resolve <code>sessionVerifierInstance</code> through <code>sessionVerifierInstances</code>, require <code>verifier != address(0)</code> and require the stored <code>keyRingHash</code> to equal the current <code>keyRingHash</code>, and load the resolved verifier implementation address;</li>
 <li>require the account balance to cover the worst-case payload gas charge and <code>MIN_VALIDATION_FAILURE_FEE</code>;</li>
 <li>compute <code>signingHash</code>;</li>
 <li>call <code>IWorldChainAccountRouter(account).isValidSignatureForVerifier(sessionVerifierInstance, signingHash, signature)</code> in a restricted validation frame;</li>
@@ -668,7 +678,7 @@ setKeyRingHash = keccak256(abi.encode(
 <li><code>account</code> exists;</li>
 <li>the account balance can cover <code>MIN_VALIDATION_FAILURE_FEE</code> at the current <code>baseFee</code>;</li>
 <li>the transaction nonce can still become executable under the account nonce ordering rules;</li>
-<li><code>sessionVerifierInstance</code> is a member of the account’s current <code>sessionVerifiers</code> set;</li>
+<li><code>sessionVerifierInstance</code> resolves to a nonzero verifier in <code>sessionVerifierInstances</code> with the account’s current <code>keyRingHash</code>;</li>
 <li>the current account <code>keyRingHash</code> equals the hash recorded when the transaction was admitted or last revalidated.</li>
 </ul>
 <p>A client MAY reuse a prior successful signature-validation result only when the cached <code>(account, sessionVerifierInstance, signingHash, signature, keyRingHash)</code> tuple exactly matches the current transaction and account state. Block builders MAY rely on such a cache to avoid repeating signature verification before block construction; if the active <code>keyRingHash</code> changes, the cached result MUST be discarded and the signature MUST be revalidated.</p>
@@ -681,7 +691,7 @@ setKeyRingHash = keccak256(abi.encode(
 <p>Execution policy belongs inside the session verifier. The protocol supplies the canonical transaction context and execution trace, then asks the verifier for a boolean decision.</p>
 <p>Validation gas limits are protocol constants, not signer-selected values. This gives clients a fixed resource bound for mempool validation and block execution.</p>
 <p>Validation gas is supplied from a per-block budget rather than the envelope <code>gasLimit</code>. This keeps the payload gas model close to EIP-1559 transactions while bounding validation work per block.</p>
-<p>Whole-set <code>setKeyRing</code> updates make the account’s session authorization state a single ordered set with one deterministic <code>keyRingHash</code>. Session verifier instances allow that ordered set to contain multiple entries backed by the same verifier implementation while still giving clients a stable membership key for cached validation. Clients can bind cached signature validation to that hash and must revalidate when it changes.</p>
+<p>Whole-set <code>setKeyRing</code> updates make the account’s session authorization state a single ordered set with one deterministic <code>keyRingHash</code>. Session verifier instances allow that ordered set to contain multiple entries backed by the same verifier implementation while still giving clients a stable membership key for cached validation. The account-router resolver stores the verifier implementation address beside the key-ring generation so validation can dispatch from <code>sessionVerifierInstance</code> without accepting a verifier address from transaction calldata. Clients can bind cached signature validation to that hash and must revalidate when it changes.</p>
 <p>Restricted validation frames prevent validation from depending on mutable external state, block metadata, or arbitrary external contract calls.</p>
 <h2 id="backwards-compatibility"><a class="header" href="#backwards-compatibility">Backwards Compatibility</a></h2>
 <p>WIP-1001 introduces a new EIP-2718 transaction type and a new account manager predeploy. Existing Ethereum transaction types, EOAs, contracts, and Safe accounts are unchanged.</p>
@@ -692,15 +702,16 @@ setKeyRingHash = keccak256(abi.encode(
 <li>address derivation across multiple <code>(chainId, manager, adminSigner, accountSalt)</code> tuples;</li>
 <li><code>keyRingHash = keccak256(abi.encode(sessionVerifiers))</code> for empty-forbidden, single-verifier, multi-verifier, repeated implementation with distinct installations, and reordered verifier sets;</li>
 <li><code>sessionVerifierInstance</code> derivation, including domain separation, chain ID binding, account binding, implementation-address binding, installation-hash binding, duplicate-instance rejection, and repeated implementation addresses with distinct installation bytes;</li>
+<li><code>sessionVerifierInstances</code> resolution, including verifier address lookup, stale key-ring hash rejection, zero verifier rejection, and repeated implementation addresses with distinct instance IDs;</li>
 <li><code>create</code> validation, including deployed-code checks, duplicate instance and zero verifier rejection, account-exists rejection, initial nonce values, initial <code>keyRingHash</code>, <code>AccountCreated</code>, and default World ID admin signer account binding;</li>
 <li><code>setKeyRing</code> validation, including stale <code>expectedCurrentKeyRingHash</code>, duplicate instance, zero, undeployed, empty, oversized, and no-op verifier set rejection;</li>
 <li><code>setKeyRing</code> success behavior, including full-set replacement, <code>newKeyRingHash</code>, <code>adminNonce</code> increment, <code>KeyRingSet</code>, authorization lookup updates, and failure atomicity;</li>
 <li><code>createHash</code> and <code>setKeyRingHash</code> domain separation, parameter binding, nonce binding, and negative replay cases across accounts, chains, managers, hashes, and operation types;</li>
 <li><code>0x1D</code> RLP encoding, signing hash, and transaction hash;</li>
 <li>malformed envelope rejection for <code>chainId</code>, <code>nonce</code>, <code>to</code>, <code>data</code>, <code>accessList</code>, <code>signature</code>, and EIP-1559 fee bounds;</li>
-<li>transaction validation against the current verifier set, including unauthorized session verifier instance rejection and <code>ExecutionTraceContext.transaction.keyRingHash</code>;</li>
+<li>transaction validation against the current session verifier instance resolver, including unauthorized session verifier instance rejection and <code>ExecutionTraceContext.transaction.keyRingHash</code>;</li>
 <li>failure semantics for envelope/precheck failures, validation-budget exhaustion, signature failures, trace overflow, policy failures, and payload reverts;</li>
-<li>txpool revalidation, signature-validation cache reuse, and cache invalidation when <code>keyRingHash</code>, session verifier instance membership, account balance, or nonce eligibility changes;</li>
+<li>txpool revalidation, signature-validation cache reuse, and cache invalidation when <code>keyRingHash</code>, session verifier instance authorization, account balance, or nonce eligibility changes;</li>
 <li>signer-state determinism, including rejection of validation-affecting session verifier updates behind an unchanged session verifier instance;</li>
 <li>restricted-frame positive cases and each forbidden opcode or call target;</li>
 <li>default signer factory <code>CREATE2</code> address computation, idempotency, metadata, and incompatible-code rejection;</li>
@@ -718,6 +729,7 @@ setKeyRingHash = keccak256(abi.encode(
 <li><code>keyRingHash</code> binds cached validation to the ordered <code>sessionVerifiers</code> set. Clients MUST discard cached signature results when the active hash changes, even if the transaction’s <code>sessionVerifierInstance</code> remains present in the new set.</li>
 <li><code>keyRingHash</code> does not commit to mutable verifier behavior by itself. Session verifier state that can affect <code>isValidSignature</code> or <code>evaluateSessionPolicy</code> MUST be immutable for that verifier instance; upgrades that affect validation require a different verifier implementation address or different installation bytes installed through <code>setKeyRing</code>.</li>
 <li>The protocol MUST verify that <code>sessionVerifierInstance</code> is authorized for <code>account</code> before calling verifier code. Unauthorized instances MUST fail as a precheck rather than receiving a validation call.</li>
+<li><code>sessionVerifierInstances</code> entries from prior key rings MAY remain in storage. They MUST NOT authorize unless their stored <code>keyRingHash</code> equals the account’s current <code>keyRingHash</code>.</li>
 <li>Fixed validation gas limits bound signer execution. Signers that exceed the limit fail validation, and all signature and policy validation gas counts against <code>BLOCK_VALIDATION_GAS_BUDGET</code>.</li>
 <li><code>BLOCK_VALIDATION_GAS_BUDGET</code> is scarce. <code>MIN_VALIDATION_FAILURE_FEE</code> MUST be tuned so validation spam is costly, and clients MUST reject pooled transactions that cannot pay it.</li>
 <li>Builders may prefer transactions with cheaper validation profiles. Fixed validation gas bounds the worst-case bias but does not eliminate ordering incentives.</li>
