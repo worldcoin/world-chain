@@ -8,10 +8,10 @@ import {WorldChainAccountVerifier} from "../interfaces/IWorldChainAccountManager
 import {IWorldChainAccountHooks} from "../interfaces/IWorldChainAccountHooks.sol";
 import {IWorldChainAccountRouterErrors} from "../interfaces/IWorldChainAccountRouterErrors.sol";
 
-/// @title KeyRingStore
+/// @title KeyringStore
 /// @author 0xOsiris, World Contributors
 /// @custom:security-contact security@toolsforhumanity.com
-abstract contract KeyRingStore {
+abstract contract KeyringStore {
     using Address for address;
 
     /// @dev `keccak256(abi.encode(uint256(keccak256("worldchain.account.keyring")) - 1)) & ~bytes32(uint256(0xff))`

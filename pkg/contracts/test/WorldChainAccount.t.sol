@@ -5,7 +5,7 @@ import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
 import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 
 import {WorldChainAccount} from "../src/WorldChainAccount.sol";
-import {KeyRingStore} from "../src/abstract/KeyRingStore.sol";
+import {KeyringStore} from "../src/abstract/KeyringStore.sol";
 import {IWorldChainAccount} from "../src/interfaces/IWorldChainAccount.sol";
 import {IWorldChainAccountRouterErrors} from "../src/interfaces/IWorldChainAccountRouterErrors.sol";
 import {IWorldChainSessionVerifier} from "../src/interfaces/IWorldChainSessionVerifier.sol";
@@ -157,7 +157,7 @@ contract WorldChainAccountTest is WorldChainAccountTestSetup {
             ring[i] = descriptor(address(happyVerifier));
         }
 
-        vm.expectRevert(abi.encodeWithSelector(KeyRingStore.InvalidKeyRingSize.selector, oversize));
+        vm.expectRevert(abi.encodeWithSelector(KeyringStore.InvalidKeyRingSize.selector, oversize));
         vm.prank(MANAGER);
         account.installKeyRing(ring);
     }

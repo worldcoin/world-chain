@@ -5,7 +5,7 @@ import {Address} from "@openzeppelin/contracts/utils/Address.sol";
 import {IERC1271} from "@openzeppelin/contracts/interfaces/IERC1271.sol";
 
 import {Dispatch} from "./abstract/Dispatch.sol";
-import {KeyRingStore} from "./abstract/KeyRingStore.sol";
+import {KeyringStore} from "./abstract/KeyringStore.sol";
 import {WorldChainAccountVerifier} from "./interfaces/IWorldChainAccountManager.sol";
 import {IWorldChainAccount} from "./interfaces/IWorldChainAccount.sol";
 import {IWorldChainAccountRouterErrors} from "./interfaces/IWorldChainAccountRouterErrors.sol";
@@ -16,7 +16,7 @@ import {IWorldChainSessionVerifier} from "./interfaces/IWorldChainSessionVerifie
 /// @notice Implementation behind `WorldChainAccountUpgradeableBeacon` and reached at every account address
 ///         through `WorldChainAccountBeaconProxy`
 /// @custom:security-contact security@toolsforhumanity.com
-contract WorldChainAccount is KeyRingStore, Dispatch, IWorldChainAccount, IWorldChainAccountRouterErrors {
+contract WorldChainAccount is KeyringStore, Dispatch, IWorldChainAccount, IWorldChainAccountRouterErrors {
     using Address for address;
 
     /// @notice The contract version.
