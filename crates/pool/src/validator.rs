@@ -413,6 +413,10 @@ where
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
         if transaction.ty() == WIP_1001_TX_TYPE {
+            // Note: this line is currently unreachable because we're still using legacy
+            // OpPooledTransaction that doesn't have the wip1001 tx type, therefore
+            // wip1001 txs would fail at the decoding phase, never reaching this point.
+            // See: https://vscode.dev/github/worldcoin/world-chain/blob/ale/wip1001-mempool-validation/crates/pool/src/tx.rs#L232
             return self.validate_wip1001(origin, transaction.clone()).await;
         }
         if transaction.to().unwrap_or_default() != self.pbh_entrypoint {
