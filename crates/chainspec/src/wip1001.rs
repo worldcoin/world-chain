@@ -66,7 +66,7 @@ pub struct Wip1001ActivationConfig {
 }
 
 /// Returns finalized WIP-1001 parameters for production World Chain networks.
-pub fn strato_wip1001_config_for_chain(chain: Chain) -> Option<Wip1001ActivationConfig> {
+pub fn strato_wip1001_parameters_for_chain(chain: Chain) -> Option<Wip1001ActivationConfig> {
     match chain.named() {
         Some(NamedChain::World) => STRATO_WIP1001_WORLD_MAINNET_CONFIG,
         Some(NamedChain::WorldSepolia) => STRATO_WIP1001_WORLD_SEPOLIA_CONFIG,

@@ -13,5 +13,6 @@ pub use spec::{
 };
 pub use wip1001::{
     STRATO_WIP1001_PLACEHOLDER_CONFIG, STRATO_WIP1001_WORLD_MAINNET_CONFIG,
-    STRATO_WIP1001_WORLD_SEPOLIA_CONFIG, Wip1001ActivationConfig, strato_wip1001_config_for_chain,
+    STRATO_WIP1001_WORLD_SEPOLIA_CONFIG, Wip1001ActivationConfig,
+    strato_wip1001_parameters_for_chain,
 };

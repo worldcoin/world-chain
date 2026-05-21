@@ -6,7 +6,7 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_hardforks::Hardfork;
 use alloy_primitives::{B256, U256};
-use derive_more::{Constructor, Deref, Into};
+use derive_more::Deref;
 use reth_chainspec::{
     BaseFeeParams, BaseFeeParamsKind, ChainHardforks, ChainSpec, DepositContract, DisplayHardforks,
     EthChainSpec, EthereumHardfork, EthereumHardforks, ForkCondition, ForkFilter, ForkId,
@@ -20,7 +20,11 @@ use reth_optimism_chainspec::{
 use reth_optimism_forks::{OP_MAINNET_HARDFORKS, OpHardfork, OpHardforks};
 use reth_primitives_traits::SealedHeader;
 
-use crate::{WorldChainHardfork, WorldChainHardforks};
+use crate::{
+    Wip1001ActivationConfig, WorldChainHardfork, WorldChainHardforks,
+    strato_wip1001_parameters_for_chain,
+    wip1001::{Wip1001ActivationConfigError, Wip1001ActivationReadinessError},
+};
 
 /// World Chain Jovian activation timestamp on Sepolia.
 pub const JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA: u64 = 1_777_161_600;
@@ -28,17 +32,35 @@ pub const JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA: u64 = 1_777_161_600;
 /// World Chain Jovian activation timestamp on mainnet.
 pub const JOVIAN_UPGRADE_TIMESTAMP_MAINNET: u64 = 1_777_593_600;
 
+/// World Chain Strato activation timestamp on Sepolia.
+///
+/// Keep this unset until the final production activation timestamp is available.
+pub const STRATO_UPGRADE_TIMESTAMP_SEPOLIA: Option<u64> = None;
+
+/// World Chain Strato activation timestamp on mainnet.
+///
+/// Keep this unset until the final production activation timestamp is available.
+pub const STRATO_UPGRADE_TIMESTAMP_MAINNET: Option<u64> = None;
+
 /// World Chain spec type.
 ///
 /// This wraps reth's generic [`ChainSpec`] the same way the OP stack spec does, while using World
 /// Chain hardfork names as the canonical post-Jovian schedule.
-#[derive(Debug, Clone, Deref, Into, Constructor, PartialEq, Eq)]
+#[derive(Debug, Clone, Deref, PartialEq, Eq)]
 pub struct WorldChainSpec {
     /// Inner reth chain spec.
+    #[deref]
     pub inner: ChainSpec,
+    /// WIP-1001 parameters that activate with Strato.
+    pub(crate) strato_wip1001_parameters: Option<Wip1001ActivationConfig>,
 }
 
 impl WorldChainSpec {
+    /// Wraps a reth chain spec as a World Chain spec.
+    pub fn new(inner: ChainSpec) -> Self {
+        Self::from(inner)
+    }
+
     /// Converts the given [`Genesis`] into a [`WorldChainSpec`].
     pub fn from_genesis(genesis: Genesis) -> Self {
         genesis.into()
@@ -74,26 +96,118 @@ impl WorldChainSpec {
         ));
     }
 
-    /// Applies World Chain defaults that are not yet represented in the upstream OP stack chain
-    /// specs. Only fills in forks that have no explicit activation; an operator-supplied
-    /// timestamp (e.g. `jovianTime` in genesis) is preserved.
-    pub fn apply_world_chain_defaults(&mut self) {
-        if !matches!(
-            self.inner.fork(WorldChainHardfork::Jovian),
+    /// Set validated WIP-1001 activation parameters.
+    ///
+    /// The parameters do not activate WIP-1001 by themselves; Strato must also be active at the
+    /// evaluated timestamp.
+    pub fn set_strato_wip1001_parameters(
+        &mut self,
+        config: Wip1001ActivationConfig,
+    ) -> Result<(), Wip1001ActivationConfigError> {
+        config.validate()?;
+        self.strato_wip1001_parameters = Some(config);
+        Ok(())
+    }
+
+    /// Returns Strato/WIP-1001 parameters iff Strato is active and parameters are assigned.
+    pub fn strato_wip1001_parameters_at_timestamp(
+        &self,
+        timestamp: u64,
+    ) -> Option<&Wip1001ActivationConfig> {
+        self.is_strato_active_at_timestamp(timestamp)
+            .then_some(self.strato_wip1001_parameters.as_ref())
+            .flatten()
+    }
+
+    /// Verifies that the chain spec is safe to run with the configured Strato fork schedule.
+    pub fn validate_wip1001_activation_readiness(
+        &self,
+    ) -> Result<(), Wip1001ActivationReadinessError> {
+        let strato_scheduled = !matches!(
+            self.world_chain_fork_activation(WorldChainHardfork::Strato),
             ForkCondition::Never
-        ) {
-            return;
+        );
+        let is_world_production_chain = matches!(
+            self.chain().named(),
+            Some(NamedChain::World | NamedChain::WorldSepolia)
+        );
+
+        if is_world_production_chain && let Some(config) = self.strato_wip1001_parameters {
+            if Some(config) != strato_wip1001_parameters_for_chain(self.chain()) {
+                return Err(Wip1001ActivationReadinessError::ProductionConfigMismatch);
+            }
         }
+
+        if strato_scheduled {
+            let Some(config) = self.strato_wip1001_parameters.as_ref() else {
+                return Err(Wip1001ActivationReadinessError::StratoScheduledWithoutConfig);
+            };
+            config
+                .validate()
+                .map_err(|_| Wip1001ActivationReadinessError::InvalidActivationConfig)?;
+        }
+
+        Ok(())
+    }
+
+    /// Applies World Chain defaults that are not yet represented in the upstream OP stack chain
+    /// specs. Only fills in unset defaults; operator-supplied fork timestamps and WIP-1001
+    /// parameter sets are preserved.
+    pub fn apply_world_chain_defaults(&mut self) {
+        self.apply_world_chain_hardfork_defaults();
+        self.apply_strato_wip1001_parameters_defaults();
+    }
+
+    fn apply_world_chain_hardfork_defaults(&mut self) {
         match self.chain().named() {
-            Some(NamedChain::World) => self.set_fork(
-                WorldChainHardfork::Jovian,
-                ForkCondition::Timestamp(JOVIAN_UPGRADE_TIMESTAMP_MAINNET),
-            ),
-            Some(NamedChain::WorldSepolia) => self.set_fork(
-                WorldChainHardfork::Jovian,
-                ForkCondition::Timestamp(JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA),
-            ),
+            Some(NamedChain::World) => {
+                self.set_world_chain_hardfork_timestamp_default(
+                    WorldChainHardfork::Jovian,
+                    Some(JOVIAN_UPGRADE_TIMESTAMP_MAINNET),
+                );
+                self.set_world_chain_hardfork_timestamp_default(
+                    WorldChainHardfork::Strato,
+                    STRATO_UPGRADE_TIMESTAMP_MAINNET,
+                );
+            }
+            Some(NamedChain::WorldSepolia) => {
+                self.set_world_chain_hardfork_timestamp_default(
+                    WorldChainHardfork::Jovian,
+                    Some(JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA),
+                );
+                self.set_world_chain_hardfork_timestamp_default(
+                    WorldChainHardfork::Strato,
+                    STRATO_UPGRADE_TIMESTAMP_SEPOLIA,
+                );
+            }
             _ => {}
+        }
+    }
+
+    fn set_world_chain_hardfork_timestamp_default(
+        &mut self,
+        fork: WorldChainHardfork,
+        timestamp: Option<u64>,
+    ) {
+        if matches!(self.inner.fork(fork), ForkCondition::Never)
+            && let Some(timestamp) = timestamp
+        {
+            self.set_fork(fork, ForkCondition::Timestamp(timestamp));
+        }
+    }
+
+    fn apply_strato_wip1001_parameters_defaults(&mut self) {
+        self.apply_strato_wip1001_parameters_default(strato_wip1001_parameters_for_chain(
+            self.chain(),
+        ));
+    }
+
+    fn apply_strato_wip1001_parameters_default(&mut self, config: Option<Wip1001ActivationConfig>) {
+        if self.strato_wip1001_parameters.is_none()
+            && let Some(config) = config
+        {
+            self.set_strato_wip1001_parameters(config)
+                .expect("built-in WIP-1001 activation config must be internally valid");
         }
     }
 }
@@ -219,24 +333,26 @@ impl OpHardforks for WorldChainSpec {
 
 impl From<OpChainSpec> for WorldChainSpec {
     fn from(value: OpChainSpec) -> Self {
-        let mut inner = value.inner;
-        inner.hardforks = convert_op_hardforks(&inner.hardforks);
-        inner.genesis_header =
-            SealedHeader::seal_slow(make_op_genesis_header(&inner.genesis, &inner.hardforks));
-
-        let mut spec = Self { inner };
-        spec.apply_world_chain_defaults();
-        spec
+        Self::from_chain_spec(value.inner)
     }
 }
 
 impl From<ChainSpec> for WorldChainSpec {
-    fn from(mut inner: ChainSpec) -> Self {
+    fn from(inner: ChainSpec) -> Self {
+        Self::from_chain_spec(inner)
+    }
+}
+
+impl WorldChainSpec {
+    fn from_chain_spec(mut inner: ChainSpec) -> Self {
         inner.hardforks = convert_op_hardforks(&inner.hardforks);
         inner.genesis_header =
             SealedHeader::seal_slow(make_op_genesis_header(&inner.genesis, &inner.hardforks));
 
-        let mut spec = Self { inner };
+        let mut spec = Self {
+            inner,
+            strato_wip1001_parameters: None,
+        };
         spec.apply_world_chain_defaults();
         spec
     }
@@ -244,6 +360,12 @@ impl From<ChainSpec> for WorldChainSpec {
 
 impl From<Genesis> for WorldChainSpec {
     fn from(genesis: Genesis) -> Self {
+        Self::from_genesis_inner(genesis)
+    }
+}
+
+impl WorldChainSpec {
+    fn from_genesis_inner(genesis: Genesis) -> Self {
         let genesis_info = WorldGenesisInfo::extract_from(&genesis);
         let op_genesis_info = genesis_info
             .optimism_chain_info
@@ -386,6 +508,7 @@ impl From<Genesis> for WorldChainSpec {
                 base_fee_params: genesis_info.base_fee_params,
                 ..Default::default()
             },
+            strato_wip1001_parameters: None,
         };
         spec.apply_world_chain_defaults();
         spec
@@ -396,8 +519,8 @@ impl From<Genesis> for WorldChainSpec {
 struct WorldGenesisInfo {
     optimism_chain_info: op_alloy_rpc_types::OpChainInfo,
     base_fee_params: BaseFeeParamsKind,
-    tropo_time: Option<u64>,
     strato_time: Option<u64>,
+    tropo_time: Option<u64>,
 }
 
 impl WorldGenesisInfo {
@@ -536,9 +659,14 @@ fn order_world_hardforks(
 #[cfg(test)]
 mod tests {
     use alloy_genesis::Genesis;
+    use alloy_primitives::Address;
     use reth_chainspec::Hardforks;
 
     use super::*;
+    use crate::{
+        STRATO_WIP1001_PLACEHOLDER_CONFIG, WorldChainSpecBuilder,
+        strato_wip1001_parameters_for_chain,
+    };
 
     #[test]
     fn world_mainnet_defaults_to_jovian() {
@@ -554,5 +682,221 @@ mod tests {
         let spec = WorldChainSpec::from_genesis(Genesis::default());
         assert_eq!(spec.fork(WorldChainHardfork::Tropo), ForkCondition::Never);
         assert_eq!(spec.fork(WorldChainHardfork::Strato), ForkCondition::Never);
+        assert_eq!(spec.strato_wip1001_parameters_at_timestamp(0), None);
+    }
+
+    #[test]
+    fn strato_time_alone_does_not_activate_wip1001() {
+        let mut genesis = Genesis::default();
+        genesis
+            .config
+            .extra_fields
+            .insert_value("stratoTime".to_string(), 10u64)
+            .unwrap();
+
+        let spec = WorldChainSpec::from_genesis(genesis);
+        assert_eq!(
+            spec.fork(WorldChainHardfork::Strato),
+            ForkCondition::Timestamp(10)
+        );
+        assert!(spec.is_strato_active_at_timestamp(10));
+        assert_eq!(spec.strato_wip1001_parameters_at_timestamp(10), None);
+    }
+
+    #[test]
+    fn strato_readiness_rejects_scheduled_fork_without_wip1001_config() {
+        let spec = WorldChainSpecBuilder::default()
+            .chain(Chain::from_id(1))
+            .genesis(Genesis::default())
+            .strato_activated()
+            .build();
+
+        assert_eq!(
+            spec.validate_wip1001_activation_readiness(),
+            Err(Wip1001ActivationReadinessError::StratoScheduledWithoutConfig)
+        );
+    }
+
+    #[test]
+    fn wip1001_builder_try_build_applies_strato_readiness_gate() {
+        let err = WorldChainSpecBuilder::default()
+            .chain(Chain::from_id(1))
+            .genesis(Genesis::default())
+            .strato_activated()
+            .try_build()
+            .expect_err("scheduled Strato needs WIP-1001 parameters");
+
+        assert_eq!(
+            err,
+            Wip1001ActivationReadinessError::StratoScheduledWithoutConfig
+        );
+
+        WorldChainSpecBuilder::default()
+            .chain(Chain::from_id(1))
+            .genesis(Genesis::default())
+            .strato_activated()
+            .with_strato_wip1001_parameters(STRATO_WIP1001_PLACEHOLDER_CONFIG)
+            .expect("placeholder config is valid")
+            .try_build()
+            .expect("complete config is ready");
+    }
+
+    #[test]
+    fn strato_readiness_accepts_unscheduled_or_fully_configured_wip1001() {
+        let unscheduled = WorldChainSpecBuilder::default()
+            .chain(Chain::from_id(1))
+            .genesis(Genesis::default())
+            .build();
+        assert_eq!(unscheduled.validate_wip1001_activation_readiness(), Ok(()));
+
+        let configured = WorldChainSpecBuilder::default()
+            .chain(Chain::from_id(1))
+            .genesis(Genesis::default())
+            .strato_activated()
+            .with_strato_wip1001_parameters(STRATO_WIP1001_PLACEHOLDER_CONFIG)
+            .expect("placeholder config is valid")
+            .build();
+        assert_eq!(configured.validate_wip1001_activation_readiness(), Ok(()));
+    }
+
+    #[test]
+    fn strato_readiness_rejects_custom_wip1001_config_on_world_chains() {
+        for chain in [Chain::from_id(480), Chain::from_id(4801)] {
+            let mut config = strato_wip1001_parameters_for_chain(chain)
+                .unwrap_or(STRATO_WIP1001_PLACEHOLDER_CONFIG);
+            config.block_validation_gas_budget += 1;
+
+            let spec = WorldChainSpecBuilder::default()
+                .chain(chain)
+                .genesis(Genesis::default())
+                .with_strato_wip1001_parameters(config)
+                .expect("custom config is valid")
+                .build();
+
+            assert_eq!(
+                spec.validate_wip1001_activation_readiness(),
+                Err(Wip1001ActivationReadinessError::ProductionConfigMismatch)
+            );
+        }
+    }
+
+    #[test]
+    fn strato_readiness_allows_placeholder_config_on_custom_chains() {
+        let spec = WorldChainSpecBuilder::default()
+            .chain(Chain::from_id(1))
+            .genesis(Genesis::default())
+            .with_strato_wip1001_parameters(STRATO_WIP1001_PLACEHOLDER_CONFIG)
+            .expect("placeholder config is valid")
+            .build();
+
+        assert_eq!(spec.validate_wip1001_activation_readiness(), Ok(()));
+    }
+
+    #[test]
+    fn strato_wip1001_parameters_is_available_only_after_strato() {
+        let mut genesis = Genesis::default();
+        genesis
+            .config
+            .extra_fields
+            .insert_value("stratoTime".to_string(), 10u64)
+            .unwrap();
+
+        let mut spec = WorldChainSpec::from_genesis(genesis);
+        spec.set_strato_wip1001_parameters(STRATO_WIP1001_PLACEHOLDER_CONFIG)
+            .expect("placeholder config is valid");
+
+        assert_eq!(spec.strato_wip1001_parameters_at_timestamp(9), None);
+        assert_eq!(
+            spec.strato_wip1001_parameters_at_timestamp(10),
+            Some(&STRATO_WIP1001_PLACEHOLDER_CONFIG)
+        );
+    }
+
+    #[test]
+    fn from_chain_spec_does_not_parse_wip1001_config_from_inner_genesis() {
+        let spec = WorldChainSpec::from(ChainSpec {
+            chain: Chain::from_id(1),
+            genesis: Genesis::default(),
+            ..Default::default()
+        });
+
+        assert_eq!(spec.strato_wip1001_parameters_at_timestamp(0), None);
+    }
+
+    #[test]
+    fn spec_setter_replaces_wip1001_config() {
+        let mut spec = WorldChainSpec::from_genesis(Genesis::default());
+        spec.set_fork(WorldChainHardfork::Strato, ForkCondition::Timestamp(0));
+        spec.set_strato_wip1001_parameters(STRATO_WIP1001_PLACEHOLDER_CONFIG)
+            .expect("placeholder config is valid");
+
+        assert_eq!(
+            spec.strato_wip1001_parameters_at_timestamp(0),
+            Some(&STRATO_WIP1001_PLACEHOLDER_CONFIG)
+        );
+        assert_eq!(spec.validate_wip1001_activation_readiness(), Ok(()));
+    }
+
+    #[test]
+    fn builder_can_enable_placeholder_wip1001_config() {
+        let spec = WorldChainSpecBuilder::default()
+            .chain(Chain::from_id(1))
+            .genesis(Genesis::default())
+            .strato_activated()
+            .with_strato_wip1001_parameters(STRATO_WIP1001_PLACEHOLDER_CONFIG)
+            .expect("placeholder config is valid")
+            .build();
+
+        assert!(spec.is_strato_active_at_timestamp(0));
+        assert_eq!(
+            spec.strato_wip1001_parameters_at_timestamp(0),
+            Some(&STRATO_WIP1001_PLACEHOLDER_CONFIG)
+        );
+    }
+
+    #[test]
+    fn builder_rejects_invalid_wip1001_config() {
+        let mut invalid = STRATO_WIP1001_PLACEHOLDER_CONFIG;
+        invalid.block_validation_gas_budget = 1;
+
+        let err = WorldChainSpecBuilder::default()
+            .with_strato_wip1001_parameters(invalid)
+            .expect_err("invalid config must be rejected");
+
+        assert_eq!(
+            err,
+            Wip1001ActivationConfigError::ValidationBudgetTooLow {
+                minimum: invalid.eip1271_validation_gas_limit
+                    + invalid.execution_trace_validation_gas_limit,
+                actual: invalid.block_validation_gas_budget,
+            }
+        );
+    }
+
+    #[test]
+    fn spec_setter_rejects_invalid_wip1001_config_without_mutation() {
+        let mut spec = WorldChainSpecBuilder::default()
+            .chain(Chain::from_id(1))
+            .genesis(Genesis::default())
+            .strato_activated()
+            .with_strato_wip1001_parameters(STRATO_WIP1001_PLACEHOLDER_CONFIG)
+            .expect("placeholder config is valid")
+            .build();
+
+        let mut invalid = STRATO_WIP1001_PLACEHOLDER_CONFIG;
+        invalid.world_chain_account_manager = Address::ZERO;
+
+        let err = spec
+            .set_strato_wip1001_parameters(invalid)
+            .expect_err("invalid config must be rejected");
+
+        assert_eq!(
+            err,
+            Wip1001ActivationConfigError::ZeroAddress("world_chain_account_manager")
+        );
+        assert_eq!(
+            spec.strato_wip1001_parameters_at_timestamp(0),
+            Some(&STRATO_WIP1001_PLACEHOLDER_CONFIG)
+        );
     }
 }

@@ -2,18 +2,23 @@ use alloy_chains::Chain;
 use alloy_genesis::Genesis;
 use alloy_hardforks::Hardfork;
 use alloy_primitives::U256;
-use derive_more::From;
 use reth_chainspec::{ChainHardforks, ChainSpecBuilder, EthereumHardfork, ForkCondition};
 use reth_optimism_chainspec::make_op_genesis_header;
 use reth_primitives_traits::SealedHeader;
 
-use crate::{WorldChainHardfork, WorldChainSpec};
+use crate::{
+    Wip1001ActivationConfig, WorldChainHardfork, WorldChainSpec,
+    strato_wip1001_parameters_for_chain,
+    wip1001::{Wip1001ActivationConfigError, Wip1001ActivationReadinessError},
+};
 
 /// Chain spec builder for a World Chain stack chain.
-#[derive(Debug, Default, From)]
+#[derive(Debug, Default)]
 pub struct WorldChainSpecBuilder {
     /// Inner reth chain spec builder.
     inner: ChainSpecBuilder,
+    /// Optional WIP-1001 activation parameter set - needs to be set if stratoFork is set
+    strato_wip1001_parameters: Option<Wip1001ActivationConfig>,
 }
 
 impl WorldChainSpecBuilder {
@@ -25,7 +30,10 @@ impl WorldChainSpecBuilder {
             .genesis(spec.genesis.clone());
         inner = inner.with_forks(spec.hardforks.clone());
 
-        Self { inner }
+        Self {
+            inner,
+            strato_wip1001_parameters: None,
+        }
     }
 
     /// Construct a new builder from the World Chain Sepolia chain spec.
@@ -36,7 +44,10 @@ impl WorldChainSpecBuilder {
             .genesis(spec.genesis.clone());
         inner = inner.with_forks(spec.hardforks.clone());
 
-        Self { inner }
+        Self {
+            inner,
+            strato_wip1001_parameters: None,
+        }
     }
 
     /// Set the chain ID.
@@ -67,6 +78,16 @@ impl WorldChainSpecBuilder {
     pub fn without_fork(mut self, fork: WorldChainHardfork) -> Self {
         self.inner = self.inner.without_fork(fork);
         self
+    }
+
+    /// Set validated WIP-1001 activation parameters.
+    pub fn with_strato_wip1001_parameters(
+        mut self,
+        config: Wip1001ActivationConfig,
+    ) -> Result<Self, Wip1001ActivationConfigError> {
+        config.validate()?;
+        self.strato_wip1001_parameters = Some(config);
+        Ok(self)
     }
 
     /// Enable Bedrock at genesis.
@@ -190,6 +211,30 @@ impl WorldChainSpecBuilder {
             .paris_block_and_final_difficulty
             .get_or_insert((0, U256::ZERO));
 
-        WorldChainSpec { inner }
+        let strato_wip1001_parameters = self
+            .strato_wip1001_parameters
+            .or_else(|| strato_wip1001_parameters_for_chain(inner.chain));
+
+        if let Some(config) = strato_wip1001_parameters {
+            config
+                .validate()
+                .expect("WIP-1001 activation config must be internally valid");
+        }
+
+        WorldChainSpec {
+            inner,
+            strato_wip1001_parameters,
+        }
+    }
+
+    /// Build and verify the resulting spec is ready for the configured Strato schedule.
+    ///
+    /// Use this for launch paths where a scheduled Strato fork must not run without complete
+    /// WIP-1001 activation parameters. Tests that intentionally construct incomplete specs can use
+    /// [`Self::build`] and call [`WorldChainSpec::validate_wip1001_activation_readiness`] directly.
+    pub fn try_build(self) -> Result<WorldChainSpec, Wip1001ActivationReadinessError> {
+        let spec = self.build();
+        spec.validate_wip1001_activation_readiness()?;
+        Ok(spec)
     }
 }

@@ -7,14 +7,14 @@ The exact production activation parameters are still under development. Until th
 ## Configuration
 
 - Strato timing is fork-schedule metadata: `STRATO_UPGRADE_TIMESTAMP_MAINNET`, `STRATO_UPGRADE_TIMESTAMP_SEPOLIA`, or `stratoTime` in genesis for custom chain specs.
-- WIP-1001 parameters are execution-layer chain-spec constants, not L1 contract values, rollup config values, genesis extra fields, or CLI flags.
-- Devnets and tests may inject placeholder parameters with `WorldChainSpecBuilder::with_strato_wip1001_config` or `WorldChainSpec::set_strato_wip1001_config`.
+- WIP-1001 parameters are execution-layer chain-spec constants, not L1 contract values, rollup config values, or genesis extra fields.
+- Devnets may opt into placeholder parameters with `--worldchain.enable-strato-wip1001-placeholder`; tests may inject them with `WorldChainSpecBuilder::with_strato_wip1001_parameters` or `WorldChainSpec::set_strato_wip1001_parameters`.
 - Production World chains must use the built-in network constants once finalized.
 
 ## Safety Rules
 
 - Startup must fail if Strato is scheduled but WIP-1001 parameters are unset.
-- World mainnet and World Sepolia must reject placeholder or operator-selected parameter sets.
+- World mainnet and World Sepolia must reject dev placeholder or operator-selected parameter sets.
 - After Strato activates on a network, its WIP-1001 parameter set is immutable for that fork. Any later parameter change needs a new fork boundary.
 - Block-gas-limit checks must use the current block gas limit in validation/execution code, not the genesis gas limit.
 

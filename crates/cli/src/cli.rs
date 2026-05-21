@@ -13,8 +13,8 @@ use reth_rpc_server_types::{
 use std::{str::FromStr, sync::Arc};
 use tracing::{debug, info, warn};
 use world_chain_chainspec::{
-    JOVIAN_UPGRADE_TIMESTAMP_MAINNET, JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA, WorldChainHardfork,
-    WorldChainSpec,
+    JOVIAN_UPGRADE_TIMESTAMP_MAINNET, JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA,
+    STRATO_WIP1001_PLACEHOLDER_CONFIG, WorldChainHardfork, WorldChainSpec,
 };
 
 pub mod builder;
@@ -163,6 +163,16 @@ pub struct WorldChainArgs {
     )]
     pub disable_bootnodes: bool,
 
+    /// Enable placeholder Strato/WIP-1001 activation parameters for dev/test networks.
+    ///
+    /// Rejected on World mainnet and World Sepolia.
+    #[arg(
+        long = "worldchain.enable-strato-wip1001-placeholder",
+        value_name = "WORLDCHAIN_ENABLE_STRATO_WIP1001_PLACEHOLDER",
+        default_value_t = false
+    )]
+    pub enable_strato_wip1001_placeholder: bool,
+
     /// Whether the `simulate_unsignedUserOp` RPC endpoint should be served on
     /// HTTP. Derived from `--http.api`: enabled when the selection contains
     /// the `simulate` namespace.
@@ -310,6 +320,20 @@ impl WorldChainArgs {
             }
         }
 
+        if self.enable_strato_wip1001_placeholder {
+            if matches!(
+                config.chain.chain().named(),
+                Some(NamedChain::World | NamedChain::WorldSepolia)
+            ) {
+                bail!(
+                    "--worldchain.enable-strato-wip1001-placeholder is only supported for dev/test chain IDs"
+                );
+            }
+
+            Arc::make_mut(&mut config.chain)
+                .set_strato_wip1001_parameters(STRATO_WIP1001_PLACEHOLDER_CONFIG)?;
+        }
+
         config.chain.validate_wip1001_activation_readiness()?;
 
         let bal_enabled = self.flashblocks.as_ref().is_some_and(|fb| fb.access_list);
@@ -361,7 +385,9 @@ mod tests {
     use clap::Parser;
     use reth_node_builder::NodeConfig;
     use std::sync::Arc;
-    use world_chain_chainspec::STRATO_WIP1001_PLACEHOLDER_CONFIG;
+    use world_chain_chainspec::{
+        STRATO_WIP1001_PLACEHOLDER_CONFIG, strato_wip1001_parameters_for_chain,
+    };
 
     #[derive(Debug, Parser)]
     struct CommandParser {
@@ -551,6 +577,7 @@ mod tests {
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
             disable_bootnodes: true,
             simulate_enabled: false,
+            enable_strato_wip1001_placeholder: false,
         };
 
         let spec = WorldChainSpec::from_genesis(Genesis::default());
@@ -583,15 +610,52 @@ mod tests {
     }
 
     #[test]
+    fn cli_can_enable_placeholder_wip1001_params_for_custom_devnet() {
+        let args =
+            CommandParser::parse_from(["bin", "--worldchain.enable-strato-wip1001-placeholder"])
+                .world;
+        let mut genesis = Genesis::default();
+        genesis.config.chain_id = 2_151_908;
+        genesis
+            .config
+            .extra_fields
+            .insert_value("stratoTime".to_string(), 1u64)
+            .unwrap();
+        let spec = WorldChainSpec::from_genesis(genesis);
+        let mut node_config = NodeConfig::new(Arc::new(spec));
+
+        args.into_config(&mut node_config).unwrap();
+
+        assert_eq!(
+            node_config.chain.strato_wip1001_parameters_at_timestamp(1),
+            Some(&STRATO_WIP1001_PLACEHOLDER_CONFIG)
+        );
+    }
+
+    #[test]
+    fn cli_rejects_placeholder_wip1001_params_for_world_chains() {
+        let args =
+            CommandParser::parse_from(["bin", "--worldchain.enable-strato-wip1001-placeholder"])
+                .world;
+        let mut node_config = NodeConfig::new(WorldChainSpec::mainnet());
+
+        let err = args.into_config(&mut node_config).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("only supported for dev/test chain IDs"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
     fn world_mainnet_rejects_operator_selected_wip1001_params() {
         let args = CommandParser::parse_from(["bin"]).world;
         let mut spec = (*WorldChainSpec::mainnet()).clone();
-        let mut config = spec
-            .configured_strato_wip1001_config()
-            .copied()
+        let mut config = strato_wip1001_parameters_for_chain(spec.chain())
             .unwrap_or(STRATO_WIP1001_PLACEHOLDER_CONFIG);
         config.block_validation_gas_budget += 1;
-        spec.set_strato_wip1001_config(config)
+        spec.set_strato_wip1001_parameters(config)
             .expect("custom WIP-1001 config is valid");
         let mut node_config = NodeConfig::new(Arc::new(spec));
 
