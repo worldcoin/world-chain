@@ -101,7 +101,10 @@ impl<'s, S: StateProvider + ?Sized> WorldChainAccountManagerReader<'s, S> {
     /// Reads `accounts[account].adminNonce` from predeploy storage.
     pub fn admin_nonce(&self, account: Address) -> ProviderResult<u64> {
         let raw = self.read_account_nonce_packed_slot(account)?;
-        Ok(Self::extract_nonce(raw, Self::ACCOUNT_ADMIN_NONCE_BIT_OFFSET))
+        Ok(Self::extract_nonce(
+            raw,
+            Self::ACCOUNT_ADMIN_NONCE_BIT_OFFSET,
+        ))
     }
 
     /// Reads the raw storage word holding the packed `adminNonce` and
@@ -167,8 +170,8 @@ mod tests {
         let admin_nonce: u64 = 0x1122_3344_5566_7788;
         let tx_nonce: u64 = 0xaabb_ccdd_eeff_0011;
 
-        let slot_value = (U256::from(tx_nonce) << Reader::ACCOUNT_TX_NONCE_BIT_OFFSET)
-            | U256::from(admin_nonce);
+        let slot_value =
+            (U256::from(tx_nonce) << Reader::ACCOUNT_TX_NONCE_BIT_OFFSET) | U256::from(admin_nonce);
 
         assert_eq!(
             Reader::extract_nonce(slot_value, Reader::ACCOUNT_TX_NONCE_BIT_OFFSET),

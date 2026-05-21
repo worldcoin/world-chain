@@ -2,8 +2,10 @@
 //! wire it everywhere it's needed. This also makes it possible to keep our existent codebase
 //! unaltered so that we don't change our current functionalities while developing wip1001 features.
 
-use crate::world_chain_account_manager::WorldChainAccountManagerReader;
-use crate::world_chain_tx::{WorldChainPoolTransaction, WorldChainPoolTransactionError};
+use crate::{
+    world_chain_account_manager::WorldChainAccountManagerReader,
+    world_chain_tx::{WorldChainPoolTransaction, WorldChainPoolTransactionError},
+};
 use reth_evm::ConfigureEvm;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
