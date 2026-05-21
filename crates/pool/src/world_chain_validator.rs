@@ -132,9 +132,9 @@ where
             // OpPooledTransaction that doesn't have the wip1001 tx type, therefore
             // wip1001 txs would fail at the decoding phase, never reaching this point.
             // See: https://vscode.dev/github/worldcoin/world-chain/blob/ale/wip1001-mempool-validation/crates/pool/src/tx.rs#L232
-            return self.validate_wip1001(origin, transaction.clone()).await;
+            return self.validate_wip1001(origin, transaction).await;
         }
-        return self.inner.validate_one(origin, transaction.clone()).await;
+        return self.inner.validate_one(origin, transaction).await;
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock<Self::Block>) {

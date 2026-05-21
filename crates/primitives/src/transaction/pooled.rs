@@ -100,19 +100,8 @@ impl WorldChainPooledTransactionPrimitive {
         }
     }
 
-    /// Converts the transaction into the ethereum [`TxEnvelope`].
+    /// Converts the transaction into the world chain [`WorldChainTxEnvelope`].
     pub fn into_envelope(self) -> WorldChainTxEnvelope {
-        match self {
-            Self::Legacy(tx) => tx.into(),
-            Self::Eip2930(tx) => tx.into(),
-            Self::Eip1559(tx) => tx.into(),
-            Self::Eip7702(tx) => tx.into(),
-            Self::Wip1001(tx) => tx.into(),
-        }
-    }
-
-    /// Converts the transaction into the optimism [`OpTxEnvelope`].
-    pub fn into_world_chain_envelope(self) -> WorldChainTxEnvelope {
         match self {
             Self::Legacy(tx) => tx.into(),
             Self::Eip2930(tx) => tx.into(),
