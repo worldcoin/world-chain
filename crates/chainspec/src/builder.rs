@@ -8,7 +8,7 @@ use reth_primitives_traits::SealedHeader;
 
 use crate::{
     Wip1001ActivationConfig, WorldChainHardfork, WorldChainSpec,
-    strato_wip1001_parameters_for_chain,
+    tropo_wip1001_parameters_for_chain,
     wip1001::{Wip1001ActivationConfigError, Wip1001ActivationReadinessError},
 };
 
@@ -17,8 +17,8 @@ use crate::{
 pub struct WorldChainSpecBuilder {
     /// Inner reth chain spec builder.
     inner: ChainSpecBuilder,
-    /// Optional WIP-1001 activation parameter set - needs to be set if stratoFork is set
-    strato_wip1001_parameters: Option<Wip1001ActivationConfig>,
+    /// Optional WIP-1001 activation parameter set; required when Tropo is scheduled.
+    tropo_wip1001_parameters: Option<Wip1001ActivationConfig>,
 }
 
 impl WorldChainSpecBuilder {
@@ -32,7 +32,7 @@ impl WorldChainSpecBuilder {
 
         Self {
             inner,
-            strato_wip1001_parameters: None,
+            tropo_wip1001_parameters: None,
         }
     }
 
@@ -46,7 +46,7 @@ impl WorldChainSpecBuilder {
 
         Self {
             inner,
-            strato_wip1001_parameters: None,
+            tropo_wip1001_parameters: None,
         }
     }
 
@@ -81,12 +81,12 @@ impl WorldChainSpecBuilder {
     }
 
     /// Set validated WIP-1001 activation parameters.
-    pub fn with_strato_wip1001_parameters(
+    pub fn with_tropo_wip1001_parameters(
         mut self,
         config: Wip1001ActivationConfig,
     ) -> Result<Self, Wip1001ActivationConfigError> {
         config.validate()?;
-        self.strato_wip1001_parameters = Some(config);
+        self.tropo_wip1001_parameters = Some(config);
         Ok(self)
     }
 
@@ -211,11 +211,11 @@ impl WorldChainSpecBuilder {
             .paris_block_and_final_difficulty
             .get_or_insert((0, U256::ZERO));
 
-        let strato_wip1001_parameters = self
-            .strato_wip1001_parameters
-            .or_else(|| strato_wip1001_parameters_for_chain(inner.chain));
+        let tropo_wip1001_parameters = self
+            .tropo_wip1001_parameters
+            .or_else(|| tropo_wip1001_parameters_for_chain(inner.chain));
 
-        if let Some(config) = strato_wip1001_parameters {
+        if let Some(config) = tropo_wip1001_parameters {
             config
                 .validate()
                 .expect("WIP-1001 activation config must be internally valid");
@@ -223,13 +223,13 @@ impl WorldChainSpecBuilder {
 
         WorldChainSpec {
             inner,
-            strato_wip1001_parameters,
+            tropo_wip1001_parameters,
         }
     }
 
-    /// Build and verify the resulting spec is ready for the configured Strato schedule.
+    /// Build and verify the resulting spec is ready for the configured Tropo schedule.
     ///
-    /// Use this for launch paths where a scheduled Strato fork must not run without complete
+    /// Use this for launch paths where a scheduled Tropo fork must not run without complete
     /// WIP-1001 activation parameters. Tests that intentionally construct incomplete specs can use
     /// [`Self::build`] and call [`WorldChainSpec::validate_wip1001_activation_readiness`] directly.
     pub fn try_build(self) -> Result<WorldChainSpec, Wip1001ActivationReadinessError> {

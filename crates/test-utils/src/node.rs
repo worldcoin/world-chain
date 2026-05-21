@@ -125,7 +125,7 @@ pub fn test_config_with_peers_and_gossip(
             tx_peers,
             disable_bootnodes: true,
             simulate_enabled: false,
-            enable_strato_wip1001_placeholder: false,
+            enable_tropo_wip1001_placeholder: false,
         },
         builder_config: FlashblocksPayloadBuilderConfig {
             inner: OpBuilderConfig::default(),

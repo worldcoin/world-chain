@@ -1,12 +1,12 @@
 use alloy_chains::{Chain, NamedChain};
 use alloy_primitives::{Address, B256, U256, address, b256};
 
-/// Placeholder WIP-1001 activation parameters used while Strato values are being finalized.
+/// Placeholder WIP-1001 activation parameters used while Tropo values are being finalized.
 ///
 /// These values are intentionally complete and non-zero so development nodes can exercise the
-/// Strato-gated code paths before final production constants exist. Do not treat this as the
+/// Tropo-gated code paths before final production constants exist. Do not treat this as the
 /// canonical mainnet or sepolia parameter set.
-pub const STRATO_WIP1001_PLACEHOLDER_CONFIG: Wip1001ActivationConfig = Wip1001ActivationConfig {
+pub const TROPO_WIP1001_PLACEHOLDER_CONFIG: Wip1001ActivationConfig = Wip1001ActivationConfig {
     world_chain_account_manager: address!("0x4200000000000000000000000000000000000100"),
     world_chain_account_router_code_hash: b256!(
         "0x1111111111111111111111111111111111111111111111111111111111111111"
@@ -27,13 +27,13 @@ pub const STRATO_WIP1001_PLACEHOLDER_CONFIG: Wip1001ActivationConfig = Wip1001Ac
 ///
 /// Keep this unset until final production values are available. Placeholder values must only be
 /// used by generated dev/test chain specs.
-pub const STRATO_WIP1001_WORLD_MAINNET_CONFIG: Option<Wip1001ActivationConfig> = None;
+pub const TROPO_WIP1001_WORLD_MAINNET_CONFIG: Option<Wip1001ActivationConfig> = None;
 
 /// World Sepolia WIP-1001 activation parameters.
 ///
 /// Keep this unset until final production values are available. Placeholder values must only be
 /// used by generated dev/test chain specs.
-pub const STRATO_WIP1001_WORLD_SEPOLIA_CONFIG: Option<Wip1001ActivationConfig> = None;
+pub const TROPO_WIP1001_WORLD_SEPOLIA_CONFIG: Option<Wip1001ActivationConfig> = None;
 
 /// Consensus parameters required before WIP-1001 can activate.
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
@@ -66,10 +66,10 @@ pub struct Wip1001ActivationConfig {
 }
 
 /// Returns finalized WIP-1001 parameters for production World Chain networks.
-pub fn strato_wip1001_parameters_for_chain(chain: Chain) -> Option<Wip1001ActivationConfig> {
+pub fn tropo_wip1001_parameters_for_chain(chain: Chain) -> Option<Wip1001ActivationConfig> {
     match chain.named() {
-        Some(NamedChain::World) => STRATO_WIP1001_WORLD_MAINNET_CONFIG,
-        Some(NamedChain::WorldSepolia) => STRATO_WIP1001_WORLD_SEPOLIA_CONFIG,
+        Some(NamedChain::World) => TROPO_WIP1001_WORLD_MAINNET_CONFIG,
+        Some(NamedChain::WorldSepolia) => TROPO_WIP1001_WORLD_SEPOLIA_CONFIG,
         _ => None,
     }
 }
@@ -192,9 +192,9 @@ pub enum Wip1001ActivationReadinessError {
     /// Production World Chain networks must use the built-in parameter set for their chain ID.
     #[error("production World Chain WIP-1001 activation parameters must match built-in constants")]
     ProductionConfigMismatch,
-    /// Strato is scheduled, but the WIP-1001 activation parameter set is not assigned.
-    #[error("Strato is scheduled but WIP-1001 activation parameters are unset")]
-    StratoScheduledWithoutConfig,
+    /// Tropo is scheduled, but the WIP-1001 activation parameter set is not assigned.
+    #[error("Tropo is scheduled but WIP-1001 activation parameters are unset")]
+    TropoScheduledWithoutConfig,
 }
 
 #[cfg(test)]
@@ -203,14 +203,14 @@ mod tests {
 
     #[test]
     fn placeholder_config_is_complete() {
-        STRATO_WIP1001_PLACEHOLDER_CONFIG
+        TROPO_WIP1001_PLACEHOLDER_CONFIG
             .validate()
             .expect("placeholder config must be internally valid");
     }
 
     #[test]
     fn validation_budget_must_cover_one_validation_attempt() {
-        let mut config = STRATO_WIP1001_PLACEHOLDER_CONFIG;
+        let mut config = TROPO_WIP1001_PLACEHOLDER_CONFIG;
         config.block_validation_gas_budget =
             config.eip1271_validation_gas_limit + config.execution_trace_validation_gas_limit - 1;
 
@@ -227,17 +227,17 @@ mod tests {
     #[test]
     fn validation_gas_budget_per_transaction_matches_fixed_limits() {
         assert_eq!(
-            STRATO_WIP1001_PLACEHOLDER_CONFIG.validation_gas_budget_per_transaction(),
+            TROPO_WIP1001_PLACEHOLDER_CONFIG.validation_gas_budget_per_transaction(),
             Ok(
-                STRATO_WIP1001_PLACEHOLDER_CONFIG.eip1271_validation_gas_limit
-                    + STRATO_WIP1001_PLACEHOLDER_CONFIG.execution_trace_validation_gas_limit
+                TROPO_WIP1001_PLACEHOLDER_CONFIG.eip1271_validation_gas_limit
+                    + TROPO_WIP1001_PLACEHOLDER_CONFIG.execution_trace_validation_gas_limit
             )
         );
     }
 
     #[test]
     fn validation_gas_limit_sum_must_not_overflow() {
-        let mut config = STRATO_WIP1001_PLACEHOLDER_CONFIG;
+        let mut config = TROPO_WIP1001_PLACEHOLDER_CONFIG;
         config.eip1271_validation_gas_limit = u64::MAX;
         config.execution_trace_validation_gas_limit = 1;
         config.block_validation_gas_budget = u64::MAX;
@@ -255,7 +255,7 @@ mod tests {
     #[cfg(feature = "serde")]
     #[test]
     fn serde_round_trip_preserves_activation_config_shape() {
-        let json = serde_json::to_value(STRATO_WIP1001_PLACEHOLDER_CONFIG)
+        let json = serde_json::to_value(TROPO_WIP1001_PLACEHOLDER_CONFIG)
             .expect("activation config serializes");
         let object = json.as_object().expect("config serializes as an object");
 
@@ -281,6 +281,6 @@ mod tests {
 
         let decoded: Wip1001ActivationConfig =
             serde_json::from_value(json).expect("activation config deserializes");
-        assert_eq!(decoded, STRATO_WIP1001_PLACEHOLDER_CONFIG);
+        assert_eq!(decoded, TROPO_WIP1001_PLACEHOLDER_CONFIG);
     }
 }

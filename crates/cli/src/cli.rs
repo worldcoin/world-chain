@@ -14,7 +14,7 @@ use std::{str::FromStr, sync::Arc};
 use tracing::{debug, info, warn};
 use world_chain_chainspec::{
     JOVIAN_UPGRADE_TIMESTAMP_MAINNET, JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA,
-    STRATO_WIP1001_PLACEHOLDER_CONFIG, WorldChainHardfork, WorldChainSpec,
+    TROPO_WIP1001_PLACEHOLDER_CONFIG, WorldChainHardfork, WorldChainSpec,
 };
 
 pub mod builder;
@@ -163,15 +163,15 @@ pub struct WorldChainArgs {
     )]
     pub disable_bootnodes: bool,
 
-    /// Enable placeholder Strato/WIP-1001 activation parameters for dev/test networks.
+    /// Enable placeholder Tropo/WIP-1001 activation parameters for dev/test networks.
     ///
     /// Rejected on World mainnet and World Sepolia.
     #[arg(
-        long = "worldchain.enable-strato-wip1001-placeholder",
-        value_name = "WORLDCHAIN_ENABLE_STRATO_WIP1001_PLACEHOLDER",
+        long = "worldchain.enable-tropo-wip1001-placeholder",
+        value_name = "WORLDCHAIN_ENABLE_TROPO_WIP1001_PLACEHOLDER",
         default_value_t = false
     )]
-    pub enable_strato_wip1001_placeholder: bool,
+    pub enable_tropo_wip1001_placeholder: bool,
 
     /// Whether the `simulate_unsignedUserOp` RPC endpoint should be served on
     /// HTTP. Derived from `--http.api`: enabled when the selection contains
@@ -320,18 +320,18 @@ impl WorldChainArgs {
             }
         }
 
-        if self.enable_strato_wip1001_placeholder {
+        if self.enable_tropo_wip1001_placeholder {
             if matches!(
                 config.chain.chain().named(),
                 Some(NamedChain::World | NamedChain::WorldSepolia)
             ) {
                 bail!(
-                    "--worldchain.enable-strato-wip1001-placeholder is only supported for dev/test chain IDs"
+                    "--worldchain.enable-tropo-wip1001-placeholder is only supported for dev/test chain IDs"
                 );
             }
 
             Arc::make_mut(&mut config.chain)
-                .set_strato_wip1001_parameters(STRATO_WIP1001_PLACEHOLDER_CONFIG)?;
+                .set_tropo_wip1001_parameters(TROPO_WIP1001_PLACEHOLDER_CONFIG)?;
         }
 
         config.chain.validate_wip1001_activation_readiness()?;
@@ -386,7 +386,7 @@ mod tests {
     use reth_node_builder::NodeConfig;
     use std::sync::Arc;
     use world_chain_chainspec::{
-        STRATO_WIP1001_PLACEHOLDER_CONFIG, strato_wip1001_parameters_for_chain,
+        TROPO_WIP1001_PLACEHOLDER_CONFIG, tropo_wip1001_parameters_for_chain,
     };
 
     #[derive(Debug, Parser)]
@@ -577,7 +577,7 @@ mod tests {
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
             disable_bootnodes: true,
             simulate_enabled: false,
-            enable_strato_wip1001_placeholder: false,
+            enable_tropo_wip1001_placeholder: false,
         };
 
         let spec = WorldChainSpec::from_genesis(Genesis::default());
@@ -589,13 +589,13 @@ mod tests {
     }
 
     #[test]
-    fn cli_rejects_strato_without_wip1001_params() {
+    fn cli_rejects_tropo_without_wip1001_params() {
         let args = CommandParser::parse_from(["bin"]).world;
         let mut genesis = Genesis::default();
         genesis
             .config
             .extra_fields
-            .insert_value("stratoTime".to_string(), 1u64)
+            .insert_value("tropoTime".to_string(), 1u64)
             .unwrap();
         let spec = WorldChainSpec::from_genesis(genesis);
         let mut node_config = NodeConfig::new(Arc::new(spec));
@@ -604,7 +604,7 @@ mod tests {
 
         assert!(
             err.to_string()
-                .contains("Strato is scheduled but WIP-1001 activation parameters are unset"),
+                .contains("Tropo is scheduled but WIP-1001 activation parameters are unset"),
             "got: {err}"
         );
     }
@@ -612,14 +612,14 @@ mod tests {
     #[test]
     fn cli_can_enable_placeholder_wip1001_params_for_custom_devnet() {
         let args =
-            CommandParser::parse_from(["bin", "--worldchain.enable-strato-wip1001-placeholder"])
+            CommandParser::parse_from(["bin", "--worldchain.enable-tropo-wip1001-placeholder"])
                 .world;
         let mut genesis = Genesis::default();
         genesis.config.chain_id = 2_151_908;
         genesis
             .config
             .extra_fields
-            .insert_value("stratoTime".to_string(), 1u64)
+            .insert_value("tropoTime".to_string(), 1u64)
             .unwrap();
         let spec = WorldChainSpec::from_genesis(genesis);
         let mut node_config = NodeConfig::new(Arc::new(spec));
@@ -627,15 +627,15 @@ mod tests {
         args.into_config(&mut node_config).unwrap();
 
         assert_eq!(
-            node_config.chain.strato_wip1001_parameters_at_timestamp(1),
-            Some(&STRATO_WIP1001_PLACEHOLDER_CONFIG)
+            node_config.chain.tropo_wip1001_parameters_at_timestamp(1),
+            Some(&TROPO_WIP1001_PLACEHOLDER_CONFIG)
         );
     }
 
     #[test]
     fn cli_rejects_placeholder_wip1001_params_for_world_chains() {
         let args =
-            CommandParser::parse_from(["bin", "--worldchain.enable-strato-wip1001-placeholder"])
+            CommandParser::parse_from(["bin", "--worldchain.enable-tropo-wip1001-placeholder"])
                 .world;
         let mut node_config = NodeConfig::new(WorldChainSpec::mainnet());
 
@@ -652,10 +652,10 @@ mod tests {
     fn world_mainnet_rejects_operator_selected_wip1001_params() {
         let args = CommandParser::parse_from(["bin"]).world;
         let mut spec = (*WorldChainSpec::mainnet()).clone();
-        let mut config = strato_wip1001_parameters_for_chain(spec.chain())
-            .unwrap_or(STRATO_WIP1001_PLACEHOLDER_CONFIG);
+        let mut config = tropo_wip1001_parameters_for_chain(spec.chain())
+            .unwrap_or(TROPO_WIP1001_PLACEHOLDER_CONFIG);
         config.block_validation_gas_budget += 1;
-        spec.set_strato_wip1001_parameters(config)
+        spec.set_tropo_wip1001_parameters(config)
             .expect("custom WIP-1001 config is valid");
         let mut node_config = NodeConfig::new(Arc::new(spec));
 
