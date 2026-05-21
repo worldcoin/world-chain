@@ -25,12 +25,12 @@ use revm_primitives::{Address, B256, TxKind, U256};
 use std::{borrow::Cow, sync::Arc};
 use thiserror::Error;
 use world_chain_primitives::transaction::{
-    WorldChainPooledTransaction as PrimitivesWorldChainPooledTransaction, WorldChainTxEnvelope,
+    WorldChainPooledTransactionPrimitive, WorldChainTxEnvelope,
 };
 
 #[derive(Debug, Clone)]
-pub struct WorldChainPooledTransaction {
-    pub inner: OpPooledTransaction<WorldChainTxEnvelope, PrimitivesWorldChainPooledTransaction>,
+pub struct WorldChainPooledTransactionWip1001 {
+    pub inner: OpPooledTransaction<WorldChainTxEnvelope, WorldChainPooledTransactionPrimitive>,
 }
 
 pub trait WorldChainPoolTransaction:
@@ -38,26 +38,26 @@ pub trait WorldChainPoolTransaction:
 {
 }
 
-impl WorldChainPoolTransaction for WorldChainPooledTransaction {}
+impl WorldChainPoolTransaction for WorldChainPooledTransactionWip1001 {}
 
 impl<Cons, Pooled> WorldChainPoolTransaction for OpPooledTransaction<Cons, Pooled> where
     Self: EthPoolTransaction + MaybeInteropTransaction + OpPooledTx
 {
 }
 
-impl OpPooledTx for WorldChainPooledTransaction {
+impl OpPooledTx for WorldChainPooledTransactionWip1001 {
     fn encoded_2718(&self) -> std::borrow::Cow<'_, Bytes> {
         Cow::Borrowed(self.inner.encoded_2718())
     }
 }
 
-impl DataAvailabilitySized for WorldChainPooledTransaction {
+impl DataAvailabilitySized for WorldChainPooledTransactionWip1001 {
     fn estimated_da_size(&self) -> u64 {
         self.inner.estimated_da_size()
     }
 }
 
-impl MaybeInteropTransaction for WorldChainPooledTransaction {
+impl MaybeInteropTransaction for WorldChainPooledTransactionWip1001 {
     fn interop_deadline(&self) -> Option<u64> {
         self.inner.interop_deadline()
     }
@@ -74,13 +74,13 @@ impl MaybeInteropTransaction for WorldChainPooledTransaction {
     }
 }
 
-impl Typed2718 for WorldChainPooledTransaction {
+impl Typed2718 for WorldChainPooledTransactionWip1001 {
     fn ty(&self) -> u8 {
         self.inner.ty()
     }
 }
 
-impl alloy_consensus::Transaction for WorldChainPooledTransaction {
+impl alloy_consensus::Transaction for WorldChainPooledTransactionWip1001 {
     fn chain_id(&self) -> Option<u64> {
         self.inner.chain_id()
     }
@@ -150,7 +150,7 @@ impl alloy_consensus::Transaction for WorldChainPooledTransaction {
     }
 }
 
-impl EthPoolTransaction for WorldChainPooledTransaction {
+impl EthPoolTransaction for WorldChainPooledTransactionWip1001 {
     fn take_blob(&mut self) -> EthBlobTransactionSidecar {
         EthBlobTransactionSidecar::None
     }
@@ -180,14 +180,14 @@ impl EthPoolTransaction for WorldChainPooledTransaction {
     }
 }
 
-impl InMemorySize for WorldChainPooledTransaction {
+impl InMemorySize for WorldChainPooledTransactionWip1001 {
     // TODO: double check this
     fn size(&self) -> usize {
         self.inner.size()
     }
 }
 
-impl MaybeConditionalTransaction for WorldChainPooledTransaction {
+impl MaybeConditionalTransaction for WorldChainPooledTransactionWip1001 {
     fn set_conditional(&mut self, conditional: TransactionConditional) {
         self.inner.set_conditional(conditional)
     }
@@ -205,11 +205,11 @@ impl MaybeConditionalTransaction for WorldChainPooledTransaction {
     }
 }
 
-impl PoolTransaction for WorldChainPooledTransaction {
+impl PoolTransaction for WorldChainPooledTransactionWip1001 {
     type TryFromConsensusError =
-        <PrimitivesWorldChainPooledTransaction as TryFrom<WorldChainTxEnvelope>>::Error;
+        <WorldChainPooledTransactionPrimitive as TryFrom<WorldChainTxEnvelope>>::Error;
     type Consensus = WorldChainTxEnvelope;
-    type Pooled = PrimitivesWorldChainPooledTransaction;
+    type Pooled = WorldChainPooledTransactionPrimitive;
 
     fn clone_into_consensus(&self) -> Recovered<Self::Consensus> {
         self.inner.clone_into_consensus()
@@ -284,11 +284,11 @@ impl PoolTransactionError for WorldChainPoolTransactionError {
     }
 }
 
-impl From<OpPooledTransaction<WorldChainTxEnvelope, PrimitivesWorldChainPooledTransaction>>
-    for WorldChainPooledTransaction
+impl From<OpPooledTransaction<WorldChainTxEnvelope, WorldChainPooledTransactionPrimitive>>
+    for WorldChainPooledTransactionWip1001
 {
     fn from(
-        tx: OpPooledTransaction<WorldChainTxEnvelope, PrimitivesWorldChainPooledTransaction>,
+        tx: OpPooledTransaction<WorldChainTxEnvelope, WorldChainPooledTransactionPrimitive>,
     ) -> Self {
         Self { inner: tx }
     }

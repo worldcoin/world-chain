@@ -22,7 +22,7 @@ use revm::context::TxEnv;
 
 use crate::transaction::{
     Wip1001Signature,
-    pooled::WorldChainPooledTransaction,
+    pooled::WorldChainPooledTransactionPrimitive,
     wip_1001::{SignedWip1001, TxWip1001},
 };
 
@@ -408,7 +408,7 @@ impl WorldChainTxEnvelope {
     ///
     /// Returns an error if the envelope's variant is incompatible with the pooled format:
     /// [`TxDeposit`] and [`TxPostExec`].
-    pub fn try_into_pooled(self) -> Result<WorldChainPooledTransaction, ValueError<Self>> {
+    pub fn try_into_pooled(self) -> Result<WorldChainPooledTransactionPrimitive, ValueError<Self>> {
         match self {
             Self::Legacy(tx) => Ok(tx.into()),
             Self::Eip2930(tx) => Ok(tx.into()),

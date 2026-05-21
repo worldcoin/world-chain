@@ -20,7 +20,7 @@ use core::hash::Hash;
 /// transaction variant, which is not expected to be pooled.
 #[derive(Clone, Debug, TransactionEnvelope)]
 #[envelope(tx_type_name = WorldChainPooledTxType,)]
-pub enum WorldChainPooledTransaction {
+pub enum WorldChainPooledTransactionPrimitive {
     /// An untagged [`TxLegacy`].
     #[envelope(ty = 0)]
     Legacy(Signed<TxLegacy>),
@@ -43,7 +43,7 @@ pub enum WorldChainPooledTransaction {
     Wip1001(SignedWip1001),
 }
 
-impl WorldChainPooledTransaction {
+impl WorldChainPooledTransactionPrimitive {
     /// Heavy operation that returns the signature hash over rlp encoded transaction. It is only
     /// for signature signing or signer recovery.
     pub fn signature_hash(&self) -> B256 {
@@ -163,51 +163,51 @@ impl WorldChainPooledTransaction {
     }
 }
 
-impl From<Signed<TxLegacy>> for WorldChainPooledTransaction {
+impl From<Signed<TxLegacy>> for WorldChainPooledTransactionPrimitive {
     fn from(v: Signed<TxLegacy>) -> Self {
         Self::Legacy(v)
     }
 }
 
-impl From<Signed<TxEip2930>> for WorldChainPooledTransaction {
+impl From<Signed<TxEip2930>> for WorldChainPooledTransactionPrimitive {
     fn from(v: Signed<TxEip2930>) -> Self {
         Self::Eip2930(v)
     }
 }
 
-impl From<Signed<TxEip1559>> for WorldChainPooledTransaction {
+impl From<Signed<TxEip1559>> for WorldChainPooledTransactionPrimitive {
     fn from(v: Signed<TxEip1559>) -> Self {
         Self::Eip1559(v)
     }
 }
 
-impl From<Signed<TxEip7702>> for WorldChainPooledTransaction {
+impl From<Signed<TxEip7702>> for WorldChainPooledTransactionPrimitive {
     fn from(v: Signed<TxEip7702>) -> Self {
         Self::Eip7702(v)
     }
 }
 
-impl From<SignedWip1001> for WorldChainPooledTransaction {
+impl From<SignedWip1001> for WorldChainPooledTransactionPrimitive {
     fn from(v: SignedWip1001) -> Self {
         Self::Wip1001(v)
     }
 }
 
-impl TxHashRef for WorldChainPooledTransaction {
+impl TxHashRef for WorldChainPooledTransactionPrimitive {
     fn tx_hash(&self) -> &B256 {
         Self::hash(self)
     }
 }
 
-impl InMemorySize for WorldChainPooledTransaction {
+impl InMemorySize for WorldChainPooledTransactionPrimitive {
     fn size(&self) -> usize {
         core::mem::size_of::<Self>() + self.encode_2718_len()
     }
 }
 
-impl alloy_consensus::transaction::SignerRecoverable for WorldChainPooledTransaction {
+impl alloy_consensus::transaction::SignerRecoverable for WorldChainPooledTransactionPrimitive {
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
-        if let WorldChainPooledTransaction::Wip1001(tx) = self {
+        if let WorldChainPooledTransactionPrimitive::Wip1001(tx) = self {
             return Ok(tx.tx().world_chain_account);
         }
         let signature_hash = self.signature_hash();
@@ -215,7 +215,7 @@ impl alloy_consensus::transaction::SignerRecoverable for WorldChainPooledTransac
     }
 
     fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
-        if let WorldChainPooledTransaction::Wip1001(tx) = self {
+        if let WorldChainPooledTransactionPrimitive::Wip1001(tx) = self {
             return Ok(tx.tx().world_chain_account);
         }
         let signature_hash = self.signature_hash();
@@ -244,13 +244,13 @@ impl alloy_consensus::transaction::SignerRecoverable for WorldChainPooledTransac
     }
 }
 
-impl From<WorldChainPooledTransaction> for WorldChainTxEnvelope {
-    fn from(tx: WorldChainPooledTransaction) -> Self {
+impl From<WorldChainPooledTransactionPrimitive> for WorldChainTxEnvelope {
+    fn from(tx: WorldChainPooledTransactionPrimitive) -> Self {
         tx.into_envelope()
     }
 }
 
-impl TryFrom<WorldChainTxEnvelope> for WorldChainPooledTransaction {
+impl TryFrom<WorldChainTxEnvelope> for WorldChainPooledTransactionPrimitive {
     type Error = ValueError<WorldChainTxEnvelope>;
 
     fn try_from(value: WorldChainTxEnvelope) -> Result<Self, Self::Error> {
@@ -258,13 +258,13 @@ impl TryFrom<WorldChainTxEnvelope> for WorldChainPooledTransaction {
     }
 }
 
-impl<Tx> From<WorldChainPooledTransaction> for Extended<WorldChainTxEnvelope, Tx> {
-    fn from(tx: WorldChainPooledTransaction) -> Self {
+impl<Tx> From<WorldChainPooledTransactionPrimitive> for Extended<WorldChainTxEnvelope, Tx> {
+    fn from(tx: WorldChainPooledTransactionPrimitive) -> Self {
         Self::BuiltIn(tx.into())
     }
 }
 
-impl<Tx> TryFrom<Extended<WorldChainTxEnvelope, Tx>> for WorldChainPooledTransaction {
+impl<Tx> TryFrom<Extended<WorldChainTxEnvelope, Tx>> for WorldChainPooledTransactionPrimitive {
     type Error = ();
 
     fn try_from(_tx: Extended<WorldChainTxEnvelope, Tx>) -> Result<Self, Self::Error> {
