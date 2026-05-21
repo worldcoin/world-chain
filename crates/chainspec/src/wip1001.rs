@@ -189,11 +189,6 @@ pub enum Wip1001ActivationReadinessError {
     /// WIP-1001 activation parameters were configured through an invalid internal path.
     #[error("WIP-1001 activation parameters are incomplete or invalid")]
     InvalidActivationConfig,
-    /// Placeholder values must not be enabled on production World Chain networks.
-    #[error(
-        "placeholder WIP-1001 activation parameters cannot be used for World mainnet or Sepolia"
-    )]
-    ProductionPlaceholderConfig,
     /// Production World Chain networks must use the built-in parameter set for their chain ID.
     #[error("production World Chain WIP-1001 activation parameters must match built-in constants")]
     ProductionConfigMismatch,

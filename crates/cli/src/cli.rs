@@ -310,6 +310,8 @@ impl WorldChainArgs {
             }
         }
 
+        config.chain.validate_wip1001_activation_readiness()?;
+
         let bal_enabled = self.flashblocks.as_ref().is_some_and(|fb| fb.access_list);
 
         info!(
@@ -359,6 +361,7 @@ mod tests {
     use clap::Parser;
     use reth_node_builder::NodeConfig;
     use std::sync::Arc;
+    use world_chain_chainspec::STRATO_WIP1001_PLACEHOLDER_CONFIG;
 
     #[derive(Debug, Parser)]
     struct CommandParser {
@@ -556,6 +559,48 @@ mod tests {
 
         // tx_peers should be set to None due to shadowing
         assert!(config.args.tx_peers.is_none());
+    }
+
+    #[test]
+    fn cli_rejects_strato_without_wip1001_params() {
+        let args = CommandParser::parse_from(["bin"]).world;
+        let mut genesis = Genesis::default();
+        genesis
+            .config
+            .extra_fields
+            .insert_value("stratoTime".to_string(), 1u64)
+            .unwrap();
+        let spec = WorldChainSpec::from_genesis(genesis);
+        let mut node_config = NodeConfig::new(Arc::new(spec));
+
+        let err = args.into_config(&mut node_config).unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("Strato is scheduled but WIP-1001 activation parameters are unset"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn world_mainnet_rejects_operator_selected_wip1001_params() {
+        let args = CommandParser::parse_from(["bin"]).world;
+        let mut spec = (*WorldChainSpec::mainnet()).clone();
+        let mut config = spec
+            .configured_strato_wip1001_config()
+            .copied()
+            .unwrap_or(STRATO_WIP1001_PLACEHOLDER_CONFIG);
+        config.block_validation_gas_budget += 1;
+        spec.set_strato_wip1001_config(config)
+            .expect("custom WIP-1001 config is valid");
+        let mut node_config = NodeConfig::new(Arc::new(spec));
+
+        let err = args.into_config(&mut node_config).unwrap_err();
+
+        assert!(
+            err.to_string().contains("must match built-in constants"),
+            "got: {err}"
+        );
     }
 
     #[test]
