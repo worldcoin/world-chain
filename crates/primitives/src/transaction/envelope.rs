@@ -22,6 +22,7 @@ use revm::context::TxEnv;
 
 use crate::transaction::{
     Wip1001Signature,
+    pooled::WorldChainPooledTransactionPrimitive,
     wip_1001::{SignedWip1001, TxWip1001},
 };
 
@@ -400,6 +401,27 @@ impl WorldChainTxEnvelope {
         match self {
             Self::Deposit(tx) => tx.inner().is_system_transaction,
             _ => false,
+        }
+    }
+
+    /// Attempts to convert the envelope into the pooled variant.
+    ///
+    /// Returns an error if the envelope's variant is incompatible with the pooled format:
+    /// [`TxDeposit`] and [`TxPostExec`].
+    pub fn try_into_pooled(self) -> Result<WorldChainPooledTransactionPrimitive, ValueError<Self>> {
+        match self {
+            Self::Legacy(tx) => Ok(tx.into()),
+            Self::Eip2930(tx) => Ok(tx.into()),
+            Self::Eip1559(tx) => Ok(tx.into()),
+            Self::Eip7702(tx) => Ok(tx.into()),
+            Self::Wip1001(tx) => Ok(tx.into()),
+            tx @ Self::Deposit(_) => {
+                Err(ValueError::new(tx, "Deposit transactions cannot be pooled"))
+            }
+            tx @ Self::PostExec(_) => Err(ValueError::new(
+                tx,
+                "PostExec transactions cannot be pooled",
+            )),
         }
     }
 

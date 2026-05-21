@@ -1,12 +1,4 @@
 //! World Chain transaction pool types
-use std::{
-    collections::HashSet,
-    sync::{
-        Arc,
-        atomic::{AtomicU16, AtomicU64, Ordering},
-    },
-};
-
 use super::{root::WorldChainRootValidator, tx::WorldChainPoolTransaction};
 use crate::{
     bindings::{IPBHEntryPoint, IPBHEntryPoint::PBHPayload},
@@ -27,6 +19,13 @@ use reth_transaction_pool::{
     validate::ValidTransaction,
 };
 use revm_primitives::U256;
+use std::{
+    collections::HashSet,
+    sync::{
+        Arc,
+        atomic::{AtomicU16, AtomicU64, Ordering},
+    },
+};
 use tracing::info;
 use world_chain_pbh::payload::{PBHPayload as PbhPayload, PBHValidationError};
 

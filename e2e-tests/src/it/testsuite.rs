@@ -3077,3 +3077,97 @@ async fn test_coordinator_payload_matches_builder() -> eyre::Result<()> {
 
     Ok(())
 }
+
+/// A syntactically valid WIP-1001 (`0x1D`) transaction submitted to
+/// a live node's `eth_sendRawTransaction` endpoint is rejected at decode time
+/// and never reaches `WorldChainTransactionValidator::validate_transaction`
+/// (and therefore never reaches the WIP-1001 dispatch branch in the validator).
+///
+/// This test makes sure the current node doesn't accept WIP1001 transactions,
+/// enforcing that we don't mix the new wip1001 features with the current (legacy)
+/// node architecture.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_wip1001_tx_rejected_at_rpc_decode() -> eyre::Result<()> {
+    use alloy_eips::eip2930::AccessList;
+    use alloy_primitives::{address, hex};
+    use reth_transaction_pool::TransactionPool;
+    use world_chain_primitives::transaction::{
+        SignedWip1001, TxWip1001, WIP_1001_TX_TYPE, Wip1001Signature,
+    };
+
+    reth_tracing::init_test_tracing();
+
+    let (_, mut nodes, _tasks, _, _) = WorldChainTestBuilder::builder()
+        .nodes(1)
+        .flashblocks(false)
+        .build()
+        .setup::<WorldChainDefaultContext>()
+        .await?;
+    let node = &mut nodes[0].node;
+
+    // Build a syntactically valid WIP-1001 envelope. The opaque signature bytes
+    // are intentionally arbitrary, per `wips/wip-1001.md` verification is
+    // delegated to the on-chain session verifier, and we don't expect to get
+    // anywhere near that path here.
+    let tx = TxWip1001 {
+        chain_id: CHAIN_SPEC.chain.id(),
+        nonce: 0,
+        max_priority_fee_per_gas: 0x3b9aca00,
+        max_fee_per_gas: 0x4a817c800,
+        gas_limit: 44_386,
+        world_chain_account: address!("000000000000000000000000000000000000001d"),
+        session_verifier: address!("00000000000000000000000000000000000000aa"),
+        to: address!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into(),
+        value: U256::from(1u64),
+        input: hex!("a22cb465").into(),
+        access_list: AccessList::default(),
+    };
+    let sig = Wip1001Signature {
+        signature: hex!(
+            "840cfc572845f5786e702984c2a582528cad4b49b2a10b9db1be7fca9005856525e7109ceb98168d95b09b18bbf6b685130e0562f233877d492b94eee0c5b6d1"
+        )
+        .into(),
+    };
+    let signed = SignedWip1001::new_signed(tx, sig);
+
+    // Encode exactly the way an RPC client would push the tx onto the wire.
+    let raw_tx: Bytes = signed.encoded_2718().into();
+    assert_eq!(
+        raw_tx[0], WIP_1001_TX_TYPE,
+        "leading type byte must be 0x1D (WIP-1001)",
+    );
+
+    let pool_size_before = node.inner.pool.pool_size().total;
+
+    // Submit via the standard `eth_sendRawTransaction` path. This is the
+    // entry point that calls `recover_raw_transaction::<PoolPooledTx<Pool>>`,
+    // which today cannot decode a 0x1D envelope.
+    let result = node.rpc.inject_tx(raw_tx.clone()).await;
+    let err = result.expect_err(
+        "WIP-1001 raw tx must be rejected at RPC decode time while the pool's \
+         Pooled type is op_alloy_consensus::OpPooledTransaction (no 0x1D variant)",
+    );
+
+    // The error must come from the RPC's decode step (i.e. `recover_raw_transaction`
+    // failed on the 0x1D type byte), not from anywhere inside the validator.
+    // Reth currently surfaces this as `EthApiError::FailedToDecodeSignedTransaction`;
+    // accept either that variant or the lower-level "unknown tx type" wording
+    // so the test stays meaningful if upstream renames things.
+    let err_str = format!("{err:?}").to_lowercase();
+    assert!(
+        err_str.contains("decode")
+            || err_str.contains("tx type")
+            || err_str.contains("transaction type"),
+        "expected a decode-time rejection from the RPC layer (e.g. \
+         FailedToDecodeSignedTransaction or 'unknown tx type'), got: {err:?}",
+    );
+
+    // The tx must never have been admitted to the pool.
+    let pool_size_after = node.inner.pool.pool_size().total;
+    assert_eq!(
+        pool_size_before, pool_size_after,
+        "WIP-1001 tx was rejected but the pool size changed — it must never have been admitted",
+    );
+
+    Ok(())
+}
