@@ -26,7 +26,11 @@ reth-optimism-chainspec = { workspace = true, features = ["superchain-configs"] 
 reth-optimism-forks.workspace = true
 reth-primitives-traits.workspace = true
 serde = { workspace = true, optional = true }
+thiserror.workspace = true
 tracing.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [features]
 default = []
