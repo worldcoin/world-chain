@@ -448,6 +448,19 @@ impl FullStackWorldDevnet {
         &self.sequencers[0].flashblocks_url
     }
 
+    pub async fn safe_block_number(&self) -> Result<u64> {
+        let op_node = self
+            ._op_nodes
+            .first()
+            .ok_or_else(|| eyre!("full-stack devnet has no op-node"))?;
+        let sync_status = json_rpc(&op_node.rpc_url, "optimism_syncStatus", json!([])).await?;
+        let safe_number = sync_status
+            .pointer("/safe_l2/number")
+            .ok_or_else(|| eyre!("optimism_syncStatus missing safe_l2.number: {sync_status}"))?;
+
+        json_rpc_quantity_to_u64(safe_number)
+    }
+
     pub fn prometheus_url(&self) -> Option<&str> {
         self.observability
             .as_ref()

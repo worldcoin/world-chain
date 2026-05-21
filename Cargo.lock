@@ -13966,6 +13966,7 @@ dependencies = [
  "reth-node-api",
  "reth-optimism-node",
  "reth-optimism-payload-builder",
+ "reth-provider",
  "reth-tasks",
  "secp256k1 0.30.0",
  "serde",

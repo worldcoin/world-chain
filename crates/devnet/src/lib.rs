@@ -30,6 +30,7 @@ use reth_chainspec::EthChainSpec;
 use reth_node_api::PayloadAttributes;
 use reth_optimism_node::{OpEngineTypes, utils::optimism_payload_attributes};
 use reth_optimism_payload_builder::OpPayloadAttrs;
+use reth_provider::BlockIdReader;
 use tokio::sync::watch;
 use tracing::{error, info};
 use world_chain_chainspec::WorldChainSpec;
@@ -475,6 +476,21 @@ impl WorldDevnet {
         Ok(provider.get_block_number().await?)
     }
 
+    /// Query the current safe L2 block number from the sequencer.
+    pub async fn safe_block_number(&self) -> Result<u64> {
+        if let Some(full_stack) = &self.full_stack {
+            return full_stack.safe_block_number().await;
+        }
+
+        self.nodes[0]
+            .node
+            .inner
+            .provider()
+            .safe_block_number()
+            .wrap_err("failed to query sequencer safe head")?
+            .ok_or_else(|| eyre!("sequencer safe head is unavailable"))
+    }
+
     /// Query `op_supportedCapabilities`.
     pub async fn supported_capabilities(&self) -> Result<Vec<String>> {
         if self.full_stack.is_some() {
@@ -883,7 +899,6 @@ pub fn is_docker_unavailable(err: &eyre::Report) -> bool {
     let message = format!("{err:?}");
     message.contains("Cannot connect to the Docker daemon")
         || message.contains("docker daemon")
-        || message.contains("Connection refused")
         || message.contains("No such file or directory")
         || message.contains("Docker host")
 }
