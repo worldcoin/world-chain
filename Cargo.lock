@@ -13959,6 +13959,7 @@ dependencies = [
  "flate2",
  "futures",
  "op-alloy-consensus",
+ "rand 0.9.4",
  "reqwest 0.12.28",
  "reth-chainspec",
  "reth-e2e-test-utils",

@@ -46,7 +46,7 @@ pub(crate) fn container_log_consumer(
 
 pub(crate) fn emit_process_log(target: ProcessLogTarget, process: &str, line: &str) {
     let line = strip_log_timestamp(line);
-    let level = parse_log_level(line);
+    let level = normalize_process_level(target, line, parse_log_level(line));
     let line = strip_log_level_fields(line);
     match target {
         ProcessLogTarget::L1DevChain => {
@@ -75,6 +75,18 @@ pub(crate) fn emit_process_log(target: ProcessLogTarget, process: &str, line: &s
         ProcessLogTarget::Prometheus => emit_at_level!("prometheus", level, process, line.as_str()),
         ProcessLogTarget::Grafana => emit_at_level!("grafana", level, process, line.as_str()),
     }
+}
+
+fn normalize_process_level(target: ProcessLogTarget, line: &str, level: Level) -> Level {
+    if matches!(target, ProcessLogTarget::OpNode)
+        && matches!(level, Level::ERROR)
+        && line.contains("Sequencer encountered reset signal, aborting work")
+        && line.contains("cannot continue derivation until Engine has been reset")
+    {
+        return Level::WARN;
+    }
+
+    level
 }
 
 pub(crate) fn strip_log_timestamp(line: &str) -> &str {
@@ -193,6 +205,26 @@ mod tests {
         assert_eq!(
             strip_log_level_fields(r#"msg="contains lvl=warn text" lvl=warn"#),
             r#"msg="contains lvl=warn text""#
+        );
+    }
+
+    #[test]
+    fn demotes_expected_op_node_startup_reset() {
+        assert_eq!(
+            normalize_process_level(
+                ProcessLogTarget::OpNode,
+                r#"lvl=error msg="Sequencer encountered reset signal, aborting work" err="reset: cannot continue derivation until Engine has been reset""#,
+                Level::ERROR,
+            ),
+            Level::WARN
+        );
+        assert_eq!(
+            normalize_process_level(
+                ProcessLogTarget::OpBatcher,
+                r#"lvl=error msg="Sequencer encountered reset signal, aborting work" err="reset: cannot continue derivation until Engine has been reset""#,
+                Level::ERROR,
+            ),
+            Level::ERROR
         );
     }
 }

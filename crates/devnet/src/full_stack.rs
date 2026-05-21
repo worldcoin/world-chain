@@ -16,6 +16,7 @@ use eyre::eyre::{Context, Result, bail, eyre};
 use flate2::read::GzDecoder;
 use futures::future::try_join_all;
 use op_alloy_consensus::{encode_holocene_extra_data, encode_jovian_extra_data};
+use rand::Rng as _;
 use reth_chainspec::EthChainSpec;
 use reth_network_peers::NodeRecord;
 use secp256k1::SecretKey;
@@ -51,10 +52,14 @@ const OP_NODE_P2P_PORT: u16 = 9222;
 const OP_NODE_L1_HTTP_POLL_INTERVAL: &str = "500ms";
 const OP_BATCHER_MAX_CHANNEL_DURATION_L1_BLOCKS: &str = "4";
 const OP_PROPOSER_PERMISSIONED_GAME_TYPE: &str = "1";
+const OP_TXMGR_NETWORK_TIMEOUT: &str = "30s";
+const OP_TXMGR_RESUBMISSION_TIMEOUT: &str = "5m";
 const CONDUCTOR_RPC_PORT: u16 = 8545;
 const CONDUCTOR_WS_PORT: u16 = 8546;
 const CONDUCTOR_CONSENSUS_PORT: u16 = 50050;
 const CONDUCTOR_METRICS_PORT: u16 = 7300;
+const CONDUCTOR_HEALTHCHECK_INTERVAL_SECS: &str = "5";
+const CONDUCTOR_HEALTHCHECK_UNSAFE_INTERVAL_SECS: &str = "300";
 const SERVICE_RPC_PORT: u16 = 8545;
 const SERVICE_METRICS_PORT: u16 = 7300;
 
@@ -83,17 +88,17 @@ const PBH_DISABLED_SIGNATURE_AGGREGATOR: &str = "0x00000000000000000000000000000
 
 #[derive(Debug)]
 pub struct FullStackWorldDevnet {
-    _tempdir: TempDir,
-    l1: L1DevChain,
-    sequencers: Vec<SequencerService>,
-    _op_nodes: Vec<OpNodeService>,
-    _conductors: Vec<ConductorService>,
     _batcher: Option<ContainerService>,
     _proposer: Option<ContainerService>,
     _challenger: Option<ContainerService>,
+    _conductors: Vec<ConductorService>,
+    _op_nodes: Vec<OpNodeService>,
+    sequencers: Vec<SequencerService>,
     observability: Option<ObservabilityStack>,
+    l1: L1DevChain,
     components: Vec<DevnetComponent>,
     removed_services: Vec<DevnetComponent>,
+    _tempdir: TempDir,
 }
 
 #[derive(Debug)]
@@ -324,6 +329,7 @@ impl FullStackWorldDevnet {
         }
 
         configure_conductor_cluster(&conductors).await?;
+        wait_for_conductor_health(&conductors).await?;
         wait_for_l2_blocks_with_logs(
             &sequencers[0].rpc_url,
             2,
@@ -418,17 +424,17 @@ impl FullStackWorldDevnet {
         );
 
         Ok(Self {
-            _tempdir: artifacts.workdir,
-            l1,
-            sequencers,
-            _op_nodes: op_nodes,
-            _conductors: conductors,
             _batcher: batcher,
             _proposer: proposer,
             _challenger: challenger,
+            _conductors: conductors,
+            _op_nodes: op_nodes,
+            sequencers,
             observability,
+            l1,
             components,
             removed_services: topology.removed_services,
+            _tempdir: artifacts.workdir,
         })
     }
 
@@ -935,8 +941,8 @@ fn patch_rollup_l1_hash(rollup_path: &Path, hash: &str) -> Result<()> {
         .wrap_err("failed to write rollup config with actual L1 genesis hash")
 }
 
-fn plan_sequencer(index: usize) -> Result<SequencerPlan> {
-    let p2p_secret_key = devnet_private_key(10_000 + index as u64);
+fn plan_sequencer(_index: usize) -> Result<SequencerPlan> {
+    let p2p_secret_key = random_p2p_secret_key();
     let p2p_host_port = reserve_host_port()?;
     let trusted_peer = devnet_enode(&p2p_secret_key, p2p_host_port)?;
     Ok(SequencerPlan {
@@ -1145,7 +1151,8 @@ async fn connect_execution_peers(sequencers: &[SequencerService]) -> Result<()> 
         nodes = sequencers.len(),
         min_peers_per_node, min_total_peer_connections, "waiting for world-chain EL peer graph"
     );
-    let counts = retry_until(Duration::from_secs(60), Duration::from_millis(500), || async {
+    let counts = retry_until(Duration::from_secs(120), Duration::from_millis(500), || async {
+        redial_execution_peers(sequencers, &enodes).await;
         let counts = execution_peer_counts(sequencers).await?;
         let total: u64 = counts.iter().map(|(_, connected)| *connected).sum();
         let every_node_connected = counts
@@ -1169,6 +1176,27 @@ async fn connect_execution_peers(sequencers: &[SequencerService]) -> Result<()> 
         "world-chain EL trusted peer graph connected"
     );
     Ok(())
+}
+
+async fn redial_execution_peers(sequencers: &[SequencerService], enodes: &[String]) {
+    for (source_index, source) in sequencers.iter().enumerate() {
+        for (target_index, target) in sequencers.iter().enumerate() {
+            if source_index == target_index {
+                continue;
+            }
+            if let Err(err) = add_execution_peer_once(source, &enodes[target_index])
+                .await
+                .wrap_err_with(|| {
+                    format!(
+                        "failed to redial {} as trusted EL peer of {}",
+                        target.id, source.id
+                    )
+                })
+            {
+                debug!(%err);
+            }
+        }
+    }
 }
 
 async fn execution_peer_counts(sequencers: &[SequencerService]) -> Result<Vec<(String, u64)>> {
@@ -1195,23 +1223,7 @@ async fn add_execution_peer(
 ) -> Result<()> {
     retry_until(Duration::from_secs(30), Duration::from_millis(500), || {
         let enode = enode.to_string();
-        async move {
-            let trusted = json_rpc(
-                &source.rpc_url,
-                "admin_addTrustedPeer",
-                json!([enode.clone()]),
-            )
-            .await?;
-            if trusted.as_bool() == Some(false) {
-                bail!("admin_addTrustedPeer returned false")
-            }
-
-            let added = json_rpc(&source.rpc_url, "admin_addPeer", json!([enode])).await?;
-            if added.as_bool() == Some(false) {
-                bail!("admin_addPeer returned false")
-            }
-            Ok(())
-        }
+        async move { add_execution_peer_once(source, &enode).await }
     })
     .await
     .wrap_err_with(|| {
@@ -1220,6 +1232,24 @@ async fn add_execution_peer(
             target.id, source.id
         )
     })
+}
+
+async fn add_execution_peer_once(source: &SequencerService, enode: &str) -> Result<()> {
+    let trusted = json_rpc(
+        &source.rpc_url,
+        "admin_addTrustedPeer",
+        json!([enode.to_string()]),
+    )
+    .await?;
+    if trusted.as_bool() == Some(false) {
+        bail!("admin_addTrustedPeer returned false")
+    }
+
+    let added = json_rpc(&source.rpc_url, "admin_addPeer", json!([enode])).await?;
+    if added.as_bool() == Some(false) {
+        bail!("admin_addPeer returned false")
+    }
+    Ok(())
 }
 
 fn enode_with_host_port(enode: &str, host: &str, port: u16) -> Result<String> {
@@ -1277,7 +1307,7 @@ async fn plan_op_nodes(
 ) -> Result<Vec<OpNodePlan>> {
     let mut plans = Vec::with_capacity(count);
     for index in 0..count {
-        let private_key = devnet_private_key(20_000 + index as u64);
+        let private_key = random_p2p_secret_key();
         let filename = format!("op-node-{index}-p2p-priv.txt");
         fs::write(workdir.join(&filename), &private_key)
             .wrap_err_with(|| format!("failed to write op-node P2P key {filename}"))?;
@@ -1358,8 +1388,13 @@ async fn op_node_peer_id(image: &ContainerImage, private_key: &str) -> Result<St
     Ok(peer_id.to_string())
 }
 
-fn devnet_private_key(seed: u64) -> String {
-    format!("{:064x}", seed.max(1))
+fn random_p2p_secret_key() -> String {
+    loop {
+        let bytes = rand::rng().random::<[u8; 32]>();
+        if SecretKey::from_byte_array(&bytes).is_ok() {
+            return hex::encode(bytes);
+        }
+    }
 }
 
 fn devnet_enode(secret_key_hex: &str, port: u16) -> Result<String> {
@@ -1411,11 +1446,11 @@ async fn start_conductor(
         "--rollup.config".to_string(),
         "/work/rollup.json".to_string(),
         "--healthcheck.interval".to_string(),
-        "1".to_string(),
+        CONDUCTOR_HEALTHCHECK_INTERVAL_SECS.to_string(),
         "--healthcheck.min-peer-count".to_string(),
         min_peer_count,
         "--healthcheck.unsafe-interval".to_string(),
-        "30".to_string(),
+        CONDUCTOR_HEALTHCHECK_UNSAFE_INTERVAL_SECS.to_string(),
         "--metrics.enabled".to_string(),
         "--metrics.addr".to_string(),
         "0.0.0.0".to_string(),
@@ -1746,6 +1781,32 @@ async fn configure_conductor_cluster(conductors: &[ConductorService]) -> Result<
     Ok(())
 }
 
+async fn wait_for_conductor_health(conductors: &[ConductorService]) -> Result<()> {
+    for conductor in conductors {
+        retry_until(
+            Duration::from_secs(90),
+            Duration::from_millis(500),
+            || async {
+                let healthy =
+                    conductor_bool(&conductor.rpc_url, "conductor_sequencerHealthy").await?;
+                if healthy {
+                    Ok(())
+                } else {
+                    bail!("{} sequencer is not healthy yet", conductor.id)
+                }
+            },
+        )
+        .await
+        .wrap_err_with(|| format!("{} never became sequencer-healthy", conductor.id))?;
+    }
+
+    info!(
+        count = conductors.len(),
+        "op-conductor sequencer health checks passed"
+    );
+    Ok(())
+}
+
 async fn wait_for_conductor_leader(bootstrap: &ConductorService, timeout: Duration) -> Result<()> {
     if let Err(err) = retry_until(timeout, Duration::from_millis(500), || async {
         let leader = conductor_bool(&bootstrap.rpc_url, "conductor_leader").await?;
@@ -1836,6 +1897,10 @@ async fn start_batcher(
         "0".to_string(),
         "--num-confirmations".to_string(),
         "1".to_string(),
+        "--network-timeout".to_string(),
+        OP_TXMGR_NETWORK_TIMEOUT.to_string(),
+        "--resubmission-timeout".to_string(),
+        OP_TXMGR_RESUBMISSION_TIMEOUT.to_string(),
         "--rpc.addr".to_string(),
         "0.0.0.0".to_string(),
         "--rpc.port".to_string(),
@@ -1883,6 +1948,12 @@ async fn start_proposer(
         "--poll-interval".to_string(),
         "1s".to_string(),
         "--allow-non-finalized".to_string(),
+        "--num-confirmations".to_string(),
+        "1".to_string(),
+        "--network-timeout".to_string(),
+        OP_TXMGR_NETWORK_TIMEOUT.to_string(),
+        "--resubmission-timeout".to_string(),
+        OP_TXMGR_RESUBMISSION_TIMEOUT.to_string(),
         "--rpc.addr".to_string(),
         "0.0.0.0".to_string(),
         "--rpc.port".to_string(),
@@ -2648,7 +2719,7 @@ mod tests {
 
     #[test]
     fn derives_deterministic_devnet_enode() {
-        let enode = devnet_enode(&devnet_private_key(10_000), 30_303).unwrap();
+        let enode = devnet_enode(&format!("{:064x}", 10_000), 30_303).unwrap();
 
         assert_eq!(
             enode,
