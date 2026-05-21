@@ -1,0 +1,44 @@
+[package]
+name = "world-chain-devnet"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+world-chain-chainspec.workspace = true
+world-chain-node.workspace = true
+world-chain-primitives.workspace = true
+world-chain-rpc.workspace = true
+world-chain-test-utils.workspace = true
+
+alloy-provider.workspace = true
+alloy-eips.workspace = true
+alloy-genesis.workspace = true
+alloy-hardforks.workspace = true
+alloy-primitives.workspace = true
+
+base64.workspace = true
+ed25519-dalek.workspace = true
+eyre.workspace = true
+flate2 = "1"
+op-alloy-consensus.workspace = true
+reth-chainspec.workspace = true
+reth-e2e-test-utils.workspace = true
+reth-node-api.workspace = true
+reth-optimism-node = { workspace = true, features = ["test-utils"] }
+reth-optimism-payload-builder.workspace = true
+reth-tasks.workspace = true
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+testcontainers.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url.workspace = true
