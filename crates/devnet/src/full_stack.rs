@@ -74,8 +74,8 @@ const FLASHBLOCKS_BUILDER_KEYS: [&str; 3] = [
     "2bf67f0541606bbffe221c9f00d1d5eddba777c2caa9e2171eae6a2100fe2f70",
     "09dba52ebb77d2981aa41f0206cfff58d42ef02918e3c5c396fb74ba7ae7e51b",
 ];
-const FLASHBLOCKS_DEV_AUTHORIZER_VK: &str =
-    "97eea74d4b77aae6093865aee40011bee36f8495d521786bf92f4c9f410aa68f";
+const FLASHBLOCKS_DEV_AUTHORIZER_SK: &str =
+    "0000000000000000000000000000000000000000000000000000000000000000";
 const JWT_SECRET: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const PBH_DISABLED_ENTRYPOINT: &str = "0x000000000000000000000000000000000000dEaD";
 const PBH_DISABLED_WORLD_ID: &str = "0x000000000000000000000000000000000000dEa1";
@@ -1036,10 +1036,11 @@ async fn start_world_chain_el(
         "--pbh.signature-aggregator".to_string(),
         PBH_DISABLED_SIGNATURE_AGGREGATOR.to_string(),
         "--flashblocks.enabled".to_string(),
-        "--flashblocks.authorizer-vk".to_string(),
-        FLASHBLOCKS_DEV_AUTHORIZER_VK.to_string(),
         "--flashblocks.builder-sk".to_string(),
         builder_key.to_string(),
+        "--flashblocks.override-authorizer-sk".to_string(),
+        FLASHBLOCKS_DEV_AUTHORIZER_SK.to_string(),
+        "--flashblocks.force-publish".to_string(),
         "--flashblocks.interval".to_string(),
         "200".to_string(),
         "--flashblocks.recommit-interval".to_string(),
@@ -1125,38 +1126,53 @@ async fn connect_execution_peers(sequencers: &[SequencerService]) -> Result<()> 
         }
     }
 
-    let expected = sequencers.len().saturating_sub(1) as u64;
+    let min_peers_per_node = u64::from(sequencers.len() > 1);
+    let min_total_peer_connections = sequencers.len().saturating_sub(1) as u64 * 2;
     info!(
         nodes = sequencers.len(),
-        expected_peers_per_node = expected,
-        "waiting for world-chain EL peer mesh"
+        min_peers_per_node, min_total_peer_connections, "waiting for world-chain EL peer graph"
     );
-    for sequencer in sequencers {
-        retry_until(
-            Duration::from_secs(60),
-            Duration::from_millis(500),
-            || async {
-                let peer_count = json_rpc(&sequencer.rpc_url, "net_peerCount", json!([])).await?;
-                let connected = json_rpc_quantity_to_u64(&peer_count)?;
-                if connected >= expected {
-                    Ok(())
-                } else {
-                    bail!(
-                        "{} has {connected} connected EL peers, expected {expected}",
-                        sequencer.id
-                    )
-                }
-            },
-        )
-        .await
-        .wrap_err_with(|| format!("EL trusted peer mesh did not form for {}", sequencer.id))?;
-    }
+    let counts = retry_until(Duration::from_secs(60), Duration::from_millis(500), || async {
+        let counts = execution_peer_counts(sequencers).await?;
+        let total: u64 = counts.iter().map(|(_, connected)| *connected).sum();
+        let every_node_connected = counts
+            .iter()
+            .all(|(_, connected)| *connected >= min_peers_per_node);
+        if every_node_connected && total >= min_total_peer_connections {
+            Ok(counts)
+        } else {
+            bail!(
+                "EL peer graph is not connected yet: {} (need every node >= {min_peers_per_node}, total >= {min_total_peer_connections})",
+                peer_counts_summary(&counts)
+            )
+        }
+    })
+    .await
+    .wrap_err("EL trusted peer graph did not form")?;
 
     info!(
         count = sequencers.len(),
-        "world-chain EL trusted peer mesh connected"
+        peer_counts = %peer_counts_summary(&counts),
+        "world-chain EL trusted peer graph connected"
     );
     Ok(())
+}
+
+async fn execution_peer_counts(sequencers: &[SequencerService]) -> Result<Vec<(String, u64)>> {
+    let mut counts = Vec::with_capacity(sequencers.len());
+    for sequencer in sequencers {
+        let peer_count = json_rpc(&sequencer.rpc_url, "net_peerCount", json!([])).await?;
+        counts.push((sequencer.id.clone(), json_rpc_quantity_to_u64(&peer_count)?));
+    }
+    Ok(counts)
+}
+
+fn peer_counts_summary(counts: &[(String, u64)]) -> String {
+    counts
+        .iter()
+        .map(|(id, connected)| format!("{id}={connected}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 async fn add_execution_peer(

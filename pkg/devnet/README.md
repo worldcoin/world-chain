@@ -71,6 +71,10 @@ All native presets sequence directly with flashblocks enabled by default. The ne
 does not wire rollup-boost or tx-proxy. PBH is disabled for native World Chain execution nodes with
 zero reserved PBH blockspace and an undeployed sentinel PBH entrypoint.
 
+Because rollup-boost is not present, local flashblocks use the node's dev-only override authorizer
+and force-publish mode. `op-node` still drives normal Engine API payload jobs, while the native
+World Chain EL self-authorizes flashblock publication for the active local sequencer.
+
 World contract deployment is intentionally deferred. `FeeEscrow`, `FeeRecipient`, PBH contracts,
 rollup-boost, tx-proxy, and rundler are not part of the native default HA path.
 
