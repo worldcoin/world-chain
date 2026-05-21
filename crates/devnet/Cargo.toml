@@ -27,6 +27,7 @@ base64.workspace = true
 ed25519-dalek.workspace = true
 eyre.workspace = true
 flate2 = "1"
+futures.workspace = true
 op-alloy-consensus.workspace = true
 reth-chainspec.workspace = true
 reth-e2e-test-utils.workspace = true

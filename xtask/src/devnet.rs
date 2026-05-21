@@ -1,6 +1,6 @@
 use std::{
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command as StdCommand, Stdio},
     str::FromStr,
     time::{Duration, Instant},
@@ -13,8 +13,9 @@ use tracing::{info, warn};
 use world_chain_chainspec::WorldChainHardfork;
 use world_chain_devnet::{
     DevnetComponent, DevnetPortMode, HaSequencerConfig, ObservabilityConfig,
-    WorldChainHardforkConfig, WorldDevnetBuilder, WorldDevnetPreset,
+    WorldChainHardforkConfig, WorldDevnet, WorldDevnetBuilder, WorldDevnetPreset,
 };
+use world_chain_test_utils::DEV_CHAIN_ID;
 
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
@@ -138,11 +139,20 @@ pub async fn run(args: Args) -> Result<()> {
     }
 }
 
+pub fn should_reset_log(args: &Args) -> bool {
+    matches!(
+        &args.command,
+        Command::Up(args)
+            if !args.detach || std::env::var_os("WORLD_CHAIN_DEVNET_BACKGROUND").is_some()
+    )
+}
+
 async fn up(args: UpArgs) -> Result<()> {
     if args.detach && !args.print_topology {
         return spawn_background(args).await;
     }
     let _pid_file_guard = BackgroundPidFileGuard::from_env();
+    remove_file_if_exists(&devnet_endpoints_path())?;
 
     let mut hardforks = args
         .latest_hardfork
@@ -220,6 +230,7 @@ async fn up(args: UpArgs) -> Result<()> {
             return Ok(());
         }
     };
+    write_endpoints_file(&devnet, &devnet_endpoints_path())?;
 
     let signal_task = tokio::spawn(async move {
         match ctrl_c.await {
@@ -250,6 +261,8 @@ async fn spawn_background(args: UpArgs) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
 
+    reset_devnet_start_files()?;
+
     let exe = std::env::current_exe()?;
     let log_path = devnet_log_path();
     let mut command = StdCommand::new(exe);
@@ -273,6 +286,7 @@ async fn spawn_background(args: UpArgs) -> Result<()> {
         pid,
         pid_file = %pid_path.display(),
         log_file = %log_path.display(),
+        endpoints_file = %devnet_endpoints_path().display(),
         "started World Chain devnet in the background"
     );
     Ok(())
@@ -376,6 +390,69 @@ fn devnet_log_path() -> PathBuf {
     std::env::var_os("WORLD_CHAIN_DEVNET_LOG_FILE")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("target/devnet/logs/devnet.log"))
+}
+
+fn devnet_endpoints_path() -> PathBuf {
+    std::env::var_os("WORLD_CHAIN_DEVNET_ENDPOINTS_FILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("target/devnet/endpoints.json"))
+}
+
+fn reset_devnet_start_files() -> Result<()> {
+    remove_file_if_exists(&devnet_log_path())?;
+    remove_file_if_exists(&devnet_endpoints_path())?;
+    Ok(())
+}
+
+fn remove_file_if_exists(path: &Path) -> Result<()> {
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+fn write_endpoints_file(devnet: &WorldDevnet, path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let components: Vec<_> = devnet
+        .components()
+        .iter()
+        .map(|component| {
+            serde_json::json!({
+                "id": &component.id,
+                "kind": component.kind.as_str(),
+                "status": component.status.as_str(),
+                "image": component.image.as_ref().map(|image| image.reference()),
+                "endpoints": component.endpoints.iter().map(|endpoint| {
+                    serde_json::json!({
+                        "name": &endpoint.name,
+                        "url": &endpoint.url,
+                    })
+                }).collect::<Vec<_>>(),
+                "notes": &component.notes,
+            })
+        })
+        .collect();
+
+    let endpoints = serde_json::json!({
+        "preset": format!("{:?}", devnet.preset()),
+        "chain_id": DEV_CHAIN_ID,
+        "primary": {
+            "l1_rpc_url": devnet.l1_rpc_url(),
+            "l2_rpc_url": devnet.l2_rpc_url(),
+            "sequencer_rpc_url": devnet.sequencer_rpc_url(),
+            "flashblocks_url": devnet.flashblocks_url(),
+            "prometheus_url": devnet.prometheus_url(),
+            "grafana_url": devnet.grafana_url(),
+        },
+        "components": components,
+    });
+
+    fs::write(path, serde_json::to_vec_pretty(&endpoints)?)?;
+    info!(path = %path.display(), "wrote World Chain devnet endpoints file");
+    Ok(())
 }
 
 fn read_pid(path: &PathBuf) -> Result<Option<u32>> {

@@ -13957,6 +13957,7 @@ dependencies = [
  "color-eyre",
  "ed25519-dalek",
  "flate2",
+ "futures",
  "op-alloy-consensus",
  "reqwest 0.12.28",
  "reth-chainspec",

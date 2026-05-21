@@ -14,6 +14,7 @@ use alloy_provider::{Provider, ProviderBuilder};
 use base64::prelude::{BASE64_STANDARD, Engine};
 use eyre::eyre::{Context, Result, bail, eyre};
 use flate2::read::GzDecoder;
+use futures::future::try_join_all;
 use op_alloy_consensus::{encode_holocene_extra_data, encode_jovian_extra_data};
 use reth_chainspec::EthChainSpec;
 use serde_json::{Value, json};
@@ -45,6 +46,9 @@ const ANVIL_RPC_PORT: u16 = 8545;
 const OP_NODE_RPC_PORT: u16 = 9545;
 const OP_NODE_METRICS_PORT: u16 = 7300;
 const OP_NODE_P2P_PORT: u16 = 9222;
+const OP_NODE_L1_HTTP_POLL_INTERVAL: &str = "500ms";
+const OP_BATCHER_MAX_CHANNEL_DURATION_L1_BLOCKS: &str = "4";
+const OP_PROPOSER_PERMISSIONED_GAME_TYPE: &str = "1";
 const CONDUCTOR_RPC_PORT: u16 = 8545;
 const CONDUCTOR_WS_PORT: u16 = 8546;
 const CONDUCTOR_CONSENSUS_PORT: u16 = 50050;
@@ -223,10 +227,10 @@ impl FullStackWorldDevnet {
         );
 
         let sequencer_count = config.sequencer_count.max(1) as usize;
-        let mut sequencers = Vec::with_capacity(sequencer_count);
-        for index in 0..sequencer_count {
-            sequencers.push(start_world_chain_el(index, &workdir_path).await?);
-        }
+        let sequencers = try_join_all(
+            (0..sequencer_count).map(|index| start_world_chain_el(index, &workdir_path)),
+        )
+        .await?;
         connect_execution_peers(&sequencers).await?;
 
         let mut conductor_plans = Vec::with_capacity(sequencer_count);
@@ -237,22 +241,22 @@ impl FullStackWorldDevnet {
         let op_node_plans = plan_op_nodes(sequencer_count, &workdir_path, &config.images.op_node)
             .await
             .wrap_err("failed to plan op-node trusted peer mesh")?;
-        let mut op_nodes = Vec::with_capacity(sequencer_count);
-        for index in 0..sequencer_count {
-            op_nodes.push(
-                start_op_node(
-                    index,
-                    &workdir_path,
-                    &config.images.op_node,
-                    &op_node_plans[index],
-                    &op_node_static_peers(&op_node_plans, index),
-                    &l1_internal_rpc,
-                    &sequencers[index],
-                    &conductor_plans[index].rpc_url,
-                )
-                .await?,
-            );
-        }
+        let op_node_static_peers: Vec<_> = (0..sequencer_count)
+            .map(|index| op_node_static_peers(&op_node_plans, index))
+            .collect();
+        let op_nodes = try_join_all((0..sequencer_count).map(|index| {
+            start_op_node(
+                index,
+                &workdir_path,
+                &config.images.op_node,
+                &op_node_plans[index],
+                &op_node_static_peers[index],
+                &l1_internal_rpc,
+                &sequencers[index],
+                &conductor_plans[index].rpc_url,
+            )
+        }))
+        .await?;
         connect_op_node_peers(&op_nodes).await?;
 
         let mut conductors = Vec::with_capacity(sequencer_count);
@@ -307,25 +311,19 @@ impl FullStackWorldDevnet {
         let l2_rpc_internal = host_internal_url(&sequencers[0].rpc_url)?;
         let game_factory = l1_address(&artifacts.l1_addresses, "DisputeGameFactoryProxy")?;
 
-        let batcher = Some(
-            start_batcher(
-                &config.images.op_batcher,
-                &l1_internal_rpc,
-                &conductor_rpc_internal,
-            )
-            .await?,
-        );
-        let proposer = Some(
-            start_proposer(
-                &config.images.op_proposer,
-                &l1_internal_rpc,
-                &conductor_rpc_internal,
-                &game_factory,
-            )
-            .await?,
-        );
-        let challenger = if config.op_challenger {
-            Some(
+        let (batcher, proposer, challenger) = if config.op_challenger {
+            let (batcher, proposer, challenger) = tokio::try_join!(
+                start_batcher(
+                    &config.images.op_batcher,
+                    &l1_internal_rpc,
+                    &conductor_rpc_internal,
+                ),
+                start_proposer(
+                    &config.images.op_proposer,
+                    &l1_internal_rpc,
+                    &conductor_rpc_internal,
+                    &game_factory,
+                ),
                 start_challenger(
                     &config.images.op_challenger,
                     &workdir_path,
@@ -333,11 +331,24 @@ impl FullStackWorldDevnet {
                     &l2_rpc_internal,
                     &conductor_rpc_internal,
                     &game_factory,
-                )
-                .await?,
-            )
+                ),
+            )?;
+            (Some(batcher), Some(proposer), Some(challenger))
         } else {
-            None
+            let (batcher, proposer) = tokio::try_join!(
+                start_batcher(
+                    &config.images.op_batcher,
+                    &l1_internal_rpc,
+                    &conductor_rpc_internal,
+                ),
+                start_proposer(
+                    &config.images.op_proposer,
+                    &l1_internal_rpc,
+                    &conductor_rpc_internal,
+                    &game_factory,
+                ),
+            )?;
+            (Some(batcher), Some(proposer), None)
         };
 
         let mut metrics_targets = Vec::new();
@@ -1371,6 +1382,8 @@ async fn start_op_node(
         l1_rpc.to_string(),
         "--l1.rpckind".to_string(),
         "basic".to_string(),
+        "--l1.http-poll-interval".to_string(),
+        OP_NODE_L1_HTTP_POLL_INTERVAL.to_string(),
         "--l1.beacon.ignore".to_string(),
         "--l2".to_string(),
         l2_engine_rpc,
@@ -1721,6 +1734,8 @@ async fn start_batcher(
         "calldata".to_string(),
         "--poll-interval".to_string(),
         "1s".to_string(),
+        "--max-channel-duration".to_string(),
+        OP_BATCHER_MAX_CHANNEL_DURATION_L1_BLOCKS.to_string(),
         "--sub-safety-margin".to_string(),
         "0".to_string(),
         "--num-confirmations".to_string(),
@@ -1763,6 +1778,8 @@ async fn start_proposer(
         rollup_rpc.to_string(),
         "--game-factory-address".to_string(),
         game_factory.to_string(),
+        "--game-type".to_string(),
+        OP_PROPOSER_PERMISSIONED_GAME_TYPE.to_string(),
         "--private-key".to_string(),
         PROPOSER_PRIVATE_KEY.to_string(),
         "--proposal-interval".to_string(),
