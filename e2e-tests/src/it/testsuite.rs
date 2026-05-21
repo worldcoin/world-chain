@@ -3116,7 +3116,10 @@ async fn test_wip1001_tx_rejected_at_rpc_decode() -> eyre::Result<()> {
         max_fee_per_gas: 0x4a817c800,
         gas_limit: 44_386,
         world_chain_account: address!("000000000000000000000000000000000000001d"),
-        session_verifier: address!("00000000000000000000000000000000000000aa"),
+        session_verifier_instance: hex!(
+            "11111111111111111111111100000000000000000000000000000000000000aa"
+        )
+        .into(),
         to: address!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into(),
         value: U256::from(1u64),
         input: hex!("a22cb465").into(),
