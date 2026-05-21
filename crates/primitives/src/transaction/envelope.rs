@@ -950,7 +950,10 @@ mod tests {
             max_fee_per_gas: 4_000_000_000,
             gas_limit: 100_000,
             world_chain_account: address!("000000000000000000000000000000000000001d"),
-            session_verifier: address!("00000000000000000000000000000000000000aa"),
+            session_verifier_instance: hex!(
+                "00000000000000000000000000000000000000aa111111111111111111111111"
+            )
+            .into(),
             to: address!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into(),
             value: U256::from(42u64),
             input: hex!("deadbeef").into(),

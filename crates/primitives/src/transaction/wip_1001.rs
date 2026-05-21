@@ -48,8 +48,8 @@ pub struct TxWip1001 {
     pub gas_limit: u64,
     /// The World Chain Account.
     pub world_chain_account: Address,
-    /// The session verifier.
-    pub session_verifier: Address,
+    /// The session verifier instance.
+    pub session_verifier_instance: B256,
     /// Target of the message call, or `Create` for contract creation.
     #[serde(default)]
     pub to: TxKind,
@@ -73,7 +73,7 @@ impl TxWip1001 {
             + self.max_fee_per_gas.length()
             + self.gas_limit.length()
             + self.world_chain_account.length()
-            + self.session_verifier.length()
+            + self.session_verifier_instance.length()
             + self.to.length()
             + self.value.length()
             + self.input.0.length()
@@ -88,7 +88,7 @@ impl TxWip1001 {
         self.max_fee_per_gas.encode(out);
         self.gas_limit.encode(out);
         self.world_chain_account.encode(out);
-        self.session_verifier.encode(out);
+        self.session_verifier_instance.encode(out);
         self.to.encode(out);
         self.value.encode(out);
         self.input.0.encode(out);
@@ -105,7 +105,7 @@ impl TxWip1001 {
             max_fee_per_gas: Decodable::decode(buf)?,
             gas_limit: Decodable::decode(buf)?,
             world_chain_account: Decodable::decode(buf)?,
-            session_verifier: Decodable::decode(buf)?,
+            session_verifier_instance: Decodable::decode(buf)?,
             to: Decodable::decode(buf)?,
             value: Decodable::decode(buf)?,
             input: Decodable::decode(buf)?,
@@ -664,7 +664,10 @@ mod tests {
             max_fee_per_gas: 0x4a817c800,
             gas_limit: 44386,
             world_chain_account: address!("000000000000000000000000000000000000001d"),
-            session_verifier: address!("00000000000000000000000000000000000000aa"),
+            session_verifier_instance: hex!(
+                "00000000000000000000000000000000000000aa111111111111111111111111"
+            )
+            .into(),
             to: address!("6069a6c32cf691f5982febae4faf8a6f3ab2f0f6").into(),
             value: U256::from(1u64),
             input: hex!("a22cb465").into(),
