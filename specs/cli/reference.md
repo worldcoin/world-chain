@@ -227,4 +227,9 @@ Flashblocks:
       --worldchain.disable-bootnodes
           Disable the default World Chain bootnodes
 
+      --worldchain.enable-tropo-wip1001-placeholder
+          Enable placeholder Tropo/WIP-1001 activation parameters for dev/test networks.
+
+          Rejected on World mainnet and World Sepolia.
+
 ```

@@ -132,10 +132,11 @@ impl WorldChainSpec {
             Some(NamedChain::World | NamedChain::WorldSepolia)
         );
 
-        if is_world_production_chain && let Some(config) = self.tropo_wip1001_parameters {
-            if Some(config) != tropo_wip1001_parameters_for_chain(self.chain()) {
-                return Err(Wip1001ActivationReadinessError::ProductionConfigMismatch);
-            }
+        if is_world_production_chain
+            && let Some(config) = self.tropo_wip1001_parameters
+            && Some(config) != tropo_wip1001_parameters_for_chain(self.chain())
+        {
+            return Err(Wip1001ActivationReadinessError::ProductionConfigMismatch);
         }
 
         if tropo_scheduled {
