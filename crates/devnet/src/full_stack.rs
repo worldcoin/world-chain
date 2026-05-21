@@ -1,7 +1,7 @@
 use std::{
     fs,
     io::Read,
-    net::TcpListener,
+    net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener},
     path::{Path, PathBuf},
     process::Stdio,
     time::{Duration, Instant},
@@ -17,6 +17,8 @@ use flate2::read::GzDecoder;
 use futures::future::try_join_all;
 use op_alloy_consensus::{encode_holocene_extra_data, encode_jovian_extra_data};
 use reth_chainspec::EthChainSpec;
+use reth_network_peers::NodeRecord;
+use secp256k1::SecretKey;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use testcontainers::{
@@ -105,6 +107,17 @@ struct SequencerService {
     metrics_target: MetricsTarget,
     binary: PathBuf,
     _process: NativeProcess,
+}
+
+#[derive(Clone, Debug)]
+struct SequencerPlan {
+    rpc_host_port: u16,
+    ws_host_port: u16,
+    auth_host_port: u16,
+    metrics_host_port: u16,
+    p2p_host_port: u16,
+    p2p_secret_key: String,
+    trusted_peer: String,
 }
 
 #[derive(Clone, Debug)]
@@ -227,9 +240,22 @@ impl FullStackWorldDevnet {
         );
 
         let sequencer_count = config.sequencer_count.max(1) as usize;
-        let sequencers = try_join_all(
-            (0..sequencer_count).map(|index| start_world_chain_el(index, &workdir_path)),
-        )
+        let sequencer_plans = (0..sequencer_count)
+            .map(plan_sequencer)
+            .collect::<Result<Vec<_>>>()
+            .wrap_err("failed to plan world-chain EL peer mesh")?;
+        let trusted_peers = sequencer_plans
+            .iter()
+            .map(|plan| plan.trusted_peer.clone())
+            .collect::<Vec<_>>();
+        let sequencers = try_join_all((0..sequencer_count).map(|index| {
+            let trusted_peers = trusted_peers
+                .iter()
+                .enumerate()
+                .filter_map(|(peer_index, peer)| (peer_index != index).then_some(peer.clone()))
+                .collect::<Vec<_>>();
+            start_world_chain_el(index, &workdir_path, &sequencer_plans[index], trusted_peers)
+        }))
         .await?;
         connect_execution_peers(&sequencers).await?;
 
@@ -257,7 +283,7 @@ impl FullStackWorldDevnet {
             )
         }))
         .await?;
-        connect_op_node_peers(&op_nodes).await?;
+        wait_for_op_node_peer_mesh(&op_nodes).await?;
 
         let mut conductors = Vec::with_capacity(sequencer_count);
         conductors.push(
@@ -896,7 +922,27 @@ fn patch_rollup_l1_hash(rollup_path: &Path, hash: &str) -> Result<()> {
         .wrap_err("failed to write rollup config with actual L1 genesis hash")
 }
 
-async fn start_world_chain_el(index: usize, workdir: &Path) -> Result<SequencerService> {
+fn plan_sequencer(index: usize) -> Result<SequencerPlan> {
+    let p2p_secret_key = devnet_private_key(10_000 + index as u64);
+    let p2p_host_port = reserve_host_port()?;
+    let trusted_peer = devnet_enode(&p2p_secret_key, p2p_host_port)?;
+    Ok(SequencerPlan {
+        rpc_host_port: reserve_host_port()?,
+        ws_host_port: reserve_host_port()?,
+        auth_host_port: reserve_host_port()?,
+        metrics_host_port: reserve_host_port()?,
+        p2p_host_port,
+        p2p_secret_key,
+        trusted_peer,
+    })
+}
+
+async fn start_world_chain_el(
+    index: usize,
+    workdir: &Path,
+    plan: &SequencerPlan,
+    trusted_peers: Vec<String>,
+) -> Result<SequencerService> {
     let data_dir = workdir.join(format!("l2data-{index}"));
     fs::create_dir_all(&data_dir).wrap_err("failed to create L2 data dir")?;
     let binary = world_chain_binary()?;
@@ -920,11 +966,11 @@ async fn start_world_chain_el(index: usize, workdir: &Path) -> Result<SequencerS
     .await?;
 
     let builder_key = FLASHBLOCKS_BUILDER_KEYS[index % FLASHBLOCKS_BUILDER_KEYS.len()];
-    let rpc_port = reserve_host_port()?;
-    let ws_port = reserve_host_port()?;
-    let auth_port = reserve_host_port()?;
-    let metrics_port = reserve_host_port()?;
-    let p2p_port = reserve_host_port()?;
+    let rpc_port = plan.rpc_host_port;
+    let ws_port = plan.ws_host_port;
+    let auth_port = plan.auth_host_port;
+    let metrics_port = plan.metrics_host_port;
+    let p2p_port = plan.p2p_host_port;
     let genesis_arg = genesis.to_string_lossy().to_string();
     let data_dir_arg = data_dir.to_string_lossy().to_string();
     let jwt_arg = jwt.to_string_lossy().to_string();
@@ -933,8 +979,8 @@ async fn start_world_chain_el(index: usize, workdir: &Path) -> Result<SequencerS
     let auth_port_arg = auth_port.to_string();
     let p2p_port_arg = p2p_port.to_string();
     let metrics_arg = format!("0.0.0.0:{metrics_port}");
-    let p2p_secret_key = devnet_private_key(10_000 + index as u64);
-    let args = vec![
+    let p2p_secret_key = plan.p2p_secret_key.clone();
+    let mut args = vec![
         "node".to_string(),
         "--chain".to_string(),
         genesis_arg,
@@ -969,6 +1015,11 @@ async fn start_world_chain_el(index: usize, workdir: &Path) -> Result<SequencerS
         "--metrics".to_string(),
         metrics_arg,
         "--disable-discovery".to_string(),
+    ];
+    if !trusted_peers.is_empty() {
+        args.extend(["--trusted-peers".to_string(), trusted_peers.join(",")]);
+    }
+    args.extend([
         "--builder.enabled".to_string(),
         "--builder.private-key".to_string(),
         DEVNET_PRIVATE_KEY.to_string(),
@@ -997,7 +1048,7 @@ async fn start_world_chain_el(index: usize, workdir: &Path) -> Result<SequencerS
         "--log.stdout.format".to_string(),
         "log-fmt".to_string(),
         "-vvv".to_string(),
-    ];
+    ]);
 
     let mut process = spawn_native_process(&format!("world-chain-el-{index}"), &binary, &args)
         .wrap_err_with(|| format!("failed to spawn native world-chain EL process {index}"))?;
@@ -1070,29 +1121,16 @@ async fn connect_execution_peers(sequencers: &[SequencerService]) -> Result<()> 
             if source_index == target_index {
                 continue;
             }
-            let enode = enodes[target_index].clone();
-            retry_until(Duration::from_secs(30), Duration::from_millis(500), || {
-                let enode = enode.clone();
-                async move {
-                    let result =
-                        json_rpc(&source.rpc_url, "admin_addTrustedPeer", json!([enode])).await?;
-                    if result.as_bool() == Some(false) {
-                        bail!("admin_addTrustedPeer returned false")
-                    }
-                    Ok(())
-                }
-            })
-            .await
-            .wrap_err_with(|| {
-                format!(
-                    "failed to add {} as trusted EL peer of {}",
-                    target.id, source.id
-                )
-            })?;
+            add_execution_peer(source, target, &enodes[target_index]).await?;
         }
     }
 
     let expected = sequencers.len().saturating_sub(1) as u64;
+    info!(
+        nodes = sequencers.len(),
+        expected_peers_per_node = expected,
+        "waiting for world-chain EL peer mesh"
+    );
     for sequencer in sequencers {
         retry_until(
             Duration::from_secs(60),
@@ -1119,6 +1157,40 @@ async fn connect_execution_peers(sequencers: &[SequencerService]) -> Result<()> 
         "world-chain EL trusted peer mesh connected"
     );
     Ok(())
+}
+
+async fn add_execution_peer(
+    source: &SequencerService,
+    target: &SequencerService,
+    enode: &str,
+) -> Result<()> {
+    retry_until(Duration::from_secs(30), Duration::from_millis(500), || {
+        let enode = enode.to_string();
+        async move {
+            let trusted = json_rpc(
+                &source.rpc_url,
+                "admin_addTrustedPeer",
+                json!([enode.clone()]),
+            )
+            .await?;
+            if trusted.as_bool() == Some(false) {
+                bail!("admin_addTrustedPeer returned false")
+            }
+
+            let added = json_rpc(&source.rpc_url, "admin_addPeer", json!([enode])).await?;
+            if added.as_bool() == Some(false) {
+                bail!("admin_addPeer returned false")
+            }
+            Ok(())
+        }
+    })
+    .await
+    .wrap_err_with(|| {
+        format!(
+            "failed to add {} as trusted and dialed EL peer of {}",
+            target.id, source.id
+        )
+    })
 }
 
 fn enode_with_host_port(enode: &str, host: &str, port: u16) -> Result<String> {
@@ -1259,6 +1331,18 @@ async fn op_node_peer_id(image: &ContainerImage, private_key: &str) -> Result<St
 
 fn devnet_private_key(seed: u64) -> String {
     format!("{:064x}", seed.max(1))
+}
+
+fn devnet_enode(secret_key_hex: &str, port: u16) -> Result<String> {
+    let bytes = hex::decode(secret_key_hex.trim_start_matches("0x"))
+        .wrap_err("failed to decode devnet p2p private key")?;
+    let bytes: [u8; 32] = bytes
+        .try_into()
+        .map_err(|bytes: Vec<u8>| eyre!("expected 32-byte p2p key, got {}", bytes.len()))?;
+    let secret_key =
+        SecretKey::from_byte_array(&bytes).wrap_err("invalid devnet p2p private key")?;
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
+    Ok(NodeRecord::from_secret_key(addr, &secret_key).to_string())
 }
 
 async fn start_conductor(
@@ -1503,7 +1587,7 @@ async fn start_op_node(
     })
 }
 
-async fn connect_op_node_peers(op_nodes: &[OpNodeService]) -> Result<()> {
+async fn wait_for_op_node_peer_mesh(op_nodes: &[OpNodeService]) -> Result<()> {
     if op_nodes.len() <= 1 {
         return Ok(());
     }
@@ -1531,29 +1615,12 @@ async fn connect_op_node_peers(op_nodes: &[OpNodeService]) -> Result<()> {
         }
     }
 
-    for (source_index, source) in op_nodes.iter().enumerate() {
-        for (target_index, target) in op_nodes.iter().enumerate() {
-            if source_index == target_index {
-                continue;
-            }
-            let multiaddr = format!(
-                "/dns4/host.docker.internal/tcp/{}/p2p/{}",
-                target.p2p_host_port, target.peer_id
-            );
-            retry_until(Duration::from_secs(30), Duration::from_millis(500), || {
-                let multiaddr = multiaddr.clone();
-                async move {
-                    json_rpc(&source.rpc_url, "opp2p_connectPeer", json!([multiaddr]))
-                        .await
-                        .map(|_| ())
-                }
-            })
-            .await
-            .wrap_err_with(|| format!("failed to connect {} to {}", source.id, target.id))?;
-        }
-    }
-
     let expected = op_nodes.len().saturating_sub(1) as u64;
+    info!(
+        nodes = op_nodes.len(),
+        expected_peers_per_node = expected,
+        "waiting for op-node static peer mesh"
+    );
     for node in op_nodes {
         retry_until(
             Duration::from_secs(30),
@@ -2548,6 +2615,16 @@ mod tests {
         assert_eq!(json_rpc_quantity_to_u64(&json!("0x0")).unwrap(), 0);
         assert_eq!(json_rpc_quantity_to_u64(&json!("0x2")).unwrap(), 2);
         assert_eq!(json_rpc_quantity_to_u64(&json!(3)).unwrap(), 3);
+    }
+
+    #[test]
+    fn derives_deterministic_devnet_enode() {
+        let enode = devnet_enode(&devnet_private_key(10_000), 30_303).unwrap();
+
+        assert_eq!(
+            enode,
+            "enode://7a36d7efeac579690f7b89c8982329303a02bd710bc87f4eaaf5cfd84c2f6faecdeb2ea308a7e64028781419882b4619644b637acc3ea59824452172e52e24f9@127.0.0.1:30303"
+        );
     }
 
     #[test]

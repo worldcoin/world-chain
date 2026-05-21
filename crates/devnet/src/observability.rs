@@ -7,7 +7,7 @@ use testcontainers::{
     core::{IntoContainerPort, WaitFor},
     runners::AsyncRunner,
 };
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::{
     DevnetPortMode,
@@ -19,6 +19,9 @@ const PROMETHEUS_PORT: u16 = 9090;
 const GRAFANA_PORT: u16 = 3000;
 const GRAFANA_PROMETHEUS_UID: &str = "devnet-prometheus";
 const GRAFANA_DASHBOARD_DIR: &str = "/var/lib/grafana/dashboards/world-chain";
+const RETH_DASHBOARD_URL: &str =
+    "https://raw.githubusercontent.com/paradigmxyz/reth/main/etc/grafana/dashboards/overview.json";
+const RETH_DASHBOARD_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 const FLASHBLOCKS_PAYLOAD_BUILDER_DASHBOARD: &str =
     include_str!("../../../pkg/devnet/grafana/dashboards/flashblocks-payload-builder.json");
 const FLASHBLOCKS_VALIDATION_PIPELINE_DASHBOARD: &str =
@@ -208,6 +211,19 @@ impl ObservabilityStack {
             grafana_image = grafana_image
                 .with_copy_to(format!("{GRAFANA_DASHBOARD_DIR}/{filename}"), dashboard);
         }
+        let mut dashboard_count = WORLD_CHAIN_DASHBOARDS.len();
+        if let Some(dashboard) = fetch_reth_dashboard().await {
+            match provision_grafana_dashboard(&dashboard) {
+                Ok(dashboard) => {
+                    dashboard_count += 1;
+                    grafana_image = grafana_image.with_copy_to(
+                        format!("{GRAFANA_DASHBOARD_DIR}/reth-overview.json"),
+                        dashboard,
+                    );
+                }
+                Err(err) => warn!(%err, "failed to provision downloaded reth dashboard"),
+            }
+        }
 
         let mut grafana_request = grafana_image.with_startup_timeout(Duration::from_secs(90));
         if let Some(host_port) = config.stable_grafana_port {
@@ -232,7 +248,7 @@ impl ObservabilityStack {
         info!(
             %prometheus_url,
             %grafana_url,
-            dashboards = WORLD_CHAIN_DASHBOARDS.len(),
+            dashboards = dashboard_count,
             "devnet observability ready"
         );
 
@@ -319,6 +335,40 @@ fn tail_text(text: &str, max_lines: usize) -> String {
     lines[start..].join("\n")
 }
 
+async fn fetch_reth_dashboard() -> Option<String> {
+    let client = reqwest::Client::builder()
+        .timeout(RETH_DASHBOARD_FETCH_TIMEOUT)
+        .build()
+        .ok()?;
+    match client.get(RETH_DASHBOARD_URL).send().await {
+        Ok(response) if response.status().is_success() => match response.text().await {
+            Ok(dashboard) => {
+                info!(
+                    url = RETH_DASHBOARD_URL,
+                    "downloaded latest reth Grafana dashboard"
+                );
+                Some(dashboard)
+            }
+            Err(err) => {
+                warn!(%err, url = RETH_DASHBOARD_URL, "failed to read downloaded reth Grafana dashboard");
+                None
+            }
+        },
+        Ok(response) => {
+            warn!(
+                status = %response.status(),
+                url = RETH_DASHBOARD_URL,
+                "failed to download latest reth Grafana dashboard"
+            );
+            None
+        }
+        Err(err) => {
+            warn!(%err, url = RETH_DASHBOARD_URL, "failed to download latest reth Grafana dashboard");
+            None
+        }
+    }
+}
+
 fn render_prometheus_config(scrape_interval_secs: u64, targets: &[MetricsTarget]) -> String {
     let mut config = format!(
         "global:\n  scrape_interval: {scrape_interval_secs}s\nscrape_configs:\n  - job_name: prometheus\n    static_configs:\n      - targets: ['127.0.0.1:{PROMETHEUS_PORT}']\n"
@@ -326,13 +376,22 @@ fn render_prometheus_config(scrape_interval_secs: u64, targets: &[MetricsTarget]
 
     for target in targets {
         config.push_str(&format!(
-            "  - job_name: '{}'\n    static_configs:\n      - targets: ['{}']\n",
+            "  - job_name: '{}'\n    static_configs:\n      - targets: ['{}']\n        labels:\n          instance: '{}'\n",
             quote_yaml_scalar(&target.job),
-            quote_yaml_scalar(&target.target)
+            quote_yaml_scalar(&target.target),
+            quote_yaml_scalar(&dashboard_instance_label(&target.job))
         ));
     }
 
     config
+}
+
+fn dashboard_instance_label(job: &str) -> String {
+    if job.starts_with("world-chain-el-") {
+        format!("{job}:9001")
+    } else {
+        job.to_string()
+    }
 }
 
 fn quote_yaml_scalar(value: &str) -> String {
@@ -379,24 +438,30 @@ fn provision_grafana_dashboard(dashboard: &str) -> Result<Vec<u8>> {
         object.remove("__inputs");
         object.insert("id".to_string(), Value::Null);
     }
-    replace_prometheus_datasource_uid(&mut dashboard);
+    replace_dashboard_placeholders(&mut dashboard);
 
     Ok(serde_json::to_vec_pretty(&dashboard)?)
 }
 
-fn replace_prometheus_datasource_uid(value: &mut Value) {
+fn replace_dashboard_placeholders(value: &mut Value) {
     match value {
-        Value::String(value) if value == "${DS_PROMETHEUS}" => {
-            *value = GRAFANA_PROMETHEUS_UID.to_string();
+        Value::String(value) => {
+            if value == "${DS_PROMETHEUS}" || value == "${datasource}" {
+                *value = GRAFANA_PROMETHEUS_UID.to_string();
+            } else if value == "${DS_EXPRESSION}" {
+                *value = "__expr__".to_string();
+            } else if value == "${VAR_INSTANCE_LABEL}" {
+                *value = "job".to_string();
+            }
         }
         Value::Array(values) => {
             for value in values {
-                replace_prometheus_datasource_uid(value);
+                replace_dashboard_placeholders(value);
             }
         }
         Value::Object(values) => {
             for value in values.values_mut() {
-                replace_prometheus_datasource_uid(value);
+                replace_dashboard_placeholders(value);
             }
         }
         _ => {}
@@ -412,7 +477,7 @@ mod tests {
         let config = render_prometheus_config(
             7,
             &[MetricsTarget::new(
-                "world-chain",
+                "world-chain-el-0",
                 "host.docker.internal:9001",
             )],
         );
@@ -420,8 +485,9 @@ mod tests {
         assert!(config.contains("scrape_interval: 7s"));
         assert!(config.contains("job_name: prometheus"));
         assert!(config.contains("127.0.0.1:9090"));
-        assert!(config.contains("job_name: 'world-chain'"));
+        assert!(config.contains("job_name: 'world-chain-el-0'"));
         assert!(config.contains("host.docker.internal:9001"));
+        assert!(config.contains("instance: 'world-chain-el-0:9001'"));
     }
 
     #[test]
@@ -450,5 +516,83 @@ mod tests {
         assert!(!dashboard.contains("__inputs"));
         assert!(!dashboard.contains("${DS_PROMETHEUS}"));
         assert!(dashboard.contains(GRAFANA_PROMETHEUS_UID));
+    }
+
+    #[test]
+    fn grafana_dashboards_keep_dashboard_queries_intact() {
+        let dashboard =
+            provision_grafana_dashboard(FLASHBLOCKS_VALIDATION_PIPELINE_DASHBOARD).unwrap();
+        let dashboard = String::from_utf8(dashboard).unwrap();
+
+        assert!(dashboard.contains("label_values(up{instance=~\\\".*:9001\\\"}, instance)"));
+        assert!(dashboard.contains("instance=~\\\"$node\\\""));
+        assert!(!dashboard.contains("job=~\\\"$node\\\""));
+    }
+
+    #[test]
+    fn reth_dashboard_inputs_are_rewritten_minimally_for_provisioning() {
+        let dashboard = r#"{
+          "__inputs": [
+            {"name": "DS_PROMETHEUS"},
+            {"name": "VAR_INSTANCE_LABEL"}
+          ],
+          "id": 12,
+          "panels": [
+            {
+              "datasource": {"type": "prometheus", "uid": "${datasource}"},
+              "targets": [{"expr": "reth_info{$instance_label=\"$instance\"}"}]
+            }
+          ],
+          "templating": {
+            "list": [
+              {
+                "name": "instance",
+                "current": {},
+                "definition": "label_values(reth_info,$instance_label)",
+                "query": {
+                  "query": "label_values(reth_info,$instance_label)"
+                }
+              },
+              {
+                "name": "instance_label",
+                "current": {
+                  "value": "${VAR_INSTANCE_LABEL}",
+                  "text": "${VAR_INSTANCE_LABEL}"
+                },
+                "query": "${VAR_INSTANCE_LABEL}",
+                "type": "constant"
+              },
+              {
+                "name": "datasource",
+                "query": "prometheus",
+                "type": "datasource"
+              }
+            ]
+          }
+        }"#;
+
+        let dashboard = provision_grafana_dashboard(dashboard).unwrap();
+        let dashboard: Value = serde_json::from_slice(&dashboard).unwrap();
+
+        assert!(dashboard.get("__inputs").is_none());
+        assert!(dashboard.get("id").unwrap().is_null());
+        assert_eq!(
+            dashboard.pointer("/panels/0/datasource/uid").unwrap(),
+            GRAFANA_PROMETHEUS_UID
+        );
+        assert_eq!(
+            dashboard
+                .pointer("/templating/list/1/current/value")
+                .unwrap(),
+            "job"
+        );
+        assert_eq!(
+            dashboard.pointer("/templating/list/1/query").unwrap(),
+            "job"
+        );
+        assert_eq!(
+            dashboard.pointer("/templating/list/0/current").unwrap(),
+            &serde_json::json!({})
+        );
     }
 }

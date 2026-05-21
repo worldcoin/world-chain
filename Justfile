@@ -51,7 +51,7 @@ devnet command='up' *args='':
     if [ "{{command}}" = "up" ]; then
         cargo build -p world-chain
     fi
-    RUST_LOG="${RUST_LOG:-info,engine_driver=info}" cargo run -p xtask -- devnet {{command}} {{args}}
+    RUST_LOG="${RUST_LOG:-info,flashblocks=trace,engine_driver=info}" cargo run -p xtask -- devnet {{command}} {{args}}
 
 # Run stress tests against a live network
 stress *args='':

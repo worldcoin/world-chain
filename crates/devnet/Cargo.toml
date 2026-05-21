@@ -31,11 +31,13 @@ futures.workspace = true
 op-alloy-consensus.workspace = true
 reth-chainspec.workspace = true
 reth-e2e-test-utils.workspace = true
+reth-network-peers = { workspace = true, features = ["secp256k1"] }
 reth-node-api.workspace = true
 reth-optimism-node = { workspace = true, features = ["test-utils"] }
 reth-optimism-payload-builder.workspace = true
 reth-tasks.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+secp256k1 = { version = "0.30.0", default-features = false, features = ["std"] }
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

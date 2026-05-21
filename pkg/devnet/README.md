@@ -214,6 +214,7 @@ Grafana provisions the Prometheus datasource and imports these dashboards into t
 pkg/devnet/grafana/dashboards/flashblocks-payload-builder.json
 pkg/devnet/grafana/dashboards/flashblocks-validation-pipeline.json
 pkg/devnet/grafana/dashboards/flashblocks-p2p.json
+reth-overview.json
 ```
 
 Dashboard coverage:
@@ -221,6 +222,13 @@ Dashboard coverage:
 - `flashblocks-payload-builder.json` for `reth_flashblocks_payload_build_*`.
 - `flashblocks-validation-pipeline.json` for `reth_flashblocks_validation_*`.
 - `flashblocks-p2p.json` for `reth_flashblocks_p2p*` P2P metrics, including peer-scoped `peer_id` series.
+- `reth-overview.json` is downloaded at startup from the upstream Reth dashboard in
+  `paradigmxyz/reth` and minimally patched for the devnet Prometheus datasource.
+
+The devnet does not rewrite dashboard queries or force a default node selection. Prometheus assigns
+stable `instance` labels for World Chain EL metrics, such as `world-chain-el-0:9001`, so the existing
+dashboard variables can be selected manually. If GitHub is unreachable while starting the devnet, the
+upstream Reth dashboard is skipped with a warning and the rest of the devnet still starts.
 
 ## Remaining Gaps
 
