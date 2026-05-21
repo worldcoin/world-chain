@@ -74,7 +74,8 @@ pub enum WorldDevnetPreset {
     /// sequencing path but keeps the component count minimal.
     Minimal,
     /// HA sequencing topology with three direct-sequencing World Chain replicas,
-    /// planned op-node/op-conductor wiring, op-challenger, and observability.
+    /// op-node/op-conductor wiring, and observability. `op-challenger` is
+    /// opt-in until the native devnet generates matching Cannon prestates.
     HaSequencer,
 }
 

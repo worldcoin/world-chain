@@ -129,6 +129,9 @@ pub struct HaSequencerConfig {
     /// Number of sequencer replicas.
     pub sequencer_count: u8,
     /// Whether to include op-challenger in the topology.
+    ///
+    /// Disabled by default because the native devnet does not yet generate the
+    /// Cannon prestates required to play local permissioned dispute games.
     pub op_challenger: bool,
     /// Whether to include Prometheus and Grafana.
     pub observability: ObservabilityConfig,
@@ -144,7 +147,7 @@ impl Default for HaSequencerConfig {
     fn default() -> Self {
         Self {
             sequencer_count: 3,
-            op_challenger: true,
+            op_challenger: false,
             observability: ObservabilityConfig::enabled(),
             images: OpStackImages::default(),
             op_contracts: OpContractDeploymentConfig::default(),
@@ -496,7 +499,7 @@ mod tests {
         assert_eq!(count(DevnetComponentKind::OpConductor), 3);
         assert_eq!(count(DevnetComponentKind::OpBatcher), 1);
         assert_eq!(count(DevnetComponentKind::OpProposer), 1);
-        assert_eq!(count(DevnetComponentKind::OpChallenger), 1);
+        assert_eq!(count(DevnetComponentKind::OpChallenger), 0);
         assert_eq!(count(DevnetComponentKind::Prometheus), 1);
         assert_eq!(count(DevnetComponentKind::Grafana), 1);
         assert_eq!(count(DevnetComponentKind::WorldContractsDeployer), 1);

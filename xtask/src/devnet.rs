@@ -69,7 +69,16 @@ struct UpArgs {
     #[arg(long, default_value_t = 3)]
     sequencers: u8,
 
+    /// Enable op-challenger for local dispute-game playing.
+    ///
+    /// This is disabled by default until the native devnet generates matching
+    /// Cannon prestates for local games.
+    #[arg(long)]
+    op_challenger: bool,
+
     /// Omit op-challenger from the HA topology.
+    ///
+    /// Kept for compatibility; op-challenger is already disabled by default.
     #[arg(long)]
     no_op_challenger: bool,
 
@@ -107,7 +116,7 @@ enum PresetArg {
     DirectSequencer,
     /// Minimal direct-sequencing single-node setup.
     Minimal,
-    /// HA sequencing target topology with op-conductor, op-challenger, and observability.
+    /// HA sequencing target topology with op-conductor and observability.
     #[default]
     HaSequencer,
 }
@@ -178,7 +187,7 @@ async fn up(args: UpArgs) -> Result<()> {
 
     let ha_config = HaSequencerConfig::default()
         .with_sequencer_count(args.sequencers)
-        .with_op_challenger(!args.no_op_challenger)
+        .with_op_challenger(args.op_challenger && !args.no_op_challenger)
         .with_observability(observability.clone());
 
     let mut builder = WorldDevnetBuilder::new()
@@ -216,7 +225,7 @@ async fn up(args: UpArgs) -> Result<()> {
         l1 = !args.no_l1,
         observability = !args.no_observability && (args.observability || preset == WorldDevnetPreset::HaSequencer),
         sequencers = args.sequencers,
-        op_challenger = !args.no_op_challenger,
+        op_challenger = args.op_challenger && !args.no_op_challenger,
         "Starting native World Chain devnet"
     );
 
@@ -359,6 +368,9 @@ fn background_args(args: &UpArgs) -> Vec<String> {
     }
     if args.no_op_challenger {
         argv.push("--no-op-challenger".to_string());
+    }
+    if args.op_challenger {
+        argv.push("--op-challenger".to_string());
     }
     argv.push("--sequencers".to_string());
     argv.push(args.sequencers.to_string());

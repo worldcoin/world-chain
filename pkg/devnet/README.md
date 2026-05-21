@@ -41,7 +41,7 @@ just devnet up --enable-hardfork jovian
 just devnet up --disable-hardfork jovian
 just devnet up --sequencers 3
 just devnet up --block-time-ms 2000
-just devnet up --no-op-challenger
+just devnet up --op-challenger
 just devnet up --no-observability
 ```
 
@@ -64,7 +64,6 @@ The default HA preset starts:
 - Three `op-conductor` containers with a local raft cluster.
 - `op-batcher`.
 - `op-proposer`.
-- `op-challenger`.
 - Prometheus.
 - Grafana with World Chain flashblocks dashboards provisioned.
 
@@ -74,6 +73,10 @@ zero reserved PBH blockspace and an undeployed sentinel PBH entrypoint.
 
 World contract deployment is intentionally deferred. `FeeEscrow`, `FeeRecipient`, PBH contracts,
 rollup-boost, tx-proxy, and rundler are not part of the native default HA path.
+
+`op-challenger` is disabled by default because the native devnet does not yet generate the Cannon
+prestates required to play local permissioned dispute games. Enable it explicitly with
+`just devnet up --op-challenger` when working on challenger/prestate integration.
 
 ## Batcher And Proposer Timing
 
@@ -137,7 +140,8 @@ WORLD_CHAIN_DEVNET_ENDPOINTS_FILE=/tmp/world-devnet-endpoints.json just devnet u
 
 The file includes primary URLs such as `sequencer_rpc_url`, `flashblocks_url`, `prometheus_url`,
 and `grafana_url`, plus per-component endpoints for each EL, op-node, conductor, batcher,
-proposer, challenger, Prometheus, and Grafana service.
+proposer, Prometheus, and Grafana service. If `--op-challenger` is enabled, its endpoint is included
+too.
 
 Process logs are normalized by the devnet wrapper:
 
@@ -189,7 +193,6 @@ l2data-2/static_files
 conductor-0
 conductor-1
 conductor-2
-op-challenger
 prestates
 ```
 
@@ -221,7 +224,7 @@ Dashboard coverage:
 
 ## Remaining Gaps
 
-- Full fault-proof game execution still needs generated Cannon prestates matching the local OP deployment. The current challenger runs and monitors with a lifecycle-owned local prestates directory.
+- Full fault-proof game execution still needs generated Cannon prestates matching the local OP deployment. `op-challenger` is opt-in until that exists.
 - HA failover is wired through op-conductor, but failover behavior is not yet covered by an automated test.
 - Stable ports are available through `--stable-ports`; tests should continue to use dynamic ports.
 - `FeeEscrow` and `FeeRecipient` are not deployed by the native devnet.
