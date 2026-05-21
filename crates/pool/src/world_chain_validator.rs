@@ -173,7 +173,6 @@ where
             }
             .to_outcome(tx);
         }
-        // check whether session verifier is included in the authorized set
         todo!()
     }
 }
