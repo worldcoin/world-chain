@@ -41,7 +41,7 @@ use crate::{
     DevnetComponent, DevnetComponentKind, DevnetComponentStatus, DevnetPortMode, L1DevChain,
     L1DevChainConfig, MetricsTarget, ObservabilityStack, WorldChainHardforkConfig,
     component::ContainerImage,
-    op_stack::{HaSequencerConfig, HaSequencerTopology},
+    op_stack::HaSequencerConfig,
     process_logs::{ProcessLogTarget, container_log_consumer, emit_process_log},
 };
 
@@ -97,7 +97,6 @@ pub struct FullStackWorldDevnet {
     observability: Option<ObservabilityStack>,
     l1: L1DevChain,
     components: Vec<DevnetComponent>,
-    removed_services: Vec<DevnetComponent>,
     _tempdir: TempDir,
 }
 
@@ -215,7 +214,6 @@ impl FullStackWorldDevnet {
         port_mode: DevnetPortMode,
         block_time: Duration,
     ) -> Result<Self> {
-        let topology = HaSequencerTopology::from_config(config.clone());
         let artifacts = generate_op_artifacts(&config, &hardforks).await?;
         let workdir_path = artifacts.workdir.path().to_path_buf();
 
@@ -433,7 +431,6 @@ impl FullStackWorldDevnet {
             observability,
             l1,
             components,
-            removed_services: topology.removed_services,
             _tempdir: artifacts.workdir,
         })
     }
@@ -480,9 +477,7 @@ impl FullStackWorldDevnet {
     }
 
     pub fn components(&self) -> Vec<DevnetComponent> {
-        let mut components = self.components.clone();
-        components.extend(self.removed_services.clone());
-        components
+        self.components.clone()
     }
 
     pub async fn wait_ready(&self) -> Result<()> {
@@ -2322,7 +2317,7 @@ fn build_components(
                 DevnetComponentStatus::Running,
             )
             .with_endpoint("ws", service.flashblocks_url.clone())
-            .with_note("flashblocks enabled by default; rollup-boost is intentionally absent"),
+            .with_note("flashblocks enabled by default"),
         );
     }
 

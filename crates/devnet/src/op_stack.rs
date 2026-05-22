@@ -305,8 +305,6 @@ pub struct HaSequencerTopology {
     pub config: HaSequencerConfig,
     /// Planned component graph.
     pub components: Vec<DevnetComponent>,
-    /// Explicitly removed legacy services.
-    pub removed_services: Vec<DevnetComponent>,
     /// op-conductor runtime configs, one per sequencer.
     pub conductor_configs: Vec<OpConductorConfig>,
     /// op-challenger runtime config.
@@ -436,31 +434,9 @@ impl HaSequencerTopology {
             );
         }
 
-        let removed_services = vec![
-            DevnetComponent::new(
-                "rollup-boost",
-                DevnetComponentKind::RemovedLegacyService,
-                DevnetComponentStatus::Removed,
-            )
-            .with_note("removed from the new default topology; World Chain sequences directly"),
-            DevnetComponent::new(
-                "tx-proxy",
-                DevnetComponentKind::RemovedLegacyService,
-                DevnetComponentStatus::Removed,
-            )
-            .with_note("removed unless a future test independently requires it"),
-            DevnetComponent::new(
-                "rundler",
-                DevnetComponentKind::RemovedLegacyService,
-                DevnetComponentStatus::Removed,
-            )
-            .with_note("deferred with PBH/4337 local-dev flow; PBH contracts are deprecated"),
-        ];
-
         Self {
             config,
             components,
-            removed_services,
             conductor_configs,
             challenger_config,
         }
@@ -497,7 +473,6 @@ mod tests {
         assert!(topology.components.iter().any(|component| component.kind
             == DevnetComponentKind::WorldContractsDeployer
             && component.status == DevnetComponentStatus::Deferred));
-        assert_eq!(topology.removed_services.len(), 3);
         assert!(!topology.config.world_contracts.fee_vaults);
         assert!(!topology.config.world_contracts.pbh_contracts);
     }

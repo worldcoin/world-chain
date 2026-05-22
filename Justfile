@@ -12,12 +12,6 @@ build:
 build-world-chain-bin:
     cargo build -p world-chain
 
-devnet-up: build
-    @just ./pkg/devnet/devnet-up
-
-deploy-contracts:
-    @just ./pkg/contracts/deploy-contracts
-
 test *args='':
     RUST_LOG="info" cargo nextest run --workspace $@
 

@@ -10,45 +10,23 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 STRESS_SCENARIO="${SCRIPT_DIR}/scenarios/stress.toml"
 PRECOMPILE_STRESS_SCENARIO="${SCRIPT_DIR}/scenarios/precompileStress.toml"
 
-KURTOSIS_ENCLAVE="${KURTOSIS_ENCLAVE:-world-chain}"
-KURTOSIS_BUILDER_SERVICE="${KURTOSIS_BUILDER_SERVICE:-op-el-builder-2151908-1-custom-op-node-op-kurtosis}"
-KURTOSIS_TX_PROXY_SERVICE="${KURTOSIS_TX_PROXY_SERVICE:-tx-proxy}"
+ENDPOINTS_FILE="${WORLD_CHAIN_DEVNET_ENDPOINTS_FILE:-target/devnet/endpoints.json}"
+LOCAL_RPC_FALLBACK="${LOCAL_RPC_FALLBACK:-http://localhost:8545}"
 
-LOCAL_BUILDER_FALLBACK="${LOCAL_BUILDER_FALLBACK:-http://localhost:8545}"
-LOCAL_TX_PROXY_FALLBACK="${LOCAL_TX_PROXY_FALLBACK:-http://localhost:8545}"
+resolve_devnet_endpoint() {
+    local key="$1"
 
-resolve_kurtosis_url() {
-    local service_name="$1"
-    local port_name="$2"
-    local output
-    local url
-    local host_port
-
-    if ! command -v kurtosis >/dev/null 2>&1; then
+    if [[ ! -f "$ENDPOINTS_FILE" ]] || ! command -v jq >/dev/null 2>&1; then
         return 1
     fi
 
-    output="$(kurtosis port print "$KURTOSIS_ENCLAVE" "$service_name" "$port_name" 2>/dev/null || true)"
-    url="$(printf '%s\n' "$output" | sed -nE 's/.*(https?:\/\/127\.0\.0\.1:[0-9]+).*/\1/p' | head -n1)"
-    if [[ -n "$url" ]]; then
-        printf '%s\n' "$url"
-        return 0
-    fi
-
-    host_port="$(printf '%s\n' "$output" | sed -nE 's/.*(127\.0\.0\.1:[0-9]+).*/\1/p' | head -n1)"
-    if [[ -n "$host_port" ]]; then
-        printf 'http://%s\n' "$host_port"
-        return 0
-    fi
-
-    return 1
+    jq -er --arg key "$key" '.[$key] // empty' "$ENDPOINTS_FILE" 2>/dev/null
 }
 
 resolve_endpoint() {
     local override="${1:-}"
-    local service_name="$2"
-    local port_name="$3"
-    local fallback="$4"
+    local key="$2"
+    local fallback="$3"
     local resolved=""
 
     if [[ -n "$override" ]]; then
@@ -56,7 +34,7 @@ resolve_endpoint() {
         return 0
     fi
 
-    resolved="$(resolve_kurtosis_url "$service_name" "$port_name" || true)"
+    resolved="$(resolve_devnet_endpoint "$key" || true)"
     if [[ -n "$resolved" ]]; then
         printf '%s\n' "$resolved"
         return 0
@@ -65,8 +43,8 @@ resolve_endpoint() {
     printf '%s\n' "$fallback"
 }
 
-BUILDER="$(resolve_endpoint "${BUILDER:-}" "$KURTOSIS_BUILDER_SERVICE" "rpc" "$LOCAL_BUILDER_FALLBACK")"
-TX_PROXY="$(resolve_endpoint "${TX_PROXY:-}" "$KURTOSIS_TX_PROXY_SERVICE" "rpc" "$LOCAL_TX_PROXY_FALLBACK")"
+RPC_URL="$(resolve_endpoint "${RPC_URL:-}" "sequencer_rpc_url" "$LOCAL_RPC_FALLBACK")"
+BUILDER="$(resolve_endpoint "${BUILDER:-}" "sequencer_rpc_url" "$RPC_URL")"
 
 PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 SEED="${SEED:-0x$(openssl rand -hex 32)}"
@@ -77,7 +55,7 @@ run_setup() {
     contender setup \
         -p "$PRIVATE_KEY" \
         "$scenario_file" \
-        -r "$TX_PROXY" \
+        -r "$RPC_URL" \
         --optimism
 }
 
@@ -91,7 +69,7 @@ run_spam() {
         --seed "$SEED" \
         -p "$PRIVATE_KEY" \
         "$scenario_file" \
-        -r "$TX_PROXY" \
+        -r "$RPC_URL" \
         --optimism \
         --min-balance 0.7eth
 }

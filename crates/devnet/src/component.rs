@@ -57,8 +57,6 @@ pub enum DevnetComponentKind {
     WorldContractsDeployer,
     /// Flashblocks capability on the World Chain execution node.
     Flashblocks,
-    /// Deprecated/removed legacy component.
-    RemovedLegacyService,
 }
 
 impl DevnetComponentKind {
@@ -77,7 +75,6 @@ impl DevnetComponentKind {
             Self::Grafana => "grafana",
             Self::WorldContractsDeployer => "world-contracts-deployer",
             Self::Flashblocks => "flashblocks",
-            Self::RemovedLegacyService => "removed-legacy-service",
         }
     }
 }
