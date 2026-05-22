@@ -97,7 +97,7 @@ impl L1DevChain {
         if let Some(genesis_file) = &config.genesis_file {
             let parent = genesis_file
                 .parent()
-                .unwrap_or_else(|| genesis_file.as_path());
+                .unwrap_or(genesis_file.as_path());
             request = request.with_mount(Mount::bind_mount(
                 parent.to_string_lossy().to_string(),
                 "/work",

@@ -1376,14 +1376,10 @@ fn op_node_static_peers(plans: &[OpNodePlan], source_index: usize) -> Vec<String
     plans
         .iter()
         .enumerate()
-        .filter_map(|(target_index, target)| {
-            (target_index != source_index).then(|| {
-                format!(
+        .filter(|&(target_index, _target)| target_index != source_index ).map(|(_target_index, target)| format!(
                     "/dns4/host.docker.internal/tcp/{}/p2p/{}",
                     target.p2p_host_port, target.peer_id
-                )
-            })
-        })
+                ))
         .collect()
 }
 
@@ -2707,11 +2703,10 @@ fn world_chain_binary() -> Result<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(parent) = current_exe.parent() {
         candidates.push(parent.join(bin_name));
-        if parent.file_name().and_then(|name| name.to_str()) == Some("deps") {
-            if let Some(target_profile_dir) = parent.parent() {
+        if parent.file_name().and_then(|name| name.to_str()) == Some("deps")
+            && let Some(target_profile_dir) = parent.parent() {
                 candidates.push(target_profile_dir.join(bin_name));
             }
-        }
     }
     if let Ok(target_dir) = std::env::var("CARGO_TARGET_DIR") {
         let target_dir = PathBuf::from(target_dir);

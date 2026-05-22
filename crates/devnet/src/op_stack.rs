@@ -79,6 +79,7 @@ impl Default for OpContractDeploymentConfig {
 
 /// World Chain contract deployment scope for the native devnet.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Default)]
 pub struct WorldContractsDeploymentConfig {
     /// Deploy fee-vault contracts with mock price oracles.
     ///
@@ -93,14 +94,6 @@ pub struct WorldContractsDeploymentConfig {
     pub pbh_contracts: bool,
 }
 
-impl Default for WorldContractsDeploymentConfig {
-    fn default() -> Self {
-        Self {
-            fee_vaults: false,
-            pbh_contracts: false,
-        }
-    }
-}
 
 impl WorldContractsDeploymentConfig {
     /// Contracts intentionally covered by the native devnet deployment scope.

@@ -496,7 +496,7 @@ impl WorldDevnet {
     /// Query `op_supportedCapabilities`.
     pub async fn supported_capabilities(&self) -> Result<Vec<String>> {
         if self.full_stack.is_some() {
-            return Ok(json_rpc_vec(&self.sequencer_rpc_url(), "op_supportedCapabilities").await?);
+            return json_rpc_vec(&self.sequencer_rpc_url(), "op_supportedCapabilities").await;
         }
 
         let client = self.nodes[0]
