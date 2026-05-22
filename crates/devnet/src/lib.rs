@@ -37,14 +37,16 @@ use world_chain_chainspec::WorldChainSpec;
 use world_chain_node::context::WorldChainDefaultContext;
 use world_chain_primitives::{p2p::Authorization, payload_id::force_op_payload_id_v3};
 use world_chain_rpc::op::OpApiExtClient;
-use world_chain_test_utils::e2e_harness::{
-    actions::EngineDriver,
-    setup::{TX_SET_L1_BLOCK, WorldChainTestBuilder, WorldChainTestingNodeContext},
-    spammer::TxSpammer,
-};
 use world_chain_test_utils::{
     DEV_CHAIN_ID,
-    e2e_harness::setup::{CHAIN_SPEC, build_payload_attributes, encode_eip1559_params},
+    e2e_harness::{
+        actions::EngineDriver,
+        setup::{
+            CHAIN_SPEC, TX_SET_L1_BLOCK, WorldChainTestBuilder, WorldChainTestingNodeContext,
+            build_payload_attributes, encode_eip1559_params,
+        },
+        spammer::TxSpammer,
+    },
 };
 
 use full_stack::FullStackWorldDevnet;
