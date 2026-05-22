@@ -2743,4 +2743,13 @@ mod tests {
 
         assert_eq!(genesis["extraData"], "0x01000000fa0000000a0000000000000000");
     }
+
+    #[test]
+    fn renders_op_deployer_intent_with_tagged_contract_locators() {
+        let intent = render_intent(&HaSequencerConfig::default());
+
+        assert!(intent.contains("l1ContractsLocator = \"tag://op-contracts/v3.0.0-rc.2\""));
+        assert!(intent.contains("l2ContractsLocator = \"tag://op-contracts/v3.0.0-rc.2\""));
+        assert!(!intent.contains("https://storage.googleapis.com/oplabs-contract-artifacts"));
+    }
 }

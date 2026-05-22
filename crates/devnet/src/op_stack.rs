@@ -5,8 +5,8 @@ use crate::{
     observability::ObservabilityConfig,
 };
 
-/// OP contract artifacts used by the historical Kurtosis devnet.
-pub const DEFAULT_OP_CONTRACT_ARTIFACTS_LOCATOR: &str = "https://storage.googleapis.com/oplabs-contract-artifacts/artifacts-v1-02024c5a26c16fc1a5c716fff1c46b5bf7f23890d431bb554ddbad60971211d4.tar.gz";
+/// OP contract artifacts supported by the pinned op-deployer image.
+pub const DEFAULT_OP_CONTRACT_ARTIFACTS_LOCATOR: &str = "tag://op-contracts/v3.0.0-rc.2";
 
 const DEFAULT_DEVNET_PRIVATE_KEY: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
@@ -509,6 +509,18 @@ mod tests {
         assert_eq!(topology.removed_services.len(), 3);
         assert!(!topology.config.world_contracts.fee_vaults);
         assert!(!topology.config.world_contracts.pbh_contracts);
+    }
+
+    #[test]
+    fn default_op_contract_locator_uses_supported_tag_scheme() {
+        assert_eq!(
+            OpContractDeploymentConfig::default().l1_artifacts_locator,
+            "tag://op-contracts/v3.0.0-rc.2"
+        );
+        assert_eq!(
+            OpContractDeploymentConfig::default().l2_artifacts_locator,
+            "tag://op-contracts/v3.0.0-rc.2"
+        );
     }
 
     #[test]
