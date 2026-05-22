@@ -78,8 +78,7 @@ impl Default for OpContractDeploymentConfig {
 }
 
 /// World Chain contract deployment scope for the native devnet.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct WorldContractsDeploymentConfig {
     /// Deploy fee-vault contracts with mock price oracles.
     ///
@@ -93,7 +92,6 @@ pub struct WorldContractsDeploymentConfig {
     /// deprecated and should not be part of the new default topology.
     pub pbh_contracts: bool,
 }
-
 
 impl WorldContractsDeploymentConfig {
     /// Contracts intentionally covered by the native devnet deployment scope.

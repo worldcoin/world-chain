@@ -144,10 +144,12 @@ fn logfmt_field_ranges(line: &str) -> impl Iterator<Item = std::ops::Range<usize
             in_quotes = !in_quotes;
         }
 
-        if ch.is_whitespace() && !in_quotes
-            && let Some(start) = start.take() {
-                ranges.push(start..index);
-            }
+        if ch.is_whitespace()
+            && !in_quotes
+            && let Some(start) = start.take()
+        {
+            ranges.push(start..index);
+        }
 
         escaped = ch == '\\' && !escaped;
         if ch != '\\' {

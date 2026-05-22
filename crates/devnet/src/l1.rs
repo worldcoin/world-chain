@@ -95,9 +95,7 @@ impl L1DevChain {
             .with_startup_timeout(Duration::from_secs(90));
 
         if let Some(genesis_file) = &config.genesis_file {
-            let parent = genesis_file
-                .parent()
-                .unwrap_or(genesis_file.as_path());
+            let parent = genesis_file.parent().unwrap_or(genesis_file.as_path());
             request = request.with_mount(Mount::bind_mount(
                 parent.to_string_lossy().to_string(),
                 "/work",
