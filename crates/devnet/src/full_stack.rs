@@ -32,7 +32,7 @@ use tokio::{
     process::{Child, Command},
     task::JoinHandle,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use url::Url;
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 use world_chain_test_utils::DEV_CHAIN_ID;
@@ -41,7 +41,7 @@ use crate::{
     DevnetComponent, DevnetComponentKind, DevnetComponentStatus, DevnetPortMode, L1DevChain,
     L1DevChainConfig, MetricsTarget, ObservabilityStack, WorldChainHardforkConfig,
     component::ContainerImage,
-    op_stack::{DEFAULT_OP_CONTRACT_ARTIFACTS_LOCATOR, HaSequencerConfig, HaSequencerTopology},
+    op_stack::{HaSequencerConfig, HaSequencerTopology},
     process_logs::{ProcessLogTarget, container_log_consumer, emit_process_log},
 };
 
@@ -99,6 +99,7 @@ pub struct FullStackWorldDevnet {
     components: Vec<DevnetComponent>,
     removed_services: Vec<DevnetComponent>,
     _tempdir: TempDir,
+    _docker_volume: DockerVolume,
 }
 
 #[derive(Debug)]
@@ -203,9 +204,43 @@ impl Drop for NativeProcess {
 #[derive(Debug)]
 struct OpArtifacts {
     workdir: TempDir,
+    docker_volume: DockerVolume,
     rollup_path: PathBuf,
     l1_genesis_path: PathBuf,
     l1_addresses: Value,
+}
+
+#[derive(Debug)]
+struct DockerVolume {
+    name: String,
+}
+
+impl DockerVolume {
+    async fn create(name: String) -> Result<Self> {
+        run_docker(
+            "docker volume create",
+            vec!["volume".into(), "create".into(), name.clone()],
+        )
+        .await?;
+        Ok(Self { name })
+    }
+
+    fn mount_arg(&self) -> String {
+        format!("{}:/work", self.name)
+    }
+}
+
+impl Drop for DockerVolume {
+    fn drop(&mut self) {
+        if let Err(err) = std::process::Command::new("docker")
+            .args(["volume", "rm", "-f", &self.name])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+        {
+            debug!(volume = %self.name, %err, "failed to remove devnet Docker volume");
+        }
+    }
 }
 
 impl FullStackWorldDevnet {
@@ -218,6 +253,7 @@ impl FullStackWorldDevnet {
         let topology = HaSequencerTopology::from_config(config.clone());
         let artifacts = generate_op_artifacts(&config, &hardforks).await?;
         let workdir_path = artifacts.workdir.path().to_path_buf();
+        let docker_volume_name = artifacts.docker_volume.name.clone();
 
         let mut l1_config = L1DevChainConfig {
             block_time_secs: block_time.as_secs().max(1),
@@ -272,13 +308,20 @@ impl FullStackWorldDevnet {
         let op_node_plans = plan_op_nodes(sequencer_count, &workdir_path, &config.images.op_node)
             .await
             .wrap_err("failed to plan op-node trusted peer mesh")?;
+        sync_workdir_to_docker_volume(
+            &workdir_path,
+            &artifacts.docker_volume,
+            &config.images.op_deployer.reference(),
+        )
+        .await
+        .wrap_err("failed to sync OP workdir to Docker volume")?;
         let op_node_static_peers: Vec<_> = (0..sequencer_count)
             .map(|index| op_node_static_peers(&op_node_plans, index))
             .collect();
         let op_nodes = try_join_all((0..sequencer_count).map(|index| {
             start_op_node(
                 index,
-                &workdir_path,
+                &docker_volume_name,
                 &config.images.op_node,
                 &op_node_plans[index],
                 &op_node_static_peers[index],
@@ -296,7 +339,7 @@ impl FullStackWorldDevnet {
                 0,
                 sequencer_count,
                 &config.images.op_conductor,
-                &workdir_path,
+                &docker_volume_name,
                 &sequencers[0],
                 &conductor_plans[0],
             )
@@ -320,7 +363,7 @@ impl FullStackWorldDevnet {
                     index,
                     sequencer_count,
                     &config.images.op_conductor,
-                    &workdir_path,
+                    &docker_volume_name,
                     &sequencers[index],
                     &conductor_plans[index],
                 )
@@ -358,7 +401,7 @@ impl FullStackWorldDevnet {
                 ),
                 start_challenger(
                     &config.images.op_challenger,
-                    &workdir_path,
+                    &docker_volume_name,
                     &l1_internal_rpc,
                     &l2_rpc_internal,
                     &conductor_rpc_internal,
@@ -435,6 +478,7 @@ impl FullStackWorldDevnet {
             components,
             removed_services: topology.removed_services,
             _tempdir: artifacts.workdir,
+            _docker_volume: artifacts.docker_volume,
         })
     }
 
@@ -499,6 +543,9 @@ async fn generate_op_artifacts(
         .tempdir()
         .wrap_err("failed to create OP deployer tempdir")?;
     let workdir_path = workdir.path();
+    let docker_volume = DockerVolume::create(docker_volume_name(workdir_path)?)
+        .await
+        .wrap_err("failed to create OP deployer Docker volume")?;
 
     fs::write(workdir_path.join("jwt.hex"), JWT_SECRET)
         .wrap_err("failed to write Engine API JWT secret")?;
@@ -506,7 +553,7 @@ async fn generate_op_artifacts(
         .wrap_err("failed to create op-challenger prestates directory")?;
 
     let image = config.images.op_deployer.reference();
-    let mount = format!("{}:/work", workdir_path.display());
+    let mount = docker_volume.mount_arg();
 
     run_docker(
         "op-deployer init",
@@ -531,28 +578,16 @@ async fn generate_op_artifacts(
     )
     .await?;
 
-    let l1_contracts_locator =
-        normalized_op_contracts_locator(&config.op_contracts.l1_artifacts_locator);
-    let l2_contracts_locator =
-        normalized_op_contracts_locator(&config.op_contracts.l2_artifacts_locator);
-
-    warn_on_legacy_op_contracts_locator(
-        "l1ContractsLocator",
-        &config.op_contracts.l1_artifacts_locator,
-        l1_contracts_locator,
-    );
-    warn_on_legacy_op_contracts_locator(
-        "l2ContractsLocator",
-        &config.op_contracts.l2_artifacts_locator,
-        l2_contracts_locator,
-    );
-    info!(
-        l1_contracts_locator,
-        l2_contracts_locator, "writing op-deployer intent"
-    );
-
     fs::write(workdir_path.join("intent.toml"), render_intent(config))
         .wrap_err("failed to write op-deployer intent.toml")?;
+    copy_file_to_docker_volume(
+        &workdir_path.join("intent.toml"),
+        "/work/intent.toml",
+        &docker_volume,
+        &image,
+    )
+    .await
+    .wrap_err("failed to copy op-deployer intent.toml into Docker volume")?;
 
     run_docker(
         "op-deployer apply",
@@ -600,6 +635,10 @@ async fn generate_op_artifacts(
         .await?;
     }
 
+    sync_docker_volume_to_workdir(&docker_volume, &workdir, &image)
+        .await
+        .wrap_err("failed to copy op-deployer outputs from Docker volume")?;
+
     let state_path = workdir_path.join("state.json");
     let genesis_path = workdir_path.join("genesis.json");
     let rollup_path = workdir_path.join("rollup.json");
@@ -623,23 +662,125 @@ async fn generate_op_artifacts(
 
     Ok(OpArtifacts {
         workdir,
+        docker_volume,
         rollup_path,
         l1_genesis_path,
         l1_addresses,
     })
 }
 
-fn render_intent(config: &HaSequencerConfig) -> String {
-    render_intent_with_contract_locators(
-        normalized_op_contracts_locator(&config.op_contracts.l1_artifacts_locator),
-        normalized_op_contracts_locator(&config.op_contracts.l2_artifacts_locator),
-    )
+fn docker_volume_name(workdir: &Path) -> Result<String> {
+    let name = workdir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            eyre!(
+                "failed to derive Docker volume name from {}",
+                workdir.display()
+            )
+        })?;
+    Ok(name.replace(
+        |ch: char| !ch.is_ascii_alphanumeric() && ch != '-' && ch != '_',
+        "-",
+    ))
 }
 
-fn render_intent_with_contract_locators(
-    l1_contracts_locator: &str,
-    l2_contracts_locator: &str,
-) -> String {
+async fn copy_file_to_docker_volume(
+    source: &Path,
+    destination: &str,
+    volume: &DockerVolume,
+    helper_image: &str,
+) -> Result<()> {
+    let helper = create_docker_volume_helper(volume, helper_image).await?;
+    let copy_result = run_docker(
+        "docker cp file to devnet volume",
+        vec![
+            "cp".into(),
+            source.to_string_lossy().to_string(),
+            format!("{helper}:{destination}"),
+        ],
+    )
+    .await;
+    finish_docker_volume_helper(&helper, copy_result).await
+}
+
+async fn sync_workdir_to_docker_volume(
+    workdir: &Path,
+    volume: &DockerVolume,
+    helper_image: &str,
+) -> Result<()> {
+    let helper = create_docker_volume_helper(volume, helper_image).await?;
+    let source = format!("{}/.", workdir.display());
+    let copy_result = run_docker(
+        "docker cp workdir to devnet volume",
+        vec!["cp".into(), source, format!("{helper}:/work")],
+    )
+    .await;
+    finish_docker_volume_helper(&helper, copy_result).await
+}
+
+async fn sync_docker_volume_to_workdir(
+    volume: &DockerVolume,
+    workdir: &TempDir,
+    helper_image: &str,
+) -> Result<()> {
+    let helper = create_docker_volume_helper(volume, helper_image).await?;
+    let copy_result = run_docker(
+        "docker cp devnet volume to workdir",
+        vec![
+            "cp".into(),
+            format!("{helper}:/work/."),
+            workdir.path().to_string_lossy().to_string(),
+        ],
+    )
+    .await;
+    finish_docker_volume_helper(&helper, copy_result).await
+}
+
+async fn create_docker_volume_helper(volume: &DockerVolume, image: &str) -> Result<String> {
+    let output = run_docker_capture(
+        "docker create devnet volume helper",
+        vec![
+            "create".into(),
+            "-v".into(),
+            volume.mount_arg(),
+            image.to_string(),
+        ],
+    )
+    .await?;
+    let container = output.trim();
+    if container.is_empty() {
+        bail!("docker create returned an empty container id for devnet volume helper");
+    }
+    Ok(container.to_string())
+}
+
+async fn remove_docker_container(container: &str) -> Result<()> {
+    run_docker(
+        "docker rm devnet volume helper",
+        vec!["rm".into(), "-f".into(), container.to_string()],
+    )
+    .await
+}
+
+async fn finish_docker_volume_helper(container: &str, command_result: Result<()>) -> Result<()> {
+    let remove_result = remove_docker_container(container).await;
+    match (command_result, remove_result) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(err), Ok(())) => Err(err),
+        (Ok(()), Err(err)) => Err(err).wrap_err("failed to remove devnet volume helper"),
+        (Err(command_err), Err(remove_err)) => {
+            debug!(
+                container,
+                %remove_err,
+                "failed to remove devnet volume helper after docker copy failure"
+            );
+            Err(command_err)
+        }
+    }
+}
+
+fn render_intent(config: &HaSequencerConfig) -> String {
     format!(
         r#"configType = "custom"
 l1ChainID = 31337
@@ -672,30 +813,10 @@ l2ContractsLocator = "{}"
     proposer = "0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f"
     challenger = "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720"
 "#,
-        l1_contracts_locator, l2_contracts_locator, DEV_CHAIN_ID
+        config.op_contracts.l1_artifacts_locator,
+        config.op_contracts.l2_artifacts_locator,
+        DEV_CHAIN_ID
     )
-}
-
-fn normalized_op_contracts_locator(locator: &str) -> &str {
-    if is_legacy_op_contracts_locator(locator) {
-        DEFAULT_OP_CONTRACT_ARTIFACTS_LOCATOR
-    } else {
-        locator
-    }
-}
-
-fn is_legacy_op_contracts_locator(locator: &str) -> bool {
-    locator.starts_with("https://storage.googleapis.com/oplabs-contract-artifacts/")
-        || locator.starts_with("http://storage.googleapis.com/oplabs-contract-artifacts/")
-}
-
-fn warn_on_legacy_op_contracts_locator(field: &str, configured: &str, normalized: &str) {
-    if is_legacy_op_contracts_locator(configured) {
-        warn!(
-            field,
-            configured, normalized, "normalizing legacy op-deployer contract artifacts locator"
-        );
-    }
 }
 
 fn write_l1_genesis(state_path: &Path, output_path: &Path) -> Result<()> {
@@ -1376,10 +1497,13 @@ fn op_node_static_peers(plans: &[OpNodePlan], source_index: usize) -> Vec<String
     plans
         .iter()
         .enumerate()
-        .filter(|&(target_index, _target)| target_index != source_index ).map(|(_target_index, target)| format!(
-                    "/dns4/host.docker.internal/tcp/{}/p2p/{}",
-                    target.p2p_host_port, target.peer_id
-                ))
+        .filter(|&(target_index, _target)| target_index != source_index)
+        .map(|(_target_index, target)| {
+            format!(
+                "/dns4/host.docker.internal/tcp/{}/p2p/{}",
+                target.p2p_host_port, target.peer_id
+            )
+        })
         .collect()
 }
 
@@ -1459,7 +1583,7 @@ async fn start_conductor(
     index: usize,
     sequencer_count: usize,
     image: &ContainerImage,
-    workdir: &Path,
+    docker_volume: &str,
     sequencer: &SequencerService,
     plan: &ConductorPlan,
 ) -> Result<ConductorService> {
@@ -1525,10 +1649,7 @@ async fn start_conductor(
         ))
         .with_cmd(cmd)
         .with_startup_timeout(Duration::from_secs(90))
-        .with_mount(Mount::bind_mount(
-            workdir.to_string_lossy().to_string(),
-            "/work",
-        ))
+        .with_mount(Mount::volume_mount(docker_volume, "/work"))
         .with_mapped_port(plan.rpc_host_port, CONDUCTOR_RPC_PORT.tcp())
         .with_mapped_port(plan.ws_host_port, CONDUCTOR_WS_PORT.tcp())
         .with_mapped_port(plan.consensus_host_port, CONDUCTOR_CONSENSUS_PORT.tcp())
@@ -1560,7 +1681,7 @@ async fn start_conductor(
 
 async fn start_op_node(
     index: usize,
-    workdir: &Path,
+    docker_volume: &str,
     image: &ContainerImage,
     plan: &OpNodePlan,
     static_peers: &[String],
@@ -1653,10 +1774,7 @@ async fn start_op_node(
         ))
         .with_cmd(cmd)
         .with_startup_timeout(Duration::from_secs(120))
-        .with_mount(Mount::bind_mount(
-            workdir.to_string_lossy().to_string(),
-            "/work",
-        ));
+        .with_mount(Mount::volume_mount(docker_volume, "/work"));
     request = request.with_mapped_port(plan.rpc_host_port, OP_NODE_RPC_PORT.tcp());
     request = request.with_mapped_port(plan.metrics_host_port, OP_NODE_METRICS_PORT.tcp());
     request = request.with_mapped_port(plan.p2p_host_port, OP_NODE_P2P_PORT.tcp());
@@ -2027,7 +2145,7 @@ async fn start_proposer(
 
 async fn start_challenger(
     image: &ContainerImage,
-    workdir: &Path,
+    docker_volume: &str,
     l1_rpc: &str,
     l2_rpc: &str,
     rollup_rpc: &str,
@@ -2075,7 +2193,7 @@ async fn start_challenger(
         DevnetComponentKind::OpChallenger,
         image,
         cmd,
-        Some(workdir),
+        Some(docker_volume),
     )
     .await
 }
@@ -2085,7 +2203,7 @@ async fn start_aux_service(
     kind: DevnetComponentKind,
     image: &ContainerImage,
     cmd: Vec<String>,
-    mount: Option<&Path>,
+    docker_volume: Option<&str>,
 ) -> Result<ContainerService> {
     info!(
         id,
@@ -2106,11 +2224,8 @@ async fn start_aux_service(
         .with_cmd(cmd)
         .with_startup_timeout(Duration::from_secs(90));
 
-    if let Some(mount) = mount {
-        request = request.with_mount(Mount::bind_mount(
-            mount.to_string_lossy().to_string(),
-            "/work",
-        ));
+    if let Some(docker_volume) = docker_volume {
+        request = request.with_mount(Mount::volume_mount(docker_volume, "/work"));
     }
 
     let container = request
@@ -2449,6 +2564,10 @@ fn build_components(
 }
 
 async fn run_docker(label: &str, args: Vec<String>) -> Result<()> {
+    run_docker_capture(label, args).await.map(|_| ())
+}
+
+async fn run_docker_capture(label: &str, args: Vec<String>) -> Result<String> {
     info!(label, command = %format!("docker {}", args.join(" ")), "running devnet docker command");
     let output = Command::new("docker")
         .args(&args)
@@ -2471,7 +2590,7 @@ async fn run_docker(label: &str, args: Vec<String>) -> Result<()> {
             stderr
         );
     }
-    Ok(())
+    Ok(stdout.into_owned())
 }
 
 async fn wait_for_l2_blocks(rpc_url: &str, min_block: u64, timeout: Duration) -> Result<()> {
@@ -2704,9 +2823,10 @@ fn world_chain_binary() -> Result<PathBuf> {
     if let Some(parent) = current_exe.parent() {
         candidates.push(parent.join(bin_name));
         if parent.file_name().and_then(|name| name.to_str()) == Some("deps")
-            && let Some(target_profile_dir) = parent.parent() {
-                candidates.push(target_profile_dir.join(bin_name));
-            }
+            && let Some(target_profile_dir) = parent.parent()
+        {
+            candidates.push(target_profile_dir.join(bin_name));
+        }
     }
     if let Ok(target_dir) = std::env::var("CARGO_TARGET_DIR") {
         let target_dir = PathBuf::from(target_dir);
@@ -2796,20 +2916,5 @@ mod tests {
         assert!(intent.contains("l1ContractsLocator = \"tag://op-contracts/v3.0.0-rc.2\""));
         assert!(intent.contains("l2ContractsLocator = \"tag://op-contracts/v3.0.0-rc.2\""));
         assert!(!intent.contains("https://storage.googleapis.com/oplabs-contract-artifacts"));
-    }
-
-    #[test]
-    fn normalizes_legacy_https_contract_locators_before_rendering_intent() {
-        let mut config = HaSequencerConfig::default();
-        config.op_contracts.l1_artifacts_locator =
-            "https://storage.googleapis.com/oplabs-contract-artifacts/artifacts-v1-02024c5a26c16fc1a5c716fff1c46b5bf7f23890d431bb554ddbad60971211d4.tar.gz".to_string();
-        config.op_contracts.l2_artifacts_locator =
-            "http://storage.googleapis.com/oplabs-contract-artifacts/artifacts-v1-02024c5a26c16fc1a5c716fff1c46b5bf7f23890d431bb554ddbad60971211d4.tar.gz".to_string();
-
-        let intent = render_intent(&config);
-
-        assert!(intent.contains("l1ContractsLocator = \"tag://op-contracts/v3.0.0-rc.2\""));
-        assert!(intent.contains("l2ContractsLocator = \"tag://op-contracts/v3.0.0-rc.2\""));
-        assert!(!intent.contains("storage.googleapis.com/oplabs-contract-artifacts"));
     }
 }
