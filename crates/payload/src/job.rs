@@ -639,7 +639,7 @@ where
         // During syncing, it could happen that the CL sends the `getPayload` engine API request
         // before the EL has completed the execution of the block, therefore it's important to take
         // the `pending_block` so that EL can complete the execution and return the payload to the CL.
-        let maybe_better = if self.config.attributes.no_tx_pool.unwrap_or(false) {
+        let mut maybe_better = if self.config.attributes.no_tx_pool.unwrap_or(false) {
             self.pending_block.take().map(Into::into)
         } else {
             None
@@ -662,6 +662,9 @@ where
             match self.builder.on_missing_payload(args) {
                 MissingPayloadBehaviour::AwaitInProgress => {
                     debug!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "awaiting in progress payload build job");
+                    if maybe_better.is_none() {
+                        maybe_better = self.pending_block.take().map(Into::into);
+                    }
                 }
                 MissingPayloadBehaviour::RaceEmptyPayload => {
                     debug!(target: "flashblocks::payload_builder", id=%self.config.payload_id(), "racing empty payload");

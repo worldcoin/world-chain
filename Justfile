@@ -9,6 +9,9 @@ build:
         --build-arg VERGEN_GIT_SHA="$(git rev-parse HEAD)" \
         -t world-chain:latest .
 
+build-world-chain-bin:
+    cargo build -p world-chain
+
 devnet-up: build
     @just ./pkg/devnet/devnet-up
 
@@ -40,6 +43,15 @@ fmt-check:
 # Launch a local playground (in-process node swarm)
 playground *args='':
     RUST_LOG="info" cargo run -p xtask --release -- launch-node $@
+
+# Manage the native Rust HA devnet. Use `just devnet up -d` to run in the background and `just devnet down` to stop it.
+devnet command='up' *args='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "{{command}}" = "up" ]; then
+        cargo build -p world-chain
+    fi
+    RUST_LOG="${RUST_LOG:-info,flashblocks=trace,engine_driver=info}" cargo run -p xtask -- devnet {{command}} {{args}}
 
 # Run stress tests against a live network
 stress *args='':
