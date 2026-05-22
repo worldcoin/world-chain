@@ -32,7 +32,7 @@ use tokio::{
     process::{Child, Command},
     task::JoinHandle,
 };
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use url::Url;
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 use world_chain_test_utils::DEV_CHAIN_ID;
@@ -41,7 +41,7 @@ use crate::{
     DevnetComponent, DevnetComponentKind, DevnetComponentStatus, DevnetPortMode, L1DevChain,
     L1DevChainConfig, MetricsTarget, ObservabilityStack, WorldChainHardforkConfig,
     component::ContainerImage,
-    op_stack::{HaSequencerConfig, HaSequencerTopology},
+    op_stack::{DEFAULT_OP_CONTRACT_ARTIFACTS_LOCATOR, HaSequencerConfig, HaSequencerTopology},
     process_logs::{ProcessLogTarget, container_log_consumer, emit_process_log},
 };
 
@@ -531,6 +531,26 @@ async fn generate_op_artifacts(
     )
     .await?;
 
+    let l1_contracts_locator =
+        normalized_op_contracts_locator(&config.op_contracts.l1_artifacts_locator);
+    let l2_contracts_locator =
+        normalized_op_contracts_locator(&config.op_contracts.l2_artifacts_locator);
+
+    warn_on_legacy_op_contracts_locator(
+        "l1ContractsLocator",
+        &config.op_contracts.l1_artifacts_locator,
+        l1_contracts_locator,
+    );
+    warn_on_legacy_op_contracts_locator(
+        "l2ContractsLocator",
+        &config.op_contracts.l2_artifacts_locator,
+        l2_contracts_locator,
+    );
+    info!(
+        l1_contracts_locator,
+        l2_contracts_locator, "writing op-deployer intent"
+    );
+
     fs::write(workdir_path.join("intent.toml"), render_intent(config))
         .wrap_err("failed to write op-deployer intent.toml")?;
 
@@ -610,6 +630,16 @@ async fn generate_op_artifacts(
 }
 
 fn render_intent(config: &HaSequencerConfig) -> String {
+    render_intent_with_contract_locators(
+        normalized_op_contracts_locator(&config.op_contracts.l1_artifacts_locator),
+        normalized_op_contracts_locator(&config.op_contracts.l2_artifacts_locator),
+    )
+}
+
+fn render_intent_with_contract_locators(
+    l1_contracts_locator: &str,
+    l2_contracts_locator: &str,
+) -> String {
     format!(
         r#"configType = "custom"
 l1ChainID = 31337
@@ -642,10 +672,30 @@ l2ContractsLocator = "{}"
     proposer = "0x23618e81E3f5cdF7f54C3d65f7FBc0aBf5B21E8f"
     challenger = "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720"
 "#,
-        config.op_contracts.l1_artifacts_locator,
-        config.op_contracts.l2_artifacts_locator,
-        DEV_CHAIN_ID
+        l1_contracts_locator, l2_contracts_locator, DEV_CHAIN_ID
     )
+}
+
+fn normalized_op_contracts_locator(locator: &str) -> &str {
+    if is_legacy_op_contracts_locator(locator) {
+        DEFAULT_OP_CONTRACT_ARTIFACTS_LOCATOR
+    } else {
+        locator
+    }
+}
+
+fn is_legacy_op_contracts_locator(locator: &str) -> bool {
+    locator.starts_with("https://storage.googleapis.com/oplabs-contract-artifacts/")
+        || locator.starts_with("http://storage.googleapis.com/oplabs-contract-artifacts/")
+}
+
+fn warn_on_legacy_op_contracts_locator(field: &str, configured: &str, normalized: &str) {
+    if is_legacy_op_contracts_locator(configured) {
+        warn!(
+            field,
+            configured, normalized, "normalizing legacy op-deployer contract artifacts locator"
+        );
+    }
 }
 
 fn write_l1_genesis(state_path: &Path, output_path: &Path) -> Result<()> {
@@ -2751,5 +2801,20 @@ mod tests {
         assert!(intent.contains("l1ContractsLocator = \"tag://op-contracts/v3.0.0-rc.2\""));
         assert!(intent.contains("l2ContractsLocator = \"tag://op-contracts/v3.0.0-rc.2\""));
         assert!(!intent.contains("https://storage.googleapis.com/oplabs-contract-artifacts"));
+    }
+
+    #[test]
+    fn normalizes_legacy_https_contract_locators_before_rendering_intent() {
+        let mut config = HaSequencerConfig::default();
+        config.op_contracts.l1_artifacts_locator =
+            "https://storage.googleapis.com/oplabs-contract-artifacts/artifacts-v1-02024c5a26c16fc1a5c716fff1c46b5bf7f23890d431bb554ddbad60971211d4.tar.gz".to_string();
+        config.op_contracts.l2_artifacts_locator =
+            "http://storage.googleapis.com/oplabs-contract-artifacts/artifacts-v1-02024c5a26c16fc1a5c716fff1c46b5bf7f23890d431bb554ddbad60971211d4.tar.gz".to_string();
+
+        let intent = render_intent(&config);
+
+        assert!(intent.contains("l1ContractsLocator = \"tag://op-contracts/v3.0.0-rc.2\""));
+        assert!(intent.contains("l2ContractsLocator = \"tag://op-contracts/v3.0.0-rc.2\""));
+        assert!(!intent.contains("storage.googleapis.com/oplabs-contract-artifacts"));
     }
 }
