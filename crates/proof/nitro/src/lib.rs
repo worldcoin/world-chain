@@ -26,19 +26,23 @@
 //! The enclave-side guest is the `world-chain-nitro-enclave` binary (`src/enclave.rs`).
 
 use serde::{Deserialize, Serialize};
-use world_chain_proof_succinct_client_utils::{
-    WorldRangeProofPublicValues, boot::BootInfoStruct, types::AggregationInputs,
+use world_chain_proof_core::{
+    artifacts::AggregationProofArtifact,
+    boot::BootInfoStruct,
+    range::WorldRangeProofPublicValues,
+    types::AggregationInputs,
     witness::WorldRangeWitnessData,
 };
-use world_chain_proof_succinct_proof_utils::AggregationProofArtifact;
 
 pub mod attestation;
+#[cfg(feature = "aws_nitro")]
 pub mod host;
 pub mod protocol;
 
 #[cfg(feature = "enclave")]
 pub mod enclave_lib;
 
+#[cfg(feature = "aws_nitro")]
 pub use host::{NitroProver, NitroProverError};
 
 /// Length, in bytes, of a Nitro PCR slot value (SHA-384 digest).
@@ -171,9 +175,136 @@ pub fn range_user_data(boot_info: &BootInfoStruct) -> [u8; 32] {
 
 /// Re-exports of common host-facing types so callers can do `use world_chain_proof_nitro::*`.
 pub mod prelude {
+    #[cfg(feature = "aws_nitro")]
+    pub use crate::{NitroProver, NitroProverError};
     pub use crate::{
-        ExpectedPcrs, NitroAggregationProofArtifact, NitroAggregationProofRequest, NitroProver,
-        NitroProverError, NitroRangeProofArtifact, NitroRangeProofRequest, WorldTeeProver,
-        range_user_data,
+        ExpectedPcrs, NitroAggregationProofArtifact, NitroAggregationProofRequest,
+        NitroRangeProofArtifact, NitroRangeProofRequest, WorldTeeProver, range_user_data,
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::B256;
+    use world_chain_proof_core::boot::BootInfoStruct;
+
+    use crate::{
+        ExpectedPcrs, NitroRangeProofArtifact, PCR_LEN,
+        attestation::{AttestationError, verify_attestation_doc},
+        protocol::range_user_data,
+    };
+
+    /// Builds a minimal synthetic COSE_Sign1 attestation document suitable for unit tests.
+    /// The signature bytes are a 96-byte placeholder — no cryptographic verification is
+    /// performed by `parse_attestation_doc` / `verify_attestation_doc` (see the TODO in
+    /// `attestation.rs`).
+    fn make_attestation_doc(pcrs: &[[u8; PCR_LEN]; 3], user_data: &[u8]) -> Vec<u8> {
+        let pcr_map: Vec<(ciborium::value::Value, ciborium::value::Value)> = pcrs
+            .iter()
+            .enumerate()
+            .map(|(idx, bytes)| {
+                (
+                    ciborium::value::Value::Integer((idx as i128).try_into().unwrap()),
+                    ciborium::value::Value::Bytes(bytes.to_vec()),
+                )
+            })
+            .collect();
+
+        let entries: Vec<(ciborium::value::Value, ciborium::value::Value)> = vec![
+            (
+                ciborium::value::Value::Text("pcrs".into()),
+                ciborium::value::Value::Map(pcr_map),
+            ),
+            (
+                ciborium::value::Value::Text("user_data".into()),
+                ciborium::value::Value::Bytes(user_data.to_vec()),
+            ),
+            (
+                ciborium::value::Value::Text("module_id".into()),
+                ciborium::value::Value::Text("test-enclave".into()),
+            ),
+            (
+                ciborium::value::Value::Text("digest".into()),
+                ciborium::value::Value::Text("SHA384".into()),
+            ),
+        ];
+
+        let mut payload_bytes = Vec::new();
+        ciborium::into_writer(&ciborium::value::Value::Map(entries), &mut payload_bytes).unwrap();
+
+        let cose = ciborium::value::Value::Array(vec![
+            ciborium::value::Value::Bytes(vec![]),
+            ciborium::value::Value::Map(vec![]),
+            ciborium::value::Value::Bytes(payload_bytes),
+            ciborium::value::Value::Bytes(vec![0u8; 96]),
+        ]);
+        let mut out = Vec::new();
+        ciborium::into_writer(&cose, &mut out).unwrap();
+        out
+    }
+
+    fn boot_info() -> BootInfoStruct {
+        BootInfoStruct {
+            l1Head: B256::from([1; 32]),
+            l2PreRoot: B256::from([2; 32]),
+            l2PostRoot: B256::from([3; 32]),
+            l2BlockNumber: 42,
+            rollupConfigHash: B256::from([4; 32]),
+        }
+    }
+
+    #[test]
+    fn range_artifact_user_data_binds_boot_info() {
+        let boot_info = boot_info();
+        let user_data = range_user_data(&boot_info);
+        let attestation_doc = make_attestation_doc(&[[0u8; PCR_LEN]; 3], &user_data);
+
+        let artifact = NitroRangeProofArtifact { boot_info, attestation_doc };
+
+        let expected_user_data = range_user_data(&artifact.boot_info);
+        verify_attestation_doc(
+            &artifact.attestation_doc,
+            &ExpectedPcrs::PLACEHOLDER,
+            &expected_user_data,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn tampered_boot_info_fails_user_data_check() {
+        let boot_info = boot_info();
+        let user_data = range_user_data(&boot_info);
+        let attestation_doc = make_attestation_doc(&[[0u8; PCR_LEN]; 3], &user_data);
+
+        let mut tampered = boot_info;
+        tampered.l2PostRoot = B256::from([9; 32]);
+
+        let expected_user_data = range_user_data(&tampered);
+        let err = verify_attestation_doc(
+            &attestation_doc,
+            &ExpectedPcrs::PLACEHOLDER,
+            &expected_user_data,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, AttestationError::UserDataMismatch { .. }));
+    }
+
+    #[test]
+    fn wrong_pcrs_fail_verification() {
+        let boot_info = boot_info();
+        let user_data = range_user_data(&boot_info);
+        // Document has all-zero PCRs but we verify against all-ones.
+        let attestation_doc = make_attestation_doc(&[[0u8; PCR_LEN]; 3], &user_data);
+
+        let wrong_pcrs = ExpectedPcrs {
+            pcr0: [1u8; PCR_LEN],
+            pcr1: [0u8; PCR_LEN],
+            pcr2: [0u8; PCR_LEN],
+        };
+        let err =
+            verify_attestation_doc(&attestation_doc, &wrong_pcrs, &user_data).unwrap_err();
+
+        assert!(matches!(err, AttestationError::PcrMismatch { index: 0, .. }));
+    }
 }

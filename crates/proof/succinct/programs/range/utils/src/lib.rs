@@ -3,14 +3,14 @@
 use std::sync::Arc;
 
 use kona_proof::{l1::OracleL1ChainProvider, l2::OracleL2ChainProvider};
-use world_chain_proof_succinct_client_utils::{
+use world_chain_proof_core::{
     BlobStore,
     boot::BootInfoStruct,
     range::WorldRangeHardforkConfig,
-    witness::{
-        executor::{WitnessExecutor, get_inputs_for_pipeline},
-        preimage_store::PreimageStore,
-    },
+    witness::preimage_store::PreimageStore,
+};
+use world_chain_proof_succinct_client_utils::witness::executor::{
+    WitnessExecutor, get_inputs_for_pipeline,
 };
 
 /// Sets up tracing for the range program.

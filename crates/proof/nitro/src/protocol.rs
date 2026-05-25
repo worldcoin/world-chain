@@ -11,8 +11,10 @@ use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use world_chain_proof_succinct_client_utils::{
-    WorldRangeProofPublicValues, boot::BootInfoStruct, types::AggregationInputs,
+use world_chain_proof_core::{
+    boot::BootInfoStruct,
+    range::WorldRangeProofPublicValues,
+    types::AggregationInputs,
 };
 
 /// Current protocol version. Bumped whenever the wire format changes incompatibly.

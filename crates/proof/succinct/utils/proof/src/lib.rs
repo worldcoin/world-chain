@@ -1,21 +1,24 @@
-//! Proof request/artifact types shared by host services and prover adapters.
+//! SP1-specific proof request types and the `WorldSuccinctProver` backend trait.
+//!
+//! Proof artifact types (`RangeProofArtifact`, `AggregationProofArtifact`) and all shared
+//! primitives live in `world-chain-proof-core`.
 
 use serde::{Deserialize, Serialize};
-use world_chain_proof_succinct_client_utils::{
-    WorldRangeWitness,
-    boot::BootInfoStruct,
-    types::{AggregationInputs, AggregationOutputs},
-};
-use world_chain_proof_succinct_elfs::{AGGREGATION_ELF, RANGE_ELF_EMBEDDED};
+use world_chain_proof_core::types::AggregationInputs;
+use world_chain_proof_succinct_client_utils::WorldRangeWitness;
+
+pub use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArtifact};
 
 /// Returns the embedded World range ELF.
-pub const fn get_range_elf_embedded() -> &'static [u8] {
-    RANGE_ELF_EMBEDDED
+#[cfg(feature = "embedded-elfs")]
+pub fn get_range_elf_embedded() -> &'static [u8] {
+    world_chain_proof_succinct_elfs::RANGE_ELF_EMBEDDED
 }
 
 /// Returns the embedded World aggregation ELF.
-pub const fn get_aggregation_elf_embedded() -> &'static [u8] {
-    AGGREGATION_ELF
+#[cfg(feature = "embedded-elfs")]
+pub fn get_aggregation_elf_embedded() -> &'static [u8] {
+    world_chain_proof_succinct_elfs::AGGREGATION_ELF
 }
 
 /// Host request for a single SP1 range proof.
@@ -34,24 +37,6 @@ pub struct AggregationProofRequest {
     pub l1_headers_cbor: Vec<u8>,
 }
 
-/// Public output and proof bytes returned by a range prover.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RangeProofArtifact {
-    /// OP Succinct-compatible boot info committed by the guest.
-    pub boot_info: BootInfoStruct,
-    /// Serialized SP1 proof bytes.
-    pub proof: Vec<u8>,
-}
-
-/// Public output and proof bytes returned by an aggregation prover.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AggregationProofArtifact {
-    /// ABI-compatible aggregation outputs committed by the guest.
-    pub outputs: AggregationOutputs,
-    /// Serialized SP1 proof bytes.
-    pub proof: Vec<u8>,
-}
-
 /// Interface expected from a concrete SP1 prover backend.
 pub trait WorldSuccinctProver {
     /// Backend-specific error type.
@@ -67,7 +52,7 @@ pub trait WorldSuccinctProver {
     ) -> Result<AggregationProofArtifact, Self::Error>;
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "embedded-elfs"))]
 mod tests {
     use super::*;
 

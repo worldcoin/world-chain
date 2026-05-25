@@ -11,7 +11,7 @@ use alloy_consensus::Header;
 use alloy_primitives::B256;
 use alloy_sol_types::SolValue;
 use sha2::{Digest, Sha256};
-use world_chain_proof_succinct_client_utils::{
+use world_chain_proof_core::{
     boot::BootInfoStruct,
     types::{AggregationInputs, AggregationOutputs, u32_to_u8},
 };

@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 kona-proof.workspace = true
 sp1-zkvm.workspace = true
+world-chain-proof-core.workspace = true
 world-chain-proof-succinct-client-utils.workspace = true
 
 [features]

@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use kona_derive::BlobProvider;
 use kona_protocol::BlockInfo;
 use kzg_rs::{Blob as KzgRsBlob, Bytes48};
-use world_chain_proof_succinct_client_utils::witness::BlobData;
+use world_chain_proof_core::witness::BlobData;
 
 #[derive(Clone, Debug)]
 pub struct OnlineBlobStore<T: BlobProvider> {

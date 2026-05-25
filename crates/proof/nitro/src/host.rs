@@ -152,7 +152,7 @@ impl NitroProver {
 
         // The aggregation artifact mirrors the Succinct shape, but the `proof` bytes carry
         // the attestation document instead of an SP1 proof.
-        Ok(world_chain_proof_succinct_proof_utils::AggregationProofArtifact {
+        Ok(world_chain_proof_core::artifacts::AggregationProofArtifact {
             outputs: aggregation_outputs(&boot_info, &request.inputs),
             proof: attestation_doc,
         })
@@ -160,11 +160,11 @@ impl NitroProver {
 }
 
 fn aggregation_outputs(
-    boot_info: &world_chain_proof_succinct_client_utils::boot::BootInfoStruct,
-    inputs: &world_chain_proof_succinct_client_utils::types::AggregationInputs,
-) -> world_chain_proof_succinct_client_utils::types::AggregationOutputs {
+    boot_info: &world_chain_proof_core::boot::BootInfoStruct,
+    inputs: &world_chain_proof_core::types::AggregationInputs,
+) -> world_chain_proof_core::types::AggregationOutputs {
     use alloy_primitives::B256;
-    use world_chain_proof_succinct_client_utils::types::{AggregationOutputs, u32_to_u8};
+    use world_chain_proof_core::types::{AggregationOutputs, u32_to_u8};
     AggregationOutputs {
         l1Head: boot_info.l1Head,
         l2PreRoot: boot_info.l2PreRoot,

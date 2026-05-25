@@ -2,41 +2,212 @@
 
 pub mod witness_generation;
 
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
-use world_chain_proof_client::{WorldProofInput, WorldProofPublicValues};
-use world_chain_proof_host::{RangeSplitCount, WorldFaultProofServiceConfig};
-use world_chain_proof_protocol::{WorldChainHardfork, WorldSpecId};
-use world_chain_proof_succinct_client_utils::{
-    WorldRangeHardfork, WorldRangeHardforkConfig, WorldRangeProofClaim, WorldRangeProofInput,
-    WorldRangeProofPublicValues, WorldRangeSpecId, WorldRangeWitness,
-    boot::{BootInfoPublicValues, BootInfoStruct},
+use world_chain_proof_core::{
+    RollupConfigHashError,
+    boot::{BootInfoStruct, hash_world_rollup_config_generic},
+    hash_rollup_config,
+    range::{WorldRangeHardforkConfig, WorldRangeProofInput, WorldRangeProofPublicValues},
     types::AggregationInputs,
 };
+use world_chain_proof_succinct_client_utils::WorldRangeWitness;
 use world_chain_proof_succinct_proof_utils::{AggregationProofRequest, RangeProofRequest};
 
-/// Host request construction error.
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+/// Error returned while constructing host-side proof config.
+#[derive(Debug, thiserror::Error)]
 pub enum WorldSuccinctHostError {
-    /// The range bounds are invalid.
     #[error("range end block {end} must be greater than start block {start}")]
     InvalidRange { start: u64, end: u64 },
-    /// The witness rollup config hash does not match the configured dispute game.
     #[error("rollup config hash mismatch: expected {expected:?}, got {actual:?}")]
     RollupConfigHashMismatch { expected: B256, actual: B256 },
+    #[error(transparent)]
+    RollupConfigHash(#[from] RollupConfigHashError),
+    #[error("range split count must be one of 1, 2, 4, 8, or 16, got {0}")]
+    InvalidRangeSplitCount(u8),
+}
+
+/// Number of independent range proofs before aggregation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "u8", into = "u8")]
+#[repr(u8)]
+pub enum RangeSplitCount {
+    One = 1,
+    Two = 2,
+    Four = 4,
+    Eight = 8,
+    Sixteen = 16,
+}
+
+impl RangeSplitCount {
+    pub const fn get(self) -> u8 {
+        self as u8
+    }
+}
+
+impl From<RangeSplitCount> for u8 {
+    fn from(value: RangeSplitCount) -> Self {
+        value.get()
+    }
+}
+
+impl TryFrom<u8> for RangeSplitCount {
+    type Error = WorldSuccinctHostError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::One),
+            2 => Ok(Self::Two),
+            4 => Ok(Self::Four),
+            8 => Ok(Self::Eight),
+            16 => Ok(Self::Sixteen),
+            other => Err(WorldSuccinctHostError::InvalidRangeSplitCount(other)),
+        }
+    }
+}
+
+/// Version tag for the World OP Succinct Lite prover identity.
+pub const WORLD_OP_SUCCINCT_LITE_VERSION: &str = "world-op-succinct-lite-v1";
+
+/// Prover/game identity checked before participating in a fault dispute game.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldProverIdentity {
+    pub aggregation_vkey: B256,
+    pub range_vkey_commitment: B256,
+    pub rollup_config_hash: B256,
+}
+
+impl WorldProverIdentity {
+    pub const fn new(
+        aggregation_vkey: B256,
+        range_vkey_commitment: B256,
+        rollup_config_hash: B256,
+    ) -> Self {
+        Self { aggregation_vkey, range_vkey_commitment, rollup_config_hash }
+    }
+
+    pub fn from_rollup_config<T: Serialize + ?Sized>(
+        aggregation_vkey: B256,
+        range_vkey_commitment: B256,
+        rollup_config: &T,
+    ) -> Result<Self, RollupConfigHashError> {
+        Ok(Self::new(aggregation_vkey, range_vkey_commitment, hash_rollup_config(rollup_config)?))
+    }
+
+    pub fn from_world_rollup_config<T: Serialize + ?Sized>(
+        aggregation_vkey: B256,
+        range_vkey_commitment: B256,
+        rollup_config: &T,
+        schedule: &WorldRangeHardforkConfig,
+    ) -> Result<Self, RollupConfigHashError> {
+        Ok(Self::new(
+            aggregation_vkey,
+            range_vkey_commitment,
+            hash_world_rollup_config_generic(rollup_config, schedule)?,
+        ))
+    }
+
+    pub fn matches_game(self, game: &WorldFaultDisputeGameConfig) -> bool {
+        self == game.identity()
+    }
+}
+
+/// Fault-dispute-game config consumed by World proposer/challenger services.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldFaultDisputeGameConfig {
+    pub aggregation_vkey: B256,
+    pub range_vkey_commitment: B256,
+    pub rollup_config_hash: B256,
+    pub challenger_addresses: Vec<Address>,
+    pub challenger_bond_wei: U256,
+    pub dispute_game_finality_delay_seconds: u64,
+    pub existing_anchor_state_registry: Option<Address>,
+    pub existing_dispute_game_factory_proxy: Option<Address>,
+    pub fallback_timeout_fp_secs: u64,
+    pub game_type: u32,
+    pub initial_bond_wei: U256,
+    pub max_challenge_duration: u64,
+    pub max_prove_duration: u64,
+    pub optimism_portal2_address: Address,
+    pub permissionless_mode: bool,
+    pub proposer_addresses: Vec<Address>,
+    pub starting_l2_block_number: u64,
+    pub starting_root: B256,
+    pub system_config_address: Address,
+    pub use_sp1_mock_verifier: bool,
+    pub verifier_address: Address,
+}
+
+impl WorldFaultDisputeGameConfig {
+    pub const fn identity(&self) -> WorldProverIdentity {
+        WorldProverIdentity::new(
+            self.aggregation_vkey,
+            self.range_vkey_commitment,
+            self.rollup_config_hash,
+        )
+    }
+
+    pub fn with_rollup_config<T: Serialize + ?Sized>(
+        mut self,
+        rollup_config: &T,
+    ) -> Result<Self, RollupConfigHashError> {
+        self.rollup_config_hash = hash_rollup_config(rollup_config)?;
+        Ok(self)
+    }
+
+    pub fn with_world_rollup_config<T: Serialize + ?Sized>(
+        mut self,
+        rollup_config: &T,
+        schedule: &WorldRangeHardforkConfig,
+    ) -> Result<Self, RollupConfigHashError> {
+        self.rollup_config_hash = hash_world_rollup_config_generic(rollup_config, schedule)?;
+        Ok(self)
+    }
+}
+
+/// Runtime config for the World fault-proof host service.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorldFaultProofServiceConfig {
+    pub l1_rpc_url: String,
+    pub l1_beacon_rpc_url: String,
+    pub l2_rpc_url: String,
+    pub safe_db_fallback: bool,
+    pub range_split_count: RangeSplitCount,
+    pub fault_dispute_game: WorldFaultDisputeGameConfig,
+}
+
+impl WorldFaultProofServiceConfig {
+    pub fn new(
+        l1_rpc_url: String,
+        l1_beacon_rpc_url: String,
+        l2_rpc_url: String,
+        safe_db_fallback: bool,
+        range_split_count: u8,
+        fault_dispute_game: WorldFaultDisputeGameConfig,
+    ) -> Result<Self, WorldSuccinctHostError> {
+        Ok(Self {
+            l1_rpc_url,
+            l1_beacon_rpc_url,
+            l2_rpc_url,
+            safe_db_fallback,
+            range_split_count: range_split_count.try_into()?,
+            fault_dispute_game,
+        })
+    }
+
+    pub const fn identity(&self) -> WorldProverIdentity {
+        self.fault_dispute_game.identity()
+    }
 }
 
 /// Half-open L2 block range `[start, end)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct L2BlockRange {
-    /// First L2 block in the range.
     pub start: u64,
-    /// One past the last L2 block in the range.
     pub end: u64,
 }
 
 impl L2BlockRange {
-    /// Creates a validated half-open L2 block range.
     pub const fn new(start: u64, end: u64) -> Result<Self, WorldSuccinctHostError> {
         if end <= start {
             return Err(WorldSuccinctHostError::InvalidRange { start, end });
@@ -44,7 +215,6 @@ impl L2BlockRange {
         Ok(Self { start, end })
     }
 
-    /// Number of blocks in the range.
     pub const fn len(self) -> u64 {
         self.end - self.start
     }
@@ -53,21 +223,18 @@ impl L2BlockRange {
 /// World Succinct host request builder.
 #[derive(Clone, Debug)]
 pub struct WorldSuccinctHost {
-    /// Fault-proof service config.
     pub config: WorldFaultProofServiceConfig,
 }
 
 impl WorldSuccinctHost {
-    /// Creates a request builder.
     pub const fn new(config: WorldFaultProofServiceConfig) -> Self {
         Self { config }
     }
 
-    /// Builds a range proof request and checks the witness binds to this host identity.
     pub fn range_request(
         &self,
-        input: WorldProofInput,
-        expected_public_values: Option<WorldProofPublicValues>,
+        input: WorldRangeProofInput,
+        expected_public_values: Option<WorldRangeProofPublicValues>,
     ) -> Result<RangeProofRequest, WorldSuccinctHostError> {
         let expected_hash = self.config.identity().rollup_config_hash;
         if input.rollup_config_hash != expected_hash {
@@ -79,15 +246,14 @@ impl WorldSuccinctHost {
 
         Ok(RangeProofRequest {
             witness: WorldRangeWitness {
-                input: range_proof_input(input),
+                input,
                 pre_state: None,
                 post_state: None,
-                expected_public_values: expected_public_values.map(range_public_values),
+                expected_public_values,
             },
         })
     }
 
-    /// Builds an aggregation proof request from range boot infos and CBOR-encoded L1 headers.
     pub fn aggregation_request(
         &self,
         boot_infos: Vec<BootInfoStruct>,
@@ -107,86 +273,11 @@ impl WorldSuccinctHost {
         }
     }
 
-    /// Splits a half-open range according to the configured range split count.
     pub fn split_range(
         &self,
         range: L2BlockRange,
     ) -> Result<Vec<L2BlockRange>, WorldSuccinctHostError> {
-        let split_count = self.config.range_split_count.get() as u64;
-        split_range(range, split_count)
-    }
-}
-
-fn range_proof_input(input: WorldProofInput) -> WorldRangeProofInput {
-    WorldRangeProofInput {
-        schedule: WorldRangeHardforkConfig {
-            bedrock_block: input.schedule.bedrock_block,
-            regolith_time: input.schedule.regolith_time,
-            canyon_time: input.schedule.canyon_time,
-            ecotone_time: input.schedule.ecotone_time,
-            fjord_time: input.schedule.fjord_time,
-            granite_time: input.schedule.granite_time,
-            holocene_time: input.schedule.holocene_time,
-            isthmus_time: input.schedule.isthmus_time,
-            jovian_time: input.schedule.jovian_time,
-            tropo_time: input.schedule.tropo_time,
-            strato_time: input.schedule.strato_time,
-        },
-        claim: WorldRangeProofClaim {
-            l1_head: input.claim.l1_head,
-            agreed_l2_output_root: input.claim.agreed_l2_output_root,
-            claimed_l2_output_root: input.claim.claimed_l2_output_root,
-            claimed_l2_block_number: input.claim.claimed_l2_block_number,
-        },
-        claimed_l2_timestamp: input.claimed_l2_timestamp,
-        rollup_config_hash: input.rollup_config_hash,
-    }
-}
-
-fn range_public_values(values: WorldProofPublicValues) -> WorldRangeProofPublicValues {
-    WorldRangeProofPublicValues {
-        boot_info: BootInfoPublicValues {
-            l1_head: values.boot_info.l1_head,
-            l2_pre_root: values.boot_info.l2_pre_root,
-            l2_post_root: values.boot_info.l2_post_root,
-            l2_block_number: values.boot_info.l2_block_number,
-            rollup_config_hash: values.boot_info.rollup_config_hash,
-        },
-        active_fork: range_hardfork(values.active_fork),
-        world_spec_id: range_spec_id(values.world_spec_id),
-    }
-}
-
-fn range_hardfork(hardfork: WorldChainHardfork) -> WorldRangeHardfork {
-    match hardfork {
-        WorldChainHardfork::Bedrock => WorldRangeHardfork::Bedrock,
-        WorldChainHardfork::Regolith => WorldRangeHardfork::Regolith,
-        WorldChainHardfork::Canyon => WorldRangeHardfork::Canyon,
-        WorldChainHardfork::Ecotone => WorldRangeHardfork::Ecotone,
-        WorldChainHardfork::Fjord => WorldRangeHardfork::Fjord,
-        WorldChainHardfork::Granite => WorldRangeHardfork::Granite,
-        WorldChainHardfork::Holocene => WorldRangeHardfork::Holocene,
-        WorldChainHardfork::Isthmus => WorldRangeHardfork::Isthmus,
-        WorldChainHardfork::Jovian => WorldRangeHardfork::Jovian,
-        WorldChainHardfork::Tropo => WorldRangeHardfork::Tropo,
-        WorldChainHardfork::Strato => WorldRangeHardfork::Strato,
-        _ => WorldRangeHardfork::Strato,
-    }
-}
-
-fn range_spec_id(spec_id: WorldSpecId) -> WorldRangeSpecId {
-    match spec_id {
-        WorldSpecId::BEDROCK => WorldRangeSpecId::BEDROCK,
-        WorldSpecId::REGOLITH => WorldRangeSpecId::REGOLITH,
-        WorldSpecId::CANYON => WorldRangeSpecId::CANYON,
-        WorldSpecId::ECOTONE => WorldRangeSpecId::ECOTONE,
-        WorldSpecId::FJORD => WorldRangeSpecId::FJORD,
-        WorldSpecId::GRANITE => WorldRangeSpecId::GRANITE,
-        WorldSpecId::HOLOCENE => WorldRangeSpecId::HOLOCENE,
-        WorldSpecId::ISTHMUS => WorldRangeSpecId::ISTHMUS,
-        WorldSpecId::JOVIAN => WorldRangeSpecId::JOVIAN,
-        WorldSpecId::TROPO => WorldRangeSpecId::TROPO,
-        WorldSpecId::STRATO => WorldRangeSpecId::STRATO,
+        split_range(range, self.config.range_split_count.get() as u64)
     }
 }
 
@@ -196,10 +287,7 @@ pub fn split_range(
     split_count: u64,
 ) -> Result<Vec<L2BlockRange>, WorldSuccinctHostError> {
     if range.end <= range.start {
-        return Err(WorldSuccinctHostError::InvalidRange {
-            start: range.start,
-            end: range.end,
-        });
+        return Err(WorldSuccinctHostError::InvalidRange { start: range.start, end: range.end });
     }
 
     let split_count = split_count.max(1).min(range.len());
@@ -218,7 +306,6 @@ pub fn split_range(
     Ok(ranges)
 }
 
-/// Returns the split count as a nonzero u64.
 pub const fn split_count_u64(split_count: RangeSplitCount) -> u64 {
     split_count.get() as u64
 }
@@ -226,11 +313,110 @@ pub const fn split_count_u64(split_count: RangeSplitCount) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+
+    fn game_config(rollup_config_hash: B256) -> WorldFaultDisputeGameConfig {
+        WorldFaultDisputeGameConfig {
+            aggregation_vkey: B256::from([1; 32]),
+            range_vkey_commitment: B256::from([2; 32]),
+            rollup_config_hash,
+            challenger_addresses: vec![Address::from([3; 20])],
+            challenger_bond_wei: U256::from(1u64),
+            dispute_game_finality_delay_seconds: 2,
+            existing_anchor_state_registry: None,
+            existing_dispute_game_factory_proxy: None,
+            fallback_timeout_fp_secs: 3,
+            game_type: 42,
+            initial_bond_wei: U256::from(4u64),
+            max_challenge_duration: 5,
+            max_prove_duration: 6,
+            optimism_portal2_address: Address::from([7; 20]),
+            permissionless_mode: false,
+            proposer_addresses: vec![Address::from([8; 20])],
+            starting_l2_block_number: 9,
+            starting_root: B256::from([10; 32]),
+            system_config_address: Address::from([11; 20]),
+            use_sp1_mock_verifier: false,
+            verifier_address: Address::from([12; 20]),
+        }
+    }
+
+    #[test]
+    fn identity_matches_game_config() {
+        let game = game_config(B256::from([9; 32]));
+        let identity = WorldProverIdentity::new(
+            game.aggregation_vkey,
+            game.range_vkey_commitment,
+            game.rollup_config_hash,
+        );
+        assert!(identity.matches_game(&game));
+    }
+
+    #[test]
+    fn identity_hash_changes_with_rollup_config() {
+        let first = json!({"jovian_time": 10, "tropo_time": 20});
+        let second = json!({"jovian_time": 10, "tropo_time": 21});
+        let agg = B256::from([1; 32]);
+        let rvc = B256::from([2; 32]);
+
+        let a = WorldProverIdentity::from_rollup_config(agg, rvc, &first).unwrap();
+        let b = WorldProverIdentity::from_rollup_config(agg, rvc, &second).unwrap();
+
+        assert_ne!(a.rollup_config_hash, b.rollup_config_hash);
+    }
+
+    #[test]
+    fn identity_hash_with_world_schedule() {
+        let rollup_config = json!({"jovian_time": 10});
+        let first_schedule = WorldRangeHardforkConfig { tropo_time: Some(20), ..Default::default() };
+        let second_schedule =
+            WorldRangeHardforkConfig { tropo_time: Some(21), ..Default::default() };
+        let agg = B256::from([1; 32]);
+        let rvc = B256::from([2; 32]);
+
+        let a = WorldProverIdentity::from_world_rollup_config(agg, rvc, &rollup_config, &first_schedule).unwrap();
+        let b = WorldProverIdentity::from_world_rollup_config(agg, rvc, &rollup_config, &second_schedule).unwrap();
+
+        assert_ne!(a.rollup_config_hash, b.rollup_config_hash);
+    }
+
+    #[test]
+    fn validates_range_split_count() {
+        assert_eq!(RangeSplitCount::try_from(16).unwrap().get(), 16);
+        assert!(matches!(
+            RangeSplitCount::try_from(3),
+            Err(WorldSuccinctHostError::InvalidRangeSplitCount(3))
+        ));
+    }
+
+    #[test]
+    fn range_split_count_serializes_as_number() {
+        assert_eq!(serde_json::to_value(RangeSplitCount::Four).unwrap(), json!(4));
+        assert_eq!(
+            serde_json::from_value::<RangeSplitCount>(json!(16)).unwrap(),
+            RangeSplitCount::Sixteen
+        );
+    }
+
+    #[test]
+    fn service_config_exposes_identity() {
+        let game = game_config(B256::from([9; 32]));
+        let service = WorldFaultProofServiceConfig::new(
+            "http://l1".into(),
+            "http://beacon".into(),
+            "http://l2".into(),
+            true,
+            4,
+            game.clone(),
+        )
+        .unwrap();
+        assert_eq!(service.identity(), game.identity());
+        assert_eq!(service.range_split_count, RangeSplitCount::Four);
+    }
 
     #[test]
     fn splits_range_evenly_with_remainder() {
         let ranges = split_range(L2BlockRange::new(10, 20).unwrap(), 4).unwrap();
-
         assert_eq!(
             ranges,
             vec![

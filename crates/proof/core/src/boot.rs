@@ -1,14 +1,24 @@
 //! Public boot value ABI used by range proofs and the aggregation program.
 
+use alloy_primitives::B256;
 use alloy_sol_types::sol;
 use kona_genesis::RollupConfig;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use alloy_primitives::B256;
-use kona_proof::BootInfo;
-
 use crate::range::WorldRangeHardforkConfig;
+
+/// Error returned when a rollup config cannot be serialized for hashing.
+#[derive(Debug, thiserror::Error)]
+pub enum RollupConfigHashError {
+    #[error("failed to serialize rollup config for hashing: {0}")]
+    Serde(#[from] serde_json::Error),
+}
+
+/// Hashes a rollup config as pretty JSON then SHA-256, matching OP Succinct Lite.
+pub fn hash_rollup_config<T: Serialize + ?Sized>(config: &T) -> Result<B256, RollupConfigHashError> {
+    Ok(sha256_b256(serde_json::to_string_pretty(config)?.as_bytes()))
+}
 
 /// Public boot values committed by the range proof.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,29 +67,17 @@ sol! {
     }
 }
 
-impl From<BootInfoPublicValues> for BootInfoStruct {
-    fn from(value: BootInfoPublicValues) -> Self {
-        Self {
-            l1Head: value.l1_head,
-            l2PreRoot: value.l2_pre_root,
-            l2PostRoot: value.l2_post_root,
-            l2BlockNumber: value.l2_block_number,
-            rollupConfigHash: value.rollup_config_hash,
-        }
-    }
-}
-
 impl BootInfoStruct {
     /// Converts Kona boot info into the on-chain public values.
     ///
-    /// The rollup config hash is computed inside the guest from Kona's rollup config plus the
+    /// The rollup config hash is computed from Kona's rollup config plus the
     /// World-only Tropo/Strato schedule fields used during execution.
     pub fn from_kona_boot_info(
-        boot_info: BootInfo,
+        boot_info: kona_proof::BootInfo,
         world_schedule: &WorldRangeHardforkConfig,
     ) -> Self {
-        let rollup_config_hash = hash_world_rollup_config(&boot_info.rollup_config, world_schedule);
-
+        let rollup_config_hash =
+            hash_world_rollup_config(&boot_info.rollup_config, world_schedule);
         Self {
             l1Head: boot_info.l1_head,
             l2PreRoot: boot_info.agreed_l2_output_root,
@@ -90,39 +88,16 @@ impl BootInfoStruct {
     }
 }
 
-#[derive(Serialize)]
-struct WorldRollupConfigHashInput<'a> {
-    #[serde(flatten)]
-    rollup_config: &'a RollupConfig,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tropo_time: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    strato_time: Option<u64>,
-}
-
-/// Hashes the rollup config committed by World range proofs.
-///
-/// This mirrors OP Succinct's pretty-JSON-then-SHA256 hash, but appends World-only fork fields
-/// that are not represented in upstream Kona's `RollupConfig`.
-pub fn hash_world_rollup_config(
-    rollup_config: &RollupConfig,
-    world_schedule: &WorldRangeHardforkConfig,
-) -> B256 {
-    let serialized_config = serde_json::to_string_pretty(&WorldRollupConfigHashInput {
-        rollup_config,
-        tropo_time: world_schedule.tropo_time,
-        strato_time: world_schedule.strato_time,
-    })
-    .expect("failed to serialize World rollup config for hashing");
-
-    sha256_b256(serialized_config.as_bytes())
-}
-
-fn sha256_b256(bytes: &[u8]) -> B256 {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let hash = hasher.finalize();
-    B256::from_slice(hash.as_ref())
+impl From<BootInfoPublicValues> for BootInfoStruct {
+    fn from(value: BootInfoPublicValues) -> Self {
+        Self {
+            l1Head: value.l1_head,
+            l2PreRoot: value.l2_pre_root,
+            l2PostRoot: value.l2_post_root,
+            l2BlockNumber: value.l2_block_number,
+            rollupConfigHash: value.rollup_config_hash,
+        }
+    }
 }
 
 impl From<&BootInfoPublicValues> for BootInfoStruct {
@@ -149,6 +124,47 @@ impl From<BootInfoStruct> for BootInfoPublicValues {
     }
 }
 
+#[derive(Serialize)]
+struct WorldRollupConfigHashInput<'a, T: Serialize + ?Sized> {
+    #[serde(flatten)]
+    rollup_config: &'a T,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tropo_time: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    strato_time: Option<u64>,
+}
+
+/// Hashes the rollup config committed by World range proofs.
+///
+/// This mirrors OP Succinct's pretty-JSON-then-SHA256 hash, but appends World-only fork fields
+/// that are not represented in upstream Kona's `RollupConfig`.
+pub fn hash_world_rollup_config(
+    rollup_config: &RollupConfig,
+    world_schedule: &WorldRangeHardforkConfig,
+) -> B256 {
+    hash_world_rollup_config_generic(rollup_config, world_schedule)
+        .expect("failed to serialize World rollup config for hashing")
+}
+
+/// Generic, fallible variant of [`hash_world_rollup_config`] for use with arbitrary config types.
+pub fn hash_world_rollup_config_generic<T: Serialize + ?Sized>(
+    rollup_config: &T,
+    world_schedule: &WorldRangeHardforkConfig,
+) -> Result<B256, RollupConfigHashError> {
+    let serialized = serde_json::to_string_pretty(&WorldRollupConfigHashInput {
+        rollup_config,
+        tropo_time: world_schedule.tropo_time,
+        strato_time: world_schedule.strato_time,
+    })?;
+    Ok(sha256_b256(serialized.as_bytes()))
+}
+
+fn sha256_b256(bytes: &[u8]) -> B256 {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    B256::from_slice(hasher.finalize().as_ref())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,9 +180,7 @@ mod tests {
             42,
             B256::from([4; 32]),
         );
-
         let boot_info = BootInfoStruct::from(&values);
-
         assert_eq!(boot_info.l1Head, values.l1_head);
         assert_eq!(boot_info.l2PreRoot, values.l2_pre_root);
         assert_eq!(boot_info.l2PostRoot, values.l2_post_root);
@@ -187,7 +201,6 @@ mod tests {
             strato_time: Some(30),
             ..Default::default()
         };
-
         assert_ne!(
             hash_world_rollup_config(&rollup_config, &before),
             hash_world_rollup_config(&rollup_config, &after)
@@ -198,7 +211,6 @@ mod tests {
     fn world_rollup_hash_matches_op_hash_without_world_forks() {
         let rollup_config = RollupConfig::default();
         let serialized_config = serde_json::to_string_pretty(&rollup_config).unwrap();
-
         assert_eq!(
             hash_world_rollup_config(&rollup_config, &WorldRangeHardforkConfig::default()),
             sha256_b256(serialized_config.as_bytes())

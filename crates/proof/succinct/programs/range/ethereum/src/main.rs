@@ -6,7 +6,7 @@
 sp1_zkvm::entrypoint!(main);
 
 use rkyv::rancor::Error;
-use world_chain_proof_succinct_client_utils::witness::{WitnessData, WorldRangeWitnessData};
+use world_chain_proof_core::witness::{WitnessData, WorldRangeWitnessData};
 use world_chain_proof_succinct_ethereum_client_utils::executor::ETHDAWitnessExecutor;
 use world_chain_proof_succinct_range_utils::run_range_program;
 #[cfg(feature = "tracing-subscriber")]

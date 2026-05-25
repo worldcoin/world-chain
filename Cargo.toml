@@ -23,10 +23,10 @@ members = [
     "crates/evm",
     "crates/state",
     "crates/pbh",
+    "crates/proof/core",
     "crates/proof/protocol",
-    "crates/proof/client",
-    "crates/proof/host",
     "crates/proof/nitro",
+    "crates/proof/world-chain-proof",
     "crates/proof/succinct/utils/build",
     "crates/proof/succinct/utils/client",
     "crates/proof/succinct/utils/elfs",
@@ -77,9 +77,9 @@ world-chain-evm = { path = "crates/evm", default-features = false }
 world-chain-state = { path = "crates/state", default-features = false }
 world-chain-devnet = { path = "crates/devnet", default-features = false }
 world-chain-test-utils = { path = "crates/test-utils", default-features = false }
+world-chain-proof-core = { path = "crates/proof/core", default-features = false }
+world-chain-proof = { path = "crates/proof/world-chain-proof", default-features = false }
 world-chain-proof-protocol = { path = "crates/proof/protocol", default-features = false }
-world-chain-proof-client = { path = "crates/proof/client", default-features = false }
-world-chain-proof-host = { path = "crates/proof/host", default-features = false }
 world-chain-proof-nitro = { path = "crates/proof/nitro", default-features = false }
 world-chain-proof-succinct-build-utils = { path = "crates/proof/succinct/utils/build", default-features = false }
 world-chain-proof-succinct-client-utils = { path = "crates/proof/succinct/utils/client", default-features = false }

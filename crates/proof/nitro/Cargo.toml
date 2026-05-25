@@ -21,6 +21,9 @@ required-features = ["enclave-bin"]
 
 [features]
 default = []
+# Enables the host-side prover that talks to a running Nitro enclave over vsock.
+# Requires Linux (AF_VSOCK is not available on macOS or Windows).
+aws_nitro = ["dep:tokio-vsock"]
 # Enables the enclave-side code path. The actual `[[bin]]` target additionally
 # requires the `enclave-bin` feature so it is only built for the enclave image.
 enclave = [
@@ -45,10 +48,9 @@ serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
-tokio-vsock = "0.5"
+tokio-vsock = { version = "0.5", optional = true }
 tracing.workspace = true
-world-chain-proof-succinct-client-utils.workspace = true
-world-chain-proof-succinct-proof-utils.workspace = true
+world-chain-proof-core.workspace = true
 
 # Enclave-only (gated by the `enclave` feature) -----------------------------
 aws-nitro-enclaves-nsm-api = { version = "0.4", optional = true }

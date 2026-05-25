@@ -11,7 +11,7 @@ use revm::{
     inspector::NoOpInspector,
 };
 
-use crate::range::{WorldRangeHardfork, WorldRangeHardforkConfig};
+use world_chain_proof_core::range::{WorldRangeHardfork, WorldRangeHardforkConfig};
 
 /// Factory producing OP Stack EVMs for the zkVM.
 #[derive(Debug, Clone)]

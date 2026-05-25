@@ -21,10 +21,11 @@ use kona_proof::{
 use spin::RwLock;
 use tracing::info;
 
+use world_chain_proof_core::range::WorldRangeHardforkConfig;
+
 use crate::{
     client::{advance_to_target, fetch_safe_head_hash},
     precompiles::{CustomCrypto, ZkvmOpEvmFactory},
-    range::WorldRangeHardforkConfig,
 };
 
 // Gets the inputs for constructing the derivation pipeline.

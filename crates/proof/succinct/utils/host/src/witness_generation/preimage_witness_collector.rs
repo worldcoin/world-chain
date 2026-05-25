@@ -6,7 +6,7 @@ use kona_preimage::{
     errors::{PreimageOracleError, PreimageOracleResult},
 };
 use kona_proof::FlushableCache;
-use world_chain_proof_succinct_client_utils::witness::preimage_store::PreimageStore;
+use world_chain_proof_core::witness::preimage_store::PreimageStore;
 
 #[derive(Clone, Debug)]
 pub struct PreimageWitnessCollector<P: CommsClient + FlushableCache + Send + Sync + Clone> {

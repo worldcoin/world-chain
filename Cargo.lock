@@ -15078,25 +15078,36 @@ dependencies = [
 ]
 
 [[package]]
-name = "world-chain-proof-client"
+name = "world-chain-proof"
 version = "2.2.0"
 dependencies = [
- "alloy-primitives",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "world-chain-proof-protocol",
+ "world-chain-proof-core",
+ "world-chain-proof-nitro",
+ "world-chain-proof-succinct-client-utils",
+ "world-chain-proof-succinct-proof-utils",
 ]
 
 [[package]]
-name = "world-chain-proof-host"
+name = "world-chain-proof-core"
 version = "2.2.0"
 dependencies = [
+ "alloy-consensus 2.0.4",
+ "alloy-eips 2.0.4",
  "alloy-primitives",
+ "alloy-sol-types",
+ "anyhow",
+ "async-trait",
+ "kona-derive",
+ "kona-genesis",
+ "kona-preimage",
+ "kona-proof",
+ "kona-protocol",
+ "kzg-rs",
+ "rkyv",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.18",
- "world-chain-proof-protocol",
 ]
 
 [[package]]
@@ -15120,9 +15131,8 @@ dependencies = [
  "tokio-vsock",
  "tracing",
  "tracing-subscriber 0.3.23",
- "world-chain-proof-succinct-client-utils",
+ "world-chain-proof-core",
  "world-chain-proof-succinct-ethereum-client-utils",
- "world-chain-proof-succinct-proof-utils",
 ]
 
 [[package]]
@@ -15181,6 +15191,7 @@ dependencies = [
  "spin 0.10.0",
  "thiserror 2.0.18",
  "tracing",
+ "world-chain-proof-core",
 ]
 
 [[package]]
@@ -15222,10 +15233,9 @@ dependencies = [
  "kona-protocol",
  "kzg-rs",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
- "world-chain-proof-client",
- "world-chain-proof-host",
- "world-chain-proof-protocol",
+ "world-chain-proof-core",
  "world-chain-proof-succinct-client-utils",
  "world-chain-proof-succinct-proof-utils",
 ]
@@ -15235,6 +15245,7 @@ name = "world-chain-proof-succinct-proof-utils"
 version = "2.2.0"
 dependencies = [
  "serde",
+ "world-chain-proof-core",
  "world-chain-proof-succinct-client-utils",
  "world-chain-proof-succinct-elfs",
 ]

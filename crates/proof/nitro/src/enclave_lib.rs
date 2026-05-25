@@ -19,16 +19,15 @@ use rkyv::rancor::Error as RkyvError;
 use serde_bytes::ByteBuf;
 use tokio_vsock::{VsockAddr, VsockListener, VsockStream};
 use tracing::{error, info, warn};
-use world_chain_proof_succinct_client_utils::{
-    BlobStore, WorldRangeProofPublicValues,
+use world_chain_proof_core::{
+    BlobStore,
     boot::BootInfoStruct,
-    range::WorldRangeHardforkConfig,
+    range::{WorldRangeHardforkConfig, WorldRangeProofPublicValues},
     types::AggregationInputs,
-    witness::{
-        WitnessData, WorldRangeWitnessData,
-        executor::{WitnessExecutor, get_inputs_for_pipeline},
-        preimage_store::PreimageStore,
-    },
+    witness::{WitnessData, WorldRangeWitnessData, preimage_store::PreimageStore},
+};
+use world_chain_proof_succinct_client_utils::witness::executor::{
+    WitnessExecutor, get_inputs_for_pipeline,
 };
 use world_chain_proof_succinct_ethereum_client_utils::executor::ETHDAWitnessExecutor;
 

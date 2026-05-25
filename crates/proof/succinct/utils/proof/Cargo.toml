@@ -7,7 +7,13 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[features]
+# Embeds the compiled SP1 ELF blobs into the binary. Requires the ELF files to
+# be present under crates/proof/succinct/elf/ (built by the SP1 build pipeline).
+embedded-elfs = ["dep:world-chain-proof-succinct-elfs"]
+
 [dependencies]
 serde.workspace = true
+world-chain-proof-core.workspace = true
 world-chain-proof-succinct-client-utils.workspace = true
-world-chain-proof-succinct-elfs.workspace = true
+world-chain-proof-succinct-elfs = { workspace = true, optional = true }

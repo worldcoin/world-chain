@@ -1,4 +1,3 @@
-use crate::witness::BlobData;
 use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::Blob;
 use alloy_eips::eip4844::kzg_to_versioned_hash;
@@ -7,6 +6,8 @@ use async_trait::async_trait;
 use kona_derive::{BlobProvider, BlobProviderError};
 use kona_protocol::BlockInfo;
 use kzg_rs::get_kzg_settings;
+
+use crate::witness::BlobData;
 
 #[derive(Clone, Debug, Default)]
 pub struct BlobStore {
@@ -34,7 +35,7 @@ impl From<BlobData> for BlobStore {
             value.proofs,
             &get_kzg_settings(),
         ) {
-            Ok(true) => {} // Verification passed
+            Ok(true) => {}
             Ok(false) => panic!("KZG proof verification failed: invalid proofs"),
             Err(e) => panic!("KZG proof verification error: {}", e),
         }
