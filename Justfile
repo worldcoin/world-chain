@@ -69,9 +69,9 @@ devnet-logs index='':
     fi
     tail -n 200 -F "$LOG_FILE" | grep --line-buffered -- "$PATTERN"
 
-# Run stress tests against a live network
+# Run Contender stress tests against a running native Rust devnet.
 stress *args='':
-    RUST_LOG="info" cargo run -p xtask --release -- stress $@
+    @scripts/stress/stress.sh $@
 
 # Prove a PBH transaction
 prove *args='':
