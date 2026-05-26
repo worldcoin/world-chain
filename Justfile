@@ -53,6 +53,22 @@ devnet command='up' *args='':
     fi
     RUST_LOG="${RUST_LOG:-info,flashblocks=trace,engine_driver=info}" cargo run -p xtask -- devnet {{command}} {{args}}
 
+# Tail world-chain execution client logs from the running devnet (e.g. `just devnet-logs` or `just devnet-logs 0` for a specific sequencer).
+devnet-logs index='':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    LOG_FILE="${WORLD_CHAIN_DEVNET_LOG_FILE:-target/devnet/logs/devnet.log}"
+    if [ ! -f "$LOG_FILE" ]; then
+        echo "no devnet log file at $LOG_FILE; is the devnet running?" >&2
+        exit 1
+    fi
+    if [ -n "{{index}}" ]; then
+        PATTERN="world-chain-el-{{index}} "
+    else
+        PATTERN="world-chain-el-"
+    fi
+    tail -n 200 -F "$LOG_FILE" | grep --line-buffered -- "$PATTERN"
+
 # Run stress tests against a live network
 stress *args='':
     RUST_LOG="info" cargo run -p xtask --release -- stress $@
