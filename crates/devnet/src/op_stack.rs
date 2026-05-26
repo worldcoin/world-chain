@@ -14,7 +14,7 @@ const DEFAULT_DEVNET_PRIVATE_KEY: &str =
 /// OP Stack container images used by the HA topology.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpStackImages {
-    /// OP Node image.
+    /// OP Node-compatible rollup node image.
     pub op_node: ContainerImage,
     /// OP Deployer image.
     pub op_deployer: ContainerImage,
@@ -32,8 +32,8 @@ impl Default for OpStackImages {
     fn default() -> Self {
         Self {
             op_node: ContainerImage::new(
-                "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node",
-                "develop",
+                "us-docker.pkg.dev/oplabs-tools-artifacts/images/kona-node",
+                "v1.5.0",
             ),
             op_deployer: ContainerImage::new(
                 "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-deployer",

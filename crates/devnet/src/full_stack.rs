@@ -18,7 +18,7 @@ use futures::future::try_join_all;
 use op_alloy_consensus::{encode_holocene_extra_data, encode_jovian_extra_data};
 use rand::Rng as _;
 use reth_chainspec::EthChainSpec;
-use reth_network_peers::NodeRecord;
+use reth_network_peers::{NodeRecord, TrustedPeer};
 use secp256k1::SecretKey;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -28,12 +28,12 @@ use testcontainers::{
     runners::AsyncRunner,
 };
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
     task::JoinHandle,
 };
 use tracing::{debug, info};
-use url::Url;
+use url::{Host, Url};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 use world_chain_test_utils::DEV_CHAIN_ID;
 
@@ -49,7 +49,6 @@ const ANVIL_RPC_PORT: u16 = 8545;
 const OP_NODE_RPC_PORT: u16 = 9545;
 const OP_NODE_METRICS_PORT: u16 = 7300;
 const OP_NODE_P2P_PORT: u16 = 9222;
-const OP_NODE_L1_HTTP_POLL_INTERVAL: &str = "500ms";
 const OP_BATCHER_MAX_CHANNEL_DURATION_L1_BLOCKS: &str = "4";
 const OP_PROPOSER_PERMISSIONED_GAME_TYPE: &str = "1";
 const OP_TXMGR_NETWORK_TIMEOUT: &str = "30s";
@@ -130,7 +129,7 @@ struct OpNodePlan {
     rpc_host_port: u16,
     metrics_host_port: u16,
     p2p_host_port: u16,
-    peer_id: String,
+    bootnode: String,
     private_key_path: String,
 }
 
@@ -138,9 +137,8 @@ struct OpNodePlan {
 struct OpNodeService {
     id: String,
     rpc_url: String,
-    peer_id: String,
     p2p_host_port: u16,
-    static_peers: Vec<String>,
+    bootnodes: Vec<String>,
     metrics_target: MetricsTarget,
     image: ContainerImage,
     _container: ContainerAsync<GenericImage>,
@@ -269,19 +267,20 @@ impl FullStackWorldDevnet {
             conductor_plans.push(plan_conductor(index, port_mode)?);
         }
 
-        let op_node_plans = plan_op_nodes(sequencer_count, &workdir_path, &config.images.op_node)
-            .await
-            .wrap_err("failed to plan op-node trusted peer mesh")?;
-        let op_node_static_peers: Vec<_> = (0..sequencer_count)
-            .map(|index| op_node_static_peers(&op_node_plans, index))
+        let op_node_plans = plan_op_nodes(sequencer_count, &workdir_path)
+            .wrap_err("failed to plan op-node bootnode peer mesh")?;
+        let op_node_bootnodes: Vec<_> = (0..sequencer_count)
+            .map(|index| op_node_bootnodes(&op_node_plans, index))
             .collect();
+        let l1_slot_duration_secs = block_time.as_secs().max(1);
         let op_nodes = try_join_all((0..sequencer_count).map(|index| {
             start_op_node(
                 index,
                 &workdir_path,
                 &config.images.op_node,
                 &op_node_plans[index],
-                &op_node_static_peers[index],
+                &op_node_bootnodes[index],
+                l1_slot_duration_secs,
                 &l1_internal_rpc,
                 &sequencers[index],
                 &conductor_plans[index].rpc_url,
@@ -1300,91 +1299,32 @@ fn plan_conductor(index: usize, port_mode: DevnetPortMode) -> Result<ConductorPl
     })
 }
 
-async fn plan_op_nodes(
-    count: usize,
-    workdir: &Path,
-    image: &ContainerImage,
-) -> Result<Vec<OpNodePlan>> {
+fn plan_op_nodes(count: usize, workdir: &Path) -> Result<Vec<OpNodePlan>> {
     let mut plans = Vec::with_capacity(count);
     for index in 0..count {
         let private_key = random_p2p_secret_key();
+        let p2p_host_port = reserve_host_port()?;
         let filename = format!("op-node-{index}-p2p-priv.txt");
         fs::write(workdir.join(&filename), &private_key)
             .wrap_err_with(|| format!("failed to write op-node P2P key {filename}"))?;
         plans.push(OpNodePlan {
             rpc_host_port: 19_545 + index as u16,
             metrics_host_port: reserve_host_port()?,
-            p2p_host_port: reserve_host_port()?,
-            peer_id: op_node_peer_id(image, &private_key).await?,
+            p2p_host_port,
+            bootnode: devnet_trusted_peer(&private_key, "host.docker.internal", p2p_host_port)?,
             private_key_path: format!("/work/{filename}"),
         });
     }
     Ok(plans)
 }
 
-fn op_node_static_peers(plans: &[OpNodePlan], source_index: usize) -> Vec<String> {
+fn op_node_bootnodes(plans: &[OpNodePlan], source_index: usize) -> Vec<String> {
     plans
         .iter()
         .enumerate()
         .filter(|&(target_index, _target)| target_index != source_index)
-        .map(|(_target_index, target)| {
-            format!(
-                "/dns4/host.docker.internal/tcp/{}/p2p/{}",
-                target.p2p_host_port, target.peer_id
-            )
-        })
+        .map(|(_target_index, target)| target.bootnode.clone())
         .collect()
-}
-
-async fn op_node_peer_id(image: &ContainerImage, private_key: &str) -> Result<String> {
-    let image_ref = image.reference();
-    let mut child = Command::new("docker")
-        .args([
-            "run",
-            "--rm",
-            "-i",
-            "--entrypoint",
-            "op-node",
-            &image_ref,
-            "p2p",
-            "priv2id",
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .wrap_err_with(|| format!("failed to spawn {image_ref} p2p priv2id"))?;
-
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| eyre!("failed to open stdin for op-node p2p priv2id"))?;
-    stdin
-        .write_all(private_key.as_bytes())
-        .await
-        .wrap_err("failed to write op-node P2P key to priv2id")?;
-    drop(stdin);
-
-    let output = child
-        .wait_with_output()
-        .await
-        .wrap_err("failed to wait for op-node p2p priv2id")?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !output.status.success() {
-        bail!(
-            "op-node p2p priv2id failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
-            output.status.code(),
-            stdout,
-            stderr
-        );
-    }
-
-    let peer_id = stdout.trim();
-    if peer_id.is_empty() {
-        bail!("op-node p2p priv2id returned an empty peer ID");
-    }
-    Ok(peer_id.to_string())
 }
 
 fn random_p2p_secret_key() -> String {
@@ -1396,16 +1336,25 @@ fn random_p2p_secret_key() -> String {
     }
 }
 
-fn devnet_enode(secret_key_hex: &str, port: u16) -> Result<String> {
+fn devnet_p2p_secret_key(secret_key_hex: &str) -> Result<SecretKey> {
     let bytes = hex::decode(secret_key_hex.trim_start_matches("0x"))
         .wrap_err("failed to decode devnet p2p private key")?;
     let bytes: [u8; 32] = bytes
         .try_into()
         .map_err(|bytes: Vec<u8>| eyre!("expected 32-byte p2p key, got {}", bytes.len()))?;
-    let secret_key =
-        SecretKey::from_byte_array(&bytes).wrap_err("invalid devnet p2p private key")?;
+    SecretKey::from_byte_array(&bytes).wrap_err("invalid devnet p2p private key")
+}
+
+fn devnet_enode(secret_key_hex: &str, port: u16) -> Result<String> {
+    let secret_key = devnet_p2p_secret_key(secret_key_hex)?;
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port);
     Ok(NodeRecord::from_secret_key(addr, &secret_key).to_string())
+}
+
+fn devnet_trusted_peer(secret_key_hex: &str, host: &str, port: u16) -> Result<String> {
+    let secret_key = devnet_p2p_secret_key(secret_key_hex)?;
+    let host = Host::parse(host).wrap_err_with(|| format!("invalid devnet peer host {host}"))?;
+    Ok(TrustedPeer::from_secret_key(host, port, &secret_key).to_string())
 }
 
 async fn start_conductor(
@@ -1516,7 +1465,8 @@ async fn start_op_node(
     workdir: &Path,
     image: &ContainerImage,
     plan: &OpNodePlan,
-    static_peers: &[String],
+    bootnodes: &[String],
+    l1_slot_duration_secs: u64,
     l1_rpc: &str,
     sequencer: &SequencerService,
     conductor_rpc_url: &str,
@@ -1524,82 +1474,84 @@ async fn start_op_node(
     let conductor_rpc = host_internal_url(conductor_rpc_url)?;
     let l2_engine_rpc = host_internal_url(&sequencer.auth_url)?;
     let p2p_host_port = plan.p2p_host_port.to_string();
+    let l1_slot_duration_secs = l1_slot_duration_secs.to_string();
     let mut cmd = vec![
-        "--l1".to_string(),
-        l1_rpc.to_string(),
-        "--l1.rpckind".to_string(),
-        "basic".to_string(),
-        "--l1.http-poll-interval".to_string(),
-        OP_NODE_L1_HTTP_POLL_INTERVAL.to_string(),
-        "--l1.beacon.ignore".to_string(),
-        "--l2".to_string(),
-        l2_engine_rpc,
-        "--l2.jwt-secret".to_string(),
-        "/work/jwt.hex".to_string(),
-        "--l2.enginekind".to_string(),
-        "reth".to_string(),
-        "--rollup.config".to_string(),
-        "/work/rollup.json".to_string(),
-        "--rollup.l1-chain-config".to_string(),
-        "/work/l1-genesis.json".to_string(),
-        "--rpc.addr".to_string(),
-        "0.0.0.0".to_string(),
-        "--rpc.port".to_string(),
-        OP_NODE_RPC_PORT.to_string(),
-        "--rpc.enable-admin".to_string(),
+        "-vvv".to_string(),
+        "--logs.stdout.format=logfmt".to_string(),
+        "node".to_string(),
+        "--chain".to_string(),
+        DEV_CHAIN_ID.to_string(),
         "--metrics.enabled".to_string(),
         "--metrics.addr".to_string(),
         "0.0.0.0".to_string(),
         "--metrics.port".to_string(),
         OP_NODE_METRICS_PORT.to_string(),
+        "--mode".to_string(),
+        "Sequencer".to_string(),
+        "--sequencer.stopped".to_string(),
+        "--sequencer.max-safe-lag".to_string(),
+        "0".to_string(),
+        "--sequencer.l1-confs".to_string(),
+        "0".to_string(),
+        "--conductor.rpc".to_string(),
+        conductor_rpc,
+        "--conductor.rpc.timeout".to_string(),
+        "5".to_string(),
+        "--l2-config-file".to_string(),
+        "/work/rollup.json".to_string(),
+        "--l1-config-file".to_string(),
+        "/work/l1-genesis.json".to_string(),
+        "--l1-eth-rpc".to_string(),
+        l1_rpc.to_string(),
+        "--l1-beacon".to_string(),
+        l1_rpc.to_string(),
+        "--l1-slot-duration-override".to_string(),
+        l1_slot_duration_secs,
+        "--l1-trust-rpc".to_string(),
+        "--l2-engine-rpc".to_string(),
+        l2_engine_rpc,
+        "--l2-engine-jwt-secret".to_string(),
+        "/work/jwt.hex".to_string(),
+        "--l2-trust-rpc".to_string(),
+        "--p2p.sequencer.key".to_string(),
+        UNSAFE_BLOCK_SIGNER_PRIVATE_KEY.to_string(),
         "--p2p.listen.ip".to_string(),
         "0.0.0.0".to_string(),
         "--p2p.listen.tcp".to_string(),
         OP_NODE_P2P_PORT.to_string(),
         "--p2p.listen.udp".to_string(),
-        "0".to_string(),
+        OP_NODE_P2P_PORT.to_string(),
         "--p2p.advertise.ip".to_string(),
         "host.docker.internal".to_string(),
         "--p2p.advertise.tcp".to_string(),
+        p2p_host_port.clone(),
+        "--p2p.advertise.udp".to_string(),
         p2p_host_port,
         "--p2p.priv.path".to_string(),
         plan.private_key_path.clone(),
-        "--p2p.peerstore.path".to_string(),
-        "memory".to_string(),
-        "--p2p.discovery.path".to_string(),
-        "memory".to_string(),
+        "--p2p.bootstore".to_string(),
+        format!("/work/kona-bootstore-{index}"),
         "--p2p.no-discovery".to_string(),
-        "--sequencer.enabled".to_string(),
-        "--sequencer.l1-confs".to_string(),
+        "--p2p.redial".to_string(),
         "0".to_string(),
-        "--verifier.l1-confs".to_string(),
-        "0".to_string(),
-        "--p2p.sequencer.key".to_string(),
-        UNSAFE_BLOCK_SIGNER_PRIVATE_KEY.to_string(),
-        "--conductor.enabled".to_string(),
-        "--conductor.rpc".to_string(),
-        conductor_rpc,
-        "--conductor.rpc-timeout".to_string(),
-        "5s".to_string(),
-        "--log.format".to_string(),
-        "logfmt".to_string(),
-        "--log.level".to_string(),
-        "DEBUG".to_string(),
+        "--rpc.addr".to_string(),
+        "0.0.0.0".to_string(),
+        "--rpc.enable-admin".to_string(),
+        "--port".to_string(),
+        OP_NODE_RPC_PORT.to_string(),
     ];
-    if index != 0 {
-        cmd.push("--sequencer.stopped".to_string());
-    }
-    if !static_peers.is_empty() {
-        cmd.push("--p2p.static".to_string());
-        cmd.push(static_peers.join(","));
+    if !bootnodes.is_empty() {
+        cmd.push("--p2p.bootnodes".to_string());
+        cmd.push(bootnodes.join(","));
     }
 
     let mut request = GenericImage::new(image.repository.clone(), image.tag.clone())
-        .with_entrypoint("op-node")
+        .with_entrypoint("kona-node")
         .with_wait_for(WaitFor::seconds(5))
         .with_exposed_port(OP_NODE_RPC_PORT.tcp())
         .with_exposed_port(OP_NODE_METRICS_PORT.tcp())
         .with_exposed_port(OP_NODE_P2P_PORT.tcp())
+        .with_exposed_port(OP_NODE_P2P_PORT.udp())
         .with_log_consumer(container_log_consumer(
             format!("op-node-{index}"),
             ProcessLogTarget::OpNode,
@@ -1613,6 +1565,7 @@ async fn start_op_node(
     request = request.with_mapped_port(plan.rpc_host_port, OP_NODE_RPC_PORT.tcp());
     request = request.with_mapped_port(plan.metrics_host_port, OP_NODE_METRICS_PORT.tcp());
     request = request.with_mapped_port(plan.p2p_host_port, OP_NODE_P2P_PORT.tcp());
+    request = request.with_mapped_port(plan.p2p_host_port, OP_NODE_P2P_PORT.udp());
 
     let container = request
         .start()
@@ -1638,9 +1591,8 @@ async fn start_op_node(
     Ok(OpNodeService {
         id: format!("op-node-{index}"),
         rpc_url,
-        peer_id: plan.peer_id.clone(),
         p2p_host_port: plan.p2p_host_port,
-        static_peers: static_peers.to_vec(),
+        bootnodes: bootnodes.to_vec(),
         metrics_target: MetricsTarget::new(
             format!("op-node-{index}"),
             format!("host.docker.internal:{}", plan.metrics_host_port),
@@ -1655,34 +1607,11 @@ async fn wait_for_op_node_peer_mesh(op_nodes: &[OpNodeService]) -> Result<()> {
         return Ok(());
     }
 
-    for node in op_nodes {
-        let peer = wait_for_json_rpc(
-            &node.rpc_url,
-            "opp2p_self",
-            json!([]),
-            Duration::from_secs(30),
-        )
-        .await
-        .wrap_err_with(|| format!("failed to read P2P identity for {}", node.id))?;
-        let peer_id = peer
-            .get("peerID")
-            .and_then(Value::as_str)
-            .ok_or_else(|| eyre!("opp2p_self for {} missing peerID: {peer}", node.id))?
-            .to_string();
-        if peer_id != node.peer_id {
-            bail!(
-                "{} has unexpected op-node peer ID {peer_id}, expected {}",
-                node.id,
-                node.peer_id
-            );
-        }
-    }
-
     let expected = op_nodes.len().saturating_sub(1) as u64;
     info!(
         nodes = op_nodes.len(),
         expected_peers_per_node = expected,
-        "waiting for op-node static peer mesh"
+        "waiting for op-node bootnode peer mesh"
     );
     for node in op_nodes {
         retry_until(
@@ -1699,7 +1628,7 @@ async fn wait_for_op_node_peer_mesh(op_nodes: &[OpNodeService]) -> Result<()> {
                             node.id
                         )
                     })?;
-                if connected >= expected {
+                if connected == expected {
                     Ok(())
                 } else {
                     bail!(
@@ -1710,7 +1639,7 @@ async fn wait_for_op_node_peer_mesh(op_nodes: &[OpNodeService]) -> Result<()> {
             },
         )
         .await
-        .wrap_err_with(|| format!("op-node P2P mesh did not form for {}", node.id))?;
+        .wrap_err_with(|| format!("op-node bootnode P2P mesh did not form for {}", node.id))?;
     }
 
     info!(count = op_nodes.len(), "op-node P2P mesh connected");
@@ -2339,10 +2268,7 @@ fn build_components(
                 "p2p",
                 format!("host.docker.internal:{}", service.p2p_host_port),
             )
-            .with_note(format!(
-                "static trusted peers={}",
-                service.static_peers.join(",")
-            )),
+            .with_note(format!("bootnodes={}", service.bootnodes.join(","))),
         );
     }
 
