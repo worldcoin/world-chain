@@ -33,6 +33,16 @@ cargo xtask launch-node --nodes 2 --spam --flashblocks
 
 Starts N nodes via P2P, drives block production with `EngineDriver`, optionally runs `TxSpammer`. Prints RPC URLs for `cast` interaction.
 
+### Local Devnet
+
+Run the native World Chain devnet with:
+
+```bash
+just devnet up
+```
+
+See [the devnet README](../crates/devnet/README.md) for topology, endpoint, logging, and Grafana details.
+
 ## Metrics
 
 Custom metrics are exposed via the standard reth metrics endpoint (`/metrics`). Key namespaces:

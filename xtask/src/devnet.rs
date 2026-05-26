@@ -210,7 +210,6 @@ async fn up(args: UpArgs) -> Result<()> {
     if args.print_topology {
         if let Some(topology) = builder.ha_topology() {
             print_components(&topology.components);
-            print_components(&topology.removed_services);
         } else {
             info!("selected preset has no HA topology manifest");
         }
