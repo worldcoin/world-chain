@@ -260,9 +260,14 @@ native `just devnet up` path for current local HA sequencing work.
 # Run E2E tests
 just e2e-test -n
 
-# Run stress tests with contender, if installed
-just stress-test <stress | stress-precompile>
+# Run Contender stress tests against a running native Rust devnet
+just devnet up -d
+just stress
+
+# Optional knobs
+TPS=100 DURATION=120 just stress
+just stress stress-precompile
 
 # Generate a performance report
-just stress-test report
+just stress report
 ```
