@@ -1531,6 +1531,7 @@ async fn start_op_node(
         plan.private_key_path.clone(),
         "--p2p.bootstore".to_string(),
         format!("/work/kona-bootstore-{index}"),
+        "--p2p.no-discovery".to_string(),
         "--p2p.redial".to_string(),
         "0".to_string(),
         "--rpc.addr".to_string(),
@@ -1627,7 +1628,7 @@ async fn wait_for_op_node_peer_mesh(op_nodes: &[OpNodeService]) -> Result<()> {
                             node.id
                         )
                     })?;
-                if connected >= expected {
+                if connected == expected {
                     Ok(())
                 } else {
                     bail!(
