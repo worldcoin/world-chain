@@ -226,7 +226,7 @@ futures = "0.3"
 futures-util = "0.3"
 chrono = "0.4"
 thiserror = "2"
-strum = { version = "0.27", features = ["derive"] }
+strum = { version = "0.28", features = ["derive"] }
 bytemuck = "1"
 semaphore-rs = { version = "0.5", features = ["depth_30"] }
 semaphore-rs-proof = "0.5"
