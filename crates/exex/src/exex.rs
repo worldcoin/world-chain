@@ -13,10 +13,11 @@ use reth_node_api::FullNodeComponents;
 use tracing::{debug, info, warn};
 
 use crate::{
+    Result,
     config::{ProposerCliArgs, ProposerConfig},
     db::StoredHead,
-    error::{OpProposerError, Result},
-    local_node::{ExExLocalAccess, local_access_from_ctx},
+    error::OpProposerError,
+    local_node::{ProviderBounds, local_reader_from_ctx},
     service::{AdminRpcSettings, ProposerService},
     source::{ProposalSource, local::LocalProposalSource},
 };
@@ -25,24 +26,16 @@ use crate::{
 pub async fn op_proposer_exex<N>(mut ctx: ExExContext<N>, cfg: ProposerConfig) -> Result<()>
 where
     N: FullNodeComponents,
-    N::Provider: Clone
-        + reth_storage_api::BlockReader<Header = alloy_consensus::Header>
-        + reth_storage_api::BlockHashReader
-        + reth_storage_api::StateProviderFactory
-        + reth_storage_api::BlockIdReader
-        + Send
-        + Sync
-        + 'static,
+    N::Provider: ProviderBounds,
 {
     let admin_settings = AdminRpcSettings::from_config(&cfg);
 
-    let local_access = local_access_from_ctx::<N>(&ctx);
-    let source: Arc<dyn ProposalSource> = Arc::new(LocalProposalSource::new(local_access));
+    let reader = local_reader_from_ctx::<N>(&ctx);
+    let source: Arc<dyn ProposalSource> = Arc::new(LocalProposalSource::new(reader));
     info!(
         target: "exex::proposer",
         "using local proposal source (state read directly from node)",
     );
-    let _ = std::marker::PhantomData::<ExExLocalAccess<N>>;
 
     let mut service = ProposerService::from_config_with_source(cfg, source).await?;
     service.start(&admin_settings).await?;
@@ -112,14 +105,7 @@ pub async fn install_op_proposer_exex<N>(
 ) -> Result<()>
 where
     N: FullNodeComponents,
-    N::Provider: Clone
-        + reth_storage_api::BlockReader<Header = alloy_consensus::Header>
-        + reth_storage_api::BlockHashReader
-        + reth_storage_api::StateProviderFactory
-        + reth_storage_api::BlockIdReader
-        + Send
-        + Sync
-        + 'static,
+    N::Provider: ProviderBounds,
 {
     if !args.enabled {
         info!(target: "exex::proposer", "OP Proposer disabled; ExEx will only drain notifications");

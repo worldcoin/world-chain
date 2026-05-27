@@ -32,10 +32,6 @@ use crate::{
     provider::ProviderError, rpc::AdminRpcError, source::ProposalSourceError,
 };
 
-/// Crate-wide `Result` alias. Use this in place of `std::result::Result`
-/// throughout the library so callers see a single, uniform error type.
-pub type Result<T, E = OpProposerError> = std::result::Result<T, E>;
-
 /// Top-level error for the OP Proposer ExEx.
 #[derive(Debug, Error)]
 pub enum OpProposerError {

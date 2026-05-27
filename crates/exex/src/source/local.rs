@@ -1,19 +1,46 @@
 //! Local, in-process proposal source backed by the ExEx node's state.
 //!
-//! This is the preferred source when running as an ExEx: we already have the
-//! whole L2 chain locally, so there is no point doing an RPC round-trip to an
-//! op-node. We compute the OP output root ourselves:
+//! Computes the OP `OutputV0` root directly from the L2 block header. Post-
+//! Isthmus, the L2ToL1MessagePasser storage root lives in the header's
+//! `withdrawalsRoot` field, so the output root reduces to three header
+//! reads — no state-proof RPC and no state-trie walk required.
 //!
 //! ```text
 //! output_root = keccak256(
 //!     version_zero_32 ||
 //!     header.state_root ||
-//!     L2ToL1MessagePasser.storage_root ||
+//!     header.withdrawals_root ||  (== L2ToL1MessagePasser storage root, post-Isthmus)
 //!     header.block_hash,
 //! )
 //! ```
 //!
-//! Mirrors `op-service/eth/output.go` (`OutputV0::Marshal`).
+//! ## Spec
+//!
+//! The substitution is mandated by the [Isthmus L2 block header
+//! spec][isthmus-spec]:
+//!
+//! > After Isthmus activation, the `withdrawalsRoot` header field is
+//! > re-purposed to hold the storage root of the
+//! > `L2ToL1MessagePasser` predeploy account (rather than being unused, as
+//! > on canonical Ethereum L1 post-Shanghai).
+//!
+//! The corresponding upstream implementation lives in
+//! [`op-service/sources/l2_client.go`][l2-client] L192–L227 (function
+//! `outputV0`): if `IsIsthmus(block.Time())` the header field is read
+//! directly, otherwise it falls back to an `eth_getProof` against
+//! `L2ToL1MessagePasser`. **This ExEx is post-Isthmus**, so we only need
+//! the header branch.
+//!
+//! The OutputV0 marshal layout (128 B buffer: version || state_root ||
+//! message_passer_storage_root || block_hash) is defined in
+//! [`op-service/eth/output.go`][output-go] L49–L63.
+//!
+//! [isthmus-spec]:
+//!     https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/isthmus/exec-engine.md
+//! [l2-client]:
+//!     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-service/sources/l2_client.go#L192-L227
+//! [output-go]:
+//!     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-service/eth/output.go#L49-L63
 
 use std::sync::Arc;
 
@@ -23,7 +50,12 @@ use async_trait::async_trait;
 
 use super::{Proposal, ProposalSource, ProposalSourceError, SyncStatus};
 
-/// L2ToL1MessagePasser predeploy address (`0x4200000000000000000000000000000000000016`).
+/// `L2ToL1MessagePasser` predeploy address
+/// (`0x4200000000000000000000000000000000000016`).
+///
+/// Kept as a public constant for callers that still want to do the
+/// pre-Isthmus state-proof path; the post-Isthmus header-field path does
+/// not use it.
 pub const L2_TO_L1_MESSAGE_PASSER: Address = Address::new(
     *b"\x42\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x16",
 );
@@ -31,28 +63,28 @@ pub const L2_TO_L1_MESSAGE_PASSER: Address = Address::new(
 /// Abstraction over the local node state required by [`LocalProposalSource`].
 ///
 /// Implementors typically delegate to an ExEx `FullNodeComponents::provider()`
-/// and call the underlying `BlockReader`, `StateProviderFactory`, and
-/// `BlockIdReader` traits. Keeping it small avoids leaking the full
-/// reth-storage-api surface area into this crate.
+/// and call the underlying `BlockReader` and `BlockIdReader` traits. Keeping
+/// the surface small avoids leaking reth-storage-api into the rest of this
+/// crate.
 #[async_trait]
-pub trait LocalChainAccess: Send + Sync {
-    /// `(state_root, block_hash)` for the given L2 block.
+pub trait LocalStorageReader: Send + Sync {
+    /// `(state_root, withdrawals_root, block_hash)` for the given L2 block.
+    /// Post-Isthmus, `withdrawals_root` *is* the L2ToL1MessagePasser
+    /// storage root.
     async fn block_meta(&self, block_number: u64) -> Result<BlockMeta, ProposalSourceError>;
-
-    /// Storage root of `address` at `block_number`.
-    async fn storage_root_at(
-        &self,
-        block_number: u64,
-        address: Address,
-    ) -> Result<B256, ProposalSourceError>;
 
     /// Latest safe / finalized L2 block numbers.
     async fn chain_status(&self) -> Result<ChainStatus, ProposalSourceError>;
 }
 
+/// L2 block header fields needed to compute an `OutputV0`.
 #[derive(Debug, Clone, Copy)]
 pub struct BlockMeta {
     pub state_root: B256,
+    /// Header `withdrawalsRoot` field. Post-Isthmus this is the storage
+    /// root of the `L2ToL1MessagePasser` predeploy. See the module-level
+    /// spec reference.
+    pub withdrawals_root: B256,
     pub block_hash: B256,
 }
 
@@ -63,15 +95,23 @@ pub struct ChainStatus {
 }
 
 pub struct LocalProposalSource {
-    access: Arc<dyn LocalChainAccess>,
+    access: Arc<dyn LocalStorageReader>,
 }
 
 impl LocalProposalSource {
-    pub fn new(access: Arc<dyn LocalChainAccess>) -> Self {
+    pub fn new(access: Arc<dyn LocalStorageReader>) -> Self {
         Self { access }
     }
 
-    /// Compute an OutputV0 output root from raw components.
+    /// Compute an `OutputV0` output root from raw components.
+    ///
+    /// Mirrors: `(*OutputV0).Marshal` + `OutputRoot` in
+    /// [output.go L49–L63][src]. The 128-byte buffer layout (32 B version ||
+    /// 32 B state_root || 32 B message_passer_storage_root || 32 B
+    /// block_hash) is identical.
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-service/eth/output.go#L49-L63
     pub fn output_root_v0(
         state_root: B256,
         message_passer_storage_root: B256,
@@ -90,11 +130,7 @@ impl LocalProposalSource {
 impl ProposalSource for LocalProposalSource {
     async fn proposal_at_block(&self, block_number: u64) -> Result<Proposal, ProposalSourceError> {
         let meta = self.access.block_meta(block_number).await?;
-        let storage_root = self
-            .access
-            .storage_root_at(block_number, L2_TO_L1_MESSAGE_PASSER)
-            .await?;
-        let root = Self::output_root_v0(meta.state_root, storage_root, meta.block_hash);
+        let root = Self::output_root_v0(meta.state_root, meta.withdrawals_root, meta.block_hash);
         Ok(Proposal {
             root,
             block_number,
@@ -119,8 +155,8 @@ impl ProposalSource for LocalProposalSource {
 mod tests {
     use super::*;
 
-    /// Sanity-check the `OutputV0` layout: same constants as `op-service/eth`
-    /// (taken from a known test vector in `OptimismPortal2.sol` tests).
+    /// Sanity-check the `OutputV0` layout matches the upstream Go
+    /// `(*OutputV0).Marshal` byte ordering.
     #[test]
     fn output_root_layout_matches_op_v0() {
         let state_root = B256::repeat_byte(0xaa);

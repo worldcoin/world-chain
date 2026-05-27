@@ -28,7 +28,7 @@ use thiserror::Error;
 use tower::ServiceBuilder;
 use url::Url;
 
-use crate::tx_fillers::GasEstimateWithFallbackFiller;
+use crate::tx::GasEstimateWithFallbackFiller;
 
 /// Resolved configuration for the L1 provider.
 #[derive(Debug, Clone)]
@@ -56,6 +56,7 @@ pub enum SignerKind {
     PrivateKey(String),
     /// BIP-39 mnemonic + HD path.
     Mnemonic { phrase: String, hd_path: String },
+    // TODO: Add KMS support
 }
 
 /// A built L1 provider, plus the resolved `from` address of the wallet.

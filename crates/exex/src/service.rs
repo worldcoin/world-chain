@@ -3,7 +3,13 @@
 //! Wires everything together: L1 provider, DGF instance, source, store,
 //! driver, metrics, admin RPC, balance poller.
 //!
-//! Mirrors the single-chain slice of `op-proposer/proposer/service.go`.
+//! Mirrors: the single-chain slice of
+//! [`op-proposer/proposer/service.go`][src] @ tag
+//! `op-proposer/v1.16.3-rc.1`. Per-function references below cite specific
+//! Go line ranges.
+//!
+//! [src]:
+//!     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/service.go
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
@@ -14,11 +20,12 @@ use tracing::info;
 use url::Url;
 
 use crate::{
+    Result,
     config::ProposerConfig,
     contracts::DisputeGameFactory,
     db::ProposerStore,
     driver::L2OutputSubmitter,
-    error::{OpProposerError, Result},
+    error::OpProposerError,
     metrics::{ProposerMetrics, spawn_balance_poller},
     provider::{L1Provider, L1ProviderConfig, ProviderError, SignerKind},
     rpc::{AdminRpcError, start_admin_server},
@@ -44,6 +51,14 @@ impl ProposerService {
     /// [`ProposerService::from_config_with_source`] with a
     /// [`LocalProposalSource`](crate::source::local::LocalProposalSource)
     /// to skip the rollup-RPC round-trip entirely.
+    ///
+    /// Mirrors: `ProposerServiceFromCLIConfig` + `(*ProposerService).initFromCLIConfig`
+    /// — [service.go L79–L123][src]. The interop branches in
+    /// `initRPCClients` (L125–L173) are omitted; supervisor/supernode
+    /// sources are intentionally not supported.
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/service.go#L79-L173
     pub async fn from_config(cfg: ProposerConfig) -> Result<Self> {
         if cfg.rollup_rpcs.is_empty() {
             return Err(OpProposerError::msg(
@@ -164,6 +179,15 @@ impl ProposerService {
     }
 
     /// Start the driver (and the admin RPC server, if configured).
+    ///
+    /// Mirrors: `(*ProposerService).Start` in
+    /// [service.go L288–L291][src], with admin-RPC bring-up inlined from
+    /// `initRPCServer` [L264–L284][rpc].
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/service.go#L288-L291
+    /// [rpc]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/service.go#L264-L284
     pub async fn start(&mut self, cfg: &AdminRpcSettings) -> Result<()> {
         if cfg.enable {
             let addr: SocketAddr = format!("{}:{}", cfg.addr, cfg.port)
@@ -177,6 +201,16 @@ impl ProposerService {
     }
 
     /// Stop the driver, balance poller, and admin RPC server.
+    ///
+    /// Mirrors: `(*ProposerService).Stop` in
+    /// [service.go L306–L359][src]. The Go function also shuts down
+    /// pprof / metrics HTTP servers and a balance-monitor `io.Closer`;
+    /// we have neither (metrics are emitted via the global metrics-rs
+    /// recorder, no HTTP server is bound) and the balance poller is
+    /// cancelled via the [`CancellationToken`] stored on `self`.
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/service.go#L306-L359
     pub async fn stop(&mut self) -> Result<()> {
         self.driver.stop_if_running().await;
         self.balance_cancel.cancel();

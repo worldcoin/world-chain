@@ -1,4 +1,7 @@
-//! OP Proposer driver (port of `op-proposer/proposer/driver.go`).
+//! OP Proposer driver.
+//!
+//! Mirrors: [`op-proposer/proposer/driver.go`][driver-go] @ tag
+//! `op-proposer/v1.16.3-rc.1`.
 //!
 //! The driver owns the polling loop: every `poll_interval` it walks the DGF
 //! to determine whether a proposal is due, fetches the proposal from the
@@ -9,6 +12,9 @@
 //! management, signing, fee bumps — are handled by the provider's filler
 //! stack (see [`crate::provider`]). This module has no custom transaction
 //! manager and no custom receipt types.
+//!
+//! [driver-go]:
+//!     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/driver.go
 
 use std::{
     sync::Arc,
@@ -23,10 +29,11 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use crate::{
+    Result,
     config::ProposerConfig,
     contracts::DisputeGameFactory,
     db::{ProposerStore, StoredProposal},
-    error::{OpProposerError, Result},
+    error::OpProposerError,
     metrics::ProposerMetrics,
     source::{Proposal, ProposalSource, ProposalSourceError},
 };
@@ -89,6 +96,12 @@ impl L2OutputSubmitter {
     }
 
     /// Start the polling loop.
+    ///
+    /// Mirrors: `(L2OutputSubmitter).StartL2OutputSubmitting` in
+    /// [driver.go L115–L134][src].
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/driver.go#L115-L134
     pub fn start(self: &Arc<Self>) -> Result<()> {
         let mut state = self.state.lock();
         if state.running {
@@ -111,6 +124,12 @@ impl L2OutputSubmitter {
     }
 
     /// Stop the polling loop, waiting for it to exit.
+    ///
+    /// Mirrors: `(L2OutputSubmitter).StopL2OutputSubmitting` in
+    /// [driver.go L144–L157][src].
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/driver.go#L144-L157
     pub async fn stop(self: &Arc<Self>) -> Result<()> {
         let (cancel, stopped) = {
             let mut state = self.state.lock();
@@ -130,6 +149,12 @@ impl L2OutputSubmitter {
     }
 
     /// Convenience: stops only if running, swallows `NotRunning`.
+    ///
+    /// Mirrors: `(L2OutputSubmitter).StopL2OutputSubmittingIfRunning` in
+    /// [driver.go L136–L142][src].
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/driver.go#L136-L142
     pub async fn stop_if_running(self: &Arc<Self>) {
         match self.stop().await {
             Ok(()) | Err(OpProposerError::NotRunning) => {}
@@ -137,6 +162,18 @@ impl L2OutputSubmitter {
         }
     }
 
+    /// Mirrors: `(L2OutputSubmitter).loop` in [driver.go L261–L294][src].
+    ///
+    /// Differences from the Go original:
+    /// - The Go loop uses a manual `select { ticker.C / l.done }` chain; here
+    ///   we use `tokio::select!` over the cancellation token + ticker tick.
+    /// - Cancellation is signalled via [`tokio_util::CancellationToken`]
+    ///   instead of a `done chan struct{}`. Semantics are identical: a
+    ///   cancellation wins over a fired tick (`biased;` matches Go's
+    ///   `case <-l.done: return` short-circuit at the top of each cycle).
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/driver.go#L261-L294
     async fn run_loop(self: Arc<Self>, cancel: CancellationToken) {
         if self.cfg.wait_node_sync
             && let Err(e) = self.wait_node_sync(&cancel).await
@@ -167,7 +204,18 @@ impl L2OutputSubmitter {
         }
     }
 
-    /// Port of `FetchDGFOutput`.
+    /// Mirrors: `(L2OutputSubmitter).FetchDGFOutput` in
+    /// [driver.go L164–L200][src].
+    ///
+    /// Differences from the Go original:
+    /// - `claim` equality skip (Go L192–L195) is rephrased as an MDBX
+    ///   persistence check (we don't always have the previous claim from
+    ///   `HasProposedSince`, so we compare against the last persisted
+    ///   submission instead — strictly stronger: identical
+    ///   (root, block_number) is skipped even across restarts).
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/driver.go#L164-L200
     pub async fn fetch_dgf_output(&self) -> Result<Option<Proposal>> {
         let now_unix = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -221,7 +269,11 @@ impl L2OutputSubmitter {
         Ok(Some(proposal))
     }
 
-    /// Port of `FetchCurrentBlockNumber`.
+    /// Mirrors: `(L2OutputSubmitter).FetchCurrentBlockNumber` in
+    /// [driver.go L204–L215][src].
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/driver.go#L204-L215
     pub async fn fetch_current_block_number(&self) -> Result<u64> {
         let status = self.source.sync_status().await?;
         Ok(if self.cfg.allow_non_finalized {
@@ -231,7 +283,14 @@ impl L2OutputSubmitter {
         })
     }
 
-    /// Port of `FetchOutput`.
+    /// Mirrors: `(L2OutputSubmitter).FetchOutput` in
+    /// [driver.go L217–L226][src].
+    ///
+    /// The super-root branch (`!proposal.IsSuperRootProposal()`) is omitted —
+    /// interop is intentionally not supported here.
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/driver.go#L217-L226
     pub async fn fetch_output(&self, block: u64) -> Result<Proposal> {
         let proposal = self.source.proposal_at_block(block).await?;
         if proposal.block_number != block {
@@ -245,6 +304,11 @@ impl L2OutputSubmitter {
         Ok(proposal)
     }
 
+    /// Mirrors: `(L2OutputSubmitter).proposeOutput` in
+    /// [driver.go L314–L336][src].
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/driver.go#L314-L336
     async fn propose(&self, output: &Proposal) {
         match self.send_proposal(output).await {
             Ok(()) => {
@@ -267,6 +331,18 @@ impl L2OutputSubmitter {
     /// instance. Gas estimation, nonce management, signing, and fee
     /// computation are all handled by the wallet-equipped provider's
     /// filler stack.
+    ///
+    /// Mirrors: `(L2OutputSubmitter).sendTransaction` in
+    /// [driver.go L235–L257][src] **and** the contract-side bond/calldata
+    /// assembly from `(L2OutputSubmitter).ProposeL2OutputDGFTxCandidate`
+    /// in [driver.go L228–L232][candidate] — fused here because alloy's
+    /// `CallBuilder::send()` replaces the Go `TxManager.Send(candidate)`
+    /// pattern.
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/driver.go#L235-L257
+    /// [candidate]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/driver.go#L228-L232
     async fn send_proposal(&self, output: &Proposal) -> Result<()> {
         info!(
             target: "exex::proposer",
@@ -286,7 +362,13 @@ impl L2OutputSubmitter {
             .send()
             .await?;
 
-        let receipt = pending.get_receipt().await?;
+        let tx_hash = *pending.tx_hash();
+        let receipt = pending
+            .with_required_confirmations(1)
+            .with_timeout(Some(Duration::from_secs(120)))
+            .get_receipt()
+            .await
+            .map_err(|e| OpProposerError::msg(format!("get_receipt({tx_hash:?}): {e}")))?;
 
         if !receipt.status() {
             error!(
@@ -321,8 +403,14 @@ impl L2OutputSubmitter {
         Ok(())
     }
 
-    /// Port of `waitNodeSync`. Polls the source sync status until it catches
-    /// up with the current L1 head.
+    /// Polls the source sync status until it catches up with the current L1
+    /// head.
+    ///
+    /// Mirrors: `(L2OutputSubmitter).waitNodeSync` in
+    /// [driver.go L296–L312][src].
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/driver.go#L296-L312
     async fn wait_node_sync(&self, cancel: &CancellationToken) -> Result<()> {
         let target = self.l1.get_block_number().await?;
         let deadline_interval = Duration::from_secs(12);

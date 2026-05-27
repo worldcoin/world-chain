@@ -1,10 +1,15 @@
 //! Rollup-RPC backed proposal source.
 //!
-//! Mirrors `op-proposer/proposer/source/source_rollup.go`. Talks to an
-//! `op-node` over `optimism_syncStatus` / `optimism_outputAtBlock`.
+//! Mirrors: [`op-proposer/proposer/source/source_rollup.go`][src] @ tag
+//! `op-proposer/v1.16.3-rc.1`. Talks to an `op-node` over
+//! `optimism_syncStatus` / `optimism_outputAtBlock`.
 //!
-//! When given multiple URLs, behaves like upstream's *active* rollup provider:
-//! periodically probes endpoints and routes calls to a healthy sequencer.
+//! When given multiple URLs, behaves like upstream's *active* rollup
+//! provider: periodically probes endpoints and routes calls to a healthy
+//! sequencer (`dial.NewActiveL2RollupProvider`).
+//!
+//! [src]:
+//!     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/source/source_rollup.go
 
 use std::{
     borrow::Cow,
@@ -173,6 +178,12 @@ struct RawOutputResponse {
 
 #[async_trait]
 impl ProposalSource for RollupProposalSource {
+    /// Mirrors: `(*RollupProposalSource).ProposalAtSequenceNum` in
+    /// [source_rollup.go L44–L68][src]. We also re-check the version byte
+    /// matches `eth.OutputVersionV0` (the zero-hash) before returning.
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/source/source_rollup.go#L44-L68
     async fn proposal_at_block(&self, block_number: u64) -> Result<Proposal, ProposalSourceError> {
         let raw: RawOutputResponse = self
             .raw_request("optimism_outputAtBlock", (format!("{block_number:#x}"),))
@@ -202,6 +213,11 @@ impl ProposalSource for RollupProposalSource {
         })
     }
 
+    /// Mirrors: `(*RollupProposalSource).SyncStatus` in
+    /// [source_rollup.go L28–L42][src].
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/source/source_rollup.go#L28-L42
     async fn sync_status(&self) -> Result<SyncStatus, ProposalSourceError> {
         let raw: RawSyncStatus = self.raw_request("optimism_syncStatus", ()).await?;
         Ok(SyncStatus {

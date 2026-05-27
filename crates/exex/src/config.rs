@@ -1,7 +1,16 @@
 //! Configuration for the OP Proposer ExEx.
 //!
-//! Mirrors `op-proposer/flags/flags.go` and `op-proposer/proposer/config.go`,
-//! pared down to the single-chain (pre-interop) DGF proposer.
+//! Mirrors:
+//! - [`op-proposer/flags/flags.go`][flags] — CLI flag definitions.
+//! - [`op-proposer/proposer/config.go`][config] — `CLIConfig` + validation.
+//!
+//! Pinned to tag `op-proposer/v1.16.3-rc.1`. Pared down to the single-chain
+//! (pre-interop) DGF proposer.
+//!
+//! [flags]:
+//!     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/flags/flags.go
+//! [config]:
+//!     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/config.go
 
 use std::{path::PathBuf, time::Duration};
 
@@ -255,6 +264,16 @@ pub struct ProposerConfig {
     pub datadir: PathBuf,
 }
 
+/// Mirrors: `(*CLIConfig).Check` + `NewConfig` in
+/// [config.go L87–L160][src]. Validation differs from upstream in two ways:
+///
+/// * The interop game-type matrix (`preInteropGameTypes` / `postInteropGameTypes`)
+///   is intentionally not enforced — interop is unsupported.
+/// * The "exactly one signer" check is added (upstream pulls signer config
+///   out of `txmgr.CLIConfig` which lives in a separate package).
+///
+/// [src]:
+///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/config.go#L87-L160
 impl ProposerCliArgs {
     /// Translate CLI args into a validated [`ProposerConfig`].
     ///

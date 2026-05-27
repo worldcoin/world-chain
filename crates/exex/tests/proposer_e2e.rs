@@ -32,10 +32,8 @@ use alloy_sol_types::sol;
 use async_trait::async_trait;
 use url::Url;
 use world_chain_exex::{
-    L1ProviderConfig, ProposerConfig, ProposerService, SignerKind,
-    provider::L1Provider,
-    service::AdminRpcSettings,
-    source::{Proposal, ProposalSource, ProposalSourceError, SyncStatus},
+    AdminRpcSettings, L1Provider, L1ProviderConfig, Proposal, ProposalSource, ProposalSourceError,
+    ProposerConfig, ProposerService, ProposerStore, SignerKind, SyncStatus,
 };
 
 // Stub DGF Solidity bindings — compiled offline from
@@ -63,10 +61,7 @@ struct MockSource {
 
 #[async_trait]
 impl ProposalSource for MockSource {
-    async fn proposal_at_block(
-        &self,
-        block_number: u64,
-    ) -> Result<Proposal, ProposalSourceError> {
+    async fn proposal_at_block(&self, block_number: u64) -> Result<Proposal, ProposalSourceError> {
         Ok(Proposal {
             root: self.root,
             block_number,
@@ -98,7 +93,10 @@ struct Harness {
 
 impl Harness {
     async fn spawn() -> Self {
-        let anvil = Anvil::new().block_time(1u64).try_spawn().expect("spawn anvil");
+        let anvil = Anvil::new()
+            .block_time(1u64)
+            .try_spawn()
+            .expect("spawn anvil");
         let endpoint = anvil.endpoint();
         let pk_hex = hex::encode(anvil.first_key().to_bytes());
 
@@ -114,8 +112,9 @@ impl Harness {
         .expect("build provider");
 
         // Deploy the stub DGF.
-        let runtime: alloy_primitives::Bytes =
-            hex::decode(STUB_DGF_DEPLOY_BYTECODE.trim()).expect("hex").into();
+        let runtime: alloy_primitives::Bytes = hex::decode(STUB_DGF_DEPLOY_BYTECODE.trim())
+            .expect("hex")
+            .into();
         let req = alloy_rpc_types::TransactionRequest::default()
             .with_deploy_code(runtime)
             .with_from(l1.from);
@@ -135,7 +134,13 @@ impl Harness {
         let version = dgf.version().call().await.expect("version");
         assert_eq!(version, "stub-1.0");
 
-        Harness { anvil, l1, dgf_address, bond, pk_hex }
+        Harness {
+            anvil,
+            l1,
+            dgf_address,
+            bond,
+            pk_hex,
+        }
     }
 
     fn config(&self, datadir: PathBuf) -> ProposerConfig {
@@ -166,7 +171,11 @@ impl Harness {
 }
 
 fn no_admin() -> AdminRpcSettings {
-    AdminRpcSettings { enable: false, addr: "127.0.0.1".into(), port: 0 }
+    AdminRpcSettings {
+        enable: false,
+        addr: "127.0.0.1".into(),
+        port: 0,
+    }
 }
 
 async fn wait_for<F>(timeout: Duration, mut check: F) -> bool
@@ -201,24 +210,29 @@ async fn propose_creates_dispute_game() {
     let datadir = tempfile::tempdir().unwrap();
     let cfg = h.config(datadir.path().to_path_buf());
 
-    let source = Arc::new(MockSource { root: B256::repeat_byte(0xaa), block_number: 100 });
-    let mut service =
-        ProposerService::from_config_with_source(cfg, source).await.expect("service");
+    let source = Arc::new(MockSource {
+        root: B256::repeat_byte(0xaa),
+        block_number: 100,
+    });
+    let mut service = ProposerService::from_config_with_source(cfg, source)
+        .await
+        .expect("service");
 
     assert_eq!(service.factory.game_count().await.unwrap(), 0);
 
     service.start(&no_admin()).await.expect("start");
 
-    let factory = service.factory.clone();
-    let landed = wait_for(Duration::from_secs(15), async move || {
-        factory.game_count().await.unwrap_or(0) >= 1
+    let store = service.store.clone();
+    let landed = wait_for(Duration::from_secs(30), async move || {
+        store.last_proposal().ok().flatten().is_some()
     })
     .await;
-    assert!(landed, "no game submitted within deadline");
+    assert!(landed, "proposal not persisted within deadline");
 
     let stored = service.store.last_proposal().unwrap().expect("stored");
     assert_eq!(stored.root, B256::repeat_byte(0xaa));
     assert_eq!(stored.block_number, 100);
+    assert_eq!(service.factory.game_count().await.unwrap(), 1);
 
     let _ = service.stop().await;
 }
@@ -232,9 +246,13 @@ async fn dedup_skips_recent_proposal() {
     // Long interval: once we land one, the second cycle must skip.
     cfg.proposal_interval = Duration::from_secs(3600);
 
-    let source = Arc::new(MockSource { root: B256::repeat_byte(0x77), block_number: 42 });
-    let mut service =
-        ProposerService::from_config_with_source(cfg, source).await.expect("service");
+    let source = Arc::new(MockSource {
+        root: B256::repeat_byte(0x77),
+        block_number: 42,
+    });
+    let mut service = ProposerService::from_config_with_source(cfg, source)
+        .await
+        .expect("service");
     service.start(&no_admin()).await.expect("start");
 
     let factory = service.factory.clone();
@@ -246,7 +264,11 @@ async fn dedup_skips_recent_proposal() {
 
     // Give the loop time to attempt a second cycle.
     tokio::time::sleep(Duration::from_secs(2)).await;
-    assert_eq!(service.factory.game_count().await.unwrap(), 1, "dedup failed");
+    assert_eq!(
+        service.factory.game_count().await.unwrap(),
+        1,
+        "dedup failed"
+    );
 
     let _ = service.stop().await;
 }
@@ -258,9 +280,13 @@ async fn restart_resumes_from_mdbx() {
     let datadir = tempfile::tempdir().unwrap();
     let stored = {
         let cfg = h.config(datadir.path().to_path_buf());
-        let source = Arc::new(MockSource { root: B256::repeat_byte(0xbe), block_number: 7 });
-        let mut service =
-            ProposerService::from_config_with_source(cfg, source).await.expect("service");
+        let source = Arc::new(MockSource {
+            root: B256::repeat_byte(0xbe),
+            block_number: 7,
+        });
+        let mut service = ProposerService::from_config_with_source(cfg, source)
+            .await
+            .expect("service");
         service.start(&no_admin()).await.expect("start");
 
         let store = service.store.clone();
@@ -275,7 +301,7 @@ async fn restart_resumes_from_mdbx() {
     };
 
     // Re-open the same dir with a fresh store handle.
-    let store = world_chain_exex::db::ProposerStore::open(datadir.path()).expect("reopen");
+    let store = ProposerStore::open(datadir.path()).expect("reopen");
     let after = store.last_proposal().expect("read").expect("present");
     assert_eq!(after, stored);
 }
