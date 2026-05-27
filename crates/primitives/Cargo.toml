@@ -38,9 +38,6 @@ chrono.workspace = true
 
 [features]
 default = []
-# Exposes in-memory mocks (e.g. `MockKeyringRegistry`) to downstream crates for
-# integration testing.
-test-utils = []
 
 [dev-dependencies]
 alloy-signer-local.workspace = true
