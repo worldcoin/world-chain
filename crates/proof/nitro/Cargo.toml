@@ -30,6 +30,8 @@ enclave = [
     "dep:aws-nitro-enclaves-nsm-api",
     "dep:kona-proof",
     "dep:serde_bytes",
+    "dep:tokio-vsock",
+    "dep:world-chain-proof-succinct-client-utils",
     "dep:world-chain-proof-succinct-ethereum-client-utils",
     "dep:spin",
 ]
@@ -57,6 +59,7 @@ aws-nitro-enclaves-nsm-api = { version = "0.4", optional = true }
 kona-proof = { workspace = true, optional = true }
 serde_bytes = { version = "0.11", optional = true }
 spin = { workspace = true, optional = true }
+world-chain-proof-succinct-client-utils = { workspace = true, optional = true }
 world-chain-proof-succinct-ethereum-client-utils = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
 
