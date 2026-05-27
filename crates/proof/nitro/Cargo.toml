@@ -19,11 +19,16 @@ name = "world-chain-nitro-enclave"
 path = "src/enclave.rs"
 required-features = ["enclave-bin"]
 
+[[bin]]
+name = "test-attestation"
+path = "src/bin/test_attestation.rs"
+required-features = ["aws_nitro"]
+
 [features]
 default = []
 # Enables the host-side prover that talks to a running Nitro enclave over vsock.
 # Requires Linux (AF_VSOCK is not available on macOS or Windows).
-aws_nitro = ["dep:tokio-vsock"]
+aws_nitro = ["dep:tokio-vsock", "dep:tracing-subscriber"]
 # Enables the enclave-side code path. The actual `[[bin]]` target additionally
 # requires the `enclave-bin` feature so it is only built for the enclave image.
 enclave = [
