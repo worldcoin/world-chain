@@ -7,12 +7,12 @@
 
 use std::sync::Arc;
 
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, B256};
 use async_trait::async_trait;
 use reth_exex::ExExContext;
 use reth_node_api::FullNodeComponents;
-use alloy_consensus::BlockHeader;
 use reth_storage_api::{
     BlockHashReader, BlockIdReader, HeaderProvider, StateProofProvider, StateProviderFactory,
 };
@@ -70,7 +70,10 @@ where
                 .ok_or_else(|| {
                     ProposalSourceError::Other(format!("hash for {block_number} not found"))
                 })?;
-            Ok(BlockMeta { state_root: header.state_root(), block_hash })
+            Ok(BlockMeta {
+                state_root: header.state_root(),
+                block_hash,
+            })
         })
         .await
         .map_err(|e| ProposalSourceError::Other(e.to_string()))?

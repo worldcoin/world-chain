@@ -72,7 +72,9 @@ pub struct DisputeGameFactory {
 impl DisputeGameFactory {
     pub fn new(address: Address, provider: DynProvider) -> Self {
         let instance = IDisputeGameFactory::new(address, provider);
-        Self { instance: Arc::new(instance) }
+        Self {
+            instance: Arc::new(instance),
+        }
     }
 
     /// The DGF address.

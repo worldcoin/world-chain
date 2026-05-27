@@ -13,7 +13,7 @@ use jsonrpsee::{
 };
 use tracing::info;
 
-use crate::driver::L2OutputSubmitter;
+use crate::{driver::L2OutputSubmitter, error::Result};
 
 #[rpc(server, namespace = "admin")]
 pub trait ProposerAdminApi {
@@ -54,14 +54,12 @@ impl ProposerAdminApiServer for ProposerAdminRpc {
 pub async fn start_admin_server(
     addr: SocketAddr,
     driver: Arc<L2OutputSubmitter>,
-) -> Result<(SocketAddr, ServerHandle), AdminRpcError> {
+) -> Result<(SocketAddr, ServerHandle)> {
     let server = ServerBuilder::default()
         .build(addr)
         .await
         .map_err(|e| AdminRpcError::Bind(e.to_string()))?;
-    let local = server
-        .local_addr()
-        .map_err(|e| AdminRpcError::Bind(e.to_string()))?;
+    let local = server.local_addr().map_err(|e| AdminRpcError::Bind(e.to_string()))?;
     let handle = server.start(ProposerAdminRpc::new(driver).into_rpc());
     info!(target: "exex::proposer::rpc", addr = %local, "proposer admin RPC listening");
     Ok((local, handle))

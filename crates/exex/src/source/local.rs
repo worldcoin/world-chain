@@ -88,10 +88,7 @@ impl LocalProposalSource {
 
 #[async_trait]
 impl ProposalSource for LocalProposalSource {
-    async fn proposal_at_block(
-        &self,
-        block_number: u64,
-    ) -> Result<Proposal, ProposalSourceError> {
+    async fn proposal_at_block(&self, block_number: u64) -> Result<Proposal, ProposalSourceError> {
         let meta = self.access.block_meta(block_number).await?;
         let storage_root = self
             .access

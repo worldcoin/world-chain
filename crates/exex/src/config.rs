@@ -339,9 +339,7 @@ pub enum ProposerConfigError {
     ZeroProposalInterval,
     #[error("missing signer: provide either --proposer.private-key or --proposer.mnemonic")]
     MissingSigner,
-    #[error(
-        "conflicting signer: provide only one of --proposer.private-key / --proposer.mnemonic"
-    )]
+    #[error("conflicting signer: provide only one of --proposer.private-key / --proposer.mnemonic")]
     ConflictingSigner,
     #[error("invalid duration string: {0}")]
     InvalidDuration(String),

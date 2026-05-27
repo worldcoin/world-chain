@@ -56,8 +56,7 @@ impl Proposal {
 /// A pluggable proposal source.
 #[async_trait]
 pub trait ProposalSource: Send + Sync {
-    async fn proposal_at_block(&self, block_number: u64)
-    -> Result<Proposal, ProposalSourceError>;
+    async fn proposal_at_block(&self, block_number: u64) -> Result<Proposal, ProposalSourceError>;
 
     async fn sync_status(&self) -> Result<SyncStatus, ProposalSourceError>;
 

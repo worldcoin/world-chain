@@ -173,10 +173,7 @@ struct RawOutputResponse {
 
 #[async_trait]
 impl ProposalSource for RollupProposalSource {
-    async fn proposal_at_block(
-        &self,
-        block_number: u64,
-    ) -> Result<Proposal, ProposalSourceError> {
+    async fn proposal_at_block(&self, block_number: u64) -> Result<Proposal, ProposalSourceError> {
         let raw: RawOutputResponse = self
             .raw_request("optimism_outputAtBlock", (format!("{block_number:#x}"),))
             .await?;

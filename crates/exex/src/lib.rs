@@ -17,6 +17,7 @@ pub mod config;
 pub mod contracts;
 pub mod db;
 pub mod driver;
+pub mod error;
 pub mod exex;
 pub mod local_node;
 pub mod metrics;
@@ -27,8 +28,11 @@ pub mod source;
 pub mod tx_fillers;
 
 pub use config::{ProposerCliArgs, ProposerConfig};
-pub use driver::{L2OutputSubmitter, ProposerError};
+pub use driver::L2OutputSubmitter;
+pub use error::OpProposerError;
 pub use exex::{install_op_proposer_exex, op_proposer_exex};
 pub use provider::{L1Provider, L1ProviderConfig, SignerKind};
 pub use service::ProposerService;
 pub use source::{Proposal, ProposalSource, SyncStatus};
+
+pub type Result<T, E = OpProposerError> = std::result::Result<T, E>;
