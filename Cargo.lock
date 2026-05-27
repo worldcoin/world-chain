@@ -15132,6 +15132,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber 0.3.23",
  "world-chain-proof-core",
+ "world-chain-proof-succinct-client-utils",
  "world-chain-proof-succinct-ethereum-client-utils",
 ]
 
