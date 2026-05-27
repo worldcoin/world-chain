@@ -6,5 +6,6 @@ pub mod flashblocks;
 pub mod p2p;
 pub mod payload_id;
 pub mod primitives;
-pub mod transaction;
+
+// re-exports
 pub use ed25519_dalek;

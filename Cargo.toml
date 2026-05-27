@@ -23,6 +23,7 @@ members = [
     "crates/evm",
     "crates/state",
     "crates/pbh",
+    "crates/devnet",
     "crates/test-utils",
     "e2e-tests",
     "xtask",
@@ -63,6 +64,7 @@ world-chain-rpc = { path = "crates/rpc", default-features = false }
 world-chain-pool = { path = "crates/pool", default-features = false }
 world-chain-evm = { path = "crates/evm", default-features = false }
 world-chain-state = { path = "crates/state", default-features = false }
+world-chain-devnet = { path = "crates/devnet", default-features = false }
 world-chain-test-utils = { path = "crates/test-utils", default-features = false }
 
 # reth crates.io
@@ -224,7 +226,7 @@ futures = "0.3"
 futures-util = "0.3"
 chrono = "0.4"
 thiserror = "2"
-strum = { version = "0.27", features = ["derive"] }
+strum = { version = "0.28", features = ["derive"] }
 bytemuck = "1"
 semaphore-rs = { version = "0.5", features = ["depth_30"] }
 semaphore-rs-proof = "0.5"
@@ -232,6 +234,7 @@ clap = { version = "4", features = ["derive", "env"] }
 eyre = { version = "0.6", package = "color-eyre" }
 serde = { version = "1", features = ["derive"] }
 tracing = "0.1"
+tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 parking_lot = "0.12"
 derive_more = { version = "2", default-features = false, features = ["full"] }
@@ -262,7 +265,7 @@ url = "2.5.7"
 brotli = "8.0.2"
 once_cell = "1.19"
 lru = "0.18"
-either = { version = "1.15.0", default-features = false }
+either = { version = "1.16.0", default-features = false }
 pin-project = "1.1.13"
 vergen = "9.1.0"
 vergen-git2 = "9.1.0"
