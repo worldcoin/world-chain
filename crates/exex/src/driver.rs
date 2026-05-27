@@ -2,16 +2,21 @@
 //!
 //! The driver owns the polling loop: every `poll_interval` it walks the DGF
 //! to determine whether a proposal is due, fetches the proposal from the
-//! configured [`ProposalSource`], and submits it on L1 through the
-//! [`TxManager`]. Start/stop are toggled via [`L2OutputSubmitter::start`] /
-//! [`L2OutputSubmitter::stop`].
+//! configured [`ProposalSource`], and submits it on L1 by calling
+//! `DisputeGameFactory.create(...).send()` on the wallet-equipped provider.
+//!
+//! All transaction concerns — gas estimation (with 3/2 fallback), nonce
+//! management, signing, fee bumps — are handled by the provider's filler
+//! stack (see [`crate::provider`]). This module has no custom transaction
+//! manager and no custom receipt types.
 
 use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use alloy_primitives::Bytes;
+use alloy_primitives::Address;
+use alloy_provider::{DynProvider, Provider};
 use parking_lot::Mutex;
 use thiserror::Error;
 use tokio::sync::Notify;
@@ -24,13 +29,7 @@ use crate::{
     db::{ProposerStore, ProposerStoreError, StoredProposal},
     metrics::ProposerMetrics,
     source::{Proposal, ProposalSource, ProposalSourceError},
-    txmgr::{TxCandidate, TxManager, TxManagerError},
 };
-
-/// Returned when callers try to stop a proposer that isn't running.
-#[derive(Debug, Error)]
-#[error("proposer is not running")]
-pub struct ErrProposerNotRunning;
 
 /// Top-level error type for the driver.
 #[derive(Debug, Error)]
@@ -43,20 +42,25 @@ pub enum ProposerError {
     Contract(#[from] ContractError),
     #[error(transparent)]
     Source(#[from] ProposalSourceError),
-    #[error(transparent)]
-    TxManager(#[from] TxManagerError),
+    #[error("contract submission failed: {0}")]
+    Submit(#[from] alloy_contract::Error),
+    #[error("pending transaction failed: {0}")]
+    Pending(#[from] alloy_provider::PendingTransactionError),
+    #[error("l1 rpc error: {0}")]
+    Rpc(String),
     #[error(transparent)]
     Store(#[from] ProposerStoreError),
-    #[error("node sync wait timed out")]
-    SyncTimeout,
 }
 
 /// The L2 output submitter / proposer driver.
 pub struct L2OutputSubmitter {
     cfg: ProposerConfig,
     source: Arc<dyn ProposalSource>,
-    factory: Arc<DisputeGameFactory<alloy_provider::DynProvider>>,
-    txmgr: Arc<TxManager>,
+    factory: DisputeGameFactory,
+    /// Wallet-equipped L1 provider used for both reads and writes.
+    l1: DynProvider,
+    /// The proposer EOA — recorded from the wallet at startup.
+    from: Address,
     metrics: Arc<ProposerMetrics>,
     store: Arc<ProposerStore>,
 
@@ -73,8 +77,9 @@ impl L2OutputSubmitter {
     pub fn new(
         cfg: ProposerConfig,
         source: Arc<dyn ProposalSource>,
-        factory: Arc<DisputeGameFactory<alloy_provider::DynProvider>>,
-        txmgr: Arc<TxManager>,
+        factory: DisputeGameFactory,
+        l1: DynProvider,
+        from: Address,
         metrics: Arc<ProposerMetrics>,
         store: Arc<ProposerStore>,
     ) -> Self {
@@ -82,7 +87,8 @@ impl L2OutputSubmitter {
             cfg,
             source,
             factory,
-            txmgr,
+            l1,
+            from,
             metrics,
             store,
             state: Mutex::new(DriverState {
@@ -98,8 +104,12 @@ impl L2OutputSubmitter {
         self.state.lock().running
     }
 
-    /// Start the polling loop. Idempotent failure: returns
-    /// [`ProposerError::AlreadyRunning`] if already started.
+    /// Address that signs and pays for proposer transactions.
+    pub fn from_address(&self) -> Address {
+        self.from
+    }
+
+    /// Start the polling loop.
     pub fn start(self: &Arc<Self>) -> Result<(), ProposerError> {
         let mut state = self.state.lock();
         if state.running {
@@ -121,8 +131,7 @@ impl L2OutputSubmitter {
         Ok(())
     }
 
-    /// Stop the polling loop, waiting for it to exit. Returns
-    /// [`ProposerError::NotRunning`] if it wasn't running.
+    /// Stop the polling loop, waiting for it to exit.
     pub async fn stop(self: &Arc<Self>) -> Result<(), ProposerError> {
         let (cancel, stopped) = {
             let mut state = self.state.lock();
@@ -151,11 +160,8 @@ impl L2OutputSubmitter {
 
     async fn run_loop(self: Arc<Self>, cancel: CancellationToken) {
         if self.cfg.wait_node_sync {
-            match self.wait_node_sync(&cancel).await {
-                Ok(()) => {}
-                Err(e) => {
-                    error!(target: "exex::proposer", error = %e, "wait_node_sync failed");
-                }
+            if let Err(e) = self.wait_node_sync(&cancel).await {
+                error!(target: "exex::proposer", error = %e, "wait_node_sync failed");
             }
         }
 
@@ -169,16 +175,10 @@ impl L2OutputSubmitter {
                     break;
                 }
                 _ = ticker.tick() => {
-                    if cancel.is_cancelled() {
-                        break;
-                    }
+                    if cancel.is_cancelled() { break; }
                     match self.fetch_dgf_output().await {
-                        Ok(Some(proposal)) => {
-                            self.propose(&proposal).await;
-                        }
-                        Ok(None) => {
-                            // already debug-logged inside fetch_dgf_output
-                        }
+                        Ok(Some(proposal)) => self.propose(&proposal).await,
+                        Ok(None) => {}
                         Err(e) => {
                             warn!(target: "exex::proposer", error = %e, "error getting proposal");
                         }
@@ -198,7 +198,7 @@ impl L2OutputSubmitter {
 
         let recent = self
             .factory
-            .has_proposed_since(self.txmgr.from_address(), cutoff, self.cfg.game_type)
+            .has_proposed_since(self.from, cutoff, self.cfg.game_type)
             .await?;
         if let Some((ts, claim)) = recent {
             debug!(
@@ -220,12 +220,8 @@ impl L2OutputSubmitter {
 
         let proposal = self.fetch_output(current_block).await?;
 
-        // If a recent proposal happens to share its root with what we'd
-        // submit now, upstream skips. We don't have the previous claim once
-        // `has_proposed_since` returns `None`, but we also defend against
-        // duplicate submissions by comparing against the persisted root.
         if let Some(last) = self.store.last_proposal()? {
-            if last.root == proposal.root && last.sequence_num == proposal.sequence_num {
+            if last.root == proposal.root && last.block_number == proposal.block_number {
                 debug!(
                     target: "exex::proposer",
                     last_root = ?last.root,
@@ -239,7 +235,7 @@ impl L2OutputSubmitter {
         info!(
             target: "exex::proposer",
             proposal_interval_secs = self.cfg.proposal_interval.as_secs(),
-            sequence_num = proposal.sequence_num,
+            block_number = proposal.block_number,
             "no proposals found for at least proposal interval, submitting proposal now",
         );
         Ok(Some(proposal))
@@ -248,35 +244,25 @@ impl L2OutputSubmitter {
     /// Port of `FetchCurrentBlockNumber`.
     pub async fn fetch_current_block_number(&self) -> Result<u64, ProposerError> {
         let status = self.source.sync_status().await?;
-        Ok(if self.cfg.allow_non_finalized {
-            status.safe_l2
-        } else {
-            status.finalized_l2
-        })
+        Ok(if self.cfg.allow_non_finalized { status.safe_l2 } else { status.finalized_l2 })
     }
 
     /// Port of `FetchOutput`.
-    pub async fn fetch_output(&self, block_or_ts: u64) -> Result<Proposal, ProposerError> {
-        let proposal = self.source.proposal_at_sequence_num(block_or_ts).await?;
-        if !proposal.is_super_root() && proposal.sequence_num != block_or_ts {
-            return Err(ProposerError::Source(
-                ProposalSourceError::BlockNumberMismatch {
-                    got: proposal.sequence_num,
-                    expected: block_or_ts,
-                },
-            ));
+    pub async fn fetch_output(&self, block: u64) -> Result<Proposal, ProposerError> {
+        let proposal = self.source.proposal_at_block(block).await?;
+        if proposal.block_number != block {
+            return Err(ProposerError::Source(ProposalSourceError::BlockNumberMismatch {
+                got: proposal.block_number,
+                expected: block,
+            }));
         }
         Ok(proposal)
     }
 
     async fn propose(&self, output: &Proposal) {
-        match self.send_transaction(output).await {
+        match self.send_proposal(output).await {
             Ok(()) => {
-                self.metrics.record_l2_proposal(output.sequence_num);
-                if output.legacy.block_ref.number != 0 {
-                    self.metrics
-                        .record_l2_block_proposed(output.legacy.block_ref.number);
-                }
+                self.metrics.record_l2_proposal(output.block_number);
             }
             Err(e) => {
                 self.metrics.record_failure();
@@ -285,73 +271,75 @@ impl L2OutputSubmitter {
                     error = %e,
                     l1_blocknum = output.current_l1.number,
                     l1_blockhash = ?output.current_l1.hash,
-                    legacy_l1head = output.legacy.head_l1.number,
                     "failed to send proposal transaction",
                 );
             }
         }
     }
 
-    async fn send_transaction(&self, output: &Proposal) -> Result<(), ProposerError> {
+    /// Build and submit the proposal transaction directly via the contract
+    /// instance. Gas estimation, nonce management, signing, and fee
+    /// computation are all handled by the wallet-equipped provider's
+    /// filler stack.
+    async fn send_proposal(&self, output: &Proposal) -> Result<(), ProposerError> {
         info!(
             target: "exex::proposer",
-            sequence_num = output.sequence_num,
+            block_number = output.block_number,
             output_root = ?output.root,
-            extra_data_len = output.extra_data().len(),
             "proposing output root",
         );
 
-        let extra: Bytes = output.extra_data().into();
-        let (calldata, bond) = self
+        let bond = self.factory.init_bond(self.cfg.game_type).await?;
+        let extra = alloy_primitives::Bytes::from(output.extra_data().to_vec());
+
+        let pending = self
             .factory
-            .proposal_tx_calldata(self.cfg.game_type, output.root, extra)
+            .instance()
+            .create(self.cfg.game_type, output.root, extra)
+            .value(bond)
+            .send()
             .await?;
 
-        let candidate = TxCandidate {
-            to: self.factory.address(),
-            value: bond,
-            data: calldata,
-            gas_limit: None,
-        };
-        let receipt = self.txmgr.send(candidate).await?;
+        let receipt = pending.get_receipt().await?;
 
-        if !receipt.status {
+        if !receipt.status() {
             error!(
                 target: "exex::proposer",
-                tx_hash = ?receipt.tx_hash,
+                tx_hash = ?receipt.transaction_hash,
                 "proposer tx successfully published but reverted",
             );
             return Ok(());
         }
         info!(
             target: "exex::proposer",
-            tx_hash = ?receipt.tx_hash,
+            tx_hash = ?receipt.transaction_hash,
             l1_blocknum = output.current_l1.number,
             l1_blockhash = ?output.current_l1.hash,
             "proposer tx successfully published",
         );
 
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
         self.store.put_last_proposal(&StoredProposal {
             game_type: self.cfg.game_type,
-            sequence_num: output.sequence_num,
+            block_number: output.block_number,
             root: output.root,
-            tx_hash: receipt.tx_hash,
+            tx_hash: receipt.transaction_hash,
             l1_block_number: receipt.block_number.unwrap_or(0),
             l1_block_hash: receipt.block_hash.unwrap_or_default(),
-            proposer: self.txmgr.from_address(),
+            proposer: self.from,
             at_unix: now,
         })?;
         Ok(())
     }
 
     /// Port of `waitNodeSync`. Polls the source sync status until it catches
-    /// up with the current L1 head as reported by the txmgr.
+    /// up with the current L1 head.
     async fn wait_node_sync(&self, cancel: &CancellationToken) -> Result<(), ProposerError> {
-        let target = self.txmgr.block_number().await?;
+        let target = self
+            .l1
+            .get_block_number()
+            .await
+            .map_err(|e| ProposerError::Rpc(e.to_string()))?;
         let deadline_interval = Duration::from_secs(12);
         loop {
             if cancel.is_cancelled() {

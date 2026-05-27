@@ -12,6 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{B256, BlockHash};
 use alloy_provider::{Provider, RootProvider};
 use async_trait::async_trait;
@@ -20,10 +21,7 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use url::Url;
 
-use super::{
-    L1BlockRef, L2BlockRef, LegacyProposalData, Proposal, ProposalSource, ProposalSourceError,
-    SyncStatus,
-};
+use super::{Proposal, ProposalSource, ProposalSourceError, SyncStatus};
 
 const EXPECTED_OUTPUT_VERSION: B256 = B256::ZERO;
 
@@ -145,9 +143,6 @@ impl RollupProposalSource {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RawSyncStatus {
-    head_l1: RawL1BlockRef,
-    safe_l1: RawL1BlockRef,
-    finalized_l1: RawL1BlockRef,
     current_l1: RawL1BlockRef,
     safe_l2: RawL2BlockRef,
     finalized_l2: RawL2BlockRef,
@@ -165,7 +160,6 @@ struct RawL1BlockRef {
 struct RawL2BlockRef {
     hash: BlockHash,
     number: u64,
-    timestamp: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -177,33 +171,14 @@ struct RawOutputResponse {
     status: RawSyncStatus,
 }
 
-impl From<RawL1BlockRef> for L1BlockRef {
-    fn from(r: RawL1BlockRef) -> Self {
-        Self {
-            number: r.number,
-            hash: r.hash,
-        }
-    }
-}
-
-impl From<RawL2BlockRef> for L2BlockRef {
-    fn from(r: RawL2BlockRef) -> Self {
-        Self {
-            number: r.number,
-            hash: r.hash,
-            timestamp: r.timestamp,
-        }
-    }
-}
-
 #[async_trait]
 impl ProposalSource for RollupProposalSource {
-    async fn proposal_at_sequence_num(
+    async fn proposal_at_block(
         &self,
-        sequence_num: u64,
+        block_number: u64,
     ) -> Result<Proposal, ProposalSourceError> {
         let raw: RawOutputResponse = self
-            .raw_request("optimism_outputAtBlock", (format!("{sequence_num:#x}"),))
+            .raw_request("optimism_outputAtBlock", (format!("{block_number:#x}"),))
             .await?;
 
         if raw.version != EXPECTED_OUTPUT_VERSION {
@@ -212,31 +187,20 @@ impl ProposalSource for RollupProposalSource {
                 expected: EXPECTED_OUTPUT_VERSION,
             });
         }
-
-        let head_l1: L1BlockRef = raw.status.head_l1.into();
-        let _safe_l1: L1BlockRef = raw.status.safe_l1.into();
-        let _finalized_l1: L1BlockRef = raw.status.finalized_l1.into();
-        let current_l1: L1BlockRef = raw.status.current_l1.into();
-        let safe_l2: L2BlockRef = raw.status.safe_l2.into();
-        let finalized_l2: L2BlockRef = raw.status.finalized_l2.into();
-        let block_ref: L2BlockRef = raw.block_ref.into();
-
-        if block_ref.number != sequence_num {
+        if raw.block_ref.number != block_number {
             return Err(ProposalSourceError::BlockNumberMismatch {
-                got: block_ref.number,
-                expected: sequence_num,
+                got: raw.block_ref.number,
+                expected: block_number,
             });
         }
 
         Ok(Proposal {
             root: raw.output_root,
-            sequence_num: block_ref.number,
-            current_l1,
-            legacy: LegacyProposalData {
-                head_l1,
-                safe_l2,
-                finalized_l2,
-                block_ref,
+            block_number: raw.block_ref.number,
+            block_hash: raw.block_ref.hash,
+            current_l1: BlockNumHash {
+                number: raw.status.current_l1.number,
+                hash: raw.status.current_l1.hash,
             },
         })
     }
@@ -244,7 +208,10 @@ impl ProposalSource for RollupProposalSource {
     async fn sync_status(&self) -> Result<SyncStatus, ProposalSourceError> {
         let raw: RawSyncStatus = self.raw_request("optimism_syncStatus", ()).await?;
         Ok(SyncStatus {
-            current_l1: raw.current_l1.into(),
+            current_l1: BlockNumHash {
+                number: raw.current_l1.number,
+                hash: raw.current_l1.hash,
+            },
             safe_l2: raw.safe_l2.number,
             finalized_l2: raw.finalized_l2.number,
         })

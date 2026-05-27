@@ -27,7 +27,7 @@ const SOLE_KEY: &[u8] = &[0u8];
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StoredProposal {
     pub game_type: u32,
-    pub sequence_num: u64,
+    pub block_number: u64,
     pub root: B256,
     pub tx_hash: B256,
     pub l1_block_number: u64,
@@ -156,7 +156,7 @@ mod tests {
     fn proposal() -> StoredProposal {
         StoredProposal {
             game_type: 0,
-            sequence_num: 1234,
+            block_number: 1234,
             root: B256::repeat_byte(0xab),
             tx_hash: B256::repeat_byte(0xcd),
             l1_block_number: 999,

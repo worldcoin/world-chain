@@ -1,20 +1,4 @@
 //! Contract bindings for the OP Proposer.
-//!
-//! Mirrors the small subset of `op-proposer/contracts/disputegamefactory.go`
-//! that the proposer actually exercises:
-//!
-//! * `DisputeGameFactory.gameCount()`
-//! * `DisputeGameFactory.gameAtIndex(uint256)`
-//! * `DisputeGameFactory.initBonds(uint32)`
-//! * `DisputeGameFactory.create(uint32,bytes32,bytes)` — payable
-//! * `DisputeGameFactory.version()`
-//! * `FaultDisputeGame.claimData(uint256)`
-//!
-//! Reads go through the sol-generated instance. Writes (proposal submission)
-//! also go through the instance via [`alloy_contract::CallBuilder::send`],
-//! which composes with the wallet-equipped provider's filler stack (gas
-//! estimation, nonce management, signing). The proposer therefore needs
-//! neither a custom `TxManager` nor custom receipt types.
 
 use std::sync::Arc;
 

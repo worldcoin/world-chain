@@ -122,23 +122,40 @@ pub struct ProposerCliArgs {
     )]
     pub hd_path: String,
 
-    /// Number of confirmations required for a transaction to be considered
-    /// included.
+    /// Interval between wallet-balance metric refreshes.
     #[arg(
-        long = "proposer.num-confirmations",
-        env = "OP_PROPOSER_NUM_CONFIRMATIONS",
-        default_value_t = 1u64
-    )]
-    pub num_confirmations: u64,
-
-    /// Resubmission timeout: after this duration, the tx is bumped & rebroadcast.
-    #[arg(
-        long = "proposer.resubmission-timeout",
-        env = "OP_PROPOSER_RESUBMISSION_TIMEOUT",
-        default_value = "48s",
+        long = "proposer.balance-poll-interval",
+        env = "OP_PROPOSER_BALANCE_POLL_INTERVAL",
+        default_value = "60s",
         value_parser = parse_duration
     )]
-    pub resubmission_timeout: Duration,
+    pub balance_poll_interval: Duration,
+
+    /// Maximum rate-limit retries the L1 transport will attempt before
+    /// surfacing an error. `0` disables retries.
+    #[arg(
+        long = "proposer.rpc-max-retries",
+        env = "OP_PROPOSER_RPC_MAX_RETRIES",
+        default_value_t = 10u32
+    )]
+    pub rpc_max_retries: u32,
+
+    /// Initial backoff for L1 rate-limit retries (ms).
+    #[arg(
+        long = "proposer.rpc-initial-backoff-ms",
+        env = "OP_PROPOSER_RPC_INITIAL_BACKOFF_MS",
+        default_value_t = 500u64
+    )]
+    pub rpc_initial_backoff_ms: u64,
+
+    /// Compute-units-per-second budget used by alloy's retry backoff layer
+    /// to scale waits. Default lifts from world-id-protocol's defaults.
+    #[arg(
+        long = "proposer.rpc-cups",
+        env = "OP_PROPOSER_RPC_CUPS",
+        default_value_t = 660u64
+    )]
+    pub rpc_compute_units_per_second: u64,
 
     /// Admin RPC bind address.
     #[arg(
@@ -208,7 +225,7 @@ fn parse_humantime(raw: &str) -> Result<Duration, ProposerConfigError> {
 /// Runtime configuration consumed by the proposer service.
 #[derive(Debug, Clone)]
 pub struct ProposerConfig {
-    pub l1_eth_rpc: String,
+    pub l1_eth_rpcs: Vec<String>,
     pub rollup_rpcs: Vec<String>,
 
     pub game_factory_address: Address,
@@ -218,7 +235,7 @@ pub struct ProposerConfig {
     pub proposal_interval: Duration,
     pub network_timeout: Duration,
     pub active_sequencer_check_duration: Duration,
-    pub resubmission_timeout: Duration,
+    pub balance_poll_interval: Duration,
 
     pub allow_non_finalized: bool,
     pub wait_node_sync: bool,
@@ -226,7 +243,10 @@ pub struct ProposerConfig {
     pub private_key: Option<String>,
     pub mnemonic: Option<String>,
     pub hd_path: String,
-    pub num_confirmations: u64,
+
+    pub rpc_max_retries: u32,
+    pub rpc_initial_backoff_ms: u64,
+    pub rpc_compute_units_per_second: u64,
 
     pub rpc_addr: String,
     pub rpc_port: u16,
@@ -244,9 +264,17 @@ impl ProposerCliArgs {
         self,
         fallback_datadir: PathBuf,
     ) -> Result<ProposerConfig, ProposerConfigError> {
-        let l1_eth_rpc = self
+        let l1_eth_rpcs: Vec<String> = self
             .l1_eth_rpc
-            .ok_or(ProposerConfigError::MissingL1EthRpc)?;
+            .as_deref()
+            .ok_or(ProposerConfigError::MissingL1EthRpc)?
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if l1_eth_rpcs.is_empty() {
+            return Err(ProposerConfigError::MissingL1EthRpc);
+        }
         let game_factory_address = self
             .game_factory_address
             .ok_or(ProposerConfigError::MissingGameFactory)?;
@@ -276,7 +304,7 @@ impl ProposerCliArgs {
         let datadir = self.datadir.unwrap_or(fallback_datadir);
 
         Ok(ProposerConfig {
-            l1_eth_rpc,
+            l1_eth_rpcs,
             rollup_rpcs,
             game_factory_address,
             game_type: self.game_type,
@@ -284,13 +312,15 @@ impl ProposerCliArgs {
             proposal_interval: self.proposal_interval,
             network_timeout: self.network_timeout,
             active_sequencer_check_duration: self.active_sequencer_check_duration,
-            resubmission_timeout: self.resubmission_timeout,
+            balance_poll_interval: self.balance_poll_interval,
             allow_non_finalized: self.allow_non_finalized,
             wait_node_sync: self.wait_node_sync,
             private_key: self.private_key,
             mnemonic: self.mnemonic,
             hd_path: self.hd_path,
-            num_confirmations: self.num_confirmations,
+            rpc_max_retries: self.rpc_max_retries,
+            rpc_initial_backoff_ms: self.rpc_initial_backoff_ms,
+            rpc_compute_units_per_second: self.rpc_compute_units_per_second,
             rpc_addr: self.rpc_addr,
             rpc_port: self.rpc_port,
             rpc_enable_admin: self.rpc_enable_admin,

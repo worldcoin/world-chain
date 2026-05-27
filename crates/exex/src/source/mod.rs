@@ -14,40 +14,20 @@
 pub mod local;
 pub mod rollup;
 
-use alloy_primitives::{B256, BlockHash};
+use alloy_eips::BlockNumHash;
+use alloy_primitives::B256;
 use async_trait::async_trait;
 use thiserror::Error;
-
-/// L1 block reference (number + hash) embedded in proposals.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct L1BlockRef {
-    pub number: u64,
-    pub hash: BlockHash,
-}
-
-/// L2 block reference (used by legacy logs / metrics).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct L2BlockRef {
-    pub number: u64,
-    pub hash: BlockHash,
-    pub timestamp: u64,
-}
 
 /// Sync status reported by a proposal source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SyncStatus {
-    pub current_l1: L1BlockRef,
+    /// L1 block the source is anchored to (optional for the local source).
+    pub current_l1: BlockNumHash,
+    /// Latest safe L2 block number.
     pub safe_l2: u64,
+    /// Latest finalized L2 block number.
     pub finalized_l2: u64,
-}
-
-/// Optional metrics-only fields available from a single rollup source.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct LegacyProposalData {
-    pub head_l1: L1BlockRef,
-    pub safe_l2: L2BlockRef,
-    pub finalized_l2: L2BlockRef,
-    pub block_ref: L2BlockRef,
 }
 
 /// A proposal returned from a [`ProposalSource`].
@@ -56,11 +36,11 @@ pub struct Proposal {
     /// The L2 output root being proposed.
     pub root: B256,
     /// L2 block number this proposal corresponds to.
-    pub sequence_num: u64,
-    /// The L1 block this proposal is anchored to.
-    pub current_l1: L1BlockRef,
-    /// Single-source extra data; only useful for logs/metrics.
-    pub legacy: LegacyProposalData,
+    pub block_number: u64,
+    /// L2 block hash (for logs only).
+    pub block_hash: B256,
+    /// The L1 block this proposal is anchored to (zero for the local source).
+    pub current_l1: BlockNumHash,
 }
 
 impl Proposal {
@@ -68,7 +48,7 @@ impl Proposal {
     /// passed to `DisputeGameFactory.create` as the `_extraData` parameter.
     pub fn extra_data(&self) -> [u8; 32] {
         let mut buf = [0u8; 32];
-        buf[24..].copy_from_slice(&self.sequence_num.to_be_bytes());
+        buf[24..].copy_from_slice(&self.block_number.to_be_bytes());
         buf
     }
 }
@@ -76,10 +56,8 @@ impl Proposal {
 /// A pluggable proposal source.
 #[async_trait]
 pub trait ProposalSource: Send + Sync {
-    async fn proposal_at_sequence_num(
-        &self,
-        sequence_num: u64,
-    ) -> Result<Proposal, ProposalSourceError>;
+    async fn proposal_at_block(&self, block_number: u64)
+    -> Result<Proposal, ProposalSourceError>;
 
     async fn sync_status(&self) -> Result<SyncStatus, ProposalSourceError>;
 

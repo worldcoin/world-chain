@@ -19,9 +19,8 @@ use std::{num::NonZeroUsize, time::Duration};
 
 use alloy_network::EthereumWallet;
 use alloy_primitives::Address;
-use alloy_provider::{fillers::CachedNonceManager, DynProvider, ProviderBuilder};
+use alloy_provider::{fillers::CachedNonceManager, DynProvider, Provider, ProviderBuilder};
 use alloy_rpc_client::RpcClient;
-use alloy_signer::Signer;
 use alloy_signer_local::{coins_bip39::English, MnemonicBuilder, PrivateKeySigner};
 use alloy_transport::layers::{FallbackLayer, RetryBackoffLayer};
 use alloy_transport_http::{reqwest, Http};
@@ -157,26 +156,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn builds_provider_with_private_key() {
-        // Anvil deterministic account #0.
-        let pk = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-        let cfg = L1ProviderConfig {
-            http_urls: vec![Url::parse("http://localhost:18545").unwrap()],
-            timeout: Duration::from_secs(10),
-            max_rate_limit_retries: 5,
-            initial_backoff_ms: 500,
-            compute_units_per_second: 660,
-            signer: SignerKind::PrivateKey(pk.into()),
-        };
-        let p = cfg.build().expect("build provider");
-        assert_eq!(
-            format!("{:?}", p.from),
-            // The anvil-0 address.
-            "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
-        );
-    }
-
-    #[test]
     fn rejects_empty_http_urls() {
         let cfg = L1ProviderConfig {
             http_urls: vec![],
@@ -189,5 +168,21 @@ mod tests {
             ),
         };
         assert!(matches!(cfg.build(), Err(ProviderError::NoHttpUrls)));
+    }
+
+    #[test]
+    fn rejects_invalid_private_key() {
+        let cfg = L1ProviderConfig {
+            http_urls: vec![Url::parse("http://localhost:0").unwrap()],
+            timeout: Duration::from_secs(10),
+            max_rate_limit_retries: 5,
+            initial_backoff_ms: 500,
+            compute_units_per_second: 660,
+            signer: SignerKind::PrivateKey("not-a-key".into()),
+        };
+        assert!(matches!(
+            cfg.build(),
+            Err(ProviderError::InvalidPrivateKey(_))
+        ));
     }
 }

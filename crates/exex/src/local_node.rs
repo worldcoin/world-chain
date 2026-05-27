@@ -7,12 +7,12 @@
 
 use std::sync::Arc;
 
-use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, B256};
 use async_trait::async_trait;
 use reth_exex::ExExContext;
 use reth_node_api::FullNodeComponents;
+use alloy_consensus::BlockHeader;
 use reth_storage_api::{
     BlockHashReader, BlockIdReader, HeaderProvider, StateProofProvider, StateProviderFactory,
 };
@@ -70,11 +70,7 @@ where
                 .ok_or_else(|| {
                     ProposalSourceError::Other(format!("hash for {block_number} not found"))
                 })?;
-            Ok(BlockMeta {
-                state_root: header.state_root(),
-                block_hash,
-                timestamp: header.timestamp(),
-            })
+            Ok(BlockMeta { state_root: header.state_root(), block_hash })
         })
         .await
         .map_err(|e| ProposalSourceError::Other(e.to_string()))?
@@ -112,15 +108,9 @@ where
                 .finalized_block_num_hash()
                 .map_err(|e| ProposalSourceError::Other(e.to_string()))?
                 .unwrap_or_default();
-            // For the local source we don't have an L1 view; the proposer
-            // shouldn't be making decisions based on it when running locally,
-            // so we surface zeros. The DGF interaction still uses the txmgr's
-            // L1 connection for the actual proposal anchoring.
             Ok(ChainStatus {
                 safe_l2: safe.number,
                 finalized_l2: finalized.number,
-                current_l1_number: 0,
-                current_l1_hash: B256::ZERO,
             })
         })
         .await

@@ -17,10 +17,11 @@
 
 use std::sync::Arc;
 
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{Address, B256, keccak256};
 use async_trait::async_trait;
 
-use super::{LegacyProposalData, Proposal, ProposalSource, ProposalSourceError, SyncStatus};
+use super::{Proposal, ProposalSource, ProposalSourceError, SyncStatus};
 
 /// L2ToL1MessagePasser predeploy address (`0x4200000000000000000000000000000000000016`).
 pub const L2_TO_L1_MESSAGE_PASSER: Address = Address::new(
@@ -29,15 +30,13 @@ pub const L2_TO_L1_MESSAGE_PASSER: Address = Address::new(
 
 /// Abstraction over the local node state required by [`LocalProposalSource`].
 ///
-/// Implementors will typically just delegate to an ExEx
-/// `FullNodeComponents::provider()` and call the underlying `BlockReader`,
-/// `StateProviderFactory`, and `BlockIdReader` traits.
-///
-/// We keep this small to avoid leaking the full reth-storage-api surface
-/// area into this crate.
+/// Implementors typically delegate to an ExEx `FullNodeComponents::provider()`
+/// and call the underlying `BlockReader`, `StateProviderFactory`, and
+/// `BlockIdReader` traits. Keeping it small avoids leaking the full
+/// reth-storage-api surface area into this crate.
 #[async_trait]
 pub trait LocalChainAccess: Send + Sync {
-    /// Returns `(state_root, block_hash, timestamp)` for the given block.
+    /// `(state_root, block_hash)` for the given L2 block.
     async fn block_meta(&self, block_number: u64) -> Result<BlockMeta, ProposalSourceError>;
 
     /// Storage root of `address` at `block_number`.
@@ -47,8 +46,7 @@ pub trait LocalChainAccess: Send + Sync {
         address: Address,
     ) -> Result<B256, ProposalSourceError>;
 
-    /// Returns the latest safe and finalized L2 block numbers, together with
-    /// the L1 block they are anchored to.
+    /// Latest safe / finalized L2 block numbers.
     async fn chain_status(&self) -> Result<ChainStatus, ProposalSourceError>;
 }
 
@@ -56,15 +54,12 @@ pub trait LocalChainAccess: Send + Sync {
 pub struct BlockMeta {
     pub state_root: B256,
     pub block_hash: B256,
-    pub timestamp: u64,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ChainStatus {
     pub safe_l2: u64,
     pub finalized_l2: u64,
-    pub current_l1_number: u64,
-    pub current_l1_hash: B256,
 }
 
 pub struct LocalProposalSource {
@@ -93,59 +88,58 @@ impl LocalProposalSource {
 
 #[async_trait]
 impl ProposalSource for LocalProposalSource {
-    async fn proposal_at_sequence_num(
+    async fn proposal_at_block(
         &self,
-        sequence_num: u64,
+        block_number: u64,
     ) -> Result<Proposal, ProposalSourceError> {
-        let meta = self.access.block_meta(sequence_num).await?;
+        let meta = self.access.block_meta(block_number).await?;
         let storage_root = self
             .access
-            .storage_root_at(sequence_num, L2_TO_L1_MESSAGE_PASSER)
+            .storage_root_at(block_number, L2_TO_L1_MESSAGE_PASSER)
             .await?;
-        let output_root = Self::output_root_v0(meta.state_root, storage_root, meta.block_hash);
-        let status = self.access.chain_status().await?;
+        let root = Self::output_root_v0(meta.state_root, storage_root, meta.block_hash);
         Ok(Proposal {
-            root: output_root,
-            sequence_num,
-            current_l1: super::L1BlockRef {
-                number: status.current_l1_number,
-                hash: status.current_l1_hash,
-            },
-            legacy: LegacyProposalData {
-                head_l1: super::L1BlockRef {
-                    number: status.current_l1_number,
-                    hash: status.current_l1_hash,
-                },
-                safe_l2: super::L2BlockRef {
-                    number: status.safe_l2,
-                    hash: B256::ZERO,
-                    timestamp: 0,
-                },
-                finalized_l2: super::L2BlockRef {
-                    number: status.finalized_l2,
-                    hash: B256::ZERO,
-                    timestamp: 0,
-                },
-                block_ref: super::L2BlockRef {
-                    number: sequence_num,
-                    hash: meta.block_hash,
-                    timestamp: meta.timestamp,
-                },
-            },
+            root,
+            block_number,
+            block_hash: meta.block_hash,
+            current_l1: BlockNumHash::default(),
         })
     }
 
     async fn sync_status(&self) -> Result<SyncStatus, ProposalSourceError> {
         let s = self.access.chain_status().await?;
         Ok(SyncStatus {
-            current_l1: super::L1BlockRef {
-                number: s.current_l1_number,
-                hash: s.current_l1_hash,
-            },
+            current_l1: BlockNumHash::default(),
             safe_l2: s.safe_l2,
             finalized_l2: s.finalized_l2,
         })
     }
 
     async fn close(&self) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Sanity-check the `OutputV0` layout: same constants as `op-service/eth`
+    /// (taken from a known test vector in `OptimismPortal2.sol` tests).
+    #[test]
+    fn output_root_layout_matches_op_v0() {
+        let state_root = B256::repeat_byte(0xaa);
+        let storage_root = B256::repeat_byte(0xbb);
+        let block_hash = B256::repeat_byte(0xcc);
+
+        let mut expected = [0u8; 128];
+        // version (zeroed)
+        expected[32..64].copy_from_slice(&[0xaa; 32]);
+        expected[64..96].copy_from_slice(&[0xbb; 32]);
+        expected[96..128].copy_from_slice(&[0xcc; 32]);
+        let want = alloy_primitives::keccak256(expected);
+
+        assert_eq!(
+            LocalProposalSource::output_root_v0(state_root, storage_root, block_hash),
+            want,
+        );
+    }
 }

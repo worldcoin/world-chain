@@ -1,46 +1,49 @@
 //! Proposer service.
 //!
-//! Wires everything together: source, DGF contract, txmgr, store, driver,
-//! metrics, admin RPC. Mirrors the single-chain slice of
-//! `op-proposer/proposer/service.go`.
+//! Wires everything together: L1 provider, DGF instance, source, store,
+//! driver, metrics, admin RPC, balance poller.
+//!
+//! Mirrors the single-chain slice of `op-proposer/proposer/service.go`.
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use alloy_provider::DynProvider;
 use jsonrpsee::server::ServerHandle;
 use thiserror::Error;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
+use url::Url;
 
 use crate::{
     config::ProposerConfig,
     contracts::DisputeGameFactory,
     db::{ProposerStore, ProposerStoreError},
     driver::{L2OutputSubmitter, ProposerError},
-    metrics::ProposerMetrics,
+    metrics::{ProposerMetrics, spawn_balance_poller},
+    provider::{L1Provider, L1ProviderConfig, ProviderError, SignerKind},
     rpc::{AdminRpcError, start_admin_server},
     source::{ProposalSource, ProposalSourceError, rollup::RollupProposalSource},
-    txmgr::{SignerKey, TxManager, TxManagerConfig, TxManagerError},
 };
 
 /// Fully assembled proposer service.
 pub struct ProposerService {
     pub driver: Arc<L2OutputSubmitter>,
     pub source: Arc<dyn ProposalSource>,
-    pub factory: Arc<DisputeGameFactory<DynProvider>>,
-    pub txmgr: Arc<TxManager>,
+    pub factory: DisputeGameFactory,
+    pub l1: DynProvider,
     pub store: Arc<ProposerStore>,
     pub metrics: Arc<ProposerMetrics>,
-
     admin_rpc: Option<(SocketAddr, ServerHandle)>,
+    balance_cancel: CancellationToken,
 }
 
 impl ProposerService {
     /// Build the proposer service using a [`RollupProposalSource`].
     ///
-    /// Requires `--proposer.rollup-rpc`. Prefer
-    /// [`ProposerService::from_config_with_source`] when running as an ExEx
-    /// — pass a [`LocalProposalSource`](crate::source::local::LocalProposalSource)
-    /// backed by the node's own state and skip the rollup-rpc round-trip.
+    /// Requires `--proposer.rollup-rpc`. When running as an ExEx, prefer
+    /// [`ProposerService::from_config_with_source`] with a
+    /// [`LocalProposalSource`](crate::source::local::LocalProposalSource)
+    /// to skip the rollup-RPC round-trip entirely.
     pub async fn from_config(cfg: ProposerConfig) -> Result<Self, ServiceError> {
         if cfg.rollup_rpcs.is_empty() {
             return Err(ServiceError::MissingSource);
@@ -56,8 +59,8 @@ impl ProposerService {
     /// Build the proposer service with a pre-constructed proposal source.
     ///
     /// This is the preferred constructor for the ExEx, which builds a
-    /// [`LocalProposalSource`](crate::source::local::LocalProposalSource) over
-    /// the in-process node provider.
+    /// [`LocalProposalSource`](crate::source::local::LocalProposalSource)
+    /// over the in-process node provider.
     pub async fn from_config_with_source(
         cfg: ProposerConfig,
         source: Arc<dyn ProposalSource>,
@@ -65,36 +68,44 @@ impl ProposerService {
         let metrics = Arc::new(ProposerMetrics::new());
         metrics.record_up();
 
+        // L1 provider — wallet-equipped, with fallback, retry, cached nonces,
+        // 3/2 gas fallback filler, blob gas estimation, and chain-id pre-fetch.
         let signer = match (&cfg.private_key, &cfg.mnemonic) {
-            (Some(pk), None) => SignerKey::from_private_key_hex(pk)?,
-            (None, Some(mnemonic)) => SignerKey::from_mnemonic(mnemonic, &cfg.hd_path)?,
+            (Some(pk), None) => SignerKind::PrivateKey(pk.clone()),
+            (None, Some(phrase)) => {
+                SignerKind::Mnemonic { phrase: phrase.clone(), hd_path: cfg.hd_path.clone() }
+            }
             (Some(_), Some(_)) => return Err(ServiceError::ConflictingSigner),
             (None, None) => return Err(ServiceError::MissingSigner),
         };
 
-        let txmgr = TxManager::new(
-            &cfg.l1_eth_rpc,
+        let http_urls: Vec<Url> = cfg
+            .l1_eth_rpcs
+            .iter()
+            .map(|u| Url::parse(u))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| ServiceError::Provider(ProviderError::HttpClient(e.to_string())))?;
+
+        let L1Provider { provider: l1, from } = L1ProviderConfig {
+            http_urls,
+            timeout: cfg.network_timeout,
+            max_rate_limit_retries: cfg.rpc_max_retries,
+            initial_backoff_ms: cfg.rpc_initial_backoff_ms,
+            compute_units_per_second: cfg.rpc_compute_units_per_second,
             signer,
-            TxManagerConfig {
-                network_timeout: cfg.network_timeout,
-                resubmission_timeout: cfg.resubmission_timeout,
-                num_confirmations: cfg.num_confirmations,
-            },
-        )
-        .await?;
-        let txmgr = Arc::new(txmgr);
+        }
+        .build()?;
         info!(
             target: "exex::proposer::service",
-            proposer = ?txmgr.from_address(),
-            l1_rpc = %cfg.l1_eth_rpc,
-            "tx manager initialized",
+            proposer = ?from,
+            l1_rpcs = ?cfg.l1_eth_rpcs,
+            "L1 provider initialized",
         );
 
-        let factory = Arc::new(DisputeGameFactory::new(
-            cfg.game_factory_address,
-            txmgr.provider(),
-            cfg.network_timeout,
-        ));
+        // DGF instance over the wallet-equipped provider — used both for
+        // reads (gameCount, gameAtIndex, initBonds, version) and for the
+        // write path (`create(..).send()` in the driver).
+        let factory = DisputeGameFactory::new(cfg.game_factory_address, l1.clone());
         let version = factory.version().await?;
         info!(
             target: "exex::proposer::service",
@@ -110,11 +121,22 @@ impl ProposerService {
             "proposer mdbx store opened",
         );
 
+        // Wallet balance poller.
+        let balance_cancel = CancellationToken::new();
+        spawn_balance_poller(
+            l1.clone(),
+            from,
+            cfg.balance_poll_interval,
+            metrics.clone(),
+            balance_cancel.clone(),
+        );
+
         let driver = Arc::new(L2OutputSubmitter::new(
             cfg,
             source.clone(),
             factory.clone(),
-            txmgr.clone(),
+            l1.clone(),
+            from,
             metrics.clone(),
             store.clone(),
         ));
@@ -123,10 +145,11 @@ impl ProposerService {
             driver,
             source,
             factory,
-            txmgr,
+            l1,
             store,
             metrics,
             admin_rpc: None,
+            balance_cancel,
         })
     }
 
@@ -143,17 +166,20 @@ impl ProposerService {
         Ok(())
     }
 
-    /// Stop the driver and admin RPC server.
+    /// Stop the driver, balance poller, and admin RPC server.
     pub async fn stop(&mut self) -> Result<(), ServiceError> {
         self.driver.stop_if_running().await;
+        self.balance_cancel.cancel();
         if let Some((_, handle)) = self.admin_rpc.take() {
             let _ = handle.stop();
             handle.stopped().await;
         }
         self.source.close().await;
-        self.txmgr.close();
         Ok(())
     }
+
+    /// Default balance-poll interval used by tests / examples.
+    pub const DEFAULT_BALANCE_POLL_INTERVAL: Duration = Duration::from_secs(60);
 }
 
 #[derive(Debug, Clone)]
@@ -182,7 +208,7 @@ pub enum ServiceError {
     #[error("missing proposal source")]
     MissingSource,
     #[error(transparent)]
-    TxManager(#[from] TxManagerError),
+    Provider(#[from] ProviderError),
     #[error(transparent)]
     Contract(#[from] crate::contracts::ContractError),
     #[error(transparent)]
