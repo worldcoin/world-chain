@@ -25,6 +25,7 @@ members = [
     "crates/pbh",
     "crates/devnet",
     "crates/test-utils",
+    "exex/world-chain-exex",
     "e2e-tests",
     "xtask",
 ]
@@ -66,6 +67,7 @@ world-chain-evm = { path = "crates/evm", default-features = false }
 world-chain-state = { path = "crates/state", default-features = false }
 world-chain-devnet = { path = "crates/devnet", default-features = false }
 world-chain-test-utils = { path = "crates/test-utils", default-features = false }
+world-chain-exex = { path = "exex/world-chain-exex", default-features = false }
 
 # reth crates.io
 reth-codecs = { version = "0.3.1", default-features = false }
@@ -125,6 +127,8 @@ reth-rpc-layer = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddead
 reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
 reth-storage-api = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
 reth-storage-errors = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
+reth-exex = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
+reth-libmdbx = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
 
 # reth-optimism
 reth-optimism-evm = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }

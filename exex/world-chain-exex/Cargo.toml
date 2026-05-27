@@ -1,0 +1,66 @@
+[package]
+name = "world-chain-exex"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "World Chain ExEx providing the OP Proposer (L2 output submitter) inside an op-reth node."
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-exex.workspace = true
+reth-node-api.workspace = true
+reth-tasks.workspace = true
+reth-libmdbx.workspace = true
+reth-tracing.workspace = true
+reth-storage-api.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-sol-types.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-rpc-client.workspace = true
+alloy-rpc-types.workspace = true
+alloy-transport.workspace = true
+alloy-transport-http.workspace = true
+alloy-provider = { workspace = true, features = ["reqwest"] }
+alloy-network.workspace = true
+alloy-consensus.workspace = true
+alloy-signer.workspace = true
+alloy-signer-local.workspace = true
+alloy-contract.workspace = true
+alloy-json-rpc.workspace = true
+alloy-eips.workspace = true
+
+# rpc
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
+
+# metrics
+metrics.workspace = true
+metrics-derive.workspace = true
+
+# async
+tokio = { workspace = true, features = ["full"] }
+tokio-util.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+
+# misc
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+eyre.workspace = true
+url.workspace = true
+hex.workspace = true
+parking_lot.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
