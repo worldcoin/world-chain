@@ -107,7 +107,6 @@ impl ProposalSource for LocalProposalSource {
         Ok(Proposal {
             root: output_root,
             sequence_num,
-            super_root_marshalled: None,
             current_l1: super::L1BlockRef {
                 number: status.current_l1_number,
                 hash: status.current_l1_hash,

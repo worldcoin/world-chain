@@ -1,21 +1,18 @@
 //! Proposal sources.
 //!
-//! Mirrors `op-proposer/proposer/source/`:
+//! Mirrors the single-chain (pre-interop) slice of
+//! `op-proposer/proposer/source/`:
 //!
-//! * [`rollup::RollupProposalSource`] — backed by a single (or active list of)
-//!   `op-node` rollup RPC endpoints.
-//! * [`supervisor::SupervisorProposalSource`] — backed by `op-supervisor`
-//!   instances (interop).
-//! * [`supernode::SuperNodeProposalSource`] — backed by `op-supernode`
-//!   instances (interop).
+//! * [`local::LocalProposalSource`] — backed by the in-process ExEx node
+//!   state. The default for this ExEx; no external RPC required.
+//! * [`rollup::RollupProposalSource`] — backed by an `op-node` rollup RPC.
+//!   Kept for parity with upstream and for use outside of the ExEx.
 //!
-//! Higher levels of the proposer treat all sources uniformly through the
-//! [`ProposalSource`] trait.
+//! Interop (supervisor / supernode / super-root) is intentionally not
+//! supported here.
 
 pub mod local;
 pub mod rollup;
-pub mod supernode;
-pub mod supervisor;
 
 use alloy_primitives::{B256, BlockHash};
 use async_trait::async_trait;
@@ -56,12 +53,10 @@ pub struct LegacyProposalData {
 /// A proposal returned from a [`ProposalSource`].
 #[derive(Debug, Clone)]
 pub struct Proposal {
-    /// The output root being proposed.
+    /// The L2 output root being proposed.
     pub root: B256,
-    /// Block number (pre-interop) or timestamp (interop super-root).
+    /// L2 block number this proposal corresponds to.
     pub sequence_num: u64,
-    /// Set for super-root proposals (interop).
-    pub super_root_marshalled: Option<Vec<u8>>,
     /// The L1 block this proposal is anchored to.
     pub current_l1: L1BlockRef,
     /// Single-source extra data; only useful for logs/metrics.
@@ -69,22 +64,12 @@ pub struct Proposal {
 }
 
 impl Proposal {
-    pub fn is_super_root(&self) -> bool {
-        self.super_root_marshalled.is_some()
-    }
-
-    /// `ExtraData()` from upstream.
-    ///
-    /// For super-root proposals this is the marshalled super root. For
-    /// pre-interop proposals it's a 32-byte big-endian sequence number.
-    pub fn extra_data(&self) -> Vec<u8> {
-        if let Some(super_root) = &self.super_root_marshalled {
-            super_root.clone()
-        } else {
-            let mut buf = [0u8; 32];
-            buf[24..].copy_from_slice(&self.sequence_num.to_be_bytes());
-            buf.to_vec()
-        }
+    /// `ExtraData()` from upstream — a 32-byte big-endian L2 block number,
+    /// passed to `DisputeGameFactory.create` as the `_extraData` parameter.
+    pub fn extra_data(&self) -> [u8; 32] {
+        let mut buf = [0u8; 32];
+        buf[24..].copy_from_slice(&self.sequence_num.to_be_bytes());
+        buf
     }
 }
 
@@ -114,8 +99,6 @@ pub enum ProposalSourceError {
     BlockNumberMismatch { got: u64, expected: u64 },
     #[error("no available proposal sources")]
     NoSources,
-    #[error("no available sync status sources")]
-    NoSyncStatusSources,
     #[error("other: {0}")]
     Other(String),
 }

@@ -1,7 +1,7 @@
 //! Contract bindings for the OP Proposer.
 //!
-//! Mirrors `op-proposer/contracts/disputegamefactory.go`. We only bind the
-//! subset of the ABI the proposer actually uses:
+//! Mirrors the small subset of `op-proposer/contracts/disputegamefactory.go`
+//! that the proposer actually exercises:
 //!
 //! * `DisputeGameFactory.gameCount()`
 //! * `DisputeGameFactory.gameAtIndex(uint256)`
@@ -9,12 +9,18 @@
 //! * `DisputeGameFactory.create(uint32,bytes32,bytes)` — payable
 //! * `DisputeGameFactory.version()`
 //! * `FaultDisputeGame.claimData(uint256)`
+//!
+//! Reads go through the sol-generated instance. Writes (proposal submission)
+//! also go through the instance via [`alloy_contract::CallBuilder::send`],
+//! which composes with the wallet-equipped provider's filler stack (gas
+//! estimation, nonce management, signing). The proposer therefore needs
+//! neither a custom `TxManager` nor custom receipt types.
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
-use alloy_primitives::{Address, B256, Bytes, U256};
-use alloy_provider::{Provider, RootProvider};
-use alloy_sol_types::{SolCall, sol};
+use alloy_primitives::{Address, B256, U256};
+use alloy_provider::DynProvider;
+use alloy_sol_types::sol;
 use thiserror::Error;
 
 sol! {
@@ -56,6 +62,9 @@ sol! {
     }
 }
 
+/// Concrete type for the sol-generated factory instance over our dyn provider.
+pub type FactoryInstance = IDisputeGameFactory::IDisputeGameFactoryInstance<DynProvider>;
+
 /// Metadata for a game returned by `gameAtIndex` (+ a follow-up claimData lookup).
 #[derive(Debug, Clone)]
 pub struct GameMetadata {
@@ -66,95 +75,75 @@ pub struct GameMetadata {
     pub claim: B256,
 }
 
-/// Thin wrapper around the `DisputeGameFactory` RPC binding that adds
-/// per-call network timeouts (matching the Go implementation).
-pub struct DisputeGameFactory<P: Provider> {
-    address: Address,
-    provider: Arc<P>,
-    network_timeout: Duration,
+/// Thin wrapper around the sol-generated factory instance.
+///
+/// Keeps [`has_proposed_since`](Self::has_proposed_since) — the only piece
+/// of business logic on top of the raw ABI calls — and re-exposes the
+/// underlying instance for `.create(..).send()` from the driver.
+#[derive(Clone)]
+pub struct DisputeGameFactory {
+    instance: Arc<FactoryInstance>,
 }
 
-impl<P: Provider> DisputeGameFactory<P> {
-    pub fn new(address: Address, provider: Arc<P>, network_timeout: Duration) -> Self {
-        Self {
-            address,
-            provider,
-            network_timeout,
-        }
+impl DisputeGameFactory {
+    pub fn new(address: Address, provider: DynProvider) -> Self {
+        let instance = IDisputeGameFactory::new(address, provider);
+        Self { instance: Arc::new(instance) }
     }
 
+    /// The DGF address.
     pub fn address(&self) -> Address {
-        self.address
+        *self.instance.address()
     }
 
-    /// Returns the factory contract version string.
+    /// Underlying alloy contract instance (use for `.create(..).send()`).
+    pub fn instance(&self) -> &FactoryInstance {
+        &self.instance
+    }
+
+    /// Returns the factory `version()` string.
     pub async fn version(&self) -> Result<String, ContractError> {
-        let call = IDisputeGameFactory::versionCall {}.abi_encode();
-        let out = self.eth_call(self.address, call.into()).await?;
-        let decoded = IDisputeGameFactory::versionCall::abi_decode_returns(&out)
-            .map_err(|e| ContractError::Decode(e.to_string()))?;
-        Ok(decoded)
+        Ok(self.instance.version().call().await?)
     }
 
-    /// Returns the total number of games created by the factory.
+    /// Total number of games created by the factory.
     pub async fn game_count(&self) -> Result<u64, ContractError> {
-        let call = IDisputeGameFactory::gameCountCall {}.abi_encode();
-        let out = self.eth_call(self.address, call.into()).await?;
-        let decoded = IDisputeGameFactory::gameCountCall::abi_decode_returns(&out)
-            .map_err(|e| ContractError::Decode(e.to_string()))?;
-        u64::try_from(decoded).map_err(|_| ContractError::Decode("game count > u64".into()))
+        let n = self.instance.gameCount().call().await?;
+        u64::try_from(n).map_err(|_| ContractError::Decode("game count > u64".into()))
     }
 
-    /// Returns the `_index`-th game (type, timestamp, proxy address).
+    /// `(game_type, timestamp, proxy)` for the i-th game.
     pub async fn game_at_index_raw(
         &self,
         index: u64,
     ) -> Result<(u32, u64, Address), ContractError> {
-        let call = IDisputeGameFactory::gameAtIndexCall {
-            _index: U256::from(index),
-        }
-        .abi_encode();
-        let out = self.eth_call(self.address, call.into()).await?;
-        let decoded = IDisputeGameFactory::gameAtIndexCall::abi_decode_returns(&out)
-            .map_err(|e| ContractError::Decode(e.to_string()))?;
-        Ok((decoded.gameType_, decoded.timestamp_, decoded.proxy_))
+        let ret = self.instance.gameAtIndex(U256::from(index)).call().await?;
+        Ok((ret.gameType_, ret.timestamp_, ret.proxy_))
     }
 
-    /// Returns the `_index`-th game with claimant and claim resolved via a
-    /// follow-up `claimData(0)` call. Mirrors the Go `gameAtIndex`.
+    /// `game_at_index_raw` + a follow-up `claimData(0)` to resolve the
+    /// claimant / claim. Mirrors `gameAtIndex` from the Go contracts pkg.
     pub async fn game_at_index(&self, index: u64) -> Result<GameMetadata, ContractError> {
         let (game_type, timestamp, proxy) = self.game_at_index_raw(index).await?;
-        let claim_call = IFaultDisputeGame::claimDataCall { _index: U256::ZERO }.abi_encode();
-        let out = self.eth_call(proxy, claim_call.into()).await?;
-        let decoded = IFaultDisputeGame::claimDataCall::abi_decode_returns(&out)
-            .map_err(|e| ContractError::Decode(e.to_string()))?;
+        let game = IFaultDisputeGame::new(proxy, self.instance.provider().clone());
+        let ret = game.claimData(U256::ZERO).call().await?;
         Ok(GameMetadata {
             game_type,
             timestamp,
             address: proxy,
-            proposer: decoded.claimant,
-            claim: decoded.claim,
+            proposer: ret.claimant,
+            claim: ret.claim,
         })
     }
 
     /// Initial bond required to create a game of the given type.
     pub async fn init_bond(&self, game_type: u32) -> Result<U256, ContractError> {
-        let call = IDisputeGameFactory::initBondsCall {
-            _gameType: game_type,
-        }
-        .abi_encode();
-        let out = self.eth_call(self.address, call.into()).await?;
-        let decoded = IDisputeGameFactory::initBondsCall::abi_decode_returns(&out)
-            .map_err(|e| ContractError::Decode(e.to_string()))?;
-        Ok(decoded)
+        Ok(self.instance.initBonds(game_type).call().await?)
     }
 
-    /// Returns true if `proposer` has created a game of type `game_type` after `cutoff_unix`.
-    /// On match, also returns the timestamp and the claim (root) of that game.
-    ///
-    /// Walks the factory backwards from the latest game and short-circuits as
-    /// soon as a game older than `cutoff_unix` is seen. Direct port of
-    /// `HasProposedSince`.
+    /// Returns true if `proposer` has created a game of type `game_type`
+    /// after `cutoff_unix`, along with the timestamp and claim of that game.
+    /// Direct port of upstream `HasProposedSince`.
     pub async fn has_proposed_since(
         &self,
         proposer: Address,
@@ -180,54 +169,12 @@ impl<P: Provider> DisputeGameFactory<P> {
             }
         }
     }
-
-    /// Returns the ABI-encoded `create(uint32,bytes32,bytes)` input and the
-    /// required bond (the `value` field of the eventual L1 tx).
-    pub async fn proposal_tx_calldata(
-        &self,
-        game_type: u32,
-        output_root: B256,
-        extra_data: Bytes,
-    ) -> Result<(Bytes, U256), ContractError> {
-        let bond = self.init_bond(game_type).await?;
-        let call = IDisputeGameFactory::createCall {
-            _gameType: game_type,
-            _rootClaim: output_root,
-            _extraData: extra_data,
-        }
-        .abi_encode();
-        Ok((call.into(), bond))
-    }
-
-    async fn eth_call(&self, to: Address, data: Bytes) -> Result<Bytes, ContractError> {
-        use alloy_rpc_types_eth::TransactionRequest;
-        let req = TransactionRequest::default().to(to).input(data.into());
-        let fut = self.provider.call(req);
-        let out = tokio::time::timeout(self.network_timeout, fut)
-            .await
-            .map_err(|_| ContractError::Timeout)?
-            .map_err(|e| ContractError::Rpc(e.to_string()))?;
-        Ok(out)
-    }
-}
-
-impl DisputeGameFactory<RootProvider> {
-    /// Convenience constructor for the type-erased root provider.
-    pub fn from_root(
-        address: Address,
-        provider: Arc<RootProvider>,
-        network_timeout: Duration,
-    ) -> Self {
-        Self::new(address, provider, network_timeout)
-    }
 }
 
 #[derive(Debug, Error)]
 pub enum ContractError {
-    #[error("rpc call failed: {0}")]
-    Rpc(String),
-    #[error("call timed out")]
-    Timeout,
+    #[error(transparent)]
+    Alloy(#[from] alloy_contract::Error),
     #[error("abi decode error: {0}")]
     Decode(String),
 }

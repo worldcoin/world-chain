@@ -1,7 +1,8 @@
 //! Proposer service.
 //!
-//! Wires everything together: source(s), DGF contract, txmgr, store, driver,
-//! metrics, admin RPC. Mirrors `op-proposer/proposer/service.go`.
+//! Wires everything together: source, DGF contract, txmgr, store, driver,
+//! metrics, admin RPC. Mirrors the single-chain slice of
+//! `op-proposer/proposer/service.go`.
 
 use std::{net::SocketAddr, sync::Arc};
 
@@ -17,10 +18,7 @@ use crate::{
     driver::{L2OutputSubmitter, ProposerError},
     metrics::ProposerMetrics,
     rpc::{AdminRpcError, start_admin_server},
-    source::{
-        ProposalSource, ProposalSourceError, rollup::RollupProposalSource,
-        supernode::SuperNodeProposalSource, supervisor::SupervisorProposalSource,
-    },
+    source::{ProposalSource, ProposalSourceError, rollup::RollupProposalSource},
     txmgr::{SignerKey, TxManager, TxManagerConfig, TxManagerError},
 };
 
@@ -37,93 +35,29 @@ pub struct ProposerService {
 }
 
 impl ProposerService {
-    /// Build the proposer service from a [`ProposerConfig`].
+    /// Build the proposer service using a [`RollupProposalSource`].
     ///
-    /// Picks an RPC-based proposal source: rollup, supervisor, or supernode.
-    /// Prefer [`ProposerService::from_config_with_source`] when running as
-    /// an ExEx — pass a [`LocalProposalSource`](crate::source::local::LocalProposalSource)
+    /// Requires `--proposer.rollup-rpc`. Prefer
+    /// [`ProposerService::from_config_with_source`] when running as an ExEx
+    /// — pass a [`LocalProposalSource`](crate::source::local::LocalProposalSource)
     /// backed by the node's own state and skip the rollup-rpc round-trip.
     pub async fn from_config(cfg: ProposerConfig) -> Result<Self, ServiceError> {
-        let metrics = Arc::new(ProposerMetrics::new());
-        metrics.record_up();
-
-        // Signer.
-        let signer = match (&cfg.private_key, &cfg.mnemonic) {
-            (Some(pk), None) => SignerKey::from_private_key_hex(pk)?,
-            (None, Some(mnemonic)) => SignerKey::from_mnemonic(mnemonic, &cfg.hd_path)?,
-            (Some(_), Some(_)) => return Err(ServiceError::ConflictingSigner),
-            (None, None) => return Err(ServiceError::MissingSigner),
-        };
-
-        // L1 tx manager.
-        let txmgr = TxManager::new(
-            &cfg.l1_eth_rpc,
-            signer,
-            TxManagerConfig {
-                network_timeout: cfg.network_timeout,
-                resubmission_timeout: cfg.resubmission_timeout,
-                num_confirmations: cfg.num_confirmations,
-            },
-        )
-        .await?;
-        let txmgr = Arc::new(txmgr);
-        info!(
-            target: "exex::proposer::service",
-            proposer = ?txmgr.from_address(),
-            l1_rpc = %cfg.l1_eth_rpc,
-            "tx manager initialized",
-        );
-
-        // DisputeGameFactory bindings (uses the txmgr's wallet-equipped provider).
-        let factory = Arc::new(DisputeGameFactory::new(
-            cfg.game_factory_address,
-            txmgr.provider(),
+        if cfg.rollup_rpcs.is_empty() {
+            return Err(ServiceError::MissingSource);
+        }
+        let source: Arc<dyn ProposalSource> = Arc::new(RollupProposalSource::new(
+            cfg.rollup_rpcs.clone(),
             cfg.network_timeout,
-        ));
-        let version = factory.version().await?;
-        info!(
-            target: "exex::proposer::service",
-            address = ?cfg.game_factory_address,
-            version,
-            "connected to DisputeGameFactory",
-        );
-
-        // Proposal source.
-        let source: Arc<dyn ProposalSource> = build_rpc_source(&cfg)?;
-
-        // Persistent state.
-        let store = Arc::new(ProposerStore::open(&cfg.datadir)?);
-        info!(
-            target: "exex::proposer::service",
-            path = %store.path().display(),
-            "proposer mdbx store opened",
-        );
-
-        // Driver.
-        let driver = Arc::new(L2OutputSubmitter::new(
-            cfg,
-            source.clone(),
-            factory.clone(),
-            txmgr.clone(),
-            metrics.clone(),
-            store.clone(),
-        ));
-
-        Ok(Self {
-            driver,
-            source,
-            factory,
-            txmgr,
-            store,
-            metrics,
-            admin_rpc: None,
-        })
+            cfg.active_sequencer_check_duration,
+        )?);
+        Self::from_config_with_source(cfg, source).await
     }
 
     /// Build the proposer service with a pre-constructed proposal source.
     ///
     /// This is the preferred constructor for the ExEx, which builds a
-    /// [`LocalProposalSource`] over the in-process node provider.
+    /// [`LocalProposalSource`](crate::source::local::LocalProposalSource) over
+    /// the in-process node provider.
     pub async fn from_config_with_source(
         cfg: ProposerConfig,
         source: Arc<dyn ProposalSource>,
@@ -153,7 +87,7 @@ impl ProposerService {
             target: "exex::proposer::service",
             proposer = ?txmgr.from_address(),
             l1_rpc = %cfg.l1_eth_rpc,
-            "tx manager initialized (local source)",
+            "tx manager initialized",
         );
 
         let factory = Arc::new(DisputeGameFactory::new(
@@ -238,31 +172,6 @@ impl AdminRpcSettings {
         }
     }
 }
-
-fn build_rpc_source(cfg: &ProposerConfig) -> Result<Arc<dyn ProposalSource>, ServiceError> {
-    if !cfg.rollup_rpcs.is_empty() {
-        Ok(Arc::new(RollupProposalSource::new(
-            cfg.rollup_rpcs.clone(),
-            cfg.network_timeout,
-            cfg.active_sequencer_check_duration,
-        )?))
-    } else if !cfg.supervisor_rpcs.is_empty() {
-        Ok(Arc::new(SupervisorProposalSource::new(
-            cfg.supervisor_rpcs.clone(),
-            cfg.network_timeout,
-        )?))
-    } else if !cfg.supernode_rpcs.is_empty() {
-        Ok(Arc::new(SuperNodeProposalSource::new(
-            cfg.supernode_rpcs.clone(),
-            cfg.network_timeout,
-        )?))
-    } else {
-        Err(ServiceError::MissingSource)
-    }
-}
-
-// Re-export of `LocalProposalSource` so callers don't need a deep path.
-pub use crate::source::local::LocalProposalSource as LocalSource;
 
 #[derive(Debug, Error)]
 pub enum ServiceError {

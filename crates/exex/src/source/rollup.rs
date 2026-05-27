@@ -231,7 +231,6 @@ impl ProposalSource for RollupProposalSource {
         Ok(Proposal {
             root: raw.output_root,
             sequence_num: block_ref.number,
-            super_root_marshalled: None,
             current_l1,
             legacy: LegacyProposalData {
                 head_l1,

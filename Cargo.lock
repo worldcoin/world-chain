@@ -396,7 +396,7 @@ checksum = "7f092eb6af80456e4ab41c9722e777d791335bc9c00b11bc3db7bf29a432dfd0"
 dependencies = [
  "alloy-consensus 2.0.4",
  "alloy-eips 2.0.4",
- "alloy-hardforks",
+ "alloy-hardforks 0.4.7",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth 2.0.4",
@@ -421,6 +421,19 @@ dependencies = [
  "borsh",
  "serde",
  "serde_with",
+]
+
+[[package]]
+name = "alloy-hardforks"
+version = "0.2.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3165210652f71dfc094b051602bafd691f506c54050a174b1cba18fb5ef706a3"
+dependencies = [
+ "alloy-chains",
+ "alloy-eip2124",
+ "alloy-primitives",
+ "auto_impl",
+ "dyn-clone",
 ]
 
 [[package]]
@@ -558,6 +571,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "alloy-node-bindings"
+version = "2.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a29998ddc1f3a7658b82de0784566c65e2f116917a349de7fdd0b765e539d0c"
+dependencies = [
+ "alloy-genesis",
+ "alloy-hardforks 0.2.13",
+ "alloy-network 2.0.4",
+ "alloy-primitives",
+ "alloy-signer 2.0.4",
+ "alloy-signer-local",
+ "k256",
+ "libc",
+ "rand 0.8.6",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "alloy-op-evm"
 version = "0.31.0"
 source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.0#484be19f69054f74bc736b5df229e896e338d9a3"
@@ -580,7 +615,7 @@ version = "0.4.7"
 source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.0#484be19f69054f74bc736b5df229e896e338d9a3"
 dependencies = [
  "alloy-chains",
- "alloy-hardforks",
+ "alloy-hardforks 0.4.7",
  "alloy-primitives",
  "auto_impl",
 ]
@@ -1956,6 +1991,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cffb0e931875b666fc4fcb20fee52e9bbd1ef836fd9e9e04ec21555f9f85f7ef"
 dependencies = [
  "fastrand",
+ "gloo-timers 0.3.0",
  "tokio",
 ]
 
@@ -3971,7 +4007,7 @@ version = "3.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f288b0a4f20f9a56b5d1da57e2227c661b7b16168e2f72365f57b63326e29b24"
 dependencies = [
- "gloo-timers",
+ "gloo-timers 0.2.6",
  "send_wrapper 0.4.0",
 ]
 
@@ -4126,6 +4162,18 @@ name = "gloo-timers"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b995a66bb87bebce9a0f4a95aed01daca4872c050bfcb21653361c03bc35e5c"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "gloo-timers"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbb143cf96099802033e0d4f4963b19fd2e0b728bcf076cd9cf7f6634f092994"
 dependencies = [
  "futures-channel",
  "futures-core",
@@ -8183,7 +8231,7 @@ dependencies = [
  "alloy-consensus 2.0.4",
  "alloy-eip7928",
  "alloy-eips 2.0.4",
- "alloy-hardforks",
+ "alloy-hardforks 0.4.7",
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
@@ -8251,7 +8299,7 @@ version = "2.0.0"
 source = "git+https://github.com/paradigmxyz/reth?rev=27bfddeada3953edc22759080a3659ccea62ca1f#27bfddeada3953edc22759080a3659ccea62ca1f"
 dependencies = [
  "alloy-eip2124",
- "alloy-hardforks",
+ "alloy-hardforks 0.4.7",
  "alloy-primitives",
  "arbitrary",
  "auto_impl",
@@ -9006,7 +9054,7 @@ dependencies = [
  "alloy-consensus 2.0.4",
  "alloy-eips 2.0.4",
  "alloy-genesis",
- "alloy-hardforks",
+ "alloy-hardforks 0.4.7",
  "alloy-primitives",
  "derive_more",
  "miniz_oxide 0.9.1",
@@ -13917,7 +13965,7 @@ dependencies = [
  "alloy-consensus 2.0.4",
  "alloy-eips 2.0.4",
  "alloy-genesis",
- "alloy-hardforks",
+ "alloy-hardforks 0.4.7",
  "alloy-primitives",
  "auto_impl",
  "derive_more",
@@ -13971,7 +14019,7 @@ version = "2.2.0"
 dependencies = [
  "alloy-eips 2.0.4",
  "alloy-genesis",
- "alloy-hardforks",
+ "alloy-hardforks 0.4.7",
  "alloy-primitives",
  "alloy-provider 2.0.4",
  "base64 0.22.1",
@@ -14046,8 +14094,8 @@ dependencies = [
  "alloy-consensus 2.0.4",
  "alloy-contract",
  "alloy-eips 2.0.4",
- "alloy-json-rpc 2.0.4",
  "alloy-network 2.0.4",
+ "alloy-node-bindings",
  "alloy-primitives",
  "alloy-provider 2.0.4",
  "alloy-rpc-client 2.0.4",
@@ -14059,6 +14107,7 @@ dependencies = [
  "alloy-transport 2.0.4",
  "alloy-transport-http 2.0.4",
  "async-trait",
+ "backon",
  "clap",
  "color-eyre",
  "futures",
@@ -14079,6 +14128,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "tower",
  "tracing",
  "url",
 ]

@@ -1,18 +1,13 @@
 //! Configuration for the OP Proposer ExEx.
 //!
-//! Mirrors `op-proposer/flags/flags.go` and `op-proposer/proposer/config.go`.
+//! Mirrors `op-proposer/flags/flags.go` and `op-proposer/proposer/config.go`,
+//! pared down to the single-chain (pre-interop) DGF proposer.
 
 use std::{path::PathBuf, time::Duration};
 
 use alloy_primitives::Address;
 use clap::Args;
 use thiserror::Error;
-
-/// Game types that are pre-interop and require a rollup-rpc.
-pub const PRE_INTEROP_GAME_TYPES: &[u32] = &[0, 1, 2, 3, 6, 254, 255, 1337];
-
-/// Game types that are post-interop and require a supervisor / supernode RPC.
-pub const POST_INTEROP_GAME_TYPES: &[u32] = &[4, 5];
 
 /// CLI configuration for the OP Proposer ExEx, parsed via clap.
 ///
@@ -32,28 +27,13 @@ pub struct ProposerCliArgs {
     #[arg(long = "proposer.l1-eth-rpc", env = "OP_PROPOSER_L1_ETH_RPC")]
     pub l1_eth_rpc: Option<String>,
 
-    /// HTTP provider URL for the rollup node.
+    /// Optional HTTP provider URL for a remote `op-node` rollup RPC.
     ///
-    /// A comma-separated list enables the active rollup provider (the proposer
-    /// will round-robin failover, matching the Go behaviour).
+    /// When set, the proposer will read output roots from this endpoint
+    /// instead of computing them locally. A comma-separated list enables
+    /// active failover (matches the Go behaviour).
     #[arg(long = "proposer.rollup-rpc", env = "OP_PROPOSER_ROLLUP_RPC")]
     pub rollup_rpc: Option<String>,
-
-    /// HTTP provider URLs for supervisor nodes (interop).
-    #[arg(
-        long = "proposer.supervisor-rpcs",
-        env = "OP_PROPOSER_SUPERVISOR_RPCS",
-        value_delimiter = ','
-    )]
-    pub supervisor_rpcs: Vec<String>,
-
-    /// HTTP provider URLs for supernode instances (interop).
-    #[arg(
-        long = "proposer.supernode-rpcs",
-        env = "OP_PROPOSER_SUPERNODE_RPCS",
-        value_delimiter = ','
-    )]
-    pub supernode_rpcs: Vec<String>,
 
     /// Address of the `DisputeGameFactory` contract.
     #[arg(
@@ -96,7 +76,7 @@ pub struct ProposerCliArgs {
     )]
     pub game_type: u32,
 
-    /// Active sequencer check duration.
+    /// Active sequencer check duration (only used with `--proposer.rollup-rpc`).
     #[arg(
         long = "proposer.active-sequencer-check-duration",
         env = "OP_PROPOSER_ACTIVE_SEQUENCER_CHECK_DURATION",
@@ -105,8 +85,8 @@ pub struct ProposerCliArgs {
     )]
     pub active_sequencer_check_duration: Duration,
 
-    /// Whether to wait for the rollup node to sync to the current L1 tip
-    /// before starting the driver loop.
+    /// Whether to wait for the node to sync to the current L1 tip before
+    /// starting the driver loop.
     #[arg(
         long = "proposer.wait-node-sync",
         env = "OP_PROPOSER_WAIT_NODE_SYNC",
@@ -130,8 +110,7 @@ pub struct ProposerCliArgs {
     #[arg(long = "proposer.private-key", env = "OP_PROPOSER_PRIVATE_KEY")]
     pub private_key: Option<String>,
 
-    /// BIP-39 mnemonic for the L1 proposer signer. Path is taken from
-    /// `--proposer.hd-path` (default `m/44'/60'/0'/0/0`).
+    /// BIP-39 mnemonic for the L1 proposer signer.
     #[arg(long = "proposer.mnemonic", env = "OP_PROPOSER_MNEMONIC")]
     pub mnemonic: Option<String>,
 
@@ -144,7 +123,7 @@ pub struct ProposerCliArgs {
     pub hd_path: String,
 
     /// Number of confirmations required for a transaction to be considered
-    /// included. Matches the txmgr default.
+    /// included.
     #[arg(
         long = "proposer.num-confirmations",
         env = "OP_PROPOSER_NUM_CONFIRMATIONS",
@@ -186,8 +165,6 @@ pub struct ProposerCliArgs {
     pub rpc_enable_admin: bool,
 
     /// Directory for proposer persistent state (MDBX).
-    /// Defaults to `<datadir>/world-chain-exex/proposer` when used through the ExEx,
-    /// otherwise the current directory.
     #[arg(long = "proposer.datadir", env = "OP_PROPOSER_DATADIR")]
     pub datadir: Option<PathBuf>,
 }
@@ -202,7 +179,6 @@ fn parse_humantime(raw: &str) -> Result<Duration, ProposerConfigError> {
     if trimmed.is_empty() {
         return Err(ProposerConfigError::InvalidDuration(raw.to_string()));
     }
-    // accept plain integers as seconds
     if let Ok(secs) = trimmed.parse::<u64>() {
         return Ok(Duration::from_secs(secs));
     }
@@ -234,8 +210,6 @@ fn parse_humantime(raw: &str) -> Result<Duration, ProposerConfigError> {
 pub struct ProposerConfig {
     pub l1_eth_rpc: String,
     pub rollup_rpcs: Vec<String>,
-    pub supervisor_rpcs: Vec<String>,
-    pub supernode_rpcs: Vec<String>,
 
     pub game_factory_address: Address,
     pub game_type: u32,
@@ -264,7 +238,8 @@ pub struct ProposerConfig {
 impl ProposerCliArgs {
     /// Translate CLI args into a validated [`ProposerConfig`].
     ///
-    /// Mirrors `CLIConfig.Check()` from `op-proposer/proposer/config.go`.
+    /// Mirrors `CLIConfig.Check()` from `op-proposer/proposer/config.go`,
+    /// minus the interop game-type matrix.
     pub fn into_config(
         self,
         fallback_datadir: PathBuf,
@@ -291,39 +266,6 @@ impl ProposerCliArgs {
             })
             .unwrap_or_default();
 
-        let supervisor_rpcs = self.supervisor_rpcs;
-        let supernode_rpcs = self.supernode_rpcs;
-
-        let mut source_count = 0;
-        if !rollup_rpcs.is_empty() {
-            source_count += 1;
-        }
-        if !supervisor_rpcs.is_empty() {
-            source_count += 1;
-        }
-        if !supernode_rpcs.is_empty() {
-            source_count += 1;
-        }
-        if source_count > 1 {
-            return Err(ProposerConfigError::ConflictingSource);
-        }
-
-        // No source is fine: the ExEx wires up a local proposal source from
-        // the node's own state (see `crate::source::local::LocalProposalSource`).
-        // We only enforce the pre/post-interop source matrix if at least one
-        // remote source was provided, mirroring upstream's intent.
-        if source_count > 0 {
-            if PRE_INTEROP_GAME_TYPES.contains(&self.game_type) && rollup_rpcs.is_empty() {
-                return Err(ProposerConfigError::MissingRollupRpc);
-            }
-            if POST_INTEROP_GAME_TYPES.contains(&self.game_type)
-                && supervisor_rpcs.is_empty()
-                && supernode_rpcs.is_empty()
-            {
-                return Err(ProposerConfigError::MissingSupervisorRpc);
-            }
-        }
-
         if self.private_key.is_none() && self.mnemonic.is_none() {
             return Err(ProposerConfigError::MissingSigner);
         }
@@ -336,8 +278,6 @@ impl ProposerCliArgs {
         Ok(ProposerConfig {
             l1_eth_rpc,
             rollup_rpcs,
-            supervisor_rpcs,
-            supernode_rpcs,
             game_factory_address,
             game_type: self.game_type,
             poll_interval: self.poll_interval,
@@ -363,21 +303,15 @@ impl ProposerCliArgs {
 pub enum ProposerConfigError {
     #[error("missing L1 RPC (--proposer.l1-eth-rpc)")]
     MissingL1EthRpc,
-    #[error("missing rollup RPC (--proposer.rollup-rpc)")]
-    MissingRollupRpc,
-    #[error("missing supervisor / supernode RPC")]
-    MissingSupervisorRpc,
-    #[error("missing proposal source (rollup, supervisor or supernode)")]
-    MissingSource,
-    #[error("must specify exactly one of rollup rpc, supervisor rpc, or supernode rpc")]
-    ConflictingSource,
     #[error("missing DisputeGameFactory address (--proposer.game-factory-address)")]
     MissingGameFactory,
     #[error("--proposer.proposal-interval must be non-zero when DGF is configured")]
     ZeroProposalInterval,
     #[error("missing signer: provide either --proposer.private-key or --proposer.mnemonic")]
     MissingSigner,
-    #[error("conflicting signer: provide only one of --proposer.private-key / --proposer.mnemonic")]
+    #[error(
+        "conflicting signer: provide only one of --proposer.private-key / --proposer.mnemonic"
+    )]
     ConflictingSigner,
     #[error("invalid duration string: {0}")]
     InvalidDuration(String),

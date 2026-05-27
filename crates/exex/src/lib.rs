@@ -1,9 +1,11 @@
 //! World Chain ExEx playing the role of the OP Proposer.
 //!
-//! This crate ports the [op-proposer](https://github.com/ethereum-optimism/optimism/tree/develop/op-proposer)
-//! specification to a reth [`ExEx`](reth_exex::ExExContext). It periodically
-//! reads an L2 output root from a rollup node (or supervisor), and submits it
-//! to the L1 `DisputeGameFactory` contract by creating a fault dispute game.
+//! This crate ports the single-chain (pre-interop) slice of
+//! [op-proposer](https://github.com/ethereum-optimism/optimism/tree/develop/op-proposer)
+//! to a reth [`ExEx`](reth_exex::ExExContext). It periodically reads an L2
+//! output root (by default from local node state, optionally from a rollup
+//! RPC) and submits it to the L1 `DisputeGameFactory` contract by creating a
+//! fault dispute game.
 //!
 //! Components (mirroring the Go layout):
 //!
