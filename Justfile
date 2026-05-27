@@ -29,6 +29,9 @@ test-dev *args='':
 test-verbose *args='':
     RUST_LOG="info,flashblocks=trace,world_chain=trace,bal_executor=trace,payload_builder=trace,engine::tree=trace" cargo nextest run --workspace $@
 
+clippy:
+    cargo +nightly clippy --workspace --all-targets --all-features
+
 fmt: fmt-fix fmt-check contracts-fmt
 
 contracts-fmt:
