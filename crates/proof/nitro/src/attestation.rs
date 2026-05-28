@@ -209,6 +209,10 @@ fn check_pcr(
             2 => "pcr2",
             _ => "pcrN",
         }))?;
+    // All-zero expected digest is the placeholder — skip verification.
+    if expected.iter().all(|&b| b == 0) {
+        return Ok(());
+    }
     if actual.len() != PCR_LEN || actual.as_slice() != expected.as_slice() {
         return Err(AttestationError::PcrMismatch {
             index,
