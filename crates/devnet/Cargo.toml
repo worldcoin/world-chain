@@ -39,7 +39,7 @@ reth-provider.workspace = true
 reth-tasks.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls-tls"] }
-secp256k1 = { version = "0.30.0", default-features = false, features = ["std"] }
+secp256k1 = { version = "0.31.1", default-features = false, features = ["std"] }
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
