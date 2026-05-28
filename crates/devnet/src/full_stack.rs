@@ -9,7 +9,7 @@ use std::{
 
 use alloy_eips::{BlockNumberOrTag, eip1559::BaseFeeParams};
 use alloy_genesis::Genesis;
-use alloy_primitives::{B64, hex};
+use alloy_primitives::{B64, hex, keccak256};
 use alloy_provider::{Provider, ProviderBuilder};
 use base64::prelude::{BASE64_STANDARD, Engine};
 use eyre::eyre::{Context, Result, bail, eyre};
@@ -20,6 +20,7 @@ use rand::Rng as _;
 use reth_chainspec::EthChainSpec;
 use reth_network_peers::{NodeRecord, TrustedPeer};
 use secp256k1::SecretKey;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use testcontainers::{
@@ -35,6 +36,7 @@ use tokio::{
 use tracing::{debug, info};
 use url::{Host, Url};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
+use world_chain_proofs::{PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
 use world_chain_test_utils::DEV_CHAIN_ID;
 
 use crate::{
@@ -61,6 +63,8 @@ const CONDUCTOR_HEALTHCHECK_INTERVAL_SECS: &str = "5";
 const CONDUCTOR_HEALTHCHECK_UNSAFE_INTERVAL_SECS: &str = "300";
 const SERVICE_RPC_PORT: u16 = 8545;
 const SERVICE_METRICS_PORT: u16 = 7300;
+const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 10;
+const PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL: u64 = 5;
 
 const DEVNET_PRIVATE_KEY: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
@@ -90,6 +94,7 @@ pub struct FullStackWorldDevnet {
     _batcher: Option<ContainerService>,
     _proposer: Option<ContainerService>,
     _challenger: Option<ContainerService>,
+    _proof_system: Option<WorldProofSystemDeployment>,
     _conductors: Vec<ConductorService>,
     _op_nodes: Vec<OpNodeService>,
     sequencers: Vec<SequencerService>,
@@ -179,6 +184,22 @@ struct ContainerService {
     _container: ContainerAsync<GenericImage>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorldProofSystemDeployment {
+    anchor_state_registry: String,
+    validity_proof_verifier: String,
+    tee_verifier: String,
+    security_council: String,
+    staking_registry: String,
+    proof_system_factory: String,
+    rollup_config_hash: String,
+    l2_chain_id: u64,
+    proof_system_version: u64,
+    block_interval: u64,
+    intermediate_block_interval: u64,
+}
+
 #[derive(Debug)]
 struct NativeProcess {
     id: String,
@@ -241,6 +262,15 @@ impl FullStackWorldDevnet {
             l1_genesis_hash = %actual_l1_hash,
             "L1 dev chain has OP contracts loaded"
         );
+
+        let proof_system = if config.world_contracts.proof_system {
+            Some(
+                deploy_world_proof_system(&l1_public_rpc, &artifacts.rollup_path, &workdir_path)
+                    .await?,
+            )
+        } else {
+            None
+        };
 
         let sequencer_count = config.sequencer_count.max(1) as usize;
         let sequencer_plans = (0..sequencer_count)
@@ -418,6 +448,7 @@ impl FullStackWorldDevnet {
             batcher.as_ref(),
             proposer.as_ref(),
             challenger.as_ref(),
+            proof_system.as_ref(),
             observability.as_ref(),
             &game_factory,
         );
@@ -426,6 +457,7 @@ impl FullStackWorldDevnet {
             _batcher: batcher,
             _proposer: proposer,
             _challenger: challenger,
+            _proof_system: proof_system,
             _conductors: conductors,
             _op_nodes: op_nodes,
             sequencers,
@@ -645,6 +677,100 @@ l2ContractsLocator = "{}"
         config.op_contracts.l2_artifacts_locator,
         DEV_CHAIN_ID
     )
+}
+
+async fn deploy_world_proof_system(
+    l1_rpc_url: &str,
+    rollup_path: &Path,
+    workdir: &Path,
+) -> Result<WorldProofSystemDeployment> {
+    let rollup_config = fs::read(rollup_path)
+        .wrap_err_with(|| format!("failed to read rollup config {}", rollup_path.display()))?;
+    let rollup_config_hash = keccak256(&rollup_config);
+    let rollup_config_hash_hex = format!("0x{}", hex::encode(rollup_config_hash.as_slice()));
+    let deployment_path = workdir.join("world-proof-system-deployment.json");
+    let contracts_dir = repo_root()?.join("pkg/contracts");
+
+    let mut command = Command::new("forge");
+    command
+        .current_dir(&contracts_dir)
+        .arg("script")
+        .arg("scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem")
+        .arg("--broadcast")
+        .arg("--rpc-url")
+        .arg(l1_rpc_url)
+        .arg("--private-key")
+        .arg(DEVNET_PRIVATE_KEY)
+        .arg("--slow")
+        .arg("--evm-version")
+        .arg("cancun")
+        .env("PRIVATE_KEY", DEVNET_PRIVATE_KEY)
+        .env("WORLD_CHAIN_L2_CHAIN_ID", DEV_CHAIN_ID.to_string())
+        .env("ROLLUP_CONFIG_HASH", &rollup_config_hash_hex)
+        .env(
+            "PROOF_SYSTEM_BLOCK_INTERVAL",
+            PROOF_SYSTEM_BLOCK_INTERVAL.to_string(),
+        )
+        .env(
+            "PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL",
+            PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL.to_string(),
+        )
+        .env("PROOF_SYSTEM_DEPLOYMENT_OUT", &deployment_path);
+
+    info!(
+        l1_rpc_url,
+        rollup_config_hash = %rollup_config_hash_hex,
+        output = %deployment_path.display(),
+        "deploying World Chain proof-system contracts"
+    );
+
+    let output = command
+        .output()
+        .await
+        .wrap_err("failed to spawn forge proof-system deployment")?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stdout.trim().is_empty() {
+        emit_command_logs(
+            "world-proof-system deploy",
+            ProcessLogTarget::OpDeployer,
+            &stdout,
+        );
+    }
+    if !stderr.trim().is_empty() {
+        emit_command_logs(
+            "world-proof-system deploy",
+            ProcessLogTarget::OpDeployer,
+            &stderr,
+        );
+    }
+    if !output.status.success() {
+        bail!(
+            "forge proof-system deployment failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+            output.status.code(),
+            stdout,
+            stderr
+        );
+    }
+
+    let deployment: WorldProofSystemDeployment =
+        serde_json::from_value(read_json(&deployment_path)?).wrap_err_with(|| {
+            format!(
+                "invalid World Chain proof-system deployment JSON at {}",
+                deployment_path.display()
+            )
+        })?;
+
+    info!(
+        factory = %deployment.proof_system_factory,
+        anchor = %deployment.anchor_state_registry,
+        validity = %deployment.validity_proof_verifier,
+        tee = %deployment.tee_verifier,
+        council = %deployment.security_council,
+        "World Chain proof-system contracts deployed"
+    );
+
+    Ok(deployment)
 }
 
 fn write_l1_genesis(state_path: &Path, output_path: &Path) -> Result<()> {
@@ -2202,6 +2328,7 @@ fn build_components(
     batcher: Option<&ContainerService>,
     proposer: Option<&ContainerService>,
     challenger: Option<&ContainerService>,
+    proof_system: Option<&WorldProofSystemDeployment>,
     observability: Option<&ObservabilityStack>,
     game_factory: &str,
 ) -> Vec<DevnetComponent> {
@@ -2310,13 +2437,57 @@ fn build_components(
         components.push(component);
     }
 
+    if let Some(deployment) = proof_system {
+        components.push(
+            DevnetComponent::new(
+                "world-proof-system",
+                DevnetComponentKind::WorldProofSystem,
+                DevnetComponentStatus::Running,
+            )
+            .with_endpoint("factory", deployment.proof_system_factory.clone())
+            .with_endpoint("anchor", deployment.anchor_state_registry.clone())
+            .with_endpoint(
+                "validity-verifier",
+                deployment.validity_proof_verifier.clone(),
+            )
+            .with_endpoint("tee-verifier", deployment.tee_verifier.clone())
+            .with_endpoint("security-council", deployment.security_council.clone())
+            .with_endpoint("staking-registry", deployment.staking_registry.clone())
+            .with_note(format!(
+                "WIP-1006 threshold {PROOF_THRESHOLD}/3, proof_system_version={}",
+                deployment.proof_system_version
+            ))
+            .with_note(format!(
+                "l2_chain_id={}, block_interval={}, intermediate_block_interval={}",
+                deployment.l2_chain_id,
+                deployment.block_interval,
+                deployment.intermediate_block_interval
+            ))
+            .with_note(format!(
+                "rollup_config_hash={}",
+                deployment.rollup_config_hash
+            )),
+        );
+    }
+
     components.push(
         DevnetComponent::new(
             "world-contracts-deployer",
             DevnetComponentKind::WorldContractsDeployer,
-            DevnetComponentStatus::Deferred,
+            if proof_system.is_some() {
+                DevnetComponentStatus::Running
+            } else {
+                DevnetComponentStatus::Deferred
+            },
         )
-        .with_note("not run by the native devnet; FeeEscrow and FeeRecipient are intentionally not deployed")
+        .with_note(if proof_system.is_some() {
+            "deployed the WIP-1006 proof-system suite to the local L1"
+        } else {
+            "not run by the native devnet; FeeEscrow and FeeRecipient are intentionally not deployed"
+        })
+        .with_note(format!(
+            "proof_system_version={PROOF_SYSTEM_VERSION}, threshold={PROOF_THRESHOLD}/3"
+        ))
         .with_note("PBH contracts are deprecated and intentionally omitted"),
     );
 

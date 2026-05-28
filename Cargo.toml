@@ -23,6 +23,7 @@ members = [
     "crates/evm",
     "crates/state",
     "crates/pbh",
+    "crates/proofs",
     "crates/devnet",
     "crates/test-utils",
     "e2e-tests",
@@ -60,6 +61,7 @@ world-chain-validator = { path = "crates/validator", default-features = false }
 world-chain-payload = { path = "crates/payload", default-features = false }
 world-chain-node = { path = "crates/node", default-features = false }
 world-chain-pbh = { path = "crates/pbh", default-features = false }
+world-chain-proofs = { path = "crates/proofs", default-features = false }
 world-chain-rpc = { path = "crates/rpc", default-features = false }
 world-chain-pool = { path = "crates/pool", default-features = false }
 world-chain-evm = { path = "crates/evm", default-features = false }

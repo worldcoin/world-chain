@@ -14001,6 +14001,7 @@ dependencies = [
  "world-chain-chainspec",
  "world-chain-node",
  "world-chain-primitives",
+ "world-chain-proofs",
  "world-chain-rpc",
  "world-chain-test-utils",
 ]
@@ -14252,6 +14253,18 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "world-chain-chainspec",
+]
+
+[[package]]
+name = "world-chain-proofs"
+version = "2.2.0"
+dependencies = [
+ "alloy-contract",
+ "alloy-primitives",
+ "alloy-provider 2.0.4",
+ "alloy-sol-types",
+ "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

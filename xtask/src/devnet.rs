@@ -82,6 +82,10 @@ struct UpArgs {
     #[arg(long)]
     no_op_challenger: bool,
 
+    /// Do not deploy the WIP-1006 proof-system contracts in the HA devnet.
+    #[arg(long)]
+    no_proof_system: bool,
+
     /// Print the selected topology manifest and exit.
     #[arg(long)]
     print_topology: bool,
@@ -185,10 +189,11 @@ async fn up(args: UpArgs) -> Result<()> {
         ObservabilityConfig::default()
     };
 
-    let ha_config = HaSequencerConfig::default()
+    let mut ha_config = HaSequencerConfig::default()
         .with_sequencer_count(args.sequencers)
         .with_op_challenger(args.op_challenger && !args.no_op_challenger)
         .with_observability(observability.clone());
+    ha_config.world_contracts.proof_system = !args.no_proof_system;
 
     let mut builder = WorldDevnetBuilder::new()
         .preset(preset)
@@ -226,6 +231,7 @@ async fn up(args: UpArgs) -> Result<()> {
         observability = !args.no_observability && (args.observability || preset == WorldDevnetPreset::HaSequencer),
         sequencers = args.sequencers,
         op_challenger = args.op_challenger && !args.no_op_challenger,
+        proof_system = !args.no_proof_system,
         "Starting native World Chain devnet"
     );
 
@@ -371,6 +377,9 @@ fn background_args(args: &UpArgs) -> Vec<String> {
     }
     if args.op_challenger {
         argv.push("--op-challenger".to_string());
+    }
+    if args.no_proof_system {
+        argv.push("--no-proof-system".to_string());
     }
     argv.push("--sequencers".to_string());
     argv.push(args.sequencers.to_string());

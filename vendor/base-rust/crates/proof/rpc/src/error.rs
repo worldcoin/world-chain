@@ -1,0 +1,102 @@
+//! RPC-specific error types.
+
+use alloy_transport::{RpcError as AlloyRpcError, TransportError};
+use thiserror::Error;
+
+/// RPC-specific error type.
+#[derive(Debug, Error)]
+pub enum RpcError {
+    /// Transport error from alloy.
+    #[error("Transport error: {0}")]
+    Transport(String),
+
+    /// Block not found.
+    #[error("Block not found: {0}")]
+    BlockNotFound(String),
+
+    /// Header not found.
+    #[error("Header not found: {0}")]
+    HeaderNotFound(String),
+
+    /// Proof not found.
+    #[error("Proof not found: {0}")]
+    ProofNotFound(String),
+
+    /// Witness not found.
+    #[error("Witness not found: {0}")]
+    WitnessNotFound(String),
+
+    /// Invalid response from RPC.
+    #[error("Invalid response: {0}")]
+    InvalidResponse(String),
+
+    /// Request timeout.
+    #[error("Request timeout: {0}")]
+    Timeout(String),
+
+    /// Connection error.
+    #[error("Connection error: {0}")]
+    Connection(String),
+
+    /// Serialization/deserialization error.
+    #[error("Serialization error: {0}")]
+    Serialization(String),
+
+    /// Header chain validation failed.
+    #[error("Header chain validation failed: {0}")]
+    HeaderChainInvalid(String),
+}
+
+impl RpcError {
+    /// Maximum length for error messages stored in [`RpcError`] variants.
+    ///
+    /// RPC error payloads (e.g. from `debug_executionWitness`) can contain multi-MB
+    /// JSON responses. Truncating at the conversion boundary prevents large strings
+    /// from propagating through retry loops, log lines, and error chains.
+    pub const MAX_ERROR_MSG_LEN: usize = 500;
+
+    /// Truncates a string to [`Self::MAX_ERROR_MSG_LEN`], appending a `(truncated)`
+    /// suffix if it exceeds the limit.
+    pub fn truncate_msg(mut msg: String) -> String {
+        if msg.len() > Self::MAX_ERROR_MSG_LEN {
+            let end = msg.floor_char_boundary(Self::MAX_ERROR_MSG_LEN);
+            msg.truncate(end);
+            msg.push_str("... (truncated)");
+        }
+        msg
+    }
+
+    /// Returns true if this error is transient and the operation should be retried.
+    ///
+    /// Only transport-level errors (network issues, timeouts, connection failures)
+    /// are considered retryable. Application-level errors (not found, invalid data)
+    /// are not retryable.
+    pub const fn is_retryable(&self) -> bool {
+        matches!(self, Self::Transport(_) | Self::Timeout(_) | Self::Connection(_))
+    }
+}
+
+impl From<TransportError> for RpcError {
+    fn from(err: TransportError) -> Self {
+        match err {
+            AlloyRpcError::SerError(e) => Self::Serialization(e.to_string()),
+            AlloyRpcError::DeserError { err, .. } => Self::InvalidResponse(err.to_string()),
+            AlloyRpcError::NullResp => Self::InvalidResponse("null response".into()),
+            AlloyRpcError::ErrorResp(payload) => {
+                Self::InvalidResponse(Self::truncate_msg(payload.to_string()))
+            }
+            err @ (AlloyRpcError::Transport(_)
+            | AlloyRpcError::UnsupportedFeature(_)
+            | AlloyRpcError::LocalUsageError(_)) => Self::Transport(err.to_string()),
+        }
+    }
+}
+
+impl From<serde_json::Error> for RpcError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::Serialization(err.to_string())
+    }
+}
+
+/// Result type alias for RPC operations.
+pub type RpcResult<T> = Result<T, RpcError>;

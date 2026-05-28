@@ -1,0 +1,248 @@
+//! `DisputeGameFactory` contract bindings.
+//!
+//! Used to create new dispute games and query existing ones.
+
+use alloy_primitives::{Address, B256, Bytes, U256};
+use alloy_provider::RootProvider;
+use alloy_sol_types::{SolCall, SolError, sol};
+use async_trait::async_trait;
+
+use crate::ContractError;
+
+sol! {
+    /// `DisputeGameFactory` contract interface.
+    #[sol(rpc)]
+    interface IDisputeGameFactory {
+        /// Error returned when a game with the same UUID already exists.
+        error GameAlreadyExists(bytes32 uuid);
+
+        /// Creates a new dispute game with proof data passed to `initializeWithInitData`.
+        function createWithInitData(
+            uint32 gameType,
+            bytes32 rootClaim,
+            bytes calldata extraData,
+            bytes calldata initData
+        ) external payable returns (address proxy);
+
+        /// Returns the game at the given index.
+        function gameAtIndex(uint256 index) external view returns (
+            uint32 gameType,
+            uint64 timestamp,
+            address proxy
+        );
+
+        /// Returns the total number of games.
+        function gameCount() external view returns (uint256);
+
+        /// Returns the bond required to create a game of the given type.
+        function initBonds(uint32 gameType) external view returns (uint256);
+
+        /// Returns the implementation address for the given game type.
+        function gameImpls(uint32 gameType) external view returns (address);
+
+        /// Looks up a game by its unique `(gameType, rootClaim, extraData)` tuple.
+        ///
+        /// Returns `address(0)` when no matching game exists.
+        function games(
+            uint32 gameType,
+            bytes32 rootClaim,
+            bytes calldata extraData
+        ) external view returns (address proxy, uint64 timestamp);
+    }
+}
+
+/// Information about a game at a factory index.
+#[derive(Debug, Clone, Copy)]
+pub struct GameAtIndex {
+    /// The game type ID.
+    pub game_type: u32,
+    /// The creation timestamp.
+    pub timestamp: u64,
+    /// The proxy address of the game contract.
+    pub proxy: Address,
+}
+
+/// Async trait for interacting with the `DisputeGameFactory`.
+#[async_trait]
+pub trait DisputeGameFactoryClient: Send + Sync {
+    /// Returns the total number of games created.
+    async fn game_count(&self) -> Result<u64, ContractError>;
+
+    /// Returns the game at the given factory index.
+    async fn game_at_index(&self, index: u64) -> Result<GameAtIndex, ContractError>;
+
+    /// Returns the bond required to create a game of the given type.
+    async fn init_bonds(&self, game_type: u32) -> Result<U256, ContractError>;
+
+    /// Returns the implementation address for the given game type.
+    async fn game_impls(&self, game_type: u32) -> Result<Address, ContractError>;
+
+    /// Looks up a game by its unique `(gameType, rootClaim, extraData)` tuple.
+    ///
+    /// Returns `Address::ZERO` when no matching game exists.
+    async fn games(
+        &self,
+        game_type: u32,
+        root_claim: B256,
+        extra_data: Bytes,
+    ) -> Result<Address, ContractError>;
+}
+
+/// The 4-byte selector for `GameAlreadyExists(bytes32)`.
+pub const fn game_already_exists_selector() -> [u8; 4] {
+    IDisputeGameFactory::GameAlreadyExists::SELECTOR
+}
+
+/// Concrete implementation backed by Alloy's sol-generated contract bindings.
+#[derive(Debug)]
+pub struct DisputeGameFactoryContractClient {
+    contract: IDisputeGameFactory::IDisputeGameFactoryInstance<RootProvider>,
+}
+
+impl DisputeGameFactoryContractClient {
+    /// Creates a new client for the given contract address and L1 RPC URL.
+    pub fn new(address: Address, l1_rpc_url: url::Url) -> Result<Self, ContractError> {
+        let provider = RootProvider::new_http(l1_rpc_url);
+        let contract = IDisputeGameFactory::IDisputeGameFactoryInstance::new(address, provider);
+        Ok(Self { contract })
+    }
+}
+
+#[async_trait]
+impl DisputeGameFactoryClient for DisputeGameFactoryContractClient {
+    async fn game_count(&self) -> Result<u64, ContractError> {
+        let result = contract_call!(self.contract.gameCount().call(), "gameCount failed")?;
+
+        result.try_into().map_err(|_| ContractError::validation("gameCount overflows u64"))
+    }
+
+    async fn game_at_index(&self, index: u64) -> Result<GameAtIndex, ContractError> {
+        let result = contract_call!(
+            self.contract.gameAtIndex(U256::from(index)).call(),
+            format!("gameAtIndex({index}) failed")
+        )?;
+
+        Ok(GameAtIndex {
+            game_type: result.gameType,
+            timestamp: result.timestamp,
+            proxy: result.proxy,
+        })
+    }
+
+    async fn init_bonds(&self, game_type: u32) -> Result<U256, ContractError> {
+        let result = contract_call!(self.contract.initBonds(game_type).call(), "initBonds failed")?;
+
+        Ok(result)
+    }
+
+    async fn game_impls(&self, game_type: u32) -> Result<Address, ContractError> {
+        let result = contract_call!(self.contract.gameImpls(game_type).call(), "gameImpls failed")?;
+
+        Ok(result)
+    }
+
+    async fn games(
+        &self,
+        game_type: u32,
+        root_claim: B256,
+        extra_data: Bytes,
+    ) -> Result<Address, ContractError> {
+        let result = contract_call!(
+            self.contract.games(game_type, root_claim, extra_data).call(),
+            "games lookup failed"
+        )?;
+
+        Ok(result.proxy)
+    }
+}
+
+/// Encodes the `extraData` for `DisputeGameFactory.createWithInitData()`.
+///
+/// Format: `l2BlockNumber(32) + parentAddress(20) + intermediateRoots(32 * N)`.
+///
+/// This is **packed encoding** (not ABI-encoded). The Solidity contract
+/// reads these fields at fixed byte offsets via clone-with-immutable-args
+/// (CWIA).
+pub fn encode_extra_data(
+    l2_block_number: u64,
+    parent_address: Address,
+    intermediate_roots: &[B256],
+) -> Bytes {
+    let mut data = vec![0u8; 52 + 32 * intermediate_roots.len()];
+    data[..32].copy_from_slice(&U256::from(l2_block_number).to_be_bytes::<32>());
+    data[32..52].copy_from_slice(parent_address.as_slice());
+    for (i, root) in intermediate_roots.iter().enumerate() {
+        data[52 + i * 32..52 + (i + 1) * 32].copy_from_slice(root.as_slice());
+    }
+    Bytes::from(data)
+}
+
+/// Encodes the calldata for `DisputeGameFactory.createWithInitData()`.
+pub fn encode_create_calldata(
+    game_type: u32,
+    root_claim: B256,
+    extra_data: Bytes,
+    init_data: Bytes,
+) -> Bytes {
+    let call = IDisputeGameFactory::createWithInitDataCall {
+        gameType: game_type,
+        rootClaim: root_claim,
+        extraData: extra_data,
+        initData: init_data,
+    };
+    Bytes::from(call.abi_encode())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_encode_extra_data() {
+        let parent = Address::repeat_byte(0x42);
+        let data = encode_extra_data(1000, parent, &[]);
+        assert_eq!(data.len(), 52);
+
+        assert_eq!(&data[24..32], &1000u64.to_be_bytes());
+        assert_eq!(&data[32..52], parent.as_slice());
+    }
+
+    #[test]
+    fn test_encode_extra_data_no_parent() {
+        let registry = Address::repeat_byte(0xAA);
+        let data = encode_extra_data(500, registry, &[]);
+        assert_eq!(&data[32..52], registry.as_slice());
+    }
+
+    #[test]
+    fn test_encode_extra_data_with_intermediate_roots() {
+        let parent = Address::repeat_byte(0x42);
+        let roots = vec![B256::repeat_byte(0xAA), B256::repeat_byte(0xBB)];
+        let data = encode_extra_data(1000, parent, &roots);
+        assert_eq!(data.len(), 52 + 64);
+
+        assert_eq!(&data[24..32], &1000u64.to_be_bytes());
+        assert_eq!(&data[32..52], parent.as_slice());
+        assert_eq!(&data[52..84], roots[0].as_slice());
+        assert_eq!(&data[84..116], roots[1].as_slice());
+    }
+
+    #[test]
+    fn test_encode_create_calldata_has_selector() {
+        let calldata = encode_create_calldata(
+            1,
+            B256::ZERO,
+            Bytes::from(vec![0u8; 36]),
+            Bytes::from(vec![0u8; 130]),
+        );
+        assert_eq!(&calldata[..4], &IDisputeGameFactory::createWithInitDataCall::SELECTOR);
+    }
+
+    #[test]
+    fn test_game_already_exists_selector() {
+        let selector = game_already_exists_selector();
+        assert_eq!(selector.len(), 4);
+        // Just verify we get a non-zero selector
+        assert_ne!(selector, [0u8; 4]);
+    }
+}

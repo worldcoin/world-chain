@@ -1,0 +1,79 @@
+[package]
+name = "base-proof-tee-registrar"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Alloy
+alloy-signer.workspace = true
+alloy-sol-types.workspace = true
+alloy-primitives.workspace = true
+boundless-market.workspace = true
+
+# AWS
+aws-sdk-ec2.workspace = true
+aws-sdk-elasticloadbalancingv2.workspace = true
+
+# Crypto
+rand.workspace = true
+k256 = { workspace = true, features = ["ecdsa"] }
+
+# X.509 / CRL
+x509-parser.workspace = true
+
+# HTTP (CRL fetching)
+reqwest.workspace = true
+
+# Contracts
+base-proof-contracts.workspace = true
+
+# Proving
+base-proof-tee-nitro-verifier.workspace = true
+base-proof-tee-nitro-attestation-prover.workspace = true
+
+# Transaction management
+base-tx-manager.workspace = true
+
+# RPC
+jsonrpsee = { workspace = true, features = ["http-client", "server"] }
+base-proof-primitives = { workspace = true, features = ["rpc-client"] }
+
+# Async
+futures.workspace = true
+tokio-util.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "net", "time", "macros"] }
+
+# Error
+thiserror.workspace = true
+
+# Metrics
+base-metrics.workspace = true
+metrics = { workspace = true, optional = true }
+
+# Tracing
+tracing.workspace = true
+
+# Misc
+url.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true
+rstest.workspace = true
+metrics.workspace = true
+hex-literal.workspace = true
+alloy-consensus.workspace = true
+alloy-rpc-types-eth.workspace = true
+metrics-exporter-prometheus.workspace = true
+tokio = { workspace = true, features = ["rt", "macros", "test-util"] }
+
+[features]
+metrics = [ "base-metrics/metrics", "base-tx-manager/metrics", "dep:metrics" ]

@@ -1,0 +1,31 @@
+[package]
+name = "base-prover-service"
+description = "Base prover service JSON-RPC definitions"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+# primitives
+chrono = { workspace = true, features = ["serde"] }
+alloy-primitives = { workspace = true, features = ["serde"] }
+
+# rpc
+jsonrpsee = { workspace = true, optional = true }
+
+# serialization
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+serde_json = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true
+
+[features]
+default = []
+rpc-client = [ "dep:jsonrpsee", "jsonrpsee/http-client", "jsonrpsee/macros" ]
+rpc-server = [ "dep:jsonrpsee", "jsonrpsee/macros", "jsonrpsee/server" ]
