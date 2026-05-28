@@ -21,14 +21,16 @@ use url::Url;
 
 use crate::{
     DisputeGameFactory, Result,
-    config::ProposerConfig,
-    db::ProposerStore,
-    driver::L2OutputSubmitter,
     error::OpProposerError,
-    metrics::{ProposerMetrics, spawn_balance_poller},
-    provider::{L1Provider, L1ProviderConfig, ProviderError, SignerKind},
-    rpc::{AdminRpcError, start_admin_server},
-    source::{ProposalSource, rollup::RollupProposalSource},
+    proposer::{
+        config::ProposerConfig,
+        db::ProposerStore,
+        driver::L2OutputSubmitter,
+        metrics::{ProposerMetrics, spawn_balance_poller},
+        provider::{L1Provider, L1ProviderConfig, ProviderError, SignerKind},
+        rpc::{AdminRpcError, start_admin_server},
+        source::{ProposalSource, rollup::RollupProposalSource},
+    },
 };
 
 /// Fully assembled proposer service.
@@ -48,7 +50,7 @@ impl ProposerService {
     ///
     /// Requires `--proposer.rollup-rpc`. When running as an ExEx, prefer
     /// [`ProposerService::from_config_with_source`] with a
-    /// [`LocalProposalSource`](crate::source::local::LocalProposalSource)
+    /// [`LocalProposalSource`](crate::proposer::source::local::LocalProposalSource)
     /// to skip the rollup-RPC round-trip entirely.
     ///
     /// Mirrors: `ProposerServiceFromCLIConfig` + `(*ProposerService).initFromCLIConfig`
@@ -76,7 +78,7 @@ impl ProposerService {
     /// Build the proposer service with a pre-constructed proposal source.
     ///
     /// This is the preferred constructor for the ExEx, which builds a
-    /// [`LocalProposalSource`](crate::source::local::LocalProposalSource)
+    /// [`LocalProposalSource`](crate::proposer::source::local::LocalProposalSource)
     /// over the in-process node provider.
     pub async fn from_config_with_source(
         cfg: ProposerConfig,

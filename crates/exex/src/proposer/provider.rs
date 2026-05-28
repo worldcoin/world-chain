@@ -28,7 +28,7 @@ use thiserror::Error;
 use tower::ServiceBuilder;
 use url::Url;
 
-use crate::tx::GasEstimateWithFallbackFiller;
+use crate::proposer::tx::GasEstimateWithFallbackFiller;
 
 /// Resolved configuration for the L1 provider.
 #[derive(Debug, Clone)]

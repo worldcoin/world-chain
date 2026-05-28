@@ -9,7 +9,9 @@ use reth_node_builder::{
 };
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_cli::WorldChainArgs;
-use world_chain_exex::{ProviderBounds, install_op_proposer_exex};
+use world_chain_exex::{
+    CacherPrimitives, ProviderBounds, install_op_proposer_exex, install_world_chain_relayer_exex,
+};
 
 pub trait WorldChainNodeExtensions: Sized {
     /// Installer for World Chain Node Extensions.
@@ -23,10 +25,15 @@ where
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
     NodeAdapter<T, CB::Components>: FullNodeComponents,
     <NodeAdapter<T, CB::Components> as FullNodeTypes>::Provider: ProviderBounds,
+    <<NodeAdapter<T, CB::Components> as FullNodeTypes>::Types as NodeTypes>::Primitives:
+        CacherPrimitives,
 {
     fn install_extensions(self, args: &WorldChainArgs) -> Self {
-        let proposer_datadir = self.config().datadir().data_dir().join("op-proposer");
-        install_op_proposer(self, args.proposer.clone(), proposer_datadir)
+        let data_dir = self.config().datadir().data_dir().to_path_buf();
+        let proposer_datadir = data_dir.join("op-proposer");
+        let relayer_datadir = data_dir.join("wc-relayer");
+        let builder = install_op_proposer(self, args.proposer.clone(), proposer_datadir);
+        install_world_chain_relayer(builder, args.relayer.clone(), relayer_datadir)
     }
 }
 
@@ -46,6 +53,29 @@ where
     builder.install_exex_if(enabled, "op-proposer", move |ctx| async move {
         Ok(async move {
             install_op_proposer_exex(ctx, args, fallback_datadir)
+                .await
+                .map_err(eyre::eyre::Report::from)
+        })
+    })
+}
+
+fn install_world_chain_relayer<T, CB, AO>(
+    builder: WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>,
+    args: world_chain_exex::RelayerCliArgs,
+    fallback_datadir: PathBuf,
+) -> WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>
+where
+    T: FullNodeTypes,
+    CB: NodeComponentsBuilder<T>,
+    AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
+    NodeAdapter<T, CB::Components>: FullNodeComponents,
+    <<NodeAdapter<T, CB::Components> as FullNodeTypes>::Types as NodeTypes>::Primitives:
+        CacherPrimitives,
+{
+    let enabled = args.enabled;
+    builder.install_exex_if(enabled, "wc-relayer", move |ctx| async move {
+        Ok(async move {
+            install_world_chain_relayer_exex(ctx, args, fallback_datadir)
                 .await
                 .map_err(eyre::eyre::Report::from)
         })

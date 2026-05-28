@@ -1,53 +1,59 @@
-//! World Chain ExEx playing the role of the OP Proposer.
+//! World Chain ExEx crate.
 //!
-//! # Upstream spec reference
+//! Hosts two cooperating, independently-gated reth Execution Extensions:
 //!
-//! All `Mirrors:` annotations on functions throughout this crate are pinned to
-//! optimism tag [`op-proposer/v1.16.3-rc.1`][tag] (commit
-//! `1852be216f45a942321b440da4d92cfb3055f3c1`).
+//! * [`proposer`] — the **OP Proposer** (L2 output submitter), ported from
+//!   `op-proposer` and pinned to optimism tag
+//!   [`op-proposer/v1.16.3-rc.1`][tag] (commit
+//!   `1852be216f45a942321b440da4d92cfb3055f3c1`). All `Mirrors:` annotations
+//!   in that module reference the upstream Go files.
+//! * [`withdrawals`] — the **Withdrawal Cacher and Relayer**, implementing the
+//!   cacher role.
+//!
+//! [`error`] holds the shared top-level [`OpProposerError`] returned from the
+//! crate's public surface.
 //!
 //! [tag]: https://github.com/ethereum-optimism/optimism/tree/op-proposer/v1.16.3-rc.1
 //!
-//! ## Internal module → upstream file map
+//! ## Crate layout
 //!
-//! | Internal module      | Upstream Go file                                  |
-//! | -------------------- | ------------------------------------------------- |
-//! | `config`             | `op-proposer/flags/flags.go`, `op-proposer/proposer/config.go` |
-//! | `bindings`           | `op-proposer/contracts/disputegamefactory.go`     |
-//! | `driver`             | `op-proposer/proposer/driver.go`                  |
-//! | `metrics`            | `op-proposer/metrics/metrics.go`                  |
-//! | `rpc`                | `op-proposer/proposer/rpc/api.go`                 |
-//! | `service`            | `op-proposer/proposer/service.go`                 |
-//! | `source`             | `op-proposer/proposer/source/source.go`           |
-//! | `source::rollup`     | `op-proposer/proposer/source/source_rollup.go`    |
-//! | `source::local`      | `op-service/eth/output.go` (`OutputV0`)           |
+//! ```text
+//! src/
+//!   lib.rs            crate root: module wiring + public re-exports
+//!   error.rs          shared top-level error
+//!   proposer/         OP Proposer ExEx (op-proposer port)
+//!   withdrawals/      Withdrawal Cacher and Relayer ExEx
+//! ```
 
-mod bindings;
-mod config;
-mod db;
-mod driver;
 mod error;
-mod exex;
-mod local_node;
-mod metrics;
-mod provider;
-mod rpc;
-mod service;
-mod source;
-mod tx;
+mod proposer;
+mod withdrawals;
 
-use bindings::{ContractError, DisputeGameFactory};
-pub use config::{ProposerCliArgs, ProposerConfig};
-pub use db::{ProposerStore, StoredHead, StoredProposal};
 pub use error::OpProposerError;
-pub use exex::{install_op_proposer_exex, op_proposer_exex};
-pub use local_node::{ExExChainReader, ProviderBounds};
-pub use provider::{L1Provider, L1ProviderConfig, SignerKind};
-pub use service::{AdminRpcSettings, ProposerService};
-pub use source::{
-    Proposal, ProposalSource, ProposalSourceError, SyncStatus,
-    local::{
-        BlockMeta, ChainStatus, L2_TO_L1_MESSAGE_PASSER, LocalProposalSource, LocalStorageReader,
+use proposer::{ContractError, DisputeGameFactory};
+pub use proposer::{
+    config::{ProposerCliArgs, ProposerConfig},
+    db::{ProposerStore, StoredHead, StoredProposal},
+    exex::{install_op_proposer_exex, op_proposer_exex},
+    local_node::{ExExChainReader, ProviderBounds},
+    provider::{L1Provider, L1ProviderConfig, SignerKind},
+    service::{AdminRpcSettings, ProposerService},
+    source::{
+        Proposal, ProposalSource, ProposalSourceError, SyncStatus,
+        local::{
+            BlockMeta, ChainStatus, L2_TO_L1_MESSAGE_PASSER, LocalProposalSource,
+            LocalStorageReader,
+        },
+    },
+};
+pub use withdrawals::{
+    cacher::{ScanStats, prune_chain, scan_chain},
+    config::{RelayerCliArgs, RelayerConfig, RelayerConfigError},
+    exex::{CacherPrimitives, install_world_chain_relayer_exex, world_chain_relayer_exex},
+    store::{StatusCounts, WithdrawalStore, WithdrawalStoreError},
+    types::{
+        MessagePassed, WithdrawalDecodeError, WithdrawalRecord, WithdrawalStatus,
+        WithdrawalTransaction, message_slot, withdrawal_hash,
     },
 };
 

@@ -23,7 +23,7 @@ use jsonrpsee::{
 };
 use tracing::info;
 
-use crate::{Result, driver::L2OutputSubmitter};
+use crate::{Result, proposer::driver::L2OutputSubmitter};
 
 #[rpc(server, namespace = "admin")]
 pub trait ProposerAdminApi {

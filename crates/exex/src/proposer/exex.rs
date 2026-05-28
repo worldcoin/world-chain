@@ -14,12 +14,14 @@ use tracing::{debug, info, warn};
 
 use crate::{
     Result,
-    config::{ProposerCliArgs, ProposerConfig},
-    db::StoredHead,
     error::OpProposerError,
-    local_node::{ProviderBounds, local_reader_from_ctx},
-    service::{AdminRpcSettings, ProposerService},
-    source::{ProposalSource, local::LocalProposalSource},
+    proposer::{
+        config::{ProposerCliArgs, ProposerConfig},
+        db::StoredHead,
+        local_node::{ProviderBounds, local_reader_from_ctx},
+        service::{AdminRpcSettings, ProposerService},
+        source::{ProposalSource, local::LocalProposalSource},
+    },
 };
 
 /// Spawned reth ExEx future for the OP Proposer.

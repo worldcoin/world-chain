@@ -12,9 +12,9 @@
 //! * [`OpProposerError::Eyre`] — wraps an [`eyre::Report`]. `eyre` captures
 //!   a backtrace at construction (subject to `RUST_BACKTRACE` /
 //!   `RUST_LIB_BACKTRACE`).
-//! * [`OpProposerError::Boxed`] — wraps an arbitrary `Box<dyn std::error::Error
-//!   + Send + Sync>`, useful for FFI / interop boundaries that already hand us
-//!     trait objects.
+//! * [`OpProposerError::Boxed`] — wraps an arbitrary
+//!   `Box<dyn std::error::Error + Send + Sync>`, useful for FFI / interop
+//!   boundaries that already hand us trait objects.
 //!
 //! Each variant uses `#[error(transparent)]` so the upstream error's
 //! `Display` and `source()` chain are surfaced unchanged. Combined with
@@ -28,8 +28,12 @@ use eyre::eyre::eyre;
 use thiserror::Error;
 
 use crate::{
-    ContractError, config::ProposerConfigError, db::ProposerStoreError, provider::ProviderError,
-    rpc::AdminRpcError, source::ProposalSourceError,
+    ContractError,
+    proposer::{
+        config::ProposerConfigError, db::ProposerStoreError, provider::ProviderError,
+        rpc::AdminRpcError, source::ProposalSourceError,
+    },
+    withdrawals::{config::RelayerConfigError, store::WithdrawalStoreError},
 };
 
 /// Top-level error for the OP Proposer ExEx.
@@ -50,6 +54,14 @@ pub enum OpProposerError {
     /// MDBX-backed proposer store failed.
     #[error(transparent)]
     Store(#[from] ProposerStoreError),
+
+    /// MDBX-backed withdrawal cache store failed (relayer cacher).
+    #[error(transparent)]
+    WithdrawalStore(#[from] WithdrawalStoreError),
+
+    /// Relayer CLI -> runtime config translation failed.
+    #[error(transparent)]
+    RelayerConfig(#[from] RelayerConfigError),
 
     /// Admin RPC server failed (bind / start).
     #[error(transparent)]

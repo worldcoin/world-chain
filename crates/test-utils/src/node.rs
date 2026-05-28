@@ -126,6 +126,7 @@ pub fn test_config_with_peers_and_gossip(
             disable_bootnodes: true,
             simulate_enabled: false,
             proposer: world_chain_exex::ProposerCliArgs::default(),
+            relayer: world_chain_exex::RelayerCliArgs::default(),
         },
         builder_config: FlashblocksPayloadBuilderConfig {
             inner: OpBuilderConfig::default(),

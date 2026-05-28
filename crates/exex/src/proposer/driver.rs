@@ -10,7 +10,7 @@
 //!
 //! All transaction concerns — gas estimation (with 3/2 fallback), nonce
 //! management, signing, fee bumps — are handled by the provider's filler
-//! stack (see [`crate::provider`]). This module has no custom transaction
+//! stack (see [`crate::proposer::provider`]). This module has no custom transaction
 //! manager and no custom receipt types.
 //!
 //! [driver-go]:
@@ -30,11 +30,13 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     DisputeGameFactory, Result,
-    config::ProposerConfig,
-    db::{ProposerStore, StoredProposal},
     error::OpProposerError,
-    metrics::ProposerMetrics,
-    source::{Proposal, ProposalSource, ProposalSourceError},
+    proposer::{
+        config::ProposerConfig,
+        db::{ProposerStore, StoredProposal},
+        metrics::ProposerMetrics,
+        source::{Proposal, ProposalSource, ProposalSourceError},
+    },
 };
 
 /// The L2 output submitter / proposer driver.
@@ -90,7 +92,8 @@ impl L2OutputSubmitter {
     }
 
     /// Address that signs and pays for proposer transactions.
-    pub fn signer_address(&self) -> Address {
+    #[allow(clippy::wrong_self_convention)]
+    pub fn from_address(&self) -> Address {
         self.from
     }
 

@@ -1,13 +1,13 @@
-//! Implementation of [`LocalStorageReader`](crate::source::local::LocalStorageReader)
+//! Implementation of [`LocalStorageReader`](crate::proposer::source::local::LocalStorageReader)
 //! over a reth ExEx node provider.
 //!
 //! Splitting this off into its own module keeps the broad reth storage-api
 //! trait bounds isolated; the rest of the crate only depends on the small
-//! [`LocalStorageReader`](crate::source::local::LocalStorageReader) trait.
+//! [`LocalStorageReader`](crate::proposer::source::local::LocalStorageReader) trait.
 //!
 //! Post-Isthmus, the L2ToL1MessagePasser storage root is carried in the
 //! header's `withdrawalsRoot` field — see the spec & rationale in
-//! [`crate::source::local`]. This adapter therefore only does header
+//! [`crate::proposer::source::local`]. This adapter therefore only does header
 //! lookups; no state-trie reads are involved.
 
 use std::sync::Arc;
@@ -18,7 +18,7 @@ use reth_exex::ExExContext;
 use reth_node_api::FullNodeComponents;
 use reth_storage_api::{BlockIdReader, BlockReader, HeaderProvider};
 
-use crate::source::{
+use crate::proposer::source::{
     ProposalSourceError,
     local::{BlockMeta, ChainStatus, LocalStorageReader},
 };

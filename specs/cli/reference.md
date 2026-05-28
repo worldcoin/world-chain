@@ -348,6 +348,26 @@ OP Proposer ExEx:
           
           [env: OP_PROPOSER_DATADIR=]
 
+World Chain Relayer ExEx:
+      --relayer.enabled
+          Enable the withdrawal cacher + relayer ExEx
+          
+          [env: WC_RELAYER_ENABLED=]
+
+      --relayer.cache-only
+          Run the cacher only; never submit L1 transactions.
+          
+          The relayer driver honours this flag once it lands; the cacher's behaviour is identical either way.
+          
+          [env: WC_RELAYER_CACHE_ONLY=]
+
+      --relayer.datadir <relayer_datadir>
+          MDBX store location for the withdrawal cache.
+          
+          Defaults to `<datadir>/wc-relayer` (resolved in [`RelayerCliArgs::into_config`]).
+          
+          [env: WC_RELAYER_DATADIR=]
+
       --tx-peers <PEER_ID>
           Comma-separated list of peer IDs to which transactions should be propagated
 
