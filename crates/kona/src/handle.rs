@@ -15,15 +15,17 @@
 //! │  └─────┬─────┘  └──────┬───────┘  └─────┬──────┘           │
 //! │        │               │                │                   │
 //! │        │     ┌─────────▼─────────┐      │                   │
-//! │        └────►│   Engine Actor    │◄─────┘                   │
-//! │              │  (in-process EL)  │                           │
-//! │              └───────────────────┘                           │
-//! └─────────────────────────────────────────────────────────────┘
+//! │        └────►│   Engine Actor    │──────┘                   │
+//! │              │  (Engine API/HTTP)│                           │
+//! │              └─────────┬─────────┘                           │
+//! └────────────────────────┼────────────────────────────────────┘
+//!                          │ Engine API (HTTP + JWT)
+//!                          ▼
+//!                   reth auth RPC (:8551)
 //! ```
 
-use crate::{InProcessEngineClient, KonaConfig};
+use crate::KonaConfig;
 use alloy_rpc_types_engine::JwtSecret;
-use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use url::Url;
@@ -43,33 +45,22 @@ pub struct KonaServiceHandle {
 impl KonaServiceHandle {
     /// Spawn the Kona consensus node as an in-process service.
     ///
-    /// This builds a [`kona_node_service::RollupNode`] from the provided [`KonaConfig`] and
-    /// starts it using [`RollupNode::start_with_engine_client`], which injects the provided
-    /// [`InProcessEngineClient`] into Kona's actor system instead of constructing a default
-    /// HTTP-based `OpEngineClient`.
+    /// This builds a [`kona_node_service::RollupNode`] from the provided [`KonaConfig`] and runs
+    /// it via [`kona_node_service::RollupNode::start`] on a dedicated tokio task. Canonical kona
+    /// constructs its own engine client internally and drives reth's execution engine over the
+    /// standard authenticated Engine API against reth's auth RPC endpoint.
     ///
     /// # Arguments
     ///
-    /// * `config` — Kona-specific configuration (L1 RPC, beacon URL, P2P settings, etc.)
-    /// * `engine_client` — The in-process engine client connected to reth's engine handler.
-    /// * `l2_rpc_url` — URL of reth's L2 RPC endpoint (for Kona's derivation pipeline).
-    /// * `jwt_secret` — JWT secret for the L2 RPC endpoint.
-    pub async fn spawn<L2Provider>(
+    /// * `config` — Kona-specific configuration (L1 RPC, beacon URL, P2P settings, etc.).
+    /// * `l2_auth_rpc_url` — URL of reth's L2 auth Engine API endpoint (e.g.
+    ///   `http://127.0.0.1:8551`).
+    /// * `jwt_secret` — JWT secret used to authenticate against reth's auth RPC endpoint.
+    pub async fn spawn(
         config: KonaConfig,
-        engine_client: InProcessEngineClient<L2Provider>,
-        l2_rpc_url: Url,
+        l2_auth_rpc_url: Url,
         jwt_secret: JwtSecret,
-    ) -> eyre::Result<Self>
-    where
-        L2Provider: reth_provider::BlockReaderIdExt
-            + reth_storage_api::BlockReader
-            + reth_provider::HeaderProvider
-            + reth_provider::StateProviderFactory
-            + Clone
-            + Send
-            + Sync
-            + 'static,
-    {
+    ) -> eyre::Result<Self> {
         let cancellation = CancellationToken::new();
         let rollup_config = config.rollup_config.clone();
 
@@ -77,22 +68,21 @@ impl KonaServiceHandle {
             target: "world_chain::kona",
             l2_chain_id = %rollup_config.l2_chain_id,
             block_time = rollup_config.block_time,
-            "Starting Kona consensus node (in-process mode)"
+            %l2_auth_rpc_url,
+            "Starting Kona consensus node (Engine API transport)"
         );
 
-        let engine_config = config.make_engine_config(l2_rpc_url, jwt_secret);
+        let engine_config = config.make_engine_config(l2_auth_rpc_url, jwt_secret);
 
-        let l2_chain_id = rollup_config.l2_chain_id;
-        let p2p_config = config.p2p.build_network_config(&rollup_config, l2_chain_id)?;
+        let l2_chain_id: u64 = rollup_config.l2_chain_id.into();
+        let p2p_config = config
+            .p2p
+            .clone()
+            .build_network_config(&rollup_config, l2_chain_id)?;
 
         let rollup_node = config.build_rollup_node(engine_config, p2p_config);
-        let engine_client = Arc::new(engine_client);
 
-        let task_handle = tokio::spawn(async move {
-            rollup_node
-                .start_with_engine_client(engine_client)
-                .await
-        });
+        let task_handle = tokio::spawn(async move { rollup_node.start().await });
 
         Ok(Self {
             cancellation,

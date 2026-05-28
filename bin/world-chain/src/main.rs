@@ -2,7 +2,6 @@ use clap::Parser;
 use eyre::config::HookBuilder;
 use reth_node_builder::NodeHandle;
 use reth_optimism_consensus::OpBeaconConsensus;
-use reth_payload_builder::PayloadStore;
 use reth_tracing::tracing::info;
 use std::sync::Arc;
 use world_chain_chainspec::WorldChainSpec;
@@ -10,7 +9,7 @@ use world_chain_cli::{
     Cli, WorldChainArgs, WorldChainNodeConfig, WorldChainRpcModuleValidator, WorldChainSpecParser,
 };
 use world_chain_evm::WorldChainEvmConfig;
-use world_chain_kona::{InProcessEngineClient, KonaConfig, KonaServiceHandle};
+use world_chain_kona::{KonaConfig, KonaServiceHandle};
 use world_chain_node::{context::WorldChainDefaultContext, node::WorldChainNode};
 
 #[cfg(all(feature = "jemalloc", unix))]
@@ -48,7 +47,7 @@ fn main() {
                 let node = WorldChainNode::<WorldChainDefaultContext>::new(config.clone());
                 let NodeHandle {
                     node_exit_future,
-                    node: full_node,
+                    node: _full_node,
                 } = builder.node(node).launch().await?;
 
                 let kona_enabled = kona_args.as_ref().is_some_and(|k| k.enabled);
@@ -77,8 +76,8 @@ fn main() {
                     };
 
                     let kona_config = KonaConfig {
-                        rollup_config: rollup_config.clone(),
-                        l1_rpc_url: l1_rpc_url.clone(),
+                        rollup_config,
+                        l1_rpc_url,
                         l1_beacon_url,
                         l1_trust_rpc: kona_args.l1_trust_rpc,
                         l2_trust_rpc: false,
@@ -88,41 +87,16 @@ fn main() {
                         l1_slot_duration_override: None,
                     };
 
-                    let engine_handle = full_node.consensus_engine_handle().clone();
-                    let l2_provider = full_node.provider.clone();
-                    let payload_store = PayloadStore::new(full_node.payload_builder_handle.clone());
-                    let l1_provider = alloy_provider::RootProvider::new_http(l1_rpc_url);
-
-                    // L2 RPC provider for block reads / proofs. Points at reth's own HTTP endpoint
-                    // so we get proper RPC type conversion for free.
-                    // TODO(kona-integration): Extract actual HTTP port from reth's launched config.
-                    let l2_rpc_url: url::Url = "http://127.0.0.1:8545".parse()?;
-                    let l2_rpc = alloy_provider::RootProvider::<op_alloy_network::Optimism>::new_http(
-                        l2_rpc_url,
-                    );
-
-                    let engine_client = InProcessEngineClient::new(
-                        rollup_config,
-                        engine_handle,
-                        l2_provider,
-                        payload_store,
-                        l1_provider,
-                        l2_rpc,
-                    );
-
-                    // Reth's auth RPC URL and JWT for the Kona derivation pipeline.
+                    // Canonical kona constructs its own engine client internally and drives reth's
+                    // execution engine over the standard authenticated Engine API. Point it at
+                    // reth's auth RPC endpoint.
                     // TODO(kona-integration): Extract the actual auth RPC port and JWT secret from
                     // reth's launched config rather than using defaults.
                     let l2_auth_rpc_url: url::Url = "http://127.0.0.1:8551".parse()?;
                     let jwt_secret = alloy_rpc_types_engine::JwtSecret::random();
 
-                    let mut kona_handle = KonaServiceHandle::spawn(
-                        kona_config,
-                        engine_client,
-                        l2_auth_rpc_url,
-                        jwt_secret,
-                    )
-                    .await?;
+                    let mut kona_handle =
+                        KonaServiceHandle::spawn(kona_config, l2_auth_rpc_url, jwt_secret).await?;
 
                     info!(target: "reth::cli", "Kona consensus node started in-process");
 

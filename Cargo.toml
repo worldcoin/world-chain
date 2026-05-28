@@ -150,7 +150,7 @@ kona-disc = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-r
 kona-gossip = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
 kona-peers = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
 kona-sources = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
-kona-cli = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
+kona-cli = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false, features = ["secrets"] }
 
 discv5 = "0.10.2"
 libp2p = "0.56.0"

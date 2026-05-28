@@ -320,7 +320,9 @@ impl KonaP2PArgs {
         }
 
         let Some(ref key_path) = self.priv_path else {
-            eyre::bail!("Neither a raw private key nor a private key file path was provided.");
+            eyre::eyre::bail!(
+                "Neither a raw private key nor a private key file path was provided."
+            );
         };
 
         kona_cli::SecretKeyLoader::load(key_path).map_err(|e| eyre::Report::msg(format!("{e}")))
@@ -527,7 +529,7 @@ impl KonaSignerArgs {
                 Some(B256::from_slice(&secp.secret().to_bytes()))
             }
             (Some(_), Some(_)) => {
-                eyre::bail!(
+                eyre::eyre::bail!(
                     "Both --p2p.sequencer.key and --p2p.sequencer.key.path cannot be specified"
                 );
             }
@@ -538,7 +540,7 @@ impl KonaSignerArgs {
 
         match (sequencer_key, remote) {
             (Some(_), Some(_)) => {
-                eyre::bail!("Cannot specify both local sequencer key and remote signer")
+                eyre::eyre::bail!("Cannot specify both local sequencer key and remote signer")
             }
             (Some(key), None) => {
                 let signer: BlockSigner = PrivateKeySigner::from_bytes(&key)?.into();
@@ -554,7 +556,7 @@ impl KonaSignerArgs {
             return Ok(None);
         };
         let Some(address) = self.address else {
-            eyre::bail!("--p2p.signer.address is required with --p2p.signer.endpoint");
+            eyre::eyre::bail!("--p2p.signer.address is required with --p2p.signer.endpoint");
         };
 
         let headers = self

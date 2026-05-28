@@ -23,20 +23,15 @@ world-chain-kona.workspace = true
 reth-cli-util.workspace = true
 reth-node-builder.workspace = true
 reth-tracing.workspace = true
-reth-payload-builder.workspace = true
 
 # op-reth
 reth-optimism-consensus.workspace = true
-
-reth-provider.workspace = true
 
 # kona consensus node (in-process)
 kona-genesis.workspace = true
 
 # alloy
-alloy-provider = { workspace = true, features = ["reqwest"] }
 alloy-rpc-types-engine = { workspace = true, features = ["jwt"] }
-op-alloy-network.workspace = true
 
 # misc
 dotenvy.workspace = true
