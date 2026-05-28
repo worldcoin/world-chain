@@ -11,7 +11,7 @@ pub mod pool;
 pub mod tx_propagation;
 pub mod version;
 
-pub use extensions::MaybeWorldChainExtensions;
+pub use extensions::WorldChainNodeExtensions;
 pub use version::{init_version_metadata, version_metadata};
 
 // Re-export for ease of use

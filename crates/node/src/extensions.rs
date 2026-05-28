@@ -11,13 +11,12 @@ use world_chain_chainspec::WorldChainSpec;
 use world_chain_cli::WorldChainArgs;
 use world_chain_exex::{ProviderBounds, install_op_proposer_exex};
 
-pub trait MaybeWorldChainExtensions: Sized {
+pub trait WorldChainNodeExtensions: Sized {
     /// Installer for World Chain Node Extensions.
-    fn install_extensions_if(self, args: &WorldChainArgs) -> Self;
+    fn install_extensions(self, args: &WorldChainArgs) -> Self;
 }
 
-impl<T, CB, AO> MaybeWorldChainExtensions
-    for WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>
+impl<T, CB, AO> WorldChainNodeExtensions for WithLaunchContext<NodeBuilderWithComponents<T, CB, AO>>
 where
     T: FullNodeTypes<Types: NodeTypes<ChainSpec = WorldChainSpec>>,
     CB: NodeComponentsBuilder<T>,
@@ -25,7 +24,7 @@ where
     NodeAdapter<T, CB::Components>: FullNodeComponents,
     <NodeAdapter<T, CB::Components> as FullNodeTypes>::Provider: ProviderBounds,
 {
-    fn install_extensions_if(self, args: &WorldChainArgs) -> Self {
+    fn install_extensions(self, args: &WorldChainArgs) -> Self {
         let proposer_datadir = self.config().datadir().data_dir().join("op-proposer");
         install_op_proposer(self, args.proposer.clone(), proposer_datadir)
     }

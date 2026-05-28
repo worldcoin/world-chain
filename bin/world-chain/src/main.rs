@@ -10,7 +10,8 @@ use world_chain_cli::{
 };
 use world_chain_evm::WorldChainEvmConfig;
 use world_chain_node::{
-    MaybeWorldChainExtensions, context::WorldChainDefaultContext, node::WorldChainNode,
+    MaybeWorldChainExtensions, WorldChainNodeExtensions, context::WorldChainDefaultContext,
+    node::WorldChainNode,
 };
 
 #[cfg(all(feature = "jemalloc", unix))]
@@ -51,7 +52,7 @@ fn main() {
                     node: _node,
                 } = builder
                     .node(node)
-                    .install_extensions_if(&args)
+                    .install_extensions(&args)
                     .launch()
                     .await?;
 
