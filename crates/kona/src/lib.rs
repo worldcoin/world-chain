@@ -1,50 +1,40 @@
 //! # World Chain Kona Integration
 //!
-//! This crate integrates the [Kona](https://github.com/ethereum-optimism/optimism) OP Stack
-//! consensus node into World Chain so that the **consensus/derivation pipeline** runs in the
-//! **same binary** as the Reth execution engine.
+//! This crate runs the [Kona](https://github.com/ethereum-optimism/optimism) OP Stack consensus
+//! node **in-process** alongside the reth execution engine, in the same binary.
 //!
 //! ## Architecture
 //!
 //! ```text
-//! ┌─────────────────────────────────────────────────────┐
-//! │              world-chain binary                      │
-//! │                                                      │
-//! │  ┌──────────────────┐   Engine API     ┌──────────┐ │
-//! │  │   Kona Node      │ ───(HTTP/JWT)──► │  Reth     │ │
-//! │  │ (consensus/deriv)│   auth RPC :8551 │  Engine   │ │
-//! │  └──────────────────┘                   └──────────┘ │
-//! └─────────────────────────────────────────────────────┘
+//! ┌──────────────────────────────────────────────────────────────┐
+//! │                     world-chain binary                        │
+//! │                                                                │
+//! │  ┌──────────────────┐  in-process Rust calls  ┌─────────────┐ │
+//! │  │   Kona actors    │ ──────────────────────► │ reth Engine │ │
+//! │  │ (consensus/deriv)│  ConsensusEngineHandle   │  (EL tree)  │ │
+//! │  └──────────────────┘  + PayloadStore          └─────────────┘ │
+//! └──────────────────────────────────────────────────────────────┘
 //! ```
 //!
-//! Canonical Optimism kona builds its own [`kona_engine::OpEngineClient`] internally and drives
-//! reth over the standard Engine API (HTTP + JWT) against reth's auth RPC endpoint. Both processes
-//! share a single tokio runtime, so there is no separate node process to supervise, but the
-//! transport between consensus and execution is the regular authenticated Engine API rather than
-//! direct in-process Rust calls.
+//! Unlike canonical kona — which drives reth over the authenticated Engine API (HTTP + JWT) — the
+//! consensus hot path (`fork_choice_updated`, `new_payload`, `get_payload`) is dispatched directly
+//! to reth's [`reth_engine_primitives::ConsensusEngineHandle`] and
+//! [`reth_payload_builder::PayloadStore`] via [`InProcessEngineClient`]. There is no separate node
+//! process and no network transport on that path.
 //!
 //! ## Key Components
 //!
-//! - [`KonaServiceHandle`] — Manages the lifecycle of the Kona node service, spawning the
-//!   derivation, engine, network, and RPC actors under the same tokio runtime as reth and driving
-//!   reth's execution engine over the Engine API.
-//!
-//! - [`KonaConfig`] — Bridges World Chain's node configuration to kona's
-//!   [`kona_node_service::RollupNodeBuilder`] requirements.
-//!
-//! ## Status
-//!
-//! This is a **work-in-progress** integration. Key areas that need further work:
-//!
-//! - Full compatibility testing between kona's alloy versions and world-chain's
-//! - Integration with reth's node builder lifecycle hooks
-//! - Configuration bridging (rollup config, genesis, etc.)
-//! - End-to-end integration tests
-//!
-//! See inline `TODO` comments throughout the code.
+//! - [`InProcessEngineClient`] — Implements kona's [`kona_engine::EngineClient`] trait by
+//!   dispatching Engine API calls in-process to reth.
+//! - [`KonaService`] — Manually assembles the kona actor graph (engine, derivation, network, L1
+//!   watcher, optional sequencer, optional RPC) around the in-process engine client.
+//! - [`KonaServiceHandle`] — Owns the spawned service task and its cancellation token.
+//! - [`KonaConfig`] — Bridges World Chain's node configuration to the kona service inputs.
 
 pub mod config;
-pub mod handle;
+pub mod engine_client;
+pub mod service;
 
 pub use config::KonaConfig;
-pub use handle::KonaServiceHandle;
+pub use engine_client::InProcessEngineClient;
+pub use service::{KonaService, KonaServiceHandle};

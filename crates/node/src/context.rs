@@ -368,11 +368,75 @@ where
             1_000_000,
             self.config.args.simulate_enabled,
         )
+        .with_kona_config(self.kona_config())
     }
 
     fn ext_context(&self) -> Self::ExtContext {
         self.components_context.clone()
     }
+
+    fn kona_config(&self) -> Option<world_chain_kona::KonaConfig> {
+        let kona_args = self.config.args.kona.as_ref()?;
+        if !kona_args.enabled {
+            return None;
+        }
+
+        match build_kona_config(kona_args) {
+            Ok(config) => Some(config),
+            Err(error) => {
+                tracing::error!(
+                    target: "world_chain::kona",
+                    %error,
+                    "Failed to build Kona configuration; in-process consensus will not start"
+                );
+                None
+            }
+        }
+    }
+}
+
+/// Builds a [`KonaConfig`](world_chain_kona::KonaConfig) from the parsed `--kona.*` CLI arguments.
+///
+/// The rollup configuration is loaded from the JSON file referenced by `--kona.rollup-config`,
+/// which is required when Kona is enabled.
+fn build_kona_config(
+    kona_args: &world_chain_cli::KonaArgs,
+) -> eyre::Result<world_chain_kona::KonaConfig> {
+    use std::sync::Arc;
+
+    let l1_rpc_url = kona_args.l1_rpc_url.parse()?;
+    let l1_beacon_url = kona_args.l1_beacon_url.parse()?;
+
+    let rollup_config_path = kona_args.rollup_config_path.as_ref().ok_or_else(|| {
+        eyre::Report::msg("--kona.rollup-config is required when --kona.enabled is set")
+    })?;
+    let config_json = std::fs::read_to_string(rollup_config_path).map_err(|e| {
+        eyre::Report::msg(format!(
+            "failed to read rollup config from {}: {e}",
+            rollup_config_path.display()
+        ))
+    })?;
+    let rollup_config: kona_genesis::RollupConfig = serde_json::from_str(&config_json)
+        .map_err(|e| eyre::Report::msg(format!("failed to parse rollup config: {e}")))?;
+
+    Ok(world_chain_kona::KonaConfig {
+        rollup_config: Arc::new(rollup_config),
+        l1_rpc_url,
+        l1_beacon_url,
+        l1_trust_rpc: kona_args.l1_trust_rpc,
+        l2_trust_rpc: false,
+        sequencer_mode: kona_args.sequencer,
+        sequencer_stopped: kona_args.sequencer_stopped,
+        sequencer_recovery_mode: kona_args.sequencer_recovery_mode,
+        conductor_rpc_url: kona_args.conductor_rpc.clone(),
+        l1_confs: kona_args.l1_confs,
+        p2p: kona_args.p2p.clone(),
+        rpc_addr: kona_args.rpc_addr,
+        rpc_port: kona_args.rpc_port,
+        rpc_enable_admin: kona_args.rpc_enable_admin,
+        rpc_enabled: !kona_args.rpc_disabled,
+        l1_slot_duration_override: kona_args.l1_slot_duration_override,
+    })
 }
 
 #[derive(Clone, Debug)]

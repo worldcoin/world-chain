@@ -1,28 +1,28 @@
-//! Configuration for the Kona integration.
+//! Configuration for the in-process Kona integration.
 //!
-//! Bridges between World Chain's node configuration and Kona's node builder requirements.
+//! Bridges World Chain's node configuration to the [`KonaService`](crate::KonaService) inputs.
+//! Unlike the previous HTTP transport, there is no engine RPC URL or JWT here: the engine is driven
+//! in-process via an [`InProcessEngineClient`](crate::InProcessEngineClient) supplied by the node
+//! add-ons.
 
-use alloy_rpc_types_engine::JwtSecret;
-use kona_genesis::RollupConfig;
-use kona_node_service::{
-    EngineConfig, L1ConfigBuilder, NetworkConfig, NodeMode, RollupNode, RollupNodeBuilder,
-    SequencerConfig,
-};
-use kona_rpc::RpcBuilder;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
 };
+
+use kona_genesis::RollupConfig;
+use kona_node_service::SequencerConfig;
+use kona_rpc::RpcBuilder;
 use url::Url;
 use world_chain_cli::KonaP2PArgs;
 
-/// Configuration for the in-process Kona node.
+/// Static configuration for the in-process Kona node.
 ///
-/// This bridges the gap between World Chain's existing configuration and what Kona's
-/// [`RollupNodeBuilder`] expects.
+/// The dynamic, post-launch pieces (the reth engine handle, payload store, and L2 provider) are
+/// injected by the add-ons when assembling the [`KonaService`](crate::KonaService).
 #[derive(Debug, Clone)]
 pub struct KonaConfig {
-    /// The OP Stack rollup configuration.
+    /// The OP Stack rollup configuration, shared with reth.
     pub rollup_config: Arc<RollupConfig>,
 
     /// L1 RPC endpoint URL for fetching L1 block data.
@@ -34,7 +34,7 @@ pub struct KonaConfig {
     /// Whether to trust the L1 RPC without additional receipt verification.
     pub l1_trust_rpc: bool,
 
-    /// Whether to trust the L2 RPC without additional verification.
+    /// Whether to trust the L2 RPC used by the derivation pipeline.
     pub l2_trust_rpc: bool,
 
     /// Whether to run in sequencer mode.
@@ -98,39 +98,6 @@ impl KonaConfig {
         }
     }
 
-    /// Builds a [`RollupNode`] from this configuration.
-    ///
-    /// The `engine_config` points kona's internally-constructed engine client at reth's auth RPC
-    /// endpoint, which it drives over the standard Engine API (HTTP + JWT).
-    pub fn build_rollup_node(
-        self,
-        engine_config: EngineConfig,
-        p2p_config: NetworkConfig,
-    ) -> RollupNode {
-        let rpc_config = self.make_rpc_builder();
-        let sequencer_config = self.make_sequencer_config();
-
-        let l1_config_builder = L1ConfigBuilder {
-            chain_config: kona_genesis::L1ChainConfig::default(),
-            trust_rpc: self.l1_trust_rpc,
-            beacon: self.l1_beacon_url,
-            rpc_url: self.l1_rpc_url,
-            slot_duration_override: self.l1_slot_duration_override,
-        };
-
-        let builder = RollupNodeBuilder::new(
-            (*self.rollup_config).clone(),
-            l1_config_builder,
-            self.l2_trust_rpc,
-            engine_config,
-            p2p_config,
-            rpc_config,
-        )
-        .with_sequencer_config(sequencer_config);
-
-        builder.build()
-    }
-
     /// Builds the [`SequencerConfig`] driving kona's sequencer actor.
     pub fn make_sequencer_config(&self) -> SequencerConfig {
         SequencerConfig {
@@ -154,24 +121,5 @@ impl KonaConfig {
             ws_enabled: false,
             dev_enabled: false,
         })
-    }
-
-    /// Builds an [`EngineConfig`] pointed at reth's L2 auth RPC endpoint.
-    ///
-    /// Canonical kona constructs its own [`kona_engine::OpEngineClient`] from this config and
-    /// drives reth's execution engine over the standard authenticated Engine API. The
-    /// `l2_auth_rpc_url`/`jwt_secret` must match reth's launched auth server.
-    pub fn make_engine_config(&self, l2_auth_rpc_url: Url, jwt_secret: JwtSecret) -> EngineConfig {
-        EngineConfig {
-            config: self.rollup_config.clone(),
-            l2_url: l2_auth_rpc_url,
-            l2_jwt_secret: jwt_secret,
-            l1_url: self.l1_rpc_url.clone(),
-            mode: if self.sequencer_mode {
-                NodeMode::Sequencer
-            } else {
-                NodeMode::Validator
-            },
-        }
     }
 }

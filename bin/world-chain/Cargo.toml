@@ -17,30 +17,20 @@ world-chain-chainspec.workspace = true
 world-chain-evm.workspace = true
 world-chain-node.workspace = true
 world-chain-rpc.workspace = true
-world-chain-kona.workspace = true
 
 # reth
 reth-cli-util.workspace = true
 reth-node-builder.workspace = true
-reth-rpc-builder.workspace = true
 reth-tracing.workspace = true
 
 # op-reth
 reth-optimism-consensus.workspace = true
-
-# kona consensus node (in-process)
-kona-genesis.workspace = true
-
-# alloy
-alloy-rpc-types-engine = { workspace = true, features = ["jwt"] }
 
 # misc
 dotenvy.workspace = true
 clap.workspace = true
 eyre.workspace = true
 tokio.workspace = true
-serde_json.workspace = true
-url.workspace = true
 
 # optional
 tikv-jemallocator = { workspace = true, optional = true }

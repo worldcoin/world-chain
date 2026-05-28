@@ -14,7 +14,7 @@ use reth_node_builder::rpc::{
 };
 use reth_optimism_chainspec::OpHardfork;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::{OpEngineApiBuilder, txpool::OpPooledTx};
+use reth_optimism_node::{OpEngineApiBuilder, OpEngineTypes, txpool::OpPooledTx};
 use reth_optimism_payload_builder::{
     OpPayloadBuilderAttributes, OpPayloadPrimitives,
     config::{OpDAConfig, OpGasLimitConfig},
@@ -37,6 +37,7 @@ use reth_transaction_pool::TransactionPool;
 use tracing::{debug, info};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_evm::OpTx;
+use world_chain_kona::{KonaConfig, KonaService, KonaServiceHandle};
 use world_chain_rpc::{
     EthApiExtServer, SequencerClient as WorldChainSequencerClient, Simulate, SimulateApiServer,
     WorldChainEthApiExt,
@@ -108,6 +109,11 @@ pub struct WorldChainAddOns<
     min_suggested_priority_fee: u64,
     /// Enables the World Chain simulate namespace.
     simulate_enabled: bool,
+    /// In-process Kona consensus startup configuration.
+    ///
+    /// When [`Some`], the add-ons assemble an [`InProcessEngineClient`] from reth's engine handle
+    /// and spawn the Kona consensus node in-process during [`launch_add_ons`](NodeAddOns::launch_add_ons).
+    kona_config: Option<KonaConfig>,
     /// Transaction type carried by the node primitives.
     _tx: PhantomData<fn() -> Tx>,
 }
@@ -141,8 +147,18 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            kona_config: None,
             _tx: PhantomData,
         }
+    }
+
+    /// Sets the in-process Kona consensus startup configuration.
+    ///
+    /// When [`Some`], the Kona consensus node is assembled and spawned in-process during
+    /// [`launch_add_ons`](NodeAddOns::launch_add_ons), owning reth's `ConsensusEngineHandle`.
+    pub fn with_kona_config(mut self, kona_config: Option<KonaConfig>) -> Self {
+        self.kona_config = kona_config;
+        self
     }
 }
 
@@ -297,7 +313,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx> NodeAddOns<N>
     for WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
 where
     N: FullNodeComponents<
-            Types: NodeTypes<ChainSpec = WorldChainSpec>,
+            Types: NodeTypes<ChainSpec = WorldChainSpec, Payload = OpEngineTypes>,
             Evm: ConfigureEvm<
                 NextBlockEnvCtx: BuildNextEnv<
                     OpPayloadBuilderAttributes<Tx>,
@@ -340,8 +356,15 @@ where
             enable_tx_conditional,
             historical_rpc,
             simulate_enabled,
+            kona_config,
             ..
         } = self;
+
+        // Spawn the in-process Kona consensus node, if enabled. This owns reth's
+        // `ConsensusEngineHandle` and drives the execution engine via direct Rust calls.
+        if let Some(kona_config) = kona_config {
+            spawn_kona(&ctx, kona_config)?;
+        }
 
         let eth_config =
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
@@ -451,7 +474,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx> RethRpcAddOns<N>
     for WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
 where
     N: FullNodeComponents<
-            Types: NodeTypes<ChainSpec = WorldChainSpec>,
+            Types: NodeTypes<ChainSpec = WorldChainSpec, Payload = OpEngineTypes>,
             Evm: ConfigureEvm<
                 NextBlockEnvCtx: BuildNextEnv<
                     OpPayloadBuilderAttributes<Tx>,
@@ -501,4 +524,74 @@ where
     fn engine_validator_builder(&self) -> Self::ValidatorBuilder {
         EngineValidatorAddOn::engine_validator_builder(&self.rpc_add_ons)
     }
+}
+
+/// Assembles the in-process Kona consensus node from reth's engine handle and spawns it on the
+/// node's task executor.
+///
+/// Builds the kona service's in-process engine client from:
+/// - `ctx.beacon_engine_handle` — reth's `ConsensusEngineHandle`, for the FCU / new-payload
+///   consensus hot path,
+/// - `ctx.node.payload_builder_handle()` — wrapped in a `PayloadStore`, for `get_payload`,
+/// - an L2 alloy provider over reth's standard HTTP RPC, for the infrequent reads the engine actor
+///   performs during sync,
+/// - an L1 alloy provider from `--kona.l1-rpc-url`.
+///
+/// The assembled [`KonaService`] is then run on the node's task executor for the node's lifetime.
+fn spawn_kona<N>(
+    ctx: &reth_node_api::AddOnsContext<'_, N>,
+    kona_config: KonaConfig,
+) -> eyre::Result<()>
+where
+    N: FullNodeComponents<Types: NodeTypes<Payload = OpEngineTypes>>,
+{
+    use reth_payload_builder::PayloadStore;
+
+    // Reth's standard HTTP RPC endpoint feeds the kona derivation pipeline and the engine actor's
+    // infrequent read methods (not the consensus hot path, which is in-process).
+    if !ctx.config.rpc.http {
+        return Err(eyre::Report::msg(
+            "--kona.enabled requires reth's HTTP RPC server to be enabled (set --http)",
+        ));
+    }
+    let l2_rpc_url: url::Url = format!(
+        "http://{}:{}",
+        ctx.config.rpc.http_addr, ctx.config.rpc.http_port
+    )
+    .parse()?;
+
+    let sequencer_mode = kona_config.sequencer_mode;
+    let l1_chain_id = kona_config.rollup_config.l1_chain_id;
+    let l2_chain_id: u64 = kona_config.rollup_config.l2_chain_id.into();
+
+    let payload_store = PayloadStore::new(ctx.node.payload_builder_handle().clone());
+    let service = KonaService::build(
+        kona_config,
+        ctx.beacon_engine_handle.clone(),
+        payload_store,
+        l2_rpc_url,
+    )?;
+
+    info!(
+        target: "world_chain::kona",
+        %l1_chain_id,
+        %l2_chain_id,
+        sequencer = sequencer_mode,
+        "Starting in-process Kona consensus node (direct ConsensusEngineHandle transport)"
+    );
+
+    // Spawn on the node's task executor so the service lives for the node's lifetime.
+    ctx.node
+        .task_executor()
+        .spawn_critical_task("kona-consensus", async move {
+            let mut handle = KonaServiceHandle::spawn(service);
+            match handle.stopped().await {
+                Ok(()) => info!(target: "world_chain::kona", "Kona consensus node stopped"),
+                Err(error) => {
+                    tracing::error!(target: "world_chain::kona", %error, "Kona consensus node exited with error")
+                }
+            }
+        });
+
+    Ok(())
 }
