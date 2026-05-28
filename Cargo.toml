@@ -239,7 +239,7 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 parking_lot = "0.12"
 derive_more = { version = "2", default-features = false, features = ["full"] }
 dotenvy = "0.15.7"
-tikv-jemallocator = { version = "0.6" }
+tikv-jemallocator = { version = "0.7" }
 bytes = "1.7.2"
 hex = "0.4.3"
 tempfile = "3"
