@@ -22,6 +22,7 @@ world-chain-p2p = { workspace = true, features = ["test-utils"] }
 world-chain-cli.workspace = true
 world-chain-chainspec.workspace = true
 world-chain-exex.workspace = true
+world-chain-op-batcher.workspace = true
 
 # reth
 reth-e2e-test-utils.workspace = true

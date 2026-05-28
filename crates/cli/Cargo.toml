@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 world-chain-chainspec.workspace = true
 world-chain-exex.workspace = true
+world-chain-op-batcher.workspace = true
 reth-node-builder.workspace = true
 reth-chainspec.workspace = true
 reth-cli.workspace = true

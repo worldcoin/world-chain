@@ -348,6 +348,131 @@ OP Proposer ExEx:
           
           [env: OP_PROPOSER_DATADIR=]
 
+OP Batcher ExEx:
+      --batcher.enabled
+          Enable the OP Batcher ExEx
+          
+          [env: OP_BATCHER_ENABLED=]
+
+      --batcher.l1-eth-rpc <batcher_l1_eth_rpc>
+          HTTP provider URL(s) for L1 (comma-separated for failover)
+          
+          [env: OP_BATCHER_L1_ETH_RPC=]
+
+      --batcher.batch-inbox-address <batcher_batch_inbox_address>
+          Address of the L1 `BatchInbox` that batch transactions are sent to
+          
+          [env: OP_BATCHER_BATCH_INBOX_ADDRESS=]
+
+      --batcher.poll-interval <batcher_poll_interval>
+          Interval between batch-submission polling cycles
+          
+          [env: OP_BATCHER_POLL_INTERVAL=]
+          [default: 6s]
+
+      --batcher.max-l1-tx-size-bytes <batcher_max_l1_tx_size_bytes>
+          Maximum L1 calldata tx size (bytes). The max frame size is this minus 1
+          
+          [env: OP_BATCHER_MAX_L1_TX_SIZE_BYTES=]
+          [default: 120000]
+
+      --batcher.max-channel-duration <batcher_max_channel_duration>
+          Maximum number of L1 blocks a channel may remain open before being force-closed. `0` disables the duration timeout
+          
+          [env: OP_BATCHER_MAX_CHANNEL_DURATION=]
+          [default: 0]
+
+      --batcher.sub-safety-margin <batcher_sub_safety_margin>
+          Number of L1 blocks subtracted from channel timeout / sequencing window when computing the close deadline, so the channel lands with margin
+          
+          [env: OP_BATCHER_SUB_SAFETY_MARGIN=]
+          [default: 10]
+
+      --batcher.approx-compr-ratio <batcher_approx_compr_ratio>
+          Approximate compression ratio used to decide when a channel is full (input target = target output size / ratio)
+          
+          [env: OP_BATCHER_APPROX_COMPR_RATIO=]
+          [default: 0.6]
+
+      --batcher.channel-timeout <batcher_channel_timeout>
+          On-chain channel timeout (L1 blocks). Defaults to the Granite value
+          
+          [env: OP_BATCHER_CHANNEL_TIMEOUT=]
+          [default: 50]
+
+      --batcher.wait-node-sync
+          Whether to wait for the node to sync before starting the driver loop
+          
+          [env: OP_BATCHER_WAIT_NODE_SYNC=]
+
+      --batcher.network-timeout <batcher_network_timeout>
+          Allow batching against the unsafe head even when it is not yet safe (the normal mode). Reserved for future use; always true for v1
+          
+          [env: OP_BATCHER_NETWORK_TIMEOUT=]
+          [default: 10s]
+
+      --batcher.private-key <batcher_private_key>
+          Hex-encoded private key of the L1 batcher EOA (must match `SystemConfig.batcherHash`). Mutually exclusive with `--batcher.mnemonic`
+          
+          [env: OP_BATCHER_PRIVATE_KEY=]
+
+      --batcher.mnemonic <batcher_mnemonic>
+          BIP-39 mnemonic for the L1 batcher signer
+          
+          [env: OP_BATCHER_MNEMONIC=]
+
+      --batcher.hd-path <batcher_hd_path>
+          HD derivation path used with `--batcher.mnemonic`
+          
+          [env: OP_BATCHER_HD_PATH=]
+          [default: m/44'/60'/0'/0/0]
+
+      --batcher.balance-poll-interval <batcher_balance_poll_interval>
+          Interval between wallet-balance metric refreshes
+          
+          [env: OP_BATCHER_BALANCE_POLL_INTERVAL=]
+          [default: 60s]
+
+      --batcher.rpc-max-retries <batcher_rpc_max_retries>
+          Maximum rate-limit retries the L1 transport will attempt. `0` disables
+          
+          [env: OP_BATCHER_RPC_MAX_RETRIES=]
+          [default: 10]
+
+      --batcher.rpc-initial-backoff-ms <batcher_rpc_initial_backoff_ms>
+          Initial backoff for L1 rate-limit retries (ms)
+          
+          [env: OP_BATCHER_RPC_INITIAL_BACKOFF_MS=]
+          [default: 500]
+
+      --batcher.rpc-cups <batcher_rpc_cups>
+          Compute-units-per-second budget used by alloy's retry backoff layer
+          
+          [env: OP_BATCHER_RPC_CUPS=]
+          [default: 660]
+
+      --batcher.rpc-addr <batcher_rpc_addr>
+          Admin RPC bind address
+          
+          [env: OP_BATCHER_RPC_ADDR=]
+          [default: 127.0.0.1]
+
+      --batcher.rpc-port <batcher_rpc_port>
+          Admin RPC bind port. Pass `0` to disable the admin RPC server
+          
+          [env: OP_BATCHER_RPC_PORT=]
+          [default: 0]
+
+      --batcher.rpc-enable-admin
+          Enable the admin namespace on the batcher RPC
+          
+          [env: OP_BATCHER_RPC_ENABLE_ADMIN=]
+
+      --batcher.datadir <batcher_datadir>
+          Directory for batcher persistent state (MDBX)
+          
+          [env: OP_BATCHER_DATADIR=]
+
       --tx-peers <PEER_ID>
           Comma-separated list of peer IDs to which transactions should be propagated
 

@@ -12,6 +12,7 @@ members = [
     "bin/world-chain",
     "crates/chainspec",
     "crates/exex",
+    "crates/op-batcher",
     "crates/node",
     "crates/rpc",
     "crates/primitives",
@@ -68,6 +69,7 @@ world-chain-state = { path = "crates/state", default-features = false }
 world-chain-devnet = { path = "crates/devnet", default-features = false }
 world-chain-test-utils = { path = "crates/test-utils", default-features = false }
 world-chain-exex = { path = "crates/exex", default-features = false }
+world-chain-op-batcher = { path = "crates/op-batcher", default-features = false }
 
 # reth crates.io
 reth-codecs = { version = "0.3.1", default-features = false }
@@ -140,6 +142,12 @@ reth-optimism-chainspec = { git = "https://github.com/ethereum-optimism/optimism
 reth-optimism-payload-builder = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
 reth-optimism-forks = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
 reth-optimism-primitives = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
+
+# kona — consensus-critical OP derivation primitives (Frame, SingleBatch, Batch,
+# ChannelId, L1BlockInfoTx). Pinned to the same optimism tag the op-reth deps
+# use, so alloy versions are guaranteed to match.
+kona-protocol = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false, features = ["std"] }
+kona-genesis = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false, features = ["std"] }
 reth-optimism-storage = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
 reth-optimism-flashblocks = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
 
@@ -260,6 +268,7 @@ async-trait = "0.1.88"
 dashmap = { version = "6.2.1", features = ["rayon"] }
 tower = "0.5.0"
 backon = "1"
+flate2 = "1"
 arbitrary = { version = "=1.4.2", features = ["derive"] }
 blake3 = "1.8.4"
 ed25519-dalek = { version = "2", features = ["serde"] }

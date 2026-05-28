@@ -369,17 +369,8 @@ impl HaSequencerTopology {
             conductor_configs.push(conductor);
         }
 
-        components.push(
-            DevnetComponent::new(
-                "op-batcher",
-                DevnetComponentKind::OpBatcher,
-                DevnetComponentStatus::Planned,
-            )
-            .with_image(config.images.op_batcher.clone())
-            .with_note("submits L2 batches through the active sequencer/conductor"),
-        );
-        // No standalone op-proposer container. The OP Proposer runs as a
-        // reth ExEx inside sequencer 0 (see
+        // No standalone op-batcher / op-proposer containers. Both the OP
+        // Batcher and OP Proposer run as reth ExExes inside sequencer 0 (see
         // `world_chain_node::WorldChainExtensions::install_worldchain_extensions`).
 
         let challenger_config = config.op_challenger.then(OpChallengerConfig::local);
@@ -476,9 +467,9 @@ mod tests {
         assert_eq!(count(DevnetComponentKind::WorldChainExecutionNode), 3);
         assert_eq!(count(DevnetComponentKind::OpNode), 3);
         assert_eq!(count(DevnetComponentKind::OpConductor), 3);
-        assert_eq!(count(DevnetComponentKind::OpBatcher), 1);
-        // No `OpProposer` topology component — the OP Proposer runs as a
-        // reth ExEx inside sequencer 0.
+        // No `OpBatcher` / `OpProposer` topology components — both run as reth
+        // ExExes inside sequencer 0.
+        assert_eq!(count(DevnetComponentKind::OpBatcher), 0);
         assert_eq!(count(DevnetComponentKind::OpChallenger), 0);
         assert_eq!(count(DevnetComponentKind::Prometheus), 1);
         assert_eq!(count(DevnetComponentKind::Grafana), 1);
