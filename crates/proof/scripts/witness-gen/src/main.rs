@@ -175,6 +175,10 @@ struct NitroArgs {
     /// PCR2 hex (48 bytes). Leave unset to skip PCR verification (testing only).
     #[arg(long, env = "PCR2")]
     pcr2: Option<String>,
+
+    /// Output path for the JSON artifact (boot info + attestation doc).
+    #[arg(long)]
+    output: Option<PathBuf>,
 }
 
 struct RangeProofInput {
@@ -335,6 +339,14 @@ fn nitro_prove(args: NitroArgs) -> eyre::Result<()> {
 
     println!("attestation verified OK");
     println!("{}", serde_json::to_string_pretty(&artifact.boot_info)?);
+
+    if let Some(output) = args.output {
+        write_json(&output, &json!({
+            "bootInfo": artifact.boot_info,
+            "attestationDoc": format!("0x{}", hex::encode(&artifact.attestation_doc)),
+        }))?;
+        println!("artifact written to {}", output.display());
+    }
 
     Ok(())
 }
