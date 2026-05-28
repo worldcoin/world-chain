@@ -43,8 +43,8 @@ type WorldEthWitnessExecutor = ETHDAWitnessExecutor<WorldPreimageCollector, Worl
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "world-chain-proof-succinct-local-prover",
-    about = "World Chain local witness generator and Nitro enclave prover"
+    name = "world-chain-proof-witness-gen",
+    about = "World Chain witness generator and Nitro enclave prover"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -53,11 +53,24 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Print the rollup config hash used in proofs.
+    HashRollupConfig(HashRollupConfigArgs),
     /// Build and write the witness to a file without proving.
     Witness(WitnessArgs),
     /// Generate witness and send to a running Nitro enclave for attested proving.
     #[cfg(feature = "nitro")]
     Nitro(NitroArgs),
+}
+
+#[derive(Debug, Args)]
+struct HashRollupConfigArgs {
+    /// Rollup config JSON file. Mutually exclusive with --l2-rpc.
+    #[arg(long, env = "ROLLUP_CONFIG", conflicts_with = "l2_rpc")]
+    rollup_config: Option<PathBuf>,
+
+    /// L2 RPC URL to fetch the rollup config from. Mutually exclusive with --rollup-config.
+    #[arg(long, env = "L2_RPC_URL", conflicts_with = "rollup_config")]
+    l2_rpc: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -210,6 +223,20 @@ fn main() -> eyre::Result<()> {
     dotenvy::dotenv().ok();
 
     match Cli::parse().command {
+        Command::HashRollupConfig(args) => {
+            let hash = match (args.rollup_config, args.l2_rpc) {
+                (Some(path), _) => proof_config_from_file(&path)?.1,
+                (None, Some(url)) => {
+                    let client = Client::new();
+                    let value: Value =
+                        rpc(&client, &url, "optimism_rollupConfig", json!([]))?
+                            .context("optimism_rollupConfig returned null")?;
+                    world_chain_proof_protocol::hash_rollup_config(&value)?
+                }
+                (None, None) => return Err(eyre!("provide --rollup-config or --l2-rpc")),
+            };
+            println!("{hash:?}");
+        }
         Command::Witness(args) => {
             let input = build_range_input(&args.rpc)?;
             let bytes = witness_bytes(&input.witness)?;
