@@ -30,11 +30,13 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     DisputeGameFactory, Result,
-    config::ProposerConfig,
-    db::{ProposerStore, StoredProposal},
     error::OpProposerError,
-    metrics::ProposerMetrics,
-    source::{Proposal, ProposalSource, ProposalSourceError},
+    proposer::{
+        config::ProposerConfig,
+        db::{ProposerStore, StoredProposal},
+        metrics::ProposerMetrics,
+        source::{Proposal, ProposalSource, ProposalSourceError},
+    },
 };
 
 /// The L2 output submitter / proposer driver.
