@@ -159,11 +159,10 @@ impl L2OutputSubmitter {
     }
 
     async fn run_loop(self: Arc<Self>, cancel: CancellationToken) {
-        if self.cfg.wait_node_sync {
-            if let Err(e) = self.wait_node_sync(&cancel).await {
+        if self.cfg.wait_node_sync
+            && let Err(e) = self.wait_node_sync(&cancel).await {
                 error!(target: "exex::proposer", error = %e, "wait_node_sync failed");
             }
-        }
 
         let mut ticker = tokio::time::interval(self.cfg.poll_interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -220,8 +219,8 @@ impl L2OutputSubmitter {
 
         let proposal = self.fetch_output(current_block).await?;
 
-        if let Some(last) = self.store.last_proposal()? {
-            if last.root == proposal.root && last.block_number == proposal.block_number {
+        if let Some(last) = self.store.last_proposal()?
+            && last.root == proposal.root && last.block_number == proposal.block_number {
                 debug!(
                     target: "exex::proposer",
                     last_root = ?last.root,
@@ -230,7 +229,6 @@ impl L2OutputSubmitter {
                 self.metrics.record_skipped();
                 return Ok(None);
             }
-        }
 
         info!(
             target: "exex::proposer",
