@@ -13,40 +13,29 @@ use reth_node_api::FullNodeComponents;
 use tracing::{debug, info, warn};
 
 use crate::{
+    Result,
     config::{ProposerCliArgs, ProposerConfig},
     db::StoredHead,
-    local_node::{ExExLocalAccess, local_access_from_ctx},
+    error::OpProposerError,
+    local_node::{ProviderBounds, local_reader_from_ctx},
     service::{AdminRpcSettings, ProposerService},
     source::{ProposalSource, local::LocalProposalSource},
 };
 
 /// Spawned reth ExEx future for the OP Proposer.
-///
-/// Build a [`ProposerConfig`] (typically by parsing `--proposer.*` flags) then
-/// hand the future to `node_builder.install_exex(...)`.
-pub async fn op_proposer_exex<N>(mut ctx: ExExContext<N>, cfg: ProposerConfig) -> eyre::Result<()>
+pub async fn op_proposer_exex<N>(mut ctx: ExExContext<N>, cfg: ProposerConfig) -> Result<()>
 where
     N: FullNodeComponents,
-    N::Provider: Clone
-        + reth_storage_api::BlockReader<Header = alloy_consensus::Header>
-        + reth_storage_api::BlockHashReader
-        + reth_storage_api::StateProviderFactory
-        + reth_storage_api::BlockIdReader
-        + Send
-        + Sync
-        + 'static,
+    N::Provider: ProviderBounds,
 {
     let admin_settings = AdminRpcSettings::from_config(&cfg);
 
-    // Build a local in-process proposal source backed by the ExEx node state.
-    let local_access = local_access_from_ctx::<N>(&ctx);
-    let source: Arc<dyn ProposalSource> = Arc::new(LocalProposalSource::new(local_access));
+    let reader = local_reader_from_ctx::<N>(&ctx);
+    let source: Arc<dyn ProposalSource> = Arc::new(LocalProposalSource::new(reader));
     info!(
         target: "exex::proposer",
         "using local proposal source (state read directly from node)",
     );
-    // Silence unused-import lint when ExExLocalAccess isn't directly named.
-    let _ = std::marker::PhantomData::<ExExLocalAccess<N>>;
 
     let mut service = ProposerService::from_config_with_source(cfg, source).await?;
     service.start(&admin_settings).await?;
@@ -58,7 +47,12 @@ where
     );
 
     loop {
-        let notification = match ctx.notifications.try_next().await? {
+        let notification = match ctx
+            .notifications
+            .try_next()
+            .await
+            .map_err(|e| OpProposerError::msg(format!("exex notifications channel: {e}")))?
+        {
             Some(n) => n,
             None => break,
         };
@@ -87,12 +81,14 @@ where
             }) {
                 warn!(
                     target: "exex::proposer",
-                    error = %e,
+                    error = ?e,
                     block = num_hash.number,
                     "failed to persist proposer head",
                 );
             }
-            ctx.events.send(ExExEvent::FinishedHeight(num_hash))?;
+            ctx.events
+                .send(ExExEvent::FinishedHeight(num_hash))
+                .map_err(|e| OpProposerError::msg(format!("exex events channel: {e}")))?;
         }
     }
 
@@ -101,27 +97,15 @@ where
     Ok(())
 }
 
-/// Wraps the proposer ExEx with an enable flag so callers can install it
-/// unconditionally and let `--proposer.enabled` decide whether it actually
-/// runs.
-///
-/// When disabled, the ExEx drains notifications and emits `FinishedHeight`
-/// events so reth's pruner is not blocked.
+/// Wraps the proposer ExEx with an enable flag.
 pub async fn install_op_proposer_exex<N>(
     ctx: ExExContext<N>,
     args: ProposerCliArgs,
     fallback_datadir: PathBuf,
-) -> eyre::Result<()>
+) -> Result<()>
 where
     N: FullNodeComponents,
-    N::Provider: Clone
-        + reth_storage_api::BlockReader<Header = alloy_consensus::Header>
-        + reth_storage_api::BlockHashReader
-        + reth_storage_api::StateProviderFactory
-        + reth_storage_api::BlockIdReader
-        + Send
-        + Sync
-        + 'static,
+    N::Provider: ProviderBounds,
 {
     if !args.enabled {
         info!(target: "exex::proposer", "OP Proposer disabled; ExEx will only drain notifications");
@@ -131,11 +115,17 @@ where
     op_proposer_exex(ctx, cfg).await
 }
 
-async fn drain_until_closed<N: FullNodeComponents>(mut ctx: ExExContext<N>) -> eyre::Result<()> {
-    while let Some(notification) = ctx.notifications.try_next().await? {
+async fn drain_until_closed<N: FullNodeComponents>(mut ctx: ExExContext<N>) -> Result<()> {
+    while let Some(notification) = ctx
+        .notifications
+        .try_next()
+        .await
+        .map_err(|e| OpProposerError::msg(format!("exex notifications channel: {e}")))?
+    {
         if let Some(committed) = notification.committed_chain() {
             ctx.events
-                .send(ExExEvent::FinishedHeight(committed.tip().num_hash()))?;
+                .send(ExExEvent::FinishedHeight(committed.tip().num_hash()))
+                .map_err(|e| OpProposerError::msg(format!("exex events channel: {e}")))?;
         }
     }
     Ok(())

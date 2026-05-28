@@ -20,8 +20,6 @@ pub struct OpStackImages {
     pub op_deployer: ContainerImage,
     /// OP Batcher image.
     pub op_batcher: ContainerImage,
-    /// OP Proposer image.
-    pub op_proposer: ContainerImage,
     /// OP Challenger image.
     pub op_challenger: ContainerImage,
     /// OP Conductor image.
@@ -41,10 +39,6 @@ impl Default for OpStackImages {
             ),
             op_batcher: ContainerImage::new(
                 "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher",
-                "develop",
-            ),
-            op_proposer: ContainerImage::new(
-                "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-proposer",
                 "develop",
             ),
             op_challenger: ContainerImage::new(
@@ -384,15 +378,9 @@ impl HaSequencerTopology {
             .with_image(config.images.op_batcher.clone())
             .with_note("submits L2 batches through the active sequencer/conductor"),
         );
-        components.push(
-            DevnetComponent::new(
-                "op-proposer",
-                DevnetComponentKind::OpProposer,
-                DevnetComponentStatus::Planned,
-            )
-            .with_image(config.images.op_proposer.clone())
-            .with_note("posts L2 output roots / dispute-game proposals to L1"),
-        );
+        // No standalone op-proposer container. The OP Proposer runs as a
+        // reth ExEx inside sequencer 0 (see
+        // `world_chain_node::WorldChainExtensions::install_worldchain_extensions`).
 
         let challenger_config = config.op_challenger.then(OpChallengerConfig::local);
         if config.op_challenger {
@@ -489,7 +477,8 @@ mod tests {
         assert_eq!(count(DevnetComponentKind::OpNode), 3);
         assert_eq!(count(DevnetComponentKind::OpConductor), 3);
         assert_eq!(count(DevnetComponentKind::OpBatcher), 1);
-        assert_eq!(count(DevnetComponentKind::OpProposer), 1);
+        // No `OpProposer` topology component — the OP Proposer runs as a
+        // reth ExEx inside sequencer 0.
         assert_eq!(count(DevnetComponentKind::OpChallenger), 0);
         assert_eq!(count(DevnetComponentKind::Prometheus), 1);
         assert_eq!(count(DevnetComponentKind::Grafana), 1);

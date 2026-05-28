@@ -1,34 +1,54 @@
 //! World Chain ExEx playing the role of the OP Proposer.
 //!
-//! This crate ports the single-chain (pre-interop) slice of
-//! [op-proposer](https://github.com/ethereum-optimism/optimism/tree/develop/op-proposer)
-//! to a reth [`ExEx`](reth_exex::ExExContext). It periodically reads an L2
-//! output root (by default from local node state, optionally from a rollup
-//! RPC) and submits it to the L1 `DisputeGameFactory` contract by creating a
-//! fault dispute game.
+//! # Upstream spec reference
 //!
-//! Transaction submission goes directly through the alloy contract instance
-//! (`factory.create(..).send()`); the wallet-equipped provider's filler stack
-//! handles gas estimation (with a 3/2 fallback), nonce management, signing,
-//! and fee computation. There is **no custom transaction manager** and
-//! **no custom receipt type** — alloy's are used directly.
+//! All `Mirrors:` annotations on functions throughout this crate are pinned to
+//! optimism tag [`op-proposer/v1.16.3-rc.1`][tag] (commit
+//! `1852be216f45a942321b440da4d92cfb3055f3c1`).
+//!
+//! [tag]: https://github.com/ethereum-optimism/optimism/tree/op-proposer/v1.16.3-rc.1
+//!
+//! ## Internal module → upstream file map
+//!
+//! | Internal module      | Upstream Go file                                  |
+//! | -------------------- | ------------------------------------------------- |
+//! | `config`             | `op-proposer/flags/flags.go`, `op-proposer/proposer/config.go` |
+//! | `bindings`           | `op-proposer/contracts/disputegamefactory.go`     |
+//! | `driver`             | `op-proposer/proposer/driver.go`                  |
+//! | `metrics`            | `op-proposer/metrics/metrics.go`                  |
+//! | `rpc`                | `op-proposer/proposer/rpc/api.go`                 |
+//! | `service`            | `op-proposer/proposer/service.go`                 |
+//! | `source`             | `op-proposer/proposer/source/source.go`           |
+//! | `source::rollup`     | `op-proposer/proposer/source/source_rollup.go`    |
+//! | `source::local`      | `op-service/eth/output.go` (`OutputV0`)           |
 
-pub mod config;
-pub mod contracts;
-pub mod db;
-pub mod driver;
-pub mod exex;
-pub mod local_node;
-pub mod metrics;
-pub mod provider;
-pub mod rpc;
-pub mod service;
-pub mod source;
-pub mod tx_fillers;
+mod bindings;
+mod config;
+mod db;
+mod driver;
+mod error;
+mod exex;
+mod local_node;
+mod metrics;
+mod provider;
+mod rpc;
+mod service;
+mod source;
+mod tx;
 
+use bindings::{ContractError, DisputeGameFactory};
 pub use config::{ProposerCliArgs, ProposerConfig};
-pub use driver::{L2OutputSubmitter, ProposerError};
+pub use db::{ProposerStore, StoredHead, StoredProposal};
+pub use error::OpProposerError;
 pub use exex::{install_op_proposer_exex, op_proposer_exex};
+pub use local_node::{ExExChainReader, ProviderBounds};
 pub use provider::{L1Provider, L1ProviderConfig, SignerKind};
-pub use service::ProposerService;
-pub use source::{Proposal, ProposalSource, SyncStatus};
+pub use service::{AdminRpcSettings, ProposerService};
+pub use source::{
+    Proposal, ProposalSource, ProposalSourceError, SyncStatus,
+    local::{
+        BlockMeta, ChainStatus, L2_TO_L1_MESSAGE_PASSER, LocalProposalSource, LocalStorageReader,
+    },
+};
+
+pub type Result<T, E = OpProposerError> = std::result::Result<T, E>;

@@ -1,7 +1,16 @@
 //! Configuration for the OP Proposer ExEx.
 //!
-//! Mirrors `op-proposer/flags/flags.go` and `op-proposer/proposer/config.go`,
-//! pared down to the single-chain (pre-interop) DGF proposer.
+//! Mirrors:
+//! - [`op-proposer/flags/flags.go`][flags] — CLI flag definitions.
+//! - [`op-proposer/proposer/config.go`][config] — `CLIConfig` + validation.
+//!
+//! Pinned to tag `op-proposer/v1.16.3-rc.1`. Pared down to the single-chain
+//! (pre-interop) DGF proposer.
+//!
+//! [flags]:
+//!     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/flags/flags.go
+//! [config]:
+//!     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/config.go
 
 use std::{path::PathBuf, time::Duration};
 
@@ -12,11 +21,16 @@ use thiserror::Error;
 /// CLI configuration for the OP Proposer ExEx, parsed via clap.
 ///
 /// Flag names and semantics mirror `op-proposer` upstream.
-#[derive(Debug, Clone, Args)]
+///
+/// The `Default` impl mirrors the clap `default_value*` attributes so callers
+/// can construct disabled-by-default args in tests without going through
+/// `try_parse_from`.
+#[derive(Clone, Args)]
 #[command(next_help_heading = "OP Proposer ExEx")]
 pub struct ProposerCliArgs {
     /// Enable the OP Proposer ExEx.
     #[arg(
+        id = "proposer_enabled",
         long = "proposer.enabled",
         env = "OP_PROPOSER_ENABLED",
         default_value_t = false
@@ -24,7 +38,11 @@ pub struct ProposerCliArgs {
     pub enabled: bool,
 
     /// HTTP provider URL for L1.
-    #[arg(long = "proposer.l1-eth-rpc", env = "OP_PROPOSER_L1_ETH_RPC")]
+    #[arg(
+        id = "proposer_l1_eth_rpc",
+        long = "proposer.l1-eth-rpc",
+        env = "OP_PROPOSER_L1_ETH_RPC"
+    )]
     pub l1_eth_rpc: Option<String>,
 
     /// Optional HTTP provider URL for a remote `op-node` rollup RPC.
@@ -32,11 +50,16 @@ pub struct ProposerCliArgs {
     /// When set, the proposer will read output roots from this endpoint
     /// instead of computing them locally. A comma-separated list enables
     /// active failover (matches the Go behaviour).
-    #[arg(long = "proposer.rollup-rpc", env = "OP_PROPOSER_ROLLUP_RPC")]
+    #[arg(
+        id = "proposer_rollup_rpc",
+        long = "proposer.rollup-rpc",
+        env = "OP_PROPOSER_ROLLUP_RPC"
+    )]
     pub rollup_rpc: Option<String>,
 
     /// Address of the `DisputeGameFactory` contract.
     #[arg(
+        id = "proposer_game_factory_address",
         long = "proposer.game-factory-address",
         env = "OP_PROPOSER_GAME_FACTORY_ADDRESS"
     )]
@@ -44,6 +67,7 @@ pub struct ProposerCliArgs {
 
     /// Interval between checks for whether to load and submit a new proposal.
     #[arg(
+        id = "proposer_poll_interval",
         long = "proposer.poll-interval",
         env = "OP_PROPOSER_POLL_INTERVAL",
         default_value = "12s",
@@ -53,6 +77,7 @@ pub struct ProposerCliArgs {
 
     /// Interval between submitting L2 output proposals.
     #[arg(
+        id = "proposer_proposal_interval",
         long = "proposer.proposal-interval",
         env = "OP_PROPOSER_PROPOSAL_INTERVAL",
         default_value = "1h",
@@ -62,6 +87,7 @@ pub struct ProposerCliArgs {
 
     /// Allow proposals derived from non-finalized L1 data.
     #[arg(
+        id = "proposer_allow_non_finalized",
         long = "proposer.allow-non-finalized",
         env = "OP_PROPOSER_ALLOW_NON_FINALIZED",
         default_value_t = false
@@ -70,6 +96,7 @@ pub struct ProposerCliArgs {
 
     /// Dispute game type.
     #[arg(
+        id = "proposer_game_type",
         long = "proposer.game-type",
         env = "OP_PROPOSER_GAME_TYPE",
         default_value_t = 0u32
@@ -78,6 +105,7 @@ pub struct ProposerCliArgs {
 
     /// Active sequencer check duration (only used with `--proposer.rollup-rpc`).
     #[arg(
+        id = "proposer_active_sequencer_check_duration",
         long = "proposer.active-sequencer-check-duration",
         env = "OP_PROPOSER_ACTIVE_SEQUENCER_CHECK_DURATION",
         default_value = "2m",
@@ -88,6 +116,7 @@ pub struct ProposerCliArgs {
     /// Whether to wait for the node to sync to the current L1 tip before
     /// starting the driver loop.
     #[arg(
+        id = "proposer_wait_node_sync",
         long = "proposer.wait-node-sync",
         env = "OP_PROPOSER_WAIT_NODE_SYNC",
         default_value_t = false
@@ -96,6 +125,7 @@ pub struct ProposerCliArgs {
 
     /// L1 network timeout (per-call).
     #[arg(
+        id = "proposer_network_timeout",
         long = "proposer.network-timeout",
         env = "OP_PROPOSER_NETWORK_TIMEOUT",
         default_value = "10s",
@@ -107,15 +137,24 @@ pub struct ProposerCliArgs {
     ///
     /// Mutually exclusive with `--proposer.mnemonic`. Either is required when
     /// the proposer is enabled.
-    #[arg(long = "proposer.private-key", env = "OP_PROPOSER_PRIVATE_KEY")]
+    #[arg(
+        id = "proposer_private_key",
+        long = "proposer.private-key",
+        env = "OP_PROPOSER_PRIVATE_KEY"
+    )]
     pub private_key: Option<String>,
 
     /// BIP-39 mnemonic for the L1 proposer signer.
-    #[arg(long = "proposer.mnemonic", env = "OP_PROPOSER_MNEMONIC")]
+    #[arg(
+        id = "proposer_mnemonic",
+        long = "proposer.mnemonic",
+        env = "OP_PROPOSER_MNEMONIC"
+    )]
     pub mnemonic: Option<String>,
 
     /// HD derivation path used with `--proposer.mnemonic`.
     #[arg(
+        id = "proposer_hd_path",
         long = "proposer.hd-path",
         env = "OP_PROPOSER_HD_PATH",
         default_value = "m/44'/60'/0'/0/0"
@@ -124,6 +163,7 @@ pub struct ProposerCliArgs {
 
     /// Interval between wallet-balance metric refreshes.
     #[arg(
+        id = "proposer_balance_poll_interval",
         long = "proposer.balance-poll-interval",
         env = "OP_PROPOSER_BALANCE_POLL_INTERVAL",
         default_value = "60s",
@@ -134,6 +174,7 @@ pub struct ProposerCliArgs {
     /// Maximum rate-limit retries the L1 transport will attempt before
     /// surfacing an error. `0` disables retries.
     #[arg(
+        id = "proposer_rpc_max_retries",
         long = "proposer.rpc-max-retries",
         env = "OP_PROPOSER_RPC_MAX_RETRIES",
         default_value_t = 10u32
@@ -142,6 +183,7 @@ pub struct ProposerCliArgs {
 
     /// Initial backoff for L1 rate-limit retries (ms).
     #[arg(
+        id = "proposer_rpc_initial_backoff_ms",
         long = "proposer.rpc-initial-backoff-ms",
         env = "OP_PROPOSER_RPC_INITIAL_BACKOFF_MS",
         default_value_t = 500u64
@@ -149,8 +191,9 @@ pub struct ProposerCliArgs {
     pub rpc_initial_backoff_ms: u64,
 
     /// Compute-units-per-second budget used by alloy's retry backoff layer
-    /// to scale waits. Default lifts from world-id-protocol's defaults.
+    /// to scale waits.
     #[arg(
+        id = "proposer_rpc_cups",
         long = "proposer.rpc-cups",
         env = "OP_PROPOSER_RPC_CUPS",
         default_value_t = 660u64
@@ -159,6 +202,7 @@ pub struct ProposerCliArgs {
 
     /// Admin RPC bind address.
     #[arg(
+        id = "proposer_rpc_addr",
         long = "proposer.rpc-addr",
         env = "OP_PROPOSER_RPC_ADDR",
         default_value = "127.0.0.1"
@@ -167,6 +211,7 @@ pub struct ProposerCliArgs {
 
     /// Admin RPC bind port. Pass `0` to disable the admin RPC server.
     #[arg(
+        id = "proposer_rpc_port",
         long = "proposer.rpc-port",
         env = "OP_PROPOSER_RPC_PORT",
         default_value_t = 0u16
@@ -175,6 +220,7 @@ pub struct ProposerCliArgs {
 
     /// Enable admin namespace on the proposer RPC.
     #[arg(
+        id = "proposer_rpc_enable_admin",
         long = "proposer.rpc-enable-admin",
         env = "OP_PROPOSER_RPC_ENABLE_ADMIN",
         default_value_t = true
@@ -182,8 +228,81 @@ pub struct ProposerCliArgs {
     pub rpc_enable_admin: bool,
 
     /// Directory for proposer persistent state (MDBX).
-    #[arg(long = "proposer.datadir", env = "OP_PROPOSER_DATADIR")]
+    #[arg(
+        id = "proposer_datadir",
+        long = "proposer.datadir",
+        env = "OP_PROPOSER_DATADIR"
+    )]
     pub datadir: Option<PathBuf>,
+}
+
+/// Manual `Debug` impl: redacts `private_key` and `mnemonic`.
+///
+/// Mirrors the redaction on [`ProposerConfig`] so secrets can't leak via
+/// `tracing::error!(?args, ...)` on the CLI-parsed args before they've been
+/// translated into a [`ProposerConfig`].
+impl std::fmt::Debug for ProposerCliArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProposerCliArgs")
+            .field("enabled", &self.enabled)
+            .field("l1_eth_rpc", &self.l1_eth_rpc)
+            .field("rollup_rpc", &self.rollup_rpc)
+            .field("game_factory_address", &self.game_factory_address)
+            .field("poll_interval", &self.poll_interval)
+            .field("proposal_interval", &self.proposal_interval)
+            .field("allow_non_finalized", &self.allow_non_finalized)
+            .field("game_type", &self.game_type)
+            .field(
+                "active_sequencer_check_duration",
+                &self.active_sequencer_check_duration,
+            )
+            .field("wait_node_sync", &self.wait_node_sync)
+            .field("network_timeout", &self.network_timeout)
+            .field("private_key", &redacted(&self.private_key))
+            .field("mnemonic", &redacted(&self.mnemonic))
+            .field("hd_path", &self.hd_path)
+            .field("balance_poll_interval", &self.balance_poll_interval)
+            .field("rpc_max_retries", &self.rpc_max_retries)
+            .field("rpc_initial_backoff_ms", &self.rpc_initial_backoff_ms)
+            .field(
+                "rpc_compute_units_per_second",
+                &self.rpc_compute_units_per_second,
+            )
+            .field("rpc_addr", &self.rpc_addr)
+            .field("rpc_port", &self.rpc_port)
+            .field("rpc_enable_admin", &self.rpc_enable_admin)
+            .field("datadir", &self.datadir)
+            .finish()
+    }
+}
+
+impl Default for ProposerCliArgs {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            l1_eth_rpc: None,
+            rollup_rpc: None,
+            game_factory_address: None,
+            poll_interval: Duration::from_secs(12),
+            proposal_interval: Duration::from_secs(3600),
+            allow_non_finalized: false,
+            game_type: 0,
+            active_sequencer_check_duration: Duration::from_secs(120),
+            wait_node_sync: false,
+            network_timeout: Duration::from_secs(10),
+            private_key: None,
+            mnemonic: None,
+            hd_path: "m/44'/60'/0'/0/0".to_string(),
+            balance_poll_interval: Duration::from_secs(60),
+            rpc_max_retries: 10,
+            rpc_initial_backoff_ms: 500,
+            rpc_compute_units_per_second: 660,
+            rpc_addr: "127.0.0.1".to_string(),
+            rpc_port: 0,
+            rpc_enable_admin: true,
+            datadir: None,
+        }
+    }
 }
 
 fn parse_duration(raw: &str) -> Result<Duration, String> {
@@ -223,7 +342,11 @@ fn parse_humantime(raw: &str) -> Result<Duration, ProposerConfigError> {
 }
 
 /// Runtime configuration consumed by the proposer service.
-#[derive(Debug, Clone)]
+///
+/// `Debug` is implemented manually below to redact `private_key` and
+/// `mnemonic` so accidental `tracing::error!(?cfg, ...)` calls (or panic
+/// messages) can't leak the proposer EOA secrets into logs.
+#[derive(Clone)]
 pub struct ProposerConfig {
     pub l1_eth_rpcs: Vec<String>,
     pub rollup_rpcs: Vec<String>,
@@ -255,6 +378,58 @@ pub struct ProposerConfig {
     pub datadir: PathBuf,
 }
 
+/// Manual `Debug` impl: redacts `private_key` and `mnemonic`.
+impl std::fmt::Debug for ProposerConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProposerConfig")
+            .field("l1_eth_rpcs", &self.l1_eth_rpcs)
+            .field("rollup_rpcs", &self.rollup_rpcs)
+            .field("game_factory_address", &self.game_factory_address)
+            .field("game_type", &self.game_type)
+            .field("poll_interval", &self.poll_interval)
+            .field("proposal_interval", &self.proposal_interval)
+            .field("network_timeout", &self.network_timeout)
+            .field(
+                "active_sequencer_check_duration",
+                &self.active_sequencer_check_duration,
+            )
+            .field("balance_poll_interval", &self.balance_poll_interval)
+            .field("allow_non_finalized", &self.allow_non_finalized)
+            .field("wait_node_sync", &self.wait_node_sync)
+            .field("private_key", &redacted(&self.private_key))
+            .field("mnemonic", &redacted(&self.mnemonic))
+            .field("hd_path", &self.hd_path)
+            .field("rpc_max_retries", &self.rpc_max_retries)
+            .field("rpc_initial_backoff_ms", &self.rpc_initial_backoff_ms)
+            .field(
+                "rpc_compute_units_per_second",
+                &self.rpc_compute_units_per_second,
+            )
+            .field("rpc_addr", &self.rpc_addr)
+            .field("rpc_port", &self.rpc_port)
+            .field("rpc_enable_admin", &self.rpc_enable_admin)
+            .field("datadir", &self.datadir)
+            .finish()
+    }
+}
+
+fn redacted(secret: &Option<String>) -> &'static str {
+    match secret {
+        Some(_) => "<redacted>",
+        None => "None",
+    }
+}
+
+/// Mirrors: `(*CLIConfig).Check` + `NewConfig` in
+/// [config.go L87–L160][src]. Validation differs from upstream in two ways:
+///
+/// * The interop game-type matrix (`preInteropGameTypes` / `postInteropGameTypes`)
+///   is intentionally not enforced — interop is unsupported.
+/// * The "exactly one signer" check is added (upstream pulls signer config
+///   out of `txmgr.CLIConfig` which lives in a separate package).
+///
+/// [src]:
+///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/config.go#L87-L160
 impl ProposerCliArgs {
     /// Translate CLI args into a validated [`ProposerConfig`].
     ///
@@ -339,9 +514,7 @@ pub enum ProposerConfigError {
     ZeroProposalInterval,
     #[error("missing signer: provide either --proposer.private-key or --proposer.mnemonic")]
     MissingSigner,
-    #[error(
-        "conflicting signer: provide only one of --proposer.private-key / --proposer.mnemonic"
-    )]
+    #[error("conflicting signer: provide only one of --proposer.private-key / --proposer.mnemonic")]
     ConflictingSigner,
     #[error("invalid duration string: {0}")]
     InvalidDuration(String),

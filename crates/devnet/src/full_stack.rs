@@ -50,6 +50,8 @@ const OP_NODE_RPC_PORT: u16 = 9545;
 const OP_NODE_METRICS_PORT: u16 = 7300;
 const OP_NODE_P2P_PORT: u16 = 9222;
 const OP_BATCHER_MAX_CHANNEL_DURATION_L1_BLOCKS: &str = "4";
+/// Dispute-game type used by the OP Proposer ExEx in the devnet. Matches
+/// the `permissioned` game-type the legacy Docker `op-proposer` used.
 const OP_PROPOSER_PERMISSIONED_GAME_TYPE: &str = "1";
 const OP_TXMGR_NETWORK_TIMEOUT: &str = "30s";
 const OP_TXMGR_RESUBMISSION_TIMEOUT: &str = "5m";
@@ -85,10 +87,20 @@ const PBH_DISABLED_ENTRYPOINT: &str = "0x000000000000000000000000000000000000dEa
 const PBH_DISABLED_WORLD_ID: &str = "0x000000000000000000000000000000000000dEa1";
 const PBH_DISABLED_SIGNATURE_AGGREGATOR: &str = "0x000000000000000000000000000000000000dEa2";
 
+/// Inputs needed by `start_world_chain_el` to wire the OP Proposer ExEx
+/// onto a sequencer (gets passed to **only** the index-0 sequencer; the
+/// other sequencers stay proposer-less so we don't propose duplicates).
+#[derive(Debug, Clone)]
+struct ProposerWiring {
+    /// L1 host-facing RPC (e.g. `http://127.0.0.1:8545`).
+    l1_rpc: String,
+    /// `DisputeGameFactoryProxy` address from the L1 deployer artifacts.
+    game_factory: String,
+}
+
 #[derive(Debug)]
 pub struct FullStackWorldDevnet {
     _batcher: Option<ContainerService>,
-    _proposer: Option<ContainerService>,
     _challenger: Option<ContainerService>,
     _conductors: Vec<ConductorService>,
     _op_nodes: Vec<OpNodeService>,
@@ -242,6 +254,16 @@ impl FullStackWorldDevnet {
             "L1 dev chain has OP contracts loaded"
         );
 
+        // Resolve `DisputeGameFactoryProxy` from the op-deployer L1 artifacts.
+        // Hoisted above the sequencer launch so the index-0 sequencer can
+        // wire its OP Proposer ExEx at startup. Subsequent sequencers don't
+        // get the wiring — only one node submits proposals.
+        let game_factory = l1_address(&artifacts.l1_addresses, "DisputeGameFactoryProxy")?;
+        let proposer_wiring = ProposerWiring {
+            l1_rpc: l1_public_rpc.clone(),
+            game_factory: game_factory.clone(),
+        };
+
         let sequencer_count = config.sequencer_count.max(1) as usize;
         let sequencer_plans = (0..sequencer_count)
             .map(plan_sequencer)
@@ -257,7 +279,14 @@ impl FullStackWorldDevnet {
                 .enumerate()
                 .filter_map(|(peer_index, peer)| (peer_index != index).then_some(peer.clone()))
                 .collect::<Vec<_>>();
-            start_world_chain_el(index, &workdir_path, &sequencer_plans[index], trusted_peers)
+            let proposer = (index == 0).then(|| proposer_wiring.clone());
+            start_world_chain_el(
+                index,
+                &workdir_path,
+                &sequencer_plans[index],
+                trusted_peers,
+                proposer,
+            )
         }))
         .await?;
         connect_execution_peers(&sequencers).await?;
@@ -340,20 +369,15 @@ impl FullStackWorldDevnet {
 
         let conductor_rpc_internal = host_internal_url(&conductors[0].rpc_url)?;
         let l2_rpc_internal = host_internal_url(&sequencers[0].rpc_url)?;
-        let game_factory = l1_address(&artifacts.l1_addresses, "DisputeGameFactoryProxy")?;
 
-        let (batcher, proposer, challenger) = if config.op_challenger {
-            let (batcher, proposer, challenger) = tokio::try_join!(
+        // No standalone op-proposer container — the OP Proposer runs as a
+        // reth ExEx inside sequencer 0 (wired above via `proposer_wiring`).
+        let (batcher, challenger) = if config.op_challenger {
+            let (batcher, challenger) = tokio::try_join!(
                 start_batcher(
                     &config.images.op_batcher,
                     &l1_internal_rpc,
                     &conductor_rpc_internal,
-                ),
-                start_proposer(
-                    &config.images.op_proposer,
-                    &l1_internal_rpc,
-                    &conductor_rpc_internal,
-                    &game_factory,
                 ),
                 start_challenger(
                     &config.images.op_challenger,
@@ -364,22 +388,15 @@ impl FullStackWorldDevnet {
                     &game_factory,
                 ),
             )?;
-            (Some(batcher), Some(proposer), Some(challenger))
+            (Some(batcher), Some(challenger))
         } else {
-            let (batcher, proposer) = tokio::try_join!(
-                start_batcher(
-                    &config.images.op_batcher,
-                    &l1_internal_rpc,
-                    &conductor_rpc_internal,
-                ),
-                start_proposer(
-                    &config.images.op_proposer,
-                    &l1_internal_rpc,
-                    &conductor_rpc_internal,
-                    &game_factory,
-                ),
-            )?;
-            (Some(batcher), Some(proposer), None)
+            let batcher = start_batcher(
+                &config.images.op_batcher,
+                &l1_internal_rpc,
+                &conductor_rpc_internal,
+            )
+            .await?;
+            (Some(batcher), None)
         };
 
         let mut metrics_targets = Vec::new();
@@ -398,7 +415,7 @@ impl FullStackWorldDevnet {
                 .iter()
                 .map(|service| service.metrics_target.clone()),
         );
-        for service in [&batcher, &proposer, &challenger].into_iter().flatten() {
+        for service in [&batcher, &challenger].into_iter().flatten() {
             if let Some(target) = &service.metrics_target {
                 metrics_targets.push(target.clone());
             }
@@ -416,7 +433,6 @@ impl FullStackWorldDevnet {
             &op_nodes,
             &conductors,
             batcher.as_ref(),
-            proposer.as_ref(),
             challenger.as_ref(),
             observability.as_ref(),
             &game_factory,
@@ -424,7 +440,6 @@ impl FullStackWorldDevnet {
 
         Ok(Self {
             _batcher: batcher,
-            _proposer: proposer,
             _challenger: challenger,
             _conductors: conductors,
             _op_nodes: op_nodes,
@@ -960,6 +975,7 @@ async fn start_world_chain_el(
     workdir: &Path,
     plan: &SequencerPlan,
     trusted_peers: Vec<String>,
+    proposer: Option<ProposerWiring>,
 ) -> Result<SequencerService> {
     let data_dir = workdir.join(format!("l2data-{index}"));
     fs::create_dir_all(&data_dir).wrap_err("failed to create L2 data dir")?;
@@ -1068,6 +1084,30 @@ async fn start_world_chain_el(
         "log-fmt".to_string(),
         "-vvv".to_string(),
     ]);
+
+    // Wire the OP Proposer ExEx for sequencer 0 only. Subsequent sequencers
+    // stay proposer-less so we don't submit duplicate proposals on every
+    // block.
+    if let Some(wiring) = proposer {
+        args.extend([
+            "--proposer.enabled".to_string(),
+            "--proposer.l1-eth-rpc".to_string(),
+            wiring.l1_rpc,
+            "--proposer.game-factory-address".to_string(),
+            wiring.game_factory,
+            "--proposer.game-type".to_string(),
+            OP_PROPOSER_PERMISSIONED_GAME_TYPE.to_string(),
+            "--proposer.private-key".to_string(),
+            PROPOSER_PRIVATE_KEY.to_string(),
+            "--proposer.proposal-interval".to_string(),
+            "6s".to_string(),
+            "--proposer.poll-interval".to_string(),
+            "1s".to_string(),
+            "--proposer.allow-non-finalized".to_string(),
+            "--proposer.network-timeout".to_string(),
+            OP_TXMGR_NETWORK_TIMEOUT.to_string(),
+        ]);
+    }
 
     let mut process = spawn_native_process(&format!("world-chain-el-{index}"), &binary, &args)
         .wrap_err_with(|| format!("failed to spawn native world-chain EL process {index}"))?;
@@ -1854,58 +1894,10 @@ async fn start_batcher(
     .await
 }
 
-async fn start_proposer(
-    image: &ContainerImage,
-    l1_rpc: &str,
-    rollup_rpc: &str,
-    game_factory: &str,
-) -> Result<ContainerService> {
-    let cmd = vec![
-        "--l1-eth-rpc".to_string(),
-        l1_rpc.to_string(),
-        "--rollup-rpc".to_string(),
-        rollup_rpc.to_string(),
-        "--game-factory-address".to_string(),
-        game_factory.to_string(),
-        "--game-type".to_string(),
-        OP_PROPOSER_PERMISSIONED_GAME_TYPE.to_string(),
-        "--private-key".to_string(),
-        PROPOSER_PRIVATE_KEY.to_string(),
-        "--proposal-interval".to_string(),
-        "6s".to_string(),
-        "--poll-interval".to_string(),
-        "1s".to_string(),
-        "--allow-non-finalized".to_string(),
-        "--num-confirmations".to_string(),
-        "1".to_string(),
-        "--network-timeout".to_string(),
-        OP_TXMGR_NETWORK_TIMEOUT.to_string(),
-        "--resubmission-timeout".to_string(),
-        OP_TXMGR_RESUBMISSION_TIMEOUT.to_string(),
-        "--rpc.addr".to_string(),
-        "0.0.0.0".to_string(),
-        "--rpc.port".to_string(),
-        SERVICE_RPC_PORT.to_string(),
-        "--rpc.enable-admin".to_string(),
-        "--metrics.enabled".to_string(),
-        "--metrics.addr".to_string(),
-        "0.0.0.0".to_string(),
-        "--metrics.port".to_string(),
-        SERVICE_METRICS_PORT.to_string(),
-        "--log.format".to_string(),
-        "logfmt".to_string(),
-        "--log.level".to_string(),
-        "DEBUG".to_string(),
-    ];
-    start_aux_service(
-        "op-proposer",
-        DevnetComponentKind::OpProposer,
-        image,
-        cmd,
-        None,
-    )
-    .await
-}
+// `start_proposer` (standalone op-proposer container) has been removed.
+// The OP Proposer now runs as a reth ExEx inside sequencer 0; see the
+// `--proposer.*` flags appended by `start_world_chain_el` when its
+// `proposer_wiring` arg is `Some`.
 
 async fn start_challenger(
     image: &ContainerImage,
@@ -2187,7 +2179,6 @@ async fn log_process_stream<R>(
 fn service_log_target(id: &str) -> ProcessLogTarget {
     match id {
         "op-batcher" => ProcessLogTarget::OpBatcher,
-        "op-proposer" => ProcessLogTarget::OpProposer,
         "op-challenger" => ProcessLogTarget::OpChallenger,
         _ => ProcessLogTarget::OpStackService,
     }
@@ -2200,7 +2191,6 @@ fn build_components(
     op_nodes: &[OpNodeService],
     conductors: &[ConductorService],
     batcher: Option<&ContainerService>,
-    proposer: Option<&ContainerService>,
     challenger: Option<&ContainerService>,
     observability: Option<&ObservabilityStack>,
     game_factory: &str,
@@ -2287,7 +2277,7 @@ fn build_components(
         );
     }
 
-    for service in [batcher, proposer, challenger].into_iter().flatten() {
+    for service in [batcher, challenger].into_iter().flatten() {
         let mut component = DevnetComponent::new(
             service.id.clone(),
             service.kind,
@@ -2297,9 +2287,7 @@ fn build_components(
         if let Some(url) = &service.rpc_url {
             component = component.with_endpoint("rpc", url.clone());
         }
-        if service.kind == DevnetComponentKind::OpProposer
-            || service.kind == DevnetComponentKind::OpChallenger
-        {
+        if service.kind == DevnetComponentKind::OpChallenger {
             component = component.with_note(format!("DisputeGameFactoryProxy={game_factory}"));
         }
         if service.kind == DevnetComponentKind::OpChallenger {

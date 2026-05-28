@@ -1,7 +1,17 @@
 //! Admin RPC for the OP Proposer.
 //!
-//! Mirrors `op-proposer/proposer/rpc/api.go` — exposes `admin_startProposer`
-//! and `admin_stopProposer`.
+//! Mirrors: [`op-proposer/proposer/rpc/api.go`][src] @ tag
+//! `op-proposer/v1.16.3-rc.1`. Exposes:
+//!
+//! * `admin_startProposer` — [api.go L39–L41][src]
+//! * `admin_stopProposer`  — [api.go L43–L45][src]
+//!
+//! The Go `ProposerDriver` interface (api.go L13–L16) is satisfied here by
+//! `Arc<L2OutputSubmitter>` directly (via its inherent `start` / `stop`
+//! methods).
+//!
+//! [src]:
+//!     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/rpc/api.go
 
 use std::{net::SocketAddr, sync::Arc};
 
@@ -13,7 +23,7 @@ use jsonrpsee::{
 };
 use tracing::info;
 
-use crate::driver::L2OutputSubmitter;
+use crate::{Result, driver::L2OutputSubmitter};
 
 #[rpc(server, namespace = "admin")]
 pub trait ProposerAdminApi {
@@ -54,7 +64,7 @@ impl ProposerAdminApiServer for ProposerAdminRpc {
 pub async fn start_admin_server(
     addr: SocketAddr,
     driver: Arc<L2OutputSubmitter>,
-) -> Result<(SocketAddr, ServerHandle), AdminRpcError> {
+) -> Result<(SocketAddr, ServerHandle)> {
     let server = ServerBuilder::default()
         .build(addr)
         .await

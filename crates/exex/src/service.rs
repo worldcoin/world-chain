@@ -3,26 +3,32 @@
 //! Wires everything together: L1 provider, DGF instance, source, store,
 //! driver, metrics, admin RPC, balance poller.
 //!
-//! Mirrors the single-chain slice of `op-proposer/proposer/service.go`.
+//! Mirrors: the single-chain slice of
+//! [`op-proposer/proposer/service.go`][src] @ tag
+//! `op-proposer/v1.16.3-rc.1`. Per-function references below cite specific
+//! Go line ranges.
+//!
+//! [src]:
+//!     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/service.go
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use alloy_provider::DynProvider;
 use jsonrpsee::server::ServerHandle;
-use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 use url::Url;
 
 use crate::{
+    DisputeGameFactory, Result,
     config::ProposerConfig,
-    contracts::DisputeGameFactory,
-    db::{ProposerStore, ProposerStoreError},
-    driver::{L2OutputSubmitter, ProposerError},
+    db::ProposerStore,
+    driver::L2OutputSubmitter,
+    error::OpProposerError,
     metrics::{ProposerMetrics, spawn_balance_poller},
     provider::{L1Provider, L1ProviderConfig, ProviderError, SignerKind},
     rpc::{AdminRpcError, start_admin_server},
-    source::{ProposalSource, ProposalSourceError, rollup::RollupProposalSource},
+    source::{ProposalSource, rollup::RollupProposalSource},
 };
 
 /// Fully assembled proposer service.
@@ -44,9 +50,20 @@ impl ProposerService {
     /// [`ProposerService::from_config_with_source`] with a
     /// [`LocalProposalSource`](crate::source::local::LocalProposalSource)
     /// to skip the rollup-RPC round-trip entirely.
-    pub async fn from_config(cfg: ProposerConfig) -> Result<Self, ServiceError> {
+    ///
+    /// Mirrors: `ProposerServiceFromCLIConfig` + `(*ProposerService).initFromCLIConfig`
+    /// — [service.go L79–L123][src]. The interop branches in
+    /// `initRPCClients` (L125–L173) are omitted; supervisor/supernode
+    /// sources are intentionally not supported.
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/service.go#L79-L173
+    pub async fn from_config(cfg: ProposerConfig) -> Result<Self> {
         if cfg.rollup_rpcs.is_empty() {
-            return Err(ServiceError::MissingSource);
+            return Err(OpProposerError::msg(
+                "missing proposal source: pass --proposer.rollup-rpc or use \
+                 ProposerService::from_config_with_source",
+            ));
         }
         let source: Arc<dyn ProposalSource> = Arc::new(RollupProposalSource::new(
             cfg.rollup_rpcs.clone(),
@@ -64,7 +81,7 @@ impl ProposerService {
     pub async fn from_config_with_source(
         cfg: ProposerConfig,
         source: Arc<dyn ProposalSource>,
-    ) -> Result<Self, ServiceError> {
+    ) -> Result<Self> {
         let metrics = Arc::new(ProposerMetrics::new());
         metrics.record_up();
 
@@ -72,19 +89,26 @@ impl ProposerService {
         // 3/2 gas fallback filler, blob gas estimation, and chain-id pre-fetch.
         let signer = match (&cfg.private_key, &cfg.mnemonic) {
             (Some(pk), None) => SignerKind::PrivateKey(pk.clone()),
-            (None, Some(phrase)) => {
-                SignerKind::Mnemonic { phrase: phrase.clone(), hd_path: cfg.hd_path.clone() }
+            (None, Some(phrase)) => SignerKind::Mnemonic {
+                phrase: phrase.clone(),
+                hd_path: cfg.hd_path.clone(),
+            },
+            (Some(_), Some(_)) => {
+                return Err(OpProposerError::msg(
+                    "conflicting signer: provide only one of private-key / mnemonic",
+                ));
             }
-            (Some(_), Some(_)) => return Err(ServiceError::ConflictingSigner),
-            (None, None) => return Err(ServiceError::MissingSigner),
+            (None, None) => {
+                return Err(OpProposerError::msg(
+                    "missing signer: provide either private-key or mnemonic",
+                ));
+            }
         };
 
-        let http_urls: Vec<Url> = cfg
-            .l1_eth_rpcs
-            .iter()
-            .map(|u| Url::parse(u))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| ServiceError::Provider(ProviderError::HttpClient(e.to_string())))?;
+        let http_urls: std::result::Result<Vec<Url>, _> =
+            cfg.l1_eth_rpcs.iter().map(|u| Url::parse(u)).collect();
+        let http_urls = http_urls
+            .map_err(|e| OpProposerError::from(ProviderError::HttpClient(e.to_string())))?;
 
         let L1Provider { provider: l1, from } = L1ProviderConfig {
             http_urls,
@@ -154,11 +178,20 @@ impl ProposerService {
     }
 
     /// Start the driver (and the admin RPC server, if configured).
-    pub async fn start(&mut self, cfg: &AdminRpcSettings) -> Result<(), ServiceError> {
+    ///
+    /// Mirrors: `(*ProposerService).Start` in
+    /// [service.go L288–L291][src], with admin-RPC bring-up inlined from
+    /// `initRPCServer` [L264–L284][rpc].
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/service.go#L288-L291
+    /// [rpc]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/service.go#L264-L284
+    pub async fn start(&mut self, cfg: &AdminRpcSettings) -> Result<()> {
         if cfg.enable {
             let addr: SocketAddr = format!("{}:{}", cfg.addr, cfg.port)
                 .parse()
-                .map_err(|e| ServiceError::Rpc(AdminRpcError::Bind(format!("{e}"))))?;
+                .map_err(|e| OpProposerError::from(AdminRpcError::Bind(format!("{e}"))))?;
             let (local, handle) = start_admin_server(addr, self.driver.clone()).await?;
             self.admin_rpc = Some((local, handle));
         }
@@ -167,7 +200,17 @@ impl ProposerService {
     }
 
     /// Stop the driver, balance poller, and admin RPC server.
-    pub async fn stop(&mut self) -> Result<(), ServiceError> {
+    ///
+    /// Mirrors: `(*ProposerService).Stop` in
+    /// [service.go L306–L359][src]. The Go function also shuts down
+    /// pprof / metrics HTTP servers and a balance-monitor `io.Closer`;
+    /// we have neither (metrics are emitted via the global metrics-rs
+    /// recorder, no HTTP server is bound) and the balance poller is
+    /// cancelled via the [`CancellationToken`] stored on `self`.
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/service.go#L306-L359
+    pub async fn stop(&mut self) -> Result<()> {
         self.driver.stop_if_running().await;
         self.balance_cancel.cancel();
         if let Some((_, handle)) = self.admin_rpc.take() {
@@ -197,26 +240,4 @@ impl AdminRpcSettings {
             port: cfg.rpc_port,
         }
     }
-}
-
-#[derive(Debug, Error)]
-pub enum ServiceError {
-    #[error("missing signer")]
-    MissingSigner,
-    #[error("conflicting signer")]
-    ConflictingSigner,
-    #[error("missing proposal source")]
-    MissingSource,
-    #[error(transparent)]
-    Provider(#[from] ProviderError),
-    #[error(transparent)]
-    Contract(#[from] crate::contracts::ContractError),
-    #[error(transparent)]
-    Source(#[from] ProposalSourceError),
-    #[error(transparent)]
-    Store(#[from] ProposerStoreError),
-    #[error(transparent)]
-    Driver(#[from] ProposerError),
-    #[error(transparent)]
-    Rpc(#[from] AdminRpcError),
 }

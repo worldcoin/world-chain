@@ -1,7 +1,8 @@
 //! Proposal sources.
 //!
 //! Mirrors the single-chain (pre-interop) slice of
-//! `op-proposer/proposer/source/`:
+//! [`op-proposer/proposer/source/source.go`][src] @ tag
+//! `op-proposer/v1.16.3-rc.1`:
 //!
 //! * [`local::LocalProposalSource`] — backed by the in-process ExEx node
 //!   state. The default for this ExEx; no external RPC required.
@@ -10,6 +11,9 @@
 //!
 //! Interop (supervisor / supernode / super-root) is intentionally not
 //! supported here.
+//!
+//! [src]:
+//!     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/source/source.go
 
 pub mod local;
 pub mod rollup;
@@ -20,6 +24,12 @@ use async_trait::async_trait;
 use thiserror::Error;
 
 /// Sync status reported by a proposal source.
+///
+/// Mirrors: `SyncStatus` struct in
+/// [source.go L61–L65][src].
+///
+/// [src]:
+///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/source/source.go#L61-L65
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SyncStatus {
     /// L1 block the source is anchored to (optional for the local source).
@@ -31,6 +41,13 @@ pub struct SyncStatus {
 }
 
 /// A proposal returned from a [`ProposalSource`].
+///
+/// Mirrors: `Proposal` struct in
+/// [source.go L11–L26][src]. The `Super` field is omitted (interop only)
+/// and `Legacy` is reduced to just `block_hash` + L1 anchor.
+///
+/// [src]:
+///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/source/source.go#L11-L26
 #[derive(Debug, Clone)]
 pub struct Proposal {
     /// The L2 output root being proposed.
@@ -44,8 +61,14 @@ pub struct Proposal {
 }
 
 impl Proposal {
-    /// `ExtraData()` from upstream — a 32-byte big-endian L2 block number,
-    /// passed to `DisputeGameFactory.create` as the `_extraData` parameter.
+    /// Encode `_extraData` for `DisputeGameFactory.create`: a 32-byte
+    /// big-endian L2 block number.
+    ///
+    /// Mirrors: `(*Proposal).ExtraData` in
+    /// [source.go L34–L42][src] (the non-super-root branch only).
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/source/source.go#L34-L42
     pub fn extra_data(&self) -> [u8; 32] {
         let mut buf = [0u8; 32];
         buf[24..].copy_from_slice(&self.block_number.to_be_bytes());
@@ -54,10 +77,18 @@ impl Proposal {
 }
 
 /// A pluggable proposal source.
+///
+/// Mirrors: `ProposalSource` interface in
+/// [source.go L53–L59][src]. The Go method name
+/// `ProposalAtSequenceNum` is renamed to `proposal_at_block` here since we
+/// dropped super-root support and the sequence number is unambiguously an
+/// L2 block number.
+///
+/// [src]:
+///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/source/source.go#L53-L59
 #[async_trait]
 pub trait ProposalSource: Send + Sync {
-    async fn proposal_at_block(&self, block_number: u64)
-    -> Result<Proposal, ProposalSourceError>;
+    async fn proposal_at_block(&self, block_number: u64) -> Result<Proposal, ProposalSourceError>;
 
     async fn sync_status(&self) -> Result<SyncStatus, ProposalSourceError>;
 

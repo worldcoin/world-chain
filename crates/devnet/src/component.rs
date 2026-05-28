@@ -45,8 +45,6 @@ pub enum DevnetComponentKind {
     OpConductor,
     /// OP Batcher.
     OpBatcher,
-    /// OP Proposer.
-    OpProposer,
     /// OP Challenger.
     OpChallenger,
     /// Prometheus metrics scraper.
@@ -71,7 +69,6 @@ impl DevnetComponentKind {
             Self::OpNode => "op-node",
             Self::OpConductor => "op-conductor",
             Self::OpBatcher => "op-batcher",
-            Self::OpProposer => "op-proposer",
             Self::OpChallenger => "op-challenger",
             Self::Prometheus => "prometheus",
             Self::Grafana => "grafana",

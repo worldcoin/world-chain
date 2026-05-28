@@ -109,7 +109,10 @@ mod tests {
     #[test]
     fn applies_three_halves_margin() {
         assert_eq!(GasEstimateWithFallbackFiller::apply_margin(100), 150);
-        assert_eq!(GasEstimateWithFallbackFiller::apply_margin(210_000), 315_000);
+        assert_eq!(
+            GasEstimateWithFallbackFiller::apply_margin(210_000),
+            315_000
+        );
     }
 
     #[test]

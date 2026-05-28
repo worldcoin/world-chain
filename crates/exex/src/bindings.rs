@@ -1,4 +1,11 @@
 //! Contract bindings for the OP Proposer.
+//!
+//! Mirrors: [`op-proposer/contracts/disputegamefactory.go`][src] @ tag
+//! `op-proposer/v1.16.3-rc.1`. Every wrapper method below references the
+//! upstream Go line range it ports.
+//!
+//! [src]:
+//!     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/contracts/disputegamefactory.go
 
 use std::sync::Arc;
 
@@ -72,7 +79,9 @@ pub struct DisputeGameFactory {
 impl DisputeGameFactory {
     pub fn new(address: Address, provider: DynProvider) -> Self {
         let instance = IDisputeGameFactory::new(address, provider);
-        Self { instance: Arc::new(instance) }
+        Self {
+            instance: Arc::new(instance),
+        }
     }
 
     /// The DGF address.
@@ -86,11 +95,23 @@ impl DisputeGameFactory {
     }
 
     /// Returns the factory `version()` string.
+    ///
+    /// Mirrors: `(*DisputeGameFactory).Version` in
+    /// [disputegamefactory.go L57–L65][src].
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/contracts/disputegamefactory.go#L57-L65
     pub async fn version(&self) -> Result<String, ContractError> {
         Ok(self.instance.version().call().await?)
     }
 
     /// Total number of games created by the factory.
+    ///
+    /// Mirrors: `(*DisputeGameFactory).gameCount` in
+    /// [disputegamefactory.go L115–L123][src].
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/contracts/disputegamefactory.go#L115-L123
     pub async fn game_count(&self) -> Result<u64, ContractError> {
         let n = self.instance.gameCount().call().await?;
         u64::try_from(n).map_err(|_| ContractError::Decode("game count > u64".into()))
@@ -106,7 +127,13 @@ impl DisputeGameFactory {
     }
 
     /// `game_at_index_raw` + a follow-up `claimData(0)` to resolve the
-    /// claimant / claim. Mirrors `gameAtIndex` from the Go contracts pkg.
+    /// claimant / claim.
+    ///
+    /// Mirrors: `(*DisputeGameFactory).gameAtIndex` in
+    /// [disputegamefactory.go L125–L154][src].
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/contracts/disputegamefactory.go#L125-L154
     pub async fn game_at_index(&self, index: u64) -> Result<GameMetadata, ContractError> {
         let (game_type, timestamp, proxy) = self.game_at_index_raw(index).await?;
         let game = IFaultDisputeGame::new(proxy, self.instance.provider().clone());
@@ -121,13 +148,29 @@ impl DisputeGameFactory {
     }
 
     /// Initial bond required to create a game of the given type.
+    ///
+    /// Mirrors the `initBonds` call wrapped in
+    /// `(*DisputeGameFactory).ProposalTx` —
+    /// [disputegamefactory.go L98–L113][src] L100–L106. We hoist the read
+    /// into its own method since alloy's contract instance handles the
+    /// calldata + value assembly for us.
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/contracts/disputegamefactory.go#L98-L113
     pub async fn init_bond(&self, game_type: u32) -> Result<U256, ContractError> {
         Ok(self.instance.initBonds(game_type).call().await?)
     }
 
     /// Returns true if `proposer` has created a game of type `game_type`
     /// after `cutoff_unix`, along with the timestamp and claim of that game.
-    /// Direct port of upstream `HasProposedSince`.
+    ///
+    /// Mirrors: `(*DisputeGameFactory).HasProposedSince` in
+    /// [disputegamefactory.go L70–L96][src]. The Rust loop is a 1:1
+    /// translation of the Go for-loop that walks the factory backwards
+    /// from the latest game and short-circuits on the cutoff.
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/contracts/disputegamefactory.go#L70-L96
     pub async fn has_proposed_since(
         &self,
         proposer: Address,

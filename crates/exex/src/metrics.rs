@@ -1,7 +1,18 @@
 //! Prometheus metrics for the OP Proposer ExEx.
 //!
-//! Mirrors `op-proposer/metrics/metrics.go`. The metric name prefix matches
-//! upstream (`op_proposer_*`) so existing dashboards keep working.
+//! Mirrors: [`op-proposer/metrics/metrics.go`][src] @ tag
+//! `op-proposer/v1.16.3-rc.1`. The metric name prefix matches upstream
+//! (`op_proposer_*`) so existing dashboards keep working.
+//!
+//! Per-counter mapping:
+//! * `proposed_block_number` ← `proposalSequenceNum` (metrics.go L75–L79)
+//! * `wallet_balance_eth` ← `StartBalanceMetrics` (metrics.go L99–L101);
+//!   we expose it as a Gauge polled by [`spawn_balance_poller`] instead of
+//!   running a separate balance-monitor goroutine.
+//! * `up` ← `up` (metrics.go L87–L91 + `RecordUp` L110–L112)
+//!
+//! [src]:
+//!     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/metrics/metrics.go
 
 use std::{sync::Arc, time::Duration};
 
@@ -43,6 +54,11 @@ impl ProposerMetrics {
         Self::default()
     }
 
+    /// Mirrors: `(*Metrics).RecordL2Proposal` in
+    /// [metrics.go L123–L125][src].
+    ///
+    /// [src]:
+    ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/metrics/metrics.go#L123-L125
     pub fn record_l2_proposal(&self, block_number: u64) {
         self.proposed_block_number.set(block_number as f64);
         self.proposal_submissions.increment(1);
@@ -64,6 +80,15 @@ impl ProposerMetrics {
 /// Periodically polls `provider.get_balance(address)` and updates
 /// [`ProposerMetrics::wallet_balance_eth`]. Cancellation via the supplied
 /// token shuts the task down.
+///
+/// Mirrors: `opmetrics.LaunchBalanceMetrics` invoked via
+/// `(*Metrics).StartBalanceMetrics` in
+/// [op-proposer/metrics/metrics.go L99–L101][src]. Upstream emits the
+/// balance as a Gauge over the `eth_getBalance` RPC; we do the same, with
+/// the polling interval driven by `--proposer.balance-poll-interval`.
+///
+/// [src]:
+///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/metrics/metrics.go#L99-L101
 pub fn spawn_balance_poller(
     provider: DynProvider,
     address: Address,
