@@ -14115,6 +14115,7 @@ dependencies = [
  "metrics",
  "metrics-derive",
  "parking_lot",
+ "reth-execution-types",
  "reth-exex",
  "reth-libmdbx",
  "reth-node-api",

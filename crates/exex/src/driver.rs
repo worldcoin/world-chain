@@ -90,6 +90,7 @@ impl L2OutputSubmitter {
     }
 
     /// Address that signs and pays for proposer transactions.
+    #[allow(clippy::wrong_self_convention)]
     pub fn from_address(&self) -> Address {
         self.from
     }
@@ -178,9 +179,10 @@ impl L2OutputSubmitter {
     ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/driver.go#L261-L294
     async fn run_loop(self: Arc<Self>, cancel: CancellationToken) {
         if self.cfg.wait_node_sync
-            && let Err(e) = self.wait_node_sync(&cancel).await {
-                error!(target: "exex::proposer", error = %e, "wait_node_sync failed");
-            }
+            && let Err(e) = self.wait_node_sync(&cancel).await
+        {
+            error!(target: "exex::proposer", error = %e, "wait_node_sync failed");
+        }
 
         let mut ticker = tokio::time::interval(self.cfg.poll_interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -249,15 +251,17 @@ impl L2OutputSubmitter {
         let proposal = self.fetch_output(current_block).await?;
 
         if let Some(last) = self.store.last_proposal()?
-            && last.root == proposal.root && last.block_number == proposal.block_number {
-                debug!(
-                    target: "exex::proposer",
-                    last_root = ?last.root,
-                    "skipping proposal: output root unchanged since last persisted submission",
-                );
-                self.metrics.record_skipped();
-                return Ok(None);
-            }
+            && last.root == proposal.root
+            && last.block_number == proposal.block_number
+        {
+            debug!(
+                target: "exex::proposer",
+                last_root = ?last.root,
+                "skipping proposal: output root unchanged since last persisted submission",
+            );
+            self.metrics.record_skipped();
+            return Ok(None);
+        }
 
         info!(
             target: "exex::proposer",

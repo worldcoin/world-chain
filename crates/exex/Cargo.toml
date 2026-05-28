@@ -19,6 +19,7 @@ reth-tasks.workspace = true
 reth-libmdbx.workspace = true
 reth-tracing.workspace = true
 reth-storage-api.workspace = true
+reth-execution-types.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
