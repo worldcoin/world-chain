@@ -25,8 +25,8 @@
 //! [wip]: ../../../../wips/wip-1006.md
 //! [op-withdrawals]: https://specs.optimism.io/protocol/withdrawals.html
 
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
-use alloy_sol_types::{sol, SolValue};
+use alloy_primitives::{Address, B256, Bytes, U256, keccak256};
+use alloy_sol_types::{SolValue, sol};
 use serde::{Deserialize, Serialize};
 
 // Re-export the predeploy address rather than redefining it; the proposer's

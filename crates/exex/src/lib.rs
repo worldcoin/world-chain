@@ -30,8 +30,8 @@ mod error;
 mod proposer;
 mod withdrawals;
 
-use proposer::{ContractError, DisputeGameFactory};
 pub use error::OpProposerError;
+use proposer::{ContractError, DisputeGameFactory};
 pub use proposer::{
     config::{ProposerCliArgs, ProposerConfig},
     db::{ProposerStore, StoredHead, StoredProposal},

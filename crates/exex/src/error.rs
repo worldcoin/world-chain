@@ -28,12 +28,12 @@ use eyre::eyre::eyre;
 use thiserror::Error;
 
 use crate::{
+    ContractError,
     proposer::{
         config::ProposerConfigError, db::ProposerStoreError, provider::ProviderError,
         rpc::AdminRpcError, source::ProposalSourceError,
     },
     withdrawals::{config::RelayerConfigError, store::WithdrawalStoreError},
-    ContractError,
 };
 
 /// Top-level error for the OP Proposer ExEx.

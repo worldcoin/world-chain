@@ -19,7 +19,7 @@ use tracing::{debug, warn};
 
 use crate::withdrawals::{
     store::{WithdrawalStore, WithdrawalStoreError},
-    types::{MessagePassed, WithdrawalDecodeError, WithdrawalRecord, L2_TO_L1_MESSAGE_PASSER},
+    types::{L2_TO_L1_MESSAGE_PASSER, MessagePassed, WithdrawalDecodeError, WithdrawalRecord},
 };
 
 const TARGET: &str = "exex::relayer";
@@ -177,8 +177,8 @@ fn now_unix() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::withdrawals::types::{message_slot, withdrawal_hash, WithdrawalTransaction};
-    use alloy_primitives::{Address, Bytes, LogData, B256, U256};
+    use crate::withdrawals::types::{WithdrawalTransaction, message_slot, withdrawal_hash};
+    use alloy_primitives::{Address, B256, Bytes, LogData, U256};
 
     fn sample_tx(seed: u8) -> WithdrawalTransaction {
         WithdrawalTransaction {
