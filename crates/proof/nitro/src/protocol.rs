@@ -23,8 +23,8 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// Default vsock port the enclave binary listens on.
 pub const DEFAULT_VSOCK_PORT: u32 = 5005;
 
-/// Maximum frame size accepted on the wire (64 MiB).
-pub const MAX_FRAME_BYTES: u32 = 64 * 1024 * 1024;
+/// Maximum frame size accepted on the wire (256 MiB).
+pub const MAX_FRAME_BYTES: u32 = 256 * 1024 * 1024;
 
 /// Requests the host can send to the enclave.
 #[derive(Clone, Debug, Serialize, Deserialize)]
