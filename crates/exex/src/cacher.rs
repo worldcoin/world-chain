@@ -7,8 +7,6 @@
 //! [`scan_chain`] extracts `MessagePassed` logs from a committed [`Chain`] and
 //! persists [`WithdrawalRecord`]s; [`prune_chain`] applies the reorg rule over
 //! a reverted chain's block range.
-//!
-//! [wip]: ../../../wips/wip-1006.md
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

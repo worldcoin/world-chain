@@ -1107,6 +1107,16 @@ async fn start_world_chain_el(
             "--proposer.network-timeout".to_string(),
             OP_TXMGR_NETWORK_TIMEOUT.to_string(),
         ]);
+
+        // Wire the withdrawal cacher (wip-1006) on the same privileged
+        // sequencer. The cacher indexes `MessagePassed` withdrawals straight
+        // from local L2 state, so it needs no L1/portal/game-factory wiring;
+        // those land with the relayer driver. `--relayer.cache-only` is set
+        // explicitly to document that this node only caches for now.
+        args.extend([
+            "--relayer.enabled".to_string(),
+            "--relayer.cache-only".to_string(),
+        ]);
     }
 
     let mut process = spawn_native_process(&format!("world-chain-el-{index}"), &binary, &args)
