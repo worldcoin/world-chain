@@ -221,6 +221,133 @@ Flashblocks:
           
           [env: FLASHBLOCKS_FORCE_RECEIVE_PEERS=]
 
+OP Proposer ExEx:
+      --proposer.enabled
+          Enable the OP Proposer ExEx
+          
+          [env: OP_PROPOSER_ENABLED=]
+
+      --proposer.l1-eth-rpc <proposer_l1_eth_rpc>
+          HTTP provider URL for L1
+          
+          [env: OP_PROPOSER_L1_ETH_RPC=]
+
+      --proposer.rollup-rpc <proposer_rollup_rpc>
+          Optional HTTP provider URL for a remote `op-node` rollup RPC.
+          
+          When set, the proposer will read output roots from this endpoint instead of computing them locally. A comma-separated list enables active failover (matches the Go behaviour).
+          
+          [env: OP_PROPOSER_ROLLUP_RPC=]
+
+      --proposer.game-factory-address <proposer_game_factory_address>
+          Address of the `DisputeGameFactory` contract
+          
+          [env: OP_PROPOSER_GAME_FACTORY_ADDRESS=]
+
+      --proposer.poll-interval <proposer_poll_interval>
+          Interval between checks for whether to load and submit a new proposal
+          
+          [env: OP_PROPOSER_POLL_INTERVAL=]
+          [default: 12s]
+
+      --proposer.proposal-interval <proposer_proposal_interval>
+          Interval between submitting L2 output proposals
+          
+          [env: OP_PROPOSER_PROPOSAL_INTERVAL=]
+          [default: 1h]
+
+      --proposer.allow-non-finalized
+          Allow proposals derived from non-finalized L1 data
+          
+          [env: OP_PROPOSER_ALLOW_NON_FINALIZED=]
+
+      --proposer.game-type <proposer_game_type>
+          Dispute game type
+          
+          [env: OP_PROPOSER_GAME_TYPE=]
+          [default: 0]
+
+      --proposer.active-sequencer-check-duration <proposer_active_sequencer_check_duration>
+          Active sequencer check duration (only used with `--proposer.rollup-rpc`)
+          
+          [env: OP_PROPOSER_ACTIVE_SEQUENCER_CHECK_DURATION=]
+          [default: 2m]
+
+      --proposer.wait-node-sync
+          Whether to wait for the node to sync to the current L1 tip before starting the driver loop
+          
+          [env: OP_PROPOSER_WAIT_NODE_SYNC=]
+
+      --proposer.network-timeout <proposer_network_timeout>
+          L1 network timeout (per-call)
+          
+          [env: OP_PROPOSER_NETWORK_TIMEOUT=]
+          [default: 10s]
+
+      --proposer.private-key <proposer_private_key>
+          Hex-encoded private key of the L1 proposer EOA.
+          
+          Mutually exclusive with `--proposer.mnemonic`. Either is required when the proposer is enabled.
+          
+          [env: OP_PROPOSER_PRIVATE_KEY=]
+
+      --proposer.mnemonic <proposer_mnemonic>
+          BIP-39 mnemonic for the L1 proposer signer
+          
+          [env: OP_PROPOSER_MNEMONIC=]
+
+      --proposer.hd-path <proposer_hd_path>
+          HD derivation path used with `--proposer.mnemonic`
+          
+          [env: OP_PROPOSER_HD_PATH=]
+          [default: m/44'/60'/0'/0/0]
+
+      --proposer.balance-poll-interval <proposer_balance_poll_interval>
+          Interval between wallet-balance metric refreshes
+          
+          [env: OP_PROPOSER_BALANCE_POLL_INTERVAL=]
+          [default: 60s]
+
+      --proposer.rpc-max-retries <proposer_rpc_max_retries>
+          Maximum rate-limit retries the L1 transport will attempt before surfacing an error. `0` disables retries
+          
+          [env: OP_PROPOSER_RPC_MAX_RETRIES=]
+          [default: 10]
+
+      --proposer.rpc-initial-backoff-ms <proposer_rpc_initial_backoff_ms>
+          Initial backoff for L1 rate-limit retries (ms)
+          
+          [env: OP_PROPOSER_RPC_INITIAL_BACKOFF_MS=]
+          [default: 500]
+
+      --proposer.rpc-cups <proposer_rpc_cups>
+          Compute-units-per-second budget used by alloy's retry backoff layer to scale waits
+          
+          [env: OP_PROPOSER_RPC_CUPS=]
+          [default: 660]
+
+      --proposer.rpc-addr <proposer_rpc_addr>
+          Admin RPC bind address
+          
+          [env: OP_PROPOSER_RPC_ADDR=]
+          [default: 127.0.0.1]
+
+      --proposer.rpc-port <proposer_rpc_port>
+          Admin RPC bind port. Pass `0` to disable the admin RPC server
+          
+          [env: OP_PROPOSER_RPC_PORT=]
+          [default: 0]
+
+      --proposer.rpc-enable-admin
+          Enable admin namespace on the proposer RPC
+          
+          [env: OP_PROPOSER_RPC_ENABLE_ADMIN=]
+
+      --proposer.datadir <proposer_datadir>
+          Directory for proposer persistent state (MDBX)
+          
+          [env: OP_PROPOSER_DATADIR=]
+
       --tx-peers <PEER_ID>
           Comma-separated list of peer IDs to which transactions should be propagated
 
