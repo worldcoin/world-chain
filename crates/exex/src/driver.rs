@@ -178,16 +178,9 @@ impl L2OutputSubmitter {
     ///     https://github.com/ethereum-optimism/optimism/blob/op-proposer/v1.16.3-rc.1/op-proposer/proposer/driver.go#L261-L294
     async fn run_loop(self: Arc<Self>, cancel: CancellationToken) {
         if self.cfg.wait_node_sync
-<<<<<<< HEAD
             && let Err(e) = self.wait_node_sync(&cancel).await {
                 error!(target: "exex::proposer", error = %e, "wait_node_sync failed");
             }
-=======
-            && let Err(e) = self.wait_node_sync(&cancel).await
-        {
-            error!(target: "exex::proposer", error = ?e, "wait_node_sync failed");
-        }
->>>>>>> be78e50c736bfa38cb5d32b2bd9a67fbebffddcb
 
         let mut ticker = tokio::time::interval(self.cfg.poll_interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -256,7 +249,6 @@ impl L2OutputSubmitter {
         let proposal = self.fetch_output(current_block).await?;
 
         if let Some(last) = self.store.last_proposal()?
-<<<<<<< HEAD
             && last.root == proposal.root && last.block_number == proposal.block_number {
                 debug!(
                     target: "exex::proposer",
@@ -266,19 +258,6 @@ impl L2OutputSubmitter {
                 self.metrics.record_skipped();
                 return Ok(None);
             }
-=======
-            && last.root == proposal.root
-            && last.block_number == proposal.block_number
-        {
-            debug!(
-                target: "exex::proposer",
-                last_root = ?last.root,
-                "skipping proposal: output root unchanged since last persisted submission",
-            );
-            self.metrics.record_skipped();
-            return Ok(None);
-        }
->>>>>>> be78e50c736bfa38cb5d32b2bd9a67fbebffddcb
 
         info!(
             target: "exex::proposer",
