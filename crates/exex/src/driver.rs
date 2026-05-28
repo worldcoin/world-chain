@@ -90,6 +90,7 @@ impl L2OutputSubmitter {
     }
 
     /// Address that signs and pays for proposer transactions.
+    #[allow(clippy::wrong_self_convention)]
     pub fn from_address(&self) -> Address {
         self.from
     }

@@ -21,6 +21,7 @@ world-chain-builder.workspace = true
 world-chain-chainspec.workspace = true
 world-chain-cli.workspace = true
 world-chain-exex.workspace = true
+world-chain-op-batcher.workspace = true
 world-chain-evm.workspace = true
 world-chain-rpc.workspace = true
 world-chain-state.workspace = true

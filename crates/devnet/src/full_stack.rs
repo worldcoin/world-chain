@@ -54,7 +54,6 @@ const OP_BATCHER_MAX_CHANNEL_DURATION_L1_BLOCKS: &str = "4";
 /// the `permissioned` game-type the legacy Docker `op-proposer` used.
 const OP_PROPOSER_PERMISSIONED_GAME_TYPE: &str = "1";
 const OP_TXMGR_NETWORK_TIMEOUT: &str = "30s";
-const OP_TXMGR_RESUBMISSION_TIMEOUT: &str = "5m";
 const CONDUCTOR_RPC_PORT: u16 = 8545;
 const CONDUCTOR_WS_PORT: u16 = 8546;
 const CONDUCTOR_CONSENSUS_PORT: u16 = 50050;
@@ -96,6 +95,17 @@ struct ProposerWiring {
     l1_rpc: String,
     /// `DisputeGameFactoryProxy` address from the L1 deployer artifacts.
     game_factory: String,
+}
+
+/// Inputs needed by `start_world_chain_el` to wire the OP Batcher ExEx onto a
+/// sequencer (index-0 only, mirroring the proposer — a single node submits
+/// batches). Replaces the standalone `op-batcher` Docker container.
+#[derive(Debug, Clone)]
+struct BatcherWiring {
+    /// L1 host-facing RPC (e.g. `http://127.0.0.1:8545`).
+    l1_rpc: String,
+    /// `batch_inbox_address` from the op-deployer rollup config.
+    batch_inbox: String,
 }
 
 #[derive(Debug)]
@@ -264,6 +274,14 @@ impl FullStackWorldDevnet {
             game_factory: game_factory.clone(),
         };
 
+        // Resolve the L1 `batch_inbox_address` from the op-deployer rollup
+        // config so the OP Batcher ExEx (sequencer 0) can post batches there.
+        let batch_inbox = rollup_batch_inbox(&artifacts.rollup_path)?;
+        let batcher_wiring = BatcherWiring {
+            l1_rpc: l1_public_rpc.clone(),
+            batch_inbox,
+        };
+
         let sequencer_count = config.sequencer_count.max(1) as usize;
         let sequencer_plans = (0..sequencer_count)
             .map(plan_sequencer)
@@ -280,12 +298,14 @@ impl FullStackWorldDevnet {
                 .filter_map(|(peer_index, peer)| (peer_index != index).then_some(peer.clone()))
                 .collect::<Vec<_>>();
             let proposer = (index == 0).then(|| proposer_wiring.clone());
+            let batcher = (index == 0).then(|| batcher_wiring.clone());
             start_world_chain_el(
                 index,
                 &workdir_path,
                 &sequencer_plans[index],
                 trusted_peers,
                 proposer,
+                batcher,
             )
         }))
         .await?;
@@ -370,15 +390,12 @@ impl FullStackWorldDevnet {
         let conductor_rpc_internal = host_internal_url(&conductors[0].rpc_url)?;
         let l2_rpc_internal = host_internal_url(&sequencers[0].rpc_url)?;
 
-        // No standalone op-proposer container — the OP Proposer runs as a
-        // reth ExEx inside sequencer 0 (wired above via `proposer_wiring`).
-        let (batcher, challenger) = if config.op_challenger {
-            let (batcher, challenger) = tokio::try_join!(
-                start_batcher(
-                    &config.images.op_batcher,
-                    &l1_internal_rpc,
-                    &conductor_rpc_internal,
-                ),
+        // No standalone op-proposer / op-batcher containers — both the OP
+        // Proposer and the OP Batcher run as reth ExExes inside sequencer 0
+        // (wired above via `proposer_wiring` / `batcher_wiring`).
+        let batcher: Option<ContainerService> = None;
+        let challenger = if config.op_challenger {
+            Some(
                 start_challenger(
                     &config.images.op_challenger,
                     &workdir_path,
@@ -386,17 +403,11 @@ impl FullStackWorldDevnet {
                     &l2_rpc_internal,
                     &conductor_rpc_internal,
                     &game_factory,
-                ),
-            )?;
-            (Some(batcher), Some(challenger))
-        } else {
-            let batcher = start_batcher(
-                &config.images.op_batcher,
-                &l1_internal_rpc,
-                &conductor_rpc_internal,
+                )
+                .await?,
             )
-            .await?;
-            (Some(batcher), None)
+        } else {
+            None
         };
 
         let mut metrics_targets = Vec::new();
@@ -976,6 +987,7 @@ async fn start_world_chain_el(
     plan: &SequencerPlan,
     trusted_peers: Vec<String>,
     proposer: Option<ProposerWiring>,
+    batcher: Option<BatcherWiring>,
 ) -> Result<SequencerService> {
     let data_dir = workdir.join(format!("l2data-{index}"));
     fs::create_dir_all(&data_dir).wrap_err("failed to create L2 data dir")?;
@@ -1105,6 +1117,29 @@ async fn start_world_chain_el(
             "1s".to_string(),
             "--proposer.allow-non-finalized".to_string(),
             "--proposer.network-timeout".to_string(),
+            OP_TXMGR_NETWORK_TIMEOUT.to_string(),
+        ]);
+    }
+
+    // Wire the OP Batcher ExEx for sequencer 0 only (replaces the standalone
+    // op-batcher container). It reads L2 blocks from this node's local state
+    // and posts calldata batches to the L1 BatchInbox.
+    if let Some(wiring) = batcher {
+        args.extend([
+            "--batcher.enabled".to_string(),
+            "--batcher.l1-eth-rpc".to_string(),
+            wiring.l1_rpc,
+            "--batcher.batch-inbox-address".to_string(),
+            wiring.batch_inbox,
+            "--batcher.private-key".to_string(),
+            BATCHER_PRIVATE_KEY.to_string(),
+            "--batcher.poll-interval".to_string(),
+            "1s".to_string(),
+            "--batcher.max-channel-duration".to_string(),
+            OP_BATCHER_MAX_CHANNEL_DURATION_L1_BLOCKS.to_string(),
+            "--batcher.sub-safety-margin".to_string(),
+            "0".to_string(),
+            "--batcher.network-timeout".to_string(),
             OP_TXMGR_NETWORK_TIMEOUT.to_string(),
         ]);
     }
@@ -1841,63 +1876,10 @@ async fn start_bootstrap_sequencer(op_node: &OpNodeService) -> Result<()> {
     Ok(())
 }
 
-async fn start_batcher(
-    image: &ContainerImage,
-    l1_rpc: &str,
-    conductor_rpc: &str,
-) -> Result<ContainerService> {
-    let cmd = vec![
-        "--l1-eth-rpc".to_string(),
-        l1_rpc.to_string(),
-        "--l2-eth-rpc".to_string(),
-        conductor_rpc.to_string(),
-        "--rollup-rpc".to_string(),
-        conductor_rpc.to_string(),
-        "--private-key".to_string(),
-        BATCHER_PRIVATE_KEY.to_string(),
-        "--data-availability-type".to_string(),
-        "calldata".to_string(),
-        "--poll-interval".to_string(),
-        "1s".to_string(),
-        "--max-channel-duration".to_string(),
-        OP_BATCHER_MAX_CHANNEL_DURATION_L1_BLOCKS.to_string(),
-        "--sub-safety-margin".to_string(),
-        "0".to_string(),
-        "--num-confirmations".to_string(),
-        "1".to_string(),
-        "--network-timeout".to_string(),
-        OP_TXMGR_NETWORK_TIMEOUT.to_string(),
-        "--resubmission-timeout".to_string(),
-        OP_TXMGR_RESUBMISSION_TIMEOUT.to_string(),
-        "--rpc.addr".to_string(),
-        "0.0.0.0".to_string(),
-        "--rpc.port".to_string(),
-        SERVICE_RPC_PORT.to_string(),
-        "--rpc.enable-admin".to_string(),
-        "--metrics.enabled".to_string(),
-        "--metrics.addr".to_string(),
-        "0.0.0.0".to_string(),
-        "--metrics.port".to_string(),
-        SERVICE_METRICS_PORT.to_string(),
-        "--log.format".to_string(),
-        "logfmt".to_string(),
-        "--log.level".to_string(),
-        "DEBUG".to_string(),
-    ];
-    start_aux_service(
-        "op-batcher",
-        DevnetComponentKind::OpBatcher,
-        image,
-        cmd,
-        None,
-    )
-    .await
-}
-
-// `start_proposer` (standalone op-proposer container) has been removed.
-// The OP Proposer now runs as a reth ExEx inside sequencer 0; see the
-// `--proposer.*` flags appended by `start_world_chain_el` when its
-// `proposer_wiring` arg is `Some`.
+// `start_proposer` and `start_batcher` (standalone op-proposer / op-batcher
+// containers) have been removed. Both now run as reth ExExes inside sequencer
+// 0; see the `--proposer.*` / `--batcher.*` flags appended by
+// `start_world_chain_el` when its `proposer` / `batcher` args are `Some`.
 
 async fn start_challenger(
     image: &ContainerImage,
@@ -2541,6 +2523,16 @@ fn l1_address(addresses: &Value, name: &str) -> Result<String> {
         .and_then(Value::as_str)
         .map(ToString::to_string)
         .ok_or_else(|| eyre!("op-deployer l1-addresses.json missing {name}"))
+}
+
+/// Read the `batch_inbox_address` from the op-deployer rollup config.
+fn rollup_batch_inbox(rollup_path: &Path) -> Result<String> {
+    let rollup = read_json(rollup_path)?;
+    rollup
+        .get("batch_inbox_address")
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+        .ok_or_else(|| eyre!("rollup config missing batch_inbox_address"))
 }
 
 fn reserve_host_port() -> Result<u16> {

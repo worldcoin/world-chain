@@ -2352,6 +2352,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
             pbh,
             flashblocks: Some(test_flashblocks_args(&authorizer_sk, &builder_sk)),
             proposer: world_chain_exex::ProposerCliArgs::default(),
+            batcher: world_chain_op_batcher::BatcherCliArgs::default(),
             tx_peers: None,
             disable_bootnodes: true,
             simulate_enabled: false,
