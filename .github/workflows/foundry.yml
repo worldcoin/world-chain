@@ -20,7 +20,7 @@ jobs:
       contents: read
     defaults:
       run:
-        working-directory: contracts
+        working-directory: pkg/contracts
     steps:
       - uses: actions/checkout@v6
         with:

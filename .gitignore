@@ -3,8 +3,8 @@ book
 .env
 .vscode
 .report
-contracts/sepolia_load_test_*.json
-contracts/sepolia_load_test.json
+pkg/contracts/sepolia_load_test_*.json
+pkg/contracts/sepolia_load_test.json
 .claude
 .vscode
 .docker-cache

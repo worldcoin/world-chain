@@ -12,6 +12,9 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  WORLDCHAIN_PROVIDER: "${{ secrets.WORLDCHAIN_PROVIDER }}"
 
 jobs:
   cargo-tests:
@@ -79,3 +82,25 @@ jobs:
           restore-keys: cargo-test-
       - name: clippy
         run: cargo +nightly clippy --workspace --all-targets --all-features -- -D warnings
+
+  cargo-docs:
+    runs-on: arc-public-8xlarge-amd64-runner
+    timeout-minutes: 20
+    name: docs
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache
+        uses: actions/cache@v5
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-test-
+      - name: Generate CLI docs
+        run: cargo xtask docs
+      - name: Check docs are up to date
+        run: git diff --exit-code specs/

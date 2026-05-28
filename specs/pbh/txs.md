@@ -1,6 +1,6 @@
 # PBH Transactions
 
-The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that target the [PBHEntryPoint](https://github.com/worldcoin/world-chain/blob/main/contracts/src/PBHEntryPointImplV1.sol) and includes a [PBHPayload](./payload.md) encoded in the tx calldata.
+The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that target the [PBHEntryPoint](https://github.com/worldcoin/world-chain/blob/main/pkg/contracts/src/PBHEntryPointImplV1.sol) and includes a [PBHPayload](./payload.md) encoded in the tx calldata.
 <!--TODO: uncomment this once the pbh sidecar is merged to main The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid `PBHPayload` either encoded in the `WorldChainTxEnvelope` or in tx calldata and target the `PBHEntryPoint`. -->
 
 
@@ -41,4 +41,4 @@ The bundler will [validate the PBHPayload](./validation.md), strip the payload f
 
 Upon submitting a PBH bundle to the network, the World Chain builder will ensure that all PBH bundles have valid proofs and mark the bundle for priority inclusion.
 
-Visit the [validation](./validation.md#signal-hash) section of the docs to see how to encode the `signalHash` for a PBH `UserOps` work, check out the [handleAggregatedOps()](https://github.com/worldcoin/world-chain/blob/main/contracts/src/PBHEntryPointImplV1.sol#L216-L250) function and [PBH4337Module](https://github.com/worldcoin/world-chain/blob/main/contracts/src/PBH4337Module.sol).
+Visit the [validation](./validation.md#signal-hash) section of the docs to see how to encode the `signalHash` for a PBH `UserOps` work, check out the [handleAggregatedOps()](https://github.com/worldcoin/world-chain/blob/main/pkg/contracts/src/PBHEntryPointImplV1.sol#L216-L250) function and [PBH4337Module](https://github.com/worldcoin/world-chain/blob/main/pkg/contracts/src/PBH4337Module.sol).

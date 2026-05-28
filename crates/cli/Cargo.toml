@@ -1,0 +1,61 @@
+[package]
+name = "world-chain-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+world-chain-chainspec.workspace = true
+reth-node-builder.workspace = true
+reth-chainspec.workspace = true
+reth-cli.workspace = true
+reth-cli-commands.workspace = true
+reth-cli-runner.workspace = true
+reth-db = { workspace = true, features = ["mdbx"] }
+reth-node-core.workspace = true
+reth-node-metrics.workspace = true
+reth-optimism-chainspec.workspace = true
+reth-optimism-cli.workspace = true
+reth-optimism-consensus.workspace = true
+reth-optimism-evm.workspace = true
+reth-optimism-node.workspace = true
+reth-optimism-payload-builder.workspace = true
+reth-rpc-server-types.workspace = true
+reth-tracing.workspace = true
+alloy-chains.workspace = true
+alloy-signer-local.workspace = true
+alloy-primitives.workspace = true
+ed25519-dalek.workspace = true
+
+clap.workspace = true
+eyre.workspace = true
+futures-util.workspace = true
+hex.workspace = true
+reth-network-peers.workspace = true
+tracing.workspace = true
+
+# kona consensus node (in-process) — CLI args / P2P config
+kona-node-service.workspace = true
+kona-disc.workspace = true
+kona-gossip.workspace = true
+kona-peers.workspace = true
+kona-sources.workspace = true
+kona-cli.workspace = true
+kona-genesis.workspace = true
+discv5.workspace = true
+libp2p.workspace = true
+k256.workspace = true
+url.workspace = true
+reqwest.workspace = true
+
+[dev-dependencies]
+alloy-genesis.workspace = true
+reth-node-core.workspace = true
+
+[features]
+default = []
+dev = ["reth-optimism-cli/dev"]
+
+[[example]]
+name = "sk-to-vk"
+path = "examples/sk_to_vk.rs"

@@ -1,0 +1,20 @@
+[package]
+name = "world-chain-pbh"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+alloy-rlp = { workspace = true }
+alloy-primitives = { workspace = true }
+
+chrono.workspace = true
+thiserror.workspace = true
+semaphore-rs.workspace = true
+semaphore-rs-proof.workspace = true
+strum.workspace = true
+serde.workspace = true
+bon.workspace = true
+
+[dev-dependencies]
+test-case.workspace = true
+eyre.workspace = true

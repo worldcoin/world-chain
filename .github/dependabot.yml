@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      cargo-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "reth*"
+      - dependency-name: "op-reth*"
+      - dependency-name: "alloy*"
+      - dependency-name: "op-alloy*"
+      - dependency-name: "revm*"
+      - dependency-name: "op-revm*"

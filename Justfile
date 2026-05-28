@@ -4,34 +4,38 @@ set positional-arguments := true
 default:
     @just --list
 
-# Spawns the devnet
-devnet-up: deploy-devnet deploy-contracts
-
-deploy-devnet: build
-    just ./devnet/devnet-up
-
 build:
     docker buildx build \
+        --build-arg VERGEN_GIT_SHA="$(git rev-parse HEAD)" \
         -t world-chain:latest .
 
-deploy-contracts:
-    @just ./contracts/deploy-contracts
+build-world-chain-bin:
+    cargo build -p world-chain
 
-# Stops the devnet **This will prune all docker containers**
-devnet-down:
-    @just ./devnet/devnet-down
+devnet-up: build
+    @just ./pkg/devnet/devnet-up
+
+deploy-contracts:
+    @just ./pkg/contracts/deploy-contracts
 
 test *args='':
     RUST_LOG="info" cargo nextest run --workspace $@
 
-# Formats the whole workspace
-fmt: devnet-fmt contracts-fmt fmt-fix fmt-check
+# Test with flashblocks debug tracing
+test-dev *args='':
+    RUST_LOG="info,flashblocks=debug,world_chain=info" cargo nextest run --workspace $@
 
-devnet-fmt:
-    @just ./devnet/fmt
+# Test with verbose flashblocks tracing (all subsystems at trace level)
+test-verbose *args='':
+    RUST_LOG="info,flashblocks=trace,world_chain=trace,bal_executor=trace,payload_builder=trace,engine::tree=trace" cargo nextest run --workspace $@
+
+clippy:
+    cargo +nightly clippy --workspace --all-targets --all-features
+
+fmt: fmt-fix fmt-check contracts-fmt
 
 contracts-fmt:
-    @just ./contracts/fmt
+    @just ./pkg/contracts/fmt
 
 fmt-fix:
     cargo +nightly fmt --all
@@ -39,11 +43,46 @@ fmt-fix:
 fmt-check:
     cargo +nightly fmt --all -- --check
 
-e2e-test *args='':
-    RUST_LOG="info,tests=info" cargo run -p tests-devnet --release -- $@
+# Launch a local playground (in-process node swarm)
+playground *args='':
+    RUST_LOG="info" cargo run -p xtask --release -- launch-node $@
+
+# Manage the native Rust HA devnet. Use `just devnet up -d` to run in the background and `just devnet down` to stop it.
+devnet command='up' *args='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "{{command}}" = "up" ]; then
+        cargo build -p world-chain
+    fi
+    RUST_LOG="${RUST_LOG:-info,flashblocks=trace,engine_driver=info}" cargo run -p xtask -- devnet {{command}} {{args}}
+
+# Tail world-chain execution client logs from the running devnet (e.g. `just devnet-logs` or `just devnet-logs 0` for a specific sequencer).
+devnet-logs index='':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    LOG_FILE="${WORLD_CHAIN_DEVNET_LOG_FILE:-target/devnet/logs/devnet.log}"
+    if [ ! -f "$LOG_FILE" ]; then
+        echo "no devnet log file at $LOG_FILE; is the devnet running?" >&2
+        exit 1
+    fi
+    if [ -n "{{index}}" ]; then
+        PATTERN="world-chain-el-{{index}} "
+    else
+        PATTERN="world-chain-el-"
+    fi
+    tail -n 200 -F "$LOG_FILE" | grep --line-buffered -- "$PATTERN"
+
+# Run Contender stress tests against a running native Rust devnet.
+stress *args='':
+    @scripts/stress/stress.sh $@
+
+# Prove a PBH transaction
+prove *args='':
+    cargo run -p xtask -- prove $@
+
+# Generate CLI reference docs for the mdbook
+docs:
+    cargo xtask docs
 
 install *args='':
-    cargo install --path crates/world/bin --locked $@
-
-stress-test *args='':
-    @just ./devnet/stress-test $@
+    cargo install --path bin/world-chain --locked $@

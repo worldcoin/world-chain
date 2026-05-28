@@ -1,5 +1,7 @@
 # Summary
 - [Introduction](./overview.md)
+- [Flashblocks](./flashblocks/p2p.md)
+    - [Flashblocks P2P Protocol v2](./flashblocks/p2p_v2.md)
 - [Priority Blockspace for Humans](./pbh/overview.md)
     - [Architecture](./pbh/architecture.md)
     - [PBH Transactions](./pbh/txs.md)
@@ -7,3 +9,8 @@
         - [Validation](./pbh/validation.md)
     <!-- - [PBH Contracts](./pbh/contracts.md)
     - [PBH Bundlers](./pbh/bundlers.md) -->
+- [CLI Reference](./cli/reference.md)
+- [World Chain Improvement Proposals](./wips/README.md)
+    - [WIP-1001: WorldID Native Account Abstraction](./wips/wip-1001.md)
+    - [WIP-1002: WorldID Gas Accounting](./wips/wip-1002.md)
+    - [WIP Template](./wips/wip-template.md)

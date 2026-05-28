@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.10
-FROM public.ecr.aws/docker/library/rust:1.92.0-bookworm AS base
+FROM public.ecr.aws/docker/library/rust:1.95.0-bookworm AS base
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
   --mount=type=cache,target=/usr/local/cargo/git \
@@ -28,7 +28,8 @@ FROM base AS builder
 WORKDIR /app
 
 RUN curl -L https://foundry.paradigm.xyz | bash && \
-  /root/.foundry/bin/foundryup
+  /root/.foundry/bin/foundryup --install 1.5.1
+
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"
 ARG PROFILE="maxperf"
@@ -48,6 +49,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     if [ -z "$SCCACHE_BUCKET" ]; then unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; fi && \
     cargo chef cook --locked --profile ${PROFILE} --bin ${WORLD_CHAIN_BUILDER_BIN} --features ${FEATURES} --recipe-path recipe.json
 
+ARG VERGEN_GIT_SHA
 COPY . .
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -84,7 +86,7 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/aws
   rm -rf /tmp/aws /tmp/awscliv2.zip
 
 # Install s3fcp
-RUN curl -L "https://github.com/Dzejkop/s3fcp/releases/download/v0.1.4/s3fcp-linux-x86_64" -o "/usr/local/bin/s3fcp" && \
+RUN curl -L "https://github.com/Dzejkop/s3fcp/releases/download/v0.3.0/s3fcp-linux-x86_64" -o "/usr/local/bin/s3fcp" && \
   chmod +x /usr/local/bin/s3fcp
 
 ARG WORLD_CHAIN_BUILDER_BIN="world-chain"

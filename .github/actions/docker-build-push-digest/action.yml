@@ -59,6 +59,7 @@ runs:
         context: .
         file: Dockerfile
         build-args: |
+          VERGEN_GIT_SHA=${{ github.sha }}
           SCCACHE_BUCKET=${{ inputs.sccache_bucket }}
           SCCACHE_REGION=${{ inputs.aws_region }}
           SCCACHE_S3_KEY_PREFIX=sccache/${{ github.repository }}/${{ env.PLATFORM_PAIR }}

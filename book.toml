@@ -5,10 +5,14 @@ src = "specs"
 title = "World Chain Specs"
 
 
+[preprocessor.strip-front-matter]
+command = "python3 specs/strip-front-matter.py"
+
 [preprocessor.mermaid]
 command = "mdbook-mermaid"
 
 [output.html]
+mathjax-support = true
 additional-js = [
     "specs/static/mermaid.min.js",
     "specs/static/mermaid-init.js",

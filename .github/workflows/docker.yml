@@ -55,3 +55,37 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=nightly
+            type=sha
+
+  dispatch-devnet-bump:
+    name: dispatch devnet bump to crypto-apps
+    needs: merge
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.DEVNET_DEPLOYMENT_APPID }}
+          private-key: ${{ secrets.DEVNET_DEPLOYMENT_SECRET }}
+          owner: worldcoin
+          repositories: crypto-apps
+
+      - name: Send repository_dispatch
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHORT=${SHA::7}
+          gh api repos/worldcoin/crypto-apps/dispatches \
+            -f event_type=bump-world-chain-dev \
+            -f "client_payload[tag]=sha-${SHORT}" \
+            -f "client_payload[sha]=${SHA}" \
+            -f "client_payload[issuer]=${RUN_URL}"
+          echo "Dispatched bump-world-chain-dev with tag sha-${SHORT}"
