@@ -19,10 +19,10 @@
 //!
 //! Infrequent reads that the engine actor performs during sync / forkchoice reconstruction
 //! (`get_l2_block`, `l2_block_by_label`, `l2_block_info_by_label`, `get_proof`, `new_payload_v1`)
-//! are delegated to alloy HTTP providers: an L2 [`RootProvider<Optimism>`] pointed at reth's
-//! standard (unauthenticated) RPC, and an L1 [`RootProvider`]. These are not on the consensus hot
-//! path, so the HTTP transport is acceptable; keeping them on alloy avoids reth<->alloy block type
-//! conversions while preserving correctness.
+//! are delegated to alloy providers: an L2 [`RootProvider<Optimism>`] connected to reth's standard
+//! (unauthenticated) IPC RPC endpoint, and an L1 [`RootProvider`] over HTTP (`--kona.l1-rpc-url`).
+//! These are not on the consensus hot path, so the network/IPC transport is acceptable; keeping
+//! them on alloy avoids reth<->alloy block type conversions while preserving correctness.
 
 use std::sync::Arc;
 
@@ -62,7 +62,7 @@ use reth_payload_builder::PayloadStore;
 ///
 /// The fork-choice / new-payload / get-payload methods are dispatched directly to reth's
 /// [`ConsensusEngineHandle`] and [`PayloadStore`]. Infrequent read methods are delegated to alloy
-/// HTTP providers (see the module docs).
+/// providers — the L2 over reth's IPC RPC, the L1 over HTTP (see the module docs).
 pub struct WorldChainKonaEngineClient {
     /// The OP Stack rollup configuration, shared between Kona and reth.
     cfg: Arc<RollupConfig>,
@@ -71,7 +71,7 @@ pub struct WorldChainKonaEngineClient {
     engine_handle: ConsensusEngineHandle<OpEngineTypes>,
     /// Reth's payload store, used to resolve built payloads for `get_payload_v*`.
     payload_store: PayloadStore<OpEngineTypes>,
-    /// L2 EL provider over reth's standard RPC, used for the infrequent read methods that the
+    /// L2 EL provider over reth's standard IPC RPC, used for the infrequent read methods that the
     /// engine actor performs during sync and forkchoice reconstruction.
     l2_provider: RootProvider<Optimism>,
     /// L1 EL provider, used for `get_l1_block`. Reth only stores L2 data.
@@ -95,7 +95,7 @@ impl WorldChainKonaEngineClient {
     /// * `engine_handle` — A handle to reth's consensus engine tree, obtained from the node's
     ///   [`AddOnsContext`](reth_node_api::AddOnsContext) after launch.
     /// * `payload_store` — Reth's store of in-progress and completed payloads.
-    /// * `l2_provider` — An alloy provider pointed at reth's standard L2 RPC, used for reads.
+    /// * `l2_provider` — An alloy provider connected to reth's standard L2 IPC RPC, used for reads.
     /// * `l1_provider` — An alloy provider for the L1 chain (deposits, finalization).
     pub const fn new(
         cfg: Arc<RollupConfig>,

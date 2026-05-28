@@ -36,6 +36,8 @@ reth-optimism-forks.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-node-api.workspace = true
+reth-engine-primitives.workspace = true
+reth-tasks.workspace = true
 reth-network.workspace = true
 reth-network-peers.workspace = true
 reth-eth-wire-types.workspace = true
@@ -67,7 +69,6 @@ tracing.workspace = true
 ed25519-dalek.workspace = true
 hex.workspace = true
 serde_json.workspace = true
-url.workspace = true
 
 [build-dependencies]
 vergen.workspace = true

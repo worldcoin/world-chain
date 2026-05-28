@@ -2,6 +2,10 @@
 
 use core::marker::PhantomData;
 
+use reth_engine_primitives::ConsensusEngineHandle;
+use reth_payload_builder::PayloadStore;
+use reth_tasks::TaskExecutor;
+
 use alloy_consensus::{Block, BlockBody, Header};
 use op_alloy_consensus::OpTransaction;
 use reth_chainspec::ChainSpecProvider;
@@ -357,11 +361,23 @@ where
             ..
         } = self;
 
-        // Spawn the in-process Kona consensus node, if enabled. This owns reth's
-        // `ConsensusEngineHandle` and drives the execution engine via direct Rust calls.
-        if let Some(kona_config) = kona_config {
-            spawn_kona(&ctx, kona_config)?;
-        }
+        // Capture the inputs the in-process Kona consensus node needs from `ctx` *before*
+        // `launch_add_ons_with` consumes it. The authoritative L2 IPC endpoint is read from the
+        // live RPC server handle after launch (below), so we only stash the engine-layer handles
+        // here. We also fail fast if the IPC server is disabled, since Kona connects over it.
+        let kona_inputs = kona_config
+            .map(|kona_config| -> eyre::Result<_> {
+                if ctx.config.rpc.ipcdisable {
+                    return Err(eyre::Report::msg(
+                        "--kona.enabled requires reth's IPC RPC server (do not pass --ipcdisable)",
+                    ));
+                }
+                let engine_handle = ctx.beacon_engine_handle.clone();
+                let payload_store = PayloadStore::new(ctx.node.payload_builder_handle().clone());
+                let task_executor = ctx.node.task_executor().clone();
+                Ok((kona_config, engine_handle, payload_store, task_executor))
+            })
+            .transpose()?;
 
         let eth_config =
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
@@ -417,7 +433,7 @@ where
         let provider = ctx.node.provider().clone();
         let evm_config = ctx.node.evm_config().clone();
 
-        rpc_add_ons
+        let handle = rpc_add_ons
             .launch_add_ons_with(ctx, move |container| {
                 let reth_node_builder::rpc::RpcModuleContainer {
                     modules,
@@ -463,7 +479,32 @@ where
 
                 Ok(())
             })
-            .await
+            .await?;
+
+        // Now that the RPC server is live, spawn the in-process Kona consensus node (if enabled).
+        // The L2 IPC endpoint is read from the running server so it reflects the actual path reth
+        // bound, rather than re-deriving it from config.
+        if let Some((kona_config, engine_handle, payload_store, task_executor)) = kona_inputs {
+            let ipc_path = handle
+                .rpc_server_handles
+                .rpc
+                .ipc_endpoint()
+                .ok_or_else(|| {
+                    eyre::Report::msg(
+                        "--kona.enabled requires reth's IPC RPC server (do not pass --ipcdisable)",
+                    )
+                })?;
+            spawn_kona(
+                kona_config,
+                engine_handle,
+                payload_store,
+                task_executor,
+                ipc_path,
+            )
+            .await?;
+        }
+
+        Ok(handle)
     }
 }
 
@@ -523,51 +564,33 @@ where
     }
 }
 
-/// Assembles the in-process Kona consensus node from reth's engine handle and spawns it on the
-/// node's task executor.
+/// Assembles the in-process Kona consensus node from reth's engine handle and the live RPC
+/// server's IPC endpoint, then spawns it on the node's task executor.
 ///
 /// Builds the kona service's in-process engine client from:
-/// - `ctx.beacon_engine_handle` — reth's `ConsensusEngineHandle`, for the FCU / new-payload
-///   consensus hot path,
-/// - `ctx.node.payload_builder_handle()` — wrapped in a `PayloadStore`, for `get_payload`,
-/// - an L2 alloy provider over reth's standard HTTP RPC, for the infrequent reads the engine actor
+/// - `engine_handle` — reth's `ConsensusEngineHandle`, for the FCU / new-payload consensus hot
+///   path,
+/// - `payload_store` — wrapping reth's payload builder handle, for `get_payload`,
+/// - an L2 alloy provider connected over `l2_ipc_path` (the live IPC RPC endpoint reported by the
+///   running server, not re-derived from config), for the infrequent reads the engine actor
 ///   performs during sync,
-/// - an L1 alloy provider from `--kona.l1-rpc-url`.
+/// - an L1 alloy provider over HTTP from `--kona.l1-rpc-url`.
 ///
-/// The assembled [`KonaService`] is then run on the node's task executor for the node's lifetime.
-fn spawn_kona<N>(
-    ctx: &reth_node_api::AddOnsContext<'_, N>,
+/// Connecting the L2 provider over IPC is asynchronous, so this is an `async fn`. The assembled
+/// [`KonaService`] is then run on the provided `task_executor` for the node's lifetime.
+async fn spawn_kona(
     kona_config: KonaConfig,
-) -> eyre::Result<()>
-where
-    N: FullNodeComponents<Types: NodeTypes<Payload = OpEngineTypes>>,
-{
-    use reth_payload_builder::PayloadStore;
-
-    // Reth's standard HTTP RPC endpoint feeds the kona derivation pipeline and the engine actor's
-    // infrequent read methods (not the consensus hot path, which is in-process).
-    if !ctx.config.rpc.http {
-        return Err(eyre::Report::msg(
-            "--kona.enabled requires reth's HTTP RPC server to be enabled (set --http)",
-        ));
-    }
-    let l2_rpc_url: url::Url = format!(
-        "http://{}:{}",
-        ctx.config.rpc.http_addr, ctx.config.rpc.http_port
-    )
-    .parse()?;
-
+    engine_handle: ConsensusEngineHandle<OpEngineTypes>,
+    payload_store: PayloadStore<OpEngineTypes>,
+    task_executor: TaskExecutor,
+    l2_ipc_path: String,
+) -> eyre::Result<()> {
     let sequencer_mode = kona_config.sequencer_mode;
     let l1_chain_id = kona_config.rollup_config.l1_chain_id;
     let l2_chain_id: u64 = kona_config.rollup_config.l2_chain_id.into();
 
-    let payload_store = PayloadStore::new(ctx.node.payload_builder_handle().clone());
-    let service = KonaService::build(
-        kona_config,
-        ctx.beacon_engine_handle.clone(),
-        payload_store,
-        l2_rpc_url,
-    )?;
+    let service =
+        KonaService::build(kona_config, engine_handle, payload_store, l2_ipc_path).await?;
 
     info!(
         target: "world_chain::kona",
@@ -578,17 +601,15 @@ where
     );
 
     // Spawn on the node's task executor so the service lives for the node's lifetime.
-    ctx.node
-        .task_executor()
-        .spawn_critical_task("kona-consensus", async move {
-            let mut handle = KonaServiceHandle::spawn(service);
-            match handle.stopped().await {
-                Ok(()) => info!(target: "world_chain::kona", "Kona consensus node stopped"),
-                Err(error) => {
-                    tracing::error!(target: "world_chain::kona", %error, "Kona consensus node exited with error")
-                }
+    task_executor.spawn_critical_task("kona-consensus", async move {
+        let mut handle = KonaServiceHandle::spawn(service);
+        match handle.stopped().await {
+            Ok(()) => info!(target: "world_chain::kona", "Kona consensus node stopped"),
+            Err(error) => {
+                tracing::error!(target: "world_chain::kona", %error, "Kona consensus node exited with error")
             }
-        });
+        }
+    });
 
     Ok(())
 }
