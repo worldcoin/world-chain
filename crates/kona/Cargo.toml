@@ -18,6 +18,7 @@ world-chain-cli.workspace = true
 # Kona crates — canonical ethereum-optimism
 kona-node-service.workspace = true
 kona-genesis.workspace = true
+kona-rpc.workspace = true
 
 # Alloy - shared Ethereum types
 alloy-rpc-types-engine.workspace = true

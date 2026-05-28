@@ -46,9 +46,6 @@ use crate::{
 };
 
 const ANVIL_RPC_PORT: u16 = 8545;
-const OP_NODE_RPC_PORT: u16 = 9545;
-const OP_NODE_METRICS_PORT: u16 = 7300;
-const OP_NODE_P2P_PORT: u16 = 9222;
 const OP_BATCHER_MAX_CHANNEL_DURATION_L1_BLOCKS: &str = "4";
 const OP_PROPOSER_PERMISSIONED_GAME_TYPE: &str = "1";
 const OP_TXMGR_NETWORK_TIMEOUT: &str = "30s";
@@ -91,7 +88,6 @@ pub struct FullStackWorldDevnet {
     _proposer: Option<ContainerService>,
     _challenger: Option<ContainerService>,
     _conductors: Vec<ConductorService>,
-    _op_nodes: Vec<OpNodeService>,
     sequencers: Vec<SequencerService>,
     observability: Option<ObservabilityStack>,
     l1: L1DevChain,
@@ -107,7 +103,16 @@ struct SequencerService {
     ws_url: String,
     auth_url: String,
     flashblocks_url: String,
+    /// Native (host-reachable) URL of the in-process kona consensus node RPC.
+    ///
+    /// Serves `optimism_syncStatus`, `optimism_rollupConfig`, and the
+    /// `admin_*Sequencer` admin namespace. Reachable from the host at
+    /// `127.0.0.1:<kona_rpc_host_port>` and from containers via
+    /// `host.docker.internal:<kona_rpc_host_port>`.
+    kona_rpc_url: String,
+    kona_rpc_host_port: u16,
     p2p_host_port: u16,
+    kona_p2p_host_port: u16,
     metrics_target: MetricsTarget,
     binary: PathBuf,
     _process: NativeProcess,
@@ -122,26 +127,15 @@ struct SequencerPlan {
     p2p_host_port: u16,
     p2p_secret_key: String,
     trusted_peer: String,
-}
-
-#[derive(Clone, Debug)]
-struct OpNodePlan {
-    rpc_host_port: u16,
-    metrics_host_port: u16,
-    p2p_host_port: u16,
-    bootnode: String,
-    private_key_path: String,
-}
-
-#[derive(Debug)]
-struct OpNodeService {
-    id: String,
-    rpc_url: String,
-    p2p_host_port: u16,
-    bootnodes: Vec<String>,
-    metrics_target: MetricsTarget,
-    image: ContainerImage,
-    _container: ContainerAsync<GenericImage>,
+    /// Host port for the in-process kona consensus node RPC (native bind on
+    /// `0.0.0.0`, directly reachable at `127.0.0.1:<port>`).
+    kona_rpc_host_port: u16,
+    /// Host port for the in-process kona consensus P2P listener.
+    kona_p2p_host_port: u16,
+    /// secp256k1 secret key (hex, no `0x`) for the kona consensus P2P identity.
+    kona_p2p_secret_key: String,
+    /// Consensus enode advertised to the other sequencers' kona P2P bootstore.
+    kona_consensus_enode: String,
 }
 
 #[derive(Clone, Debug)]
@@ -247,6 +241,18 @@ impl FullStackWorldDevnet {
             .map(plan_sequencer)
             .collect::<Result<Vec<_>>>()
             .wrap_err("failed to plan world-chain EL peer mesh")?;
+
+        // Plan conductors before starting the sequencers: each monomorphic
+        // sequencer runs kona in-process and needs its conductor's RPC host port
+        // up front (kona's outbound `--kona.conductor.rpc` client). The conductor
+        // containers themselves are still started afterwards.
+        let mut conductor_plans = Vec::with_capacity(sequencer_count);
+        for index in 0..sequencer_count {
+            conductor_plans.push(plan_conductor(index, port_mode)?);
+        }
+
+        let rollup_config_path = workdir_path.join("rollup.json");
+        let l1_slot_duration_secs = block_time.as_secs().max(1);
         let trusted_peers = sequencer_plans
             .iter()
             .map(|plan| plan.trusted_peer.clone())
@@ -257,37 +263,24 @@ impl FullStackWorldDevnet {
                 .enumerate()
                 .filter_map(|(peer_index, peer)| (peer_index != index).then_some(peer.clone()))
                 .collect::<Vec<_>>();
-            start_world_chain_el(index, &workdir_path, &sequencer_plans[index], trusted_peers)
-        }))
-        .await?;
-        connect_execution_peers(&sequencers).await?;
-
-        let mut conductor_plans = Vec::with_capacity(sequencer_count);
-        for index in 0..sequencer_count {
-            conductor_plans.push(plan_conductor(index, port_mode)?);
-        }
-
-        let op_node_plans = plan_op_nodes(sequencer_count, &workdir_path)
-            .wrap_err("failed to plan op-node bootnode peer mesh")?;
-        let op_node_bootnodes: Vec<_> = (0..sequencer_count)
-            .map(|index| op_node_bootnodes(&op_node_plans, index))
-            .collect();
-        let l1_slot_duration_secs = block_time.as_secs().max(1);
-        let op_nodes = try_join_all((0..sequencer_count).map(|index| {
-            start_op_node(
+            let kona_consensus_bootnodes = kona_consensus_bootnodes(&sequencer_plans, index);
+            start_world_chain_el(
                 index,
                 &workdir_path,
-                &config.images.op_node,
-                &op_node_plans[index],
-                &op_node_bootnodes[index],
-                l1_slot_duration_secs,
-                &l1_internal_rpc,
-                &sequencers[index],
-                &conductor_plans[index].rpc_url,
+                &sequencer_plans[index],
+                trusted_peers,
+                WorldChainElKona {
+                    rollup_config_path: &rollup_config_path,
+                    l1_rpc_url: &l1_public_rpc,
+                    l1_slot_duration_secs,
+                    conductor_rpc_host_port: conductor_plans[index].rpc_host_port,
+                    consensus_bootnodes: kona_consensus_bootnodes,
+                },
             )
         }))
         .await?;
-        wait_for_op_node_peer_mesh(&op_nodes).await?;
+        connect_execution_peers(&sequencers).await?;
+        wait_for_kona_consensus_mesh(&sequencers).await?;
 
         let mut conductors = Vec::with_capacity(sequencer_count);
         conductors.push(
@@ -303,12 +296,12 @@ impl FullStackWorldDevnet {
         );
 
         wait_for_conductor_leader(&conductors[0], Duration::from_secs(90)).await?;
-        start_bootstrap_sequencer(&op_nodes[0]).await?;
+        start_bootstrap_sequencer(&sequencers[0]).await?;
         wait_for_l2_blocks_with_logs(
             &sequencers[0].rpc_url,
             1,
             Duration::from_secs(120),
-            &op_nodes,
+            &sequencers,
             &conductors,
         )
         .await?;
@@ -333,7 +326,7 @@ impl FullStackWorldDevnet {
             &sequencers[0].rpc_url,
             2,
             Duration::from_secs(120),
-            &op_nodes,
+            &sequencers,
             &conductors,
         )
         .await?;
@@ -389,11 +382,6 @@ impl FullStackWorldDevnet {
                 .map(|service| service.metrics_target.clone()),
         );
         metrics_targets.extend(
-            op_nodes
-                .iter()
-                .map(|service| service.metrics_target.clone()),
-        );
-        metrics_targets.extend(
             conductors
                 .iter()
                 .map(|service| service.metrics_target.clone()),
@@ -413,7 +401,6 @@ impl FullStackWorldDevnet {
             &config,
             &l1_public_rpc,
             &sequencers,
-            &op_nodes,
             &conductors,
             batcher.as_ref(),
             proposer.as_ref(),
@@ -427,7 +414,6 @@ impl FullStackWorldDevnet {
             _proposer: proposer,
             _challenger: challenger,
             _conductors: conductors,
-            _op_nodes: op_nodes,
             sequencers,
             observability,
             l1,
@@ -454,11 +440,12 @@ impl FullStackWorldDevnet {
     }
 
     pub async fn safe_block_number(&self) -> Result<u64> {
-        let op_node = self
-            ._op_nodes
+        let sequencer = self
+            .sequencers
             .first()
-            .ok_or_else(|| eyre!("full-stack devnet has no op-node"))?;
-        let sync_status = json_rpc(&op_node.rpc_url, "optimism_syncStatus", json!([])).await?;
+            .ok_or_else(|| eyre!("full-stack devnet has no sequencer"))?;
+        let sync_status =
+            json_rpc(&sequencer.kona_rpc_url, "optimism_syncStatus", json!([])).await?;
         let safe_number = sync_status
             .pointer("/safe_l2/number")
             .ok_or_else(|| eyre!("optimism_syncStatus missing safe_l2.number: {sync_status}"))?;
@@ -944,6 +931,14 @@ fn plan_sequencer(_index: usize) -> Result<SequencerPlan> {
     let p2p_secret_key = random_p2p_secret_key();
     let p2p_host_port = reserve_host_port()?;
     let trusted_peer = devnet_enode(&p2p_secret_key, p2p_host_port)?;
+
+    let kona_p2p_secret_key = random_p2p_secret_key();
+    let kona_p2p_host_port = reserve_host_port()?;
+    // The in-process kona consensus node advertises 127.0.0.1: it is native, so
+    // its peers (the other native sequencers) reach it directly on the host.
+    let kona_consensus_enode =
+        devnet_trusted_peer(&kona_p2p_secret_key, "127.0.0.1", kona_p2p_host_port)?;
+
     Ok(SequencerPlan {
         rpc_host_port: reserve_host_port()?,
         ws_host_port: reserve_host_port()?,
@@ -952,7 +947,43 @@ fn plan_sequencer(_index: usize) -> Result<SequencerPlan> {
         p2p_host_port,
         p2p_secret_key,
         trusted_peer,
+        kona_rpc_host_port: reserve_host_port()?,
+        kona_p2p_host_port,
+        kona_p2p_secret_key,
+        kona_consensus_enode,
     })
+}
+
+/// Returns the consensus enodes of every sequencer except `source_index`, used
+/// to seed the in-process kona P2P bootstore so the sequencer mesh forms.
+fn kona_consensus_bootnodes(plans: &[SequencerPlan], source_index: usize) -> Vec<String> {
+    plans
+        .iter()
+        .enumerate()
+        .filter(|&(target_index, _)| target_index != source_index)
+        .map(|(_, plan)| plan.kona_consensus_enode.clone())
+        .collect()
+}
+
+/// Inputs the monomorphic world-chain client needs to run kona in-process as
+/// the consensus/sequencer.
+///
+/// All URLs and paths here are addressed from the NATIVE world-chain process:
+/// host-reachable URLs (the public Anvil L1, the host-mapped conductor RPC) and
+/// native filesystem paths (the workdir rollup config), never the `/work` mount
+/// or `host.docker.internal` used by the OP Stack containers.
+struct WorldChainElKona<'a> {
+    /// Native path to the patched rollup config (`<workdir>/rollup.json`).
+    rollup_config_path: &'a Path,
+    /// Host-reachable public Anvil L1 RPC (also used as the L1 beacon endpoint).
+    l1_rpc_url: &'a str,
+    /// L1 slot duration override, mirroring the dev L1 block time.
+    l1_slot_duration_secs: u64,
+    /// Host port of this sequencer's op-conductor RPC (kona's outbound client
+    /// reaches it at `http://127.0.0.1:<port>` since the binary is native).
+    conductor_rpc_host_port: u16,
+    /// Consensus enodes of the other sequencers for the kona P2P bootstore.
+    consensus_bootnodes: Vec<String>,
 }
 
 async fn start_world_chain_el(
@@ -960,6 +991,7 @@ async fn start_world_chain_el(
     workdir: &Path,
     plan: &SequencerPlan,
     trusted_peers: Vec<String>,
+    kona: WorldChainElKona<'_>,
 ) -> Result<SequencerService> {
     let data_dir = workdir.join(format!("l2data-{index}"));
     fs::create_dir_all(&data_dir).wrap_err("failed to create L2 data dir")?;
@@ -1069,6 +1101,80 @@ async fn start_world_chain_el(
         "-vvv".to_string(),
     ]);
 
+    // Monomorphic client: run kona in-process as the consensus/sequencer. When
+    // `--kona.enabled` is set the binary auto-wires kona to reth's own launched
+    // auth Engine API + JWT, so no engine URL/jwt is passed here.
+    //
+    // All addressing is NATIVE: the rollup config is the workdir path, the L1
+    // and conductor URLs are host-reachable. The kona node RPC binds on
+    // `0.0.0.0:<kona_rpc_host_port>` and is directly reachable at
+    // `127.0.0.1:<port>` (and from containers at
+    // `host.docker.internal:<port>`).
+    let kona_rpc_port = plan.kona_rpc_host_port;
+    let kona_p2p_port = plan.kona_p2p_host_port;
+    let kona_rpc_port_arg = kona_rpc_port.to_string();
+    let kona_p2p_port_arg = kona_p2p_port.to_string();
+    let conductor_rpc_url = format!("http://127.0.0.1:{}", kona.conductor_rpc_host_port);
+    let rollup_config_arg = kona.rollup_config_path.to_string_lossy().to_string();
+    let kona_bootstore_arg = workdir
+        .join(format!("kona-bootstore-{index}"))
+        .to_string_lossy()
+        .to_string();
+    let kona_p2p_priv_arg = format!("0x{}", plan.kona_p2p_secret_key);
+    args.extend([
+        "--kona.enabled".to_string(),
+        "--kona.sequencer".to_string(),
+        // Start stopped: op-conductor starts the active leader's sequencer via
+        // `admin_startSequencer` (see `start_bootstrap_sequencer`), mirroring the
+        // old op-node `--sequencer.stopped` + bootstrap flow.
+        "--kona.sequencer.stopped".to_string(),
+        "--kona.sequencer.l1-confs".to_string(),
+        "0".to_string(),
+        "--kona.rollup-config".to_string(),
+        rollup_config_arg,
+        "--kona.l1-rpc-url".to_string(),
+        kona.l1_rpc_url.to_string(),
+        // Dev L1 (Anvil) has no separate beacon node; the EL RPC doubles as the
+        // beacon endpoint, mirroring the old op-node `--l1-beacon = l1_rpc`.
+        "--kona.l1-beacon-url".to_string(),
+        kona.l1_rpc_url.to_string(),
+        "--kona.l1-trust-rpc".to_string(),
+        "--kona.l1-slot-duration-override".to_string(),
+        kona.l1_slot_duration_secs.to_string(),
+        "--kona.rpc.addr".to_string(),
+        "0.0.0.0".to_string(),
+        "--kona.rpc.port".to_string(),
+        kona_rpc_port_arg,
+        "--kona.rpc.enable-admin".to_string(),
+        "--kona.conductor.rpc".to_string(),
+        conductor_rpc_url,
+        "--p2p.sequencer.key".to_string(),
+        UNSAFE_BLOCK_SIGNER_PRIVATE_KEY.to_string(),
+        "--p2p.listen.ip".to_string(),
+        "0.0.0.0".to_string(),
+        "--p2p.listen.tcp".to_string(),
+        kona_p2p_port_arg.clone(),
+        "--p2p.listen.udp".to_string(),
+        kona_p2p_port_arg.clone(),
+        "--p2p.advertise.ip".to_string(),
+        "127.0.0.1".to_string(),
+        "--p2p.advertise.tcp".to_string(),
+        kona_p2p_port_arg.clone(),
+        "--p2p.advertise.udp".to_string(),
+        kona_p2p_port_arg,
+        "--p2p.priv.raw".to_string(),
+        kona_p2p_priv_arg,
+        "--p2p.no-discovery".to_string(),
+        "--p2p.bootstore".to_string(),
+        kona_bootstore_arg,
+    ]);
+    if !kona.consensus_bootnodes.is_empty() {
+        args.extend([
+            "--p2p.bootnodes".to_string(),
+            kona.consensus_bootnodes.join(","),
+        ]);
+    }
+
     let mut process = spawn_native_process(&format!("world-chain-el-{index}"), &binary, &args)
         .wrap_err_with(|| format!("failed to spawn native world-chain EL process {index}"))?;
 
@@ -1083,14 +1189,33 @@ async fn start_world_chain_el(
             format!("world-chain EL {index} RPC did not become ready; process_status={status:?}")
         })?;
 
+    // The in-process kona node RPC is native, so it is reachable at 127.0.0.1.
+    let kona_rpc_url = format!("http://127.0.0.1:{kona_rpc_port}");
+    wait_for_json_rpc(
+        &kona_rpc_url,
+        "optimism_rollupConfig",
+        json!([]),
+        Duration::from_secs(120),
+    )
+    .await
+    .wrap_err_with(|| {
+        let status = process.child.try_wait().ok().flatten();
+        format!(
+            "in-process kona consensus RPC for sequencer {index} did not become ready; \
+             process_status={status:?}"
+        )
+    })?;
+
     info!(
         index,
         rpc_url = %rpc_url,
         auth_url = %auth_url,
+        kona_rpc_url = %kona_rpc_url,
         p2p = %format!("127.0.0.1:{p2p_port}"),
+        kona_p2p = %format!("127.0.0.1:{kona_p2p_port}"),
         metrics = %format!("127.0.0.1:{metrics_port}"),
         binary = %binary.display(),
-        "native world-chain EL started"
+        "native monomorphic world-chain client started (reth EL + in-process kona sequencer)"
     );
 
     Ok(SequencerService {
@@ -1099,7 +1224,10 @@ async fn start_world_chain_el(
         ws_url,
         auth_url,
         flashblocks_url: format!("ws://127.0.0.1:{ws_port}"),
+        kona_rpc_url,
+        kona_rpc_host_port: kona_rpc_port,
         p2p_host_port: p2p_port,
+        kona_p2p_host_port: kona_p2p_port,
         metrics_target: MetricsTarget::new(
             format!("world-chain-el-{index}"),
             format!("host.docker.internal:{metrics_port}"),
@@ -1299,34 +1427,6 @@ fn plan_conductor(index: usize, port_mode: DevnetPortMode) -> Result<ConductorPl
     })
 }
 
-fn plan_op_nodes(count: usize, workdir: &Path) -> Result<Vec<OpNodePlan>> {
-    let mut plans = Vec::with_capacity(count);
-    for index in 0..count {
-        let private_key = random_p2p_secret_key();
-        let p2p_host_port = reserve_host_port()?;
-        let filename = format!("op-node-{index}-p2p-priv.txt");
-        fs::write(workdir.join(&filename), &private_key)
-            .wrap_err_with(|| format!("failed to write op-node P2P key {filename}"))?;
-        plans.push(OpNodePlan {
-            rpc_host_port: 19_545 + index as u16,
-            metrics_host_port: reserve_host_port()?,
-            p2p_host_port,
-            bootnode: devnet_trusted_peer(&private_key, "host.docker.internal", p2p_host_port)?,
-            private_key_path: format!("/work/{filename}"),
-        });
-    }
-    Ok(plans)
-}
-
-fn op_node_bootnodes(plans: &[OpNodePlan], source_index: usize) -> Vec<String> {
-    plans
-        .iter()
-        .enumerate()
-        .filter(|&(target_index, _target)| target_index != source_index)
-        .map(|(_target_index, target)| target.bootnode.clone())
-        .collect()
-}
-
 fn random_p2p_secret_key() -> String {
     loop {
         let bytes = rand::rng().random::<[u8; 32]>();
@@ -1365,7 +1465,12 @@ async fn start_conductor(
     sequencer: &SequencerService,
     plan: &ConductorPlan,
 ) -> Result<ConductorService> {
-    let node_rpc = format!("http://host.docker.internal:{}", 19_545 + index as u16);
+    // op-conductor runs in a container and reaches the native in-process kona
+    // node RPC via host.docker.internal on its directly-bound host port.
+    let node_rpc = format!(
+        "http://host.docker.internal:{}",
+        sequencer.kona_rpc_host_port
+    );
     let execution_rpc = host_internal_url(&sequencer.rpc_url)?;
     let min_peer_count = sequencer_count.saturating_sub(1).max(1).to_string();
     let mut cmd = vec![
@@ -1460,189 +1565,50 @@ async fn start_conductor(
     Ok(service)
 }
 
-async fn start_op_node(
-    index: usize,
-    workdir: &Path,
-    image: &ContainerImage,
-    plan: &OpNodePlan,
-    bootnodes: &[String],
-    l1_slot_duration_secs: u64,
-    l1_rpc: &str,
-    sequencer: &SequencerService,
-    conductor_rpc_url: &str,
-) -> Result<OpNodeService> {
-    let conductor_rpc = host_internal_url(conductor_rpc_url)?;
-    let l2_engine_rpc = host_internal_url(&sequencer.auth_url)?;
-    let p2p_host_port = plan.p2p_host_port.to_string();
-    let l1_slot_duration_secs = l1_slot_duration_secs.to_string();
-    let mut cmd = vec![
-        "-vvv".to_string(),
-        "--logs.stdout.format=logfmt".to_string(),
-        "node".to_string(),
-        "--chain".to_string(),
-        DEV_CHAIN_ID.to_string(),
-        "--metrics.enabled".to_string(),
-        "--metrics.addr".to_string(),
-        "0.0.0.0".to_string(),
-        "--metrics.port".to_string(),
-        OP_NODE_METRICS_PORT.to_string(),
-        "--mode".to_string(),
-        "Sequencer".to_string(),
-        "--sequencer.stopped".to_string(),
-        "--sequencer.max-safe-lag".to_string(),
-        "0".to_string(),
-        "--sequencer.l1-confs".to_string(),
-        "0".to_string(),
-        "--conductor.rpc".to_string(),
-        conductor_rpc,
-        "--conductor.rpc.timeout".to_string(),
-        "5".to_string(),
-        "--l2-config-file".to_string(),
-        "/work/rollup.json".to_string(),
-        "--l1-config-file".to_string(),
-        "/work/l1-genesis.json".to_string(),
-        "--l1-eth-rpc".to_string(),
-        l1_rpc.to_string(),
-        "--l1-beacon".to_string(),
-        l1_rpc.to_string(),
-        "--l1-slot-duration-override".to_string(),
-        l1_slot_duration_secs,
-        "--l1-trust-rpc".to_string(),
-        "--l2-engine-rpc".to_string(),
-        l2_engine_rpc,
-        "--l2-engine-jwt-secret".to_string(),
-        "/work/jwt.hex".to_string(),
-        "--l2-trust-rpc".to_string(),
-        "--p2p.sequencer.key".to_string(),
-        UNSAFE_BLOCK_SIGNER_PRIVATE_KEY.to_string(),
-        "--p2p.listen.ip".to_string(),
-        "0.0.0.0".to_string(),
-        "--p2p.listen.tcp".to_string(),
-        OP_NODE_P2P_PORT.to_string(),
-        "--p2p.listen.udp".to_string(),
-        OP_NODE_P2P_PORT.to_string(),
-        "--p2p.advertise.ip".to_string(),
-        "host.docker.internal".to_string(),
-        "--p2p.advertise.tcp".to_string(),
-        p2p_host_port.clone(),
-        "--p2p.advertise.udp".to_string(),
-        p2p_host_port,
-        "--p2p.priv.path".to_string(),
-        plan.private_key_path.clone(),
-        "--p2p.bootstore".to_string(),
-        format!("/work/kona-bootstore-{index}"),
-        "--p2p.no-discovery".to_string(),
-        "--p2p.redial".to_string(),
-        "0".to_string(),
-        "--rpc.addr".to_string(),
-        "0.0.0.0".to_string(),
-        "--rpc.enable-admin".to_string(),
-        "--port".to_string(),
-        OP_NODE_RPC_PORT.to_string(),
-    ];
-    if !bootnodes.is_empty() {
-        cmd.push("--p2p.bootnodes".to_string());
-        cmd.push(bootnodes.join(","));
-    }
-
-    let mut request = GenericImage::new(image.repository.clone(), image.tag.clone())
-        .with_entrypoint("kona-node")
-        .with_wait_for(WaitFor::seconds(5))
-        .with_exposed_port(OP_NODE_RPC_PORT.tcp())
-        .with_exposed_port(OP_NODE_METRICS_PORT.tcp())
-        .with_exposed_port(OP_NODE_P2P_PORT.tcp())
-        .with_exposed_port(OP_NODE_P2P_PORT.udp())
-        .with_log_consumer(container_log_consumer(
-            format!("op-node-{index}"),
-            ProcessLogTarget::OpNode,
-        ))
-        .with_cmd(cmd)
-        .with_startup_timeout(Duration::from_secs(120))
-        .with_mount(Mount::bind_mount(
-            workdir.to_string_lossy().to_string(),
-            "/work",
-        ));
-    request = request.with_mapped_port(plan.rpc_host_port, OP_NODE_RPC_PORT.tcp());
-    request = request.with_mapped_port(plan.metrics_host_port, OP_NODE_METRICS_PORT.tcp());
-    request = request.with_mapped_port(plan.p2p_host_port, OP_NODE_P2P_PORT.tcp());
-    request = request.with_mapped_port(plan.p2p_host_port, OP_NODE_P2P_PORT.udp());
-
-    let container = request
-        .start()
-        .await
-        .wrap_err_with(|| format!("failed to start op-node {index}"))?;
-
-    let host = container.get_host().await?;
-    let rpc_url = format!("http://{host}:{}", plan.rpc_host_port);
-    if let Err(err) = wait_for_json_rpc(
-        &rpc_url,
-        "optimism_rollupConfig",
-        json!([]),
-        Duration::from_secs(60),
-    )
-    .await
-    {
-        let logs = container_logs(&container).await;
-        return Err(err).wrap_err_with(|| {
-            format!("op-node {index} RPC did not become ready; container logs:\n{logs}")
-        });
-    }
-
-    Ok(OpNodeService {
-        id: format!("op-node-{index}"),
-        rpc_url,
-        p2p_host_port: plan.p2p_host_port,
-        bootnodes: bootnodes.to_vec(),
-        metrics_target: MetricsTarget::new(
-            format!("op-node-{index}"),
-            format!("host.docker.internal:{}", plan.metrics_host_port),
-        ),
-        image: image.clone(),
-        _container: container,
-    })
-}
-
-async fn wait_for_op_node_peer_mesh(op_nodes: &[OpNodeService]) -> Result<()> {
-    if op_nodes.len() <= 1 {
+async fn wait_for_kona_consensus_mesh(sequencers: &[SequencerService]) -> Result<()> {
+    if sequencers.len() <= 1 {
         return Ok(());
     }
 
-    let expected = op_nodes.len().saturating_sub(1) as u64;
+    let expected = sequencers.len().saturating_sub(1) as u64;
     info!(
-        nodes = op_nodes.len(),
+        nodes = sequencers.len(),
         expected_peers_per_node = expected,
-        "waiting for op-node bootnode peer mesh"
+        "waiting for in-process kona consensus P2P mesh"
     );
-    for node in op_nodes {
+    for sequencer in sequencers {
         retry_until(
-            Duration::from_secs(30),
+            Duration::from_secs(60),
             Duration::from_millis(500),
             || async {
-                let peers = json_rpc(&node.rpc_url, "opp2p_peers", json!([true])).await?;
+                let peers = json_rpc(&sequencer.kona_rpc_url, "opp2p_peers", json!([true])).await?;
                 let connected = peers
                     .get("totalConnected")
                     .and_then(Value::as_u64)
                     .ok_or_else(|| {
                         eyre!(
                             "opp2p_peers for {} missing totalConnected: {peers}",
-                            node.id
+                            sequencer.id
                         )
                     })?;
-                if connected == expected {
+                if connected >= expected {
                     Ok(())
                 } else {
                     bail!(
-                        "{} has {connected} connected op-node peers, expected {expected}",
-                        node.id
+                        "{} has {connected} connected kona consensus peers, expected {expected}",
+                        sequencer.id
                     )
                 }
             },
         )
         .await
-        .wrap_err_with(|| format!("op-node bootnode P2P mesh did not form for {}", node.id))?;
+        .wrap_err_with(|| format!("kona consensus P2P mesh did not form for {}", sequencer.id))?;
     }
 
-    info!(count = op_nodes.len(), "op-node P2P mesh connected");
+    info!(
+        count = sequencers.len(),
+        "in-process kona consensus P2P mesh connected"
+    );
     Ok(())
 }
 
@@ -1758,12 +1724,13 @@ async fn wait_for_conductor_leader(bootstrap: &ConductorService, timeout: Durati
     Ok(())
 }
 
-async fn start_bootstrap_sequencer(op_node: &OpNodeService) -> Result<()> {
+async fn start_bootstrap_sequencer(sequencer: &SequencerService) -> Result<()> {
+    let kona_rpc_url = &sequencer.kona_rpc_url;
     retry_until(
         Duration::from_secs(30),
         Duration::from_millis(500),
         || async {
-            let active = json_rpc(&op_node.rpc_url, "admin_sequencerActive", json!([]))
+            let active = json_rpc(kona_rpc_url, "admin_sequencerActive", json!([]))
                 .await?
                 .as_bool()
                 .ok_or_else(|| eyre!("admin_sequencerActive did not return a bool"))?;
@@ -1771,32 +1738,29 @@ async fn start_bootstrap_sequencer(op_node: &OpNodeService) -> Result<()> {
                 return Ok(());
             }
 
-            let sync_status = json_rpc(&op_node.rpc_url, "optimism_syncStatus", json!([])).await?;
+            let sync_status = json_rpc(kona_rpc_url, "optimism_syncStatus", json!([])).await?;
             let unsafe_hash = sync_status
                 .pointer("/unsafe_l2/hash")
                 .and_then(Value::as_str)
                 .ok_or_else(|| eyre!("optimism_syncStatus missing unsafe_l2.hash: {sync_status}"))?
                 .to_string();
-            json_rpc(
-                &op_node.rpc_url,
-                "admin_startSequencer",
-                json!([unsafe_hash]),
-            )
-            .await
-            .map(|_| ())
+            json_rpc(kona_rpc_url, "admin_startSequencer", json!([unsafe_hash]))
+                .await
+                .map(|_| ())
         },
     )
     .await
     .wrap_err_with(|| {
         format!(
-            "failed to explicitly start bootstrap sequencer {}",
-            op_node.id
+            "failed to explicitly start in-process kona bootstrap sequencer {}",
+            sequencer.id
         )
     })?;
 
     info!(
-        op_node = %op_node.id,
-        "bootstrap op-node sequencer started"
+        sequencer = %sequencer.id,
+        kona_rpc_url = %sequencer.kona_rpc_url,
+        "bootstrap in-process kona sequencer started"
     );
     Ok(())
 }
@@ -2197,7 +2161,6 @@ fn build_components(
     config: &HaSequencerConfig,
     l1_rpc_url: &str,
     sequencers: &[SequencerService],
-    op_nodes: &[OpNodeService],
     conductors: &[ConductorService],
     batcher: Option<&ContainerService>,
     proposer: Option<&ContainerService>,
@@ -2232,9 +2195,14 @@ fn build_components(
             .with_endpoint("rpc", service.rpc_url.clone())
             .with_endpoint("ws", service.ws_url.clone())
             .with_endpoint("engine", service.auth_url.clone())
+            .with_endpoint("kona-rpc", service.kona_rpc_url.clone())
             .with_endpoint("p2p", format!("127.0.0.1:{}", service.p2p_host_port))
+            .with_endpoint(
+                "kona-p2p",
+                format!("127.0.0.1:{}", service.kona_p2p_host_port),
+            )
             .with_note(
-                "native direct-sequencing World Chain execution node with flashblocks enabled and trusted EL peers",
+                "monomorphic World Chain client: native reth EL + in-process kona consensus/sequencer, flashblocks enabled and trusted EL peers",
             )
             .with_note(format!(
                 "PBH disabled with zero reserved blockspace and sentinel entrypoint {PBH_DISABLED_ENTRYPOINT}"
@@ -2252,23 +2220,6 @@ fn build_components(
             )
             .with_endpoint("ws", service.flashblocks_url.clone())
             .with_note("flashblocks enabled by default; rollup-boost is intentionally absent"),
-        );
-    }
-
-    for service in op_nodes {
-        components.push(
-            DevnetComponent::new(
-                service.id.clone(),
-                DevnetComponentKind::OpNode,
-                DevnetComponentStatus::Running,
-            )
-            .with_image(service.image.clone())
-            .with_endpoint("rpc", service.rpc_url.clone())
-            .with_endpoint(
-                "p2p",
-                format!("host.docker.internal:{}", service.p2p_host_port),
-            )
-            .with_note(format!("bootnodes={}", service.bootnodes.join(","))),
         );
     }
 
@@ -2370,25 +2321,25 @@ async fn wait_for_l2_blocks_with_logs(
     rpc_url: &str,
     min_block: u64,
     timeout: Duration,
-    op_nodes: &[OpNodeService],
+    sequencers: &[SequencerService],
     conductors: &[ConductorService],
 ) -> Result<()> {
     if let Err(err) = wait_for_l2_blocks(rpc_url, min_block, timeout).await {
         let mut diagnostics = String::new();
-        diagnostics.push_str("op-node status:\n");
-        for node in op_nodes {
-            let sync_status = json_rpc(&node.rpc_url, "optimism_syncStatus", json!([]))
+        diagnostics.push_str("in-process kona consensus status:\n");
+        for sequencer in sequencers {
+            let sync_status = json_rpc(&sequencer.kona_rpc_url, "optimism_syncStatus", json!([]))
                 .await
                 .map(|value| value.to_string())
                 .unwrap_or_else(|err| format!("error: {err}"));
-            let sequencer_active = json_rpc(&node.rpc_url, "admin_sequencerActive", json!([]))
-                .await
-                .map(|value| value.to_string())
-                .unwrap_or_else(|err| format!("error: {err}"));
-            let logs = tail_text(&container_logs(&node._container).await, 160);
+            let sequencer_active =
+                json_rpc(&sequencer.kona_rpc_url, "admin_sequencerActive", json!([]))
+                    .await
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|err| format!("error: {err}"));
             diagnostics.push_str(&format!(
-                "\n{} rpc={} sequencer_active={} sync_status={}\nlogs:\n{}\n",
-                node.id, node.rpc_url, sequencer_active, sync_status, logs
+                "\n{} kona_rpc={} sequencer_active={} sync_status={}\n",
+                sequencer.id, sequencer.kona_rpc_url, sequencer_active, sync_status
             ));
         }
 

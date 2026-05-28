@@ -649,4 +649,96 @@ pub struct KonaArgs {
         requires = "kona.enabled"
     )]
     pub rollup_config_path: Option<std::path::PathBuf>,
+
+    /// Run the Kona consensus node in sequencer mode.
+    ///
+    /// When set, the node builds and gossips unsafe blocks rather than only following the chain.
+    #[arg(
+        long = "kona.sequencer",
+        env = "KONA_SEQUENCER",
+        requires = "kona.enabled",
+        default_value_t = false
+    )]
+    pub sequencer: bool,
+
+    /// Start the sequencer in the stopped state.
+    ///
+    /// Block production must be resumed explicitly (e.g. via the admin RPC or op-conductor).
+    #[arg(
+        long = "kona.sequencer.stopped",
+        env = "KONA_SEQUENCER_STOPPED",
+        requires = "kona.enabled",
+        default_value_t = false
+    )]
+    pub sequencer_stopped: bool,
+
+    /// Run the sequencer in recovery mode.
+    #[arg(
+        long = "kona.sequencer.recover",
+        env = "KONA_SEQUENCER_RECOVER",
+        requires = "kona.enabled",
+        default_value_t = false
+    )]
+    pub sequencer_recovery_mode: bool,
+
+    /// Number of L1 confirmations the sequencer waits on before building from an L1 origin.
+    #[arg(
+        long = "kona.sequencer.l1-confs",
+        env = "KONA_SEQUENCER_L1_CONFS",
+        requires = "kona.enabled",
+        default_value_t = 4
+    )]
+    pub l1_confs: u64,
+
+    /// URL of the op-conductor RPC endpoint. When set, the conductor service is enabled.
+    #[arg(
+        long = "kona.conductor.rpc",
+        env = "KONA_CONDUCTOR_RPC",
+        requires = "kona.enabled"
+    )]
+    pub conductor_rpc: Option<Url>,
+
+    /// IP address the Kona node RPC server binds to.
+    #[arg(
+        long = "kona.rpc.addr",
+        env = "KONA_RPC_ADDR",
+        requires = "kona.enabled",
+        default_value = "0.0.0.0"
+    )]
+    pub rpc_addr: IpAddr,
+
+    /// Port the Kona node RPC server binds to.
+    #[arg(
+        long = "kona.rpc.port",
+        env = "KONA_RPC_PORT",
+        requires = "kona.enabled",
+        default_value_t = 8547
+    )]
+    pub rpc_port: u16,
+
+    /// Enable the admin namespace on the Kona node RPC server.
+    #[arg(
+        long = "kona.rpc.enable-admin",
+        env = "KONA_RPC_ENABLE_ADMIN",
+        requires = "kona.enabled",
+        default_value_t = false
+    )]
+    pub rpc_enable_admin: bool,
+
+    /// Disable the Kona node RPC server entirely.
+    #[arg(
+        long = "kona.rpc.disabled",
+        env = "KONA_RPC_DISABLED",
+        requires = "kona.enabled",
+        default_value_t = false
+    )]
+    pub rpc_disabled: bool,
+
+    /// Override the L1 slot duration (in seconds) used by the L1 watcher.
+    #[arg(
+        long = "kona.l1-slot-duration-override",
+        env = "KONA_L1_SLOT_DURATION_OVERRIDE",
+        requires = "kona.enabled"
+    )]
+    pub l1_slot_duration_override: Option<u64>,
 }

@@ -2,6 +2,7 @@ use clap::Parser;
 use eyre::config::HookBuilder;
 use reth_node_builder::NodeHandle;
 use reth_optimism_consensus::OpBeaconConsensus;
+use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_tracing::tracing::info;
 use std::sync::Arc;
 use world_chain_chainspec::WorldChainSpec;
@@ -45,15 +46,24 @@ fn main() {
 
                 info!(target: "reth::cli", "Starting in Flashblocks mode");
                 let node = WorldChainNode::<WorldChainDefaultContext>::new(config.clone());
-                let NodeHandle {
-                    node_exit_future,
-                    node: _full_node,
-                } = builder.node(node).launch().await?;
 
                 let kona_enabled = kona_args.as_ref().is_some_and(|k| k.enabled);
-                if kona_enabled {
-                    let kona_args = kona_args.expect("already checked");
 
+                // Capture reth's real auth-server JWT secret before launch, while `builder` is
+                // still owned. This is the secret kona must present on the Engine API.
+                let kona_jwt_secret = if kona_enabled {
+                    let jwt_path = builder.config().datadir().jwt();
+                    Some(builder.config().rpc.auth_jwt_secret(jwt_path)?)
+                } else {
+                    None
+                };
+
+                let NodeHandle {
+                    node_exit_future,
+                    node: full_node,
+                } = builder.node(node).launch().await?;
+
+                if let (Some(kona_args), Some(jwt_secret)) = (kona_args, kona_jwt_secret) {
                     let l1_rpc_url: url::Url = kona_args.l1_rpc_url.parse()?;
                     let l1_beacon_url: url::Url = kona_args.l1_beacon_url.parse()?;
 
@@ -81,19 +91,24 @@ fn main() {
                         l1_beacon_url,
                         l1_trust_rpc: kona_args.l1_trust_rpc,
                         l2_trust_rpc: false,
-                        sequencer_mode: false,
+                        sequencer_mode: kona_args.sequencer,
+                        sequencer_stopped: kona_args.sequencer_stopped,
+                        sequencer_recovery_mode: kona_args.sequencer_recovery_mode,
+                        conductor_rpc_url: kona_args.conductor_rpc.clone(),
+                        l1_confs: kona_args.l1_confs,
                         p2p: kona_args.p2p,
-                        rpc_listen_addr: None,
-                        l1_slot_duration_override: None,
+                        rpc_addr: kona_args.rpc_addr,
+                        rpc_port: kona_args.rpc_port,
+                        rpc_enable_admin: kona_args.rpc_enable_admin,
+                        rpc_enabled: !kona_args.rpc_disabled,
+                        l1_slot_duration_override: kona_args.l1_slot_duration_override,
                     };
 
                     // Canonical kona constructs its own engine client internally and drives reth's
                     // execution engine over the standard authenticated Engine API. Point it at
-                    // reth's auth RPC endpoint.
-                    // TODO(kona-integration): Extract the actual auth RPC port and JWT secret from
-                    // reth's launched config rather than using defaults.
-                    let l2_auth_rpc_url: url::Url = "http://127.0.0.1:8551".parse()?;
-                    let jwt_secret = alloy_rpc_types_engine::JwtSecret::random();
+                    // reth's launched auth RPC endpoint, authenticated with reth's real JWT secret.
+                    let auth_addr = full_node.auth_server_handle().local_addr();
+                    let l2_auth_rpc_url: url::Url = format!("http://{auth_addr}").parse()?;
 
                     let mut kona_handle =
                         KonaServiceHandle::spawn(kona_config, l2_auth_rpc_url, jwt_secret).await?;
@@ -113,6 +128,9 @@ fn main() {
                             }
                         }
                     }
+
+                    // Keep the launched reth node alive for the duration of the select above.
+                    drop(full_node);
                 } else {
                     node_exit_future.await?;
                 }

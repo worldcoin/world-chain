@@ -127,6 +127,7 @@ reth-rpc-layer = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddead
 reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
 reth-storage-api = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
 reth-storage-errors = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
+reth-rpc-builder = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
 
 # reth-optimism
 reth-optimism-evm = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
@@ -144,6 +145,7 @@ reth-optimism-flashblocks = { git = "https://github.com/ethereum-optimism/optimi
 # kona (ethereum-optimism/optimism monorepo, same tag as op-alloy)
 kona-engine = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
 kona-node-service = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+kona-rpc = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
 kona-genesis = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
 kona-protocol = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", features = ["serde", "std"] }
 kona-disc = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
