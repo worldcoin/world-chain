@@ -688,8 +688,23 @@ async fn deploy_world_proof_system(
         .wrap_err_with(|| format!("failed to read rollup config {}", rollup_path.display()))?;
     let rollup_config_hash = keccak256(&rollup_config);
     let rollup_config_hash_hex = format!("0x{}", hex::encode(rollup_config_hash.as_slice()));
-    let deployment_path = workdir.join("world-proof-system-deployment.json");
     let contracts_dir = repo_root()?.join("pkg/contracts");
+    let deployment_name = workdir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("world-devnet");
+    let deployment_rel_path = PathBuf::from("out")
+        .join("devnet")
+        .join(format!("{deployment_name}-proof-system-deployment.json"));
+    let deployment_path = contracts_dir.join(&deployment_rel_path);
+    if let Some(parent) = deployment_path.parent() {
+        fs::create_dir_all(parent).wrap_err_with(|| {
+            format!(
+                "failed to create proof-system deployment output directory {}",
+                parent.display()
+            )
+        })?;
+    }
 
     let mut command = Command::new("forge");
     command
@@ -715,7 +730,7 @@ async fn deploy_world_proof_system(
             "PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL",
             PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL.to_string(),
         )
-        .env("PROOF_SYSTEM_DEPLOYMENT_OUT", &deployment_path);
+        .env("PROOF_SYSTEM_DEPLOYMENT_OUT", &deployment_rel_path);
 
     info!(
         l1_rpc_url,
