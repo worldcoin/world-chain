@@ -17,6 +17,7 @@ use world_chain_chainspec::{
     WorldChainSpec,
 };
 use world_chain_exex::ProposerCliArgs;
+use world_chain_op_batcher::BatcherCliArgs;
 
 pub mod builder;
 pub mod p2p;
@@ -155,6 +156,10 @@ pub struct WorldChainArgs {
     /// OP Proposer ExEx args (single-chain DGF proposer).
     #[command(flatten)]
     pub proposer: ProposerCliArgs,
+
+    /// OP Batcher ExEx args (singular-batch / calldata DA batch submitter).
+    #[command(flatten)]
+    pub batcher: BatcherCliArgs,
 
     /// Comma-separated list of peer IDs to which transactions should be propagated
     #[arg(long = "tx-peers", value_delimiter = ',', value_name = "PEER_ID")]
@@ -551,6 +556,7 @@ mod tests {
             },
             flashblocks: None,
             proposer: ProposerCliArgs::default(),
+            batcher: BatcherCliArgs::default(),
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
             disable_bootnodes: true,
             simulate_enabled: false,
