@@ -21,7 +21,6 @@ pub(crate) enum ProcessLogTarget {
     OpNode,
     OpConductor,
     OpBatcher,
-    OpProposer,
     OpChallenger,
     OpStackService,
     Prometheus,
@@ -63,9 +62,6 @@ pub(crate) fn emit_process_log(target: ProcessLogTarget, process: &str, line: &s
             emit_at_level!("op_conductor", level, process, line.as_str())
         }
         ProcessLogTarget::OpBatcher => emit_at_level!("op_batcher", level, process, line.as_str()),
-        ProcessLogTarget::OpProposer => {
-            emit_at_level!("op_proposer", level, process, line.as_str())
-        }
         ProcessLogTarget::OpChallenger => {
             emit_at_level!("op_challenger", level, process, line.as_str())
         }

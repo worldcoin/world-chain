@@ -2179,7 +2179,6 @@ async fn log_process_stream<R>(
 fn service_log_target(id: &str) -> ProcessLogTarget {
     match id {
         "op-batcher" => ProcessLogTarget::OpBatcher,
-        "op-proposer" => ProcessLogTarget::OpProposer,
         "op-challenger" => ProcessLogTarget::OpChallenger,
         _ => ProcessLogTarget::OpStackService,
     }
@@ -2288,9 +2287,7 @@ fn build_components(
         if let Some(url) = &service.rpc_url {
             component = component.with_endpoint("rpc", url.clone());
         }
-        if service.kind == DevnetComponentKind::OpProposer
-            || service.kind == DevnetComponentKind::OpChallenger
-        {
+        if service.kind == DevnetComponentKind::OpChallenger {
             component = component.with_note(format!("DisputeGameFactoryProxy={game_factory}"));
         }
         if service.kind == DevnetComponentKind::OpChallenger {

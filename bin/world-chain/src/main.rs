@@ -10,8 +10,7 @@ use world_chain_cli::{
 };
 use world_chain_evm::WorldChainEvmConfig;
 use world_chain_node::{
-    MaybeWorldChainExtensions, WorldChainNodeExtensions, context::WorldChainDefaultContext,
-    node::WorldChainNode,
+    WorldChainNodeExtensions, context::WorldChainDefaultContext, node::WorldChainNode,
 };
 
 #[cfg(all(feature = "jemalloc", unix))]
