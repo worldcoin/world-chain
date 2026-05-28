@@ -308,7 +308,8 @@ fn nitro_prove(args: NitroArgs) -> eyre::Result<()> {
     let request = NitroRangeProofRequest::from_witness_data(&input.witness, None)
         .map_err(|e| eyre!("failed to serialize witness: {e}"))?;
 
-    let prover = NitroProver::new(EnclaveEndpoint::new(args.cid), expected_pcrs);
+    let rt = tokio::runtime::Runtime::new()?;
+    let prover = NitroProver::with_runtime(EnclaveEndpoint::new(args.cid), expected_pcrs, rt.handle().clone());
 
     println!(
         "sending range {start}..={end} to enclave (cid {cid})",
@@ -317,7 +318,7 @@ fn nitro_prove(args: NitroArgs) -> eyre::Result<()> {
         cid = args.cid,
     );
 
-    let artifact = tokio::runtime::Runtime::new()?
+    let artifact = rt
         .block_on(prover.prove_range_async(request))
         .map_err(|e| eyre!("enclave proving failed: {e}"))?;
 
