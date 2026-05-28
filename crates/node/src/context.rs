@@ -1,6 +1,6 @@
 // Module defining World Chain Node Preset contexts for components & add-ons.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use crate::{
     add_ons::WorldChainAddOns,
@@ -29,7 +29,8 @@ use reth_optimism_node::{
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApiBuilder;
 use world_chain_chainspec::WorldChainSpec;
-use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
+use world_chain_cli::{KonaArgs, WorldChainArgs, WorldChainNodeConfig};
+use world_chain_kona::KonaConfig;
 use world_chain_p2p::{
     monitor::PeerMonitor,
     protocol::{
@@ -399,11 +400,7 @@ where
 ///
 /// The rollup configuration is loaded from the JSON file referenced by `--kona.rollup-config`,
 /// which is required when Kona is enabled.
-fn build_kona_config(
-    kona_args: &world_chain_cli::KonaArgs,
-) -> eyre::Result<world_chain_kona::KonaConfig> {
-    use std::sync::Arc;
-
+fn build_kona_config(kona_args: &KonaArgs) -> eyre::Result<world_chain_kona::KonaConfig> {
     let l1_rpc_url = kona_args.l1_rpc_url.parse()?;
     let l1_beacon_url = kona_args.l1_beacon_url.parse()?;
 
@@ -416,15 +413,15 @@ fn build_kona_config(
             rollup_config_path.display()
         ))
     })?;
+
     let rollup_config: kona_genesis::RollupConfig = serde_json::from_str(&config_json)
         .map_err(|e| eyre::Report::msg(format!("failed to parse rollup config: {e}")))?;
 
-    Ok(world_chain_kona::KonaConfig {
+    Ok(KonaConfig {
         rollup_config: Arc::new(rollup_config),
         l1_rpc_url,
         l1_beacon_url,
         l1_trust_rpc: kona_args.l1_trust_rpc,
-        l2_trust_rpc: false,
         sequencer_mode: kona_args.sequencer,
         sequencer_stopped: kona_args.sequencer_stopped,
         sequencer_recovery_mode: kona_args.sequencer_recovery_mode,

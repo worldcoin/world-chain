@@ -111,7 +111,7 @@ pub struct WorldChainAddOns<
     simulate_enabled: bool,
     /// In-process Kona consensus startup configuration.
     ///
-    /// When [`Some`], the add-ons assemble an [`InProcessEngineClient`] from reth's engine handle
+    /// When [`Some`], the add-ons assemble an [`WorldChainKonaEngineClient`] from reth's engine handle
     /// and spawn the Kona consensus node in-process during [`launch_add_ons`](NodeAddOns::launch_add_ons).
     kona_config: Option<KonaConfig>,
     /// Transaction type carried by the node primitives.
@@ -151,15 +151,6 @@ where
             _tx: PhantomData,
         }
     }
-
-    /// Sets the in-process Kona consensus startup configuration.
-    ///
-    /// When [`Some`], the Kona consensus node is assembled and spawned in-process during
-    /// [`launch_add_ons`](NodeAddOns::launch_add_ons), owning reth's `ConsensusEngineHandle`.
-    pub fn with_kona_config(mut self, kona_config: Option<KonaConfig>) -> Self {
-        self.kona_config = kona_config;
-        self
-    }
 }
 
 impl<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
@@ -168,6 +159,12 @@ where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
 {
+    /// Sets a [`KonaConfig`] which signals the add-ons to spawn an in-process Consensus Engine.
+    pub fn with_kona_config(mut self, kona_config: Option<KonaConfig>) -> Self {
+        self.kona_config = kona_config;
+        self
+    }
+
     /// Maps the [`EngineApiBuilder`] builder type.
     pub fn with_engine_api<T>(
         self,

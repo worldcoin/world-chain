@@ -2,7 +2,7 @@
 //!
 //! Bridges World Chain's node configuration to the [`KonaService`](crate::KonaService) inputs.
 //! Unlike the previous HTTP transport, there is no engine RPC URL or JWT here: the engine is driven
-//! in-process via an [`InProcessEngineClient`](crate::InProcessEngineClient) supplied by the node
+//! in-process via an [`WorldChainKonaEngineClient`](crate::WorldChainKonaEngineClient) supplied by the node
 //! add-ons.
 
 use std::{
@@ -33,9 +33,6 @@ pub struct KonaConfig {
 
     /// Whether to trust the L1 RPC without additional receipt verification.
     pub l1_trust_rpc: bool,
-
-    /// Whether to trust the L2 RPC used by the derivation pipeline.
-    pub l2_trust_rpc: bool,
 
     /// Whether to run in sequencer mode.
     pub sequencer_mode: bool,
@@ -83,7 +80,6 @@ impl KonaConfig {
             l1_rpc_url,
             l1_beacon_url,
             l1_trust_rpc: false,
-            l2_trust_rpc: false,
             sequencer_mode: false,
             sequencer_stopped: false,
             sequencer_recovery_mode: false,

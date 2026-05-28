@@ -3,7 +3,7 @@
 //! Canonical kona drives reth's execution engine over the authenticated Engine API (HTTP + JWT)
 //! via [`kona_node_service::RollupNode::start`], which hard-wires its [`EngineActor`] to an
 //! [`kona_engine::OpEngineClient`]. To run the consensus hot path **in-process**, we reproduce the
-//! same actor graph here but inject an [`InProcessEngineClient`](crate::InProcessEngineClient) into
+//! same actor graph here but inject an [`WorldChainKonaEngineClient`](crate::WorldChainKonaEngineClient) into
 //! the [`EngineProcessor`]/[`EngineRpcProcessor`].
 //!
 //! The actor graph is identical to upstream:
@@ -50,7 +50,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use url::Url;
 
-use crate::{InProcessEngineClient, KonaConfig};
+use crate::{KonaConfig, WorldChainKonaEngineClient};
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_optimism_node::OpEngineTypes;
 use reth_payload_builder::PayloadStore;
@@ -63,7 +63,7 @@ const CHANNEL_SIZE: usize = 1024;
 /// Inputs required to assemble and run the Kona consensus node in-process.
 ///
 /// These are the canonical kona node settings *minus* the Engine API transport, which is replaced
-/// by the in-process [`InProcessEngineClient`].
+/// by the in-process [`WorldChainKonaEngineClient`].
 pub struct KonaService {
     /// The OP Stack rollup configuration, shared with reth.
     pub rollup_config: Arc<RollupConfig>,
@@ -71,8 +71,6 @@ pub struct KonaService {
     pub l1_chain_config: Arc<L1ChainConfig>,
     /// Whether to trust the L1 RPC without receipt re-verification.
     pub l1_trust_rpc: bool,
-    /// Whether to trust the L2 RPC used by the derivation pipeline.
-    pub l2_trust_rpc: bool,
     /// The L1 EL provider (used by derivation, sequencer origin selection, and L1 watcher).
     pub l1_provider: RootProvider,
     /// The L1 beacon client (blob data availability).
@@ -80,7 +78,7 @@ pub struct KonaService {
     /// The L2 EL provider over reth's standard RPC (used by derivation for safe-head reads).
     pub l2_provider: RootProvider<Optimism>,
     /// The in-process engine client driving reth's execution engine.
-    pub engine_client: Arc<InProcessEngineClient>,
+    pub engine_client: Arc<WorldChainKonaEngineClient>,
     /// Whether the node runs in sequencer mode.
     pub sequencer_mode: bool,
     /// The sequencer configuration.
@@ -95,7 +93,7 @@ impl KonaService {
     /// Assembles a [`KonaService`] from a [`KonaConfig`] and the reth execution-layer handles
     /// obtained from the node add-ons after launch.
     ///
-    /// Constructs the [`InProcessEngineClient`] (wrapping the engine handle + payload store + L2/L1
+    /// Constructs the [`WorldChainKonaEngineClient`] (wrapping the engine handle + payload store + L2/L1
     /// providers), the L1 beacon client, and the P2P network configuration. The `l2_rpc_url` should
     /// point at reth's standard (unauthenticated) HTTP RPC; it is used only for the derivation
     /// pipeline and the engine actor's infrequent reads, never for the consensus hot path.
@@ -108,7 +106,7 @@ impl KonaService {
         let l1_provider = RootProvider::new_http(config.l1_rpc_url.clone());
         let l2_provider = RootProvider::<Optimism>::new_http(l2_rpc_url);
 
-        let engine_client = Arc::new(InProcessEngineClient::new(
+        let engine_client = Arc::new(WorldChainKonaEngineClient::new(
             config.rollup_config.clone(),
             engine_handle,
             payload_store,
@@ -131,7 +129,6 @@ impl KonaService {
             rollup_config: config.rollup_config.clone(),
             l1_chain_config: Arc::new(L1ChainConfig::default()),
             l1_trust_rpc: config.l1_trust_rpc,
-            l2_trust_rpc: config.l2_trust_rpc,
             l1_provider,
             l1_beacon,
             l2_provider,
@@ -158,7 +155,7 @@ impl KonaService {
             self.l2_provider.clone(),
             self.rollup_config.clone(),
             DERIVATION_PROVIDER_CACHE_SIZE,
-            self.l2_trust_rpc,
+            false,
         )
     }
 
@@ -187,7 +184,7 @@ impl KonaService {
         )
     }
 
-    /// Assembles the [`EngineActor`] around our [`InProcessEngineClient`].
+    /// Assembles the [`EngineActor`] around our [`WorldChainKonaEngineClient`].
     ///
     /// This mirrors `RollupNode::create_engine_actor`, but constructs the processors from the
     /// injected in-process client instead of building an [`kona_engine::OpEngineClient`] from an
@@ -200,8 +197,8 @@ impl KonaService {
         derivation_client: QueuedEngineDerivationClient,
         unsafe_head_tx: watch::Sender<L2BlockInfo>,
     ) -> EngineActor<
-        EngineProcessor<InProcessEngineClient, QueuedEngineDerivationClient>,
-        EngineRpcProcessor<InProcessEngineClient>,
+        EngineProcessor<WorldChainKonaEngineClient, QueuedEngineDerivationClient>,
+        EngineRpcProcessor<WorldChainKonaEngineClient>,
     > {
         let engine_state = EngineState::default();
         let (engine_state_tx, engine_state_rx) = watch::channel(engine_state);

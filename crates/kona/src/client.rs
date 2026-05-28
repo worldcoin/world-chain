@@ -1,6 +1,6 @@
 //! In-process Engine API client for Kona.
 //!
-//! This module provides [`InProcessEngineClient`], which implements Kona's
+//! This module provides [`WorldChainKonaEngineClient`], which implements Kona's
 //! [`EngineClient`](kona_engine::EngineClient) trait by dispatching the *consensus hot path* —
 //! `engine_forkchoiceUpdated`, `engine_newPayload`, and `engine_getPayload` — directly to reth's
 //! [`ConsensusEngineHandle`] and [`PayloadStore`] as in-process Rust calls. There is **no HTTP, no
@@ -63,7 +63,7 @@ use reth_payload_builder::PayloadStore;
 /// The fork-choice / new-payload / get-payload methods are dispatched directly to reth's
 /// [`ConsensusEngineHandle`] and [`PayloadStore`]. Infrequent read methods are delegated to alloy
 /// HTTP providers (see the module docs).
-pub struct InProcessEngineClient {
+pub struct WorldChainKonaEngineClient {
     /// The OP Stack rollup configuration, shared between Kona and reth.
     cfg: Arc<RollupConfig>,
     /// Handle to reth's consensus engine tree. `new_payload` and `fork_choice_updated` calls are
@@ -78,15 +78,15 @@ pub struct InProcessEngineClient {
     l1_provider: RootProvider,
 }
 
-impl std::fmt::Debug for InProcessEngineClient {
+impl std::fmt::Debug for WorldChainKonaEngineClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InProcessEngineClient")
+        f.debug_struct("WorldChainKonaEngineClient")
             .field("l2_chain_id", &self.cfg.l2_chain_id)
             .finish_non_exhaustive()
     }
 }
 
-impl InProcessEngineClient {
+impl WorldChainKonaEngineClient {
     /// Creates a new in-process engine client.
     ///
     /// # Arguments
@@ -152,7 +152,7 @@ impl InProcessEngineClient {
 }
 
 #[async_trait]
-impl EngineClient for InProcessEngineClient {
+impl EngineClient for WorldChainKonaEngineClient {
     fn cfg(&self) -> &RollupConfig {
         &self.cfg
     }
@@ -210,7 +210,7 @@ impl EngineClient for InProcessEngineClient {
 // ---------------------------------------------------------------------------
 
 #[async_trait]
-impl OpEngineApi<Optimism, Http<HyperAuthClient>> for InProcessEngineClient {
+impl OpEngineApi<Optimism, Http<HyperAuthClient>> for WorldChainKonaEngineClient {
     async fn new_payload_v2(
         &self,
         payload: ExecutionPayloadInputV2,

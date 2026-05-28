@@ -19,22 +19,22 @@
 //! Unlike canonical kona — which drives reth over the authenticated Engine API (HTTP + JWT) — the
 //! consensus hot path (`fork_choice_updated`, `new_payload`, `get_payload`) is dispatched directly
 //! to reth's [`reth_engine_primitives::ConsensusEngineHandle`] and
-//! [`reth_payload_builder::PayloadStore`] via [`InProcessEngineClient`]. There is no separate node
+//! [`reth_payload_builder::PayloadStore`] via [`WorldChainKonaEngineClient`]. There is no separate node
 //! process and no network transport on that path.
 //!
 //! ## Key Components
 //!
-//! - [`InProcessEngineClient`] — Implements kona's [`kona_engine::EngineClient`] trait by
+//! - [`WorldChainKonaEngineClient`] — Implements kona's [`kona_engine::EngineClient`] trait by
 //!   dispatching Engine API calls in-process to reth.
 //! - [`KonaService`] — Manually assembles the kona actor graph (engine, derivation, network, L1
 //!   watcher, optional sequencer, optional RPC) around the in-process engine client.
 //! - [`KonaServiceHandle`] — Owns the spawned service task and its cancellation token.
 //! - [`KonaConfig`] — Bridges World Chain's node configuration to the kona service inputs.
 
+pub mod client;
 pub mod config;
-pub mod engine_client;
 pub mod service;
 
+pub use client::WorldChainKonaEngineClient;
 pub use config::KonaConfig;
-pub use engine_client::InProcessEngineClient;
 pub use service::{KonaService, KonaServiceHandle};
