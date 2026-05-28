@@ -13,7 +13,7 @@
 //! | Internal module      | Upstream Go file                                  |
 //! | -------------------- | ------------------------------------------------- |
 //! | `config`             | `op-proposer/flags/flags.go`, `op-proposer/proposer/config.go` |
-//! | `contracts`          | `op-proposer/contracts/disputegamefactory.go`     |
+//! | `bindings`           | `op-proposer/contracts/disputegamefactory.go`     |
 //! | `driver`             | `op-proposer/proposer/driver.go`                  |
 //! | `metrics`            | `op-proposer/metrics/metrics.go`                  |
 //! | `rpc`                | `op-proposer/proposer/rpc/api.go`                 |
@@ -23,7 +23,7 @@
 //! | `source::local`      | `op-service/eth/output.go` (`OutputV0`)           |
 
 mod config;
-mod contracts;
+mod bindings;
 mod db;
 mod driver;
 mod error;
@@ -43,6 +43,7 @@ pub use exex::{install_op_proposer_exex, op_proposer_exex};
 pub use local_node::{ExExChainReader, ProviderBounds};
 pub use provider::{L1Provider, L1ProviderConfig, SignerKind};
 pub use service::{AdminRpcSettings, ProposerService};
+use bindings::{DisputeGameFactory, ContractError};
 pub use source::{
     Proposal, ProposalSource, ProposalSourceError, SyncStatus,
     local::{

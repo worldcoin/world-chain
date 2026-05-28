@@ -13900,6 +13900,7 @@ dependencies = [
  "world-chain-chainspec",
  "world-chain-cli",
  "world-chain-evm",
+ "world-chain-exex",
  "world-chain-node",
  "world-chain-rpc",
 ]
@@ -14011,6 +14012,7 @@ dependencies = [
  "reth-tracing",
  "tracing",
  "world-chain-chainspec",
+ "world-chain-exex",
 ]
 
 [[package]]

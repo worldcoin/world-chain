@@ -22,7 +22,7 @@ use url::Url;
 use crate::{
     Result,
     config::ProposerConfig,
-    contracts::DisputeGameFactory,
+    DisputeGameFactory,
     db::ProposerStore,
     driver::L2OutputSubmitter,
     error::OpProposerError,

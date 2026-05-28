@@ -31,7 +31,7 @@ use tracing::{debug, error, info, warn};
 use crate::{
     Result,
     config::ProposerConfig,
-    contracts::DisputeGameFactory,
+    DisputeGameFactory,
     db::{ProposerStore, StoredProposal},
     error::OpProposerError,
     metrics::ProposerMetrics,
@@ -118,7 +118,10 @@ impl L2OutputSubmitter {
         let this = self.clone();
         tokio::spawn(async move {
             this.run_loop(cancel).await;
-            stopped.notify_waiters();
+            // `notify_one` (not `notify_waiters`) — stores a permit if no
+            // waiter is registered yet, so `stop()` can't deadlock when the
+            // loop finishes before the waiter parks itself.
+            stopped.notify_one();
         });
         Ok(())
     }
@@ -376,7 +379,13 @@ impl L2OutputSubmitter {
                 tx_hash = ?receipt.transaction_hash,
                 "proposer tx successfully published but reverted",
             );
-            return Ok(());
+            // Surface this as a failure so `propose` records it via
+            // `record_failure` and *not* `record_l2_proposal` — a reverted
+            // tx must not bump `proposal_submissions` / `proposed_block_number`.
+            return Err(OpProposerError::msg(format!(
+                "proposer tx {:?} reverted on-chain",
+                receipt.transaction_hash
+            )));
         }
         info!(
             target: "exex::proposer",
