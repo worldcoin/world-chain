@@ -1,7 +1,6 @@
 //! reth ExEx entrypoint for the World Chain Relayer (cacher role).
 //!
-//! Implements the cacher's notification loop from [`wips/wip-1006.md`][wip]
-//! §Cacher. The body:
+//! Implements the cacher's notification loop. The body:
 //!
 //! * opens the [`WithdrawalStore`] at the relayer datadir,
 //! * on `ChainCommitted { new }` and the `new` side of `ChainReorged` scans the
@@ -18,8 +17,6 @@
 //!
 //! The relayer **driver** (proof construction, L1 prove/finalize, dispute-game
 //! polling) is out of scope here; this module only runs the cacher.
-//!
-//! [wip]: ../../../../wips/wip-1006.md
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -106,7 +103,7 @@ where
 
             // Persist the head durably *before* acknowledging the height, so a
             // crash can never lose a withdrawal whose height we already
-            // acknowledged (wip-1006 §Cacher).
+            // acknowledged.
             let num_hash = committed.tip().num_hash();
             if let Err(e) = store.put_head(StoredHead {
                 block_number: num_hash.number,

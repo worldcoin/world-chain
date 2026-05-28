@@ -1108,7 +1108,7 @@ async fn start_world_chain_el(
             OP_TXMGR_NETWORK_TIMEOUT.to_string(),
         ]);
 
-        // Wire the withdrawal cacher (wip-1006) on the same privileged
+        // Wire the withdrawal cacher on the same privileged
         // sequencer. The cacher indexes `MessagePassed` withdrawals straight
         // from local L2 state, so it needs no L1/portal/game-factory wiring;
         // those land with the relayer driver. `--relayer.cache-only` is set

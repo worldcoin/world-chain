@@ -4,8 +4,8 @@
 //! [`Environment`], tables created up front, JSON-encoded values, a
 //! [`parking_lot::Mutex`] write lock, and a `map_mdbx` error mapper.
 //!
-//! Implements the cacher's persistence contract from
-//! [`wips/wip-1006.md`][wip] §Cacher. The store is reorg-aware and idempotent.
+//! Implements the cacher's persistence contract: the store is reorg-aware and
+//! idempotent.
 //!
 //! Schema:
 //!
@@ -17,8 +17,6 @@
 //!   keys keep the index lexicographically ordered by block number.
 //! * `head` (single-entry): the cache tip, like
 //!   [`StoredHead`](crate::proposer::db::StoredHead).
-//!
-//! [wip]: ../../../../wips/wip-1006.md
 
 use std::{
     ops::RangeInclusive,
@@ -46,7 +44,7 @@ const SOLE_KEY: &[u8] = &[0u8];
 
 /// Tally of cached withdrawals grouped by lifecycle status.
 ///
-/// Seam for the future admin RPC (`wips/wip-1006.md` §Admin RPC).
+/// Seam for the future admin RPC.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatusCounts {
     pub cached: u64,
@@ -113,7 +111,7 @@ impl WithdrawalStore {
 
     /// Persist a freshly observed withdrawal.
     ///
-    /// Idempotent per [`wips/wip-1006.md`][wip] §Cacher: re-observing an
+    /// Idempotent: re-observing an
     /// already-cached `withdrawalHash` MUST NOT create a duplicate, and an
     /// existing record is never overwritten — in particular a record already
     /// proven/finalized on L1 ([`WithdrawalStatus::is_settled_on_l1`]) is never
@@ -123,8 +121,6 @@ impl WithdrawalStore {
     /// The block index is updated only when the record is newly inserted, so
     /// re-delivery of the same notification range never duplicates index
     /// entries either.
-    ///
-    /// [wip]: ../../../../wips/wip-1006.md
     pub fn put_withdrawal(&self, record: &WithdrawalRecord) -> Result<(), WithdrawalStoreError> {
         let _g = self.write_lock.lock();
         let tx = self.env.begin_rw_txn().map_err(map_mdbx)?;
@@ -181,7 +177,7 @@ impl WithdrawalStore {
         get_json(&tx, db.dbi(), hash.as_slice(), TABLE_WITHDRAWALS)
     }
 
-    /// Apply the reorg rule from [`wips/wip-1006.md`][wip] §Cacher over the
+    /// Apply the reorg rule over the
     /// (inclusive) reverted L2 block range:
     ///
     /// * a `Cached` record whose origin block falls in `range` is deleted, and
@@ -190,8 +186,6 @@ impl WithdrawalStore {
     ///
     /// The block-index entries for the range are removed; orphaned hashes are
     /// dropped from the index since they no longer map to a canonical block.
-    ///
-    /// [wip]: ../../../../wips/wip-1006.md
     pub fn prune_range(&self, range: RangeInclusive<u64>) -> Result<(), WithdrawalStoreError> {
         let _g = self.write_lock.lock();
         let tx = self.env.begin_rw_txn().map_err(map_mdbx)?;
@@ -245,7 +239,7 @@ impl WithdrawalStore {
 
     /// Counts of cached withdrawals grouped by status.
     ///
-    /// Seam for the admin RPC (`wips/wip-1006.md` §Admin RPC).
+    /// Seam for the admin RPC.
     pub fn counts_by_status(&self) -> Result<StatusCounts, WithdrawalStoreError> {
         let mut counts = StatusCounts::default();
         for record in self.collect_where(|_| true)? {

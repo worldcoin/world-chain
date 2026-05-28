@@ -1,8 +1,7 @@
 //! Withdrawal cacher core: chain scanning, decoupled from the store.
 //!
-//! Implements the **Cacher** scan/prune logic from [`wips/wip-1006.md`][wip]
-//! §Cacher. Kept independent of the ExEx notification loop so it can be unit
-//! tested against synthetic logs/receipts.
+//! Implements the **Cacher** scan/prune logic, kept independent of the ExEx
+//! notification loop so it can be unit tested against synthetic logs/receipts.
 //!
 //! [`scan_chain`] extracts `MessagePassed` logs from a committed [`Chain`] and
 //! persists [`WithdrawalRecord`]s; [`prune_chain`] applies the reorg rule over
@@ -41,11 +40,9 @@ pub struct ScanStats {
 /// selector is decoded into a [`WithdrawalRecord`] and written to `store`. The
 /// origin block number/hash are taken from the enclosing block. Logs whose
 /// recomputed withdrawal hash does not match the event-supplied hash are
-/// skipped with a warning (see [`wips/wip-1006.md`][wip] §Cacher).
+/// skipped with a warning.
 ///
 /// Persistence is idempotent, so re-scanning an already-cached range is safe.
-///
-/// [wip]: ../../../../wips/wip-1006.md
 pub fn scan_chain<N>(
     chain: &Chain<N>,
     store: &WithdrawalStore,

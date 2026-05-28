@@ -1,7 +1,7 @@
 //! L2-to-L1 withdrawal types, event decoding, and hashing.
 //!
-//! Implements the **Cacher** data model from [`wips/wip-1006.md`][wip] and the
-//! OP Stack [withdrawals specification][op-withdrawals]. A withdrawal is
+//! Implements the **Cacher** data model and the OP Stack
+//! [withdrawals specification][op-withdrawals]. A withdrawal is
 //! initiated on L2 by the `L2ToL1MessagePasser` predeploy
 //! (`0x4200000000000000000000000000000000000016`), which emits a
 //! `MessagePassed` event and writes the withdrawal hash into its
@@ -22,7 +22,6 @@
 //! the cacher; [`WithdrawalStatus::Proven`] / [`WithdrawalStatus::Finalized`]
 //! are forward-compatibility seams it will set.
 //!
-//! [wip]: ../../../../wips/wip-1006.md
 //! [op-withdrawals]: https://specs.optimism.io/protocol/withdrawals.html
 
 use alloy_primitives::{Address, B256, Bytes, U256, keccak256};
@@ -154,10 +153,7 @@ impl WithdrawalStatus {
 
 /// A cached withdrawal record, keyed by its `withdrawalHash`.
 ///
-/// Persisted as JSON in the `WithdrawalStore`. See the field table in
-/// [`wips/wip-1006.md`][wip] §Cacher.
-///
-/// [wip]: ../../../../wips/wip-1006.md
+/// Persisted as JSON in the `WithdrawalStore`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WithdrawalRecord {
     /// `MessagePassed.withdrawalHash` (validated against [`withdrawal_hash`]).
@@ -182,9 +178,7 @@ impl WithdrawalRecord {
     ///
     /// Returns `Err(WithdrawalDecodeError::HashMismatch)` if the recomputed
     /// `keccak256(abi.encode(tx))` does not equal `event.withdrawalHash`; the
-    /// cacher MUST skip such logs (see [`wips/wip-1006.md`][wip] §Cacher).
-    ///
-    /// [wip]: ../../../../wips/wip-1006.md
+    /// cacher MUST skip such logs.
     pub fn from_event(
         event: &MessagePassed,
         l2_block_number: u64,

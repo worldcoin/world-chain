@@ -8,13 +8,12 @@
 //!   `1852be216f45a942321b440da4d92cfb3055f3c1`). All `Mirrors:` annotations
 //!   in that module reference the upstream Go files.
 //! * [`withdrawals`] — the **Withdrawal Cacher and Relayer**, implementing the
-//!   cacher role of [`wips/wip-1006.md`][wip].
+//!   cacher role.
 //!
 //! [`error`] holds the shared top-level [`OpProposerError`] returned from the
 //! crate's public surface.
 //!
 //! [tag]: https://github.com/ethereum-optimism/optimism/tree/op-proposer/v1.16.3-rc.1
-//! [wip]: ../../../wips/wip-1006.md
 //!
 //! ## Crate layout
 //!
@@ -23,7 +22,7 @@
 //!   lib.rs            crate root: module wiring + public re-exports
 //!   error.rs          shared top-level error
 //!   proposer/         OP Proposer ExEx (op-proposer port)
-//!   withdrawals/      Withdrawal Cacher and Relayer ExEx (wip-1006)
+//!   withdrawals/      Withdrawal Cacher and Relayer ExEx
 //! ```
 
 mod error;

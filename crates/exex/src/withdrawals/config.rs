@@ -1,14 +1,13 @@
 //! Configuration for the World Chain Relayer ExEx (cacher subset).
 //!
-//! Mirrors the [`ProposerCliArgs`](crate::proposer::config::ProposerCliArgs) clap pattern
-//! from [`wips/wip-1006.md`][wip] §CLI. Only the flags the **cacher** consumes
-//! today are wired up here:
+//! Mirrors the [`ProposerCliArgs`](crate::proposer::config::ProposerCliArgs) clap pattern.
+//! Only the flags the **cacher** consumes today are wired up here:
 //!
 //! * `--relayer.enabled`   (env `WC_RELAYER_ENABLED`, default `false`)
 //! * `--relayer.cache-only` (env `WC_RELAYER_CACHE_ONLY`, default `false`)
 //! * `--relayer.datadir`   (env `WC_RELAYER_DATADIR`, default `<datadir>/wc-relayer`)
 //!
-//! The remaining `--relayer.*` flags from [`wips/wip-1006.md`][wip] §CLI —
+//! The remaining `--relayer.*` flags —
 //! `--relayer.l1-eth-rpc`, `--relayer.portal-address`,
 //! `--relayer.game-factory-address`, `--relayer.game-type`,
 //! `--relayer.poll-interval`, the signer flags (`--relayer.private-key` /
@@ -16,8 +15,6 @@
 //! and the admin-RPC flags — arrive with the relayer driver. They are
 //! intentionally omitted here so the cacher build stays free of dead code
 //! under the workspace's `-D warnings` lint policy.
-//!
-//! [wip]: ../../../../wips/wip-1006.md
 
 use std::path::PathBuf;
 
@@ -93,10 +90,8 @@ impl RelayerCliArgs {
     /// Translate CLI args into a validated [`RelayerConfig`].
     ///
     /// The cacher needs no L1 endpoint or signer, so the only resolution here
-    /// is the datadir fallback. The signer/RPC validation from
-    /// [`wips/wip-1006.md`][wip] §CLI arrives with the relayer driver.
-    ///
-    /// [wip]: ../../../../wips/wip-1006.md
+    /// is the datadir fallback. The signer/RPC validation arrives with the
+    /// relayer driver.
     pub fn into_config(
         self,
         fallback_datadir: PathBuf,
@@ -112,11 +107,9 @@ impl RelayerCliArgs {
 #[derive(Debug, Error)]
 pub enum RelayerConfigError {
     /// Placeholder for the signer/endpoint validation added with the relayer
-    /// driver (see [`wips/wip-1006.md`][wip] §CLI). Kept so the error seam and
-    /// the [`OpProposerError`](crate::error::OpProposerError) `#[from]` wiring
+    /// driver. Kept so the error seam and the
+    /// [`OpProposerError`](crate::error::OpProposerError) `#[from]` wiring
     /// are in place; the cacher never constructs it.
-    ///
-    /// [wip]: ../../../../wips/wip-1006.md
     // Forward-compat seam for the relayer driver; the cacher never builds it.
     #[allow(dead_code)]
     #[error("invalid relayer configuration: {0}")]
