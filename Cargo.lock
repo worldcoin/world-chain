@@ -13900,7 +13900,6 @@ dependencies = [
  "world-chain-chainspec",
  "world-chain-cli",
  "world-chain-evm",
- "world-chain-exex",
  "world-chain-node",
  "world-chain-rpc",
 ]
@@ -14183,6 +14182,7 @@ dependencies = [
  "world-chain-chainspec",
  "world-chain-cli",
  "world-chain-evm",
+ "world-chain-exex",
  "world-chain-p2p",
  "world-chain-payload",
  "world-chain-pool",
