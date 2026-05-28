@@ -1,6 +1,6 @@
 //! MDBX-backed persistence for the withdrawal cacher.
 //!
-//! Mirrors the [`ProposerStore`](crate::db::ProposerStore) style: a libmdbx
+//! Mirrors the [`ProposerStore`](crate::proposer::db::ProposerStore) style: a libmdbx
 //! [`Environment`], tables created up front, JSON-encoded values, a
 //! [`parking_lot::Mutex`] write lock, and a `map_mdbx` error mapper.
 //!
@@ -16,9 +16,9 @@
 //!   touch on reorg without scanning the whole `withdrawals` table. Big-endian
 //!   keys keep the index lexicographically ordered by block number.
 //! * `head` (single-entry): the cache tip, like
-//!   [`StoredHead`](crate::db::StoredHead).
+//!   [`StoredHead`](crate::proposer::db::StoredHead).
 //!
-//! [wip]: ../../../wips/wip-1006.md
+//! [wip]: ../../../../wips/wip-1006.md
 
 use std::{
     ops::RangeInclusive,
@@ -28,15 +28,15 @@ use std::{
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_libmdbx::{
-    DatabaseFlags, Environment, Geometry, RW, Transaction, TransactionKind, WriteFlags,
-    ffi::MDBX_dbi,
+    ffi::MDBX_dbi, DatabaseFlags, Environment, Geometry, Transaction, TransactionKind, WriteFlags,
+    RW,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    db::StoredHead,
-    withdrawal::{WithdrawalRecord, WithdrawalStatus},
+    proposer::db::StoredHead,
+    withdrawals::types::{WithdrawalRecord, WithdrawalStatus},
 };
 
 const TABLE_WITHDRAWALS: &str = "withdrawals";
@@ -124,7 +124,7 @@ impl WithdrawalStore {
     /// re-delivery of the same notification range never duplicates index
     /// entries either.
     ///
-    /// [wip]: ../../../wips/wip-1006.md
+    /// [wip]: ../../../../wips/wip-1006.md
     pub fn put_withdrawal(&self, record: &WithdrawalRecord) -> Result<(), WithdrawalStoreError> {
         let _g = self.write_lock.lock();
         let tx = self.env.begin_rw_txn().map_err(map_mdbx)?;
@@ -191,7 +191,7 @@ impl WithdrawalStore {
     /// The block-index entries for the range are removed; orphaned hashes are
     /// dropped from the index since they no longer map to a canonical block.
     ///
-    /// [wip]: ../../../wips/wip-1006.md
+    /// [wip]: ../../../../wips/wip-1006.md
     pub fn prune_range(&self, range: RangeInclusive<u64>) -> Result<(), WithdrawalStoreError> {
         let _g = self.write_lock.lock();
         let tx = self.env.begin_rw_txn().map_err(map_mdbx)?;
@@ -370,7 +370,7 @@ pub enum WithdrawalStoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::withdrawal::{WithdrawalTransaction, message_slot, withdrawal_hash};
+    use crate::withdrawals::types::{message_slot, withdrawal_hash, WithdrawalTransaction};
     use alloy_primitives::{Address, Bytes, U256};
 
     fn record(seed: u8, block: u64, status: WithdrawalStatus) -> WithdrawalRecord {
@@ -468,12 +468,10 @@ mod tests {
         store.prune_range(300..=301).unwrap();
 
         // Cached @300 removed.
-        assert!(
-            store
-                .get_withdrawal(cached.withdrawal_hash)
-                .unwrap()
-                .is_none()
-        );
+        assert!(store
+            .get_withdrawal(cached.withdrawal_hash)
+            .unwrap()
+            .is_none());
         // Proven @301 retained, now Orphaned.
         let kept = store
             .get_withdrawal(proven.withdrawal_hash)
@@ -481,12 +479,10 @@ mod tests {
             .unwrap();
         assert_eq!(kept.status, WithdrawalStatus::Orphaned);
         // Out-of-range record untouched.
-        assert!(
-            store
-                .get_withdrawal(untouched.withdrawal_hash)
-                .unwrap()
-                .is_some()
-        );
+        assert!(store
+            .get_withdrawal(untouched.withdrawal_hash)
+            .unwrap()
+            .is_some());
 
         // Index for pruned blocks cleared; block 400 still present.
         let idx = store.block_index_snapshot().unwrap();

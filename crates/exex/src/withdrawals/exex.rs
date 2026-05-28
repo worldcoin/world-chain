@@ -19,7 +19,7 @@
 //! The relayer **driver** (proof construction, L1 prove/finalize, dispute-game
 //! polling) is out of scope here; this module only runs the cacher.
 //!
-//! [wip]: ../../../wips/wip-1006.md
+//! [wip]: ../../../../wips/wip-1006.md
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -32,11 +32,13 @@ use tracing::{info, warn};
 
 use crate::{
     Result,
-    cacher::{prune_chain, scan_chain},
-    db::StoredHead,
     error::OpProposerError,
-    relayer_config::{RelayerCliArgs, RelayerConfig},
-    withdrawal_store::WithdrawalStore,
+    proposer::db::StoredHead,
+    withdrawals::{
+        cacher::{prune_chain, scan_chain},
+        config::{RelayerCliArgs, RelayerConfig},
+        store::WithdrawalStore,
+    },
 };
 
 const TARGET: &str = "exex::relayer";

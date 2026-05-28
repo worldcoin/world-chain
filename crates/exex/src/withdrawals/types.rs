@@ -22,16 +22,16 @@
 //! the cacher; [`WithdrawalStatus::Proven`] / [`WithdrawalStatus::Finalized`]
 //! are forward-compatibility seams it will set.
 //!
-//! [wip]: ../../../wips/wip-1006.md
+//! [wip]: ../../../../wips/wip-1006.md
 //! [op-withdrawals]: https://specs.optimism.io/protocol/withdrawals.html
 
-use alloy_primitives::{Address, B256, Bytes, U256, keccak256};
-use alloy_sol_types::{SolValue, sol};
+use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_sol_types::{sol, SolValue};
 use serde::{Deserialize, Serialize};
 
 // Re-export the predeploy address rather than redefining it; the proposer's
 // local proposal source already owns the canonical constant.
-pub use crate::source::local::L2_TO_L1_MESSAGE_PASSER;
+pub use crate::proposer::source::local::L2_TO_L1_MESSAGE_PASSER;
 
 sol! {
     /// `MessagePassed` event emitted by the `L2ToL1MessagePasser` predeploy on
@@ -157,7 +157,7 @@ impl WithdrawalStatus {
 /// Persisted as JSON in the `WithdrawalStore`. See the field table in
 /// [`wips/wip-1006.md`][wip] §Cacher.
 ///
-/// [wip]: ../../../wips/wip-1006.md
+/// [wip]: ../../../../wips/wip-1006.md
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WithdrawalRecord {
     /// `MessagePassed.withdrawalHash` (validated against [`withdrawal_hash`]).
@@ -184,7 +184,7 @@ impl WithdrawalRecord {
     /// `keccak256(abi.encode(tx))` does not equal `event.withdrawalHash`; the
     /// cacher MUST skip such logs (see [`wips/wip-1006.md`][wip] §Cacher).
     ///
-    /// [wip]: ../../../wips/wip-1006.md
+    /// [wip]: ../../../../wips/wip-1006.md
     pub fn from_event(
         event: &MessagePassed,
         l2_block_number: u64,

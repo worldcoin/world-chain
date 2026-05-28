@@ -17,9 +17,9 @@ use reth_execution_types::Chain;
 use reth_node_api::NodePrimitives;
 use tracing::{debug, warn};
 
-use crate::{
-    withdrawal::{L2_TO_L1_MESSAGE_PASSER, MessagePassed, WithdrawalDecodeError, WithdrawalRecord},
-    withdrawal_store::{WithdrawalStore, WithdrawalStoreError},
+use crate::withdrawals::{
+    store::{WithdrawalStore, WithdrawalStoreError},
+    types::{MessagePassed, WithdrawalDecodeError, WithdrawalRecord, L2_TO_L1_MESSAGE_PASSER},
 };
 
 const TARGET: &str = "exex::relayer";
@@ -45,7 +45,7 @@ pub struct ScanStats {
 ///
 /// Persistence is idempotent, so re-scanning an already-cached range is safe.
 ///
-/// [wip]: ../../../wips/wip-1006.md
+/// [wip]: ../../../../wips/wip-1006.md
 pub fn scan_chain<N>(
     chain: &Chain<N>,
     store: &WithdrawalStore,
@@ -177,8 +177,8 @@ fn now_unix() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::withdrawal::{WithdrawalTransaction, message_slot, withdrawal_hash};
-    use alloy_primitives::{Address, B256, Bytes, LogData, U256};
+    use crate::withdrawals::types::{message_slot, withdrawal_hash, WithdrawalTransaction};
+    use alloy_primitives::{Address, Bytes, LogData, B256, U256};
 
     fn sample_tx(seed: u8) -> WithdrawalTransaction {
         WithdrawalTransaction {

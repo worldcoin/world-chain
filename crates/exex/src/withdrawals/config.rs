@@ -1,6 +1,6 @@
 //! Configuration for the World Chain Relayer ExEx (cacher subset).
 //!
-//! Mirrors the [`ProposerCliArgs`](crate::config::ProposerCliArgs) clap pattern
+//! Mirrors the [`ProposerCliArgs`](crate::proposer::config::ProposerCliArgs) clap pattern
 //! from [`wips/wip-1006.md`][wip] §CLI. Only the flags the **cacher** consumes
 //! today are wired up here:
 //!
@@ -17,7 +17,7 @@
 //! intentionally omitted here so the cacher build stays free of dead code
 //! under the workspace's `-D warnings` lint policy.
 //!
-//! [wip]: ../../../wips/wip-1006.md
+//! [wip]: ../../../../wips/wip-1006.md
 
 use std::path::PathBuf;
 
@@ -70,7 +70,7 @@ impl Default for RelayerCliArgs {
     fn default() -> Self {
         // Spelled out (rather than `#[derive(Default)]`) to mirror the
         // explicit clap-default `Default` impl on
-        // [`ProposerCliArgs`](crate::config::ProposerCliArgs), and to keep the
+        // [`ProposerCliArgs`](crate::proposer::config::ProposerCliArgs), and to keep the
         // defaults co-located with the flag table as more flags land.
         Self {
             enabled: false,
@@ -96,7 +96,7 @@ impl RelayerCliArgs {
     /// is the datadir fallback. The signer/RPC validation from
     /// [`wips/wip-1006.md`][wip] §CLI arrives with the relayer driver.
     ///
-    /// [wip]: ../../../wips/wip-1006.md
+    /// [wip]: ../../../../wips/wip-1006.md
     pub fn into_config(
         self,
         fallback_datadir: PathBuf,
@@ -116,7 +116,7 @@ pub enum RelayerConfigError {
     /// the [`OpProposerError`](crate::error::OpProposerError) `#[from]` wiring
     /// are in place; the cacher never constructs it.
     ///
-    /// [wip]: ../../../wips/wip-1006.md
+    /// [wip]: ../../../../wips/wip-1006.md
     // Forward-compat seam for the relayer driver; the cacher never builds it.
     #[allow(dead_code)]
     #[error("invalid relayer configuration: {0}")]

@@ -10,7 +10,7 @@
 //!
 //! All transaction concerns — gas estimation (with 3/2 fallback), nonce
 //! management, signing, fee bumps — are handled by the provider's filler
-//! stack (see [`crate::provider`]). This module has no custom transaction
+//! stack (see [`crate::proposer::provider`]). This module has no custom transaction
 //! manager and no custom receipt types.
 //!
 //! [driver-go]:

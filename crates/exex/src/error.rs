@@ -130,7 +130,7 @@ mod tests {
 
     #[test]
     fn eyre_variant_preserves_source_chain() {
-        let inner = std::io::Error::new(std::io::ErrorKind::Other, "boom");
+        let inner = std::io::Error::other("boom");
         let report: eyre::eyre::Report = eyre!(inner).wrap_err("outer context");
         let err: OpProposerError = report.into();
         let s = format!("{err}");

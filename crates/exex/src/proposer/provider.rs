@@ -19,16 +19,16 @@ use std::{num::NonZeroUsize, time::Duration};
 
 use alloy_network::EthereumWallet;
 use alloy_primitives::Address;
-use alloy_provider::{DynProvider, Provider, ProviderBuilder, fillers::CachedNonceManager};
+use alloy_provider::{fillers::CachedNonceManager, DynProvider, Provider, ProviderBuilder};
 use alloy_rpc_client::RpcClient;
-use alloy_signer_local::{MnemonicBuilder, PrivateKeySigner, coins_bip39::English};
+use alloy_signer_local::{coins_bip39::English, MnemonicBuilder, PrivateKeySigner};
 use alloy_transport::layers::{FallbackLayer, RetryBackoffLayer};
-use alloy_transport_http::{Http, reqwest};
+use alloy_transport_http::{reqwest, Http};
 use thiserror::Error;
 use tower::ServiceBuilder;
 use url::Url;
 
-use crate::tx::GasEstimateWithFallbackFiller;
+use crate::proposer::tx::GasEstimateWithFallbackFiller;
 
 /// Resolved configuration for the L1 provider.
 #[derive(Debug, Clone)]
