@@ -36,6 +36,30 @@ const L2_TO_L1_MESSAGE_PASSER: Address = Address::new([
     0x42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x16,
 ]);
 
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum Network {
+    #[value(name = "worldchain")]
+    WorldChain,
+    #[value(name = "worldchain-sepolia")]
+    WorldChainSepolia,
+}
+
+impl Network {
+    fn chain_id(self) -> u64 {
+        match self {
+            Self::WorldChain => 480,
+            Self::WorldChainSepolia => 4801,
+        }
+    }
+
+    fn chain_spec(self) -> Arc<WorldChainSpec> {
+        match self {
+            Self::WorldChain => WorldChainSpec::mainnet(),
+            Self::WorldChainSepolia => WorldChainSpec::sepolia(),
+        }
+    }
+}
+
 type DefaultOracleBase = CachingOracle<OracleReader<NativeChannel>, HintWriter<NativeChannel>>;
 type WorldPreimageCollector = PreimageWitnessCollector<DefaultOracleBase>;
 type WorldOnlineBlobStore = OnlineBlobStore<OracleBlobProvider<DefaultOracleBase>>;
@@ -114,6 +138,10 @@ struct RpcArgs {
     /// Maximum seconds to spend generating the Kona witness.
     #[arg(long, default_value_t = 900)]
     witness_timeout_seconds: u64,
+
+    /// World Chain network to prove.
+    #[arg(long, env = "NETWORK", default_value = "worldchain")]
+    network: Network,
 }
 
 #[derive(Debug, Args)]
@@ -338,7 +366,7 @@ fn build_range_input(args: &RpcArgs) -> eyre::Result<RangeProofInput> {
     }
 
     let (schedule, rollup_config_hash) =
-        proof_config(args.rollup_config.as_deref(), args.rollup_config_hash)?;
+        proof_config(args.network, args.rollup_config.as_deref(), args.rollup_config_hash)?;
 
     let pre_block = get_block(&client, &args.l2_rpc, BlockTag::Number(args.start_block))?;
     let post_block = get_block(&client, &args.l2_rpc, BlockTag::Number(args.end_block))?;
@@ -368,7 +396,7 @@ fn build_range_input(args: &RpcArgs) -> eyre::Result<RangeProofInput> {
         data_format: DataFormat::default(),
         native: false,
         server: true,
-        l2_chain_id: args.rollup_config.is_none().then_some(480),
+        l2_chain_id: args.rollup_config.is_none().then_some(args.network.chain_id()),
         rollup_config_path: args.rollup_config.clone(),
         l1_config_path: None,
         enable_experimental_witness_endpoint: false,
@@ -500,6 +528,7 @@ async fn collect_witness_from_channels(
 }
 
 fn proof_config(
+    network: Network,
     rollup_config_path: Option<&Path>,
     rollup_config_hash: Option<B256>,
 ) -> eyre::Result<(WorldRangeHardforkConfig, B256)> {
@@ -510,7 +539,7 @@ fn proof_config(
     let hash = rollup_config_hash.context(
         "provide --rollup-config or ROLLUP_CONFIG, or supply --rollup-config-hash",
     )?;
-    let spec = WorldChainSpec::mainnet();
+    let spec = network.chain_spec();
     let protocol_config = ProtocolHardforkConfig::from_chain_spec(spec.as_ref());
     Ok((range_hardfork_config(&protocol_config), hash))
 }
