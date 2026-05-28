@@ -11,7 +11,7 @@ pub mod extensions;
 pub mod tx_propagation;
 pub mod version;
 
-pub use extensions::{OpProposerInstall, install_worldchain_extensions};
+pub use extensions::WorldChainExtensions;
 pub use version::{init_version_metadata, version_metadata};
 
 // Re-export for ease of use
