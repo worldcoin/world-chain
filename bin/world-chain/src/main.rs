@@ -10,7 +10,7 @@ use world_chain_cli::{
 };
 use world_chain_evm::WorldChainEvmConfig;
 use world_chain_node::{
-    WorldChainExtensions, context::WorldChainDefaultContext, node::WorldChainNode,
+    MaybeWorldChainExtensions, context::WorldChainDefaultContext, node::WorldChainNode,
 };
 
 #[cfg(all(feature = "jemalloc", unix))]
@@ -40,17 +40,21 @@ fn main() {
         .run::<WorldChainNode<WorldChainDefaultContext>, _, _, _>(
             |mut builder, args| async move {
                 info!(target: "reth::cli", "Launching node");
-                let config: WorldChainNodeConfig = args.clone().into_config(builder.config_mut())?;
+                let config: WorldChainNodeConfig =
+                    args.clone().into_config(builder.config_mut())?;
 
                 info!(target: "reth::cli", "Starting in Flashblocks mode");
                 let node = WorldChainNode::<WorldChainDefaultContext>::new(config.clone());
 
-                let NodeHandle { node_exit_future, node: _node } = builder
+                let NodeHandle {
+                    node_exit_future,
+                    node: _node,
+                } = builder
                     .node(node)
-                    .install_worldchain_extensions(&args)
+                    .install_extensions_if(&args)
                     .launch()
                     .await?;
-                
+
                 node_exit_future.await?;
 
                 Ok(())

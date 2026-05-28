@@ -20,9 +20,8 @@ use tracing::info;
 use url::Url;
 
 use crate::{
-    Result,
+    DisputeGameFactory, Result,
     config::ProposerConfig,
-    DisputeGameFactory,
     db::ProposerStore,
     driver::L2OutputSubmitter,
     error::OpProposerError,

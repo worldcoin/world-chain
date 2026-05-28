@@ -22,8 +22,8 @@
 //! | `source::rollup`     | `op-proposer/proposer/source/source_rollup.go`    |
 //! | `source::local`      | `op-service/eth/output.go` (`OutputV0`)           |
 
-mod config;
 mod bindings;
+mod config;
 mod db;
 mod driver;
 mod error;
@@ -36,6 +36,7 @@ mod service;
 mod source;
 mod tx;
 
+use bindings::{ContractError, DisputeGameFactory};
 pub use config::{ProposerCliArgs, ProposerConfig};
 pub use db::{ProposerStore, StoredHead, StoredProposal};
 pub use error::OpProposerError;
@@ -43,7 +44,6 @@ pub use exex::{install_op_proposer_exex, op_proposer_exex};
 pub use local_node::{ExExChainReader, ProviderBounds};
 pub use provider::{L1Provider, L1ProviderConfig, SignerKind};
 pub use service::{AdminRpcSettings, ProposerService};
-use bindings::{DisputeGameFactory, ContractError};
 pub use source::{
     Proposal, ProposalSource, ProposalSourceError, SyncStatus,
     local::{

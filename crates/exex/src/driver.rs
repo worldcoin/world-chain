@@ -29,9 +29,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    Result,
+    DisputeGameFactory, Result,
     config::ProposerConfig,
-    DisputeGameFactory,
     db::{ProposerStore, StoredProposal},
     error::OpProposerError,
     metrics::ProposerMetrics,
