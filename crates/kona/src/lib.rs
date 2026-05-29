@@ -37,4 +37,4 @@ mod service;
 
 pub use client::WorldChainKonaEngineClient;
 pub use config::KonaConfig;
-pub use service::{KonaService, KonaServiceHandle};
+pub use service::{KonaService, KonaServiceHandle, L2RpcEndpoint};

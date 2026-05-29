@@ -388,11 +388,6 @@ where
         let kona_inputs = kona_args
             .map(|kona_args| -> eyre::Result<_> {
                 let kona_config = build_kona_config(&kona_args)?;
-                if ctx.config.rpc.ipcdisable {
-                    return Err(eyre::Report::msg(
-                        "--kona.enabled requires reth's IPC RPC server (do not pass --ipcdisable)",
-                    ));
-                }
                 let engine_handle = ctx.beacon_engine_handle.clone();
                 let payload_store = PayloadStore::new(ctx.node.payload_builder_handle().clone());
                 let task_executor = ctx.node.task_executor().clone();
@@ -503,24 +498,29 @@ where
             .await?;
 
         // Now that the RPC server is live, spawn the in-process Kona consensus node (if enabled).
-        // The L2 IPC endpoint is read from the running server so it reflects the actual path reth
-        // bound, rather than re-deriving it from config.
+        // Kona reaches reth's standard (non-engine) L2 RPC over IPC when the IPC server is enabled,
+        // otherwise it falls back to the HTTP RPC endpoint. Both are read from the running server so
+        // they reflect what reth actually bound, rather than being re-derived from config.
         if let Some((kona_config, engine_handle, payload_store, task_executor)) = kona_inputs {
-            let ipc_path = handle
-                .rpc_server_handles
-                .rpc
-                .ipc_endpoint()
-                .ok_or_else(|| {
-                    eyre::Report::msg(
-                        "--kona.enabled requires reth's IPC RPC server (do not pass --ipcdisable)",
-                    )
-                })?;
+            let rpc = &handle.rpc_server_handles.rpc;
+            let l2_endpoint = match rpc.ipc_endpoint() {
+                Some(ipc_path) => L2RpcEndpoint::Ipc(ipc_path),
+                None => {
+                    let http_url = rpc.http_url().ok_or_else(|| {
+                        eyre::Report::msg(
+                            "--kona.enabled requires reth's IPC or HTTP RPC server \
+                             (enable at least one of --ipc / --http)",
+                        )
+                    })?;
+                    L2RpcEndpoint::Http(http_url.parse()?)
+                }
+            };
             spawn_kona(
                 kona_config,
                 engine_handle,
                 payload_store,
                 task_executor,
-                ipc_path,
+                l2_endpoint,
             )
             .await?;
         }
