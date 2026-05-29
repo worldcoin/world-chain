@@ -470,31 +470,7 @@ pub trait SimulateApi {
 /// Maximum number of token metadata entries kept across requests.
 ///
 /// Cross-request cache for resolved token metadata. LRU-bounded.
-type MetadataCache = Arc<Mutex<LruCache<Address, TokenMetadata>>>;
-
-/// Address-level token metadata cached across simulations.
-///
-/// The cache intentionally excludes `AssetType`: a single contract address can
-/// be observed through different token-standard event surfaces, and that
-/// classification belongs to the detected change rather than the metadata.
-#[derive(Debug, Clone)]
-struct TokenMetadata {
-    symbol: String,
-    name: String,
-    decimals: u8,
-}
-
-impl TokenMetadata {
-    fn is_resolved(&self) -> bool {
-        !self.symbol.is_empty() || !self.name.is_empty() || self.decimals != 0
-    }
-
-    fn apply_to(&self, asset: &mut AssetInfo) {
-        asset.symbol.clone_from(&self.symbol);
-        asset.name.clone_from(&self.name);
-        asset.decimals = self.decimals;
-    }
-}
+type MetadataCache = Arc<Mutex<LruCache<Address, AssetInfo>>>;
 
 /// Relax EVM rules so simulations succeed regardless of the caller's gas
 /// pricing, balance, or block limits — matching `eth_call` semantics. The
@@ -1370,7 +1346,7 @@ fn run_metadata_calls<EvmConfig, N, Tx, DB>(
     header: &Header,
     state: &mut State<DB>,
     tokens: &[(Address, AssetType)],
-) -> Vec<(Address, TokenMetadata)>
+) -> Vec<(Address, AssetInfo)>
 where
     DB: Database + Debug,
     EvmConfig: ConfigureEvm<Primitives = N>,
@@ -1418,7 +1394,7 @@ where
     };
 
     let mut out = Vec::with_capacity(tokens.len());
-    for (addr, _) in tokens {
+    for (addr, asset_type) in tokens {
         let name = call_view(*addr, &NAME_SELECTOR)
             .and_then(|b| decode_metadata_string(&b))
             .unwrap_or_default();
@@ -1430,10 +1406,12 @@ where
             .unwrap_or(0);
         out.push((
             *addr,
-            TokenMetadata {
+            AssetInfo {
+                address: *addr,
                 symbol,
                 name,
                 decimals,
+                asset_type: *asset_type,
             },
         ));
     }
@@ -1475,6 +1453,16 @@ fn decode_bytes32_string(data: &[u8]) -> Option<String> {
         return Some(String::new());
     }
     String::from_utf8(data[..len].to_vec()).ok()
+}
+
+fn asset_metadata_is_resolved(asset: &AssetInfo) -> bool {
+    !asset.symbol.is_empty() || !asset.name.is_empty() || asset.decimals != 0
+}
+
+fn apply_cached_metadata(cached: &AssetInfo, asset: &mut AssetInfo) {
+    asset.symbol.clone_from(&cached.symbol);
+    asset.name.clone_from(&cached.name);
+    asset.decimals = cached.decimals;
 }
 
 /// Resolve metadata for all unique token addresses, using a persistent cache.
@@ -1541,7 +1529,7 @@ fn resolve_all_metadata<EvmConfig, N, Tx, DB>(
             cache_guard.pop(addr);
         }
         for (addr, info) in resolved {
-            if info.is_resolved() {
+            if asset_metadata_is_resolved(&info) {
                 cache_guard.put(addr, info);
             }
         }
@@ -1553,12 +1541,12 @@ fn resolve_all_metadata<EvmConfig, N, Tx, DB>(
     let mut cache_guard = cache.lock().unwrap();
     for change in asset_changes.iter_mut() {
         if let Some(info) = cache_guard.get(&change.asset.address) {
-            info.apply_to(&mut change.asset);
+            apply_cached_metadata(info, &mut change.asset);
         }
     }
     for change in exposure_changes.iter_mut() {
         if let Some(info) = cache_guard.get(&change.asset.address) {
-            info.apply_to(&mut change.asset);
+            apply_cached_metadata(info, &mut change.asset);
         }
     }
 }
@@ -1694,13 +1682,15 @@ mod tests {
             decimals: 0,
             asset_type: AssetType::Erc1155,
         };
-        let metadata = TokenMetadata {
+        let cached = AssetInfo {
+            address: Address::repeat_byte(0x11),
             symbol: "GAME".to_string(),
             name: "Game Items".to_string(),
             decimals: 0,
+            asset_type: AssetType::Erc20,
         };
 
-        metadata.apply_to(&mut asset);
+        apply_cached_metadata(&cached, &mut asset);
 
         assert_eq!(asset.symbol, "GAME");
         assert_eq!(asset.name, "Game Items");
