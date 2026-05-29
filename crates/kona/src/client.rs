@@ -153,7 +153,7 @@ impl<Engine: PayloadTypes> WorldChainKonaEngineClient<Engine> {
     ///
     /// The OP execution data is converted into the engine's native execution-data type via the
     /// [`From`] bound on `Engine::ExecutionData`.
-    async fn dispatch_new_payload(&self, data: OpExecutionData) -> TransportResult<PayloadStatus>
+    async fn on_new_payload(&self, data: OpExecutionData) -> TransportResult<PayloadStatus>
     where
         Engine::ExecutionData: From<OpExecutionData>,
     {
@@ -168,7 +168,7 @@ impl<Engine: PayloadTypes> WorldChainKonaEngineClient<Engine> {
     ///
     /// The OP payload attributes are converted into the engine's native attributes type via the
     /// [`From`] bound on `Engine::PayloadAttributes`.
-    async fn dispatch_fcu(
+    async fn on_forkchoice_updated(
         &self,
         state: ForkchoiceState,
         attrs: Option<OpPayloadAttributes>,
@@ -194,10 +194,7 @@ impl<Engine: PayloadTypes> WorldChainKonaEngineClient<Engine> {
 
     /// Resolves a built payload from reth's [`PayloadStore`] by id, mapping the absence of a job
     /// or a build error into a [`TransportError`].
-    async fn resolve_payload(
-        &self,
-        payload_id: PayloadId,
-    ) -> TransportResult<Engine::BuiltPayload> {
+    async fn on_get_payload(&self, payload_id: PayloadId) -> TransportResult<Engine::BuiltPayload> {
         match self.payload_store.resolve(payload_id).await {
             Some(Ok(payload)) => Ok(payload),
             Some(Err(e)) => Err(TransportErrorKind::custom_str(&e.to_string())),
@@ -242,7 +239,7 @@ where
     async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> TransportResult<PayloadStatus> {
         // V1 (pre-Shanghai) is unused in OP Stack post-Bedrock, but the engine task queue still
         // calls it via the version-dispatched insert task. Dispatch it in-process for completeness.
-        self.dispatch_new_payload(OpExecutionData::v2(ExecutionPayloadInputV2 {
+        self.on_new_payload(OpExecutionData::v2(ExecutionPayloadInputV2 {
             execution_payload: payload,
             withdrawals: None,
         }))
@@ -284,8 +281,7 @@ where
         &self,
         payload: ExecutionPayloadInputV2,
     ) -> TransportResult<PayloadStatus> {
-        self.dispatch_new_payload(OpExecutionData::v2(payload))
-            .await
+        self.on_new_payload(OpExecutionData::v2(payload)).await
     }
 
     async fn new_payload_v3(
@@ -294,7 +290,7 @@ where
         parent_beacon_block_root: B256,
     ) -> TransportResult<PayloadStatus> {
         // OP `newPayloadV3` carries no versioned hashes (they must be empty).
-        self.dispatch_new_payload(OpExecutionData::v3(
+        self.on_new_payload(OpExecutionData::v3(
             payload,
             Vec::new(),
             parent_beacon_block_root,
@@ -308,7 +304,7 @@ where
         parent_beacon_block_root: B256,
     ) -> TransportResult<PayloadStatus> {
         // Isthmus variant. OP carries no versioned hashes and no execution requests on L2.
-        self.dispatch_new_payload(OpExecutionData::v4(
+        self.on_new_payload(OpExecutionData::v4(
             payload,
             Vec::new(),
             parent_beacon_block_root,
@@ -322,7 +318,7 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<OpPayloadAttributes>,
     ) -> TransportResult<ForkchoiceUpdated> {
-        self.dispatch_fcu(fork_choice_state, payload_attributes)
+        self.on_forkchoice_updated(fork_choice_state, payload_attributes)
             .await
     }
 
@@ -331,7 +327,7 @@ where
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<OpPayloadAttributes>,
     ) -> TransportResult<ForkchoiceUpdated> {
-        self.dispatch_fcu(fork_choice_state, payload_attributes)
+        self.on_forkchoice_updated(fork_choice_state, payload_attributes)
             .await
     }
 
@@ -339,21 +335,21 @@ where
         &self,
         payload_id: PayloadId,
     ) -> TransportResult<ExecutionPayloadEnvelopeV2> {
-        Ok(self.resolve_payload(payload_id).await?.into())
+        Ok(self.on_get_payload(payload_id).await?.into())
     }
 
     async fn get_payload_v3(
         &self,
         payload_id: PayloadId,
     ) -> TransportResult<OpExecutionPayloadEnvelopeV3> {
-        Ok(self.resolve_payload(payload_id).await?.into())
+        Ok(self.on_get_payload(payload_id).await?.into())
     }
 
     async fn get_payload_v4(
         &self,
         payload_id: PayloadId,
     ) -> TransportResult<OpExecutionPayloadEnvelopeV4> {
-        Ok(self.resolve_payload(payload_id).await?.into())
+        Ok(self.on_get_payload(payload_id).await?.into())
     }
 
     async fn get_payload_bodies_by_hash_v1(
