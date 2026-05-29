@@ -7,7 +7,6 @@ contract WorldChainAnchorStateRegistry {
     error NotOwner();
     error RegistryPaused();
     error GameBlacklisted(address game);
-    error GameRetired(address game);
     error GameNotFinalized(address game);
     error NonMonotonicRoot(uint256 currentL2BlockNumber, uint256 nextL2BlockNumber);
     error InvalidParent(address parentRef);
