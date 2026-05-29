@@ -1438,7 +1438,7 @@ fn decode_abi_string(data: &[u8]) -> Option<String> {
 }
 
 fn asset_metadata_is_resolved(asset: &AssetInfo) -> bool {
-    !asset.symbol.is_empty() || !asset.name.is_empty() || asset.decimals != 0
+    !asset.symbol.is_empty() || !asset.name.is_empty()
 }
 
 fn apply_cached_metadata(cached: &AssetInfo, asset: &mut AssetInfo) {
