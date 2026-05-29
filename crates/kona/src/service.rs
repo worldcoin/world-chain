@@ -52,6 +52,21 @@ use tracing::{error, info, warn};
 
 use crate::{KonaConfig, WorldChainKonaEngineClient};
 use reth_engine_primitives::ConsensusEngineHandle;
+use url::Url;
+
+/// How the in-process Kona node reaches reth's standard (non-engine) L2 RPC.
+///
+/// This transport is used only for the derivation pipeline and the engine actor's infrequent
+/// reads — never for the consensus hot path, which is dispatched in-process via
+/// [`ConsensusEngineHandle`]. IPC is preferred when reth's IPC server is enabled; otherwise we
+/// fall back to reth's HTTP RPC endpoint.
+#[derive(Debug, Clone)]
+pub enum L2RpcEndpoint {
+    /// reth's IPC RPC endpoint (socket path).
+    Ipc(String),
+    /// reth's HTTP RPC endpoint.
+    Http(Url),
+}
 use reth_optimism_node::OpEngineTypes;
 use reth_payload_builder::PayloadStore;
 
@@ -94,20 +109,23 @@ impl KonaService {
     /// obtained from the node add-ons after launch.
     ///
     /// Constructs the [`WorldChainKonaEngineClient`] (wrapping the engine handle + payload store + L2/L1
-    /// providers), the L1 beacon client, and the P2P network configuration. The `l2_ipc_path` should
-    /// point at reth's standard (unauthenticated) IPC RPC endpoint; it is used only for the
-    /// derivation pipeline and the engine actor's infrequent reads, never for the consensus hot
-    /// path. The L1 provider remains an HTTP connection (`--kona.l1-rpc-url`).
+    /// providers), the L1 beacon client, and the P2P network configuration. The `l2_endpoint` should
+    /// point at reth's standard (unauthenticated) RPC — IPC when available, otherwise HTTP; it is
+    /// used only for the derivation pipeline and the engine actor's infrequent reads, never for the
+    /// consensus hot path. The L1 provider remains an HTTP connection (`--kona.l1-rpc-url`).
     pub async fn build(
         config: KonaConfig,
         engine_handle: ConsensusEngineHandle<OpEngineTypes>,
         payload_store: PayloadStore<OpEngineTypes>,
-        local_ipc_path: String,
+        l2_endpoint: L2RpcEndpoint,
     ) -> eyre::Result<Self> {
         let l1_provider = RootProvider::new_http(config.l1_rpc_url.clone());
-        let l2_client = ClientBuilder::default()
-            .ipc(IpcConnect::new(local_ipc_path))
-            .await?;
+        let l2_client = match l2_endpoint {
+            L2RpcEndpoint::Ipc(path) => {
+                ClientBuilder::default().ipc(IpcConnect::new(path)).await?
+            }
+            L2RpcEndpoint::Http(url) => ClientBuilder::default().http(url),
+        };
         let l2_provider = RootProvider::<Optimism>::new(l2_client);
 
         let engine_client = Arc::new(WorldChainKonaEngineClient::new(
