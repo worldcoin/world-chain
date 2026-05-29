@@ -7,19 +7,32 @@ import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.so
 import {IWorldChainStakingRegistry} from "./interfaces/IWorldChainStakingRegistry.sol";
 
 contract WorldChainProofSystemFactory {
-    error GameAlreadyExists(bytes32 rootId, address game);
+    error GameAlreadyExists(bytes32 proposalKey, address game);
     error InvalidActivationParameters();
 
     event GameCreated(
+        bytes32 indexed proposalKey,
         bytes32 indexed rootId,
         address indexed game,
-        address indexed proposer,
+        address proposer,
         bytes32 rootClaim,
         uint256 l2BlockNumber,
         address parentRef,
         bytes32 l1OriginHash,
         uint256 l1OriginNumber
     );
+
+    struct GameCreatedLog {
+        bytes32 proposalKey;
+        bytes32 rootId;
+        address game;
+        address proposer;
+        bytes32 rootClaim;
+        uint256 l2BlockNumber;
+        address parentRef;
+        bytes32 l1OriginHash;
+        uint256 l1OriginNumber;
+    }
 
     WorldChainProofLib.Domain public domain;
     bytes32 public immutable domainHash;
@@ -34,7 +47,7 @@ contract WorldChainProofSystemFactory {
     IWorldChainProofVerifier public immutable securityCouncil;
     IWorldChainStakingRegistry public immutable stakingRegistry;
 
-    mapping(bytes32 rootId => address game) public games;
+    mapping(bytes32 proposalKey => address game) public games;
 
     constructor(
         WorldChainProofLib.Domain memory domain_,
@@ -75,12 +88,14 @@ contract WorldChainProofSystemFactory {
         uint256 l1OriginNumber = block.number == 0 ? 0 : block.number - 1;
         bytes32 l1OriginHash = block.number == 0 ? bytes32(0) : blockhash(l1OriginNumber);
 
+        bytes32 key =
+            WorldChainProofLib.proposalKey(domainHash, parentRef, rootClaim, l2BlockNumber, intermediateRootsHash);
+        address existing = games[key];
+        if (existing != address(0)) revert GameAlreadyExists(key, existing);
+
         id = WorldChainProofLib.rootId(
             domainHash, parentRef, rootClaim, l2BlockNumber, intermediateRootsHash, l1OriginHash, l1OriginNumber
         );
-
-        address existing = games[id];
-        if (existing != address(0)) revert GameAlreadyExists(id, existing);
 
         game = address(
             new WorldChainProofSystemGame{value: msg.value}(
@@ -106,9 +121,30 @@ contract WorldChainProofSystemFactory {
                 })
             )
         );
-        games[id] = game;
+        games[key] = game;
 
-        emit GameCreated(id, game, msg.sender, rootClaim, l2BlockNumber, parentRef, l1OriginHash, l1OriginNumber);
+        _emitGameCreated(
+            GameCreatedLog({
+                proposalKey: key,
+                rootId: id,
+                game: game,
+                proposer: msg.sender,
+                rootClaim: rootClaim,
+                l2BlockNumber: l2BlockNumber,
+                parentRef: parentRef,
+                l1OriginHash: l1OriginHash,
+                l1OriginNumber: l1OriginNumber
+            })
+        );
+    }
+
+    function computeProposalKey(
+        address parentRef,
+        bytes32 rootClaim,
+        uint256 l2BlockNumber,
+        bytes32 intermediateRootsHash
+    ) external view returns (bytes32) {
+        return WorldChainProofLib.proposalKey(domainHash, parentRef, rootClaim, l2BlockNumber, intermediateRootsHash);
     }
 
     function computeRootId(
@@ -121,6 +157,20 @@ contract WorldChainProofSystemFactory {
     ) external view returns (bytes32) {
         return WorldChainProofLib.rootId(
             domainHash, parentRef, rootClaim, l2BlockNumber, intermediateRootsHash, l1OriginHash, l1OriginNumber
+        );
+    }
+
+    function _emitGameCreated(GameCreatedLog memory log) private {
+        emit GameCreated(
+            log.proposalKey,
+            log.rootId,
+            log.game,
+            log.proposer,
+            log.rootClaim,
+            log.l2BlockNumber,
+            log.parentRef,
+            log.l1OriginHash,
+            log.l1OriginNumber
         );
     }
 }

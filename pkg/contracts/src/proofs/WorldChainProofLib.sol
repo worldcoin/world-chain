@@ -55,6 +55,16 @@ library WorldChainProofLib {
         );
     }
 
+    function proposalKey(
+        bytes32 domainHash_,
+        address parentRef,
+        bytes32 rootClaim,
+        uint256 l2BlockNumber,
+        bytes32 intermediateRootsHash
+    ) internal pure returns (bytes32) {
+        return keccak256(abi.encode(domainHash_, parentRef, rootClaim, l2BlockNumber, intermediateRootsHash));
+    }
+
     function laneMask(ProofLane lane) internal pure returns (uint8) {
         return uint8(1 << uint8(lane));
     }

@@ -14270,6 +14270,18 @@ dependencies = [
 [[package]]
 name = "world-chain-proposer"
 version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-provider 2.0.4",
+ "async-trait",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "world-chain-proofs",
+]
 
 [[package]]
 name = "world-chain-rpc"

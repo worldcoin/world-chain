@@ -51,7 +51,7 @@ impl ProofDomain {
 
 /// Per-proposal commitment fields used to compute a canonical root id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RootCommitment {
+pub struct ProposalCommitment {
     /// Parent `AnchorStateRegistry` or parent game address.
     pub parent_ref: Address,
     /// Claimed OP Stack output root.
@@ -60,6 +60,29 @@ pub struct RootCommitment {
     pub l2_block_number: u64,
     /// Commitment to ordered intermediate roots, or zero if unused.
     pub intermediate_roots_hash: B256,
+}
+
+impl ProposalCommitment {
+    /// Compute the Solidity-compatible proposal key used for factory lookups.
+    #[must_use]
+    pub fn proposal_key(self, domain_hash: B256) -> B256 {
+        let encoded = (
+            domain_hash,
+            self.parent_ref,
+            self.root_claim,
+            U256::from(self.l2_block_number),
+            self.intermediate_roots_hash,
+        )
+            .abi_encode();
+        keccak256(encoded)
+    }
+}
+
+/// Per-proposal commitment fields used to compute a canonical root id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RootCommitment {
+    /// Proposal fields supplied by the proposer.
+    pub proposal: ProposalCommitment,
     /// L1 origin hash pinned by the proposal factory.
     pub l1_origin_hash: B256,
     /// L1 origin block number paired with `l1_origin_hash`.
@@ -67,15 +90,21 @@ pub struct RootCommitment {
 }
 
 impl RootCommitment {
+    /// Compute the Solidity-compatible proposal key used for factory lookups.
+    #[must_use]
+    pub fn proposal_key(self, domain_hash: B256) -> B256 {
+        self.proposal.proposal_key(domain_hash)
+    }
+
     /// Compute the Solidity-compatible root id for this proposal.
     #[must_use]
     pub fn root_id(self, domain_hash: B256) -> B256 {
         let encoded = (
             domain_hash,
-            self.parent_ref,
-            self.root_claim,
-            U256::from(self.l2_block_number),
-            self.intermediate_roots_hash,
+            self.proposal.parent_ref,
+            self.proposal.root_claim,
+            U256::from(self.proposal.l2_block_number),
+            self.proposal.intermediate_roots_hash,
             self.l1_origin_hash,
             U256::from(self.l1_origin_number),
         )
@@ -128,13 +157,19 @@ sol! {
     #[sol(rpc)]
     interface IWorldChainProofSystemFactory {
         function domainHash() external view returns (bytes32);
-        function games(bytes32 rootId) external view returns (address);
+        function games(bytes32 proposalKey) external view returns (address);
         function propose(
             address parentRef,
             bytes32 rootClaim,
             uint256 l2BlockNumber,
             bytes32 intermediateRootsHash
         ) external payable returns (address game, bytes32 rootId);
+        function computeProposalKey(
+            address parentRef,
+            bytes32 rootClaim,
+            uint256 l2BlockNumber,
+            bytes32 intermediateRootsHash
+        ) external view returns (bytes32);
         function computeRootId(
             address parentRef,
             bytes32 rootClaim,
@@ -196,11 +231,14 @@ mod tests {
             block_interval: 10,
             intermediate_block_interval: 5,
         };
-        let commitment = RootCommitment {
+        let proposal = ProposalCommitment {
             parent_ref: address!("0000000000000000000000000000000000001006"),
             root_claim: b256!("2222222222222222222222222222222222222222222222222222222222222222"),
             l2_block_number: 10,
             intermediate_roots_hash: B256::ZERO,
+        };
+        let commitment = RootCommitment {
+            proposal,
             l1_origin_hash: b256!(
                 "3333333333333333333333333333333333333333333333333333333333333333"
             ),
@@ -208,6 +246,7 @@ mod tests {
         };
 
         let root_id = commitment.root_id(domain.hash());
+        assert_ne!(B256::ZERO, proposal.proposal_key(domain.hash()));
         let changed = ProofDomain {
             chain_id: 4802,
             ..domain

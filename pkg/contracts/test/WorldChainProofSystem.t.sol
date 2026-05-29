@@ -161,6 +161,26 @@ contract WorldChainProofSystemTest is Test {
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(bytes32(uint256(0x1234))));
     }
 
+    function testFactoryIndexesGamesByProposalKeyWithoutL1Origin() public {
+        bytes32 rootClaim = keccak256("root");
+        bytes32 intermediateRootsHash = keccak256("intermediate");
+        bytes32 proposalKey = factory.computeProposalKey(address(anchor), rootClaim, 10, intermediateRootsHash);
+
+        vm.prank(proposer);
+        (address game, bytes32 rootId) =
+            factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10, intermediateRootsHash);
+
+        assertEq(factory.games(proposalKey), game);
+        assertEq(WorldChainProofSystemGame(payable(game)).rootId(), rootId);
+
+        vm.roll(block.number + 1);
+        vm.prank(proposer);
+        vm.expectRevert(
+            abi.encodeWithSelector(WorldChainProofSystemFactory.GameAlreadyExists.selector, proposalKey, game)
+        );
+        factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10, intermediateRootsHash);
+    }
+
     function testAnchorUpdatesOnlyAcceptFinalizedMonotonicRoots() public {
         (WorldChainProofSystemGame game,) = _finalizedGame(10);
 
