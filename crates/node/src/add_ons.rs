@@ -42,7 +42,7 @@ use tracing::{debug, info};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_cli::KonaArgs;
 use world_chain_evm::OpTx;
-use world_chain_kona::{KonaConfig, KonaService, KonaServiceHandle};
+use world_chain_kona::{KonaConfig, KonaService, KonaServiceHandle, L2RpcEndpoint};
 
 use crate::context::build_kona_config;
 use world_chain_rpc::{
@@ -592,26 +592,26 @@ where
 /// - `engine_handle` — reth's `ConsensusEngineHandle`, for the FCU / new-payload consensus hot
 ///   path,
 /// - `payload_store` — wrapping reth's payload builder handle, for `get_payload`,
-/// - an L2 alloy provider connected over `l2_ipc_path` (the live IPC RPC endpoint reported by the
-///   running server, not re-derived from config), for the infrequent reads the engine actor
-///   performs during sync,
+/// - an L2 alloy provider connected over `l2_endpoint` (the live RPC endpoint reported by the
+///   running server — IPC when enabled, otherwise HTTP — not re-derived from config), for the
+///   infrequent reads the engine actor performs during sync,
 /// - an L1 alloy provider over HTTP from `--kona.l1-rpc-url`.
 ///
-/// Connecting the L2 provider over IPC is asynchronous, so this is an `async fn`. The assembled
+/// Connecting the L2 provider may be asynchronous (IPC), so this is an `async fn`. The assembled
 /// [`KonaService`] is then run on the provided `task_executor` for the node's lifetime.
 async fn spawn_kona(
     kona_config: KonaConfig,
     engine_handle: ConsensusEngineHandle<OpEngineTypes>,
     payload_store: PayloadStore<OpEngineTypes>,
     task_executor: TaskExecutor,
-    l2_ipc_path: String,
+    l2_endpoint: L2RpcEndpoint,
 ) -> eyre::Result<()> {
     let sequencer_mode = kona_config.sequencer_mode;
     let l1_chain_id = kona_config.rollup_config.l1_chain_id;
     let l2_chain_id: u64 = kona_config.rollup_config.l2_chain_id.into();
 
     let service =
-        KonaService::build(kona_config, engine_handle, payload_store, l2_ipc_path).await?;
+        KonaService::build(kona_config, engine_handle, payload_store, l2_endpoint).await?;
 
     info!(
         target: "world_chain::kona",
