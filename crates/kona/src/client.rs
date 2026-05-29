@@ -1,28 +1,4 @@
 //! In-process Engine API client for Kona.
-//!
-//! This module provides [`WorldChainKonaEngineClient`], which implements Kona's
-//! [`EngineClient`](kona_engine::EngineClient) trait by dispatching the *consensus hot path* —
-//! `engine_forkchoiceUpdated`, `engine_newPayload`, and `engine_getPayload` — directly to reth's
-//! [`ConsensusEngineHandle`] and [`PayloadStore`] as in-process Rust calls. There is **no HTTP, no
-//! JWT, and no JSON (de)serialization** on this path.
-//!
-//! # How it works
-//!
-//! Reth's engine is driven by a [`ConsensusEngineHandle`], which forwards messages over a tokio
-//! channel to the engine tree — the exact same channel reth's authenticated Engine API RPC handler
-//! uses. We wrap that handle and translate each Kona Engine API call into the corresponding reth
-//! call:
-//!
-//! - `new_payload_v{2,3,4}` -> [`ConsensusEngineHandle::new_payload`]
-//! - `fork_choice_updated_v{2,3}` -> [`ConsensusEngineHandle::fork_choice_updated`]
-//! - `get_payload_v{2,3,4}` -> [`PayloadStore::resolve`]
-//!
-//! Infrequent reads that the engine actor performs during sync / forkchoice reconstruction
-//! (`get_l2_block`, `l2_block_by_label`, `l2_block_info_by_label`, `get_proof`, `new_payload_v1`)
-//! are delegated to alloy providers: an L2 [`RootProvider<Optimism>`] connected to reth's standard
-//! (unauthenticated) IPC RPC endpoint, and an L1 [`RootProvider`] over HTTP (`--kona.l1-rpc-url`).
-//! These are not on the consensus hot path, so the network/IPC transport is acceptable; keeping
-//! them on alloy avoids reth<->alloy block type conversions while preserving correctness.
 
 use std::sync::Arc;
 
@@ -54,23 +30,19 @@ use op_alloy_rpc_types_engine::{
 
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_optimism_node::OpEngineTypes;
-use reth_optimism_payload_builder::{OpPayloadAttrs, payload::OpExecData};
 use reth_payload_builder::PayloadStore;
+use reth_payload_primitives::PayloadTypes;
 
 /// An in-process Engine API client that bridges Kona's consensus layer to reth's execution engine
 /// for the consensus hot path, without any network transport.
-///
-/// The fork-choice / new-payload / get-payload methods are dispatched directly to reth's
-/// [`ConsensusEngineHandle`] and [`PayloadStore`]. Infrequent read methods are delegated to alloy
-/// providers — the L2 over reth's IPC RPC, the L1 over HTTP (see the module docs).
-pub struct WorldChainKonaEngineClient {
+pub struct WorldChainKonaEngineClient<Engine: PayloadTypes = OpEngineTypes> {
     /// The OP Stack rollup configuration, shared between Kona and reth.
     cfg: Arc<RollupConfig>,
     /// Handle to reth's consensus engine tree. `new_payload` and `fork_choice_updated` calls are
     /// dispatched here over the same channel reth's authenticated Engine API uses internally.
-    engine_handle: ConsensusEngineHandle<OpEngineTypes>,
+    engine_handle: ConsensusEngineHandle<Engine>,
     /// Reth's payload store, used to resolve built payloads for `get_payload_v*`.
-    payload_store: PayloadStore<OpEngineTypes>,
+    payload_store: PayloadStore<Engine>,
     /// L2 EL provider over reth's standard IPC RPC, used for the infrequent read methods that the
     /// engine actor performs during sync and forkchoice reconstruction.
     l2_provider: RootProvider<Optimism>,
@@ -78,7 +50,7 @@ pub struct WorldChainKonaEngineClient {
     l1_provider: RootProvider,
 }
 
-impl std::fmt::Debug for WorldChainKonaEngineClient {
+impl<Engine: PayloadTypes> std::fmt::Debug for WorldChainKonaEngineClient<Engine> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WorldChainKonaEngineClient")
             .field("l2_chain_id", &self.cfg.l2_chain_id)
@@ -86,7 +58,7 @@ impl std::fmt::Debug for WorldChainKonaEngineClient {
     }
 }
 
-impl WorldChainKonaEngineClient {
+impl<Engine: PayloadTypes> WorldChainKonaEngineClient<Engine> {
     /// Creates a new in-process engine client.
     ///
     /// # Arguments
@@ -99,8 +71,8 @@ impl WorldChainKonaEngineClient {
     /// * `l1_provider` — An alloy provider for the L1 chain (deposits, finalization).
     pub const fn new(
         cfg: Arc<RollupConfig>,
-        engine_handle: ConsensusEngineHandle<OpEngineTypes>,
-        payload_store: PayloadStore<OpEngineTypes>,
+        engine_handle: ConsensusEngineHandle<Engine>,
+        payload_store: PayloadStore<Engine>,
         l2_provider: RootProvider<Optimism>,
         l1_provider: RootProvider,
     ) -> Self {
@@ -113,24 +85,36 @@ impl WorldChainKonaEngineClient {
         }
     }
 
-    /// Dispatches a [`OpExecutionData`] payload to reth's engine and maps the result into a
+    /// Dispatches an [`OpExecutionData`] payload to reth's engine and maps the result into a
     /// [`TransportResult`], as the Kona trait surface expects.
-    async fn dispatch_new_payload(&self, data: OpExecutionData) -> TransportResult<PayloadStatus> {
+    ///
+    /// The OP execution data is converted into the engine's native execution-data type via the
+    /// [`From`] bound on `Engine::ExecutionData`.
+    async fn dispatch_new_payload(&self, data: OpExecutionData) -> TransportResult<PayloadStatus>
+    where
+        Engine::ExecutionData: From<OpExecutionData>,
+    {
         self.engine_handle
-            .new_payload(OpExecData(data))
+            .new_payload(data.into())
             .await
             .map_err(|e| TransportErrorKind::custom_str(&e.to_string()))
     }
 
     /// Dispatches a forkchoice update to reth's engine and maps the result into a
     /// [`TransportResult`].
+    ///
+    /// The OP payload attributes are converted into the engine's native attributes type via the
+    /// [`From`] bound on `Engine::PayloadAttributes`.
     async fn dispatch_fcu(
         &self,
         state: ForkchoiceState,
         attrs: Option<OpPayloadAttributes>,
-    ) -> TransportResult<ForkchoiceUpdated> {
+    ) -> TransportResult<ForkchoiceUpdated>
+    where
+        Engine::PayloadAttributes: From<OpPayloadAttributes>,
+    {
         self.engine_handle
-            .fork_choice_updated(state, attrs.map(OpPayloadAttrs))
+            .fork_choice_updated(state, attrs.map(Into::into))
             .await
             .map_err(|e| TransportErrorKind::custom_str(&e.to_string()))
     }
@@ -140,7 +124,7 @@ impl WorldChainKonaEngineClient {
     async fn resolve_payload(
         &self,
         payload_id: PayloadId,
-    ) -> TransportResult<reth_optimism_payload_builder::OpBuiltPayload> {
+    ) -> TransportResult<Engine::BuiltPayload> {
         match self.payload_store.resolve(payload_id).await {
             Some(Ok(payload)) => Ok(payload),
             Some(Err(e)) => Err(TransportErrorKind::custom_str(&e.to_string())),
@@ -152,7 +136,15 @@ impl WorldChainKonaEngineClient {
 }
 
 #[async_trait]
-impl EngineClient for WorldChainKonaEngineClient {
+impl<Engine> EngineClient for WorldChainKonaEngineClient<Engine>
+where
+    Engine: PayloadTypes,
+    Engine::ExecutionData: From<OpExecutionData>,
+    Engine::PayloadAttributes: From<OpPayloadAttributes>,
+    Engine::BuiltPayload: Into<ExecutionPayloadEnvelopeV2>
+        + Into<OpExecutionPayloadEnvelopeV3>
+        + Into<OpExecutionPayloadEnvelopeV4>,
+{
     fn cfg(&self) -> &RollupConfig {
         &self.cfg
     }
@@ -205,12 +197,16 @@ impl EngineClient for WorldChainKonaEngineClient {
     }
 }
 
-// ---------------------------------------------------------------------------
-// OpEngineApi — the consensus hot path (dispatched in-process)
-// ---------------------------------------------------------------------------
-
 #[async_trait]
-impl OpEngineApi<Optimism, Http<HyperAuthClient>> for WorldChainKonaEngineClient {
+impl<Engine> OpEngineApi<Optimism, Http<HyperAuthClient>> for WorldChainKonaEngineClient<Engine>
+where
+    Engine: PayloadTypes,
+    Engine::ExecutionData: From<OpExecutionData>,
+    Engine::PayloadAttributes: From<OpPayloadAttributes>,
+    Engine::BuiltPayload: Into<ExecutionPayloadEnvelopeV2>
+        + Into<OpExecutionPayloadEnvelopeV3>
+        + Into<OpExecutionPayloadEnvelopeV4>,
+{
     async fn new_payload_v2(
         &self,
         payload: ExecutionPayloadInputV2,

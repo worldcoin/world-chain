@@ -102,11 +102,11 @@ impl KonaService {
         config: KonaConfig,
         engine_handle: ConsensusEngineHandle<OpEngineTypes>,
         payload_store: PayloadStore<OpEngineTypes>,
-        l2_ipc_path: String,
+        local_ipc_path: String,
     ) -> eyre::Result<Self> {
         let l1_provider = RootProvider::new_http(config.l1_rpc_url.clone());
         let l2_client = ClientBuilder::default()
-            .ipc(IpcConnect::new(l2_ipc_path))
+            .ipc(IpcConnect::new(local_ipc_path))
             .await?;
         let l2_provider = RootProvider::<Optimism>::new(l2_client);
 

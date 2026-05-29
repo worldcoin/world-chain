@@ -31,9 +31,9 @@
 //! - [`KonaServiceHandle`] — Owns the spawned service task and its cancellation token.
 //! - [`KonaConfig`] — Bridges World Chain's node configuration to the kona service inputs.
 
-pub mod client;
-pub mod config;
-pub mod service;
+mod client;
+mod config;
+mod service;
 
 pub use client::WorldChainKonaEngineClient;
 pub use config::KonaConfig;

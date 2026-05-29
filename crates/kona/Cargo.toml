@@ -27,8 +27,8 @@ kona-rpc.workspace = true
 # Reth (in-process engine handle, payload store, optimism payload types)
 reth-engine-primitives.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
 reth-optimism-node.workspace = true
-reth-optimism-payload-builder.workspace = true
 
 # Alloy - shared Ethereum types
 alloy-eips.workspace = true
