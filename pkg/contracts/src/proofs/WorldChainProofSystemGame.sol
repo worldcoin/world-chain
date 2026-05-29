@@ -32,6 +32,7 @@ contract WorldChainProofSystemGame {
 
     error InvalidBond(uint256 expected, uint256 actual);
     error InvalidState(WorldChainProofLib.RootState expected, WorldChainProofLib.RootState actual);
+    error AlreadyFinalized();
     error ChallengePeriodElapsed(uint256 timestamp, uint256 challengeDeadline);
     error ProofPeriodElapsed(uint256 timestamp, uint256 proofDeadline);
     error ProofPeriodOpen(uint256 timestamp, uint256 proofDeadline);
@@ -147,6 +148,9 @@ contract WorldChainProofSystemGame {
     }
 
     function submitProofLane(uint8 laneId, bytes calldata proof) external {
+        if (state == WorldChainProofLib.RootState.FINALIZED) {
+            revert AlreadyFinalized();
+        }
         if (block.timestamp >= proofDeadline) {
             revert ProofPeriodElapsed(block.timestamp, proofDeadline);
         }
