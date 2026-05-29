@@ -1396,10 +1396,10 @@ where
     let mut out = Vec::with_capacity(tokens.len());
     for (addr, asset_type) in tokens {
         let name = call_view(*addr, &NAME_SELECTOR)
-            .and_then(|b| decode_metadata_string(&b))
+            .and_then(|b| decode_abi_string(&b))
             .unwrap_or_default();
         let symbol = call_view(*addr, &SYMBOL_SELECTOR)
-            .and_then(|b| decode_metadata_string(&b))
+            .and_then(|b| decode_abi_string(&b))
             .unwrap_or_default();
         let decimals = call_view(*addr, &DECIMALS_SELECTOR)
             .and_then(|b| b.get(31).copied())
@@ -1416,12 +1416,6 @@ where
         ));
     }
     out
-}
-
-/// Decode token metadata returned as either standard ABI `string` or the
-/// common legacy/non-standard `bytes32` representation.
-fn decode_metadata_string(data: &[u8]) -> Option<String> {
-    decode_abi_string(data).or_else(|| decode_bytes32_string(data))
 }
 
 /// Decode an ABI-encoded string from raw bytes.
@@ -1441,18 +1435,6 @@ fn decode_abi_string(data: &[u8]) -> Option<String> {
         return None;
     }
     String::from_utf8(data[str_start..str_start + len].to_vec()).ok()
-}
-
-/// Decode a bytes32 string, trimming Solidity-style trailing NUL padding.
-fn decode_bytes32_string(data: &[u8]) -> Option<String> {
-    if data.len() != 32 {
-        return None;
-    }
-    let len = data.iter().rposition(|b| *b != 0).map_or(0, |i| i + 1);
-    if len == 0 {
-        return Some(String::new());
-    }
-    String::from_utf8(data[..len].to_vec()).ok()
 }
 
 fn asset_metadata_is_resolved(asset: &AssetInfo) -> bool {
@@ -1662,15 +1644,7 @@ mod tests {
         encoded[63] = 3;
         encoded[64..67].copy_from_slice(b"WLD");
 
-        assert_eq!(decode_metadata_string(&encoded), Some("WLD".to_string()));
-    }
-
-    #[test]
-    fn decodes_legacy_bytes32_metadata_string() {
-        let mut encoded = [0_u8; 32];
-        encoded[..3].copy_from_slice(b"MKR");
-
-        assert_eq!(decode_metadata_string(&encoded), Some("MKR".to_string()));
+        assert_eq!(decode_abi_string(&encoded), Some("WLD".to_string()));
     }
 
     #[test]
