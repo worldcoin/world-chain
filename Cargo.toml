@@ -25,6 +25,7 @@ members = [
     "crates/pbh",
     "crates/proofs",
     "crates/devnet",
+    "crates/proposer",
     "crates/test-utils",
     "e2e-tests",
     "xtask",
@@ -68,6 +69,7 @@ world-chain-evm = { path = "crates/evm", default-features = false }
 world-chain-state = { path = "crates/state", default-features = false }
 world-chain-devnet = { path = "crates/devnet", default-features = false }
 world-chain-test-utils = { path = "crates/test-utils", default-features = false }
+world-chain-proposer = { path = "crates/proposer", default-features = false }
 
 # reth crates.io
 reth-codecs = { version = "0.3.1", default-features = false }
