@@ -16,7 +16,7 @@ use reth_revm::{State, database::StateProviderDatabase};
 use reth_rpc_eth_api::helpers::SpawnBlocking;
 use reth_tasks::pool::{BlockingTaskGuard, BlockingTaskPool};
 use revm::{
-    Inspector,
+    Database, DatabaseCommit, Inspector,
     context::{
         CfgEnv, TxEnv,
         result::{ExecutionResult, Output},
@@ -26,7 +26,8 @@ use revm::{
 use revm_primitives::TxKind;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
+    fmt::Debug,
     num::NonZeroUsize,
     sync::{Arc, Mutex},
 };
@@ -469,7 +470,31 @@ pub trait SimulateApi {
 /// Maximum number of token metadata entries kept across requests.
 ///
 /// Cross-request cache for resolved token metadata. LRU-bounded.
-type MetadataCache = Arc<Mutex<LruCache<Address, AssetInfo>>>;
+type MetadataCache = Arc<Mutex<LruCache<Address, TokenMetadata>>>;
+
+/// Address-level token metadata cached across simulations.
+///
+/// The cache intentionally excludes `AssetType`: a single contract address can
+/// be observed through different token-standard event surfaces, and that
+/// classification belongs to the detected change rather than the metadata.
+#[derive(Debug, Clone)]
+struct TokenMetadata {
+    symbol: String,
+    name: String,
+    decimals: u8,
+}
+
+impl TokenMetadata {
+    fn is_resolved(&self) -> bool {
+        !self.symbol.is_empty() || !self.name.is_empty() || self.decimals != 0
+    }
+
+    fn apply_to(&self, asset: &mut AssetInfo) {
+        asset.symbol.clone_from(&self.symbol);
+        asset.name.clone_from(&self.name);
+        asset.decimals = self.decimals;
+    }
+}
 
 /// Relax EVM rules so simulations succeed regardless of the caller's gas
 /// pricing, balance, or block limits — matching `eth_call` semantics. The
@@ -764,6 +789,10 @@ where
         let trace = inspector.take_trace_entries();
         asset_changes.extend(inspector.take_native_asset_changes());
         let inspector_creations = inspector.take_contract_creations();
+        let force_metadata_refresh: HashSet<Address> = inspector_creations
+            .iter()
+            .map(|(_, deployed)| *deployed)
+            .collect();
         let inspector_destructs = inspector.take_self_destructs();
 
         // `revert_reason` is the *root cause* — the deepest reverted frame's
@@ -786,13 +815,19 @@ where
             }),
         };
 
+        // Apply the simulated state diff to the in-memory DB before metadata
+        // lookup. This keeps the RPC non-persistent while letting tokens
+        // created or initialized by the simulation answer name/symbol/decimals.
+        drop(evm);
+        state.commit(result_and_state.state.clone());
+
         // 11. Resolve on-chain token metadata (name, symbol, decimals) — cached
         resolve_all_metadata(
-            &self.client,
             &self.evm_config,
             header.header(),
-            block_id,
+            &mut state,
             &self.metadata_cache,
+            &force_metadata_refresh,
             &mut asset_changes,
             &mut exposure_changes,
         );
@@ -1330,15 +1365,14 @@ pub fn selector_to_name(selector: [u8; 4]) -> Option<&'static str> {
 ///
 /// Each token previously paid for 3 separate state-provider open + EVM build
 /// cycles; this batches all 3·N calls onto the same warm state cache.
-fn run_metadata_calls<Client, EvmConfig, N, Tx>(
-    client: &Client,
+fn run_metadata_calls<EvmConfig, N, Tx, DB>(
     evm_config: &EvmConfig,
     header: &Header,
-    block_id: alloy_rpc_types::BlockId,
+    state: &mut State<DB>,
     tokens: &[(Address, AssetType)],
-) -> Vec<(Address, AssetInfo)>
+) -> Vec<(Address, TokenMetadata)>
 where
-    Client: StateProviderFactory + HeaderProvider<Header = Header>,
+    DB: Database + Debug,
     EvmConfig: ConfigureEvm<Primitives = N>,
     <EvmConfig::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory: EvmFactory<Tx = OpTx>,
     N: NodePrimitives<
@@ -1355,15 +1389,10 @@ where
     };
     relax_cfg_for_simulation(&mut evm_env.cfg_env);
 
-    let Ok(state_provider) = client.state_by_block_id(block_id) else {
-        return Vec::new();
-    };
-    let db = StateProviderDatabase::new(state_provider.as_ref());
-    let mut state = State::builder().with_database(db).build();
     // Capture chain_id before `evm_env` moves into the EVM — `TxEnv::default()`
     // hardcodes Some(1), which would mismatch any non-mainnet chainspec.
     let chain_id = evm_env.cfg_env.chain_id;
-    let mut evm = evm_config.evm_factory().create_evm(&mut state, evm_env);
+    let mut evm = evm_config.evm_factory().create_evm(state, evm_env);
 
     let mut call_view = |to: Address, selector: &[u8; 4]| -> Option<Bytes> {
         let tx = OpTx(OpTransaction {
@@ -1389,28 +1418,32 @@ where
     };
 
     let mut out = Vec::with_capacity(tokens.len());
-    for (addr, asset_type) in tokens {
+    for (addr, _) in tokens {
         let name = call_view(*addr, &NAME_SELECTOR)
-            .and_then(|b| decode_abi_string(&b))
+            .and_then(|b| decode_metadata_string(&b))
             .unwrap_or_default();
         let symbol = call_view(*addr, &SYMBOL_SELECTOR)
-            .and_then(|b| decode_abi_string(&b))
+            .and_then(|b| decode_metadata_string(&b))
             .unwrap_or_default();
         let decimals = call_view(*addr, &DECIMALS_SELECTOR)
             .and_then(|b| b.get(31).copied())
             .unwrap_or(0);
         out.push((
             *addr,
-            AssetInfo {
-                address: *addr,
+            TokenMetadata {
                 symbol,
                 name,
                 decimals,
-                asset_type: *asset_type,
             },
         ));
     }
     out
+}
+
+/// Decode token metadata returned as either standard ABI `string` or the
+/// common legacy/non-standard `bytes32` representation.
+fn decode_metadata_string(data: &[u8]) -> Option<String> {
+    decode_abi_string(data).or_else(|| decode_bytes32_string(data))
 }
 
 /// Decode an ABI-encoded string from raw bytes.
@@ -1432,17 +1465,29 @@ fn decode_abi_string(data: &[u8]) -> Option<String> {
     String::from_utf8(data[str_start..str_start + len].to_vec()).ok()
 }
 
+/// Decode a bytes32 string, trimming Solidity-style trailing NUL padding.
+fn decode_bytes32_string(data: &[u8]) -> Option<String> {
+    if data.len() != 32 {
+        return None;
+    }
+    let len = data.iter().rposition(|b| *b != 0).map_or(0, |i| i + 1);
+    if len == 0 {
+        return Some(String::new());
+    }
+    String::from_utf8(data[..len].to_vec()).ok()
+}
+
 /// Resolve metadata for all unique token addresses, using a persistent cache.
-fn resolve_all_metadata<Client, EvmConfig, N, Tx>(
-    client: &Client,
+fn resolve_all_metadata<EvmConfig, N, Tx, DB>(
     evm_config: &EvmConfig,
     header: &Header,
-    block_id: alloy_rpc_types::BlockId,
+    state: &mut State<DB>,
     cache: &MetadataCache,
+    force_refresh: &HashSet<Address>,
     asset_changes: &mut [AssetChange],
     exposure_changes: &mut [ExposureChange],
 ) where
-    Client: StateProviderFactory + HeaderProvider<Header = Header>,
+    DB: Database + Debug,
     EvmConfig: ConfigureEvm<Primitives = N>,
     <EvmConfig::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory: EvmFactory<Tx = OpTx>,
     N: NodePrimitives<
@@ -1459,14 +1504,14 @@ fn resolve_all_metadata<Client, EvmConfig, N, Tx>(
 
     {
         let cache_guard = cache.lock().unwrap();
-        let mut seen_this_call = std::collections::HashSet::new();
+        let mut seen_this_call = HashSet::new();
 
         // Native ETH has its metadata pre-populated (symbol="ETH"), so the
         // `symbol.is_empty()` gate keeps `Address::ZERO` out of the resolver.
         for change in asset_changes.iter() {
             let addr = change.asset.address;
             if change.asset.symbol.is_empty()
-                && !cache_guard.contains(&addr)
+                && (force_refresh.contains(&addr) || !cache_guard.contains(&addr))
                 && seen_this_call.insert(addr)
             {
                 to_resolve.push((addr, change.asset.asset_type));
@@ -1475,7 +1520,7 @@ fn resolve_all_metadata<Client, EvmConfig, N, Tx>(
         for change in exposure_changes.iter() {
             let addr = change.asset.address;
             if change.asset.symbol.is_empty()
-                && !cache_guard.contains(&addr)
+                && (force_refresh.contains(&addr) || !cache_guard.contains(&addr))
                 && seen_this_call.insert(addr)
             {
                 to_resolve.push((addr, change.asset.asset_type));
@@ -1487,10 +1532,18 @@ fn resolve_all_metadata<Client, EvmConfig, N, Tx>(
     // intentionally not held during the EVM/disk work so concurrent requests
     // can read other entries in parallel.
     if !to_resolve.is_empty() {
-        let resolved = run_metadata_calls(client, evm_config, header, block_id, &to_resolve);
+        let resolved = run_metadata_calls(evm_config, header, state, &to_resolve);
         let mut cache_guard = cache.lock().unwrap();
+        for (addr, _) in to_resolve
+            .iter()
+            .filter(|(addr, _)| force_refresh.contains(addr))
+        {
+            cache_guard.pop(addr);
+        }
         for (addr, info) in resolved {
-            cache_guard.put(addr, info);
+            if info.is_resolved() {
+                cache_guard.put(addr, info);
+            }
         }
     }
 
@@ -1500,12 +1553,12 @@ fn resolve_all_metadata<Client, EvmConfig, N, Tx>(
     let mut cache_guard = cache.lock().unwrap();
     for change in asset_changes.iter_mut() {
         if let Some(info) = cache_guard.get(&change.asset.address) {
-            change.asset = info.clone();
+            info.apply_to(&mut change.asset);
         }
     }
     for change in exposure_changes.iter_mut() {
         if let Some(info) = cache_guard.get(&change.asset.address) {
-            change.asset = info.clone();
+            info.apply_to(&mut change.asset);
         }
     }
 }
@@ -1612,5 +1665,45 @@ mod tests {
             "second acquire should block until the rayon task releases its \
              permit; waited={waited:?}"
         );
+    }
+
+    #[test]
+    fn decodes_standard_abi_metadata_string() {
+        let mut encoded = vec![0_u8; 96];
+        encoded[31] = 32;
+        encoded[63] = 3;
+        encoded[64..67].copy_from_slice(b"WLD");
+
+        assert_eq!(decode_metadata_string(&encoded), Some("WLD".to_string()));
+    }
+
+    #[test]
+    fn decodes_legacy_bytes32_metadata_string() {
+        let mut encoded = [0_u8; 32];
+        encoded[..3].copy_from_slice(b"MKR");
+
+        assert_eq!(decode_metadata_string(&encoded), Some("MKR".to_string()));
+    }
+
+    #[test]
+    fn cached_metadata_preserves_detected_asset_type() {
+        let mut asset = AssetInfo {
+            address: Address::repeat_byte(0x11),
+            symbol: String::new(),
+            name: String::new(),
+            decimals: 0,
+            asset_type: AssetType::Erc1155,
+        };
+        let metadata = TokenMetadata {
+            symbol: "GAME".to_string(),
+            name: "Game Items".to_string(),
+            decimals: 0,
+        };
+
+        metadata.apply_to(&mut asset);
+
+        assert_eq!(asset.symbol, "GAME");
+        assert_eq!(asset.name, "Game Items");
+        assert_eq!(asset.asset_type, AssetType::Erc1155);
     }
 }
