@@ -1030,6 +1030,10 @@ async fn start_world_chain_el(
     let p2p_port_arg = p2p_port.to_string();
     let metrics_arg = format!("0.0.0.0:{metrics_port}");
     let p2p_secret_key = plan.p2p_secret_key.clone();
+    // Each node needs a distinct IPC socket: reth's default `--ipcpath` is a global path
+    // (`/tmp/reth.ipc`), so co-located nodes would collide. The in-process kona client connects to
+    // reth's standard (non-engine) RPC over this IPC endpoint.
+    let ipc_path_arg = data_dir.join("reth.ipc").to_string_lossy().to_string();
     let mut args = vec![
         "node".to_string(),
         "--chain".to_string(),
@@ -1041,7 +1045,8 @@ async fn start_world_chain_el(
         "--p2p-secret-key-hex".to_string(),
         p2p_secret_key,
         "--no-persist-peers".to_string(),
-        "--ipcdisable".to_string(),
+        "--ipcpath".to_string(),
+        ipc_path_arg,
         "--http".to_string(),
         "--http.addr".to_string(),
         "0.0.0.0".to_string(),

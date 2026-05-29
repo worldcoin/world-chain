@@ -52,6 +52,8 @@ use tracing::{error, info, warn};
 
 use crate::{KonaConfig, WorldChainKonaEngineClient};
 use reth_engine_primitives::ConsensusEngineHandle;
+use reth_optimism_node::OpEngineTypes;
+use reth_payload_builder::PayloadStore;
 use url::Url;
 
 /// How the in-process Kona node reaches reth's standard (non-engine) L2 RPC.
@@ -67,8 +69,6 @@ pub enum L2RpcEndpoint {
     /// reth's HTTP RPC endpoint.
     Http(Url),
 }
-use reth_optimism_node::OpEngineTypes;
-use reth_payload_builder::PayloadStore;
 
 const DERIVATION_PROVIDER_CACHE_SIZE: usize = 1024;
 const HEAD_STREAM_POLL_INTERVAL: u64 = 4;
@@ -121,9 +121,7 @@ impl KonaService {
     ) -> eyre::Result<Self> {
         let l1_provider = RootProvider::new_http(config.l1_rpc_url.clone());
         let l2_client = match l2_endpoint {
-            L2RpcEndpoint::Ipc(path) => {
-                ClientBuilder::default().ipc(IpcConnect::new(path)).await?
-            }
+            L2RpcEndpoint::Ipc(path) => ClientBuilder::default().ipc(IpcConnect::new(path)).await?,
             L2RpcEndpoint::Http(url) => ClientBuilder::default().http(url),
         };
         let l2_provider = RootProvider::<Optimism>::new(l2_client);
