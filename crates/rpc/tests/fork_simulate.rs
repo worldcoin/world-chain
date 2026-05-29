@@ -15,7 +15,7 @@
 //! ```
 
 use alloy_op_evm::{OpEvmFactory, OpTx};
-use alloy_primitives::{Address, Bytes, U256, address};
+use alloy_primitives::{Address, Bytes, U256, address, b256};
 use alloy_sol_types::{SolCall, sol};
 use op_revm::{OpSpecId, OpTransaction};
 use reth_evm::{Evm as RethEvm, EvmFactory};
@@ -49,11 +49,15 @@ const CHAIN_ID: u64 = 480;
 /// genuinely needs newer state — and re-verify the existing assertions.
 const FORK_BLOCK_NUMBER: u64 = 29_001_024;
 const ANT_METADATA_BLOCK_NUMBER: u64 = 30_374_933;
-const ANT_METADATA_BLOCK_TIMESTAMP: u64 = 1_781_005_057;
+const ANT_METADATA_BLOCK_TIMESTAMP: u64 = 1_780_085_505;
 const ANT_METADATA_BLOCK_GAS_LIMIT: u64 = 280_000_000;
 const ANT_METADATA_BLOCK_BASE_FEE: u64 = 500_000;
+const ANT_METADATA_BLOCK_BENEFICIARY: Address =
+    address!("4200000000000000000000000000000000000011");
 const ANT_SIMULATION_SENDER: Address = address!("f62902a1e7ef7445fc3e45a027eae197e103e14f");
-const ANT_SIMULATION_CALL_DATA: &str = "0x7bb3742800000000000000000000000038869bf66a61cf6bdb996a6ae40d5853fd43b52600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000004448d80ff0a000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000003f900c301bace6e9409b1876347a3dc94ec24d18c1fe4000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003a4855700fd00000000000000000000000000000000000000000000000000000000000001a000000000000000000000000000000000000000000000000000000000000001e0000000000000000000000000000000000000000000000000000000000000022000000000000000000000000000000000000000000000000000000000000002a000000000000000000000000000000000000000000000000000000000000002e0000000000000000000000000000000000000000000000002b5e3af16b188000000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000019e755d4377000000000000000000000000000000000000000000000000000000006a19f37a0000000000000000000000000000000000000000000000000000000000000320000000000000000000000000000000000000000000000000000000000000000754484520414e54000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003414e540000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004968747470733a2f2f63646e2e7075662e776f726c642f697066732f516d58764b646a6478487167675638723848656539634d6d44546d3553786f4c4c69577632326d314c547939385200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016414e54206974206d65616e202042494720504f5745520000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004167c634ae266cbf2ceb2c6deb070f715df96e0cf662bc12a9ea56b7b20c211c18340f30a79b26a842a75ff4372d3ef99c374eb37bf546ff81d1993492006371ae1b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+const ANT_TOKEN: Address = address!("ab5cc1359c09c1bb33030ed2f0394cb94c88d030");
+const ANT_SIMULATION_CALL_DATA_FROM_DATADOG: &str =
+    include_str!("fixtures/ant_metadata_calldata.txt");
 
 // ─── ABI fragments ───────────────────────────────────────────────────────────
 
@@ -115,9 +119,16 @@ fn metadata_evm_env() -> reth_evm::EvmEnv<OpSpecId> {
 }
 
 fn ant_metadata_evm_env() -> reth_evm::EvmEnv<OpSpecId> {
-    let mut env = simulate_evm_env();
+    let mut cfg = CfgEnv::new_with_spec(OpSpecId::JOVIAN);
+    cfg.chain_id = CHAIN_ID;
+    relax_cfg_for_simulation(&mut cfg);
+    let mut env = reth_evm::EvmEnv::new(cfg, BlockEnv::default());
     env.block_env.number = U256::from(ANT_METADATA_BLOCK_NUMBER);
+    env.block_env.beneficiary = ANT_METADATA_BLOCK_BENEFICIARY;
     env.block_env.timestamp = U256::from(ANT_METADATA_BLOCK_TIMESTAMP);
+    env.block_env.prevrandao = Some(b256!(
+        "8de60f421c6c2f8c85005b6c0966b7a1e025d0b790c67e483c4d15735b84f78c"
+    ));
     env.block_env.gas_limit = ANT_METADATA_BLOCK_GAS_LIMIT;
     env.block_env.basefee = ANT_METADATA_BLOCK_BASE_FEE;
     env
@@ -256,8 +267,16 @@ async fn test_fork_view_calls() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_simulate_new_token_reads_post_state_for_normalized_asset() {
     let mut db = forked_db!(ANT_METADATA_BLOCK_NUMBER);
-    let mut evm = OpEvmFactory::default().create_evm(&mut db, ant_metadata_evm_env());
-    let call_data = Bytes::from_str(ANT_SIMULATION_CALL_DATA).unwrap();
+    let mut evm = OpEvmFactory::default().create_evm_with_inspector(
+        &mut db,
+        ant_metadata_evm_env(),
+        SimulationInspector::default(),
+    );
+    let call_data_hex: String = ANT_SIMULATION_CALL_DATA_FROM_DATADOG
+        .lines()
+        .map(str::trim)
+        .collect();
+    let call_data = Bytes::from_str(&call_data_hex).unwrap();
 
     let result = RethEvm::transact(
         &mut evm,
@@ -287,17 +306,18 @@ async fn test_simulate_new_token_reads_post_state_for_normalized_asset() {
         .expect("expected simulated token transfer")
         .asset
         .address;
+    assert_eq!(token, WLD);
 
     drop(evm);
     db.commit(result.state);
 
-    let mut metadata_evm = OpEvmFactory::default().create_evm(&mut db, metadata_evm_env());
+    let mut metadata_evm = OpEvmFactory::default().create_evm(&mut db, ant_metadata_evm_env());
     let name: String = match RethEvm::transact(
         &mut metadata_evm,
         OpTx(OpTransaction {
             base: TxEnv {
                 caller: Address::ZERO,
-                kind: TxKind::Call(token),
+                kind: TxKind::Call(ANT_TOKEN),
                 data: nameCall {}.abi_encode().into(),
                 gas_limit: 100_000,
                 gas_price: 0,
@@ -314,14 +334,14 @@ async fn test_simulate_new_token_reads_post_state_for_normalized_asset() {
             output: Output::Call(d),
             ..
         } => nameCall::abi_decode_returns(&d).unwrap(),
-        other => panic!("name() failed for simulated token {token:?}: {other:?}"),
+        other => panic!("name() failed for simulated token {ANT_TOKEN:?}: {other:?}"),
     };
     let symbol: String = match RethEvm::transact(
         &mut metadata_evm,
         OpTx(OpTransaction {
             base: TxEnv {
                 caller: Address::ZERO,
-                kind: TxKind::Call(token),
+                kind: TxKind::Call(ANT_TOKEN),
                 data: symbolCall {}.abi_encode().into(),
                 gas_limit: 100_000,
                 gas_price: 0,
@@ -338,14 +358,14 @@ async fn test_simulate_new_token_reads_post_state_for_normalized_asset() {
             output: Output::Call(d),
             ..
         } => symbolCall::abi_decode_returns(&d).unwrap(),
-        other => panic!("symbol() failed for simulated token {token:?}: {other:?}"),
+        other => panic!("symbol() failed for simulated token {ANT_TOKEN:?}: {other:?}"),
     };
     let decimals: u8 = match RethEvm::transact(
         &mut metadata_evm,
         OpTx(OpTransaction {
             base: TxEnv {
                 caller: Address::ZERO,
-                kind: TxKind::Call(token),
+                kind: TxKind::Call(ANT_TOKEN),
                 data: decimalsCall {}.abi_encode().into(),
                 gas_limit: 100_000,
                 gas_price: 0,
@@ -362,12 +382,12 @@ async fn test_simulate_new_token_reads_post_state_for_normalized_asset() {
             output: Output::Call(d),
             ..
         } => decimalsCall::abi_decode_returns(&d).unwrap(),
-        other => panic!("decimals() failed for simulated token {token:?}: {other:?}"),
+        other => panic!("decimals() failed for simulated token {ANT_TOKEN:?}: {other:?}"),
     };
 
     assert_eq!(name, "THE ANT");
     assert_eq!(symbol, "ANT");
-    assert_eq!(decimals, 0);
+    assert_eq!(decimals, 18);
 }
 
 /// ERC-20 Transfer log is parsed into the correct AssetChange.
