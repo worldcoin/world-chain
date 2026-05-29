@@ -654,11 +654,21 @@ impl KonaSignerArgs {
 /// via Rust function calls instead of HTTP/IPC.
 #[derive(Debug, Clone, PartialEq, clap::Args)]
 #[command(next_help_heading = "Kona Consensus Node")]
+// `Option<KonaArgs>` flatten resolves to `Some` only when this presence group is
+// matched. The group's sole member is `--kona.enabled`, so passing any other
+// `--kona.*`/`--p2p.*` flag without `--kona.enabled` is rejected, and omitting all
+// kona flags leaves the field `None`. Mirrors `FlashblocksArgs`' `flashblocks_presence`.
+#[group(id = "kona_presence", requires = "kona.enabled")]
 pub struct KonaArgs {
     /// Enable the in-process Kona consensus node.
     ///
     /// When enabled, the world-chain binary acts as both the execution and consensus client.
-    #[arg(long = "kona.enabled", id = "kona.enabled", default_value_t = false)]
+    #[arg(
+        long = "kona.enabled",
+        id = "kona.enabled",
+        group = "kona_presence",
+        required = false
+    )]
     pub enabled: bool,
 
     /// L1 execution RPC URL for fetching deposits, batches, and finalization signals.

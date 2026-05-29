@@ -369,16 +369,11 @@ where
             1_000_000,
             self.config.args.simulate_enabled,
         )
-        .with_kona_args(self.kona_args())
+        .with_kona_args(self.config.args.kona.clone())
     }
 
     fn ext_context(&self) -> Self::ExtContext {
         self.components_context.clone()
-    }
-
-    fn kona_args(&self) -> Option<KonaArgs> {
-        let kona_args = self.config.args.kona.as_ref()?;
-        kona_args.enabled.then(|| kona_args.clone())
     }
 }
 
