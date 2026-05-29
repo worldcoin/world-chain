@@ -15,7 +15,6 @@ contract WorldChainAnchorStateRegistry {
     event AnchorUpdated(address indexed game, bytes32 indexed rootId, bytes32 rootClaim, uint256 l2BlockNumber);
     event PausedSet(bool paused);
     event GameBlacklistedSet(address indexed game, bool blacklisted);
-    event GameRetiredSet(address indexed game, bool retired);
 
     address public owner;
     bool public paused;
@@ -28,7 +27,6 @@ contract WorldChainAnchorStateRegistry {
     mapping(address game => bool accepted) public acceptedGames;
     mapping(bytes32 rootId => bool accepted) public acceptedRoots;
     mapping(address game => bool blacklisted) public blacklistedGames;
-    mapping(address game => bool retired) public retiredGames;
 
     constructor(bytes32 startingRootClaim, uint256 startingL2BlockNumber) {
         owner = msg.sender;
@@ -55,15 +53,9 @@ contract WorldChainAnchorStateRegistry {
         emit GameBlacklistedSet(game, blacklisted);
     }
 
-    function setGameRetired(address game, bool retired) external onlyOwner {
-        retiredGames[game] = retired;
-        emit GameRetiredSet(game, retired);
-    }
-
     function setAnchorState(address game) external {
         if (paused) revert RegistryPaused();
         if (blacklistedGames[game]) revert GameBlacklisted(game);
-        if (retiredGames[game]) revert GameRetired(game);
 
         IWorldChainProofSystemGame proofGame = IWorldChainProofSystemGame(game);
         if (proofGame.state() != IWorldChainProofSystemGame.RootState.FINALIZED) {

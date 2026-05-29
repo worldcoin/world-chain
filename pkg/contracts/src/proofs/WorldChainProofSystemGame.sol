@@ -147,9 +147,6 @@ contract WorldChainProofSystemGame {
     }
 
     function submitProofLane(uint8 laneId, bytes calldata proof) external {
-        if (state != WorldChainProofLib.RootState.CHALLENGED) {
-            revert InvalidState(WorldChainProofLib.RootState.CHALLENGED, state);
-        }
         if (block.timestamp >= proofDeadline) {
             revert ProofPeriodElapsed(block.timestamp, proofDeadline);
         }
