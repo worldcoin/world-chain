@@ -50,6 +50,7 @@ pub struct KonaP2PArgs {
     /// Disable Discv5 (node discovery).
     #[arg(
         long = "p2p.no-discovery",
+        id = "kona.no_discovery",
         default_value = "false",
         env = "KONA_NODE_P2P_NO_DISCOVERY"
     )]
@@ -58,33 +59,52 @@ pub struct KonaP2PArgs {
     /// Read the hex-encoded 32-byte private key for the peer ID from this txt file.
     /// Created if not already exists. Important to persist to keep the same network identity
     /// after restarting.
-    #[arg(long = "p2p.priv.path", env = "KONA_NODE_P2P_PRIV_PATH")]
+    #[arg(
+        long = "p2p.priv.path",
+        id = "kona.priv_path",
+        env = "KONA_NODE_P2P_PRIV_PATH"
+    )]
     pub priv_path: Option<PathBuf>,
 
     /// The hex-encoded 32-byte private key for the peer ID.
-    #[arg(long = "p2p.priv.raw", env = "KONA_NODE_P2P_PRIV_RAW")]
+    #[arg(
+        long = "p2p.priv.raw",
+        id = "kona.private_key",
+        env = "KONA_NODE_P2P_PRIV_RAW"
+    )]
     pub private_key: Option<B256>,
 
     /// IP address or DNS hostname to advertise to external peers from Discv5.
     /// Uses `p2p.listen.ip` if not set. Setting this disables dynamic ENR updates.
-    #[arg(long = "p2p.advertise.ip", env = "KONA_NODE_P2P_ADVERTISE_IP", value_parser = resolve_host)]
+    #[arg(long = "p2p.advertise.ip",
+        id = "kona.advertise_ip", env = "KONA_NODE_P2P_ADVERTISE_IP", value_parser = resolve_host)]
     pub advertise_ip: Option<IpAddr>,
 
     /// TCP port to advertise. Same as `p2p.listen.tcp` if not set.
-    #[arg(long = "p2p.advertise.tcp", env = "KONA_NODE_P2P_ADVERTISE_TCP_PORT")]
+    #[arg(
+        long = "p2p.advertise.tcp",
+        id = "kona.advertise_tcp_port",
+        env = "KONA_NODE_P2P_ADVERTISE_TCP_PORT"
+    )]
     pub advertise_tcp_port: Option<u16>,
 
     /// UDP port to advertise. Same as `p2p.listen.udp` if not set.
-    #[arg(long = "p2p.advertise.udp", env = "KONA_NODE_P2P_ADVERTISE_UDP_PORT")]
+    #[arg(
+        long = "p2p.advertise.udp",
+        id = "kona.advertise_udp_port",
+        env = "KONA_NODE_P2P_ADVERTISE_UDP_PORT"
+    )]
     pub advertise_udp_port: Option<u16>,
 
     /// IP address or DNS hostname to bind LibP2P/Discv5 to.
-    #[arg(long = "p2p.listen.ip", default_value = "0.0.0.0", env = "KONA_NODE_P2P_LISTEN_IP", value_parser = resolve_host)]
+    #[arg(long = "p2p.listen.ip",
+        id = "kona.listen_ip", default_value = "0.0.0.0", env = "KONA_NODE_P2P_LISTEN_IP", value_parser = resolve_host)]
     pub listen_ip: IpAddr,
 
     /// TCP port to bind LibP2P to. Any available system port if set to 0.
     #[arg(
         long = "p2p.listen.tcp",
+        id = "kona.listen_tcp_port",
         default_value = "9222",
         env = "KONA_NODE_P2P_LISTEN_TCP_PORT"
     )]
@@ -93,6 +113,7 @@ pub struct KonaP2PArgs {
     /// UDP port to bind Discv5 to. Same as TCP port if left 0.
     #[arg(
         long = "p2p.listen.udp",
+        id = "kona.listen_udp_port",
         default_value = "9223",
         env = "KONA_NODE_P2P_LISTEN_UDP_PORT"
     )]
@@ -101,6 +122,7 @@ pub struct KonaP2PArgs {
     /// Low-tide peer count. The node actively searches for new peer connections if below this.
     #[arg(
         long = "p2p.peers.lo",
+        id = "kona.peers_lo",
         default_value = "20",
         env = "KONA_NODE_P2P_PEERS_LO"
     )]
@@ -109,6 +131,7 @@ pub struct KonaP2PArgs {
     /// High-tide peer count. The node starts pruning peer connections after reaching this.
     #[arg(
         long = "p2p.peers.hi",
+        id = "kona.peers_hi",
         default_value = "30",
         env = "KONA_NODE_P2P_PEERS_HI"
     )]
@@ -117,6 +140,7 @@ pub struct KonaP2PArgs {
     /// Grace period (seconds) to keep a newly connected peer around.
     #[arg(
         long = "p2p.peers.grace",
+        id = "kona.peers_grace",
         default_value = "30",
         env = "KONA_NODE_P2P_PEERS_GRACE",
         value_parser = |arg: &str| -> Result<Duration, ParseIntError> {Ok(Duration::from_secs(arg.parse()?))}
@@ -126,6 +150,7 @@ pub struct KonaP2PArgs {
     /// GossipSub topic stable mesh target count (desired outbound degree).
     #[arg(
         long = "p2p.gossip.mesh.d",
+        id = "kona.gossip_mesh_d",
         default_value = "8",
         env = "KONA_NODE_P2P_GOSSIP_MESH_D"
     )]
@@ -134,6 +159,7 @@ pub struct KonaP2PArgs {
     /// GossipSub topic stable mesh low watermark.
     #[arg(
         long = "p2p.gossip.mesh.lo",
+        id = "kona.gossip_mesh_dlo",
         default_value = "6",
         env = "KONA_NODE_P2P_GOSSIP_MESH_DLO"
     )]
@@ -142,6 +168,7 @@ pub struct KonaP2PArgs {
     /// GossipSub topic stable mesh high watermark.
     #[arg(
         long = "p2p.gossip.mesh.dhi",
+        id = "kona.gossip_mesh_dhi",
         default_value = "12",
         env = "KONA_NODE_P2P_GOSSIP_MESH_DHI"
     )]
@@ -150,6 +177,7 @@ pub struct KonaP2PArgs {
     /// GossipSub gossip target (announcements of IHAVE).
     #[arg(
         long = "p2p.gossip.mesh.dlazy",
+        id = "kona.gossip_mesh_dlazy",
         default_value = "6",
         env = "KONA_NODE_P2P_GOSSIP_MESH_DLAZY"
     )]
@@ -158,6 +186,7 @@ pub struct KonaP2PArgs {
     /// Publish messages to all known peers on the topic, outside of the mesh.
     #[arg(
         long = "p2p.gossip.mesh.floodpublish",
+        id = "kona.gossip_flood_publish",
         default_value = "false",
         env = "KONA_NODE_P2P_GOSSIP_FLOOD_PUBLISH"
     )]
@@ -166,6 +195,7 @@ pub struct KonaP2PArgs {
     /// Peer scoring strategy: none or light.
     #[arg(
         long = "p2p.scoring",
+        id = "kona.scoring",
         default_value = "light",
         env = "KONA_NODE_P2P_SCORING"
     )]
@@ -174,6 +204,7 @@ pub struct KonaP2PArgs {
     /// Ban peers based on their score.
     #[arg(
         long = "p2p.ban.peers",
+        id = "kona.ban_enabled",
         default_value = "false",
         env = "KONA_NODE_P2P_BAN_PEERS"
     )]
@@ -182,6 +213,7 @@ pub struct KonaP2PArgs {
     /// Score threshold below which peers are banned.
     #[arg(
         long = "p2p.ban.threshold",
+        id = "kona.ban_threshold",
         default_value = "-100",
         env = "KONA_NODE_P2P_BAN_THRESHOLD"
     )]
@@ -190,6 +222,7 @@ pub struct KonaP2PArgs {
     /// Duration in minutes to ban a peer for.
     #[arg(
         long = "p2p.ban.duration",
+        id = "kona.ban_duration",
         default_value = "60",
         env = "KONA_NODE_P2P_BAN_DURATION"
     )]
@@ -198,6 +231,7 @@ pub struct KonaP2PArgs {
     /// Interval in seconds to find peers using the discovery service.
     #[arg(
         long = "p2p.discovery.interval",
+        id = "kona.discovery_interval",
         default_value = "5",
         env = "KONA_NODE_P2P_DISCOVERY_INTERVAL"
     )]
@@ -206,21 +240,31 @@ pub struct KonaP2PArgs {
     /// Seconds to wait before removing a random peer from discovery to rotate the peer set.
     #[arg(
         long = "p2p.discovery.randomize",
+        id = "kona.discovery_randomize",
         env = "KONA_NODE_P2P_DISCOVERY_RANDOMIZE"
     )]
     pub discovery_randomize: Option<u64>,
 
     /// Directory to store the bootstore.
-    #[arg(long = "p2p.bootstore", env = "KONA_NODE_P2P_BOOTSTORE")]
+    #[arg(
+        long = "p2p.bootstore",
+        id = "kona.bootstore",
+        env = "KONA_NODE_P2P_BOOTSTORE"
+    )]
     pub bootstore: Option<PathBuf>,
 
     /// Disable the bootstore.
-    #[arg(long = "p2p.no-bootstore", env = "KONA_NODE_P2P_NO_BOOTSTORE")]
+    #[arg(
+        long = "p2p.no-bootstore",
+        id = "kona.disable_bootstore",
+        env = "KONA_NODE_P2P_NO_BOOTSTORE"
+    )]
     pub disable_bootstore: bool,
 
     /// Max redial attempts for a disconnected peer. 0 = unlimited.
     #[arg(
         long = "p2p.redial",
+        id = "kona.peer_redial",
         env = "KONA_NODE_P2P_REDIAL",
         default_value = "500"
     )]
@@ -229,6 +273,7 @@ pub struct KonaP2PArgs {
     /// Duration in minutes of the peer dial period.
     #[arg(
         long = "p2p.redial.period",
+        id = "kona.redial_period",
         env = "KONA_NODE_P2P_REDIAL_PERIOD",
         default_value = "60"
     )]
@@ -237,6 +282,7 @@ pub struct KonaP2PArgs {
     /// Comma-separated list of bootnode ENRs or enode URLs.
     #[arg(
         long = "p2p.bootnodes",
+        id = "kona.bootnodes",
         value_delimiter = ',',
         env = "KONA_NODE_P2P_BOOTNODES"
     )]
@@ -245,6 +291,7 @@ pub struct KonaP2PArgs {
     /// Enable topic scoring (being phased out, for backwards-compat/debugging only).
     #[arg(
         long = "p2p.topic-scoring",
+        id = "kona.topic_scoring",
         default_value = "false",
         env = "KONA_NODE_P2P_TOPIC_SCORING"
     )]
@@ -254,6 +301,7 @@ pub struct KonaP2PArgs {
     /// By default fetched from rollup config's system config on L1.
     #[arg(
         long = "p2p.unsafe.block.signer",
+        id = "kona.unsafe_block_signer",
         env = "KONA_NODE_P2P_UNSAFE_BLOCK_SIGNER"
     )]
     pub unsafe_block_signer: Option<Address>,
@@ -448,69 +496,74 @@ pub struct KonaSignerArgs {
     /// Local private key for the sequencer to sign unsafe blocks.
     #[arg(
         long = "p2p.sequencer.key",
+        id = "kona.sequencer_key",
         env = "KONA_NODE_P2P_SEQUENCER_KEY",
-        conflicts_with = "p2p_signer_endpoint"
+        conflicts_with = "kona.endpoint"
     )]
     pub sequencer_key: Option<B256>,
 
     /// Path to a file containing the sequencer private key.
     #[arg(
         long = "p2p.sequencer.key.path",
+        id = "kona.sequencer_key_path",
         env = "KONA_NODE_P2P_SEQUENCER_KEY_PATH",
-        conflicts_with_all = ["sequencer_key", "p2p_signer_endpoint"]
+        conflicts_with_all = ["kona.sequencer_key", "kona.endpoint"]
     )]
     pub sequencer_key_path: Option<PathBuf>,
 
     /// URL of the remote signer endpoint.
     #[arg(
         long = "p2p.signer.endpoint",
-        id = "p2p_signer_endpoint",
+        id = "kona.endpoint",
         env = "KONA_NODE_P2P_SIGNER_ENDPOINT",
-        requires = "p2p_signer_address"
+        requires = "kona.address"
     )]
     pub endpoint: Option<Url>,
 
     /// Address to sign transactions for (required with remote signer).
     #[arg(
         long = "p2p.signer.address",
-        id = "p2p_signer_address",
+        id = "kona.address",
         env = "KONA_NODE_P2P_SIGNER_ADDRESS",
-        requires = "p2p_signer_endpoint"
+        requires = "kona.endpoint"
     )]
     pub address: Option<Address>,
 
     /// Headers for the remote signer. Format: `key=value`.
     #[arg(
         long = "p2p.signer.header",
+        id = "kona.header",
         env = "KONA_NODE_P2P_SIGNER_HEADER",
-        requires = "p2p_signer_endpoint"
+        requires = "kona.endpoint"
     )]
     pub header: Vec<String>,
 
     /// Path to CA certificates for the remote signer.
     #[arg(
         long = "p2p.signer.tls.ca",
+        id = "kona.ca_cert",
         env = "KONA_NODE_P2P_SIGNER_TLS_CA",
-        requires = "p2p_signer_endpoint"
+        requires = "kona.endpoint"
     )]
     pub ca_cert: Option<PathBuf>,
 
     /// Path to the client certificate for the remote signer.
     #[arg(
         long = "p2p.signer.tls.cert",
+        id = "kona.cert",
         env = "KONA_NODE_P2P_SIGNER_TLS_CERT",
-        requires = "p2p_signer_tls_key",
-        requires = "p2p_signer_endpoint"
+        requires = "kona.key",
+        requires = "kona.endpoint"
     )]
     pub cert: Option<PathBuf>,
 
     /// Path to the client key for the remote signer.
     #[arg(
         long = "p2p.signer.tls.key",
-        id = "p2p_signer_tls_key",
+        id = "kona.key",
         env = "KONA_NODE_P2P_SIGNER_TLS_KEY",
-        requires = "cert",
-        requires = "p2p_signer_endpoint"
+        requires = "kona.cert",
+        requires = "kona.endpoint"
     )]
     pub key: Option<PathBuf>,
 }
@@ -611,6 +664,7 @@ pub struct KonaArgs {
     /// L1 execution RPC URL for fetching deposits, batches, and finalization signals.
     #[arg(
         long = "kona.l1-rpc-url",
+        id = "kona.l1_rpc_url",
         env = "KONA_L1_RPC_URL",
         requires = "kona.enabled",
         default_value = "http://localhost:8545"
@@ -620,6 +674,7 @@ pub struct KonaArgs {
     /// L1 beacon API URL for fetching blob data (required post-Dencun).
     #[arg(
         long = "kona.l1-beacon-url",
+        id = "kona.l1_beacon_url",
         env = "KONA_L1_BEACON_URL",
         requires = "kona.enabled",
         default_value = "http://localhost:5052"
@@ -629,6 +684,7 @@ pub struct KonaArgs {
     /// Trust the L1 RPC without additional receipt verification.
     #[arg(
         long = "kona.l1-trust-rpc",
+        id = "kona.l1_trust_rpc",
         requires = "kona.enabled",
         default_value_t = false
     )]
@@ -645,6 +701,7 @@ pub struct KonaArgs {
     /// format as op-node's `--rollup.config` flag.
     #[arg(
         long = "kona.rollup-config",
+        id = "kona.rollup_config_path",
         env = "KONA_ROLLUP_CONFIG",
         requires = "kona.enabled"
     )]
@@ -655,6 +712,7 @@ pub struct KonaArgs {
     /// When set, the node builds and gossips unsafe blocks rather than only following the chain.
     #[arg(
         long = "kona.sequencer",
+        id = "kona.sequencer",
         env = "KONA_SEQUENCER",
         requires = "kona.enabled",
         default_value_t = false
@@ -666,6 +724,7 @@ pub struct KonaArgs {
     /// Block production must be resumed explicitly (e.g. via the admin RPC or op-conductor).
     #[arg(
         long = "kona.sequencer.stopped",
+        id = "kona.sequencer_stopped",
         env = "KONA_SEQUENCER_STOPPED",
         requires = "kona.enabled",
         default_value_t = false
@@ -675,6 +734,7 @@ pub struct KonaArgs {
     /// Run the sequencer in recovery mode.
     #[arg(
         long = "kona.sequencer.recover",
+        id = "kona.sequencer_recovery_mode",
         env = "KONA_SEQUENCER_RECOVER",
         requires = "kona.enabled",
         default_value_t = false
@@ -684,6 +744,7 @@ pub struct KonaArgs {
     /// Number of L1 confirmations the sequencer waits on before building from an L1 origin.
     #[arg(
         long = "kona.sequencer.l1-confs",
+        id = "kona.l1_confs",
         env = "KONA_SEQUENCER_L1_CONFS",
         requires = "kona.enabled",
         default_value_t = 4
@@ -693,6 +754,7 @@ pub struct KonaArgs {
     /// URL of the op-conductor RPC endpoint. When set, the conductor service is enabled.
     #[arg(
         long = "kona.conductor.rpc",
+        id = "kona.conductor_rpc",
         env = "KONA_CONDUCTOR_RPC",
         requires = "kona.enabled"
     )]
@@ -701,6 +763,7 @@ pub struct KonaArgs {
     /// IP address the Kona node RPC server binds to.
     #[arg(
         long = "kona.rpc.addr",
+        id = "kona.rpc_addr",
         env = "KONA_RPC_ADDR",
         requires = "kona.enabled",
         default_value = "0.0.0.0"
@@ -710,6 +773,7 @@ pub struct KonaArgs {
     /// Port the Kona node RPC server binds to.
     #[arg(
         long = "kona.rpc.port",
+        id = "kona.rpc_port",
         env = "KONA_RPC_PORT",
         requires = "kona.enabled",
         default_value_t = 8547
@@ -719,6 +783,7 @@ pub struct KonaArgs {
     /// Enable the admin namespace on the Kona node RPC server.
     #[arg(
         long = "kona.rpc.enable-admin",
+        id = "kona.rpc_enable_admin",
         env = "KONA_RPC_ENABLE_ADMIN",
         requires = "kona.enabled",
         default_value_t = false
@@ -728,6 +793,7 @@ pub struct KonaArgs {
     /// Disable the Kona node RPC server entirely.
     #[arg(
         long = "kona.rpc.disabled",
+        id = "kona.rpc_disabled",
         env = "KONA_RPC_DISABLED",
         requires = "kona.enabled",
         default_value_t = false
@@ -737,6 +803,7 @@ pub struct KonaArgs {
     /// Override the L1 slot duration (in seconds) used by the L1 watcher.
     #[arg(
         long = "kona.l1-slot-duration-override",
+        id = "kona.l1_slot_duration_override",
         env = "KONA_L1_SLOT_DURATION_OVERRIDE",
         requires = "kona.enabled"
     )]
