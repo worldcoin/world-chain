@@ -457,7 +457,7 @@ pub struct KonaSignerArgs {
     #[arg(
         long = "p2p.sequencer.key.path",
         env = "KONA_NODE_P2P_SEQUENCER_KEY_PATH",
-        conflicts_with = "sequencer_key"
+        conflicts_with_all = ["sequencer_key", "p2p_signer_endpoint"]
     )]
     pub sequencer_key_path: Option<PathBuf>,
 

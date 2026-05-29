@@ -40,8 +40,11 @@ use reth_rpc_server_types::RethRpcModule;
 use reth_transaction_pool::TransactionPool;
 use tracing::{debug, info};
 use world_chain_chainspec::WorldChainSpec;
+use world_chain_cli::KonaArgs;
 use world_chain_evm::OpTx;
 use world_chain_kona::{KonaConfig, KonaService, KonaServiceHandle};
+
+use crate::context::build_kona_config;
 use world_chain_rpc::{
     EthApiExtServer, SequencerClient as WorldChainSequencerClient, Simulate, SimulateApiServer,
     WorldChainEthApiExt,
@@ -113,11 +116,17 @@ pub struct WorldChainAddOns<
     min_suggested_priority_fee: u64,
     /// Enables the World Chain simulate namespace.
     simulate_enabled: bool,
-    /// In-process Kona consensus startup configuration.
+    /// In-process Kona consensus startup intent (the enabled `--kona.*` CLI args).
     ///
-    /// When [`Some`], the add-ons assemble an [`WorldChainKonaEngineClient`] from reth's engine handle
-    /// and spawn the Kona consensus node in-process during [`launch_add_ons`](NodeAddOns::launch_add_ons).
-    kona_config: Option<KonaConfig>,
+    /// When [`Some`], [`launch_add_ons`](NodeAddOns::launch_add_ons) builds the [`KonaConfig`] from
+    /// these args (failing the launch if the rollup config is missing/unreadable/unparsable),
+    /// assembles a [`WorldChainKonaEngineClient`] from reth's engine handle, and spawns the Kona
+    /// consensus node in-process. The build is deferred to launch so misconfiguration aborts node
+    /// startup rather than being silently swallowed.
+    ///
+    /// [`KonaConfig`]: world_chain_kona::KonaConfig
+    /// [`WorldChainKonaEngineClient`]: world_chain_kona::WorldChainKonaEngineClient
+    kona_args: Option<KonaArgs>,
     /// Transaction type carried by the node primitives.
     _tx: PhantomData<fn() -> Tx>,
 }
@@ -151,7 +160,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
-            kona_config: None,
+            kona_args: None,
             _tx: PhantomData,
         }
     }
@@ -163,9 +172,15 @@ where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
 {
-    /// Sets a [`KonaConfig`] which signals the add-ons to spawn an in-process Consensus Engine.
-    pub fn with_kona_config(mut self, kona_config: Option<KonaConfig>) -> Self {
-        self.kona_config = kona_config;
+    /// Sets the enabled `--kona.*` CLI args which signal the add-ons to build a
+    /// [`KonaConfig`](world_chain_kona::KonaConfig) and spawn an in-process Consensus Engine during
+    /// launch.
+    ///
+    /// Passing [`Some`] defers the fallible config build to
+    /// [`launch_add_ons`](NodeAddOns::launch_add_ons), so a misconfigured-but-enabled Kona aborts
+    /// node startup instead of silently disabling consensus.
+    pub fn with_kona_args(mut self, kona_args: Option<KonaArgs>) -> Self {
+        self.kona_args = kona_args;
         self
     }
 
@@ -357,7 +372,7 @@ where
             enable_tx_conditional,
             historical_rpc,
             simulate_enabled,
-            kona_config,
+            kona_args,
             ..
         } = self;
 
@@ -365,8 +380,14 @@ where
         // `launch_add_ons_with` consumes it. The authoritative L2 IPC endpoint is read from the
         // live RPC server handle after launch (below), so we only stash the engine-layer handles
         // here. We also fail fast if the IPC server is disabled, since Kona connects over it.
-        let kona_inputs = kona_config
-            .map(|kona_config| -> eyre::Result<_> {
+        //
+        // The [`KonaConfig`](world_chain_kona::KonaConfig) is built here (not in `add_ons`, which
+        // cannot return errors) so that an enabled-but-misconfigured Kona — a missing, unreadable,
+        // or unparsable rollup config — aborts node startup via `?` rather than silently starting
+        // without a consensus engine.
+        let kona_inputs = kona_args
+            .map(|kona_args| -> eyre::Result<_> {
+                let kona_config = build_kona_config(&kona_args)?;
                 if ctx.config.rpc.ipcdisable {
                     return Err(eyre::Report::msg(
                         "--kona.enabled requires reth's IPC RPC server (do not pass --ipcdisable)",

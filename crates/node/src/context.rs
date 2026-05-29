@@ -369,38 +369,27 @@ where
             1_000_000,
             self.config.args.simulate_enabled,
         )
-        .with_kona_config(self.kona_config())
+        .with_kona_args(self.kona_args())
     }
 
     fn ext_context(&self) -> Self::ExtContext {
         self.components_context.clone()
     }
 
-    fn kona_config(&self) -> Option<world_chain_kona::KonaConfig> {
+    fn kona_args(&self) -> Option<KonaArgs> {
         let kona_args = self.config.args.kona.as_ref()?;
-        if !kona_args.enabled {
-            return None;
-        }
-
-        match build_kona_config(kona_args) {
-            Ok(config) => Some(config),
-            Err(error) => {
-                tracing::error!(
-                    target: "world_chain::kona",
-                    %error,
-                    "Failed to build Kona configuration; in-process consensus will not start"
-                );
-                None
-            }
-        }
+        kona_args.enabled.then(|| kona_args.clone())
     }
 }
 
 /// Builds a [`KonaConfig`](world_chain_kona::KonaConfig) from the parsed `--kona.*` CLI arguments.
 ///
 /// The rollup configuration is loaded from the JSON file referenced by `--kona.rollup-config`,
-/// which is required when Kona is enabled.
-fn build_kona_config(kona_args: &KonaArgs) -> eyre::Result<world_chain_kona::KonaConfig> {
+/// which is required when Kona is enabled. Returns an error (which the caller propagates to fail
+/// node startup) if the rollup config is missing, unreadable, or unparsable.
+pub(crate) fn build_kona_config(
+    kona_args: &KonaArgs,
+) -> eyre::Result<world_chain_kona::KonaConfig> {
     let l1_rpc_url = kona_args.l1_rpc_url.parse()?;
     let l1_beacon_url = kona_args.l1_beacon_url.parse()?;
 

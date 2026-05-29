@@ -139,13 +139,15 @@ pub trait WorldChainNodeContext<N: FullNodeTypes<Types = WorldChainNode<Self>>>:
     /// Returns the extension context for the node.
     fn ext_context(&self) -> Self::ExtContext;
 
-    /// Returns the in-process Kona consensus startup configuration, if Kona is enabled.
+    /// Returns the enabled `--kona.*` CLI args, if the in-process Kona consensus node is enabled.
     ///
-    /// When this returns [`Some`], the add-ons assemble an
-    /// [`WorldChainKonaEngineClient`](world_chain_kona::WorldChainKonaEngineClient) from reth's engine handle
-    /// and spawn the Kona consensus node in-process during add-on launch. When [`None`], the node
-    /// runs without an in-process consensus layer (relying on an external consensus client).
-    fn kona_config(&self) -> Option<world_chain_kona::KonaConfig> {
+    /// When this returns [`Some`], the add-ons build a
+    /// [`KonaConfig`](world_chain_kona::KonaConfig) from these args during add-on launch (failing
+    /// the launch if the rollup config is missing/unreadable/unparsable), assemble a
+    /// [`WorldChainKonaEngineClient`](world_chain_kona::WorldChainKonaEngineClient) from reth's
+    /// engine handle, and spawn the Kona consensus node in-process. When [`None`], the node runs
+    /// without an in-process consensus layer (relying on an external consensus client).
+    fn kona_args(&self) -> Option<world_chain_cli::KonaArgs> {
         None
     }
 }
