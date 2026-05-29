@@ -50,11 +50,12 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-use crate::{KonaConfig, WorldChainKonaEngineClient};
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_optimism_node::OpEngineTypes;
 use reth_payload_builder::PayloadStore;
 use url::Url;
+
+use crate::{FlashblocksAuthorizationNotifier, KonaConfig, WorldChainKonaEngineClient};
 
 /// How the in-process Kona node reaches reth's standard (non-engine) L2 RPC.
 ///
@@ -118,6 +119,7 @@ impl KonaService {
         engine_handle: ConsensusEngineHandle<OpEngineTypes>,
         payload_store: PayloadStore<OpEngineTypes>,
         l2_endpoint: L2RpcEndpoint,
+        flashblocks_authorizer: Option<FlashblocksAuthorizationNotifier>,
     ) -> eyre::Result<Self> {
         let l1_provider = RootProvider::new_http(config.l1_rpc_url.clone());
         let l2_client = match l2_endpoint {
@@ -132,6 +134,7 @@ impl KonaService {
             payload_store,
             l2_provider.clone(),
             l1_provider.clone(),
+            flashblocks_authorizer,
         ));
 
         let l2_chain_id: u64 = config.rollup_config.l2_chain_id.into();

@@ -35,6 +35,6 @@ mod client;
 mod config;
 mod service;
 
-pub use client::WorldChainKonaEngineClient;
+pub use client::{AuthorizerKeys, FlashblocksAuthorizationNotifier, WorldChainKonaEngineClient};
 pub use config::KonaConfig;
 pub use service::{KonaService, KonaServiceHandle, L2RpcEndpoint};

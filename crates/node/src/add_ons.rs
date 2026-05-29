@@ -42,7 +42,9 @@ use tracing::{debug, info};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_cli::KonaArgs;
 use world_chain_evm::OpTx;
-use world_chain_kona::{KonaConfig, KonaService, KonaServiceHandle, L2RpcEndpoint};
+use world_chain_kona::{
+    FlashblocksAuthorizationNotifier, KonaConfig, KonaService, KonaServiceHandle, L2RpcEndpoint,
+};
 
 use crate::context::build_kona_config;
 use world_chain_rpc::{
@@ -127,6 +129,10 @@ pub struct WorldChainAddOns<
     /// [`KonaConfig`]: world_chain_kona::KonaConfig
     /// [`WorldChainKonaEngineClient`]: world_chain_kona::WorldChainKonaEngineClient
     kona_args: Option<KonaArgs>,
+    /// Flashblocks payload-job authorizer, plumbed into the in-process Kona engine client so a
+    /// forkchoice update with attributes notifies (and optionally authorizes) the generator. See
+    /// [`FlashblocksAuthorizationNotifier`]; [`None`] when Flashblocks is disabled.
+    flashblocks_authorizer: Option<FlashblocksAuthorizationNotifier>,
     /// Transaction type carried by the node primitives.
     _tx: PhantomData<fn() -> Tx>,
 }
@@ -161,6 +167,7 @@ where
             min_suggested_priority_fee,
             simulate_enabled,
             kona_args: None,
+            flashblocks_authorizer: None,
             _tx: PhantomData,
         }
     }
@@ -181,6 +188,16 @@ where
     /// node startup instead of silently disabling consensus.
     pub fn with_kona_args(mut self, kona_args: Option<KonaArgs>) -> Self {
         self.kona_args = kona_args;
+        self
+    }
+
+    /// Sets the Flashblocks payload-job authorizer plumbed into the in-process Kona engine client,
+    /// so a forkchoice update with attributes notifies (and optionally authorizes) the generator.
+    pub fn with_flashblocks_authorizer(
+        mut self,
+        flashblocks_authorizer: Option<FlashblocksAuthorizationNotifier>,
+    ) -> Self {
+        self.flashblocks_authorizer = flashblocks_authorizer;
         self
     }
 
@@ -373,6 +390,7 @@ where
             historical_rpc,
             simulate_enabled,
             kona_args,
+            flashblocks_authorizer,
             ..
         } = self;
 
@@ -391,7 +409,13 @@ where
                 let engine_handle = ctx.beacon_engine_handle.clone();
                 let payload_store = PayloadStore::new(ctx.node.payload_builder_handle().clone());
                 let task_executor = ctx.node.task_executor().clone();
-                Ok((kona_config, engine_handle, payload_store, task_executor))
+                Ok((
+                    kona_config,
+                    engine_handle,
+                    payload_store,
+                    task_executor,
+                    flashblocks_authorizer,
+                ))
             })
             .transpose()?;
 
@@ -501,7 +525,14 @@ where
         // Kona reaches reth's standard (non-engine) L2 RPC over IPC when the IPC server is enabled,
         // otherwise it falls back to the HTTP RPC endpoint. Both are read from the running server so
         // they reflect what reth actually bound, rather than being re-derived from config.
-        if let Some((kona_config, engine_handle, payload_store, task_executor)) = kona_inputs {
+        if let Some((
+            kona_config,
+            engine_handle,
+            payload_store,
+            task_executor,
+            flashblocks_authorizer,
+        )) = kona_inputs
+        {
             let rpc = &handle.rpc_server_handles.rpc;
             let l2_endpoint = match rpc.ipc_endpoint() {
                 Some(ipc_path) => L2RpcEndpoint::Ipc(ipc_path),
@@ -521,6 +552,7 @@ where
                 payload_store,
                 task_executor,
                 l2_endpoint,
+                flashblocks_authorizer,
             )
             .await?;
         }
@@ -605,13 +637,20 @@ async fn spawn_kona(
     payload_store: PayloadStore<OpEngineTypes>,
     task_executor: TaskExecutor,
     l2_endpoint: L2RpcEndpoint,
+    flashblocks_authorizer: Option<FlashblocksAuthorizationNotifier>,
 ) -> eyre::Result<()> {
     let sequencer_mode = kona_config.sequencer_mode;
     let l1_chain_id = kona_config.rollup_config.l1_chain_id;
     let l2_chain_id: u64 = kona_config.rollup_config.l2_chain_id.into();
 
-    let service =
-        KonaService::build(kona_config, engine_handle, payload_store, l2_endpoint).await?;
+    let service = KonaService::build(
+        kona_config,
+        engine_handle,
+        payload_store,
+        l2_endpoint,
+        flashblocks_authorizer,
+    )
+    .await?;
 
     info!(
         target: "world_chain::kona",

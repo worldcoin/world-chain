@@ -15615,6 +15615,7 @@ dependencies = [
  "alloy-transport-http 2.0.4",
  "async-trait",
  "color-eyre",
+ "ed25519-dalek",
  "kona-derive",
  "kona-engine",
  "kona-genesis",
@@ -15635,6 +15636,7 @@ dependencies = [
  "tracing",
  "url",
  "world-chain-cli",
+ "world-chain-primitives",
 ]
 
 [[package]]

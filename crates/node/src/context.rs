@@ -30,7 +30,7 @@ use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApiBuilder;
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_cli::{KonaArgs, WorldChainArgs, WorldChainNodeConfig};
-use world_chain_kona::KonaConfig;
+use world_chain_kona::{AuthorizerKeys, FlashblocksAuthorizationNotifier, KonaConfig};
 use world_chain_p2p::{
     monitor::PeerMonitor,
     protocol::{
@@ -370,6 +370,30 @@ where
             self.config.args.simulate_enabled,
         )
         .with_kona_args(self.config.args.kona.clone())
+        .with_flashblocks_authorizer(self.components_context.as_ref().map(
+            |flashblocks_components_ctx| {
+                // Mirror rollup-boost: when self-authorization keys are configured
+                // (`--flashblocks.override-authorizer-sk` + `--flashblocks.builder-sk`), the
+                // in-process Kona node mints full authorizations for the payloads it builds.
+                let keys = self
+                    .config
+                    .args
+                    .flashblocks
+                    .as_ref()
+                    .and_then(|flashblocks| {
+                        let authorizer_sk = flashblocks.override_authorizer_sk.clone()?;
+                        let builder_sk = flashblocks.builder_sk.as_ref()?;
+                        Some(AuthorizerKeys {
+                            authorizer_sk,
+                            builder_vk: builder_sk.verifying_key(),
+                        })
+                    });
+                FlashblocksAuthorizationNotifier {
+                    to_jobs_generator: flashblocks_components_ctx.to_jobs_generator.clone(),
+                    keys,
+                }
+            },
+        ))
     }
 
     fn ext_context(&self) -> Self::ExtContext {

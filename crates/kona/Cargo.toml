@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 # World-chain
 world-chain-cli.workspace = true
+world-chain-primitives.workspace = true
 
 # Kona crates — canonical ethereum-optimism
 kona-node-service.workspace = true
@@ -48,6 +49,7 @@ op-alloy-rpc-types.workspace = true
 op-alloy-rpc-types-engine.workspace = true
 
 # General
+ed25519-dalek.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-util.workspace = true

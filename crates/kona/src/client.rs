@@ -28,10 +28,66 @@ use op_alloy_rpc_types_engine::{
     OpExecutionPayloadV4, OpPayloadAttributes,
 };
 
+use ed25519_dalek::{SigningKey, VerifyingKey};
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_optimism_node::OpEngineTypes;
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::PayloadTypes;
+use tokio::sync::watch;
+use world_chain_primitives::p2p::Authorization;
+
+/// OP `engine_forkchoiceUpdatedV3` payload-id version, matching the version the Flashblocks
+/// payload-job generator expects authorization payload ids to carry.
+const OP_PAYLOAD_ID_V3: u8 = 3;
+
+/// Self-authorization keys for the in-process Kona node to mint Flashblocks
+/// [`Authorization`]s for the payloads it builds, mirroring rollup-boost.
+#[derive(Clone)]
+pub struct AuthorizerKeys {
+    /// The authorizer's signing key (`--flashblocks.override-authorizer-sk`). Its verifying key
+    /// must equal the `--flashblocks.authorizer-vk` the payload-job generator verifies against.
+    pub authorizer_sk: SigningKey,
+    /// The verifying key of the builder being authorized (`--flashblocks.builder-sk`).
+    pub builder_vk: VerifyingKey,
+}
+
+/// Notifies the Flashblocks payload-job generator on each attributes-bearing forkchoice update.
+#[derive(Clone)]
+pub struct FlashblocksAuthorizationNotifier {
+    /// Watch channel to the payload-job generator.
+    pub to_jobs_generator: watch::Sender<Option<Authorization>>,
+    /// Self-authorization keys, when authorizations are enabled.
+    pub keys: Option<AuthorizerKeys>,
+}
+
+// Manual `Debug` because `ed25519_dalek::SigningKey` (in `keys`) is intentionally not `Debug`;
+// we only surface whether self-authorization is enabled, never the key material.
+impl std::fmt::Debug for FlashblocksAuthorizationNotifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FlashblocksAuthorizationNotifier")
+            .field("self_authorizing", &self.keys.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl FlashblocksAuthorizationNotifier {
+    /// Notifies the payload-job generator for an attributes-bearing forkchoice update, minting a
+    /// full authorization when self-authorization keys are configured.
+    fn notify(&self, attributes: &OpPayloadAttributes, head_block_hash: B256) {
+        let authorization = self.keys.as_ref().map(|keys| {
+            let payload_id = attributes.payload_id(&head_block_hash, OP_PAYLOAD_ID_V3);
+            Authorization::new(
+                payload_id,
+                attributes.payload_attributes.timestamp,
+                &keys.authorizer_sk,
+                keys.builder_vk,
+            )
+        });
+
+        self.to_jobs_generator
+            .send_modify(|slot| *slot = authorization);
+    }
+}
 
 /// An in-process Engine API client that bridges Kona's consensus layer to reth's execution engine
 /// for the consensus hot path, without any network transport.
@@ -48,6 +104,9 @@ pub struct WorldChainKonaEngineClient<Engine: PayloadTypes = OpEngineTypes> {
     l2_provider: RootProvider<Optimism>,
     /// L1 EL provider, used for `get_l1_block`. Reth only stores L2 data.
     l1_provider: RootProvider,
+    /// Flashblocks payload-job authorizer, when Flashblocks is enabled. See
+    /// [`FlashblocksAuthorizationNotifier`]; [`None`] disables the notification entirely.
+    flashblocks_authorizer: Option<FlashblocksAuthorizationNotifier>,
 }
 
 impl<Engine: PayloadTypes> std::fmt::Debug for WorldChainKonaEngineClient<Engine> {
@@ -69,12 +128,15 @@ impl<Engine: PayloadTypes> WorldChainKonaEngineClient<Engine> {
     /// * `payload_store` — Reth's store of in-progress and completed payloads.
     /// * `l2_provider` — An alloy provider connected to reth's standard L2 IPC RPC, used for reads.
     /// * `l1_provider` — An alloy provider for the L1 chain (deposits, finalization).
+    /// * `flashblocks_authorizer` — Optional [`FlashblocksAuthorizationNotifier`] (see its docs); pass [`None`]
+    ///   when Flashblocks is disabled.
     pub const fn new(
         cfg: Arc<RollupConfig>,
         engine_handle: ConsensusEngineHandle<Engine>,
         payload_store: PayloadStore<Engine>,
         l2_provider: RootProvider<Optimism>,
         l1_provider: RootProvider,
+        flashblocks_authorizer: Option<FlashblocksAuthorizationNotifier>,
     ) -> Self {
         Self {
             cfg,
@@ -82,6 +144,7 @@ impl<Engine: PayloadTypes> WorldChainKonaEngineClient<Engine> {
             payload_store,
             l2_provider,
             l1_provider,
+            flashblocks_authorizer,
         }
     }
 
@@ -113,6 +176,16 @@ impl<Engine: PayloadTypes> WorldChainKonaEngineClient<Engine> {
     where
         Engine::PayloadAttributes: From<OpPayloadAttributes>,
     {
+        // A forkchoice update *with* attributes starts a payload build. The Flashblocks job
+        // generator blocks each build until it observes a change on the jobs-generator channel, so
+        // we notify it here before dispatching the FCU — minting a full authorization when
+        // self-authorization keys are configured (as rollup-boost does), otherwise sending `None`.
+        // This replicates `OpEngineApiExt::{engine,flashblocks}_forkchoiceUpdatedV3`, which Kona
+        // bypasses by driving the engine handle directly. Without it the build hangs forever.
+        if let (Some(attributes), Some(authorizer)) = (&attrs, &self.flashblocks_authorizer) {
+            authorizer.notify(attributes, state.head_block_hash);
+        }
+
         self.engine_handle
             .fork_choice_updated(state, attrs.map(Into::into))
             .await
