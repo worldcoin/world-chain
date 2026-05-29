@@ -13972,8 +13972,10 @@ dependencies = [
  "alloy-eips 2.0.4",
  "alloy-genesis",
  "alloy-hardforks",
+ "alloy-network 2.0.4",
  "alloy-primitives",
  "alloy-provider 2.0.4",
+ "alloy-signer-local",
  "base64 0.22.1",
  "color-eyre",
  "ed25519-dalek",
@@ -14002,6 +14004,7 @@ dependencies = [
  "world-chain-node",
  "world-chain-primitives",
  "world-chain-proofs",
+ "world-chain-proposer",
  "world-chain-rpc",
  "world-chain-test-utils",
 ]
