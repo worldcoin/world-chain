@@ -53,6 +53,10 @@ struct UpArgs {
     #[arg(long)]
     no_flashblocks: bool,
 
+    /// Enable flashblocks block access lists (BAL) on the sequencer nodes.
+    #[arg(long)]
+    bal_enabled: bool,
+
     /// Disable the containerized L1 dependency.
     #[arg(long)]
     no_l1: bool,
@@ -196,6 +200,7 @@ async fn up(args: UpArgs) -> Result<()> {
         .observability(observability)
         .hardforks(hardforks)
         .flashblocks(!args.no_flashblocks)
+        .flashblocks_access_list(args.bal_enabled)
         .block_time(Duration::from_millis(args.block_time_ms))
         .port_mode(if args.stable_ports {
             DevnetPortMode::Stable
@@ -221,6 +226,7 @@ async fn up(args: UpArgs) -> Result<()> {
         preset = ?args.preset,
         block_time_ms = args.block_time_ms,
         flashblocks = !args.no_flashblocks,
+        bal_enabled = args.bal_enabled,
         stable_ports = args.stable_ports,
         l1 = !args.no_l1,
         observability = !args.no_observability && (args.observability || preset == WorldDevnetPreset::HaSequencer),
@@ -356,6 +362,9 @@ fn background_args(args: &UpArgs) -> Vec<String> {
     }
     if args.no_flashblocks {
         argv.push("--no-flashblocks".to_string());
+    }
+    if args.bal_enabled {
+        argv.push("--bal-enabled".to_string());
     }
     if args.no_l1 {
         argv.push("--no-l1".to_string());

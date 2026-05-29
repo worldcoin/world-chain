@@ -212,6 +212,7 @@ impl FullStackWorldDevnet {
         hardforks: WorldChainHardforkConfig,
         port_mode: DevnetPortMode,
         block_time: Duration,
+        access_list: bool,
     ) -> Result<Self> {
         let topology = HaSequencerTopology::from_config(config.clone());
         let artifacts = generate_op_artifacts(&config, &hardforks).await?;
@@ -257,7 +258,13 @@ impl FullStackWorldDevnet {
                 .enumerate()
                 .filter_map(|(peer_index, peer)| (peer_index != index).then_some(peer.clone()))
                 .collect::<Vec<_>>();
-            start_world_chain_el(index, &workdir_path, &sequencer_plans[index], trusted_peers)
+            start_world_chain_el(
+                index,
+                &workdir_path,
+                &sequencer_plans[index],
+                trusted_peers,
+                access_list,
+            )
         }))
         .await?;
         connect_execution_peers(&sequencers).await?;
@@ -960,6 +967,7 @@ async fn start_world_chain_el(
     workdir: &Path,
     plan: &SequencerPlan,
     trusted_peers: Vec<String>,
+    access_list: bool,
 ) -> Result<SequencerService> {
     let data_dir = workdir.join(format!("l2data-{index}"));
     fs::create_dir_all(&data_dir).wrap_err("failed to create L2 data dir")?;
@@ -1068,6 +1076,9 @@ async fn start_world_chain_el(
         "log-fmt".to_string(),
         "-vvv".to_string(),
     ]);
+    if access_list {
+        args.push("--flashblocks.access-list".to_string());
+    }
 
     let mut process = spawn_native_process(&format!("world-chain-el-{index}"), &binary, &args)
         .wrap_err_with(|| format!("failed to spawn native world-chain EL process {index}"))?;

@@ -98,6 +98,7 @@ pub struct WorldDevnetBuilder {
     preset: WorldDevnetPreset,
     hardforks: WorldChainHardforkConfig,
     flashblocks: bool,
+    access_list: bool,
     nodes: u8,
     block_time: Duration,
     port_mode: DevnetPortMode,
@@ -112,6 +113,7 @@ impl Default for WorldDevnetBuilder {
             preset: WorldDevnetPreset::DirectSequencer,
             hardforks: WorldChainHardforkConfig::default(),
             flashblocks: true,
+            access_list: false,
             nodes: 1,
             block_time: Duration::from_secs(2),
             port_mode: DevnetPortMode::Dynamic,
@@ -161,6 +163,13 @@ impl WorldDevnetBuilder {
     /// Enable or disable flashblocks. Presets enable it by default.
     pub fn flashblocks(mut self, enabled: bool) -> Self {
         self.flashblocks = enabled;
+        self
+    }
+
+    /// Enable or disable flashblocks block access lists (BAL). Disabled by
+    /// default; only takes effect when flashblocks is enabled.
+    pub fn flashblocks_access_list(mut self, enabled: bool) -> Self {
+        self.access_list = enabled;
         self
     }
 
@@ -248,6 +257,7 @@ impl WorldDevnetBuilder {
             preset = ?self.preset,
             nodes = self.nodes,
             flashblocks = self.flashblocks,
+            access_list = self.access_list,
             block_time_ms = self.block_time.as_millis(),
             hardforks = %active_hardforks,
             l1_enabled = self.l1.is_some(),
@@ -270,6 +280,7 @@ impl WorldDevnetBuilder {
                 self.hardforks.clone(),
                 self.port_mode,
                 self.block_time,
+                self.access_list,
             )
             .await?;
             let components = full_stack.components();
@@ -308,6 +319,7 @@ impl WorldDevnetBuilder {
         let (_, nodes, tasks, env, tx_spammer) = WorldChainTestBuilder::builder()
             .nodes(self.nodes)
             .flashblocks(self.flashblocks)
+            .access_list(self.access_list)
             .chain_spec(chain_spec.clone())
             .build()
             .setup_with::<WorldChainDefaultContext, _>(optimism_payload_attributes)
