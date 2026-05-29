@@ -425,6 +425,14 @@ impl HaSequencerTopology {
                 )
                 .with_note("deploys WIP-1006 proof-system contracts to the local L1"),
             );
+            components.push(
+                DevnetComponent::new(
+                    "world-chain-proposer",
+                    DevnetComponentKind::WorldChainProposer,
+                    DevnetComponentStatus::Planned,
+                )
+                .with_note("native proposer posting OP output roots to the WIP-1006 proof system"),
+            );
         }
 
         let challenger_config = config.op_challenger.then(OpChallengerConfig::local);
@@ -536,6 +544,7 @@ mod tests {
         assert_eq!(count(DevnetComponentKind::Grafana), 1);
         assert_eq!(count(DevnetComponentKind::WorldContractsDeployer), 1);
         assert_eq!(count(DevnetComponentKind::WorldProofSystem), 1);
+        assert_eq!(count(DevnetComponentKind::WorldChainProposer), 1);
         assert!(topology.components.iter().any(|component| component.kind
             == DevnetComponentKind::WorldContractsDeployer
             && component.status == DevnetComponentStatus::Planned));

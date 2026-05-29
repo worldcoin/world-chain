@@ -9,8 +9,10 @@ use std::{
 
 use alloy_eips::{BlockNumberOrTag, eip1559::BaseFeeParams};
 use alloy_genesis::Genesis;
-use alloy_primitives::{B64, hex, keccak256};
+use alloy_network::EthereumWallet;
+use alloy_primitives::{Address, B64, U256, hex, keccak256};
 use alloy_provider::{Provider, ProviderBuilder};
+use alloy_signer_local::PrivateKeySigner;
 use base64::prelude::{BASE64_STANDARD, Engine};
 use eyre::eyre::{Context, Result, bail, eyre};
 use flate2::read::GzDecoder;
@@ -33,10 +35,13 @@ use tokio::{
     process::{Child, Command},
     task::JoinHandle,
 };
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use url::{Host, Url};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 use world_chain_proofs::{PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
+use world_chain_proposer::{
+    AlloyProofSystemClient, OptimismOutputRootClient, ProposerConfig, WorldChainProposer,
+};
 use world_chain_test_utils::DEV_CHAIN_ID;
 
 use crate::{
@@ -65,6 +70,11 @@ const SERVICE_RPC_PORT: u16 = 8545;
 const SERVICE_METRICS_PORT: u16 = 7300;
 const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 10;
 const PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL: u64 = 5;
+/// Bond, in wei, sent with every `WorldChainProofSystemFactory.propose`.
+/// Matches `PROPOSER_BOND` (1 ether) in `scripts/devnet/DeployProofSystem.s.sol`.
+const WORLD_PROPOSER_BOND_WEI: u128 = 1_000_000_000_000_000_000;
+/// Delay between World Chain proof-system proposal attempts.
+const WORLD_PROPOSER_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 const DEVNET_PRIVATE_KEY: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
@@ -95,6 +105,7 @@ pub struct FullStackWorldDevnet {
     _proposer: Option<ContainerService>,
     _challenger: Option<ContainerService>,
     _proof_system: Option<WorldProofSystemDeployment>,
+    _world_proposer: Option<ProposerTask>,
     _conductors: Vec<ConductorService>,
     _op_nodes: Vec<OpNodeService>,
     sequencers: Vec<SequencerService>,
@@ -198,6 +209,18 @@ struct WorldProofSystemDeployment {
     proof_system_version: u64,
     block_interval: u64,
     intermediate_block_interval: u64,
+}
+
+/// In-process World Chain proof-system proposer task. Aborted on devnet drop.
+#[derive(Debug)]
+struct ProposerTask {
+    handle: JoinHandle<()>,
+}
+
+impl Drop for ProposerTask {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
 }
 
 #[derive(Debug)]
@@ -412,6 +435,18 @@ impl FullStackWorldDevnet {
             (Some(batcher), Some(proposer), None)
         };
 
+        let world_proposer = if let Some(deployment) = proof_system.as_ref() {
+            let output_root_rpc = op_nodes
+                .first()
+                .map(|node| node.rpc_url.clone())
+                .ok_or_else(|| {
+                    eyre!("full-stack devnet has no op-node for the World Chain proposer")
+                })?;
+            Some(start_world_chain_proposer(&l1_public_rpc, &output_root_rpc, deployment).await?)
+        } else {
+            None
+        };
+
         let mut metrics_targets = Vec::new();
         metrics_targets.extend(
             sequencers
@@ -458,6 +493,7 @@ impl FullStackWorldDevnet {
             _proposer: proposer,
             _challenger: challenger,
             _proof_system: proof_system,
+            _world_proposer: world_proposer,
             _conductors: conductors,
             _op_nodes: op_nodes,
             sequencers,
@@ -2103,6 +2139,62 @@ async fn start_challenger(
     .await
 }
 
+/// Spawns the in-process World Chain proof-system proposer.
+///
+/// The proposer signs with the dev proposer key (Anvil account #1), which
+/// `DeployProofSystem.s.sol` stakes in the `MockStakingRegistry` and funds via
+/// `fundDevAccounts`. Output roots are read from the op-node rollup RPC and
+/// proposals are submitted to `WorldChainProofSystemFactory.propose` on L1.
+async fn start_world_chain_proposer(
+    l1_rpc_url: &str,
+    output_root_rpc_url: &str,
+    deployment: &WorldProofSystemDeployment,
+) -> Result<ProposerTask> {
+    let factory_address: Address = deployment
+        .proof_system_factory
+        .parse()
+        .wrap_err("invalid proof-system factory address")?;
+    let anchor_address: Address = deployment
+        .anchor_state_registry
+        .parse()
+        .wrap_err("invalid anchor-state-registry address")?;
+
+    let signer: PrivateKeySigner = DEVNET_PRIVATE_KEY
+        .parse()
+        .wrap_err("invalid World Chain proposer signing key")?;
+    let proposer_address = signer.address();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::from(signer))
+        .connect_http(Url::parse(l1_rpc_url)?);
+
+    let contracts = AlloyProofSystemClient::new(provider, factory_address, anchor_address);
+    let output_roots = OptimismOutputRootClient::new(output_root_rpc_url.to_string());
+    let config = ProposerConfig {
+        block_interval: deployment.block_interval,
+        proposer_bond: U256::from(WORLD_PROPOSER_BOND_WEI),
+        poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
+    };
+    let proposer = WorldChainProposer::new(config, contracts, output_roots);
+
+    info!(
+        l1_rpc_url,
+        output_root_rpc_url,
+        factory = %deployment.proof_system_factory,
+        anchor = %deployment.anchor_state_registry,
+        proposer = %proposer_address,
+        block_interval = deployment.block_interval,
+        "starting native World Chain proof-system proposer"
+    );
+
+    let handle = tokio::spawn(async move {
+        if let Err(error) = proposer.run_forever().await {
+            warn!(%error, "World Chain proof-system proposer stopped");
+        }
+    });
+
+    Ok(ProposerTask { handle })
+}
+
 async fn start_aux_service(
     id: &str,
     kind: DevnetComponentKind,
@@ -2482,6 +2574,20 @@ fn build_components(
                 "rollup_config_hash={}",
                 deployment.rollup_config_hash
             )),
+        );
+        components.push(
+            DevnetComponent::new(
+                "world-chain-proposer",
+                DevnetComponentKind::WorldChainProposer,
+                DevnetComponentStatus::Running,
+            )
+            .with_endpoint("factory", deployment.proof_system_factory.clone())
+            .with_endpoint("anchor", deployment.anchor_state_registry.clone())
+            .with_note(format!(
+                "native in-process proposer posting OP output roots every {} L2 blocks via WorldChainProofSystemFactory.propose",
+                deployment.block_interval
+            ))
+            .with_note("signs with the dev proposer key staked in the MockStakingRegistry"),
         );
     }
 
