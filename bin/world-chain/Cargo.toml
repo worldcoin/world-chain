@@ -30,7 +30,6 @@ reth-optimism-consensus.workspace = true
 dotenvy.workspace = true
 clap.workspace = true
 eyre.workspace = true
-tokio.workspace = true
 
 # optional
 tikv-jemallocator = { workspace = true, optional = true }

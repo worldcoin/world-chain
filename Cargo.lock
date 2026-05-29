@@ -15398,7 +15398,6 @@ dependencies = [
  "reth-optimism-consensus",
  "reth-tracing",
  "tikv-jemallocator",
- "tokio",
  "world-chain-chainspec",
  "world-chain-cli",
  "world-chain-evm",
