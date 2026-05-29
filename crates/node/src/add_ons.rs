@@ -546,6 +546,7 @@ where
                     L2RpcEndpoint::Http(http_url.parse()?)
                 }
             };
+
             spawn_kona(
                 kona_config,
                 engine_handle,
