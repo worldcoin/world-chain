@@ -57,6 +57,19 @@ struct UpArgs {
     #[arg(long)]
     bal_enabled: bool,
 
+    /// Automatically run a Contender stress test against the live nodes once
+    /// the devnet is ready. The devnet keeps running until Ctrl-C.
+    #[arg(long)]
+    stress: bool,
+
+    /// Target transactions per second for the automated stress run.
+    #[arg(long, default_value_t = 50, requires = "stress")]
+    stress_tps: u64,
+
+    /// Duration in seconds to sustain the automated stress run.
+    #[arg(long, default_value_t = 60, requires = "stress")]
+    stress_duration: u64,
+
     /// Disable the containerized L1 dependency.
     #[arg(long)]
     no_l1: bool,
@@ -227,6 +240,7 @@ async fn up(args: UpArgs) -> Result<()> {
         block_time_ms = args.block_time_ms,
         flashblocks = !args.no_flashblocks,
         bal_enabled = args.bal_enabled,
+        stress = args.stress,
         stable_ports = args.stable_ports,
         l1 = !args.no_l1,
         observability = !args.no_observability && (args.observability || preset == WorldDevnetPreset::HaSequencer),
@@ -247,6 +261,14 @@ async fn up(args: UpArgs) -> Result<()> {
     };
     write_endpoints_file(&devnet, &devnet_endpoints_path())?;
 
+    let stress_task = args.stress.then(|| {
+        spawn_stress_run(
+            devnet.sequencer_rpc_url(),
+            args.stress_tps,
+            args.stress_duration,
+        )
+    });
+
     let signal_task = tokio::spawn(async move {
         match ctrl_c.await {
             Ok(()) => {
@@ -258,7 +280,54 @@ async fn up(args: UpArgs) -> Result<()> {
 
     let result = devnet.run_until_shutdown(shutdown_rx).await;
     signal_task.abort();
+    if let Some(task) = stress_task {
+        // Dropping the join handle's future kills the stress child via
+        // `kill_on_drop` if it is still running.
+        task.abort();
+    }
     result
+}
+
+/// Spawn a background task that drives `scripts/stress/stress.sh` against the
+/// live devnet. The script is responsible for `contender setup` + `spam`; we
+/// just point it at the primary sequencer and pass the rate/duration through.
+fn spawn_stress_run(rpc_url: String, tps: u64, duration: u64) -> tokio::task::JoinHandle<()> {
+    let script = stress_script_path();
+    tokio::spawn(async move {
+        info!(
+            rpc_url = %rpc_url,
+            tps,
+            duration_secs = duration,
+            script = %script.display(),
+            "starting automated stress run against live devnet"
+        );
+
+        let status = tokio::process::Command::new("bash")
+            .arg(&script)
+            .arg("stress")
+            .env("RPC_URL", &rpc_url)
+            .env("TPS", tps.to_string())
+            .env("DURATION", duration.to_string())
+            .kill_on_drop(true)
+            .status()
+            .await;
+
+        match status {
+            Ok(status) if status.success() => info!("automated stress run completed"),
+            Ok(status) => warn!(
+                ?status,
+                "automated stress run exited with a non-zero status"
+            ),
+            Err(err) => warn!(
+                %err,
+                "failed to launch automated stress run; is `contender` installed and on PATH?"
+            ),
+        }
+    })
+}
+
+fn stress_script_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../scripts/stress/stress.sh")
 }
 
 async fn spawn_background(args: UpArgs) -> Result<()> {
@@ -365,6 +434,13 @@ fn background_args(args: &UpArgs) -> Vec<String> {
     }
     if args.bal_enabled {
         argv.push("--bal-enabled".to_string());
+    }
+    if args.stress {
+        argv.push("--stress".to_string());
+        argv.push("--stress-tps".to_string());
+        argv.push(args.stress_tps.to_string());
+        argv.push("--stress-duration".to_string());
+        argv.push(args.stress_duration.to_string());
     }
     if args.no_l1 {
         argv.push("--no-l1".to_string());
