@@ -53,9 +53,15 @@ where
             .call()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let anchor_game = self
+            .anchor
+            .anchorGame()
+            .call()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
 
         Ok(ParentRef {
-            address: self.anchor_address,
+            address: anchor_parent_address(self.anchor_address, anchor_game),
             l2_block_number: u256_to_u64(l2_block_number, "currentL2BlockNumber")?,
         })
     }
@@ -139,4 +145,32 @@ fn u256_to_u64(value: U256, field: &'static str) -> Result<u64, ProposerError> {
     value
         .try_into()
         .map_err(|_| ProposerError::Contract(format!("{field} overflows u64")))
+}
+
+fn anchor_parent_address(anchor_address: Address, anchor_game: Address) -> Address {
+    if anchor_game == Address::ZERO {
+        anchor_address
+    } else {
+        anchor_game
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::{Address, address};
+
+    use super::anchor_parent_address;
+
+    const ANCHOR: Address = address!("0000000000000000000000000000000000001006");
+    const GAME: Address = address!("0000000000000000000000000000000000000001");
+
+    #[test]
+    fn anchor_parent_address_uses_registry_before_first_game() {
+        assert_eq!(anchor_parent_address(ANCHOR, Address::ZERO), ANCHOR);
+    }
+
+    #[test]
+    fn anchor_parent_address_uses_anchor_game_after_registry_advances() {
+        assert_eq!(anchor_parent_address(ANCHOR, GAME), GAME);
+    }
 }
