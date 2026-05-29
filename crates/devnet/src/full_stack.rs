@@ -63,6 +63,11 @@ const DEVNET_PRIVATE_KEY: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 const UNSAFE_BLOCK_SIGNER_PRIVATE_KEY: &str =
     "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e";
+/// Address of [`UNSAFE_BLOCK_SIGNER_PRIVATE_KEY`], matching `unsafeBlockSigner` in the deployer
+/// intent. Passed to every node so the kona P2P gossip layer expects the correct unsafe-block
+/// signer immediately, rather than defaulting to the zero address before the L1 system config is
+/// fetched (which makes followers reject the leader's gossiped unsafe blocks).
+const UNSAFE_BLOCK_SIGNER_ADDRESS: &str = "0x976EA74026E726554dB657fA54763abd0C3a0aa9";
 const BATCHER_PRIVATE_KEY: &str =
     "0x4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356";
 const PROPOSER_PRIVATE_KEY: &str =
@@ -1155,6 +1160,8 @@ async fn start_world_chain_el(
         conductor_rpc_url,
         "--p2p.sequencer.key".to_string(),
         UNSAFE_BLOCK_SIGNER_PRIVATE_KEY.to_string(),
+        "--p2p.unsafe.block.signer".to_string(),
+        UNSAFE_BLOCK_SIGNER_ADDRESS.to_string(),
         "--p2p.listen.ip".to_string(),
         "0.0.0.0".to_string(),
         "--p2p.listen.tcp".to_string(),
