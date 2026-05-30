@@ -2351,6 +2351,7 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
             builder,
             pbh,
             flashblocks: Some(test_flashblocks_args(&authorizer_sk, &builder_sk)),
+            kona: None,
             tx_peers: None,
             disable_bootnodes: true,
             simulate_enabled: false,

@@ -2,6 +2,10 @@
 
 use core::marker::PhantomData;
 
+use reth_engine_primitives::ConsensusEngineHandle;
+use reth_payload_builder::PayloadStore;
+use reth_tasks::TaskExecutor;
+
 use alloy_consensus::{Block, BlockBody, Header};
 use op_alloy_consensus::OpTransaction;
 use reth_chainspec::ChainSpecProvider;
@@ -14,7 +18,7 @@ use reth_node_builder::rpc::{
 };
 use reth_optimism_chainspec::OpHardfork;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::{OpEngineApiBuilder, txpool::OpPooledTx};
+use reth_optimism_node::{OpEngineApiBuilder, OpEngineTypes, txpool::OpPooledTx};
 use reth_optimism_payload_builder::{
     OpPayloadBuilderAttributes, OpPayloadPrimitives,
     config::{OpDAConfig, OpGasLimitConfig},
@@ -37,6 +41,7 @@ use reth_transaction_pool::TransactionPool;
 use tracing::{debug, info};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_evm::OpTx;
+use world_chain_kona::{KonaConfig, KonaService, KonaServiceHandle};
 use world_chain_rpc::{
     EthApiExtServer, SequencerClient as WorldChainSequencerClient, Simulate, SimulateApiServer,
     WorldChainEthApiExt,
@@ -108,6 +113,11 @@ pub struct WorldChainAddOns<
     min_suggested_priority_fee: u64,
     /// Enables the World Chain simulate namespace.
     simulate_enabled: bool,
+    /// In-process Kona consensus startup configuration.
+    ///
+    /// When [`Some`], the add-ons assemble an [`WorldChainKonaEngineClient`] from reth's engine handle
+    /// and spawn the Kona consensus node in-process during [`launch_add_ons`](NodeAddOns::launch_add_ons).
+    kona_config: Option<KonaConfig>,
     /// Transaction type carried by the node primitives.
     _tx: PhantomData<fn() -> Tx>,
 }
@@ -141,6 +151,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            kona_config: None,
             _tx: PhantomData,
         }
     }
@@ -152,6 +163,12 @@ where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
 {
+    /// Sets a [`KonaConfig`] which signals the add-ons to spawn an in-process Consensus Engine.
+    pub fn with_kona_config(mut self, kona_config: Option<KonaConfig>) -> Self {
+        self.kona_config = kona_config;
+        self
+    }
+
     /// Maps the [`EngineApiBuilder`] builder type.
     pub fn with_engine_api<T>(
         self,
@@ -297,7 +314,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx> NodeAddOns<N>
     for WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
 where
     N: FullNodeComponents<
-            Types: NodeTypes<ChainSpec = WorldChainSpec>,
+            Types: NodeTypes<ChainSpec = WorldChainSpec, Payload = OpEngineTypes>,
             Evm: ConfigureEvm<
                 NextBlockEnvCtx: BuildNextEnv<
                     OpPayloadBuilderAttributes<Tx>,
@@ -340,8 +357,27 @@ where
             enable_tx_conditional,
             historical_rpc,
             simulate_enabled,
+            kona_config,
             ..
         } = self;
+
+        // Capture the inputs the in-process Kona consensus node needs from `ctx` *before*
+        // `launch_add_ons_with` consumes it. The authoritative L2 IPC endpoint is read from the
+        // live RPC server handle after launch (below), so we only stash the engine-layer handles
+        // here. We also fail fast if the IPC server is disabled, since Kona connects over it.
+        let kona_inputs = kona_config
+            .map(|kona_config| -> eyre::Result<_> {
+                if ctx.config.rpc.ipcdisable {
+                    return Err(eyre::Report::msg(
+                        "--kona.enabled requires reth's IPC RPC server (do not pass --ipcdisable)",
+                    ));
+                }
+                let engine_handle = ctx.beacon_engine_handle.clone();
+                let payload_store = PayloadStore::new(ctx.node.payload_builder_handle().clone());
+                let task_executor = ctx.node.task_executor().clone();
+                Ok((kona_config, engine_handle, payload_store, task_executor))
+            })
+            .transpose()?;
 
         let eth_config =
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
@@ -397,7 +433,7 @@ where
         let provider = ctx.node.provider().clone();
         let evm_config = ctx.node.evm_config().clone();
 
-        rpc_add_ons
+        let handle = rpc_add_ons
             .launch_add_ons_with(ctx, move |container| {
                 let reth_node_builder::rpc::RpcModuleContainer {
                     modules,
@@ -443,7 +479,32 @@ where
 
                 Ok(())
             })
-            .await
+            .await?;
+
+        // Now that the RPC server is live, spawn the in-process Kona consensus node (if enabled).
+        // The L2 IPC endpoint is read from the running server so it reflects the actual path reth
+        // bound, rather than re-deriving it from config.
+        if let Some((kona_config, engine_handle, payload_store, task_executor)) = kona_inputs {
+            let ipc_path = handle
+                .rpc_server_handles
+                .rpc
+                .ipc_endpoint()
+                .ok_or_else(|| {
+                    eyre::Report::msg(
+                        "--kona.enabled requires reth's IPC RPC server (do not pass --ipcdisable)",
+                    )
+                })?;
+            spawn_kona(
+                kona_config,
+                engine_handle,
+                payload_store,
+                task_executor,
+                ipc_path,
+            )
+            .await?;
+        }
+
+        Ok(handle)
     }
 }
 
@@ -451,7 +512,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx> RethRpcAddOns<N>
     for WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
 where
     N: FullNodeComponents<
-            Types: NodeTypes<ChainSpec = WorldChainSpec>,
+            Types: NodeTypes<ChainSpec = WorldChainSpec, Payload = OpEngineTypes>,
             Evm: ConfigureEvm<
                 NextBlockEnvCtx: BuildNextEnv<
                     OpPayloadBuilderAttributes<Tx>,
@@ -501,4 +562,54 @@ where
     fn engine_validator_builder(&self) -> Self::ValidatorBuilder {
         EngineValidatorAddOn::engine_validator_builder(&self.rpc_add_ons)
     }
+}
+
+/// Assembles the in-process Kona consensus node from reth's engine handle and the live RPC
+/// server's IPC endpoint, then spawns it on the node's task executor.
+///
+/// Builds the kona service's in-process engine client from:
+/// - `engine_handle` — reth's `ConsensusEngineHandle`, for the FCU / new-payload consensus hot
+///   path,
+/// - `payload_store` — wrapping reth's payload builder handle, for `get_payload`,
+/// - an L2 alloy provider connected over `l2_ipc_path` (the live IPC RPC endpoint reported by the
+///   running server, not re-derived from config), for the infrequent reads the engine actor
+///   performs during sync,
+/// - an L1 alloy provider over HTTP from `--kona.l1-rpc-url`.
+///
+/// Connecting the L2 provider over IPC is asynchronous, so this is an `async fn`. The assembled
+/// [`KonaService`] is then run on the provided `task_executor` for the node's lifetime.
+async fn spawn_kona(
+    kona_config: KonaConfig,
+    engine_handle: ConsensusEngineHandle<OpEngineTypes>,
+    payload_store: PayloadStore<OpEngineTypes>,
+    task_executor: TaskExecutor,
+    l2_ipc_path: String,
+) -> eyre::Result<()> {
+    let sequencer_mode = kona_config.sequencer_mode;
+    let l1_chain_id = kona_config.rollup_config.l1_chain_id;
+    let l2_chain_id: u64 = kona_config.rollup_config.l2_chain_id.into();
+
+    let service =
+        KonaService::build(kona_config, engine_handle, payload_store, l2_ipc_path).await?;
+
+    info!(
+        target: "world_chain::kona",
+        %l1_chain_id,
+        %l2_chain_id,
+        sequencer = sequencer_mode,
+        "Starting in-process Kona consensus node (direct ConsensusEngineHandle transport)"
+    );
+
+    // Spawn on the node's task executor so the service lives for the node's lifetime.
+    task_executor.spawn_critical_task("kona-consensus", async move {
+        let mut handle = KonaServiceHandle::spawn(service);
+        match handle.stopped().await {
+            Ok(()) => info!(target: "world_chain::kona", "Kona consensus node stopped"),
+            Err(error) => {
+                tracing::error!(target: "world_chain::kona", %error, "Kona consensus node exited with error")
+            }
+        }
+    });
+
+    Ok(())
 }

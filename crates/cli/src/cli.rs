@@ -18,10 +18,12 @@ use world_chain_chainspec::{
 };
 
 pub mod builder;
+pub mod kona;
 pub mod p2p;
 pub mod pbh;
 
 pub use builder::*;
+pub use kona::*;
 pub use p2p::*;
 pub use pbh::*;
 
@@ -150,6 +152,10 @@ pub struct WorldChainArgs {
     /// Flashblock args
     #[command(flatten)]
     pub flashblocks: Option<FlashblocksArgs>,
+
+    /// Kona consensus node args
+    #[command(flatten)]
+    pub kona: Option<KonaArgs>,
 
     /// Comma-separated list of peer IDs to which transactions should be propagated
     #[arg(long = "tx-peers", value_delimiter = ',', value_name = "PEER_ID")]
@@ -545,6 +551,7 @@ mod tests {
                 block_uncompressed_size_limit: None,
             },
             flashblocks: None,
+            kona: None,
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
             disable_bootnodes: true,
             simulate_enabled: false,

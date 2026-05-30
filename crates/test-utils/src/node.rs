@@ -122,6 +122,7 @@ pub fn test_config_with_peers_and_gossip(
             builder,
             pbh,
             flashblocks,
+            kona: None,
             tx_peers,
             disable_bootnodes: true,
             simulate_enabled: false,

@@ -26,12 +26,11 @@ reth-tracing.workspace = true
 # op-reth
 reth-optimism-consensus.workspace = true
 
-reth-provider.workspace = true
-
 # misc
 dotenvy.workspace = true
 clap.workspace = true
 eyre.workspace = true
+tokio.workspace = true
 
 # optional
 tikv-jemallocator = { workspace = true, optional = true }
