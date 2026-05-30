@@ -72,8 +72,15 @@ async fn main() -> eyre::Result<()> {
 fn init_devnet_tracing(
     reset_log: bool,
 ) -> eyre::Result<tracing_appender::non_blocking::WorkerGuard> {
+    // Devnet default: only stream the world-chain EL's stdout (tracing
+    // target `world_chain_el`). Everything else — op-batcher / op-node /
+    // op-conductor / op-challenger / op-deployer container output and the
+    // devnet orchestrator's own info-level lifecycle logs — is muted at
+    // `warn`. Override with `RUST_LOG=...` (e.g. `RUST_LOG=info` for the
+    // full stream, or `RUST_LOG=world_chain_devnet=info,world_chain_el=info`
+    // for EL + orchestration without the OP-stack noise).
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn,world_chain_el=info"));
     let log_path = devnet_log_path();
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent)

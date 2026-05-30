@@ -269,7 +269,7 @@ mod property_tests {
     }
 
     proptest! {
-                #![proptest_config(::proptest::prelude::ProptestConfig::with_cases(1))]
+                #![proptest_config(::proptest::prelude::ProptestConfig::with_cases(20))]
 
                 #[test]
                 fn prop_validate_many(payloads in (1usize..200, 1usize..20).prop_flat_map(|(max_txs, max_flashblocks)| { arb_execution_payload_sequence(max_txs, max_flashblocks) })) {

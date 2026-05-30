@@ -16,6 +16,7 @@ use world_chain_chainspec::{
     JOVIAN_UPGRADE_TIMESTAMP_MAINNET, JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA, WorldChainHardfork,
     WorldChainSpec,
 };
+use world_chain_exex::ProposerCliArgs;
 
 pub mod builder;
 pub mod p2p;
@@ -150,6 +151,10 @@ pub struct WorldChainArgs {
     /// Flashblock args
     #[command(flatten)]
     pub flashblocks: Option<FlashblocksArgs>,
+
+    /// OP Proposer ExEx args (single-chain DGF proposer).
+    #[command(flatten)]
+    pub proposer: ProposerCliArgs,
 
     /// Comma-separated list of peer IDs to which transactions should be propagated
     #[arg(long = "tx-peers", value_delimiter = ',', value_name = "PEER_ID")]
@@ -545,6 +550,7 @@ mod tests {
                 block_uncompressed_size_limit: None,
             },
             flashblocks: None,
+            proposer: ProposerCliArgs::default(),
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
             disable_bootnodes: true,
             simulate_enabled: false,
