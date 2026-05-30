@@ -78,6 +78,28 @@ const HEAD_STREAM_POLL_INTERVAL: u64 = 4;
 const FINALIZED_STREAM_POLL_INTERVAL: u64 = 60;
 const CHANNEL_SIZE: usize = 1024;
 
+fn load_registered_l1_chain_config(l1_chain_id: u64) -> Arc<L1ChainConfig> {
+    match RegisteredL1Config::get_l1_genesis(l1_chain_id) {
+        Ok(config) => {
+            info!(
+                target: "world_chain::kona",
+                l1_chain_id,
+                "Loaded registered L1 chain config for in-process Kona"
+            );
+            Arc::new(config.into())
+        }
+        Err(error) => {
+            warn!(
+                target: "world_chain::kona",
+                l1_chain_id,
+                %error,
+                "failed to load registered L1 chain config; falling back to default"
+            );
+            Arc::new(L1ChainConfig::default())
+        }
+    }
+}
+
 /// Inputs required to assemble and run the Kona consensus node in-process.
 ///
 /// These are the canonical kona node settings *minus* the Engine API transport, which is replaced
@@ -125,26 +147,7 @@ impl KonaService {
     ) -> eyre::Result<Self> {
         let l1_provider = RootProvider::new_http(config.l1_rpc_url.clone());
         let l1_chain_id: u64 = config.rollup_config.l1_chain_id.into();
-        let chain_config: Arc<L1ChainConfig> = match RegisteredL1Config::get_l1_genesis(l1_chain_id)
-        {
-            Ok(config) => {
-                info!(
-                    target: "world_chain::kona",
-                    l1_chain_id,
-                    "Loaded registered L1 chain config for in-process Kona"
-                );
-                Arc::new(config.into())
-            }
-            Err(error) => {
-                warn!(
-                    target: "world_chain::kona",
-                    l1_chain_id,
-                    %error,
-                    "failed to load registered L1 chain config; falling back to default"
-                );
-                Arc::new(L1ChainConfig::default())
-            }
-        };
+        let chain_config = load_registered_l1_chain_config(l1_chain_id);
         let l2_client = match l2_endpoint {
             L2RpcEndpoint::Ipc(path) => ClientBuilder::default().ipc(IpcConnect::new(path)).await?,
             L2RpcEndpoint::Http(url) => ClientBuilder::default().http(url),
@@ -535,6 +538,29 @@ impl KonaService {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eips::eip7840::BlobParams;
+
+    const SEPOLIA_L1_CHAIN_ID: u64 = 11_155_111;
+    const SEPOLIA_BPO2_TIMESTAMP: u64 = 1_761_607_008;
+
+    #[test]
+    fn registered_l1_config_uses_sepolia_blob_schedule() {
+        let chain_config = load_registered_l1_chain_config(SEPOLIA_L1_CHAIN_ID);
+
+        assert_eq!(chain_config.bpo2_time, Some(SEPOLIA_BPO2_TIMESTAMP));
+        assert_ne!(chain_config.bpo2_time, L1ChainConfig::default().bpo2_time);
+
+        let blob_schedule = chain_config.blob_schedule_blob_params();
+        assert_eq!(
+            blob_schedule.active_scheduled_params_at_timestamp(SEPOLIA_BPO2_TIMESTAMP),
+            Some(&BlobParams::bpo2())
+        );
     }
 }
 
