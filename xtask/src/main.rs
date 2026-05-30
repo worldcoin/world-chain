@@ -7,6 +7,7 @@ use tracing::{
     field::{Field, Visit},
 };
 use tracing_subscriber::{
+    Layer,
     fmt::{FmtContext, FormatEvent, FormatFields, format::Writer},
     layer::SubscriberExt,
     registry::LookupSpan,
@@ -69,11 +70,33 @@ async fn main() -> eyre::Result<()> {
     }
 }
 
+/// Tracing targets used for the auxiliary devnet services, i.e. everything that
+/// is not a World Chain execution node. These are suppressed on stdout so the
+/// main terminal only shows the World Chain nodes (and the devnet harness's own
+/// lifecycle), but they are still written to the devnet log file for debugging.
+///
+/// Set `DEVNET_LOG_ALL=1` to keep these on stdout as well.
+const AUX_SERVICE_TARGETS: &[&str] = &[
+    "l1_dev_chain",
+    "op_deployer",
+    "op_node",
+    "op_conductor",
+    "op_batcher",
+    "op_proposer",
+    "op_challenger",
+    "op_stack_service",
+    "prometheus",
+    "grafana",
+];
+
+fn devnet_env_filter() -> tracing_subscriber::EnvFilter {
+    tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+}
+
 fn init_devnet_tracing(
     reset_log: bool,
 ) -> eyre::Result<tracing_appender::non_blocking::WorkerGuard> {
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     let log_path = devnet_log_path();
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent)
@@ -90,16 +113,31 @@ fn init_devnet_tracing(
         .wrap_err_with(|| format!("failed to open {}", log_path.display()))?;
     let (file_writer, guard) = tracing_appender::non_blocking(file);
 
+    // The file keeps the full firehose; stdout is filtered down to the World
+    // Chain nodes unless DEVNET_LOG_ALL is set.
+    let file_filter = devnet_env_filter();
+    let mut stdout_filter = devnet_env_filter();
+    if std::env::var_os("DEVNET_LOG_ALL").is_none() {
+        for target in AUX_SERVICE_TARGETS {
+            stdout_filter = stdout_filter.add_directive(
+                format!("{target}=off")
+                    .parse()
+                    .expect("valid tracing directive"),
+            );
+        }
+    }
+
     let stdout_layer = tracing_subscriber::fmt::layer()
         .event_format(DevnetLogFormatter)
-        .with_ansi(true);
+        .with_ansi(true)
+        .with_filter(stdout_filter);
     let file_layer = tracing_subscriber::fmt::layer()
         .event_format(DevnetLogFormatter)
         .with_ansi(false)
-        .with_writer(file_writer);
+        .with_writer(file_writer)
+        .with_filter(file_filter);
 
     tracing_subscriber::registry()
-        .with(env_filter)
         .with(stdout_layer)
         .with(file_layer)
         .init();
