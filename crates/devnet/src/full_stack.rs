@@ -211,6 +211,7 @@ impl FullStackWorldDevnet {
         hardforks: WorldChainHardforkConfig,
         port_mode: DevnetPortMode,
         block_time: Duration,
+        access_list: bool,
     ) -> Result<Self> {
         let topology = HaSequencerTopology::from_config(config.clone());
         let artifacts = generate_op_artifacts(&config, &hardforks).await?;
@@ -1110,6 +1111,9 @@ async fn start_world_chain_el(
         "log-fmt".to_string(),
         "-vvv".to_string(),
     ]);
+    if access_list {
+        args.push("--flashblocks.access-list".to_string());
+    }
 
     // Monomorphic client: run kona in-process as the consensus/sequencer. When
     // `--kona.enabled` is set the binary auto-wires kona to reth's own launched
