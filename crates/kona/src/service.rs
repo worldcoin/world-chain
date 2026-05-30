@@ -22,10 +22,11 @@
 
 use std::{sync::Arc, time::Duration};
 
-use alloy_provider::{IpcConnect, RootProvider};
+use alloy_primitives::{Address, B256, U256, b256};
+use alloy_provider::{IpcConnect, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use kona_derive::StatefulAttributesBuilder;
-use kona_engine::{Engine, EngineState};
+use kona_engine::{Engine, EngineClient, EngineState};
 use kona_genesis::{L1ChainConfig, RollupConfig};
 use kona_node_service::{
     BlockStream, ConductorClient, DelayedL1OriginSelectorProvider, DerivationActor, EngineActor,
@@ -138,10 +139,33 @@ impl KonaService {
         ));
 
         let l2_chain_id: u64 = config.rollup_config.l2_chain_id.into();
-        let p2p_config = config
+        let mut p2p_config = config
             .p2p
             .clone()
             .build_network_config(&config.rollup_config, l2_chain_id)?;
+
+        // The unsafe-block signer (the address P2P gossip validates each block's signature against)
+        // lives in the L1 `SystemConfig` contract. Canonical kona seeds it from L1 at startup and the
+        // L1 watcher keeps it updated via `SystemConfigUpdate` events. Our P2P arg builder only honors
+        // an explicit `--p2p.unsafe.block.signer` override and otherwise leaves it zero, which makes
+        // gossip reject every block with `Signer { expected: 0x0, .. }`. Seed it from L1 here when not
+        // overridden (the L1 watcher still applies any later on-chain changes).
+        if p2p_config.unsafe_block_signer.is_zero() {
+            match fetch_unsafe_block_signer(
+                &l1_provider,
+                config.rollup_config.l1_system_config_address,
+            )
+            .await
+            {
+                Ok(signer) => {
+                    info!(target: "world_chain::kona", %signer, "Loaded unsafe block signer from L1 system config");
+                    p2p_config.unsafe_block_signer = signer;
+                }
+                Err(e) => {
+                    warn!(target: "world_chain::kona", error = %e, "failed to fetch unsafe block signer from L1; P2P gossip will reject blocks until a SystemConfig update is observed");
+                }
+            }
+        }
 
         let mut l1_beacon = OnlineBeaconClient::new_http(config.l1_beacon_url.to_string());
         if let Some(slot) = config.l1_slot_duration_override {
@@ -212,6 +236,14 @@ impl KonaService {
     /// This mirrors `RollupNode::create_engine_actor`, but constructs the processors from the
     /// injected in-process client instead of building an [`kona_engine::OpEngineClient`] from an
     /// [`kona_node_service::EngineConfig`].
+    ///
+    /// When `el_sync_finished` is `true`, the engine starts with EL sync already considered
+    /// complete. This is used when reth's execution layer already holds a chain (a restart from an
+    /// existing/snapshotted database): rather than waiting for a gossip-driven forkchoice update to
+    /// confirm EL sync — which never arrives if no peer is actively gossiping unsafe blocks — the
+    /// engine immediately performs its initial reset (reading the EL head and issuing the bootstrap
+    /// forkchoice update) so derivation can proceed from L1. This mirrors Base's follower, which
+    /// seeds its engine from the local EL head on startup.
     #[allow(clippy::type_complexity)]
     fn create_engine_actor(
         &self,
@@ -219,11 +251,15 @@ impl KonaService {
         engine_request_rx: mpsc::Receiver<kona_node_service::EngineActorRequest>,
         derivation_client: QueuedEngineDerivationClient,
         unsafe_head_tx: watch::Sender<L2BlockInfo>,
+        el_sync_finished: bool,
     ) -> EngineActor<
         EngineProcessor<WorldChainKonaEngineClient, QueuedEngineDerivationClient>,
         EngineRpcProcessor<WorldChainKonaEngineClient>,
     > {
-        let engine_state = EngineState::default();
+        let engine_state = EngineState {
+            el_sync_finished,
+            ..Default::default()
+        };
         let (engine_state_tx, engine_state_rx) = watch::channel(engine_state);
         let (engine_queue_length_tx, engine_queue_length_rx) = watch::channel(0);
         let engine = Engine::new(engine_state, engine_state_tx, engine_queue_length_tx);
@@ -262,12 +298,42 @@ impl KonaService {
         let (engine_actor_request_tx, engine_actor_request_rx) = mpsc::channel(CHANNEL_SIZE);
         let (unsafe_head_tx, unsafe_head_rx) = watch::channel(L2BlockInfo::default());
 
+        // Determine whether reth's EL already holds a chain beyond genesis. If so, EL sync needs no
+        // gossip-driven snap sync to bootstrap: mark EL sync complete up front so the engine
+        // performs its initial reset (reading the EL head + forkchoice) and derivation can proceed
+        // from L1 immediately. Without this, a verifier whose peers are not gossiping unsafe blocks
+        // (e.g. a devnet replaying history via derivation) deadlocks in `AwaitingELSyncCompletion`.
+        let el_sync_finished = match self
+            .engine_client
+            .l2_block_info_by_label(alloy_eips::BlockNumberOrTag::Latest)
+            .await
+        {
+            Ok(Some(head)) if head.block_info.number > self.rollup_config.genesis.l2.number => {
+                info!(
+                    target: "world_chain::kona",
+                    el_head = head.block_info.number,
+                    "reth EL already holds a chain; marking EL sync complete to bootstrap derivation from L1 without waiting for unsafe-block gossip"
+                );
+                true
+            }
+            Ok(_) => false,
+            Err(e) => {
+                warn!(
+                    target: "world_chain::kona",
+                    error = %e,
+                    "failed to read reth EL head at startup; falling back to gossip-driven EL sync"
+                );
+                false
+            }
+        };
+
         // Engine actor (in-process EL).
         let engine_actor = self.create_engine_actor(
             cancellation.clone(),
             engine_actor_request_rx,
             QueuedEngineDerivationClient::new(derivation_actor_request_tx.clone()),
             unsafe_head_tx,
+            el_sync_finished,
         );
 
         // Derivation actor.
@@ -506,6 +572,28 @@ impl Drop for KonaServiceHandle {
     fn drop(&mut self) {
         self.cancellation.cancel();
     }
+}
+
+/// Reads the unsafe-block signer address from the L1 `SystemConfig` contract.
+///
+/// Mirrors canonical kona's startup fetch (`bin/node`'s `unsafe_block_signer`): the address is held
+/// at storage slot `bytes32(uint256(keccak256("systemconfig.unsafeblocksigner")) - 1)` and read at
+/// the latest L1 block. The low 20 bytes of the slot are the signer address.
+async fn fetch_unsafe_block_signer(
+    l1_provider: &RootProvider,
+    system_config_address: Address,
+) -> eyre::Result<Address> {
+    /// `bytes32(uint256(keccak256("systemconfig.unsafeblocksigner")) - 1)`.
+    const UNSAFE_BLOCK_SIGNER_SLOT: B256 =
+        b256!("0x65a7ed542fb37fe237fdfbdd70b31598523fe5b32879e307bae27a0bd9581c08");
+
+    let value = l1_provider
+        .get_storage_at(
+            system_config_address,
+            U256::from_be_bytes(UNSAFE_BLOCK_SIGNER_SLOT.0),
+        )
+        .await?;
+    Ok(Address::from_slice(&value.to_be_bytes::<32>()[12..]))
 }
 
 /// Listens for OS shutdown signals (SIGTERM, SIGINT). Reimplements kona's crate-private
