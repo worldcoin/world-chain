@@ -15622,6 +15622,7 @@ dependencies = [
  "kona-node-service",
  "kona-protocol",
  "kona-providers-alloy",
+ "kona-registry",
  "kona-rpc",
  "op-alloy-network",
  "op-alloy-provider",

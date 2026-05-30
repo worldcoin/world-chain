@@ -23,6 +23,7 @@ kona-derive.workspace = true
 kona-genesis.workspace = true
 kona-protocol.workspace = true
 kona-providers-alloy.workspace = true
+kona-registry.workspace = true
 kona-rpc.workspace = true
 
 # Reth (in-process engine handle, payload store, optimism payload types)

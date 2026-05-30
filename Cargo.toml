@@ -148,6 +148,7 @@ kona-node-service = { git = "https://github.com/ethereum-optimism/optimism", tag
 kona-rpc = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
 kona-genesis = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
 kona-protocol = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", features = ["serde", "std"] }
+kona-registry = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
 kona-providers-alloy = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
 kona-interop = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
 kona-derive = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }

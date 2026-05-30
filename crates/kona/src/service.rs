@@ -41,6 +41,7 @@ use kona_providers_alloy::{
     AlloyChainProvider, AlloyL2ChainProvider, OnlineBeaconClient, OnlineBlobProvider,
     OnlinePipeline,
 };
+use kona_registry::L1Config as RegisteredL1Config;
 use kona_rpc::RpcBuilder;
 use op_alloy_network::Optimism;
 use std::ops::Not as _;
@@ -123,6 +124,27 @@ impl KonaService {
         flashblocks_authorizer: Option<FlashblocksAuthorizationNotifier>,
     ) -> eyre::Result<Self> {
         let l1_provider = RootProvider::new_http(config.l1_rpc_url.clone());
+        let l1_chain_id: u64 = config.rollup_config.l1_chain_id.into();
+        let chain_config: Arc<L1ChainConfig> = match RegisteredL1Config::get_l1_genesis(l1_chain_id)
+        {
+            Ok(config) => {
+                info!(
+                    target: "world_chain::kona",
+                    l1_chain_id,
+                    "Loaded registered L1 chain config for in-process Kona"
+                );
+                Arc::new(config.into())
+            }
+            Err(error) => {
+                warn!(
+                    target: "world_chain::kona",
+                    l1_chain_id,
+                    %error,
+                    "failed to load registered L1 chain config; falling back to default"
+                );
+                Arc::new(L1ChainConfig::default())
+            }
+        };
         let l2_client = match l2_endpoint {
             L2RpcEndpoint::Ipc(path) => ClientBuilder::default().ipc(IpcConnect::new(path)).await?,
             L2RpcEndpoint::Http(url) => ClientBuilder::default().http(url),
@@ -174,7 +196,7 @@ impl KonaService {
 
         Ok(Self {
             rollup_config: config.rollup_config.clone(),
-            l1_chain_config: Arc::new(L1ChainConfig::default()),
+            l1_chain_config: chain_config,
             l1_trust_rpc: config.l1_trust_rpc,
             l1_provider,
             l1_beacon,
