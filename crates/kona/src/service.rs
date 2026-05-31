@@ -146,7 +146,7 @@ impl KonaService {
         flashblocks_authorizer: Option<FlashblocksAuthorizationNotifier>,
     ) -> eyre::Result<Self> {
         let l1_provider = RootProvider::new_http(config.l1_rpc_url.clone());
-        let l1_chain_id: u64 = config.rollup_config.l1_chain_id.into();
+        let l1_chain_id: u64 = config.rollup_config.l1_chain_id;
         let chain_config = load_registered_l1_chain_config(l1_chain_id);
         let l2_client = match l2_endpoint {
             L2RpcEndpoint::Ipc(path) => ClientBuilder::default().ipc(IpcConnect::new(path)).await?,

@@ -282,6 +282,7 @@ impl FullStackWorldDevnet {
                     conductor_rpc_host_port: conductor_plans[index].rpc_host_port,
                     consensus_bootnodes: kona_consensus_bootnodes,
                 },
+                access_list,
             )
         }))
         .await?;
@@ -998,6 +999,7 @@ async fn start_world_chain_el(
     plan: &SequencerPlan,
     trusted_peers: Vec<String>,
     kona: WorldChainElKona<'_>,
+    access_list: bool,
 ) -> Result<SequencerService> {
     let data_dir = workdir.join(format!("l2data-{index}"));
     fs::create_dir_all(&data_dir).wrap_err("failed to create L2 data dir")?;
