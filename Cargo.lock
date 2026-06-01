@@ -13928,6 +13928,7 @@ dependencies = [
  "chrono",
  "color-eyre",
  "inventory",
+ "reth-rpc-layer",
  "serde",
  "serde_json",
  "tokio",

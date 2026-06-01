@@ -42,16 +42,22 @@ pub mod runner;
 mod checks;
 
 pub use context::{Metric, MetricValue, Skipped, TestCtx};
-pub use env::{CloudflareAccess, Env, EnvBuilder, EnvSummary, Thresholds};
+pub use env::{CloudflareAccess, EngineApi, Env, EnvBuilder, EnvSummary, Thresholds};
 pub use registry::{AcceptanceTest, Category, TestFn, TestFuture};
 pub use report::{Report, Status, TestResult, Totals};
 pub use runner::{
     Execution, InlineExecutor, PanicIsolatedExecutor, RunOptions, TestExecutor, run, run_with,
 };
 
-// Re-exported so consumers can load and build manifests without depending on
-// the manifest crate directly.
-pub use world_chain_manifest::{self as manifest, NetworkManifest};
+/// The Engine API JWT secret type, re-exported so consumers can construct one
+/// without depending on `reth-rpc-layer` directly.
+pub use reth_rpc_layer::JwtSecret;
+
+// Re-exported so consumers (and the `acceptance_test` macro) can use the
+// manifest types without depending on the manifest crate directly.
+pub use world_chain_manifest::{
+    self as manifest, Commitments, Feature, Hardfork, NetworkManifest, Requirement,
+};
 
 /// The attribute macro that registers an `async fn` as an acceptance check.
 pub use world_chain_acceptance_macros::acceptance_test;
@@ -87,11 +93,11 @@ mod tests {
             );
         }
 
-        // The feature-gated check carries its manifest requirement key.
+        // The feature-gated check carries its typed requirement.
         let flashblocks = tests
             .iter()
             .find(|t| t.name == "supports flashblocks capability")
             .expect("flashblocks check registered");
-        assert_eq!(flashblocks.requires, &["flashblocks"]);
+        assert_eq!(flashblocks.requires, &[Requirement::feature("flashblocks")]);
     }
 }

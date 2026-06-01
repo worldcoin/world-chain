@@ -6,7 +6,7 @@
 //! must deliver. The same `Env` describes a freshly spawned devnet or a remote
 //! alphanet behind Cloudflare Access.
 
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use alloy_eips::BlockNumberOrTag;
 use alloy_provider::{Provider, RootProvider};
@@ -14,12 +14,47 @@ use alloy_rpc_client::RpcClient;
 use alloy_transport::layers::RetryBackoffLayer;
 use alloy_transport_http::reqwest::{
     Client,
-    header::{HeaderMap, HeaderName, HeaderValue},
+    header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue},
 };
 use eyre::eyre::{WrapErr, bail, eyre};
+use reth_rpc_layer::{JwtSecret, secret_to_bearer_header};
 use serde::Serialize;
 use url::Url;
-use world_chain_manifest::NetworkManifest;
+use world_chain_manifest::{Commitments, NetworkManifest, Requirement, feature_is_known};
+
+/// A JWT-authenticated Engine API endpoint.
+///
+/// The Engine API (`authrpc`) requires a bearer token derived from a shared JWT
+/// secret with a short validity window, so a fresh token is minted for every
+/// [`EngineApi::provider`] call rather than cached.
+#[derive(Clone)]
+pub struct EngineApi {
+    url: Url,
+    secret: JwtSecret,
+}
+
+impl EngineApi {
+    /// The Engine API URL.
+    pub fn url(&self) -> &Url {
+        &self.url
+    }
+
+    /// A freshly JWT-authenticated provider over the Engine API.
+    ///
+    /// A new bearer token is generated per call so it never outlives the JWT
+    /// validity window on long runs. Engine methods are reached through the raw
+    /// client, e.g. `engine.provider()?.client().request("engine_…", params)`.
+    pub fn provider(&self) -> eyre::Result<RootProvider> {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, secret_to_bearer_header(&self.secret));
+        let http = Client::builder()
+            .default_headers(headers)
+            .build()
+            .wrap_err("failed to build Engine API HTTP client")?;
+        let client = RpcClient::builder().http_with_client(http, self.url.clone());
+        Ok(RootProvider::new(client))
+    }
+}
 
 /// Default timeouts and budgets applied to checks. Overridable per run.
 #[derive(Clone, Copy, Debug)]
@@ -57,10 +92,10 @@ pub struct CloudflareAccess {
 pub struct Env {
     network: String,
     manifest: Arc<NetworkManifest>,
-    committed: BTreeSet<String>,
-    known: BTreeSet<String>,
+    commitments: Commitments,
     l2: RootProvider,
     l1: Option<RootProvider>,
+    engine: Option<EngineApi>,
     flashblocks_url: Option<Url>,
     prometheus_url: Option<Url>,
     http: Client,
@@ -93,6 +128,11 @@ impl Env {
         self.l1.as_ref()
     }
 
+    /// JWT-authenticated Engine API, when an engine endpoint was configured.
+    pub fn engine(&self) -> Option<&EngineApi> {
+        self.engine.as_ref()
+    }
+
     /// Flashblocks endpoint, when configured.
     pub fn flashblocks_url(&self) -> Option<&Url> {
         self.flashblocks_url.as_ref()
@@ -113,33 +153,39 @@ impl Env {
         &self.thresholds
     }
 
-    /// Requirement keys the manifest commits to.
-    pub fn committed_requirements(&self) -> &BTreeSet<String> {
-        &self.committed
+    /// The resolved manifest commitments (hardfork + features).
+    pub fn commitments(&self) -> &Commitments {
+        &self.commitments
     }
 
-    /// Every requirement key the manifest recognises (committable or not). Used
-    /// to reject `requires(...)` keys that name no known fork or feature.
-    pub fn known_requirements(&self) -> &BTreeSet<String> {
-        &self.known
-    }
-
-    /// Whether the manifest commits to the given requirement key.
-    pub fn commits_to(&self, key: &str) -> bool {
-        self.committed.contains(key)
+    /// Whether the manifest commits to a single requirement.
+    pub fn commits_to(&self, requirement: &Requirement) -> bool {
+        self.commitments.satisfies(requirement)
     }
 
     /// Whether the manifest commits to every requirement in `required`.
-    pub fn satisfies(&self, required: &[&str]) -> bool {
-        required.iter().all(|key| self.committed.contains(*key))
+    pub fn satisfies(&self, required: &[Requirement]) -> bool {
+        required.iter().all(|req| self.commitments.satisfies(req))
     }
 
-    /// Requirement keys in `required` the manifest does not commit to.
-    pub fn missing(&self, required: &[&str]) -> Vec<String> {
+    /// Requirements in `required` the manifest does not commit to (as labels).
+    pub fn missing(&self, required: &[Requirement]) -> Vec<String> {
         required
             .iter()
-            .filter(|key| !self.committed.contains(**key))
-            .map(|key| key.to_string())
+            .filter(|req| !self.commitments.satisfies(req))
+            .map(Requirement::label)
+            .collect()
+    }
+
+    /// Feature requirements in `required` that name no known feature (a
+    /// declaration bug, since features form a closed set).
+    pub fn unknown(&self, required: &[Requirement]) -> Vec<String> {
+        required
+            .iter()
+            .filter_map(|req| match req {
+                Requirement::Feature(feature) if !feature_is_known(feature.0) => Some(req.label()),
+                _ => None,
+            })
             .collect()
     }
 
@@ -211,10 +257,13 @@ impl Env {
             network: self.network.clone(),
             chain_source: self.chain_source(),
             expected_chain_id: self.manifest.chain.chain_id,
+            hardfork: self.commitments.hardfork().to_string(),
+            features: self.commitments.features().iter().cloned().collect(),
             flashblocks: self.flashblocks_url.is_some(),
             metrics: self.prometheus_url.is_some(),
             l1: self.l1.is_some(),
-            committed_requirements: self.committed.iter().cloned().collect(),
+            engine: self.engine.is_some(),
+            committed_requirements: self.commitments.committed_keys().into_iter().collect(),
         }
     }
 }
@@ -225,9 +274,12 @@ pub struct EnvSummary {
     pub network: String,
     pub chain_source: String,
     pub expected_chain_id: Option<u64>,
+    pub hardfork: String,
+    pub features: Vec<String>,
     pub flashblocks: bool,
     pub metrics: bool,
     pub l1: bool,
+    pub engine: bool,
     pub committed_requirements: Vec<String>,
 }
 
@@ -237,6 +289,8 @@ pub struct EnvBuilder {
     manifest: Arc<NetworkManifest>,
     l2_rpc_url: Option<Url>,
     l1_rpc_url: Option<Url>,
+    engine_url: Option<Url>,
+    engine_jwt: Option<JwtSecret>,
     flashblocks_url: Option<Url>,
     prometheus_url: Option<Url>,
     cloudflare_access: Option<CloudflareAccess>,
@@ -250,6 +304,8 @@ impl EnvBuilder {
             manifest,
             l2_rpc_url: None,
             l1_rpc_url: None,
+            engine_url: None,
+            engine_jwt: None,
             flashblocks_url: None,
             prometheus_url: None,
             cloudflare_access: None,
@@ -272,6 +328,13 @@ impl EnvBuilder {
     /// L1 JSON-RPC URL.
     pub fn l1_rpc_url(mut self, url: Option<Url>) -> Self {
         self.l1_rpc_url = url;
+        self
+    }
+
+    /// Engine API endpoint and its JWT secret. Both must be provided together.
+    pub fn engine(mut self, url: Option<Url>, jwt: Option<JwtSecret>) -> Self {
+        self.engine_url = url;
+        self.engine_jwt = jwt;
         self
     }
 
@@ -305,15 +368,17 @@ impl EnvBuilder {
             bail!("an L2 RPC URL is required to build an acceptance environment");
         };
 
-        let committed = self
+        let commitments = self
             .manifest
-            .committed_requirements()
-            .wrap_err("failed to resolve committed requirements from manifest")?;
-        let known = self
-            .manifest
-            .known_requirement_keys()
-            .wrap_err("failed to resolve known requirement keys from manifest")?;
+            .commitments()
+            .wrap_err("failed to resolve manifest commitments")?;
         let network = self.network.unwrap_or_else(|| self.manifest.name.clone());
+
+        let engine = match (self.engine_url, self.engine_jwt) {
+            (Some(url), Some(secret)) => Some(EngineApi { url, secret }),
+            (None, None) => None,
+            _ => bail!("engine URL and JWT secret must be provided together"),
+        };
 
         let http = http_client(self.cloudflare_access.as_ref())?;
         let l2 = provider(http.clone(), l2_rpc_url);
@@ -322,9 +387,9 @@ impl EnvBuilder {
         Ok(Env {
             network,
             manifest: self.manifest,
-            committed,
-            known,
+            commitments,
             l2,
+            engine,
             l1,
             flashblocks_url: self.flashblocks_url,
             prometheus_url: self.prometheus_url,

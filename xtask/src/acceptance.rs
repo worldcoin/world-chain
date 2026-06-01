@@ -9,15 +9,19 @@ use std::{collections::BTreeSet, path::PathBuf, sync::Arc, time::Duration};
 
 use clap::{Args as ClapArgs, ValueEnum};
 use eyre::eyre::{Result, WrapErr, bail, eyre};
+use std::str::FromStr;
 use tokio::sync::watch;
 use tracing::{info, warn};
 use url::Url;
 use world_chain_acceptance::{
-    Category, CloudflareAccess, Env, NetworkManifest, Report, RunOptions, Thresholds, run,
+    Category, CloudflareAccess, Env, JwtSecret, NetworkManifest, Report, RunOptions, Thresholds,
+    run,
 };
+
+use world_chain_chainspec::WorldChainHardfork;
 use world_chain_devnet::{
-    HaSequencerConfig, ObservabilityConfig, WORLD_CHAIN_DEVNET_HARDFORK_ORDER,
-    WorldChainHardforkConfig, WorldDevnetBuilder, WorldDevnetPreset, is_docker_unavailable,
+    HaSequencerConfig, ObservabilityConfig, WorldChainHardforkConfig, WorldDevnetBuilder,
+    WorldDevnetPreset, is_docker_unavailable,
 };
 
 /// Run the acceptance harness and emit a report.
@@ -38,6 +42,15 @@ pub struct Args {
     /// Optional L1 RPC URL. Enables the safe-head health check.
     #[arg(long, env = "ACCEPTANCE_L1_RPC_URL")]
     l1_rpc_url: Option<Url>,
+
+    /// Optional Engine API (authrpc) URL. Requires `--engine-jwt`.
+    #[arg(long, env = "ACCEPTANCE_ENGINE_RPC_URL")]
+    engine_rpc_url: Option<Url>,
+
+    /// Engine API JWT secret as a hex string. Sourced from the environment so
+    /// it never lands in shell history; never logged.
+    #[arg(long, env = "ACCEPTANCE_ENGINE_JWT", hide_env_values = true)]
+    engine_jwt: Option<String>,
 
     /// Optional flashblocks endpoint.
     #[arg(long, env = "ACCEPTANCE_FLASHBLOCKS_URL")]
@@ -188,6 +201,7 @@ async fn run_remote(
     let mut builder = Env::builder(manifest)
         .l2_rpc_url(rpc_url)
         .l1_rpc_url(args.l1_rpc_url.clone())
+        .engine(args.engine_rpc_url.clone(), engine_jwt(args)?)
         .flashblocks_url(args.flashblocks_url.clone())
         .prometheus_url(args.prometheus_url.clone())
         .cloudflare_access(cloudflare_access_from_env()?);
@@ -212,13 +226,20 @@ async fn run_spawned(
     };
     let ha_config = HaSequencerConfig::default().with_observability(observability.clone());
 
+    let has_feature = |key: &str| {
+        manifest
+            .features
+            .iter()
+            .any(|f| f.eq_ignore_ascii_case(key))
+    };
+
     let build = WorldDevnetBuilder::new()
         .preset(preset)
         .ha_sequencer(ha_config)
         .observability(observability)
         .hardforks(hardfork_config(&manifest)?)
-        .flashblocks(manifest.features.flashblocks.enabled)
-        .flashblocks_access_list(manifest.features.flashblocks.access_list)
+        .flashblocks(has_feature("flashblocks"))
+        .flashblocks_access_list(has_feature("block_access_list"))
         .block_time(Duration::from_millis(args.block_time_ms))
         .build()
         .await;
@@ -241,6 +262,7 @@ async fn run_spawned(
     let mut builder = Env::builder(manifest)
         .l2_rpc_url(l2_rpc_url)
         .l1_rpc_url(l1_rpc_url)
+        .engine(args.engine_rpc_url.clone(), engine_jwt(args)?)
         .flashblocks_url(flashblocks_url)
         .prometheus_url(prometheus_url)
         .thresholds(Thresholds {
@@ -267,22 +289,16 @@ async fn run_spawned(
     Ok(Some(report))
 }
 
-/// Map the manifest's committed hardforks onto the devnet hardfork config.
-///
-/// The manifest commits to a canonical chain spec; we read which World Chain
-/// forks it schedules (by requirement key) and reflect them in the devnet's
-/// fork selection so the spawned devnet runs exactly what the manifest commits.
+/// Map the manifest's single committed hardfork onto the devnet fork config
+/// (all forks through the committed one active at genesis).
 fn hardfork_config(manifest: &NetworkManifest) -> Result<WorldChainHardforkConfig> {
-    let committed = manifest.committed_requirements()?;
-    let mut config = WorldChainHardforkConfig::default();
-    for fork in WORLD_CHAIN_DEVNET_HARDFORK_ORDER {
-        let key = format!("{fork:?}").to_ascii_lowercase();
-        config = if committed.contains(&key) {
-            config.enable(fork)
-        } else {
-            config.disable(fork)
-        };
-    }
+    let fork = WorldChainHardfork::from_str(&manifest.hardfork).map_err(|_| {
+        eyre!(
+            "spawned devnet supports World Chain hardforks only; `{}` is not one (use --target alphanet for it)",
+            manifest.hardfork
+        )
+    })?;
+    let config = WorldChainHardforkConfig::through(fork);
     config.validate()?;
     Ok(config)
 }
@@ -301,6 +317,16 @@ fn emit_report(args: &Args, report: &Report) -> Result<()> {
         info!(path = %path.display(), "wrote Markdown acceptance report");
     }
     Ok(())
+}
+
+/// Parse the Engine API JWT secret from the hex argument, if provided.
+fn engine_jwt(args: &Args) -> Result<Option<JwtSecret>> {
+    args.engine_jwt
+        .as_deref()
+        .map(|hex| {
+            JwtSecret::from_hex(hex).wrap_err("failed to parse --engine-jwt as a hex secret")
+        })
+        .transpose()
 }
 
 fn parse_opt_url(value: Option<&str>) -> Result<Option<Url>> {

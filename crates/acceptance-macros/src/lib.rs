@@ -61,12 +61,20 @@ pub fn acceptance_test(attr: TokenStream, item: TokenStream) -> TokenStream {
         .name
         .unwrap_or_else(|| fn_name.to_string().replace('_', " "));
 
-    // Requirement keys are emitted as lowercase string literals (a fork or
-    // feature name) resolved against the network manifest at run time.
-    let requires = args
-        .requires
-        .iter()
-        .map(|ident| ident.to_string().to_ascii_lowercase());
+    // Each requirement is emitted as a typed `Requirement` (a `Hardfork` or
+    // `Feature`) resolved against the network manifest at run time.
+    let requires = args.requires.iter().map(|(kind, name)| {
+        let name = name.to_string().to_ascii_lowercase();
+        match kind.to_string().as_str() {
+            "hardfork" => quote! { ::world_chain_acceptance::Requirement::Hardfork(
+                ::world_chain_acceptance::Hardfork(#name)
+            ) },
+            // already validated to be `hardfork` or `feature`
+            _ => quote! { ::world_chain_acceptance::Requirement::Feature(
+                ::world_chain_acceptance::Feature(#name)
+            ) },
+        }
+    });
 
     let expanded = quote! {
         #func
@@ -88,7 +96,8 @@ pub fn acceptance_test(attr: TokenStream, item: TokenStream) -> TokenStream {
 struct Args {
     category: Option<proc_macro2::Ident>,
     name: Option<String>,
-    requires: Vec<proc_macro2::Ident>,
+    /// Requirement entries as `(kind, name)` where kind is `hardfork`/`feature`.
+    requires: Vec<(proc_macro2::Ident, proc_macro2::Ident)>,
 }
 
 impl Args {
@@ -105,10 +114,22 @@ impl Args {
                     args.name = Some(expr_str(&nv.value, "name")?);
                 }
                 Meta::List(list) if list.path.is_ident("requires") => {
-                    let idents = list.parse_args_with(
-                        Punctuated::<proc_macro2::Ident, Token![,]>::parse_terminated,
+                    let entries = list.parse_args_with(
+                        Punctuated::<syn::MetaNameValue, Token![,]>::parse_terminated,
                     )?;
-                    args.requires.extend(idents);
+                    for entry in entries {
+                        let kind = entry.path.get_ident().cloned().ok_or_else(|| {
+                            syn::Error::new(entry.path.span(), "expected `hardfork` or `feature`")
+                        })?;
+                        if kind != "hardfork" && kind != "feature" {
+                            return Err(syn::Error::new(
+                                kind.span(),
+                                "requirement kind must be `hardfork` or `feature`",
+                            ));
+                        }
+                        let name = expr_ident(&entry.value, "requirement")?;
+                        args.requires.push((kind, name));
+                    }
                 }
                 other => {
                     return Err(syn::Error::new(

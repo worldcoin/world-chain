@@ -13,6 +13,7 @@ use std::{
 };
 
 use tracing::{info, warn};
+use world_chain_manifest::Requirement;
 
 use crate::{
     context::{Metric, Skipped, TestCtx},
@@ -186,30 +187,21 @@ async fn evaluate<E: TestExecutor>(
     env: &Arc<Env>,
     executor: &E,
 ) -> TestResult {
-    let requires: Vec<String> = test.requires.iter().map(|k| k.to_string()).collect();
+    let requires: Vec<String> = test.requires.iter().map(Requirement::label).collect();
 
-    // A requirement key that is not a known fork/feature is a declaration bug.
-    let known_keys = env.known_requirements();
-    let unknown: Vec<&str> = test
-        .requires
-        .iter()
-        .copied()
-        .filter(|key| !known_keys.contains(*key))
-        .collect();
+    // A feature requirement naming no known feature is a declaration bug.
+    let unknown = env.unknown(test.requires);
     if !unknown.is_empty() {
         warn!(
             check = test.name,
             ?unknown,
-            "check declares unknown requirement keys"
+            "check declares unknown requirements"
         );
         return skipped_or_failed(
             test,
             requires,
             Status::Failed,
-            Some(format!(
-                "unknown requirement key(s): {}",
-                unknown.join(", ")
-            )),
+            Some(format!("unknown requirement(s): {}", unknown.join(", "))),
             None,
         );
     }
@@ -282,13 +274,13 @@ fn skipped_or_failed(
 fn uncovered_commitments(env: &Env) -> Vec<String> {
     let referenced: BTreeSet<&str> = inventory::iter::<AcceptanceTest>
         .into_iter()
-        .flat_map(|test| test.requires.iter().copied())
+        .flat_map(|test| test.requires.iter().map(Requirement::name))
         .collect();
 
-    env.committed_requirements()
-        .iter()
+    env.commitments()
+        .committed_keys()
+        .into_iter()
         .filter(|key| !referenced.contains(key.as_str()))
-        .cloned()
         .collect()
 }
 

@@ -5,16 +5,15 @@
 # harness holds the network to (`xtask acceptance --manifest manifests/devnet.toml`).
 name = "devnet"
 
+# The single hardfork this network commits to. Hardfork-gated checks run for
+# this fork and every fork before it.
+hardfork = "jovian"
+
+# Arbitrary set of committed features. The native in-process devnet does not
+# deploy PBH contracts, so PBH is omitted.
+features = ["flashblocks"]
+
 [chain]
-# Canonical predefined spec. The committed hardforks are read back from this
-# chain spec via reth's hardfork traits — they are not re-declared here.
+# Canonical predefined spec; the committed hardfork must be one it schedules.
 spec = "dev"
 chain_id = 2151908
-
-[features.flashblocks]
-enabled = true
-access_list = false
-
-[features.pbh]
-# The native in-process devnet does not deploy PBH contracts.
-enabled = false

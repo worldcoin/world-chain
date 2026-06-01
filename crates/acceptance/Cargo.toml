@@ -15,6 +15,9 @@ workspace = true
 world-chain-acceptance-macros.workspace = true
 world-chain-manifest.workspace = true
 
+# reth
+reth-rpc-layer.workspace = true
+
 # alloy
 alloy-eips.workspace = true
 alloy-provider.workspace = true

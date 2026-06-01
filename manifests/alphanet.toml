@@ -6,17 +6,16 @@
 # deployment and its acceptance criteria can never drift apart.
 name = "alphanet"
 
+# The single committed hardfork (cumulative: jovian + every earlier fork).
+hardfork = "jovian"
+
+# Arbitrary set of committed features.
+features = ["flashblocks", "block_access_list", "pbh"]
+
 [chain]
 # Canonical chain source. Use a named spec, or commit to a genesis file with
-# `genesis = "alphanet.genesis.json"` for full control over the schedule.
+# `genesis = "alphanet.genesis.json"` for full control over the schedule
+# (required to commit to World-specific forks like tropo that named specs omit).
 spec = "dev"
 # TODO(alphanet): set the real alphanet chain id once the chain is provisioned.
 # chain_id = 0
-
-[features.flashblocks]
-enabled = true
-access_list = true
-
-[features.pbh]
-enabled = true
-verified_blockspace_capacity = 70

@@ -2,36 +2,29 @@
 //! truth for both a World Chain deployment and the acceptance criteria it is
 //! tested against.
 //!
-//! A manifest is a small TOML document that commits to a canonical chain spec
-//! (a named OP/World spec or a canonical [`Genesis`] file) plus the World Chain
-//! features layered on top. The node consumes it (via `--chain <manifest>.toml`)
-//! to derive its chain spec, and the acceptance harness consumes the same file
-//! to decide which checks to run and to assert the live network delivers
-//! everything the manifest commits to.
+//! A manifest commits to a canonical chain spec (a named OP/World spec or a
+//! canonical [`Genesis`] file), exactly one **hardfork**, and an arbitrary set
+//! of **features**. The node consumes it (via `--chain <manifest>.toml`) to
+//! derive its chain spec; the acceptance harness consumes the same file to
+//! decide which checks run and to assert the live network delivers everything
+//! committed.
 //!
-//! Hardforks are *not* modelled with a bespoke schedule: they are read back from
-//! the derived chain spec through reth's canonical [`Hardforks`] /
-//! [`EthereumHardforks`](reth_chainspec::EthereumHardforks) traits, so the
-//! manifest commits to canonical chain configuration rather than reinventing it.
+//! Hardfork ordering is read from the derived chain spec through reth's
+//! canonical [`Hardforks`] trait, so a hardfork requirement is satisfied when
+//! the committed hardfork is at or after it (cumulative).
 //!
 //! ```toml
 //! name = "alphanet"
+//! hardfork = "jovian"                              # exactly one
+//! features = ["flashblocks", "block_access_list"]  # arbitrary set
 //!
 //! [chain]
 //! spec = "dev"          # a named OP/World spec, or `genesis = "path.json"`
 //! chain_id = 2151908    # optional override
-//!
-//! [features.flashblocks]
-//! enabled = true
-//! access_list = true
-//!
-//! [features.pbh]
-//! enabled = true
-//! verified_blockspace_capacity = 70
 //! ```
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
 };
 
@@ -44,7 +37,7 @@ use world_chain_chainspec::WorldChainSpec;
 
 mod requirement;
 
-pub use requirement::{FEATURE_KEYS, RequirementKey, feature_keys};
+pub use requirement::{Feature, Hardfork, KNOWN_FEATURE_KEYS, Requirement, feature_is_known};
 
 /// A committed network manifest.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -52,12 +45,14 @@ pub use requirement::{FEATURE_KEYS, RequirementKey, feature_keys};
 pub struct NetworkManifest {
     /// Human-readable network name (e.g. `alphanet`).
     pub name: String,
+    /// The single hardfork this network commits to (canonical fork name).
+    pub hardfork: String,
+    /// The set of features this network commits to.
+    #[serde(default)]
+    pub features: Vec<String>,
     /// Canonical chain configuration this network commits to.
     #[serde(default)]
     pub chain: ChainConfig,
-    /// Committed World Chain features.
-    #[serde(default)]
-    pub features: Features,
     /// Directory the manifest was loaded from, used to resolve a relative
     /// `chain.genesis` path. Not part of the serialized document.
     #[serde(skip)]
@@ -80,40 +75,54 @@ pub struct ChainConfig {
     pub chain_id: Option<u64>,
 }
 
-/// Committed World Chain features.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Features {
-    /// Flashblocks configuration.
-    #[serde(default)]
-    pub flashblocks: Flashblocks,
-    /// Priority Blockspace for Humans configuration.
-    #[serde(default)]
-    pub pbh: Pbh,
+/// The resolved commitments of a manifest: the hardfork (with its position in
+/// the canonical fork order) and the feature set. Owns requirement gating.
+#[derive(Clone, Debug)]
+pub struct Commitments {
+    hardfork: String,
+    /// Canonical fork name -> position among scheduled forks.
+    fork_order: BTreeMap<String, usize>,
+    features: BTreeSet<String>,
 }
 
-/// Flashblocks feature commitment.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Flashblocks {
-    /// Whether flashblocks are served.
-    #[serde(default)]
-    pub enabled: bool,
-    /// Whether block access lists (BAL) are produced.
-    #[serde(default)]
-    pub access_list: bool,
-}
+impl Commitments {
+    /// Whether the committed configuration satisfies `requirement`.
+    ///
+    /// Features must be in the committed set; a hardfork is satisfied when the
+    /// committed hardfork is at or after it in the canonical order.
+    pub fn satisfies(&self, requirement: &Requirement) -> bool {
+        match requirement {
+            Requirement::Feature(Feature(name)) => self.features.contains(*name),
+            Requirement::Hardfork(Hardfork(name)) => {
+                match (self.fork_order.get(*name), self.committed_index()) {
+                    (Some(required), Some(committed)) => *required <= committed,
+                    _ => false,
+                }
+            }
+        }
+    }
 
-/// PBH feature commitment.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Pbh {
-    /// Whether PBH is enabled.
-    #[serde(default)]
-    pub enabled: bool,
-    /// Percentage of block gas reserved for verified transactions.
-    #[serde(default)]
-    pub verified_blockspace_capacity: Option<u8>,
+    /// The committed hardfork name.
+    pub fn hardfork(&self) -> &str {
+        &self.hardfork
+    }
+
+    /// The committed feature keys.
+    pub fn features(&self) -> &BTreeSet<String> {
+        &self.features
+    }
+
+    /// The requirement keys this manifest commits to: the hardfork plus every
+    /// feature. Used to flag commitments that no check exercises.
+    pub fn committed_keys(&self) -> BTreeSet<String> {
+        let mut keys = self.features.clone();
+        keys.insert(self.hardfork.clone());
+        keys
+    }
+
+    fn committed_index(&self) -> Option<usize> {
+        self.fork_order.get(&self.hardfork).copied()
+    }
 }
 
 impl NetworkManifest {
@@ -125,12 +134,10 @@ impl NetworkManifest {
         let mut manifest = Self::from_toml_str(&contents)
             .wrap_err_with(|| format!("invalid manifest {}", path.display()))?;
         manifest.base_dir = path.parent().map(Path::to_path_buf);
-        // Eagerly resolve the chain spec so a broken chain source fails at load.
-        manifest.into_chain_spec().wrap_err_with(|| {
-            format!(
-                "manifest {} does not resolve to a chain spec",
-                path.display()
-            )
+        // Resolve commitments so a broken chain source or an unscheduled
+        // hardfork fails at load.
+        manifest.commitments().wrap_err_with(|| {
+            format!("manifest {} is not internally consistent", path.display())
         })?;
         Ok(manifest)
     }
@@ -177,48 +184,41 @@ impl NetworkManifest {
         Ok(spec)
     }
 
-    /// The requirement keys this manifest commits to: every hardfork the derived
-    /// chain spec schedules, plus every enabled feature.
-    pub fn committed_requirements(&self) -> Result<BTreeSet<String>> {
+    /// Resolve the manifest's commitments against its canonical chain spec.
+    ///
+    /// The committed hardfork must be scheduled by the chain spec; its position
+    /// in the canonical fork order drives cumulative hardfork gating.
+    pub fn commitments(&self) -> Result<Commitments> {
         let spec = self.into_chain_spec()?;
-        let mut keys = scheduled_hardfork_keys(&spec);
-        keys.extend(self.committed_feature_keys());
-        Ok(keys)
-    }
 
-    /// Every recognised requirement key for this manifest: every hardfork the
-    /// chain spec knows about (whether scheduled or not), plus every feature
-    /// key. Used to reject typos in `requires(...)` declarations.
-    pub fn known_requirement_keys(&self) -> Result<BTreeSet<String>> {
-        let spec = self.into_chain_spec()?;
-        let mut keys: BTreeSet<String> = spec
+        let mut fork_order = BTreeMap::new();
+        for (index, (fork, _)) in spec
             .forks_iter()
-            .map(|(fork, _)| fork.name().to_ascii_lowercase())
+            .filter(|(_, condition)| !matches!(condition, ForkCondition::Never))
+            .enumerate()
+        {
+            fork_order.insert(fork.name().to_ascii_lowercase(), index);
+        }
+
+        let hardfork = self.hardfork.to_ascii_lowercase();
+        if !fork_order.contains_key(&hardfork) {
+            bail!(
+                "committed hardfork `{}` is not scheduled by the chain spec",
+                self.hardfork
+            );
+        }
+
+        let features = self
+            .features
+            .iter()
+            .map(|f| f.to_ascii_lowercase())
             .collect();
-        for feature in FEATURE_KEYS {
-            keys.insert(feature.as_str().to_string());
-        }
-        Ok(keys)
-    }
 
-    /// Whether the manifest commits to a given requirement key.
-    pub fn commits_to(&self, key: &str) -> Result<bool> {
-        Ok(self.committed_requirements()?.contains(key))
-    }
-
-    /// Feature requirement keys this manifest enables.
-    fn committed_feature_keys(&self) -> BTreeSet<String> {
-        let mut keys = BTreeSet::new();
-        if self.features.flashblocks.enabled {
-            keys.insert(RequirementKey::Flashblocks.as_str().to_string());
-            if self.features.flashblocks.access_list {
-                keys.insert(RequirementKey::FlashblocksAccessList.as_str().to_string());
-            }
-        }
-        if self.features.pbh.enabled {
-            keys.insert(RequirementKey::Pbh.as_str().to_string());
-        }
-        keys
+        Ok(Commitments {
+            hardfork,
+            fork_order,
+            features,
+        })
     }
 
     /// Resolve a (possibly relative) path against the manifest directory.
@@ -229,8 +229,8 @@ impl NetworkManifest {
         }
     }
 
-    /// Validate internal consistency: a resolvable chain source and coherent
-    /// feature parameters.
+    /// Validate static internal consistency (cheap checks that do not need the
+    /// chain spec). Chain-spec consistency is enforced by [`Self::commitments`].
     pub fn validate(&self) -> Result<()> {
         match (&self.chain.spec, &self.chain.genesis) {
             (Some(_), Some(_)) => bail!("set only one of `chain.spec` or `chain.genesis`"),
@@ -238,32 +238,31 @@ impl NetworkManifest {
             _ => {}
         }
 
-        if self.features.flashblocks.access_list && !self.features.flashblocks.enabled {
-            bail!("features.flashblocks.access_list requires features.flashblocks.enabled");
+        if self.hardfork.trim().is_empty() {
+            bail!("`hardfork` must name the single committed hardfork");
         }
-        if let Some(capacity) = self.features.pbh.verified_blockspace_capacity
-            && capacity > 100
-        {
-            bail!(
-                "features.pbh.verified_blockspace_capacity must be between 0 and 100, got {capacity}"
-            );
+
+        let mut seen = BTreeSet::new();
+        for feature in &self.features {
+            let key = feature.to_ascii_lowercase();
+            if !feature_is_known(&key) {
+                bail!(
+                    "unknown feature `{feature}`; expected one of {}",
+                    KNOWN_FEATURE_KEYS.join(", ")
+                );
+            }
+            if !seen.insert(key) {
+                bail!("duplicate feature `{feature}`");
+            }
         }
-        if self.features.pbh.verified_blockspace_capacity.is_some() && !self.features.pbh.enabled {
-            bail!(
-                "features.pbh.verified_blockspace_capacity set while features.pbh.enabled is false"
-            );
+
+        let has = |key: &str| seen.contains(key);
+        if has("block_access_list") && !has("flashblocks") {
+            bail!("feature `block_access_list` requires feature `flashblocks`");
         }
 
         Ok(())
     }
-}
-
-/// Lowercase names of every hardfork the spec schedules (condition != `Never`).
-fn scheduled_hardfork_keys(spec: &WorldChainSpec) -> BTreeSet<String> {
-    spec.forks_iter()
-        .filter(|(_, condition)| !matches!(condition, ForkCondition::Never))
-        .map(|(fork, _)| fork.name().to_ascii_lowercase())
-        .collect()
 }
 
 #[cfg(test)]
@@ -272,64 +271,82 @@ mod tests {
 
     const SAMPLE: &str = r#"
         name = "alphanet"
+        hardfork = "jovian"
+        features = ["flashblocks", "block_access_list", "pbh"]
 
         [chain]
         spec = "dev"
         chain_id = 2151908
-
-        [features.flashblocks]
-        enabled = true
-        access_list = false
-
-        [features.pbh]
-        enabled = true
-        verified_blockspace_capacity = 70
     "#;
 
     #[test]
-    fn derives_requirements_from_canonical_spec() {
+    fn cumulative_hardfork_and_feature_gating() {
         let manifest = NetworkManifest::from_toml_str(SAMPLE).unwrap();
-        let reqs = manifest.committed_requirements().unwrap();
+        let commitments = manifest.commitments().unwrap();
 
-        // Hardforks come straight from the canonical chain spec.
-        assert!(reqs.contains("jovian"));
-        assert!(reqs.contains("cancun"));
-        // Features are our addition.
-        assert!(reqs.contains("flashblocks"));
-        assert!(!reqs.contains("flashblocks_access_list"));
-        assert!(reqs.contains("pbh"));
+        // Cumulative: forks at or before the committed hardfork are satisfied.
+        assert!(commitments.satisfies(&Requirement::hardfork("jovian")));
+        assert!(commitments.satisfies(&Requirement::hardfork("cancun")));
+        // A later / unscheduled fork is not.
+        assert!(!commitments.satisfies(&Requirement::hardfork("karst")));
+        assert!(!commitments.satisfies(&Requirement::hardfork("tropo")));
 
-        assert!(manifest.commits_to("flashblocks").unwrap());
-        assert!(
-            manifest
-                .known_requirement_keys()
-                .unwrap()
-                .contains("jovian")
+        // Features must be in the committed set.
+        assert!(commitments.satisfies(&Requirement::feature("flashblocks")));
+        assert!(commitments.satisfies(&Requirement::feature("block_access_list")));
+    }
+
+    #[test]
+    fn pbh_feature_is_committed() {
+        let manifest = NetworkManifest::from_toml_str(SAMPLE).unwrap();
+        let commitments = manifest.commitments().unwrap();
+        assert!(commitments.satisfies(&Requirement::feature("pbh")));
+        assert!(commitments.committed_keys().contains("jovian"));
+        assert!(commitments.committed_keys().contains("flashblocks"));
+    }
+
+    #[test]
+    fn chain_id_override_applies() {
+        let manifest = NetworkManifest::from_toml_str(SAMPLE).unwrap();
+        assert_eq!(
+            manifest.into_chain_spec().unwrap().inner.chain.id(),
+            2151908
         );
     }
 
     #[test]
-    fn derives_chain_spec_with_chain_id_override() {
-        let manifest = NetworkManifest::from_toml_str(SAMPLE).unwrap();
-        let spec = manifest.into_chain_spec().unwrap();
-        assert_eq!(spec.inner.chain.id(), 2151908);
-    }
-
-    #[test]
-    fn rejects_missing_chain_source() {
-        let toml = r#"name = "broken""#;
+    fn rejects_unknown_feature() {
+        let toml = r#"
+            name = "broken"
+            hardfork = "jovian"
+            features = ["teleport"]
+            [chain]
+            spec = "dev"
+        "#;
         assert!(NetworkManifest::from_toml_str(toml).is_err());
     }
 
     #[test]
-    fn rejects_access_list_without_flashblocks() {
+    fn rejects_unscheduled_hardfork() {
         let toml = r#"
             name = "broken"
+            hardfork = "tropo"
             [chain]
             spec = "dev"
-            [features.flashblocks]
-            enabled = false
-            access_list = true
+        "#;
+        // Parses, but commitments fail because `dev` does not schedule tropo.
+        let manifest = NetworkManifest::from_toml_str(toml).unwrap();
+        assert!(manifest.commitments().is_err());
+    }
+
+    #[test]
+    fn rejects_bal_without_flashblocks() {
+        let toml = r#"
+            name = "broken"
+            hardfork = "jovian"
+            features = ["block_access_list"]
+            [chain]
+            spec = "dev"
         "#;
         assert!(NetworkManifest::from_toml_str(toml).is_err());
     }

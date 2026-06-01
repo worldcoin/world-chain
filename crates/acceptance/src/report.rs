@@ -117,10 +117,11 @@ impl Report {
         if let Some(chain_id) = self.environment.expected_chain_id {
             let _ = writeln!(out, "- expected chain id: `{chain_id}`");
         }
+        let _ = writeln!(out, "- hardfork: `{}`", self.environment.hardfork);
         let _ = writeln!(
             out,
-            "- committed requirements: {}",
-            join_or_none(&self.environment.committed_requirements)
+            "- features: {}",
+            join_or_none(&self.environment.features)
         );
         if !self.uncovered_commitments.is_empty() {
             let _ = writeln!(

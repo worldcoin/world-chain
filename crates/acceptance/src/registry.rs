@@ -3,6 +3,7 @@
 use std::{fmt, future::Future, pin::Pin, sync::Arc};
 
 use serde::{Serialize, Serializer};
+use world_chain_manifest::Requirement;
 
 use crate::context::TestCtx;
 
@@ -72,11 +73,11 @@ pub struct AcceptanceTest {
     pub name: &'static str,
     /// Classification used for grouping and filtering.
     pub category: Category,
-    /// Manifest requirement keys (fork or feature names) the network must
-    /// commit to for this check to run. A check whose requirements the manifest
-    /// does not commit to is reported as skipped rather than failed, so the same
+    /// Typed requirements (features and/or a hardfork) the network must commit
+    /// to for this check to run. A check whose requirements the manifest does
+    /// not commit to is reported as skipped rather than failed, so the same
     /// suite runs against any deployment that commits to a superset.
-    pub requires: &'static [&'static str],
+    pub requires: &'static [Requirement],
     /// The check body.
     pub run: TestFn,
 }
