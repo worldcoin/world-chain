@@ -30,14 +30,15 @@ use std::{
 
 use alloy_chains::Chain;
 use alloy_genesis::Genesis;
-use eyre::eyre::{Result, WrapErr, bail, eyre};
+use eyre::eyre::{bail, eyre, Result, WrapErr};
 use reth_chainspec::{ForkCondition, Hardforks};
 use serde::{Deserialize, Serialize};
-use world_chain_chainspec::WorldChainSpec;
+use world_chain_chainspec::{parse_hardfork, WorldChainSpec};
 
 mod requirement;
 
-pub use requirement::{Feature, Hardfork, KNOWN_FEATURE_KEYS, Requirement, feature_is_known};
+pub use requirement::{feature_is_known, Feature, Requirement, KNOWN_FEATURE_KEYS};
+pub use world_chain_chainspec::Hardfork;
 
 /// A committed network manifest.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -45,8 +46,10 @@ pub use requirement::{Feature, Hardfork, KNOWN_FEATURE_KEYS, Requirement, featur
 pub struct NetworkManifest {
     /// Human-readable network name (e.g. `alphanet`).
     pub name: String,
-    /// The single hardfork this network commits to (canonical fork name).
-    pub hardfork: String,
+    /// The single hardfork this network commits to. Serialized as its canonical
+    /// fork name (e.g. `"jovian"`); deserialized through [`parse_hardfork`].
+    #[serde(with = "hardfork_serde")]
+    pub hardfork: Box<dyn Hardfork>,
     /// The set of features this network commits to.
     #[serde(default)]
     pub features: Vec<String>,
@@ -79,7 +82,7 @@ pub struct ChainConfig {
 /// the canonical fork order) and the feature set. Owns requirement gating.
 #[derive(Clone, Debug)]
 pub struct Commitments {
-    hardfork: String,
+    hardfork: Box<dyn Hardfork>,
     /// Canonical fork name -> position among scheduled forks.
     fork_order: BTreeMap<String, usize>,
     features: BTreeSet<String>,
@@ -92,9 +95,10 @@ impl Commitments {
     /// committed hardfork is at or after it in the canonical order.
     pub fn satisfies(&self, requirement: &Requirement) -> bool {
         match requirement {
-            Requirement::Feature(Feature(name)) => self.features.contains(*name),
-            Requirement::Hardfork(Hardfork(name)) => {
-                match (self.fork_order.get(*name), self.committed_index()) {
+            Requirement::Feature(feature) => self.features.contains(feature.0),
+            Requirement::Hardfork(fork) => {
+                let required = self.fork_order.get(&fork.name().to_ascii_lowercase());
+                match (required, self.committed_index()) {
                     (Some(required), Some(committed)) => *required <= committed,
                     _ => false,
                 }
@@ -102,9 +106,9 @@ impl Commitments {
         }
     }
 
-    /// The committed hardfork name.
-    pub fn hardfork(&self) -> &str {
-        &self.hardfork
+    /// The committed hardfork.
+    pub fn hardfork(&self) -> &dyn Hardfork {
+        &*self.hardfork
     }
 
     /// The committed feature keys.
@@ -116,12 +120,14 @@ impl Commitments {
     /// feature. Used to flag commitments that no check exercises.
     pub fn committed_keys(&self) -> BTreeSet<String> {
         let mut keys = self.features.clone();
-        keys.insert(self.hardfork.clone());
+        keys.insert(self.hardfork.name().to_ascii_lowercase());
         keys
     }
 
     fn committed_index(&self) -> Option<usize> {
-        self.fork_order.get(&self.hardfork).copied()
+        self.fork_order
+            .get(&self.hardfork.name().to_ascii_lowercase())
+            .copied()
     }
 }
 
@@ -200,11 +206,10 @@ impl NetworkManifest {
             fork_order.insert(fork.name().to_ascii_lowercase(), index);
         }
 
-        let hardfork = self.hardfork.to_ascii_lowercase();
-        if !fork_order.contains_key(&hardfork) {
+        if !fork_order.contains_key(&self.hardfork.name().to_ascii_lowercase()) {
             bail!(
                 "committed hardfork `{}` is not scheduled by the chain spec",
-                self.hardfork
+                self.hardfork.name()
             );
         }
 
@@ -215,7 +220,7 @@ impl NetworkManifest {
             .collect();
 
         Ok(Commitments {
-            hardfork,
+            hardfork: self.hardfork.clone(),
             fork_order,
             features,
         })
@@ -238,10 +243,6 @@ impl NetworkManifest {
             _ => {}
         }
 
-        if self.hardfork.trim().is_empty() {
-            bail!("`hardfork` must name the single committed hardfork");
-        }
-
         let mut seen = BTreeSet::new();
         for feature in &self.features {
             let key = feature.to_ascii_lowercase();
@@ -262,6 +263,29 @@ impl NetworkManifest {
         }
 
         Ok(())
+    }
+}
+
+/// Serde glue for the typed [`Hardfork`] field: a fork serializes to its
+/// canonical name and deserializes through [`parse_hardfork`].
+mod hardfork_serde {
+    use serde::{de::Error, Deserialize, Deserializer, Serializer};
+
+    use super::{parse_hardfork, Hardfork};
+
+    #[allow(clippy::borrowed_box)]
+    pub fn serialize<S: Serializer>(
+        fork: &Box<dyn Hardfork>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(fork.name())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Box<dyn Hardfork>, D::Error> {
+        let name = String::deserialize(deserializer)?;
+        parse_hardfork(&name).ok_or_else(|| D::Error::custom(format!("unknown hardfork `{name}`")))
     }
 }
 

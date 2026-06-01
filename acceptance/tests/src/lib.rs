@@ -66,6 +66,8 @@ pub use world_chain_acceptance_macros::acceptance_test;
 // crate without consumers needing an `inventory` dependency.
 pub use inventory;
 
+inventory::collect!(AcceptanceTest);
+
 #[cfg(test)]
 mod tests {
     use super::*;

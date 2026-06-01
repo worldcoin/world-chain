@@ -98,6 +98,26 @@ impl WorldChainSpec {
     }
 }
 
+/// Resolve a (case-insensitive) hardfork name to a boxed [`Hardfork`].
+///
+/// Tries the World Chain schedule first, then the OP and Ethereum schedules, so
+/// any fork the canonical chain spec can schedule (`jovian`, `karst`, `cancun`,
+/// …) round-trips through its name. Returns `None` if no known hardfork matches.
+pub fn parse_hardfork(name: &str) -> Option<Box<dyn Hardfork>> {
+    use core::str::FromStr;
+
+    if let Ok(fork) = WorldChainHardfork::from_str(name) {
+        return Some(Box::new(fork));
+    }
+    if let Ok(fork) = OpHardfork::from_str(name) {
+        return Some(Box::new(fork));
+    }
+    if let Ok(fork) = EthereumHardfork::from_str(name) {
+        return Some(Box::new(fork));
+    }
+    None
+}
+
 impl EthChainSpec for WorldChainSpec {
     type Header = Header;
 

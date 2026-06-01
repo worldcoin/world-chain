@@ -4,8 +4,10 @@ mod builder;
 mod hardfork;
 mod spec;
 
+pub use alloy_hardforks::Hardfork;
 pub use builder::WorldChainSpecBuilder;
 pub use hardfork::{WorldChainHardfork, WorldChainHardforks};
 pub use spec::{
     JOVIAN_UPGRADE_TIMESTAMP_MAINNET, JOVIAN_UPGRADE_TIMESTAMP_SEPOLIA, WorldChainSpec,
+    parse_hardfork,
 };

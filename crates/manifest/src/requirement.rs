@@ -5,9 +5,11 @@
 //!
 //! - [`Feature`] — a World Chain feature (flashblocks, block access lists, PBH).
 //!   A manifest may commit to an arbitrary set of features.
-//! - [`Hardfork`] — a canonical hardfork (e.g. `jovian`, `karst`, `tropo`). A
+//! - A hardfork — a typed [`Hardfork`] (e.g. `jovian`, `karst`, `tropo`). A
 //!   manifest commits to exactly one hardfork; cumulative ordering means a
 //!   requirement is satisfied when the committed hardfork is at or after it.
+
+use world_chain_chainspec::{parse_hardfork, Hardfork};
 
 /// The recognised feature keys. Features form a closed set, so a `requires(...)`
 /// naming a feature outside this set is a declaration error.
@@ -17,23 +19,24 @@ pub const KNOWN_FEATURE_KEYS: [&str; 3] = ["flashblocks", "block_access_list", "
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Feature(pub &'static str);
 
-/// A canonical hardfork requirement key (lowercase fork name).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Hardfork(pub &'static str);
-
-/// A single requirement: either a feature or a hardfork.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+/// A single requirement: either a feature or a typed hardfork.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Requirement {
     /// A hardfork the network must be at (or past).
-    Hardfork(Hardfork),
+    Hardfork(Box<dyn Hardfork>),
     /// A feature the network must enable.
     Feature(Feature),
 }
 
 impl Requirement {
-    /// Construct a hardfork requirement.
-    pub const fn hardfork(name: &'static str) -> Self {
-        Requirement::Hardfork(Hardfork(name))
+    /// Construct a hardfork requirement from a (case-insensitive) fork name.
+    ///
+    /// Panics if `name` is not a known hardfork — a `requires(hardfork = ...)`
+    /// naming an unknown fork is a declaration error caught at startup.
+    pub fn hardfork(name: &str) -> Self {
+        let fork =
+            parse_hardfork(name).unwrap_or_else(|| panic!("unknown hardfork requirement `{name}`"));
+        Requirement::Hardfork(fork)
     }
 
     /// Construct a feature requirement.
@@ -42,10 +45,10 @@ impl Requirement {
     }
 
     /// The requirement key (fork or feature name).
-    pub const fn name(&self) -> &'static str {
+    pub fn name(&self) -> &str {
         match self {
-            Requirement::Hardfork(Hardfork(name)) => name,
-            Requirement::Feature(Feature(name)) => name,
+            Requirement::Hardfork(fork) => fork.name(),
+            Requirement::Feature(feature) => feature.0,
         }
     }
 

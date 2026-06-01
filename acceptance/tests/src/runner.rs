@@ -187,10 +187,11 @@ async fn evaluate<E: TestExecutor>(
     env: &Arc<Env>,
     executor: &E,
 ) -> TestResult {
-    let requires: Vec<String> = test.requires.iter().map(Requirement::label).collect();
+    let required = (test.requires)();
+    let requires: Vec<String> = required.iter().map(Requirement::label).collect();
 
     // A feature requirement naming no known feature is a declaration bug.
-    let unknown = env.unknown(test.requires);
+    let unknown = env.unknown(&required);
     if !unknown.is_empty() {
         warn!(
             check = test.name,
@@ -207,7 +208,7 @@ async fn evaluate<E: TestExecutor>(
     }
 
     // Skip checks the manifest does not commit to.
-    let missing = env.missing(test.requires);
+    let missing = env.missing(&required);
     if !missing.is_empty() {
         let reason = format!("manifest does not commit to: {}", missing.join(", "));
         info!(check = test.name, %reason, "skipping acceptance check");
@@ -272,9 +273,9 @@ fn skipped_or_failed(
 
 /// Committed requirements not referenced by any registered check.
 fn uncovered_commitments(env: &Env) -> Vec<String> {
-    let referenced: BTreeSet<&str> = inventory::iter::<AcceptanceTest>
+    let referenced: BTreeSet<String> = inventory::iter::<AcceptanceTest>
         .into_iter()
-        .flat_map(|test| test.requires.iter().map(Requirement::name))
+        .flat_map(|test| (test.requires)().into_iter().map(|req| req.name().to_string()))
         .collect();
 
     env.commitments()

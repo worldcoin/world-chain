@@ -61,18 +61,16 @@ pub fn acceptance_test(attr: TokenStream, item: TokenStream) -> TokenStream {
         .name
         .unwrap_or_else(|| fn_name.to_string().replace('_', " "));
 
-    // Each requirement is emitted as a typed `Requirement` (a `Hardfork` or
-    // `Feature`) resolved against the network manifest at run time.
+    // Each requirement is emitted as a typed `Requirement` (a hardfork or a
+    // `Feature`) resolved against the network manifest at run time. A hardfork
+    // carries a `Box<dyn Hardfork>`, which cannot live in a `'static` constant,
+    // so the requirements are produced by a constructor function.
     let requires = args.requires.iter().map(|(kind, name)| {
         let name = name.to_string().to_ascii_lowercase();
         match kind.to_string().as_str() {
-            "hardfork" => quote! { ::world_chain_acceptance::Requirement::Hardfork(
-                ::world_chain_acceptance::Hardfork(#name)
-            ) },
+            "hardfork" => quote! { ::world_chain_acceptance::Requirement::hardfork(#name) },
             // already validated to be `hardfork` or `feature`
-            _ => quote! { ::world_chain_acceptance::Requirement::Feature(
-                ::world_chain_acceptance::Feature(#name)
-            ) },
+            _ => quote! { ::world_chain_acceptance::Requirement::feature(#name) },
         }
     });
 
@@ -83,7 +81,7 @@ pub fn acceptance_test(attr: TokenStream, item: TokenStream) -> TokenStream {
             ::world_chain_acceptance::AcceptanceTest {
                 name: #test_name,
                 category: ::world_chain_acceptance::Category::#category,
-                requires: &[ #( #requires ),* ],
+                requires: || ::std::vec![ #( #requires ),* ],
                 run: |ctx| ::std::boxed::Box::pin(#fn_name(ctx)),
             }
         }

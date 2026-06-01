@@ -77,9 +77,10 @@ pub struct AcceptanceTest {
     /// to for this check to run. A check whose requirements the manifest does
     /// not commit to is reported as skipped rather than failed, so the same
     /// suite runs against any deployment that commits to a superset.
-    pub requires: &'static [Requirement],
+    ///
+    /// Built lazily: a hardfork requirement carries a `Box<dyn Hardfork>`, which
+    /// cannot live in a `'static` constant, so the macro emits a constructor.
+    pub requires: fn() -> Vec<Requirement>,
     /// The check body.
     pub run: TestFn,
 }
-
-inventory::collect!(AcceptanceTest);
