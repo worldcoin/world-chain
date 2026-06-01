@@ -1,0 +1,103 @@
+name: deploy-alphanet
+
+# Maintainer-triggered deploy of a PR's code to the world-chain-alphanet devnet.
+# Comment `/deploy-alphanet` on a PR to build that PR's HEAD into a tagged image and
+# dispatch a tag bump to worldcoin/crypto-apps (alphanet apps).
+#
+# This workflow is privileged (issue_comment runs the copy on the DEFAULT branch with
+# write tokens + secrets). It therefore does NOT check out or execute any PR code; it only
+# authorizes the commenter, resolves the immutable PR head SHA, and hands off to the
+# separate `deploy-alphanet-build.yml` workflow (workflow_dispatch) which performs the
+# actual checkout/build. Keeping untrusted-code execution out of this privileged context
+# avoids the CodeQL "untrusted checkout" / TOCTOU class entirely.
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: deploy-alphanet-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  authorize-and-dispatch:
+    name: authorize and dispatch build
+    # Only react to `/deploy-alphanet` comments on pull requests.
+    if: >-
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/deploy-alphanet')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Acknowledge command
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api -X POST \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${REPO}/issues/comments/${COMMENT_ID}/reactions" \
+            -f content=eyes >/dev/null
+
+      - name: Check commenter permission
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.event.comment.user.login }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PERMISSION="$(gh api "repos/${REPO}/collaborators/${ACTOR}/permission" --jq '.permission')"
+          echo "Commenter ${ACTOR} has permission: ${PERMISSION}"
+          if [[ "${PERMISSION}" != "admin" && "${PERMISSION}" != "write" ]]; then
+            gh pr comment "${PR_NUMBER}" --repo "${REPO}" \
+              --body "@${ACTOR} \`/deploy-alphanet\` requires write or admin access on this repository. Deploy aborted."
+            echo "::error::${ACTOR} is not authorized to run /deploy-alphanet"
+            exit 1
+          fi
+
+      - name: Resolve PR head and dispatch build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          ACTOR: ${{ github.event.comment.user.login }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          read -r HEAD_SHA HEAD_OWNER < <(
+            gh pr view "${PR_NUMBER}" --repo "${REPO}" \
+              --json headRefOid,headRepositoryOwner \
+              --jq '[.headRefOid, .headRepositoryOwner.login] | @tsv'
+          )
+          OWNER="${REPO%%/*}"
+          if [[ "${HEAD_OWNER}" != "${OWNER}" ]]; then
+            gh pr comment "${PR_NUMBER}" --repo "${REPO}" \
+              --body "Refusing to deploy a fork PR (head owned by \`${HEAD_OWNER}\`). Push the branch to \`${OWNER}/${REPO##*/}\` to deploy."
+            echo "::error::Refusing to build fork PR head owned by ${HEAD_OWNER}"
+            exit 1
+          fi
+          TAG="sha-${HEAD_SHA:0:7}"
+
+          # Hand off to the build workflow. --ref main pins the build workflow + its local
+          # composite actions to the trusted default branch; the PR code is only consumed as
+          # an immutable SHA input to checkout/build.
+          gh workflow run deploy-alphanet-build.yml \
+            --repo "${REPO}" \
+            --ref main \
+            -f sha="${HEAD_SHA}" \
+            -f tag="${TAG}" \
+            -f pr="${PR_NUMBER}" \
+            -f issuer="${ACTOR:-${PR_NUMBER}}"
+
+          gh pr comment "${PR_NUMBER}" --repo "${REPO}" \
+            --body "🛠️ Building \`${TAG}\` and dispatching an **alphanet** deploy. Track it in the [deploy-alphanet-build runs](https://github.com/${REPO}/actions/workflows/deploy-alphanet-build.yml)."
