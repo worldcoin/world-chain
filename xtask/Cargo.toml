@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 # Internal
+world-chain-acceptance.workspace = true
 world-chain-cli.workspace = true
 world-chain-chainspec.workspace = true
 world-chain-devnet.workspace = true
@@ -59,3 +60,4 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true
 tracing-subscriber.workspace = true
+url.workspace = true

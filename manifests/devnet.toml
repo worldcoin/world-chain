@@ -1,0 +1,20 @@
+# Local devnet manifest.
+#
+# Single source of truth for the in-process devnet: it derives the node's chain
+# spec (`--chain manifests/devnet.toml`) AND is the acceptance criterion the
+# harness holds the network to (`xtask acceptance --manifest manifests/devnet.toml`).
+name = "devnet"
+
+[chain]
+# Canonical predefined spec. The committed hardforks are read back from this
+# chain spec via reth's hardfork traits — they are not re-declared here.
+spec = "dev"
+chain_id = 2151908
+
+[features.flashblocks]
+enabled = true
+access_list = false
+
+[features.pbh]
+# The native in-process devnet does not deploy PBH contracts.
+enabled = false

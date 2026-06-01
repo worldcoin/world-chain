@@ -14,6 +14,7 @@ use tracing_subscriber::{
     util::SubscriberInitExt,
 };
 
+mod acceptance;
 mod devnet;
 mod docs;
 mod preflight;
@@ -23,6 +24,9 @@ mod toolkit;
 
 #[derive(Parser)]
 #[command(name = "xtask", about = "World Chain development tasks")]
+// Subcommand arg structs differ in size; this enum is a short-lived CLI parse
+// target, so the size disparity is irrelevant.
+#[allow(clippy::large_enum_variant)]
 enum Command {
     /// Generate CLI reference documentation for the mdbook
     Docs(docs::Args),
@@ -36,6 +40,8 @@ enum Command {
     Stress(stress::Args),
     /// Prove a PBH transaction
     Prove(toolkit::Args),
+    /// Run the acceptance harness and emit a report
+    Acceptance(acceptance::Args),
 }
 
 #[tokio::main]
@@ -67,6 +73,13 @@ async fn main() -> eyre::Result<()> {
             stress::run(args).await
         }
         Command::Prove(args) => toolkit::run(args).await,
+        Command::Acceptance(args) => {
+            tracing_subscriber::fmt()
+                .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+                .init();
+
+            acceptance::run_acceptance(args).await
+        }
     }
 }
 

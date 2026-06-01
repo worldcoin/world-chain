@@ -1,0 +1,22 @@
+# Alphanet manifest.
+#
+# The deployed alphanet commits to exactly the functionality declared here. The
+# node is launched with `--chain manifests/alphanet.toml` (deriving its chain
+# spec) and the harness is run with `--manifest manifests/alphanet.toml`, so the
+# deployment and its acceptance criteria can never drift apart.
+name = "alphanet"
+
+[chain]
+# Canonical chain source. Use a named spec, or commit to a genesis file with
+# `genesis = "alphanet.genesis.json"` for full control over the schedule.
+spec = "dev"
+# TODO(alphanet): set the real alphanet chain id once the chain is provisioned.
+# chain_id = 0
+
+[features.flashblocks]
+enabled = true
+access_list = true
+
+[features.pbh]
+enabled = true
+verified_blockspace_capacity = 70
