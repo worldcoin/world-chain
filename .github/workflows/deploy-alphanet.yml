@@ -1,0 +1,191 @@
+name: deploy-alphanet
+
+# Maintainer-triggered deploy of a PR's code to the world-chain-alphanet devnet.
+# Comment `/deploy-alphanet` on a PR to build that PR's HEAD into a tagged image and
+# dispatch a tag bump to worldcoin/crypto-apps (alphanet apps).
+#
+# issue_comment workflows always run the copy of this file on the DEFAULT branch, so the
+# authorization gate below cannot be modified from within the PR being deployed.
+
+on:
+  issue_comment:
+    types: [created]
+
+env:
+  IMAGE_NAME: ${{ github.repository }}
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  AWS_REGION: us-east-1
+  SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: deploy-alphanet-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    name: authorize and resolve PR head
+    # Only react to `/deploy-alphanet` comments on pull requests.
+    if: >-
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/deploy-alphanet')
+    runs-on: ubuntu-latest
+    outputs:
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      tag: ${{ steps.pr.outputs.tag }}
+    steps:
+      - name: Acknowledge command
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api -X POST \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${REPO}/issues/comments/${COMMENT_ID}/reactions" \
+            -f content=eyes >/dev/null
+
+      - name: Check commenter permission
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.event.comment.user.login }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PERMISSION="$(gh api "repos/${REPO}/collaborators/${ACTOR}/permission" --jq '.permission')"
+          echo "Commenter ${ACTOR} has permission: ${PERMISSION}"
+          if [[ "${PERMISSION}" != "admin" && "${PERMISSION}" != "write" ]]; then
+            gh pr comment "${PR_NUMBER}" --repo "${REPO}" \
+              --body "@${ACTOR} \`/deploy-alphanet\` requires write or admin access on this repository. Deploy aborted."
+            echo "::error::${ACTOR} is not authorized to run /deploy-alphanet"
+            exit 1
+          fi
+
+      - name: Resolve PR head
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          read -r HEAD_SHA HEAD_OWNER < <(
+            gh pr view "${PR_NUMBER}" --repo "${REPO}" \
+              --json headRefOid,headRepositoryOwner \
+              --jq '[.headRefOid, .headRepositoryOwner.login] | @tsv'
+          )
+          OWNER="${REPO%%/*}"
+          if [[ "${HEAD_OWNER}" != "${OWNER}" ]]; then
+            gh pr comment "${PR_NUMBER}" --repo "${REPO}" \
+              --body "Refusing to deploy a fork PR (head owned by \`${HEAD_OWNER}\`). Push the branch to \`${OWNER}/${REPO##*/}\` to deploy."
+            echo "::error::Refusing to build fork PR head owned by ${HEAD_OWNER}"
+            exit 1
+          fi
+          echo "head_sha=${HEAD_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "tag=sha-${HEAD_SHA:0:7}" >> "${GITHUB_OUTPUT}"
+          echo "Resolved head ${HEAD_SHA} -> tag sha-${HEAD_SHA:0:7}"
+
+  build-and-push:
+    name: build and push docker
+    needs: authorize
+    environment: dev
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: arc-public-8xlarge-amd64-runner
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check Out PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.authorize.outputs.head_sha }}
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: ${{ matrix.platform }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          git_sha: ${{ needs.authorize.outputs.head_sha }}
+
+  merge:
+    name: merge multi-arch manifest
+    needs:
+      - authorize
+      - build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Out PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.authorize.outputs.head_sha }}
+      - name: Merge multi-arch manifest
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.authorize.outputs.tag }}
+
+  dispatch:
+    name: dispatch alphanet bump to crypto-apps
+    needs:
+      - authorize
+      - merge
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.DEVNET_DEPLOYMENT_APPID }}
+          private-key: ${{ secrets.DEVNET_DEPLOYMENT_SECRET }}
+          owner: worldcoin
+          repositories: crypto-apps
+
+      - name: Send repository_dispatch
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          TAG: ${{ needs.authorize.outputs.tag }}
+          SHA: ${{ needs.authorize.outputs.head_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api repos/worldcoin/crypto-apps/dispatches \
+            -f event_type=bump-world-chain-alphanet \
+            -f "client_payload[tag]=${TAG}" \
+            -f "client_payload[sha]=${SHA}" \
+            -f "client_payload[issuer]=${RUN_URL}" \
+            -f "client_payload[pr]=${PR_NUMBER}"
+          echo "Dispatched bump-world-chain-alphanet with tag ${TAG}"
+
+      - name: Comment dispatch result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          TAG: ${{ needs.authorize.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh pr comment "${PR_NUMBER}" --repo "${REPO}" \
+            --body "🚀 Built \`${REGISTRY}/${IMAGE_NAME}:${TAG}\` and dispatched an **alphanet** deploy to [worldcoin/crypto-apps](https://github.com/worldcoin/crypto-apps/actions/workflows/bump-world-chain-alphanet.yaml). A bump PR will open there and auto-merge once checks pass."
