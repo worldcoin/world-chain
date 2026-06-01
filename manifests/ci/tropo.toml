@@ -1,0 +1,19 @@
+# CI fork-compatibility manifest — Tropo (wired, not yet gating).
+#
+# Tropo is the first World Chain specific hardfork after Jovian. The built-in
+# `dev` spec does not schedule it, so this manifest commits to a genesis file
+# that activates every fork through Tropo at genesis. Tropo IS a
+# `WorldChainHardfork`, so the spawned devnet can activate it once this cell is
+# enabled in the workflow matrix.
+name = "ci-tropo"
+
+# Committed hardfork (cumulative: Tropo + every earlier fork).
+hardfork = "tropo"
+
+# Current World Chain features. `block_access_list` implies `flashblocks`.
+features = ["flashblocks", "block_access_list"]
+
+[chain]
+# Named specs omit World Chain specific forks, so commit to a genesis file that
+# schedules `tropoTime` (see manifests/ci/tropo.genesis.json).
+genesis = "tropo.genesis.json"

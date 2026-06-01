@@ -25,8 +25,8 @@ members = [
     "crates/pbh",
     "crates/devnet",
     "crates/test-utils",
-    "crates/acceptance",
-    "crates/acceptance-macros",
+    "acceptance/tests",
+    "acceptance/macros",
     "crates/manifest",
     "e2e-tests",
     "xtask",
@@ -69,8 +69,8 @@ world-chain-evm = { path = "crates/evm", default-features = false }
 world-chain-state = { path = "crates/state", default-features = false }
 world-chain-devnet = { path = "crates/devnet", default-features = false }
 world-chain-test-utils = { path = "crates/test-utils", default-features = false }
-world-chain-acceptance = { path = "crates/acceptance", default-features = false }
-world-chain-acceptance-macros = { path = "crates/acceptance-macros", default-features = false }
+world-chain-acceptance = { path = "acceptance/tests", default-features = false }
+world-chain-acceptance-macros = { path = "acceptance/macros", default-features = false }
 world-chain-manifest = { path = "crates/manifest", default-features = false }
 
 # reth crates.io

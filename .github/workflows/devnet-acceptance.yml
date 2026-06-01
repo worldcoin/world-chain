@@ -1,0 +1,130 @@
+name: Devnet Acceptance
+
+# Fork-compatibility smoke gate, modeled after Optimism's op-acceptance-tests.
+#
+# Each matrix cell bootstraps an in-process devnet derived from a committed
+# manifest (`xtask acceptance --target spawned`) and runs the full acceptance
+# suite against it. Because the same manifest drives both the deployment and the
+# acceptance criteria, every cell asserts that the network behaves exactly as the
+# forks and features it commits to require. A single aggregator job
+# (`acceptance-gate`) fans the cells back in as the required status check.
+#
+# The matrix is the wire for "various manifest deployments": add a manifest under
+# manifests/ci/ and a row here to assert another fork/feature combination.
+
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: full
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+
+jobs:
+  fork-acceptance:
+    name: fork-acceptance (${{ matrix.fork }})
+    runs-on: arc-public-8xlarge-amd64-runner
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Jovian is the live World Chain hardfork: the gating cell.
+          - fork: jovian
+            manifest: manifests/ci/jovian.toml
+            preset: minimal
+            run: true
+            allow_failure: false
+
+          # --- Wired but dormant. Flip `run` to true to start gating on it. ---
+
+          # Tropo is a WorldChainHardfork and its genesis schedules `tropoTime`,
+          # so the spawned devnet can activate it. Enable once Tropo behaviour is
+          # ready to be asserted on every PR.
+          - fork: tropo
+            manifest: manifests/ci/tropo.toml
+            preset: minimal
+            run: false
+            allow_failure: true
+
+          # Karst is an OpHardfork, not (yet) a WorldChainHardfork, so the spawned
+          # devnet rejects it; and the genesis-based Tropo cell can't cover it
+          # either (karstTime is unparsable). This cell stays dormant until the
+          # devnet hardfork config maps Karst, or it runs with `--target alphanet`
+          # against a deployed network. See manifests/ci/README.md.
+          - fork: karst
+            manifest: manifests/ci/karst.toml
+            preset: minimal
+            run: false
+            allow_failure: true
+    steps:
+      - uses: actions/checkout@v6
+        if: ${{ matrix.run }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ matrix.run }}
+
+      - name: Cache
+        if: ${{ matrix.run }}
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-devnet-acceptance-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-devnet-acceptance-
+
+      - name: Run acceptance harness (${{ matrix.fork }})
+        id: run
+        if: ${{ matrix.run }}
+        continue-on-error: ${{ matrix.allow_failure }}
+        run: |
+          cargo xtask acceptance \
+            --manifest "${{ matrix.manifest }}" \
+            --target spawned \
+            --preset "${{ matrix.preset }}" \
+            --block-time-ms 1000 \
+            --strict \
+            --report "acceptance-${{ matrix.fork }}.json" \
+            --markdown "acceptance-${{ matrix.fork }}.md"
+
+      - name: Upload acceptance report (${{ matrix.fork }})
+        if: ${{ always() && matrix.run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-report-${{ matrix.fork }}
+          path: |
+            acceptance-${{ matrix.fork }}.json
+            acceptance-${{ matrix.fork }}.md
+          if-no-files-found: ignore
+
+      - name: Report allowed failure (${{ matrix.fork }})
+        if: ${{ matrix.run && matrix.allow_failure && steps.run.outcome == 'failure' }}
+        env:
+          FORK: ${{ matrix.fork }}
+        run: printf '::warning::Acceptance run failed for %s, but this cell is allowed to fail.\n' "$FORK"
+
+  # Single required status check: green only when every gating cell passed.
+  acceptance-gate:
+    name: acceptance-gate
+    runs-on: ubuntu-latest
+    needs: [fork-acceptance]
+    if: ${{ always() }}
+    steps:
+      - name: Verify fork-acceptance result
+        env:
+          RESULT: ${{ needs.fork-acceptance.result }}
+        run: |
+          echo "fork-acceptance result: $RESULT"
+          if [ "$RESULT" != "success" ]; then
+            echo "::error::Devnet acceptance gate failed (fork-acceptance: $RESULT)"
+            exit 1
+          fi

@@ -1,0 +1,23 @@
+# CI fork-compatibility manifest — Karst (wired, not spawnable in-process yet).
+#
+# Karst is an OP Stack hardfork (`OpHardfork::Karst`), NOT a `WorldChainHardfork`.
+# The built-in `dev` spec schedules it, so this manifest LOADS, but the spawned
+# devnet cannot activate it: `xtask acceptance --target spawned` rejects it with
+# "spawned devnet supports World Chain hardforks only" (see xtask/src/acceptance.rs,
+# `hardfork_config`). Until Karst is represented in the devnet hardfork config,
+# this cell can only run with `--target alphanet` against a deployed network.
+#
+# Note: Karst sits before Tropo in the canonical fork order, so once a Tropo cell
+# is spawned its cumulative gating already exercises the `karst/` checks.
+name = "ci-karst"
+
+# Committed hardfork (cumulative: Karst + every earlier fork).
+hardfork = "karst"
+
+# Current World Chain features. `block_access_list` implies `flashblocks`.
+features = ["flashblocks", "block_access_list"]
+
+[chain]
+# The built-in OP dev spec schedules Karst, so no genesis file is needed.
+spec = "dev"
+chain_id = 2151908
