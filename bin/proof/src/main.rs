@@ -81,14 +81,33 @@ enum Command {
     HashRollupConfig(HashRollupConfigArgs),
     /// Build and write the witness to a file without proving.
     Witness(WitnessArgs),
-    /// Generate witness and send to a running Nitro enclave for attested proving.
+    /// AWS Nitro TEE proving.
     #[cfg(feature = "nitro")]
-    Nitro(NitroArgs),
+    Nitro {
+        #[command(subcommand)]
+        command: NitroCommand,
+    },
+    /// SP1 zkVM proving.
+    #[cfg(feature = "sp1")]
+    Sp1 {
+        #[command(subcommand)]
+        command: Sp1Command,
+    },
+}
+
+#[cfg(feature = "nitro")]
+#[derive(Debug, Subcommand)]
+enum NitroCommand {
+    /// Generate witness and send to a running Nitro enclave for attested proving.
+    Prove(NitroArgs),
+}
+
+#[cfg(feature = "sp1")]
+#[derive(Debug, Subcommand)]
+enum Sp1Command {
     /// Execute the SP1 range program against a witness file (no ZK proof, fast).
-    #[cfg(feature = "sp1")]
     Execute(Sp1ExecuteArgs),
-    /// Prove the SP1 range program against a witness file (full ZK proof, very slow).
-    #[cfg(feature = "sp1")]
+    /// Generate range + aggregation proofs end-to-end from RPC.
     Prove(Sp1ProveArgs),
 }
 
@@ -342,11 +361,14 @@ fn main() -> eyre::Result<()> {
             println!("metadata:      {}", metadata_path.display());
         }
         #[cfg(feature = "nitro")]
-        Command::Nitro(args) => nitro_prove(args)?,
+        Command::Nitro { command } => match command {
+            NitroCommand::Prove(args) => nitro_prove(args)?,
+        },
         #[cfg(feature = "sp1")]
-        Command::Execute(args) => sp1_execute(args)?,
-        #[cfg(feature = "sp1")]
-        Command::Prove(args) => sp1_prove(args)?,
+        Command::Sp1 { command } => match command {
+            Sp1Command::Execute(args) => sp1_execute(args)?,
+            Sp1Command::Prove(args) => sp1_prove(args)?,
+        },
     }
 
     Ok(())

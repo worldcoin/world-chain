@@ -13,7 +13,7 @@ default = []
 # SP1/Succinct zkVM backend.
 sp1 = [
     "dep:world-chain-proof-succinct-client-utils",
-    "dep:world-chain-proof-succinct-proof-utils",
+    "dep:world-chain-proof-succinct-utils",
 ]
 # AWS Nitro TEE backend. Only compiles on Linux (requires AF_VSOCK).
 aws_nitro = [
@@ -25,4 +25,4 @@ aws_nitro = [
 world-chain-proof-core.workspace = true
 world-chain-proof-nitro = { workspace = true, optional = true }
 world-chain-proof-succinct-client-utils = { workspace = true, optional = true }
-world-chain-proof-succinct-proof-utils = { workspace = true, optional = true }
+world-chain-proof-succinct-utils = { workspace = true, optional = true }

@@ -19,4 +19,4 @@ kona-preimage = { git = "https://github.com/ethereum-optimism/optimism", tag = "
 ] }
 kona-proof = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
 spin = "0.10"
-world-chain-proof-succinct-client-utils = { path = "../../client", default-features = false }
+world-chain-proof-succinct-client-utils = { path = "../client", default-features = false }

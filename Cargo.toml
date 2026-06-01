@@ -10,6 +10,7 @@ repository = "https://github.com/worldcoin/world-chain/"
 resolver = "3"
 members = [
     "bin/world-chain",
+    "bin/proof",
     "crates/chainspec",
     "crates/node",
     "crates/rpc",
@@ -27,10 +28,8 @@ members = [
     "crates/proof/protocol",
     "crates/proof/nitro",
     "crates/proof/world-chain-proof",
-    "crates/proof/succinct/utils/build",
     "crates/proof/succinct/utils/client",
-    "crates/proof/succinct/utils/elfs",
-    "crates/proof/succinct/utils/ethereum/client",
+    "crates/proof/succinct/utils/ethereum-client",
     "crates/proof/succinct/utils/host",
     "crates/proof/succinct/utils/proof",
     "crates/devnet",
@@ -81,12 +80,10 @@ world-chain-proof-core = { path = "crates/proof/core", default-features = false 
 world-chain-proof = { path = "crates/proof/world-chain-proof", default-features = false }
 world-chain-proof-protocol = { path = "crates/proof/protocol", default-features = false }
 world-chain-proof-nitro = { path = "crates/proof/nitro", default-features = false }
-world-chain-proof-succinct-build-utils = { path = "crates/proof/succinct/utils/build", default-features = false }
 world-chain-proof-succinct-client-utils = { path = "crates/proof/succinct/utils/client", default-features = false }
-world-chain-proof-succinct-elfs = { path = "crates/proof/succinct/utils/elfs", default-features = false }
-world-chain-proof-succinct-ethereum-client-utils = { path = "crates/proof/succinct/utils/ethereum/client", default-features = false }
+world-chain-proof-succinct-ethereum-client-utils = { path = "crates/proof/succinct/utils/ethereum-client", default-features = false }
 world-chain-proof-succinct-host-utils = { path = "crates/proof/succinct/utils/host", default-features = false }
-world-chain-proof-succinct-proof-utils = { path = "crates/proof/succinct/utils/proof", default-features = false }
+world-chain-proof-succinct-utils = { path = "crates/proof/succinct/utils/proof", default-features = false }
 
 # reth crates.io
 reth-codecs = { version = "0.3.1", default-features = false }
@@ -238,6 +235,7 @@ kona-preimage = { git = "https://github.com/ethereum-optimism/optimism", tag = "
     "rkyv",
     "serde",
 ] }
+kona-host = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
 kona-proof = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
 kona-protocol = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
 

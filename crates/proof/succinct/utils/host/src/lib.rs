@@ -12,7 +12,7 @@ use world_chain_proof_core::{
     types::AggregationInputs,
 };
 use world_chain_proof_succinct_client_utils::WorldRangeWitness;
-use world_chain_proof_succinct_proof_utils::{AggregationProofRequest, RangeProofRequest};
+use world_chain_proof_succinct_utils::{AggregationProofRequest, RangeProofRequest};
 
 /// Error returned while constructing host-side proof config.
 #[derive(Debug, thiserror::Error)]

@@ -15,7 +15,7 @@ pub use world_chain_proof_core::*;
 #[cfg(feature = "sp1")]
 pub mod sp1 {
     pub use world_chain_proof_succinct_client_utils::*;
-    pub use world_chain_proof_succinct_proof_utils::*;
+    pub use world_chain_proof_succinct_utils::*;
 }
 
 #[cfg(feature = "aws_nitro")]
