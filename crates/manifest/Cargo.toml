@@ -1,0 +1,29 @@
+[package]
+name = "world-chain-manifest"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# World Chain
+world-chain-chainspec = { workspace = true, features = ["serde"] }
+
+# reth / alloy
+reth-chainspec.workspace = true
+alloy-chains.workspace = true
+alloy-genesis.workspace = true
+
+# misc
+eyre.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+world-chain-chainspec = { workspace = true, features = ["serde"] }

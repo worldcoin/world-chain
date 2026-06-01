@@ -1,0 +1,19 @@
+# Local devnet manifest.
+#
+# Single source of truth for the in-process devnet: it derives the node's chain
+# spec (`--chain manifests/devnet.toml`) AND is the acceptance criterion the
+# harness holds the network to (`xtask acceptance --manifest manifests/devnet.toml`).
+name = "devnet"
+
+# The single hardfork this network commits to. Hardfork-gated checks run for
+# this fork and every fork before it.
+hardfork = "jovian"
+
+# Arbitrary set of committed features. The native in-process devnet does not
+# deploy PBH contracts, so PBH is omitted.
+features = ["flashblocks"]
+
+[chain]
+# Canonical predefined spec; the committed hardfork must be one it schedules.
+spec = "dev"
+chain_id = 2151908

@@ -25,6 +25,9 @@ members = [
     "crates/pbh",
     "crates/devnet",
     "crates/test-utils",
+    "acceptance/tests",
+    "acceptance/macros",
+    "crates/manifest",
     "e2e-tests",
     "xtask",
 ]
@@ -66,6 +69,9 @@ world-chain-evm = { path = "crates/evm", default-features = false }
 world-chain-state = { path = "crates/state", default-features = false }
 world-chain-devnet = { path = "crates/devnet", default-features = false }
 world-chain-test-utils = { path = "crates/test-utils", default-features = false }
+world-chain-acceptance = { path = "acceptance/tests", default-features = false }
+world-chain-acceptance-macros = { path = "acceptance/macros", default-features = false }
+world-chain-manifest = { path = "crates/manifest", default-features = false }
 
 # reth crates.io
 reth-codecs = { version = "0.3.1", default-features = false }
@@ -265,6 +271,11 @@ url = "2.5.7"
 brotli = "8.0.2"
 once_cell = "1.19"
 lru = "0.18"
+inventory = "0.3"
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+toml = "0.8"
 either = { version = "1.16.0", default-features = false }
 pin-project = "1.1.13"
 vergen = "9.1.0"
