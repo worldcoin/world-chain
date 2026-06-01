@@ -227,6 +227,85 @@ proof sp1 prove \
 
 ---
 
+## Running the Nitro enclave
+
+**Requirements:** an EC2 instance type with Nitro Enclave support (e.g. `m5.xlarge`) and the
+[AWS Nitro CLI](https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-cli-install.html)
+installed. The enclave binary and the `proof nitro prove` command must both run on the same
+instance; vsock (AF_VSOCK) is Linux-only and does not cross machine boundaries.
+
+### 1. Build the Docker image
+
+Run from the repo root. The Dockerfile at `crates/proof/nitro/Dockerfile` compiles the enclave
+binary inside the container.
+
+```bash
+docker build -t world-chain-nitro-enclave \
+  -f crates/proof/nitro/Dockerfile .
+```
+
+### 2. Package as an EIF
+
+```bash
+nitro-cli build-enclave \
+  --docker-uri world-chain-nitro-enclave:latest \
+  --output-file world-chain-nitro-enclave.eif
+```
+
+`nitro-cli` prints the PCR measurements on success:
+
+```
+PCR0: <48-byte hex>   # EIF image hash
+PCR1: <48-byte hex>   # kernel + bootstrap
+PCR2: <48-byte hex>   # application
+```
+
+Save these — they are passed to `proof nitro prove` as `--pcr0/1/2`.
+
+### 3. Run the enclave
+
+```bash
+nitro-cli run-enclave \
+  --eif-path world-chain-nitro-enclave.eif \
+  --memory 16384 \
+  --cpu-count 4 \
+  --enclave-cid 16
+```
+
+The enclave listens on vsock port **5005** by default. Override with `NITRO_VSOCK_PORT` if needed.
+
+Check it started:
+
+```bash
+nitro-cli describe-enclaves
+```
+
+### 4. Prove from the host
+
+```bash
+cargo run -p proof --features nitro -- nitro prove \
+  --start-block 29875200 \
+  --end-block   29875800 \
+  --l2-rpc      $L2_RPC_URL \
+  --l1-rpc      $L1_RPC_URL \
+  --l1-beacon-rpc $L1_BEACON_RPC_URL \
+  --rollup-config-hash $ROLLUP_CONFIG_HASH \
+  --network worldchain-sepolia \
+  --cid  16 \
+  --pcr0 $PCR0 \
+  --pcr1 $PCR1 \
+  --pcr2 $PCR2 \
+  --output ./nitro-artifact.json
+```
+
+### Stopping the enclave
+
+```bash
+nitro-cli terminate-enclave --enclave-id $(nitro-cli describe-enclaves | jq -r '.[0].EnclaveID')
+```
+
+---
+
 ## `nitro`
 
 ```
