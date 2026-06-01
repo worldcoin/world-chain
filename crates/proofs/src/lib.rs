@@ -155,29 +155,26 @@ pub const fn has_threshold(bitmap: u8) -> bool {
 
 sol! {
     #[sol(rpc)]
-    interface IWorldChainProofSystemFactory {
-        function domainHash() external view returns (bytes32);
-        function games(bytes32 proposalKey) external view returns (address);
-        function propose(
-            address parentRef,
+    interface IDisputeGameFactory {
+        function create(
+            uint32 gameType,
             bytes32 rootClaim,
-            uint256 l2BlockNumber,
-            bytes32 intermediateRootsHash
-        ) external payable returns (address game, bytes32 rootId);
-        function computeProposalKey(
-            address parentRef,
+            bytes calldata extraData
+        ) external payable returns (address proxy);
+        function setImplementation(uint32 gameType, address impl) external;
+        function setInitBond(uint32 gameType, uint256 initBond) external;
+        function initBonds(uint32 gameType) external view returns (uint256);
+        function gameImpls(uint32 gameType) external view returns (address);
+        function games(
+            uint32 gameType,
             bytes32 rootClaim,
-            uint256 l2BlockNumber,
-            bytes32 intermediateRootsHash
-        ) external view returns (bytes32);
-        function computeRootId(
-            address parentRef,
+            bytes calldata extraData
+        ) external view returns (address proxy, uint64 timestamp);
+        function getGameUUID(
+            uint32 gameType,
             bytes32 rootClaim,
-            uint256 l2BlockNumber,
-            bytes32 intermediateRootsHash,
-            bytes32 l1OriginHash,
-            uint256 l1OriginNumber
-        ) external view returns (bytes32);
+            bytes calldata extraData
+        ) external pure returns (bytes32 uuid);
     }
 
     #[sol(rpc)]
@@ -186,13 +183,19 @@ sol! {
         function parentRef() external view returns (address);
         function rootClaim() external view returns (bytes32);
         function l2BlockNumber() external view returns (uint256);
-        function state() external view returns (uint8);
+        function l1Head() external view returns (bytes32);
+        function extraData() external view returns (bytes memory);
+        function status() external view returns (uint8);
         function proofBitmap() external view returns (uint8);
         function proofCount() external view returns (uint8);
+        function proofDeadline() external view returns (uint64);
+        function challengeDeadline() external view returns (uint64);
+        function challenged() external view returns (bool);
         function challenge() external payable;
         function submitProofLane(uint8 laneId, bytes calldata proof) external;
-        function finalize() external;
-        function invalidate() external;
+        function resolve() external returns (uint8 status);
+        function invalidate() external returns (uint8 status);
+        function claimCredit() external;
     }
 
     #[sol(rpc)]
@@ -204,7 +207,6 @@ sol! {
         function setAnchorState(address game) external;
     }
 }
-
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{address, b256};
