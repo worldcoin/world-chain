@@ -29,7 +29,12 @@ world-chain-proof-succinct-client-utils = { path = "../../succinct/utils/client"
 world-chain-proof-succinct-ethereum-client-utils = { path = "../../succinct/utils/ethereum/client", default-features = false }
 world-chain-proof-succinct-host-utils = { path = "../../succinct/utils/host", default-features = false }
 world-chain-proof-nitro = { path = "../../nitro", default-features = false, features = ["aws_nitro"], optional = true }
+alloy-consensus = { version = "2.0.0", default-features = false, features = ["serde"], optional = true }
+bincode = { version = "1", optional = true }
+serde_cbor = { version = "0.11", optional = true }
+sp1-sdk = { version = "=6.1.0", features = ["network"], optional = true }
 
 [features]
 default = []
 nitro = ["dep:world-chain-proof-nitro"]
+sp1 = ["dep:sp1-sdk", "dep:alloy-consensus", "dep:bincode", "dep:serde_cbor"]

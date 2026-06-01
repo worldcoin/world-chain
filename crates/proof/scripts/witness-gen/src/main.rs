@@ -84,6 +84,12 @@ enum Command {
     /// Generate witness and send to a running Nitro enclave for attested proving.
     #[cfg(feature = "nitro")]
     Nitro(NitroArgs),
+    /// Execute the SP1 range program against a witness file (no ZK proof, fast).
+    #[cfg(feature = "sp1")]
+    Execute(Sp1ExecuteArgs),
+    /// Prove the SP1 range program against a witness file (full ZK proof, very slow).
+    #[cfg(feature = "sp1")]
+    Prove(Sp1ProveArgs),
 }
 
 #[derive(Debug, Args)]
@@ -97,7 +103,7 @@ struct HashRollupConfigArgs {
     l2_rpc: Option<String>,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 struct RpcArgs {
     /// L2 block number to start from (exclusive lower bound; proved range is start+1..=end).
     #[arg(long)]
@@ -177,6 +183,63 @@ struct NitroArgs {
     pcr2: Option<String>,
 
     /// Output path for the JSON artifact (boot info + attestation doc).
+    #[arg(long)]
+    output: Option<PathBuf>,
+}
+
+#[cfg(feature = "sp1")]
+#[derive(Debug, Args)]
+struct Sp1ExecuteArgs {
+    /// rkyv-serialized witness file produced by the `witness` subcommand.
+    #[arg(long, env = "WITNESS_PATH")]
+    witness: PathBuf,
+
+    /// Path to the SP1 range ELF binary.
+    #[arg(long, env = "RANGE_ELF_PATH")]
+    elf: PathBuf,
+}
+
+#[cfg(feature = "sp1")]
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum Sp1Prover {
+    /// Local CPU prover (requires 32–128 GB RAM).
+    #[value(name = "cpu")]
+    Cpu,
+    /// Succinct proving network (requires SP1_PRIVATE_KEY env var).
+    #[value(name = "network")]
+    Network,
+    /// Mock prover — no real ZK, for integration testing only.
+    #[value(name = "mock")]
+    Mock,
+}
+
+#[cfg(feature = "sp1")]
+#[derive(Debug, Args)]
+struct Sp1ProveArgs {
+    #[command(flatten)]
+    rpc: RpcArgs,
+
+    /// Number of equal-length sub-ranges to split the block range into.
+    #[arg(long, default_value_t = 1)]
+    ranges: u64,
+
+    /// Path to the SP1 range ELF binary.
+    #[arg(long, env = "RANGE_ELF_PATH")]
+    range_elf: PathBuf,
+
+    /// Path to the SP1 aggregation ELF binary.
+    #[arg(long, env = "AGG_ELF_PATH")]
+    agg_elf: PathBuf,
+
+    /// Prover backend. Overrides SP1_PROVER env var.
+    #[arg(long, env = "SP1_PROVER", default_value = "cpu")]
+    prover: Sp1Prover,
+
+    /// Prover address for on-chain attribution (defaults to zero address).
+    #[arg(long, default_value = "0x0000000000000000000000000000000000000000")]
+    prover_address: Address,
+
+    /// Output path for the aggregation proof JSON.
     #[arg(long)]
     output: Option<PathBuf>,
 }
@@ -280,6 +343,10 @@ fn main() -> eyre::Result<()> {
         }
         #[cfg(feature = "nitro")]
         Command::Nitro(args) => nitro_prove(args)?,
+        #[cfg(feature = "sp1")]
+        Command::Execute(args) => sp1_execute(args)?,
+        #[cfg(feature = "sp1")]
+        Command::Prove(args) => sp1_prove(args)?,
     }
 
     Ok(())
@@ -785,4 +852,191 @@ fn ensure_parent_dir(path: &Path) -> eyre::Result<()> {
             .wrap_err_with(|| format!("failed to create {}", parent.display()))?;
     }
     Ok(())
+}
+
+#[cfg(feature = "sp1")]
+fn sp1_execute(args: Sp1ExecuteArgs) -> eyre::Result<()> {
+    use sp1_sdk::{ProverClient, Prover, SP1Stdin};
+
+    let witness_bytes = fs::read(&args.witness)
+        .wrap_err_with(|| format!("failed to read {}", args.witness.display()))?;
+    let elf = fs::read(&args.elf)
+        .wrap_err_with(|| format!("failed to read ELF {}", args.elf.display()))?;
+
+    let mut stdin = SP1Stdin::new();
+    stdin.write_vec(witness_bytes);
+
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let client = ProverClient::builder().cpu().build().await;
+        let (public_values, report) = client
+            .execute(elf.into(), stdin)
+            .await
+            .map_err(|e| eyre!("SP1 execution failed: {e}"))?;
+
+        println!("execution succeeded");
+        println!("total cycles:  {}", report.total_instruction_count());
+        println!("public values: 0x{}", hex::encode(public_values.as_slice()));
+        Ok(())
+    })
+}
+
+#[cfg(feature = "sp1")]
+fn fetch_l1_header_by_hash(
+    client: &Client,
+    rpc_url: &str,
+    hash: B256,
+) -> eyre::Result<alloy_consensus::Header> {
+    let block_json: serde_json::Value = rpc(
+        client,
+        rpc_url,
+        "eth_getBlockByHash",
+        json!([hash, false]),
+    )?
+    .with_context(|| format!("eth_getBlockByHash returned null for {hash:?}"))?;
+    serde_json::from_value(block_json).wrap_err("failed to deserialize L1 block header")
+}
+
+#[cfg(feature = "sp1")]
+fn sp1_prove(args: Sp1ProveArgs) -> eyre::Result<()> {
+    use alloy_consensus::Header as L1Header;
+    use sp1_sdk::{HashableKey, ProverClient, Prover, ProvingKey, SP1Stdin};
+    use world_chain_proof_core::{boot::BootInfoStruct, types::AggregationInputs};
+
+    let n_ranges = args.ranges.max(1);
+    let total_blocks = args.rpc.end_block
+        .checked_sub(args.rpc.start_block)
+        .filter(|&n| n > 0)
+        .ok_or_else(|| eyre!("end_block must be > start_block"))?;
+    if n_ranges > total_blocks {
+        return Err(eyre!("--ranges {n_ranges} exceeds total block count {total_blocks}"));
+    }
+
+    let http_client = Client::new();
+
+    // Resolve a single L1 head that covers all sub-ranges.
+    let l1_head_hash = match args.rpc.l1_head {
+        Some(h) => h,
+        None => resolve_l1_head(&http_client, &args.rpc.l2_rpc, &args.rpc.l1_rpc, args.rpc.end_block)?,
+    };
+
+    // Compute sub-range boundaries: [start, end] with end > start.
+    let sub_ranges: Vec<(u64, u64)> = (0..n_ranges)
+        .map(|i| {
+            let start = args.rpc.start_block + total_blocks * i / n_ranges;
+            let end = args.rpc.start_block + total_blocks * (i + 1) / n_ranges;
+            (start, end)
+        })
+        .collect();
+
+    // Build all witnesses synchronously before entering the async proving loop.
+    let mut range_inputs: Vec<RangeProofInput> = Vec::with_capacity(sub_ranges.len());
+    for (i, (sub_start, sub_end)) in sub_ranges.iter().enumerate() {
+        println!(
+            "range {}/{}: generating witness for blocks {}..={}",
+            i + 1,
+            n_ranges,
+            sub_start + 1,
+            sub_end,
+        );
+        let mut sub_rpc = args.rpc.clone();
+        sub_rpc.start_block = *sub_start;
+        sub_rpc.end_block = *sub_end;
+        sub_rpc.l1_head = Some(l1_head_hash);
+        range_inputs.push(build_range_input(&sub_rpc)?);
+    }
+
+    // Fetch the single L1 header for the shared checkpoint head and CBOR-encode it.
+    let l1_header: L1Header =
+        fetch_l1_header_by_hash(&http_client, &args.rpc.l1_rpc, l1_head_hash)?;
+    let headers_cbor =
+        serde_cbor::to_vec(&vec![l1_header]).map_err(|e| eyre!("CBOR-encoding L1 header failed: {e}"))?;
+
+    let range_elf = fs::read(&args.range_elf)
+        .wrap_err_with(|| format!("failed to read {}", args.range_elf.display()))?;
+    let agg_elf = fs::read(&args.agg_elf)
+        .wrap_err_with(|| format!("failed to read {}", args.agg_elf.display()))?;
+    let prover_address = args.prover_address;
+    let output = args.output;
+
+    let sp1_prover = args.prover;
+
+    tokio::runtime::Runtime::new()?.block_on(async {
+        use sp1_sdk::{CpuProver, MockProver, env::EnvProver};
+        let client: EnvProver = match sp1_prover {
+            Sp1Prover::Cpu => EnvProver::Cpu(CpuProver::new().await),
+            Sp1Prover::Mock => EnvProver::Mock(MockProver::new().await),
+            Sp1Prover::Network => EnvProver::Network(
+                ProverClient::builder().network().build().await,
+            ),
+        };
+
+        let range_pk = client
+            .setup(range_elf.into())
+            .await
+            .map_err(|e| eyre!("range setup failed: {e}"))?;
+        let multi_block_vkey = range_pk.verifying_key().hash_u32();
+
+        let mut boot_infos: Vec<BootInfoStruct> = Vec::with_capacity(range_inputs.len());
+        for (i, input) in range_inputs.iter().enumerate() {
+            println!(
+                "range {}/{}: proving blocks {}..={}...",
+                i + 1,
+                n_ranges,
+                input.metadata.start_block + 1,
+                input.metadata.end_block,
+            );
+            let mut stdin = SP1Stdin::new();
+            stdin.write_vec(witness_bytes(&input.witness)?);
+            let proof = client
+                .prove(&range_pk, stdin)
+                .await
+                .map_err(|e| eyre!("range proof {i} failed: {e}"))?;
+            let boot_info: BootInfoStruct =
+                bincode::deserialize(proof.public_values.as_slice())
+                    .map_err(|e| eyre!("range {i} public values deserialization failed: {e}"))?;
+            println!(
+                "  proved block {}: pre={:?} post={:?}",
+                boot_info.l2BlockNumber, boot_info.l2PreRoot, boot_info.l2PostRoot,
+            );
+            boot_infos.push(boot_info);
+        }
+
+        let agg_inputs = AggregationInputs {
+            boot_infos,
+            latest_l1_checkpoint_head: l1_head_hash,
+            multi_block_vkey,
+            prover_address,
+        };
+
+        let agg_pk = client
+            .setup(agg_elf.into())
+            .await
+            .map_err(|e| eyre!("aggregation setup failed: {e}"))?;
+
+        let mut agg_stdin = SP1Stdin::new();
+        agg_stdin.write(&agg_inputs);
+        agg_stdin.write_vec(headers_cbor);
+
+        println!("generating aggregation proof over {n_ranges} range(s)...");
+        let agg_proof = client
+            .prove(&agg_pk, agg_stdin)
+            .await
+            .map_err(|e| eyre!("aggregation proof failed: {e}"))?;
+
+        if matches!(sp1_prover, Sp1Prover::Mock) {
+            println!("skipping verification (mock prover)");
+        } else {
+            client
+                .verify(&agg_proof, agg_pk.verifying_key(), None)
+                .map_err(|e| eyre!("aggregation proof verification failed: {e}"))?;
+            println!("aggregation proof verified OK");
+        }
+
+        if let Some(path) = output {
+            write_bytes(&path, &serde_json::to_vec_pretty(&agg_proof)?)?;
+            println!("proof written to {}", path.display());
+        }
+
+        Ok(())
+    })
 }
