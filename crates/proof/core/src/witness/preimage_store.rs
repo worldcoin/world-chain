@@ -52,11 +52,10 @@ pub fn check_preimage(key: &PreimageKey, value: &[u8]) -> PreimageOracleResult<(
         PreimageKeyType::Local | PreimageKeyType::GlobalGeneric => None,
         PreimageKeyType::Precompile => unimplemented!("Precompile not supported in zkVM"),
         PreimageKeyType::Blob => unreachable!("Blob keys validated in blob witness"),
-    } {
-        if key != &PreimageKey::new(expected_hash, key.key_type()) {
+    }
+        && key != &PreimageKey::new(expected_hash, key.key_type()) {
             return Err(PreimageOracleError::InvalidPreimageKey);
         }
-    }
     Ok(())
 }
 

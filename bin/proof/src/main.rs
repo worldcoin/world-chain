@@ -108,7 +108,7 @@ enum Sp1Command {
     /// Execute the SP1 range program against a witness file (no ZK proof, fast).
     Execute(Sp1ExecuteArgs),
     /// Generate range + aggregation proofs end-to-end from RPC.
-    Prove(Sp1ProveArgs),
+    Prove(Box<Sp1ProveArgs>),
 }
 
 #[derive(Debug, Args)]
@@ -388,7 +388,7 @@ fn main() -> eyre::Result<()> {
         #[cfg(feature = "sp1")]
         Command::Sp1 { command } => match command {
             Sp1Command::Execute(args) => sp1_execute(args)?,
-            Sp1Command::Prove(args) => sp1_prove(args)?,
+            Sp1Command::Prove(args) => sp1_prove(*args)?,
         },
     }
 

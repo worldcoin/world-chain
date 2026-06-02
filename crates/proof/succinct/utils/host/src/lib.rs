@@ -218,6 +218,10 @@ impl L2BlockRange {
     pub const fn len(self) -> u64 {
         self.end - self.start
     }
+
+    pub const fn is_empty(self) -> bool {
+        self.end <= self.start
+    }
 }
 
 /// World Succinct host request builder.

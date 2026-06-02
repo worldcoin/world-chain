@@ -53,6 +53,7 @@ where
 /// - `Ok((l2_safe_head, output_root))` - A tuple containing the [L2BlockInfo] of the produced block
 ///   and the output root.
 /// - `Err(e)` - An error if the block could not be produced.
+#[allow(clippy::result_large_err)]
 pub async fn advance_to_target<E, DP, P>(
     driver: &mut Driver<E, DP, P>,
     cfg: &RollupConfig,
@@ -67,12 +68,11 @@ where
         // Check if we have reached the target block number.
         let pipeline_cursor = driver.cursor.read();
         let tip_cursor = pipeline_cursor.tip();
-        if let Some(tb) = target {
-            if tip_cursor.l2_safe_head.block_info.number >= tb {
+        if let Some(tb) = target
+            && tip_cursor.l2_safe_head.block_info.number >= tb {
                 info!(target: "client", "Derivation complete, reached L2 safe head.");
                 return Ok((tip_cursor.l2_safe_head, tip_cursor.l2_safe_head_output_root));
             }
-        }
 
         #[cfg(target_os = "zkvm")]
         println!("cycle-tracker-report-start: payload-derivation");
