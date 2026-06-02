@@ -12,7 +12,6 @@ pkg/contracts/sepolia_load_test.json
 .docker-cache
 /diagnostics
 /proofs/
-/crates/proof/succinct/elf/world-chain-*
 .DS_Store
 **/.DS_Store
 **/proptest-regressions/

@@ -1,0 +1,36 @@
+name: ELF
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'crates/proof/succinct/programs/**'
+      - 'crates/proof/core/**'
+      - 'crates/proof/succinct/utils/client/**'
+      - 'crates/proof/succinct/utils/ethereum-client/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-elfs:
+    runs-on: arc-public-8xlarge-amd64-runner
+    name: verify ELFs
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install SP1 toolchain
+        run: |
+          curl -L https://sp1.succinct.xyz | bash
+          ~/.sp1/bin/sp1up --version v6.1.0
+          echo "$HOME/.sp1/bin" >> $GITHUB_PATH
+      - name: Build ELFs
+        run: just build-proof-elfs
+      - name: Verify ELFs unchanged
+        run: |
+          if [[ -n $(git diff crates/proof/succinct/elf/) ]]; then
+            echo "ELF files changed after rebuild — commit the updated ELFs"
+            git diff crates/proof/succinct/elf/
+            exit 1
+          fi
