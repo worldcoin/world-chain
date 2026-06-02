@@ -11,7 +11,9 @@ const DEFAULT_USER_OPERATION_TIMEOUT_SECS: u64 = 30;
 const DEFAULT_USER_OPERATION_REJECT_TIMEOUT_SECS: u64 = 3;
 const DEFAULT_USER_OPERATION_POLL_INTERVAL_MS: u64 = 250;
 const DEFAULT_USER_OPERATION_WALLET_COUNT: usize = 20;
-const DEFAULT_USER_OPERATION_DEPLOY_CONCURRENCY: usize = 4;
+const DEFAULT_USER_OPERATION_DEPLOY_CONCURRENCY: usize = 20;
+const DEFAULT_USER_OPERATION_OPS_PER_WALLET: u64 = 3;
+const DEFAULT_USER_OPERATION_OP_CONCURRENCY: usize = 60;
 const DEFAULT_USER_OPERATION_NONCE_CONCURRENCY: usize = 2;
 const DEFAULT_USER_OPERATION_OWNER_START_INDEX: u32 = 1000;
 const DEFAULT_USER_OPERATION_SPONSORSHIP_VALIDITY_SECS: u64 = 60;
@@ -51,6 +53,8 @@ pub(super) struct BundlerConfig {
     pub(super) wallet_deployer: Address,
     pub(super) wallet_count: usize,
     pub(super) deploy_concurrency: usize,
+    pub(super) operations_per_wallet: u64,
+    pub(super) operation_concurrency: usize,
     pub(super) nonce_concurrency: usize,
     pub(super) owner_start_index: u32,
     pub(super) user_operation_timeout: Duration,
@@ -156,6 +160,14 @@ fn bundler_config_from_env(
         deploy_concurrency: parse_optional_value(
             "ACCEPTANCE_4337_DEPLOY_CONCURRENCY",
             DEFAULT_USER_OPERATION_DEPLOY_CONCURRENCY,
+        )?,
+        operations_per_wallet: parse_optional_value(
+            "ACCEPTANCE_4337_OPS_PER_WALLET",
+            DEFAULT_USER_OPERATION_OPS_PER_WALLET,
+        )?,
+        operation_concurrency: parse_optional_value(
+            "ACCEPTANCE_4337_OP_CONCURRENCY",
+            DEFAULT_USER_OPERATION_OP_CONCURRENCY,
         )?,
         nonce_concurrency: parse_optional_value(
             "ACCEPTANCE_4337_NONCE_CONCURRENCY",

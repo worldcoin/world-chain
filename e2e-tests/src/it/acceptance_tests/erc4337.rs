@@ -28,6 +28,10 @@ const SAFE_OP_TYPE_HASH: FixedBytes<32> =
     fixed_bytes!("c03dfc11d8b10bf9cf703d558958c8c42777f785d998c62060d85a4f0ef6ea7f");
 const SAFE_DOMAIN_TYPE_HASH: FixedBytes<32> =
     fixed_bytes!("47e79534a245952e8b16893a336b85a3d9ea9fa8c573f3d803afb92a79469218");
+const PARALLEL_NOOP_NONCE_KEY: u64 = 10;
+const MULTI_LANE_NONCE_KEYS: [u64; 3] = [20, 21, 22];
+const SINGLE_WALLET_NONCE_OPS: u64 = 4;
+const SAD_PATH_REJECTION_CHECKS: u64 = 7;
 
 sol! {
     struct EncodedSafeOpStruct {
@@ -83,6 +87,9 @@ pub(super) async fn sponsored_user_operations(env: &RpcEnv) -> eyre::Result<()> 
         bundler_rpc = config.rpc_target(),
         entry_point = ?config.entry_point,
         wallets = config.wallet_count,
+        deploy_concurrency = config.deploy_concurrency,
+        operations_per_wallet = config.operations_per_wallet,
+        operation_concurrency = config.operation_concurrency,
         "running ERC-4337 sponsored user operation acceptance tests"
     );
 
@@ -143,6 +150,14 @@ impl<'a> UserOperationHarness<'a> {
             "ACCEPTANCE_4337_DEPLOY_CONCURRENCY must be greater than zero"
         );
         ensure!(
+            config.operations_per_wallet > 0,
+            "ACCEPTANCE_4337_OPS_PER_WALLET must be greater than zero"
+        );
+        ensure!(
+            config.operation_concurrency > 0,
+            "ACCEPTANCE_4337_OP_CONCURRENCY must be greater than zero"
+        );
+        ensure!(
             config.nonce_concurrency > 0,
             "ACCEPTANCE_4337_NONCE_CONCURRENCY must be greater than zero"
         );
@@ -157,24 +172,43 @@ impl<'a> UserOperationHarness<'a> {
     }
 
     async fn run(&self) -> eyre::Result<()> {
+        eprintln!("erc4337: checking bundler-supported entry points");
         self.assert_supported_entry_point().await?;
 
+        eprintln!(
+            "erc4337: deriving {} ephemeral Safe wallets",
+            self.config.wallet_count
+        );
         let wallets = stream::iter(0..self.config.wallet_count)
             .map(Ok)
             .and_then(|offset| self.fresh_wallet(offset))
             .try_collect::<Vec<_>>()
             .await?;
 
+        eprintln!(
+            "erc4337: deploying {} wallets with concurrency {}",
+            wallets.len(),
+            self.config.deploy_concurrency
+        );
         stream::iter(wallets.clone())
             .map(Ok)
             .try_for_each_concurrent(self.config.deploy_concurrency, |wallet| async move {
-                self.send_sponsored_noop(&wallet, 0, 0, true).await?;
+                self.send_sponsored_noop("initial wallet deployment", &wallet, 0, 0, true)
+                    .await?;
                 self.assert_wallet_deployed(&wallet).await
             })
             .await?;
 
+        self.run_parallel_wallet_operation_checks(&wallets).await?;
+        self.run_multi_lane_nonce_burst_checks(&wallets).await?;
+
+        eprintln!("erc4337: running two-dimensional nonce checks");
         self.run_two_dimensional_nonce_checks(&wallets[0]).await?;
-        self.run_rejection_checks(&wallets[0]).await
+        eprintln!("erc4337: running rejection checks");
+        self.run_rejection_checks(&wallets[0]).await?;
+
+        self.log_completion_summary(wallets.len());
+        Ok(())
     }
 
     async fn assert_supported_entry_point(&self) -> eyre::Result<()> {
@@ -193,19 +227,96 @@ impl<'a> UserOperationHarness<'a> {
         Ok(())
     }
 
+    async fn run_parallel_wallet_operation_checks(
+        &self,
+        wallets: &[TestWallet],
+    ) -> eyre::Result<()> {
+        for sequence in 0..self.config.operations_per_wallet {
+            let expected_sequence = sequence
+                .checked_add(1)
+                .ok_or_eyre("parallel wallet operation sequence overflowed u64")?;
+
+            eprintln!(
+                "erc4337: running sponsored operation round {}/{} across {} wallets with concurrency {}",
+                expected_sequence,
+                self.config.operations_per_wallet,
+                wallets.len(),
+                self.config.operation_concurrency
+            );
+
+            stream::iter(wallets)
+                .map(Ok)
+                .try_for_each_concurrent(self.config.operation_concurrency, |wallet| async move {
+                    self.assert_entry_point_nonce(wallet.sender, PARALLEL_NOOP_NONCE_KEY, sequence)
+                        .await?;
+                    self.send_sponsored_noop(
+                        "parallel wallet operation",
+                        wallet,
+                        PARALLEL_NOOP_NONCE_KEY,
+                        sequence,
+                        false,
+                    )
+                    .await?;
+                    self.assert_entry_point_nonce(
+                        wallet.sender,
+                        PARALLEL_NOOP_NONCE_KEY,
+                        expected_sequence,
+                    )
+                    .await
+                })
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn run_multi_lane_nonce_burst_checks(&self, wallets: &[TestWallet]) -> eyre::Result<()> {
+        let operation_count = wallets.len() * MULTI_LANE_NONCE_KEYS.len();
+        eprintln!(
+            "erc4337: running multi-lane nonce burst with {operation_count} sponsored operations across {} wallets, {} nonce keys, concurrency {}",
+            wallets.len(),
+            MULTI_LANE_NONCE_KEYS.len(),
+            self.config.operation_concurrency
+        );
+
+        let operations = wallets.iter().flat_map(|wallet| {
+            MULTI_LANE_NONCE_KEYS
+                .into_iter()
+                .map(move |nonce_key| (wallet, nonce_key))
+        });
+
+        stream::iter(operations)
+            .map(Ok)
+            .try_for_each_concurrent(
+                self.config.operation_concurrency,
+                |(wallet, nonce_key)| async move {
+                    self.assert_entry_point_nonce(wallet.sender, nonce_key, 0)
+                        .await?;
+                    self.send_sponsored_noop("multi-lane nonce burst", wallet, nonce_key, 0, false)
+                        .await?;
+                    self.assert_entry_point_nonce(wallet.sender, nonce_key, 1)
+                        .await
+                },
+            )
+            .await
+    }
+
     async fn run_two_dimensional_nonce_checks(&self, wallet: &TestWallet) -> eyre::Result<()> {
         self.assert_entry_point_nonce(wallet.sender, 1, 0).await?;
-        self.send_sponsored_noop(wallet, 1, 0, false).await?;
+        self.send_sponsored_noop("2D nonce key 1", wallet, 1, 0, false)
+            .await?;
         self.assert_entry_point_nonce(wallet.sender, 1, 1).await?;
 
-        self.send_sponsored_noop(wallet, 2, 0, false).await?;
+        self.send_sponsored_noop("2D nonce key 2", wallet, 2, 0, false)
+            .await?;
         self.assert_entry_point_nonce(wallet.sender, 1, 1).await?;
         self.assert_entry_point_nonce(wallet.sender, 2, 1).await?;
 
         stream::iter([3_u64, 4])
             .map(Ok)
             .try_for_each_concurrent(self.config.nonce_concurrency, |key| async move {
-                self.send_sponsored_noop(wallet, key, 0, false).await?;
+                self.send_sponsored_noop("concurrent 2D nonce key", wallet, key, 0, false)
+                    .await?;
                 self.assert_entry_point_nonce(wallet.sender, key, 1).await
             })
             .await
@@ -329,11 +440,14 @@ impl<'a> UserOperationHarness<'a> {
 
     async fn send_sponsored_noop(
         &self,
+        label: &'static str,
         wallet: &TestWallet,
         nonce_key: u64,
         sequence: u64,
         include_factory: bool,
     ) -> eyre::Result<UserOperationReceipt> {
+        log_user_operation_attempt(label, wallet, nonce_key, sequence, include_factory);
+
         let user_op = self
             .signed_noop_user_operation(
                 wallet,
@@ -344,11 +458,24 @@ impl<'a> UserOperationHarness<'a> {
             )
             .await?;
 
-        let hash = self.send_sponsored_user_operation(user_op).await?;
+        let hash = self
+            .send_sponsored_user_operation(user_op)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed during {label}: owner_index={}, owner={:?}, sender={:?}, nonce_key={nonce_key}, sequence={sequence}, include_factory={include_factory}",
+                    wallet.owner_index, wallet.owner, wallet.sender
+                )
+            })?;
         let receipt = self
             .wait_for_receipt(hash)
             .await
-            .with_context(|| format!("user operation {hash:?} was not included"))?;
+            .with_context(|| {
+                format!(
+                    "user operation {hash:?} was not included during {label}: owner_index={}, sender={:?}, nonce_key={nonce_key}, sequence={sequence}, include_factory={include_factory}",
+                    wallet.owner_index, wallet.sender
+                )
+            })?;
 
         ensure!(
             receipt.success,
@@ -636,6 +763,19 @@ impl<'a> UserOperationHarness<'a> {
             },
         })
     }
+
+    fn log_completion_summary(&self, wallet_count: usize) {
+        let wallet_count = wallet_count as u128;
+        let deploy_ops = wallet_count;
+        let parallel_ops = wallet_count * u128::from(self.config.operations_per_wallet);
+        let multi_lane_nonce_ops = wallet_count * MULTI_LANE_NONCE_KEYS.len() as u128;
+        let successful_user_ops =
+            deploy_ops + parallel_ops + multi_lane_nonce_ops + u128::from(SINGLE_WALLET_NONCE_OPS);
+
+        eprintln!(
+            "erc4337: completed sponsored checks: wallets={wallet_count}, successful_user_ops={successful_user_ops}, deploy_ops={deploy_ops}, parallel_ops={parallel_ops}, multi_lane_nonce_ops={multi_lane_nonce_ops}, single_wallet_nonce_ops={SINGLE_WALLET_NONCE_OPS}, sad_paths={SAD_PATH_REJECTION_CHECKS}"
+        );
+    }
 }
 
 fn execute_noop_data() -> Bytes {
@@ -660,6 +800,19 @@ fn deploy_wallet_data(owner: Address, salt: U256) -> Bytes {
 
 fn packed_nonce(key: u64, sequence: u64) -> U256 {
     (U256::from(key) << 64) | U256::from(sequence)
+}
+
+fn log_user_operation_attempt(
+    label: &'static str,
+    wallet: &TestWallet,
+    nonce_key: u64,
+    sequence: u64,
+    include_factory: bool,
+) {
+    eprintln!(
+        "erc4337: sending {label}: owner_index={}, owner={:?}, sender={:?}, nonce_key={nonce_key}, sequence={sequence}, include_factory={include_factory}",
+        wallet.owner_index, wallet.owner, wallet.sender
+    );
 }
 
 fn safe_operation_hash(
