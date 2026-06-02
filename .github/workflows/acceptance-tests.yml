@@ -110,7 +110,7 @@ jobs:
           ACCEPTANCE_BUNDLER_CF_ACCESS_CLIENT_SECRET: ${{ secrets.ACCEPTANCE_BUNDLER_CF_ACCESS_CLIENT_SECRET }}
           ACCEPTANCE_BLOCK_ADVANCE_TIMEOUT_SECS: "60"
           ACCEPTANCE_BLOCK_POLL_INTERVAL_SECS: "2"
-        run: cargo nextest run --profile ci -p world-chain-tests -E 'package(world-chain-tests) & binary(world-chain-tests) & test(/acceptance_tests::test_network/)'
+        run: cargo nextest run --profile ci -p world-chain-tests -E 'package(world-chain-tests) & binary(world-chain-tests) & test(/acceptance_tests::test_network/)' --no-capture
 
       - name: Report allowed build failure
         if: ${{ (inputs.network == 'all' || inputs.network == matrix.network) && matrix.allow_failure && steps.build.outcome == 'failure' }}
