@@ -233,6 +233,23 @@ enum Sp1Prover {
 }
 
 #[cfg(feature = "sp1")]
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+enum Sp1Mode {
+    /// Default. Proof size grows linearly with cycles.
+    #[value(name = "core")]
+    Core,
+    /// Constant-size recursive proof.
+    #[value(name = "compressed")]
+    Compressed,
+    /// PLONK proof, ~300k gas to verify on-chain.
+    #[value(name = "plonk")]
+    Plonk,
+    /// Groth16 proof, ~100k gas to verify on-chain.
+    #[value(name = "groth16")]
+    Groth16,
+}
+
+#[cfg(feature = "sp1")]
 #[derive(Debug, Args)]
 struct Sp1ProveArgs {
     #[command(flatten)]
@@ -253,6 +270,10 @@ struct Sp1ProveArgs {
     /// Prover backend. Overrides SP1_PROVER env var.
     #[arg(long, env = "SP1_PROVER", default_value = "cpu")]
     prover: Sp1Prover,
+
+    /// Aggregation proof mode.
+    #[arg(long, default_value = "core")]
+    mode: Sp1Mode,
 
     /// Prover address for on-chain attribution (defaults to zero address).
     #[arg(long, default_value = "0x0000000000000000000000000000000000000000")]
@@ -981,6 +1002,7 @@ fn sp1_prove(args: Sp1ProveArgs) -> eyre::Result<()> {
     let output = args.output;
 
     let sp1_prover = args.prover;
+    let sp1_mode = args.mode;
 
     tokio::runtime::Runtime::new()?.block_on(async {
         use sp1_sdk::{CpuProver, MockProver, env::EnvProver};
@@ -1039,9 +1061,18 @@ fn sp1_prove(args: Sp1ProveArgs) -> eyre::Result<()> {
         agg_stdin.write(&agg_inputs);
         agg_stdin.write_vec(headers_cbor);
 
-        println!("generating aggregation proof over {n_ranges} range(s)...");
+        use sp1_sdk::SP1ProofMode;
+        let agg_proof_mode = match sp1_mode {
+            Sp1Mode::Core => SP1ProofMode::Core,
+            Sp1Mode::Compressed => SP1ProofMode::Compressed,
+            Sp1Mode::Plonk => SP1ProofMode::Plonk,
+            Sp1Mode::Groth16 => SP1ProofMode::Groth16,
+        };
+
+        println!("generating aggregation proof over {n_ranges} range(s) ({sp1_mode:?} mode)...");
         let agg_proof = client
             .prove(&agg_pk, agg_stdin)
+            .mode(agg_proof_mode)
             .await
             .map_err(|e| eyre!("aggregation proof failed: {e}"))?;
 
