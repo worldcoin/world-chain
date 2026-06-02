@@ -297,7 +297,13 @@ mod tests {
             vec![(0, vec![1u8; 48]), (1, vec![0u8; 48]), (2, vec![0u8; 48])],
             Some(vec![7u8; 32]),
         );
-        let err = verify_attestation_doc(&doc, &ExpectedPcrs::PLACEHOLDER, &[7u8; 32]).unwrap_err();
+        // Expected PCR0 must be non-zero so check_pcr doesn't treat it as placeholder.
+        let expected = ExpectedPcrs {
+            pcr0: [2u8; PCR_LEN],
+            pcr1: [0u8; PCR_LEN],
+            pcr2: [0u8; PCR_LEN],
+        };
+        let err = verify_attestation_doc(&doc, &expected, &[7u8; 32]).unwrap_err();
         assert!(matches!(
             err,
             AttestationError::PcrMismatch { index: 0, .. }
