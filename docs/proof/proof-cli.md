@@ -181,7 +181,7 @@ proof sp1 prove [RPC flags] --range-elf <FILE> --agg-elf <FILE> [options]
 | `--agg-elf <FILE>` | `AGG_ELF_PATH` | required | SP1 aggregation ELF |
 | `--ranges <N>` | — | `1` | Number of equal sub-ranges to prove in parallel |
 | `--prover <NAME>` | `SP1_PROVER` | `cpu` | `cpu`, `network`, or `mock` |
-| `--mode <NAME>` | — | `core` | Aggregation proof mode: `core`, `compressed`, `plonk`, `groth16` |
+| `--mode <NAME>` | — | `groth16` | Aggregation proof mode: `core`, `compressed`, `plonk`, `groth16` |
 | `--prover-address <ADDR>` | — | zero address | On-chain attribution address |
 | `--output <FILE>` | — | — | Write aggregation proof JSON to file |
 
@@ -194,12 +194,13 @@ proof sp1 prove [RPC flags] --range-elf <FILE> --agg-elf <FILE> [options]
 **Aggregation proof modes**
 
 The `--mode` flag controls the proof system used for the final aggregation proof. Range proofs
-always use core mode since they are intermediate inputs to the aggregation program.
+are always proved in Compressed mode internally — this is required so the aggregation guest can
+recursively verify them with `sp1_lib::verify::verify_sp1_proof`.
 
-- `core` — default; proof size grows linearly with cycles.
-- `compressed` — constant-size recursive proof; slower than core.
+- `core` — proof size grows linearly with cycles. Not EVM-verifiable; use for debugging only.
+- `compressed` — constant-size recursive proof; slower than core. Not EVM-verifiable.
 - `plonk` — PLONK proof; ~300k gas to verify on-chain.
-- `groth16` — Groth16 proof; ~100k gas to verify on-chain; use this for production submissions.
+- `groth16` — **default**; Groth16 proof; ~100k gas to verify on-chain; use for production submissions.
 
 **Example — mock proof (integration test)**
 

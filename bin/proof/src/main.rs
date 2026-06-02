@@ -272,7 +272,7 @@ struct Sp1ProveArgs {
     prover: Sp1Prover,
 
     /// Aggregation proof mode.
-    #[arg(long, default_value = "core")]
+    #[arg(long, default_value = "groth16")]
     mode: Sp1Mode,
 
     /// Prover address for on-chain attribution (defaults to zero address).
@@ -1005,7 +1005,7 @@ fn sp1_prove(args: Sp1ProveArgs) -> eyre::Result<()> {
     let sp1_mode = args.mode;
 
     tokio::runtime::Runtime::new()?.block_on(async {
-        use sp1_sdk::{CpuProver, MockProver, env::EnvProver};
+        use sp1_sdk::{CpuProver, MockProver, ProveRequest, SP1Proof, SP1ProofMode, env::EnvProver};
         let client: EnvProver = match sp1_prover {
             Sp1Prover::Cpu => EnvProver::Cpu(CpuProver::new().await),
             Sp1Prover::Mock => EnvProver::Mock(MockProver::new().await),
@@ -1020,29 +1020,43 @@ fn sp1_prove(args: Sp1ProveArgs) -> eyre::Result<()> {
             .map_err(|e| eyre!("range setup failed: {e}"))?;
         let multi_block_vkey = range_pk.verifying_key().hash_u32();
 
-        let mut boot_infos: Vec<BootInfoStruct> = Vec::with_capacity(range_inputs.len());
+        // Spawn all range proofs in parallel. Range proofs must be Compressed so
+        // the aggregation guest can recursively verify them with verify_sp1_proof.
+        let mut handles = Vec::with_capacity(range_inputs.len());
         for (i, input) in range_inputs.iter().enumerate() {
-            println!(
-                "range {}/{}: proving blocks {}..={}...",
-                i + 1,
-                n_ranges,
-                input.metadata.start_block + 1,
-                input.metadata.end_block,
-            );
-            let mut stdin = SP1Stdin::new();
-            stdin.write_vec(witness_bytes(&input.witness)?);
-            let proof = client
-                .prove(&range_pk, stdin)
+            let client = client.clone();
+            let range_pk = range_pk.clone();
+            let bytes = witness_bytes(&input.witness)?;
+            let start = input.metadata.start_block;
+            let end = input.metadata.end_block;
+            handles.push(tokio::spawn(async move {
+                println!("range {}/{n_ranges}: proving blocks {}..={}...", i + 1, start + 1, end);
+                let mut stdin = SP1Stdin::new();
+                stdin.write_vec(bytes);
+                let proof = client
+                    .prove(&range_pk, stdin)
+                    .compressed()
+                    .await
+                    .map_err(|e| eyre!("range proof {i} failed: {e}"))?;
+                let boot_info: BootInfoStruct =
+                    bincode::deserialize(proof.public_values.as_slice())
+                        .map_err(|e| eyre!("range {i} public values deserialization failed: {e}"))?;
+                println!(
+                    "  range {}: block {} pre={:?} post={:?}",
+                    i + 1, boot_info.l2BlockNumber, boot_info.l2PreRoot, boot_info.l2PostRoot,
+                );
+                Ok::<_, eyre::Report>((boot_info, proof))
+            }));
+        }
+
+        let mut boot_infos: Vec<BootInfoStruct> = Vec::with_capacity(handles.len());
+        let mut compressed_range_proofs = Vec::with_capacity(handles.len());
+        for (i, handle) in handles.into_iter().enumerate() {
+            let (boot_info, proof) = handle
                 .await
-                .map_err(|e| eyre!("range proof {i} failed: {e}"))?;
-            let boot_info: BootInfoStruct =
-                bincode::deserialize(proof.public_values.as_slice())
-                    .map_err(|e| eyre!("range {i} public values deserialization failed: {e}"))?;
-            println!(
-                "  proved block {}: pre={:?} post={:?}",
-                boot_info.l2BlockNumber, boot_info.l2PreRoot, boot_info.l2PostRoot,
-            );
+                .map_err(|e| eyre!("range task {i} panicked: {e}"))??;
             boot_infos.push(boot_info);
+            compressed_range_proofs.push(proof);
         }
 
         let agg_inputs = AggregationInputs {
@@ -1058,10 +1072,18 @@ fn sp1_prove(args: Sp1ProveArgs) -> eyre::Result<()> {
             .map_err(|e| eyre!("aggregation setup failed: {e}"))?;
 
         let mut agg_stdin = SP1Stdin::new();
+        // Write each compressed range proof as a deferred proof so the aggregation
+        // guest's verify_sp1_proof calls have something to verify against.
+        // Order must match boot_infos order.
+        for proof in compressed_range_proofs {
+            let SP1Proof::Compressed(inner) = proof.proof else {
+                return Err(eyre!("range proof was not Compressed"));
+            };
+            agg_stdin.write_proof(*inner, range_pk.verifying_key().vk.clone());
+        }
         agg_stdin.write(&agg_inputs);
         agg_stdin.write_vec(headers_cbor);
 
-        use sp1_sdk::SP1ProofMode;
         let agg_proof_mode = match sp1_mode {
             Sp1Mode::Core => SP1ProofMode::Core,
             Sp1Mode::Compressed => SP1ProofMode::Compressed,
@@ -1070,9 +1092,12 @@ fn sp1_prove(args: Sp1ProveArgs) -> eyre::Result<()> {
         };
 
         println!("generating aggregation proof over {n_ranges} range(s) ({sp1_mode:?} mode)...");
-        let agg_proof = client
-            .prove(&agg_pk, agg_stdin)
-            .mode(agg_proof_mode)
+        let mut agg_prove = client.prove(&agg_pk, agg_stdin).mode(agg_proof_mode);
+        if matches!(sp1_prover, Sp1Prover::Mock) {
+            // Mock proofs are dummies; skip recursive verification inside the guest.
+            agg_prove = agg_prove.deferred_proof_verification(false);
+        }
+        let agg_proof = agg_prove
             .await
             .map_err(|e| eyre!("aggregation proof failed: {e}"))?;
 
