@@ -12,9 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use world_chain_proof_core::{
-    boot::BootInfoStruct,
-    range::WorldRangeProofPublicValues,
-    types::AggregationInputs,
+    boot::BootInfoStruct, range::WorldRangeProofPublicValues, types::AggregationInputs,
 };
 
 /// Current protocol version. Bumped whenever the wire format changes incompatibly.

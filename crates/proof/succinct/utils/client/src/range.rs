@@ -166,8 +166,10 @@ mod tests {
         let expected = input.clone().public_values();
         assert_eq!(expected.world_spec_id, WorldRangeSpecId::STRATO);
         assert!(
-            run_range_program(WorldRangeWitness::with_expected_public_values(input, expected))
-                .is_ok()
+            run_range_program(WorldRangeWitness::with_expected_public_values(
+                input, expected
+            ))
+            .is_ok()
         );
     }
 

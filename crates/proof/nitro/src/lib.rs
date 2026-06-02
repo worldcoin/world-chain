@@ -27,11 +27,8 @@
 
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
-    artifacts::AggregationProofArtifact,
-    boot::BootInfoStruct,
-    range::WorldRangeProofPublicValues,
-    types::AggregationInputs,
-    witness::WorldRangeWitnessData,
+    artifacts::AggregationProofArtifact, boot::BootInfoStruct, range::WorldRangeProofPublicValues,
+    types::AggregationInputs, witness::WorldRangeWitnessData,
 };
 
 pub mod attestation;
@@ -175,12 +172,12 @@ pub fn range_user_data(boot_info: &BootInfoStruct) -> [u8; 32] {
 
 /// Re-exports of common host-facing types so callers can do `use world_chain_proof_nitro::*`.
 pub mod prelude {
-    #[cfg(feature = "aws_nitro")]
-    pub use crate::{NitroProver, NitroProverError};
     pub use crate::{
         ExpectedPcrs, NitroAggregationProofArtifact, NitroAggregationProofRequest,
         NitroRangeProofArtifact, NitroRangeProofRequest, WorldTeeProver, range_user_data,
     };
+    #[cfg(feature = "aws_nitro")]
+    pub use crate::{NitroProver, NitroProverError};
 }
 
 #[cfg(test)]
@@ -259,7 +256,10 @@ mod tests {
         let user_data = range_user_data(&boot_info);
         let attestation_doc = make_attestation_doc(&[[0u8; PCR_LEN]; 3], &user_data);
 
-        let artifact = NitroRangeProofArtifact { boot_info, attestation_doc };
+        let artifact = NitroRangeProofArtifact {
+            boot_info,
+            attestation_doc,
+        };
 
         let expected_user_data = range_user_data(&artifact.boot_info);
         verify_attestation_doc(
@@ -302,9 +302,11 @@ mod tests {
             pcr1: [0u8; PCR_LEN],
             pcr2: [0u8; PCR_LEN],
         };
-        let err =
-            verify_attestation_doc(&attestation_doc, &wrong_pcrs, &user_data).unwrap_err();
+        let err = verify_attestation_doc(&attestation_doc, &wrong_pcrs, &user_data).unwrap_err();
 
-        assert!(matches!(err, AttestationError::PcrMismatch { index: 0, .. }));
+        assert!(matches!(
+            err,
+            AttestationError::PcrMismatch { index: 0, .. }
+        ));
     }
 }

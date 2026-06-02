@@ -112,10 +112,9 @@ async fn handle_range(
         bytes = witness_rkyv.len(),
         "deserializing range witness"
     );
-    let witness_data: WorldRangeWitnessData = rkyv::from_bytes::<WorldRangeWitnessData, RkyvError>(
-        &witness_rkyv,
-    )
-    .map_err(|err| anyhow!("failed to rkyv-deserialize WorldRangeWitnessData: {err}"))?;
+    let witness_data: WorldRangeWitnessData =
+        rkyv::from_bytes::<WorldRangeWitnessData, RkyvError>(&witness_rkyv)
+            .map_err(|err| anyhow!("failed to rkyv-deserialize WorldRangeWitnessData: {err}"))?;
 
     let world_schedule = witness_data.schedule.clone();
     let (oracle, beacon) = witness_data
@@ -160,10 +159,7 @@ async fn handle_aggregation(
         .boot_infos
         .first()
         .ok_or_else(|| anyhow!("aggregation requires at least one range boot info"))?;
-    let last = inputs
-        .boot_infos
-        .last()
-        .expect("checked non-empty above");
+    let last = inputs.boot_infos.last().expect("checked non-empty above");
 
     let boot_info = BootInfoStruct {
         l1Head: inputs.latest_l1_checkpoint_head,
@@ -235,7 +231,10 @@ where
         None => boot_info,
     };
 
-    Ok(BootInfoStruct::from_kona_boot_info(boot_info, &world_schedule))
+    Ok(BootInfoStruct::from_kona_boot_info(
+        boot_info,
+        &world_schedule,
+    ))
 }
 
 fn ensure_boot_info_matches(
@@ -244,7 +243,10 @@ fn ensure_boot_info_matches(
 ) -> Result<()> {
     let mismatches = [
         ("l1Head", expected.boot_info.l1_head == actual.l1Head),
-        ("l2PreRoot", expected.boot_info.l2_pre_root == actual.l2PreRoot),
+        (
+            "l2PreRoot",
+            expected.boot_info.l2_pre_root == actual.l2PreRoot,
+        ),
         (
             "l2PostRoot",
             expected.boot_info.l2_post_root == actual.l2PostRoot,

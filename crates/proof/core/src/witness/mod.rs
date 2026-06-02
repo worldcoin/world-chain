@@ -48,7 +48,10 @@ pub struct DefaultWitnessData {
 #[async_trait]
 impl WitnessData for DefaultWitnessData {
     fn from_parts(preimage_store: PreimageStore, blob_data: BlobData) -> Self {
-        Self { preimage_store, blob_data }
+        Self {
+            preimage_store,
+            blob_data,
+        }
     }
 
     fn into_parts(self) -> (PreimageStore, BlobData) {
@@ -84,7 +87,11 @@ impl WorldRangeWitnessData {
         blob_data: BlobData,
         schedule: WorldRangeHardforkConfig,
     ) -> Self {
-        Self { preimage_store, blob_data, schedule }
+        Self {
+            preimage_store,
+            blob_data,
+            schedule,
+        }
     }
 }
 

@@ -69,9 +69,17 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
         // Tag 18 = COSE_Sign1 tag.
         ciborium::value::Value::Tag(18, inner) => match *inner {
             ciborium::value::Value::Array(a) => a,
-            _ => return Err(AttestationError::Malformed("expected array under tag 18".into())),
+            _ => {
+                return Err(AttestationError::Malformed(
+                    "expected array under tag 18".into(),
+                ));
+            }
         },
-        _ => return Err(AttestationError::Malformed("expected COSE_Sign1 array".into())),
+        _ => {
+            return Err(AttestationError::Malformed(
+                "expected COSE_Sign1 array".into(),
+            ));
+        }
     };
     if array.len() != 4 {
         return Err(AttestationError::Malformed(format!(
@@ -275,11 +283,7 @@ mod tests {
     #[test]
     fn parses_and_verifies_placeholder_pcrs() {
         let doc = make_doc(
-            vec![
-                (0, vec![0u8; 48]),
-                (1, vec![0u8; 48]),
-                (2, vec![0u8; 48]),
-            ],
+            vec![(0, vec![0u8; 48]), (1, vec![0u8; 48]), (2, vec![0u8; 48])],
             Some(vec![7u8; 32]),
         );
         let parsed = verify_attestation_doc(&doc, &ExpectedPcrs::PLACEHOLDER, &[7u8; 32]).unwrap();
@@ -290,30 +294,23 @@ mod tests {
     #[test]
     fn rejects_pcr_mismatch() {
         let doc = make_doc(
-            vec![
-                (0, vec![1u8; 48]),
-                (1, vec![0u8; 48]),
-                (2, vec![0u8; 48]),
-            ],
+            vec![(0, vec![1u8; 48]), (1, vec![0u8; 48]), (2, vec![0u8; 48])],
             Some(vec![7u8; 32]),
         );
-        let err =
-            verify_attestation_doc(&doc, &ExpectedPcrs::PLACEHOLDER, &[7u8; 32]).unwrap_err();
-        assert!(matches!(err, AttestationError::PcrMismatch { index: 0, .. }));
+        let err = verify_attestation_doc(&doc, &ExpectedPcrs::PLACEHOLDER, &[7u8; 32]).unwrap_err();
+        assert!(matches!(
+            err,
+            AttestationError::PcrMismatch { index: 0, .. }
+        ));
     }
 
     #[test]
     fn rejects_user_data_mismatch() {
         let doc = make_doc(
-            vec![
-                (0, vec![0u8; 48]),
-                (1, vec![0u8; 48]),
-                (2, vec![0u8; 48]),
-            ],
+            vec![(0, vec![0u8; 48]), (1, vec![0u8; 48]), (2, vec![0u8; 48])],
             Some(vec![9u8; 32]),
         );
-        let err =
-            verify_attestation_doc(&doc, &ExpectedPcrs::PLACEHOLDER, &[7u8; 32]).unwrap_err();
+        let err = verify_attestation_doc(&doc, &ExpectedPcrs::PLACEHOLDER, &[7u8; 32]).unwrap_err();
         assert!(matches!(err, AttestationError::UserDataMismatch { .. }));
     }
 }

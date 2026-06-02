@@ -363,9 +363,8 @@ fn main() -> eyre::Result<()> {
                 (Some(path), _) => proof_config_from_file(&path)?.1,
                 (None, Some(url)) => {
                     let client = Client::new();
-                    let value: Value =
-                        rpc(&client, &url, "optimism_rollupConfig", json!([]))?
-                            .context("optimism_rollupConfig returned null")?;
+                    let value: Value = rpc(&client, &url, "optimism_rollupConfig", json!([]))?
+                        .context("optimism_rollupConfig returned null")?;
                     world_chain_proof_protocol::hash_rollup_config(&value)?
                 }
                 (None, None) => return Err(eyre!("provide --rollup-config or --l2-rpc")),
@@ -423,7 +422,11 @@ fn nitro_prove(args: NitroArgs) -> eyre::Result<()> {
         .map_err(|e| eyre!("failed to serialize witness: {e}"))?;
 
     let rt = tokio::runtime::Runtime::new()?;
-    let prover = NitroProver::with_runtime(EnclaveEndpoint::new(args.cid), expected_pcrs, rt.handle().clone());
+    let prover = NitroProver::with_runtime(
+        EnclaveEndpoint::new(args.cid),
+        expected_pcrs,
+        rt.handle().clone(),
+    );
 
     println!(
         "sending range {start}..={end} to enclave (cid {cid})",
@@ -444,17 +447,24 @@ fn nitro_prove(args: NitroArgs) -> eyre::Result<()> {
     );
 
     let expected_user_data = range_user_data(&artifact.boot_info);
-    verify_attestation_doc(&artifact.attestation_doc, &expected_pcrs, &expected_user_data)
-        .map_err(|e| eyre!("attestation verification failed: {e}"))?;
+    verify_attestation_doc(
+        &artifact.attestation_doc,
+        &expected_pcrs,
+        &expected_user_data,
+    )
+    .map_err(|e| eyre!("attestation verification failed: {e}"))?;
 
     println!("attestation verified OK");
     println!("{}", serde_json::to_string_pretty(&artifact.boot_info)?);
 
     if let Some(output) = args.output {
-        write_json(&output, &json!({
-            "bootInfo": artifact.boot_info,
-            "attestationDoc": format!("0x{}", hex::encode(&artifact.attestation_doc)),
-        }))?;
+        write_json(
+            &output,
+            &json!({
+                "bootInfo": artifact.boot_info,
+                "attestationDoc": format!("0x{}", hex::encode(&artifact.attestation_doc)),
+            }),
+        )?;
         println!("artifact written to {}", output.display());
     }
 
@@ -478,9 +488,7 @@ fn build_range_input(args: &RpcArgs) -> eyre::Result<RangeProofInput> {
 
     let client = Client::new();
     let finalized_l2_head = finalized_l2_head(&client, &args.l2_rpc)?;
-    if !args.allow_unfinalized
-        && finalized_l2_head.is_some_and(|head| args.end_block > head)
-    {
+    if !args.allow_unfinalized && finalized_l2_head.is_some_and(|head| args.end_block > head) {
         return Err(eyre!(
             "end_block {} is newer than finalized L2 head {}; pass --allow-unfinalized to override",
             args.end_block,
@@ -488,8 +496,11 @@ fn build_range_input(args: &RpcArgs) -> eyre::Result<RangeProofInput> {
         ));
     }
 
-    let (schedule, rollup_config_hash) =
-        proof_config(args.network, args.rollup_config.as_deref(), args.rollup_config_hash)?;
+    let (schedule, rollup_config_hash) = proof_config(
+        args.network,
+        args.rollup_config.as_deref(),
+        args.rollup_config_hash,
+    )?;
 
     let pre_block = get_block(&client, &args.l2_rpc, BlockTag::Number(args.start_block))?;
     let post_block = get_block(&client, &args.l2_rpc, BlockTag::Number(args.end_block))?;
@@ -519,7 +530,10 @@ fn build_range_input(args: &RpcArgs) -> eyre::Result<RangeProofInput> {
         data_format: DataFormat::default(),
         native: false,
         server: true,
-        l2_chain_id: args.rollup_config.is_none().then_some(args.network.chain_id()),
+        l2_chain_id: args
+            .rollup_config
+            .is_none()
+            .then_some(args.network.chain_id()),
         rollup_config_path: args.rollup_config.clone(),
         l1_config_path: None,
         enable_experimental_witness_endpoint: false,
@@ -556,11 +570,7 @@ async fn collect_world_range_witness(
     let hint = BidirectionalChannel::new()?;
     let mut server_task = host.start_server(hint.host, preimage.host).await?;
 
-    let witness = collect_witness_from_channels(
-        preimage.client,
-        hint.client,
-        schedule,
-    );
+    let witness = collect_witness_from_channels(preimage.client, hint.client, schedule);
     tokio::pin!(witness);
 
     let result = match tokio::time::timeout(timeout, async {
@@ -659,9 +669,8 @@ fn proof_config(
         return proof_config_from_file(path);
     }
 
-    let hash = rollup_config_hash.context(
-        "provide --rollup-config or ROLLUP_CONFIG, or supply --rollup-config-hash",
-    )?;
+    let hash = rollup_config_hash
+        .context("provide --rollup-config or ROLLUP_CONFIG, or supply --rollup-config-hash")?;
     let spec = network.chain_spec();
     let protocol_config = ProtocolHardforkConfig::from_chain_spec(spec.as_ref());
     Ok((range_hardfork_config(&protocol_config), hash))
@@ -780,7 +789,9 @@ fn resolve_l1_head(
 ) -> eyre::Result<B256> {
     let l1_origin_number = l1_origin_number(client, l2_rpc, end_block)?;
     let finalized_l1 = get_block(client, l1_rpc, BlockTag::Finalized)?;
-    let target = l1_origin_number.saturating_add(20).min(finalized_l1.number.0);
+    let target = l1_origin_number
+        .saturating_add(20)
+        .min(finalized_l1.number.0);
     Ok(get_block(client, l1_rpc, BlockTag::Number(target))?.hash)
 }
 
@@ -837,7 +848,11 @@ fn rpc<T: DeserializeOwned>(
         .wrap_err_with(|| format!("failed to decode {method} response"))?;
 
     if let Some(error) = response.error {
-        return Err(eyre!("{method} RPC error {}: {}", error.code, error.message));
+        return Err(eyre!(
+            "{method} RPC error {}: {}",
+            error.code,
+            error.message
+        ));
     }
 
     Ok(response.result)
@@ -899,7 +914,7 @@ fn ensure_parent_dir(path: &Path) -> eyre::Result<()> {
 
 #[cfg(feature = "sp1")]
 fn sp1_execute(args: Sp1ExecuteArgs) -> eyre::Result<()> {
-    use sp1_sdk::{ProverClient, Prover, SP1Stdin};
+    use sp1_sdk::{Prover, ProverClient, SP1Stdin};
 
     let witness_bytes = fs::read(&args.witness)
         .wrap_err_with(|| format!("failed to read {}", args.witness.display()))?;
@@ -929,29 +944,29 @@ fn fetch_l1_header_by_hash(
     rpc_url: &str,
     hash: B256,
 ) -> eyre::Result<alloy_consensus::Header> {
-    let block_json: serde_json::Value = rpc(
-        client,
-        rpc_url,
-        "eth_getBlockByHash",
-        json!([hash, false]),
-    )?
-    .with_context(|| format!("eth_getBlockByHash returned null for {hash:?}"))?;
+    let block_json: serde_json::Value =
+        rpc(client, rpc_url, "eth_getBlockByHash", json!([hash, false]))?
+            .with_context(|| format!("eth_getBlockByHash returned null for {hash:?}"))?;
     serde_json::from_value(block_json).wrap_err("failed to deserialize L1 block header")
 }
 
 #[cfg(feature = "sp1")]
 fn sp1_prove(args: Sp1ProveArgs) -> eyre::Result<()> {
     use alloy_consensus::Header as L1Header;
-    use sp1_sdk::{HashableKey, ProverClient, Prover, ProvingKey, SP1Stdin};
+    use sp1_sdk::{HashableKey, Prover, ProverClient, ProvingKey, SP1Stdin};
     use world_chain_proof_core::{boot::BootInfoStruct, types::AggregationInputs};
 
     let n_ranges = args.ranges.max(1);
-    let total_blocks = args.rpc.end_block
+    let total_blocks = args
+        .rpc
+        .end_block
         .checked_sub(args.rpc.start_block)
         .filter(|&n| n > 0)
         .ok_or_else(|| eyre!("end_block must be > start_block"))?;
     if n_ranges > total_blocks {
-        return Err(eyre!("--ranges {n_ranges} exceeds total block count {total_blocks}"));
+        return Err(eyre!(
+            "--ranges {n_ranges} exceeds total block count {total_blocks}"
+        ));
     }
 
     let http_client = Client::new();
@@ -959,7 +974,12 @@ fn sp1_prove(args: Sp1ProveArgs) -> eyre::Result<()> {
     // Resolve a single L1 head that covers all sub-ranges.
     let l1_head_hash = match args.rpc.l1_head {
         Some(h) => h,
-        None => resolve_l1_head(&http_client, &args.rpc.l2_rpc, &args.rpc.l1_rpc, args.rpc.end_block)?,
+        None => resolve_l1_head(
+            &http_client,
+            &args.rpc.l2_rpc,
+            &args.rpc.l1_rpc,
+            args.rpc.end_block,
+        )?,
     };
 
     // Compute sub-range boundaries: [start, end] with end > start.
@@ -991,8 +1011,8 @@ fn sp1_prove(args: Sp1ProveArgs) -> eyre::Result<()> {
     // Fetch the single L1 header for the shared checkpoint head and CBOR-encode it.
     let l1_header: L1Header =
         fetch_l1_header_by_hash(&http_client, &args.rpc.l1_rpc, l1_head_hash)?;
-    let headers_cbor =
-        serde_cbor::to_vec(&vec![l1_header]).map_err(|e| eyre!("CBOR-encoding L1 header failed: {e}"))?;
+    let headers_cbor = serde_cbor::to_vec(&vec![l1_header])
+        .map_err(|e| eyre!("CBOR-encoding L1 header failed: {e}"))?;
 
     let range_elf = fs::read(&args.range_elf)
         .wrap_err_with(|| format!("failed to read {}", args.range_elf.display()))?;
@@ -1005,13 +1025,15 @@ fn sp1_prove(args: Sp1ProveArgs) -> eyre::Result<()> {
     let sp1_mode = args.mode;
 
     tokio::runtime::Runtime::new()?.block_on(async {
-        use sp1_sdk::{CpuProver, MockProver, ProveRequest, SP1Proof, SP1ProofMode, env::EnvProver};
+        use sp1_sdk::{
+            CpuProver, MockProver, ProveRequest, SP1Proof, SP1ProofMode, env::EnvProver,
+        };
         let client: EnvProver = match sp1_prover {
             Sp1Prover::Cpu => EnvProver::Cpu(CpuProver::new().await),
             Sp1Prover::Mock => EnvProver::Mock(MockProver::new().await),
-            Sp1Prover::Network => EnvProver::Network(
-                ProverClient::builder().network().build().await,
-            ),
+            Sp1Prover::Network => {
+                EnvProver::Network(ProverClient::builder().network().build().await)
+            }
         };
 
         let range_pk = client
@@ -1030,7 +1052,12 @@ fn sp1_prove(args: Sp1ProveArgs) -> eyre::Result<()> {
             let start = input.metadata.start_block;
             let end = input.metadata.end_block;
             handles.push(tokio::spawn(async move {
-                println!("range {}/{n_ranges}: proving blocks {}..={}...", i + 1, start + 1, end);
+                println!(
+                    "range {}/{n_ranges}: proving blocks {}..={}...",
+                    i + 1,
+                    start + 1,
+                    end
+                );
                 let mut stdin = SP1Stdin::new();
                 stdin.write_vec(bytes);
                 let proof = client
@@ -1039,11 +1066,15 @@ fn sp1_prove(args: Sp1ProveArgs) -> eyre::Result<()> {
                     .await
                     .map_err(|e| eyre!("range proof {i} failed: {e}"))?;
                 let boot_info: BootInfoStruct =
-                    bincode::deserialize(proof.public_values.as_slice())
-                        .map_err(|e| eyre!("range {i} public values deserialization failed: {e}"))?;
+                    bincode::deserialize(proof.public_values.as_slice()).map_err(|e| {
+                        eyre!("range {i} public values deserialization failed: {e}")
+                    })?;
                 println!(
                     "  range {}: block {} pre={:?} post={:?}",
-                    i + 1, boot_info.l2BlockNumber, boot_info.l2PreRoot, boot_info.l2PostRoot,
+                    i + 1,
+                    boot_info.l2BlockNumber,
+                    boot_info.l2PreRoot,
+                    boot_info.l2PostRoot,
                 );
                 Ok::<_, eyre::Report>((boot_info, proof))
             }));

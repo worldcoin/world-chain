@@ -12,12 +12,17 @@ use world_chain_proof_nitro::{
 
 fn hex_to_pcr(hex: &str) -> anyhow::Result<[u8; 48]> {
     let bytes = hex::decode(hex).context("invalid hex")?;
-    bytes.try_into().map_err(|_| anyhow::anyhow!("PCR must be 48 bytes"))
+    bytes
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("PCR must be 48 bytes"))
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt().with_target(false).compact().init();
+    tracing_subscriber::fmt()
+        .with_target(false)
+        .compact()
+        .init();
 
     let pcr0 = std::env::var("PCR0").context("PCR0 env var required")?;
     let pcr1 = std::env::var("PCR1").context("PCR1 env var required")?;
@@ -54,7 +59,11 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let expected_user_data = range_user_data(&artifact.boot_info);
-    verify_attestation_doc(&artifact.attestation_doc, &expected_pcrs, &expected_user_data)?;
+    verify_attestation_doc(
+        &artifact.attestation_doc,
+        &expected_pcrs,
+        &expected_user_data,
+    )?;
 
     tracing::info!("attestation verified OK");
     Ok(())

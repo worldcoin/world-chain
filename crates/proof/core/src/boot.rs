@@ -16,8 +16,12 @@ pub enum RollupConfigHashError {
 }
 
 /// Hashes a rollup config as pretty JSON then SHA-256, matching OP Succinct Lite.
-pub fn hash_rollup_config<T: Serialize + ?Sized>(config: &T) -> Result<B256, RollupConfigHashError> {
-    Ok(sha256_b256(serde_json::to_string_pretty(config)?.as_bytes()))
+pub fn hash_rollup_config<T: Serialize + ?Sized>(
+    config: &T,
+) -> Result<B256, RollupConfigHashError> {
+    Ok(sha256_b256(
+        serde_json::to_string_pretty(config)?.as_bytes(),
+    ))
 }
 
 /// Public boot values committed by the range proof.
@@ -76,8 +80,7 @@ impl BootInfoStruct {
         boot_info: kona_proof::BootInfo,
         world_schedule: &WorldRangeHardforkConfig,
     ) -> Self {
-        let rollup_config_hash =
-            hash_world_rollup_config(&boot_info.rollup_config, world_schedule);
+        let rollup_config_hash = hash_world_rollup_config(&boot_info.rollup_config, world_schedule);
         Self {
             l1Head: boot_info.l1_head,
             l2PreRoot: boot_info.agreed_l2_output_root,

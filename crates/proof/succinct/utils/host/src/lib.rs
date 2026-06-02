@@ -83,7 +83,11 @@ impl WorldProverIdentity {
         range_vkey_commitment: B256,
         rollup_config_hash: B256,
     ) -> Self {
-        Self { aggregation_vkey, range_vkey_commitment, rollup_config_hash }
+        Self {
+            aggregation_vkey,
+            range_vkey_commitment,
+            rollup_config_hash,
+        }
     }
 
     pub fn from_rollup_config<T: Serialize + ?Sized>(
@@ -91,7 +95,11 @@ impl WorldProverIdentity {
         range_vkey_commitment: B256,
         rollup_config: &T,
     ) -> Result<Self, RollupConfigHashError> {
-        Ok(Self::new(aggregation_vkey, range_vkey_commitment, hash_rollup_config(rollup_config)?))
+        Ok(Self::new(
+            aggregation_vkey,
+            range_vkey_commitment,
+            hash_rollup_config(rollup_config)?,
+        ))
     }
 
     pub fn from_world_rollup_config<T: Serialize + ?Sized>(
@@ -291,7 +299,10 @@ pub fn split_range(
     split_count: u64,
 ) -> Result<Vec<L2BlockRange>, WorldSuccinctHostError> {
     if range.end <= range.start {
-        return Err(WorldSuccinctHostError::InvalidRange { start: range.start, end: range.end });
+        return Err(WorldSuccinctHostError::InvalidRange {
+            start: range.start,
+            end: range.end,
+        });
     }
 
     let split_count = split_count.max(1).min(range.len());
@@ -372,14 +383,31 @@ mod tests {
     #[test]
     fn identity_hash_with_world_schedule() {
         let rollup_config = json!({"jovian_time": 10});
-        let first_schedule = WorldRangeHardforkConfig { tropo_time: Some(20), ..Default::default() };
-        let second_schedule =
-            WorldRangeHardforkConfig { tropo_time: Some(21), ..Default::default() };
+        let first_schedule = WorldRangeHardforkConfig {
+            tropo_time: Some(20),
+            ..Default::default()
+        };
+        let second_schedule = WorldRangeHardforkConfig {
+            tropo_time: Some(21),
+            ..Default::default()
+        };
         let agg = B256::from([1; 32]);
         let rvc = B256::from([2; 32]);
 
-        let a = WorldProverIdentity::from_world_rollup_config(agg, rvc, &rollup_config, &first_schedule).unwrap();
-        let b = WorldProverIdentity::from_world_rollup_config(agg, rvc, &rollup_config, &second_schedule).unwrap();
+        let a = WorldProverIdentity::from_world_rollup_config(
+            agg,
+            rvc,
+            &rollup_config,
+            &first_schedule,
+        )
+        .unwrap();
+        let b = WorldProverIdentity::from_world_rollup_config(
+            agg,
+            rvc,
+            &rollup_config,
+            &second_schedule,
+        )
+        .unwrap();
 
         assert_ne!(a.rollup_config_hash, b.rollup_config_hash);
     }
@@ -395,7 +423,10 @@ mod tests {
 
     #[test]
     fn range_split_count_serializes_as_number() {
-        assert_eq!(serde_json::to_value(RangeSplitCount::Four).unwrap(), json!(4));
+        assert_eq!(
+            serde_json::to_value(RangeSplitCount::Four).unwrap(),
+            json!(4)
+        );
         assert_eq!(
             serde_json::from_value::<RangeSplitCount>(json!(16)).unwrap(),
             RangeSplitCount::Sixteen
