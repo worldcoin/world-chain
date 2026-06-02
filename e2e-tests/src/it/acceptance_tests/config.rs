@@ -97,14 +97,7 @@ impl Config {
     }
 
     pub(super) fn rpc_target(&self) -> String {
-        let host = self.rpc_url.host_str().unwrap_or("<unknown-host>");
-        let port = self
-            .rpc_url
-            .port()
-            .map(|port| format!(":{port}"))
-            .unwrap_or_default();
-
-        format!("{}://{}{}/...", self.rpc_url.scheme(), host, port)
+        rpc_target(&self.rpc_url)
     }
 }
 
