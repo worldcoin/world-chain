@@ -13,6 +13,7 @@ use super::config::{CloudflareAccess, Config};
 #[derive(Clone)]
 pub(super) struct RpcEnv {
     provider: RootProvider,
+    bundler_provider: Option<RootProvider>,
     config: Config,
 }
 
@@ -23,18 +24,30 @@ impl RpcEnv {
         let Some(config) = Config::from_env()? else {
             return Ok(None);
         };
-        let retry = RetryBackoffLayer::new(4, 100, 330);
-        let http_client = http_client(config.cloudflare_access.as_ref())?;
-        let client = RpcClient::builder()
-            .layer(retry)
-            .http_with_client(http_client, config.rpc_url.clone());
-        let provider = RootProvider::new(client);
+        let provider = provider_for_url(&config.rpc_url, config.cloudflare_access.as_ref())?;
+        let bundler_provider = config
+            .bundler
+            .as_ref()
+            .map(|bundler| provider_for_url(&bundler.rpc_url, bundler.cloudflare_access.as_ref()))
+            .transpose()?;
 
-        Ok(Some(Self { provider, config }))
+        Ok(Some(Self {
+            provider,
+            bundler_provider,
+            config,
+        }))
     }
 
     pub(super) fn config(&self) -> &Config {
         &self.config
+    }
+
+    pub(super) fn chain_provider(&self) -> &RootProvider {
+        &self.provider
+    }
+
+    pub(super) fn bundler_provider(&self) -> Option<&RootProvider> {
+        self.bundler_provider.as_ref()
     }
 
     pub(super) async fn chain_id(&self) -> eyre::Result<u64> {
@@ -51,6 +64,19 @@ impl RpcEnv {
             .await?
             .ok_or_else(|| eyre!("latest block missing"))
     }
+}
+
+fn provider_for_url(
+    url: &url::Url,
+    cloudflare_access: Option<&CloudflareAccess>,
+) -> eyre::Result<RootProvider> {
+    let retry = RetryBackoffLayer::new(4, 100, 330);
+    let http_client = http_client(cloudflare_access)?;
+    let client = RpcClient::builder()
+        .layer(retry)
+        .http_with_client(http_client, url.clone());
+
+    Ok(RootProvider::new(client))
 }
 
 fn http_client(access: Option<&CloudflareAccess>) -> eyre::Result<Client> {
