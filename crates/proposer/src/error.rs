@@ -23,4 +23,6 @@ pub enum ProposerError {
     /// The output-root RPC response did not contain an output root.
     #[error("optimism_outputAtBlock response did not contain an output root")]
     MissingOutputRoot,
+    #[error("The proposal transaction didn't execute succesfully")]
+    Revert,
 }

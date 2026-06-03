@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, B256, U256};
-use alloy_provider::Provider;
+use alloy_provider::{Provider, network::any::error};
 use async_trait::async_trait;
 use world_chain_proofs::{
     IWorldChainAnchorStateRegistry, IWorldChainProofSystemFactory, IWorldChainProofSystemGame,
@@ -112,10 +112,13 @@ where
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
 
         let tx_hash = *pending.tx_hash();
-        pending
-            .watch()
+        let receipt = pending
+            .get_receipt()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        if !receipt.status() {
+            return Err(ProposerError::Revert);
+        }
 
         Ok(ProposalSubmission { tx_hash })
     }
