@@ -1,11 +1,10 @@
 //! World Chain acceptance test harness.
 //!
-//! A modular, registry-driven suite for asserting network-wide **health**,
-//! **spec compatibility**, and **performance** of a World Chain deployment, and
-//! for emitting an acceptance report. The same suite runs against a freshly
-//! spawned in-process devnet and against a remote alphanet over RPC.
+//! A code-derived acceptance suite for asserting a World Chain deployment and
+//! emitting an acceptance report. The same suite runs against a freshly spawned
+//! in-process devnet and against a remote alphanet over RPC.
 //!
-//! # Adding a check
+//! # Adding a test
 //!
 //! Write an `async fn` taking the [`TestCtx`] and annotate it with
 //! [`macro@acceptance_test`]. It self-registers at link time — there is no
@@ -15,7 +14,7 @@
 //! use std::sync::Arc;
 //! use world_chain_acceptance::{TestCtx, acceptance_test};
 //!
-//! #[acceptance_test(category = Health)]
+//! #[acceptance_test]
 //! async fn rpc_is_live(ctx: Arc<TestCtx>) -> eyre::Result<()> {
 //!     let _ = ctx.chain_id().await?;
 //!     Ok(())
@@ -28,25 +27,29 @@
 //! [`Report`] renders to JSON, Markdown, and a stdout summary.
 
 // Allow the `acceptance_test` macro's `::world_chain_acceptance::…` paths to
-// resolve when the macro is used inside this crate (the bundled checks).
+// resolve when the macro is used inside this crate (the bundled tests).
 extern crate self as world_chain_acceptance;
 
+pub mod catalog;
 pub mod context;
 pub mod env;
-pub mod registry;
 pub mod report;
 pub mod runner;
+pub mod target;
 
-// Bundled checks. Compiled unconditionally so they self-register for any
+// Bundled tests. Compiled unconditionally so they self-register for any
 // consumer of the harness (e.g. the `xtask acceptance` command).
-mod checks;
+mod tests;
 
-pub use context::{Metric, MetricValue, Skipped, TestCtx};
+pub use catalog::{
+    AcceptanceTest, Applicability, Catalog, Location, Requirements, TestFn, TestFuture,
+};
+pub use context::{Metric, MetricValue, RunConfig, Skipped, TestCtx};
 pub use env::{CloudflareAccess, EngineApi, Env, EnvBuilder, EnvSummary, Thresholds};
-pub use registry::{AcceptanceTest, Category, TestFn, TestFuture};
 pub use report::{Report, Status, TestResult, Totals};
-pub use runner::{
-    Execution, InlineExecutor, PanicIsolatedExecutor, RunOptions, TestExecutor, run, run_with,
+pub use runner::{CONCURRENCY_ENV, Execution, FAIL_FLAKY_TESTS_ENV, RunOptions, run, run_matrix};
+pub use target::{
+    AcceptanceTarget, MatrixCell, Provisioned, Remote, RemoteConfig, Teardown, TeardownFuture, Tier,
 };
 
 /// The Engine API JWT secret type, re-exported so consumers can construct one
@@ -55,11 +58,12 @@ pub use reth_rpc_layer::JwtSecret;
 
 // Re-exported so consumers (and the `acceptance_test` macro) can use the
 // manifest types without depending on the manifest crate directly.
-pub use world_chain_manifest::{
-    self as manifest, Commitments, Feature, Hardfork, NetworkManifest, Requirement,
+pub use world_chain_chainspec::{
+    Feature, ManifestCommitment, NetworkManifest, WORLD_CHAIN_HARDFORKS, WorldChainHardfork,
+    hardfork_key, manifest,
 };
 
-/// The attribute macro that registers an `async fn` as an acceptance check.
+/// The attribute macro that registers an `async fn` as an acceptance test.
 pub use world_chain_acceptance_macros::acceptance_test;
 
 // Re-exported so the generated registration code can reference it through this
@@ -69,23 +73,41 @@ pub use inventory;
 inventory::collect!(AcceptanceTest);
 
 #[cfg(test)]
-mod tests {
+mod self_tests {
     use super::*;
 
     #[test]
-    fn bundled_checks_self_register() {
+    fn bundled_tests_self_register() {
         let tests: Vec<&AcceptanceTest> = inventory::iter::<AcceptanceTest>.into_iter().collect();
 
-        // The bundled spec checks should be collected at link time.
+        // The bundled acceptance tests should be collected at link time.
         assert!(
             !tests.is_empty(),
-            "expected the bundled spec checks to self-register"
+            "expected the bundled acceptance tests to self-register"
         );
-        assert!(
-            tests
-                .iter()
-                .any(|t| t.category == Category::SpecCompatibility),
-            "no registered spec-compatibility check"
+        assert!(tests.iter().any(|t| t.package.contains("tests::spec")));
+    }
+
+    /// Every registered test's declarative requirements must parse against the
+    /// typed enums — this catches a typo in `requires_hardfork`/`features` at
+    /// `cargo test` time rather than as a silent skip during a real run.
+    #[test]
+    fn bundled_requirements_resolve() {
+        // A maximal commitment so applicability can only be Applicable or
+        // Invalid (a parse failure), never a legitimate Skip.
+        let commitment = ManifestCommitment::new(
+            WorldChainHardfork::Strato,
+            world_chain_chainspec::Feature::ALL,
         );
+        for test in inventory::iter::<AcceptanceTest> {
+            assert!(
+                !matches!(
+                    test.requirements.applicability(&commitment),
+                    Applicability::Invalid(_)
+                ),
+                "test `{}` has unresolvable requirements",
+                test.name
+            );
+        }
     }
 }

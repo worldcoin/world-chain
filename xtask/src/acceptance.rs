@@ -3,22 +3,22 @@
 //!
 //! The same manifest both configures the target (the spawned devnet's forks and
 //! features are derived from it) and is the acceptance criterion, so a network
-//! is tested against exactly what it commits to.
+//! is tested against exactly what it commits to. The optional `--fork-matrix`
+//! sweep provisions one devnet per hardfork and aggregates the results.
 
-use std::{collections::BTreeSet, path::PathBuf, sync::Arc, time::Duration};
+use std::{future::Future, path::PathBuf, pin::Pin, str::FromStr, sync::Arc, time::Duration};
 
 use clap::{Args as ClapArgs, ValueEnum};
-use eyre::eyre::{Result, WrapErr, bail, eyre};
-use std::str::FromStr;
+use eyre::eyre::{Result, WrapErr, bail};
 use tokio::sync::watch;
 use tracing::{info, warn};
 use url::Url;
 use world_chain_acceptance::{
-    Category, CloudflareAccess, Env, JwtSecret, NetworkManifest, Report, RunOptions, Thresholds,
-    run,
+    AcceptanceTarget, CloudflareAccess, Env, Feature, JwtSecret, MatrixCell, NetworkManifest,
+    Provisioned, Remote, RemoteConfig, Report, RunOptions, Teardown, Thresholds,
+    WORLD_CHAIN_HARDFORKS, WorldChainHardfork, run_matrix,
 };
 
-use world_chain_chainspec::WorldChainHardfork;
 use world_chain_devnet::{
     HaSequencerConfig, ObservabilityConfig, WorldChainHardforkConfig, WorldDevnetBuilder,
     WorldDevnetPreset, is_docker_unavailable,
@@ -64,13 +64,23 @@ pub struct Args {
     #[arg(long)]
     network: Option<String>,
 
-    /// Restrict to these categories (`health`, `spec`, `performance`).
-    #[arg(long, value_delimiter = ',')]
-    category: Vec<String>,
+    /// Run only tests whose Rust module/package path contains this substring.
+    #[arg(long)]
+    package: Option<String>,
 
-    /// Run only checks whose name contains this substring.
+    /// Run only tests whose name contains this substring.
     #[arg(long)]
     name: Option<String>,
+
+    /// Maximum number of non-serial tests to run concurrently within a cell.
+    #[arg(long)]
+    concurrency: Option<usize>,
+
+    /// Sweep the suite across multiple hardforks (spawned target only). Accepts
+    /// `all`, `through:<fork>`, or a comma list like `jovian,tropo,strato`. Each
+    /// cell provisions a fresh devnet at that fork with the manifest's features.
+    #[arg(long)]
+    fork_matrix: Option<String>,
 
     /// Write the JSON report to this path.
     #[arg(long)]
@@ -80,9 +90,9 @@ pub struct Args {
     #[arg(long)]
     markdown: Option<PathBuf>,
 
-    /// Fail the run if any committed requirement has no backing check.
+    /// Write the JUnit XML report to this path.
     #[arg(long)]
-    strict: bool,
+    junit: Option<PathBuf>,
 
     /// Spawned-devnet topology preset (`--target spawned` only).
     #[arg(long, value_enum, default_value_t = PresetArg::HaSequencer)]
@@ -130,11 +140,26 @@ pub async fn run_acceptance(args: Args) -> Result<()> {
         "loaded acceptance manifest"
     );
 
-    let options = run_options(&args)?;
+    let options = run_options(&args);
+    let cells = matrix_cells(&args, &manifest)?;
+    let engine_jwt = parse_engine_jwt(args.engine_jwt.as_deref())?;
 
     let report = match args.target {
-        Target::Spawned => run_spawned(&args, manifest, &options).await?,
-        Target::Alphanet => run_remote(&args, manifest, &options).await?,
+        Target::Spawned => {
+            let target = SpawnedDevnet::new(&args, manifest, engine_jwt);
+            match run_matrix(&target, &cells, &options).await {
+                Ok(report) => Some(report),
+                Err(err) if is_docker_unavailable(&err) => {
+                    warn!(error = %format!("{err:#}"), "skipping spawned acceptance run: Docker is unavailable");
+                    None
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        Target::Alphanet => {
+            let target = remote_target(&args, manifest, engine_jwt)?;
+            Some(run_matrix(&target, &cells, &options).await?)
+        }
     };
 
     let Some(report) = report else {
@@ -144,163 +169,203 @@ pub async fn run_acceptance(args: Args) -> Result<()> {
 
     emit_report(&args, &report)?;
 
-    let passed = if args.strict {
-        report.passed_strict()
-    } else {
-        report.passed()
-    };
-
-    if passed {
+    if report.passed() {
         info!(
             passed = report.totals.passed,
             skipped = report.totals.skipped,
             "acceptance run passed"
         );
         Ok(())
-    } else if args.strict && !report.uncovered_commitments.is_empty() && report.passed() {
-        bail!(
-            "acceptance run failed under --strict: uncovered commitments: {}",
-            report.uncovered_commitments.join(", ")
-        );
     } else {
         bail!(
-            "acceptance run failed: {} of {} checks failed",
+            "acceptance run failed: {} of {} tests failed",
             report.totals.failed,
             report.totals.total
         );
     }
 }
 
-fn run_options(args: &Args) -> Result<RunOptions> {
-    let categories = if args.category.is_empty() {
-        None
-    } else {
-        let mut set = BTreeSet::new();
-        for raw in &args.category {
-            set.insert(Category::parse(raw).ok_or_else(|| eyre!("unknown category `{raw}`"))?);
-        }
-        Some(set)
-    };
-
-    Ok(RunOptions {
-        categories,
+fn run_options(args: &Args) -> RunOptions {
+    RunOptions {
+        package_filter: args.package.clone(),
         name_filter: args.name.clone(),
-    })
+        concurrency: args.concurrency,
+    }
 }
 
-/// Build a remote environment and run the suite against it.
-async fn run_remote(
+/// Resolve the matrix cells for this run. A non-matrix run is a single cell
+/// taken from the manifest. The fork-matrix sweep is spawned-target only.
+fn matrix_cells(args: &Args, manifest: &NetworkManifest) -> Result<Vec<MatrixCell>> {
+    let Some(spec) = &args.fork_matrix else {
+        return Ok(vec![MatrixCell::from_manifest(manifest)]);
+    };
+
+    if args.target != Target::Spawned {
+        bail!(
+            "--fork-matrix is only valid for `--target spawned`; a remote network is a single deployed fork"
+        );
+    }
+
+    let features: Vec<Feature> = manifest.features.clone();
+    let forks = parse_fork_set(spec)?;
+    Ok(forks
+        .into_iter()
+        .map(|fork| MatrixCell::new(fork, features.iter().copied()))
+        .collect())
+}
+
+/// Parse a `--fork-matrix` spec into an ordered, deduplicated fork set.
+fn parse_fork_set(spec: &str) -> Result<Vec<WorldChainHardfork>> {
+    let spec = spec.trim();
+    if spec.eq_ignore_ascii_case("all") {
+        return Ok(WORLD_CHAIN_HARDFORKS.to_vec());
+    }
+    if let Some(name) = spec.strip_prefix("through:") {
+        let target = WorldChainHardfork::from_str(name.trim())
+            .map_err(|_| eyre::eyre::eyre!("unknown hardfork `{name}` in --fork-matrix"))?;
+        return Ok(WORLD_CHAIN_HARDFORKS
+            .iter()
+            .copied()
+            .filter(|fork| fork.idx() <= target.idx())
+            .collect());
+    }
+    spec.split(',')
+        .map(|name| {
+            WorldChainHardfork::from_str(name.trim())
+                .map_err(|_| eyre::eyre::eyre!("unknown hardfork `{name}` in --fork-matrix"))
+        })
+        .collect()
+}
+
+/// A spawned-devnet [`AcceptanceTarget`]: each cell builds a fresh
+/// `world_chain_devnet` at the cell's hardfork and features.
+struct SpawnedDevnet {
+    manifest: Arc<NetworkManifest>,
+    preset: WorldDevnetPreset,
+    block_time: Duration,
+    network: Option<String>,
+    engine_rpc_url: Option<Url>,
+    engine_jwt: Option<JwtSecret>,
+}
+
+impl SpawnedDevnet {
+    fn new(args: &Args, manifest: Arc<NetworkManifest>, engine_jwt: Option<JwtSecret>) -> Self {
+        Self {
+            manifest,
+            preset: WorldDevnetPreset::from(args.preset),
+            block_time: Duration::from_millis(args.block_time_ms),
+            network: args.network.clone(),
+            engine_rpc_url: args.engine_rpc_url.clone(),
+            engine_jwt,
+        }
+    }
+
+    async fn provision_inner(&self, cell: MatrixCell) -> Result<Provisioned> {
+        let observability = if self.preset == WorldDevnetPreset::HaSequencer {
+            ObservabilityConfig::enabled()
+        } else {
+            ObservabilityConfig::default()
+        };
+        let ha_config = HaSequencerConfig::default().with_observability(observability.clone());
+
+        let hardforks = WorldChainHardforkConfig::through(cell.hardfork);
+        hardforks.validate()?;
+
+        let has_feature = |feature: Feature| cell.features.contains(&feature);
+
+        let devnet = WorldDevnetBuilder::new()
+            .preset(self.preset)
+            .ha_sequencer(ha_config)
+            .observability(observability)
+            .hardforks(hardforks)
+            .flashblocks(has_feature(Feature::Flashblocks))
+            .flashblocks_access_list(has_feature(Feature::BlockAccessList))
+            .block_time(self.block_time)
+            .build()
+            .await?;
+
+        // Capture endpoints before the devnet is moved into its run loop.
+        let l2_rpc_url: Url = devnet.sequencer_rpc_url().parse()?;
+        let l1_rpc_url = parse_opt_url(devnet.l1_rpc_url())?;
+        let flashblocks_url = parse_opt_url(devnet.flashblocks_url().as_deref())?;
+        let prometheus_url = parse_opt_url(devnet.prometheus_url())?;
+
+        // Reflect the cell's fork/features in the manifest the report displays.
+        let mut cell_manifest = (*self.manifest).clone();
+        cell_manifest.hardfork = cell.hardfork;
+        cell_manifest.features = cell.features.clone();
+
+        let mut builder = Env::builder(Arc::new(cell_manifest))
+            .l2_rpc_url(l2_rpc_url)
+            .l1_rpc_url(l1_rpc_url)
+            .engine(self.engine_rpc_url.clone(), self.engine_jwt)
+            .flashblocks_url(flashblocks_url)
+            .prometheus_url(prometheus_url)
+            .thresholds(Thresholds {
+                block_advance_timeout: Duration::from_secs(120),
+                ..Thresholds::default()
+            });
+        if let Some(network) = &self.network {
+            builder = builder.network(network.clone());
+        }
+        let env = builder.build()?;
+
+        // Drive continuous block production in the background while tests run.
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let devnet_handle =
+            tokio::spawn(async move { devnet.run_until_shutdown(shutdown_rx).await });
+
+        let teardown: Teardown = Box::new(move || {
+            Box::pin(async move {
+                let _ = shutdown_tx.send(true);
+                devnet_handle
+                    .await
+                    .wrap_err("devnet task panicked")?
+                    .wrap_err("devnet run loop returned an error")?;
+                Ok(())
+            })
+        });
+
+        Ok(Provisioned::with_teardown(env, teardown))
+    }
+}
+
+impl AcceptanceTarget for SpawnedDevnet {
+    fn manifest(&self) -> Arc<NetworkManifest> {
+        self.manifest.clone()
+    }
+
+    fn provision(
+        &self,
+        cell: MatrixCell,
+    ) -> Pin<Box<dyn Future<Output = Result<Provisioned>> + Send + '_>> {
+        Box::pin(async move { self.provision_inner(cell).await })
+    }
+}
+
+/// Build the in-crate [`Remote`] target from CLI args and the environment.
+fn remote_target(
     args: &Args,
     manifest: Arc<NetworkManifest>,
-    options: &RunOptions,
-) -> Result<Option<Report>> {
+    engine_jwt: Option<JwtSecret>,
+) -> Result<Remote> {
     let Some(rpc_url) = args.rpc_url.clone() else {
         bail!("`--target alphanet` requires `--rpc-url` (or ACCEPTANCE_RPC_URL)");
     };
 
-    let mut builder = Env::builder(manifest)
-        .l2_rpc_url(rpc_url)
-        .l1_rpc_url(args.l1_rpc_url.clone())
-        .engine(args.engine_rpc_url.clone(), engine_jwt(args)?)
-        .flashblocks_url(args.flashblocks_url.clone())
-        .prometheus_url(args.prometheus_url.clone())
-        .cloudflare_access(cloudflare_access_from_env()?);
-    if let Some(network) = &args.network {
-        builder = builder.network(network.clone());
-    }
-
-    Ok(Some(run(builder.build()?, options).await))
-}
-
-/// Spawn an in-process devnet derived from the manifest, run the suite, tear down.
-async fn run_spawned(
-    args: &Args,
-    manifest: Arc<NetworkManifest>,
-    options: &RunOptions,
-) -> Result<Option<Report>> {
-    let preset = WorldDevnetPreset::from(args.preset);
-    let observability = if preset == WorldDevnetPreset::HaSequencer {
-        ObservabilityConfig::enabled()
-    } else {
-        ObservabilityConfig::default()
-    };
-    let ha_config = HaSequencerConfig::default().with_observability(observability.clone());
-
-    let has_feature = |key: &str| {
-        manifest
-            .features
-            .iter()
-            .any(|f| f.eq_ignore_ascii_case(key))
+    let config = RemoteConfig {
+        network: args.network.clone(),
+        l2_rpc_url: Some(rpc_url),
+        l1_rpc_url: args.l1_rpc_url.clone(),
+        engine_url: args.engine_rpc_url.clone(),
+        engine_jwt,
+        flashblocks_url: args.flashblocks_url.clone(),
+        prometheus_url: args.prometheus_url.clone(),
+        cloudflare_access: cloudflare_access_from_env()?,
+        thresholds: None,
     };
 
-    let build = WorldDevnetBuilder::new()
-        .preset(preset)
-        .ha_sequencer(ha_config)
-        .observability(observability)
-        .hardforks(hardfork_config(&manifest)?)
-        .flashblocks(has_feature("flashblocks"))
-        .flashblocks_access_list(has_feature("block_access_list"))
-        .block_time(Duration::from_millis(args.block_time_ms))
-        .build()
-        .await;
-
-    let devnet = match build {
-        Ok(devnet) => devnet,
-        Err(err) if is_docker_unavailable(&err) => {
-            warn!(error = %format!("{err:#}"), "skipping spawned acceptance run: Docker is unavailable");
-            return Ok(None);
-        }
-        Err(err) => return Err(err),
-    };
-
-    // Capture endpoints before the devnet is moved into its run loop.
-    let l2_rpc_url: Url = devnet.sequencer_rpc_url().parse()?;
-    let l1_rpc_url = parse_opt_url(devnet.l1_rpc_url())?;
-    let flashblocks_url = parse_opt_url(devnet.flashblocks_url().as_deref())?;
-    let prometheus_url = parse_opt_url(devnet.prometheus_url())?;
-
-    let mut builder = Env::builder(manifest)
-        .l2_rpc_url(l2_rpc_url)
-        .l1_rpc_url(l1_rpc_url)
-        .engine(args.engine_rpc_url.clone(), engine_jwt(args)?)
-        .flashblocks_url(flashblocks_url)
-        .prometheus_url(prometheus_url)
-        .thresholds(Thresholds {
-            block_advance_timeout: Duration::from_secs(120),
-            ..Thresholds::default()
-        });
-    if let Some(network) = &args.network {
-        builder = builder.network(network.clone());
-    }
-    let env = builder.build()?;
-
-    // Drive continuous block production in the background while checks run.
-    let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let devnet_handle = tokio::spawn(async move { devnet.run_until_shutdown(shutdown_rx).await });
-
-    let report = run(env, options).await;
-
-    let _ = shutdown_tx.send(true);
-    devnet_handle
-        .await
-        .wrap_err("devnet task panicked")?
-        .wrap_err("devnet run loop returned an error")?;
-
-    Ok(Some(report))
-}
-
-/// Map the manifest's single committed hardfork onto the devnet fork config
-/// (all forks through the committed one active at genesis).
-fn hardfork_config(manifest: &NetworkManifest) -> Result<WorldChainHardforkConfig> {
-    let fork = WorldChainHardfork::from_str(&manifest.hardfork).map_err(|_| {
-        eyre!(
-            "spawned devnet supports World Chain hardforks only; `{}` is not one (use --target alphanet for it)",
-            manifest.hardfork
-        )
-    })?;
-    let config = WorldChainHardforkConfig::through(fork);
-    config.validate()?;
-    Ok(config)
+    Remote::new(manifest, config)
 }
 
 fn emit_report(args: &Args, report: &Report) -> Result<()> {
@@ -316,16 +381,17 @@ fn emit_report(args: &Args, report: &Report) -> Result<()> {
             .wrap_err_with(|| format!("failed to write Markdown report to {}", path.display()))?;
         info!(path = %path.display(), "wrote Markdown acceptance report");
     }
+    if let Some(path) = &args.junit {
+        std::fs::write(path, report.to_junit())
+            .wrap_err_with(|| format!("failed to write JUnit report to {}", path.display()))?;
+        info!(path = %path.display(), "wrote JUnit acceptance report");
+    }
     Ok(())
 }
 
-/// Parse the Engine API JWT secret from the hex argument, if provided.
-fn engine_jwt(args: &Args) -> Result<Option<JwtSecret>> {
-    args.engine_jwt
-        .as_deref()
-        .map(|hex| {
-            JwtSecret::from_hex(hex).wrap_err("failed to parse --engine-jwt as a hex secret")
-        })
+/// Parse the Engine API JWT secret from a hex string, if provided.
+fn parse_engine_jwt(hex: Option<&str>) -> Result<Option<JwtSecret>> {
+    hex.map(|hex| JwtSecret::from_hex(hex).wrap_err("failed to parse --engine-jwt as a hex secret"))
         .transpose()
 }
 

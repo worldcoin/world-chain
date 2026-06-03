@@ -1,15 +1,51 @@
-//! Per-check execution context.
+//! Per-test execution context.
 
 use std::{
     ops::Deref,
     sync::{Arc, Mutex},
 };
 
+use alloy_signer_local::{MnemonicBuilder, PrivateKeySigner, coins_bip39::English};
 use serde::Serialize;
 
 use crate::env::Env;
 
-/// A value recorded by a check for inclusion in the report (e.g. a measured
+/// Deterministic mnemonic used to derive per-test signers. Combined with the
+/// run-level salt and the test index, it gives every test its own account so
+/// tests running concurrently against a shared devnet do not collide on nonces.
+const TEST_MNEMONIC: &str = "test test test test test test test test test test test junk";
+
+/// Run-level configuration threaded into every [`TestCtx`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RunConfig {
+    /// When `true`, a run-time [`TestCtx::skip`] is converted into a failure
+    /// because an orchestrator selected this test and expected it to run.
+    /// Declarative pre-gating (unmet `requires_*`) still skips regardless.
+    pub expect_preconditions: bool,
+    /// Salt applied to per-test signer derivation, for reproducible isolation
+    /// across runs. Sourced from `ACCEPTANCE_KEYS_SALT`.
+    pub keys_salt: u32,
+}
+
+impl RunConfig {
+    /// Build a [`RunConfig`] from the acceptance environment variables.
+    pub fn from_env() -> Self {
+        Self {
+            expect_preconditions: env_flag("ACCEPTANCE_EXPECT_PRECONDITIONS_MET"),
+            keys_salt: std::env::var("ACCEPTANCE_KEYS_SALT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+        }
+    }
+}
+
+fn env_flag(key: &str) -> bool {
+    std::env::var(key)
+        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+}
+
+/// A value recorded by a test for inclusion in the report (e.g. a measured
 /// block time or throughput number).
 #[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
@@ -29,27 +65,33 @@ impl std::fmt::Display for MetricValue {
     }
 }
 
-/// A named metric emitted by a check.
+/// A named metric emitted by a test.
 #[derive(Clone, Debug, Serialize)]
 pub struct Metric {
     pub key: String,
     pub value: MetricValue,
 }
 
-/// Context handed to every check.
+/// Context handed to every test.
 ///
-/// Derefs to the [`Env`], so checks call `ctx.chain_id().await` directly, and
-/// additionally lets a check record metrics that surface in the report.
+/// Derefs to the [`Env`], so tests call `ctx.chain_id().await` directly, and
+/// additionally lets a test record metrics, derive an isolated signer, and skip
+/// at run time.
 pub struct TestCtx {
     env: Arc<Env>,
+    config: RunConfig,
+    /// Stable index of this test within the run, used to namespace derived keys.
+    test_index: u32,
     metrics: Mutex<Vec<Metric>>,
 }
 
 impl TestCtx {
     /// Wrap a shared environment in a fresh context.
-    pub fn new(env: Arc<Env>) -> Arc<Self> {
+    pub fn new(env: Arc<Env>, config: RunConfig, test_index: u32) -> Arc<Self> {
         Arc::new(Self {
             env,
+            config,
+            test_index,
             metrics: Mutex::new(Vec::new()),
         })
     }
@@ -57,6 +99,22 @@ impl TestCtx {
     /// The environment under test.
     pub fn env(&self) -> &Env {
         &self.env
+    }
+
+    /// A deterministic signer unique to this test (and run salt), so concurrent
+    /// tests against a shared network do not collide on account nonces. `index`
+    /// distinguishes multiple signers within a single test.
+    pub fn signer(&self, index: u32) -> eyre::Result<PrivateKeySigner> {
+        // Namespace by test index so two tests never derive the same account.
+        let derivation = self
+            .config
+            .keys_salt
+            .wrapping_add(self.test_index.wrapping_mul(64))
+            .wrapping_add(index);
+        Ok(MnemonicBuilder::<English>::default()
+            .phrase(TEST_MNEMONIC)
+            .index(derivation)?
+            .build()?)
     }
 
     /// Record an integer metric.
@@ -85,21 +143,29 @@ impl TestCtx {
             });
     }
 
-    /// Drain the metrics recorded by the check.
+    /// Drain the metrics recorded by the test.
     pub(crate) fn take_metrics(&self) -> Vec<Metric> {
         std::mem::take(&mut self.metrics.lock().expect("metrics mutex poisoned"))
     }
 }
 
 impl TestCtx {
-    /// Skip the check at run time with a reason (e.g. an optional endpoint is
-    /// not configured). Returns an error the runner recognises as a skip rather
-    /// than a failure.
+    /// Skip the test at run time with a reason (e.g. an optional endpoint is
+    /// not configured). Returns an error the runner recognises as a skip.
+    ///
+    /// When the run sets `ACCEPTANCE_EXPECT_PRECONDITIONS_MET`, this is promoted
+    /// to a failure instead — an orchestrator selected the test and expected its
+    /// preconditions to hold (mirrors Optimism's `DEVNET_EXPECT_PRECONDITIONS_MET`).
     pub fn skip(&self, reason: impl Into<String>) -> eyre::Report {
-        eyre::eyre::Report::new(Skipped(reason.into()))
+        let reason = reason.into();
+        if self.config.expect_preconditions {
+            eyre::eyre::eyre!("precondition not met (expected to be met): {reason}")
+        } else {
+            eyre::eyre::Report::new(Skipped(reason))
+        }
     }
 
-    /// Skip the check when `condition` holds; otherwise continue.
+    /// Skip the test when `condition` holds; otherwise continue.
     pub fn skip_if(&self, condition: bool, reason: impl Into<String>) -> eyre::Result<()> {
         if condition {
             Err(self.skip(reason))

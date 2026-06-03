@@ -1,40 +1,32 @@
 //! Procedural macros for the World Chain acceptance test harness.
 //!
-//! The [`macro@acceptance_test`] attribute turns a plain `async fn` into a
-//! self-registering acceptance check. Every annotated function is collected at
-//! link time via [`inventory`], so adding a new check is a single attribute on
-//! a new function — no central registry to edit.
-//!
-//! ```ignore
-//! use std::sync::Arc;
-//! use world_chain_acceptance::{TestCtx, acceptance_test};
-//!
-//! #[acceptance_test(category = Health)]
-//! async fn chain_id_matches(ctx: Arc<TestCtx>) -> eyre::Result<()> {
-//!     // ...
-//!     Ok(())
-//! }
-//!
-//! // With explicit name and capability requirements:
-//! #[acceptance_test(category = SpecCompatibility, name = "flashblocks_capability", requires(Flashblocks))]
-//! async fn supports_flashblocks(ctx: Arc<TestCtx>) -> eyre::Result<()> {
-//!     Ok(())
-//! }
-//! ```
+//! `#[acceptance_test]` registers an async function in the code-derived
+//! acceptance catalog. Metadata — including the hardfork and features the test
+//! requires — lives next to the test, not in an external gate file. The runner
+//! reads that metadata to select and gate tests per the committed manifest.
 
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
-    Expr, ExprPath, ItemFn, Meta, Token, parse::Parser, punctuated::Punctuated, spanned::Spanned,
+    Expr, ExprArray, ItemFn, Lit, Meta, Token, parse::Parser, punctuated::Punctuated,
+    spanned::Spanned,
 };
 
-/// Register an `async fn(Arc<TestCtx>) -> eyre::Result<()>` as an acceptance check.
+/// Register an `async fn(Arc<TestCtx>) -> eyre::Result<()>` as an acceptance test.
 ///
-/// Arguments:
-/// - `category = <Health|SpecCompatibility|Performance>` (required)
-/// - `name = "..."` (optional; defaults to the function name)
-/// - `requires(<Capability>, ...)` (optional; the check is skipped when the
-///   environment does not advertise every listed capability)
+/// Arguments (all optional):
+/// - `name = "..."` — stable test name (defaults to the function name).
+/// - `requires_hardfork = "tropo"` — minimum [`WorldChainHardfork`]; the runner
+///   skips the test when the committed manifest is on an earlier fork.
+/// - `features = ["flashblocks", "pbh"]` — features the test needs; the runner
+///   skips the test when the manifest does not commit to all of them.
+/// - `serial` — opt the test out of intra-cell parallelism.
+/// - `flaky = "reason"` — failures downgrade to skips unless
+///   `ACCEPTANCE_FAIL_FLAKY_TESTS=true`.
+///
+/// The hardfork/feature strings are stored verbatim and resolved against the
+/// typed enums at selection time (see `Requirements`), keeping this proc-macro
+/// crate free of a dependency on the chainspec types.
 #[proc_macro_attribute]
 pub fn acceptance_test(attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = syn::parse_macro_input!(item as ItemFn);
@@ -44,35 +36,18 @@ pub fn acceptance_test(attr: TokenStream, item: TokenStream) -> TokenStream {
         Err(err) => return err.to_compile_error().into(),
     };
 
-    let category = match args.category {
-        Some(category) => category,
-        None => {
-            return syn::Error::new(
-                proc_macro2::Span::call_site(),
-                "`#[acceptance_test]` requires a `category = <Health|SpecCompatibility|Performance>` argument",
-            )
-            .to_compile_error()
-            .into();
-        }
-    };
-
     let fn_name = &func.sig.ident;
-    let test_name = args
-        .name
-        .unwrap_or_else(|| fn_name.to_string().replace('_', " "));
-
-    // Each requirement is emitted as a typed `Requirement` (a hardfork or a
-    // `Feature`) resolved against the network manifest at run time. A hardfork
-    // carries a `Box<dyn Hardfork>`, which cannot live in a `'static` constant,
-    // so the requirements are produced by a constructor function.
-    let requires = args.requires.iter().map(|(kind, name)| {
-        let name = name.to_string().to_ascii_lowercase();
-        match kind.to_string().as_str() {
-            "hardfork" => quote! { ::world_chain_acceptance::Requirement::hardfork(#name) },
-            // already validated to be `hardfork` or `feature`
-            _ => quote! { ::world_chain_acceptance::Requirement::feature(#name) },
-        }
-    });
+    let test_name = args.name.unwrap_or_else(|| fn_name.to_string());
+    let flaky = match args.flaky {
+        Some(reason) => quote! { ::std::option::Option::Some(#reason) },
+        None => quote! { ::std::option::Option::None },
+    };
+    let min_hardfork = match args.requires_hardfork {
+        Some(fork) => quote! { ::std::option::Option::Some(#fork) },
+        None => quote! { ::std::option::Option::None },
+    };
+    let features = args.features;
+    let serial = args.serial;
 
     let expanded = quote! {
         #func
@@ -80,8 +55,17 @@ pub fn acceptance_test(attr: TokenStream, item: TokenStream) -> TokenStream {
         ::world_chain_acceptance::inventory::submit! {
             ::world_chain_acceptance::AcceptanceTest {
                 name: #test_name,
-                category: ::world_chain_acceptance::Category::#category,
-                requires: || ::std::vec![ #( #requires ),* ],
+                package: ::std::module_path!(),
+                location: ::world_chain_acceptance::Location {
+                    file: ::std::file!(),
+                    line: ::std::line!(),
+                },
+                flaky: #flaky,
+                requirements: ::world_chain_acceptance::Requirements {
+                    min_hardfork: #min_hardfork,
+                    features: &[#(#features),*],
+                    serial: #serial,
+                },
                 run: |ctx| ::std::boxed::Box::pin(#fn_name(ctx)),
             }
         }
@@ -92,10 +76,11 @@ pub fn acceptance_test(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[derive(Default)]
 struct Args {
-    category: Option<proc_macro2::Ident>,
     name: Option<String>,
-    /// Requirement entries as `(kind, name)` where kind is `hardfork`/`feature`.
-    requires: Vec<(proc_macro2::Ident, proc_macro2::Ident)>,
+    flaky: Option<String>,
+    requires_hardfork: Option<String>,
+    features: Vec<String>,
+    serial: bool,
 }
 
 impl Args {
@@ -105,34 +90,26 @@ impl Args {
         let mut args = Args::default();
         for meta in metas {
             match meta {
-                Meta::NameValue(nv) if nv.path.is_ident("category") => {
-                    args.category = Some(expr_ident(&nv.value, "category")?);
-                }
                 Meta::NameValue(nv) if nv.path.is_ident("name") => {
                     args.name = Some(expr_str(&nv.value, "name")?);
                 }
-                Meta::List(list) if list.path.is_ident("requires") => {
-                    let entries = list.parse_args_with(
-                        Punctuated::<syn::MetaNameValue, Token![,]>::parse_terminated,
-                    )?;
-                    for entry in entries {
-                        let kind = entry.path.get_ident().cloned().ok_or_else(|| {
-                            syn::Error::new(entry.path.span(), "expected `hardfork` or `feature`")
-                        })?;
-                        if kind != "hardfork" && kind != "feature" {
-                            return Err(syn::Error::new(
-                                kind.span(),
-                                "requirement kind must be `hardfork` or `feature`",
-                            ));
-                        }
-                        let name = expr_ident(&entry.value, "requirement")?;
-                        args.requires.push((kind, name));
-                    }
+                Meta::NameValue(nv) if nv.path.is_ident("flaky") => {
+                    args.flaky = Some(expr_str(&nv.value, "flaky")?);
+                }
+                Meta::NameValue(nv) if nv.path.is_ident("requires_hardfork") => {
+                    args.requires_hardfork = Some(expr_str(&nv.value, "requires_hardfork")?);
+                }
+                Meta::NameValue(nv) if nv.path.is_ident("features") => {
+                    args.features = expr_str_array(&nv.value, "features")?;
+                }
+                Meta::Path(path) if path.is_ident("serial") => {
+                    args.serial = true;
                 }
                 other => {
                     return Err(syn::Error::new(
                         other.span(),
-                        "expected `category = ...`, `name = \"...\"`, or `requires(...)`",
+                        "expected one of `name = \"...\"`, `requires_hardfork = \"...\"`, \
+                         `features = [\"...\"]`, `serial`, or `flaky = \"...\"`",
                     ));
                 }
             }
@@ -142,23 +119,10 @@ impl Args {
     }
 }
 
-/// Extract a bare identifier from `key = Ident`.
-fn expr_ident(expr: &Expr, key: &str) -> syn::Result<proc_macro2::Ident> {
-    if let Expr::Path(ExprPath { path, .. }) = expr
-        && let Some(ident) = path.get_ident()
-    {
-        return Ok(ident.clone());
-    }
-    Err(syn::Error::new(
-        expr.span(),
-        format!("`{key}` must be a single identifier"),
-    ))
-}
-
 /// Extract a string literal from `key = "value"`.
 fn expr_str(expr: &Expr, key: &str) -> syn::Result<String> {
     if let Expr::Lit(lit) = expr
-        && let syn::Lit::Str(s) = &lit.lit
+        && let Lit::Str(s) = &lit.lit
     {
         return Ok(s.value());
     }
@@ -166,4 +130,15 @@ fn expr_str(expr: &Expr, key: &str) -> syn::Result<String> {
         expr.span(),
         format!("`{key}` must be a string literal"),
     ))
+}
+
+/// Extract a list of string literals from `key = ["a", "b"]`.
+fn expr_str_array(expr: &Expr, key: &str) -> syn::Result<Vec<String>> {
+    let Expr::Array(ExprArray { elems, .. }) = expr else {
+        return Err(syn::Error::new(
+            expr.span(),
+            format!("`{key}` must be an array of string literals"),
+        ));
+    };
+    elems.iter().map(|elem| expr_str(elem, key)).collect()
 }

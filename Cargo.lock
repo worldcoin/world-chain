@@ -13920,13 +13920,16 @@ name = "world-chain-acceptance"
 version = "2.2.0"
 dependencies = [
  "alloy-eips 2.0.4",
+ "alloy-primitives",
  "alloy-provider 2.0.4",
  "alloy-rpc-client 2.0.4",
  "alloy-rpc-types-eth 2.0.4",
+ "alloy-signer-local",
  "alloy-transport 2.0.4",
  "alloy-transport-http 2.0.4",
  "chrono",
  "color-eyre",
+ "futures",
  "inventory",
  "reth-rpc-layer",
  "serde",
@@ -13935,7 +13938,7 @@ dependencies = [
  "tracing",
  "url",
  "world-chain-acceptance-macros",
- "world-chain-manifest",
+ "world-chain-chainspec",
 ]
 
 [[package]]
@@ -14011,6 +14014,7 @@ dependencies = [
  "alloy-hardforks",
  "alloy-primitives",
  "auto_impl",
+ "color-eyre",
  "derive_more",
  "op-alloy-rpc-types",
  "reth-chainspec",
@@ -14019,6 +14023,8 @@ dependencies = [
  "reth-optimism-forks",
  "reth-primitives-traits",
  "serde",
+ "serde_json",
+ "toml 0.8.23",
  "tracing",
 ]
 
@@ -14054,7 +14060,6 @@ dependencies = [
  "reth-tracing",
  "tracing",
  "world-chain-chainspec",
- "world-chain-manifest",
 ]
 
 [[package]]
@@ -14129,20 +14134,6 @@ dependencies = [
  "world-chain-chainspec",
  "world-chain-primitives",
  "world-chain-state",
-]
-
-[[package]]
-name = "world-chain-manifest"
-version = "2.2.0"
-dependencies = [
- "alloy-chains",
- "alloy-genesis",
- "color-eyre",
- "reth-chainspec",
- "serde",
- "serde_json",
- "toml 0.8.23",
- "world-chain-chainspec",
 ]
 
 [[package]]

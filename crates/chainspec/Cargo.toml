@@ -19,15 +19,18 @@ alloy-hardforks.workspace = true
 alloy-primitives.workspace = true
 auto_impl.workspace = true
 derive_more.workspace = true
+eyre.workspace = true
 op-alloy-rpc-types.workspace = true
 reth-chainspec.workspace = true
 reth-network-peers.workspace = true
 reth-optimism-chainspec = { workspace = true, features = ["superchain-configs"] }
 reth-optimism-forks.workspace = true
 reth-primitives-traits.workspace = true
-serde = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+toml.workspace = true
 tracing.workspace = true
 
 [features]
 default = []
-serde = ["dep:serde"]
+serde = []

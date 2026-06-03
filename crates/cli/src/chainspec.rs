@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use reth_cli::chainspec::{ChainSpecParser, parse_genesis};
 use reth_optimism_chainspec::SUPPORTED_CHAINS;
-use world_chain_chainspec::WorldChainSpec;
-use world_chain_manifest::NetworkManifest;
+use world_chain_chainspec::{NetworkManifest, WorldChainSpec};
 
 /// World Chain chain specification parser.
 #[derive(Debug, Clone, Default)]

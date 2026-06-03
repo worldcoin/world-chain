@@ -1,16 +1,19 @@
-//! The environment an acceptance check runs against.
+//! The environment an acceptance test runs against.
 //!
 //! An [`Env`] pairs a committed [`NetworkManifest`] with live RPC endpoints. The
-//! manifest is the acceptance criterion: it decides which checks run (a check
-//! runs only when the manifest commits to its requirements) and what the network
-//! must deliver. The same `Env` describes a freshly spawned devnet or a remote
-//! alphanet behind Cloudflare Access.
+//! manifest describes the target network configuration. The acceptance catalog
+//! itself is derived from test code.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use alloy_eips::BlockNumberOrTag;
+use alloy_primitives::TxHash;
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_client::RpcClient;
+use alloy_rpc_types_eth::TransactionReceipt;
 use alloy_transport::layers::RetryBackoffLayer;
 use alloy_transport_http::reqwest::{
     Client,
@@ -20,7 +23,7 @@ use eyre::eyre::{WrapErr, bail, eyre};
 use reth_rpc_layer::{JwtSecret, secret_to_bearer_header};
 use serde::Serialize;
 use url::Url;
-use world_chain_manifest::{Commitments, NetworkManifest, Requirement, feature_is_known};
+use world_chain_chainspec::{Feature, NetworkManifest, WorldChainHardfork, hardfork_key};
 
 /// A JWT-authenticated Engine API endpoint.
 ///
@@ -56,14 +59,14 @@ impl EngineApi {
     }
 }
 
-/// Default timeouts and budgets applied to checks. Overridable per run.
+/// Default timeouts and budgets applied to tests. Overridable per run.
 #[derive(Clone, Copy, Debug)]
 pub struct Thresholds {
     /// Maximum time to wait for the block number to advance.
     pub block_advance_timeout: Duration,
     /// Poll interval while waiting for block-number progress.
     pub block_poll_interval: Duration,
-    /// Minimum required block-number increase for liveness checks.
+    /// Minimum required block-number increase for liveness tests.
     pub min_block_increments: u64,
     /// Upper bound on the observed average block time before it is a failure.
     pub max_block_time: Duration,
@@ -92,7 +95,6 @@ pub struct CloudflareAccess {
 pub struct Env {
     network: String,
     manifest: Arc<NetworkManifest>,
-    commitments: Commitments,
     l2: RootProvider,
     l1: Option<RootProvider>,
     engine: Option<EngineApi>,
@@ -153,40 +155,24 @@ impl Env {
         &self.thresholds
     }
 
-    /// The resolved manifest commitments (hardfork + features).
-    pub fn commitments(&self) -> &Commitments {
-        &self.commitments
+    /// The committed World Chain hardfork.
+    pub fn hardfork(&self) -> WorldChainHardfork {
+        self.manifest.hardfork
     }
 
-    /// Whether the manifest commits to a single requirement.
-    pub fn commits_to(&self, requirement: &Requirement) -> bool {
-        self.commitments.satisfies(requirement)
+    /// The committed feature list.
+    pub fn features(&self) -> &[Feature] {
+        &self.manifest.features
     }
 
-    /// Whether the manifest commits to every requirement in `required`.
-    pub fn satisfies(&self, required: &[Requirement]) -> bool {
-        required.iter().all(|req| self.commitments.satisfies(req))
+    /// Whether the manifest commits to `feature`.
+    pub fn commits_to_feature(&self, feature: Feature) -> bool {
+        self.manifest.features.contains(&feature)
     }
 
-    /// Requirements in `required` the manifest does not commit to (as labels).
-    pub fn missing(&self, required: &[Requirement]) -> Vec<String> {
-        required
-            .iter()
-            .filter(|req| !self.commitments.satisfies(req))
-            .map(Requirement::label)
-            .collect()
-    }
-
-    /// Feature requirements in `required` that name no known feature (a
-    /// declaration bug, since features form a closed set).
-    pub fn unknown(&self, required: &[Requirement]) -> Vec<String> {
-        required
-            .iter()
-            .filter_map(|req| match req {
-                Requirement::Feature(feature) if !feature_is_known(feature.0) => Some(req.label()),
-                _ => None,
-            })
-            .collect()
+    /// Whether the manifest commits to `fork` or any later hardfork.
+    pub fn commits_to_hardfork(&self, fork: WorldChainHardfork) -> bool {
+        fork.idx() <= self.manifest.hardfork.idx()
     }
 
     /// `eth_chainId` on the L2 provider.
@@ -225,6 +211,51 @@ impl Env {
             .await?)
     }
 
+    /// Wait until the L2 chain reaches at least `target` block, returning the
+    /// observed block number. Bounded by [`Thresholds::block_advance_timeout`]
+    /// and polled at [`Thresholds::block_poll_interval`].
+    pub async fn wait_for_block(&self, target: u64) -> eyre::Result<u64> {
+        let deadline = Instant::now() + self.thresholds.block_advance_timeout;
+        loop {
+            let current = self.block_number().await?;
+            if current >= target {
+                return Ok(current);
+            }
+            if Instant::now() >= deadline {
+                bail!(
+                    "timed out after {:?} waiting for block {target}; last seen {current}",
+                    self.thresholds.block_advance_timeout
+                );
+            }
+            tokio::time::sleep(self.thresholds.block_poll_interval).await;
+        }
+    }
+
+    /// Wait for the chain to advance by at least `delta` blocks from now,
+    /// returning the final block number.
+    pub async fn wait_for_blocks(&self, delta: u64) -> eyre::Result<u64> {
+        let start = self.block_number().await?;
+        self.wait_for_block(start + delta).await
+    }
+
+    /// Poll for a transaction receipt until it appears, bounded by
+    /// [`Thresholds::block_advance_timeout`].
+    pub async fn await_receipt(&self, tx: TxHash) -> eyre::Result<TransactionReceipt> {
+        let deadline = Instant::now() + self.thresholds.block_advance_timeout;
+        loop {
+            if let Some(receipt) = self.l2.get_transaction_receipt(tx).await? {
+                return Ok(receipt);
+            }
+            if Instant::now() >= deadline {
+                bail!(
+                    "timed out after {:?} waiting for receipt of {tx}",
+                    self.thresholds.block_advance_timeout
+                );
+            }
+            tokio::time::sleep(self.thresholds.block_poll_interval).await;
+        }
+    }
+
     /// Perform a GET against a URL using the shared (Cloudflare-aware) client,
     /// returning the response body as text.
     pub async fn http_get_text(&self, url: Url) -> eyre::Result<String> {
@@ -257,13 +288,17 @@ impl Env {
             network: self.network.clone(),
             chain_source: self.chain_source(),
             expected_chain_id: self.manifest.chain.chain_id,
-            hardfork: self.commitments.hardfork().to_string(),
-            features: self.commitments.features().iter().cloned().collect(),
+            hardfork: hardfork_key(self.manifest.hardfork).to_string(),
+            features: self
+                .manifest
+                .features
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
             flashblocks: self.flashblocks_url.is_some(),
             metrics: self.prometheus_url.is_some(),
             l1: self.l1.is_some(),
             engine: self.engine.is_some(),
-            committed_requirements: self.commitments.committed_keys().into_iter().collect(),
         }
     }
 }
@@ -280,7 +315,6 @@ pub struct EnvSummary {
     pub metrics: bool,
     pub l1: bool,
     pub engine: bool,
-    pub committed_requirements: Vec<String>,
 }
 
 /// Builder for [`Env`].
@@ -313,50 +347,51 @@ impl EnvBuilder {
         }
     }
 
-    /// Override the network label (defaults to the manifest name).
+    /// Network label override (defaults to the manifest name).
     pub fn network(mut self, network: impl Into<String>) -> Self {
         self.network = Some(network.into());
         self
     }
 
-    /// L2 JSON-RPC URL. Required.
+    /// Set the required L2 JSON-RPC endpoint.
     pub fn l2_rpc_url(mut self, url: Url) -> Self {
         self.l2_rpc_url = Some(url);
         self
     }
 
-    /// L1 JSON-RPC URL.
+    /// Set the optional L1 JSON-RPC endpoint.
     pub fn l1_rpc_url(mut self, url: Option<Url>) -> Self {
         self.l1_rpc_url = url;
         self
     }
 
-    /// Engine API endpoint and its JWT secret. Both must be provided together.
+    /// Set the optional Engine API endpoint and its JWT secret. Both must be
+    /// provided together or both omitted.
     pub fn engine(mut self, url: Option<Url>, jwt: Option<JwtSecret>) -> Self {
         self.engine_url = url;
         self.engine_jwt = jwt;
         self
     }
 
-    /// Flashblocks endpoint.
+    /// Set the optional flashblocks endpoint.
     pub fn flashblocks_url(mut self, url: Option<Url>) -> Self {
         self.flashblocks_url = url;
         self
     }
 
-    /// Prometheus endpoint.
+    /// Set the optional Prometheus endpoint.
     pub fn prometheus_url(mut self, url: Option<Url>) -> Self {
         self.prometheus_url = url;
         self
     }
 
-    /// Cloudflare Access service token applied to every HTTP request.
+    /// Set optional Cloudflare Access service-token credentials.
     pub fn cloudflare_access(mut self, access: Option<CloudflareAccess>) -> Self {
         self.cloudflare_access = access;
         self
     }
 
-    /// Override the default thresholds.
+    /// Override the default thresholds for this run.
     pub fn thresholds(mut self, thresholds: Thresholds) -> Self {
         self.thresholds = thresholds;
         self
@@ -368,10 +403,6 @@ impl EnvBuilder {
             bail!("an L2 RPC URL is required to build an acceptance environment");
         };
 
-        let commitments = self
-            .manifest
-            .commitments()
-            .wrap_err("failed to resolve manifest commitments")?;
         let network = self.network.unwrap_or_else(|| self.manifest.name.clone());
 
         let engine = match (self.engine_url, self.engine_jwt) {
@@ -387,7 +418,6 @@ impl EnvBuilder {
         Ok(Env {
             network,
             manifest: self.manifest,
-            commitments,
             l2,
             engine,
             l1,
