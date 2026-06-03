@@ -33,6 +33,7 @@ sol! {
         function parentRef() external view returns (address);
         function rootClaim() external view returns (bytes32);
         function l2BlockNumber() external view returns (uint256);
+        function challengeDeadline() external view returns (uint64);
         function state() external view returns (uint8);
         function proofBitmap() external view returns (uint8);
         function proofCount() external view returns (uint8);
