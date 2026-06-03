@@ -1,12 +1,12 @@
 //! World Chain Challenger.
 
+mod alloy;
+mod challenger;
 mod config;
 mod error;
-mod types;
-mod traits;
-mod alloy;
 mod sync;
-mod challenger;
+mod traits;
+mod types;
 
 #[cfg(test)]
 mod tests;

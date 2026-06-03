@@ -18545,7 +18545,10 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider 2.0.4",
  "alloy-sol-types",
+ "async-trait",
+ "reqwest 0.12.28",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 

@@ -1,8 +1,24 @@
 use alloy_primitives::B256;
 use async_trait::async_trait;
 use serde::Deserialize;
+use thiserror::Error;
 
-use crate::{OutputRootProvider, ProposerError};
+/// Source for OP Stack output roots.
+#[async_trait]
+pub trait OutputRootProvider: Send + Sync {
+    /// Returns the output root for an L2 block number.
+    async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, OutputRootError>;
+}
+
+#[derive(Error, Debug)]
+pub enum OutputRootError {
+    /// The output-root RPC response did not contain an output root.
+    #[error("optimism_outputAtBlock response did not contain an output root")]
+    MissingOutputRoot,
+    /// RPC transport or JSON-RPC failure.
+    #[error("rpc error: {0}")]
+    Rpc(String),
+}
 
 /// HTTP client for `optimism_outputAtBlock`.
 #[derive(Debug, Clone)]
@@ -23,7 +39,7 @@ impl OptimismOutputRootClient {
 
 #[async_trait]
 impl OutputRootProvider for OptimismOutputRootClient {
-    async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, ProposerError> {
+    async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, OutputRootError> {
         let block = format!("0x{l2_block_number:x}");
         let request = serde_json::json!({
             "jsonrpc": "2.0",
@@ -38,25 +54,25 @@ impl OutputRootProvider for OptimismOutputRootClient {
             .json(&request)
             .send()
             .await
-            .map_err(|error| ProposerError::Rpc(error.to_string()))?
+            .map_err(|error| OutputRootError::Rpc(error.to_string()))?
             .error_for_status()
-            .map_err(|error| ProposerError::Rpc(error.to_string()))?
+            .map_err(|error| OutputRootError::Rpc(error.to_string()))?
             .json::<JsonRpcResponse<OutputAtBlockResponse>>()
             .await
-            .map_err(|error| ProposerError::Rpc(error.to_string()))?;
+            .map_err(|error| OutputRootError::Rpc(error.to_string()))?;
 
         if let Some(error) = response.error {
-            return Err(ProposerError::Rpc(format!(
+            return Err(OutputRootError::Rpc(format!(
                 "json-rpc error {}: {}",
                 error.code, error.message
             )));
         }
 
-        let output = response.result.ok_or(ProposerError::MissingOutputRoot)?;
+        let output = response.result.ok_or(OutputRootError::MissingOutputRoot)?;
         output
             .output_root
             .parse()
-            .map_err(|error| ProposerError::Rpc(format!("invalid outputRoot: {error}")))
+            .map_err(|error| OutputRootError::Rpc(format!("invalid outputRoot: {error}")))
     }
 }
 

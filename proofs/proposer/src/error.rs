@@ -1,4 +1,5 @@
 use thiserror::Error;
+use world_chain_proofs::OutputRootError;
 
 /// Errors returned by the proposer.
 #[derive(Debug, Error)]
@@ -17,12 +18,8 @@ pub enum ProposerError {
     /// Contract call or transaction failure.
     #[error("contract error: {0}")]
     Contract(String),
-    /// RPC transport or JSON-RPC failure.
-    #[error("rpc error: {0}")]
-    Rpc(String),
-    /// The output-root RPC response did not contain an output root.
-    #[error("optimism_outputAtBlock response did not contain an output root")]
-    MissingOutputRoot,
+    #[error(transparent)]
+    OutputRoot(#[from] OutputRootError),
     #[error("The proposal transaction didn't execute succesfully")]
     Revert,
 }
