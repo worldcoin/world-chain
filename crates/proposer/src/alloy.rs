@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, B256, U256};
-use alloy_provider::{Provider, network::any::error};
+use alloy_provider::Provider;
 use async_trait::async_trait;
 use world_chain_proofs::{
     IWorldChainAnchorStateRegistry, IWorldChainProofSystemFactory, IWorldChainProofSystemGame,
@@ -14,7 +14,6 @@ pub struct AlloyProofSystemClient<P> {
     factory: IWorldChainProofSystemFactory::IWorldChainProofSystemFactoryInstance<P>,
     anchor: IWorldChainAnchorStateRegistry::IWorldChainAnchorStateRegistryInstance<P>,
     provider: P,
-    anchor_address: Address,
 }
 
 impl<P> AlloyProofSystemClient<P>
@@ -36,7 +35,6 @@ where
             factory,
             anchor,
             provider,
-            anchor_address,
         }
     }
 }
@@ -61,7 +59,7 @@ where
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
 
         Ok(ParentRef {
-            address: anchor_parent_address(self.anchor_address, anchor_game),
+            address: anchor_parent_address(*self.anchor.address(), anchor_game),
             l2_block_number: u256_to_u64(l2_block_number, "currentL2BlockNumber")?,
         })
     }
