@@ -36,6 +36,7 @@ members = [
     "crates/test-utils",
     "proofs/primitives",
     "proofs/proposer",
+    "proofs/challenger",
     "e2e-tests",
     "xtask",
 ]
@@ -88,6 +89,8 @@ world-chain-proof-succinct-client-utils = { path = "proofs/succinct/utils/client
 world-chain-proof-succinct-ethereum-client-utils = { path = "proofs/succinct/utils/ethereum-client", default-features = false }
 world-chain-proof-succinct-host-utils = { path = "proofs/succinct/utils/host", default-features = false }
 world-chain-proof-succinct-utils = { path = "proofs/succinct/utils/proof", default-features = false }
+world-chain-proposer = { path = "proofs/proposer", default-features = false }
+world-chain-challenger = { path = "proofs/challenger", default-features = false }
 
 # reth crates.io
 reth-codecs = { version = "0.3.1", default-features = false }
