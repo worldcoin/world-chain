@@ -34,7 +34,7 @@ impl ProposerConfig {
 impl Default for ProposerConfig {
     fn default() -> Self {
         Self {
-            block_interval: 0,
+            block_interval: 6,
             proposer_bond: U256::ZERO,
             poll_interval: Duration::from_secs(12),
         }
