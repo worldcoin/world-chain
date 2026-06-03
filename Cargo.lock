@@ -13972,8 +13972,10 @@ dependencies = [
  "alloy-eips 2.0.4",
  "alloy-genesis",
  "alloy-hardforks",
+ "alloy-network 2.0.4",
  "alloy-primitives",
  "alloy-provider 2.0.4",
+ "alloy-signer-local",
  "base64 0.22.1",
  "color-eyre",
  "ed25519-dalek",
@@ -14001,6 +14003,8 @@ dependencies = [
  "world-chain-chainspec",
  "world-chain-node",
  "world-chain-primitives",
+ "world-chain-proofs",
+ "world-chain-proposer",
  "world-chain-rpc",
  "world-chain-test-utils",
 ]
@@ -14252,6 +14256,34 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "world-chain-chainspec",
+]
+
+[[package]]
+name = "world-chain-proofs"
+version = "2.2.0"
+dependencies = [
+ "alloy-contract",
+ "alloy-primitives",
+ "alloy-provider 2.0.4",
+ "alloy-sol-types",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "world-chain-proposer"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-provider 2.0.4",
+ "async-trait",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "world-chain-proofs",
 ]
 
 [[package]]
