@@ -40,7 +40,9 @@ impl RunConfig {
     }
 }
 
-fn env_flag(key: &str) -> bool {
+/// Read a boolean acceptance flag from the environment, treating the usual
+/// truthy spellings as `true` and an unset/other value as `false`.
+pub(crate) fn env_flag(key: &str) -> bool {
     std::env::var(key)
         .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
 }

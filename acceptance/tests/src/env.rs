@@ -37,11 +37,6 @@ pub struct EngineApi {
 }
 
 impl EngineApi {
-    /// The Engine API URL.
-    pub fn url(&self) -> &Url {
-        &self.url
-    }
-
     /// A freshly JWT-authenticated provider over the Engine API.
     ///
     /// A new bearer token is generated per call so it never outlives the JWT

@@ -49,7 +49,7 @@ pub use env::{CloudflareAccess, EngineApi, Env, EnvBuilder, EnvSummary, Threshol
 pub use report::{Report, Status, TestResult, Totals};
 pub use runner::{CONCURRENCY_ENV, Execution, FAIL_FLAKY_TESTS_ENV, RunOptions, run, run_matrix};
 pub use target::{
-    AcceptanceTarget, MatrixCell, Provisioned, Remote, RemoteConfig, Teardown, TeardownFuture, Tier,
+    AcceptanceTarget, MatrixCell, Provisioned, Remote, RemoteConfig, Teardown, TeardownFuture,
 };
 
 /// The Engine API JWT secret type, re-exported so consumers can construct one

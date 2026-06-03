@@ -131,21 +131,6 @@ pub trait AcceptanceTarget: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = eyre::Result<Provisioned>> + Send + '_>>;
 }
 
-/// Which execution tier a run targets.
-///
-/// [`Tier::InProcess`] is a reserved seam for a future fast, deterministic
-/// reth-e2e tier (drive blocks directly, no Docker) modeled on Tempo's
-/// integration harness and Base's action harness. It is not implemented yet.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Tier {
-    /// A spawned `world_chain_devnet` (Docker-backed); the primary tier.
-    Spawned,
-    /// A remote, already-deployed network reached over RPC.
-    Remote,
-    /// Reserved: a fast in-process node tier. Not implemented.
-    InProcess,
-}
-
 /// Connection details for a [`Remote`] target.
 ///
 /// Deliberately not `Debug`: it carries the Engine API JWT and Cloudflare Access

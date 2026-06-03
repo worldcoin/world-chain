@@ -6,10 +6,9 @@ use serde::{Deserialize, Serialize};
 ///
 /// Each `Variant => "key"` pair binds an enum variant to its stable snake_case
 /// manifest key. From a single variant list the macro generates the enum and
-/// the boilerplate the manifest and catalog rely on:
-/// [`ALL`](Feature::ALL)/[`COUNT`](Feature::COUNT), the key (`as_str`/`Display`),
-/// the declaration-order [`index`](Feature::index), and a case-insensitive
-/// [`FromStr`] that mirrors the manifest's key normalization.
+/// the boilerplate the manifest and catalog rely on: [`ALL`](Feature::ALL), the
+/// key (`as_str`/`Display`), and a case-insensitive [`FromStr`] that mirrors the
+/// manifest's key normalization.
 macro_rules! features {
     (
         $(#[$enum_meta:meta])*
@@ -31,19 +30,12 @@ macro_rules! features {
         impl $name {
             /// Every feature, in declaration order.
             pub const ALL: [Self; [$(stringify!($variant)),*].len()] = [$(Self::$variant),*];
-            /// The number of features.
-            pub const COUNT: usize = Self::ALL.len();
 
             /// The stable snake_case manifest key for this feature.
             pub const fn as_str(self) -> &'static str {
                 match self {
                     $(Self::$variant => $key,)*
                 }
-            }
-
-            /// The feature's index in declaration order.
-            pub const fn index(self) -> usize {
-                self as usize
             }
         }
 

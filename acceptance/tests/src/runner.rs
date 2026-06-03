@@ -363,8 +363,7 @@ fn log_execution(test: &AcceptanceTest, execution: &Execution) {
 }
 
 fn fail_flaky_tests() -> bool {
-    std::env::var(FAIL_FLAKY_TESTS_ENV)
-        .is_ok_and(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "YES"))
+    crate::context::env_flag(FAIL_FLAKY_TESTS_ENV)
 }
 
 fn panic_message(join_err: tokio::task::JoinError) -> String {
