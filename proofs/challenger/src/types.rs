@@ -1,6 +1,7 @@
 use alloy_primitives::{Address, B256, BlockNumber, TxHash};
 
 /// A game root state.
+#[derive(Debug, PartialEq, Eq)]
 pub enum RootState {
     Proposed,
     Challenged,
@@ -9,6 +10,7 @@ pub enum RootState {
 }
 
 /// A WorldChainProofSystemGame view for the challenger.
+#[derive(Debug)]
 pub struct Game {
     /// The game contract address.
     pub game: Address,
@@ -28,4 +30,17 @@ pub struct Game {
 pub struct ChallengeSubmission {
     /// Transaction hash for the challenge submission.
     pub tx_hash: TxHash,
+}
+
+#[derive(Debug)]
+pub struct GameCreated {
+    pub proposal_key: B256,
+    pub root_it: B256,
+    pub game: Address,
+    pub proposer: Address,
+    pub root_claim: B256,
+    pub l2_block_number: BlockNumber,
+    pub parent_ref: Address,
+    pub l1_origin_hash: B256,
+    pub l1_origin_number: BlockNumber,
 }
