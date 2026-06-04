@@ -8,9 +8,11 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
   cargo install --locked sccache --version ^0.9 \
   && cargo install --locked cargo-chef --version ^0.1
 
-# clang/llvm for C deps; protobuf-compiler for the sp1-sdk `network` (gRPC) client.
+# clang/llvm for C deps; protobuf-compiler + libprotobuf-dev for the sp1-sdk `network`
+# (gRPC) client — libprotobuf-dev provides the well-known type .proto files
+# (google/protobuf/*.proto) under /usr/include that protoc resolves imports against.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends clang libclang-dev gcc curl protobuf-compiler \
+  && apt-get install -y --no-install-recommends clang libclang-dev gcc curl protobuf-compiler libprotobuf-dev \
   && rm -rf /var/lib/apt/lists/*
 
 ENV CARGO_HOME=/usr/local/cargo \
