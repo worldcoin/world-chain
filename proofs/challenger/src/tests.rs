@@ -127,7 +127,10 @@ async fn scan_once_challenges_invalid_root() {
 
     challenger.scan_once().await.unwrap();
 
-    assert_eq!(submissions.lock().expect("not poisoned").as_slice(), &[GAME_1]);
+    assert_eq!(
+        submissions.lock().expect("not poisoned").as_slice(),
+        &[GAME_1]
+    );
 }
 
 #[tokio::test]

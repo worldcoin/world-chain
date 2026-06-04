@@ -10,6 +10,7 @@ mod proposer;
 mod traits;
 mod types;
 
+// re-exports
 pub use alloy::AlloyProofSystemClient;
 pub use config::ProposerConfig;
 pub use error::ProposerError;
