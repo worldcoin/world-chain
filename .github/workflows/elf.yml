@@ -6,10 +6,10 @@ on:
   merge_group:
   pull_request:
     paths:
-      - 'crates/proof/succinct/programs/**'
-      - 'crates/proof/core/**'
-      - 'crates/proof/succinct/utils/client/**'
-      - 'crates/proof/succinct/utils/ethereum-client/**'
+      - 'proofs/succinct/programs/**'
+      - 'proofs/core/**'
+      - 'proofs/succinct/utils/client/**'
+      - 'proofs/succinct/utils/ethereum-client/**'
   workflow_dispatch:
 
 permissions:
@@ -31,8 +31,8 @@ jobs:
         run: just build-proof-elfs
       - name: Verify ELFs unchanged
         run: |
-          if [[ -n $(git diff crates/proof/succinct/elf/) ]]; then
+          if [[ -n $(git diff proofs/succinct/elf/) ]]; then
             echo "ELF files changed after rebuild — commit the updated ELFs"
-            git diff crates/proof/succinct/elf/
+            git diff proofs/succinct/elf/
             exit 1
           fi

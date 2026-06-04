@@ -10,7 +10,7 @@ repository = "https://github.com/worldcoin/world-chain/"
 resolver = "3"
 members = [
     "bin/world-chain",
-    "bin/proof",
+    "proofs/bin",
     "crates/chainspec",
     "crates/node",
     "crates/rpc",
@@ -24,14 +24,14 @@ members = [
     "crates/evm",
     "crates/state",
     "crates/pbh",
-    "crates/proof/core",
-    "crates/proof/protocol",
-    "crates/proof/nitro",
-    "crates/proof/world-chain-proof",
-    "crates/proof/succinct/utils/client",
-    "crates/proof/succinct/utils/ethereum-client",
-    "crates/proof/succinct/utils/host",
-    "crates/proof/succinct/utils/proof",
+    "proofs/core",
+    "proofs/protocol",
+    "proofs/nitro",
+    "proofs/proof",
+    "proofs/succinct/utils/client",
+    "proofs/succinct/utils/ethereum-client",
+    "proofs/succinct/utils/host",
+    "proofs/succinct/utils/proof",
     "crates/devnet",
     "crates/test-utils",
     "proofs/primitives",
@@ -39,7 +39,7 @@ members = [
     "e2e-tests",
     "xtask",
 ]
-exclude = ["crates/proof/succinct/programs"]
+exclude = ["proofs/succinct/programs"]
 
 default-members = ["bin/world-chain"]
 
@@ -80,14 +80,14 @@ world-chain-evm = { path = "crates/evm", default-features = false }
 world-chain-state = { path = "crates/state", default-features = false }
 world-chain-devnet = { path = "crates/devnet", default-features = false }
 world-chain-test-utils = { path = "crates/test-utils", default-features = false }
-world-chain-proof-core = { path = "crates/proof/core", default-features = false }
-world-chain-proof = { path = "crates/proof/world-chain-proof", default-features = false }
-world-chain-proof-protocol = { path = "crates/proof/protocol", default-features = false }
-world-chain-proof-nitro = { path = "crates/proof/nitro", default-features = false }
-world-chain-proof-succinct-client-utils = { path = "crates/proof/succinct/utils/client", default-features = false }
-world-chain-proof-succinct-ethereum-client-utils = { path = "crates/proof/succinct/utils/ethereum-client", default-features = false }
-world-chain-proof-succinct-host-utils = { path = "crates/proof/succinct/utils/host", default-features = false }
-world-chain-proof-succinct-utils = { path = "crates/proof/succinct/utils/proof", default-features = false }
+world-chain-proof-core = { path = "proofs/core", default-features = false }
+world-chain-proof = { path = "proofs/proof", default-features = false }
+world-chain-proof-protocol = { path = "proofs/protocol", default-features = false }
+world-chain-proof-nitro = { path = "proofs/nitro", default-features = false }
+world-chain-proof-succinct-client-utils = { path = "proofs/succinct/utils/client", default-features = false }
+world-chain-proof-succinct-ethereum-client-utils = { path = "proofs/succinct/utils/ethereum-client", default-features = false }
+world-chain-proof-succinct-host-utils = { path = "proofs/succinct/utils/host", default-features = false }
+world-chain-proof-succinct-utils = { path = "proofs/succinct/utils/proof", default-features = false }
 
 # reth crates.io
 reth-codecs = { version = "0.3.1", default-features = false }
