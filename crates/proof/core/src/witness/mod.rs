@@ -32,7 +32,8 @@ pub trait WitnessData: Sized {
         let oracle = Arc::new(owned_preimage_store);
 
         println!("cycle-tracker-report-start: blob-verification");
-        let beacon = BlobStore::from(owned_blob_data);
+        let beacon = BlobStore::try_from(owned_blob_data)
+            .map_err(|err| anyhow::anyhow!("failed to verify blob data: {err}"))?;
         println!("cycle-tracker-report-end: blob-verification");
 
         Ok((oracle, beacon))

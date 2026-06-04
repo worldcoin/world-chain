@@ -75,19 +75,21 @@ impl BootInfoStruct {
     /// Converts Kona boot info into the on-chain public values.
     ///
     /// The rollup config hash is computed from Kona's rollup config plus the
-    /// World-only Tropo/Strato schedule fields used during execution.
-    pub fn from_kona_boot_info(
+    /// World-only Tropo/Strato schedule fields used during execution. Returns an
+    /// error if the rollup config cannot be serialized for hashing.
+    pub fn try_from_kona_boot_info(
         boot_info: kona_proof::BootInfo,
         world_schedule: &WorldRangeHardforkConfig,
-    ) -> Self {
-        let rollup_config_hash = hash_world_rollup_config(&boot_info.rollup_config, world_schedule);
-        Self {
+    ) -> Result<Self, RollupConfigHashError> {
+        let rollup_config_hash =
+            hash_world_rollup_config(&boot_info.rollup_config, world_schedule)?;
+        Ok(Self {
             l1Head: boot_info.l1_head,
             l2PreRoot: boot_info.agreed_l2_output_root,
             l2PostRoot: boot_info.claimed_l2_output_root,
             l2BlockNumber: boot_info.claimed_l2_block_number,
             rollupConfigHash: rollup_config_hash,
-        }
+        })
     }
 }
 
@@ -140,13 +142,14 @@ struct WorldRollupConfigHashInput<'a, T: Serialize + ?Sized> {
 /// Hashes the rollup config committed by World range proofs.
 ///
 /// This mirrors OP Succinct's pretty-JSON-then-SHA256 hash, but appends World-only fork fields
-/// that are not represented in upstream Kona's `RollupConfig`.
+/// that are not represented in upstream Kona's `RollupConfig`. Delegates to
+/// [`hash_world_rollup_config_generic`] and propagates serialization errors instead of
+/// panicking on malformed input.
 pub fn hash_world_rollup_config(
     rollup_config: &RollupConfig,
     world_schedule: &WorldRangeHardforkConfig,
-) -> B256 {
+) -> Result<B256, RollupConfigHashError> {
     hash_world_rollup_config_generic(rollup_config, world_schedule)
-        .expect("failed to serialize World rollup config for hashing")
 }
 
 /// Generic, fallible variant of [`hash_world_rollup_config`] for use with arbitrary config types.
@@ -205,8 +208,8 @@ mod tests {
             ..Default::default()
         };
         assert_ne!(
-            hash_world_rollup_config(&rollup_config, &before),
-            hash_world_rollup_config(&rollup_config, &after)
+            hash_world_rollup_config(&rollup_config, &before).unwrap(),
+            hash_world_rollup_config(&rollup_config, &after).unwrap()
         );
     }
 
@@ -215,7 +218,7 @@ mod tests {
         let rollup_config = RollupConfig::default();
         let serialized_config = serde_json::to_string_pretty(&rollup_config).unwrap();
         assert_eq!(
-            hash_world_rollup_config(&rollup_config, &WorldRangeHardforkConfig::default()),
+            hash_world_rollup_config(&rollup_config, &WorldRangeHardforkConfig::default()).unwrap(),
             sha256_b256(serialized_config.as_bytes())
         );
     }

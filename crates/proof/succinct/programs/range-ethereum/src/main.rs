@@ -32,7 +32,8 @@ pub fn main() {
             beacon,
             world_schedule,
         )
-        .await;
+        .await
+        .expect("failed to hash World rollup config for boot info");
 
         sp1_zkvm::io::commit(&boot_info);
     });

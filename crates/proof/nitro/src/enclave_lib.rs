@@ -231,10 +231,10 @@ where
         None => boot_info,
     };
 
-    Ok(BootInfoStruct::from_kona_boot_info(
+    Ok(BootInfoStruct::try_from_kona_boot_info(
         boot_info,
         &world_schedule,
-    ))
+    )?)
 }
 
 fn ensure_boot_info_matches(
