@@ -46,7 +46,7 @@ where
     pub async fn scan_once(&mut self) -> Result<(), ChallengerError> {
         let target = self.provider.finalized_l1_block_num().await?;
         let from = if self.cursor == 0 {
-            target - (ONE_DAY_OF_L1_BLOCKS + MARGIN)
+            target.saturating_sub(ONE_DAY_OF_L1_BLOCKS + MARGIN)
         } else {
             self.cursor
         };
@@ -87,7 +87,7 @@ where
             }
         }
         // if the scan goes well, update the cursor
-        self.cursor = target;
+        self.cursor = target + 1;
         Ok(())
     }
 
