@@ -36,8 +36,14 @@ use world_chain_proof_core::{
 // so the default build doesn't trip `unused_crate_dependencies`.
 use anyhow as _;
 use tracing as _;
+// `tracing-subscriber` is only used by the `enclave`/`test-attestation` bins, not the
+// lib; bind it here under the features that pull it in so the lib target doesn't trip
+// `unused_crate_dependencies`.
+#[cfg(any(feature = "aws_nitro", feature = "enclave-bin"))]
+use tracing_subscriber as _;
 
 pub mod attestation;
+
 #[cfg(feature = "aws_nitro")]
 pub mod host;
 pub mod protocol;
