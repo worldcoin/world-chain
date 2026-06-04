@@ -50,6 +50,11 @@ where
         } else {
             self.cursor
         };
+        // short circuit if from >= target: it means that there are no
+        // new L1 finalized blocks compared to last scan
+        if from >= target {
+            return Ok(());
+        }
         let game_created = self.provider.games_created(from, target).await?;
         for game_created in game_created {
             let game = game_created.game;
