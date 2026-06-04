@@ -32,6 +32,7 @@ pub struct ChallengeSubmission {
     pub tx_hash: TxHash,
 }
 
+/// The `GameCreated` event.
 #[derive(Debug)]
 pub struct GameCreated {
     pub proposal_key: B256,
