@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use alloy_primitives::{Address, B256, keccak256};
+use alloy_primitives::{Address, B256, address, keccak256};
 use clap::{Args, Parser, Subcommand};
 use color_eyre::eyre::{self, Context, ContextCompat, eyre};
 use kona_host::{DataFormat, single::SingleChainHost};
@@ -29,12 +29,8 @@ use world_chain_proof_succinct_host_utils::witness_generation::{
     OnlineBlobStore, PreimageWitnessCollector,
 };
 
-const L1_BLOCK_PREDEPLOY: Address = Address::new([
-    0x42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x15,
-]);
-const L2_TO_L1_MESSAGE_PASSER: Address = Address::new([
-    0x42, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x16,
-]);
+const L1_BLOCK_PREDEPLOY: Address = address!("0x4200000000000000000000000000000000000015");
+const L2_TO_L1_MESSAGE_PASSER: Address = address!("0x4200000000000000000000000000000000000016");
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum Network {
@@ -398,7 +394,7 @@ fn main() -> eyre::Result<()> {
 fn nitro_prove(args: NitroArgs) -> eyre::Result<()> {
     use world_chain_proof_nitro::{
         ExpectedPcrs, NitroRangeProofRequest,
-        attestation::verify_attestation_doc,
+        attestation::parse_and_check_pcrs,
         host::{EnclaveEndpoint, NitroProver},
         protocol::range_user_data,
     };
@@ -412,8 +408,9 @@ fn nitro_prove(args: NitroArgs) -> eyre::Result<()> {
             pcr2: hex_to_pcr(&p2)?,
         },
         (None, None, None) => {
-            eprintln!("warning: PCRs not set, skipping enclave image verification");
-            ExpectedPcrs::PLACEHOLDER
+            return Err(eyre!(
+                "--pcr0/--pcr1/--pcr2 are required: real PCR measurements must be supplied to verify the enclave image"
+            ));
         }
         _ => return Err(eyre!("provide all three of --pcr0, --pcr1, --pcr2 or none")),
     };
@@ -447,7 +444,7 @@ fn nitro_prove(args: NitroArgs) -> eyre::Result<()> {
     );
 
     let expected_user_data = range_user_data(&artifact.boot_info);
-    verify_attestation_doc(
+    parse_and_check_pcrs(
         &artifact.attestation_doc,
         &expected_pcrs,
         &expected_user_data,

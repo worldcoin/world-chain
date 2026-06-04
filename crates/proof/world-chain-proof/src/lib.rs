@@ -1,3 +1,4 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 //! World Chain fault-proof library.
 //!
 //! # Feature flags
