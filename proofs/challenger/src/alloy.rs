@@ -65,6 +65,30 @@ where
         from: BlockNumber,
         to: BlockNumber,
     ) -> Result<Vec<GameCreated>, ChallengerError> {
+        let logs = self
+            .factory
+            .GameCreated_filter()
+            .from_block(from)
+            .to_block(to)
+            .query()
+            .await
+            .map_err(|err| ChallengerError::Rpc(err.to_string()))?;
+
+        logs.into_iter()
+            .map(|(event, _log)| {
+                Ok(GameCreated {
+                    proposal_key: event.proposalKey,
+                    root_it: event.rootId,
+                    game: event.game,
+                    proposer: event.proposer,
+                    root_claim: event.rootClaim,
+                    l2_block_number: u256_to_u64(event.l2BlockNumber, "l2BlockNumber")?,
+                    parent_ref: event.parentRef,
+                    l1_origin_hash: event.l1OriginHash,
+                    l1_origin_number: u256_to_u64(event.l1OriginNumber, "l1OriginNumber")?,
+                })
+            })
+            .collect()
     }
 
     async fn challenge_deadline(&self, game: Address) -> Result<u64, ChallengerError> {

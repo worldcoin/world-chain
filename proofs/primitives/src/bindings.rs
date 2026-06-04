@@ -3,6 +3,18 @@ use alloy_sol_types::sol;
 sol! {
     #[sol(rpc)]
     interface IWorldChainProofSystemFactory {
+        event GameCreated(
+            bytes32 indexed proposalKey,
+            bytes32 indexed rootId,
+            address indexed game,
+            address proposer,
+            bytes32 rootClaim,
+            uint256 l2BlockNumber,
+            address parentRef,
+            bytes32 l1OriginHash,
+            uint256 l1OriginNumber
+        );
+
         function domainHash() external view returns (bytes32);
         function games(bytes32 proposalKey) external view returns (address);
         function propose(
