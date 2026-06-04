@@ -1,3 +1,4 @@
+use alloy_primitives::TxHash;
 use thiserror::Error;
 use world_chain_proofs::OutputRootError;
 
@@ -20,8 +21,12 @@ pub enum ChallengerError {
     Contract(String),
     #[error(transparent)]
     OutputRoot(#[from] OutputRootError),
-    #[error("The challenge transaction didn't execute succesfully")]
-    Revert,
+    #[error("The challenge transaction didn't execute succesfully: {0}")]
+    Revert(TxHash),
     #[error("Invalid root state: {0}")]
     InvalidRootState(u8),
+    #[error("RPC error: {0}")]
+    Rpc(String),
+    #[error("Latest L1 finalized block not found")]
+    L1FinalizedBlockNotFound(),
 }

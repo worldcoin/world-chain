@@ -18042,6 +18042,7 @@ version = "2.2.0"
 dependencies = [
  "alloy-primitives",
  "alloy-provider 2.0.4",
+ "alloy-rpc-types-eth 2.0.4",
  "async-trait",
  "reqwest 0.12.28",
  "serde",

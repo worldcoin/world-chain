@@ -1,5 +1,6 @@
 use alloy_primitives::{Address, B256, BlockNumber, U256};
 use alloy_provider::Provider;
+use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
 use world_chain_proofs::{IWorldChainProofSystemFactory, IWorldChainProofSystemGame};
 
@@ -50,7 +51,14 @@ where
         Ok(root_state)
     }
 
-    async fn finalized_l1_block_num(&self) -> Result<BlockNumber, ChallengerError> {}
+    async fn finalized_l1_block_num(&self) -> Result<BlockNumber, ChallengerError> {
+        self.provider
+            .get_block(BlockId::finalized())
+            .await
+            .map_err(|err| ChallengerError::Rpc(err.to_string()))?
+            .map(|block| block.number())
+            .ok_or_else(|| ChallengerError::L1FinalizedBlockNotFound())
+    }
 
     async fn games_created(
         &self,
@@ -59,13 +67,43 @@ where
     ) -> Result<Vec<GameCreated>, ChallengerError> {
     }
 
-    async fn challenge_deadline(&self, game: Address) -> Result<u64, ChallengerError> {}
+    async fn challenge_deadline(&self, game: Address) -> Result<u64, ChallengerError> {
+        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
+            game,
+            self.provider.clone(),
+        );
+        let challenge_deadline = game
+            .challengeDeadline()
+            .call()
+            .await
+            .map_err(|err| ChallengerError::Contract(err.to_string()))?;
+        Ok(challenge_deadline)
+    }
 
     async fn submit_challenge(
         &self,
         game: Address,
         challenger_bond: U256,
     ) -> Result<ChallengeSubmission, ChallengerError> {
+        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
+            game,
+            self.provider.clone(),
+        );
+        let pending = game
+            .challenge()
+            .value(challenger_bond)
+            .send()
+            .await
+            .map_err(|err| ChallengerError::Contract(err.to_string()))?;
+        let tx_hash = *pending.tx_hash();
+        let receipt = pending
+            .get_receipt()
+            .await
+            .map_err(|err| ChallengerError::Contract(err.to_string()))?;
+        if !receipt.status() {
+            return Err(ChallengerError::Revert(tx_hash));
+        }
+        Ok(ChallengeSubmission { tx_hash })
     }
 }
 

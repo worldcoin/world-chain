@@ -17,6 +17,7 @@ world-chain-proofs.workspace = true
 # alloy
 alloy-primitives.workspace = true
 alloy-provider.workspace = true
+alloy-rpc-types-eth.workspace = true
 
 # misc
 async-trait.workspace = true

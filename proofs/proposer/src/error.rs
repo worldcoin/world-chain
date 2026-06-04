@@ -1,3 +1,4 @@
+use alloy_primitives::TxHash;
 use thiserror::Error;
 use world_chain_proofs::OutputRootError;
 
@@ -20,6 +21,6 @@ pub enum ProposerError {
     Contract(String),
     #[error(transparent)]
     OutputRoot(#[from] OutputRootError),
-    #[error("The proposal transaction didn't execute succesfully")]
-    Revert,
+    #[error("The proposal transaction didn't execute succesfully: {0}")]
+    Revert(TxHash),
 }

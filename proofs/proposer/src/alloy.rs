@@ -115,7 +115,7 @@ where
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
         if !receipt.status() {
-            return Err(ProposerError::Revert);
+            return Err(ProposerError::Revert(tx_hash));
         }
 
         Ok(ProposalSubmission { tx_hash })
