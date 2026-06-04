@@ -32,6 +32,11 @@ use world_chain_proof_core::{
     types::AggregationInputs, witness::WorldRangeWitnessData,
 };
 
+// Used only by the feature-gated `enclave`/`aws_nitro` modules; bind with `as _`
+// so the default build doesn't trip `unused_crate_dependencies`.
+use anyhow as _;
+use tracing as _;
+
 pub mod attestation;
 #[cfg(feature = "aws_nitro")]
 pub mod host;
