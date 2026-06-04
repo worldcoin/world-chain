@@ -5,7 +5,7 @@ use world_chain_proof_core::{
 };
 use world_chain_proof_nitro::{
     ExpectedPcrs, NitroRangeProofRequest,
-    attestation::verify_attestation_doc,
+    attestation::parse_and_check_pcrs,
     host::{EnclaveEndpoint, NitroProver},
     protocol::range_user_data,
 };
@@ -59,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let expected_user_data = range_user_data(&artifact.boot_info);
-    verify_attestation_doc(
+    parse_and_check_pcrs(
         &artifact.attestation_doc,
         &expected_pcrs,
         &expected_user_data,

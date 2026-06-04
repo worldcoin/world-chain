@@ -1,3 +1,4 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 //! AWS Nitro TEE-attested prover for the World Chain OP Succinct Lite fault-proof stack.
 //!
 //! The Succinct backend produces ZK proofs of `BootInfoStruct` by re-executing the OP Stack
@@ -187,13 +188,13 @@ mod tests {
 
     use crate::{
         ExpectedPcrs, NitroRangeProofArtifact, PCR_LEN,
-        attestation::{AttestationError, verify_attestation_doc},
+        attestation::{AttestationError, parse_and_check_pcrs},
         protocol::range_user_data,
     };
 
     /// Builds a minimal synthetic COSE_Sign1 attestation document suitable for unit tests.
     /// The signature bytes are a 96-byte placeholder — no cryptographic verification is
-    /// performed by `parse_attestation_doc` / `verify_attestation_doc` (see the TODO in
+    /// performed by `parse_attestation_doc` / `parse_and_check_pcrs` (see the TODO in
     /// `attestation.rs`).
     fn make_attestation_doc(pcrs: &[[u8; PCR_LEN]; 3], user_data: &[u8]) -> Vec<u8> {
         let pcr_map: Vec<(ciborium::value::Value, ciborium::value::Value)> = pcrs
@@ -240,6 +241,20 @@ mod tests {
         out
     }
 
+    /// PCR values used by every test — a non-placeholder, fully deterministic measurement
+    /// so `parse_and_check_pcrs` does not bail out on the all-zero guard.
+    fn test_pcrs() -> [[u8; PCR_LEN]; 3] {
+        [[3u8; PCR_LEN]; 3]
+    }
+
+    fn test_expected_pcrs() -> ExpectedPcrs {
+        ExpectedPcrs {
+            pcr0: [3u8; PCR_LEN],
+            pcr1: [3u8; PCR_LEN],
+            pcr2: [3u8; PCR_LEN],
+        }
+    }
+
     fn boot_info() -> BootInfoStruct {
         BootInfoStruct {
             l1Head: B256::from([1; 32]),
@@ -254,7 +269,7 @@ mod tests {
     fn range_artifact_user_data_binds_boot_info() {
         let boot_info = boot_info();
         let user_data = range_user_data(&boot_info);
-        let attestation_doc = make_attestation_doc(&[[0u8; PCR_LEN]; 3], &user_data);
+        let attestation_doc = make_attestation_doc(&test_pcrs(), &user_data);
 
         let artifact = NitroRangeProofArtifact {
             boot_info,
@@ -262,9 +277,9 @@ mod tests {
         };
 
         let expected_user_data = range_user_data(&artifact.boot_info);
-        verify_attestation_doc(
+        parse_and_check_pcrs(
             &artifact.attestation_doc,
-            &ExpectedPcrs::PLACEHOLDER,
+            &test_expected_pcrs(),
             &expected_user_data,
         )
         .unwrap();
@@ -274,15 +289,15 @@ mod tests {
     fn tampered_boot_info_fails_user_data_check() {
         let boot_info = boot_info();
         let user_data = range_user_data(&boot_info);
-        let attestation_doc = make_attestation_doc(&[[0u8; PCR_LEN]; 3], &user_data);
+        let attestation_doc = make_attestation_doc(&test_pcrs(), &user_data);
 
         let mut tampered = boot_info;
         tampered.l2PostRoot = B256::from([9; 32]);
 
         let expected_user_data = range_user_data(&tampered);
-        let err = verify_attestation_doc(
+        let err = parse_and_check_pcrs(
             &attestation_doc,
-            &ExpectedPcrs::PLACEHOLDER,
+            &test_expected_pcrs(),
             &expected_user_data,
         )
         .unwrap_err();
@@ -294,19 +309,34 @@ mod tests {
     fn wrong_pcrs_fail_verification() {
         let boot_info = boot_info();
         let user_data = range_user_data(&boot_info);
-        // Document has all-zero PCRs but we verify against all-ones.
-        let attestation_doc = make_attestation_doc(&[[0u8; PCR_LEN]; 3], &user_data);
+        // Document carries PCR0 = 0x03; we verify against a different non-zero value.
+        let attestation_doc = make_attestation_doc(&test_pcrs(), &user_data);
 
         let wrong_pcrs = ExpectedPcrs {
             pcr0: [1u8; PCR_LEN],
-            pcr1: [0u8; PCR_LEN],
-            pcr2: [0u8; PCR_LEN],
+            pcr1: [3u8; PCR_LEN],
+            pcr2: [3u8; PCR_LEN],
         };
-        let err = verify_attestation_doc(&attestation_doc, &wrong_pcrs, &user_data).unwrap_err();
+        let err = parse_and_check_pcrs(&attestation_doc, &wrong_pcrs, &user_data).unwrap_err();
 
         assert!(matches!(
             err,
             AttestationError::PcrMismatch { index: 0, .. }
+        ));
+    }
+
+    #[test]
+    fn placeholder_pcrs_are_rejected() {
+        let boot_info = boot_info();
+        let user_data = range_user_data(&boot_info);
+        let attestation_doc = make_attestation_doc(&[[0u8; PCR_LEN]; 3], &user_data);
+
+        let err =
+            parse_and_check_pcrs(&attestation_doc, &ExpectedPcrs::PLACEHOLDER, &user_data)
+                .unwrap_err();
+        assert!(matches!(
+            err,
+            AttestationError::EmptyExpectedPcr { index: 0 }
         ));
     }
 }

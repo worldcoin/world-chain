@@ -111,7 +111,7 @@ impl NitroProver {
         };
 
         let expected_user_data = protocol::range_user_data(&boot_info);
-        attestation::verify_attestation_doc(
+        attestation::parse_and_check_pcrs(
             &attestation_doc,
             &self.expected_pcrs,
             &expected_user_data,
@@ -147,7 +147,7 @@ impl NitroProver {
         };
 
         let expected_user_data = protocol::aggregation_user_data(&boot_info, &request.inputs);
-        attestation::verify_attestation_doc(
+        attestation::parse_and_check_pcrs(
             &attestation_doc,
             &self.expected_pcrs,
             &expected_user_data,

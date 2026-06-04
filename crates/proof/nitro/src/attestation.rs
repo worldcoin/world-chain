@@ -41,6 +41,17 @@ pub enum AttestationError {
         /// Actual user data hex string from the document.
         actual: String,
     },
+    /// An expected PCR was all-zero, which is the placeholder value and indicates the
+    /// caller forgot to configure real measurements. We refuse to silently accept the
+    /// document in that case because doing so would let the enclave run any unrelated
+    /// image with the same `user_data`.
+    #[error(
+        "expected pcr{index} is all-zero placeholder; supply real PCR measurements to verify"
+    )]
+    EmptyExpectedPcr {
+        /// PCR index whose expected value was the placeholder.
+        index: u8,
+    },
 }
 
 /// Decodes the relevant subset of a Nitro attestation document.
@@ -174,8 +185,32 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
     })
 }
 
-/// Verifies that a parsed attestation document matches the supplied expectations.
-pub fn verify_attestation_doc(
+/// Parses a `COSE_Sign1` Nitro attestation document and checks that its PCR map and
+/// `user_data` field match the supplied expectations.
+///
+/// # What this function DOES
+///
+/// - Decodes the outer `COSE_Sign1` envelope and the inner CBOR payload map.
+/// - Extracts the `pcrs` map and compares PCR0/1/2 byte-for-byte against `expected_pcrs`.
+/// - Extracts `user_data` and compares it byte-for-byte against `expected_user_data`.
+/// - Returns the parsed payload fields on success.
+///
+/// # What this function does NOT do
+///
+/// - It does **not** verify the COSE_Sign1 signature.
+/// - It does **not** validate the enclave certificate or its chain against the AWS Nitro
+///   Attestation PKI root CA.
+/// - It does **not** check `timestamp`, `nonce`, or any freshness / replay constraint.
+///
+/// As a consequence, a valid output from this function only proves that *some* CBOR blob
+/// with the right PCRs and `user_data` exists — not that AWS Nitro produced it. Callers
+/// that need real attestation guarantees must pair this with a separate cryptographic
+/// verification step.
+///
+/// TODO(nitro): replace this with full verification using the `aws-nitro-enclaves-cose`
+/// and `aws-nitro-enclaves-attestation` crates so the signature and certificate chain are
+/// checked here.
+pub fn parse_and_check_pcrs(
     doc: &[u8],
     expected_pcrs: &ExpectedPcrs,
     expected_user_data: &[u8],
@@ -208,6 +243,12 @@ fn check_pcr(
     index: u8,
     expected: &PcrDigest,
 ) -> Result<(), AttestationError> {
+    // An all-zero expected digest is the placeholder. We used to silently skip
+    // verification here, but that meant a caller who forgot to set their PCRs would
+    // accept *any* enclave image. Treat it as a hard configuration error instead.
+    if expected.iter().all(|&b| b == 0) {
+        return Err(AttestationError::EmptyExpectedPcr { index });
+    }
     let actual = parsed
         .pcrs
         .get(&index)
@@ -217,10 +258,6 @@ fn check_pcr(
             2 => "pcr2",
             _ => "pcrN",
         }))?;
-    // All-zero expected digest is the placeholder — skip verification.
-    if expected.iter().all(|&b| b == 0) {
-        return Ok(());
-    }
     if actual.len() != PCR_LEN || actual.as_slice() != expected.as_slice() {
         return Err(AttestationError::PcrMismatch {
             index,
@@ -280,30 +317,51 @@ mod tests {
         out
     }
 
+    fn non_placeholder_pcrs(byte: u8) -> ExpectedPcrs {
+        ExpectedPcrs {
+            pcr0: [byte; PCR_LEN],
+            pcr1: [byte; PCR_LEN],
+            pcr2: [byte; PCR_LEN],
+        }
+    }
+
     #[test]
-    fn parses_and_verifies_placeholder_pcrs() {
+    fn parses_and_verifies_matching_pcrs() {
         let doc = make_doc(
-            vec![(0, vec![0u8; 48]), (1, vec![0u8; 48]), (2, vec![0u8; 48])],
+            vec![(0, vec![3u8; 48]), (1, vec![3u8; 48]), (2, vec![3u8; 48])],
             Some(vec![7u8; 32]),
         );
-        let parsed = verify_attestation_doc(&doc, &ExpectedPcrs::PLACEHOLDER, &[7u8; 32]).unwrap();
+        let parsed = parse_and_check_pcrs(&doc, &non_placeholder_pcrs(3), &[7u8; 32]).unwrap();
         assert_eq!(parsed.user_data.unwrap(), vec![7u8; 32]);
         assert_eq!(parsed.module_id.unwrap(), "test-module");
     }
 
     #[test]
-    fn rejects_pcr_mismatch() {
+    fn rejects_all_zero_expected_pcr() {
         let doc = make_doc(
-            vec![(0, vec![1u8; 48]), (1, vec![0u8; 48]), (2, vec![0u8; 48])],
+            vec![(0, vec![0u8; 48]), (1, vec![0u8; 48]), (2, vec![0u8; 48])],
             Some(vec![7u8; 32]),
         );
-        // Expected PCR0 must be non-zero so check_pcr doesn't treat it as placeholder.
+        let err =
+            parse_and_check_pcrs(&doc, &ExpectedPcrs::PLACEHOLDER, &[7u8; 32]).unwrap_err();
+        assert!(matches!(
+            err,
+            AttestationError::EmptyExpectedPcr { index: 0 }
+        ));
+    }
+
+    #[test]
+    fn rejects_pcr_mismatch() {
+        let doc = make_doc(
+            vec![(0, vec![1u8; 48]), (1, vec![3u8; 48]), (2, vec![3u8; 48])],
+            Some(vec![7u8; 32]),
+        );
         let expected = ExpectedPcrs {
             pcr0: [2u8; PCR_LEN],
-            pcr1: [0u8; PCR_LEN],
-            pcr2: [0u8; PCR_LEN],
+            pcr1: [3u8; PCR_LEN],
+            pcr2: [3u8; PCR_LEN],
         };
-        let err = verify_attestation_doc(&doc, &expected, &[7u8; 32]).unwrap_err();
+        let err = parse_and_check_pcrs(&doc, &expected, &[7u8; 32]).unwrap_err();
         assert!(matches!(
             err,
             AttestationError::PcrMismatch { index: 0, .. }
@@ -313,10 +371,11 @@ mod tests {
     #[test]
     fn rejects_user_data_mismatch() {
         let doc = make_doc(
-            vec![(0, vec![0u8; 48]), (1, vec![0u8; 48]), (2, vec![0u8; 48])],
+            vec![(0, vec![3u8; 48]), (1, vec![3u8; 48]), (2, vec![3u8; 48])],
             Some(vec![9u8; 32]),
         );
-        let err = verify_attestation_doc(&doc, &ExpectedPcrs::PLACEHOLDER, &[7u8; 32]).unwrap_err();
+        let err =
+            parse_and_check_pcrs(&doc, &non_placeholder_pcrs(3), &[7u8; 32]).unwrap_err();
         assert!(matches!(err, AttestationError::UserDataMismatch { .. }));
     }
 }
