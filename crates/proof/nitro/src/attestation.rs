@@ -45,9 +45,7 @@ pub enum AttestationError {
     /// caller forgot to configure real measurements. We refuse to silently accept the
     /// document in that case because doing so would let the enclave run any unrelated
     /// image with the same `user_data`.
-    #[error(
-        "expected pcr{index} is all-zero placeholder; supply real PCR measurements to verify"
-    )]
+    #[error("expected pcr{index} is all-zero placeholder; supply real PCR measurements to verify")]
     EmptyExpectedPcr {
         /// PCR index whose expected value was the placeholder.
         index: u8,
@@ -342,8 +340,7 @@ mod tests {
             vec![(0, vec![0u8; 48]), (1, vec![0u8; 48]), (2, vec![0u8; 48])],
             Some(vec![7u8; 32]),
         );
-        let err =
-            parse_and_check_pcrs(&doc, &ExpectedPcrs::PLACEHOLDER, &[7u8; 32]).unwrap_err();
+        let err = parse_and_check_pcrs(&doc, &ExpectedPcrs::PLACEHOLDER, &[7u8; 32]).unwrap_err();
         assert!(matches!(
             err,
             AttestationError::EmptyExpectedPcr { index: 0 }
@@ -374,8 +371,7 @@ mod tests {
             vec![(0, vec![3u8; 48]), (1, vec![3u8; 48]), (2, vec![3u8; 48])],
             Some(vec![9u8; 32]),
         );
-        let err =
-            parse_and_check_pcrs(&doc, &non_placeholder_pcrs(3), &[7u8; 32]).unwrap_err();
+        let err = parse_and_check_pcrs(&doc, &non_placeholder_pcrs(3), &[7u8; 32]).unwrap_err();
         assert!(matches!(err, AttestationError::UserDataMismatch { .. }));
     }
 }

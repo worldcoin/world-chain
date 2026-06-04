@@ -295,12 +295,9 @@ mod tests {
         tampered.l2PostRoot = B256::from([9; 32]);
 
         let expected_user_data = range_user_data(&tampered);
-        let err = parse_and_check_pcrs(
-            &attestation_doc,
-            &test_expected_pcrs(),
-            &expected_user_data,
-        )
-        .unwrap_err();
+        let err =
+            parse_and_check_pcrs(&attestation_doc, &test_expected_pcrs(), &expected_user_data)
+                .unwrap_err();
 
         assert!(matches!(err, AttestationError::UserDataMismatch { .. }));
     }
@@ -331,9 +328,8 @@ mod tests {
         let user_data = range_user_data(&boot_info);
         let attestation_doc = make_attestation_doc(&[[0u8; PCR_LEN]; 3], &user_data);
 
-        let err =
-            parse_and_check_pcrs(&attestation_doc, &ExpectedPcrs::PLACEHOLDER, &user_data)
-                .unwrap_err();
+        let err = parse_and_check_pcrs(&attestation_doc, &ExpectedPcrs::PLACEHOLDER, &user_data)
+            .unwrap_err();
         assert!(matches!(
             err,
             AttestationError::EmptyExpectedPcr { index: 0 }
