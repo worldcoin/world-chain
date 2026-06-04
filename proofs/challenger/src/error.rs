@@ -22,4 +22,6 @@ pub enum ChallengerError {
     OutputRoot(#[from] OutputRootError),
     #[error("The challenge transaction didn't execute succesfully")]
     Revert,
+    #[error("Invalid root state: {0}")]
+    InvalidRootState(u8),
 }

@@ -1,12 +1,30 @@
 use alloy_primitives::{Address, B256, BlockNumber, TxHash};
 
+use crate::error::ChallengerError;
+
 /// A game root state.
 #[derive(Debug, PartialEq, Eq)]
 pub enum RootState {
+    None,
     Proposed,
     Challenged,
     Finalized,
     Invalidated,
+}
+
+impl TryFrom<u8> for RootState {
+    type Error = ChallengerError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(RootState::None),
+            1 => Ok(RootState::Proposed),
+            2 => Ok(RootState::Challenged),
+            3 => Ok(RootState::Finalized),
+            4 => Ok(RootState::Invalidated),
+            _ => Err(ChallengerError::InvalidRootState(value)),
+        }
+    }
 }
 
 /// A WorldChainProofSystemGame view for the challenger.

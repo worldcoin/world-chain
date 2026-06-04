@@ -41,18 +41,18 @@ where
     O: OutputRootProvider,
 {
     pub async fn scan_once(&self) -> Result<(), ChallengerError> {
-        let target = self.provider.finalized_l1_block_num().await;
+        let target = self.provider.finalized_l1_block_num().await.unwrap();
         let from = target - (ONE_DAY_OF_L1_BLOCKS + MARGIN);
 
-        let game_created = self.provider.games_created(from, target).await;
+        let game_created = self.provider.games_created(from, target).await.unwrap();
         for game_created in game_created {
             let game = game_created.game;
-            let root_state = self.provider.root_state(game).await;
+            let root_state = self.provider.root_state(game).await.unwrap();
             if root_state != RootState::Proposed {
                 // root state is not `Proposed` anymore, skip immediately
                 continue;
             }
-            let challenge_deadline = self.provider.challenge_deadline(game).await;
+            let challenge_deadline = self.provider.challenge_deadline(game).await.unwrap();
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("system time before unix epoch")
