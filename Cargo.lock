@@ -18123,6 +18123,7 @@ dependencies = [
  "tracing",
  "url",
  "world-chain-chainspec",
+ "world-chain-challenger",
  "world-chain-node",
  "world-chain-primitives",
  "world-chain-proofs",
