@@ -57,7 +57,7 @@ where
             .await
             .map_err(|err| ChallengerError::Rpc(err.to_string()))?
             .map(|block| block.number())
-            .ok_or_else(|| ChallengerError::L1FinalizedBlockNotFound())
+            .ok_or(ChallengerError::L1FinalizedBlockNotFound())
     }
 
     async fn games_created(

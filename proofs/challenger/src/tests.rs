@@ -1,13 +1,3 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-
-use alloy_primitives::{Address, B256, BlockNumber, U256, address};
-use async_trait::async_trait;
-use world_chain_proofs::{OutputRootError, OutputRootProvider};
-
 use crate::{
     challenger::WorldChainChallenger,
     config::ChallengerConfig,
@@ -15,6 +5,14 @@ use crate::{
     traits::ChallengerClient,
     types::{ChallengeSubmission, GameCreated, RootState},
 };
+use alloy_primitives::{Address, B256, BlockNumber, U256, address};
+use async_trait::async_trait;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+use world_chain_proofs::{OutputRootError, OutputRootProvider};
 
 const FACTORY: Address = address!("0000000000000000000000000000000000001006");
 const GAME_1: Address = address!("0000000000000000000000000000000000000001");
@@ -123,7 +121,7 @@ async fn scan_once_challenges_invalid_root() {
     let output_roots = MockOutputRoots {
         roots: HashMap::from([(L2_BLOCK, canonical_root)]),
     };
-    let challenger = WorldChainChallenger::new(config(), client, output_roots);
+    let mut challenger = WorldChainChallenger::new(config(), client, output_roots);
 
     challenger.scan_once().await.unwrap();
 
@@ -148,7 +146,7 @@ async fn scan_once_leaves_valid_root() {
     let output_roots = MockOutputRoots {
         roots: HashMap::from([(L2_BLOCK, canonical_root)]),
     };
-    let challenger = WorldChainChallenger::new(config(), client, output_roots);
+    let mut challenger = WorldChainChallenger::new(config(), client, output_roots);
 
     challenger.scan_once().await.unwrap();
 
@@ -171,7 +169,7 @@ async fn scan_once_skips_non_proposed_game() {
     let output_roots = MockOutputRoots {
         roots: HashMap::from([(L2_BLOCK, canonical_root)]),
     };
-    let challenger = WorldChainChallenger::new(config(), client, output_roots);
+    let mut challenger = WorldChainChallenger::new(config(), client, output_roots);
 
     challenger.scan_once().await.unwrap();
 
@@ -194,7 +192,7 @@ async fn scan_once_skips_expired_challenge_deadline() {
     let output_roots = MockOutputRoots {
         roots: HashMap::from([(L2_BLOCK, canonical_root)]),
     };
-    let challenger = WorldChainChallenger::new(config(), client, output_roots);
+    let mut challenger = WorldChainChallenger::new(config(), client, output_roots);
 
     challenger.scan_once().await.unwrap();
 

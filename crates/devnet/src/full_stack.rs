@@ -38,10 +38,8 @@ use tokio::{
 use tracing::{debug, info, warn};
 use url::{Host, Url};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
-use world_chain_proofs::{PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
-use world_chain_proposer::{
-    AlloyProofSystemClient, OptimismOutputRootClient, ProposerConfig, WorldChainProposer,
-};
+use world_chain_proofs::{OptimismOutputRootClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
+use world_chain_proposer::{AlloyProofSystemClient, ProposerConfig, WorldChainProposer};
 use world_chain_test_utils::DEV_CHAIN_ID;
 
 use crate::{
