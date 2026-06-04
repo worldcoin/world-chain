@@ -1,0 +1,69 @@
+[package]
+name = "world-chain-proof-nitro"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "AWS Nitro TEE attestation prover for World Chain OP Succinct Lite fault proofs."
+
+[lib]
+path = "src/lib.rs"
+
+# Binary that runs inside the Nitro Enclave. Only built when the `enclave-bin`
+# feature is enabled because it depends on the full kona derivation stack and
+# the NSM device interface that is only available inside the enclave runtime.
+[[bin]]
+name = "world-chain-nitro-enclave"
+path = "src/enclave.rs"
+required-features = ["enclave-bin"]
+
+[[bin]]
+name = "test-attestation"
+path = "src/bin/test_attestation.rs"
+required-features = ["aws_nitro"]
+
+[features]
+default = []
+# Enables the host-side prover that talks to a running Nitro enclave over vsock.
+# Requires Linux (AF_VSOCK is not available on macOS or Windows).
+aws_nitro = ["dep:tokio-vsock", "dep:tracing-subscriber"]
+# Enables the enclave-side code path. The actual `[[bin]]` target additionally
+# requires the `enclave-bin` feature so it is only built for the enclave image.
+enclave = [
+    "dep:aws-nitro-enclaves-nsm-api",
+    "dep:kona-proof",
+    "dep:serde_bytes",
+    "dep:tokio-vsock",
+    "dep:world-chain-proof-succinct-client-utils",
+    "dep:world-chain-proof-succinct-ethereum-client-utils",
+]
+# Builds the actual enclave binary entry point. Implies `enclave`.
+enclave-bin = ["enclave", "dep:tracing-subscriber"]
+
+[dependencies]
+# Shared (host + enclave) ----------------------------------------------------
+alloy-primitives = { workspace = true, features = ["serde"] }
+anyhow.workspace = true
+ciborium = "0.2"
+hex.workspace = true
+rkyv.workspace = true
+serde = { workspace = true, features = ["derive"] }
+sha2.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["full"] }
+tokio-vsock = { version = "0.5", optional = true }
+tracing.workspace = true
+world-chain-proof-core.workspace = true
+
+# Enclave-only (gated by the `enclave` feature) -----------------------------
+aws-nitro-enclaves-nsm-api = { version = "0.4", optional = true }
+kona-proof = { workspace = true, optional = true }
+serde_bytes = { version = "0.11", optional = true }
+world-chain-proof-succinct-client-utils = { workspace = true, optional = true }
+world-chain-proof-succinct-ethereum-client-utils = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
