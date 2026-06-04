@@ -1,9 +1,27 @@
 //! Custom crypto provider for KZG proof verification.
+//!
+//! # Why a custom `Crypto` impl?
+//!
+//! `revm-precompile`'s default [`Crypto`] implementation uses `c-kzg` (backed by the
+//! blst C library) for KZG point-evaluation. blst cannot be compiled inside the SP1
+//! zkVM guest because:
+//!   1. It requires a C toolchain (not available in the SP1 build environment), and
+//!   2. It uses platform SIMD / assembly that is not supported in the RISC-V zkVM ISA.
+//!
+//! [`kzg-rs`](https://crates.io/crates/kzg-rs) is a pure-Rust KZG implementation that
+//! compiles cleanly inside the zkVM. This shim wires it into revm's crypto interface.
+//!
+//! There is no upstream crate that already provides a `kzg-rs`-backed [`Crypto`] impl,
+//! so we roll a minimal one here. SP1's BLS12-381 syscalls only accelerate G1
+//! add/double/decompress — they do not expose a pairing precompile — so a full zkVM
+//! hardware-accelerated KZG path is not yet feasible and remains a future optimisation.
 
 use kzg_rs::{Bytes32, Bytes48, KzgProof, KzgSettings};
 use revm::precompile::{Crypto, PrecompileHalt};
 
 /// Custom cryptography provider using kzg-rs for KZG proof verification.
+///
+/// See the module-level documentation for the rationale behind this type.
 #[derive(Debug)]
 pub struct CustomCrypto {
     kzg_settings: KzgSettings,
