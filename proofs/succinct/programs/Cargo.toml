@@ -1,0 +1,35 @@
+[workspace]
+resolver = "3"
+members = [
+    "aggregation",
+    "range-ethereum",
+    "range-utils",
+]
+
+[workspace.package]
+version = "2.2.0"
+edition = "2024"
+license = "MIT"
+homepage = "https://world.org/world-chain"
+repository = "https://github.com/worldcoin/world-chain/"
+
+[workspace.dependencies]
+alloy-consensus = { version = "2.0.0", default-features = false, features = ["serde"] }
+alloy-primitives = { version = "1.5.6", default-features = false, features = ["serde", "std"] }
+alloy-sol-types = "1.5.6"
+anyhow = { version = "1.0.86", default-features = false }
+bincode = "1"
+kona-proof = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+rkyv = { version = "0.8", features = ["hashbrown-0_15", "std"] }
+serde = { version = "1", features = ["derive"] }
+serde_cbor = "0.11"
+sha2 = "0.10.9"
+sp1-lib = { version = "=6.1.0", features = ["verify"] }
+sp1-zkvm = { version = "=6.1.0", features = ["verify"] }
+thiserror = "2"
+tracing = { version = "0.1", default-features = false }
+tracing-subscriber = { version = "0.3.18", features = ["fmt"] }
+world-chain-proof-core = { path = "../../core", default-features = false }
+world-chain-proof-succinct-client-utils = { path = "../utils/client", default-features = false }
+world-chain-proof-succinct-ethereum-client-utils = { path = "../utils/ethereum-client", default-features = false }
+world-chain-proof-succinct-range-utils = { path = "range-utils", default-features = false }
