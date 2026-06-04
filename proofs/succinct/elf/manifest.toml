@@ -1,0 +1,11 @@
+[programs.range-ethereum]
+package = "world-chain-proof-succinct-range-ethereum"
+manifest = "proofs/succinct/programs/range/ethereum/Cargo.toml"
+elf_name = "world-chain-range-ethereum"
+env = "WORLD_CHAIN_RANGE_ELF"
+
+[programs.aggregation]
+package = "world-chain-proof-succinct-aggregation"
+manifest = "proofs/succinct/programs/aggregation/Cargo.toml"
+elf_name = "world-chain-aggregation"
+env = "WORLD_CHAIN_AGGREGATION_ELF"
