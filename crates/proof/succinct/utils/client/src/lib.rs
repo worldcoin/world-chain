@@ -1,3 +1,4 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 //! SP1 guest/host execution utilities for the World Chain OP Succinct Lite programs.
 
 extern crate alloc;
