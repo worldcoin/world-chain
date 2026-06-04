@@ -35,11 +35,7 @@ sol! {
 
 /// Converts an SP1 vkey digest from `[u32; 8]` to the bytes used on-chain.
 pub fn u32_to_u8(input: [u32; 8]) -> [u8; 32] {
-    let mut output = [0u8; 32];
-    for (i, value) in input.into_iter().enumerate() {
-        output[i * 4..(i + 1) * 4].copy_from_slice(&value.to_be_bytes());
-    }
-    output
+    std::array::from_fn(|i| input[i / 4].to_be_bytes()[i % 4])
 }
 
 #[cfg(test)]

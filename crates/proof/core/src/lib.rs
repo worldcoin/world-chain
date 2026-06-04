@@ -1,3 +1,4 @@
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 //! Shared proof primitives for World Chain fault-proof backends.
 //!
 //! Types in this crate are used by both the SP1/Succinct and the AWS Nitro TEE backends.

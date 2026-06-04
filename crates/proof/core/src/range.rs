@@ -58,7 +58,11 @@ impl WorldRangeHardforkConfig {
     /// Returns `true` when the fork is active at the given L2 block/timestamp.
     pub fn is_active(&self, fork: WorldRangeHardfork, block_number: u64, timestamp: u64) -> bool {
         match fork {
-            WorldRangeHardfork::Bedrock => block_number >= self.bedrock_block.unwrap_or(0),
+            // Bedrock is a genesis fork keyed on block number; every other OP Stack fork is
+            // keyed on block timestamp. We treat `bedrock_block = None` as "always active"
+            // (block 0) so chains that never explicitly enable Bedrock still report it as
+            // active, matching the asymmetric semantics in `op-node`.
+            WorldRangeHardfork::Bedrock => block_active(self.bedrock_block, block_number),
             WorldRangeHardfork::Regolith => timestamp_active(self.regolith_time, timestamp),
             WorldRangeHardfork::Canyon => timestamp_active(self.canyon_time, timestamp),
             WorldRangeHardfork::Ecotone => timestamp_active(self.ecotone_time, timestamp),
@@ -94,6 +98,15 @@ impl WorldRangeHardforkConfig {
 
 fn timestamp_active(activation: Option<u64>, timestamp: u64) -> bool {
     activation.is_some_and(|activation| timestamp >= activation)
+}
+
+/// Returns whether a block-number-keyed fork is active at `block`.
+///
+/// Mirrors [`timestamp_active`] but applies the convention that an unset activation
+/// (`None`) is treated as `0`, i.e. always active. Bedrock is the only OP Stack fork
+/// that activates by block number, so it is the sole user of this helper.
+fn block_active(activation: Option<u64>, block: u64) -> bool {
+    block >= activation.unwrap_or(0)
 }
 
 /// World hardfork names used inside range proof public values.
