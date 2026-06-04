@@ -3,6 +3,7 @@ name: ELF
 on:
   push:
     branches: [main]
+  merge_group:
   pull_request:
     paths:
       - 'crates/proof/succinct/programs/**'
