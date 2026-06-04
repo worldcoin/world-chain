@@ -33,7 +33,7 @@ impl Default for ChallengerConfig {
     fn default() -> Self {
         Self {
             challenger_bond: U256::ZERO,
-            factory_contract: Address::random(),
+            factory_contract: Address::with_last_byte(1),
             poll_interval: Duration::from_mins(1),
         }
     }

@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, B256, BlockNumber, U256};
+use alloy_primitives::{Address, BlockNumber, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
