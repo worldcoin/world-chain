@@ -35,7 +35,7 @@ use tokio::{
     process::{Child, Command},
     task::JoinHandle,
 };
-use tracing::{debug, info, warn};
+use tracing::{Instrument, debug, info, info_span, warn};
 use url::{Host, Url};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 use world_chain_challenger::{AlloyChallengerClient, ChallengerConfig, WorldChainChallenger};
@@ -2266,11 +2266,14 @@ async fn start_world_chain_proposer(
         "starting native World Chain proof-system proposer"
     );
 
-    let handle = tokio::spawn(async move {
-        if let Err(error) = proposer.run_forever().await {
-            warn!(%error, "World Chain proof-system proposer stopped");
+    let handle = tokio::spawn(
+        async move {
+            if let Err(error) = proposer.run_forever().await {
+                warn!(%error, "World Chain proof-system proposer stopped");
+            }
         }
-    });
+        .instrument(info_span!("world-chain-proposer", process = "world-chain-proposer")),
+    );
 
     Ok(ProposerTask { handle })
 }
@@ -2318,11 +2321,17 @@ async fn start_world_chain_challenger(
         "starting native World Chain proof-system challenger"
     );
 
-    let handle = tokio::spawn(async move {
-        if let Err(error) = challenger.run_forever().await {
-            warn!(%error, "World Chain proof-system challenger stopped");
+    let handle = tokio::spawn(
+        async move {
+            if let Err(error) = challenger.run_forever().await {
+                warn!(%error, "World Chain proof-system challenger stopped");
+            }
         }
-    });
+        .instrument(info_span!(
+            "world-chain-challenger",
+            process = "world-chain-challenger"
+        )),
+    );
 
     Ok(ChallengerTask { handle })
 }
