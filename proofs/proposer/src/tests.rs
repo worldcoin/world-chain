@@ -6,10 +6,10 @@ use std::{
 
 use alloy_primitives::{Address, B256, U256, address, b256};
 use async_trait::async_trait;
-use world_chain_proofs::{OutputRootError, OutputRootProvider, ProposalCommitment};
+use world_chain_proofs::{ConsensusError, ConsensusProvider, ProposalCommitment};
 
 use crate::{
-    ParentRef, ProofSystemClient, Proposal, ProposalSubmission, ProposerConfig, ProposerError,
+    ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerConfig, ProposerError,
     WorldChainProposer,
 };
 
@@ -25,7 +25,7 @@ struct MockContracts {
 }
 
 #[async_trait]
-impl ProofSystemClient for MockContracts {
+impl ProposerClient for MockContracts {
     async fn anchor_parent(&self) -> Result<ParentRef, ProposerError> {
         Ok(self.anchor)
     }
@@ -62,12 +62,12 @@ struct MockOutputRoots {
 }
 
 #[async_trait]
-impl OutputRootProvider for MockOutputRoots {
-    async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, OutputRootError> {
+impl ConsensusProvider for MockOutputRoots {
+    async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, ConsensusError> {
         self.roots
             .get(&l2_block_number)
             .copied()
-            .ok_or_else(|| OutputRootError::Rpc(format!("missing root for {l2_block_number}")))
+            .ok_or_else(|| ConsensusError::Rpc(format!("missing root for {l2_block_number}")))
     }
 }
 

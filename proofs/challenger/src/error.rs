@@ -1,6 +1,6 @@
 use alloy_primitives::TxHash;
 use thiserror::Error;
-use world_chain_proofs::OutputRootError;
+use world_chain_proofs::ConsensusError;
 
 /// Errors returned by the proposer.
 #[derive(Debug, Error)]
@@ -20,7 +20,7 @@ pub enum ChallengerError {
     #[error("contract error: {0}")]
     Contract(String),
     #[error(transparent)]
-    OutputRoot(#[from] OutputRootError),
+    OutputRoot(#[from] ConsensusError),
     #[error("The challenge transaction didn't execute succesfully: {0}")]
     Revert(TxHash),
     #[error("Invalid root state: {0}")]

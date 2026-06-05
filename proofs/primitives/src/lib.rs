@@ -12,7 +12,7 @@ mod types;
 pub use bindings::{
     IWorldChainAnchorStateRegistry, IWorldChainProofSystemFactory, IWorldChainProofSystemGame,
 };
-pub use output_root::{OptimismOutputRootClient, OutputRootError, OutputRootProvider};
+pub use output_root::{ConsensusError, ConsensusProvider, OptimismOutputRootClient};
 pub use types::{
     PROOF_LANE_COUNT, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD, ProofDomain, ProofLane,
     ProposalCommitment, RootCommitment, has_threshold, proof_count,

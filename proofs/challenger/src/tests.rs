@@ -12,7 +12,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use world_chain_proofs::{OutputRootError, OutputRootProvider};
+use world_chain_proofs::{ConsensusError, ConsensusProvider};
 
 const FACTORY: Address = address!("0000000000000000000000000000000000001006");
 const GAME_1: Address = address!("0000000000000000000000000000000000000001");
@@ -88,12 +88,12 @@ struct MockOutputRoots {
 }
 
 #[async_trait]
-impl OutputRootProvider for MockOutputRoots {
-    async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, OutputRootError> {
+impl ConsensusProvider for MockOutputRoots {
+    async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, ConsensusError> {
         self.roots
             .get(&l2_block_number)
             .copied()
-            .ok_or_else(|| OutputRootError::Rpc(format!("missing root for {l2_block_number}")))
+            .ok_or_else(|| ConsensusError::Rpc(format!("missing root for {l2_block_number}")))
     }
 }
 

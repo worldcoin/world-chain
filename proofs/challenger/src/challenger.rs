@@ -4,7 +4,7 @@ use crate::{
 use alloy_primitives::BlockNumber;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
-use world_chain_proofs::OutputRootProvider;
+use world_chain_proofs::ConsensusProvider;
 
 /// The number of L1 blocks published in 24h.
 const ONE_DAY_OF_L1_BLOCKS: u64 = 7_200;
@@ -41,7 +41,7 @@ impl<P, O> WorldChainChallenger<P, O> {
 impl<P, O> WorldChainChallenger<P, O>
 where
     P: ChallengerClient,
-    O: OutputRootProvider,
+    O: ConsensusProvider,
 {
     pub async fn scan_once(&mut self) -> Result<(), ChallengerError> {
         let target = self.provider.finalized_l1_block_num().await?;
