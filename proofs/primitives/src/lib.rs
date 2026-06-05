@@ -5,14 +5,14 @@
 //! bitmaps, and lightweight ABI bindings for the local proof contracts.
 
 mod bindings;
-mod output_root;
+mod consensus_provider;
 mod types;
 
 // re-exports
 pub use bindings::{
     IWorldChainAnchorStateRegistry, IWorldChainProofSystemFactory, IWorldChainProofSystemGame,
 };
-pub use output_root::{ConsensusError, ConsensusProvider, OptimismOutputRootClient};
+pub use consensus_provider::{ConsensusError, ConsensusProvider, OptimismConsensusClient};
 pub use types::{
     PROOF_LANE_COUNT, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD, ProofDomain, ProofLane,
     ProposalCommitment, RootCommitment, has_threshold, proof_count,

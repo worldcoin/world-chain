@@ -27,12 +27,12 @@ pub enum ConsensusError {
 
 /// HTTP client for OP consensus clients.
 #[derive(Debug, Clone)]
-pub struct OptimismOutputRootClient {
+pub struct OptimismConsensusClient {
     client: reqwest::Client,
     rpc_url: String,
 }
 
-impl OptimismOutputRootClient {
+impl OptimismConsensusClient {
     /// Creates a new output-root client from the provided consensus client rpc endpoint.
     pub fn new(rpc_url: impl Into<String>) -> Self {
         Self {
@@ -43,7 +43,7 @@ impl OptimismOutputRootClient {
 }
 
 #[async_trait]
-impl ConsensusProvider for OptimismOutputRootClient {
+impl ConsensusProvider for OptimismConsensusClient {
     async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, ConsensusError> {
         let block = format!("0x{l2_block_number:x}");
         let request = serde_json::json!({
