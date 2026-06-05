@@ -1,4 +1,4 @@
-use alloy_primitives::TxHash;
+use alloy_primitives::{Address, TxHash};
 use thiserror::Error;
 use world_chain_proofs::ConsensusError;
 
@@ -28,5 +28,16 @@ pub enum ChallengerError {
     #[error("RPC error: {0}")]
     Rpc(String),
     #[error("Latest L1 finalized block not found")]
-    L1FinalizedBlockNotFound(),
+    L1FinalizedBlockNotFound,
+    #[error(
+        "L2 block included in the game {game} is not finalized yet. latest_finalized: {latest_finalized}, given_block: {given_block}"
+    )]
+    L2BlockNotFinalized {
+        /// Address of the game.
+        game: Address,
+        /// Latest L2 finalized block number.
+        latest_finalized: u64,
+        /// Block number included in the game.
+        given_block: u64,
+    },
 }
