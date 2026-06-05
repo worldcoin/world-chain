@@ -17,10 +17,14 @@
 
 #![cfg(feature = "enclave-bin")]
 
+#[cfg(target_os = "linux")]
 use anyhow::Result;
+#[cfg(target_os = "linux")]
 use tracing_subscriber::EnvFilter;
+#[cfg(target_os = "linux")]
 use world_chain_proof_nitro::enclave_lib;
 
+#[cfg(target_os = "linux")]
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -32,4 +36,9 @@ async fn main() -> Result<()> {
         .init();
 
     enclave_lib::main_entry().await
+}
+
+#[cfg(not(target_os = "linux"))]
+fn main() {
+    eprintln!("world-chain-nitro-enclave is only supported on Linux");
 }

@@ -39,19 +39,22 @@ use tracing as _;
 // `tracing-subscriber` is only used by the `enclave`/`test-attestation` bins, not the
 // lib; bind it here under the features that pull it in so the lib target doesn't trip
 // `unused_crate_dependencies`.
-#[cfg(any(feature = "aws_nitro", feature = "enclave-bin"))]
+#[cfg(all(
+    any(feature = "aws_nitro", feature = "enclave-bin"),
+    target_os = "linux"
+))]
 use tracing_subscriber as _;
 
 pub mod attestation;
 
-#[cfg(feature = "aws_nitro")]
+#[cfg(all(feature = "aws_nitro", target_os = "linux"))]
 pub mod host;
 pub mod protocol;
 
-#[cfg(feature = "enclave")]
+#[cfg(all(feature = "enclave", target_os = "linux"))]
 pub mod enclave_lib;
 
-#[cfg(feature = "aws_nitro")]
+#[cfg(all(feature = "aws_nitro", target_os = "linux"))]
 pub use host::{NitroProver, NitroProverError};
 
 /// Length, in bytes, of a Nitro PCR slot value (SHA-384 digest).
@@ -188,7 +191,7 @@ pub mod prelude {
         ExpectedPcrs, NitroAggregationProofArtifact, NitroAggregationProofRequest,
         NitroRangeProofArtifact, NitroRangeProofRequest, WorldTeeProver, range_user_data,
     };
-    #[cfg(feature = "aws_nitro")]
+    #[cfg(all(feature = "aws_nitro", target_os = "linux"))]
     pub use crate::{NitroProver, NitroProverError};
 }
 

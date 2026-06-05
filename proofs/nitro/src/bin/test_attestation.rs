@@ -1,8 +1,11 @@
+#[cfg(target_os = "linux")]
 use anyhow::Context;
+#[cfg(target_os = "linux")]
 use world_chain_proof_core::{
     range::WorldRangeHardforkConfig,
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
+#[cfg(target_os = "linux")]
 use world_chain_proof_nitro::{
     ExpectedPcrs, NitroRangeProofRequest,
     attestation::parse_and_check_pcrs,
@@ -10,6 +13,7 @@ use world_chain_proof_nitro::{
     protocol::range_user_data,
 };
 
+#[cfg(target_os = "linux")]
 fn hex_to_pcr(hex: &str) -> anyhow::Result<[u8; 48]> {
     let bytes = hex::decode(hex).context("invalid hex")?;
     bytes
@@ -17,6 +21,7 @@ fn hex_to_pcr(hex: &str) -> anyhow::Result<[u8; 48]> {
         .map_err(|_| anyhow::anyhow!("PCR must be 48 bytes"))
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
@@ -67,4 +72,9 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("attestation verified OK");
     Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn main() {
+    eprintln!("test-attestation is only supported on Linux");
 }
