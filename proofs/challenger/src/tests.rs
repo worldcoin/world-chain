@@ -85,6 +85,7 @@ impl ChallengerClient for MockClient {
 #[derive(Debug, Clone)]
 struct MockOutputRoots {
     roots: HashMap<u64, B256>,
+    finalized_l2_block: BlockNumber,
 }
 
 #[async_trait]
@@ -94,6 +95,10 @@ impl ConsensusProvider for MockOutputRoots {
             .get(&l2_block_number)
             .copied()
             .ok_or_else(|| ConsensusError::Rpc(format!("missing root for {l2_block_number}")))
+    }
+
+    async fn latest_l2_finalized_block(&self) -> Result<BlockNumber, ConsensusError> {
+        Ok(self.finalized_l2_block)
     }
 }
 
@@ -120,6 +125,7 @@ async fn scan_once_challenges_invalid_root() {
     };
     let output_roots = MockOutputRoots {
         roots: HashMap::from([(L2_BLOCK, canonical_root)]),
+        finalized_l2_block: L2_BLOCK,
     };
     let mut challenger = WorldChainChallenger::new(config(), client, output_roots);
 
@@ -145,6 +151,7 @@ async fn scan_once_leaves_valid_root() {
     };
     let output_roots = MockOutputRoots {
         roots: HashMap::from([(L2_BLOCK, canonical_root)]),
+        finalized_l2_block: L2_BLOCK,
     };
     let mut challenger = WorldChainChallenger::new(config(), client, output_roots);
 
@@ -168,6 +175,7 @@ async fn scan_once_skips_non_proposed_game() {
     };
     let output_roots = MockOutputRoots {
         roots: HashMap::from([(L2_BLOCK, canonical_root)]),
+        finalized_l2_block: L2_BLOCK,
     };
     let mut challenger = WorldChainChallenger::new(config(), client, output_roots);
 
@@ -191,10 +199,41 @@ async fn scan_once_skips_expired_challenge_deadline() {
     };
     let output_roots = MockOutputRoots {
         roots: HashMap::from([(L2_BLOCK, canonical_root)]),
+        finalized_l2_block: L2_BLOCK,
     };
     let mut challenger = WorldChainChallenger::new(config(), client, output_roots);
 
     challenger.scan_once().await.unwrap();
 
+    assert!(submissions.lock().expect("not poisoned").is_empty());
+}
+
+#[tokio::test]
+async fn scan_once_rejects_unfinalized_l2_block() {
+    let proposed_root = B256::repeat_byte(0x10);
+    let canonical_root = B256::repeat_byte(0x20);
+
+    let submissions = Arc::default();
+    let client = MockClient {
+        finalized: FINALIZED_L1_BLOCK,
+        games: vec![(GAME_1, proposed_root, L2_BLOCK)],
+        states: HashMap::new(),
+        deadlines: HashMap::new(),
+        submissions: Arc::clone(&submissions),
+    };
+    let output_roots = MockOutputRoots {
+        roots: HashMap::from([(L2_BLOCK, canonical_root)]),
+        finalized_l2_block: L2_BLOCK - 1,
+    };
+    let mut challenger = WorldChainChallenger::new(config(), client, output_roots);
+
+    assert!(matches!(
+        challenger.scan_once().await,
+        Err(ChallengerError::L2BlockNotFinalized {
+            game: GAME_1,
+            latest_finalized,
+            given_block: L2_BLOCK,
+        }) if latest_finalized == L2_BLOCK - 1
+    ));
     assert!(submissions.lock().expect("not poisoned").is_empty());
 }
