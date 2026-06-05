@@ -78,7 +78,7 @@ enum Command {
     /// Build and write the witness to a file without proving.
     Witness(WitnessArgs),
     /// AWS Nitro TEE proving.
-    #[cfg(feature = "nitro")]
+    #[cfg(all(feature = "nitro", target_os = "linux"))]
     Nitro {
         #[command(subcommand)]
         command: NitroCommand,
@@ -91,7 +91,7 @@ enum Command {
     },
 }
 
-#[cfg(feature = "nitro")]
+#[cfg(all(feature = "nitro", target_os = "linux"))]
 #[derive(Debug, Subcommand)]
 enum NitroCommand {
     /// Generate witness and send to a running Nitro enclave for attested proving.
@@ -175,7 +175,7 @@ struct WitnessArgs {
     output: PathBuf,
 }
 
-#[cfg(feature = "nitro")]
+#[cfg(all(feature = "nitro", target_os = "linux"))]
 #[derive(Debug, Args)]
 struct NitroArgs {
     #[command(flatten)]
@@ -376,7 +376,7 @@ fn main() -> eyre::Result<()> {
             println!("witness bytes: {}", args.output.display());
             println!("metadata:      {}", metadata_path.display());
         }
-        #[cfg(feature = "nitro")]
+        #[cfg(all(feature = "nitro", target_os = "linux"))]
         Command::Nitro { command } => match command {
             NitroCommand::Prove(args) => nitro_prove(args)?,
         },
@@ -390,7 +390,7 @@ fn main() -> eyre::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "nitro")]
+#[cfg(all(feature = "nitro", target_os = "linux"))]
 fn nitro_prove(args: NitroArgs) -> eyre::Result<()> {
     use world_chain_proof_nitro::{
         ExpectedPcrs, NitroRangeProofRequest,
@@ -468,7 +468,7 @@ fn nitro_prove(args: NitroArgs) -> eyre::Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "nitro")]
+#[cfg(all(feature = "nitro", target_os = "linux"))]
 fn hex_to_pcr(hex: &str) -> eyre::Result<[u8; 48]> {
     let bytes = hex::decode(hex).context("invalid PCR hex")?;
     bytes.try_into().map_err(|_| eyre!("PCR must be 48 bytes"))

@@ -53,16 +53,24 @@ serde = { workspace = true, features = ["derive"] }
 sha2.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
-tokio-vsock = { version = "0.5", optional = true }
 tracing.workspace = true
 world-chain-proof-core.workspace = true
 
-# Enclave-only (gated by the `enclave` feature) -----------------------------
+# Linux-only host/enclave deps ----------------------------------------------
+#
+# Cargo features are target-independent, so `--all-features` on macOS still
+# enables `aws_nitro`/`enclave`. Keeping the platform-specific crates in this
+# target table prevents Cargo from trying to compile AF_VSOCK/NSM deps on
+# non-Linux hosts.
+[target.'cfg(target_os = "linux")'.dependencies]
+tokio-vsock = { version = "0.5", optional = true }
 aws-nitro-enclaves-nsm-api = { version = "0.4", optional = true }
 kona-proof = { workspace = true, optional = true }
 serde_bytes = { version = "0.11", optional = true }
 world-chain-proof-succinct-client-utils = { workspace = true, optional = true }
 world-chain-proof-succinct-ethereum-client-utils = { workspace = true, optional = true }
+
+# Feature-gated bin support -------------------------------------------------
 tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
