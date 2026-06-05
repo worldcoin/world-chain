@@ -1,9 +1,9 @@
 use alloy_primitives::B256;
 use tracing::{info, warn};
+use world_chain_proofs::OutputRootProvider;
 
 use crate::{
-    OutputRootProvider, ParentRef, ProofSystemClient, Proposal, ProposalSubmission, ProposerConfig,
-    ProposerError,
+    ParentRef, ProofSystemClient, Proposal, ProposalSubmission, ProposerConfig, ProposerError,
 };
 
 /// World Chain Proposer.

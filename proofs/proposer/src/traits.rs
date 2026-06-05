@@ -26,10 +26,3 @@ pub trait ProofSystemClient: Send + Sync {
         proposer_bond: U256,
     ) -> Result<ProposalSubmission, ProposerError>;
 }
-
-/// Source for OP Stack output roots.
-#[async_trait]
-pub trait OutputRootProvider: Send + Sync {
-    /// Returns the output root for an L2 block number.
-    async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, ProposerError>;
-}

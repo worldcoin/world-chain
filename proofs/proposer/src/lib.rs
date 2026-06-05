@@ -6,17 +6,16 @@
 mod alloy;
 mod config;
 mod error;
-mod optimism;
 mod proposer;
 mod traits;
 mod types;
 
+// re-exports
 pub use alloy::AlloyProofSystemClient;
 pub use config::ProposerConfig;
 pub use error::ProposerError;
-pub use optimism::OptimismOutputRootClient;
 pub use proposer::WorldChainProposer;
-pub use traits::{OutputRootProvider, ProofSystemClient};
+pub use traits::ProofSystemClient;
 pub use types::{ParentRef, Proposal, ProposalSubmission};
 
 #[cfg(test)]

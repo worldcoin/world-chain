@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-proofs"
+name = "world-chain-challenger"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,19 +12,18 @@ workspace = true
 
 [dependencies]
 # workspace
+world-chain-proofs.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
-alloy-contract.workspace = true
 alloy-provider.workspace = true
-alloy-sol-types.workspace = true
+alloy-rpc-types-eth.workspace = true
 
 # misc
 async-trait.workspace = true
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 serde.workspace = true
 serde_json.workspace = true
-reqwest.workspace = true
 thiserror.workspace = true
-
-[features]
-default = []
+tokio = { workspace = true, features = ["time"] }
+tracing.workspace = true

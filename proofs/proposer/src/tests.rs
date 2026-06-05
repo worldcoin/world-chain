@@ -6,11 +6,11 @@ use std::{
 
 use alloy_primitives::{Address, B256, U256, address, b256};
 use async_trait::async_trait;
-use world_chain_proofs::ProposalCommitment;
+use world_chain_proofs::{OutputRootError, OutputRootProvider, ProposalCommitment};
 
 use crate::{
-    OutputRootProvider, ParentRef, ProofSystemClient, Proposal, ProposalSubmission, ProposerConfig,
-    ProposerError, WorldChainProposer,
+    ParentRef, ProofSystemClient, Proposal, ProposalSubmission, ProposerConfig, ProposerError,
+    WorldChainProposer,
 };
 
 const DOMAIN_HASH: B256 = b256!("1111111111111111111111111111111111111111111111111111111111111111");
@@ -63,11 +63,11 @@ struct MockOutputRoots {
 
 #[async_trait]
 impl OutputRootProvider for MockOutputRoots {
-    async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, ProposerError> {
+    async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, OutputRootError> {
         self.roots
             .get(&l2_block_number)
             .copied()
-            .ok_or_else(|| ProposerError::Rpc(format!("missing root for {l2_block_number}")))
+            .ok_or_else(|| OutputRootError::Rpc(format!("missing root for {l2_block_number}")))
     }
 }
 
