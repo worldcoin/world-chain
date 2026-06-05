@@ -74,7 +74,6 @@ world-chain-payload = { path = "crates/payload", default-features = false }
 world-chain-node = { path = "crates/node", default-features = false }
 world-chain-pbh = { path = "crates/pbh", default-features = false }
 world-chain-proofs = { path = "proofs/primitives", default-features = false }
-world-chain-proposer = { path = "proofs/proposer", default-features = false }
 world-chain-rpc = { path = "crates/rpc", default-features = false }
 world-chain-pool = { path = "crates/pool", default-features = false }
 world-chain-evm = { path = "crates/evm", default-features = false }
