@@ -6,7 +6,7 @@ use crate::{ParentRef, Proposal, ProposalSubmission, ProposerError};
 
 /// Minimal contract surface needed by the proposer.
 #[async_trait]
-pub trait ProofSystemClient: Send + Sync {
+pub trait ProposerClient: Send + Sync {
     /// Reads the parent state from the anchor registry.
     async fn anchor_parent(&self) -> Result<ParentRef, ProposerError>;
 

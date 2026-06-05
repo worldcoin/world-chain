@@ -1,26 +1,26 @@
 use alloy_primitives::B256;
 use tracing::{debug, info, warn};
-use world_chain_proofs::OutputRootProvider;
+use world_chain_proofs::ConsensusProvider;
 
 use crate::{
-    ParentRef, ProofSystemClient, Proposal, ProposalSubmission, ProposerConfig, ProposerError,
+    ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerConfig, ProposerError,
 };
 
 /// World Chain Proposer.
 #[derive(Debug)]
-pub struct WorldChainProposer<C, O> {
+pub struct WorldChainProposer<E, C> {
     config: ProposerConfig,
-    contracts: C,
-    output_roots: O,
+    execution_provider: E,
+    consensus_provider: C,
 }
 
-impl<C, O> WorldChainProposer<C, O> {
-    /// Creates a proposer from contract and output-root clients.
-    pub const fn new(config: ProposerConfig, contracts: C, output_roots: O) -> Self {
+impl<E, C> WorldChainProposer<E, C> {
+    /// Creates a proposer from execution and consensus providers.
+    pub const fn new(config: ProposerConfig, execution_provider: E, consensus_provider: C) -> Self {
         Self {
             config,
-            contracts,
-            output_roots,
+            execution_provider,
+            consensus_provider,
         }
     }
 
@@ -31,16 +31,16 @@ impl<C, O> WorldChainProposer<C, O> {
     }
 }
 
-impl<C, O> WorldChainProposer<C, O>
+impl<E, C> WorldChainProposer<E, C>
 where
-    C: ProofSystemClient,
-    O: OutputRootProvider,
+    E: ProposerClient,
+    C: ConsensusProvider,
 {
     /// Finds the first missing proposal after the current anchor.
     pub async fn prepare_next_proposal(&self) -> Result<Proposal, ProposerError> {
         self.config.validate()?;
 
-        let mut parent = self.contracts.anchor_parent().await?;
+        let mut parent = self.execution_provider.anchor_parent().await?;
 
         loop {
             let l2_block_number = parent
@@ -51,19 +51,17 @@ where
                     block_interval: self.config.block_interval,
                 })?;
 
-            // Don't request an output root for a block the op-node hasn't
-            // produced yet: it would fail with an opaque internal RPC error.
-            if let Some(l2_head) = self.output_roots.latest_l2_block().await?
-                && l2_block_number > l2_head
-            {
+            let latest_finalized_l2_block =
+                self.consensus_provider.latest_l2_finalized_block().await?;
+            if l2_block_number > latest_finalized_l2_block {
                 return Err(ProposerError::ProposalNotReady {
                     target_block: l2_block_number,
-                    l2_head,
+                    finalized_block: latest_finalized_l2_block,
                 });
             }
 
             let root_claim = self
-                .output_roots
+                .consensus_provider
                 .output_root_at_block(l2_block_number)
                 .await?;
             let mut proposal = Proposal {
@@ -73,10 +71,13 @@ where
                 intermediate_roots_hash: B256::ZERO,
                 proposal_key: B256::ZERO,
             };
-            proposal.proposal_key = self.contracts.proposal_key(proposal.commitment()).await?;
+            proposal.proposal_key = self
+                .execution_provider
+                .proposal_key(proposal.commitment())
+                .await?;
 
             if let Some(game) = self
-                .contracts
+                .execution_provider
                 .game_for_proposal_key(proposal.proposal_key)
                 .await?
             {
@@ -95,7 +96,7 @@ where
     pub async fn propose_once(&self) -> Result<(Proposal, ProposalSubmission), ProposerError> {
         let proposal = self.prepare_next_proposal().await?;
         let submission = self
-            .contracts
+            .execution_provider
             .submit_proposal(&proposal, self.config.proposer_bond)
             .await?;
         Ok((proposal, submission))
@@ -120,11 +121,11 @@ where
                 }
                 Err(ProposerError::ProposalNotReady {
                     target_block,
-                    l2_head,
+                    finalized_block: l2_finalized_block,
                 }) => {
                     debug!(
                         target_block,
-                        l2_head, "waiting for L2 to reach the next proposal height"
+                        l2_finalized_block, "waiting for L2 to finalize the next proposal height"
                     );
                 }
                 Err(error) => {
