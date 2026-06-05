@@ -890,7 +890,8 @@ fn write_l1_genesis(state_path: &Path, output_path: &Path) -> Result<()> {
     decoder
         .read_to_string(&mut alloc_json)
         .wrap_err("failed to decompress l1StateDump")?;
-    let mut alloc: Value = serde_json::from_str(&alloc_json).wrap_err("invalid l1StateDump JSON")?;
+    let mut alloc: Value =
+        serde_json::from_str(&alloc_json).wrap_err("invalid l1StateDump JSON")?;
     fund_world_challenger(&mut alloc)?;
     let timestamp = state
         .pointer("/opChainDeployments/0/startBlock/timestamp")
@@ -2272,7 +2273,10 @@ async fn start_world_chain_proposer(
                 warn!(%error, "World Chain proof-system proposer stopped");
             }
         }
-        .instrument(info_span!("world-chain-proposer", process = "world-chain-proposer")),
+        .instrument(info_span!(
+            "world-chain-proposer",
+            process = "world-chain-proposer"
+        )),
     );
 
     Ok(ProposerTask { handle })

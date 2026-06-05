@@ -53,13 +53,13 @@ where
 
             // Don't request an output root for a block the op-node hasn't
             // produced yet: it would fail with an opaque internal RPC error.
-            if let Some(l2_head) = self.output_roots.latest_l2_block().await? {
-                if l2_block_number > l2_head {
-                    return Err(ProposerError::ProposalNotReady {
-                        target_block: l2_block_number,
-                        l2_head,
-                    });
-                }
+            if let Some(l2_head) = self.output_roots.latest_l2_block().await?
+                && l2_block_number > l2_head
+            {
+                return Err(ProposerError::ProposalNotReady {
+                    target_block: l2_block_number,
+                    l2_head,
+                });
             }
 
             let root_claim = self

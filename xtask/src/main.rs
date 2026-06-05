@@ -173,10 +173,7 @@ where
         // In-process subsystems (e.g. the World Chain proposer/challenger) carry
         // their component label on an enclosing span instead of every event, so
         // fall back to the nearest span's `process` value.
-        let process = fields
-            .process
-            .clone()
-            .or_else(|| process_from_spans(ctx));
+        let process = fields.process.clone().or_else(|| process_from_spans(ctx));
 
         write_level(&mut writer, event.metadata().level())?;
         writer.write_char(' ')?;
