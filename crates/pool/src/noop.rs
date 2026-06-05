@@ -1,8 +1,8 @@
 use std::{collections::HashSet, sync::Arc};
 
 use super::tx::WorldChainPooledTransaction;
-use alloy_eips::eip4844::{BlobAndProofV1, BlobAndProofV2};
-use alloy_primitives::{Address, B256, TxHash};
+use alloy_eips::eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1};
+use alloy_primitives::{Address, B128, B256, TxHash};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives_traits::Recovered;
 use reth_transaction_pool::{
@@ -78,6 +78,14 @@ impl TransactionPool for NoopWorldChainTransactionPool {
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
+        Ok(vec![None; versioned_hashes.len()])
+    }
+
+    fn get_blobs_for_versioned_hashes_v4(
+        &self,
+        versioned_hashes: &[B256],
+        _indices_bitarray: B128,
+    ) -> Result<Vec<Option<BlobCellsAndProofsV1>>, BlobStoreError> {
         Ok(vec![None; versioned_hashes.len()])
     }
 

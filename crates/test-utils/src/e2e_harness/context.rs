@@ -3,6 +3,7 @@
 use alloy_consensus::{Eip658Value, Header, Receipt};
 use alloy_evm::{Evm, eth::receipt_builder::ReceiptBuilderCtx};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
+use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1};
 use op_alloy_consensus::{OpDepositReceipt, OpTxEnvelope, OpTxType};
 use op_alloy_rpc_types::{OpTransactionReceipt, OpTransactionRequest};
@@ -61,6 +62,7 @@ impl PayloadTypes for WorldEngineTypes {
 
     fn block_to_payload(
         block: SealedBlock<BlockTy<<Self::BuiltPayload as BuiltPayload>::Primitives>>,
+        _bal: Option<Bytes>,
     ) -> Self::ExecutionData {
         OpExecData::from(OpExecutionData::from_block_unchecked(
             block.hash(),
@@ -304,6 +306,7 @@ where
             self.config.args.rollup.sequencer.clone(),
             Default::default(),
             Default::default(),
+            false,
             false,
             1_000_000,
         )

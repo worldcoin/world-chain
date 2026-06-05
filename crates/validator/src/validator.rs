@@ -7,17 +7,16 @@ use op_revm::{OpHaltReason, OpSpecId};
 use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use std::{io::Error, marker::PhantomData, sync::Arc, time::Instant};
 
-use alloy_primitives::Bytes;
+use alloy_primitives::{B256, Bytes};
 
 use alloy_op_evm::{
     OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory, OpTx,
-    block::receipt_builder::OpReceiptBuilder,
+    block::receipt_builder::OpReceiptBuilder, post_exec::PostExecEvm,
 };
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::bail;
 use op_alloy_consensus::OpReceipt;
 use rayon::prelude::*;
-use reth_chain_state::ExecutedBlock;
 use reth_revm::database::StateProviderDatabase;
 use world_chain_primitives::{
     access_list::FlashblockAccessList, primitives::ExecutionPayloadFlashblockDeltaV1,
@@ -28,6 +27,7 @@ use reth_evm::{
     block::{BlockExecutionError, BlockExecutor, CommitChanges, InternalBlockExecutionError},
     execute::{
         BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
+        GasOutput,
     },
 };
 use reth_node_api::BuiltPayload;
@@ -145,7 +145,7 @@ impl<Evm: ConfigureEvm + Clone, T: FlashblockTypes<Evm>> FlashblocksBlockValidat
                     )
                 })?;
 
-            self.validate_payload(&executed.into_executed_payload(), diff_clone)
+            self.validate_payload(executed.recovered_block.sealed_block().hash(), diff_clone)
                 .map_err(|e| BalExecutorError::Other(Box::from(e.to_string())))
                 .inspect_err(|e| {
                     error!(
@@ -176,15 +176,15 @@ impl<Evm: ConfigureEvm + Clone, T: FlashblockTypes<Evm>> FlashblocksBlockValidat
 
     pub fn validate_payload(
         &self,
-        block: &ExecutedBlock<OpPrimitives>,
+        block_hash: B256,
         diff: ExecutionPayloadFlashblockDeltaV1,
     ) -> eyre::Result<()> {
         // make sure the block matches the diff
-        if block.sealed_block().hash() != diff.block_hash {
+        if block_hash != diff.block_hash {
             bail!(
                 "Block hash mismatch: expected {}, got {}",
                 diff.block_hash,
-                block.sealed_block().hash()
+                block_hash
             );
         }
 
@@ -241,7 +241,7 @@ impl<'a, DBRef, R, E, H> BalBlockValidator<'a, DBRef, R, E, H>
 where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     DBRef: DatabaseRef + Clone + std::fmt::Debug + 'a,
-    E: Evm<DB = ValidatorDb<'a, DBRef>, Tx = OpTx, Spec = OpSpecId, BlockEnv = BlockEnv>,
+    E: PostExecEvm<DB = ValidatorDb<'a, DBRef>, Tx = OpTx, Spec = OpSpecId, BlockEnv = BlockEnv>,
     H: StateRootHandle,
     OpTx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
 {
@@ -299,7 +299,7 @@ where
 impl<'a, DB, R, E, H> BlockBuilder for BalBlockValidator<'a, DB, R, E, H>
 where
     DB: DatabaseRef + Clone + std::fmt::Debug + 'a,
-    E: Evm<
+    E: PostExecEvm<
             DB = ValidatorDb<'a, DB>,
             Tx = OpTx,
             Spec = OpSpecId,
@@ -321,7 +321,7 @@ where
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
         f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result) -> CommitChanges,
-    ) -> Result<Option<u64>, BlockExecutionError> {
+    ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
         if let Some(gas_used) = self
             .inner
@@ -329,7 +329,7 @@ where
             .execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
             self.inner.transactions.push(tx);
-            Ok(Some(gas_used.tx_gas_used()))
+            Ok(Some(gas_used))
         } else {
             Ok(None)
         }
@@ -381,6 +381,7 @@ where
             self.bundle_state.as_ref(),
             &state,
             state_root,
+            None,
         ))?;
         self.attempt_metrics.record_stage_duration(
             PayloadBuildStage::BlockAssembly,
@@ -406,6 +407,7 @@ where
             hashed_state,
             trie_updates,
             block,
+            block_access_list: None,
         })
     }
 
@@ -425,7 +427,7 @@ where
 impl<'a, DbRef, R, E, H> BalBlockValidator<'a, DbRef, R, E, H>
 where
     DbRef: DatabaseRef + Clone + std::fmt::Debug + 'a,
-    E: Evm<
+    E: PostExecEvm<
             DB = ValidatorDb<'a, DbRef>,
             Tx = OpTx,
             Spec = OpSpecId,

@@ -3,7 +3,7 @@ use alloy_op_evm::OpBlockExecutionCtx;
 use eyre::eyre::eyre;
 use futures::StreamExt;
 use parking_lot::RwLock;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{ComputedTrieData, ExecutedBlock};
 use reth_evm::ConfigureEvm;
 use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodePrimitives, NodeTypes};
 use reth_node_builder::BuilderContext;
@@ -348,12 +348,13 @@ where
             && latest_payload.1 >= flashblock.flashblock.index
         {
             flashblock_validation_metrics.increment_already_processed_flashblocks();
-            pending_block.send_replace(
-                latest_payload
-                    .0
-                    .executed_block()
-                    .map(|p| p.into_executed_payload()),
-            );
+            pending_block.send_replace(latest_payload.0.executed_block().map(|p| {
+                let trie_data = ComputedTrieData::new(
+                    Arc::new(p.hashed_state.as_ref().clone().into_sorted()),
+                    Arc::new(p.trie_updates.as_ref().clone().into_sorted()),
+                );
+                ExecutedBlock::new(p.recovered_block, p.execution_output, trie_data)
+            }));
             return Ok(());
         }
 
@@ -408,6 +409,7 @@ where
         parent_hash: base.parent_hash,
         parent_beacon_block_root: Some(base.parent_beacon_block_root),
         extra_data: base.extra_data.clone(),
+        post_exec_mode: Default::default(),
     };
 
     let next_block_context = OpNextBlockEnvAttributes {
@@ -467,11 +469,13 @@ where
     }
 
     let into_executed_block_started = Instant::now();
-    pending_block.send_replace(
-        next_payload
-            .executed_block()
-            .map(|p| p.into_executed_payload()),
-    );
+    pending_block.send_replace(next_payload.executed_block().map(|p| {
+        let trie_data = ComputedTrieData::new(
+            Arc::new(p.hashed_state.as_ref().clone().into_sorted()),
+            Arc::new(p.trie_updates.as_ref().clone().into_sorted()),
+        );
+        ExecutedBlock::new(p.recovered_block, p.execution_output, trie_data)
+    }));
     flashblock_validation_metrics.record_into_executed_block(into_executed_block_started.elapsed());
 
     trace!(
