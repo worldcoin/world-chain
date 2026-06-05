@@ -59,6 +59,8 @@ pub enum DevnetComponentKind {
     WorldProofSystem,
     /// World Chain WIP-1006 proof-system proposer.
     WorldChainProposer,
+    /// World Chain WIP-1006 proof-system challenger.
+    WorldChainChallenger,
     /// Flashblocks capability on the World Chain execution node.
     Flashblocks,
     /// Deprecated/removed legacy component.
@@ -82,6 +84,7 @@ impl DevnetComponentKind {
             Self::WorldContractsDeployer => "world-contracts-deployer",
             Self::WorldProofSystem => "world-proof-system",
             Self::WorldChainProposer => "world-chain-proposer",
+            Self::WorldChainChallenger => "world-chain-challenger",
             Self::Flashblocks => "flashblocks",
             Self::RemovedLegacyService => "removed-legacy-service",
         }

@@ -26,6 +26,7 @@ contract DeployProofSystem is Script {
 
     function run() external returns (Deployment memory deployment) {
         uint256 privateKey = vm.envUint("PRIVATE_KEY");
+        address challenger = vm.envOr("WORLD_CHALLENGER_ADDRESS", address(0));
         uint256 l2ChainId = vm.envUint("WORLD_CHAIN_L2_CHAIN_ID");
         bytes32 rollupConfigHash = vm.envBytes32("ROLLUP_CONFIG_HASH");
         uint256 blockInterval = vm.envOr("PROOF_SYSTEM_BLOCK_INTERVAL", uint256(10));
@@ -39,6 +40,9 @@ contract DeployProofSystem is Script {
         deployment.teeVerifier = new MockRootIdVerifier(false);
         deployment.councilVerifier = new MockRootIdVerifier(false);
         deployment.staking.setStaked(vm.addr(privateKey), true);
+        if (challenger != address(0)) {
+            deployment.staking.setStaked(challenger, true);
+        }
 
         deployment.factory = new WorldChainProofSystemFactory(
             WorldChainProofLib.Domain({

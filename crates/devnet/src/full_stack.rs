@@ -35,9 +35,10 @@ use tokio::{
     process::{Child, Command},
     task::JoinHandle,
 };
-use tracing::{debug, info, warn};
+use tracing::{Instrument, debug, info, info_span, warn};
 use url::{Host, Url};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
+use world_chain_challenger::{AlloyChallengerClient, ChallengerConfig, WorldChainChallenger};
 use world_chain_proofs::{OptimismOutputRootClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
 use world_chain_proposer::{AlloyProofSystemClient, ProposerConfig, WorldChainProposer};
 use world_chain_test_utils::DEV_CHAIN_ID;
@@ -73,6 +74,14 @@ const PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL: u64 = 5;
 const WORLD_PROPOSER_BOND_WEI: u128 = 1_000_000_000_000_000_000;
 /// Delay between World Chain proof-system proposal attempts.
 const WORLD_PROPOSER_POLL_INTERVAL: Duration = Duration::from_secs(2);
+/// Bond, in wei, sent with every `WorldChainProofSystemGame.challenge`.
+/// Matches `CHALLENGER_BOND` (0.1 ether) in `scripts/devnet/DeployProofSystem.s.sol`.
+const WORLD_CHALLENGER_BOND_WEI: u128 = 100_000_000_000_000_000;
+/// Delay between World Chain proof-system challenger scans.
+const WORLD_CHALLENGER_POLL_INTERVAL: Duration = Duration::from_secs(2);
+/// Balance, in wei, allocated to the World Chain challenger account in the L1
+/// genesis so it can cover the challenger bond plus gas. (100 ether)
+const WORLD_CHALLENGER_GENESIS_BALANCE_WEI: &str = "0x56bc75e2d63100000";
 
 const DEVNET_PRIVATE_KEY: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
@@ -84,6 +93,14 @@ const PROPOSER_PRIVATE_KEY: &str =
     "0xdbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97";
 const CHALLENGER_PRIVATE_KEY: &str =
     "0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6";
+/// Signing key for the in-process World Chain proof-system challenger.
+///
+/// Dedicated key (address `0x743dAA55063C608894C125Cf8eC82Afe83B2d5c5`), distinct
+/// from the proposer (Anvil account #1) and the op-challenger (Anvil account #9),
+/// so the in-process challenger never races them on L1 nonces. The matching
+/// address is funded via the L1 genesis and staked in the `MockStakingRegistry`.
+const WORLD_CHALLENGER_PRIVATE_KEY: &str =
+    "0x7c0c9c6f3f4d8a2b1e5d9a8c7b6e5f4a3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f";
 
 const FLASHBLOCKS_BUILDER_KEYS: [&str; 3] = [
     "40645f645e9e28a3f00637d8d629736e7934ee857154ec3fd336c3cc014ebb62",
@@ -104,6 +121,7 @@ pub struct FullStackWorldDevnet {
     _challenger: Option<ContainerService>,
     _proof_system: Option<WorldProofSystemDeployment>,
     _world_proposer: Option<ProposerTask>,
+    _world_challenger: Option<ChallengerTask>,
     _conductors: Vec<ConductorService>,
     _op_nodes: Vec<OpNodeService>,
     sequencers: Vec<SequencerService>,
@@ -216,6 +234,18 @@ struct ProposerTask {
 }
 
 impl Drop for ProposerTask {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
+/// In-process World Chain proof-system challenger task. Aborted on devnet drop.
+#[derive(Debug)]
+struct ChallengerTask {
+    handle: JoinHandle<()>,
+}
+
+impl Drop for ChallengerTask {
     fn drop(&mut self) {
         self.handle.abort();
     }
@@ -452,6 +482,18 @@ impl FullStackWorldDevnet {
             None
         };
 
+        let world_challenger = if let Some(deployment) = proof_system.as_ref() {
+            let output_root_rpc = op_nodes
+                .first()
+                .map(|node| node.rpc_url.clone())
+                .ok_or_else(|| {
+                    eyre!("full-stack devnet has no op-node for the World Chain challenger")
+                })?;
+            Some(start_world_chain_challenger(&l1_public_rpc, &output_root_rpc, deployment).await?)
+        } else {
+            None
+        };
+
         let mut metrics_targets = Vec::new();
         metrics_targets.extend(
             sequencers
@@ -499,6 +541,7 @@ impl FullStackWorldDevnet {
             _challenger: challenger,
             _proof_system: proof_system,
             _world_proposer: world_proposer,
+            _world_challenger: world_challenger,
             _conductors: conductors,
             _op_nodes: op_nodes,
             sequencers,
@@ -761,6 +804,10 @@ async fn deploy_world_proof_system(
         .arg("--evm-version")
         .arg("cancun")
         .env("PRIVATE_KEY", DEVNET_PRIVATE_KEY)
+        .env(
+            "WORLD_CHALLENGER_ADDRESS",
+            world_challenger_address()?.to_string(),
+        )
         .env("WORLD_CHAIN_L2_CHAIN_ID", DEV_CHAIN_ID.to_string())
         .env("ROLLUP_CONFIG_HASH", &rollup_config_hash_hex)
         .env(
@@ -843,7 +890,9 @@ fn write_l1_genesis(state_path: &Path, output_path: &Path) -> Result<()> {
     decoder
         .read_to_string(&mut alloc_json)
         .wrap_err("failed to decompress l1StateDump")?;
-    let alloc: Value = serde_json::from_str(&alloc_json).wrap_err("invalid l1StateDump JSON")?;
+    let mut alloc: Value =
+        serde_json::from_str(&alloc_json).wrap_err("invalid l1StateDump JSON")?;
+    fund_world_challenger(&mut alloc)?;
     let timestamp = state
         .pointer("/opChainDeployments/0/startBlock/timestamp")
         .and_then(Value::as_str)
@@ -902,6 +951,29 @@ fn write_l1_genesis(state_path: &Path, output_path: &Path) -> Result<()> {
 
     fs::write(output_path, serde_json::to_vec_pretty(&genesis)?)
         .wrap_err("failed to write l1-genesis.json")
+}
+
+/// Returns the address used by the in-process World Chain proof-system challenger.
+fn world_challenger_address() -> Result<Address> {
+    let signer: PrivateKeySigner = WORLD_CHALLENGER_PRIVATE_KEY
+        .parse()
+        .wrap_err("invalid World Chain challenger signing key")?;
+    Ok(signer.address())
+}
+
+/// Funds the World Chain challenger account in the L1 genesis `alloc` so it can
+/// pay the challenger bond (plus gas) when submitting challenges. The account is
+/// dedicated to the challenger, so it is never present in the op-deployer dump.
+fn fund_world_challenger(alloc: &mut Value) -> Result<()> {
+    let address = world_challenger_address()?;
+    let entry = alloc
+        .as_object_mut()
+        .ok_or_else(|| eyre!("l1 genesis alloc is not a JSON object"))?;
+    entry.insert(
+        address.to_string(),
+        json!({ "balance": WORLD_CHALLENGER_GENESIS_BALANCE_WEI }),
+    );
+    Ok(())
 }
 
 fn patch_l2_hardforks(
@@ -2195,13 +2267,77 @@ async fn start_world_chain_proposer(
         "starting native World Chain proof-system proposer"
     );
 
-    let handle = tokio::spawn(async move {
-        if let Err(error) = proposer.run_forever().await {
-            warn!(%error, "World Chain proof-system proposer stopped");
+    let handle = tokio::spawn(
+        async move {
+            if let Err(error) = proposer.run_forever().await {
+                warn!(%error, "World Chain proof-system proposer stopped");
+            }
         }
-    });
+        .instrument(info_span!(
+            "world-chain-proposer",
+            process = "world-chain-proposer"
+        )),
+    );
 
     Ok(ProposerTask { handle })
+}
+
+/// Spawns the in-process World Chain proof-system challenger.
+///
+/// The challenger signs with [`WORLD_CHALLENGER_PRIVATE_KEY`], a dedicated dev
+/// account that is funded through the L1 genesis (see [`fund_world_challenger`])
+/// and staked in the `MockStakingRegistry` by `DeployProofSystem.s.sol`. It scans
+/// `WorldChainProofSystemFactory.GameCreated` events, recomputes the expected
+/// output root from the op-node rollup RPC, and challenges any game whose
+/// `rootClaim` disagrees by calling `WorldChainProofSystemGame.challenge` on L1.
+async fn start_world_chain_challenger(
+    l1_rpc_url: &str,
+    output_root_rpc_url: &str,
+    deployment: &WorldProofSystemDeployment,
+) -> Result<ChallengerTask> {
+    let factory_address: Address = deployment
+        .proof_system_factory
+        .parse()
+        .wrap_err("invalid proof-system factory address")?;
+
+    let signer: PrivateKeySigner = WORLD_CHALLENGER_PRIVATE_KEY
+        .parse()
+        .wrap_err("invalid World Chain challenger signing key")?;
+    let challenger_address = signer.address();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::from(signer))
+        .connect_http(Url::parse(l1_rpc_url)?);
+
+    let client = AlloyChallengerClient::new(provider, factory_address);
+    let output_roots = OptimismOutputRootClient::new(output_root_rpc_url.to_string());
+    let config = ChallengerConfig {
+        challenger_bond: U256::from(WORLD_CHALLENGER_BOND_WEI),
+        factory_contract: factory_address,
+        poll_interval: WORLD_CHALLENGER_POLL_INTERVAL,
+    };
+    let mut challenger = WorldChainChallenger::new(config, client, output_roots);
+
+    info!(
+        l1_rpc_url,
+        output_root_rpc_url,
+        factory = %deployment.proof_system_factory,
+        challenger = %challenger_address,
+        "starting native World Chain proof-system challenger"
+    );
+
+    let handle = tokio::spawn(
+        async move {
+            if let Err(error) = challenger.run_forever().await {
+                warn!(%error, "World Chain proof-system challenger stopped");
+            }
+        }
+        .instrument(info_span!(
+            "world-chain-challenger",
+            process = "world-chain-challenger"
+        )),
+    );
+
+    Ok(ChallengerTask { handle })
 }
 
 async fn start_aux_service(
@@ -2597,6 +2733,20 @@ fn build_components(
                 deployment.block_interval
             ))
             .with_note("signs with the dev proposer key staked in the MockStakingRegistry"),
+        );
+        components.push(
+            DevnetComponent::new(
+                "world-chain-challenger",
+                DevnetComponentKind::WorldChainChallenger,
+                DevnetComponentStatus::Running,
+            )
+            .with_endpoint("factory", deployment.proof_system_factory.clone())
+            .with_note(
+                "native in-process challenger that disputes invalid WorldChainProofSystemFactory games via WorldChainProofSystemGame.challenge",
+            )
+            .with_note(
+                "signs with a dedicated dev key funded in the L1 genesis and staked in the MockStakingRegistry",
+            ),
         );
     }
 

@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 world-chain-chainspec.workspace = true
+world-chain-challenger.workspace = true
 world-chain-node.workspace = true
 world-chain-primitives.workspace = true
 world-chain-proofs.workspace = true
