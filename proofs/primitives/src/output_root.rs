@@ -8,6 +8,16 @@ use thiserror::Error;
 pub trait OutputRootProvider: Send + Sync {
     /// Returns the output root for an L2 block number.
     async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, OutputRootError>;
+
+    /// Returns the highest L2 block number for which an output root can be
+    /// served (the provider's current unsafe L2 head), or `None` when the head
+    /// is unknown and callers should not gate on it.
+    ///
+    /// The default implementation returns `None` so providers that cannot report
+    /// a head (e.g. tests) keep working without gating.
+    async fn latest_l2_block(&self) -> Result<Option<u64>, OutputRootError> {
+        Ok(None)
+    }
 }
 
 #[derive(Error, Debug)]
@@ -74,6 +84,37 @@ impl OutputRootProvider for OptimismOutputRootClient {
             .parse()
             .map_err(|error| OutputRootError::Rpc(format!("invalid outputRoot: {error}")))
     }
+
+    async fn latest_l2_block(&self) -> Result<Option<u64>, OutputRootError> {
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "optimism_syncStatus",
+            "params": [],
+        });
+
+        let response = self
+            .client
+            .post(&self.rpc_url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| OutputRootError::Rpc(error.to_string()))?
+            .error_for_status()
+            .map_err(|error| OutputRootError::Rpc(error.to_string()))?
+            .json::<JsonRpcResponse<SyncStatusResponse>>()
+            .await
+            .map_err(|error| OutputRootError::Rpc(error.to_string()))?;
+
+        if let Some(error) = response.error {
+            return Err(OutputRootError::Rpc(format!(
+                "json-rpc error {}: {}",
+                error.code, error.message
+            )));
+        }
+
+        Ok(response.result.map(|status| status.unsafe_l2.number))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -92,4 +133,14 @@ struct JsonRpcError {
 struct OutputAtBlockResponse {
     #[serde(rename = "outputRoot")]
     output_root: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SyncStatusResponse {
+    unsafe_l2: L2BlockRef,
+}
+
+#[derive(Debug, Deserialize)]
+struct L2BlockRef {
+    number: u64,
 }

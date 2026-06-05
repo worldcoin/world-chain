@@ -1,5 +1,5 @@
 use alloy_primitives::B256;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use world_chain_proofs::OutputRootProvider;
 
 use crate::{
@@ -50,6 +50,17 @@ where
                     parent_block: parent.l2_block_number,
                     block_interval: self.config.block_interval,
                 })?;
+
+            // Don't request an output root for a block the op-node hasn't
+            // produced yet: it would fail with an opaque internal RPC error.
+            if let Some(l2_head) = self.output_roots.latest_l2_block().await? {
+                if l2_block_number > l2_head {
+                    return Err(ProposerError::ProposalNotReady {
+                        target_block: l2_block_number,
+                        l2_head,
+                    });
+                }
+            }
 
             let root_claim = self
                 .output_roots
@@ -105,6 +116,15 @@ where
                         proposal_key = ?proposal.proposal_key,
                         tx_hash = ?submission.tx_hash,
                         "submitted World Chain proof-system game"
+                    );
+                }
+                Err(ProposerError::ProposalNotReady {
+                    target_block,
+                    l2_head,
+                }) => {
+                    debug!(
+                        target_block,
+                        l2_head, "waiting for L2 to reach the next proposal height"
                     );
                 }
                 Err(error) => {
