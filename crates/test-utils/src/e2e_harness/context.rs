@@ -303,10 +303,10 @@ where
             rpc_add_ons,
             self.config.builder_config.inner.da_config.clone(),
             self.config.builder_config.inner.gas_limit_config.clone(),
+            Default::default(),
             self.config.args.rollup.sequencer.clone(),
             Default::default(),
             Default::default(),
-            false,
             false,
             1_000_000,
         )

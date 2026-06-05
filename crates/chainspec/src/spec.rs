@@ -486,7 +486,6 @@ fn convert_op_hardfork(fork: &dyn Hardfork) -> Box<dyn Hardfork> {
         "Isthmus" => WorldChainHardfork::Isthmus.boxed(),
         "Jovian" => WorldChainHardfork::Jovian.boxed(),
         "Karst" => OpHardfork::Karst.boxed(),
-        "Interop" => OpHardfork::Interop.boxed(),
         other if other.eq_ignore_ascii_case("tropo") => WorldChainHardfork::Tropo.boxed(),
         other if other.eq_ignore_ascii_case("strato") => WorldChainHardfork::Strato.boxed(),
         _ => EthereumHardfork::VARIANTS

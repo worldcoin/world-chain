@@ -374,6 +374,7 @@ where
             ctx.node.provider().clone(),
             ctx.node.task_executor().clone(),
             builder,
+            ctx.node.evm_config().clone(),
         );
         let miner_ext = OpMinerExtApi::new(da_config, gas_limit_config);
 
