@@ -1,0 +1,146 @@
+use alloy_primitives::B256;
+use async_trait::async_trait;
+use serde::Deserialize;
+use thiserror::Error;
+
+/// Source for OP Stack output roots.
+#[async_trait]
+pub trait OutputRootProvider: Send + Sync {
+    /// Returns the output root for an L2 block number.
+    async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, OutputRootError>;
+
+    /// Returns the highest L2 block number for which an output root can be
+    /// served (the provider's current unsafe L2 head), or `None` when the head
+    /// is unknown and callers should not gate on it.
+    ///
+    /// The default implementation returns `None` so providers that cannot report
+    /// a head (e.g. tests) keep working without gating.
+    async fn latest_l2_block(&self) -> Result<Option<u64>, OutputRootError> {
+        Ok(None)
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum OutputRootError {
+    /// The output-root RPC response did not contain an output root.
+    #[error("optimism_outputAtBlock response did not contain an output root")]
+    MissingOutputRoot,
+    /// RPC transport or JSON-RPC failure.
+    #[error("rpc error: {0}")]
+    Rpc(String),
+}
+
+/// HTTP client for `optimism_outputAtBlock`.
+#[derive(Debug, Clone)]
+pub struct OptimismOutputRootClient {
+    client: reqwest::Client,
+    rpc_url: String,
+}
+
+impl OptimismOutputRootClient {
+    /// Creates a new output-root client from the provided consensus client rpc endpoint.
+    pub fn new(rpc_url: impl Into<String>) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            rpc_url: rpc_url.into(),
+        }
+    }
+}
+
+#[async_trait]
+impl OutputRootProvider for OptimismOutputRootClient {
+    async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, OutputRootError> {
+        let block = format!("0x{l2_block_number:x}");
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "optimism_outputAtBlock",
+            "params": [block],
+        });
+
+        let response = self
+            .client
+            .post(&self.rpc_url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| OutputRootError::Rpc(error.to_string()))?
+            .error_for_status()
+            .map_err(|error| OutputRootError::Rpc(error.to_string()))?
+            .json::<JsonRpcResponse<OutputAtBlockResponse>>()
+            .await
+            .map_err(|error| OutputRootError::Rpc(error.to_string()))?;
+
+        if let Some(error) = response.error {
+            return Err(OutputRootError::Rpc(format!(
+                "json-rpc error {}: {}",
+                error.code, error.message
+            )));
+        }
+
+        let output = response.result.ok_or(OutputRootError::MissingOutputRoot)?;
+        output
+            .output_root
+            .parse()
+            .map_err(|error| OutputRootError::Rpc(format!("invalid outputRoot: {error}")))
+    }
+
+    async fn latest_l2_block(&self) -> Result<Option<u64>, OutputRootError> {
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "optimism_syncStatus",
+            "params": [],
+        });
+
+        let response = self
+            .client
+            .post(&self.rpc_url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| OutputRootError::Rpc(error.to_string()))?
+            .error_for_status()
+            .map_err(|error| OutputRootError::Rpc(error.to_string()))?
+            .json::<JsonRpcResponse<SyncStatusResponse>>()
+            .await
+            .map_err(|error| OutputRootError::Rpc(error.to_string()))?;
+
+        if let Some(error) = response.error {
+            return Err(OutputRootError::Rpc(format!(
+                "json-rpc error {}: {}",
+                error.code, error.message
+            )));
+        }
+
+        Ok(response.result.map(|status| status.unsafe_l2.number))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct JsonRpcResponse<T> {
+    result: Option<T>,
+    error: Option<JsonRpcError>,
+}
+
+#[derive(Debug, Deserialize)]
+struct JsonRpcError {
+    code: i64,
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OutputAtBlockResponse {
+    #[serde(rename = "outputRoot")]
+    output_root: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SyncStatusResponse {
+    unsafe_l2: L2BlockRef,
+}
+
+#[derive(Debug, Deserialize)]
+struct L2BlockRef {
+    number: u64,
+}

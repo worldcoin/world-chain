@@ -5,11 +5,12 @@ use eyre::eyre::Context;
 use tracing::{
     Event, Subscriber,
     field::{Field, Visit},
+    span::{Attributes, Id},
 };
 use tracing_subscriber::{
     Layer,
     fmt::{FmtContext, FormatEvent, FormatFields, format::Writer},
-    layer::SubscriberExt,
+    layer::{Context as LayerContext, SubscriberExt},
     registry::LookupSpan,
     util::SubscriberInitExt,
 };
@@ -138,6 +139,7 @@ fn init_devnet_tracing(
         .with_filter(file_filter);
 
     tracing_subscriber::registry()
+        .with(ProcessSpanLayer)
         .with(stdout_layer)
         .with(file_layer)
         .init();
@@ -161,16 +163,21 @@ where
 {
     fn format_event(
         &self,
-        _ctx: &FmtContext<'_, S, N>,
+        ctx: &FmtContext<'_, S, N>,
         mut writer: Writer<'_>,
         event: &Event<'_>,
     ) -> fmt::Result {
         let mut fields = DevnetEventFields::default();
         event.record(&mut fields);
 
+        // In-process subsystems (e.g. the World Chain proposer/challenger) carry
+        // their component label on an enclosing span instead of every event, so
+        // fall back to the nearest span's `process` value.
+        let process = fields.process.clone().or_else(|| process_from_spans(ctx));
+
         write_level(&mut writer, event.metadata().level())?;
         writer.write_char(' ')?;
-        if let Some(process) = fields.process.as_deref() {
+        if let Some(process) = process.as_deref() {
             write_process(&mut writer, process)?;
             writer.write_char(' ')?;
         }
@@ -188,6 +195,43 @@ where
         }
         writer.write_char('\n')
     }
+}
+
+/// Component label captured from a span's `process` field and stored in the
+/// span's extensions so [`DevnetLogFormatter`] can render it for every event
+/// emitted within that span.
+#[derive(Clone)]
+struct ProcessLabel(String);
+
+/// Layer that records a span's `process` field into [`ProcessLabel`] extensions.
+struct ProcessSpanLayer;
+
+impl<S> Layer<S> for ProcessSpanLayer
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+{
+    fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: LayerContext<'_, S>) {
+        let mut fields = DevnetEventFields::default();
+        attrs.record(&mut fields);
+        if let Some(process) = fields.process
+            && let Some(span) = ctx.span(id)
+        {
+            span.extensions_mut().insert(ProcessLabel(process));
+        }
+    }
+}
+
+/// Finds the nearest enclosing span carrying a [`ProcessLabel`].
+fn process_from_spans<S, N>(ctx: &FmtContext<'_, S, N>) -> Option<String>
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+    N: for<'writer> FormatFields<'writer> + 'static,
+{
+    ctx.event_scope()?.find_map(|span| {
+        span.extensions()
+            .get::<ProcessLabel>()
+            .map(|label| label.0.clone())
+    })
 }
 
 #[derive(Default)]

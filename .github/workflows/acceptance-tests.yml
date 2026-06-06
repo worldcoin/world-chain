@@ -13,6 +13,11 @@ on:
           - stage
           - dev-us-east-1
           - dev-eu-central-2
+      bundler_rpc_url:
+        description: Optional Rundler RPC URL for ERC-4337 sponsored user operation checks
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -39,16 +44,22 @@ jobs:
           - network: stage
             environment: stage
             rpc_url: https://wc-node-sepolia.worldcoin.dev
+            bundler_rpc_url: https://rundler-sepolia.worldcoin.dev
+            entry_point: "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
+            safe_4337_module: "0x829Efdda958f06eA49f1F416e10b35C140bf45EF"
+            safe_4337_wallet_deployer: "0x6966cAE939Cbbb2DE66E1e7c67Ddb9143fDbA36c"
             expected_chain_id: "4801"
             allow_failure: false
           - network: dev-us-east-1
             environment: dev
             rpc_url: https://wc-node-devnet.worldcoin.dev
+            bundler_rpc_url: ""
             expected_chain_id: "4801222"
             allow_failure: true
           - network: dev-eu-central-2
             environment: dev-eu-central-2
             rpc_url: https://tx-proxy-devnet-eu-central-2.worldcoin.dev
+            bundler_rpc_url: https://rundler-devnet-eu-central-2.worldcoin.dev
             expected_chain_id: "69420"
             allow_failure: true
     steps:
@@ -94,12 +105,18 @@ jobs:
         env:
           ACCEPTANCE_NETWORK: ${{ matrix.network }}
           ACCEPTANCE_RPC_URL: ${{ matrix.rpc_url }}
+          ACCEPTANCE_BUNDLER_RPC_URL: ${{ matrix.network == 'dev-eu-central-2' && inputs.bundler_rpc_url || matrix.bundler_rpc_url }}
           ACCEPTANCE_CHAIN_ID: ${{ matrix.expected_chain_id }}
+          ACCEPTANCE_4337_ENTRY_POINT: ${{ matrix.entry_point }}
+          ACCEPTANCE_4337_MODULE: ${{ matrix.safe_4337_module }}
+          ACCEPTANCE_4337_WALLET_DEPLOYER: ${{ matrix.safe_4337_wallet_deployer }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          ACCEPTANCE_BUNDLER_CF_ACCESS_CLIENT_ID: ${{ secrets.ACCEPTANCE_BUNDLER_CF_ACCESS_CLIENT_ID }}
+          ACCEPTANCE_BUNDLER_CF_ACCESS_CLIENT_SECRET: ${{ secrets.ACCEPTANCE_BUNDLER_CF_ACCESS_CLIENT_SECRET }}
           ACCEPTANCE_BLOCK_ADVANCE_TIMEOUT_SECS: "60"
           ACCEPTANCE_BLOCK_POLL_INTERVAL_SECS: "2"
-        run: cargo nextest run --profile ci -p world-chain-tests -E 'package(world-chain-tests) & binary(world-chain-tests) & test(/acceptance_tests::test_network/)'
+        run: cargo nextest run --profile ci -p world-chain-tests -E 'package(world-chain-tests) & binary(world-chain-tests) & test(/acceptance_tests::test_network/)' --no-capture
 
       - name: Report allowed build failure
         if: ${{ (inputs.network == 'all' || inputs.network == matrix.network) && matrix.allow_failure && steps.build.outcome == 'failure' }}
