@@ -18,8 +18,8 @@ use alloy_sol_types::{SolCall, SolValue, sol};
 use eyre::eyre::{Context, OptionExt, bail, ensure};
 use futures::{StreamExt, TryStreamExt, stream};
 use serde::Serialize;
-use tokio::time::{sleep, timeout};
-use tracing::info;
+use tokio::time::{Instant, sleep, timeout};
+use tracing::{info, warn};
 use world_chain_test_utils::utils::signer;
 
 use super::{config::BundlerConfig, rpc::RpcEnv};
@@ -632,28 +632,42 @@ impl<'a> UserOperationHarness<'a> {
     }
 
     async fn wait_for_receipt(&self, hash: B256) -> eyre::Result<UserOperationReceipt> {
-        timeout(self.config.user_operation_timeout, async {
-            loop {
-                let receipt: Option<UserOperationReceipt> = self
-                    .bundler
-                    .raw_request(Cow::Borrowed("eth_getUserOperationReceipt"), (hash,))
-                    .await
-                    .context("failed to fetch user operation receipt")?;
+        let deadline = Instant::now() + self.config.user_operation_timeout;
+        let mut last_error = None;
 
-                if let Some(receipt) = receipt {
-                    return Ok(receipt);
+        loop {
+            let result: Result<Option<UserOperationReceipt>, _> = self
+                .bundler
+                .raw_request(Cow::Borrowed("eth_getUserOperationReceipt"), (hash,))
+                .await;
+
+            match result {
+                Ok(Some(receipt)) => return Ok(receipt),
+                Ok(None) => {}
+                Err(error) => {
+                    warn!(%hash, %error, "failed to fetch user operation receipt, retrying");
+                    last_error = Some(error.to_string());
+                }
+            }
+
+            let now = Instant::now();
+            if now >= deadline {
+                if let Some(error) = last_error {
+                    bail!(
+                        "timed out after {:?} waiting for user operation {hash:?}; last receipt fetch error: {error}",
+                        self.config.user_operation_timeout
+                    );
                 }
 
-                sleep(self.config.user_operation_poll_interval).await;
+                bail!(
+                    "timed out after {:?} waiting for user operation {hash:?}",
+                    self.config.user_operation_timeout
+                );
             }
-        })
-        .await
-        .with_context(|| {
-            format!(
-                "timed out after {:?} waiting for user operation {hash:?}",
-                self.config.user_operation_timeout
-            )
-        })?
+
+            let remaining = deadline.saturating_duration_since(now);
+            sleep(self.config.user_operation_poll_interval.min(remaining)).await;
+        }
     }
 
     async fn fresh_wallet(&self, offset: usize) -> eyre::Result<TestWallet> {
