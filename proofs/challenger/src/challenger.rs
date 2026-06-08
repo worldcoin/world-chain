@@ -49,6 +49,11 @@ impl<E, C> WorldChainChallenger<E, C> {
     pub const fn config(&self) -> &ChallengerConfig {
         &self.config
     }
+
+    #[cfg(test)]
+    pub(crate) fn retry_games(&self) -> Vec<Address> {
+        self.retry_games.keys().copied().collect()
+    }
 }
 
 impl<E, C> WorldChainChallenger<E, C>

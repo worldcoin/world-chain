@@ -158,6 +158,7 @@ async fn scan_once_leaves_valid_root() {
     challenger.scan_once().await.unwrap();
 
     assert!(submissions.lock().expect("not poisoned").is_empty());
+    assert!(challenger.retry_games().is_empty());
 }
 
 #[tokio::test]
@@ -182,6 +183,7 @@ async fn scan_once_skips_non_proposed_game() {
     challenger.scan_once().await.unwrap();
 
     assert!(submissions.lock().expect("not poisoned").is_empty());
+    assert!(challenger.retry_games().is_empty());
 }
 
 #[tokio::test]
@@ -206,6 +208,7 @@ async fn scan_once_skips_expired_challenge_deadline() {
     challenger.scan_once().await.unwrap();
 
     assert!(submissions.lock().expect("not poisoned").is_empty());
+    assert!(challenger.retry_games().is_empty());
 }
 
 #[tokio::test]
@@ -227,13 +230,11 @@ async fn scan_once_rejects_unfinalized_l2_block() {
     };
     let mut challenger = WorldChainChallenger::new(config(), client, output_roots);
 
-    assert!(matches!(
-        challenger.scan_once().await,
-        Err(ChallengerError::L2BlockNotFinalized {
-            game: GAME_1,
-            latest_finalized,
-            given_block: L2_BLOCK,
-        }) if latest_finalized == L2_BLOCK - 1
-    ));
+    // The game references an L2 block that is not finalized yet. This is a
+    // transient failure, so the game must not be challenged and instead be
+    // queued for a later retry, while the scan itself succeeds.
+    challenger.scan_once().await.unwrap();
+
     assert!(submissions.lock().expect("not poisoned").is_empty());
+    assert_eq!(challenger.retry_games(), [GAME_1]);
 }
