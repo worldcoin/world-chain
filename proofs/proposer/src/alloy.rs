@@ -6,7 +6,7 @@ use world_chain_proofs::{
     ProposalCommitment,
 };
 
-use crate::{ParentRef, ProofSystemClient, Proposal, ProposalSubmission, ProposerError};
+use crate::{ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError};
 
 /// Alloy-backed implementation of [`ProofSystemClient`].
 #[derive(Debug, Clone)]
@@ -40,7 +40,7 @@ where
 }
 
 #[async_trait]
-impl<P> ProofSystemClient for AlloyProofSystemClient<P>
+impl<P> ProposerClient for AlloyProofSystemClient<P>
 where
     P: Provider + Clone + Send + Sync + 'static,
 {
