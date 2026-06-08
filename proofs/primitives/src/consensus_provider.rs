@@ -1,43 +1,38 @@
-use alloy_primitives::B256;
+use alloy_primitives::{B256, BlockNumber};
 use async_trait::async_trait;
 use serde::Deserialize;
 use thiserror::Error;
 
-/// Source for OP Stack output roots.
+/// Source for all consensus clients requests.
 #[async_trait]
-pub trait OutputRootProvider: Send + Sync {
+pub trait ConsensusProvider: Send + Sync {
     /// Returns the output root for an L2 block number.
-    async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, OutputRootError>;
+    async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, ConsensusError>;
 
-    /// Returns the highest L2 block number for which an output root can be
-    /// served (the provider's current unsafe L2 head), or `None` when the head
-    /// is unknown and callers should not gate on it.
-    ///
-    /// The default implementation returns `None` so providers that cannot report
-    /// a head (e.g. tests) keep working without gating.
-    async fn latest_l2_block(&self) -> Result<Option<u64>, OutputRootError> {
-        Ok(None)
-    }
+    /// Returns the highest L2 finalized block number.
+    async fn latest_l2_finalized_block(&self) -> Result<BlockNumber, ConsensusError>;
 }
 
 #[derive(Error, Debug)]
-pub enum OutputRootError {
+pub enum ConsensusError {
     /// The output-root RPC response did not contain an output root.
     #[error("optimism_outputAtBlock response did not contain an output root")]
     MissingOutputRoot,
+    #[error("Latest L2 finalized block not found")]
+    FinalizedBlockNotFound,
     /// RPC transport or JSON-RPC failure.
     #[error("rpc error: {0}")]
     Rpc(String),
 }
 
-/// HTTP client for `optimism_outputAtBlock`.
+/// HTTP client for OP consensus clients.
 #[derive(Debug, Clone)]
-pub struct OptimismOutputRootClient {
+pub struct OptimismConsensusClient {
     client: reqwest::Client,
     rpc_url: String,
 }
 
-impl OptimismOutputRootClient {
+impl OptimismConsensusClient {
     /// Creates a new output-root client from the provided consensus client rpc endpoint.
     pub fn new(rpc_url: impl Into<String>) -> Self {
         Self {
@@ -48,8 +43,8 @@ impl OptimismOutputRootClient {
 }
 
 #[async_trait]
-impl OutputRootProvider for OptimismOutputRootClient {
-    async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, OutputRootError> {
+impl ConsensusProvider for OptimismConsensusClient {
+    async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, ConsensusError> {
         let block = format!("0x{l2_block_number:x}");
         let request = serde_json::json!({
             "jsonrpc": "2.0",
@@ -64,28 +59,28 @@ impl OutputRootProvider for OptimismOutputRootClient {
             .json(&request)
             .send()
             .await
-            .map_err(|error| OutputRootError::Rpc(error.to_string()))?
+            .map_err(|error| ConsensusError::Rpc(error.to_string()))?
             .error_for_status()
-            .map_err(|error| OutputRootError::Rpc(error.to_string()))?
+            .map_err(|error| ConsensusError::Rpc(error.to_string()))?
             .json::<JsonRpcResponse<OutputAtBlockResponse>>()
             .await
-            .map_err(|error| OutputRootError::Rpc(error.to_string()))?;
+            .map_err(|error| ConsensusError::Rpc(error.to_string()))?;
 
         if let Some(error) = response.error {
-            return Err(OutputRootError::Rpc(format!(
+            return Err(ConsensusError::Rpc(format!(
                 "json-rpc error {}: {}",
                 error.code, error.message
             )));
         }
 
-        let output = response.result.ok_or(OutputRootError::MissingOutputRoot)?;
+        let output = response.result.ok_or(ConsensusError::MissingOutputRoot)?;
         output
             .output_root
             .parse()
-            .map_err(|error| OutputRootError::Rpc(format!("invalid outputRoot: {error}")))
+            .map_err(|error| ConsensusError::Rpc(format!("invalid outputRoot: {error}")))
     }
 
-    async fn latest_l2_block(&self) -> Result<Option<u64>, OutputRootError> {
+    async fn latest_l2_finalized_block(&self) -> Result<BlockNumber, ConsensusError> {
         let request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -99,21 +94,24 @@ impl OutputRootProvider for OptimismOutputRootClient {
             .json(&request)
             .send()
             .await
-            .map_err(|error| OutputRootError::Rpc(error.to_string()))?
+            .map_err(|error| ConsensusError::Rpc(error.to_string()))?
             .error_for_status()
-            .map_err(|error| OutputRootError::Rpc(error.to_string()))?
+            .map_err(|error| ConsensusError::Rpc(error.to_string()))?
             .json::<JsonRpcResponse<SyncStatusResponse>>()
             .await
-            .map_err(|error| OutputRootError::Rpc(error.to_string()))?;
+            .map_err(|error| ConsensusError::Rpc(error.to_string()))?;
 
         if let Some(error) = response.error {
-            return Err(OutputRootError::Rpc(format!(
+            return Err(ConsensusError::Rpc(format!(
                 "json-rpc error {}: {}",
                 error.code, error.message
             )));
         }
+        let sync_status_response = response
+            .result
+            .ok_or(ConsensusError::FinalizedBlockNotFound)?;
 
-        Ok(response.result.map(|status| status.unsafe_l2.number))
+        Ok(sync_status_response.finalized_l2.number)
     }
 }
 
@@ -137,10 +135,10 @@ struct OutputAtBlockResponse {
 
 #[derive(Debug, Deserialize)]
 struct SyncStatusResponse {
-    unsafe_l2: L2BlockRef,
+    finalized_l2: L2BlockRef,
 }
 
 #[derive(Debug, Deserialize)]
 struct L2BlockRef {
-    number: u64,
+    number: BlockNumber,
 }

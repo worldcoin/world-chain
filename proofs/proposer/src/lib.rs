@@ -15,7 +15,7 @@ pub use alloy::AlloyProofSystemClient;
 pub use config::ProposerConfig;
 pub use error::ProposerError;
 pub use proposer::WorldChainProposer;
-pub use traits::ProofSystemClient;
+pub use traits::ProposerClient;
 pub use types::{ParentRef, Proposal, ProposalSubmission};
 
 #[cfg(test)]

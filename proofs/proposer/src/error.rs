@@ -1,6 +1,6 @@
 use alloy_primitives::TxHash;
 use thiserror::Error;
-use world_chain_proofs::OutputRootError;
+use world_chain_proofs::ConsensusError;
 
 /// Errors returned by the proposer.
 #[derive(Debug, Error)]
@@ -20,16 +20,17 @@ pub enum ProposerError {
     #[error("contract error: {0}")]
     Contract(String),
     #[error(transparent)]
-    OutputRoot(#[from] OutputRootError),
+    OutputRoot(#[from] ConsensusError),
     #[error("The proposal transaction didn't execute succesfully: {0}")]
     Revert(TxHash),
-    /// The next proposal target is ahead of the op-node L2 head, so no output
-    /// root is available yet. Transient and expected while the L2 catches up.
-    #[error("next proposal target {target_block} is ahead of the L2 head {l2_head}")]
+    /// The next proposal target is ahead of the op-node L2 finalized block.
+    #[error(
+        "next proposal target {target_block} is ahead of the finalized block {finalized_block}"
+    )]
     ProposalNotReady {
         /// L2 block number the proposer wants to propose next.
         target_block: u64,
         /// Current L2 head reported by the op-node.
-        l2_head: u64,
+        finalized_block: u64,
     },
 }
