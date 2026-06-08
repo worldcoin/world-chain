@@ -63,3 +63,19 @@ pub struct GameCreated {
     pub l1_origin_hash: B256,
     pub l1_origin_number: BlockNumber,
 }
+
+/// A game queued for retry after a transient scan failure.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RetryGame {
+    pub game_created: GameCreated,
+    pub challenge_deadline: Option<u64>,
+    pub attempts: u32,
+}
+
+/// Result of processing a single game.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum GameScanOutcome {
+    Valid,
+    Challenged,
+    Skip,
+}
