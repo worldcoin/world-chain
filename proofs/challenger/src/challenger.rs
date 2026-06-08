@@ -59,8 +59,8 @@ where
         if from > target {
             return Ok(());
         }
-        let game_created = self.execution_provider.games_created(from, target).await?;
-        for game_created in game_created {
+        let games_created = self.execution_provider.games_created(from, target).await?;
+        for game_created in games_created {
             let game = game_created.game;
             let root_state = self.execution_provider.root_state(game).await?;
             if root_state != RootState::Proposed {
