@@ -2314,6 +2314,7 @@ async fn start_world_chain_challenger(
         challenger_bond: U256::from(WORLD_CHALLENGER_BOND_WEI),
         factory_contract: factory_address,
         poll_interval: WORLD_CHALLENGER_POLL_INTERVAL,
+        ..ChallengerConfig::default()
     };
     let mut challenger = WorldChainChallenger::new(config, client, output_roots);
 

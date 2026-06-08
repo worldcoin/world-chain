@@ -18044,6 +18044,7 @@ dependencies = [
  "alloy-provider 2.0.4",
  "alloy-rpc-types-eth 2.0.4",
  "async-trait",
+ "futures-util",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

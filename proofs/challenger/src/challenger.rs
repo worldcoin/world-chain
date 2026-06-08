@@ -6,6 +6,7 @@ use crate::{
     types::{GameScanOutcome, RetryGame, RootState},
 };
 use alloy_primitives::{Address, BlockNumber};
+use futures_util::{StreamExt, stream};
 use std::{
     collections::HashMap,
     time::{SystemTime, UNIX_EPOCH},
@@ -119,16 +120,9 @@ where
             .output_root_at_block(game_created.l2_block_number)
             .await
         {
-            Ok(root) if root != game_created.root_claim => {
-                self.execution_provider
-                    .submit_challenge(game, self.config.challenger_bond)
-                    .await
-                    .map_err(|error| GameScanError {
-                        error,
-                        challenge_deadline,
-                    })?;
-                Ok(GameScanOutcome::Challenged)
-            }
+            Ok(root) if root != game_created.root_claim => Ok(GameScanOutcome::NeedsChallenge {
+                challenge_deadline: challenge_deadline_value,
+            }),
             Ok(_root) => {
                 // valid root, leave it
                 Ok(GameScanOutcome::Valid)
@@ -140,6 +134,65 @@ where
         }
     }
 
+    async fn process_games(
+        &self,
+        games: impl IntoIterator<Item = GameCreated>,
+        latest_finalized_l2_block: BlockNumber,
+        now: u64,
+    ) -> Vec<(GameCreated, Result<GameScanOutcome, GameScanError>)> {
+        stream::iter(games)
+            .map(|game_created| async move {
+                let result = self
+                    .process_game(&game_created, latest_finalized_l2_block, now)
+                    .await;
+                (game_created, result)
+            })
+            .buffer_unordered(self.config.max_game_concurrency)
+            .collect()
+            .await
+    }
+
+    async fn handle_game_results(
+        &mut self,
+        results: Vec<(GameCreated, Result<GameScanOutcome, GameScanError>)>,
+        failure_message: &'static str,
+    ) {
+        let mut challenge_games = Vec::new();
+
+        for (game_created, result) in results {
+            match result {
+                Ok(GameScanOutcome::NeedsChallenge { challenge_deadline }) => {
+                    challenge_games.push((game_created, challenge_deadline));
+                }
+                Ok(_outcome) => {
+                    self.retry_games.remove(&game_created.game);
+                }
+                Err(err) => {
+                    warn!(game = %game_created.game, error = %err.error, "{failure_message}");
+                    self.queue_retry_game(game_created, err.challenge_deadline);
+                }
+            }
+        }
+
+        challenge_games.sort_by_key(|(_game_created, challenge_deadline)| *challenge_deadline);
+
+        for (game_created, challenge_deadline) in challenge_games {
+            match self
+                .execution_provider
+                .submit_challenge(game_created.game, self.config.challenger_bond)
+                .await
+            {
+                Ok(_submission) => {
+                    self.retry_games.remove(&game_created.game);
+                }
+                Err(error) => {
+                    warn!(game = %game_created.game, %error, "challenge submission failed; adding to retry list");
+                    self.queue_retry_game(game_created, Some(challenge_deadline));
+                }
+            }
+        }
+    }
+
     pub async fn scan_once(&mut self) -> Result<(), ChallengerError> {
         let target = self.execution_provider.finalized_l1_block_num().await?;
         let from = if self.cursor == 0 {
@@ -148,7 +201,7 @@ where
             self.cursor
         };
         let has_new_l1_blocks = from <= target;
-        let games_created = if has_new_l1_blocks {
+        let mut games_created = if has_new_l1_blocks {
             self.execution_provider.games_created(from, target).await?
         } else {
             Vec::new()
@@ -167,7 +220,10 @@ where
         let mut retry_games: Vec<RetryGame> = self.retry_games.values().copied().collect();
         // sort retry games by deadline with unknown deadlines first
         retry_games.sort_by_key(|retry| retry.challenge_deadline.unwrap_or(0));
-        for retry_game in retry_games {
+        // retain only games that are not already in `retry_games`
+        games_created.retain(|game_created| !self.retry_games.contains_key(&game_created.game));
+
+        retry_games.retain(|retry_game| {
             let game = retry_game.game_created.game;
             if retry_game
                 .challenge_deadline
@@ -175,37 +231,29 @@ where
             {
                 warn!(game = %game, "dropping retry game after challenge deadline");
                 self.retry_games.remove(&game);
-                continue;
+                return false;
             }
 
-            match self
-                .process_game(&retry_game.game_created, latest_finalized_l2_block, now)
-                .await
-            {
-                Ok(_outcome) => {
-                    self.retry_games.remove(&game);
-                }
-                Err(err) => {
-                    warn!(game = %game, error = %err.error, "retry game failed");
-                    self.queue_retry_game(retry_game.game_created, err.challenge_deadline);
-                }
-            }
-        }
+            true
+        });
 
-        for game_created in games_created {
-            match self
-                .process_game(&game_created, latest_finalized_l2_block, now)
-                .await
-            {
-                Ok(_outcome) => {
-                    self.retry_games.remove(&game_created.game);
-                }
-                Err(err) => {
-                    warn!(game = %game_created.game, error = %err.error, "game scan failed; adding to retry list");
-                    self.queue_retry_game(game_created, err.challenge_deadline);
-                }
-            }
-        }
+        let retry_results = self
+            .process_games(
+                retry_games
+                    .into_iter()
+                    .map(|retry_game| retry_game.game_created),
+                latest_finalized_l2_block,
+                now,
+            )
+            .await;
+        self.handle_game_results(retry_results, "retry game failed")
+            .await;
+
+        let scan_results = self
+            .process_games(games_created, latest_finalized_l2_block, now)
+            .await;
+        self.handle_game_results(scan_results, "game scan failed; adding to retry list")
+            .await;
         // if the scan goes well, update the cursor
         if has_new_l1_blocks {
             self.cursor = target + 1;

@@ -125,6 +125,7 @@ fn config() -> ChallengerConfig {
         challenger_bond: U256::from(1),
         factory_contract: FACTORY,
         poll_interval: Duration::from_secs(1),
+        ..ChallengerConfig::default()
     }
 }
 
