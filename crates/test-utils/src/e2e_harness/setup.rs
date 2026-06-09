@@ -177,6 +177,8 @@ pub struct WorldChainTestBuilder {
     nodes: u8,
     #[builder(default)]
     flashblocks: bool,
+    #[builder(default = true)]
+    access_list: bool,
     #[builder(default)]
     tx_peers: bool,
     #[builder(default)]
@@ -233,6 +235,7 @@ impl WorldChainTestBuilder {
             self.tx_peers,
             self.disable_gossip,
             self.flashblocks,
+            self.access_list,
             self.block_uncompressed_size_limit,
             self.chain_spec,
         )
@@ -326,6 +329,7 @@ async fn setup_inner<T, G>(
     enable_tx_peers: bool,
     disable_gossip: bool,
     flashblocks_enabled: bool,
+    access_list: bool,
     block_uncompressed_size_limit: Option<u64>,
     chain_spec: Arc<WorldChainSpec>,
 ) -> eyre::Result<(
@@ -402,9 +406,15 @@ where
                 Some(previous_peer_ids),
                 disable_gossip,
                 flashblocks_enabled,
+                access_list,
             )
         } else {
-            test_config_with_peers_and_gossip(None, disable_gossip, flashblocks_enabled)
+            test_config_with_peers_and_gossip(
+                None,
+                disable_gossip,
+                flashblocks_enabled,
+                access_list,
+            )
         };
         let mut config = config;
         config.args.builder.block_uncompressed_size_limit = block_uncompressed_size_limit;

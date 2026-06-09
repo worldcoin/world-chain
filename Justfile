@@ -1,4 +1,5 @@
 set positional-arguments := true
+set dotenv-load := true
 
 # default recipe to display help information
 default:
@@ -48,13 +49,18 @@ playground *args='':
     RUST_LOG="info" cargo run -p xtask --release -- launch-node $@
 
 # Manage the native Rust HA devnet. Use `just devnet up -d` to run in the background and `just devnet down` to stop it.
+# Set BAL=1 to enable flashblocks block access lists on the sequencer nodes.
 devnet command='up' *args='':
     #!/usr/bin/env bash
     set -euo pipefail
+    EXTRA_ARGS=()
     if [ "{{command}}" = "up" ]; then
         cargo build -p world-chain
+        if [ "${BAL:-0}" = "1" ]; then
+            EXTRA_ARGS+=(--bal-enabled)
+        fi
     fi
-    RUST_LOG="${RUST_LOG:-info,flashblocks=trace,engine_driver=info}" cargo run -p xtask -- devnet {{command}} {{args}}
+    RUST_LOG="${RUST_LOG:-info,flashblocks=trace,engine_driver=info}" cargo run -p xtask -- devnet {{command}} {{args}} ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 
 # Tail world-chain execution client logs from the running devnet (e.g. `just devnet-logs` or `just devnet-logs 0` for a specific sequencer).
 devnet-logs index='':
@@ -79,6 +85,17 @@ stress *args='':
 # Prove a PBH transaction
 prove *args='':
     cargo run -p xtask -- prove $@
+
+# Deterministically build the World range SP1 ELF with cargo-prove/Docker
+build-proof-range-elf:
+    cd proofs/succinct/programs/range-ethereum && cargo prove build --docker --workspace-directory ../../../.. --tag v6.1.0 --ignore-rust-version --elf-name world-chain-range-ethereum --output-directory ../../elf
+
+# Deterministically build the World aggregation SP1 ELF with cargo-prove/Docker
+build-proof-aggregation-elf:
+    cd proofs/succinct/programs/aggregation && cargo prove build --docker --workspace-directory ../../../.. --tag v6.1.0 --ignore-rust-version --elf-name world-chain-aggregation --output-directory ../../elf
+
+# Build all World SP1 proof ELFs
+build-proof-elfs: build-proof-range-elf build-proof-aggregation-elf
 
 # Generate CLI reference docs for the mdbook
 docs:
