@@ -76,6 +76,6 @@ pub(crate) struct RetryGame {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum GameScanOutcome {
     Valid,
-    Challenged,
+    NeedsChallenge { challenge_deadline: u64 },
     Skip,
 }
