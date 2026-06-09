@@ -1,6 +1,9 @@
 use crate::{
-    GameCreated, config::ChallengerConfig, error::ChallengerError, traits::ChallengerClient,
-    types::RootState,
+    GameCreated,
+    config::ChallengerConfig,
+    error::{ChallengerError, GameScanError},
+    traits::ChallengerClient,
+    types::{GameScanOutcome, RetryGame, RootState},
 };
 use alloy_primitives::{Address, BlockNumber};
 use std::{
@@ -15,13 +18,6 @@ const ONE_DAY_OF_L1_BLOCKS: u64 = 7_200;
 /// The safety margin of blocks.
 const MARGIN: u64 = 500;
 
-#[derive(Debug)]
-enum GameScanOutcome {
-    Valid,
-    Challenged,
-    Skip,
-}
-
 /// World Chain Challenger.
 #[derive(Debug)]
 pub struct WorldChainChallenger<E, C> {
@@ -29,7 +25,7 @@ pub struct WorldChainChallenger<E, C> {
     execution_provider: E,
     consensus_provider: C,
     cursor: BlockNumber,
-    retry_games: HashMap<Address, GameCreated>,
+    retry_games: HashMap<Address, RetryGame>,
 }
 
 impl<E, C> WorldChainChallenger<E, C> {
@@ -54,6 +50,17 @@ impl<E, C> WorldChainChallenger<E, C> {
     pub(crate) fn retry_games(&self) -> Vec<Address> {
         self.retry_games.keys().copied().collect()
     }
+
+    fn queue_retry_game(&mut self, game_created: GameCreated, challenge_deadline: Option<u64>) {
+        let existing = self.retry_games.get(&game_created.game);
+        let retry_game = RetryGame {
+            game_created,
+            challenge_deadline: challenge_deadline
+                .or(existing.and_then(|retry| retry.challenge_deadline)),
+            attempts: existing.map_or(1, |retry| retry.attempts.saturating_add(1)),
+        };
+        self.retry_games.insert(game_created.game, retry_game);
+    }
 }
 
 impl<E, C> WorldChainChallenger<E, C>
@@ -65,29 +72,45 @@ where
         &self,
         game_created: &GameCreated,
         latest_finalized_l2_block: BlockNumber,
-    ) -> Result<GameScanOutcome, ChallengerError> {
+        now: u64,
+    ) -> Result<GameScanOutcome, GameScanError> {
         let game = game_created.game;
-        let root_state = self.execution_provider.root_state(game).await?;
+        let root_state = self
+            .execution_provider
+            .root_state(game)
+            .await
+            .map_err(|error| GameScanError {
+                error,
+                challenge_deadline: None,
+            })?;
         if root_state != RootState::Proposed {
             // root state is not `Proposed` anymore, skip immediately
             return Ok(GameScanOutcome::Skip);
         }
-        let challenge_deadline = self.execution_provider.challenge_deadline(game).await?;
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_secs();
+        let challenge_deadline = self
+            .execution_provider
+            .challenge_deadline(game)
+            .await
+            .map_err(|error| GameScanError {
+                error,
+                challenge_deadline: None,
+            })?;
+        let challenge_deadline_value = challenge_deadline;
+        let challenge_deadline = Some(challenge_deadline_value);
 
-        if now >= challenge_deadline {
+        if now >= challenge_deadline_value {
             // challenge deadline has expired, skip immediately
             return Ok(GameScanOutcome::Skip);
         }
         // ensure that the l2 block is finalized
         if game_created.l2_block_number > latest_finalized_l2_block {
-            return Err(ChallengerError::L2BlockNotFinalized {
-                game,
-                latest_finalized: latest_finalized_l2_block,
-                given_block: game_created.l2_block_number,
+            return Err(GameScanError {
+                error: ChallengerError::L2BlockNotFinalized {
+                    game,
+                    latest_finalized: latest_finalized_l2_block,
+                    given_block: game_created.l2_block_number,
+                },
+                challenge_deadline,
             });
         }
 
@@ -99,14 +122,21 @@ where
             Ok(root) if root != game_created.root_claim => {
                 self.execution_provider
                     .submit_challenge(game, self.config.challenger_bond)
-                    .await?;
+                    .await
+                    .map_err(|error| GameScanError {
+                        error,
+                        challenge_deadline,
+                    })?;
                 Ok(GameScanOutcome::Challenged)
             }
             Ok(_root) => {
                 // valid root, leave it
                 Ok(GameScanOutcome::Valid)
             }
-            Err(err) => Err(ChallengerError::OutputRoot(err)),
+            Err(err) => Err(GameScanError {
+                error: ChallengerError::OutputRoot(err),
+                challenge_deadline,
+            }),
         }
     }
 
@@ -117,45 +147,69 @@ where
         } else {
             self.cursor
         };
-        // short circuit if from > target: it means that there are no
-        // new L1 finalized blocks compared to last scan
-        if from > target {
+        let has_new_l1_blocks = from <= target;
+        let games_created = if has_new_l1_blocks {
+            self.execution_provider.games_created(from, target).await?
+        } else {
+            Vec::new()
+        };
+
+        if games_created.is_empty() && self.retry_games.is_empty() {
+            if has_new_l1_blocks {
+                self.cursor = target + 1;
+            }
             return Ok(());
         }
-        let games_created = self.execution_provider.games_created(from, target).await?;
-        let latest_finalized_l2_block = self.consensus_provider.latest_l2_finalized_block().await?;
 
-        let retry_games: Vec<GameCreated> = self.retry_games.values().copied().collect();
+        let latest_finalized_l2_block = self.consensus_provider.latest_l2_finalized_block().await?;
+        let now = unix_now();
+
+        let mut retry_games: Vec<RetryGame> = self.retry_games.values().copied().collect();
+        // sort retry games by deadline with unknown deadlines first
+        retry_games.sort_by_key(|retry| retry.challenge_deadline.unwrap_or(0));
         for retry_game in retry_games {
+            let game = retry_game.game_created.game;
+            if retry_game
+                .challenge_deadline
+                .is_some_and(|challenge_deadline| now >= challenge_deadline)
+            {
+                warn!(game = %game, "dropping retry game after challenge deadline");
+                self.retry_games.remove(&game);
+                continue;
+            }
+
             match self
-                .process_game(&retry_game, latest_finalized_l2_block)
+                .process_game(&retry_game.game_created, latest_finalized_l2_block, now)
                 .await
             {
-                Ok(_) => {
-                    self.retry_games.remove(&retry_game.game);
+                Ok(_outcome) => {
+                    self.retry_games.remove(&game);
                 }
                 Err(err) => {
-                    warn!(game = %retry_game.game, %err, "retry game failed");
+                    warn!(game = %game, error = %err.error, "retry game failed");
+                    self.queue_retry_game(retry_game.game_created, err.challenge_deadline);
                 }
             }
         }
 
         for game_created in games_created {
             match self
-                .process_game(&game_created, latest_finalized_l2_block)
+                .process_game(&game_created, latest_finalized_l2_block, now)
                 .await
             {
-                Ok(_) => {
+                Ok(_outcome) => {
                     self.retry_games.remove(&game_created.game);
                 }
                 Err(err) => {
-                    warn!(game = %game_created.game, %err, "game scan failed; adding to retry list");
-                    self.retry_games.insert(game_created.game, game_created);
+                    warn!(game = %game_created.game, error = %err.error, "game scan failed; adding to retry list");
+                    self.queue_retry_game(game_created, err.challenge_deadline);
                 }
             }
         }
         // if the scan goes well, update the cursor
-        self.cursor = target + 1;
+        if has_new_l1_blocks {
+            self.cursor = target + 1;
+        }
         Ok(())
     }
 
@@ -171,4 +225,11 @@ where
             }
         }
     }
+}
+
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time before unix epoch")
+        .as_secs()
 }

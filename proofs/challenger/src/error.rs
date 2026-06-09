@@ -41,3 +41,10 @@ pub enum ChallengerError {
         given_block: u64,
     },
 }
+
+/// Error returned while processing a single game.
+#[derive(Debug)]
+pub(crate) struct GameScanError {
+    pub error: ChallengerError,
+    pub challenge_deadline: Option<u64>,
+}
