@@ -51,7 +51,7 @@ pub struct ChallengeSubmission {
 }
 
 /// The `GameCreated` event.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct GameCreated {
     pub proposal_key: B256,
     pub root_it: B256,
