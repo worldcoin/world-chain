@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Flashblocks P2P Protocol v2 - World Chain Specs</title>
+        <title>WIP-1004: EdDSA Verification Precompile - World Chain Specs</title>
 
 
         <!-- Custom HTML head -->
@@ -176,189 +176,144 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="flashblocks-p2p-protocol-v2"><a class="header" href="#flashblocks-p2p-protocol-v2">Flashblocks P2P Protocol v2</a></h1>
-<p><em>This document specifies changes to the flashblocks P2P protocol (<code>flblk</code>) to replace full-broadcast fanout with bounded, latency-optimized peer selection. It is an amendment to the existing <a href="./specs/flashblocks_p2p.html">Flashblocks P2P Extension</a>.</em></p>
-<h2 id="problem"><a class="header" href="#problem">Problem</a></h2>
-<p>The current flashblocks P2P protocol broadcasts every <code>FlashblocksPayloadV1</code> to <strong>all</strong> connected peers (<code>handler.rs:585</code>, <code>connection.rs:97-129</code>). A node with N peers sends N copies of every flashblock. For a node connected to 50 peers, that is 50x outgoing bandwidth per flashblock. As the network grows, this becomes unsustainable.</p>
-<h2 id="design-goals"><a class="header" href="#design-goals">Design Goals</a></h2>
-<ol>
-<li><strong>Reduce bandwidth</strong> — Each node sends flashblocks to a bounded number of peers instead of all peers.</li>
-<li><strong>Optimize latency</strong> — Nodes periodically rotate out their slowest receive peers in favor of random alternatives.</li>
-<li><strong>Reliability</strong> — Multiple receive peers provide redundancy against individual peer failures.</li>
-<li><strong>Trusted peer priority</strong> — Trusted peers are always served when they request flashblocks, regardless of limits.</li>
-<li><strong>Uniform roles</strong> — Builders and consumers follow the same protocol. No special-casing by role.</li>
-</ol>
-<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
-<p>Each node maintains two bounded peer sets:</p>
-<ul>
-<li><strong>Send Set</strong> (max <code>max_send_peers</code>, default 10): Peers this node actively forwards flashblocks to. These are peers that have sent a <code>RequestFlashblocks</code> and been accepted. Trusted peers bypass the limit.</li>
-<li><strong>Receive Set</strong> (max <code>max_receive_peers</code>, default 3): Peers this node actively receives flashblocks from. These are peers this node has selected as active feed sources.</li>
-</ul>
-<p>Flashblocks propagate through the network as a directed acyclic graph: the builder sends to its send set, those nodes relay to their send sets, and so on. With a fanout of 10, a network of N nodes requires approximately log₁₀(N) hops from builder to the most distant node.</p>
-<p>Periodically, each node evaluates the latency of its receive peers and may rotate out the highest-latency peer in favor of a randomly-selected alternative, one peer at a time.</p>
-<h2 id="protocol-version"><a class="header" href="#protocol-version">Protocol Version</a></h2>
-<p>This change adds new message types to the <code>flblk</code> protocol. The protocol version is bumped from <code>1</code> to <code>2</code>. Nodes advertising <code>flblk/2</code> support the fanout control messages described below. Nodes running <code>flblk/1</code> will not understand these messages and are incompatible.</p>
-<h2 id="new-message-types"><a class="header" href="#new-message-types">New Message Types</a></h2>
-<p>Four unsigned control messages are added to <code>FlashblocksP2PMsg</code>:</p>
+                        <h2 id="abstract"><a class="header" href="#abstract">Abstract</a></h2>
+<p>This WIP introduces a precompiled contract that verifies an <a href="https://www.rfc-editor.org/rfc/rfc8032#section-5.1">Ed25519</a> signature over an arbitrary-length message, using the cofactored verification equation standardized by <a href="https://zips.z.cash/zip-0215">ZIP-215</a>.</p>
+<p>The precompile takes a concatenated <code>(publicKey, signature, message)</code> input and returns a 32-byte big-endian <code>1</code> on a valid signature, or <code>0</code> on any failure mode (malformed input, non-canonical encoding, or invalid signature). It never reverts on signature failure; it reverts only on out-of-gas.</p>
+<h2 id="motivation"><a class="header" href="#motivation">Motivation</a></h2>
+<p>Ed25519 is the dominant non-secp256k1 signature scheme in the broader ecosystem: it is the default in XMTP, NaCl/libsodium, OpenSSH, age, TLS 1.3, Solana, Cosmos / Tendermint consensus, Stellar, NEAR, Aptos, and Sui. Native verification on World Chain unlocks several first-class use cases:</p>
+<p>Off-chain attestation services (orb signatures, OPRF transcripts, oracle quorums) can sign with Ed25519 — the format most existing key-management hardware already produces — without forcing on-chain consumers onto secp256k1.</p>
+<h2 id="specification"><a class="header" href="#specification">Specification</a></h2>
+<p>The key words “MUST”, “MUST NOT”, “REQUIRED”, “SHALL”, “SHALL NOT”, “SHOULD”, “SHOULD NOT”, “RECOMMENDED”, “NOT RECOMMENDED”, “MAY”, and “OPTIONAL” in this document are to be interpreted as described in <a href="https://www.rfc-editor.org/rfc/rfc2119">RFC 2119</a> and <a href="https://www.rfc-editor.org/rfc/rfc8174">RFC 8174</a>.</p>
+<h3 id="constants"><a class="header" href="#constants">Constants</a></h3>
 <div class="table-wrapper">
 <table>
 <thead>
-<tr><th>Discriminator</th><th>Message</th><th>Direction</th><th>Description</th></tr>
+<tr><th>Name</th><th>Type</th><th>Value</th><th>Meaning</th></tr>
 </thead>
 <tbody>
-<tr><td><code>0x01</code></td><td><code>RequestFlashblocks</code></td><td>Receiver → Sender</td><td>“I want to receive flashblocks from you”</td></tr>
-<tr><td><code>0x02</code></td><td><code>AcceptFlashblocks</code></td><td>Sender → Receiver</td><td>“Accepted. I will send you flashblocks”</td></tr>
-<tr><td><code>0x03</code></td><td><code>RejectFlashblocks</code></td><td>Sender → Receiver</td><td>“Rejected. I am at capacity”</td></tr>
-<tr><td><code>0x04</code></td><td><code>CancelFlashblocks</code></td><td>Receiver → Sender</td><td>“Stop sending me flashblocks”</td></tr>
+<tr><td><code>EDDSA_PRECOMPILE_ADDRESS</code></td><td><code>address</code></td><td><code>0x0000000000000000000000000000000000000100</code></td><td>Precompile entry-point address.</td></tr>
+<tr><td><code>EDDSA_BASE_GAS</code></td><td><code>uint64</code></td><td><code>2000</code></td><td>Flat per-call cost.</td></tr>
+<tr><td><code>EDDSA_WORD_GAS</code></td><td><code>uint64</code></td><td><code>12</code></td><td>Gas charged per 32-byte word of message.</td></tr>
+<tr><td><code>ED25519_PUBKEY_BYTES</code></td><td><code>uint32</code></td><td><code>32</code></td><td>Length of an Ed25519 public key.</td></tr>
+<tr><td><code>ED25519_SIGNATURE_BYTES</code></td><td><code>uint32</code></td><td><code>64</code></td><td>Length of an Ed25519 signature.</td></tr>
+<tr><td><code>MAX_MESSAGE_BYTES</code></td><td><code>uint32</code></td><td><code>2^16</code></td><td>Maximum message length the precompile will hash.</td></tr>
 </tbody>
 </table>
 </div>
-<p>These messages carry no payload. The connection context (peer ID) provides all necessary information.</p>
+<p><code>EDDSA_PRECOMPILE_ADDRESS</code> is the activation value for the <code>EDDSA_PRECOMPILE</code> parameter declared by <a href="./wip-1001.html">WIP-1001</a>.</p>
+<h3 id="scheme"><a class="header" href="#scheme">Scheme</a></h3>
+<p>The precompile implements pure Ed25519 verification as specified in <a href="https://www.rfc-editor.org/rfc/rfc8032#section-5.1.7">RFC 8032 §5.1.7</a>, with the following pinned choices:</p>
+<ul>
+<li><strong>Curve</strong>: edwards25519 (Ed25519). Ed25519ph and Ed448 are out of scope; a separate WIP MAY introduce additional variants at distinct addresses.</li>
+<li><strong>Context</strong>: empty. Ed25519ctx is not supported.</li>
+<li><strong>Verification equation</strong>: cofactored, per <a href="https://zips.z.cash/zip-0215">ZIP-215</a>. Verification accepts the signature iff <code>[8]SB = [8]R + [8]([hash(R, A, M) mod L])A</code>, where <code>S</code>, <code>R</code>, <code>A</code>, <code>M</code>, and <code>L</code> are as defined in RFC 8032 §5.1.</li>
+<li><strong>Public key validation</strong>: <code>A</code> MUST decode as a valid edwards25519 point per RFC 8032 §5.1.3. Non-canonical y-coordinate encodings (<code>y &gt;= p</code>) MUST be rejected. Small-order public keys are NOT rejected — application-level policy is responsible for additional restrictions.</li>
+<li><strong>Signature <code>R</code> validation</strong>: <code>R</code> MUST decode as a valid edwards25519 point. Non-canonical y-coordinate encodings of <code>R</code> MUST be rejected.</li>
+<li><strong>Signature <code>S</code> validation</strong>: <code>S</code> is interpreted as little-endian and MUST satisfy <code>0 &lt;= S &lt; L</code>, where <code>L = 2^252 + 27742317777372353535851937790883648493</code>. Non-canonical <code>S</code> MUST be rejected.</li>
+</ul>
+<h3 id="input-encoding"><a class="header" href="#input-encoding">Input Encoding</a></h3>
+<p>The precompile input is the concatenation:</p>
+<pre><code>input = publicKey (32 bytes) || signature (64 bytes) || message (variable)
+</code></pre>
+<ul>
+<li><code>publicKey</code> is the 32-byte encoded edwards25519 point <code>A</code>, per RFC 8032 §5.1.2.</li>
+<li><code>signature</code> is <code>R (32 bytes) || S (32 bytes)</code>, per RFC 8032 §5.1.6.</li>
+<li><code>message</code> is the byte string <code>M</code> passed verbatim to the hash function.</li>
+</ul>
+<p>The total input length MUST satisfy <code>96 &lt;= len(input) &lt;= 96 + MAX_MESSAGE_BYTES</code>. Any other length is treated as a failure (the precompile consumes gas as specified in <a href="#gas-cost">Gas Cost</a> and returns the zero word).</p>
+<h3 id="output-encoding"><a class="header" href="#output-encoding">Output Encoding</a></h3>
+<p>The precompile output is exactly 32 bytes:</p>
+<ul>
+<li><code>0x0000…0001</code> (big-endian) if the signature is valid under the rules above.</li>
+<li><code>0x0000…0000</code> (big-endian) otherwise, including for all malformed input, non-canonical encoding, point-decoding failure, scalar-range failure, and equation failure.</li>
+</ul>
+<p>The precompile MUST NOT revert on a failed verification. It MUST revert only when the caller supplies insufficient gas, in which case standard out-of-gas semantics apply.</p>
+<h3 id="gas-cost"><a class="header" href="#gas-cost">Gas Cost</a></h3>
+<p>For an input of length <code>N</code> bytes:</p>
+<pre><code>gasCost = EDDSA_BASE_GAS + EDDSA_WORD_GAS * ceil(max(N, 96) - 96 / 32)
+        = EDDSA_BASE_GAS + EDDSA_WORD_GAS * ceil(messageLength / 32)
+</code></pre>
+<p><code>messageLength = max(N, 96) - 96</code>. The per-word charge covers SHA-512 absorption of <code>R || A || M</code> and is intentionally aligned with the per-word cost of the <code>sha256</code> precompile (<a href="https://eips.ethereum.org/EIPS/eip-2">EIP-2</a>).</p>
+<p>Gas is charged in full before execution. Inputs shorter than 96 bytes are charged <code>EDDSA_BASE_GAS</code> and return the zero word.</p>
+<h2 id="rationale"><a class="header" href="#rationale">Rationale</a></h2>
+<p><strong>Ed25519 only.</strong> Ed25519 dominates the non-secp256k1 deployed base by orders of magnitude. Supporting Ed448 doubles the surface area for marginal real-world demand; it can be added in a follow-on WIP at a separate address if needed. Pre-hashed variants (Ed25519ph, Ed25519ctx) are likewise excluded — callers that need them can hash off-chain and use the pure verifier, or a future WIP can allocate a distinct address.</p>
+<p><strong>ZIP-215 / cofactored verification.</strong> RFC 8032 leaves verification underspecified on edge cases involving small-order points and non-canonical encodings, and historical libraries have disagreed. ZIP-215 pins these choices: cofactored equation, canonical encoding required, small-order keys accepted. This is the modern consensus-rule choice (Zcash, Tendermint/CometBFT) and admits straightforward batch verification by re-deriving the cofactored form from a random linear combination. Cofactorless RFC 8032 verification would reject a strict subset of signatures that cofactored accepts; pinning the more permissive rule means a signature accepted by the precompile is also accepted by any conformant ZIP-215 verifier, which is the property bridges and light clients depend on.</p>
+<p><strong>Failure returns zero, never reverts.</strong> This mirrors <code>ecrecover</code> and <a href="https://eips.ethereum.org/EIPS/eip-7951">EIP-7951</a> (secp256r1 verify): callers branch on the boolean result. Reverting on bad signatures would force every caller to wrap the call in a <code>try/catch</code> and would make the precompile incompatible with WIP-1001 restricted validation frames, which forbid revert-based control flow inside <code>STATICCALL</code>s.</p>
+<p><strong>Concatenated, variable-length input.</strong> A length prefix on the message would add a decoding branch without reducing ambiguity — the EVM already provides the total calldata length. The 32 + 64 prefix layout matches the wire layout produced by libsodium’s <code>crypto_sign_open</code> and Solana / Cosmos transaction signatures, so callers can forward bytes verbatim.</p>
+<p><strong><code>MAX_MESSAGE_BYTES</code> bound.</strong> Caps worst-case SHA-512 work per call to a predictable upper bound, which simplifies gas-cost validation and matches the bounded-input style of other consensus-critical precompiles.</p>
+<p><strong>Gas cost.</strong> The base cost is calibrated against benchmark data for <code>ed25519-dalek</code> and <code>curve25519-dalek</code> (single-signature verify on modern x86_64 completes in roughly 50–100 µs), giving Ed25519 verification a per-call cost comparable to <code>ecrecover</code> (3000 gas) and modestly cheaper than RIP-7212 (3450 gas). The per-word charge matches <code>sha256</code> because the dominant variable-cost component is the SHA-512 over <code>R || A || M</code>. Concrete values SHOULD be refined against client benchmarks before this WIP advances to Review.</p>
+<p><strong>Small-order public keys are not rejected.</strong> Rejecting them at the precompile boundary would deviate from ZIP-215 and break compatibility with signatures produced by certain hardware modules. Applications that care (e.g., signers used as identity commitments) MUST reject small-order keys themselves.</p>
+<p><strong>Address <code>0x0100</code>.</strong> Reserves a precompile slot above the Ethereum-reserved <code>0x01</code>–<code>0x0A</code> range and aligns with RIP-7212’s convention of placing non-mainnet precompiles starting at <code>0x0100</code>. The concrete address MAY be revised by maintainers before activation; the activation value flows through <code>EDDSA_PRECOMPILE</code> in WIP-1001.</p>
+<h2 id="backwards-compatibility"><a class="header" href="#backwards-compatibility">Backwards Compatibility</a></h2>
+<p>This WIP adds a precompile at a previously unused address. No existing transaction type, opcode, gas cost, or precompile behavior is modified. Contracts that previously called <code>EDDSA_PRECOMPILE_ADDRESS</code> would have received an empty return; after activation they receive a 32-byte response. Such pre-activation calls have no on-chain precedent on World Chain.</p>
+<h2 id="test-cases"><a class="header" href="#test-cases">Test Cases</a></h2>
+<p>Conforming implementations MUST pass:</p>
+<ul>
+<li><strong>RFC 8032 §7.1 vectors</strong>: Test 1–4 (empty, 1-byte, 2-byte, and 1023-byte messages); all MUST return <code>1</code>.</li>
+<li><strong>ZIP-215 §“Tests” vectors</strong>: every signature listed as ZIP-215-valid MUST return <code>1</code>; every signature listed as ZIP-215-invalid MUST return <code>0</code>. This includes the small-order public key cases that diverge from strict RFC 8032 cofactorless verification.</li>
+<li><strong>Non-canonical encodings</strong>: <code>A</code> with <code>y &gt;= p</code>, <code>R</code> with <code>y &gt;= p</code>, and <code>S</code> with <code>S &gt;= L</code> MUST each return <code>0</code>.</li>
+<li><strong>Mutated signature</strong>: every RFC 8032 §7.1 vector with the last byte of <code>S</code> incremented by 1 MUST return <code>0</code>.</li>
+<li><strong>Mutated message</strong>: every RFC 8032 §7.1 vector with the message extended by one zero byte MUST return <code>0</code>.</li>
+<li><strong>Truncated input</strong>: inputs of length <code>0</code>, <code>31</code>, <code>32</code>, <code>95</code>, <code>96 - 1</code> MUST return <code>0</code> and charge exactly <code>EDDSA_BASE_GAS</code>.</li>
+<li><strong>Maximum-length message</strong>: input of length <code>96 + MAX_MESSAGE_BYTES</code> MUST be accepted (modulo signature validity) and charge <code>EDDSA_BASE_GAS + EDDSA_WORD_GAS * (MAX_MESSAGE_BYTES / 32)</code>.</li>
+<li><strong>Oversize input</strong>: input of length <code>96 + MAX_MESSAGE_BYTES + 1</code> MUST return <code>0</code>.</li>
+<li><strong>Identity / zero inputs</strong>: 32-byte zero public key, 64-byte zero signature MUST return <code>0</code>.</li>
+<li><strong>Gas-charge boundary</strong>: a caller supplying exactly <code>gasCost - 1</code> gas MUST observe an out-of-gas revert; a caller supplying exactly <code>gasCost</code> MUST observe a successful return.</li>
+</ul>
+<p>Golden vectors with hex-encoded <code>(publicKey, signature, message, expected)</code> tuples covering each row above MUST be published in <code>assets/wip-1004/</code> before this WIP advances to Review.</p>
+<h2 id="reference-implementation"><a class="header" href="#reference-implementation">Reference Implementation</a></h2>
+<p>The precompile is implementable in a few lines on top of any conformant Ed25519 library that exposes a ZIP-215 verification mode. For Rust clients (reth, OP-reth derivatives) the recommended primitive is <code>ed25519-dalek</code> v2 with the <code>zebra</code> / cofactored verification feature, or the <code>ed25519-zebra</code> crate directly:</p>
 <pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
 </span><span class="boring">fn main() {
-</span>pub enum FlashblocksP2PMsg {
-    /// Existing authorized message wrapper (flashblock payloads, StartPublish, StopPublish).
-    Authorized(Authorized) = 0x00,
-    /// New fanout control messages (unsigned).
-    RequestFlashblocks = 0x01,
-    AcceptFlashblocks = 0x02,
-    RejectFlashblocks = 0x03,
-    CancelFlashblocks = 0x04,
+</span>fn run_eddsa_verify(input: &amp;[u8], gas_limit: u64) -&gt; Result&lt;(Vec&lt;u8&gt;, u64), PrecompileError&gt; {
+    let msg_len = input.len().saturating_sub(96);
+    let gas_used = EDDSA_BASE_GAS + EDDSA_WORD_GAS * msg_len.div_ceil(32) as u64;
+    if gas_used &gt; gas_limit {
+        return Err(PrecompileError::OutOfGas);
+    }
+
+    let mut output = [0u8; 32]; // default: invalid
+
+    if input.len() &lt; 96 || msg_len &gt; MAX_MESSAGE_BYTES as usize {
+        return Ok((output.to_vec(), gas_used));
+    }
+
+    let pk_bytes: [u8; 32] = input[0..32].try_into().unwrap();
+    let sig_bytes: [u8; 64] = input[32..96].try_into().unwrap();
+    let message = &amp;input[96..];
+
+    let ok = ed25519_zebra::VerificationKey::try_from(pk_bytes)
+        .and_then(|vk| {
+            let sig = ed25519_zebra::Signature::from(sig_bytes);
+            vk.verify(&amp;sig, message)
+        })
+        .is_ok();
+
+    if ok {
+        output[31] = 1;
+    }
+    Ok((output.to_vec(), gas_used))
 }
 <span class="boring">}</span></code></pre>
-<h3 id="message-semantics"><a class="header" href="#message-semantics">Message Semantics</a></h3>
-<p><strong><code>RequestFlashblocks</code></strong> — Sent by a node that wants to receive flashblocks from the connected peer. The recipient evaluates:</p>
-<ol>
-<li>Is the requester a trusted peer? → Always accept (trusted peers bypass <code>max_send_peers</code>).</li>
-<li>Is the number of non-trusted peers in the send set below <code>max_send_peers</code>? → Accept.</li>
-<li>Otherwise → Reject.</li>
-</ol>
-<p><strong><code>AcceptFlashblocks</code></strong> — Response to <code>RequestFlashblocks</code>. After this, the sender begins forwarding all <code>Authorized</code> messages to the receiver and adds the receiver to its send set.</p>
-<p><strong><code>RejectFlashblocks</code></strong> — Response to <code>RequestFlashblocks</code> when the sender cannot accommodate more peers. The requester should try another peer.</p>
-<p><strong><code>CancelFlashblocks</code></strong> — Sent only by a receiver to the sender it no longer wants to receive flashblocks from (e.g., during peer rotation).</p>
-<p>After receiving <code>CancelFlashblocks</code>, the sender immediately stops forwarding flashblocks to that peer and removes it from its send set.</p>
-<h2 id="peer-management"><a class="header" href="#peer-management">Peer Management</a></h2>
-<h3 id="per-node-state"><a class="header" href="#per-node-state">Per-Node State</a></h3>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>struct FanoutState {
-    /// Peers we are actively sending flashblocks to.
-    send_set: HashSet&lt;PeerId&gt;,
-    /// Peers we are actively receiving flashblocks from.
-    receive_set: HashSet&lt;PeerId&gt;,
-    /// Peers we have sent RequestFlashblocks to but not yet received a response.
-    pending_requests: HashSet&lt;PeerId&gt;,
-    /// Sliding-window latency stats per receive peer.
-    peer_latency: HashMap&lt;PeerId, LatencyTracker&gt;,
-    /// Whether a rotation is currently in progress.
-    rotation_in_progress: bool,
-}
-<span class="boring">}</span></code></pre>
-<h3 id="bootstrapping-node-startup"><a class="header" href="#bootstrapping-node-startup">Bootstrapping (Node Startup)</a></h3>
-<p>When a node starts and connects to peers via devp2p:</p>
-<ol>
-<li>As peers connect and complete the <code>flblk/2</code> handshake, discover whether they are trusted or untrusted.</li>
-<li>Only request peers whose trust classification is known, so trusted peers are always considered first.</li>
-<li>Continue sending requests as new peers connect until <code>receive_set.len() &gt;= max_receive_peers</code>.</li>
-<li>Once the receive set is full, stop sending unsolicited requests (further changes happen via rotation).</li>
-</ol>
-<h3 id="handling-incoming-requestflashblocks"><a class="header" href="#handling-incoming-requestflashblocks">Handling Incoming <code>RequestFlashblocks</code></a></h3>
-<pre><code>receive RequestFlashblocks from peer P:
-
-if P is trusted:
-    add P to send_set
-    send AcceptFlashblocks to P
-
-else if non_trusted_send_count &lt; max_send_peers:
-    add P to send_set
-    send AcceptFlashblocks to P
-
-else:
-    send RejectFlashblocks to P
-</code></pre>
-<h3 id="handling-disconnections"><a class="header" href="#handling-disconnections">Handling Disconnections</a></h3>
-<p>When a peer disconnects unexpectedly (connection drops):</p>
-<ul>
-<li>If peer was in <strong>send set</strong> → remove it. The slot is now available for future requests.</li>
-<li>If peer was in <strong>receive set</strong> → remove it. Immediately attempt to fill the slot by sending <code>RequestFlashblocks</code> to a random connected peer not already in <code>receive_set</code> or <code>pending_requests</code>.</li>
-<li>If peer was in <strong>pending requests</strong> → remove it. If receive set is not full, try another peer.</li>
-</ul>
-<h3 id="forwarding-rules"><a class="header" href="#forwarding-rules">Forwarding Rules</a></h3>
-<p>When a node receives an <code>Authorized</code> message from a peer in its receive set:</p>
-<ul>
-<li><strong><code>FlashblocksPayloadV1</code></strong>: Verify signatures, process the flashblock (update state, emit to flashblock stream). Then forward the serialized bytes to all peers in the <strong>send set</strong> except the peer that sent it.</li>
-<li><strong><code>StartPublish</code></strong>: Verify signatures and process locally. Do not relay it beyond the direct neighbor that sent it.</li>
-<li><strong><code>StopPublish</code></strong>: Same as <code>StartPublish</code> — process locally, do not relay.</li>
-</ul>
-<p>If a node receives an <code>Authorized(FlashblocksPayloadV1)</code> from a peer <strong>not</strong> in its receive set, or from a peer whose <code>RequestFlashblocks</code> is still pending, the message should be ignored and the peer should be penalized. This prevents unsolicited data delivery.</p>
-<h3 id="duplicate-handling"><a class="header" href="#duplicate-handling">Duplicate Handling</a></h3>
-<p>Since a node receives from up to <code>max_receive_peers</code> peers, it will receive multiple copies of each flashblock. This is expected behavior in the new protocol.</p>
-<ul>
-<li><strong>First copy</strong>: Process normally (update state, emit to stream, forward to send set). Record latency for the delivering peer.</li>
-<li><strong>Subsequent copies (same flashblock from different peers)</strong>: Record the latency for the delivering peer. Discard the flashblock data.</li>
-<li><strong>Same flashblock from the same peer twice</strong>: This is NOT expected. Apply reputation penalty as before (<code>ReputationChangeKind::AlreadySeenTransaction</code>).</li>
-</ul>
-<p>This is a behavioral change from the current protocol, where any duplicate from any peer triggers a reputation penalty (<code>connection.rs:288-290</code>).</p>
-<h2 id="latency-based-peer-rotation"><a class="header" href="#latency-based-peer-rotation">Latency-Based Peer Rotation</a></h2>
-<h3 id="latency-measurement"><a class="header" href="#latency-measurement">Latency Measurement</a></h3>
-<p>Each <code>FlashblocksPayloadV1</code> includes a <code>flashblock_timestamp</code> in its metadata, set by the builder at creation time. When a node receives a flashblock from a receive peer, it computes:</p>
-<pre><code>one_way_latency = now() - flashblock_timestamp
-</code></pre>
-<p>This measurement is attributed to the specific peer that delivered the flashblock. Nodes maintain a sliding window of the last <code>latency_window</code> (default 1000) measurements per receive peer and compute a moving average.</p>
-<p>Since all receive peers deliver the same flashblock (with the same <code>flashblock_timestamp</code>), the <strong>relative ordering</strong> of peers by latency is accurate even with clock skew between the builder and receiver.</p>
-<h3 id="rotation-algorithm"><a class="header" href="#rotation-algorithm">Rotation Algorithm</a></h3>
-<p>The receive set must never exceed <code>max_receive_peers</code>.</p>
-<p>When rotating:</p>
-<ol>
-<li>Select the worst-scoring peer in the current receive set.</li>
-<li>Remove that peer from the receive set immediately and send <code>CancelFlashblocks</code>.</li>
-<li>Pick a replacement candidate, prioritizing trusted peers.</li>
-<li>Add the replacement peer to the receive set in a provisional state and send <code>RequestFlashblocks</code>.</li>
-</ol>
-<p>The provisional peer occupies a receive slot immediately, so the node still never exceeds <code>max_receive_peers</code>. While provisional, the peer is scored for missed flashblocks the same as any other receive peer. If it fails to respond or fails to deliver flashblocks, its score will deteriorate and it can be rotated out on a later interval.</p>
-<h2 id="configuration-parameters"><a class="header" href="#configuration-parameters">Configuration Parameters</a></h2>
-<div class="table-wrapper">
-<table>
-<thead>
-<tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
-</thead>
-<tbody>
-<tr><td><code>max_send_peers</code></td><td>10</td><td>Maximum non-trusted peers to send flashblocks to</td></tr>
-<tr><td><code>max_receive_peers</code></td><td>3</td><td>Maximum peers to receive flashblocks from</td></tr>
-<tr><td><code>rotation_interval</code></td><td>30s</td><td>How often to evaluate and potentially rotate receive peers</td></tr>
-<tr><td><code>latency_window</code></td><td>1000</td><td>Number of flashblocks to track for per-peer latency averaging</td></tr>
-</tbody>
-</table>
-</div>
-<p>Trusted peers are always served on request and <strong>do not count</strong> toward <code>max_send_peers</code>.</p>
-<h2 id="interaction-with-existing-protocol"><a class="header" href="#interaction-with-existing-protocol">Interaction with Existing Protocol</a></h2>
-<h3 id="unchanged-components"><a class="header" href="#unchanged-components">Unchanged Components</a></h3>
-<p>The existing <code>Authorized</code> message types (<code>FlashblocksPayloadV1</code>, <code>StartPublish</code>, <code>StopPublish</code>) remain unchanged. They continue to use the <code>Authorized</code> wrapper with sequencer + builder signatures. The multi-builder coordination state machine (Publishing, WaitingToPublish, NotPublishing) is unaffected. <code>StartPublish</code> and <code>StopPublish</code> remain direct-neighbor messages and are not relayed.</p>
-<h3 id="required-changes-to-existing-code"><a class="header" href="#required-changes-to-existing-code">Required Changes to Existing Code</a></h3>
-<ol>
-<li>
-<p><strong>Duplicate handling must change</strong> — The current per-peer duplicate check at <code>connection.rs:278-291</code> penalizes any duplicate flashblock with <code>ReputationChangeKind::AlreadySeenTransaction</code>. In the new protocol, receiving the same flashblock from different receive peers is expected. Only same-peer duplicates (same flashblock index from the same peer twice) should trigger a penalty.</p>
-</li>
-<li>
-<p><strong>Flashblock forwarding must be scoped to send set</strong> — The current broadcast channel (<code>peer_tx</code>) sends to all connections. This must be replaced with targeted sends to only peers in the send set. The <code>PeerMsg::FlashblocksPayloadV1</code> variant currently uses a broadcast channel subscribed by all connections; this must be changed so each connection checks whether the destination peer is in the send set before forwarding.</p>
-</li>
-<li>
-<p><strong>Receive-peer selection must respect trust discovery</strong> — Nodes should not request unknown peers before their trust classification is available, otherwise untrusted peers can fill the bounded receive set before trusted peers are considered.</p>
-</li>
-<li>
-<p><strong>Protocol version bump</strong> — <code>Capability::new_static("flblk", 1)</code> at <code>handler.rs:239</code> must be updated to version <code>2</code>.</p>
-</li>
-</ol>
+<p><code>ed25519-zebra</code> implements ZIP-215 directly. Other clients SHOULD select an Ed25519 implementation that explicitly documents ZIP-215 compatibility; libraries that implement only strict RFC 8032 cofactorless verification are non-conforming.</p>
+<h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
+<p><strong>Verification-rule monoculture.</strong> All World Chain clients MUST implement identical edge-case behavior. A client that accepts a signature another client rejects causes a consensus split. Selecting ZIP-215 — a written, testable, and widely-deployed specification — is the primary mitigation. Implementers MUST pass the ZIP-215 test corpus, not just RFC 8032 §7.1.</p>
+<p><strong>Signature malleability.</strong> Ed25519 is non-malleable only when <code>S</code> is canonical (<code>S &lt; L</code>). The precompile enforces this; callers MUST NOT assume malleability resistance from any other property of the encoding. In particular, the 32-byte encoding of <code>R</code> is canonicalized but the underlying point is not: ZIP-215 accepts certain low-order <code>R</code> values that strict RFC 8032 rejects.</p>
+<p><strong>Small-order public keys.</strong> Per ZIP-215, the precompile accepts public keys of small order. A small-order <code>A</code> makes the discrete log of <code>A</code> trivial, so any party can forge signatures under such a key. Identity systems and authentication contracts MUST reject small-order keys at registration time, not at verification time. WIP-1001 session verifiers that bind a public key into account state SHOULD perform this check during <code>install</code>.</p>
+<p><strong>Batch verification not exposed.</strong> This precompile verifies one signature per call. Consumers that need batch verification (e.g., light clients ingesting a consensus quorum) MUST batch at the application layer or rely on a future batched-verify WIP. Single-signature verification under ZIP-215 is, however, batch-equivalent: any signature accepted singly is accepted in a batch.</p>
+<p><strong>Side channels.</strong> Verification handles only public data; constant-time implementation is not required for correctness. Implementations SHOULD still use constant-time field arithmetic to remain consistent with their underlying curve library and to avoid surprising callers who later use the same library on secret data.</p>
+<p><strong>Restricted validation frames.</strong> When called from a WIP-1001 session verifier inside a restricted frame, the precompile’s <code>STATICCALL</code> MUST be the only externally-visible effect; it has no storage, no logs, and no nested calls, so it satisfies the WIP-1001 tracer rules by construction. The precompile MUST NOT be modified to read block context, account state, or any external mutable input.</p>
+<p><strong>Gas-cost calibration.</strong> Underpriced verification is a DoS vector. The recommended values in <a href="#constants">Constants</a> MUST be re-benchmarked on representative consensus-client hardware before activation, and adjusted upward if Ed25519 verification proves slower than the priced cost on the slowest supported client.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../flashblocks/p2p.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../wips/wip-1003.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../pbh/overview.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../wips/wip-1005.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -368,11 +323,11 @@ else:
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../flashblocks/p2p.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../wips/wip-1003.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../pbh/overview.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../wips/wip-1005.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

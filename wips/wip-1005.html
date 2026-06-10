@@ -1,0 +1,1318 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>WIP-1005: Proof System Upgrade - World Chain Specs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-0392ca55.css">
+        <link rel="stylesheet" href="../css/chrome-fc474251.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+        <!-- MathJax -->
+        <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex-dce329de.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-a26f203c.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">World Chain Specs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <p><strong>All numbers in the document for time windows and ETH values are not calculated. They are just put as templates with more/less appropriate order of magnitude.</strong></p>
+<h2 id="abstract"><a class="header" href="#abstract">Abstract</a></h2>
+<p>World Chain currently runs a permissioned Cannon-based fault proof system (<code>game-type=1</code>) with <code>op-proposer</code> posting output roots every 20 minutes. This WIP evaluates different proof system options to upgrade the fault proof mechanism using ZKP or TEE technologies that are compatible with OP Stack dispute games.</p>
+<h2 id="motivation"><a class="header" href="#motivation">Motivation</a></h2>
+<p>The current Cannon-based system has several limitations:</p>
+<ul>
+<li>7-day challenge window required to safely accommodate the interactive bisection game</li>
+<li>Large bond requirements (hundreds of ETH at mainnet scale) to deter adversarial challenges</li>
+<li>Multi-round interactive bisection game: ~30–40 on-chain transactions per dispute</li>
+<li>Game-theoretic security only — requires an honest party to be watching and able to respond within each bisection round</li>
+</ul>
+<p>The goal is to upgrade to a proof system that:</p>
+<ul>
+<li>Reduces the challenge window to ~1 day</li>
+<li>Reduces bond requirements to 5–15 ETH</li>
+<li>Eliminates the multi-round interactive bisection game</li>
+</ul>
+<h2 id="specification"><a class="header" href="#specification">Specification</a></h2>
+<h3 id="zk-options-zkvms--compatible-with-op-stack-dispute-games"><a class="header" href="#zk-options-zkvms--compatible-with-op-stack-dispute-games">ZK Options (zkVMs — compatible with OP Stack dispute games)</a></h3>
+<hr>
+<h4 id="option-1-op-succinct-lite-sp1-zkvm"><a class="header" href="#option-1-op-succinct-lite-sp1-zkvm">Option 1: OP Succinct Lite (SP1 zkVM)</a></h4>
+<p>OP Succinct Lite replaces the interactive bisection game with a single ZK proof generated only when a dispute occurs. The chain runs optimistically by default — no proving cost on the happy path.</p>
+<h5 id="proof-pipeline"><a class="header" href="#proof-pipeline">Proof pipeline</a></h5>
+<pre><code>L2 blocks (proposal range)
+  │
+  ├─ split into N sub-ranges (RANGE_SPLIT_COUNT)
+  │
+  ├─ parallel range proofs via Succinct Prover Network
+  │    world-chain-range-ethereum ELF runs in SP1 zkVM (RISC-V)
+  │    produces: compressed STARK proof per range
+  │
+  └─ aggregation proof
+       world-chain-aggregation ELF verifies all range proofs
+       produces: single Groth16/Plonk SNARK
+         │
+         └─ game.prove(agg_proof.bytes()) → L1 tx
+              SP1_VERIFIER.verifyProof(AGGREGATION_VKEY, publicValues, proofBytes)
+</code></pre>
+<h5 id="program-identity-keys"><a class="header" href="#program-identity-keys">Program identity (keys)</a></h5>
+<ul>
+<li><code>aggregation_vkey</code> — SP1 verifying key, deterministic fingerprint of <code>world-chain-aggregation</code> ELF</li>
+<li><code>range_vkey_commitment</code> — SP1 verifying key commitment for <code>world-chain-range-ethereum</code> ELF</li>
+<li><code>rollup_config_hash</code> — SHA-256 of Kona <code>RollupConfig</code> + World-specific <code>tropo_time</code> + <code>strato_time</code></li>
+</ul>
+<p>All three MUST match between the deployed contract and the running proposer, or games are classified as foreign and will not be proven.</p>
+<h5 id="world-specific-changes-vs-upstream-op-succinct"><a class="header" href="#world-specific-changes-vs-upstream-op-succinct">World-specific changes vs upstream OP Succinct</a></h5>
+<ul>
+<li>Replace ELF imports with <code>world-chain-proof-succinct-elfs</code></li>
+<li>Replace <code>hash_rollup_config(...)</code> with World hash helper (appends <code>tropo_time</code> and <code>strato_time</code>)</li>
+<li>Replace ETH witness generation with World witness data carrying the hardfork schedule</li>
+</ul>
+<h5 id="dispute-flow"><a class="header" href="#dispute-flow">Dispute flow</a></h5>
+<pre><code>Proposer posts output root (no proof required)
+  │
+  │  challenge window (~1 day)
+  │
+  ├─ No challenge → DEFENDER_WINS  (no proof ever needed)
+  │
+  └─ Challenger calls challenge() + bond
+       │
+       Proposer requests ZK proof from Succinct Network (minutes–hours)
+       Proposer calls prove(proofBytes)
+         │
+         ├─ proof valid → DEFENDER_WINS
+         └─ proof missing/invalid by deadline → CHALLENGER_WINS
+</code></pre>
+<h5 id="properties"><a class="header" href="#properties">Properties</a></h5>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Property</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Trust root</td><td>Cryptographic (SP1 zkVM math)</td></tr>
+<tr><td>Challenge window</td><td>~1 day</td></tr>
+<tr><td>Bond size</td><td>5–15 ETH</td></tr>
+<tr><td>Proof generated</td><td>Only on dispute</td></tr>
+<tr><td>On-chain verification gas</td><td>~300k gas (Groth16 pairing check)</td></tr>
+<tr><td>AWS dependency</td><td>None</td></tr>
+<tr><td>Hardware dependency</td><td>None</td></tr>
+<tr><td>Prover network dependency</td><td>Succinct Prover Network</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h4 id="option-2-risc-zero-zkvm-boundless--op-risc0"><a class="header" href="#option-2-risc-zero-zkvm-boundless--op-risc0">Option 2: RISC Zero zkVM (Boundless / op-risc0)</a></h4>
+<p>RISC Zero’s Zeth proves the OP Stack state transition inside the RISC Zero RISC-V zkVM. Like SP1, it runs <code>op-program</code> (Kona) as a RISC-V ELF and produces a STARK proof compressed to a Groth16 SNARK for on-chain verification. RISC Zero offers both a managed proving network (Bonsai / Boundless) and self-hosted provers.</p>
+<h5 id="key-differences-vs-sp1"><a class="header" href="#key-differences-vs-sp1">Key differences vs SP1</a></h5>
+<ul>
+<li><strong>Prover flexibility</strong>: RISC Zero supports self-hosted proving clusters, reducing dependency on an external prover network.</li>
+<li><strong>Continuations</strong>: RISC Zero uses a segment/continuation model for long-running programs; SP1 uses a range-split model. Both handle the full EVM transition.</li>
+<li><strong>Circuit audit maturity</strong>: SP1 has a production OP Stack integration (<code>op-succinct</code>); RISC Zero’s <code>op-risc0</code> is at a similar stage but less field-tested on OP Stack.</li>
+<li><strong>Proof system</strong>: RISC Zero uses FRI-based STARKs (Plonky2/Plonky3) internally; final on-chain proof is Groth16 or Plonk (~300k gas).</li>
+<li><strong>Verifying key</strong>: <code>imageId</code> (SHA-256 of the guest ELF) plays the same role as SP1’s <code>aggregation_vkey</code>.</li>
+</ul>
+<h5 id="properties-1"><a class="header" href="#properties-1">Properties</a></h5>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Property</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Trust root</td><td>Cryptographic (RISC Zero zkVM math)</td></tr>
+<tr><td>Challenge window</td><td>~1 day</td></tr>
+<tr><td>Bond size</td><td>5–15 ETH</td></tr>
+<tr><td>Proof generated</td><td>Only on dispute</td></tr>
+<tr><td>On-chain verification gas</td><td>~300k gas (Groth16)</td></tr>
+<tr><td>AWS dependency</td><td>None</td></tr>
+<tr><td>Hardware dependency</td><td>None (GPU-accelerated prover recommended)</td></tr>
+<tr><td>Prover network dependency</td><td>Bonsai/Boundless (optional; self-host possible)</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h4 id="option-3-jolt-zkvm-a16z"><a class="header" href="#option-3-jolt-zkvm-a16z">Option 3: Jolt zkVM (a16z)</a></h4>
+<p>Jolt is a RISC-V zkVM developed by a16z crypto research, based on sumcheck-based lookup arguments (Lasso + Jolt). It is currently at research/early-prototype stage and does not yet have a production OP Stack integration, but the RISC-V architecture is compatible in principle.</p>
+<h5 id="key-characteristics"><a class="header" href="#key-characteristics">Key characteristics</a></h5>
+<ul>
+<li><strong>Novel proof system</strong>: Uses a sumcheck + multilinear polynomial approach rather than FRI-based STARKs. Potentially faster proving for certain workloads.</li>
+<li><strong>No production OP Stack integration yet</strong>: No published <code>op-jolt</code> equivalent exists as of this writing.</li>
+<li><strong>On-chain verification</strong>: Hyperplonk/HyperKZG-based verifier; on-chain gas costs not yet characterised for OP Stack use.</li>
+<li><strong>Maturity</strong>: Significantly less mature than SP1 or RISC Zero. Not recommended for near-term deployment.</li>
+</ul>
+<h5 id="properties-2"><a class="header" href="#properties-2">Properties</a></h5>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Property</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Trust root</td><td>Cryptographic (Jolt proof system)</td></tr>
+<tr><td>Challenge window</td><td>~1 day</td></tr>
+<tr><td>Proof generated</td><td>Only on dispute</td></tr>
+<tr><td>On-chain verification gas</td><td>TBD (HyperKZG verifier)</td></tr>
+<tr><td>OP Stack integration</td><td>❌ Not available</td></tr>
+<tr><td>Maturity</td><td>🔬 Research / early prototype</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h3 id="tee-options"><a class="header" href="#tee-options">TEE Options</a></h3>
+<hr>
+<h4 id="option-4-aws-nitro-enclaves"><a class="header" href="#option-4-aws-nitro-enclaves">Option 4: AWS Nitro Enclaves</a></h4>
+<p>The L2 state transition function runs inside an AWS Nitro Enclave — a hypervisor-isolated VM partitioned from the parent EC2 instance. The Nitro Hypervisor signs an attestation document proving that a specific program (identified by PCR measurements) produced a specific output.</p>
+<h5 id="attestation-pipeline"><a class="header" href="#attestation-pipeline">Attestation pipeline</a></h5>
+<pre><code>L2 blocks + previous state root
+  │
+  └─ load into Nitro Enclave (isolated VM, no external network, no storage)
+       │
+       state transition function runs natively at full CPU speed
+       computes: new_state_root
+         │
+         └─ request attestation from Nitro Hypervisor
+              {
+                PCR0: SHA384(enclave image),    ← program fingerprint
+                PCR1: SHA384(kernel),
+                PCR2: SHA384(application),
+                user_data: new_state_root,       ← the output
+              }
+              signed with P-384 ECDSA by AWS Nitro PKI
+                │
+                └─ post attestation doc on-chain
+                     L1 contract verifies:
+                       - AWS PKI cert chain
+                       - PCR0 matches expected image hash
+                       - output_root extracted from user_data
+</code></pre>
+<h5 id="properties-3"><a class="header" href="#properties-3">Properties</a></h5>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Property</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Trust root</td><td>AWS (owns attestation key + infrastructure)</td></tr>
+<tr><td>Challenge window</td><td>Could be ~1 hour</td></tr>
+<tr><td>Bond size</td><td>Low</td></tr>
+<tr><td>On-chain verification gas</td><td>~21k gas (ECDSA signature check)</td></tr>
+<tr><td>AWS dependency</td><td><strong>Hard dependency on AWS</strong></td></tr>
+<tr><td>Hardware dependency</td><td>AWS Nitro Security Chip</td></tr>
+</tbody>
+</table>
+</div>
+<h5 id="risks"><a class="header" href="#risks">Risks</a></h5>
+<ul>
+<li><strong>Single trust point</strong>: AWS owns both the attestation key and the infrastructure. A compromised or malicious AWS invalidates all proofs.</li>
+<li><strong>Not Intel SGX</strong>: AWS Nitro uses hypervisor-based isolation, not CPU memory encryption. AWS disables Intel SGX at the BIOS level on all EC2 instances.</li>
+<li><strong>Certificate expiry</strong>: AWS Nitro attestation certificates expire after 3 hours, requiring active rotation.</li>
+</ul>
+<hr>
+<h4 id="option-5-intel-sgx-tee"><a class="header" href="#option-5-intel-sgx-tee">Option 5: Intel SGX TEE</a></h4>
+<p>Intel SGX (Software Guard Extensions) is a CPU-level TEE. The state transition function runs inside an SGX enclave — a private memory region that is hardware-encrypted and isolated from the OS, hypervisor, and root users. Intel’s Provisioning Certification Service (PCS) signs attestation quotes.</p>
+<p><strong>Note: Intel SGX is not available on AWS.</strong> It requires Azure DC-series instances, IBM Cloud bare metal, or physical Intel Skylake/Ice Lake hardware with SGX enabled in BIOS.</p>
+<h5 id="attestation-pipeline-1"><a class="header" href="#attestation-pipeline-1">Attestation pipeline</a></h5>
+<pre><code>L2 blocks + previous state root
+  │
+  └─ load into SGX enclave (CPU-encrypted memory region)
+       │
+       state transition function runs natively
+       computes: new_state_root
+         │
+         └─ generate SGX quote (DCAP attestation)
+              {
+                MRENCLAVE: SHA256(enclave code + data),  ← program fingerprint
+                MRSIGNER:  SHA256(enclave signing key),
+                report_data: new_state_root,              ← the output
+              }
+              signed by Intel Provisioning Certification Key (PCK)
+                │
+                └─ post quote on-chain
+                     Automata DCAP contracts verify on-chain:
+                       - PCK cert chain back to Intel root CA
+                       - MRENCLAVE matches expected value
+                       - report_data extracted as new state root
+</code></pre>
+<h5 id="properties-4"><a class="header" href="#properties-4">Properties</a></h5>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Property</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Trust root</td><td>Intel (attestation key) + operator (hardware)</td></tr>
+<tr><td>Challenge window</td><td>Could be ~1 hour</td></tr>
+<tr><td>Bond size</td><td>Low</td></tr>
+<tr><td>On-chain verification gas</td><td>~30k–300k gas (DCAP; SNARK-compressed via Automata)</td></tr>
+<tr><td>AWS dependency</td><td>None (but requires Azure/IBM/bare metal)</td></tr>
+<tr><td>Hardware dependency</td><td>Intel CPU with SGX enabled</td></tr>
+</tbody>
+</table>
+</div>
+<h5 id="risks-1"><a class="header" href="#risks-1">Risks</a></h5>
+<ul>
+<li><strong>Intel trust</strong>: Intel owns the PCK signing key. Side-channel attacks (Spectre, Plundervolt, SGAxe, Foreshadow) have repeatedly compromised SGX enclaves.</li>
+<li><strong>Not on AWS</strong>: Requires migrating proposer/sequencer infra to Azure or bare metal.</li>
+<li><strong>EPC memory limits</strong>: SGX1 limits enclave memory to ~256 MB; full L2 STF may exceed this. SGX2 (EDMM) and multi-enclave sharding partially mitigate this.</li>
+<li><strong>Maintenance burden</strong>: Regular TCB recovery updates required as Intel patches microcode.</li>
+</ul>
+<hr>
+<h4 id="option-6-amd-sev-snp-tee"><a class="header" href="#option-6-amd-sev-snp-tee">Option 6: AMD SEV-SNP TEE</a></h4>
+<p>AMD Secure Encrypted Virtualization — Secure Nested Paging (SEV-SNP) is a CPU-level TEE that isolates full VMs (rather than individual enclaves like SGX). Memory pages are encrypted with a VM-unique key managed by the AMD Secure Processor. SEV-SNP adds memory integrity protection and a hardware-attested measurement of the entire VM image.</p>
+<h5 id="attestation-pipeline-2"><a class="header" href="#attestation-pipeline-2">Attestation pipeline</a></h5>
+<pre><code>L2 blocks + previous state root
+  │
+  └─ load into SEV-SNP VM (full VM, hardware memory-encrypted)
+       │
+       state transition function runs natively at full VM speed
+       computes: new_state_root
+         │
+         └─ generate SNP attestation report
+              {
+                MEASUREMENT: SHA384(VM launch digest),  ← program fingerprint
+                HOST_DATA: new_state_root,               ← the output
+                VMPL: privilege level of requesting vCPU
+              }
+              signed by AMD VCEK (Versioned Chip Endorsement Key)
+              cert chain: VCEK → AMD ASK → AMD ARK (root CA)
+                │
+                └─ post attestation report on-chain
+                     L1 contract verifies:
+                       - AMD cert chain
+                       - MEASUREMENT matches expected VM digest
+                       - HOST_DATA extracted as new state root
+</code></pre>
+<h5 id="properties-5"><a class="header" href="#properties-5">Properties</a></h5>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Property</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Trust root</td><td>AMD (VCEK attestation key)</td></tr>
+<tr><td>Challenge window</td><td>Could be ~1 hour</td></tr>
+<tr><td>Bond size</td><td>Low</td></tr>
+<tr><td>On-chain verification gas</td><td>~30k–200k gas (ECDSA + cert chain; SNARK-compression possible)</td></tr>
+<tr><td>AWS dependency</td><td>None</td></tr>
+<tr><td>Hardware dependency</td><td>AMD EPYC Milan/Genoa CPU (Azure Mnn/NCC, Google Cloud C2D, Equinix bare metal)</td></tr>
+<tr><td>Cloud availability</td><td>Azure (NCC v5 with SEV-SNP), Google Cloud, Equinix</td></tr>
+</tbody>
+</table>
+</div>
+<h5 id="risks-2"><a class="header" href="#risks-2">Risks</a></h5>
+<ul>
+<li><strong>AMD trust</strong>: AMD owns the VCEK signing key. Unlike SGX, AMD SEV-SNP has fewer published side-channel exploits, but the attack surface of a full VM TEE is broader than a CPU enclave.</li>
+<li><strong>VCEK cert rotation</strong>: VCEK certificates are versioned per TCB level and must be refreshed after firmware updates.</li>
+<li><strong>No AWS support</strong>: AWS does not expose AMD SEV-SNP to tenants (analogous to the SGX situation).</li>
+<li><strong>On-chain verifier</strong>: No widely-deployed production on-chain AMD SNP verifier exists yet; would require custom development or adaptation of existing work.</li>
+</ul>
+<hr>
+<h4 id="option-7-intel-tdx-tee"><a class="header" href="#option-7-intel-tdx-tee">Option 7: Intel TDX TEE</a></h4>
+<p>Intel Trust Domain Extensions (TDX) is Intel’s VM-level TEE — the conceptual successor to SGX but for full VMs rather than per-process enclaves. TDX Trust Domains (TDs) are hardware-isolated VMs with encrypted memory and CPU state. Attestation uses the same DCAP infrastructure as SGX.</p>
+<h5 id="key-characteristics-1"><a class="header" href="#key-characteristics-1">Key characteristics</a></h5>
+<ul>
+<li><strong>Full VM isolation</strong>: No EPC memory limits; the full state transition function runs inside the VM without SGX’s ~256 MB enclave restriction.</li>
+<li><strong>Same attestation infrastructure as SGX</strong>: TDX attestation quotes use the same PCK cert chain and DCAP verification flow as SGX, enabling reuse of Automata-style on-chain verifiers.</li>
+<li><strong>Cloud availability</strong>: Intel TDX VMs are available on Azure (DCesv5/DCedsv5 series), Google Cloud (C3 with TDX), and Alibaba Cloud.</li>
+<li><strong>MRTD measurement</strong>: The VM launch measurement (<code>MRTD</code>) plays the same role as SGX’s <code>MRENCLAVE</code>.</li>
+<li><strong>Not available on AWS</strong>: Same constraint as SGX.</li>
+</ul>
+<h5 id="properties-6"><a class="header" href="#properties-6">Properties</a></h5>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Property</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Trust root</td><td>Intel (PCK attestation key)</td></tr>
+<tr><td>Challenge window</td><td>Could be ~1 hour</td></tr>
+<tr><td>Bond size</td><td>Low</td></tr>
+<tr><td>On-chain verification gas</td><td>~30k–300k gas (DCAP; reuses SGX verifier stack)</td></tr>
+<tr><td>AWS dependency</td><td>None (requires Azure/GCP/Alibaba)</td></tr>
+<tr><td>Hardware dependency</td><td>Intel 4th-gen Xeon Scalable (Sapphire Rapids) or later</td></tr>
+<tr><td>Cloud availability</td><td>Azure DCesv5, Google Cloud C3 TDX</td></tr>
+</tbody>
+</table>
+</div>
+<h5 id="risks-3"><a class="header" href="#risks-3">Risks</a></h5>
+<ul>
+<li><strong>Intel trust</strong>: Same Intel PKI trust assumption as SGX.</li>
+<li><strong>Newer / less battle-tested</strong>: TDX is more recent than SGX; fewer published attacks but also less third-party review.</li>
+<li><strong>Not on AWS</strong>: Infra migration required.</li>
+</ul>
+<hr>
+<h3 id="comparison"><a class="header" href="#comparison">Comparison</a></h3>
+<h4 id="dispute-game--trust-model"><a class="header" href="#dispute-game--trust-model">Dispute Game &amp; Trust Model</a></h4>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Option</th><th>Type</th><th>Dispute Game Suitability</th><th>Validity Proof Suitability</th><th>Trust Assumption</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>SP1 (OP Succinct Lite)</strong></td><td>zkVM</td><td>✅ Yes — production OP Stack integration</td><td>✅ Yes (can also run as validity prover)</td><td>Math only (cryptographic soundness)</td></tr>
+<tr><td><strong>RISC Zero</strong></td><td>zkVM</td><td>✅ Yes — op-risc0 available</td><td>✅ Yes</td><td>Math only</td></tr>
+<tr><td><strong>Jolt</strong></td><td>zkVM</td><td>⚠️ In principle yes, no OP Stack integration yet</td><td>⚠️ In principle</td><td>Math only</td></tr>
+<tr><td><strong>AWS Nitro</strong></td><td>TEE</td><td>✅ Yes</td><td>❌ No (not a proof; attestation only)</td><td>Hardware (trust AWS)</td></tr>
+<tr><td><strong>Intel SGX</strong></td><td>TEE</td><td>✅ Yes</td><td>❌ No</td><td>Hardware (trust Intel)</td></tr>
+<tr><td><strong>AMD SEV-SNP</strong></td><td>TEE</td><td>✅ Yes</td><td>❌ No</td><td>Hardware (trust AMD)</td></tr>
+<tr><td><strong>Intel TDX</strong></td><td>TEE</td><td>✅ Yes</td><td>❌ No</td><td>Hardware (trust Intel)</td></tr>
+</tbody>
+</table>
+</div>
+<h4 id="speed-cost-and-world-chain-fit"><a class="header" href="#speed-cost-and-world-chain-fit">Speed, Cost, and World Chain Fit</a></h4>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Option</th><th>Proof/Attest Time</th><th>On-chain Gas</th><th>Challenge Window</th><th>Happy Path Cost</th><th>World Chain Fit</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>SP1 (OP Succinct Lite)</strong></td><td>Minutes–hours (Succinct Network)</td><td>~300k (Groth16)</td><td>~1 day</td><td>$0</td><td>✅ <strong>Best ZK option</strong> — production integration, no AWS lock-in</td></tr>
+<tr><td><strong>RISC Zero</strong></td><td>Minutes–hours (Bonsai or self-hosted)</td><td>~300k (Groth16)</td><td>~1 day</td><td>$0</td><td>✅ Good alternative — self-hosted proving reduces external dependency</td></tr>
+<tr><td><strong>Jolt</strong></td><td>TBD</td><td>TBD</td><td>~1 day</td><td>$0</td><td>🔬 Research only — not ready for production</td></tr>
+<tr><td><strong>AWS Nitro</strong></td><td>Seconds–minutes</td><td>~21k (ECDSA)</td><td>~1 hour</td><td>$0</td><td>✅ <strong>Best TEE option</strong> — minimal infra change, already on AWS</td></tr>
+<tr><td><strong>Intel SGX</strong></td><td>Seconds–minutes</td><td>~30k–300k (DCAP)</td><td>~1 hour</td><td>$0</td><td>⚠️ Requires Azure/bare metal migration</td></tr>
+<tr><td><strong>AMD SEV-SNP</strong></td><td>Seconds–minutes</td><td>~30k–200k</td><td>~1 hour</td><td>$0</td><td>⚠️ Requires Azure/GCP; no production on-chain verifier</td></tr>
+<tr><td><strong>Intel TDX</strong></td><td>Seconds–minutes</td><td>~30k–300k</td><td>~1 hour</td><td>$0</td><td>⚠️ Requires Azure/GCP; newer, less battle-tested</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="backwards-compatibility"><a class="header" href="#backwards-compatibility">Backwards Compatibility</a></h2>
+<p>Introducing a new <code>game-type=42</code> is additive. The existing Cannon challenger (<code>game-type=1</code>) (with Optimism upgrade 19 Cannon Kona challenger <code>game-type=8</code>) continues to operate in parallel and MUST NOT be decommissioned until the ZK game type is deployed, funded, and producing verified games on devnet.</p>
+<h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
+<h3 id="zk-options-sp1-risc-zero-jolt"><a class="header" href="#zk-options-sp1-risc-zero-jolt">ZK Options (SP1, RISC Zero, Jolt)</a></h3>
+<ul>
+<li>The verifying key (<code>aggregation_vkey</code> for SP1, <code>imageId</code> for RISC Zero) deployed in the contract MUST exactly match the values used by the running proposer. A mismatch causes the proposer to classify games as foreign and refuse to prove them, leaving valid proposals vulnerable to challenger wins.</li>
+<li>The <code>CHALLENGER_BOND</code> MUST be set high enough to make spam challenges economically irrational (recommended: at least 10× the cost to generate one proof).</li>
+<li>The <code>tropo_time</code> and <code>strato_time</code> hardfork timestamps MUST be finalised before deploying contracts — the <code>rollup_config_hash</code> is derived from these values and cannot be changed post-deployment without redeployment.</li>
+<li>Proof generation relies on an external prover network (Succinct / Bonsai). Availability risk should be mitigated via <code>MAX_PROVE_DURATION</code> being set conservatively and a fallback mock-mode tested on devnet. Self-hosted proving for RISC Zero mitigates this.</li>
+</ul>
+<h3 id="tee-options-aws-nitro-intel-sgx-amd-sev-snp-intel-tdx"><a class="header" href="#tee-options-aws-nitro-intel-sgx-amd-sev-snp-intel-tdx">TEE Options (AWS Nitro, Intel SGX, AMD SEV-SNP, Intel TDX)</a></h3>
+<ul>
+<li>All TEE options introduce a trust dependency on the hardware vendor’s PKI. Compromise of the vendor’s attestation key allows forging arbitrary state roots.</li>
+<li>TEE enclaves and VMs have a history of side-channel vulnerabilities. Any production deployment requires a thorough security audit and an ongoing TCB update process.</li>
+<li>AWS Nitro certificates expire after 3 hours and must be actively rotated.</li>
+<li>Intel SGX’s EPC memory limit (~256 MB) may be insufficient for the full L2 state transition function without sharding.</li>
+</ul>
+<hr>
+<h2 id="threshold-multi-proof--multi-attestation-system"><a class="header" href="#threshold-multi-proof--multi-attestation-system">Threshold Multi-Proof / Multi-Attestation System</a></h2>
+<p>The single-prover options above each provide a significant improvement over the current Cannon-based system, but they each carry a single point of failure — whether that is a cryptographic bug in one zkVM, a hardware vendor’s PKI, or a prover-network outage. This section describes a <strong>threshold multi-proof architecture</strong> that layers two or more of the proof systems described above into an N-of-M pool, so that no single system’s failure or compromise is sufficient to accept a fraudulent state root or to halt the chain.</p>
+<h3 id="overview"><a class="header" href="#overview">Overview</a></h3>
+<pre><code>                      ┌─────────────────────────────────────────────────┐
+                      │            ProofAggregator (L1)                  │
+                      │                                                   │
+  SP1 prover ─────────┤→ submitProof(gameId, PROVER_SP1, proofBytes)     │
+  RISC Zero prover ───┤→ submitProof(gameId, PROVER_RISCZ, proofBytes)   │
+  SGX prover ─────────┤→ submitAttestation(gameId, PROVER_SGX, quote)    │
+                      │                                                   │
+                      │  validCount = sum of accepted submissions         │
+                      │                                                   │
+                      │  validCount ≥ ⌈2N/3⌉  → ACCEPT  (happy path)    │
+                      │  ⌈N/3⌉ ≤ validCount &lt; ⌈2N/3⌉ → COUNCIL REVIEW  │
+                      │  validCount &lt; ⌊N/3⌋  → REJECT                   │
+                      └─────────────────────────────────────────────────┘
+</code></pre>
+<p>With the reference configuration of <strong>N = 3</strong> provers (SP1 + RISC Zero + Intel SGX), the thresholds are:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>validCount</th><th>Outcome</th></tr>
+</thead>
+<tbody>
+<tr><td>3</td><td>✅ Auto-accepted (happy path, all agree)</td></tr>
+<tr><td>2</td><td>✅ Auto-accepted (2-of-3 threshold met)</td></tr>
+<tr><td>1</td><td>🔶 Security Council review window opens</td></tr>
+<tr><td>0</td><td>❌ Auto-rejected</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h3 id="81-happy-path--23-threshold"><a class="header" href="#81-happy-path--23-threshold">8.1 Happy Path — 2/3 Threshold</a></h3>
+<p>When <strong>at least 2 of 3</strong> provers submit valid proofs/attestations for the same output root within the challenge window, the <code>ProofAggregator</code> automatically marks the game as <code>DEFENDER_WINS</code> and no human intervention is required. The sequencer can then proceed with state root finalisation.</p>
+<p><strong>Why 2/3?</strong> A threshold strictly greater than half is a standard requirement for Byzantine fault tolerance: an attacker controlling fewer than 1/3 of the pool cannot unilaterally cause acceptance of a fraudulent root. Requiring a simple majority (1/2) would mean that compromising just one additional prover beyond 50 % is sufficient; the 2/3 threshold requires compromising two independent systems simultaneously, which is substantially harder.</p>
+<p><strong>Economic security</strong>: An attacker attempting to submit a fraudulent state root must:</p>
+<ol>
+<li>Break the soundness of at least two zkVM proof systems (SP1 + RISC Zero), <strong>or</strong></li>
+<li>Break one zkVM system and exploit the SGX hardware attestation chain, <strong>or</strong></li>
+<li>Compromise the Security Council without triggering a timely response.</li>
+</ol>
+<p>Each of these requires defeating fundamentally different security assumptions (cryptographic soundness vs hardware vendor PKI vs human governance), making simultaneous compromise extremely unlikely.</p>
+<hr>
+<h3 id="82-security-council-fallback--between-13-and-23"><a class="header" href="#82-security-council-fallback--between-13-and-23">8.2 Security Council Fallback — Between 1/3 and 2/3</a></h3>
+<p>If <strong>exactly 1 of 3</strong> provers submits a valid proof within the challenge window, the <code>ProofAggregator</code> enters a <strong>council review period</strong> (recommended: 72 hours) rather than auto-rejecting.</p>
+<p>This situation is expected to occur legitimately when:</p>
+<ul>
+<li>One prover network (e.g. Succinct) is temporarily offline or degraded.</li>
+<li>One zkVM has a known bug that is actively being patched.</li>
+<li>One TEE platform has an expired TCB update pending from the hardware vendor.</li>
+<li>A new prover is being added to the pool and has not yet generated its first proof.</li>
+</ul>
+<p>In each of these cases, auto-rejection would halt chain progress unnecessarily. The Security Council exists to distinguish a <strong>liveness failure</strong> (one prover is down) from a <strong>safety failure</strong> (two provers are producing conflicting results).</p>
+<h4 id="security-council-composition"><a class="header" href="#security-council-composition">Security Council Composition</a></h4>
+<p>The Security Council is an on-chain multisig (e.g. <code>SafeMultisig</code>) controlled by a set of trusted entities.</p>
+<p>A <strong>3-of-5</strong> or <strong>4-of-7</strong> approval threshold within the council is recommended. Larger councils reduce coup risk at the cost of slower response time; the 72-hour review window should be calibrated to the council’s expected decision latency.</p>
+<h4 id="council-decision-time-lock"><a class="header" href="#council-decision-time-lock">Council Decision Time-lock</a></h4>
+<p>Council approval does <strong>not</strong> take effect immediately. A <strong>24-hour time-lock</strong> is enforced on-chain between a council vote and state root finalisation. This gives the broader community a window to:</p>
+<ul>
+<li>Observe the pending council action.</li>
+<li>Issue an emergency veto if the council is acting maliciously or under duress.</li>
+<li>Coordinate a client-level soft-fork if necessary.</li>
+</ul>
+<p>The time-lock contract should allow a <strong>guardian</strong> (a separate cold-key multisig) to cancel a pending council action within the lock period.</p>
+<h4 id="council-governance"><a class="header" href="#council-governance">Council Governance</a></h4>
+<ul>
+<li>Council seats are held for fixed terms (e.g. 12 months) and are renewable.</li>
+<li>Seat changes require an on-chain governance vote (World ID-gated or token-gated, per the chain’s governance model at the time of deployment).</li>
+<li>Council members are expected to publish public rationale for any approval or rejection decision in the council review period. Decisions are permanently recorded on-chain.</li>
+<li>If the council fails to reach a quorum within the review window, the disputed game defaults to <strong>rejection</strong> to preserve safety.</li>
+</ul>
+<p>We already have a Security Council that can be used.</p>
+<hr>
+<h3 id="83-automatic-rejection---13-valid"><a class="header" href="#83-automatic-rejection---13-valid">8.3 Automatic Rejection — &lt; 1/3 Valid</a></h3>
+<p>If <strong>zero provers</strong> agree on the proposed state root, the output is immediately and automatically rejected. This is the expected outcome when:</p>
+<ul>
+<li>The proposer has submitted a fraudulent root.</li>
+<li>The proposer’s client software has a critical bug that produces an incorrect output.</li>
+<li>A re-org has occurred and the root no longer corresponds to the canonical chain.</li>
+</ul>
+<p>No council intervention is permitted in this state. Automatic rejection prevents the council from being used as a mechanism to push through fraudulent state roots even if the council is fully compromised.</p>
+<hr>
+<h3 id="84-n-of-m-proof-pool-design"><a class="header" href="#84-n-of-m-proof-pool-design">8.4 N-of-M Proof Pool Design</a></h3>
+<p>The proof pool is defined by an ordered list of <code>(proverId, verifierAddress, weight)</code> tuples stored in the <code>ProofAggregator</code> contract. The recommended initial pool:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>ID</th><th>System</th><th>Verifier</th><th>Type</th></tr>
+</thead>
+<tbody>
+<tr><td><code>PROVER_SP1</code></td><td>SP1 (OP Succinct Lite)</td><td><code>SP1Verifier</code> (deployed)</td><td>zkVM</td></tr>
+<tr><td><code>PROVER_RISCZ</code></td><td>RISC Zero</td><td><code>RiscZeroGroth16Verifier</code></td><td>zkVM</td></tr>
+<tr><td><code>PROVER_SGX</code></td><td>Intel SGX (via Automata DCAP)</td><td><code>AutomataDcapAttestation</code></td><td>TEE</td></tr>
+</tbody>
+</table>
+</div>
+<p>Each prover submits its result independently. The <code>ProofAggregator</code> verifies each submission against its registered verifier contract before incrementing <code>validCount</code>. Submissions arriving after the challenge window are discarded.</p>
+<p><strong>Combining zkVM and TEE provers is intentional.</strong> The two categories have orthogonal trust assumptions: breaking a zkVM proof requires finding a mathematical soundness flaw, while breaking a TEE attestation requires compromising vendor PKI or hardware. An attacker capable of doing one is unlikely to be capable of doing both.</p>
+<hr>
+<h3 id="85-liveness-vs-safety-tradeoff"><a class="header" href="#85-liveness-vs-safety-tradeoff">8.5 Liveness vs Safety Tradeoff</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Scenario</th><th>validCount</th><th>Outcome</th><th>Analysis</th></tr>
+</thead>
+<tbody>
+<tr><td>All provers healthy</td><td>3</td><td>Accept</td><td>Best case; no council needed</td></tr>
+<tr><td>One prover down (liveness failure)</td><td>2</td><td>Accept</td><td>Happy path still clears; chain unaffected</td></tr>
+<tr><td>Two provers down</td><td>1</td><td>Council review</td><td>Rare; council distinguishes outage from attack</td></tr>
+<tr><td>All provers down</td><td>0</td><td>Reject</td><td>Halt confirmations of state root on L1 <em>*</em>; emergency recovery required</td></tr>
+<tr><td>One prover compromised (attacker injects false root)</td><td>At most 1 valid for correct root</td><td>Council review or Reject</td><td>Attacker cannot force acceptance</td></tr>
+<tr><td>Two provers compromised</td><td>2 “valid” for fraudulent root</td><td>⚠️ Accept (attack success)</td><td>Requires simultaneous compromise of 2 independent systems</td></tr>
+</tbody>
+</table>
+</div>
+<p>The 2/3 threshold means the system tolerates <strong>up to 1 prover failure</strong> without losing liveness, and requires an attacker to compromise <strong>at least 2 independent systems</strong> to achieve a safety failure. This matches the standard BFT fault-tolerance guarantee (tolerate ⌊(N−1)/3⌋ = 1 Byzantine fault for N = 3).</p>
+<p><em>* We can also halt chain.</em></p>
+<hr>
+<h3 id="86-comparison-with-taikos-multi-prover-model"><a class="header" href="#86-comparison-with-taikos-multi-prover-model">8.6 Comparison with Taiko’s Multi-Prover Model</a></h3>
+<p>Taiko’s <a href="https://taiko.mirror.xyz/Y_ZrVlfTCcAh0cXHsJSIVWD9EoJATN5A0mVkJPiMON4">TEE Prover</a> and multi-prover architecture is the closest published analogue to what is described here. Key differences:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Dimension</th><th>Taiko</th><th>World Chain (proposed)</th></tr>
+</thead>
+<tbody>
+<tr><td>Pool size</td><td>4 provers (ZK + TEE)</td><td>3 provers (2 ZK + 1 TEE)</td></tr>
+<tr><td>Required threshold</td><td>2-of-4</td><td>2-of-3</td></tr>
+<tr><td>SGX</td><td>Required (mandatory TEE slot)</td><td>Yes (one of three)</td></tr>
+<tr><td>Council fallback</td><td>Not described</td><td>Yes — explicit, time-locked</td></tr>
+<tr><td>Rejection threshold</td><td>0 valid</td><td>≤ 1/3 (≤ 1-of-3)</td></tr>
+<tr><td>Upgrade mechanism</td><td>Not specified</td><td>On-chain governance with pool versioning</td></tr>
+</tbody>
+</table>
+</div>
+<p>Taiko’s model requires SGX as a mandatory slot, meaning SGX is a hard dependency. The World Chain model treats SGX as one of three equal participants; if the SGX slot is eventually replaced by a newer TEE (e.g. Intel TDX or AMD SEV-SNP), the pool can be updated via governance without changing the threshold logic.</p>
+<hr>
+<h3 id="87-on-chain-contract-design-sketch"><a class="header" href="#87-on-chain-contract-design-sketch">8.7 On-Chain Contract Design Sketch</a></h3>
+<h4 id="proofaggregator"><a class="header" href="#proofaggregator"><code>ProofAggregator</code></a></h4>
+<pre><code class="language-solidity">/// @notice Collects proofs/attestations from the registered prover pool,
+///         checks the threshold, and gates DisputeGame resolution.
+contract ProofAggregator {
+
+    // -- Configuration --
+
+    struct Prover {
+        address verifier;   // IProofVerifier — verify(gameId, proof) → bool
+        bool    active;
+    }
+
+    Prover[]  public provers;           // ordered pool; index = proverId
+    uint256   public threshold;         // min valid count to auto-accept (e.g. 2)
+    uint256   public councilThreshold;  // min valid count to allow council review (e.g. 1)
+    uint256   public reviewWindow;      // seconds council has to vote (e.g. 72 hours)
+    uint256   public timeLockDelay;     // seconds between council approval and execution (e.g. 24 hours)
+
+    ISecurityCouncil public council;
+
+    // -- State per game --
+
+    struct GameState {
+        uint128 validCount;
+        uint128 submittedMask;  // bitmask of which provers have submitted
+        Status  status;         // Pending | Accepted | CouncilReview | Rejected
+        uint64  reviewDeadline;
+    }
+
+    mapping(bytes32 gameId =&gt; GameState) public games;
+
+    // -- Events --
+
+    event ProofSubmitted(bytes32 indexed gameId, uint256 proverId, bool valid);
+    event ThresholdReached(bytes32 indexed gameId, uint256 validCount);
+    event CouncilReviewOpened(bytes32 indexed gameId, uint64 deadline);
+    event CouncilApproved(bytes32 indexed gameId, uint64 executionTime);
+    event GameRejected(bytes32 indexed gameId, uint256 validCount);
+
+    // -- Submission --
+
+    /// @notice Called by each prover's off-chain agent.
+    function submitProof(bytes32 gameId, uint256 proverId, bytes calldata proof) external {
+        GameState storage g = games[gameId];
+        require(g.status == Status.Pending, "game not pending");
+        require(!_hasBit(g.submittedMask, proverId), "already submitted");
+
+        g.submittedMask = uint128(_setBit(g.submittedMask, proverId));
+
+        bool valid = provers[proverId].verifier != address(0)
+            &amp;&amp; IProofVerifier(provers[proverId].verifier).verify(gameId, proof);
+
+        if (valid) g.validCount++;
+
+        emit ProofSubmitted(gameId, proverId, valid);
+        _evaluate(gameId, g);
+    }
+
+    // -- Internal threshold evaluation --
+
+    function _evaluate(bytes32 gameId, GameState storage g) internal {
+        uint256 total = _activeProverCount();
+        if (g.validCount &gt;= _twoThirds(total)) {
+            g.status = Status.Accepted;
+            emit ThresholdReached(gameId, g.validCount);
+        } else if (_allSubmitted(g, total) || block.timestamp &gt;= g.reviewDeadline) {
+            // All submissions received or window closed — check council threshold
+            if (g.validCount &gt; total / 3) {
+                g.status = Status.CouncilReview;
+                g.reviewDeadline = uint64(block.timestamp + reviewWindow);
+                emit CouncilReviewOpened(gameId, g.reviewDeadline);
+            } else {
+                g.status = Status.Rejected;
+                emit GameRejected(gameId, g.validCount);
+            }
+        }
+    }
+
+    // -- Council approval --
+
+    /// @notice Called by the SecurityCouncil contract after quorum is reached.
+    function councilApprove(bytes32 gameId) external onlyCouncil {
+        GameState storage g = games[gameId];
+        require(g.status == Status.CouncilReview, "not in review");
+        require(block.timestamp &lt;= g.reviewDeadline, "review window expired");
+        // Time-lock: emit event; actual execution happens after timeLockDelay
+        emit CouncilApproved(gameId, uint64(block.timestamp + timeLockDelay));
+        // Execution is handled by a separate TimelockController.execute() call.
+    }
+}
+</code></pre>
+<h4 id="integration-with-disputegame"><a class="header" href="#integration-with-disputegame">Integration with <code>DisputeGame</code></a></h4>
+<p>The <code>DisputeGame.resolve()</code> function is gated by a call to <code>ProofAggregator.gameStatus(gameId)</code>. The game can only be resolved as <code>DEFENDER_WINS</code> if the aggregator returns <code>Status.Accepted</code> (or <code>Status.CouncilApproved</code> after the time-lock has elapsed). Any other status results in <code>CHALLENGER_WINS</code> or a revert while the game is still in review.</p>
+<pre><code>DisputeGame.resolve()
+  │
+  └─ require(aggregator.gameStatus(id) == Accepted || CouncilApproved, "proof threshold not met")
+       │
+       ├─ Accepted → DEFENDER_WINS immediately
+       └─ CouncilApproved → DEFENDER_WINS only if timeLock.elapsed(id)
+</code></pre>
+<hr>
+<h3 id="88-upgrade-path-and-pool-governance"><a class="header" href="#88-upgrade-path-and-pool-governance">8.8 Upgrade Path and Pool Governance</a></h3>
+<p>The proof pool is designed to evolve over time:</p>
+<ul>
+<li><strong>Adding a new prover</strong>: Governance vote → <code>ProofAggregator.addProver(verifier)</code> → pool size N increases → threshold recalculated. A 3-of-4 configuration (threshold = 3) would give stronger safety guarantees.</li>
+<li><strong>Removing a deprecated prover</strong>: Governance vote → <code>ProofAggregator.deactivateProver(id)</code> → pool size decreases. A minimum pool size of 2 should be enforced.</li>
+<li><strong>Replacing a verifier contract</strong>: e.g. upgrading from Groth16 to a newer SP1 verifier — update the <code>verifier</code> address for the relevant prover slot after governance approval.</li>
+<li><strong>Changing the threshold</strong>: Requires a governance vote and an on-chain parameter update. Any threshold change takes effect only after a 7-day delay.</li>
+</ul>
+<p>The pool configuration (<code>provers[]</code>, <code>threshold</code>, <code>councilThreshold</code>) is stored in an upgradeable proxy, allowing future governance to adapt the system without redeploying the full aggregator.</p>
+<hr>
+<h3 id="89-summary"><a class="header" href="#89-summary">8.9 Summary</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Property</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Pool</td><td>SP1 (zkVM) + RISC Zero (zkVM) + Intel SGX (TEE)</td></tr>
+<tr><td>Auto-accept threshold</td><td>2-of-3 valid</td></tr>
+<tr><td>Council review trigger</td><td>1-of-3 valid</td></tr>
+<tr><td>Auto-reject</td><td>0-of-3 valid</td></tr>
+<tr><td>Safety assumption</td><td>Must compromise ≥ 2 independent systems simultaneously</td></tr>
+<tr><td>Liveness tolerance</td><td>Tolerates 1 prover outage with no chain disruption</td></tr>
+<tr><td>Council</td><td>3-of-5 (or 4-of-7) multisig; 72-hour review window</td></tr>
+<tr><td>Time-lock</td><td>24 hours between council approval and finalisation</td></tr>
+<tr><td>Upgrade mechanism</td><td>On-chain governance; 7-day delay for threshold changes</td></tr>
+</tbody>
+</table>
+</div>
+<hr>
+<h2 id="9-economic-escalation-game"><a class="header" href="#9-economic-escalation-game">9. Economic Escalation Game</a></h2>
+<p>The multi-proof architecture in Section 8 establishes <em>what</em> counts as a valid proof. This section describes <em>how</em> economic incentives govern the challenge/response lifecycle — specifically, a <strong>bond escalation mechanism</strong> that makes griefing attacks progressively more expensive while ensuring honest parties are always compensated for participating in disputes.</p>
+<h3 id="91-core-concept"><a class="header" href="#91-core-concept">9.1 Core Concept</a></h3>
+<p>The escalation game replaces the OP Stack’s fixed-bond model with a dynamic bidding mechanism. Both the challenger and the defender can raise their bond at any point during the challenge window. A higher bid signals confidence and forces the opposing party to match or forfeit. The winner receives their own bond back plus the loser’s bond (minus a small protocol fee).</p>
+<p>This creates a game-theoretic equilibrium:</p>
+<ul>
+<li><strong>Honest defenders</strong> always match escalations because their expected value of winning exceeds the cost of matching.</li>
+<li><strong>Frivolous challengers</strong> face escalating capital at risk with no economic upside on a valid root.</li>
+<li><strong>Griefing attackers</strong> must keep outbidding an honest defender, losing their full cumulative stake each time they fail.</li>
+</ul>
+<h3 id="92-mechanism-design"><a class="header" href="#92-mechanism-design">9.2 Mechanism Design</a></h3>
+<h4 id="921-initial-bonds"><a class="header" href="#921-initial-bonds">9.2.1 Initial Bonds</a></h4>
+<ul>
+<li>The <strong>challenger</strong> posts an initial bond to open a dispute. This bond is locked in escrow and signals the challenger’s confidence in their claim.</li>
+<li>The <strong>defender</strong> (proposer) must post a matching or exceeding bond to formally respond. Failing to respond within the initial response window constitutes a concession.</li>
+<li>Asymmetric entry costs apply: the challenger pays more to <em>open</em> a dispute than to <em>respond</em> to an escalation, deterring spam while keeping honest response cheap.</li>
+</ul>
+<h4 id="922-escalation-rounds"><a class="header" href="#922-escalation-rounds">9.2.2 Escalation Rounds</a></h4>
+<p>Either party may raise their bond at any point during the active challenge window. The opponent then has a fixed <strong>escalation response window</strong> (24 hours per round) to match the new bond level. Failure to match within that window constitutes a <strong>forfeit</strong> for that round — the forfeiting party concedes the dispute.</p>
+<p>There is no limit on the number of rounds, but a <strong>bond cap</strong> (see Section 9.6) ensures costs remain bounded.</p>
+<h4 id="923-winner-takes-all-resolution"><a class="header" href="#923-winner-takes-all-resolution">9.2.3 Winner-Takes-All Resolution</a></h4>
+<p>When the dispute resolves (either by proof outcome, bond forfeit, or challenge window expiry), the winning party receives:</p>
+<pre><code>payout = winner_bond + loser_bond × (1 − protocol_fee_rate)
+</code></pre>
+<p>The <code>protocol_fee_rate</code> portion of the loser’s bond is transferred to the protocol treasury / prover incentive fund (see Section 9.7).</p>
+<h3 id="93-anti-griefing-properties"><a class="header" href="#93-anti-griefing-properties">9.3 Anti-Griefing Properties</a></h3>
+<p>The escalation model provides three layers of protection against griefing:</p>
+<ol>
+<li>
+<p><strong>Raising is expensive.</strong> An attacker attempting to grief an honest proposer must continually match or exceed the defender’s escalations. Each round increases the attacker’s capital at risk without any economic upside, since the honest prover will eventually produce a valid ZK proof and win.</p>
+</li>
+<li>
+<p><strong>Honest parties have economic certainty.</strong> Because the multi-proof system (Section 8) produces a deterministic proof outcome, an honest defender knows with certainty they will win. Their expected value of matching any escalation is strictly positive; their dominant strategy is always to match.</p>
+</li>
+<li>
+<p><strong>Bond escalation caps prevent runaway costs.</strong> A configurable <strong>maximum bond cap</strong> (see Section 9.6) bounds the maximum capital at risk for any participant, ensuring that no single dispute can drain an honest party’s reserves entirely.</p>
+</li>
+</ol>
+<h3 id="94-interaction-with-the-multi-proof-system-section-8"><a class="header" href="#94-interaction-with-the-multi-proof-system-section-8">9.4 Interaction with the Multi-Proof System (Section 8)</a></h3>
+<p>The economic game runs <em>in parallel</em> with the proof submission lifecycle:</p>
+<ul>
+<li><strong>Early termination</strong>: If the <code>ProofAggregator</code> reaches the 2/3 acceptance threshold before the challenge window closes, the escalation game terminates immediately. No further escalation rounds are permitted; the winner is determined by the proof outcome.</li>
+<li><strong>Disagreement signal</strong>: If exactly 1-of-3 provers has submitted a valid proof when the escalation game is active, the current bond level is used as a <strong>priority signal</strong> to the Security Council — a higher bond level indicates that one or both parties have high conviction, which the council should weight accordingly when triaging its review queue.</li>
+<li><strong>Proof-independent forfeit</strong>: A party that forfeits the economic game (by failing to match within the response window) loses the dispute regardless of the eventual proof outcome. This ensures the economic and proof-based systems are independently enforceable.</li>
+</ul>
+<pre><code>Challenge window opens
+  │
+  ├─ ProofAggregator: 2/3 threshold reached → escalation game terminates early
+  │                                            winner = proof outcome
+  │
+  ├─ Escalation: one party fails to match within response window
+  │              → that party forfeits (proof outcome irrelevant)
+  │
+  └─ Challenge window closes with no forfeit
+       → winner determined by ProofAggregator status
+            ├─ Accepted (2/3) → DEFENDER_WINS
+            ├─ CouncilReview (1/3) → council decides; bond level informs priority
+            └─ Rejected (0) → CHALLENGER_WINS
+</code></pre>
+<h3 id="95-game-theory-analysis"><a class="header" href="#95-game-theory-analysis">9.5 Game Theory Analysis</a></h3>
+<h4 id="nash-equilibrium"><a class="header" href="#nash-equilibrium">Nash Equilibrium</a></h4>
+<p>Let <code>B_d</code> be the defender’s current bond and <code>B_c</code> the challenger’s. The honest defender’s expected payoff from matching any escalation to <code>B_c'</code> is:</p>
+<pre><code>E[payoff] = B_d + B_c' × (1 − fee) &gt; 0   (because they win with certainty)
+</code></pre>
+<p>Since the honest defender’s win probability approaches 1 (they can produce a valid ZK proof), they will always match. The unique Nash equilibrium is therefore:</p>
+<blockquote>
+<p><em>The honest defender matches every escalation; a rational attacker, anticipating this, never escalates.</em></p>
+</blockquote>
+<p>In practice, an attacker with deep pockets might still try to exhaust the defender’s liquidity. The bond cap (Section 9.6) and the yield-bearing escrow design (Section 9.8) mitigate this.</p>
+<h4 id="attackers-cost"><a class="header" href="#attackers-cost">Attacker’s Cost</a></h4>
+<p>Under the recommended Option B + E design, the costs diverge between the escalating attacker and the responding honest party:</p>
+<pre><code>attacker_cumulative_stake  = B_initial × 2.0^N   (escalating party: 2.0× per round)
+honest_defender_stake      = B_initial × 1.5^N   (responding party: 1.5× per round)
+</code></pre>
+<p>With an initial defender bond of 0.1 ETH and a 32 ETH cap, the honest defender exhausts the cap at approximately <strong>⌊log_{1.5}(320)⌋ = 13 rounds</strong>, while the attacker (using 2.0× increments) exhausts the cap at approximately <strong>⌊log_{2.0}(320)⌋ = 8 rounds</strong>. The attacker forfeits their entire cumulative stake on loss, and because their costs compound faster, the honest party maintains a structural capital advantage in any prolonged escalation.</p>
+<h4 id="comparison-to-the-op-stack-fixed-bond-model"><a class="header" href="#comparison-to-the-op-stack-fixed-bond-model">Comparison to the OP Stack Fixed-Bond Model</a></h4>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Property</th><th>OP Stack Fixed Bond</th><th>Economic Escalation Game</th></tr>
+</thead>
+<tbody>
+<tr><td>Griefing cost</td><td>Fixed (one bond per challenge)</td><td>Escalating (compounds per round)</td></tr>
+<tr><td>Deep-pocket attacker</td><td>Can spam challenges cheaply</td><td>Must match each escalation; losses grow exponentially</td></tr>
+<tr><td>Honest party compensation</td><td>Bond refund only</td><td>Bond refund + loser’s bond</td></tr>
+<tr><td>Capital at risk (honest)</td><td>Fixed</td><td>Bounded by cap (32 ETH)</td></tr>
+<tr><td>On-chain complexity</td><td>Simple</td><td>Moderate (state machine + escrow)</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="96-bond-asymmetry-design-options"><a class="header" href="#96-bond-asymmetry-design-options">9.6 Bond Asymmetry Design Options</a></h3>
+<p>The single most consequential parameter choice in the escalation game is the <strong>entry-bond asymmetry</strong> between the challenger (the party making an extraordinary claim against an existing output root) and the defender (the proposer responding to that claim). Five distinct design options are presented below, each with trade-offs.</p>
+<hr>
+<h4 id="option-a-symmetric-bonds-equal-entry"><a class="header" href="#option-a-symmetric-bonds-equal-entry">Option A: Symmetric Bonds (Equal Entry)</a></h4>
+<p>Both challenger and defender post the same initial bond to open or respond to a dispute.</p>
+<p><strong>Pros:</strong></p>
+<ul>
+<li>Simple, fair, and requires no special-casing in the contract.</li>
+<li>The escalation mechanic alone handles anti-spam — a frivolous challenger still faces escalating capital at risk with no upside.</li>
+<li>Easy to reason about on-chain; reduces audit surface.</li>
+</ul>
+<p><strong>Cons:</strong></p>
+<ul>
+<li>May deter low-capital honest challengers who cannot afford the same bond as a well-resourced proposer/sequencer.</li>
+<li>Does not account for the asymmetry of risk: the challenger is the <em>initiating</em> (riskier) party making the extraordinary claim.</li>
+</ul>
+<hr>
+<h4 id="option-b-challenger-pays-more-initiator-premium"><a class="header" href="#option-b-challenger-pays-more-initiator-premium">Option B: Challenger Pays More (Initiator Premium)</a></h4>
+<p>The challenger must post a higher bond than the defender to open a dispute (e.g. <strong>1.5× the required defender response bond</strong>).</p>
+<p><strong>Pros:</strong></p>
+<ul>
+<li>Raises the cost of spam and griefing — the challenger is the party making the extraordinary claim, so a higher barrier is economically justified.</li>
+<li>Honest challengers are still protected by the winner-takes-all payout; their expected value remains positive when they are correct.</li>
+<li>Natural deterrent against frivolous disputes without banning challengers with lower capital (they can still participate, just at a higher initial cost).</li>
+</ul>
+<p><strong>Cons:</strong></p>
+<ul>
+<li>Higher barrier to entry could deter undercapitalized honest watchers, reducing decentralization of the challenger network.</li>
+<li>Wealthier attackers can still afford the higher entry bond, so it raises the floor but does not eliminate deep-pocket attacks.</li>
+<li>May discourage challenger networks or watchdog services from operating at scale.</li>
+</ul>
+<hr>
+<h4 id="option-c-challenger-pays-less-watcher-incentive"><a class="header" href="#option-c-challenger-pays-less-watcher-incentive">Option C: Challenger Pays Less (Watcher Incentive)</a></h4>
+<p>The challenger posts a smaller bond (e.g. <strong>50% of the defender’s bond</strong>) to lower the barrier for honest watchers.</p>
+<p><strong>Pros:</strong></p>
+<ul>
+<li>Encourages a broad, decentralized watcher network by minimizing capital requirements for honest challengers.</li>
+<li>Reduces the economic burden on parties who are already spending resources monitoring the chain.</li>
+</ul>
+<p><strong>Cons:</strong></p>
+<ul>
+<li>Enables cheap spam — low-cost entry means attackers can flood the system with frivolous disputes.</li>
+<li>The defender (sequencer) must repeatedly respond and lock up capital for each dispute, even if most are meritless.</li>
+<li>The asymmetry can be deliberately exploited: an attacker need only risk a small bond to force the defender to tie up large capital.</li>
+</ul>
+<hr>
+<h4 id="option-d-time-asymmetric-response-windows"><a class="header" href="#option-d-time-asymmetric-response-windows">Option D: Time-Asymmetric Response Windows</a></h4>
+<p>Bonds are <strong>symmetric</strong> in size, but the defender receives a longer response window at each escalation round (e.g. challenger must respond in <strong>12 hours</strong>, defender gets <strong>24 hours</strong>). Rationale: the defender is a reactive party, not a proactive one.</p>
+<p><strong>Pros:</strong></p>
+<ul>
+<li>Protects honest defenders from being timed out by a challenger who escalates just before a deadline.</li>
+<li>No capital asymmetry is needed — fairness is achieved through time rather than cost.</li>
+<li>Relatively simple to implement: only the <code>responseWindow</code> logic branches on which party is responding.</li>
+</ul>
+<p><strong>Cons:</strong></p>
+<ul>
+<li>Slower overall dispute resolution — a single escalation chain now takes longer to resolve at each round.</li>
+<li>A malicious defender can use the extra response time to delay finality without conceding.</li>
+<li>Does not address spam at the point of entry; a low-bond challenger can still open many cheap disputes.</li>
+</ul>
+<hr>
+<h4 id="option-e-progressive-escalation-multiplier-asymmetric-escalation-cost"><a class="header" href="#option-e-progressive-escalation-multiplier-asymmetric-escalation-cost">Option E: Progressive Escalation Multiplier (Asymmetric Escalation Cost)</a></h4>
+<p>Both parties start with the <strong>same initial bond</strong>, but each escalation round requires a higher multiplier from the <em>escalating party</em> than from the <em>responding party</em> (e.g. the party that raises must increase by <strong>2×</strong>, while the party responding need only match by <strong>1.5×</strong>).</p>
+<p><strong>Pros:</strong></p>
+<ul>
+<li>Makes aggressive escalation increasingly expensive for the attacking party while keeping honest responses comparatively cheaper.</li>
+<li>An honest defender who is confident in their root can always match at a lower incremental cost than the cost of the attack.</li>
+<li>Naturally terminates runaway escalation: the escalating party’s capital grows faster than the responding party’s, so rational attackers abandon escalation early.</li>
+</ul>
+<p><strong>Cons:</strong></p>
+<ul>
+<li>More complex to implement and audit; the asymmetric multiplier introduces additional contract state and branching logic.</li>
+<li>The multiplier ratio (2× escalate vs 1.5× respond) needs careful calibration — too large a gap may over-penalize honest challengers who legitimately want to escalate.</li>
+<li>May confuse participants who expect symmetric rules; requires clear documentation in the dispute interface.</li>
+</ul>
+<hr>
+<h3 id="comparison-table"><a class="header" href="#comparison-table">Comparison Table</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Option</th><th>Anti-Spam Protection</th><th>Honest Challenger Accessibility</th><th>Implementation Complexity</th><th>Capital Efficiency</th><th>Recommended for World Chain?</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>A — Symmetric Bonds</strong></td><td>Medium</td><td>High</td><td>Low</td><td>High</td><td>Maybe</td></tr>
+<tr><td><strong>B — Challenger Pays More</strong></td><td>High</td><td>Medium</td><td>Low</td><td>Medium</td><td><strong>Yes</strong></td></tr>
+<tr><td><strong>C — Challenger Pays Less</strong></td><td>Low</td><td>High</td><td>Low</td><td>Low</td><td>No</td></tr>
+<tr><td><strong>D — Time-Asymmetric Windows</strong></td><td>Low</td><td>High</td><td>Medium</td><td>High</td><td>Maybe</td></tr>
+<tr><td><strong>E — Progressive Multiplier</strong></td><td>High</td><td>Medium</td><td>High</td><td>Medium</td><td><strong>Yes</strong></td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="97-protocol-fee"><a class="header" href="#97-protocol-fee">9.7 Protocol Fee</a></h3>
+<p>A <strong>3% fee</strong> on the loser’s bond is deducted before paying out the winner. These funds are routed to a designated <strong>protocol treasury address</strong> that serves a dual purpose:</p>
+<ol>
+<li><strong>Prover incentive fund</strong>: Partially reimburses ZK prover costs (prover network fees from Succinct / Bonsai) incurred during the dispute.</li>
+<li><strong>Protocol reserves</strong>: Builds a reserve that can be used to cover prover costs on the happy path if a validity-proof model is adopted in future.</li>
+</ol>
+<p>The fee rate is a governance-controlled parameter, stored in the <code>EscalationGame</code> contract and bounded between 1% and 10%.</p>
+<h3 id="98-capital-efficiency-optional"><a class="header" href="#98-capital-efficiency-optional">9.8 Capital Efficiency (Optional)</a></h3>
+<p>Locking large bonds in a smart contract carries significant opportunity cost. Two mechanisms reduce this burden for honest participants:</p>
+<h4 id="yield-bearing-escrow-optional"><a class="header" href="#yield-bearing-escrow-optional">Yield-Bearing Escrow (Optional)</a></h4>
+<p>Bonds held in escrow are deposited into a yield-bearing position (e.g. an ERC-4626 vault backed by <code>wstETH</code> or <code>aETH</code>) rather than held as raw ETH. The depositor retains the yield during the lock period; only the principal is at risk. This approach:</p>
+<ul>
+<li>Reduces the effective cost of bonding for honest parties (yield offsets lock cost).</li>
+<li>Does not change the slashing semantics — only the principal is forfeit on loss.</li>
+<li>Requires the escrow contract to wrap/unwrap positions atomically when bonds are posted or released.</li>
+</ul>
+<h4 id="asymmetric-bond-ratios-optional"><a class="header" href="#asymmetric-bond-ratios-optional">Asymmetric Bond Ratios (Optional)</a></h4>
+<p>The challenger pays the full bond to <em>open</em> a dispute but only <strong>50%</strong> of the current bond level to <em>respond</em> to a subsequent escalation initiated by the defender. The inverse applies to the defender. This asymmetry:</p>
+<ul>
+<li>Increases the cost of opening frivolous disputes.</li>
+<li>Keeps the marginal cost of honest response lower than the marginal cost of escalation.</li>
+<li>Preserves the winner-takes-all payout (the loser forfeits the full amount they posted).</li>
+</ul>
+<h3 id="99-on-chain-contract-design-sketch"><a class="header" href="#99-on-chain-contract-design-sketch">9.9 On-Chain Contract Design Sketch</a></h3>
+<h4 id="escalationgame-contract"><a class="header" href="#escalationgame-contract"><code>EscalationGame</code> Contract</a></h4>
+<pre><code class="language-solidity">/// @notice Manages the economic escalation game for a single DisputeGame instance.
+///         Deployed per game or as a shared singleton with per-game state.
+contract EscalationGame {
+
+    // -- Types --
+
+    enum GameStatus { Open, Active, Escalated, Resolved, Forfeited }
+
+    struct EscalationState {
+        address  challenger;
+        address  defender;
+        uint256  challengerBond;   // current bond posted by challenger
+        uint256  defenderBond;     // current bond posted by defender
+        uint256  roundDeadline;    // timestamp by which the responding party must match
+        address  pendingResponder; // party that must respond (match or forfeit)
+        GameStatus status;
+    }
+
+    // -- State --
+
+    mapping(bytes32 gameId =&gt; EscalationState) public games;
+
+    IProofAggregator public aggregator;
+    IVault           public escrowVault;   // ERC-4626 yield-bearing vault
+    address          public treasury;
+    uint256          public protocolFeeRate;   // e.g. 300 = 3%
+    uint256          public maxBondCap;        // e.g. 32 ether
+    uint256          public minEscalationMultiplier; // e.g. 150 = 1.5×, in bps (10000 = 1×)
+    uint256          public responseWindow;    // seconds per escalation round (e.g. 86400)
+
+    // -- Events --
+
+    event ChallengeOpened(bytes32 indexed gameId, address challenger, uint256 bond);
+    event DefenderResponded(bytes32 indexed gameId, address defender, uint256 bond);
+    event BondEscalated(bytes32 indexed gameId, address escalator, uint256 newBond);
+    event PartyForfeited(bytes32 indexed gameId, address forfeiter, uint256 bondLost);
+    event GameResolved(bytes32 indexed gameId, address winner, uint256 payout);
+
+    // -- Actions --
+
+    /// @notice Challenger calls this to open a new dispute.
+    /// @param gameId  The ID of the associated DisputeGame.
+    /// @param bond    ETH bond amount (must equal msg.value).
+    function openChallenge(bytes32 gameId, uint256 bond) external payable {
+        require(msg.value == bond, "bond mismatch");
+        require(bond &gt;= MIN_INITIAL_BOND, "bond too low");
+        EscalationState storage s = games[gameId];
+        require(s.status == GameStatus(0), "already opened"); // default is Open
+
+        _depositToVault(gameId, msg.sender, bond);
+
+        s.challenger    = msg.sender;
+        s.challengerBond = bond;
+        s.roundDeadline = block.timestamp + responseWindow;
+        s.pendingResponder = address(0); // defender must respond
+        s.status        = GameStatus.Open;
+
+        emit ChallengeOpened(gameId, msg.sender, bond);
+    }
+
+    /// @notice Defender calls this to respond to an open challenge.
+    function respond(bytes32 gameId, uint256 bond) external payable {
+        EscalationState storage s = games[gameId];
+        require(s.status == GameStatus.Open, "not open");
+        require(block.timestamp &lt;= s.roundDeadline, "response window expired");
+        require(bond &gt;= s.challengerBond, "must match or exceed challenger bond");
+        require(msg.value == bond, "bond mismatch");
+
+        _depositToVault(gameId, msg.sender, bond);
+
+        s.defender    = msg.sender;
+        s.defenderBond = bond;
+        s.status      = GameStatus.Active;
+
+        emit DefenderResponded(gameId, msg.sender, bond);
+    }
+
+    /// @notice Either party escalates by raising their bond.
+    /// @param newBond  New total bond (must be ≥ 1.5× the current highest bond).
+    function escalate(bytes32 gameId, uint256 newBond) external payable {
+        EscalationState storage s = games[gameId];
+        require(s.status == GameStatus.Active || s.status == GameStatus.Escalated,
+                "cannot escalate");
+        require(msg.sender == s.challenger || msg.sender == s.defender,
+                "not a party");
+
+        uint256 currentMax = s.challengerBond &gt; s.defenderBond
+            ? s.challengerBond : s.defenderBond;
+        uint256 minNew = currentMax * minEscalationMultiplier / 10000;
+        require(newBond &gt;= minNew, "escalation too small");
+        require(newBond &lt;= maxBondCap, "exceeds bond cap");
+
+        uint256 existing = (msg.sender == s.challenger)
+            ? s.challengerBond : s.defenderBond;
+        uint256 topUp = newBond - existing;
+        require(msg.value == topUp, "incorrect top-up");
+
+        _depositToVault(gameId, msg.sender, topUp);
+
+        if (msg.sender == s.challenger) {
+            s.challengerBond  = newBond;
+            s.pendingResponder = s.defender;
+        } else {
+            s.defenderBond    = newBond;
+            s.pendingResponder = s.challenger;
+        }
+
+        s.roundDeadline = block.timestamp + responseWindow;
+        s.status        = GameStatus.Escalated;
+
+        emit BondEscalated(gameId, msg.sender, newBond);
+    }
+
+    /// @notice Called when a party fails to match within the response window.
+    function concede(bytes32 gameId) external {
+        EscalationState storage s = games[gameId];
+        require(s.status == GameStatus.Active || s.status == GameStatus.Escalated,
+                "not active");
+        require(block.timestamp &gt; s.roundDeadline, "window still open");
+
+        // The pending responder has forfeited.
+        address loser = s.pendingResponder != address(0)
+            ? s.pendingResponder
+            : s.defender; // defender never responded
+
+        _settleGame(gameId, s, loser);
+        emit PartyForfeited(gameId, loser, _bondOf(s, loser));
+    }
+
+    /// @notice Called after ProofAggregator has reached a final status.
+    function resolve(bytes32 gameId) external {
+        EscalationState storage s = games[gameId];
+        require(s.status != GameStatus.Resolved &amp;&amp; s.status != GameStatus.Forfeited,
+                "already settled");
+
+        IProofAggregator.Status ps = aggregator.gameStatus(gameId);
+        require(
+            ps == IProofAggregator.Status.Accepted ||
+            ps == IProofAggregator.Status.Rejected,
+            "proof not finalised"
+        );
+
+        address loser = (ps == IProofAggregator.Status.Accepted)
+            ? s.challenger  // defender wins
+            : s.defender;   // challenger wins
+
+        _settleGame(gameId, s, loser);
+    }
+
+    // -- Internal --
+
+    function _settleGame(bytes32 gameId, EscalationState storage s, address loser) internal {
+        address winner = (loser == s.challenger) ? s.defender : s.challenger;
+
+        uint256 loserBond  = _bondOf(s, loser);
+        uint256 winnerBond = _bondOf(s, winner);
+        uint256 fee        = loserBond * protocolFeeRate / 10000;
+        uint256 payout     = winnerBond + loserBond - fee;
+
+        s.status = GameStatus.Resolved;
+
+        _withdrawFromVault(gameId, winner, payout);
+        _withdrawFromVault(gameId, treasury, fee);
+
+        emit GameResolved(gameId, winner, payout);
+    }
+
+    function _bondOf(EscalationState storage s, address party) internal view returns (uint256) {
+        if (party == s.challenger) return s.challengerBond;
+        if (party == s.defender)   return s.defenderBond;
+        return 0;
+    }
+}
+</code></pre>
+<h4 id="state-machine"><a class="header" href="#state-machine">State Machine</a></h4>
+<pre><code>                  openChallenge()
+                       │
+                    [ Open ]
+                       │  respond() within responseWindow
+                       │
+                    [ Active ]
+                       │
+             ┌─────────┴─────────┐
+       escalate()           concede() / resolve()
+             │                   │
+         [ Escalated ]       [ Forfeited / Resolved ]
+             │
+    match within responseWindow?
+             │
+      ┌──────┴──────┐
+    Yes             No
+      │              │
+  [ Active ]    [ Forfeited ]
+      │
+  resolve() (proof finalised)
+      │
+  [ Resolved ]
+</code></pre>
+<h4 id="integration-points"><a class="header" href="#integration-points">Integration Points</a></h4>
+<ul>
+<li><strong><code>DisputeGame</code></strong>: <code>EscalationGame</code> is called by <code>DisputeGame.challenge()</code> to lock the challenger’s bond and start the timer.</li>
+<li><strong><code>ProofAggregator</code></strong> (Section 8): <code>EscalationGame.resolve()</code> reads <code>ProofAggregator.gameStatus()</code> to determine the winner once proofs are finalised.</li>
+<li><strong><code>DisputeGame.resolve()</code></strong>: Requires <code>EscalationGame</code> to be in <code>Resolved</code> or <code>Forfeited</code> state before finalising the dispute outcome on-chain. This ensures the economic and proof-based layers are both settled before state root finalisation.</li>
+</ul>
+<h3 id="910-summary"><a class="header" href="#910-summary">9.10 Summary</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Property</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Initial challenger bond</td><td>0.15 ETH (Option B: 1.5× defender entry bond)</td></tr>
+<tr><td>Initial defender bond</td><td>0.1 ETH</td></tr>
+<tr><td>Escalation multiplier (escalating party)</td><td>2.0× current bond (Option E)</td></tr>
+<tr><td>Response multiplier (responding party)</td><td>1.5× current bond (Option E)</td></tr>
+<tr><td>Maximum bond cap</td><td>32 ETH</td></tr>
+<tr><td>Escalation response window (challenger)</td><td>12 hours per round</td></tr>
+<tr><td>Escalation response window (defender)</td><td>24 hours per round (Option D complement)</td></tr>
+<tr><td>Protocol fee</td><td>3% of loser’s bond</td></tr>
+<tr><td>Escrow model</td><td>Yield-bearing (ERC-4626 vault)</td></tr>
+<tr><td>Winner payout</td><td>Own bond + loser bond − protocol fee</td></tr>
+<tr><td>Integration</td><td><code>EscalationGame</code> ↔ <code>DisputeGame</code> ↔ <code>ProofAggregator</code></td></tr>
+<tr><td>Griefing resistance</td><td>Escalating party cost ∝ 2.0^N; responding party cost ∝ 1.5^N; capped at 32 ETH</td></tr>
+<tr><td>Bond design</td><td>Option B (Initiator Premium) + Option E (Progressive Multiplier) + Option D (time windows)</td></tr>
+<tr><td>Nash equilibrium</td><td>Honest parties always match at lower cost; rational attackers never escalate</td></tr>
+</tbody>
+</table>
+</div>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../wips/wip-1004.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../wips/wip-1006.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../wips/wip-1004.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../wips/wip-1006.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-09f2665d.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-c22b7243.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../specs/static/mermaid-3a6b472a.min.js"></script>
+        <script src="../specs/static/mermaid-init-025d9952.js"></script>
+        <script src="../specs/static/solidity-min-a44de257.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

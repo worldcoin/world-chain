@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Introduction - World Chain Specs</title>
+        <title>WIP-1003: World ID Transaction Subsidies - World Chain Specs</title>
 
 
         <!-- Custom HTML head -->
@@ -12,20 +12,20 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="favicon-de23e50b.svg">
-        <link rel="shortcut icon" href="favicon-8114d1fc.png">
-        <link rel="stylesheet" href="css/variables-8adf115d.css">
-        <link rel="stylesheet" href="css/general-0392ca55.css">
-        <link rel="stylesheet" href="css/chrome-fc474251.css">
-        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-0392ca55.css">
+        <link rel="stylesheet" href="../css/chrome-fc474251.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
-        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
-        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
 
@@ -34,13 +34,13 @@
 
         <!-- Provide site root and default themes to javascript -->
         <script>
-            const path_to_root = "";
+            const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-dce329de.js";
+            window.path_to_searchindex_js = "../searchindex-dce329de.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-a26f203c.js"></script>
+        <script src="../toc-a26f203c.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -107,7 +107,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
             </noscript>
             <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -142,7 +142,7 @@
                     <h1 class="menu-title">World Chain Specs</h1>
 
                     <div class="right-buttons">
-                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
                         </a>
 
@@ -176,19 +176,169 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="world-chain-specs"><a class="header" href="#world-chain-specs">World Chain Specs</a></h1>
-<h2 id="about-world-chain"><a class="header" href="#about-world-chain">About World Chain</a></h2>
-<p><a href="https://worldscan.org/">World Chain</a> is a blockchain designed for humans. Prioritizing scalability and accessibility for real users, World Chain provides the rails for a frictionless onchain UX.</p>
-<h2 id="site-navigation"><a class="header" href="#site-navigation">Site Navigation</a></h2>
-<p>Navigate this site using the sidebar on the left, the search icon found at the top of this page, or the left/right
-navigation buttons found to the sides of each page.</p>
+                        <h2 id="abstract"><a class="header" href="#abstract">Abstract</a></h2>
+<p>This WIP replaces PBH with a builder-enforced transaction subsidy system for World ID verified addresses.</p>
+<p>The protocol fee market is effectively disabled: the in-protocol gas target and gas limit are set high enough that the protocol base fee never rises above the configured minimum base fee, and once the chain is running the <code>minBaseFee</code>-aware payload path that minimum base fee is set to <code>0</code>. As a result, <code>baseFeePerGas</code> is always <code>0</code>.</p>
+<p>Fee pricing moves out of protocol. Builders maintain a virtual fee market with a <code>virtualBaseFee</code>, <code>virtualMinBaseFee</code>, <code>virtualGasTarget</code>, and <code>virtualGasLimit</code>. For ordinary transactions, the virtual base fee is enforced through <code>maxPriorityFeePerGas</code>, so the chain behaves like a simulated EIP-1559 market even though the protocol base fee is <code>0</code>. For eligible World ID transactions, the builder may discount or fully waive that virtual fee floor and charge the waived amount against the account’s subsidy budget for the current WIP-1002 epoch.</p>
+<h2 id="motivation"><a class="header" href="#motivation">Motivation</a></h2>
+<p>World Chain wants two properties at the same time:</p>
+<ul>
+<li>a real fee market for non-verified traffic</li>
+<li>fully subsidized transactions for verified humans up to a bounded limit</li>
+</ul>
+<p>PBH solves priority and fairness, but it does not provide a unified fee model for free verified transactions and market-priced non-verified transactions. This WIP makes the subsidy model native to normal transaction inclusion. Verified transactions can be literally free up to a per-epoch wei limit, while the rest of the chain still sees a fee floor and blockspace competition.</p>
+<h2 id="proposal"><a class="header" href="#proposal">Proposal</a></h2>
+<h3 id="1-protocol-fee-market"><a class="header" href="#1-protocol-fee-market">1. Protocol Fee Market</a></h3>
+<ul>
+<li>The protocol gas target and protocol gas limit are set arbitrarily high, so the protocol base fee does not rise above the protocol minimum base fee.</li>
+<li>The chain must run the fork and client path that supports configurable <code>minBaseFee</code> in payload attributes and block extra data.</li>
+<li>Once that path is active, <code>SystemConfig.setMinBaseFee(0)</code> disables the protocol minimum base fee floor.</li>
+<li>After that, the protocol <code>baseFeePerGas</code> is always <code>0</code>.</li>
+<li>This WIP does not introduce a new transaction type.</li>
+</ul>
+<h3 id="2-virtual-fee-market"><a class="header" href="#2-virtual-fee-market">2. Virtual Fee Market</a></h3>
+<p>Builders maintain a virtual fee market with the following values:</p>
+<ul>
+<li><code>virtualBaseFee</code></li>
+<li><code>virtualMinBaseFee</code></li>
+<li><code>virtualGasTarget</code></li>
+<li><code>virtualGasLimit</code></li>
+</ul>
+<p>These values are out of protocol. They control transaction admission and ordering in the World Chain client, but they do not affect block validity at the protocol level.</p>
+<p><code>virtualGasLimit</code> is the builder-local effective gas limit used for transaction selection and verified blockspace segmentation.
+<code>virtualGasTarget</code> is the target used by the virtual fee controller when deriving the next <code>virtualBaseFee</code>.</p>
+<p>This WIP assumes the virtual fee parameters are made deterministic by a system contract, referred to here as <code>VirtualFeeOracle</code>.</p>
+<ul>
+<li>A builder-owned transaction at the end of block <code>N</code> writes the virtual fee parameters that apply to block <code>N + 1</code>.</li>
+<li>All builders validating or constructing block <code>N + 1</code> use the parameters committed in block <code>N</code>.</li>
+<li>The virtual fee controller is intended to be EIP-1559-like, but the exact control law is out of scope for this WIP so long as the per-block values are deterministic.</li>
+</ul>
+<h3 id="3-transaction-pricing"><a class="header" href="#3-transaction-pricing">3. Transaction Pricing</a></h3>
+<p>Because the protocol base fee is <code>0</code>, the virtual base fee is represented through the priority fee.</p>
+<p>For an ordinary non-subsidized transaction:</p>
+<ul>
+<li><code>maxPriorityFeePerGas</code> must be at least <code>virtualBaseFee</code></li>
+<li>any amount above <code>virtualBaseFee</code> is an optional tip</li>
+</ul>
+<p>For a subsidy-eligible transaction, the required priority fee may be reduced by the account’s remaining subsidy.</p>
+<h3 id="4-transaction-validation"><a class="header" href="#4-transaction-validation">4. Transaction Validation</a></h3>
+<p>The World Chain transaction validator is extended to enforce the virtual fee floor for in-scope transactions. <code>WIP-1002</code> contains the specification for how to determine the subsidies available to an address.</p>
+<ul>
+<li>If a transaction is not subsidy-eligible, it is invalid unless it pays at least the virtual fee floor through <code>maxPriorityFeePerGas</code>.</li>
+<li>If a transaction is subsidy-eligible, the validator discounts the required priority fee using the charged account’s remaining subsidy.</li>
+<li>For admission, a conservative rule may use the transaction gas limit <code>G</code> and remaining subsidy <code>S</code> to derive:
+<code>discountPerGas = min(virtualBaseFee, floor(S / G))</code>
+<code>requiredPriorityFeePerGas = virtualBaseFee - discountPerGas</code></li>
+<li>This allows full subsidy when <code>S &gt;= G * virtualBaseFee</code> and partial subsidy otherwise.</li>
+<li>Final settlement uses <code>gasUsed</code>, not <code>gasLimit</code>.</li>
+<li>PBH is removed by this WIP. Bundler transactions remain out of scope.</li>
+</ul>
+<h3 id="5-subsidy-eligibility"><a class="header" href="#5-subsidy-eligibility">5. Subsidy Eligibility</a></h3>
+<p>A transaction is subsidy-eligible if either of the following is true:</p>
+<ul>
+<li>the sender is verified in the WIP-1002 defined contract for the current epoch</li>
+<li>the transaction is a valid WIP-1002 registration transaction that verifies a specific address for the current epoch or next epoch</li>
+</ul>
+<p>For WIP-1002 registration transactions:</p>
+<ul>
+<li>the subsidy is attributed to the address being verified, not necessarily <code>msg.sender</code></li>
+<li>the registration transaction counts toward that address’s subsidy budget for the current WIP-1002 epoch</li>
+<li>only canonical WIP-1002 registration calls are eligible</li>
+</ul>
+<p>Exact WIP-1002 ABI and storage changes are out of scope here. A separate spec can define them in detail.</p>
+<h3 id="6-subsidy-accounting"><a class="header" href="#6-subsidy-accounting">6. Subsidy Accounting</a></h3>
+<p>Each verified address has a subsidy budget denominated in wei for each WIP-1002 epoch.</p>
+<ul>
+<li>the subsidy budget uses the same epoch boundaries as the WIP-1002</li>
+<li>the full virtual base fee liability for an included transaction is <code>gasUsed * virtualBaseFee</code></li>
+<li>the actual subsidy applied is <code>min(remainingSubsidy, gasUsed * virtualBaseFee)</code></li>
+<li>the unsubsidized remainder is paid by the sender through priority fee</li>
+<li>any fee paid above the unsubsidized remainder is an optional tip and is not subsidized</li>
+<li>partial subsidy is allowed</li>
+</ul>
+<h3 id="7-block-construction"><a class="header" href="#7-block-construction">7. Block Construction</a></h3>
+<p>The builder preferentially uses a fraction of each block, and optionally each flashblock, for verified transactions. This replaces PBH block segmentation.</p>
+<ul>
+<li>verified transactions get preferential access to the verified portion even if they have no subsidy remaining</li>
+<li>non-verified transactions may use the remainder of that portion near the end of block construction if verified demand does not fill it</li>
+<li>the rest of the block remains open to ordinary transactions</li>
+<li>transaction selection is bounded by <code>virtualGasLimit</code>, not the protocol gas limit</li>
+</ul>
+<p>When constructing a block, the builder:</p>
+<ol>
+<li>determines the charged account for each subsidy-eligible transaction</li>
+<li>executes the transaction</li>
+<li>computes <code>virtualBaseFeeLiability = gasUsed * virtualBaseFee</code></li>
+<li>computes <code>actualSubsidy = min(remainingSubsidy, virtualBaseFeeLiability)</code></li>
+<li>checks that the sender-paid priority fee covers <code>virtualBaseFeeLiability - actualSubsidy</code></li>
+<li>updates the charged account by <code>actualSubsidy</code></li>
+</ol>
+<p>Within the verified segment, transactions may still compete via optional tip.</p>
+<h3 id="8-address-book-updates"><a class="header" href="#8-address-book-updates">8. Address-Book Updates</a></h3>
+<p>The WIP-1002 is extended to track subsidy usage per address per epoch.</p>
+<p>At minimum it must support:</p>
+<ul>
+<li>checking whether an address is verified for the current epoch</li>
+<li>tracking total subsidized wei used by an address for a given epoch</li>
+<li>exposing enough state for builders to determine remaining subsidy</li>
+</ul>
+<p>At the end of each block, the builder sends a builder-owned transaction that updates the WIP-1002 with the subsidy deltas for that block.</p>
+<h3 id="9-rpc-behavior"><a class="header" href="#9-rpc-behavior">9. RPC Behavior</a></h3>
+<p>Current wallets typically estimate fees using some combination of:</p>
+<ul>
+<li><code>eth_estimateGas</code></li>
+<li><code>eth_maxPriorityFeePerGas</code></li>
+<li><code>eth_gasPrice</code></li>
+<li><code>eth_feeHistory</code></li>
+<li>the latest block’s <code>baseFeePerGas</code></li>
+</ul>
+<p>The World Chain client overrides fee suggestion RPC behavior so wallets quote the virtual fee market instead of the protocol base fee.</p>
+<p>This includes:</p>
+<ul>
+<li><code>eth_maxPriorityFeePerGas</code></li>
+<li><code>eth_gasPrice</code></li>
+<li><code>eth_feeHistory</code>, where needed for wallet compatibility</li>
+</ul>
+<p><code>eth_estimateGas</code> continues to estimate gas usage, not fees.</p>
+<p>For ordinary transactions, overriding these fee RPCs is sufficient for compatibility with wallets that already rely on them.</p>
+<p>Wallets that derive fees directly from the block header <code>baseFeePerGas</code> may underquote, because the protocol header value remains <code>0</code>. Wallets integrating World Chain should therefore prefer the overridden fee RPCs rather than raw block-header base fee.</p>
+<p>World Chain clients should also expose account-aware subsidy information. A client can read the WIP-1002 state for an account and return at least:</p>
+<ul>
+<li>whether the account is currently verified</li>
+<li>its remaining subsidy for the current epoch</li>
+<li>an account-specific suggested <code>maxPriorityFeePerGas</code> given an estimated gas limit</li>
+</ul>
+<p>Subsidy-aware wallets may then send a lower priority fee, including <code>0</code>, when the sender’s remaining subsidy covers the virtual base fee liability.</p>
+<h2 id="rationale"><a class="header" href="#rationale">Rationale</a></h2>
+<p>The protocol base fee is pinned to <code>0</code> so verified transactions can be literally free. The fee market is moved into builder policy so World Chain can still price ordinary traffic while waiving fees for verified humans up to a bounded limit.</p>
+<p>The virtual fee parameters are committed one block ahead so all builders can validate the same fee floor for the next block. Using the WIP-1002 epoch for subsidy accounting keeps verification state and subsidy state aligned.</p>
+<p>Charging registration subsidies to the address being verified avoids tying subsidy attribution to the relayer or caller, which matches the intended beneficiary of the verification.</p>
+<h2 id="backwards-compatibility"><a class="header" href="#backwards-compatibility">Backwards Compatibility</a></h2>
+<p>This WIP intentionally changes World Chain transaction admission, fee quoting, and block segmentation behavior.</p>
+<ul>
+<li>PBH is replaced by subsidy-aware verified blockspace</li>
+<li>the protocol block header still exposes <code>baseFeePerGas = 0</code></li>
+<li>ordinary wallets interacting through standard fee RPCs continue to see a fee quote, but that quote is virtual rather than protocol-derived</li>
+</ul>
+<h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
+<p>Because the fee market is out of protocol, all builders must derive the same virtual fee parameters for the same block. If they do not, transaction admission diverges. The fallback builder must therefore run the same World Chain client behavior.</p>
+<p>Verified free transactions create a DoS surface unless both of the following are enforced:</p>
+<ul>
+<li>the preferential verified portion remains capped</li>
+<li>each verified address remains bounded by a per-epoch wei subsidy limit</li>
+</ul>
+<p>Address-book registration transactions need careful attribution and selector filtering so callers cannot redirect subsidy eligibility to arbitrary calls. Only canonical registration calls that successfully verify an address should receive subsidy treatment.</p>
+<p>The builder-owned end-of-block accounting transaction is trusted operational infrastructure. If it is omitted or delayed, subsidy accounting becomes stale.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../wips/wip-1002.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
 
-                            <a rel="next prefetch" href="flashblocks/p2p.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../wips/wip-1004.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -198,8 +348,11 @@ navigation buttons found to the sides of each page.</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../wips/wip-1002.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
 
-                    <a rel="next prefetch" href="flashblocks/p2p.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../wips/wip-1004.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -219,18 +372,18 @@ navigation buttons found to the sides of each page.</p>
         </script>
 
 
-        <script src="elasticlunr-ef4e11c1.min.js"></script>
-        <script src="mark-09e88c2c.min.js"></script>
-        <script src="searcher-09f2665d.js"></script>
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-09f2665d.js"></script>
 
-        <script src="clipboard-1626706a.min.js"></script>
-        <script src="highlight-abc7f01d.js"></script>
-        <script src="book-c22b7243.js"></script>
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-c22b7243.js"></script>
 
         <!-- Custom JS scripts -->
-        <script src="specs/static/mermaid-3a6b472a.min.js"></script>
-        <script src="specs/static/mermaid-init-025d9952.js"></script>
-        <script src="specs/static/solidity-min-a44de257.js"></script>
+        <script src="../specs/static/mermaid-3a6b472a.min.js"></script>
+        <script src="../specs/static/mermaid-init-025d9952.js"></script>
+        <script src="../specs/static/solidity-min-a44de257.js"></script>
 
 
 

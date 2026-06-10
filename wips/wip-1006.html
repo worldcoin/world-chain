@@ -1,0 +1,498 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>WIP-1006: Proof System Architecture - World Chain Specs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-0392ca55.css">
+        <link rel="stylesheet" href="../css/chrome-fc474251.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+        <!-- MathJax -->
+        <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex-dce329de.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-a26f203c.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">World Chain Specs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h2 id="abstract"><a class="header" href="#abstract">Abstract</a></h2>
+<p>We outline an architecture for an optimistic fault proof system. A proposer posts a root optimistically without any proof. If no staked participant challenges the root within a one-day window, the root finalizes purely on the basis of elapsed time. A challenge goes through optimistically — the challenger submits no proof of invalidity — and the burden then shifts to the proposer to defend the root. Defending opens a 7 day proof window during which the proposer must assemble n / m proofs establishing the root’s validity. If the proposer does not defend the root within this window, the root is invalidated and the proposer’s bond is forfeited.</p>
+<h2 id="motivation"><a class="header" href="#motivation">Motivation</a></h2>
+<p>The vanilla OP Stack fault-proof system inherits a multi-day challenge window for every proposal and routes every dispute through a single interactive fault-proof lane. Base’s Azul proof system reduces that window when two heterogeneous proofs (TEE and ZK) agree, but still requires a proof on the common path and still rests final resolution on at most two lanes.</p>
+<p>World Chain targets two properties that neither model provides together:</p>
+<ul>
+<li><strong>A cheap common path.</strong> No proof is paid for or produced when no staked participant objects to a root.</li>
+<li><strong>A diversified disputed path.</strong> When a root is challenged, the proposer must defend it, and no single prover, TEE vendor, or council action can finalize that defense. At least two independent lanes must agree.</li>
+</ul>
+<p>The result is fast finality in the common case and <code>n / m</code> threshold security in the dispute case.</p>
+<h2 id="specification"><a class="header" href="#specification">Specification</a></h2>
+<p>The key words “MUST”, “MUST NOT”, “REQUIRED”, “SHALL”, “SHALL NOT”, “SHOULD”, “SHOULD NOT”, “RECOMMENDED”, “NOT RECOMMENDED”, “MAY”, and “OPTIONAL” in this document are to be interpreted as described in <a href="https://www.rfc-editor.org/rfc/rfc2119">RFC 2119</a> and <a href="https://www.rfc-editor.org/rfc/rfc8174">RFC 8174</a>.</p>
+<h3 id="constants"><a class="header" href="#constants">Constants</a></h3>
+<p>Protocol constants are fixed by this WIP and MUST NOT be changed without a new WIP.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Name</th><th>Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>PROOF_THRESHOLD</code></td><td><code>2</code></td><td>Number of distinct proof lanes that MUST support a challenged root before it finalizes.</td></tr>
+<tr><td><code>PROOF_LANE_COUNT</code></td><td><code>3</code></td><td>Number of configured proof lanes.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="activation-parameters"><a class="header" href="#activation-parameters">Activation Parameters</a></h3>
+<p>Activation parameters are set at hardfork activation and held as immutable values on the proof system contracts. They MAY be retuned only by a subsequent activation. All implementations MUST commit to these values in their deployed configuration and MUST NOT permit per-call overrides.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Name</th><th>Initial Value</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>CHALLENGE_PERIOD</code></td><td><code>1 day</code></td><td>Duration after proposal creation during which a staked participant MAY challenge a root without submitting proof material. Per-proposal <code>challengeDeadline = createdAt + CHALLENGE_PERIOD</code>.</td></tr>
+<tr><td><code>PROOF_PERIOD</code></td><td><code>7 days</code></td><td>Duration after a root is challenged during which the proposer MAY defend the root by accumulating lane submissions toward <code>PROOF_THRESHOLD</code>. Per-proposal <code>proofDeadline = challengedAt + PROOF_PERIOD</code>. A challenged root that the proposer has not defended to <code>PROOF_THRESHOLD</code> by <code>proofDeadline</code> MUST be invalidated.</td></tr>
+<tr><td><code>PROPOSER_BOND</code></td><td>TBD</td><td>Slashable stake required of the proposer. Locked at proposal time, refunded if the root reaches <code>FINALIZED</code>, and forfeited if the root reaches <code>INVALIDATED</code>.</td></tr>
+<tr><td><code>CHALLENGER_BOND</code></td><td>TBD</td><td>Slashable stake required of each challenger. Locked at challenge time and forfeited if the challenged root finalizes; refunded if the root is invalidated.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="proof-lanes"><a class="header" href="#proof-lanes">Proof Lanes</a></h3>
+<p>A challenged root finalizes only when at least <code>PROOF_THRESHOLD</code> distinct lanes support the same root commitment. Each lane counts at most once per root.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Lane</th><th>Source</th><th>Submission</th></tr>
+</thead>
+<tbody>
+<tr><td><code>VALIDITY_PROOF</code></td><td>A configured validity proof verifier (zkVM or SNARK).</td><td>Permissionless.</td></tr>
+<tr><td><code>TEE_ATTESTATION</code></td><td>A registered TEE signer attesting to the transition.</td><td>Anyone MAY relay a valid signed attestation.</td></tr>
+<tr><td><code>SECURITY_COUNCIL</code></td><td>A Security Council threshold signature or multisig action.</td><td>Council-controlled attestation.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Multiple proofs from the same lane MUST NOT increase the threshold count.</p>
+<h3 id="root-commitments"><a class="header" href="#root-commitments">Root Commitments</a></h3>
+<p>The data bound by every proof and attestation is split into two layers so that the proposer’s submission surface is the same as the OP Stack and Base Azul proposer surfaces. Per-proposal data is supplied by the proposer or captured by the factory at proposal creation. Domain constants are fixed on the verifier implementation and are not part of the proposer’s calldata.</p>
+<h4 id="proposal-per-proposal"><a class="header" href="#proposal-per-proposal">Proposal (per-proposal)</a></h4>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Source</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>rootClaim</code></td><td>Proposer</td><td>Claimed L2 output root, computed as in the <a href="https://specs.optimism.io/protocol/proposals.html#l2-output-commitment-construction">OP Stack output-root V1 encoding</a>.</td></tr>
+<tr><td><code>l2BlockNumber</code></td><td>Proposer</td><td>L2 block number for <code>rootClaim</code>, matching the <a href="https://specs.optimism.io/protocol/proposals.html"><code>l2BlockNumber</code> field of an OP Stack L2 output proposal</a>.</td></tr>
+<tr><td><code>parentRef</code></td><td>Proposer</td><td>Address of the parent — the <code>AnchorStateRegistry</code> for the first proposal, otherwise the parent proposal. Same convention as the OP Stack [Fault Dispute Game <code>extraData</code> parent reference][op-dgi] and the parent reference encoded in Base Azul’s <code>AggregateVerifier</code> extra-data layout (see [Base Azul proof system][base-azul]). The parent’s <code>rootClaim</code> and <code>l2BlockNumber</code> are read from this reference rather than re-supplied.</td></tr>
+<tr><td><code>intermediateRootsHash</code></td><td>Proposer</td><td>Commitment to ordered intermediate output roots, compatible with Base Azul’s intermediate-root commitment. Implementations that do not use intermediate roots MUST set this field to <code>bytes32(0)</code>.</td></tr>
+<tr><td><code>l1OriginHash</code></td><td>Factory</td><td>L1 origin hash captured at proposal creation. The proposer does not pass it as calldata; it is read via <code>blockhash()</code> or <a href="https://eips.ethereum.org/EIPS/eip-2935">EIP-2935</a> history and pinned by the factory, mirroring the OP Stack [<code>l1Head</code> snapshot at clone creation][op-dgi] that Base Azul inherits.</td></tr>
+<tr><td><code>l1OriginNumber</code></td><td>Factory</td><td>L1 block number paired with <code>l1OriginHash</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<p>This matches the OP Stack and Base proposer surface field-for-field. Any OP Stack proposer that already submits <code>(rootClaim, l2BlockNumber)</code> against a parent reference can be reused without protocol-level change. See <a href="#backwards-compatibility">Backwards Compatibility</a> for the full compatibility statement.</p>
+<h4 id="domain-verifier-immutable"><a class="header" href="#domain-verifier-immutable">Domain (verifier-immutable)</a></h4>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Field</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td><code>chainId</code></td><td>World Chain L2 chain ID.</td></tr>
+<tr><td><code>proofSystemVersion</code></td><td>Version of this proof system’s proof-domain encoding.</td></tr>
+<tr><td><code>rollupConfigHash</code></td><td>Hash of the rollup configuration and World Chain hardfork schedule.</td></tr>
+<tr><td><code>blockInterval</code></td><td>Distance in L2 blocks between a parent root and a proposed root.</td></tr>
+<tr><td><code>intermediateBlockInterval</code></td><td>Distance in L2 blocks between intermediate roots inside one proposal.</td></tr>
+</tbody>
+</table>
+</div>
+<p>These values are set once on the verifier implementation (analogous to Base’s <code>CONFIG_HASH</code>, <code>L2_CHAIN_ID</code>, <code>BLOCK_INTERVAL</code>, and <code>INTERMEDIATE_BLOCK_INTERVAL</code> immutables) and are not supplied per proposal. Lane-specific verifier constants — such as the active TEE image hash, the validity proof program key, and the fault proof game type — live in the lane verifiers’ own configuration and are committed to in those lanes’ proof journals.</p>
+<h4 id="canonical-identifiers"><a class="header" href="#canonical-identifiers">Canonical identifiers</a></h4>
+<p>The contracts use two related identifiers:</p>
+<ul>
+<li><code>proposalKey</code> is the factory lookup key. It is deterministic from proposer-supplied proposal data and excludes the factory-captured L1 origin, so proposers can discover existing games before knowing which L1 block created them.</li>
+<li><code>rootId</code> is the proof-bound commitment. It includes the factory-captured L1 origin and is the value every proof lane MUST bind to.</li>
+</ul>
+<p>The contract computes:</p>
+<pre><code class="language-text">domainHash = keccak256(abi.encode(
+    chainId,
+    proofSystemVersion,
+    rollupConfigHash,
+    blockInterval,
+    intermediateBlockInterval
+))
+
+proposalKey = keccak256(abi.encode(
+    domainHash,
+    parentRef,
+    rootClaim,
+    l2BlockNumber,
+    intermediateRootsHash
+))
+
+rootId = keccak256(abi.encode(
+    domainHash,
+    parentRef,
+    rootClaim,
+    l2BlockNumber,
+    intermediateRootsHash,
+    l1OriginHash,
+    l1OriginNumber
+))
+</code></pre>
+<p>The factory MUST reject duplicate games with the same <code>proposalKey</code>. All proofs and attestations MUST bind to <code>rootId</code>. A proof, game result, or attestation that binds to a different <code>domainHash</code>, parent, root, block range, or L1 origin MUST NOT be accepted for <code>rootId</code>.</p>
+<h3 id="state-machine"><a class="header" href="#state-machine">State Machine</a></h3>
+<p>A root moves through four states:</p>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; PROPOSED: propose(root)
+    PROPOSED --&gt; FINALIZED: challenge deadline elapsed &amp; no challenge
+    PROPOSED --&gt; CHALLENGED: staked challenge before challenge deadline
+    CHALLENGED --&gt; FINALIZED: proposer defends with PROOF_THRESHOLD distinct lanes before proof deadline
+    CHALLENGED --&gt; INVALIDATED: proposer fails to defend by proof deadline
+    FINALIZED --&gt; [*]
+    INVALIDATED --&gt; [*]
+</pre>
+
+<h3 id="proposal-lifecycle"><a class="header" href="#proposal-lifecycle">Proposal Lifecycle</a></h3>
+<p>A root enters the system in the <code>PROPOSED</code> state.</p>
+<ol>
+<li>The proposer submits the root commitment and locks <code>PROPOSER_BOND</code> as slashable collateral against the proposal.</li>
+<li>The contract records <code>createdAt = block.timestamp</code> and <code>challengeDeadline = createdAt + CHALLENGE_PERIOD</code>.</li>
+<li>The root remains open to challenges until <code>challengeDeadline</code>.</li>
+</ol>
+<p>The proposer MUST NOT be required to submit material from any proof lane when creating the proposal, however they may choose to do so.</p>
+<p>If the root reaches <code>FINALIZED</code>, the locked <code>PROPOSER_BOND</code> MUST be refunded to the proposer. If the root reaches <code>INVALIDATED</code>, the locked <code>PROPOSER_BOND</code> MUST be forfeited.</p>
+<h3 id="challenge-lifecycle"><a class="header" href="#challenge-lifecycle">Challenge Lifecycle</a></h3>
+<p>Any staked participant MAY challenge a proposed root before <code>challengeDeadline</code>. A challenge goes through optimistically: the challenger is not asked to prove that the root is invalid, and the challenge succeeds by default unless the proposer defends the root. The challenge merely shifts the burden of proof onto the proposer, who must then establish the root’s validity per <a href="#proposer-defense-and-challenged-finality">Proposer Defense and Challenged Finality</a>.</p>
+<p>The challenge transaction:</p>
+<ul>
+<li>MUST verify that the caller is currently staked according to the configured staking registry.</li>
+<li>MUST NOT require the caller to submit proof material.</li>
+<li>MUST lock <code>CHALLENGER_BOND</code> of the caller’s stake as slashable collateral against the challenged root.</li>
+<li>MUST mark the root as <code>CHALLENGED</code>.</li>
+<li>MUST record <code>challengedAt = block.timestamp</code> and <code>proofDeadline = challengedAt + PROOF_PERIOD</code> on the root, the first time it transitions to <code>CHALLENGED</code>. Subsequent challenges MUST NOT extend <code>proofDeadline</code>.</li>
+</ul>
+<p>If the challenged root finalizes through the proof-lane threshold, the locked <code>CHALLENGER_BOND</code> is forfeited. If the root is invalidated, the locked <code>CHALLENGER_BOND</code> is refunded to the challenger.</p>
+<p>Multiple challenges MAY be recorded for accounting, but only the existence of at least one valid challenge affects the finality path. Each additional challenger locks their own <code>CHALLENGER_BOND</code>.</p>
+<p>A challenge submitted at or after <code>challengeDeadline</code> MUST revert.</p>
+<h3 id="unchallenged-finality"><a class="header" href="#unchallenged-finality">Unchallenged Finality</a></h3>
+<p>If no valid challenge has been submitted by <code>challengeDeadline</code>, anyone MAY call <code>finalize(rootId)</code>.</p>
+<p>The contract MUST finalize the root when all of the following hold:</p>
+<ul>
+<li>the root is still <code>PROPOSED</code>;</li>
+<li><code>block.timestamp &gt;= challengeDeadline</code>;</li>
+<li>the root’s parent is the current finalized anchor or otherwise accepted by the anchor registry; and</li>
+<li>the root has not been invalidated, blacklisted, retired, or paused by a configured safety control.</li>
+</ul>
+<p>An unchallenged root finalizes without any proof-lane submissions.</p>
+<h3 id="proposer-defense-and-challenged-finality"><a class="header" href="#proposer-defense-and-challenged-finality">Proposer Defense and Challenged Finality</a></h3>
+<p>Once a root is challenged, the burden of proof rests with the <strong>proposer</strong>, who MUST defend the root by establishing its validity. A challenged root MUST NOT finalize merely because time has elapsed. It finalizes only when the proposer’s defense assembles support from at least <code>PROOF_THRESHOLD</code> distinct proof lanes for the root, and only if the threshold is met before <code>proofDeadline</code>.</p>
+<p>Defending the root is the proposer’s responsibility because the proposer’s <code>PROPOSER_BOND</code> is forfeited if the root fails to reach the threshold. Lane submission itself remains permissionless — any party MAY relay a valid lane submission, and a proposer MAY coordinate independent provers, TEE signers, and the Security Council to do so — but the protocol assigns the economic responsibility for the defense to the proposer and to no other party.</p>
+<p>Each root tracks a per-lane support set (the <strong>proof bitmap</strong>) with one bit per entry in <a href="#proof-lanes">Proof Lanes</a>. Each lane’s bit is set at most once, so duplicate submissions from the same lane MUST NOT increase the threshold count.</p>
+<p>For each lane submission, the contract MUST:</p>
+<ol>
+<li>Verify that the root is in <code>CHALLENGED</code>.</li>
+<li>Verify that <code>block.timestamp &lt; proofDeadline</code>.</li>
+<li>Verify that the proof or attestation binds to <code>rootId</code>.</li>
+<li>Verify the proof or attestation according to the lane-specific verifier.</li>
+<li>Set the lane’s bit in the root’s proof bitmap.</li>
+<li>Finalize the root when the bitmap contains at least <code>PROOF_THRESHOLD</code> distinct lanes.</li>
+</ol>
+<p>A lane submission at or after <code>proofDeadline</code> MUST revert. Finalization of a challenged root is permissionless once the threshold is met.</p>
+<p>If <code>block.timestamp &gt;= proofDeadline</code> and the root’s proof bitmap contains fewer than <code>PROOF_THRESHOLD</code> distinct lanes, anyone MAY call <code>invalidate(rootId)</code>. The contract MUST move the root to <code>INVALIDATED</code> and forfeit <code>PROPOSER_BOND</code> per <a href="#proposal-lifecycle">Proposal Lifecycle</a>. This is the only path to <code>INVALIDATED</code>; see <a href="#invalidity-and-conflicts">Invalidity and Conflicts</a>.</p>
+<h3 id="invalidity-and-conflicts"><a class="header" href="#invalidity-and-conflicts">Invalidity and Conflicts</a></h3>
+<p>Invalidation occurs only via the <code>CHALLENGED → INVALIDATED</code> transition described in <a href="#proposer-defense-and-challenged-finality">Proposer Defense and Challenged Finality</a>: a challenged root that the proposer has not defended to <code>PROOF_THRESHOLD</code> distinct supporting lanes by <code>proofDeadline</code> MUST be invalidated. There is no fast-path invalidation from <code>PROPOSED</code>. A party in possession of evidence that a proposed root is incorrect MUST challenge the root; absence of supporting proofs within <code>PROOF_PERIOD</code> is the protocol’s sole in-band signal of invalidity.</p>
+<p>An invalidated root MUST NOT finalize, and descendants of an invalidated root MUST NOT become accepted anchors.</p>
+<p>If invalidity of a finalized root is discovered after the fact — for example, via an offchain proof exhibiting a conflicting <code>(parent, l2BlockNumber) → rootId'</code> — the protocol MUST NOT silently roll back finalized state. The configured safety process MUST be triggered: pausing the proof game type, blacklisting the game, or routing the incident to governance.</p>
+<h3 id="lane-specific-requirements"><a class="header" href="#lane-specific-requirements">Lane-Specific Requirements</a></h3>
+<h4 id="validity-proof"><a class="header" href="#validity-proof">Validity Proof</a></h4>
+<p>The validity proof lane verifies that the transition from <code>parentRoot</code> at <code>parentL2BlockNumber</code> to <code>rootClaim</code> at <code>l2BlockNumber</code> is valid under <code>rollupConfigHash</code>. The verifier MAY be implemented with a zkVM, a SNARK, or another cryptographic proof system. The proof MUST bind to <code>rootId</code> and MUST be verified onchain or by an onchain verifier gateway.</p>
+<h4 id="tee-attestation"><a class="header" href="#tee-attestation">TEE Attestation</a></h4>
+<p>The TEE lane accepts an attestation from a registered TEE signer over <code>rootId</code>. The verifier MUST check that the signer is registered, that the signer is valid for the active TEE image or measurement, that the attestation binds to <code>rootId</code>, and that the attestation has not expired or been revoked.</p>
+<h4 id="security-council-attestation"><a class="header" href="#security-council-attestation">Security Council Attestation</a></h4>
+<p>The Security Council lane accepts a threshold signature, multisig transaction, or equivalent onchain action from the configured council. The attestation MUST bind to <code>rootId</code> and MUST be domain-separated from other council actions. A council attestation counts as one lane and MUST NOT finalize a challenged root by itself.</p>
+<h3 id="anchor-updates"><a class="header" href="#anchor-updates">Anchor Updates</a></h3>
+<p>Only finalized roots may update the canonical anchor. The anchor registry MUST enforce:</p>
+<ul>
+<li>parent validity;</li>
+<li>monotonically increasing L2 block numbers;</li>
+<li>at most one accepted root per <code>(parent, l2BlockNumber)</code>; and</li>
+<li>rejection of roots that are blacklisted, retired, paused, or invalidated.</li>
+</ul>
+<p>The blacklist, retirement, and pause controls MUST be gated by the configured Security Council (or an equivalent guardian role). Setting these controls is the council’s safety responsibility — they are not permissionless. Anchor updates themselves SHOULD be permissionless and self-validating once the root is finalized and not gated by any of these controls.</p>
+<h3 id="contract-interfaces"><a class="header" href="#contract-interfaces">Contract Interfaces</a></h3>
+<p>This WIP specifies interfaces only. Implementation details — storage layouts, clone-with-immutable-args payloads, journal encodings, verifier nullification, guardian controls, and bond escrow mechanics — follow Base Azul’s [proof system specification][base-azul] and the OP Stack [dispute game interface][op-dgi], except where this WIP explicitly diverges.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Interface</th><th>Role</th><th>Reference</th></tr>
+</thead>
+<tbody>
+<tr><td><code>IDisputeGameFactory</code></td><td>Creates per-proposal game clones; indexes games by <code>proposalKey</code>; pins <code>l1OriginHash</code> at creation.</td><td><a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts#disputegamefactory"><code>DisputeGameFactory</code></a></td></tr>
+<tr><td><code>IProofSystemGame</code></td><td>Per-proposal game: holds state, accepts lane submissions, finalizes, advances anchor. World Chain analogue of Base’s <code>AggregateVerifier</code>.</td><td><a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts#aggregateverifier"><code>AggregateVerifier</code></a></td></tr>
+<tr><td><code>IAnchorStateRegistry</code></td><td>Tracks the current anchor, finalized roots, blacklist, retirement, and pause.</td><td><a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts#anchorstateregistry"><code>AnchorStateRegistry</code></a></td></tr>
+<tr><td><code>IValidityProofVerifier</code></td><td>Verifies the <code>VALIDITY_PROOF</code> lane against <code>rootId</code>.</td><td><a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts#zkverifier"><code>ZKVerifier</code></a></td></tr>
+<tr><td><code>ITEEVerifier</code></td><td>Verifies the <code>TEE_ATTESTATION</code> lane against <code>rootId</code>.</td><td><a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts#teeverifier"><code>TEEVerifier</code></a></td></tr>
+<tr><td><code>ITEEProverRegistry</code></td><td>Maintains accepted TEE signer identities, image hashes, and proposer allowlisting.</td><td><a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts#teeproverregistry"><code>TEEProverRegistry</code></a></td></tr>
+<tr><td><code>ISecurityCouncil</code></td><td>Submits and verifies <code>SECURITY_COUNCIL</code> attestations bound to <code>rootId</code>.</td><td>World Chain Security Council multisig.</td></tr>
+<tr><td><code>IStakingRegistry</code></td><td>Checks challenger eligibility and locks, forfeits, or refunds <code>PROPOSER_BOND</code> and <code>CHALLENGER_BOND</code>.</td><td>World Chain–specific; no Base analogue.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="backwards-compatibility"><a class="header" href="#backwards-compatibility">Backwards Compatibility</a></h2>
+<p>This proposal is intended to be implemented as a new World Chain proof game type. Existing output roots and existing Cannon-style games do not need to be reinterpreted.</p>
+<p>The proposer interface is preserved field-for-field with the OP Stack. Specifically:</p>
+<ul>
+<li><code>rootClaim</code> follows the <a href="https://specs.optimism.io/protocol/proposals.html#l2-output-commitment-construction">OP Stack output-root V1 encoding</a>.</li>
+<li><code>l2BlockNumber</code> matches the <a href="https://specs.optimism.io/protocol/proposals.html"><code>l2BlockNumber</code> field of an L2 output proposal</a>.</li>
+<li><code>parentRef</code> follows the <a href="https://specs.optimism.io/fault-proof/stage-one/dispute-game-interface.html">Fault Dispute Game <code>extraData</code> parent reference convention</a> — the <code>AnchorStateRegistry</code> for the first proposal, otherwise the parent proposal address.</li>
+<li><code>l1OriginHash</code> is factory-captured at proposal creation, matching the L1 head snapshot taken by <code>DisputeGameFactory</code> at clone creation.</li>
+<li>The factory lookup key intentionally excludes <code>l1OriginHash</code> and <code>l1OriginNumber</code>, matching the OP Stack/Base pattern where game existence is keyed by deterministic proposal data and the L1 origin is stored on the created game.</li>
+</ul>
+<p>An existing OP Stack proposer that already produces <code>(rootClaim, l2BlockNumber)</code> against a parent reference can be reused. Domain constants (<code>chainId</code>, <code>proofSystemVersion</code>, <code>rollupConfigHash</code>, <code>blockInterval</code>, <code>intermediateBlockInterval</code>) and lane-specific verifier constants live on the verifier implementation, not in the proposer’s calldata, so changes to those values do not require a proposer change.</p>
+<h2 id="test-cases"><a class="header" href="#test-cases">Test Cases</a></h2>
+<p>Before this WIP can move beyond Draft, implementations SHOULD cover at least:</p>
+<ul>
+<li>an unchallenged root finalizes after exactly <code>CHALLENGE_PERIOD</code>;</li>
+<li>an unstaked account cannot challenge;</li>
+<li>a staked account can challenge without proof before the deadline;</li>
+<li>a challenge at or after the deadline reverts;</li>
+<li>a challenged root with one supporting lane does not finalize;</li>
+<li>a proposer defends a challenged root to finalization with two distinct supporting lanes;</li>
+<li>a challenged root the proposer fails to defend to <code>PROOF_THRESHOLD</code> lanes by <code>proofDeadline</code> invalidates and forfeits <code>PROPOSER_BOND</code>;</li>
+<li>a lane submission at or after <code>proofDeadline</code> reverts and does not affect the proof bitmap;</li>
+<li>subsequent challenges on an already-challenged root do not extend <code>proofDeadline</code>;</li>
+<li>duplicate submissions from the same lane do not increase the threshold count;</li>
+<li>every proof lane rejects material that does not bind to <code>rootId</code>;</li>
+<li>anchor updates reject non-finalized, invalidated, paused, retired, or non-monotonic roots.</li>
+</ul>
+<h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
+<p><strong>Unchallenged-path liveness depends on honest watchers.</strong> Safety in the common case relies on at least one honest staked participant challenging an invalid root within <code>CHALLENGE_PERIOD</code>. The architecture does not protect against a root that no one watches.</p>
+<p><strong>Disputed-path safety depends on lane independence.</strong> A false challenged finality requires two lanes to accept the same invalid root. Implementations MUST avoid shared signing keys, shared verifier keys, shared operator control, and shared offchain infrastructure across lanes, because any such sharing collapses the effective threshold below two.</p>
+<p><strong>TEE trust assumptions live in one lane.</strong> The TEE lane rests on the hardware vendor, the enclave image measurement, the registrar that admits signers, and the revocation process. Each of these is a potential single point of failure for that lane. The TEE lane is therefore counted exactly once in the threshold and MUST NOT be used as the sole finality mechanism. A compromised registrar, stale signer set, or weakened image-measurement policy can turn this lane unsafe without affecting the other three.</p>
+<p><strong>Security Council is a safety valve, not a finality mechanism.</strong> Council signing keys, quorum rules, and action domains MUST be isolated from unrelated governance actions. A council attestation alone MUST NOT finalize a challenged root.</p>
+<p><strong><code>rootId</code> domain separation is critical.</strong> Every lane MUST bind to the same <code>rootId</code>, and <code>rootId</code> itself MUST commit to <code>chainId</code>, <code>proofSystemVersion</code>, <code>rollupConfigHash</code>, and the parent/child block range. Missing domain separation allows replay across chains, hardfork schedules, game types, proof-system versions, or block ranges.</p>
+<p><strong><code>proposalKey</code> is not a proof target.</strong> It exists to make factory duplicate prevention and proposer recovery deterministic. Proofs and attestations MUST bind to <code>rootId</code>, not merely to <code>proposalKey</code>, because <code>proposalKey</code> does not include the L1 origin captured at game creation.</p>
+<p><strong>Bond and stake calibration are security-critical.</strong> If <code>CHALLENGER_BOND</code> is too cheap, attackers can grief honest roots into the slow path. If <code>CHALLENGER_BOND</code> is too expensive, honest watchers may fail to challenge invalid roots. If <code>PROPOSER_BOND</code> is too cheap, invalid-proposal spam is cheap and forces honest watchers to lock capital per challenge; if <code>PROPOSER_BOND</code> is too expensive, only well-capitalized actors can propose, which centralizes the role. Exact economic parameters are out of scope for this WIP but MUST be tuned before mainnet deployment.</p>
+<h2 id="copyright"><a class="header" href="#copyright">Copyright</a></h2>
+<p>Copyright and related rights waived via <a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0</a>.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../wips/wip-1005.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../wips/wip-template.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../wips/wip-1005.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../wips/wip-template.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-09f2665d.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-c22b7243.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../specs/static/mermaid-3a6b472a.min.js"></script>
+        <script src="../specs/static/mermaid-init-025d9952.js"></script>
+        <script src="../specs/static/solidity-min-a44de257.js"></script>
+
+
+
+    </div>
+    </body>
+</html>
