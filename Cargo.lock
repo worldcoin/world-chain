@@ -18574,6 +18574,10 @@ dependencies = [
 [[package]]
 name = "world-chain-prover-service"
 version = "2.2.0"
+dependencies = [
+ "async-trait",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "world-chain-rpc"

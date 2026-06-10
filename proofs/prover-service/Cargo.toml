@@ -16,3 +16,5 @@ workspace = true
 # alloy
 
 # misc
+thiserror.workspace = true
+async-trait.workspace = true

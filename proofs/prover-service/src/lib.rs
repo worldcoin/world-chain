@@ -1,6 +1,6 @@
 //! The `prover-service` is the central orchestration layer between
 //! Defenders and proof generation backends (SP1 and Nitro/TEE).
-//! 
+//!
 //! # Architecture
 //!
 //! ```text
@@ -68,3 +68,6 @@
 //! 7. The Defender retrieves the completed proof using `getProof()`.
 //! 8. The Defender crafts and submits the corresponding on-chain transaction.
 
+pub mod error;
+pub mod traits;
+pub mod types;
