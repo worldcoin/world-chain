@@ -13,7 +13,7 @@ repository.workspace = true
 embedded-elfs = []
 
 [dependencies]
+rkyv.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 world-chain-proof-core.workspace = true
-world-chain-proof-succinct-client-utils.workspace = true

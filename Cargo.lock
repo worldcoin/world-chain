@@ -9093,20 +9093,14 @@ dependencies = [
 name = "proof"
 version = "2.2.0"
 dependencies = [
- "alloy-consensus 2.0.4",
  "alloy-primitives",
- "bincode 1.3.3",
+ "anyhow",
  "clap",
- "color-eyre",
  "dotenvy",
  "hex",
- "kona-host",
- "kona-preimage",
- "kona-proof",
  "reqwest 0.12.28",
  "rkyv",
  "serde",
- "serde_cbor",
  "serde_json",
  "sp1-sdk",
  "tokio",
@@ -9114,8 +9108,6 @@ dependencies = [
  "world-chain-proof-core",
  "world-chain-proof-nitro",
  "world-chain-proof-protocol",
- "world-chain-proof-succinct-client-utils",
- "world-chain-proof-succinct-ethereum-client-utils",
  "world-chain-proof-succinct-host-utils",
 ]
 
@@ -18514,19 +18506,30 @@ dependencies = [
  "alloy-consensus 2.0.4",
  "alloy-eips 2.0.4",
  "alloy-primitives",
+ "alloy-sol-types",
  "anyhow",
  "async-trait",
+ "bincode 1.3.3",
  "c-kzg",
+ "hex",
  "kona-derive",
+ "kona-host",
  "kona-preimage",
  "kona-proof",
  "kona-protocol",
  "kzg-rs",
+ "reqwest 0.12.28",
+ "rkyv",
  "serde",
+ "serde_cbor",
  "serde_json",
+ "sp1-sdk",
  "thiserror 2.0.18",
+ "tokio",
+ "tracing",
  "world-chain-proof-core",
  "world-chain-proof-succinct-client-utils",
+ "world-chain-proof-succinct-ethereum-client-utils",
  "world-chain-proof-succinct-utils",
 ]
 
@@ -18534,10 +18537,10 @@ dependencies = [
 name = "world-chain-proof-succinct-utils"
 version = "2.2.0"
 dependencies = [
+ "rkyv",
  "serde",
  "thiserror 2.0.18",
  "world-chain-proof-core",
- "world-chain-proof-succinct-client-utils",
 ]
 
 [[package]]
@@ -18639,6 +18642,29 @@ dependencies = [
  "tracing",
  "world-chain-evm",
  "world-chain-primitives",
+]
+
+[[package]]
+name = "world-chain-sp1-worker"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-sol-types",
+ "anyhow",
+ "async-trait",
+ "clap",
+ "dotenvy",
+ "pin-project",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber 0.3.23",
+ "world-chain-chainspec",
+ "world-chain-proof-core",
+ "world-chain-proof-protocol",
+ "world-chain-proof-succinct-host-utils",
+ "world-chain-proof-succinct-utils",
+ "world-chain-prover-service",
 ]
 
 [[package]]
