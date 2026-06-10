@@ -316,6 +316,86 @@ async fn full_queue_rejects_new_requests() {
 }
 
 #[tokio::test]
+async fn late_submission_frees_queue_capacity() {
+    let service = service(ProverServiceConfig {
+        lease_timeout: Duration::from_millis(10),
+        max_queue_len: 2,
+        ..test_config()
+    });
+    let first = request(ProofBackend::Sp1, 1);
+    let second = request(ProofBackend::Sp1, 2);
+    service.request_proof(first.clone()).await.unwrap();
+    service.request_proof(second.clone()).await.unwrap();
+
+    // Lease both jobs and let the leases expire.
+    service.get_next_proof(ProofBackend::Sp1).await.unwrap();
+    service.get_next_proof(ProofBackend::Sp1).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    // This poll re-queues both expired jobs and re-leases one of them,
+    // leaving the other waiting in the queue.
+    service.get_next_proof(ProofBackend::Sp1).await.unwrap();
+
+    // The original workers still deliver both proofs. Completing the
+    // queued one must also free its queue slot, not leave a stale entry
+    // counting against `max_queue_len`.
+    service.submit_proof(proof_for(&first)).await.unwrap();
+    service.submit_proof(proof_for(&second)).await.unwrap();
+
+    // The queue is empty again, so two new requests fit.
+    service
+        .request_proof(request(ProofBackend::Sp1, 3))
+        .await
+        .unwrap();
+    service
+        .request_proof(request(ProofBackend::Sp1, 4))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn late_submission_after_failure_gets_fresh_eviction_slot() {
+    let service = service(ProverServiceConfig {
+        max_attempts: 1,
+        max_finished_jobs: 2,
+        ..test_config()
+    });
+    let complete = async |req: &ProofRequest| {
+        service.request_proof(req.clone()).await.unwrap();
+        service.get_next_proof(ProofBackend::Sp1).await.unwrap();
+        service.submit_proof(proof_for(req)).await.unwrap();
+    };
+
+    // Exhaust the single attempt so the first job is finished as failed.
+    let first = request(ProofBackend::Sp1, 1);
+    let id = service.request_proof(first.clone()).await.unwrap();
+    service.get_next_proof(ProofBackend::Sp1).await.unwrap();
+    service
+        .fail_proof(id, "transient".to_string())
+        .await
+        .unwrap();
+    assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Failed);
+
+    // A second job finishes after the failure.
+    let second = request(ProofBackend::Sp1, 2);
+    complete(&second).await;
+
+    // The original worker still delivers a valid proof for the first job:
+    // its completion must take a fresh eviction slot, becoming younger
+    // than the second job, instead of keeping the failure-time slot.
+    service.submit_proof(proof_for(&first)).await.unwrap();
+
+    // A third finished job triggers eviction of the oldest entry, which
+    // is now the second job, not the freshly completed first one.
+    complete(&request(ProofBackend::Sp1, 3)).await;
+    assert_eq!(service.get_proof(id).await.unwrap(), proof_for(&first));
+    assert!(matches!(
+        service.get_proof(second.id()).await,
+        Err(ProofRequestError::NotFound(_))
+    ));
+}
+
+#[tokio::test]
 async fn oldest_finished_jobs_are_evicted() {
     let service = service(ProverServiceConfig {
         max_finished_jobs: 1,

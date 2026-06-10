@@ -281,13 +281,21 @@ impl ProofJobQueue for ProverService {
         }
 
         // Accept proofs from expired or already failed jobs too: a valid
-        // proof is useful no matter how late it arrives. Failed jobs were
-        // already recorded as finished.
-        let was_failed = matches!(entry.state, JobState::Failed { .. });
+        // proof is useful no matter how late it arrives.
+        let was_queued = matches!(entry.state, JobState::Queued);
+        let backend = entry.request.backend;
         entry.state = JobState::Completed(proof.proof);
-        if !was_failed {
-            state.finish_job(proof.id, self.config.max_finished_jobs);
+        if was_queued {
+            // The job was re-queued after its lease expired; drop the queue
+            // entry so it cannot be leased again or count as queued work.
+            state
+                .queue_mut(backend)
+                .retain(|queued| *queued != proof.id);
         }
+        // Give jobs that were already finished (failed) a fresh eviction
+        // slot, so the completed proof is not evicted in failure order.
+        state.finished.retain(|finished| *finished != proof.id);
+        state.finish_job(proof.id, self.config.max_finished_jobs);
         info!(id = %proof.id, "proof job completed");
 
         Ok(())
