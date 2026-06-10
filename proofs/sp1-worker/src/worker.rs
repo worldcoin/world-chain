@@ -10,7 +10,10 @@ use std::{
 
 use alloy_sol_types::SolValue;
 use pin_project::pin_project;
-use tokio::{task::JoinHandle, time::Sleep};
+use tokio::{
+    task::{JoinError, JoinHandle},
+    time::Sleep,
+};
 use tracing::{info, warn};
 use world_chain_proof_core::artifacts::AggregationProofArtifact;
 use world_chain_prover_service::{
@@ -24,9 +27,9 @@ type QueueFuture<T> = Pin<Box<dyn Future<Output = Result<T, ProofJobQueueError>>
 
 /// State machine driven by the worker's [`Future`] implementation.
 #[pin_project(project = WorkerStateProj)]
-enum WorkerState {
+enum Sp1WorkerState {
     /// Sleeping before the next lease attempt.
-    Idle(#[pin] Sleep),
+    Idle(Pin<Box<Sleep>>),
     /// Leasing the next queued job from the `prover-service`.
     Leasing(QueueFuture<Option<ProofRequest>>),
     /// Proving the leased job on a blocking thread.
@@ -55,8 +58,9 @@ pub struct Sp1Worker<Q, B> {
     queue: Arc<Q>,
     backend: Arc<B>,
     poll_interval: Duration,
+
     #[pin]
-    state: WorkerState,
+    state: Sp1WorkerState,
 }
 
 impl<Q, B> Sp1Worker<Q, B>
@@ -67,18 +71,13 @@ where
     /// Creates a worker that sleeps `poll_interval` between lease attempts when idle.
     pub fn new(queue: Q, backend: B, poll_interval: Duration) -> Self {
         let queue = Arc::new(queue);
-        let state = WorkerState::Leasing(lease(Arc::clone(&queue)));
+        let state = lease(&queue);
         Self {
             queue,
             backend: Arc::new(backend),
             poll_interval,
             state,
         }
-    }
-
-    /// Drives the worker until the process exits.
-    pub async fn run(self) {
-        self.await
     }
 }
 
@@ -92,90 +91,108 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
         loop {
-            match this.state.as_mut().project() {
+            let next = match this.state.as_mut().project() {
                 WorkerStateProj::Idle(sleep) => {
-                    ready!(sleep.poll(cx));
-                    this.state
-                        .set(WorkerState::Leasing(lease(Arc::clone(this.queue))));
+                    ready!(sleep.as_mut().poll(cx));
+                    lease(this.queue)
                 }
-                WorkerStateProj::Leasing(future) => match ready!(future.as_mut().poll(cx)) {
-                    Ok(Some(request)) => {
-                        info!(
-                            id = %request.id(),
-                            game = %request.game,
-                            l2_block_number = request.l2_block_number,
-                            "processing SP1 proof request"
-                        );
-                        let backend = Arc::clone(this.backend);
-                        let job = request.clone();
-                        let handle = tokio::task::spawn_blocking(move || backend.prove(&job));
-                        this.state.set(WorkerState::Proving { request, handle });
-                    }
-                    Ok(None) => {
-                        this.state
-                            .set(WorkerState::Idle(tokio::time::sleep(*this.poll_interval)));
-                    }
-                    Err(error) => {
-                        warn!(%error, "failed to lease next proof job");
-                        this.state
-                            .set(WorkerState::Idle(tokio::time::sleep(*this.poll_interval)));
-                    }
-                },
+                WorkerStateProj::Leasing(future) => {
+                    let leased = ready!(future.as_mut().poll(cx));
+                    on_leased(leased, this.backend, *this.poll_interval)
+                }
                 WorkerStateProj::Proving { request, handle } => {
                     let joined = ready!(Pin::new(handle).poll(cx));
-                    let result = joined
-                        .map_err(|join_error| {
-                            anyhow::anyhow!("proving task panicked: {join_error}")
-                        })
-                        .and_then(|result| result);
-                    let next = report(Arc::clone(this.queue), request, result);
-                    this.state.set(next);
+                    on_proved(this.queue, request, joined)
                 }
                 WorkerStateProj::Reporting {
                     id,
                     submitted,
                     future,
                 } => {
-                    match ready!(future.as_mut().poll(cx)) {
-                        Ok(()) if *submitted => info!(%id, "proof submitted"),
-                        // Failure reasons are logged when the report is built.
-                        Ok(()) => {}
-                        // The lease expires server-side and the job is re-queued.
-                        Err(error) => warn!(%id, %error, "failed to report proof result"),
-                    }
+                    let reported = ready!(future.as_mut().poll(cx));
+                    on_reported(*id, *submitted, reported);
                     // More work may be queued behind this job; lease again immediately.
-                    this.state
-                        .set(WorkerState::Leasing(lease(Arc::clone(this.queue))));
+                    lease(this.queue)
                 }
-            }
+            };
+            this.state.set(next);
         }
     }
 }
 
-/// Future leasing the next queued SP1 job.
-fn lease<Q>(queue: Arc<Q>) -> QueueFuture<Option<ProofRequest>>
+/// Transitions to leasing the next queued SP1 job.
+fn lease<Q>(queue: &Arc<Q>) -> Sp1WorkerState
 where
     Q: ProofJobQueue + Send + Sync + 'static,
 {
-    Box::pin(async move { queue.get_next_proof(ProofBackend::Sp1).await })
+    let queue = Arc::clone(queue);
+    Sp1WorkerState::Leasing(Box::pin(async move {
+        queue.get_next_proof(ProofBackend::Sp1).await
+    }))
 }
 
-/// Builds the reporting transition for a finished proving attempt.
-fn report<Q>(
-    queue: Arc<Q>,
+/// Transitions to sleeping out the poll interval before the next lease attempt.
+fn idle(poll_interval: Duration) -> Sp1WorkerState {
+    Sp1WorkerState::Idle(Box::pin(tokio::time::sleep(poll_interval)))
+}
+
+/// Decides the transition after a lease attempt resolves: dispatch the leased job, or back
+/// off when the queue is empty or unreachable.
+fn on_leased<B>(
+    leased: Result<Option<ProofRequest>, ProofJobQueueError>,
+    backend: &Arc<B>,
+    poll_interval: Duration,
+) -> Sp1WorkerState
+where
+    B: ValidityProofBackend,
+{
+    match leased {
+        Ok(Some(request)) => prove(backend, request),
+        Ok(None) => idle(poll_interval),
+        Err(error) => {
+            warn!(%error, "failed to lease next proof job");
+            idle(poll_interval)
+        }
+    }
+}
+
+/// Transitions to proving the leased job on a blocking thread.
+fn prove<B>(backend: &Arc<B>, request: ProofRequest) -> Sp1WorkerState
+where
+    B: ValidityProofBackend,
+{
+    info!(
+        id = %request.id(),
+        game = %request.game,
+        l2_block_number = request.l2_block_number,
+        "processing SP1 proof request"
+    );
+    let backend = Arc::clone(backend);
+    let job = request.clone();
+    let handle = tokio::task::spawn_blocking(move || backend.prove(&job));
+    Sp1WorkerState::Proving { request, handle }
+}
+
+/// Decides the transition after the proving task joins: submit the checked artifact, or
+/// report the failure.
+fn on_proved<Q>(
+    queue: &Arc<Q>,
     request: &ProofRequest,
-    result: anyhow::Result<AggregationProofArtifact>,
-) -> WorkerState
+    joined: Result<anyhow::Result<AggregationProofArtifact>, JoinError>,
+) -> Sp1WorkerState
 where
     Q: ProofJobQueue + Send + Sync + 'static,
 {
     let id = request.id();
 
     // `{:#}` renders the full anyhow context chain into the failure reason.
-    let outcome = result
+    let outcome = joined
+        .map_err(|join_error| anyhow::anyhow!("proving task panicked: {join_error}"))
+        .and_then(|result| result)
         .map_err(|error| format!("{error:#}"))
         .and_then(|artifact| check_artifact(request, &artifact).map(|()| artifact));
 
+    let queue = Arc::clone(queue);
     match outcome {
         Ok(artifact) => {
             let public_values = artifact.outputs.abi_encode();
@@ -186,7 +203,7 @@ where
                     public_values: public_values.into(),
                 },
             };
-            WorkerState::Reporting {
+            Sp1WorkerState::Reporting {
                 id,
                 submitted: true,
                 future: Box::pin(async move { queue.submit_proof(response).await }),
@@ -194,12 +211,23 @@ where
         }
         Err(reason) => {
             warn!(%id, %reason, "proving failed");
-            WorkerState::Reporting {
+            Sp1WorkerState::Reporting {
                 id,
                 submitted: false,
                 future: Box::pin(async move { queue.fail_proof(id, reason).await }),
             }
         }
+    }
+}
+
+/// Logs the outcome of reporting a job result to the `prover-service`.
+fn on_reported(id: ProofRequestId, submitted: bool, reported: Result<(), ProofJobQueueError>) {
+    match reported {
+        Ok(()) if submitted => info!(%id, "proof submitted"),
+        // Failure reasons are logged when the report transition is built.
+        Ok(()) => {}
+        // The lease expires server-side and the job is re-queued.
+        Err(error) => warn!(%id, %error, "failed to report proof result"),
     }
 }
 
@@ -358,7 +386,7 @@ mod tests {
         let request = request();
         let queue = MockQueue::with_jobs([request.clone()]);
         let worker = Sp1Worker::new(queue.clone(), MockBackend::Valid, Duration::from_millis(10));
-        let handle = tokio::spawn(worker.run());
+        let handle = tokio::spawn(worker);
 
         assert!(wait_for(|| !queue.submitted().is_empty()).await);
         handle.abort();
@@ -390,7 +418,7 @@ mod tests {
             MockBackend::WrongRoot,
             Duration::from_millis(10),
         );
-        let handle = tokio::spawn(worker.run());
+        let handle = tokio::spawn(worker);
 
         assert!(wait_for(|| !queue.failed().is_empty()).await);
         handle.abort();
@@ -407,7 +435,7 @@ mod tests {
         let request = request();
         let queue = MockQueue::with_jobs([request.clone()]);
         let worker = Sp1Worker::new(queue.clone(), MockBackend::Fails, Duration::from_millis(10));
-        let handle = tokio::spawn(worker.run());
+        let handle = tokio::spawn(worker);
 
         assert!(wait_for(|| !queue.failed().is_empty()).await);
         handle.abort();
@@ -428,7 +456,7 @@ mod tests {
     async fn idles_on_empty_queue() {
         let queue = MockQueue::default();
         let worker = Sp1Worker::new(queue.clone(), MockBackend::Valid, Duration::from_millis(10));
-        let handle = tokio::spawn(worker.run());
+        let handle = tokio::spawn(worker);
 
         tokio::time::sleep(Duration::from_millis(100)).await;
         handle.abort();
