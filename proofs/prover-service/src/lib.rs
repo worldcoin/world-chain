@@ -68,6 +68,28 @@
 //! 7. The Defender retrieves the completed proof using `getProof()`.
 //! 8. The Defender crafts and submits the corresponding on-chain transaction.
 
-pub mod error;
-pub mod traits;
-pub mod types;
+mod config;
+mod error;
+mod rpc;
+mod service;
+mod traits;
+mod types;
+
+// re-exports
+pub use config::{
+    DEFAULT_LEASE_TIMEOUT, DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_FINISHED_JOBS, DEFAULT_MAX_QUEUE_LEN,
+    ProverServiceConfig,
+};
+pub use error::{InvalidConfigError, ProofJobQueueError, ProofRequestError};
+pub use rpc::{
+    ProverServiceApiClient, ProverServiceApiServer, ProverServiceRpc, RpcProverServiceClient,
+    start_rpc_server,
+};
+pub use service::ProverService;
+pub use traits::{ProofJobQueue, ProofRequester};
+pub use types::{
+    ProofBackend, ProofData, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
+};
+
+#[cfg(test)]
+mod tests;
