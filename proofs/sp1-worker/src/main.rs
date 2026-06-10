@@ -46,19 +46,6 @@ impl Network {
     }
 }
 
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-enum Sp1Prover {
-    /// Local CPU prover (requires 32–128 GB RAM).
-    #[value(name = "cpu")]
-    Cpu,
-    /// Succinct proving network (requires SP1_PRIVATE_KEY env var).
-    #[value(name = "network")]
-    Network,
-    /// Mock prover — no real ZK, for integration testing only.
-    #[value(name = "mock")]
-    Mock,
-}
-
 #[derive(Debug, Parser)]
 #[command(
     name = "sp1-worker",
@@ -118,9 +105,9 @@ struct Cli {
     #[arg(long, env = "AGG_ELF_PATH")]
     agg_elf: PathBuf,
 
-    /// Prover backend. Overrides SP1_PROVER env var.
+    /// Prover backend: cpu, mock, or network. Overrides SP1_PROVER env var.
     #[arg(long, env = "SP1_PROVER", default_value = "cpu")]
-    prover: Sp1Prover,
+    prover: Sp1ProverKind,
 
     /// Prover address for on-chain attribution (defaults to zero address).
     #[arg(
@@ -166,13 +153,8 @@ fn main() -> Result<()> {
         .with_context(|| format!("failed to read {}", cli.range_elf.display()))?;
     let agg_elf = fs::read(&cli.agg_elf)
         .with_context(|| format!("failed to read {}", cli.agg_elf.display()))?;
-    let kind = match cli.prover {
-        Sp1Prover::Cpu => Sp1ProverKind::Cpu,
-        Sp1Prover::Mock => Sp1ProverKind::Mock,
-        Sp1Prover::Network => Sp1ProverKind::Network,
-    };
     // Challenged roots are defended on-chain; Groth16 keeps verification ~100k gas.
-    let prover = EnvSuccinctProver::new(kind, range_elf, agg_elf, SP1ProofMode::Groth16)?;
+    let prover = EnvSuccinctProver::new(cli.prover, range_elf, agg_elf, SP1ProofMode::Groth16)?;
 
     let backend = Sp1Backend::new(
         host,
@@ -201,7 +183,18 @@ fn main() -> Result<()> {
         "sp1-worker starting"
     );
 
-    tokio::runtime::Runtime::new()?.block_on(worker.run());
+    // The async side is light (job-queue RPC and timers); proving runs on the blocking pool
+    // one job at a time, and range proofs parallelize on their own scoped threads.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name("sp1-worker")
+        .worker_threads(2)
+        .max_blocking_threads(4)
+        .build()
+        .context("failed to build tokio runtime")?;
+
+    // The worker is a future that never resolves; block on it directly.
+    runtime.block_on(worker);
     Ok(())
 }
 

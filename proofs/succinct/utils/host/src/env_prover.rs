@@ -32,6 +32,21 @@ pub enum Sp1ProverKind {
     Network,
 }
 
+impl std::str::FromStr for Sp1ProverKind {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_lowercase().as_str() {
+            "cpu" => Ok(Self::Cpu),
+            "mock" => Ok(Self::Mock),
+            "network" => Ok(Self::Network),
+            other => Err(anyhow::anyhow!(
+                "unknown sp1 prover kind {other:?} (expected cpu, mock, or network)"
+            )),
+        }
+    }
+}
+
 /// Structured failures specific to [`EnvSuccinctProver`]; surfaced wrapped in
 /// [`anyhow::Error`] so callers can downcast when they need to match on them.
 #[derive(Debug, thiserror::Error)]

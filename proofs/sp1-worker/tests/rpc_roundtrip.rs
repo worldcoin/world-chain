@@ -56,7 +56,7 @@ async fn worker_completes_requested_proof_over_rpc() {
     assert_eq!(id, request.id());
 
     let worker = Sp1Worker::new(queue, MockBackend, Duration::from_millis(10));
-    let worker_handle = tokio::spawn(worker.run());
+    let worker_handle = tokio::spawn(worker);
 
     let mut status = ProofStatus::Queued;
     for _ in 0..200 {

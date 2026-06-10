@@ -197,20 +197,6 @@ struct Sp1ExecuteArgs {
 
 #[cfg(feature = "sp1")]
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
-enum Sp1Prover {
-    /// Local CPU prover (requires 32–128 GB RAM).
-    #[value(name = "cpu")]
-    Cpu,
-    /// Succinct proving network (requires SP1_PRIVATE_KEY env var).
-    #[value(name = "network")]
-    Network,
-    /// Mock prover — no real ZK, for integration testing only.
-    #[value(name = "mock")]
-    Mock,
-}
-
-#[cfg(feature = "sp1")]
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum Sp1Mode {
     /// Default. Proof size grows linearly with cycles.
     #[value(name = "core")]
@@ -244,9 +230,9 @@ struct Sp1ProveArgs {
     #[arg(long, env = "AGG_ELF_PATH")]
     agg_elf: PathBuf,
 
-    /// Prover backend. Overrides SP1_PROVER env var.
+    /// Prover backend: cpu, mock, or network. Overrides SP1_PROVER env var.
     #[arg(long, env = "SP1_PROVER", default_value = "cpu")]
-    prover: Sp1Prover,
+    prover: world_chain_proof_succinct_host_utils::env_prover::Sp1ProverKind,
 
     /// Aggregation proof mode.
     #[arg(long, default_value = "groth16")]
@@ -526,7 +512,7 @@ fn sp1_execute(args: Sp1ExecuteArgs) -> Result<()> {
 fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
     use sp1_sdk::SP1ProofMode;
     use world_chain_proof_succinct_host_utils::{
-        env_prover::{EnvSuccinctProver, Sp1ProverKind},
+        env_prover::EnvSuccinctProver,
         validity::{ValidityProofRequest, prove_validity},
     };
 
@@ -537,11 +523,6 @@ fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
     let agg_elf = fs::read(&args.agg_elf)
         .with_context(|| format!("failed to read {}", args.agg_elf.display()))?;
 
-    let kind = match args.prover {
-        Sp1Prover::Cpu => Sp1ProverKind::Cpu,
-        Sp1Prover::Mock => Sp1ProverKind::Mock,
-        Sp1Prover::Network => Sp1ProverKind::Network,
-    };
     let mode = match args.mode {
         Sp1Mode::Core => SP1ProofMode::Core,
         Sp1Mode::Compressed => SP1ProofMode::Compressed,
@@ -558,7 +539,7 @@ fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
         prover = args.prover,
     );
 
-    let prover = EnvSuccinctProver::new(kind, range_elf, agg_elf, mode)?;
+    let prover = EnvSuccinctProver::new(args.prover, range_elf, agg_elf, mode)?;
     let artifact = prove_validity(
         &host,
         &prover,
