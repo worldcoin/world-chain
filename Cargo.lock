@@ -18572,6 +18572,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-prover-service"
+version = "2.2.0"
+
+[[package]]
 name = "world-chain-rpc"
 version = "2.2.0"
 dependencies = [
