@@ -1,6 +1,6 @@
-<h1 align="center">
-  <img src="assets/world-chain.png" alt="World Chain" width="50%">
-</h1>
+<p align="center">
+  <img src="assets/world-chain.png" alt="World Chain">
+</p>
 
 <h4 align="center">
     A blockchain designed for humans, built on the <a href="https://stack.optimism.io/">OP Stack</a> and powered by <a href="https://github.com/paradigmxyz/reth"><code>reth</code></a>.
