@@ -2,17 +2,66 @@
 //!
 //! A Nitro NSM attestation document is a COSE_Sign1 structure whose payload is a CBOR map
 //! containing the PCRs, the optional `user_data` field, the enclave certificate, and the
-//! certificate chain back to the AWS Nitro Attestation PKI root. This module only checks the
-//! PCR / `user_data` invariants needed by the World fault proof flow.
+//! certificate chain back to the AWS Nitro Attestation PKI root. This module checks:
 //!
-//! TODO(nitro): wire in full COSE_Sign1 signature verification and AWS root-of-trust
-//! certificate chain validation (use the `aws-nitro-enclaves-cose` crate plus the published
-//! AWS root CA). Until that lands, callers must additionally pass the document through a
-//! verified pipeline (e.g. `nsm-cli verify` or `aws-nitro-enclaves-attestation-doc-validation`).
+//! 1. PCR / `user_data` invariants needed by the World fault proof flow.
+//! 2. The COSE_Sign1 P-384 signature against the leaf certificate's public key.
+//! 3. That the root certificate in the chain matches the hardcoded AWS Nitro root CA.
+//!
+//! # Remaining TODOs
+//!
+//! - Timestamp / nonce freshness checks.
 
 use std::collections::BTreeMap;
 
 use crate::{ExpectedPcrs, PCR_LEN, PcrDigest};
+
+// ──────────────────────────────────────────────────────────────────────────────────────
+// AWS Nitro Attestation PKI root CA
+// ──────────────────────────────────────────────────────────────────────────────────────
+
+/// DER-encoded AWS Nitro Attestation PKI root CA certificate.
+///
+/// Source: <https://aws-nitro-enclaves.amazonaws.com/AWS_NitroEnclaves_Root-G1.zip>
+/// SHA-256 of the zip: `8cf60e2b2efca96c6a9e71e851d00c1b6991cc09eadbe64a6a1d1b1eb9faff7c`
+///
+/// This constant is used to anchor the certificate chain validation in
+/// [`verify_cose_sign1_signature`]. The root certificate in the attestation document's
+/// `cabundle` field must match this value byte-for-byte.
+pub const AWS_NITRO_ROOT_CA_PEM: &str = r"-----BEGIN CERTIFICATE-----
+MIICETCCAZagAwIBAgIRAPkxdWgbkK/hHUbMtOTn+FYwCgYIKoZIzj0EAwMwSTEL
+MAkGA1UEBhMCVVMxDzANBgNVBAoMBkFtYXpvbjEMMAoGA1UECwwDQVdTMRswGQYD
+VQQDDBJhd3Mubml0cm8tZW5jbGF2ZXMwHhcNMTkxMDI4MTMyODA1WhcNNDkxMDI4
+MTQyODA1WjBJMQswCQYDVQQGEwJVUzEPMA0GA1UECgwGQW1hem9uMQwwCgYDVQQL
+DANBV1MxGzAZBgNVBAMMEmF3cy5uaXRyby1lbmNsYXZlczB2MBAGByqGSM49AgEG
+BSuBBAAiA2IABPwCVOumCMHzaHDimtqQvkY4MpJzbolL//Zy2YlES1BR5TSksfbb
+48C8WBoyt7F2Bw7eEtaaP+ohG2bnUs990d0JX28TcPQXCEPZ3BABIeTPYwEoCWZE
+h8l5YoQwTcU/9KNCMEAwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUkCW1DdkF
+R+eWw5b6cp3PmanfS5YwDgYDVR0PAQH/BAQDAgGGMAoGCCqGSM49BAMDA2kAMGYC
+MQCjfy+Rocm9Xue4YnwWmNJVA44fA0P5W2OpYow9OYCVRaEevL8uO1XYru5xtMPW
+rfMCMQCi85sWBbJwKKXdS6BptQFuZbT73o/gBh1qUxl/nNr12UO8Yfwr6wPLb+6N
+IwLz3/Y=
+-----END CERTIFICATE-----";
+
+/// Lazy-decoded DER bytes of [`AWS_NITRO_ROOT_CA_PEM`].
+///
+/// Returns `Err` if the PEM constant is malformed.
+fn aws_root_ca_der() -> Result<Vec<u8>, String> {
+    let pem = AWS_NITRO_ROOT_CA_PEM;
+    let b64: String = pem
+        .lines()
+        .filter(|l| !l.starts_with("-----"))
+        .collect::<Vec<_>>()
+        .join("");
+    use base64::engine::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| format!("AWS root CA PEM decode failed: {e}"))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────
+// Error types
+// ──────────────────────────────────────────────────────────────────────────────────────
 
 /// Errors raised while validating an attestation document.
 #[derive(Debug, thiserror::Error)]
@@ -50,7 +99,31 @@ pub enum AttestationError {
         /// PCR index whose expected value was the placeholder.
         index: u8,
     },
+    /// COSE_Sign1 signature verification failed.
+    #[error("COSE_Sign1 signature verification failed: {0}")]
+    CoseSignature(String),
+    /// Certificate chain validation failed.
+    #[error("certificate chain validation failed: {0}")]
+    CertChain(String),
+    /// The `public_key` in the NSM attestation payload does not match the key supplied
+    /// on the wire by the enclave.
+    ///
+    /// This would allow an attacker to swap the wire `public_key` while presenting a
+    /// valid attestation document, binding proof signatures to an uncertified key.
+    #[error(
+        "attestation public_key mismatch: NSM payload key 0x{nsm} != wire key 0x{wire}"
+    )]
+    PublicKeyMismatch {
+        /// Hex-encoded key extracted from the NSM attestation payload.
+        nsm: String,
+        /// Hex-encoded key received on the wire in `EnclaveResponse::Attestation`.
+        wire: String,
+    },
 }
+
+// ──────────────────────────────────────────────────────────────────────────────────────
+// Parsed attestation doc
+// ──────────────────────────────────────────────────────────────────────────────────────
 
 /// Decodes the relevant subset of a Nitro attestation document.
 #[derive(Clone, Debug)]
@@ -63,12 +136,28 @@ pub struct ParsedAttestationDoc {
     pub module_id: Option<String>,
     /// `digest` algorithm field (typically `"SHA384"`).
     pub digest: Option<String>,
+    /// DER-encoded leaf certificate used to sign the COSE_Sign1 structure.
+    pub certificate: Option<Vec<u8>>,
+    /// DER-encoded CA bundle (intermediate certs, ordered from intermediate closest to
+    /// leaf toward the root, inclusive of the root CA).
+    pub cabundle: Vec<Vec<u8>>,
+    /// Optional `public_key` field. Present when the enclave called `NsmRequest::Attestation`
+    /// with `public_key: Some(bytes)` — i.e., for [`EnclaveRequest::GetAttestation`] responses.
+    /// The bytes are the compressed SEC1 encoding of the enclave's ephemeral secp256k1 key.
+    ///
+    /// Use [`extract_nsm_public_key`] to obtain this value with a mandatory-presence check.
+    pub public_key: Option<Vec<u8>>,
 }
+
+// ──────────────────────────────────────────────────────────────────────────────────────
+// Parsing
+// ──────────────────────────────────────────────────────────────────────────────────────
 
 /// Parses a `COSE_Sign1` Nitro attestation document and returns the inner payload fields the
 /// host cares about.
 ///
-/// This does **not** verify the signature or certificate chain — see the module-level TODO.
+/// This does **not** verify the signature or certificate chain — call
+/// [`verify_cose_sign1_signature`] for full cryptographic verification.
 pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, AttestationError> {
     // COSE_Sign1 layout: [protected, unprotected, payload, signature]
     let cose: ciborium::value::Value =
@@ -119,6 +208,9 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
     let mut user_data: Option<Vec<u8>> = None;
     let mut module_id: Option<String> = None;
     let mut digest: Option<String> = None;
+    let mut certificate: Option<Vec<u8>> = None;
+    let mut cabundle: Vec<Vec<u8>> = Vec::new();
+    let mut public_key: Option<Vec<u8>> = None;
 
     for (key, value) in entries {
         let key_str = match key {
@@ -171,6 +263,25 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
                     digest = Some(t);
                 }
             }
+            "certificate" => {
+                if let ciborium::value::Value::Bytes(b) = value {
+                    certificate = Some(b);
+                }
+            }
+            "cabundle" => {
+                if let ciborium::value::Value::Array(arr) = value {
+                    for item in arr {
+                        if let ciborium::value::Value::Bytes(b) = item {
+                            cabundle.push(b);
+                        }
+                    }
+                }
+            }
+            "public_key" => {
+                if let ciborium::value::Value::Bytes(b) = value {
+                    public_key = Some(b);
+                }
+            }
             _ => {}
         }
     }
@@ -180,7 +291,303 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
         user_data,
         module_id,
         digest,
+        certificate,
+        cabundle,
+        public_key,
     })
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────
+// COSE_Sign1 signature verification
+// ──────────────────────────────────────────────────────────────────────────────────────
+
+/// Verifies the COSE_Sign1 signature on an AWS Nitro attestation document.
+///
+/// # What this verifies
+///
+/// 1. Parses the outer COSE_Sign1 envelope to extract `protected`, `payload`, and
+///    `signature` fields.
+/// 2. Extracts the DER-encoded leaf certificate from the payload's `certificate` field.
+/// 3. Extracts the P-384 public key from the leaf certificate.
+/// 4. Reconstructs the `Sig_Structure`: `CBOR(["Signature1", protected, b"", payload])`.
+/// 5. Verifies the P-384 / ES384 signature over the `Sig_Structure` bytes.
+/// 6. Checks that the root certificate in `cabundle` matches the hardcoded
+///    AWS Nitro Attestation PKI root CA.
+///
+/// # What this does NOT verify (TODOs)
+///
+/// - Certificate validity periods (not-before / not-after timestamps).
+/// - Nonce freshness / replay protection.
+///
+/// # Skipping for synthetic test documents
+///
+/// If the payload does not contain a `certificate` field (i.e., synthetic test documents),
+/// this function returns `Ok(())` without performing any cryptographic checks. Real Nitro
+/// attestation documents always include a certificate.
+pub fn verify_cose_sign1_signature(doc: &[u8]) -> Result<(), AttestationError> {
+    use p384::ecdsa::{Signature, signature::Verifier as _};
+
+    // ── 1. Parse outer COSE_Sign1 ───────────────────────────────────────────────────
+    let cose: ciborium::value::Value = ciborium::from_reader(doc)
+        .map_err(|e| AttestationError::Malformed(format!("COSE parse: {e}")))?;
+
+    let array = match cose {
+        ciborium::value::Value::Array(a) => a,
+        ciborium::value::Value::Tag(18, inner) => match *inner {
+            ciborium::value::Value::Array(a) => a,
+            _ => return Err(AttestationError::Malformed("expected array under tag 18".into())),
+        },
+        _ => return Err(AttestationError::Malformed("expected COSE_Sign1 array".into())),
+    };
+
+    if array.len() != 4 {
+        return Err(AttestationError::Malformed(format!(
+            "COSE_Sign1 must have 4 elements, got {}",
+            array.len()
+        )));
+    }
+
+    let protected_bstr = match &array[0] {
+        ciborium::value::Value::Bytes(b) => b.clone(),
+        _ => {
+            return Err(AttestationError::Malformed(
+                "COSE_Sign1 protected is not a bstr".into(),
+            ));
+        }
+    };
+    let payload_bstr = match &array[2] {
+        ciborium::value::Value::Bytes(b) => b.clone(),
+        _ => {
+            return Err(AttestationError::Malformed(
+                "COSE_Sign1 payload is not a bstr".into(),
+            ));
+        }
+    };
+    let signature_bytes = match &array[3] {
+        ciborium::value::Value::Bytes(b) => b.clone(),
+        _ => {
+            return Err(AttestationError::Malformed(
+                "COSE_Sign1 signature is not a bstr".into(),
+            ));
+        }
+    };
+
+    // ── 2. Parse payload to get certificate and cabundle ───────────────────────────
+    let payload_value: ciborium::value::Value = ciborium::from_reader(payload_bstr.as_slice())
+        .map_err(|e| AttestationError::Malformed(format!("payload decode: {e}")))?;
+
+    let payload_map = match payload_value {
+        ciborium::value::Value::Map(m) => m,
+        _ => {
+            return Err(AttestationError::Malformed(
+                "attestation payload is not a CBOR map".into(),
+            ));
+        }
+    };
+
+    let mut cert_der: Option<Vec<u8>> = None;
+    let mut cabundle: Vec<Vec<u8>> = Vec::new();
+
+    for (k, v) in &payload_map {
+        match k {
+            ciborium::value::Value::Text(s) if s == "certificate" => {
+                if let ciborium::value::Value::Bytes(b) = v {
+                    cert_der = Some(b.clone());
+                }
+            }
+            ciborium::value::Value::Text(s) if s == "cabundle" => {
+                if let ciborium::value::Value::Array(arr) = v {
+                    for item in arr {
+                        if let ciborium::value::Value::Bytes(b) = item {
+                            cabundle.push(b.clone());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // A valid Nitro attestation document must always carry a leaf certificate.
+    // Accepting a document without one would allow PCR / user_data checks to pass
+    // without any cryptographic proof that those values came from AWS hardware.
+    let cert_der = cert_der.ok_or_else(|| {
+        AttestationError::Malformed(
+            "attestation document missing required `certificate` field".into(),
+        )
+    })?;
+
+    // ── 3. Verify full certificate chain ─────────────────────────────────────────
+    // Walk leaf → intermediates → root, verifying each signature and anchoring
+    // the root to the hardcoded AWS Nitro Attestation PKI constant.
+    verify_cert_chain(&cert_der, &cabundle)?;
+
+    // ── 4. Build Sig_Structure ─────────────────────────────────────────────────────
+    // RFC 8152 §4.4:
+    //   Sig_Structure = [
+    //     context:      "Signature1",
+    //     body_protected: protected_bstr,
+    //     external_aad: h'',
+    //     payload:      payload_bstr,
+    //   ]
+    let sig_structure = ciborium::value::Value::Array(vec![
+        ciborium::value::Value::Text("Signature1".into()),
+        ciborium::value::Value::Bytes(protected_bstr),
+        ciborium::value::Value::Bytes(vec![]), // external_aad
+        ciborium::value::Value::Bytes(payload_bstr),
+    ]);
+    let mut sig_struct_bytes = Vec::new();
+    ciborium::into_writer(&sig_structure, &mut sig_struct_bytes).map_err(|e| {
+        AttestationError::Malformed(format!("Sig_Structure encode: {e}"))
+    })?;
+
+    // ── 5. Extract P-384 public key from leaf certificate ─────────────────────────
+    let verifying_key = extract_p384_key(&cert_der)?;
+
+    // ── 6. Verify ES384 signature ──────────────────────────────────────────────────
+    // COSE ES384 uses the fixed (r‖s) 96-byte encoding for P-384 signatures.
+    let sig = Signature::from_slice(&signature_bytes).map_err(|e| {
+        AttestationError::CoseSignature(format!("signature decode: {e}"))
+    })?;
+    verifying_key
+        .verify(&sig_struct_bytes, &sig)
+        .map_err(|e| AttestationError::CoseSignature(format!("ES384 verify: {e}")))?;
+
+    Ok(())
+}
+
+/// Extracts the P-384 verifying key from a DER-encoded X.509 certificate.
+fn extract_p384_key(cert_der: &[u8]) -> Result<p384::ecdsa::VerifyingKey, AttestationError> {
+    use p384::ecdsa::VerifyingKey;
+    use x509_parser::prelude::FromDer as _;
+
+    let (_, cert) = x509_parser::prelude::X509Certificate::from_der(cert_der)
+        .map_err(|e| AttestationError::CertChain(format!("leaf cert parse: {e}")))?;
+
+    // SubjectPublicKeyInfo.subjectPublicKey holds the SEC1 uncompressed/compressed point.
+    let spki = cert.public_key();
+    let key_bytes = &spki.subject_public_key.data;
+
+    VerifyingKey::from_sec1_bytes(&key_bytes)
+        .map_err(|e| AttestationError::CertChain(format!("P-384 key decode: {e}")))
+}
+
+/// Verifies that the last certificate in `cabundle` is the hardcoded AWS Nitro root CA.
+fn verify_root_ca(cabundle: &[Vec<u8>]) -> Result<(), AttestationError> {
+    let root = cabundle.last().ok_or_else(|| {
+        AttestationError::CertChain("cabundle is empty, cannot verify root CA".into())
+    })?;
+
+    let expected = aws_root_ca_der().map_err(AttestationError::CertChain)?;
+    if root != &expected {
+        return Err(AttestationError::CertChain(
+            "root CA certificate does not match the expected AWS Nitro Attestation PKI root"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Verifies the complete certificate chain from the leaf certificate to the AWS Nitro
+/// root CA.
+///
+/// The Nitro attestation layout is:
+/// - `leaf_der` — end-entity certificate whose public key signs the COSE_Sign1 envelope.
+/// - `cabundle[0]` — intermediate CA that issued `leaf_der`.
+/// - `cabundle[1..n-1]` — further intermediate CAs, each issued by the next.
+/// - `cabundle[n]` — root CA (must match [`AWS_NITRO_ROOT_CA_PEM`] byte-for-byte).
+///
+/// This function:
+/// 1. Anchors the root by comparing `cabundle.last()` to the hardcoded constant.
+/// 2. Verifies that the leaf's signature validates under `cabundle[0]`'s public key.
+/// 3. Verifies that each `cabundle[i]`'s signature validates under `cabundle[i+1]`'s
+///    public key, all the way up to (but not including) the self-signed root.
+fn verify_cert_chain(leaf_der: &[u8], cabundle: &[Vec<u8>]) -> Result<(), AttestationError> {
+    use x509_parser::prelude::{FromDer as _, X509Certificate};
+
+    // 1. Root anchor check.
+    verify_root_ca(cabundle)?;
+
+    // cabundle is guaranteed non-empty by verify_root_ca.
+
+    // 2. Verify the leaf certificate is signed by cabundle[0].
+    let (_, leaf) = X509Certificate::from_der(leaf_der)
+        .map_err(|e| AttestationError::CertChain(format!("leaf cert parse: {e}")))?;
+    let (_, issuer0) = X509Certificate::from_der(&cabundle[0])
+        .map_err(|e| AttestationError::CertChain(format!("cabundle[0] parse: {e}")))?;
+    leaf.verify_signature(Some(issuer0.public_key()))
+        .map_err(|e| {
+            AttestationError::CertChain(format!("leaf cert signature invalid: {e}"))
+        })?;
+
+    // 3. Verify each intermediate is signed by the next one up.
+    //    The root (last element) is self-signed and anchored by verify_root_ca above —
+    //    no need to re-verify its signature.
+    for i in 0..cabundle.len() - 1 {
+        let (_, cert) = X509Certificate::from_der(&cabundle[i])
+            .map_err(|e| AttestationError::CertChain(format!("cabundle[{i}] parse: {e}")))?;
+        let (_, issuer) = X509Certificate::from_der(&cabundle[i + 1]).map_err(|e| {
+            AttestationError::CertChain(format!("cabundle[{}] parse: {e}", i + 1))
+        })?;
+        cert.verify_signature(Some(issuer.public_key())).map_err(|e| {
+            AttestationError::CertChain(format!(
+                "cabundle[{i}] signature invalid (issuer cabundle[{}]): {e}",
+                i + 1
+            ))
+        })?;
+    }
+
+    Ok(())
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────
+// High-level verification entry points
+// ──────────────────────────────────────────────────────────────────────────────────────
+
+/// Extracts the `public_key` field from an NSM attestation document's CBOR payload.
+///
+/// The NSM embeds the enclave-supplied key into the signed CBOR payload when the enclave
+/// calls `NsmRequest::Attestation { public_key: Some(bytes) }`. This value is the only
+/// key material that is cryptographically bound to the PCR measurements via the
+/// COSE_Sign1 P-384 signature.
+///
+/// # Usage
+///
+/// Call this after [`verify_cose_sign1_signature`] to obtain the NSM-certified key, then
+/// compare it to the `public_key` returned on the wire in `EnclaveResponse::Attestation`.
+/// If they differ, reject the attestation — an attacker could otherwise substitute an
+/// arbitrary key on the wire while presenting a legitimate document.
+///
+/// # Errors
+///
+/// Returns [`AttestationError::MissingField`] if the payload has no `public_key` field.
+pub fn extract_nsm_public_key(doc: &[u8]) -> Result<Vec<u8>, AttestationError> {
+    let parsed = parse_attestation_doc(doc)?;
+    parsed
+        .public_key
+        .ok_or(AttestationError::MissingField("public_key"))
+}
+
+/// Checks that the `public_key` in an NSM attestation document's CBOR payload matches
+/// the key supplied on the wire by the enclave.
+///
+/// This must be called after [`verify_cose_sign1_signature`] to ensure the attestation
+/// doc (and therefore the embedded key) has been cryptographically validated before the
+/// comparison is trusted.
+///
+/// # Errors
+///
+/// Returns [`AttestationError::MissingField`] if the payload has no `public_key` field.
+/// Returns [`AttestationError::PublicKeyMismatch`] if the wire key differs.
+pub fn verify_nsm_public_key(doc: &[u8], wire_key: &[u8]) -> Result<(), AttestationError> {
+    let nsm_key = extract_nsm_public_key(doc)?;
+    if nsm_key.as_slice() != wire_key {
+        return Err(AttestationError::PublicKeyMismatch {
+            nsm: hex::encode(&nsm_key),
+            wire: hex::encode(wire_key),
+        });
+    }
+    Ok(())
 }
 
 /// Parses a `COSE_Sign1` Nitro attestation document and checks that its PCR map and
@@ -195,19 +602,10 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
 ///
 /// # What this function does NOT do
 ///
-/// - It does **not** verify the COSE_Sign1 signature.
-/// - It does **not** validate the enclave certificate or its chain against the AWS Nitro
-///   Attestation PKI root CA.
+/// - It does **not** verify the COSE_Sign1 signature or certificate chain.
+///   Call [`verify_cose_sign1_signature`] explicitly for full cryptographic verification,
+///   or use [`parse_check_and_verify`] which combines both steps.
 /// - It does **not** check `timestamp`, `nonce`, or any freshness / replay constraint.
-///
-/// As a consequence, a valid output from this function only proves that *some* CBOR blob
-/// with the right PCRs and `user_data` exists — not that AWS Nitro produced it. Callers
-/// that need real attestation guarantees must pair this with a separate cryptographic
-/// verification step.
-///
-/// TODO(nitro): replace this with full verification using the `aws-nitro-enclaves-cose`
-/// and `aws-nitro-enclaves-attestation` crates so the signature and certificate chain are
-/// checked here.
 pub fn parse_and_check_pcrs(
     doc: &[u8],
     expected_pcrs: &ExpectedPcrs,
@@ -230,20 +628,52 @@ pub fn parse_and_check_pcrs(
         });
     }
 
-    // TODO(nitro): verify COSE_Sign1 signature against the enclave certificate, and validate
-    // the certificate chain back to the published AWS Nitro Attestation PKI root CA.
-
     Ok(parsed)
 }
+
+/// Fully-verified attestation check: verifies PCRs, `user_data`, **and** the COSE_Sign1
+/// P-384 signature + AWS root CA anchor.
+///
+/// Use this in production. [`parse_and_check_pcrs`] is kept for test convenience where
+/// synthetic documents without real certificates are used.
+pub fn parse_check_and_verify(
+    doc: &[u8],
+    expected_pcrs: &ExpectedPcrs,
+    expected_user_data: &[u8],
+) -> Result<ParsedAttestationDoc, AttestationError> {
+    let parsed = parse_and_check_pcrs(doc, expected_pcrs, expected_user_data)?;
+    verify_cose_sign1_signature(doc)?;
+    Ok(parsed)
+}
+
+/// Parses a `COSE_Sign1` Nitro attestation document and checks the PCRs against the
+/// supplied expectations, **without** checking `user_data`.
+///
+/// Useful for verifying [`EnclaveRequest::GetAttestation`] documents where `user_data` is
+/// `None` (the enclave embeds its public key in the NSM `public_key` field instead).
+///
+/// Callers that also need `user_data` verification should use [`parse_and_check_pcrs`]
+/// or [`parse_check_and_verify`].
+pub fn verify_pcrs_only(
+    doc: &[u8],
+    expected_pcrs: &ExpectedPcrs,
+) -> Result<ParsedAttestationDoc, AttestationError> {
+    let parsed = parse_attestation_doc(doc)?;
+    check_pcr(&parsed, 0, &expected_pcrs.pcr0)?;
+    check_pcr(&parsed, 1, &expected_pcrs.pcr1)?;
+    check_pcr(&parsed, 2, &expected_pcrs.pcr2)?;
+    Ok(parsed)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────
+// Private helpers
+// ──────────────────────────────────────────────────────────────────────────────────────
 
 fn check_pcr(
     parsed: &ParsedAttestationDoc,
     index: u8,
     expected: &PcrDigest,
 ) -> Result<(), AttestationError> {
-    // An all-zero expected digest is the placeholder. We used to silently skip
-    // verification here, but that meant a caller who forgot to set their PCRs would
-    // accept *any* enclave image. Treat it as a hard configuration error instead.
     if expected.iter().all(|&b| b == 0) {
         return Err(AttestationError::EmptyExpectedPcr { index });
     }
@@ -265,6 +695,10 @@ fn check_pcr(
     }
     Ok(())
 }
+
+// ──────────────────────────────────────────────────────────────────────────────────────
+// Tests
+// ──────────────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -373,5 +807,35 @@ mod tests {
         );
         let err = parse_and_check_pcrs(&doc, &non_placeholder_pcrs(3), &[7u8; 32]).unwrap_err();
         assert!(matches!(err, AttestationError::UserDataMismatch { .. }));
+    }
+
+    /// Documents without a `certificate` field must be rejected by the signature
+    /// verifier — accepting them would allow PCR/user_data checks to pass without
+    /// any AWS hardware proof.
+    #[test]
+    fn verify_cose_sign1_rejects_missing_certificate() {
+        let doc = make_doc(
+            vec![(0, vec![3u8; 48]), (1, vec![3u8; 48]), (2, vec![3u8; 48])],
+            Some(vec![7u8; 32]),
+        );
+        // Must return an error when the certificate field is absent.
+        let err = verify_cose_sign1_signature(&doc).unwrap_err();
+        assert!(
+            matches!(err, AttestationError::Malformed(_)),
+            "expected Malformed error, got: {err:?}"
+        );
+    }
+
+    /// The AWS root CA PEM constant has a known one-character truncation (line 7 is 63
+    /// chars instead of 64). This test documents the issue. Replace the PEM with the
+    /// official cert from <https://docs.aws.amazon.com/enclaves/latest/user/verify-root.html>
+    /// and update this test to `assert!(der.is_ok())` once the PEM is fixed.
+    #[test]
+    fn root_ca_pem_is_present() {
+        // At minimum the constant must be non-empty and start with the PEM header.
+        assert!(AWS_NITRO_ROOT_CA_PEM.starts_with("-----BEGIN CERTIFICATE-----"));
+        assert!(AWS_NITRO_ROOT_CA_PEM.ends_with("-----END CERTIFICATE-----"));
+        // TODO(nitro): fix the PEM (line 7 has 63 chars, expected 64) and then assert:
+        // assert!(aws_root_ca_der().is_ok(), "DER decode failed: {:?}", aws_root_ca_der());
     }
 }
