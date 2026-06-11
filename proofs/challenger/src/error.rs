@@ -1,6 +1,6 @@
 use alloy_primitives::{Address, TxHash};
 use thiserror::Error;
-use world_chain_proofs::ConsensusError;
+use world_chain_proofs::{ConsensusError, RootStateError};
 
 /// Errors returned by the proposer.
 #[derive(Debug, Error)]
@@ -23,8 +23,8 @@ pub enum ChallengerError {
     OutputRoot(#[from] ConsensusError),
     #[error("The challenge transaction didn't execute succesfully: {0}")]
     Revert(TxHash),
-    #[error("Invalid root state: {0}")]
-    InvalidRootState(u8),
+    #[error(transparent)]
+    InvalidRootState(#[from] RootStateError),
     #[error("RPC error: {0}")]
     Rpc(String),
     #[error("Latest L1 finalized block not found")]

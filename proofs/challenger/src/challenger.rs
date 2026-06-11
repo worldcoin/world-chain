@@ -1,9 +1,8 @@
 use crate::{
-    GameCreated,
     config::ChallengerConfig,
     error::{ChallengerError, GameScanError},
     traits::ChallengerClient,
-    types::{GameScanOutcome, RetryGame, RootState},
+    types::{GameScanOutcome, RetryGame},
 };
 use alloy_primitives::{Address, BlockNumber};
 use futures_util::{StreamExt, stream};
@@ -12,7 +11,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::warn;
-use world_chain_proofs::ConsensusProvider;
+use world_chain_proofs::{ConsensusProvider, GameCreated, RootState};
 
 /// The number of L1 blocks published in 24h.
 const ONE_DAY_OF_L1_BLOCKS: u64 = 7_200;

@@ -13,7 +13,7 @@ pub use challenger::WorldChainChallenger;
 pub use config::ChallengerConfig;
 pub use error::ChallengerError;
 pub use traits::ChallengerClient;
-pub use types::{ChallengeSubmission, Game, GameCreated, RootState};
+pub use types::ChallengeSubmission;
 
 #[cfg(test)]
 mod tests;
