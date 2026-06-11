@@ -2,7 +2,10 @@ use crate::{
     error::{ProofJobQueueError, ProofRequestError},
     service::ProverService,
     traits::{ProofJobQueue, ProofRequester},
-    types::{ProofBackend, ProofRequest, ProofRequestId, ProofResponse, ProofStatus},
+    types::{
+        LeaseId, LeasedProof, ProofBackend, ProofRequest, ProofRequestId, ProofResponse,
+        ProofStatus,
+    },
 };
 use jsonrpsee::{
     core::{RpcResult, async_trait, client::Error as ClientError},
@@ -49,15 +52,20 @@ pub trait ProverServiceApi {
 
     /// Lease the next queued proof request for the given backend.
     #[method(name = "getNextProof")]
-    async fn get_next_proof(&self, backend: ProofBackend) -> RpcResult<Option<ProofRequest>>;
+    async fn get_next_proof(&self, backend: ProofBackend) -> RpcResult<Option<LeasedProof>>;
 
     /// Submit a generated proof.
     #[method(name = "submitProof")]
     async fn submit_proof(&self, proof: ProofResponse) -> RpcResult<()>;
 
-    /// Report that proving failed for the given job.
+    /// Report that proving failed for the given job and lease.
     #[method(name = "failProof")]
-    async fn fail_proof(&self, proof_id: ProofRequestId, reason: String) -> RpcResult<()>;
+    async fn fail_proof(
+        &self,
+        proof_id: ProofRequestId,
+        lease: LeaseId,
+        reason: String,
+    ) -> RpcResult<()>;
 }
 
 impl From<ProofRequestError> for ErrorObjectOwned {
@@ -127,7 +135,7 @@ impl ProverServiceApiServer for ProverServiceRpc {
         Ok(self.service.get_proof(proof_id).await?)
     }
 
-    async fn get_next_proof(&self, backend: ProofBackend) -> RpcResult<Option<ProofRequest>> {
+    async fn get_next_proof(&self, backend: ProofBackend) -> RpcResult<Option<LeasedProof>> {
         Ok(self.service.get_next_proof(backend).await?)
     }
 
@@ -135,8 +143,13 @@ impl ProverServiceApiServer for ProverServiceRpc {
         Ok(self.service.submit_proof(proof).await?)
     }
 
-    async fn fail_proof(&self, proof_id: ProofRequestId, reason: String) -> RpcResult<()> {
-        Ok(self.service.fail_proof(proof_id, reason).await?)
+    async fn fail_proof(
+        &self,
+        proof_id: ProofRequestId,
+        lease: LeaseId,
+        reason: String,
+    ) -> RpcResult<()> {
+        Ok(self.service.fail_proof(proof_id, lease, reason).await?)
     }
 }
 
@@ -253,7 +266,7 @@ impl ProofJobQueue for RpcProverServiceClient {
     async fn get_next_proof(
         &self,
         backend: ProofBackend,
-    ) -> Result<Option<ProofRequest>, ProofJobQueueError> {
+    ) -> Result<Option<LeasedProof>, ProofJobQueueError> {
         ProverServiceApiClient::get_next_proof(&self.client, backend)
             .await
             .map_err(|err| ProofJobQueueError::Rpc(err.to_string()))
@@ -269,9 +282,10 @@ impl ProofJobQueue for RpcProverServiceClient {
     async fn fail_proof(
         &self,
         proof_id: ProofRequestId,
+        lease: LeaseId,
         reason: String,
     ) -> Result<(), ProofJobQueueError> {
-        ProverServiceApiClient::fail_proof(&self.client, proof_id, reason)
+        ProverServiceApiClient::fail_proof(&self.client, proof_id, lease, reason)
             .await
             .map_err(|err| map_job_error(err, proof_id))
     }
