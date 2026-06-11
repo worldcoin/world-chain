@@ -1,13 +1,10 @@
+use crate::{error::ChallengerError, traits::ChallengerClient, types::ChallengeSubmission};
 use alloy_primitives::{Address, BlockNumber, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
-use world_chain_proofs::{IWorldChainProofSystemFactory, IWorldChainProofSystemGame};
-
-use crate::{
-    error::ChallengerError,
-    traits::ChallengerClient,
-    types::{ChallengeSubmission, GameCreated, RootState},
+use world_chain_proofs::{
+    GameCreated, IWorldChainProofSystemFactory, IWorldChainProofSystemGame, RootState,
 };
 
 /// Alloy-backed implementation of [`ChallengerClient`].

@@ -1,9 +1,6 @@
 use crate::{
-    challenger::WorldChainChallenger,
-    config::ChallengerConfig,
-    error::ChallengerError,
-    traits::ChallengerClient,
-    types::{ChallengeSubmission, GameCreated, RootState},
+    challenger::WorldChainChallenger, config::ChallengerConfig, error::ChallengerError,
+    traits::ChallengerClient, types::ChallengeSubmission,
 };
 use alloy_primitives::{Address, B256, BlockNumber, U256, address};
 use async_trait::async_trait;
@@ -15,7 +12,7 @@ use std::{
     },
     time::Duration,
 };
-use world_chain_proofs::{ConsensusError, ConsensusProvider};
+use world_chain_proofs::{ConsensusError, ConsensusProvider, GameCreated, RootState};
 
 const GAME_1: Address = address!("0000000000000000000000000000000000000001");
 const GAME_2: Address = address!("0000000000000000000000000000000000000002");
@@ -40,7 +37,7 @@ struct MockClient {
 impl ChallengerClient for MockClient {
     async fn root_state(&self, game: Address) -> Result<RootState, ChallengerError> {
         let raw = self.states.get(&game).copied().unwrap_or(STATE_PROPOSED);
-        RootState::try_from(raw)
+        RootState::try_from(raw).map_err(Into::into)
     }
 
     async fn finalized_l1_block_num(&self) -> Result<BlockNumber, ChallengerError> {
