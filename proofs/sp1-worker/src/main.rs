@@ -183,8 +183,8 @@ fn main() -> Result<()> {
         "sp1-worker starting"
     );
 
-    // The async side is light (job-queue RPC and timers); proving runs on the blocking pool
-    // one job at a time, and range proofs parallelize on their own scoped threads.
+    // The async side is light (job-queue RPC and timers); proving runs on the blocking
+    // pool, and range proofs parallelize on their own scoped threads.
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .thread_name("sp1-worker")
@@ -193,7 +193,16 @@ fn main() -> Result<()> {
         .build()
         .context("failed to build tokio runtime")?;
 
-    // The worker is a future that never resolves; block on it directly.
+    // Ctrl-C triggers a graceful shutdown: the worker stops leasing, flushes pending
+    // reports, and resolves.
+    let token = worker.cancellation_token();
+    runtime.spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            tracing::info!("received ctrl-c, shutting down");
+            token.cancel();
+        }
+    });
+
     runtime.block_on(worker);
     Ok(())
 }

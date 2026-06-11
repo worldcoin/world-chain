@@ -64,7 +64,7 @@ impl ValidityProofRequest {
 ///
 /// Synchronous and long-running (witness generation plus proving); it must run on a
 /// blocking-capable thread (use `tokio::task::spawn_blocking` from async code). Sub-range
-/// proofs run in parallel on scoped threads.
+/// witnesses build in parallel, and sub-range proofs run in parallel, on scoped threads.
 pub fn prove_validity<P>(
     host: &OnlineHostConfig,
     prover: &P,
@@ -85,14 +85,13 @@ where
         None => resolve_l1_head(&client, &host.l2_rpc, &host.l1_rpc, request.end_block)?,
     };
 
-    let mut inputs = Vec::with_capacity(ranges.len());
-    for sub_range in &ranges {
+    let inputs = par_map(&ranges, |sub_range| {
         tracing::info!(
             start = sub_range.start + 1,
             end = sub_range.end,
             "building range witness"
         );
-        inputs.push(build_range_input(
+        build_range_input(
             host,
             RangeWitnessRequest {
                 start_block: sub_range.start,
@@ -100,33 +99,18 @@ where
                 l1_head: Some(l1_head),
                 allow_unfinalized: request.allow_unfinalized,
             },
-        )?);
-    }
+        )
+    })?;
 
-    let artifacts = std::thread::scope(|scope| {
-        let handles: Vec<_> = inputs
-            .iter()
-            .map(|input| {
-                scope.spawn(move || {
-                    tracing::info!(
-                        start = input.metadata.start_block + 1,
-                        end = input.metadata.end_block,
-                        "proving range"
-                    );
-                    let range_request = RangeProofRequest::from_witness_data(&input.witness, None)
-                        .context("failed to serialize range witness")?;
-                    prover.prove_range(range_request).map_err(Into::into)
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|handle| {
-                handle
-                    .join()
-                    .map_err(|_| anyhow!("range proving thread panicked"))?
-            })
-            .collect::<anyhow::Result<Vec<_>>>()
+    let artifacts = par_map(&inputs, |input| {
+        tracing::info!(
+            start = input.metadata.start_block + 1,
+            end = input.metadata.end_block,
+            "proving range"
+        );
+        let range_request = RangeProofRequest::from_witness_data(&input.witness, None)
+            .context("failed to serialize range witness")?;
+        prover.prove_range(range_request).map_err(Into::into)
     })?;
 
     for (artifact, input) in artifacts.iter().zip(&inputs) {
@@ -166,4 +150,24 @@ where
             range_proofs,
         })
         .map_err(Into::into)
+}
+
+/// Runs `f` over every item on scoped threads, preserving order and failing on the first
+/// error or panicked thread.
+fn par_map<T, U>(items: &[T], f: impl Fn(&T) -> anyhow::Result<U> + Sync) -> anyhow::Result<Vec<U>>
+where
+    T: Sync,
+    U: Send,
+{
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = items.iter().map(|item| scope.spawn(|| f(item))).collect();
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .map_err(|_| anyhow!("worker thread panicked"))?
+            })
+            .collect()
+    })
 }

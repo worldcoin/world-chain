@@ -165,39 +165,47 @@ where
         }
         while let Poll::Ready(Some(())) = this.reports.poll_next_unpin(cx) {}
 
-        // Lease new work while concurrency permits are available.
-        while !shutting_down {
-            match this.lease.as_mut().project() {
-                LeaseStateProj::Ready => match MAX_CONCURRENCY.try_acquire() {
-                    Ok(permit) => this.lease.set(LeaseState::leasing(this.queue, permit)),
-                    // Every permit is proving. A finishing job wakes this task and frees its
-                    // permit; the idle backoff is a safety net for permits held elsewhere in
-                    // the process.
-                    Err(_) => this.lease.set(LeaseState::idle(*this.poll_interval)),
-                },
-                LeaseStateProj::Idle(sleep) => {
-                    if sleep.as_mut().poll(cx).is_pending() {
-                        break;
-                    }
-                    this.lease.set(LeaseState::Ready);
-                }
-                LeaseStateProj::Leasing { future, permit } => match future.as_mut().poll(cx) {
-                    Poll::Pending => break,
-                    Poll::Ready(Ok(Some(request))) => {
-                        let permit = permit
-                            .take()
-                            .expect("leasing state holds its permit until the job spawns");
-                        spawn_blocking_on_with_shutdown(this.jobs, this.backend, request, permit);
+        // Lease new work while concurrency permits are available. The loop only exits
+        // through a `break` once an inner future returns `Pending`.
+        if !shutting_down {
+            loop {
+                match this.lease.as_mut().project() {
+                    LeaseStateProj::Ready => match MAX_CONCURRENCY.try_acquire() {
+                        Ok(permit) => this.lease.set(LeaseState::leasing(this.queue, permit)),
+                        // Every permit is proving. A finishing job wakes this task and frees
+                        // its permit; the idle backoff is a safety net for permits held
+                        // elsewhere in the process.
+                        Err(_) => this.lease.set(LeaseState::idle(*this.poll_interval)),
+                    },
+                    LeaseStateProj::Idle(sleep) => {
+                        if sleep.as_mut().poll(cx).is_pending() {
+                            break;
+                        }
                         this.lease.set(LeaseState::Ready);
                     }
-                    Poll::Ready(Ok(None)) => {
-                        this.lease.set(LeaseState::idle(*this.poll_interval));
-                    }
-                    Poll::Ready(Err(error)) => {
-                        warn!(%error, "failed to lease next proof job");
-                        this.lease.set(LeaseState::idle(*this.poll_interval));
-                    }
-                },
+                    LeaseStateProj::Leasing { future, permit } => match future.as_mut().poll(cx) {
+                        Poll::Pending => break,
+                        Poll::Ready(Ok(Some(request))) => {
+                            let permit = permit
+                                .take()
+                                .expect("leasing state holds its permit until the job spawns");
+                            spawn_blocking_on_with_shutdown(
+                                this.jobs,
+                                this.backend,
+                                request,
+                                permit,
+                            );
+                            this.lease.set(LeaseState::Ready);
+                        }
+                        Poll::Ready(Ok(None)) => {
+                            this.lease.set(LeaseState::idle(*this.poll_interval));
+                        }
+                        Poll::Ready(Err(error)) => {
+                            warn!(%error, "failed to lease next proof job");
+                            this.lease.set(LeaseState::idle(*this.poll_interval));
+                        }
+                    },
+                }
             }
         }
 
@@ -245,7 +253,10 @@ fn spawn_blocking_on_with_shutdown<B>(
         let result =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| backend.prove(&request)))
                 .unwrap_or_else(|panic| {
-                    Err(anyhow::anyhow!("proving panicked: {}", panic_message(&*panic)))
+                    Err(anyhow::anyhow!(
+                        "proving panicked: {}",
+                        panic_message(&*panic)
+                    ))
                 });
         FinishedJob { request, result }
     });
