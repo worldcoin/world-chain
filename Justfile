@@ -97,6 +97,10 @@ build-proof-aggregation-elf:
 # Build all World SP1 proof ELFs
 build-proof-elfs: build-proof-range-elf build-proof-aggregation-elf
 
+# Compute the on-chain verification keys for the committed SP1 proof ELFs
+proof-vkeys *args='':
+    cargo run --release -p proof --features sp1 -- sp1 vkeys $@
+
 # Generate CLI reference docs for the mdbook
 docs:
     cargo xtask docs
