@@ -75,7 +75,7 @@ where
             .map(|(event, _log)| {
                 Ok(GameCreated {
                     proposal_key: event.proposalKey,
-                    root_it: event.rootId,
+                    root_id: event.rootId,
                     game: event.game,
                     proposer: event.proposer,
                     root_claim: event.rootClaim,
@@ -99,6 +99,19 @@ where
             .await
             .map_err(|err| DefenderError::Contract(err.to_string()))?;
         Ok(challenge_deadline)
+    }
+
+    async fn proof_bitmap(&self, game: Address) -> Result<u8, DefenderError> {
+        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
+            game,
+            self.provider.clone(),
+        );
+        let proof_bitmap = game
+            .proofBitmap()
+            .call()
+            .await
+            .map_err(|err| DefenderError::Contract(err.to_string()))?;
+        Ok(proof_bitmap)
     }
 
     async fn submit_proof(

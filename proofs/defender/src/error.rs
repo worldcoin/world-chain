@@ -1,6 +1,6 @@
 use alloy_primitives::TxHash;
 use thiserror::Error;
-use world_chain_proofs::RootStateError;
+use world_chain_proofs::{ConsensusError, RootStateError};
 
 /// Errors returned by the defender.
 #[derive(Debug, Error)]
@@ -17,6 +17,8 @@ pub enum DefenderError {
     L1FinalizedBlockNotFound,
     #[error(transparent)]
     InvalidRootState(#[from] RootStateError),
+    #[error(transparent)]
+    OutputRoot(#[from] ConsensusError),
     #[error("The submitProofLane transaction didn't execute succesfully: {0}")]
     Revert(TxHash),
 }

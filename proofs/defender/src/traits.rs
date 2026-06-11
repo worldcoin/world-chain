@@ -17,6 +17,8 @@ pub trait DefenderClient {
     ) -> Result<Vec<GameCreated>, DefenderError>;
     /// Get the challenge deadline of the provided game.
     async fn challenge_deadline(&self, game: Address) -> Result<u64, DefenderError>;
+    /// Get the bitmap of proof lanes already proven for the provided game.
+    async fn proof_bitmap(&self, game: Address) -> Result<u8, DefenderError>;
     /// Submit a proof to support a challenged game.
     async fn submit_proof(
         &self,

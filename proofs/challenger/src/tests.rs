@@ -54,7 +54,7 @@ impl ChallengerClient for MockClient {
             .iter()
             .map(|&(game, root_claim, l2_block_number)| GameCreated {
                 proposal_key: B256::ZERO,
-                root_it: B256::ZERO,
+                root_id: B256::ZERO,
                 game,
                 proposer: Address::ZERO,
                 root_claim,

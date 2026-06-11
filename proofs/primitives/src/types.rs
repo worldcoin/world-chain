@@ -16,7 +16,7 @@ pub const PROOF_SYSTEM_VERSION: u64 = 1;
 #[derive(Debug, Clone, Copy)]
 pub struct GameCreated {
     pub proposal_key: B256,
-    pub root_it: B256,
+    pub root_id: B256,
     pub game: Address,
     pub proposer: Address,
     pub root_claim: B256,

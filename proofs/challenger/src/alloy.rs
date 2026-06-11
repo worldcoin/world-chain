@@ -75,7 +75,7 @@ where
             .map(|(event, _log)| {
                 Ok(GameCreated {
                     proposal_key: event.proposalKey,
-                    root_it: event.rootId,
+                    root_id: event.rootId,
                     game: event.game,
                     proposer: event.proposer,
                     root_claim: event.rootClaim,
