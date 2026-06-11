@@ -37,7 +37,7 @@ use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequester, ProofStatus, ProverService,
     ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
 };
-use world_chain_sp1_worker::{Sp1Backend, Sp1BackendConfig, Sp1Worker};
+use world_chain_sp1_worker::{ProofWorker, ProofWorkerConfig, Sp1Backend, Sp1BackendConfig};
 
 /// Reads a required env var, or returns `None` (with a skip message) when absent.
 fn required(name: &str) -> Option<String> {
@@ -178,10 +178,13 @@ async fn worker_proves_real_range_end_to_end() {
         .expect("start prover-service");
     let url = format!("http://{addr}");
     let client = RpcProverServiceClient::new(&url).expect("client");
-    let worker = Sp1Worker::new(
+    let worker = ProofWorker::new(
         RpcProverServiceClient::new(&url).expect("client"),
         backend,
-        Duration::from_millis(500),
+        ProofWorkerConfig {
+            poll_interval: Duration::from_millis(500),
+            max_concurrent_jobs: 1,
+        },
     );
     let token = worker.cancellation_token();
     let worker_handle = tokio::spawn(worker);

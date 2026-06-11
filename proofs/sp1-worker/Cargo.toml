@@ -21,6 +21,7 @@ world-chain-proof-core.workspace = true
 world-chain-proof-protocol.workspace = true
 world-chain-proof-succinct-host-utils = { workspace = true, features = ["sp1"] }
 world-chain-proof-succinct-utils.workspace = true
+world-chain-proof-worker.workspace = true
 world-chain-prover-service.workspace = true
 
 # alloy
@@ -31,17 +32,13 @@ alloy-sol-types.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
-futures-util.workspace = true
-pin-project.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "signal", "time"] }
-tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-async-trait.workspace = true
 reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 world-chain-proofs.workspace = true

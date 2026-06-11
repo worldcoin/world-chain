@@ -1,0 +1,28 @@
+[package]
+name = "world-chain-proof-worker"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# workspace
+world-chain-prover-service.workspace = true
+
+# misc
+anyhow.workspace = true
+futures-util.workspace = true
+pin-project.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+tokio-util.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+alloy-primitives = { workspace = true, features = ["serde"] }
+async-trait.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

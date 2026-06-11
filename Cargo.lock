@@ -18121,6 +18121,7 @@ dependencies = [
  "world-chain-node",
  "world-chain-primitives",
  "world-chain-proof-succinct-host-utils",
+ "world-chain-proof-worker",
  "world-chain-proofs",
  "world-chain-proposer",
  "world-chain-prover-service",
@@ -18549,6 +18550,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-proof-worker"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "anyhow",
+ "async-trait",
+ "futures-util",
+ "pin-project",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "world-chain-prover-service",
+]
+
+[[package]]
 name = "world-chain-proofs"
 version = "2.2.0"
 dependencies = [
@@ -18656,16 +18672,12 @@ dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
  "anyhow",
- "async-trait",
  "clap",
  "dotenvy",
- "futures-util",
- "pin-project",
  "reqwest 0.12.28",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
- "tokio-util",
  "tracing",
  "tracing-subscriber 0.3.23",
  "world-chain-chainspec",
@@ -18673,6 +18685,7 @@ dependencies = [
  "world-chain-proof-protocol",
  "world-chain-proof-succinct-host-utils",
  "world-chain-proof-succinct-utils",
+ "world-chain-proof-worker",
  "world-chain-proofs",
  "world-chain-prover-service",
 ]

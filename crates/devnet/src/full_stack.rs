@@ -39,8 +39,18 @@ use tracing::{Instrument, debug, info, info_span, warn};
 use url::{Host, Url};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 use world_chain_challenger::{AlloyChallengerClient, ChallengerConfig, WorldChainChallenger};
+use world_chain_proof_succinct_host_utils::{
+    env_prover::{EnvSuccinctProver, SP1ProofMode, Sp1ProverKind},
+    online::OnlineHostConfig,
+};
+use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig};
 use world_chain_proofs::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
 use world_chain_proposer::{AlloyProofSystemClient, ProposerConfig, WorldChainProposer};
+use world_chain_prover_service::{
+    ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
+};
+use world_chain_sp1_worker::{Sp1Backend, Sp1BackendConfig};
+use jsonrpsee::server::ServerHandle;
 use world_chain_test_utils::DEV_CHAIN_ID;
 
 use crate::{
@@ -69,6 +79,13 @@ const SERVICE_RPC_PORT: u16 = 8545;
 const SERVICE_METRICS_PORT: u16 = 7300;
 const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 10;
 const PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL: u64 = 5;
+/// Poll interval for the in-process SP1 worker leasing jobs from the prover-service.
+const SP1_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
+/// Env var enabling the in-process defender prover-service + SP1 worker. Off by default: the
+/// worker idles until something enqueues proof requests (the monitoring component is not yet
+/// built), and real proving needs the SP1 ELFs. Set a prover backend (`cpu`/`mock`/`network`)
+/// to turn it on.
+const SP1_WORKER_PROVER_ENV: &str = "DEVNET_SP1_WORKER_PROVER";
 /// Bond, in wei, sent with every `WorldChainProofSystemFactory.propose`.
 /// Matches `PROPOSER_BOND` (1 ether) in `scripts/devnet/DeployProofSystem.s.sol`.
 const WORLD_PROPOSER_BOND_WEI: u128 = 1_000_000_000_000_000_000;
@@ -122,6 +139,9 @@ pub struct FullStackWorldDevnet {
     _proof_system: Option<WorldProofSystemDeployment>,
     _world_proposer: Option<ProposerTask>,
     _world_challenger: Option<ChallengerTask>,
+    _prover_service: Option<ProverServiceTask>,
+    _sp1_worker: Option<Sp1WorkerTask>,
+    prover_service_url: Option<String>,
     _conductors: Vec<ConductorService>,
     _op_nodes: Vec<OpNodeService>,
     sequencers: Vec<SequencerService>,
@@ -246,6 +266,30 @@ struct ChallengerTask {
 }
 
 impl Drop for ChallengerTask {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
+/// In-process defender prover-service RPC server. Stopped on devnet drop.
+#[derive(Debug)]
+struct ProverServiceTask {
+    handle: ServerHandle,
+}
+
+impl Drop for ProverServiceTask {
+    fn drop(&mut self) {
+        let _ = self.handle.stop();
+    }
+}
+
+/// In-process defender SP1 proving worker task. Aborted on devnet drop.
+#[derive(Debug)]
+struct Sp1WorkerTask {
+    handle: JoinHandle<()>,
+}
+
+impl Drop for Sp1WorkerTask {
     fn drop(&mut self) {
         self.handle.abort();
     }
@@ -494,6 +538,33 @@ impl FullStackWorldDevnet {
             None
         };
 
+        // Defender proving loop: an in-process prover-service plus an SP1 worker, enabled by
+        // the `DEVNET_SP1_WORKER_PROVER` env var. The worker leases SP1 jobs, builds witnesses
+        // from the devnet L1/L2 RPCs, and proves them with the selected backend.
+        let (prover_service, sp1_worker, prover_service_url) = match (
+            proof_system.as_ref(),
+            sp1_worker_prover_kind(),
+        ) {
+            (Some(deployment), Some(kind)) => {
+                let l2_rpc = sequencers
+                    .first()
+                    .map(|sequencer| sequencer.rpc_url.clone())
+                    .ok_or_else(|| eyre!("full-stack devnet has no sequencer for the SP1 worker"))?;
+                let (service, url) = start_prover_service().await?;
+                let worker = start_sp1_worker(
+                    &l1_public_rpc,
+                    &l2_rpc,
+                    &url,
+                    &artifacts.rollup_path,
+                    deployment,
+                    kind,
+                )
+                .await?;
+                (Some(service), Some(worker), Some(url))
+            }
+            _ => (None, None, None),
+        };
+
         let mut metrics_targets = Vec::new();
         metrics_targets.extend(
             sequencers
@@ -533,6 +604,7 @@ impl FullStackWorldDevnet {
             proof_system.as_ref(),
             observability.as_ref(),
             &game_factory,
+            prover_service_url.as_deref(),
         );
 
         Ok(Self {
@@ -542,6 +614,9 @@ impl FullStackWorldDevnet {
             _proof_system: proof_system,
             _world_proposer: world_proposer,
             _world_challenger: world_challenger,
+            _prover_service: prover_service,
+            _sp1_worker: sp1_worker,
+            prover_service_url,
             _conductors: conductors,
             _op_nodes: op_nodes,
             sequencers,
@@ -559,6 +634,11 @@ impl FullStackWorldDevnet {
 
     pub fn l2_rpc_url(&self) -> &str {
         &self.sequencers[0].rpc_url
+    }
+
+    /// JSON-RPC URL of the in-process defender prover-service, when enabled.
+    pub fn prover_service_url(&self) -> Option<&str> {
+        self.prover_service_url.as_deref()
     }
 
     pub fn sequencer_rpc_url(&self) -> &str {
@@ -2341,6 +2421,100 @@ async fn start_world_chain_challenger(
     Ok(ChallengerTask { handle })
 }
 
+/// Reads the SP1 worker prover backend from [`SP1_WORKER_PROVER_ENV`], or `None` when the
+/// defender proving loop is disabled.
+fn sp1_worker_prover_kind() -> Option<Sp1ProverKind> {
+    std::env::var(SP1_WORKER_PROVER_ENV)
+        .ok()
+        .and_then(|value| value.parse().ok())
+}
+
+/// Starts the in-process defender prover-service and returns its task handle and JSON-RPC URL.
+async fn start_prover_service() -> Result<(ProverServiceTask, String)> {
+    let service = Arc::new(
+        ProverService::new(ProverServiceConfig::default())
+            .wrap_err("invalid prover-service config")?,
+    );
+    let (addr, handle) = start_rpc_server("127.0.0.1:0".parse().expect("valid loopback addr"), service)
+        .await
+        .wrap_err("failed to start prover-service RPC server")?;
+    let url = format!("http://{addr}");
+    info!(prover_service = %url, "started native defender prover-service");
+    Ok((ProverServiceTask { handle }, url))
+}
+
+/// Spawns the in-process SP1 proving worker.
+///
+/// It leases SP1 jobs from the prover-service at `prover_service_url`, builds range witnesses
+/// from the devnet L1/L2 RPCs (the L1 dev chain doubles as the beacon endpoint, matching the
+/// op-node configuration), proves them with the selected backend, and submits the proofs back.
+async fn start_sp1_worker(
+    l1_rpc_url: &str,
+    l2_rpc_url: &str,
+    prover_service_url: &str,
+    rollup_path: &Path,
+    deployment: &WorldProofSystemDeployment,
+    kind: Sp1ProverKind,
+) -> Result<Sp1WorkerTask> {
+    let rollup_config: Value = read_json(rollup_path)?;
+    let host = OnlineHostConfig::from_rollup_config_value(
+        &rollup_config,
+        l1_rpc_url.to_string(),
+        l1_rpc_url.to_string(),
+        l2_rpc_url.to_string(),
+        Some(rollup_path.to_path_buf()),
+        Duration::from_secs(900),
+    )
+    .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?;
+
+    let range_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-range-ethereum");
+    let agg_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-aggregation");
+    let range_elf = fs::read(&range_elf_path)
+        .wrap_err_with(|| format!("failed to read range ELF {}", range_elf_path.display()))?;
+    let agg_elf = fs::read(&agg_elf_path)
+        .wrap_err_with(|| format!("failed to read aggregation ELF {}", agg_elf_path.display()))?;
+
+    // `EnvSuccinctProver` owns its own runtime, so build it off the async runtime.
+    let prover = tokio::task::spawn_blocking(move || {
+        EnvSuccinctProver::new(kind, range_elf, agg_elf, SP1ProofMode::Groth16)
+    })
+    .await
+    .wrap_err("SP1 prover setup task panicked")?
+    .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+
+    let backend = Sp1Backend::new(
+        host,
+        prover,
+        Sp1BackendConfig {
+            block_interval: deployment.block_interval,
+            split_count: 1,
+            prover_address: Address::ZERO,
+            allow_unfinalized: false,
+        },
+    );
+
+    let queue = RpcProverServiceClient::new(prover_service_url)
+        .map_err(|error| eyre!("failed to connect SP1 worker to prover-service: {error}"))?;
+    let worker = ProofWorker::new(
+        queue,
+        backend,
+        ProofWorkerConfig {
+            poll_interval: SP1_WORKER_POLL_INTERVAL,
+            max_concurrent_jobs: 1,
+        },
+    );
+
+    info!(
+        prover_service = %prover_service_url,
+        block_interval = deployment.block_interval,
+        prover = ?kind,
+        "starting native defender SP1 worker"
+    );
+
+    let handle = tokio::spawn(worker.instrument(info_span!("sp1-worker", process = "sp1-worker")));
+    Ok(Sp1WorkerTask { handle })
+}
+
 async fn start_aux_service(
     id: &str,
     kind: DevnetComponentKind,
@@ -2584,6 +2758,7 @@ fn build_components(
     proof_system: Option<&WorldProofSystemDeployment>,
     observability: Option<&ObservabilityStack>,
     game_factory: &str,
+    prover_service_url: Option<&str>,
 ) -> Vec<DevnetComponent> {
     let mut components = vec![
         DevnetComponent::new(
@@ -2748,6 +2923,31 @@ fn build_components(
             .with_note(
                 "signs with a dedicated dev key funded in the L1 genesis and staked in the MockStakingRegistry",
             ),
+        );
+    }
+
+    if let Some(url) = prover_service_url {
+        components.push(
+            DevnetComponent::new(
+                "prover-service",
+                DevnetComponentKind::ProverService,
+                DevnetComponentStatus::Running,
+            )
+            .with_endpoint("rpc", url.to_string())
+            .with_note(
+                "in-memory defender proof request queue; enqueue SP1/TEE jobs via the prover JSON-RPC",
+            ),
+        );
+        components.push(
+            DevnetComponent::new(
+                "sp1-worker",
+                DevnetComponentKind::Sp1Worker,
+                DevnetComponentStatus::Running,
+            )
+            .with_endpoint("prover-service", url.to_string())
+            .with_note(format!(
+                "native in-process SP1 worker (backend from {SP1_WORKER_PROVER_ENV}); leases jobs, builds witnesses, proves, and submits back"
+            )),
         );
     }
 

@@ -17,6 +17,7 @@ world-chain-node.workspace = true
 world-chain-primitives.workspace = true
 world-chain-proofs.workspace = true
 world-chain-proof-succinct-host-utils = { workspace = true, features = ["sp1"] }
+world-chain-proof-worker.workspace = true
 world-chain-proposer.workspace = true
 world-chain-prover-service.workspace = true
 world-chain-rpc.workspace = true

@@ -13,7 +13,9 @@
 //! ```
 
 pub mod backend;
-pub mod worker;
 
-pub use backend::{Sp1Backend, Sp1BackendConfig, ValidityProofBackend};
-pub use worker::Sp1Worker;
+pub use backend::{Sp1Backend, Sp1BackendConfig};
+
+// Re-exported so binaries and tests can build a worker without depending on
+// `world-chain-proof-worker` directly.
+pub use world_chain_proof_worker::{ProofJobBackend, ProofWorker, ProofWorkerConfig};

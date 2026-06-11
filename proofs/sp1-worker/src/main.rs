@@ -20,7 +20,7 @@ use world_chain_proof_succinct_host_utils::{
     online::{OnlineHostConfig, range_hardfork_config},
 };
 use world_chain_prover_service::RpcProverServiceClient;
-use world_chain_sp1_worker::{Sp1Backend, Sp1BackendConfig, Sp1Worker};
+use world_chain_sp1_worker::{ProofWorker, ProofWorkerConfig, Sp1Backend, Sp1BackendConfig};
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum Network {
@@ -120,6 +120,11 @@ struct Cli {
     /// Seconds to sleep between job-queue polls when no work is available.
     #[arg(long, default_value_t = 10)]
     poll_interval_seconds: u64,
+
+    /// Maximum number of jobs proved concurrently. One suits a local CPU prover; raise it for
+    /// the Succinct proving network.
+    #[arg(long, default_value_t = 1)]
+    max_concurrent_jobs: usize,
 }
 
 fn main() -> Result<()> {
@@ -169,10 +174,13 @@ fn main() -> Result<()> {
 
     let queue = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
-    let worker = Sp1Worker::new(
+    let worker = ProofWorker::new(
         queue,
         backend,
-        Duration::from_secs(cli.poll_interval_seconds),
+        ProofWorkerConfig {
+            poll_interval: Duration::from_secs(cli.poll_interval_seconds),
+            max_concurrent_jobs: cli.max_concurrent_jobs,
+        },
     );
 
     tracing::info!(

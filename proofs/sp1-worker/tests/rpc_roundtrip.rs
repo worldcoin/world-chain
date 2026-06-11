@@ -2,30 +2,25 @@
 
 use std::{sync::Arc, time::Duration};
 
-use alloy_primitives::{Address, B256};
-use world_chain_proof_core::{artifacts::AggregationProofArtifact, types::AggregationOutputs};
+use alloy_primitives::{Address, B256, Bytes};
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequester, ProofStatus, ProverService,
     ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
 };
-use world_chain_sp1_worker::{Sp1Worker, ValidityProofBackend};
+use world_chain_sp1_worker::{ProofJobBackend, ProofWorker, ProofWorkerConfig};
 
-/// Backend returning a canned artifact matching the request, without RPC or SP1.
+/// Backend returning a canned SP1 proof for any request, without RPC or a prover.
 struct MockBackend;
 
-impl ValidityProofBackend for MockBackend {
-    fn prove(&self, request: &ProofRequest) -> anyhow::Result<AggregationProofArtifact> {
-        Ok(AggregationProofArtifact {
-            outputs: AggregationOutputs {
-                l1Head: request.l1_head,
-                l2PreRoot: B256::repeat_byte(0x01),
-                l2PostRoot: request.root_claim,
-                l2BlockNumber: request.l2_block_number,
-                rollupConfigHash: B256::repeat_byte(0x02),
-                multiBlockVKey: B256::repeat_byte(0x03),
-                proverAddress: Address::ZERO,
-            },
-            proof: vec![0xaa, 0xbb],
+impl ProofJobBackend for MockBackend {
+    fn lane(&self) -> ProofBackend {
+        ProofBackend::Sp1
+    }
+
+    fn prove(&self, _request: &ProofRequest) -> anyhow::Result<ProofData> {
+        Ok(ProofData::Sp1 {
+            proof: Bytes::from_static(&[0xaa, 0xbb]),
+            public_values: Bytes::from_static(&[0x01]),
         })
     }
 }
@@ -55,7 +50,14 @@ async fn worker_completes_requested_proof_over_rpc() {
         .expect("request accepted");
     assert_eq!(id, request.id());
 
-    let worker = Sp1Worker::new(queue, MockBackend, Duration::from_millis(10));
+    let worker = ProofWorker::new(
+        queue,
+        MockBackend,
+        ProofWorkerConfig {
+            poll_interval: Duration::from_millis(10),
+            max_concurrent_jobs: 1,
+        },
+    );
     let worker_handle = tokio::spawn(worker);
 
     let mut status = ProofStatus::Queued;
