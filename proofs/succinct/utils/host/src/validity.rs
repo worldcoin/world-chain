@@ -5,7 +5,7 @@
 //! [`AggregationProofArtifact`] whose outputs commit to the claimed output root.
 
 use alloy_primitives::{Address, B256};
-use anyhow::{Context, anyhow, bail};
+use anyhow::{bail, Context};
 use reqwest::blocking::Client;
 use world_chain_proof_core::{artifacts::AggregationProofArtifact, types::AggregationInputs};
 use world_chain_proof_succinct_utils::{
@@ -13,12 +13,11 @@ use world_chain_proof_succinct_utils::{
 };
 
 use crate::{
-    L2BlockRange,
     online::{
-        OnlineHostConfig, RangeWitnessRequest, build_range_input, fetch_l1_header_by_hash,
-        resolve_l1_head,
+        build_range_input, fetch_l1_header_by_hash, resolve_l1_head, OnlineHostConfig,
+        RangeWitnessRequest,
     },
-    split_range,
+    split_range, L2BlockRange,
 };
 
 /// One validity-proof job covering L2 blocks `(start_block, end_block]`.
@@ -63,15 +62,20 @@ impl ValidityProofRequest {
 /// Proves the transition over `(start_block, end_block]` and aggregates it into one artifact.
 ///
 /// Synchronous and long-running (witness generation plus proving); it must run on a
-/// blocking-capable thread (use `tokio::task::spawn_blocking` from async code). Sub-range
-/// witnesses build in parallel, and sub-range proofs run in parallel, on scoped threads.
+/// blocking-capable thread (use `tokio::task::spawn_blocking` from async code).
+///
+/// Sub-ranges are built and proved sequentially. A single CPU proof already saturates the
+/// host, so intra-job parallelism would only thrash it; cross-job parallelism is handled one
+/// level up by the worker's concurrency permits. Sequential proving also keeps only one
+/// witness alive at a time, bounding memory, and avoids sharing the prover's runtime across
+/// threads.
 pub fn prove_validity<P>(
     host: &OnlineHostConfig,
     prover: &P,
     request: ValidityProofRequest,
 ) -> anyhow::Result<AggregationProofArtifact>
 where
-    P: WorldSuccinctProver + Sync,
+    P: WorldSuccinctProver,
     P::Error: Into<anyhow::Error>,
 {
     let range = L2BlockRange::new(request.start_block, request.end_block)?;
@@ -85,13 +89,15 @@ where
         None => resolve_l1_head(&client, &host.l2_rpc, &host.l1_rpc, request.end_block)?,
     };
 
-    let inputs = par_map(&ranges, |sub_range| {
+    let mut boot_infos = Vec::with_capacity(ranges.len());
+    let mut range_proofs = Vec::with_capacity(ranges.len());
+    for sub_range in &ranges {
         tracing::info!(
             start = sub_range.start + 1,
             end = sub_range.end,
             "building range witness"
         );
-        build_range_input(
+        let input = build_range_input(
             host,
             RangeWitnessRequest {
                 start_block: sub_range.start,
@@ -99,21 +105,17 @@ where
                 l1_head: Some(l1_head),
                 allow_unfinalized: request.allow_unfinalized,
             },
-        )
-    })?;
+        )?;
 
-    let artifacts = par_map(&inputs, |input| {
         tracing::info!(
-            start = input.metadata.start_block + 1,
-            end = input.metadata.end_block,
+            start = sub_range.start + 1,
+            end = sub_range.end,
             "proving range"
         );
         let range_request = RangeProofRequest::from_witness_data(&input.witness, None)
             .context("failed to serialize range witness")?;
-        prover.prove_range(range_request).map_err(Into::into)
-    })?;
+        let artifact = prover.prove_range(range_request).map_err(Into::into)?;
 
-    for (artifact, input) in artifacts.iter().zip(&inputs) {
         if artifact.boot_info.l2PostRoot != input.metadata.l2_post_root {
             bail!(
                 "range proof post root mismatch at block {}: witness {:?}, proof {:?}",
@@ -122,20 +124,14 @@ where
                 artifact.boot_info.l2PostRoot,
             );
         }
+
+        boot_infos.push(artifact.boot_info);
+        range_proofs.push(artifact.proof);
     }
 
     let l1_header = fetch_l1_header_by_hash(&client, &host.l1_rpc, l1_head)?;
     let l1_headers_cbor =
         serde_cbor::to_vec(&vec![l1_header]).context("CBOR-encoding L1 header failed")?;
-
-    let boot_infos = artifacts
-        .iter()
-        .map(|artifact| artifact.boot_info.clone())
-        .collect();
-    let range_proofs = artifacts
-        .into_iter()
-        .map(|artifact| artifact.proof)
-        .collect();
 
     tracing::info!(ranges = ranges.len(), "aggregating range proofs");
     prover
@@ -150,24 +146,4 @@ where
             range_proofs,
         })
         .map_err(Into::into)
-}
-
-/// Runs `f` over every item on scoped threads, preserving order and failing on the first
-/// error or panicked thread.
-fn par_map<T, U>(items: &[T], f: impl Fn(&T) -> anyhow::Result<U> + Sync) -> anyhow::Result<Vec<U>>
-where
-    T: Sync,
-    U: Send,
-{
-    std::thread::scope(|scope| {
-        let handles: Vec<_> = items.iter().map(|item| scope.spawn(|| f(item))).collect();
-        handles
-            .into_iter()
-            .map(|handle| {
-                handle
-                    .join()
-                    .map_err(|_| anyhow!("worker thread panicked"))?
-            })
-            .collect()
-    })
 }
