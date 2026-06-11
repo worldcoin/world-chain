@@ -18657,6 +18657,7 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "pin-project",
+ "reqwest 0.12.28",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
@@ -18668,6 +18669,7 @@ dependencies = [
  "world-chain-proof-protocol",
  "world-chain-proof-succinct-host-utils",
  "world-chain-proof-succinct-utils",
+ "world-chain-proofs",
  "world-chain-prover-service",
 ]
 
