@@ -15438,6 +15438,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "spin"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1527984ca054dfca79333baec451042863f485fbee01b7bf6d911de915cac865"
+dependencies = [
+ "lock_api",
+]
+
+[[package]]
 name = "spki"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -18486,7 +18495,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "spin 0.10.0",
+ "spin 0.12.0",
  "thiserror 2.0.18",
  "tracing",
  "world-chain-proof-core",
@@ -18503,7 +18512,7 @@ dependencies = [
  "kona-genesis",
  "kona-preimage",
  "kona-proof",
- "spin 0.10.0",
+ "spin 0.12.0",
  "world-chain-proof-succinct-client-utils",
 ]
 
