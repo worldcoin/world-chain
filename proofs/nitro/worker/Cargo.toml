@@ -63,3 +63,6 @@ dotenvy.workspace = true
 
 # Misc
 hex.workspace = true
+
+# secp256k1 signature verification for proof attestation binding
+k256 = { version = "0.13", features = ["ecdsa"] }

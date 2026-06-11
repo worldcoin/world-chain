@@ -90,6 +90,18 @@ impl ExpectedPcrs {
         pcr1: [0u8; PCR_LEN],
         pcr2: [0u8; PCR_LEN],
     };
+
+    /// Returns `true` if all three PCRs are all-zero (i.e., the placeholder value).
+    ///
+    /// Callers can use this to skip attestation verification in dev/test environments
+    /// where real PCR measurements are not available. **Never use placeholder PCRs in
+    /// production.**
+    #[must_use]
+    pub fn is_placeholder(&self) -> bool {
+        self.pcr0.iter().all(|&b| b == 0)
+            && self.pcr1.iter().all(|&b| b == 0)
+            && self.pcr2.iter().all(|&b| b == 0)
+    }
 }
 
 impl Default for ExpectedPcrs {

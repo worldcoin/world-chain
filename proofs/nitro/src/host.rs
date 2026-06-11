@@ -1,7 +1,7 @@
 //! Host-side `NitroProver` that talks to a running Nitro enclave over vsock.
 
 use tokio_vsock::{VsockAddr, VsockStream};
-use tracing::{debug, instrument};
+use tracing::{debug, instrument, warn};
 
 use crate::{
     ExpectedPcrs, NitroAggregationProofArtifact, NitroAggregationProofRequest,
@@ -133,12 +133,19 @@ impl NitroProver {
             }
         };
 
-        let expected_user_data = protocol::range_user_data(&boot_info);
-        attestation::parse_and_check_pcrs(
-            &attestation_doc,
-            &self.expected_pcrs,
-            &expected_user_data,
-        )?;
+        if self.expected_pcrs.is_placeholder() {
+            warn!(
+                target: "world_chain::nitro",
+                "placeholder PCRs in use — skipping attestation verification (dev/test mode only)"
+            );
+        } else {
+            let expected_user_data = protocol::range_user_data(&boot_info);
+            attestation::parse_check_and_verify(
+                &attestation_doc,
+                &self.expected_pcrs,
+                &expected_user_data,
+            )?;
+        };
 
         Ok(NitroRangeProofArtifact {
             boot_info,
@@ -174,12 +181,19 @@ impl NitroProver {
             }
         };
 
-        let expected_user_data = protocol::aggregation_user_data(&boot_info, &request.inputs);
-        attestation::parse_and_check_pcrs(
-            &attestation_doc,
-            &self.expected_pcrs,
-            &expected_user_data,
-        )?;
+        if self.expected_pcrs.is_placeholder() {
+            warn!(
+                target: "world_chain::nitro",
+                "placeholder PCRs in use — skipping attestation verification (dev/test mode only)"
+            );
+        } else {
+            let expected_user_data = protocol::aggregation_user_data(&boot_info, &request.inputs);
+            attestation::parse_check_and_verify(
+                &attestation_doc,
+                &self.expected_pcrs,
+                &expected_user_data,
+            )?;
+        }
 
         // The aggregation artifact mirrors the Succinct shape, but the `proof` bytes carry
         // the attestation document instead of an SP1 proof.

@@ -520,12 +520,11 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    let (schedule, _rollup_config_hash) = proof_config(
+    let (schedule, rollup_config_hash) = proof_config(
         cli.network,
         cli.rollup_config.as_deref(),
         cli.rollup_config_hash,
     )?;
-
     let expected_pcrs =
         build_expected_pcrs(cli.pcr0.as_deref(), cli.pcr1.as_deref(), cli.pcr2.as_deref())?;
 
@@ -553,7 +552,7 @@ fn main() -> Result<()> {
         .build()
         .context("failed to build tokio runtime")?;
 
-    runtime.block_on(worker_loop(cli, online_cfg, schedule, expected_pcrs))
+    runtime.block_on(worker_loop(cli, online_cfg, schedule, expected_pcrs, rollup_config_hash))
 }
 
 async fn worker_loop(
@@ -561,6 +560,7 @@ async fn worker_loop(
     online_cfg: OnlineConfig,
     schedule: WorldRangeHardforkConfig,
     expected_pcrs: ExpectedPcrs,
+    rollup_config_hash: B256,
 ) -> Result<()> {
     let queue = ProverServiceClient::new(&cli.prover_service_url)?;
     let poll_interval = Duration::from_secs(cli.poll_interval_seconds);
@@ -600,7 +600,7 @@ async fn worker_loop(
             "processing nitro proof request"
         );
 
-        let result = prove_job(&job, &online_cfg, &cli, &expected_pcrs, &schedule).await;
+        let result = prove_job(&job, &online_cfg, &cli, &expected_pcrs, &schedule, rollup_config_hash).await;
 
         match result {
             Ok(proof_data) => {
@@ -632,7 +632,11 @@ async fn prove_job(
     cli: &Cli,
     expected_pcrs: &ExpectedPcrs,
     schedule: &WorldRangeHardforkConfig,
+    rollup_config_hash: B256,
 ) -> Result<ProofData> {
+    use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
+    use world_chain_proof_nitro::{attestation, signing_commitment};
+
     let start_block =
         job.l2_block_number
             .checked_sub(cli.block_interval)
@@ -643,6 +647,29 @@ async fn prove_job(
                     cli.block_interval
                 )
             })?;
+
+    let endpoint = EnclaveEndpoint::with_port(cli.enclave_cid, cli.enclave_port);
+    let rt_handle = tokio::runtime::Handle::current();
+    let prover = NitroProver::with_runtime(endpoint, *expected_pcrs, rt_handle);
+
+    // Retrieve the enclave's certified ephemeral public key before proving.
+    // When using real PCRs this also verifies the COSE_Sign1 signature and PCR binding.
+    let enclave_pub_key: Option<Vec<u8>> = if expected_pcrs.is_placeholder() {
+        warn!("placeholder PCRs — skipping key attestation and signature verification (dev mode)");
+        None
+    } else {
+        let (attest_doc, pub_key) = prover
+            .get_attestation_async()
+            .await
+            .context("failed to retrieve enclave attestation")?;
+        // Verify the COSE_Sign1 signature on the attestation doc.
+        attestation::verify_cose_sign1_signature(&attest_doc)
+            .context("enclave key attestation COSE verification failed")?;
+        // Verify PCRs on the key attestation doc (user_data is None for GetAttestation).
+        attestation::verify_pcrs_only(&attest_doc, expected_pcrs)
+            .context("enclave key attestation PCR check failed")?;
+        Some(pub_key)
+    };
 
     // Build witness on the blocking threadpool.
     let cfg = online_cfg.clone();
@@ -660,16 +687,12 @@ async fn prove_job(
     let request =
         NitroRangeProofRequest::from_witness_data(&witness, None).context("witness serialize")?;
 
-    let endpoint = EnclaveEndpoint::with_port(cli.enclave_cid, cli.enclave_port);
-    let rt_handle = tokio::runtime::Handle::current();
-    let prover = NitroProver::with_runtime(endpoint, *expected_pcrs, rt_handle);
-
     let artifact = prover
         .prove_range_async(request)
         .await
         .context("nitro enclave proving failed")?;
 
-    // Sanity-check the attested output matches the claimed game root.
+    // Verify the attested output matches the claimed game root.
     if artifact.boot_info.l2PostRoot != job.root_claim {
         bail!(
             "enclave post root {:?} != claimed root {:?}",
@@ -684,10 +707,52 @@ async fn prove_job(
             job.l2_block_number
         );
     }
+    if artifact.boot_info.l1Head != job.l1_head {
+        bail!(
+            "enclave l1 head {:?} != claimed {:?}",
+            artifact.boot_info.l1Head,
+            job.l1_head
+        );
+    }
+    if artifact.boot_info.rollupConfigHash != rollup_config_hash {
+        bail!(
+            "enclave rollup config hash {:?} != expected {:?}",
+            artifact.boot_info.rollupConfigHash,
+            rollup_config_hash
+        );
+    }
+
+    // Verify the enclave's secp256k1 signature over signing_commitment(boot_info),
+    // and confirm the signer matches the certified enclave public key.
+    if let Some(ref expected_pub_key) = enclave_pub_key {
+        if artifact.signature.len() != 65 {
+            bail!(
+                "invalid proof signature length: expected 65 bytes, got {}",
+                artifact.signature.len()
+            );
+        }
+        let commitment = signing_commitment(&artifact.boot_info);
+        let sig = K256Signature::from_slice(&artifact.signature[..64])
+            .context("failed to parse proof signature bytes")?;
+        let rec_id = RecoveryId::from_byte(artifact.signature[64])
+            .ok_or_else(|| anyhow!("invalid secp256k1 recovery id: {}", artifact.signature[64]))?;
+        let recovered_vk = VerifyingKey::recover_from_prehash(&commitment, &sig, rec_id)
+            .context("secp256k1 signature recovery failed")?;
+        let recovered_key_bytes = recovered_vk.to_encoded_point(true).as_bytes().to_vec();
+        if &recovered_key_bytes != expected_pub_key {
+            bail!(
+                "proof signature key mismatch: recovered 0x{} != enclave 0x{}",
+                hex::encode(&recovered_key_bytes),
+                hex::encode(expected_pub_key)
+            );
+        }
+    }
 
     info!(
         post_root = ?artifact.boot_info.l2PostRoot,
         block = artifact.boot_info.l2BlockNumber,
+        l1_head = ?artifact.boot_info.l1Head,
+        rollup_config_hash = ?artifact.boot_info.rollupConfigHash,
         "enclave attested range proof"
     );
 
@@ -705,6 +770,7 @@ async fn prove_job(
     _cli: &Cli,
     _expected_pcrs: &ExpectedPcrs,
     _schedule: &WorldRangeHardforkConfig,
+    _rollup_config_hash: B256,
 ) -> Result<ProofData> {
     bail!("nitro-worker only supports Linux (requires AF_VSOCK and AWS Nitro Enclaves)")
 }

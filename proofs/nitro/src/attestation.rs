@@ -25,7 +25,8 @@ use crate::{ExpectedPcrs, PCR_LEN, PcrDigest};
 
 /// DER-encoded AWS Nitro Attestation PKI root CA certificate.
 ///
-/// Source: <https://aws.amazon.com/certificate-authority/nitro-enclaves/>
+/// Source: <https://aws-nitro-enclaves.amazonaws.com/AWS_NitroEnclaves_Root-G1.zip>
+/// SHA-256 of the zip: `8cf60e2b2efca96c6a9e71e851d00c1b6991cc09eadbe64a6a1d1b1eb9faff7c`
 ///
 /// This constant is used to anchor the certificate chain validation in
 /// [`verify_cose_sign1_signature`]. The root certificate in the attestation document's
@@ -36,23 +37,18 @@ MAkGA1UEBhMCVVMxDzANBgNVBAoMBkFtYXpvbjEMMAoGA1UECwwDQVdTMRswGQYD
 VQQDDBJhd3Mubml0cm8tZW5jbGF2ZXMwHhcNMTkxMDI4MTMyODA1WhcNNDkxMDI4
 MTQyODA1WjBJMQswCQYDVQQGEwJVUzEPMA0GA1UECgwGQW1hem9uMQwwCgYDVQQL
 DANBV1MxGzAZBgNVBAMMEmF3cy5uaXRyby1lbmNsYXZlczB2MBAGByqGSM49AgEG
-BSuBBAAiA2IABPwCVOumCMHzaHDimtqQvkY4MpJzbolL//Yfk2b8ZSmZxpJy0s9I
-en/8/f41mHXzB9LBsxkCivbVg7DY3VnEuMqjioqzUUEjS4S6xMT/MNLG5E0DKRR
-J5WVXY9lQaNmMGQwEgYDVR0TAQH/BAgwBgEB/wIBAjAOBgNVHQ8BAf8EBAMCAYYw
-HQYDVR0OBBYEFDPhENHl/OoKMsevr04OiHW7gqoZMB8GA1UdIwQYMBaAFDPhENHl
-/OoKMsevr04OiHW7gqoZMAoGCCqGSM49BAMDA2kAMGYCMQD7mTMhfaLCEJkHbPSO
-kENyYg1gFEJNMSiGJEMJ7VvmAICIBXBkjNdUqvNTQR3JqAICMQCEJnhFRqEiqpKH
-YuGmHXVqGJ8P9kOMiSiRPBVHKBzfImMZJzBVqyCqz4gjXGb3pLU=
+BSuBBAAiA2IABPwCVOumCMHzaHDimtqQvkY4MpJzbolL//Zy2YlES1BR5TSksfbb
+48C8WBoyt7F2Bw7eEtaaP+ohG2bnUs990d0JX28TcPQXCEPZ3BABIeTPYwEoCWZE
+h8l5YoQwTcU/9KNCMEAwDwYDVR0TAQH/BAUwAwEB/zAdBgNVHQ4EFgQUkCW1DdkF
+R+eWw5b6cp3PmanfS5YwDgYDVR0PAQH/BAQDAgGGMAoGCCqGSM49BAMDA2kAMGYC
+MQCjfy+Rocm9Xue4YnwWmNJVA44fA0P5W2OpYow9OYCVRaEevL8uO1XYru5xtMPW
+rfMCMQCi85sWBbJwKKXdS6BptQFuZbT73o/gBh1qUxl/nNr12UO8Yfwr6wPLb+6N
+IwLz3/Y=
 -----END CERTIFICATE-----";
 
 /// Lazy-decoded DER bytes of [`AWS_NITRO_ROOT_CA_PEM`].
 ///
 /// Returns `Err` if the PEM constant is malformed.
-///
-/// TODO(nitro): the PEM constant in this file appears to have a one-character truncation
-/// in line 7 (63 chars instead of 64). Replace it with the official cert from
-/// <https://aws-nitro-enclaves.amazonaws.com/AWS_NitroEnclaves_Root-G1.zip> or
-/// <https://docs.aws.amazon.com/enclaves/latest/user/verify-root.html>.
 fn aws_root_ca_der() -> Result<Vec<u8>, String> {
     let pem = AWS_NITRO_ROOT_CA_PEM;
     let b64: String = pem
@@ -529,6 +525,25 @@ pub fn parse_check_and_verify(
 ) -> Result<ParsedAttestationDoc, AttestationError> {
     let parsed = parse_and_check_pcrs(doc, expected_pcrs, expected_user_data)?;
     verify_cose_sign1_signature(doc)?;
+    Ok(parsed)
+}
+
+/// Parses a `COSE_Sign1` Nitro attestation document and checks the PCRs against the
+/// supplied expectations, **without** checking `user_data`.
+///
+/// Useful for verifying [`EnclaveRequest::GetAttestation`] documents where `user_data` is
+/// `None` (the enclave embeds its public key in the NSM `public_key` field instead).
+///
+/// Callers that also need `user_data` verification should use [`parse_and_check_pcrs`]
+/// or [`parse_check_and_verify`].
+pub fn verify_pcrs_only(
+    doc: &[u8],
+    expected_pcrs: &ExpectedPcrs,
+) -> Result<ParsedAttestationDoc, AttestationError> {
+    let parsed = parse_attestation_doc(doc)?;
+    check_pcr(&parsed, 0, &expected_pcrs.pcr0)?;
+    check_pcr(&parsed, 1, &expected_pcrs.pcr1)?;
+    check_pcr(&parsed, 2, &expected_pcrs.pcr2)?;
     Ok(parsed)
 }
 
