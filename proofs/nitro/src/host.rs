@@ -227,14 +227,14 @@ impl NitroProver {
             verify_proof_signature(&signature, &boot_info, expected_pub_key)?;
         }
 
-        // The aggregation artifact mirrors the Succinct shape, but the `proof` bytes carry
-        // the attestation document instead of an SP1 proof.
-        Ok(
-            world_chain_proof_core::artifacts::AggregationProofArtifact {
-                outputs: aggregation_outputs(&boot_info, &request.inputs),
-                proof: attestation_doc,
-            },
-        )
+        // The aggregation artifact carries the attestation document as `proof` and
+        // the enclave's verified secp256k1 signature so callers can perform
+        // EVM-native on-chain recovery without re-requesting the signature.
+        Ok(NitroAggregationProofArtifact {
+            outputs: aggregation_outputs(&boot_info, &request.inputs),
+            proof: attestation_doc,
+            signature,
+        })
     }
 }
 

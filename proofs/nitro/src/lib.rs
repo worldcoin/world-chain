@@ -28,8 +28,8 @@
 
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
-    artifacts::AggregationProofArtifact, boot::BootInfoStruct, range::WorldRangeProofPublicValues,
-    types::AggregationInputs, witness::WorldRangeWitnessData,
+    boot::BootInfoStruct, range::WorldRangeProofPublicValues,
+    types::{AggregationInputs, AggregationOutputs}, witness::WorldRangeWitnessData,
 };
 
 // Used only by the feature-gated `enclave`/`aws_nitro` modules; bind with `as _`
@@ -169,10 +169,29 @@ pub struct NitroAggregationProofRequest {
     pub l1_headers_cbor: Vec<u8>,
 }
 
-/// Artifact returned by a Nitro aggregation prover. The shape mirrors
-/// [`AggregationProofArtifact`] but the `proof` bytes hold an attestation document rather
-/// than an SP1 proof.
-pub type NitroAggregationProofArtifact = AggregationProofArtifact;
+/// Artifact returned by a Nitro aggregation prover.
+///
+/// Unlike the generic [`world_chain_proof_core::artifacts::AggregationProofArtifact`], this
+/// struct also preserves the 65-byte recoverable secp256k1 `signature` that the enclave
+/// produced and that was cryptographically verified against the enclave's certified key
+/// before being included here. Dropping it would prevent callers from performing
+/// EVM-native on-chain signature recovery over the aggregated output.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NitroAggregationProofArtifact {
+    /// ABI-compatible aggregation outputs committed by the enclave.
+    pub outputs: AggregationOutputs,
+    /// `COSE_Sign1` attestation document bytes returned by the Nitro NSM device.
+    ///
+    /// The document's `user_data` field commits to
+    /// [`protocol::aggregation_user_data`] of the boot info and inputs,
+    /// binding the attestation to this specific aggregation.
+    pub proof: Vec<u8>,
+    /// 65-byte recoverable secp256k1 signature over the signing commitment.
+    ///
+    /// Produced by the enclave's ephemeral signing key, which is certified by the
+    /// NSM attestation document. Enables EVM-native on-chain signature recovery.
+    pub signature: Vec<u8>,
+}
 
 /// Backend trait for TEE-attested World prover implementations.
 ///

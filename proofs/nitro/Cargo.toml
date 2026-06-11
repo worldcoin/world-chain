@@ -61,7 +61,7 @@ world-chain-proof-core.workspace = true
 # These are compiled on all platforms; the p384 / x509-parser crates are pure Rust and
 # compile on macOS / Linux alike.
 p384 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
-x509-parser = "0.16"
+x509-parser = { version = "0.16", features = ["verify"] }
 # secp256k1 signature verification used by the host-side prover to validate
 # proof signatures returned by the enclave. Pure Rust — compiles on all
 # platforms.

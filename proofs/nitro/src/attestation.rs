@@ -10,9 +10,6 @@
 //!
 //! # Remaining TODOs
 //!
-//! - Full intermediate-certificate chain signature verification (each cert signed by its
-//!   issuer up to the root). Currently only the COSE_Sign1 signature and the root CA
-//!   fingerprint are checked.
 //! - Timestamp / nonce freshness checks.
 
 use std::collections::BTreeMap;
@@ -292,9 +289,6 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
 ///
 /// # What this does NOT verify (TODOs)
 ///
-/// - Full intermediate certificate chain: each certificate's signature is not yet verified
-///   against its issuer's public key. This requires extracting raw TBSCertificate bytes for
-///   re-verification — doable with a lower-level ASN.1 library but deferred for now.
 /// - Certificate validity periods (not-before / not-after timestamps).
 /// - Nonce freshness / replay protection.
 ///
@@ -396,8 +390,10 @@ pub fn verify_cose_sign1_signature(doc: &[u8]) -> Result<(), AttestationError> {
         )
     })?;
 
-    // ── 3. Verify root CA ──────────────────────────────────────────────────────────
-    verify_root_ca(&cabundle)?;
+    // ── 3. Verify full certificate chain ─────────────────────────────────────────
+    // Walk leaf → intermediates → root, verifying each signature and anchoring
+    // the root to the hardcoded AWS Nitro Attestation PKI constant.
+    verify_cert_chain(&cert_der, &cabundle)?;
 
     // ── 4. Build Sig_Structure ─────────────────────────────────────────────────────
     // RFC 8152 §4.4:
@@ -450,12 +446,6 @@ fn extract_p384_key(cert_der: &[u8]) -> Result<p384::ecdsa::VerifyingKey, Attest
 }
 
 /// Verifies that the last certificate in `cabundle` is the hardcoded AWS Nitro root CA.
-///
-/// # TODO
-/// Also verify each intermediate certificate's signature up the chain. This requires
-/// re-extracting raw TBSCertificate DER bytes for each certificate, which is doable with
-/// a lower-level ASN.1 parser. The current check confirms the root anchor but does not
-/// fully validate the intermediate chain.
 fn verify_root_ca(cabundle: &[Vec<u8>]) -> Result<(), AttestationError> {
     let root = cabundle.last().ok_or_else(|| {
         AttestationError::CertChain("cabundle is empty, cannot verify root CA".into())
@@ -468,6 +458,58 @@ fn verify_root_ca(cabundle: &[Vec<u8>]) -> Result<(), AttestationError> {
                 .into(),
         ));
     }
+    Ok(())
+}
+
+/// Verifies the complete certificate chain from the leaf certificate to the AWS Nitro
+/// root CA.
+///
+/// The Nitro attestation layout is:
+/// - `leaf_der` — end-entity certificate whose public key signs the COSE_Sign1 envelope.
+/// - `cabundle[0]` — intermediate CA that issued `leaf_der`.
+/// - `cabundle[1..n-1]` — further intermediate CAs, each issued by the next.
+/// - `cabundle[n]` — root CA (must match [`AWS_NITRO_ROOT_CA_PEM`] byte-for-byte).
+///
+/// This function:
+/// 1. Anchors the root by comparing `cabundle.last()` to the hardcoded constant.
+/// 2. Verifies that the leaf's signature validates under `cabundle[0]`'s public key.
+/// 3. Verifies that each `cabundle[i]`'s signature validates under `cabundle[i+1]`'s
+///    public key, all the way up to (but not including) the self-signed root.
+fn verify_cert_chain(leaf_der: &[u8], cabundle: &[Vec<u8>]) -> Result<(), AttestationError> {
+    use x509_parser::prelude::{FromDer as _, X509Certificate};
+
+    // 1. Root anchor check.
+    verify_root_ca(cabundle)?;
+
+    // cabundle is guaranteed non-empty by verify_root_ca.
+
+    // 2. Verify the leaf certificate is signed by cabundle[0].
+    let (_, leaf) = X509Certificate::from_der(leaf_der)
+        .map_err(|e| AttestationError::CertChain(format!("leaf cert parse: {e}")))?;
+    let (_, issuer0) = X509Certificate::from_der(&cabundle[0])
+        .map_err(|e| AttestationError::CertChain(format!("cabundle[0] parse: {e}")))?;
+    leaf.verify_signature(Some(issuer0.public_key()))
+        .map_err(|e| {
+            AttestationError::CertChain(format!("leaf cert signature invalid: {e}"))
+        })?;
+
+    // 3. Verify each intermediate is signed by the next one up.
+    //    The root (last element) is self-signed and anchored by verify_root_ca above —
+    //    no need to re-verify its signature.
+    for i in 0..cabundle.len() - 1 {
+        let (_, cert) = X509Certificate::from_der(&cabundle[i])
+            .map_err(|e| AttestationError::CertChain(format!("cabundle[{i}] parse: {e}")))?;
+        let (_, issuer) = X509Certificate::from_der(&cabundle[i + 1]).map_err(|e| {
+            AttestationError::CertChain(format!("cabundle[{}] parse: {e}", i + 1))
+        })?;
+        cert.verify_signature(Some(issuer.public_key())).map_err(|e| {
+            AttestationError::CertChain(format!(
+                "cabundle[{i}] signature invalid (issuer cabundle[{}]): {e}",
+                i + 1
+            ))
+        })?;
+    }
+
     Ok(())
 }
 
