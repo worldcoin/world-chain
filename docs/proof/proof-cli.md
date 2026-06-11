@@ -237,6 +237,40 @@ proof sp1 prove \
   --output    ./proof.json
 ```
 
+### `sp1 vkeys`
+
+Computes the on-chain verification keys for the range and aggregation ELFs: the range vkey
+commitment (`multiBlockVKey` committed by the aggregation guest) and the aggregation vkey
+registered with the SP1 verifier. Runs SP1 setup locally — no proving, no RPC.
+
+```
+proof sp1 vkeys [--range-elf <FILE>] [--agg-elf <FILE>] [--output <FILE>]
+```
+
+| Flag | Env | Default | Description |
+|---|---|---|---|
+| `--range-elf <FILE>` | `RANGE_ELF_PATH` | `proofs/succinct/elf/world-chain-range-ethereum` | SP1 range ELF |
+| `--agg-elf <FILE>` | `AGG_ELF_PATH` | `proofs/succinct/elf/world-chain-aggregation` | SP1 aggregation ELF |
+| `--output <FILE>` | — | stdout | Write the JSON here instead of stdout |
+
+**Example**
+
+```bash
+# From the repo root, against the committed ELFs:
+just proof-vkeys
+```
+
+```json
+{
+  "range_vkey_commitment": "0x…",
+  "aggregation_vkey": "0x…",
+  "elfs": {
+    "world-chain-range-ethereum": { "path": "…", "sha256": "…" },
+    "world-chain-aggregation": { "path": "…", "sha256": "…" }
+  }
+}
+```
+
 ---
 
 ## Running the Nitro enclave
