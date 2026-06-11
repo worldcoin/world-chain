@@ -25,6 +25,7 @@ use world_chain_proof_core::{
     range::{WorldRangeHardforkConfig, WorldRangeSpecId},
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
+use world_chain_proof_protocol::WorldHardforkConfig;
 use world_chain_proof_succinct_client_utils::{
     OutputRootWitness,
     witness::executor::{WitnessExecutor, get_inputs_for_pipeline},
@@ -61,6 +62,52 @@ pub struct OnlineHostConfig {
     pub rollup_config_path: Option<PathBuf>,
     /// Maximum time to spend generating one witness.
     pub witness_timeout: Duration,
+}
+
+impl OnlineHostConfig {
+    /// Builds a host config from a rollup config JSON value, deriving the World fork schedule
+    /// and rollup config hash from it. The same JSON should be written to `rollup_config_path`
+    /// so the kona host and the witness collector agree.
+    pub fn from_rollup_config_value(
+        rollup_config: &serde_json::Value,
+        l1_rpc: String,
+        l1_beacon_rpc: String,
+        l2_rpc: String,
+        rollup_config_path: Option<PathBuf>,
+        witness_timeout: Duration,
+    ) -> anyhow::Result<Self> {
+        let protocol = WorldHardforkConfig::from_rollup_config_value(rollup_config)
+            .context("failed to parse rollup config hardforks")?;
+        let rollup_config_hash = world_chain_proof_protocol::hash_rollup_config(rollup_config)
+            .context("failed to hash rollup config")?;
+        Ok(Self {
+            l1_rpc,
+            l1_beacon_rpc,
+            l2_rpc,
+            schedule: range_hardfork_config(&protocol),
+            rollup_config_hash,
+            l2_chain_id: None,
+            rollup_config_path,
+            witness_timeout,
+        })
+    }
+}
+
+/// Maps a protocol hardfork config to the range guest's fork schedule.
+pub fn range_hardfork_config(config: &WorldHardforkConfig) -> WorldRangeHardforkConfig {
+    WorldRangeHardforkConfig {
+        bedrock_block: config.bedrock_block,
+        regolith_time: config.regolith_time,
+        canyon_time: config.canyon_time,
+        ecotone_time: config.ecotone_time,
+        fjord_time: config.fjord_time,
+        granite_time: config.granite_time,
+        holocene_time: config.holocene_time,
+        isthmus_time: config.isthmus_time,
+        jovian_time: config.jovian_time,
+        tropo_time: config.tropo_time,
+        strato_time: config.strato_time,
+    }
 }
 
 /// One range-witness request covering L2 blocks `(start_block, end_block]`.
