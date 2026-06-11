@@ -3,9 +3,12 @@ use std::{fmt::Debug, sync::Arc};
 use alloy_primitives::Sealed;
 use anyhow::{Result, anyhow};
 use kona_driver::PipelineCursor;
-use kona_preimage::CommsClient;
 use kona_executor::TrieDBProvider as _;
-use kona_proof::{BootInfo, FlushableCache, l1::OracleL1ChainProvider, l2::OracleL2ChainProvider, sync::new_oracle_pipeline_cursor};
+use kona_preimage::CommsClient;
+use kona_proof::{
+    BootInfo, FlushableCache, l1::OracleL1ChainProvider, l2::OracleL2ChainProvider,
+    sync::new_oracle_pipeline_cursor,
+};
 use spin::RwLock;
 
 use crate::client::fetch_safe_head_hash;

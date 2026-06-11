@@ -23,11 +23,15 @@ pub struct ZkvmOpEvmFactory {
 
 impl ZkvmOpEvmFactory {
     pub fn new() -> Self {
-        Self { world_schedule: None }
+        Self {
+            world_schedule: None,
+        }
     }
 
     pub fn new_with_world_schedule(world_schedule: WorldRangeHardforkConfig) -> Self {
-        Self { world_schedule: Some(world_schedule) }
+        Self {
+            world_schedule: Some(world_schedule),
+        }
     }
 
     fn spec_for_timestamp(&self, timestamp: u64, kona_spec: OpSpecId) -> OpSpecId {

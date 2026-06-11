@@ -10,10 +10,7 @@ use kona_driver::{Driver, DriverPipeline, PipelineCursor};
 use kona_genesis::{L1ChainConfig, RollupConfig};
 use kona_preimage::CommsClient;
 use kona_proof::{
-    BootInfo, FlushableCache,
-    executor::KonaExecutor,
-    l1::{OraclePipeline},
-    l2::OracleL2ChainProvider,
+    BootInfo, FlushableCache, executor::KonaExecutor, l1::OraclePipeline, l2::OracleL2ChainProvider,
 };
 use spin::RwLock;
 use tracing::info;
@@ -163,8 +160,14 @@ mod tests {
     fn returns_err_with_both_numbers_when_derived_below_claimed() {
         let err = ensure_derived_block_matches_claim(50, 100).expect_err("expected mismatch error");
         let msg = err.to_string();
-        assert!(msg.contains("#50"), "missing derived block number in: {msg}");
-        assert!(msg.contains("#100"), "missing claimed block number in: {msg}");
+        assert!(
+            msg.contains("#50"),
+            "missing derived block number in: {msg}"
+        );
+        assert!(
+            msg.contains("#100"),
+            "missing claimed block number in: {msg}"
+        );
     }
 
     #[test]
