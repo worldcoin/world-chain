@@ -37,6 +37,7 @@ members = [
     "proofs/primitives",
     "proofs/proposer",
     "proofs/challenger",
+    "proofs/prover-service",
     "e2e-tests",
     "xtask",
 ]
@@ -90,6 +91,7 @@ world-chain-proof-succinct-host-utils = { path = "proofs/succinct/utils/host", d
 world-chain-proof-succinct-utils = { path = "proofs/succinct/utils/proof", default-features = false }
 world-chain-proposer = { path = "proofs/proposer", default-features = false }
 world-chain-challenger = { path = "proofs/challenger", default-features = false }
+world-chain-prover-service = { path = "proofs/prover-service", default-features = false }
 
 # reth crates.io
 reth-codecs = { version = "0.3.1", default-features = false }
