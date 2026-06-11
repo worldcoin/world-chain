@@ -86,6 +86,8 @@ enum Sp1Command {
     Execute(Sp1ExecuteArgs),
     /// Generate range + aggregation proofs end-to-end from RPC.
     Prove(Box<Sp1ProveArgs>),
+    /// Compute the on-chain verification keys for the range and aggregation ELFs.
+    Vkeys(Sp1VkeysArgs),
 }
 
 #[derive(Debug, Args)]
@@ -281,6 +283,7 @@ fn main() -> Result<()> {
         Command::Sp1 { command } => match command {
             Sp1Command::Execute(args) => sp1_execute(args)?,
             Sp1Command::Prove(args) => sp1_prove(*args)?,
+            Sp1Command::Vkeys(args) => sp1_vkeys(args)?,
         },
     }
 
