@@ -17984,6 +17984,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-defender"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-provider 2.0.4",
+ "alloy-rpc-types-eth 2.0.4",
+ "async-trait",
+ "thiserror 2.0.18",
+ "world-chain-proofs",
+]
+
+[[package]]
 name = "world-chain-devnet"
 version = "2.2.0"
 dependencies = [
