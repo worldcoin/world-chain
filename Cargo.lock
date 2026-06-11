@@ -18096,6 +18096,7 @@ dependencies = [
  "ed25519-dalek",
  "flate2",
  "futures",
+ "jsonrpsee",
  "op-alloy-consensus",
  "rand 0.9.4",
  "reqwest 0.12.28",
@@ -18119,9 +18120,12 @@ dependencies = [
  "world-chain-challenger",
  "world-chain-node",
  "world-chain-primitives",
+ "world-chain-proof-succinct-host-utils",
  "world-chain-proofs",
  "world-chain-proposer",
+ "world-chain-prover-service",
  "world-chain-rpc",
+ "world-chain-sp1-worker",
  "world-chain-test-utils",
 ]
 

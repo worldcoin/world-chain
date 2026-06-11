@@ -16,8 +16,11 @@ world-chain-challenger.workspace = true
 world-chain-node.workspace = true
 world-chain-primitives.workspace = true
 world-chain-proofs.workspace = true
+world-chain-proof-succinct-host-utils = { workspace = true, features = ["sp1"] }
 world-chain-proposer.workspace = true
+world-chain-prover-service.workspace = true
 world-chain-rpc.workspace = true
+world-chain-sp1-worker.workspace = true
 world-chain-test-utils.workspace = true
 
 alloy-provider.workspace = true
@@ -31,6 +34,7 @@ alloy-signer-local.workspace = true
 base64.workspace = true
 ed25519-dalek.workspace = true
 eyre.workspace = true
+jsonrpsee = { workspace = true, features = ["server"] }
 flate2 = "1"
 futures.workspace = true
 op-alloy-consensus.workspace = true

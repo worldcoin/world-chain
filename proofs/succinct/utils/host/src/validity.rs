@@ -5,7 +5,7 @@
 //! [`AggregationProofArtifact`] whose outputs commit to the claimed output root.
 
 use alloy_primitives::{Address, B256};
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use reqwest::blocking::Client;
 use world_chain_proof_core::{artifacts::AggregationProofArtifact, types::AggregationInputs};
 use world_chain_proof_succinct_utils::{
@@ -13,11 +13,12 @@ use world_chain_proof_succinct_utils::{
 };
 
 use crate::{
+    L2BlockRange,
     online::{
-        build_range_input, fetch_l1_header_by_hash, resolve_l1_head, OnlineHostConfig,
-        RangeWitnessRequest,
+        OnlineHostConfig, RangeWitnessRequest, build_range_input, fetch_l1_header_by_hash,
+        resolve_l1_head,
     },
-    split_range, L2BlockRange,
+    split_range,
 };
 
 /// One validity-proof job covering L2 blocks `(start_block, end_block]`.
