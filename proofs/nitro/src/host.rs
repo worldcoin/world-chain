@@ -87,6 +87,25 @@ impl NitroProver {
         Ok(response)
     }
 
+    /// Requests the enclave's NSM attestation document that embeds its ephemeral public key.
+    ///
+    /// Use this during one-time registration to learn the enclave's secp256k1 public key
+    /// and verify it is pinned to the expected PCR measurements.
+    #[instrument(skip_all, fields(endpoint = ?self.endpoint))]
+    pub async fn get_attestation_async(
+        &self,
+    ) -> Result<(Vec<u8>, Vec<u8>), NitroProverError> {
+        let response = self.round_trip(EnclaveRequest::GetAttestation).await?;
+        match response {
+            EnclaveResponse::Attestation {
+                attestation_doc,
+                public_key,
+            } => Ok((attestation_doc, public_key)),
+            EnclaveResponse::Error { message } => Err(NitroProverError::Enclave(message)),
+            _ => Err(NitroProverError::UnexpectedResponse("non-attestation")),
+        }
+    }
+
     /// Async version of [`WorldTeeProver::prove_range`].
     #[instrument(skip_all, fields(endpoint = ?self.endpoint))]
     pub async fn prove_range_async(
@@ -99,14 +118,18 @@ impl NitroProver {
             expected_public_values: request.expected_public_values,
         };
         let response = self.round_trip(enclave_request).await?;
-        let (boot_info, attestation_doc) = match response {
+        let (boot_info, attestation_doc, signature) = match response {
             EnclaveResponse::Range {
                 boot_info,
                 attestation_doc,
-            } => (boot_info, attestation_doc),
+                signature,
+            } => (boot_info, attestation_doc, signature),
             EnclaveResponse::Error { message } => return Err(NitroProverError::Enclave(message)),
             EnclaveResponse::Aggregation { .. } => {
                 return Err(NitroProverError::UnexpectedResponse("aggregation"));
+            }
+            EnclaveResponse::Attestation { .. } => {
+                return Err(NitroProverError::UnexpectedResponse("attestation"));
             }
         };
 
@@ -120,6 +143,7 @@ impl NitroProver {
         Ok(NitroRangeProofArtifact {
             boot_info,
             attestation_doc,
+            signature,
         })
     }
 
@@ -135,14 +159,18 @@ impl NitroProver {
             l1_headers_cbor: request.l1_headers_cbor,
         };
         let response = self.round_trip(enclave_request).await?;
-        let (boot_info, attestation_doc) = match response {
+        let (boot_info, attestation_doc, _signature) = match response {
             EnclaveResponse::Aggregation {
                 boot_info,
                 attestation_doc,
-            } => (boot_info, attestation_doc),
+                signature,
+            } => (boot_info, attestation_doc, signature),
             EnclaveResponse::Error { message } => return Err(NitroProverError::Enclave(message)),
             EnclaveResponse::Range { .. } => {
                 return Err(NitroProverError::UnexpectedResponse("range"));
+            }
+            EnclaveResponse::Attestation { .. } => {
+                return Err(NitroProverError::UnexpectedResponse("attestation"));
             }
         };
 

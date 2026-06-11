@@ -33,6 +33,7 @@ aws_nitro = ["dep:tokio-vsock", "dep:tracing-subscriber"]
 # requires the `enclave-bin` feature so it is only built for the enclave image.
 enclave = [
     "dep:aws-nitro-enclaves-nsm-api",
+    "dep:k256",
     "dep:kona-proof",
     "dep:serde_bytes",
     "dep:tokio-vsock",
@@ -46,6 +47,7 @@ enclave-bin = ["enclave", "dep:tracing-subscriber"]
 # Shared (host + enclave) ----------------------------------------------------
 alloy-primitives = { workspace = true, features = ["serde"] }
 anyhow.workspace = true
+base64 = { workspace = true }
 ciborium = "0.2"
 hex.workspace = true
 rkyv.workspace = true
@@ -55,6 +57,12 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 world-chain-proof-core.workspace = true
+
+# Host-side attestation verification deps (non-optional: used by parse_check_and_verify) --
+# These are compiled on all platforms; the p384 / x509-parser crates are pure Rust and
+# compile on macOS / Linux alike.
+p384 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+x509-parser = "0.16"
 
 # Linux-only host/enclave deps ----------------------------------------------
 #
@@ -69,6 +77,8 @@ kona-proof = { workspace = true, optional = true }
 serde_bytes = { version = "0.11", optional = true }
 world-chain-proof-succinct-client-utils = { workspace = true, optional = true }
 world-chain-proof-succinct-ethereum-client-utils = { workspace = true, optional = true }
+# secp256k1 signing for enclave-side proof attestation
+k256 = { version = "0.13", features = ["ecdsa"], optional = true }
 
 # Feature-gated bin support -------------------------------------------------
 tracing-subscriber = { workspace = true, optional = true }

@@ -140,6 +140,12 @@ pub struct NitroRangeProofArtifact {
     /// The document's `user_data` field commits to [`protocol::range_user_data`] of the boot
     /// info, binding the attestation to this specific transition.
     pub attestation_doc: Vec<u8>,
+    /// 65-byte recoverable secp256k1 signature over
+    /// `keccak256(l2_post_root || l2_block_number_be || rollup_config_hash)`.
+    ///
+    /// Produced by the enclave's ephemeral signing key, which is certified by the NSM
+    /// attestation document. Enables EVM-native on-chain signature recovery.
+    pub signature: Vec<u8>,
 }
 
 /// Host request for a Nitro-attested aggregation proof.
@@ -185,11 +191,20 @@ pub fn range_user_data(boot_info: &BootInfoStruct) -> [u8; 32] {
     protocol::range_user_data(boot_info)
 }
 
+/// Convenience re-export of the enclave signing commitment.
+///
+/// `keccak256(l2_post_root || l2_block_number_be || rollup_config_hash)`
+#[must_use]
+pub fn signing_commitment(boot_info: &BootInfoStruct) -> [u8; 32] {
+    protocol::signing_commitment(boot_info)
+}
+
 /// Re-exports of common host-facing types so callers can do `use world_chain_proof_nitro::*`.
 pub mod prelude {
     pub use crate::{
         ExpectedPcrs, NitroAggregationProofArtifact, NitroAggregationProofRequest,
         NitroRangeProofArtifact, NitroRangeProofRequest, WorldTeeProver, range_user_data,
+        signing_commitment,
     };
     #[cfg(all(feature = "aws_nitro", target_os = "linux"))]
     pub use crate::{NitroProver, NitroProverError};
@@ -288,6 +303,7 @@ mod tests {
         let artifact = NitroRangeProofArtifact {
             boot_info,
             attestation_doc,
+            signature: vec![],
         };
 
         let expected_user_data = range_user_data(&artifact.boot_info);

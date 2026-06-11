@@ -46,6 +46,11 @@ pub enum EnclaveRequest {
         /// CBOR-encoded L1 headers, ordered from oldest to newest.
         l1_headers_cbor: Vec<u8>,
     },
+    /// Request an NSM attestation document that embeds the enclave's ephemeral public key.
+    ///
+    /// Used during one-time registration: the host can verify the attestation doc to learn
+    /// the enclave's current secp256k1 public key and trust it for subsequent proof signatures.
+    GetAttestation,
 }
 
 /// Responses the enclave can return to the host.
@@ -58,6 +63,12 @@ pub enum EnclaveResponse {
         boot_info: BootInfoStruct,
         /// `COSE_Sign1` attestation document bytes from the NSM device.
         attestation_doc: Vec<u8>,
+        /// 65-byte recoverable secp256k1 signature over
+        /// `keccak256(l2_post_root || l2_block_number_be || rollup_config_hash)`.
+        ///
+        /// The signing key is the enclave's ephemeral keypair, whose public key is
+        /// certified by the NSM attestation document via [`EnclaveRequest::GetAttestation`].
+        signature: Vec<u8>,
     },
     /// Successful aggregation proof.
     Aggregation {
@@ -65,6 +76,22 @@ pub enum EnclaveResponse {
         boot_info: BootInfoStruct,
         /// Attestation document from the NSM device.
         attestation_doc: Vec<u8>,
+        /// 65-byte recoverable secp256k1 signature over
+        /// `keccak256(l2_post_root || l2_block_number_be || rollup_config_hash)`.
+        signature: Vec<u8>,
+    },
+    /// NSM attestation document that embeds the enclave's ephemeral secp256k1 public key.
+    ///
+    /// Returned in response to [`EnclaveRequest::GetAttestation`]. The host can verify the
+    /// document and extract `public_key` to trust subsequent proof signatures.
+    Attestation {
+        /// `COSE_Sign1` attestation document bytes. The `public_key` field inside the
+        /// document holds the compressed SEC1 encoding of the enclave's secp256k1 key.
+        attestation_doc: Vec<u8>,
+        /// Compressed SEC1 encoding of the enclave's ephemeral secp256k1 public key
+        /// (33 bytes). Included at the top level for convenient extraction without
+        /// full document parsing.
+        public_key: Vec<u8>,
     },
     /// Enclave-side error. The host treats this as a permanent failure for the request.
     Error {
@@ -166,6 +193,22 @@ pub enum FrameError {
     /// Frame exceeds the maximum allowed size.
     #[error("frame too large: {0} bytes")]
     FrameTooLarge(usize),
+}
+
+/// Computes the 32-byte commitment the enclave signs with its ephemeral secp256k1 key.
+///
+/// `keccak256( l2_post_root || l2_block_number_be || rollup_config_hash )`
+///
+/// Unlike [`range_user_data`] (which uses SHA-256 and includes `l2_pre_root`), this
+/// commitment uses keccak256 for EVM-native verifiability and omits `l2_pre_root` so it
+/// can be reconstructed from only the minimal post-state fields.
+#[must_use]
+pub fn signing_commitment(boot_info: &BootInfoStruct) -> [u8; 32] {
+    let mut buf = Vec::with_capacity(32 + 8 + 32);
+    buf.extend_from_slice(boot_info.l2PostRoot.as_slice());
+    buf.extend_from_slice(&boot_info.l2BlockNumber.to_be_bytes());
+    buf.extend_from_slice(boot_info.rollupConfigHash.as_slice());
+    *alloy_primitives::keccak256(&buf)
 }
 
 /// Hashes an arbitrary byte slice and returns it as a 32-byte `B256`.
