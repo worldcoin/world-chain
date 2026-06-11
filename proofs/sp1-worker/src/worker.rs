@@ -38,7 +38,7 @@ const MAX_CONCURRENT_JOBS: usize = 4;
 /// site, so its permits would never contend.
 static MAX_CONCURRENCY: Semaphore = Semaphore::const_new(MAX_CONCURRENT_JOBS);
 
-type QueueFuture<T> = Pin<Box<dyn Future<Output = Result<T, ProofJobQueueError>> + Send>>;
+type Job<T> = Pin<Box<dyn Future<Output = Result<T, ProofJobQueueError>> + Send>>;
 
 /// A self-contained report of one job result: performs the `prover-service` round-trip and
 /// logs its own outcome.
@@ -53,20 +53,21 @@ struct FinishedJob {
 /// Lease sub-state: at most one `getNextProof` request is in flight at a time, and a lease
 /// is only started once a concurrency permit is held for the job it may return.
 #[pin_project(project = LeaseStateProj)]
-enum LeaseState {
+enum WorkerState<T = Option<ProofRequest>> {
     /// Acquire a permit and start a lease on the next poll.
     Ready,
     /// Sleeping out the poll interval after an empty or failed lease attempt.
     Idle(Pin<Box<Sleep>>),
     /// Waiting on `getNextProof`, holding the permit for the prospective job.
     Leasing {
-        future: QueueFuture<Option<ProofRequest>>,
-        /// Taken exactly once, when the leased job spawns.
+        /// A future yielding the next proof job.
+        future: Job<T>,
+        /// An owned job permit.
         permit: Option<SemaphorePermit<'static>>,
     },
 }
 
-impl LeaseState {
+impl WorkerState {
     /// Transitions to sleeping out the poll interval before the next lease attempt.
     fn idle(poll_interval: Duration) -> Self {
         Self::Idle(Box::pin(tokio::time::sleep(poll_interval)))
@@ -111,7 +112,7 @@ pub struct Sp1Worker<Q, B> {
     reports: FuturesUnordered<ReportFuture>,
 
     #[pin]
-    lease: LeaseState,
+    lease: WorkerState,
 }
 
 impl<Q, B> Sp1Worker<Q, B>
@@ -131,7 +132,7 @@ where
             cancelled,
             jobs: JoinSet::new(),
             reports: FuturesUnordered::new(),
-            lease: LeaseState::Ready,
+            lease: WorkerState::Ready,
         }
     }
 
@@ -171,17 +172,17 @@ where
             loop {
                 match this.lease.as_mut().project() {
                     LeaseStateProj::Ready => match MAX_CONCURRENCY.try_acquire() {
-                        Ok(permit) => this.lease.set(LeaseState::leasing(this.queue, permit)),
+                        Ok(permit) => this.lease.set(WorkerState::leasing(this.queue, permit)),
                         // Every permit is proving. A finishing job wakes this task and frees
                         // its permit; the idle backoff is a safety net for permits held
                         // elsewhere in the process.
-                        Err(_) => this.lease.set(LeaseState::idle(*this.poll_interval)),
+                        Err(_) => this.lease.set(WorkerState::idle(*this.poll_interval)),
                     },
                     LeaseStateProj::Idle(sleep) => {
                         if sleep.as_mut().poll(cx).is_pending() {
                             break;
                         }
-                        this.lease.set(LeaseState::Ready);
+                        this.lease.set(WorkerState::Ready);
                     }
                     LeaseStateProj::Leasing { future, permit } => match future.as_mut().poll(cx) {
                         Poll::Pending => break,
@@ -195,14 +196,14 @@ where
                                 request,
                                 permit,
                             );
-                            this.lease.set(LeaseState::Ready);
+                            this.lease.set(WorkerState::Ready);
                         }
                         Poll::Ready(Ok(None)) => {
-                            this.lease.set(LeaseState::idle(*this.poll_interval));
+                            this.lease.set(WorkerState::idle(*this.poll_interval));
                         }
                         Poll::Ready(Err(error)) => {
                             warn!(%error, "failed to lease next proof job");
-                            this.lease.set(LeaseState::idle(*this.poll_interval));
+                            this.lease.set(WorkerState::idle(*this.poll_interval));
                         }
                     },
                 }
