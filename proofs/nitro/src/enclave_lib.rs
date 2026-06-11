@@ -97,14 +97,32 @@ fn init_signing_key(fd: i32) -> Result<Vec<u8>> {
 }
 
 /// Obtains 32 bytes of hardware-backed randomness from the NSM device.
+///
+/// Retries automatically because the NSM may legitimately return fewer than 32
+/// bytes per call. If the device returns an empty response more than
+/// `MAX_EMPTY_RETRIES` times in a row the function fails rather than spinning
+/// indefinitely.
 fn nsm_get_random_32(fd: i32) -> Result<[u8; 32]> {
+    const MAX_EMPTY_RETRIES: usize = 32;
+
     let mut seed = [0u8; 32];
     let mut filled = 0usize;
+    let mut empty_streak = 0usize;
 
     while filled < 32 {
         let response = nsm_process_request(fd, NsmRequest::GetRandom);
         match response {
             NsmResponse::GetRandom { random } => {
+                if random.is_empty() {
+                    empty_streak += 1;
+                    if empty_streak > MAX_EMPTY_RETRIES {
+                        return Err(anyhow!(
+                            "NSM GetRandom returned empty data {MAX_EMPTY_RETRIES} consecutive times"
+                        ));
+                    }
+                    continue;
+                }
+                empty_streak = 0;
                 let needed = 32 - filled;
                 let take = random.len().min(needed);
                 seed[filled..filled + take].copy_from_slice(&random[..take]);

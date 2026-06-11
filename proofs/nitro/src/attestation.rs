@@ -387,11 +387,14 @@ pub fn verify_cose_sign1_signature(doc: &[u8]) -> Result<(), AttestationError> {
         }
     }
 
-    // Synthetic test documents omit the certificate; skip cryptographic checks.
-    let cert_der = match cert_der {
-        Some(c) => c,
-        None => return Ok(()),
-    };
+    // A valid Nitro attestation document must always carry a leaf certificate.
+    // Accepting a document without one would allow PCR / user_data checks to pass
+    // without any cryptographic proof that those values came from AWS hardware.
+    let cert_der = cert_der.ok_or_else(|| {
+        AttestationError::Malformed(
+            "attestation document missing required `certificate` field".into(),
+        )
+    })?;
 
     // ── 3. Verify root CA ──────────────────────────────────────────────────────────
     verify_root_ca(&cabundle)?;
@@ -691,16 +694,21 @@ mod tests {
         assert!(matches!(err, AttestationError::UserDataMismatch { .. }));
     }
 
-    /// Synthetic documents (no `certificate` field) should pass signature verification
-    /// unchanged — the function short-circuits when no cert is present.
+    /// Documents without a `certificate` field must be rejected by the signature
+    /// verifier — accepting them would allow PCR/user_data checks to pass without
+    /// any AWS hardware proof.
     #[test]
-    fn verify_cose_sign1_skips_for_synthetic_doc() {
+    fn verify_cose_sign1_rejects_missing_certificate() {
         let doc = make_doc(
             vec![(0, vec![3u8; 48]), (1, vec![3u8; 48]), (2, vec![3u8; 48])],
             Some(vec![7u8; 32]),
         );
-        // Should not error even though signature bytes are placeholder zeros.
-        verify_cose_sign1_signature(&doc).unwrap();
+        // Must return an error when the certificate field is absent.
+        let err = verify_cose_sign1_signature(&doc).unwrap_err();
+        assert!(
+            matches!(err, AttestationError::Malformed(_)),
+            "expected Malformed error, got: {err:?}"
+        );
     }
 
     /// The AWS root CA PEM constant has a known one-character truncation (line 7 is 63
