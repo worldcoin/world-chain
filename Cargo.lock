@@ -9131,6 +9131,7 @@ dependencies = [
  "serde",
  "serde_cbor",
  "serde_json",
+ "sha2 0.10.9",
  "sp1-sdk",
  "tokio",
  "world-chain-chainspec",
@@ -18613,6 +18614,20 @@ dependencies = [
  "tokio",
  "tracing",
  "world-chain-proofs",
+]
+
+[[package]]
+name = "world-chain-prover-service"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "async-trait",
+ "jsonrpsee",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
