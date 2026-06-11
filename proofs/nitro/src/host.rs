@@ -131,6 +131,11 @@ impl NitroProver {
             attestation::verify_cose_sign1_signature(&attest_doc)?;
             // Verify PCR binding (no user_data for GetAttestation documents).
             attestation::verify_pcrs_only(&attest_doc, &self.expected_pcrs)?;
+            // Cross-check: the `public_key` field inside the NSM payload must match the
+            // key returned on the wire. Without this check an attacker could swap the
+            // wire key while presenting a legitimate attestation doc, binding proof
+            // signature checks to an uncertified key.
+            attestation::verify_nsm_public_key(&attest_doc, &pub_key)?;
             Some(pub_key)
         };
 
@@ -191,6 +196,11 @@ impl NitroProver {
             let (attest_doc, pub_key) = self.get_attestation_async().await?;
             attestation::verify_cose_sign1_signature(&attest_doc)?;
             attestation::verify_pcrs_only(&attest_doc, &self.expected_pcrs)?;
+            // Cross-check: the `public_key` field inside the NSM payload must match the
+            // key returned on the wire. Without this check an attacker could swap the
+            // wire key while presenting a legitimate attestation doc, binding proof
+            // signature checks to an uncertified key.
+            attestation::verify_nsm_public_key(&attest_doc, &pub_key)?;
             Some(pub_key)
         };
 

@@ -105,6 +105,20 @@ pub enum AttestationError {
     /// Certificate chain validation failed.
     #[error("certificate chain validation failed: {0}")]
     CertChain(String),
+    /// The `public_key` in the NSM attestation payload does not match the key supplied
+    /// on the wire by the enclave.
+    ///
+    /// This would allow an attacker to swap the wire `public_key` while presenting a
+    /// valid attestation document, binding proof signatures to an uncertified key.
+    #[error(
+        "attestation public_key mismatch: NSM payload key 0x{nsm} != wire key 0x{wire}"
+    )]
+    PublicKeyMismatch {
+        /// Hex-encoded key extracted from the NSM attestation payload.
+        nsm: String,
+        /// Hex-encoded key received on the wire in `EnclaveResponse::Attestation`.
+        wire: String,
+    },
 }
 
 // ──────────────────────────────────────────────────────────────────────────────────────
@@ -127,6 +141,12 @@ pub struct ParsedAttestationDoc {
     /// DER-encoded CA bundle (intermediate certs, ordered from intermediate closest to
     /// leaf toward the root, inclusive of the root CA).
     pub cabundle: Vec<Vec<u8>>,
+    /// Optional `public_key` field. Present when the enclave called `NsmRequest::Attestation`
+    /// with `public_key: Some(bytes)` — i.e., for [`EnclaveRequest::GetAttestation`] responses.
+    /// The bytes are the compressed SEC1 encoding of the enclave's ephemeral secp256k1 key.
+    ///
+    /// Use [`extract_nsm_public_key`] to obtain this value with a mandatory-presence check.
+    pub public_key: Option<Vec<u8>>,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────────────
@@ -190,6 +210,7 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
     let mut digest: Option<String> = None;
     let mut certificate: Option<Vec<u8>> = None;
     let mut cabundle: Vec<Vec<u8>> = Vec::new();
+    let mut public_key: Option<Vec<u8>> = None;
 
     for (key, value) in entries {
         let key_str = match key {
@@ -256,6 +277,11 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
                     }
                 }
             }
+            "public_key" => {
+                if let ciborium::value::Value::Bytes(b) = value {
+                    public_key = Some(b);
+                }
+            }
             _ => {}
         }
     }
@@ -267,6 +293,7 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
         digest,
         certificate,
         cabundle,
+        public_key,
     })
 }
 
@@ -516,6 +543,52 @@ fn verify_cert_chain(leaf_der: &[u8], cabundle: &[Vec<u8>]) -> Result<(), Attest
 // ──────────────────────────────────────────────────────────────────────────────────────
 // High-level verification entry points
 // ──────────────────────────────────────────────────────────────────────────────────────
+
+/// Extracts the `public_key` field from an NSM attestation document's CBOR payload.
+///
+/// The NSM embeds the enclave-supplied key into the signed CBOR payload when the enclave
+/// calls `NsmRequest::Attestation { public_key: Some(bytes) }`. This value is the only
+/// key material that is cryptographically bound to the PCR measurements via the
+/// COSE_Sign1 P-384 signature.
+///
+/// # Usage
+///
+/// Call this after [`verify_cose_sign1_signature`] to obtain the NSM-certified key, then
+/// compare it to the `public_key` returned on the wire in `EnclaveResponse::Attestation`.
+/// If they differ, reject the attestation — an attacker could otherwise substitute an
+/// arbitrary key on the wire while presenting a legitimate document.
+///
+/// # Errors
+///
+/// Returns [`AttestationError::MissingField`] if the payload has no `public_key` field.
+pub fn extract_nsm_public_key(doc: &[u8]) -> Result<Vec<u8>, AttestationError> {
+    let parsed = parse_attestation_doc(doc)?;
+    parsed
+        .public_key
+        .ok_or(AttestationError::MissingField("public_key"))
+}
+
+/// Checks that the `public_key` in an NSM attestation document's CBOR payload matches
+/// the key supplied on the wire by the enclave.
+///
+/// This must be called after [`verify_cose_sign1_signature`] to ensure the attestation
+/// doc (and therefore the embedded key) has been cryptographically validated before the
+/// comparison is trusted.
+///
+/// # Errors
+///
+/// Returns [`AttestationError::MissingField`] if the payload has no `public_key` field.
+/// Returns [`AttestationError::PublicKeyMismatch`] if the wire key differs.
+pub fn verify_nsm_public_key(doc: &[u8], wire_key: &[u8]) -> Result<(), AttestationError> {
+    let nsm_key = extract_nsm_public_key(doc)?;
+    if nsm_key.as_slice() != wire_key {
+        return Err(AttestationError::PublicKeyMismatch {
+            nsm: hex::encode(&nsm_key),
+            wire: hex::encode(wire_key),
+        });
+    }
+    Ok(())
+}
 
 /// Parses a `COSE_Sign1` Nitro attestation document and checks that its PCR map and
 /// `user_data` field match the supplied expectations.
