@@ -1,6 +1,5 @@
 use std::{fmt::Debug, sync::Arc};
 
-use alloy_primitives::Sealed;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use kona_derive::{
@@ -8,15 +7,13 @@ use kona_derive::{
     SignalReceiver,
 };
 use kona_driver::{Driver, DriverPipeline, PipelineCursor};
-use kona_executor::TrieDBProvider;
 use kona_genesis::{L1ChainConfig, RollupConfig};
 use kona_preimage::CommsClient;
 use kona_proof::{
     BootInfo, FlushableCache,
     executor::KonaExecutor,
-    l1::{OracleL1ChainProvider, OraclePipeline},
+    l1::{OraclePipeline},
     l2::OracleL2ChainProvider,
-    sync::new_oracle_pipeline_cursor,
 };
 use spin::RwLock;
 use tracing::info;
@@ -24,76 +21,9 @@ use tracing::info;
 use world_chain_proof_core::range::WorldRangeHardforkConfig;
 
 use crate::{
-    client::{advance_to_target, fetch_safe_head_hash},
+    advance_to_target,
     precompiles::{CustomCrypto, ZkvmOpEvmFactory},
 };
-
-// Gets the inputs for constructing the derivation pipeline.
-pub async fn get_inputs_for_pipeline<O>(
-    oracle: Arc<O>,
-) -> Result<(
-    BootInfo,
-    Option<(
-        Arc<RwLock<PipelineCursor>>,
-        OracleL1ChainProvider<O>,
-        OracleL2ChainProvider<O>,
-    )>,
-)>
-where
-    O: CommsClient + FlushableCache + Send + Sync + Debug,
-{
-    ////////////////////////////////////////////////////////////////
-    //                          PROLOGUE                          //
-    ////////////////////////////////////////////////////////////////
-
-    let boot = match BootInfo::load(oracle.as_ref()).await {
-        Ok(boot) => boot,
-        Err(e) => {
-            return Err(anyhow!("Failed to load boot info: {:?}", e));
-        }
-    };
-
-    let boot_clone = boot.clone();
-
-    let rollup_config = Arc::new(boot.rollup_config);
-    let safe_head_hash = fetch_safe_head_hash(oracle.as_ref(), boot.agreed_l2_output_root).await?;
-
-    let mut l1_provider = OracleL1ChainProvider::new(boot.l1_head, oracle.clone());
-    let mut l2_provider =
-        OracleL2ChainProvider::new(safe_head_hash, rollup_config.clone(), oracle.clone());
-
-    // Fetch the safe head's block header.
-    let safe_head = l2_provider
-        .header_by_hash(safe_head_hash)
-        .map(|header| Sealed::new_unchecked(header, safe_head_hash))?;
-
-    // If the claimed L2 block number is less than the safe head of the L2 chain, the claim is
-    // invalid.
-    if boot.claimed_l2_block_number < safe_head.number {
-        return Err(anyhow!(
-            "Claimed L2 block number {claimed} is less than the safe head {safe}",
-            claimed = boot.claimed_l2_block_number,
-            safe = safe_head.number
-        ));
-    }
-
-    ////////////////////////////////////////////////////////////////
-    //                   DERIVATION & EXECUTION                   //
-    ////////////////////////////////////////////////////////////////
-
-    // Create a new derivation driver with the given boot information and oracle.
-    let cursor = new_oracle_pipeline_cursor(
-        rollup_config.as_ref(),
-        safe_head,
-        boot.agreed_l2_output_root,
-        &mut l1_provider,
-        &mut l2_provider,
-    )
-    .await?;
-    l2_provider.set_cursor(cursor.clone());
-
-    Ok((boot_clone, Some((cursor, l1_provider, l2_provider))))
-}
 
 #[async_trait]
 pub trait WitnessExecutor {
@@ -103,8 +33,6 @@ pub trait WitnessExecutor {
     type L2: L2ChainProvider + Send + Sync + Debug + Clone;
     type DA: DataAvailabilityProvider + Send + Sync + Debug + Clone;
 
-    // Constructs the derivation pipeline.
-    #[allow(clippy::too_many_arguments)]
     async fn create_pipeline(
         &self,
         rollup_config: Arc<RollupConfig>,
@@ -116,8 +44,6 @@ pub trait WitnessExecutor {
         l2_provider: Self::L2,
     ) -> Result<OraclePipeline<Self::O, Self::L1, Self::L2, Self::DA>>;
 
-    // Sourced from https://github.com/op-rs/kona/tree/main/bin/client/src/single.rs
-    // Runs the OP Succinct witness executor using the given derivation pipeline,
     async fn run<O, DP, P>(
         &self,
         boot: BootInfo,
@@ -134,9 +60,6 @@ pub trait WitnessExecutor {
             .await
     }
 
-    // Runs the witness executor with an optional World hardfork overlay. Tropo/Strato remain
-    // World-only schedule entries; the overlay only changes the EVM spec selected by the SP1
-    // execution factory and does not mark OP Karst/Interop active in the Kona rollup config.
     async fn run_with_world_schedule<O, DP, P>(
         &self,
         boot: BootInfo,
@@ -150,11 +73,9 @@ pub trait WitnessExecutor {
         DP: DriverPipeline<P> + Send + Sync + Debug,
         P: Pipeline + SignalReceiver + Send + Sync + Debug,
     {
-        // Install custom crypto provider for KZG point evaluation precompile
         revm::precompile::install_crypto(CustomCrypto::default());
 
         let boot_clone = boot.clone();
-
         let rollup_config = Arc::new(boot.rollup_config);
 
         let executor = KonaExecutor::new(
@@ -168,10 +89,7 @@ pub trait WitnessExecutor {
             None,
         );
         let mut driver = Driver::new(cursor, executor, pipeline);
-        // Run the derivation pipeline until we are able to produce the output root of the claimed
-        // L2 block.
 
-        // Use custom advance to target with cycle tracking.
         #[cfg(target_os = "zkvm")]
         println!("cycle-tracker-report-start: block-execution-and-derivation");
         let (safe_head, output_root) = advance_to_target(
@@ -183,23 +101,16 @@ pub trait WitnessExecutor {
         #[cfg(target_os = "zkvm")]
         println!("cycle-tracker-report-end: block-execution-and-derivation");
 
-        ////////////////////////////////////////////////////////////////
-        //                          EPILOGUE                          //
-        ////////////////////////////////////////////////////////////////
-
         if output_root != boot.claimed_l2_output_root {
             return Err(anyhow!(
-                "Failed to validate L2 block #{number} with claimed output root {claimed_output_root}. Got {output_root} instead",
+                "Failed to validate L2 block #{number} with claimed output root \
+                 {claimed_output_root}. Got {output_root} instead",
                 number = safe_head.block_info.number,
                 output_root = output_root,
                 claimed_output_root = boot.claimed_l2_output_root,
             ));
         }
 
-        // Bind the committed l2BlockNumber to the actual derived safe-head number. Without this
-        // check, a non-interop EndOfSource that triggers the silent target downgrade in
-        // advance_to_target can let an adversarial witness commit (l2PostRoot, l2BlockNumber)
-        // pairs that refer to different L2 blocks. See GHSA-5jh4-3p33-85xc.
         ensure_derived_block_matches_claim(
             safe_head.block_info.number,
             boot.claimed_l2_block_number,
@@ -222,18 +133,14 @@ pub trait WitnessExecutor {
     }
 }
 
-/// Ensures the derived L2 safe-head block number matches the boot's claimed L2 block number.
-///
-/// This is the postcondition that closes GHSA-5jh4-3p33-85xc: a non-interop `EndOfSource` inside
-/// `advance_to_target` silently downgrades the local target to the current safe head, so a
-/// successful return does not by itself prove the requested target was reached.
 fn ensure_derived_block_matches_claim(
     safe_head_number: u64,
     claimed_block_number: u64,
 ) -> Result<()> {
     if safe_head_number != claimed_block_number {
         return Err(anyhow!(
-            "Derived safe head L2 block #{derived} does not match claimed L2 block number #{claimed}",
+            "Derived safe head L2 block #{derived} does not match claimed L2 block \
+             number #{claimed}",
             derived = safe_head_number,
             claimed = claimed_block_number,
         ));
@@ -256,18 +163,8 @@ mod tests {
     fn returns_err_with_both_numbers_when_derived_below_claimed() {
         let err = ensure_derived_block_matches_claim(50, 100).expect_err("expected mismatch error");
         let msg = err.to_string();
-        assert!(
-            msg.contains("#50"),
-            "missing derived block number in: {msg}"
-        );
-        assert!(
-            msg.contains("#100"),
-            "missing claimed block number in: {msg}"
-        );
-        assert!(
-            msg.contains("Derived safe head") && msg.contains("claimed L2 block number"),
-            "missing expected labels in: {msg}",
-        );
+        assert!(msg.contains("#50"), "missing derived block number in: {msg}");
+        assert!(msg.contains("#100"), "missing claimed block number in: {msg}");
     }
 
     #[test]
