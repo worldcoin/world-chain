@@ -18572,6 +18572,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-prover-service"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "async-trait",
+ "jsonrpsee",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "world-chain-rpc"
 version = "2.2.0"
 dependencies = [
