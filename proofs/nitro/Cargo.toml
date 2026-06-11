@@ -46,6 +46,7 @@ enclave-bin = ["enclave", "dep:tracing-subscriber"]
 # Shared (host + enclave) ----------------------------------------------------
 alloy-primitives = { workspace = true, features = ["serde"] }
 anyhow.workspace = true
+base64 = { workspace = true }
 ciborium = "0.2"
 hex.workspace = true
 rkyv.workspace = true
@@ -55,6 +56,16 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 world-chain-proof-core.workspace = true
+
+# Host-side attestation verification deps (non-optional: used by parse_check_and_verify) --
+# These are compiled on all platforms; the p384 / x509-parser crates are pure Rust and
+# compile on macOS / Linux alike.
+p384 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+x509-parser = { version = "0.16", features = ["verify"] }
+# secp256k1 signature verification used by the host-side prover to validate
+# proof signatures returned by the enclave. Pure Rust — compiles on all
+# platforms.
+k256 = { version = "0.13", features = ["ecdsa"] }
 
 # Linux-only host/enclave deps ----------------------------------------------
 #
@@ -69,6 +80,9 @@ kona-proof = { workspace = true, optional = true }
 serde_bytes = { version = "0.11", optional = true }
 world-chain-proof-succinct-client-utils = { workspace = true, optional = true }
 world-chain-proof-succinct-ethereum-client-utils = { workspace = true, optional = true }
+# (k256 is in the top-level [dependencies] as a non-optional dep so it is
+# available to both the enclave-side signing code and the host-side
+# verification code in host.rs.)
 
 # Feature-gated bin support -------------------------------------------------
 tracing-subscriber = { workspace = true, optional = true }
