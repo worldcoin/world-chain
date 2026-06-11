@@ -1,6 +1,6 @@
-use alloy_primitives::TxHash;
+use alloy_primitives::{Address, TxHash};
 use thiserror::Error;
-use world_chain_proofs::OutputRootError;
+use world_chain_proofs::ConsensusError;
 
 /// Errors returned by the proposer.
 #[derive(Debug, Error)]
@@ -20,7 +20,7 @@ pub enum ChallengerError {
     #[error("contract error: {0}")]
     Contract(String),
     #[error(transparent)]
-    OutputRoot(#[from] OutputRootError),
+    OutputRoot(#[from] ConsensusError),
     #[error("The challenge transaction didn't execute succesfully: {0}")]
     Revert(TxHash),
     #[error("Invalid root state: {0}")]
@@ -28,5 +28,23 @@ pub enum ChallengerError {
     #[error("RPC error: {0}")]
     Rpc(String),
     #[error("Latest L1 finalized block not found")]
-    L1FinalizedBlockNotFound(),
+    L1FinalizedBlockNotFound,
+    #[error(
+        "L2 block included in the game {game} is not finalized yet. latest_finalized: {latest_finalized}, given_block: {given_block}"
+    )]
+    L2BlockNotFinalized {
+        /// Address of the game.
+        game: Address,
+        /// Latest L2 finalized block number.
+        latest_finalized: u64,
+        /// Block number included in the game.
+        given_block: u64,
+    },
+}
+
+/// Error returned while processing a single game.
+#[derive(Debug)]
+pub(crate) struct GameScanError {
+    pub error: ChallengerError,
+    pub challenge_deadline: Option<u64>,
 }

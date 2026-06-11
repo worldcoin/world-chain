@@ -42,6 +42,11 @@ The ERC-4337 wallet owners are deterministic test mnemonic accounts and are only
 used to sign Safe user operations. They do not need ETH. Sponsored operations are
 paid by the configured Rundler instance.
 
+The GitHub Actions acceptance workflow overrides the local defaults for a small Rundler
+smoke-spike profile: 200 ephemeral Safe wallets, 50 post-deploy sponsored no-op operations per
+wallet, and 200-way post-deploy operation concurrency. Deploy concurrency stays at 10 because all
+deployment operations use the same Safe factory.
+
 Example:
 
 ```sh

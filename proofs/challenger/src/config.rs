@@ -2,6 +2,9 @@ use crate::error::ChallengerError;
 use alloy_primitives::{Address, U256};
 use std::time::Duration;
 
+/// Default number of games processed concurrently.
+pub const DEFAULT_MAX_GAME_CONCURRENCY: usize = 10;
+
 /// Configuration for the challenger.
 #[derive(Debug, Clone)]
 pub struct ChallengerConfig {
@@ -11,6 +14,8 @@ pub struct ChallengerConfig {
     pub factory_contract: Address,
     /// Delay between periodic scan attempts.
     pub poll_interval: Duration,
+    /// Maximum number of games to process concurrently.
+    pub max_game_concurrency: usize,
 }
 
 impl ChallengerConfig {
@@ -25,6 +30,11 @@ impl ChallengerConfig {
                 "poll_interval must be greater than zero",
             ));
         }
+        if self.max_game_concurrency == 0 {
+            return Err(ChallengerError::InvalidConfig(
+                "max_game_concurrency must be greater than zero",
+            ));
+        }
         Ok(())
     }
 }
@@ -35,6 +45,7 @@ impl Default for ChallengerConfig {
             challenger_bond: U256::ZERO,
             factory_contract: Address::with_last_byte(1),
             poll_interval: Duration::from_mins(1),
+            max_game_concurrency: DEFAULT_MAX_GAME_CONCURRENCY,
         }
     }
 }

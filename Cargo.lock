@@ -18658,6 +18658,7 @@ dependencies = [
  "alloy-provider 2.0.4",
  "alloy-rpc-types-eth 2.0.4",
  "async-trait",
+ "futures-util",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -19239,6 +19240,20 @@ dependencies = [
  "tokio",
  "tracing",
  "world-chain-proofs",
+]
+
+[[package]]
+name = "world-chain-prover-service"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "async-trait",
+ "jsonrpsee",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

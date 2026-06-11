@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-challenger"
+name = "world-chain-prover-service"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,19 +12,17 @@ workspace = true
 
 [dependencies]
 # workspace
-world-chain-proofs.workspace = true
 
 # alloy
-alloy-primitives.workspace = true
-alloy-provider.workspace = true
-alloy-rpc-types-eth.workspace = true
+alloy-primitives = { workspace = true, features = ["serde"] }
 
 # misc
 async-trait.workspace = true
-futures-util.workspace = true
-reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+jsonrpsee.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["time"] }
 tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

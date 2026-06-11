@@ -51,7 +51,7 @@ pub struct ChallengeSubmission {
 }
 
 /// The `GameCreated` event.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct GameCreated {
     pub proposal_key: B256,
     pub root_it: B256,
@@ -62,4 +62,20 @@ pub struct GameCreated {
     pub parent_ref: Address,
     pub l1_origin_hash: B256,
     pub l1_origin_number: BlockNumber,
+}
+
+/// A game queued for retry after a transient scan failure.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RetryGame {
+    pub game_created: GameCreated,
+    pub challenge_deadline: Option<u64>,
+    pub attempts: u32,
+}
+
+/// Result of processing a single game.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum GameScanOutcome {
+    Valid,
+    NeedsChallenge { challenge_deadline: u64 },
+    Skip,
 }

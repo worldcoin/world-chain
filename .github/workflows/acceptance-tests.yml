@@ -33,7 +33,7 @@ jobs:
     name: acceptance-tests (${{ matrix.network }})
     runs-on: arc-public-8xlarge-amd64-runner
     environment: ${{ matrix.environment }}
-    timeout-minutes: 20
+    timeout-minutes: 45
     concurrency:
       group: ${{ github.workflow }}-${{ matrix.network }}
       cancel-in-progress: false
@@ -116,6 +116,10 @@ jobs:
           ACCEPTANCE_BUNDLER_CF_ACCESS_CLIENT_SECRET: ${{ secrets.ACCEPTANCE_BUNDLER_CF_ACCESS_CLIENT_SECRET }}
           ACCEPTANCE_BLOCK_ADVANCE_TIMEOUT_SECS: "60"
           ACCEPTANCE_BLOCK_POLL_INTERVAL_SECS: "2"
+          ACCEPTANCE_4337_WALLET_COUNT: "200"
+          ACCEPTANCE_4337_DEPLOY_CONCURRENCY: "10"
+          ACCEPTANCE_4337_OPS_PER_WALLET: "50"
+          ACCEPTANCE_4337_OP_CONCURRENCY: "200"
         run: cargo nextest run --profile ci -p world-chain-tests -E 'package(world-chain-tests) & binary(world-chain-tests) & test(/acceptance_tests::test_network/)' --no-capture
 
       - name: Report allowed build failure

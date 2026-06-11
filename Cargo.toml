@@ -30,6 +30,7 @@ members = [
     "proofs/primitives",
     "proofs/proposer",
     "proofs/challenger",
+    "proofs/prover-service",
     "e2e-tests",
     "xtask",
 ]

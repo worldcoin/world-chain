@@ -39,7 +39,7 @@ use tracing::{Instrument, debug, info, info_span, warn};
 use url::{Host, Url};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 use world_chain_challenger::{AlloyChallengerClient, ChallengerConfig, WorldChainChallenger};
-use world_chain_proofs::{OptimismOutputRootClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
+use world_chain_proofs::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
 use world_chain_proposer::{AlloyProofSystemClient, ProposerConfig, WorldChainProposer};
 use world_chain_test_utils::DEV_CHAIN_ID;
 
@@ -2220,7 +2220,7 @@ async fn start_world_chain_proposer(
         .connect_http(Url::parse(l1_rpc_url)?);
 
     let contracts = AlloyProofSystemClient::new(provider, factory_address, anchor_address);
-    let output_roots = OptimismOutputRootClient::new(output_root_rpc_url.to_string());
+    let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let config = ProposerConfig {
         block_interval: deployment.block_interval,
         proposer_bond: U256::from(WORLD_PROPOSER_BOND_WEI),
@@ -2280,11 +2280,12 @@ async fn start_world_chain_challenger(
         .connect_http(Url::parse(l1_rpc_url)?);
 
     let client = AlloyChallengerClient::new(provider, factory_address);
-    let output_roots = OptimismOutputRootClient::new(output_root_rpc_url.to_string());
+    let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let config = ChallengerConfig {
         challenger_bond: U256::from(WORLD_CHALLENGER_BOND_WEI),
         factory_contract: factory_address,
         poll_interval: WORLD_CHALLENGER_POLL_INTERVAL,
+        ..ChallengerConfig::default()
     };
     let mut challenger = WorldChainChallenger::new(config, client, output_roots);
 
