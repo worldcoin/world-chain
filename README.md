@@ -11,6 +11,7 @@
   <img src="https://img.shields.io/badge/License-MIT-d1d1f6.svg?style=flat&labelColor=1C2C2E&color=BEC5C9&label=license&logoColor=BEC5C9" alt="License">
   <a href="https://world.org"><img src="https://img.shields.io/badge/World-854a15?style=flat&labelColor=1C2C2E&color=BEC5C9&logoColor=BEC5C9" alt="World"></a>
   <a href="https://worldscan.org"><img src="https://img.shields.io/badge/Explorer-854a15?style=flat&labelColor=1C2C2E&color=BEC5C9&logo=ethereum&logoColor=BEC5C9" alt="Explorer"></a>
+  <a href="https://deepwiki.com/worldcoin/world-chain"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 </p>
 
 <p align="center">
