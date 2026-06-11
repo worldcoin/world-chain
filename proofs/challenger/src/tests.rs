@@ -17,7 +17,6 @@ use std::{
 };
 use world_chain_proofs::{ConsensusError, ConsensusProvider};
 
-const FACTORY: Address = address!("0000000000000000000000000000000000001006");
 const GAME_1: Address = address!("0000000000000000000000000000000000000001");
 const GAME_2: Address = address!("0000000000000000000000000000000000000002");
 const FINALIZED_L1_BLOCK: BlockNumber = 10_000;
@@ -123,7 +122,6 @@ fn mock_output_roots(
 fn config() -> ChallengerConfig {
     ChallengerConfig {
         challenger_bond: U256::from(1),
-        factory_contract: FACTORY,
         poll_interval: Duration::from_secs(1),
         ..ChallengerConfig::default()
     }
