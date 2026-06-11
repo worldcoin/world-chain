@@ -18249,6 +18249,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-nitro-worker"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "anyhow",
+ "clap",
+ "dotenvy",
+ "hex",
+ "kona-host",
+ "kona-preimage",
+ "kona-proof",
+ "reqwest 0.12.28",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber 0.3.23",
+ "world-chain-chainspec",
+ "world-chain-proof-core",
+ "world-chain-proof-nitro",
+ "world-chain-proof-protocol",
+ "world-chain-proof-succinct-client-utils",
+ "world-chain-proof-succinct-ethereum-client-utils",
+ "world-chain-proof-succinct-host-utils",
+ "world-chain-proof-worker",
+ "world-chain-prover-service",
+]
+
+[[package]]
 name = "world-chain-node"
 version = "2.2.0"
 dependencies = [
