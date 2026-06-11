@@ -18,6 +18,7 @@ use base64::prelude::{BASE64_STANDARD, Engine};
 use eyre::eyre::{Context, Result, bail, eyre};
 use flate2::read::GzDecoder;
 use futures::future::try_join_all;
+use jsonrpsee::server::ServerHandle;
 use op_alloy_consensus::{encode_holocene_extra_data, encode_jovian_extra_data};
 use rand::Rng as _;
 use reth_chainspec::EthChainSpec;
@@ -51,7 +52,6 @@ use world_chain_prover_service::{
     ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
 };
 use world_chain_sp1_worker::{Sp1Backend, Sp1BackendConfig};
-use jsonrpsee::server::ServerHandle;
 use world_chain_test_utils::DEV_CHAIN_ID;
 
 use crate::{
@@ -542,29 +542,29 @@ impl FullStackWorldDevnet {
         // Defender proving loop: an in-process prover-service plus an SP1 worker, enabled by
         // the `DEVNET_SP1_WORKER_PROVER` env var. The worker leases SP1 jobs, builds witnesses
         // from the devnet L1/L2 RPCs, and proves them with the selected backend.
-        let (prover_service, sp1_worker, prover_service_url) = match (
-            proof_system.as_ref(),
-            sp1_worker_prover_kind(),
-        ) {
-            (Some(deployment), Some(kind)) => {
-                let l2_rpc = sequencers
-                    .first()
-                    .map(|sequencer| sequencer.rpc_url.clone())
-                    .ok_or_else(|| eyre!("full-stack devnet has no sequencer for the SP1 worker"))?;
-                let (service, url) = start_prover_service().await?;
-                let worker = start_sp1_worker(
-                    &l1_public_rpc,
-                    &l2_rpc,
-                    &url,
-                    &artifacts.rollup_path,
-                    deployment,
-                    kind,
-                )
-                .await?;
-                (Some(service), Some(worker), Some(url))
-            }
-            _ => (None, None, None),
-        };
+        let (prover_service, sp1_worker, prover_service_url) =
+            match (proof_system.as_ref(), sp1_worker_prover_kind()) {
+                (Some(deployment), Some(kind)) => {
+                    let l2_rpc = sequencers
+                        .first()
+                        .map(|sequencer| sequencer.rpc_url.clone())
+                        .ok_or_else(|| {
+                            eyre!("full-stack devnet has no sequencer for the SP1 worker")
+                        })?;
+                    let (service, url) = start_prover_service().await?;
+                    let worker = start_sp1_worker(
+                        &l1_public_rpc,
+                        &l2_rpc,
+                        &url,
+                        &artifacts.rollup_path,
+                        deployment,
+                        kind,
+                    )
+                    .await?;
+                    (Some(service), Some(worker), Some(url))
+                }
+                _ => (None, None, None),
+            };
 
         let mut metrics_targets = Vec::new();
         metrics_targets.extend(
@@ -638,6 +638,7 @@ impl FullStackWorldDevnet {
     }
 
     /// JSON-RPC URL of the in-process defender prover-service, when enabled.
+    #[allow(dead_code)]
     pub fn prover_service_url(&self) -> Option<&str> {
         self.prover_service_url.as_deref()
     }
@@ -2436,9 +2437,10 @@ async fn start_prover_service() -> Result<(ProverServiceTask, String)> {
         ProverService::new(ProverServiceConfig::default())
             .wrap_err("invalid prover-service config")?,
     );
-    let (addr, handle) = start_rpc_server("127.0.0.1:0".parse().expect("valid loopback addr"), service)
-        .await
-        .wrap_err("failed to start prover-service RPC server")?;
+    let (addr, handle) =
+        start_rpc_server("127.0.0.1:0".parse().expect("valid loopback addr"), service)
+            .await
+            .wrap_err("failed to start prover-service RPC server")?;
     let url = format!("http://{addr}");
     info!(prover_service = %url, "started native defender prover-service");
     Ok((ProverServiceTask { handle }, url))

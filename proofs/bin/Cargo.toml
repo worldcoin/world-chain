@@ -27,6 +27,7 @@ world-chain-proof-core.workspace = true
 world-chain-proof-protocol.workspace = true
 world-chain-proof-succinct-host-utils.workspace = true
 sp1-sdk = { version = "=6.1.0", features = ["network"], optional = true }
+sha2 = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 world-chain-proof-nitro = { workspace = true, optional = true }
@@ -34,4 +35,4 @@ world-chain-proof-nitro = { workspace = true, optional = true }
 [features]
 default = []
 nitro = ["dep:world-chain-proof-nitro", "world-chain-proof-nitro/aws_nitro"]
-sp1 = ["dep:sp1-sdk", "world-chain-proof-succinct-host-utils/sp1"]
+sp1 = ["dep:sp1-sdk", "dep:sha2", "world-chain-proof-succinct-host-utils/sp1"]

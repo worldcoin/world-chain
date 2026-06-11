@@ -9102,6 +9102,7 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "sp1-sdk",
  "tokio",
  "world-chain-chainspec",
