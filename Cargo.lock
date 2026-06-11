@@ -18528,6 +18528,7 @@ dependencies = [
  "tokio",
  "tracing",
  "world-chain-proof-core",
+ "world-chain-proof-protocol",
  "world-chain-proof-succinct-client-utils",
  "world-chain-proof-succinct-ethereum-client-utils",
  "world-chain-proof-succinct-utils",

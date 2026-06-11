@@ -17,7 +17,7 @@ use world_chain_proof_core::range::WorldRangeHardforkConfig;
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
 use world_chain_proof_succinct_host_utils::{
     env_prover::{EnvSuccinctProver, SP1ProofMode, Sp1ProverKind},
-    online::OnlineHostConfig,
+    online::{OnlineHostConfig, range_hardfork_config},
 };
 use world_chain_prover_service::RpcProverServiceClient;
 use world_chain_sp1_worker::{Sp1Backend, Sp1BackendConfig, Sp1Worker};
@@ -226,20 +226,4 @@ fn proof_config(
     let spec = network.chain_spec();
     let protocol_config = ProtocolHardforkConfig::from_chain_spec(spec.as_ref());
     Ok((range_hardfork_config(&protocol_config), hash))
-}
-
-fn range_hardfork_config(config: &ProtocolHardforkConfig) -> WorldRangeHardforkConfig {
-    WorldRangeHardforkConfig {
-        bedrock_block: config.bedrock_block,
-        regolith_time: config.regolith_time,
-        canyon_time: config.canyon_time,
-        ecotone_time: config.ecotone_time,
-        fjord_time: config.fjord_time,
-        granite_time: config.granite_time,
-        holocene_time: config.holocene_time,
-        isthmus_time: config.isthmus_time,
-        jovian_time: config.jovian_time,
-        tropo_time: config.tropo_time,
-        strato_time: config.strato_time,
-    }
 }
