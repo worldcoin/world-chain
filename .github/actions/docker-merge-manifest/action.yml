@@ -11,6 +11,17 @@ inputs:
   tags:
     description: Tag rules for docker/metadata-action (newline-separated).
     required: true
+  digest_artifact_prefix:
+    description: >-
+      Prefix of the digest artifacts to merge (must match the
+      digest_artifact_prefix given to docker-build-push-digest).
+    required: false
+    default: digests
+
+outputs:
+  digest:
+    description: Digest of the pushed multi-platform manifest.
+    value: ${{ steps.manifest-digest.outputs.digest }}
 
 runs:
   using: composite
@@ -19,7 +30,7 @@ runs:
       uses: actions/download-artifact@v4
       with:
         path: ${{ runner.temp }}/digests
-        pattern: digests-*
+        pattern: ${{ inputs.digest_artifact_prefix }}-*
         merge-multiple: true
 
     - name: Log in to Registry
@@ -50,3 +61,12 @@ runs:
       shell: bash
       run: |
         docker buildx imagetools inspect ${{ inputs.registry }}/${{ inputs.image_name }}:${{ steps.meta.outputs.version }}
+
+    - name: Export manifest digest
+      id: manifest-digest
+      shell: bash
+      run: |
+        digest=$(docker buildx imagetools inspect \
+          '${{ inputs.registry }}/${{ inputs.image_name }}:${{ steps.meta.outputs.version }}' \
+          --format '{{json .Manifest.Digest}}' | tr -d '"')
+        echo "digest=${digest}" >> "$GITHUB_OUTPUT"
