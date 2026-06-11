@@ -6,14 +6,28 @@
 //!
 //! Gated behind the `enclave` feature so the heavy kona / NSM dependencies are not pulled
 //! into the host build.
+//!
+//! # Ephemeral signing keypair
+//!
+//! At startup, [`serve_forever`] generates a secp256k1 signing key using entropy from the
+//! NSM `GetRandom` request. The key is stored in a [`std::sync::OnceLock`] and is therefore:
+//!
+//! - **Ephemeral**: generated fresh every time the enclave starts; never written to disk.
+//! - **Certified**: the public key is embedded in NSM attestation documents via
+//!   [`EnclaveRequest::GetAttestation`], binding it to the enclave's PCR measurements.
+//!
+//! Every [`EnclaveResponse::Range`] and [`EnclaveResponse::Aggregation`] includes a 65-byte
+//! recoverable secp256k1 signature over
+//! `keccak256(l2_post_root ‖ l2_block_number_be ‖ rollup_config_hash)`.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result, anyhow};
 use aws_nitro_enclaves_nsm_api::{
     api::{Request as NsmRequest, Response as NsmResponse},
     driver::{nsm_init, nsm_process_request},
 };
+use k256::ecdsa::{SigningKey, signature::hazmat::PrehashSigner};
 use kona_proof::{l1::OracleL1ChainProvider, l2::OracleL2ChainProvider};
 use rkyv::rancor::Error as RkyvError;
 use serde_bytes::ByteBuf;
@@ -35,8 +49,133 @@ use crate::protocol::{
 
 const VMADDR_CID_ANY: u32 = 0xFFFF_FFFF;
 
+// ──────────────────────────────────────────────────────────────────────────────────────
+// Ephemeral signing key
+// ──────────────────────────────────────────────────────────────────────────────────────
+
+/// Ephemeral secp256k1 signing key for this enclave instance.
+///
+/// Initialised once at startup via [`init_signing_key`] using entropy from the NSM
+/// `GetRandom` call. Guaranteed non-`None` after [`serve_forever`] has started.
+static SIGNING_KEY: OnceLock<SigningKey> = OnceLock::new();
+
+/// Initialises the enclave's ephemeral signing key from NSM-provided randomness.
+///
+/// Uses [`NsmRequest::GetRandom`] to obtain 32 bytes of hardware-backed entropy and
+/// constructs a secp256k1 [`SigningKey`] from them. The key is stored in
+/// [`SIGNING_KEY`] and the public key (compressed SEC1, 33 bytes) is returned.
+///
+/// # Errors
+///
+/// Returns an error if the NSM device returns an error or unexpected response, or if
+/// the 32 bytes of entropy do not form a valid scalar (extremely unlikely).
+fn init_signing_key(fd: i32) -> Result<Vec<u8>> {
+    // Collect 32 bytes of NSM-provided random entropy.
+    let seed = nsm_get_random_32(fd)?;
+
+    let signing_key = SigningKey::from_bytes(&seed.into())
+        .context("failed to create secp256k1 signing key from NSM entropy")?;
+
+    let public_key_bytes = signing_key
+        .verifying_key()
+        .to_encoded_point(true) // compressed SEC1
+        .as_bytes()
+        .to_vec();
+
+    // Ignore the error if the key was already set (race during tests / re-init).
+    let _ = SIGNING_KEY.set(signing_key);
+
+    info!(
+        target: "world_chain::nitro",
+        pubkey = hex::encode(&public_key_bytes),
+        "ephemeral secp256k1 signing key initialised"
+    );
+
+    Ok(public_key_bytes)
+}
+
+/// Obtains 32 bytes of hardware-backed randomness from the NSM device.
+///
+/// Retries automatically because the NSM may legitimately return fewer than 32
+/// bytes per call. If the device returns an empty response more than
+/// `MAX_EMPTY_RETRIES` times in a row the function fails rather than spinning
+/// indefinitely.
+fn nsm_get_random_32(fd: i32) -> Result<[u8; 32]> {
+    const MAX_EMPTY_RETRIES: usize = 32;
+
+    let mut seed = [0u8; 32];
+    let mut filled = 0usize;
+    let mut empty_streak = 0usize;
+
+    while filled < 32 {
+        let response = nsm_process_request(fd, NsmRequest::GetRandom);
+        match response {
+            NsmResponse::GetRandom { random } => {
+                if random.is_empty() {
+                    empty_streak += 1;
+                    if empty_streak > MAX_EMPTY_RETRIES {
+                        return Err(anyhow!(
+                            "NSM GetRandom returned empty data {MAX_EMPTY_RETRIES} consecutive times"
+                        ));
+                    }
+                    continue;
+                }
+                empty_streak = 0;
+                let needed = 32 - filled;
+                let take = random.len().min(needed);
+                seed[filled..filled + take].copy_from_slice(&random[..take]);
+                filled += take;
+            }
+            NsmResponse::Error(err) => {
+                return Err(anyhow!("NSM GetRandom error: {err:?}"));
+            }
+            other => {
+                return Err(anyhow!("unexpected NSM response to GetRandom: {other:?}"));
+            }
+        }
+    }
+
+    Ok(seed)
+}
+
+/// Returns the signing key, panicking if it has not been initialised.
+fn signing_key() -> &'static SigningKey {
+    SIGNING_KEY
+        .get()
+        .expect("SIGNING_KEY must be initialised before use; call init_signing_key() at startup")
+}
+
+/// Computes the signing commitment and produces a 65-byte recoverable secp256k1 signature.
+///
+/// Commitment: `keccak256(l2_post_root ‖ l2_block_number_be ‖ rollup_config_hash)`
+fn sign_boot_info(boot_info: &BootInfoStruct) -> Result<Vec<u8>> {
+    let commitment = protocol::signing_commitment(boot_info);
+
+    let (sig, rec_id) = signing_key()
+        .sign_prehash_recoverable(&commitment)
+        .context("secp256k1 signing failed")?;
+
+    // 65 bytes: 64-byte compact sig (r ‖ s) + 1-byte recovery id.
+    let mut sig_bytes = Vec::with_capacity(65);
+    sig_bytes.extend_from_slice(sig.to_bytes().as_slice());
+    sig_bytes.push(rec_id.to_byte());
+
+    Ok(sig_bytes)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────
+// Server loop
+// ──────────────────────────────────────────────────────────────────────────────────────
+
 /// Runs the enclave loop forever on the supplied vsock port.
 pub async fn serve_forever(port: u32) -> Result<()> {
+    // Initialise NSM and the ephemeral signing key before accepting any connections.
+    let fd = nsm_init();
+    if fd < 0 {
+        return Err(anyhow!("nsm_init returned negative fd: {fd}"));
+    }
+    let _pubkey = init_signing_key(fd).context("failed to initialise enclave signing key")?;
+
     let addr = VsockAddr::new(VMADDR_CID_ANY, port);
     let mut listener = VsockListener::bind(addr).context("vsock bind")?;
     info!(target: "world_chain::nitro", port, "nitro enclave listening");
@@ -89,6 +228,7 @@ async fn dispatch(request: EnclaveRequest) -> Result<EnclaveResponse> {
             check_version(version)?;
             handle_aggregation(inputs, l1_headers_cbor).await
         }
+        EnclaveRequest::GetAttestation => handle_get_attestation(),
     }
 }
 
@@ -100,6 +240,10 @@ fn check_version(version: u32) -> Result<()> {
     }
     Ok(())
 }
+
+// ──────────────────────────────────────────────────────────────────────────────────────
+// Request handlers
+// ──────────────────────────────────────────────────────────────────────────────────────
 
 async fn handle_range(
     witness_rkyv: Vec<u8>,
@@ -132,12 +276,15 @@ async fn handle_range(
         ensure_boot_info_matches(&expected, &boot_info)?;
     }
 
+    let signature = sign_boot_info(&boot_info)?;
+
     let user_data = protocol::range_user_data(&boot_info);
     let attestation_doc = request_attestation_doc(&user_data)?;
 
     Ok(EnclaveResponse::Range {
         boot_info,
         attestation_doc,
+        signature,
     })
 }
 
@@ -167,14 +314,57 @@ async fn handle_aggregation(
         rollupConfigHash: last.rollupConfigHash,
     };
 
+    let signature = sign_boot_info(&boot_info)?;
+
     let user_data = protocol::aggregation_user_data(&boot_info, &inputs);
     let attestation_doc = request_attestation_doc(&user_data)?;
 
     Ok(EnclaveResponse::Aggregation {
         boot_info,
         attestation_doc,
+        signature,
     })
 }
+
+/// Handles a [`EnclaveRequest::GetAttestation`] request.
+///
+/// Calls the NSM device with the enclave's ephemeral public key embedded so that verifiers
+/// can bind the secp256k1 key to the PCR measurements without an extra round-trip.
+fn handle_get_attestation() -> Result<EnclaveResponse> {
+    let fd = nsm_init();
+    if fd < 0 {
+        return Err(anyhow!("nsm_init returned negative fd: {fd}"));
+    }
+
+    let public_key_bytes = signing_key()
+        .verifying_key()
+        .to_encoded_point(true)
+        .as_bytes()
+        .to_vec();
+
+    let request = NsmRequest::Attestation {
+        user_data: None,
+        nonce: None,
+        public_key: Some(ByteBuf::from(public_key_bytes.clone())),
+    };
+    let response = nsm_process_request(fd, request);
+
+    match response {
+        NsmResponse::Attestation { document } => Ok(EnclaveResponse::Attestation {
+            attestation_doc: document,
+            public_key: public_key_bytes,
+        }),
+        NsmResponse::Error(err) => {
+            warn!(target: "world_chain::nitro", ?err, "nsm error during GetAttestation");
+            Err(anyhow!("nsm returned error during GetAttestation: {err:?}"))
+        }
+        other => Err(anyhow!("unexpected nsm response: {other:?}")),
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────
+// Range program runner
+// ──────────────────────────────────────────────────────────────────────────────────────
 
 /// Runs the full Kona derivation + execution range program. Mirrors the implementation in
 /// `proofs/succinct/programs/range/utils/src/lib.rs` since that crate is excluded from
