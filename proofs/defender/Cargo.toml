@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 # workspace
 world-chain-proofs.workspace = true
+world-chain-prover-service.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -22,3 +23,6 @@ alloy-rpc-types-eth.workspace = true
 # misc
 thiserror.workspace = true
 async-trait.workspace = true
+futures-util.workspace = true
+tokio = { workspace = true, features = ["time"] }
+tracing.workspace = true
