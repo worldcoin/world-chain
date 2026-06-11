@@ -18261,7 +18261,6 @@ dependencies = [
  "dotenvy",
  "hex",
  "jsonrpsee",
- "k256",
  "kona-host",
  "kona-preimage",
  "kona-proof",

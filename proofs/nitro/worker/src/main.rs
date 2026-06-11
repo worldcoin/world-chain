@@ -634,9 +634,6 @@ async fn prove_job(
     schedule: &WorldRangeHardforkConfig,
     rollup_config_hash: B256,
 ) -> Result<ProofData> {
-    use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
-    use world_chain_proof_nitro::{attestation, signing_commitment};
-
     let start_block =
         job.l2_block_number
             .checked_sub(cli.block_interval)
@@ -652,26 +649,14 @@ async fn prove_job(
     let rt_handle = tokio::runtime::Handle::current();
     let prover = NitroProver::with_runtime(endpoint, *expected_pcrs, rt_handle);
 
-    // Retrieve the enclave's certified ephemeral public key before proving.
-    // When using real PCRs this also verifies the COSE_Sign1 signature and PCR binding.
-    let enclave_pub_key: Option<Vec<u8>> = if expected_pcrs.is_placeholder() {
-        warn!("placeholder PCRs — skipping key attestation and signature verification (dev mode)");
-        None
-    } else {
-        let (attest_doc, pub_key) = prover
-            .get_attestation_async()
-            .await
-            .context("failed to retrieve enclave attestation")?;
-        // Verify the COSE_Sign1 signature on the attestation doc.
-        attestation::verify_cose_sign1_signature(&attest_doc)
-            .context("enclave key attestation COSE verification failed")?;
-        // Verify PCRs on the key attestation doc (user_data is None for GetAttestation).
-        attestation::verify_pcrs_only(&attest_doc, expected_pcrs)
-            .context("enclave key attestation PCR check failed")?;
-        Some(pub_key)
-    };
-
     // Build witness on the blocking threadpool.
+    // NOTE: We deliberately do NOT fetch the enclave public key here (before witness
+    // generation). `prove_range_async` fetches the key immediately before sending the
+    // request to the enclave, then verifies the COSE_Sign1 signature, PCR binding, and
+    // proof secp256k1 signature all within one atomic window. Caching the key here and
+    // re-checking it afterwards would introduce a stale-key race: if the enclave restarts
+    // during the (potentially long) witness-build phase, `prove_range_async` succeeds
+    // with the new key but the worker would reject the proof with a spurious key mismatch.
     let cfg = online_cfg.clone();
     let sched = schedule.clone();
     let l1_head = job.l1_head;
@@ -722,31 +707,9 @@ async fn prove_job(
         );
     }
 
-    // Verify the enclave's secp256k1 signature over signing_commitment(boot_info),
-    // and confirm the signer matches the certified enclave public key.
-    if let Some(ref expected_pub_key) = enclave_pub_key {
-        if artifact.signature.len() != 65 {
-            bail!(
-                "invalid proof signature length: expected 65 bytes, got {}",
-                artifact.signature.len()
-            );
-        }
-        let commitment = signing_commitment(&artifact.boot_info);
-        let sig = K256Signature::from_slice(&artifact.signature[..64])
-            .context("failed to parse proof signature bytes")?;
-        let rec_id = RecoveryId::from_byte(artifact.signature[64])
-            .ok_or_else(|| anyhow!("invalid secp256k1 recovery id: {}", artifact.signature[64]))?;
-        let recovered_vk = VerifyingKey::recover_from_prehash(&commitment, &sig, rec_id)
-            .context("secp256k1 signature recovery failed")?;
-        let recovered_key_bytes = recovered_vk.to_encoded_point(true).as_bytes().to_vec();
-        if &recovered_key_bytes != expected_pub_key {
-            bail!(
-                "proof signature key mismatch: recovered 0x{} != enclave 0x{}",
-                hex::encode(&recovered_key_bytes),
-                hex::encode(expected_pub_key)
-            );
-        }
-    }
+    // Signature binding (key attestation + secp256k1 proof signature recovery) is
+    // performed inside `prove_range_async` against the key fetched in the same call,
+    // so no additional check is required here.
 
     info!(
         post_root = ?artifact.boot_info.l2PostRoot,
