@@ -12,7 +12,7 @@ use kona_proof::{
     l2::OracleL2ChainProvider,
 };
 use spin::RwLock;
-use world_chain_proof_succinct_client_utils::witness::executor::WitnessExecutor;
+use world_chain_proof_kona_utils::WitnessExecutor;
 
 pub struct ETHDAWitnessExecutor<O, B>
 where

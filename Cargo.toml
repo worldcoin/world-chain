@@ -28,6 +28,7 @@ members = [
     "proofs/protocol",
     "proofs/nitro",
     "proofs/proof",
+    "proofs/utils/kona",
     "proofs/succinct/utils/client",
     "proofs/succinct/utils/ethereum-client",
     "proofs/succinct/utils/host",
@@ -85,6 +86,7 @@ world-chain-proof-core = { path = "proofs/core", default-features = false }
 world-chain-proof = { path = "proofs/proof", default-features = false }
 world-chain-proof-protocol = { path = "proofs/protocol", default-features = false }
 world-chain-proof-nitro = { path = "proofs/nitro", default-features = false }
+world-chain-proof-kona-utils = { path = "proofs/utils/kona", default-features = false }
 world-chain-proof-succinct-client-utils = { path = "proofs/succinct/utils/client", default-features = false }
 world-chain-proof-succinct-ethereum-client-utils = { path = "proofs/succinct/utils/ethereum-client", default-features = false }
 world-chain-proof-succinct-host-utils = { path = "proofs/succinct/utils/host", default-features = false }

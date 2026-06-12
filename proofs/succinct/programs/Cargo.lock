@@ -4729,6 +4729,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-proof-kona-utils"
+version = "2.2.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips 2.0.4",
+ "alloy-evm",
+ "alloy-op-evm",
+ "alloy-primitives",
+ "alloy-rlp",
+ "anyhow",
+ "async-trait",
+ "kona-derive",
+ "kona-driver",
+ "kona-executor",
+ "kona-genesis",
+ "kona-preimage",
+ "kona-proof",
+ "kona-protocol",
+ "kzg-rs",
+ "op-alloy-consensus",
+ "op-revm",
+ "revm",
+ "revm-precompile",
+ "serde",
+ "spin 0.10.0",
+ "tracing",
+ "world-chain-proof-core",
+]
+
+[[package]]
 name = "world-chain-proof-succinct-aggregation"
 version = "2.2.0"
 dependencies = [
@@ -4748,36 +4778,17 @@ dependencies = [
 name = "world-chain-proof-succinct-client-utils"
 version = "2.2.0"
 dependencies = [
- "alloy-consensus",
  "alloy-eips 2.0.4",
- "alloy-evm",
- "alloy-op-evm",
  "alloy-primitives",
- "alloy-rlp",
  "alloy-sol-types",
- "anyhow",
- "async-trait",
  "cfg-if",
- "kona-derive",
- "kona-driver",
- "kona-executor",
- "kona-genesis",
- "kona-preimage",
- "kona-proof",
- "kona-protocol",
- "kzg-rs",
- "op-alloy-consensus",
- "op-revm",
- "revm",
  "revm-precompile",
  "rkyv",
- "serde",
  "serde_json",
  "sha2",
- "spin 0.10.0",
  "thiserror",
- "tracing",
  "world-chain-proof-core",
+ "world-chain-proof-kona-utils",
 ]
 
 [[package]]
@@ -4792,6 +4803,7 @@ dependencies = [
  "kona-preimage",
  "kona-proof",
  "spin 0.10.0",
+ "world-chain-proof-kona-utils",
  "world-chain-proof-succinct-client-utils",
 ]
 
@@ -4818,7 +4830,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "world-chain-proof-core",
- "world-chain-proof-succinct-client-utils",
+ "world-chain-proof-kona-utils",
 ]
 
 [[package]]

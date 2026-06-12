@@ -19,15 +19,12 @@ use world_chain_proof_core::{
     range::{WorldRangeHardforkConfig, WorldRangeSpecId},
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
+use world_chain_proof_kona_utils::{
+    OnlineBlobStore, OutputRootWitness, PreimageWitnessCollector, WitnessExecutor,
+    get_inputs_for_pipeline,
+};
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
-use world_chain_proof_succinct_client_utils::{
-    OutputRootWitness,
-    witness::executor::{WitnessExecutor, get_inputs_for_pipeline},
-};
 use world_chain_proof_succinct_ethereum_client_utils::executor::ETHDAWitnessExecutor;
-use world_chain_proof_succinct_host_utils::witness_generation::{
-    OnlineBlobStore, PreimageWitnessCollector,
-};
 
 const L1_BLOCK_PREDEPLOY: Address = address!("0x4200000000000000000000000000000000000015");
 const L2_TO_L1_MESSAGE_PASSER: Address = address!("0x4200000000000000000000000000000000000016");
