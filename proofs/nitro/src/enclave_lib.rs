@@ -27,7 +27,7 @@ use aws_nitro_enclaves_nsm_api::{
     api::{Request as NsmRequest, Response as NsmResponse},
     driver::{nsm_init, nsm_process_request},
 };
-use k256::ecdsa::{SigningKey, signature::hazmat::PrehashSigner as _};
+use k256::ecdsa::SigningKey;
 use kona_proof::{l1::OracleL1ChainProvider, l2::OracleL2ChainProvider};
 use rkyv::rancor::Error as RkyvError;
 use serde_bytes::ByteBuf;
