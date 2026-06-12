@@ -38,7 +38,7 @@ use reth_rpc_api::{
 };
 use reth_rpc_server_types::RethRpcModule;
 use reth_transaction_pool::TransactionPool;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_cli::KonaArgs;
 use world_chain_evm::OpTx;
@@ -662,12 +662,25 @@ async fn spawn_kona(
     );
 
     // Spawn on the node's task executor so the service lives for the node's lifetime.
+    //
+    // The in-process Kona node is reth's only engine driver: if it stops while the node is
+    // running, reth keeps serving but silently stops advancing (no FCU / new-payload), leaving a
+    // half-dead node that liveness probes on the EL don't catch. So its termination is always
+    // fatal. `spawn_critical_task` only notifies reth's `TaskManager` on a panic (normal
+    // completion is ignored), and it wraps the future in `select(on_shutdown, ..)` — during a
+    // legitimate node shutdown `on_shutdown` wins and this future is dropped before `stopped()`
+    // resolves. So panicking here fires only when Kona dies on its own, bringing the whole node
+    // down so the orchestrator restarts the pod and op-conductor fails over.
     task_executor.spawn_critical_task("kona-consensus", async move {
         let mut handle = KonaServiceHandle::spawn(service);
         match handle.stopped().await {
-            Ok(()) => info!(target: "world_chain::kona", "Kona consensus node stopped"),
+            Ok(()) => {
+                error!(target: "world_chain::kona", "Kona consensus node stopped unexpectedly; bringing down the node");
+                panic!("Kona consensus node stopped unexpectedly");
+            }
             Err(error) => {
-                tracing::error!(target: "world_chain::kona", %error, "Kona consensus node exited with error")
+                error!(target: "world_chain::kona", %error, "Kona consensus node exited with error; bringing down the node");
+                panic!("Kona consensus node exited with error: {error}");
             }
         }
     });
