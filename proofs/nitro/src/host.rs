@@ -94,9 +94,7 @@ impl NitroProver {
     /// Use this during one-time registration to learn the enclave's secp256k1 public key
     /// and verify it is pinned to the expected PCR measurements.
     #[instrument(skip_all, fields(endpoint = ?self.endpoint))]
-    pub async fn get_attestation_async(
-        &self,
-    ) -> Result<(Vec<u8>, Vec<u8>), NitroProverError> {
+    pub async fn get_attestation_async(&self) -> Result<(Vec<u8>, Vec<u8>), NitroProverError> {
         let response = self.round_trip(EnclaveRequest::GetAttestation).await?;
         match response {
             EnclaveResponse::Attestation {
@@ -350,8 +348,6 @@ pub enum NitroProverError {
     #[error("proof secp256k1 signature is invalid: {0}")]
     InvalidSignature(String),
     /// Proof signature recovered a different public key than the certified enclave key.
-    #[error(
-        "proof signature key mismatch: recovered 0x{recovered} != enclave 0x{expected}"
-    )]
+    #[error("proof signature key mismatch: recovered 0x{recovered} != enclave 0x{expected}")]
     SignatureMismatch { recovered: String, expected: String },
 }

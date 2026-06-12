@@ -28,8 +28,10 @@
 
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
-    boot::BootInfoStruct, range::WorldRangeProofPublicValues,
-    types::{AggregationInputs, AggregationOutputs}, witness::WorldRangeWitnessData,
+    boot::BootInfoStruct,
+    range::WorldRangeProofPublicValues,
+    types::{AggregationInputs, AggregationOutputs},
+    witness::WorldRangeWitnessData,
 };
 
 // Used only by the feature-gated `enclave`/`aws_nitro` modules; bind with `as _`

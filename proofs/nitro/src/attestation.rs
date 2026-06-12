@@ -110,9 +110,7 @@ pub enum AttestationError {
     ///
     /// This would allow an attacker to swap the wire `public_key` while presenting a
     /// valid attestation document, binding proof signatures to an uncertified key.
-    #[error(
-        "attestation public_key mismatch: NSM payload key 0x{nsm} != wire key 0x{wire}"
-    )]
+    #[error("attestation public_key mismatch: NSM payload key 0x{nsm} != wire key 0x{wire}")]
     PublicKeyMismatch {
         /// Hex-encoded key extracted from the NSM attestation payload.
         nsm: String,
@@ -335,9 +333,17 @@ pub fn verify_cose_sign1_signature(doc: &[u8]) -> Result<(), AttestationError> {
         ciborium::value::Value::Array(a) => a,
         ciborium::value::Value::Tag(18, inner) => match *inner {
             ciborium::value::Value::Array(a) => a,
-            _ => return Err(AttestationError::Malformed("expected array under tag 18".into())),
+            _ => {
+                return Err(AttestationError::Malformed(
+                    "expected array under tag 18".into(),
+                ));
+            }
         },
-        _ => return Err(AttestationError::Malformed("expected COSE_Sign1 array".into())),
+        _ => {
+            return Err(AttestationError::Malformed(
+                "expected COSE_Sign1 array".into(),
+            ));
+        }
     };
 
     if array.len() != 4 {
@@ -437,18 +443,16 @@ pub fn verify_cose_sign1_signature(doc: &[u8]) -> Result<(), AttestationError> {
         ciborium::value::Value::Bytes(payload_bstr),
     ]);
     let mut sig_struct_bytes = Vec::new();
-    ciborium::into_writer(&sig_structure, &mut sig_struct_bytes).map_err(|e| {
-        AttestationError::Malformed(format!("Sig_Structure encode: {e}"))
-    })?;
+    ciborium::into_writer(&sig_structure, &mut sig_struct_bytes)
+        .map_err(|e| AttestationError::Malformed(format!("Sig_Structure encode: {e}")))?;
 
     // ── 5. Extract P-384 public key from leaf certificate ─────────────────────────
     let verifying_key = extract_p384_key(&cert_der)?;
 
     // ── 6. Verify ES384 signature ──────────────────────────────────────────────────
     // COSE ES384 uses the fixed (r‖s) 96-byte encoding for P-384 signatures.
-    let sig = Signature::from_slice(&signature_bytes).map_err(|e| {
-        AttestationError::CoseSignature(format!("signature decode: {e}"))
-    })?;
+    let sig = Signature::from_slice(&signature_bytes)
+        .map_err(|e| AttestationError::CoseSignature(format!("signature decode: {e}")))?;
     verifying_key
         .verify(&sig_struct_bytes, &sig)
         .map_err(|e| AttestationError::CoseSignature(format!("ES384 verify: {e}")))?;
@@ -468,7 +472,7 @@ fn extract_p384_key(cert_der: &[u8]) -> Result<p384::ecdsa::VerifyingKey, Attest
     let spki = cert.public_key();
     let key_bytes = &spki.subject_public_key.data;
 
-    VerifyingKey::from_sec1_bytes(&key_bytes)
+    VerifyingKey::from_sec1_bytes(key_bytes)
         .map_err(|e| AttestationError::CertChain(format!("P-384 key decode: {e}")))
 }
 
@@ -481,8 +485,7 @@ fn verify_root_ca(cabundle: &[Vec<u8>]) -> Result<(), AttestationError> {
     let expected = aws_root_ca_der().map_err(AttestationError::CertChain)?;
     if root != &expected {
         return Err(AttestationError::CertChain(
-            "root CA certificate does not match the expected AWS Nitro Attestation PKI root"
-                .into(),
+            "root CA certificate does not match the expected AWS Nitro Attestation PKI root".into(),
         ));
     }
     Ok(())
@@ -516,9 +519,7 @@ fn verify_cert_chain(leaf_der: &[u8], cabundle: &[Vec<u8>]) -> Result<(), Attest
     let (_, issuer0) = X509Certificate::from_der(&cabundle[0])
         .map_err(|e| AttestationError::CertChain(format!("cabundle[0] parse: {e}")))?;
     leaf.verify_signature(Some(issuer0.public_key()))
-        .map_err(|e| {
-            AttestationError::CertChain(format!("leaf cert signature invalid: {e}"))
-        })?;
+        .map_err(|e| AttestationError::CertChain(format!("leaf cert signature invalid: {e}")))?;
 
     // 3. Verify each intermediate is signed by the next one up.
     //    The root (last element) is self-signed and anchored by verify_root_ca above —
@@ -526,15 +527,15 @@ fn verify_cert_chain(leaf_der: &[u8], cabundle: &[Vec<u8>]) -> Result<(), Attest
     for i in 0..cabundle.len() - 1 {
         let (_, cert) = X509Certificate::from_der(&cabundle[i])
             .map_err(|e| AttestationError::CertChain(format!("cabundle[{i}] parse: {e}")))?;
-        let (_, issuer) = X509Certificate::from_der(&cabundle[i + 1]).map_err(|e| {
-            AttestationError::CertChain(format!("cabundle[{}] parse: {e}", i + 1))
-        })?;
-        cert.verify_signature(Some(issuer.public_key())).map_err(|e| {
-            AttestationError::CertChain(format!(
-                "cabundle[{i}] signature invalid (issuer cabundle[{}]): {e}",
-                i + 1
-            ))
-        })?;
+        let (_, issuer) = X509Certificate::from_der(&cabundle[i + 1])
+            .map_err(|e| AttestationError::CertChain(format!("cabundle[{}] parse: {e}", i + 1)))?;
+        cert.verify_signature(Some(issuer.public_key()))
+            .map_err(|e| {
+                AttestationError::CertChain(format!(
+                    "cabundle[{i}] signature invalid (issuer cabundle[{}]): {e}",
+                    i + 1
+                ))
+            })?;
     }
 
     Ok(())
@@ -838,6 +839,10 @@ mod tests {
         assert!(AWS_NITRO_ROOT_CA_PEM.starts_with("-----BEGIN CERTIFICATE-----"));
         assert!(AWS_NITRO_ROOT_CA_PEM.ends_with("-----END CERTIFICATE-----"));
         // Verify the base64 body decodes to valid DER.
-        assert!(aws_root_ca_der().is_ok(), "DER decode failed: {:?}", aws_root_ca_der());
+        assert!(
+            aws_root_ca_der().is_ok(),
+            "DER decode failed: {:?}",
+            aws_root_ca_der()
+        );
     }
 }
