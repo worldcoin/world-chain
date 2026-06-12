@@ -95,12 +95,18 @@ impl NitroProver {
     /// and verify it is pinned to the expected PCR measurements.
     #[instrument(skip_all, fields(endpoint = ?self.endpoint))]
     pub async fn get_attestation_async(&self) -> Result<(Vec<u8>, Vec<u8>), NitroProverError> {
-        let response = self.round_trip(EnclaveRequest::GetAttestation).await?;
+        let nonce = generate_nonce()?;
+        let response = self
+            .round_trip(EnclaveRequest::GetAttestation { nonce })
+            .await?;
         match response {
             EnclaveResponse::Attestation {
                 attestation_doc,
                 public_key,
-            } => Ok((attestation_doc, public_key)),
+            } => {
+                attestation::verify_nonce(&attestation_doc, &nonce)?;
+                Ok((attestation_doc, public_key))
+            }
             EnclaveResponse::Error { message } => Err(NitroProverError::Enclave(message)),
             _ => Err(NitroProverError::UnexpectedResponse("non-attestation")),
         }
@@ -138,10 +144,12 @@ impl NitroProver {
         };
 
         // ── Step 2: Prove ──
+        let nonce = generate_nonce()?;
         let enclave_request = EnclaveRequest::Range {
             version: PROTOCOL_VERSION,
             witness_rkyv: request.witness_rkyv,
             expected_public_values: request.expected_public_values,
+            nonce,
         };
         let response = self.round_trip(enclave_request).await?;
         let (boot_info, attestation_doc, signature) = match response {
@@ -167,6 +175,7 @@ impl NitroProver {
                 &self.expected_pcrs,
                 &expected_user_data,
             )?;
+            attestation::verify_nonce(&attestation_doc, &nonce)?;
             verify_proof_signature(&signature, &boot_info, expected_pub_key)?;
         }
 
@@ -203,10 +212,12 @@ impl NitroProver {
         };
 
         // ── Step 2: Prove ──
+        let nonce = generate_nonce()?;
         let enclave_request = EnclaveRequest::Aggregation {
             version: PROTOCOL_VERSION,
             inputs: request.inputs.clone(),
             l1_headers_cbor: request.l1_headers_cbor,
+            nonce,
         };
         let response = self.round_trip(enclave_request).await?;
         let (boot_info, attestation_doc, signature) = match response {
@@ -232,6 +243,7 @@ impl NitroProver {
                 &self.expected_pcrs,
                 &expected_user_data,
             )?;
+            attestation::verify_nonce(&attestation_doc, &nonce)?;
             verify_proof_signature(&signature, &boot_info, expected_pub_key)?;
         }
 
@@ -325,6 +337,16 @@ impl WorldTeeProver for NitroProver {
         let prover = self.clone();
         runtime.block_on(prover.prove_aggregation_async(request))
     }
+}
+
+/// Reads 32 bytes from the OS CSPRNG (`/dev/urandom`) for use as a per-request nonce.
+fn generate_nonce() -> Result<[u8; 32], NitroProverError> {
+    use std::io::Read;
+    let mut nonce = [0u8; 32];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut nonce))
+        .map_err(|e| NitroProverError::Enclave(format!("nonce generation failed: {e}")))?;
+    Ok(nonce)
 }
 
 /// Errors raised by the host-side Nitro prover.

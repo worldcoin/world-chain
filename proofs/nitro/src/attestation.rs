@@ -8,9 +8,9 @@
 //! 2. The COSE_Sign1 P-384 signature against the leaf certificate's public key.
 //! 3. That the root certificate in the chain matches the hardcoded AWS Nitro root CA.
 //!
-//! # Remaining TODOs
-//!
-//! - Timestamp / nonce freshness checks.
+//! 4. Certificate validity periods (not-before / not-after) for every cert in the chain.
+//! 5. Nonce freshness: the host supplies a per-request nonce that the NSM embeds in the
+//!    signed payload, preventing replay of captured attestation documents.
 
 use std::collections::BTreeMap;
 
@@ -105,6 +105,12 @@ pub enum AttestationError {
     /// Certificate chain validation failed.
     #[error("certificate chain validation failed: {0}")]
     CertChain(String),
+    /// A certificate in the chain is outside its validity window.
+    #[error("certificate validity check failed: {0}")]
+    CertExpired(String),
+    /// The nonce in the attestation document does not match the expected value.
+    #[error("attestation nonce mismatch: expected {expected}, got {actual}")]
+    NonceMismatch { expected: String, actual: String },
     /// The `public_key` in the NSM attestation payload does not match the key supplied
     /// on the wire by the enclave.
     ///
@@ -145,6 +151,9 @@ pub struct ParsedAttestationDoc {
     ///
     /// Use [`extract_nsm_public_key`] to obtain this value with a mandatory-presence check.
     pub public_key: Option<Vec<u8>>,
+    /// Optional `nonce` field. Present when the host supplied a nonce in the request, which
+    /// the NSM embeds verbatim into the signed payload for replay protection.
+    pub nonce: Option<Vec<u8>>,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────────────
@@ -209,6 +218,7 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
     let mut certificate: Option<Vec<u8>> = None;
     let mut cabundle: Vec<Vec<u8>> = Vec::new();
     let mut public_key: Option<Vec<u8>> = None;
+    let mut nonce: Option<Vec<u8>> = None;
 
     for (key, value) in entries {
         let key_str = match key {
@@ -280,6 +290,11 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
                     public_key = Some(b);
                 }
             }
+            "nonce" => {
+                if let ciborium::value::Value::Bytes(b) = value {
+                    nonce = Some(b);
+                }
+            }
             _ => {}
         }
     }
@@ -292,6 +307,7 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
         certificate,
         cabundle,
         public_key,
+        nonce,
     })
 }
 
@@ -311,11 +327,8 @@ pub fn parse_attestation_doc(doc: &[u8]) -> Result<ParsedAttestationDoc, Attesta
 /// 5. Verifies the P-384 / ES384 signature over the `Sig_Structure` bytes.
 /// 6. Checks that the root certificate in `cabundle` matches the hardcoded
 ///    AWS Nitro Attestation PKI root CA.
-///
-/// # What this does NOT verify (TODOs)
-///
-/// - Certificate validity periods (not-before / not-after timestamps).
-/// - Nonce freshness / replay protection.
+/// 7. Checks certificate validity periods (not-before / not-after) for the leaf and
+///    all intermediate certificates in the chain.
 ///
 /// # Skipping for synthetic test documents
 ///
@@ -495,6 +508,29 @@ fn verify_root_ca(cabundle: &[Vec<u8>]) -> Result<(), AttestationError> {
     Ok(())
 }
 
+/// Checks that the current system time falls within `cert`'s not-before / not-after window.
+fn check_cert_validity(
+    cert: &x509_parser::prelude::X509Certificate<'_>,
+    label: &str,
+) -> Result<(), AttestationError> {
+    use x509_parser::time::ASN1Time;
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock before Unix epoch")
+        .as_secs() as i64;
+    let now = ASN1Time::from_timestamp(now_secs).map_err(|_| {
+        AttestationError::CertExpired(format!("{label}: failed to construct current time"))
+    })?;
+    if !cert.validity().is_valid_at(now) {
+        let v = cert.validity();
+        return Err(AttestationError::CertExpired(format!(
+            "{label}: not_before={} not_after={}",
+            v.not_before, v.not_after
+        )));
+    }
+    Ok(())
+}
+
 /// Verifies the complete certificate chain from the leaf certificate to the AWS Nitro
 /// root CA.
 ///
@@ -517,20 +553,22 @@ fn verify_cert_chain(leaf_der: &[u8], cabundle: &[Vec<u8>]) -> Result<(), Attest
 
     // cabundle is guaranteed non-empty by verify_root_ca.
 
-    // 2. Verify the leaf certificate is signed by cabundle[0].
+    // 2. Verify the leaf certificate is signed by cabundle[0] and is currently valid.
     let (_, leaf) = X509Certificate::from_der(leaf_der)
         .map_err(|e| AttestationError::CertChain(format!("leaf cert parse: {e}")))?;
+    check_cert_validity(&leaf, "leaf")?;
     let (_, issuer0) = X509Certificate::from_der(&cabundle[0])
         .map_err(|e| AttestationError::CertChain(format!("cabundle[0] parse: {e}")))?;
     leaf.verify_signature(Some(issuer0.public_key()))
         .map_err(|e| AttestationError::CertChain(format!("leaf cert signature invalid: {e}")))?;
 
-    // 3. Verify each intermediate is signed by the next one up.
+    // 3. Verify each intermediate is signed by the next one up and is currently valid.
     //    The root (last element) is self-signed and anchored by verify_root_ca above —
     //    no need to re-verify its signature.
     for i in 0..cabundle.len() - 1 {
         let (_, cert) = X509Certificate::from_der(&cabundle[i])
             .map_err(|e| AttestationError::CertChain(format!("cabundle[{i}] parse: {e}")))?;
+        check_cert_validity(&cert, &format!("cabundle[{i}]"))?;
         let (_, issuer) = X509Certificate::from_der(&cabundle[i + 1])
             .map_err(|e| AttestationError::CertChain(format!("cabundle[{}] parse: {e}", i + 1)))?;
         cert.verify_signature(Some(issuer.public_key()))
@@ -649,6 +687,25 @@ pub fn parse_check_and_verify(
     let parsed = parse_and_check_pcrs(doc, expected_pcrs, expected_user_data)?;
     verify_cose_sign1_signature(doc)?;
     Ok(parsed)
+}
+
+/// Verifies that the `nonce` field in the attestation document matches `expected`.
+///
+/// Must be called after [`verify_cose_sign1_signature`] to ensure the nonce value is
+/// cryptographically bound to the hardware measurements before the comparison is trusted.
+pub fn verify_nonce(doc: &[u8], expected: &[u8]) -> Result<(), AttestationError> {
+    let parsed = parse_attestation_doc(doc)?;
+    let actual = parsed
+        .nonce
+        .as_deref()
+        .ok_or(AttestationError::MissingField("nonce"))?;
+    if actual != expected {
+        return Err(AttestationError::NonceMismatch {
+            expected: hex::encode(expected),
+            actual: hex::encode(actual),
+        });
+    }
+    Ok(())
 }
 
 /// Parses a `COSE_Sign1` Nitro attestation document and checks the PCRs against the

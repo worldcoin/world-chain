@@ -217,19 +217,21 @@ async fn dispatch(request: EnclaveRequest) -> Result<EnclaveResponse> {
             version,
             witness_rkyv,
             expected_public_values,
+            nonce,
         } => {
             check_version(version)?;
-            handle_range(witness_rkyv, expected_public_values).await
+            handle_range(witness_rkyv, expected_public_values, nonce).await
         }
         EnclaveRequest::Aggregation {
             version,
             inputs,
             l1_headers_cbor,
+            nonce,
         } => {
             check_version(version)?;
-            handle_aggregation(inputs, l1_headers_cbor).await
+            handle_aggregation(inputs, l1_headers_cbor, nonce).await
         }
-        EnclaveRequest::GetAttestation => handle_get_attestation(),
+        EnclaveRequest::GetAttestation { nonce } => handle_get_attestation(nonce),
     }
 }
 
@@ -249,6 +251,7 @@ fn check_version(version: u32) -> Result<()> {
 async fn handle_range(
     witness_rkyv: Vec<u8>,
     expected_public_values: Option<WorldRangeProofPublicValues>,
+    nonce: [u8; 32],
 ) -> Result<EnclaveResponse> {
     info!(
         target: "world_chain::nitro",
@@ -280,7 +283,7 @@ async fn handle_range(
     let signature = sign_boot_info(&boot_info)?;
 
     let user_data = protocol::range_user_data(&boot_info);
-    let attestation_doc = request_attestation_doc(&user_data)?;
+    let attestation_doc = request_attestation_doc(&user_data, &nonce)?;
 
     Ok(EnclaveResponse::Range {
         boot_info,
@@ -292,6 +295,7 @@ async fn handle_range(
 async fn handle_aggregation(
     inputs: AggregationInputs,
     _l1_headers_cbor: Vec<u8>,
+    nonce: [u8; 32],
 ) -> Result<EnclaveResponse> {
     // The aggregation program upstream concatenates range boot infos and verifies an L1
     // header chain. For the Nitro variant we re-derive the aggregated boot info from the
@@ -318,7 +322,7 @@ async fn handle_aggregation(
     let signature = sign_boot_info(&boot_info)?;
 
     let user_data = protocol::aggregation_user_data(&boot_info, &inputs);
-    let attestation_doc = request_attestation_doc(&user_data)?;
+    let attestation_doc = request_attestation_doc(&user_data, &nonce)?;
 
     Ok(EnclaveResponse::Aggregation {
         boot_info,
@@ -331,7 +335,7 @@ async fn handle_aggregation(
 ///
 /// Calls the NSM device with the enclave's ephemeral public key embedded so that verifiers
 /// can bind the secp256k1 key to the PCR measurements without an extra round-trip.
-fn handle_get_attestation() -> Result<EnclaveResponse> {
+fn handle_get_attestation(nonce: [u8; 32]) -> Result<EnclaveResponse> {
     let fd = nsm_init();
     if fd < 0 {
         return Err(anyhow!("nsm_init returned negative fd: {fd}"));
@@ -345,7 +349,7 @@ fn handle_get_attestation() -> Result<EnclaveResponse> {
 
     let request = NsmRequest::Attestation {
         user_data: None,
-        nonce: None,
+        nonce: Some(ByteBuf::from(nonce.to_vec())),
         public_key: Some(ByteBuf::from(public_key_bytes.clone())),
     };
     let response = nsm_process_request(fd, request);
@@ -458,7 +462,7 @@ fn ensure_boot_info_matches(
 }
 
 /// Calls the NSM device to produce an attestation document committing to `user_data`.
-fn request_attestation_doc(user_data: &[u8; 32]) -> Result<Vec<u8>> {
+fn request_attestation_doc(user_data: &[u8; 32], nonce: &[u8; 32]) -> Result<Vec<u8>> {
     let fd = nsm_init();
     if fd < 0 {
         return Err(anyhow!("nsm_init returned negative fd: {fd}"));
@@ -466,7 +470,7 @@ fn request_attestation_doc(user_data: &[u8; 32]) -> Result<Vec<u8>> {
 
     let request = NsmRequest::Attestation {
         user_data: Some(ByteBuf::from(user_data.to_vec())),
-        nonce: None,
+        nonce: Some(ByteBuf::from(nonce.to_vec())),
         public_key: None,
     };
     let response = nsm_process_request(fd, request);
