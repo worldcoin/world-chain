@@ -39,6 +39,36 @@ fn resolve_host(host: &str) -> Result<IpAddr, String> {
     }
 }
 
+/// Rewrites an `enode://`/`enr:` bootnode so its host is an IP literal.
+///
+/// kona's [`BootNode::parse_bootnode`] delegates to reth's `NodeRecord::from_str`, which only
+/// accepts IP-literal hosts (it `unwrap()`s, panicking the node on a DNS hostname). Kubernetes
+/// service DNS names are the norm for our devnets, so we resolve the host to an IP first. `enr:`
+/// records and bootnodes already using an IP literal are returned unchanged.
+fn resolve_bootnode_host(bootnode: &str) -> Result<String, String> {
+    // ENR records embed their own socket addrs; nothing to resolve.
+    if bootnode.starts_with("enr:") {
+        return Ok(bootnode.to_string());
+    }
+    let url = url::Url::parse(bootnode).map_err(|e| format!("invalid bootnode url: {e}"))?;
+    match url.host() {
+        // Already an IP literal — pass through unchanged.
+        Some(url::Host::Ipv4(_)) | Some(url::Host::Ipv6(_)) => Ok(bootnode.to_string()),
+        Some(url::Host::Domain(domain)) => {
+            // Domain may already be an IP string (url treats it as a domain); resolve_host
+            // handles that, then DNS.
+            let ip = resolve_host(domain)?;
+            let rewritten = match ip {
+                IpAddr::V4(v4) => bootnode.replacen(domain, &v4.to_string(), 1),
+                // Bracket IPv6 hosts so the URL stays valid.
+                IpAddr::V6(v6) => bootnode.replacen(domain, &format!("[{v6}]"), 1),
+            };
+            Ok(rewritten)
+        }
+        None => Err("bootnode url has no host".to_string()),
+    }
+}
+
 /// P2P network configuration for the in-process Kona consensus node.
 ///
 /// These flags mirror kona's `P2PArgs` (see `bin/node/src/flags/p2p.rs`) and allow operators to
@@ -454,10 +484,27 @@ impl KonaP2PArgs {
             ))
         };
 
+        // kona's `BootNode::parse_bootnode` -> reth `NodeRecord::from_str` only accepts
+        // IP-literal enode hosts and `.unwrap()`s on failure, so a DNS-hostname enode
+        // (e.g. Kubernetes `reth-0.<ns>.svc.cluster.local:9222`) panics node startup and
+        // leaves the CL with zero gossip peers. Resolve any DNS host to an IP literal
+        // first; skip (with a warning) bootnodes that can't be parsed or resolved instead
+        // of taking the whole node down.
         let bootnodes = self
             .bootnodes
             .iter()
-            .map(|bootnode| BootNode::parse_bootnode(bootnode))
+            .filter_map(|bootnode| match resolve_bootnode_host(bootnode) {
+                Ok(resolved) => Some(BootNode::parse_bootnode(&resolved)),
+                Err(e) => {
+                    warn!(
+                        target: "world_chain::p2p",
+                        bootnode = %bootnode,
+                        error = %e,
+                        "Skipping unresolvable bootnode",
+                    );
+                    None
+                }
+            })
             .collect::<Vec<BootNode>>()
             .into();
 
@@ -818,4 +865,62 @@ pub struct KonaArgs {
         requires = "kona.enabled"
     )]
     pub l1_slot_duration_override: Option<u64>,
+}
+
+#[cfg(test)]
+mod p2p_bootnode_tests {
+    use super::*;
+    use kona_genesis::RollupConfig;
+
+    /// Reproduces the alphanet devnet config exactly: DNS-hostname enode bootnodes +
+    /// listen 0.0.0.0. Asserts what NetworkConfig we actually hand to kona.
+    #[test]
+    fn diagnose_alphanet_p2p_config() {
+        // DNS-hostname enode bootnode (the alphanet failure mode). `localhost` stands in
+        // for the Kubernetes service DNS name so the test is hermetic; previously this
+        // panicked node startup in `parse_bootnode`.
+        let args = KonaP2PArgs {
+            bootnodes: vec![
+                "enode://1dcba3bc20f1853497075f69f3d15070aa87e9476a7f059c4b28eb62c1fad99c0411f1523e269ace77958859c12795d0b9658ddd4058f3f948e8bd2949bd2075@localhost:9222?discport=9222".to_string(),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(args.listen_ip.to_string(), "0.0.0.0", "default listen ip");
+        let cfg = args
+            .build_network_config(&RollupConfig::default(), 5496749)
+            .expect("build_network_config");
+        eprintln!("gossip_address = {}", cfg.gossip_address);
+        eprintln!("bootnodes len  = {}", cfg.bootnodes.len());
+        assert!(
+            cfg.gossip_address.to_string().contains("0.0.0.0"),
+            "gossip addr: {}",
+            cfg.gossip_address
+        );
+        assert_eq!(
+            cfg.bootnodes.len(),
+            1,
+            "DNS bootnode should survive parsing"
+        );
+    }
+
+    #[test]
+    fn resolve_bootnode_host_rewrites_dns_to_ip() {
+        // localhost is deterministically resolvable in CI without network egress.
+        let enode = "enode://1dcba3bc20f1853497075f69f3d15070aa87e9476a7f059c4b28eb62c1fad99c0411f1523e269ace77958859c12795d0b9658ddd4058f3f948e8bd2949bd2075@localhost:9222?discport=9222";
+        let resolved = resolve_bootnode_host(enode).expect("resolve");
+        assert!(
+            resolved.contains("@127.0.0.1:9222") || resolved.contains("@[::1]:9222"),
+            "resolved host should be an IP literal: {resolved}"
+        );
+        // The resolved form must now parse through kona without panicking.
+        let _ = BootNode::parse_bootnode(&resolved);
+    }
+
+    #[test]
+    fn resolve_bootnode_host_passes_through_ip_and_enr() {
+        let ip_enode = "enode://1dcba3bc20f1853497075f69f3d15070aa87e9476a7f059c4b28eb62c1fad99c0411f1523e269ace77958859c12795d0b9658ddd4058f3f948e8bd2949bd2075@10.2.195.220:9222?discport=9222";
+        assert_eq!(resolve_bootnode_host(ip_enode).unwrap(), ip_enode);
+        let enr = "enr:-abc";
+        assert_eq!(resolve_bootnode_host(enr).unwrap(), enr);
+    }
 }
