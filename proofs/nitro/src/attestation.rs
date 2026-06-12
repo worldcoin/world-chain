@@ -826,16 +826,18 @@ mod tests {
         );
     }
 
-    /// The AWS root CA PEM constant has a known one-character truncation (line 7 is 63
-    /// chars instead of 64). This test documents the issue. Replace the PEM with the
-    /// official cert from <https://docs.aws.amazon.com/enclaves/latest/user/verify-root.html>
-    /// and update this test to `assert!(der.is_ok())` once the PEM is fixed.
+    /// Verifies that [`AWS_NITRO_ROOT_CA_PEM`] is the official AWS Nitro Attestation PKI
+    /// root CA certificate and decodes cleanly to DER.
+    ///
+    /// The PEM content is sourced from
+    /// <https://aws-nitro-enclaves.amazonaws.com/AWS_NitroEnclaves_Root-G1.zip>
+    /// (SHA-256 of zip: `8cf60e2b2efca96c6a9e71e851d00c1b6991cc09eadbe64a6a1d1b1eb9faff7c`).
     #[test]
-    fn root_ca_pem_is_present() {
-        // At minimum the constant must be non-empty and start with the PEM header.
+    fn root_ca_pem_decodes_successfully() {
+        // Verify the PEM delimiters are intact.
         assert!(AWS_NITRO_ROOT_CA_PEM.starts_with("-----BEGIN CERTIFICATE-----"));
         assert!(AWS_NITRO_ROOT_CA_PEM.ends_with("-----END CERTIFICATE-----"));
-        // TODO(nitro): fix the PEM (line 7 has 63 chars, expected 64) and then assert:
-        // assert!(aws_root_ca_der().is_ok(), "DER decode failed: {:?}", aws_root_ca_der());
+        // Verify the base64 body decodes to valid DER.
+        assert!(aws_root_ca_der().is_ok(), "DER decode failed: {:?}", aws_root_ca_der());
     }
 }
