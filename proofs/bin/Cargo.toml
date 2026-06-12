@@ -28,7 +28,7 @@ tokio.workspace = true
 world-chain-chainspec.workspace = true
 world-chain-proof-core.workspace = true
 world-chain-proof-protocol.workspace = true
-world-chain-proof-kona-utils.workspace = true
+world-chain-proof-kona-utils = { workspace = true, features = ["host"] }
 world-chain-proof-succinct-client-utils.workspace = true
 world-chain-proof-succinct-ethereum-client-utils.workspace = true
 alloy-consensus = { workspace = true, features = ["serde"], optional = true }

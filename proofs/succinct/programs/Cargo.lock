@@ -4740,7 +4740,6 @@ dependencies = [
  "alloy-rlp",
  "anyhow",
  "async-trait",
- "c-kzg",
  "kona-derive",
  "kona-driver",
  "kona-executor",
