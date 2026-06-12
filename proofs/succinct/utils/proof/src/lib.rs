@@ -2,7 +2,7 @@ use std::{env, fs, io, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::types::AggregationInputs;
-use world_chain_proof_succinct_client_utils::WorldRangeWitness;
+use world_chain_proof_kona_utils::WorldRangeWitness;
 
 pub use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArtifact};
 

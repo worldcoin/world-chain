@@ -16,4 +16,4 @@ embedded-elfs = []
 serde.workspace = true
 thiserror.workspace = true
 world-chain-proof-core.workspace = true
-world-chain-proof-succinct-client-utils.workspace = true
+world-chain-proof-kona-utils.workspace = true

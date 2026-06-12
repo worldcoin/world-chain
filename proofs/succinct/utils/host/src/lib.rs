@@ -1,7 +1,5 @@
 //! Host-side helpers for preparing World Chain OP Succinct Lite proof requests.
 
-pub mod witness_generation;
-
 use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
@@ -11,7 +9,7 @@ use world_chain_proof_core::{
     range::{WorldRangeHardforkConfig, WorldRangeProofInput, WorldRangeProofPublicValues},
     types::AggregationInputs,
 };
-use world_chain_proof_succinct_client_utils::WorldRangeWitness;
+use world_chain_proof_kona_utils::WorldRangeWitness;
 use world_chain_proof_succinct_utils::{AggregationProofRequest, RangeProofRequest};
 
 /// Error returned while constructing host-side proof config.

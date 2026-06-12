@@ -8,6 +8,7 @@ on:
     paths:
       - 'proofs/succinct/programs/**'
       - 'proofs/core/**'
+      - 'proofs/utils/kona/**'
       - 'proofs/succinct/utils/client/**'
       - 'proofs/succinct/utils/ethereum-client/**'
   workflow_dispatch:
