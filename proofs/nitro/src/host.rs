@@ -102,7 +102,12 @@ impl NitroProver {
                 attestation_doc,
                 public_key,
             } => {
-                attestation::verify_nonce(&attestation_doc, &nonce)?;
+                if !self.expected_pcrs.is_placeholder() {
+                    attestation::verify_cose_sign1_signature(&attestation_doc)?;
+                    attestation::verify_pcrs_only(&attestation_doc, &self.expected_pcrs)?;
+                    attestation::verify_nonce(&attestation_doc, &nonce)?;
+                    attestation::verify_nsm_public_key(&attestation_doc, &public_key)?;
+                }
                 Ok((attestation_doc, public_key))
             }
             EnclaveResponse::Error { message } => Err(NitroProverError::Enclave(message)),
