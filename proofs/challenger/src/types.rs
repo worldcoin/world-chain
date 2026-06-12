@@ -1,5 +1,5 @@
-use alloy_primitives::{Address, B256, BlockNumber, TxHash};
-use world_chain_proofs::{GameCreated, RootState};
+use alloy_primitives::TxHash;
+use world_chain_proofs::GameCreated;
 
 /// Result of a submitted challenge transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
