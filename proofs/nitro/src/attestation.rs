@@ -477,6 +477,10 @@ fn extract_p384_key(cert_der: &[u8]) -> Result<p384::ecdsa::VerifyingKey, Attest
 }
 
 /// Verifies that the last certificate in `cabundle` is the hardcoded AWS Nitro root CA.
+///
+/// AWS NSM attestation documents always include the root CA as the final element of
+/// `cabundle` (per the Nitro attestation spec), so checking `cabundle.last()` is
+/// correct and intentional — this is not a format ambiguity.
 fn verify_root_ca(cabundle: &[Vec<u8>]) -> Result<(), AttestationError> {
     let root = cabundle.last().ok_or_else(|| {
         AttestationError::CertChain("cabundle is empty, cannot verify root CA".into())

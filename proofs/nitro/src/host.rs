@@ -269,7 +269,8 @@ fn verify_proof_signature(
     let commitment = protocol::signing_commitment(boot_info);
     let sig = K256Signature::from_slice(&signature[..64])
         .map_err(|e| NitroProverError::InvalidSignature(e.to_string()))?;
-    let rec_id = RecoveryId::from_byte(signature[64]).ok_or_else(|| {
+    // Enclave encodes v as EVM-style (27 or 28); convert back to 0/1 for k256.
+    let rec_id = RecoveryId::from_byte(signature[64].wrapping_sub(27)).ok_or_else(|| {
         NitroProverError::InvalidSignature(format!(
             "invalid secp256k1 recovery id byte: {}",
             signature[64]
