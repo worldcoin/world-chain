@@ -13,7 +13,7 @@
 //!   that the enclave needs to drive the derivation pipeline.
 //! - [`NitroRangeProofArtifact`] returns the committed [`BootInfoStruct`] plus the raw
 //!   NSM attestation document (`COSE_Sign1` bytes) the host can hand to any verifier.
-//! - [`WorldTeeProver`] is the analogue of `WorldSuccinctProver` for attestation-backed
+//! - [`WorldNitroProver`] is the analogue of `WorldSuccinctProver` for attestation-backed
 //!   backends.
 //!
 //! Module layout:
@@ -58,7 +58,7 @@ pub mod host;
 pub mod protocol;
 
 #[cfg(all(feature = "enclave", target_os = "linux"))]
-pub mod enclave_lib;
+pub mod enclave;
 
 #[cfg(all(feature = "aws_nitro", target_os = "linux"))]
 pub use host::{NitroProver, NitroProverError};
@@ -203,7 +203,7 @@ pub struct NitroAggregationProofArtifact {
 ///
 /// Modeled after [`world_chain_proof_succinct_proof_utils::WorldSuccinctProver`], but the
 /// request and artifact types carry attestation material instead of ZK proofs.
-pub trait WorldTeeProver {
+pub trait WorldNitroProver {
     /// Backend-specific error type.
     type Error;
 
@@ -240,7 +240,7 @@ pub fn signing_commitment(boot_info: &BootInfoStruct) -> [u8; 32] {
 pub mod prelude {
     pub use crate::{
         ExpectedPcrs, NitroAggregationProofArtifact, NitroAggregationProofRequest,
-        NitroRangeProofArtifact, NitroRangeProofRequest, WorldTeeProver, range_user_data,
+        NitroRangeProofArtifact, NitroRangeProofRequest, WorldNitroProver, range_user_data,
         signing_commitment,
     };
     #[cfg(all(feature = "aws_nitro", target_os = "linux"))]

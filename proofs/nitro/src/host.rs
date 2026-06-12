@@ -7,7 +7,7 @@ use world_chain_proof_core::boot::BootInfoStruct;
 
 use crate::{
     ExpectedPcrs, NitroAggregationProofArtifact, NitroAggregationProofRequest,
-    NitroRangeProofArtifact, NitroRangeProofRequest, WorldTeeProver,
+    NitroRangeProofArtifact, NitroRangeProofRequest, WorldNitroProver,
     attestation::{self, AttestationError},
     protocol::{
         self, DEFAULT_VSOCK_PORT, EnclaveRequest, EnclaveResponse, FrameError, PROTOCOL_VERSION,
@@ -94,11 +94,9 @@ impl NitroProver {
     /// Use this during one-time registration to learn the enclave's secp256k1 public key
     /// and verify it is pinned to the expected PCR measurements.
     #[instrument(skip_all, fields(endpoint = ?self.endpoint))]
-    pub async fn get_attestation_async(&self) -> Result<(Vec<u8>, Vec<u8>), NitroProverError> {
+    pub async fn get_public_key_async(&self) -> Result<(Vec<u8>, Vec<u8>), NitroProverError> {
         let nonce = generate_nonce()?;
-        let response = self
-            .round_trip(EnclaveRequest::GetAttestation { nonce })
-            .await?;
+        let response = self.round_trip(EnclaveRequest::PublicKey { nonce }).await?;
         match response {
             EnclaveResponse::Attestation {
                 attestation_doc,
@@ -112,38 +110,13 @@ impl NitroProver {
         }
     }
 
-    /// Async version of [`WorldTeeProver::prove_range`].
+    /// Async version of [`WorldNitroProver::prove_range`].
     #[instrument(skip_all, fields(endpoint = ?self.endpoint))]
     pub async fn prove_range_async(
         &self,
         request: NitroRangeProofRequest,
     ) -> Result<NitroRangeProofArtifact, NitroProverError> {
-        // ── Step 1: Obtain and verify the enclave's certified ephemeral public key ──
-        //
-        // When real PCRs are configured we fetch the key-attestation document first so
-        // that the proof signature can be bound to the same AWS-certified key.  Skipped
-        // in placeholder / dev mode with an explicit warning.
-        let certified_pub_key: Option<Vec<u8>> = if self.expected_pcrs.is_placeholder() {
-            warn!(
-                target: "world_chain::nitro",
-                "placeholder PCRs in use — skipping attestation and signature verification (dev/test mode only)"
-            );
-            None
-        } else {
-            let (attest_doc, pub_key) = self.get_attestation_async().await?;
-            // Verify COSE_Sign1 signature on the key-attestation document.
-            attestation::verify_cose_sign1_signature(&attest_doc)?;
-            // Verify PCR binding (no user_data for GetAttestation documents).
-            attestation::verify_pcrs_only(&attest_doc, &self.expected_pcrs)?;
-            // Cross-check: the `public_key` field inside the NSM payload must match the
-            // key returned on the wire. Without this check an attacker could swap the
-            // wire key while presenting a legitimate attestation doc, binding proof
-            // signature checks to an uncertified key.
-            attestation::verify_nsm_public_key(&attest_doc, &pub_key)?;
-            Some(pub_key)
-        };
-
-        // ── Step 2: Prove ──
+        // ── Step 1: Prove ──
         let nonce = generate_nonce()?;
         let enclave_request = EnclaveRequest::Range {
             version: PROTOCOL_VERSION,
@@ -167,8 +140,12 @@ impl NitroProver {
             }
         };
 
-        // ── Step 3: Verify range attestation doc + proof signature ──
-        if let Some(ref expected_pub_key) = certified_pub_key {
+        // ── Step 2: Verify attestation doc + proof signature ──
+        //
+        // The range attestation doc embeds both the computation commitment (user_data) and
+        // the enclave's ephemeral public key, so a single AWS-signed document certifies both.
+        // Skipped in placeholder / dev mode.
+        if !self.expected_pcrs.is_placeholder() {
             let expected_user_data = protocol::range_user_data(&boot_info);
             attestation::parse_check_and_verify(
                 &attestation_doc,
@@ -176,7 +153,13 @@ impl NitroProver {
                 &expected_user_data,
             )?;
             attestation::verify_nonce(&attestation_doc, &nonce)?;
-            verify_proof_signature(&signature, &boot_info, expected_pub_key)?;
+            let certified_pub_key = attestation::extract_nsm_public_key(&attestation_doc)?;
+            verify_proof_signature(&signature, &boot_info, &certified_pub_key)?;
+        } else {
+            warn!(
+                target: "world_chain::nitro",
+                "placeholder PCRs in use — skipping attestation and signature verification (dev/test mode only)"
+            );
         }
 
         Ok(NitroRangeProofArtifact {
@@ -186,32 +169,13 @@ impl NitroProver {
         })
     }
 
-    /// Async version of [`WorldTeeProver::prove_aggregation`].
+    /// Async version of [`WorldNitroProver::prove_aggregation`].
     #[instrument(skip_all, fields(endpoint = ?self.endpoint))]
     pub async fn prove_aggregation_async(
         &self,
         request: NitroAggregationProofRequest,
     ) -> Result<NitroAggregationProofArtifact, NitroProverError> {
-        // ── Step 1: Obtain and verify the enclave's certified ephemeral public key ──
-        let certified_pub_key: Option<Vec<u8>> = if self.expected_pcrs.is_placeholder() {
-            warn!(
-                target: "world_chain::nitro",
-                "placeholder PCRs in use — skipping attestation and signature verification (dev/test mode only)"
-            );
-            None
-        } else {
-            let (attest_doc, pub_key) = self.get_attestation_async().await?;
-            attestation::verify_cose_sign1_signature(&attest_doc)?;
-            attestation::verify_pcrs_only(&attest_doc, &self.expected_pcrs)?;
-            // Cross-check: the `public_key` field inside the NSM payload must match the
-            // key returned on the wire. Without this check an attacker could swap the
-            // wire key while presenting a legitimate attestation doc, binding proof
-            // signature checks to an uncertified key.
-            attestation::verify_nsm_public_key(&attest_doc, &pub_key)?;
-            Some(pub_key)
-        };
-
-        // ── Step 2: Prove ──
+        // ── Step 1: Prove ──
         let nonce = generate_nonce()?;
         let enclave_request = EnclaveRequest::Aggregation {
             version: PROTOCOL_VERSION,
@@ -235,8 +199,8 @@ impl NitroProver {
             }
         };
 
-        // ── Step 3: Verify aggregation attestation doc + proof signature ──
-        if let Some(ref expected_pub_key) = certified_pub_key {
+        // ── Step 2: Verify attestation doc + proof signature ──
+        if !self.expected_pcrs.is_placeholder() {
             let expected_user_data = protocol::aggregation_user_data(&boot_info, &request.inputs);
             attestation::parse_check_and_verify(
                 &attestation_doc,
@@ -244,7 +208,13 @@ impl NitroProver {
                 &expected_user_data,
             )?;
             attestation::verify_nonce(&attestation_doc, &nonce)?;
-            verify_proof_signature(&signature, &boot_info, expected_pub_key)?;
+            let certified_pub_key = attestation::extract_nsm_public_key(&attestation_doc)?;
+            verify_proof_signature(&signature, &boot_info, &certified_pub_key)?;
+        } else {
+            warn!(
+                target: "world_chain::nitro",
+                "placeholder PCRs in use — skipping attestation and signature verification (dev/test mode only)"
+            );
         }
 
         // The aggregation artifact carries the attestation document as `proof` and
@@ -317,7 +287,7 @@ fn aggregation_outputs(
     }
 }
 
-impl WorldTeeProver for NitroProver {
+impl WorldNitroProver for NitroProver {
     type Error = NitroProverError;
 
     fn prove_range(

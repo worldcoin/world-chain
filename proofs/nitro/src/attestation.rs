@@ -146,7 +146,7 @@ pub struct ParsedAttestationDoc {
     /// leaf toward the root, inclusive of the root CA).
     pub cabundle: Vec<Vec<u8>>,
     /// Optional `public_key` field. Present when the enclave called `NsmRequest::Attestation`
-    /// with `public_key: Some(bytes)` — i.e., for [`EnclaveRequest::GetAttestation`] responses.
+    /// with `public_key: Some(bytes)` — i.e., for [`EnclaveRequest::PublicKey`] responses.
     /// The bytes are the compressed SEC1 encoding of the enclave's ephemeral secp256k1 key.
     ///
     /// Use [`extract_nsm_public_key`] to obtain this value with a mandatory-presence check.
@@ -711,7 +711,7 @@ pub fn verify_nonce(doc: &[u8], expected: &[u8]) -> Result<(), AttestationError>
 /// Parses a `COSE_Sign1` Nitro attestation document and checks the PCRs against the
 /// supplied expectations, **without** checking `user_data`.
 ///
-/// Useful for verifying [`EnclaveRequest::GetAttestation`] documents where `user_data` is
+/// Useful for verifying [`EnclaveRequest::PublicKey`] documents where `user_data` is
 /// `None` (the enclave embeds its public key in the NSM `public_key` field instead).
 ///
 /// Callers that also need `user_data` verification should use [`parse_and_check_pcrs`]

@@ -55,7 +55,7 @@ pub enum EnclaveRequest {
     ///
     /// Used during one-time registration: the host can verify the attestation doc to learn
     /// the enclave's current secp256k1 public key and trust it for subsequent proof signatures.
-    GetAttestation {
+    PublicKey {
         /// 32-byte random nonce for replay protection (see `Range::nonce`).
         nonce: [u8; 32],
     },
@@ -75,7 +75,7 @@ pub enum EnclaveResponse {
         /// `keccak256(l2_post_root || l2_block_number_be || rollup_config_hash)`.
         ///
         /// The signing key is the enclave's ephemeral keypair, whose public key is
-        /// certified by the NSM attestation document via [`EnclaveRequest::GetAttestation`].
+        /// certified by the NSM attestation document via [`EnclaveRequest::PublicKey`].
         signature: Vec<u8>,
     },
     /// Successful aggregation proof.
@@ -90,7 +90,7 @@ pub enum EnclaveResponse {
     },
     /// NSM attestation document that embeds the enclave's ephemeral secp256k1 public key.
     ///
-    /// Returned in response to [`EnclaveRequest::GetAttestation`]. The host can verify the
+    /// Returned in response to [`EnclaveRequest::PublicKey`]. The host can verify the
     /// document and extract `public_key` to trust subsequent proof signatures.
     Attestation {
         /// `COSE_Sign1` attestation document bytes. The `public_key` field inside the

@@ -18532,6 +18532,7 @@ dependencies = [
 name = "world-chain-proof-nitro"
 version = "2.2.0"
 dependencies = [
+ "alloy-consensus 2.0.4",
  "alloy-primitives",
  "anyhow",
  "aws-nitro-enclaves-nsm-api",
@@ -18544,6 +18545,7 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_bytes",
+ "serde_cbor",
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.18",
