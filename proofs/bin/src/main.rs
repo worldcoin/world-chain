@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use alloy_primitives::{Address, B256};
+use alloy_primitives::B256;
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
 use reqwest::blocking::Client;

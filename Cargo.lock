@@ -18553,7 +18553,6 @@ version = "2.2.0"
 dependencies = [
  "rkyv",
  "serde",
- "thiserror 2.0.18",
  "world-chain-proof-core",
 ]
 
