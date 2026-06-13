@@ -26,9 +26,7 @@ use world_chain_proof_core::{
     types::AggregationInputs,
     witness::{WitnessData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
-use world_chain_proof_succinct_client_utils::witness::executor::{
-    WitnessExecutor, get_inputs_for_pipeline,
-};
+use world_chain_proof_kona_utils::{WitnessExecutor, get_inputs_for_pipeline};
 use world_chain_proof_succinct_ethereum_client_utils::executor::ETHDAWitnessExecutor;
 
 use crate::protocol::{

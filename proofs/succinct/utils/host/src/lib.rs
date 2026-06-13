@@ -1,7 +1,5 @@
 //! Host-side helpers for preparing World Chain OP Succinct Lite proof requests.
 
-pub mod witness_generation;
-
 use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
