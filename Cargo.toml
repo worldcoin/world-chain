@@ -101,7 +101,6 @@ world-chain-prover-service = { path = "proofs/prover-service", default-features 
 world-chain-defender = { path = "proofs/defender", default-features = false }
 world-chain-proof-worker = { path = "proofs/worker", default-features = false }
 world-chain-sp1-worker = { path = "proofs/sp1-worker", default-features = false }
-world-chain-defender = { path = "proofs/defender", default-features = false }
 
 # reth crates.io
 reth-codecs = { version = "0.3.1", default-features = false }
