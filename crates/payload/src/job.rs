@@ -376,34 +376,43 @@ where
     pub(crate) fn record_payload_metrics(
         &self,
         payload: &OpBuiltPayload<OpPrimitives>,
-        prev_fees: U256,
+        prev_totals: Option<(u64, u64, u64, U256)>,
         flashblock_index: u64,
     ) {
-        let block = payload.block();
-        let payload_bytes: usize = block
-            .body()
-            .transactions()
-            .map(|tx| tx.encoded_2718().len())
-            .sum();
-        let gas_used = block.header().gas_used;
-        let tx_count = block.body().transactions().count();
-        // `fees()` is the cumulative block value at this flashblock. Record only the
-        // marginal fees added since the previously committed payload so that summing the
-        // histogram over a window yields true per-block revenue rather than counting each
-        // block's running total once per flashblock commit.
-        let cumulative_fees = payload.fees();
-        let incremental_fees = cumulative_fees.saturating_sub(prev_fees);
+        let (cum_bytes, cum_gas, cum_tx, cum_fees) = payload_totals(payload);
+        let (prev_bytes, prev_gas, prev_tx, prev_fees) =
+            prev_totals.unwrap_or((0, 0, 0, U256::ZERO));
         self.builder
             .payload_build_metrics()
             .record_committed_payload(
-                payload_bytes as u64,
-                gas_used,
-                tx_count as u64,
-                incremental_fees.saturating_to::<u128>() as f64,
-                cumulative_fees.saturating_to::<u128>() as f64,
+                cum_bytes.saturating_sub(prev_bytes),
+                cum_bytes,
+                cum_gas.saturating_sub(prev_gas),
+                cum_gas,
+                cum_tx.saturating_sub(prev_tx),
+                cum_tx,
+                cum_fees.saturating_sub(prev_fees).saturating_to::<u128>() as f64,
+                cum_fees.saturating_to::<u128>() as f64,
                 flashblock_index,
             );
     }
+}
+
+fn payload_totals(payload: &OpBuiltPayload<OpPrimitives>) -> (u64, u64, u64, U256) {
+    let block = payload.block();
+    let payload_bytes: usize = block
+        .body()
+        .transactions()
+        .map(|tx| tx.encoded_2718().len())
+        .sum();
+    let gas_used = block.header().gas_used;
+    let tx_count = block.body().transactions().count();
+    (
+        payload_bytes as u64,
+        gas_used,
+        tx_count as u64,
+        payload.fees(),
+    )
 }
 
 impl<Builder> Future for FlashblocksPayloadJob<Builder>
@@ -524,14 +533,12 @@ where
                     }
                 }
 
-                // Capture the previously committed cumulative fees before overwriting, so
-                // the metric can record only this flashblock's marginal contribution.
-                let prev_committed_fees = this.committed_payload.fees().unwrap_or_default();
+                let prev_totals = this.committed_payload.payload().map(payload_totals);
 
                 // commit to the best payload
                 this.committed_payload =
                     CommittedPayloadState::from((this.best_payload.0.clone(), access_list));
-                this.record_payload_metrics(&payload, prev_committed_fees, this.block_index);
+                this.record_payload_metrics(&payload, prev_totals, this.block_index);
 
                 // increment the pre-confirmation index
                 this.block_index += 1;
