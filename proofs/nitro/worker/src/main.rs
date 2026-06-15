@@ -44,8 +44,8 @@ use world_chain_proof_nitro::host::{EnclaveEndpoint, NitroProver};
 #[cfg(target_os = "linux")]
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
 #[cfg(target_os = "linux")]
-use world_chain_proof_succinct_host_utils::online::{
-    OnlineHostConfig, RangeWitnessRequest, build_range_input, range_hardfork_config,
+use world_chain_proof_kona_utils::online::{
+    OnlineHostConfig, RangeWitnessRequest, build_online_config, build_range_input,
 };
 #[cfg(target_os = "linux")]
 use world_chain_proof_worker::ProofJobBackend;
@@ -296,7 +296,18 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    let online = build_online_config(&cli)?;
+    let spec = cli.network.chain_spec();
+    let protocol_cfg = ProtocolHardforkConfig::from_chain_spec(spec.as_ref());
+    let online = build_online_config(
+        cli.rollup_config.clone(),
+        cli.rollup_config_hash,
+        cli.l1_rpc.clone(),
+        cli.l1_beacon_rpc.clone(),
+        cli.l2_rpc.clone(),
+        cli.network.chain_id(),
+        &protocol_cfg,
+        Duration::from_secs(cli.witness_timeout_seconds),
+    )?;
     let expected_pcrs =
         build_expected_pcrs(cli.pcr0.as_deref(), cli.pcr1.as_deref(), cli.pcr2.as_deref())?;
 
@@ -352,40 +363,6 @@ fn main() -> Result<()> {
 // ──────────────────────────────────────────────────────────────────────────────────────
 // Config helpers
 // ──────────────────────────────────────────────────────────────────────────────────────
-
-#[cfg(target_os = "linux")]
-fn build_online_config(cli: &Cli) -> Result<OnlineHostConfig> {
-    if let Some(path) = &cli.rollup_config {
-        let bytes = std::fs::read(path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        let value: serde_json::Value = serde_json::from_slice(&bytes)
-            .with_context(|| format!("failed to parse {}", path.display()))?;
-        return OnlineHostConfig::from_rollup_config_value(
-            &value,
-            cli.l1_rpc.clone(),
-            cli.l1_beacon_rpc.clone(),
-            cli.l2_rpc.clone(),
-            Some(path.clone()),
-            Duration::from_secs(cli.witness_timeout_seconds),
-        );
-    }
-
-    let rollup_config_hash = cli
-        .rollup_config_hash
-        .context("provide --rollup-config or ROLLUP_CONFIG, or supply --rollup-config-hash")?;
-    let spec = cli.network.chain_spec();
-    let protocol_cfg = ProtocolHardforkConfig::from_chain_spec(spec.as_ref());
-    Ok(OnlineHostConfig {
-        l1_rpc: cli.l1_rpc.clone(),
-        l1_beacon_rpc: cli.l1_beacon_rpc.clone(),
-        l2_rpc: cli.l2_rpc.clone(),
-        schedule: range_hardfork_config(&protocol_cfg),
-        rollup_config_hash,
-        l2_chain_id: Some(cli.network.chain_id()),
-        rollup_config_path: None,
-        witness_timeout: Duration::from_secs(cli.witness_timeout_seconds),
-    })
-}
 
 #[cfg(target_os = "linux")]
 fn build_expected_pcrs(

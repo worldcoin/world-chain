@@ -2,7 +2,7 @@
 //!
 //! Builds the rkyv-serializable [`WorldRangeWitnessData`] for a block range by driving the
 //! Kona single-chain host against live L1/L2 RPC endpoints. Extracted from the `proof` CLI so
-//! long-running services (the `sp1-worker`) and the CLI share one implementation.
+//! long-running services (the `sp1-worker`, `nitro-worker`) and the CLI share one implementation.
 //!
 //! The entry point [`build_range_input`] is synchronous and spins up its own Tokio runtime;
 //! it MUST NOT be called from within an async context (use `tokio::task::spawn_blocking`).
@@ -25,12 +25,11 @@ use world_chain_proof_core::{
     range::{WorldRangeHardforkConfig, WorldRangeSpecId},
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
-use world_chain_proof_kona_utils::{
-    OnlineBlobStore, OutputRootWitness, PreimageWitnessCollector, WitnessExecutor,
-    get_inputs_for_pipeline,
-};
 use world_chain_proof_protocol::WorldHardforkConfig;
-use world_chain_proof_succinct_ethereum_client_utils::executor::ETHDAWitnessExecutor;
+use crate::{
+    ETHDAWitnessExecutor, OnlineBlobStore, OutputRootWitness, PreimageWitnessCollector,
+    WitnessExecutor, get_inputs_for_pipeline,
+};
 
 const L1_BLOCK_PREDEPLOY: Address = address!("0x4200000000000000000000000000000000000015");
 const L2_TO_L1_MESSAGE_PASSER: Address = address!("0x4200000000000000000000000000000000000016");
@@ -106,6 +105,49 @@ pub fn range_hardfork_config(config: &WorldHardforkConfig) -> WorldRangeHardfork
         tropo_time: config.tropo_time,
         strato_time: config.strato_time,
     }
+}
+
+/// Builds an [`OnlineHostConfig`] from either a rollup-config file or a pre-computed hash.
+///
+/// When `rollup_config_path` is `Some`, the schedule and hash are derived from the file content.
+/// When `None`, `rollup_config_hash` must be provided and `protocol_config` supplies the schedule.
+pub fn build_online_config(
+    rollup_config_path: Option<PathBuf>,
+    rollup_config_hash: Option<B256>,
+    l1_rpc: String,
+    l1_beacon_rpc: String,
+    l2_rpc: String,
+    l2_chain_id: u64,
+    protocol_config: &WorldHardforkConfig,
+    witness_timeout: Duration,
+) -> anyhow::Result<OnlineHostConfig> {
+    if let Some(path) = rollup_config_path {
+        let bytes =
+            std::fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+        let value: Value = serde_json::from_slice(&bytes)
+            .with_context(|| format!("failed to parse {}", path.display()))?;
+        return OnlineHostConfig::from_rollup_config_value(
+            &value,
+            l1_rpc,
+            l1_beacon_rpc,
+            l2_rpc,
+            Some(path),
+            witness_timeout,
+        );
+    }
+
+    let rollup_config_hash = rollup_config_hash
+        .context("provide --rollup-config or ROLLUP_CONFIG, or supply --rollup-config-hash")?;
+    Ok(OnlineHostConfig {
+        l1_rpc,
+        l1_beacon_rpc,
+        l2_rpc,
+        schedule: range_hardfork_config(protocol_config),
+        rollup_config_hash,
+        l2_chain_id: Some(l2_chain_id),
+        rollup_config_path: None,
+        witness_timeout,
+    })
 }
 
 /// One range-witness request covering L2 blocks `(start_block, end_block]`.

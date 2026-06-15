@@ -16,7 +16,7 @@ use serde_json::{Value, json};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_core::{range::WorldRangeHardforkConfig, witness::WorldRangeWitnessData};
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
-use world_chain_proof_succinct_host_utils::online::{
+use world_chain_proof_kona_utils::online::{
     OnlineHostConfig, RangeProofInput, RangeWitnessRequest, build_range_input, rpc,
 };
 
