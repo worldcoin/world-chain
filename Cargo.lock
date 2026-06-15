@@ -18219,6 +18219,7 @@ dependencies = [
  "url",
  "world-chain-chainspec",
  "world-chain-challenger",
+ "world-chain-defender",
  "world-chain-node",
  "world-chain-primitives",
  "world-chain-proof-succinct-host-utils",
