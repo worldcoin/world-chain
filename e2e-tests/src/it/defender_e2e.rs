@@ -29,6 +29,7 @@ use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::sol;
 use eyre::eyre::eyre;
+use tracing::info;
 use url::Url;
 use world_chain_devnet::{
     HaSequencerConfig, WorldDevnetBuilder, WorldDevnetPreset, is_docker_unavailable,
@@ -64,7 +65,7 @@ async fn defender_finalizes_challenged_game_with_sp1_proof() -> eyre::Result<()>
 
     let devnet = match WorldDevnetBuilder::new()
         .preset(WorldDevnetPreset::HaSequencer)
-        .ha_sequencer(HaSequencerConfig::default().with_sequencer_count(1))
+        .ha_sequencer(HaSequencerConfig::default().with_sequencer_count(3))
         .block_time(Duration::from_secs(1))
         .build()
         .await
@@ -87,6 +88,15 @@ async fn defender_finalizes_challenged_game_with_sp1_proof() -> eyre::Result<()>
         .e2e_griefer_key()
         .ok_or_else(|| eyre!("devnet did not expose an e2e griefer key"))?;
 
+    info!(
+        l1_rpc_url,
+        factory = %proof_system.factory,
+        staking_registry = %proof_system.staking_registry,
+        validity_verifier = %proof_system.validity_proof_verifier,
+        block_interval = proof_system.block_interval,
+        "devnet up with SP1 proof system; starting defender e2e"
+    );
+
     // L1 provider signing as the funded griefer account.
     let signer: PrivateKeySigner = griefer_key.parse()?;
     let griefer = signer.address();
@@ -95,6 +105,7 @@ async fn defender_finalizes_challenged_game_with_sp1_proof() -> eyre::Result<()>
         .connect_http(Url::parse(l1_rpc_url)?);
 
     // Stake the griefer so the game contract accepts its challenge (mock registry: open).
+    info!(%griefer, "staking griefer account");
     let staking = IMockStakingRegistry::new(proof_system.staking_registry, provider.clone());
     staking
         .setStaked(griefer, true)
@@ -107,10 +118,13 @@ async fn defender_finalizes_challenged_game_with_sp1_proof() -> eyre::Result<()>
     // honest challenger only challenges invalid roots, so a valid game would otherwise never
     // enter the CHALLENGED state the defender reacts to.
     let factory = IWorldChainProofSystemFactory::new(proof_system.factory, provider.clone());
+    info!("waiting for the proposer to post a game");
     let game_addr = wait_for_proposed_game(&provider, &factory, Duration::from_secs(180)).await?;
     let game = IWorldChainProofSystemGame::new(game_addr, provider.clone());
 
-    game.challenge()
+    info!(game = %game_addr, "challenging the game's (valid) root to trigger a defense");
+    let receipt = game
+        .challenge()
         .value(U256::from(CHALLENGER_BOND_WEI))
         .send()
         .await?
@@ -121,9 +135,15 @@ async fn defender_finalizes_challenged_game_with_sp1_proof() -> eyre::Result<()>
         ROOT_STATE_CHALLENGED,
         "griefer challenge should move the game to CHALLENGED"
     );
+    info!(
+        game = %game_addr,
+        tx = %receipt.transaction_hash,
+        "game is CHALLENGED; waiting for the defender to prove and submit (real Groth16, minutes)"
+    );
 
     // The defender now requests an SP1 proof; the worker generates a real Groth16 aggregation
     // proof (minutes on CPU) and the defender submits it. With threshold 1 that finalizes.
+    let started = Instant::now();
     let finalized = wait_for_state(
         &provider,
         game_addr,
@@ -135,9 +155,15 @@ async fn defender_finalizes_challenged_game_with_sp1_proof() -> eyre::Result<()>
         finalized,
         "defender did not finalize the challenged game within the timeout"
     );
+    let proof_count = game.proofCount().call().await?;
+    info!(
+        game = %game_addr,
+        elapsed_secs = started.elapsed().as_secs(),
+        proof_count,
+        "game FINALIZED by the defender"
+    );
     assert_eq!(
-        game.proofCount().call().await?,
-        1,
+        proof_count, 1,
         "expected exactly one proven lane (the SP1 validity proof)"
     );
 
@@ -157,12 +183,19 @@ async fn wait_for_proposed_game<P: Provider>(
             .from_block(0u64)
             .query()
             .await?;
+        let games_seen = logs.len();
         for (event, _log) in logs {
             let game = IWorldChainProofSystemGame::new(event.game, provider);
             if game.state().call().await? == ROOT_STATE_PROPOSED {
+                info!(
+                    game = %event.game,
+                    l2_block = %event.l2BlockNumber,
+                    "found a PROPOSED game"
+                );
                 return Ok(event.game);
             }
         }
+        info!(games_seen, "no PROPOSED game yet; polling");
         if Instant::now() >= deadline {
             return Err(eyre!(
                 "no PROPOSED game appeared within {timeout:?}; is the proposer running?"
@@ -180,12 +213,22 @@ async fn wait_for_state<P: Provider>(
     timeout: Duration,
 ) -> eyre::Result<bool> {
     let game = IWorldChainProofSystemGame::new(game_addr, provider);
-    let deadline = Instant::now() + timeout;
+    let started = Instant::now();
+    let deadline = started + timeout;
     loop {
         let state = game.state().call().await?;
         if state == target {
             return Ok(true);
         }
+        let bitmap = game.proofBitmap().call().await.unwrap_or(0);
+        info!(
+            game = %game_addr,
+            state,
+            target,
+            proof_bitmap = bitmap,
+            elapsed_secs = started.elapsed().as_secs(),
+            "waiting for game state"
+        );
         if Instant::now() >= deadline {
             return Ok(false);
         }

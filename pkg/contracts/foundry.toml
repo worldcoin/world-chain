@@ -1,4 +1,5 @@
 [profile.default]
+solc = "0.8.28"
 evm_version = 'cancun'
 libs = ["lib"]
 out = "out"
@@ -27,13 +28,11 @@ remappings = [
   "@sp1-contracts/=lib/sp1-contracts/contracts/",
 ]
 
-# The vendored SP1 Groth16 verifier (Groth16Verifier.sol) hard-pins solc 0.8.20,
-# which predates the cancun EVM. Compile the SP1 contracts with their own version
-# and a compatible EVM target; the rest of the project stays on 0.8.28 / cancun.
-[[profile.default.compilation_restrictions]]
-paths = "lib/sp1-contracts/contracts/src/v6.1.0/**"
-version = "=0.8.20"
-evm_version = "shanghai"
+# Note: the vendored SP1 Groth16 verifier (lib/sp1-contracts/.../v6.1.0) hard-pins solc
+# 0.8.20 (pre-cancun). It is intentionally NOT imported by any src/script/test file, so it
+# is never part of this project's 0.8.28 build. It is deployed standalone via `forge create
+# --use 0.8.20 --evm-version shanghai` (see crates/devnet deploy_world_proof_system), and the
+# proof-system deploy receives the deployed address through SP1_VERIFIER_ADDRESS.
 
 [profile.ci]
 

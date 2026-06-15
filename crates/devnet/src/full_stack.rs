@@ -407,26 +407,12 @@ impl FullStackWorldDevnet {
 
         // Enabling the SP1 worker (via `DEVNET_SP1_WORKER_PROVER`) also switches the proof
         // system to the real SP1 Groth16 validity verifier with a single-lane threshold, so a
-        // defended game finalizes on one SP1 proof.
+        // defended game finalizes on one SP1 proof. The proof-system deploy itself happens
+        // *after* the L2 sequencers and conductor are healthy (see below): with the real SP1
+        // path it computes vkeys and runs two forge invocations, which is slow enough that
+        // doing it before L2 boot lets the L1 race ahead and the op-conductor health check
+        // times out.
         let sp1_prover_kind = sp1_worker_prover_kind();
-        let proof_system = if config.world_contracts.proof_system {
-            let sp1_vkeys = if sp1_prover_kind.is_some() {
-                Some(compute_sp1_vkeys().await?)
-            } else {
-                None
-            };
-            Some(
-                deploy_world_proof_system(
-                    &l1_public_rpc,
-                    &artifacts.rollup_path,
-                    &workdir_path,
-                    sp1_vkeys,
-                )
-                .await?,
-            )
-        } else {
-            None
-        };
 
         let sequencer_count = config.sequencer_count.max(1) as usize;
         let sequencer_plans = (0..sequencer_count)
@@ -572,6 +558,28 @@ impl FullStackWorldDevnet {
                 ),
             )?;
             (Some(batcher), Some(proposer), None)
+        };
+
+        // Deploy the proof system now that the L2 sequencers and conductor are healthy. With
+        // the real SP1 path this computes vkeys and runs two forge invocations (slow), so it
+        // must not block L2 boot above. The proposer/challenger/defender below consume it.
+        let proof_system = if config.world_contracts.proof_system {
+            let sp1_vkeys = if sp1_prover_kind.is_some() {
+                Some(compute_sp1_vkeys().await?)
+            } else {
+                None
+            };
+            Some(
+                deploy_world_proof_system(
+                    &l1_public_rpc,
+                    &artifacts.rollup_path,
+                    &workdir_path,
+                    sp1_vkeys,
+                )
+                .await?,
+            )
+        } else {
+            None
         };
 
         let world_proposer = if let Some(deployment) = proof_system.as_ref() {
@@ -954,6 +962,62 @@ struct Sp1Vkeys {
     range_vkey_commitment: alloy_primitives::B256,
 }
 
+/// Deploys the standalone Succinct SP1 Groth16 verifier via `forge create`.
+///
+/// That contract pins solc 0.8.20 (pre-cancun), so it is compiled in isolation with explicit
+/// `--use 0.8.20 --evm-version shanghai` and never enters the 0.8.28 project build. Returns
+/// the deployed address, which the proof-system deploy receives via `SP1_VERIFIER_ADDRESS`.
+async fn forge_create_sp1_verifier(l1_rpc_url: &str, contracts_dir: &Path) -> Result<Address> {
+    let output = Command::new("forge")
+        .current_dir(contracts_dir)
+        .arg("create")
+        .arg("lib/sp1-contracts/contracts/src/v6.1.0/SP1VerifierGroth16.sol:SP1Verifier")
+        .arg("--rpc-url")
+        .arg(l1_rpc_url)
+        .arg("--private-key")
+        .arg(DEVNET_PRIVATE_KEY)
+        .arg("--use")
+        .arg("0.8.20")
+        .arg("--evm-version")
+        .arg("shanghai")
+        .arg("--broadcast")
+        .arg("--json")
+        .output()
+        .await
+        .wrap_err("failed to spawn forge create for the SP1 verifier")?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() {
+        bail!(
+            "forge create SP1 verifier failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+            output.status.code(),
+            stdout,
+            stderr
+        );
+    }
+
+    // `forge create --json` prints a JSON object containing `deployedTo` (pretty-printed across
+    // multiple lines), so extract the whole object from the first `{` to the last `}`.
+    let start = stdout
+        .find('{')
+        .ok_or_else(|| eyre!("forge create produced no JSON output:\nstdout:\n{stdout}\nstderr:\n{stderr}"))?;
+    let end = stdout
+        .rfind('}')
+        .ok_or_else(|| eyre!("forge create JSON was not terminated:\n{stdout}"))?;
+    let parsed: Value = serde_json::from_str(&stdout[start..=end])
+        .wrap_err_with(|| format!("failed to parse forge create JSON:\n{}", &stdout[start..=end]))?;
+    let address: Address = parsed
+        .get("deployedTo")
+        .and_then(Value::as_str)
+        .ok_or_else(|| eyre!("forge create JSON missing deployedTo: {parsed}"))?
+        .parse()
+        .wrap_err("invalid SP1 verifier address from forge create")?;
+
+    info!(sp1_verifier = %address, "deployed standalone SP1 Groth16 verifier");
+    Ok(address)
+}
+
 async fn deploy_world_proof_system(
     l1_rpc_url: &str,
     rollup_path: &Path,
@@ -1014,10 +1078,14 @@ async fn deploy_world_proof_system(
 
     // With SP1 proving enabled, deploy the real Groth16 validity verifier (keyed to the
     // committed ELFs) and finalize a defended game on a single proven lane (threshold = 1).
+    // The Succinct Groth16 verifier pins solc 0.8.20, so it is deployed standalone first and
+    // passed in by address; this 0.8.28 script never imports it.
     if let Some(vkeys) = sp1_vkeys {
+        let sp1_verifier = forge_create_sp1_verifier(l1_rpc_url, &contracts_dir).await?;
         command
             .env("PROOF_SYSTEM_REAL_SP1", "1")
             .env("PROOF_SYSTEM_THRESHOLD", "1")
+            .env("SP1_VERIFIER_ADDRESS", sp1_verifier.to_string())
             .env("AGGREGATION_VKEY", vkeys.aggregation_vkey.to_string())
             .env(
                 "RANGE_VKEY_COMMITMENT",
@@ -1537,6 +1605,11 @@ async fn start_world_chain_el(
         jwt_arg,
         "--metrics".to_string(),
         metrics_arg,
+        // Serve historical `eth_getProof` so the SP1 worker can build witnesses for past
+        // blocks (defaults to 0 = tip only, which fails witness generation). Use reth's max
+        // (`MAX_ETH_PROOF_WINDOW` = 1_209_600) so deep ranges stay provable.
+        "--rpc.eth-proof-window".to_string(),
+        "1209600".to_string(),
         "--disable-discovery".to_string(),
     ];
     if !trusted_peers.is_empty() {

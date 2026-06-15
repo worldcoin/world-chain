@@ -11,7 +11,6 @@ import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainP
 import {MockRootIdVerifier} from "../../src/proofs/mocks/MockRootIdVerifier.sol";
 import {MockStakingRegistry} from "../../src/proofs/mocks/MockStakingRegistry.sol";
 import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
-import {SP1Verifier} from "@sp1-contracts/src/v6.1.0/SP1VerifierGroth16.sol";
 
 contract DeployProofSystem is Script {
     struct Deployment {
@@ -28,46 +27,63 @@ contract DeployProofSystem is Script {
     uint256 internal constant PROPOSER_BOND = 1 ether;
     uint256 internal constant CHALLENGER_BOND = 0.1 ether;
 
-    function run() external returns (Deployment memory deployment) {
-        uint256 privateKey = vm.envUint("PRIVATE_KEY");
-        address challenger = vm.envOr("WORLD_CHALLENGER_ADDRESS", address(0));
-        uint256 l2ChainId = vm.envUint("WORLD_CHAIN_L2_CHAIN_ID");
-        bytes32 rollupConfigHash = vm.envBytes32("ROLLUP_CONFIG_HASH");
-        uint256 blockInterval = vm.envOr("PROOF_SYSTEM_BLOCK_INTERVAL", uint256(10));
-        uint256 intermediateBlockInterval = vm.envOr("PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL", uint256(5));
-        uint8 proofThreshold = uint8(vm.envOr("PROOF_SYSTEM_THRESHOLD", uint256(1)));
-        // When set, deploy the real SP1 Groth16 verifier for the validity lane instead
-        // of a mock. Requires AGGREGATION_VKEY and RANGE_VKEY_COMMITMENT to be set.
-        bool realSp1 = vm.envOr("PROOF_SYSTEM_REAL_SP1", false);
+    /// Deploy inputs, read from the environment. Grouped into a struct so `run` stays well
+    /// under solc's stack-slot limit (forge script codegen is tighter than `forge build`).
+    struct DeployParams {
+        uint256 privateKey;
+        address challenger;
+        uint256 l2ChainId;
+        bytes32 rollupConfigHash;
+        uint256 blockInterval;
+        uint256 intermediateBlockInterval;
+        uint8 proofThreshold;
+        // When set, deploy the real SP1 Groth16 verifier for the validity lane instead of a
+        // mock. Requires AGGREGATION_VKEY, RANGE_VKEY_COMMITMENT, and SP1_VERIFIER_ADDRESS.
+        bool realSp1;
+    }
 
-        vm.startBroadcast(privateKey);
+    function _readParams() internal returns (DeployParams memory p) {
+        p.privateKey = vm.envUint("PRIVATE_KEY");
+        p.challenger = vm.envOr("WORLD_CHALLENGER_ADDRESS", address(0));
+        p.l2ChainId = vm.envUint("WORLD_CHAIN_L2_CHAIN_ID");
+        p.rollupConfigHash = vm.envBytes32("ROLLUP_CONFIG_HASH");
+        p.blockInterval = vm.envOr("PROOF_SYSTEM_BLOCK_INTERVAL", uint256(10));
+        p.intermediateBlockInterval = vm.envOr("PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL", uint256(5));
+        p.proofThreshold = uint8(vm.envOr("PROOF_SYSTEM_THRESHOLD", uint256(1)));
+        p.realSp1 = vm.envOr("PROOF_SYSTEM_REAL_SP1", false);
+    }
+
+    function run() external returns (Deployment memory deployment) {
+        DeployParams memory p = _readParams();
+
+        vm.startBroadcast(p.privateKey);
 
         deployment.anchor = new WorldChainAnchorStateRegistry(bytes32(0), 0);
         deployment.staking = new MockStakingRegistry();
-        deployment.validityVerifier = _deployValidityVerifier(realSp1, rollupConfigHash);
+        deployment.validityVerifier = _deployValidityVerifier(p.realSp1, p.rollupConfigHash);
         // TEE and security-council lanes stay mocked in the devnet. With a low proof
         // threshold the SP1-only defense never submits them; acceptAny keeps them from
         // blocking if they ever are submitted.
         deployment.teeVerifier = new MockRootIdVerifier(true);
         deployment.councilVerifier = new MockRootIdVerifier(true);
-        deployment.staking.setStaked(vm.addr(privateKey), true);
-        if (challenger != address(0)) {
-            deployment.staking.setStaked(challenger, true);
+        deployment.staking.setStaked(vm.addr(p.privateKey), true);
+        if (p.challenger != address(0)) {
+            deployment.staking.setStaked(p.challenger, true);
         }
 
         deployment.factory = new WorldChainProofSystemFactory(
             WorldChainProofLib.Domain({
-                chainId: l2ChainId,
+                chainId: p.l2ChainId,
                 proofSystemVersion: 1,
-                rollupConfigHash: rollupConfigHash,
-                blockInterval: blockInterval,
-                intermediateBlockInterval: intermediateBlockInterval
+                rollupConfigHash: p.rollupConfigHash,
+                blockInterval: p.blockInterval,
+                intermediateBlockInterval: p.intermediateBlockInterval
             }),
             CHALLENGE_PERIOD,
             PROOF_PERIOD,
             PROPOSER_BOND,
             CHALLENGER_BOND,
-            proofThreshold,
+            p.proofThreshold,
             IWorldChainProofVerifier(deployment.validityVerifier),
             deployment.teeVerifier,
             deployment.councilVerifier,
@@ -76,7 +92,7 @@ contract DeployProofSystem is Script {
 
         vm.stopBroadcast();
 
-        _writeDeployment(deployment, rollupConfigHash, l2ChainId, blockInterval, intermediateBlockInterval);
+        _writeDeployment(deployment, p.rollupConfigHash, p.l2ChainId, p.blockInterval, p.intermediateBlockInterval);
     }
 
     /// Deploys the validity-lane verifier: the real SP1 Groth16 stack when
@@ -86,9 +102,11 @@ contract DeployProofSystem is Script {
             return address(new MockRootIdVerifier(false));
         }
 
+        // The Succinct Groth16 verifier pins solc 0.8.20 and is deployed standalone (via
+        // `forge create`) before this 0.8.28 script runs; its address is passed in here.
+        ISP1Verifier sp1Verifier = ISP1Verifier(vm.envAddress("SP1_VERIFIER_ADDRESS"));
         bytes32 aggregationVKey = vm.envBytes32("AGGREGATION_VKEY");
         bytes32 rangeVKeyCommitment = vm.envBytes32("RANGE_VKEY_COMMITMENT");
-        ISP1Verifier sp1Verifier = ISP1Verifier(address(new SP1Verifier()));
         return address(new SP1ValidityVerifier(sp1Verifier, aggregationVKey, rollupConfigHash, rangeVKeyCommitment));
     }
 
