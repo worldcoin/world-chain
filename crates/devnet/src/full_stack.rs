@@ -130,11 +130,6 @@ const WORLD_CHALLENGER_PRIVATE_KEY: &str =
 /// genesis; the defender only pays gas for `submitProofLane` (no bond, no staking).
 const WORLD_DEFENDER_PRIVATE_KEY: &str =
     "0x6b1f3d2c5a4e9876b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d";
-/// Balance, in wei, allocated to the World Chain defender account in the L1 genesis
-/// so it can cover gas for proof-lane submissions. (100 ether)
-const WORLD_DEFENDER_GENESIS_BALANCE_WEI: &str = "0x56bc75e2d63100000";
-/// Delay between World Chain proof-system defender scans.
-const WORLD_DEFENDER_POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// Signing key for an e2e "griefer" that challenges a valid game to exercise the defender.
 ///
 /// Dedicated dev key, funded via the L1 genesis. The honest challenger only challenges
@@ -1307,20 +1302,6 @@ fn fund_world_challenger(alloc: &mut Value) -> Result<()> {
     entry.insert(
         address.to_string(),
         json!({ "balance": WORLD_CHALLENGER_GENESIS_BALANCE_WEI }),
-    );
-    Ok(())
-}
-
-/// Funds the World Chain defender account in the L1 genesis `alloc` so it can
-/// pay gas for proof-lane submissions.
-fn fund_world_defender(alloc: &mut Value) -> Result<()> {
-    let address = world_defender_address()?;
-    let entry = alloc
-        .as_object_mut()
-        .ok_or_else(|| eyre!("l1 genesis alloc is not a JSON object"))?;
-    entry.insert(
-        address.to_string(),
-        json!({ "balance": WORLD_DEFENDER_GENESIS_BALANCE_WEI }),
     );
     Ok(())
 }
@@ -2798,64 +2779,6 @@ async fn compute_sp1_vkeys() -> Result<Sp1Vkeys> {
     Ok(vkeys)
 }
 
-/// Spawns the in-process World Chain proof-system defender.
-///
-/// The defender watches `GameCreated` events, and for any challenged game whose root matches
-/// the canonical output root it requests an SP1 validity proof from the prover-service at
-/// `prover_service_url`, then submits the completed proof on-chain via `submitProofLane`,
-/// signing with [`WORLD_DEFENDER_PRIVATE_KEY`] (funded in the L1 genesis).
-async fn start_world_chain_defender(
-    l1_rpc_url: &str,
-    output_root_rpc_url: &str,
-    prover_service_url: &str,
-    deployment: &WorldProofSystemDeployment,
-) -> Result<DefenderTask> {
-    let factory_address: Address = deployment
-        .proof_system_factory
-        .parse()
-        .wrap_err("invalid proof-system factory address")?;
-
-    let signer: PrivateKeySigner = WORLD_DEFENDER_PRIVATE_KEY
-        .parse()
-        .wrap_err("invalid World Chain defender signing key")?;
-    let defender_address = signer.address();
-    let provider = ProviderBuilder::new()
-        .wallet(EthereumWallet::from(signer))
-        .connect_http(Url::parse(l1_rpc_url)?);
-
-    let client = AlloyDefenderClient::new(provider, factory_address);
-    let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
-    let proof_requester = RpcProverServiceClient::new(prover_service_url)
-        .map_err(|error| eyre!("failed to connect defender to prover-service: {error}"))?;
-    let config = DefenderConfig {
-        poll_interval: WORLD_DEFENDER_POLL_INTERVAL,
-        ..DefenderConfig::default()
-    };
-    let mut defender = WorldChainDefender::new(config, client, output_roots, proof_requester);
-
-    info!(
-        l1_rpc_url,
-        output_root_rpc_url,
-        prover_service = %prover_service_url,
-        factory = %deployment.proof_system_factory,
-        defender = %defender_address,
-        "starting native World Chain proof-system defender"
-    );
-
-    let handle = tokio::spawn(
-        async move {
-            if let Err(error) = defender.run_forever().await {
-                warn!(%error, "World Chain proof-system defender stopped");
-            }
-        }
-        .instrument(info_span!(
-            "world-chain-defender",
-            process = "world-chain-defender"
-        )),
-    );
-
-    Ok(DefenderTask { handle })
-}
 
 /// Starts the in-process defender prover-service and returns its task handle and JSON-RPC URL.
 async fn start_prover_service() -> Result<(ProverServiceTask, String)> {
