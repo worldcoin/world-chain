@@ -35,6 +35,9 @@ use world_chain_proof_core::{
 // Used only by the feature-gated `enclave`/`aws_nitro` modules; bind with `as _`
 // so the default build doesn't trip `unused_crate_dependencies`.
 use anyhow as _;
+// `alloy-primitives` is used by the `aws_nitro` host module and the test modules; bind it
+// here so the default non-test lib build doesn't trip `unused_crate_dependencies`.
+use alloy_primitives as _;
 use tracing as _;
 // `tracing-subscriber` is only used by the `enclave`/`test-attestation` bins, not the
 // lib; bind it here under the features that pull it in so the lib target doesn't trip

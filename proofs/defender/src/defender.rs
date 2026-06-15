@@ -5,6 +5,7 @@ use crate::{
     types::{ActiveDefense, DEFENDED_LANES, DefenseProgress, LaneState, WatchOutcome, WatchedGame},
 };
 use alloy_primitives::{Address, BlockNumber, Bytes};
+use alloy_sol_types::SolValue;
 use futures_util::{StreamExt, stream};
 use std::{
     collections::HashMap,
@@ -399,18 +400,24 @@ fn proof_request(game_created: &GameCreated, backend: ProofBackend) -> ProofRequ
 
 /// Encode a proof payload into the `bytes` argument of `submitProofLane`.
 ///
-/// TODO: the on-chain proof calldata format is not defined yet. Replace this
-/// placeholder encoding once the game contract specifies it.
+/// The lane verifiers decode this as `abi.decode(proof, (bytes, bytes))`:
+/// - SP1: `(publicValues, proofBytes)` — `SP1ValidityVerifier` forwards them to
+///   `ISP1Verifier.verifyProof` and binds the committed outputs to the game.
+/// - Nitro: `(attestation, signature)` — same envelope shape for the TEE lane.
 fn encode_proof(proof: &ProofData) -> Bytes {
     match proof {
         ProofData::Sp1 {
             proof,
             public_values,
-        } => [public_values.as_ref(), proof.as_ref()].concat().into(),
+        } => (public_values.clone(), proof.clone())
+            .abi_encode_params()
+            .into(),
         ProofData::Nitro {
             attestation,
             signature,
-        } => [attestation.as_ref(), signature.as_ref()].concat().into(),
+        } => (attestation.clone(), signature.clone())
+            .abi_encode_params()
+            .into(),
     }
 }
 

@@ -1,9 +1,6 @@
 use crate::{
     error::{ProofJobQueueError, ProofRequestError},
-    types::{
-        LeaseId, LeasedProof, ProofBackend, ProofRequest, ProofRequestId, ProofResponse,
-        ProofStatus,
-    },
+    types::{ProofBackend, ProofRequest, ProofRequestId, ProofResponse, ProofStatus},
 };
 use async_trait::async_trait;
 
@@ -38,30 +35,24 @@ pub trait ProofRequester {
 pub trait ProofJobQueue {
     /// Look for a new proof request to process on the given backend.
     ///
-    /// Returns `None` when no work is available. Returned jobs are leased
-    /// under a fresh [`LeaseId`]: a job that is neither submitted nor
-    /// failed before the lease expires is re-queued.
+    /// Returns `None` when no work is available. Returned jobs are leased:
+    /// a job that is neither submitted nor failed before the lease expires
+    /// is re-queued.
     async fn get_next_proof(
         &self,
         backend: ProofBackend,
-    ) -> Result<Option<LeasedProof>, ProofJobQueueError>;
+    ) -> Result<Option<ProofRequest>, ProofJobQueueError>;
 
     /// Submit a proof response to the `prover-service`.
-    ///
-    /// A valid proof is accepted no matter how late it arrives, even from
-    /// a worker whose lease has already expired.
     async fn submit_proof(&self, proof: ProofResponse) -> Result<(), ProofJobQueueError>;
 
     /// Report that proving failed for the given job.
     ///
-    /// The report is only honored when `lease` matches the job's current
-    /// lease; stale reports from expired leases are ignored. The job is
-    /// re-queued until its attempts are exhausted, after which it is
-    /// marked as permanently failed.
+    /// The job is re-queued until its attempts are exhausted, after which
+    /// it is marked as permanently failed.
     async fn fail_proof(
         &self,
         proof_id: ProofRequestId,
-        lease: LeaseId,
         reason: String,
     ) -> Result<(), ProofJobQueueError>;
 }

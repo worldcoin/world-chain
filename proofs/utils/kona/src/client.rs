@@ -12,9 +12,8 @@ use op_alloy_consensus::{OpBlock, OpTxEnvelope, OpTxType};
 use std::fmt::Debug;
 use tracing::{error, info, warn};
 
-/// Fetches the safe head hash of the L2 chain based on the agreed upon L2 output root in the
-/// [BootInfo].
-pub(crate) async fn fetch_safe_head_hash<O>(
+/// Fetches the safe head hash of the L2 chain based on the agreed upon L2 output root.
+pub async fn fetch_safe_head_hash<O>(
     caching_oracle: &O,
     agreed_l2_output_root: B256,
 ) -> Result<B256, OracleProviderError>
@@ -38,21 +37,7 @@ where
         .map_err(OracleProviderError::SliceConversion)
 }
 
-// Sourced from kona/crates/driver/src/core.rs with modifications to use the L2 provider's caching
-// system. After each block execution, we update the L2 provider's caches (header_by_number,
-// block_by_number, system_config_by_number, l2_block_info_by_number) with the new block data. This
-// ensures subsequent lookups for this block number can be served directly from cache rather than
-// requiring oracle queries.
 /// Advances the derivation pipeline to the target block number.
-///
-/// ## Takes
-/// - `cfg`: The rollup configuration.
-/// - `target`: The target block number.
-///
-/// ## Returns
-/// - `Ok((l2_safe_head, output_root))` - A tuple containing the [L2BlockInfo] of the produced block
-///   and the output root.
-/// - `Err(e)` - An error if the block could not be produced.
 #[allow(clippy::result_large_err)]
 pub async fn advance_to_target<E, DP, P>(
     driver: &mut Driver<E, DP, P>,
@@ -65,7 +50,6 @@ where
     P: Pipeline + SignalReceiver + Send + Sync + Debug,
 {
     loop {
-        // Check if we have reached the target block number.
         let pipeline_cursor = driver.cursor.read();
         let tip_cursor = pipeline_cursor.tip();
         if let Some(tb) = target
@@ -86,14 +70,10 @@ where
             Err(PipelineErrorKind::Critical(PipelineError::EndOfSource)) => {
                 warn!(target: "client", "Exhausted data source; Halting derivation and using current safe head.");
 
-                // Adjust the target block number to the current safe head, as no more blocks
-                // can be produced.
                 if target.is_some() {
                     target = Some(tip_cursor.l2_safe_head.block_info.number);
                 };
 
-                // If we are in interop mode, this error must be handled by the caller.
-                // Otherwise, we continue the loop to halt derivation on the next iteration.
                 if cfg.is_interop_active(driver.cursor.read().l2_safe_head().block_info.timestamp) {
                     return Err(PipelineError::EndOfSource.crit().into());
                 } else {
@@ -120,23 +100,16 @@ where
                 error!(target: "client", "Failed to execute L2 block: {}", e);
 
                 if cfg.is_holocene_active(attributes.payload_attributes.timestamp) {
-                    // Retry with a deposit-only block.
                     warn!(target: "client", "Flushing current channel and retrying deposit only block");
 
-                    // Flush the current batch and channel - if a block was replaced with a
-                    // deposit-only block due to execution failure, the
-                    // batch and channel it is contained in is forwards
-                    // invalidated.
                     driver.pipeline.signal(Signal::FlushChannel).await?;
 
-                    // Strip out all transactions that are not deposits.
                     attributes.transactions = attributes.transactions.map(|txs| {
                         txs.into_iter()
                             .filter(|tx| !tx.is_empty() && tx[0] == OpTxType::Deposit as u8)
                             .collect::<Vec<_>>()
                     });
 
-                    // Retry the execution.
                     driver
                         .executor
                         .update_safe_head(tip_cursor.l2_safe_head_header.clone());
@@ -151,7 +124,6 @@ where
                         }
                     }
                 } else {
-                    // Pre-Holocene, discard the block if execution fails.
                     continue;
                 }
             }
@@ -159,7 +131,6 @@ where
         #[cfg(target_os = "zkvm")]
         println!("cycle-tracker-report-end: block-execution");
 
-        // Construct the block.
         let block = OpBlock {
             header: outcome.header.inner().clone(),
             body: BlockBody {
@@ -175,7 +146,6 @@ where
             },
         };
 
-        // Get the pipeline origin and update the tip cursor.
         let origin = driver
             .pipeline
             .origin()
@@ -191,11 +161,9 @@ where
                 .map_err(DriverError::Executor)?,
         );
 
-        // Advance the derivation pipeline cursor
         drop(pipeline_cursor);
         driver.cursor.write().advance(origin, tip_cursor);
 
-        // Add forget calls to save cycles
         #[cfg(target_os = "zkvm")]
         std::mem::forget(block);
     }

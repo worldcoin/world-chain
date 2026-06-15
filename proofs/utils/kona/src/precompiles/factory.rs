@@ -1,5 +1,3 @@
-//! [`EvmFactory`] implementation for the EVM in the ZKVM environment.
-
 use alloy_evm::{Database, EvmEnv, EvmFactory, precompiles::PrecompilesMap};
 use alloy_op_evm::{OpEvm, OpEvmContext, OpTx, OpTxError};
 use op_revm::{
@@ -13,21 +11,23 @@ use revm::{
 
 use world_chain_proof_core::range::{WorldRangeHardfork, WorldRangeHardforkConfig};
 
-/// Factory producing OP Stack EVMs for the zkVM.
+/// EVM factory for OP Stack execution supporting World Chain's custom hardfork schedule.
+///
+/// Named `ZkvmOpEvmFactory` for historical reasons — it works in both host and zkVM
+/// contexts. The `Zkvm` prefix refers to the pure-Rust KZG backend and RISC-V
+/// compatibility, not to a restriction on where it can be used.
 #[derive(Debug, Clone)]
 pub struct ZkvmOpEvmFactory {
     world_schedule: Option<WorldRangeHardforkConfig>,
 }
 
 impl ZkvmOpEvmFactory {
-    /// Creates a new [`ZkvmOpEvmFactory`].
     pub fn new() -> Self {
         Self {
             world_schedule: None,
         }
     }
 
-    /// Creates a factory that selects the post-Jovian EVM spec from World fork names.
     pub fn new_with_world_schedule(world_schedule: WorldRangeHardforkConfig) -> Self {
         Self {
             world_schedule: Some(world_schedule),
@@ -38,17 +38,12 @@ impl ZkvmOpEvmFactory {
         let Some(schedule) = &self.world_schedule else {
             return kona_spec;
         };
-
         match schedule.active_fork_at(0, timestamp) {
             WorldRangeHardfork::Tropo | WorldRangeHardfork::Strato => OpSpecId::KARST,
             _ => kona_spec,
         }
     }
 
-    /// Shared EVM construction used by both [`EvmFactory::create_evm`] and
-    /// [`EvmFactory::create_evm_with_inspector`]. The only differences between the two
-    /// public entry points are the concrete inspector type and the inspection flag passed
-    /// to [`OpEvm::new`].
     fn build_inner<DB: Database, I: Inspector<OpEvmContext<DB>>>(
         &self,
         db: DB,

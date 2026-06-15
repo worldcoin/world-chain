@@ -7,7 +7,6 @@
 //! payload is rkyv-encoded [`WorldRangeWitnessData`] because that is what the SP1 range
 //! program already consumes.
 
-use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -166,14 +165,6 @@ pub enum FrameError {
     /// Frame exceeds the maximum allowed size.
     #[error("frame too large: {0} bytes")]
     FrameTooLarge(usize),
-}
-
-/// Hashes an arbitrary byte slice and returns it as a 32-byte `B256`.
-#[must_use]
-pub fn sha256_b256(bytes: &[u8]) -> B256 {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    B256::from_slice(hasher.finalize().as_ref())
 }
 
 #[cfg(test)]

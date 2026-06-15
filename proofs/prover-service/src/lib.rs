@@ -88,8 +88,7 @@ pub use rpc::{
 pub use service::ProverService;
 pub use traits::{ProofJobQueue, ProofRequester};
 pub use types::{
-    LeaseId, LeasedProof, ProofBackend, ProofData, ProofRequest, ProofRequestId, ProofResponse,
-    ProofStatus,
+    ProofBackend, ProofData, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
 };
 
 #[cfg(test)]
