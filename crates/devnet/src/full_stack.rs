@@ -611,12 +611,6 @@ impl FullStackWorldDevnet {
         let (prover_service, sp1_worker, prover_service_url) =
             match (proof_system.as_ref(), sp1_prover_kind) {
                 (Some(deployment), Some(kind)) => {
-                    let output_root_rpc = op_nodes
-                        .first()
-                        .map(|node| node.rpc_url.clone())
-                        .ok_or_else(|| {
-                            eyre!("full-stack devnet has no op-node for the World Chain defender")
-                        })?;
                     let l2_rpc = sequencers
                         .first()
                         .map(|sequencer| sequencer.rpc_url.clone())
@@ -624,13 +618,6 @@ impl FullStackWorldDevnet {
                             eyre!("full-stack devnet has no sequencer for the SP1 worker")
                         })?;
                     let (service, url) = start_prover_service().await?;
-                    let defender = start_world_chain_defender(
-                        &l1_public_rpc,
-                        &output_root_rpc,
-                        &url,
-                        deployment,
-                    )
-                    .await?;
                     let worker = start_sp1_worker(
                         &l1_public_rpc,
                         &l2_rpc,
@@ -640,9 +627,9 @@ impl FullStackWorldDevnet {
                         kind,
                     )
                     .await?;
-                    (Some(service), Some(worker), Some(defender), Some(url))
+                    (Some(service), Some(worker), Some(url))
                 }
-                _ => (None, None, None, None),
+                _ => (None, None, None),
             };
 
         // Defender: requests SP1 proofs from the prover-service for challenged-but-valid games
