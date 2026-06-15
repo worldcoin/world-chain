@@ -33,17 +33,18 @@ mod inner {
     use clap::Parser;
     use tracing::{info, warn};
     use world_chain_chainspec::WorldChainSpec;
-    use world_chain_proof_nitro::{ExpectedPcrs, NitroRangeProofRequest};
-    use world_chain_proof_nitro::host::{EnclaveEndpoint, NitroProver};
-    use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
     use world_chain_proof_kona_host_utils::online::{
         OnlineHostConfig, RangeWitnessRequest, build_online_config, build_range_input,
     };
-    use world_chain_proof_worker::ProofJobBackend;
+    use world_chain_proof_nitro::{
+        ExpectedPcrs, NitroRangeProofRequest,
+        host::{EnclaveEndpoint, NitroProver},
+    };
+    use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
+    use world_chain_proof_worker::{ProofJobBackend, ProofWorker, ProofWorkerConfig};
     use world_chain_prover_service::{
         ProofBackend, ProofData, ProofRequest, RpcProverServiceClient,
     };
-    use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig};
 
     // ──────────────────────────────────────────────────────────────────────────────────────
     // NitroBackend — ProofJobBackend implementation for the Nitro TEE lane
@@ -90,10 +91,8 @@ mod inner {
                     )
                 })?;
 
-            let endpoint = EnclaveEndpoint::with_port(
-                self.config.enclave_cid,
-                self.config.enclave_port,
-            );
+            let endpoint =
+                EnclaveEndpoint::with_port(self.config.enclave_cid, self.config.enclave_port);
             let prover = NitroProver::with_runtime(
                 endpoint,
                 self.config.expected_pcrs,
@@ -289,8 +288,11 @@ mod inner {
             &protocol_cfg,
             Duration::from_secs(cli.witness_timeout_seconds),
         )?;
-        let expected_pcrs =
-            build_expected_pcrs(cli.pcr0.as_deref(), cli.pcr1.as_deref(), cli.pcr2.as_deref())?;
+        let expected_pcrs = build_expected_pcrs(
+            cli.pcr0.as_deref(),
+            cli.pcr1.as_deref(),
+            cli.pcr2.as_deref(),
+        )?;
 
         info!(
             prover_service = %cli.prover_service_url,

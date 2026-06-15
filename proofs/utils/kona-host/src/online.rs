@@ -13,6 +13,7 @@ use std::{
     time::Duration,
 };
 
+use crate::{OnlineBlobStore, PreimageWitnessCollector};
 use alloy_primitives::{Address, B256, address, keccak256};
 use anyhow::{Context, anyhow, bail};
 use kona_host::{DataFormat, single::SingleChainHost};
@@ -29,7 +30,6 @@ use world_chain_proof_kona_client_utils::{
     ETHDAWitnessExecutor, OutputRootWitness, WitnessExecutor, get_inputs_for_pipeline,
 };
 use world_chain_proof_protocol::WorldHardforkConfig;
-use crate::{OnlineBlobStore, PreimageWitnessCollector};
 
 const L1_BLOCK_PREDEPLOY: Address = address!("0x4200000000000000000000000000000000000015");
 const L2_TO_L1_MESSAGE_PASSER: Address = address!("0x4200000000000000000000000000000000000016");
