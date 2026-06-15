@@ -63,7 +63,7 @@ use world_chain_state::{
 /// A type alias for the BAL builder database with a cache layer.
 pub type ValidatorDb<'a, DB> = BalBuilderDb<&'a mut NoOpCommitDB<TemporalDb<DB>>>;
 
-fn into_executed_payload(
+pub fn into_executed_payload(
     payload: BuiltPayloadExecutedBlock<OpPrimitives>,
 ) -> ExecutedBlock<OpPrimitives> {
     let trie_data = DeferredTrieData::sort(payload.hashed_state, payload.trie_updates);

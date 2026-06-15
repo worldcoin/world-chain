@@ -9259,7 +9259,7 @@ dependencies = [
 
 [[package]]
 name = "proof"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-primitives",
  "anyhow",
@@ -18198,7 +18198,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "clap",
  "color-eyre",
@@ -18218,7 +18218,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-builder"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
  "alloy-eips 2.0.5",
@@ -18270,7 +18270,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-chainspec"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-chains",
  "alloy-consensus 2.0.5",
@@ -18292,7 +18292,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-challenger"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-primitives",
  "alloy-provider 2.0.5",
@@ -18310,7 +18310,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-cli"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-chains",
  "alloy-genesis",
@@ -18344,7 +18344,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-defender"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-primitives",
  "alloy-provider 2.0.5",
@@ -18360,7 +18360,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-devnet"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-eips 2.0.5",
  "alloy-genesis",
@@ -18411,7 +18411,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-evm"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
  "alloy-eips 2.0.5",
@@ -18445,7 +18445,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-node"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
  "alloy-eips 2.0.5",
@@ -18504,7 +18504,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-p2p"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-eips 2.0.5",
  "alloy-primitives",
@@ -18542,7 +18542,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-payload"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
  "alloy-eips 2.0.5",
@@ -18573,7 +18573,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-pbh"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -18590,7 +18590,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-pool"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
  "alloy-eips 2.0.5",
@@ -18627,7 +18627,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-primitives"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
  "alloy-eip7928",
@@ -18660,7 +18660,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "world-chain-proof-core",
  "world-chain-proof-nitro",
@@ -18670,7 +18670,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-core"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
  "alloy-eips 2.0.5",
@@ -18693,7 +18693,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-kona-utils"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
  "alloy-eips 2.0.5",
@@ -18724,7 +18724,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-nitro"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
  "alloy-primitives",
@@ -18755,7 +18755,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-protocol"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-primitives",
  "op-revm",
@@ -18771,7 +18771,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-succinct-client-utils"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-eips 2.0.5",
  "alloy-primitives",
@@ -18788,7 +18788,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-succinct-ethereum-client-utils"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -18804,7 +18804,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-succinct-host-utils"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
  "alloy-primitives",
@@ -18833,7 +18833,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-succinct-utils"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "rkyv",
  "serde",
@@ -18842,7 +18842,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-worker"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-primitives",
  "anyhow",
@@ -18857,7 +18857,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proofs"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-contract",
  "alloy-primitives",
@@ -18872,7 +18872,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proposer"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-primitives",
  "alloy-provider 2.0.5",
@@ -18888,7 +18888,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-prover-service"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -18902,7 +18902,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-rpc"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy",
  "alloy-consensus 2.0.5",
@@ -18958,7 +18958,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-sp1-worker"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -18983,7 +18983,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-state"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-eips 2.0.5",
  "alloy-primitives",
@@ -19002,7 +19002,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-test-utils"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
  "alloy-contract",
@@ -19086,7 +19086,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-tests"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
  "alloy-eips 2.0.5",
@@ -19148,7 +19148,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-validator"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
  "alloy-eips 2.0.5",
@@ -19265,7 +19265,7 @@ checksum = "66fee0b777b0f5ac1c69bb06d361268faafa61cd4682ae064a171c16c433e9e4"
 
 [[package]]
 name = "xtask"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
  "alloy-contract",
