@@ -10,7 +10,9 @@ use kona_driver::{Driver, DriverPipeline, PipelineCursor};
 use kona_genesis::{L1ChainConfig, RollupConfig};
 use kona_preimage::CommsClient;
 use kona_proof::{
-    BootInfo, FlushableCache, executor::KonaExecutor, l1::{OracleL1ChainProvider, OraclePipeline},
+    BootInfo, FlushableCache,
+    executor::KonaExecutor,
+    l1::{OracleL1ChainProvider, OraclePipeline},
     l2::OracleL2ChainProvider,
 };
 use spin::RwLock;
@@ -162,7 +164,9 @@ where
     B: BlobProvider + Send + Sync + Debug + Clone,
 {
     pub fn new() -> Self {
-        Self { _marker: std::marker::PhantomData }
+        Self {
+            _marker: std::marker::PhantomData,
+        }
     }
 }
 

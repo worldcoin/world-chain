@@ -26,26 +26,10 @@ use world_chain_proof_core::{
     range::{WorldRangeHardforkConfig, WorldRangeSpecId},
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
-<<<<<<<< HEAD:proofs/utils/kona-client/src/online.rs
-<<<<<<<< HEAD:proofs/utils/kona-host/src/online.rs
 use world_chain_proof_kona_client_utils::{
     ETHDAWitnessExecutor, OutputRootWitness, WitnessExecutor, get_inputs_for_pipeline,
 };
 use world_chain_proof_protocol::WorldHardforkConfig;
-========
-use world_chain_proof_protocol::WorldHardforkConfig;
-use crate::{
-    ETHDAWitnessExecutor, OnlineBlobStore, OutputRootWitness, PreimageWitnessCollector,
-    WitnessExecutor, get_inputs_for_pipeline,
-};
->>>>>>>> 353f52db (Move shared code out of succint utils.):proofs/utils/kona-client/src/online.rs
-========
-use world_chain_proof_kona_client_utils::{
-    ETHDAWitnessExecutor, OutputRootWitness, WitnessExecutor, get_inputs_for_pipeline,
-};
-use world_chain_proof_protocol::WorldHardforkConfig;
-use crate::{OnlineBlobStore, PreimageWitnessCollector};
->>>>>>>> 62a31f09 (Move shared code out of succint utils.):proofs/utils/kona-host/src/online.rs
 
 const L1_BLOCK_PREDEPLOY: Address = address!("0x4200000000000000000000000000000000000015");
 const L2_TO_L1_MESSAGE_PASSER: Address = address!("0x4200000000000000000000000000000000000016");
