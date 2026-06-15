@@ -1,0 +1,384 @@
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/sys/backtrace.rs:47:25
+   9:        0x10bd3e0a4 - std[55c15c20934149c]::panicking::default_hook::{closure#0}
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/panicking.rs:292:27
+  10:        0x10bd54eac - std[55c15c20934149c]::panicking::default_hook
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/panicking.rs:319:9
+  11:        0x10bd55290 - std[55c15c20934149c]::panicking::panic_with_hook
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/panicking.rs:825:13
+  12:        0x10bd3e138 - std[55c15c20934149c]::panicking::panic_handler::{closure#0}
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/panicking.rs:698:13
+  13:        0x10bd34a68 - std[55c15c20934149c]::sys::backtrace::__rust_end_short_backtrace::<std[55c15c20934149c]::panicking::panic_handler::{closure#0}, !>
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/sys/backtrace.rs:182:18
+  14:        0x10bd3ef2c - __rustc[7bafd613781bcba]::rust_begin_unwind
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/panicking.rs:689:5
+  15:        0x10bd775b8 - core[b71867208b3d90dd]::panicking::panic_fmt
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/core/src/panicking.rs:80:14
+  16:        0x10bd7735c - core[b71867208b3d90dd]::result::unwrap_failed
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/core/src/result.rs:1867:5
+  17:        0x10468a668 - <core[b71867208b3d90dd]::result::Result<u64, kona_derive[251bc97a9e744d76]::errors::sources::BlobProviderError>>::expect
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/result.rs:1185:23
+  18:        0x104647c98 - <kona_providers_alloy[27ceae08d3b1ed8]::blobs::OnlineBlobProvider<kona_providers_alloy[27ceae08d3b1ed8]::beacon_client::OnlineBeaconClient>>::init::{closure#0}
+                               at /Users/leyton.taylor/.cargo/git/checkouts/optimism-852bcbde357560e3/484be19/rust/kona/crates/providers/providers-alloy/src/blobs.rs:67:14
+  19:        0x103bbfab4 - <kona_host[5612523efc6831e9]::single::cfg::SingleChainHost>::create_providers::{closure#0}
+                               at /Users/leyton.taylor/.cargo/git/checkouts/optimism-852bcbde357560e3/484be19/rust/kona/bin/host/src/single/cfg.rs:280:10
+  20:        0x103bbe240 - <kona_host[5612523efc6831e9]::single::cfg::SingleChainHost>::start_server::<kona_preimage[4413211c16b07727]::native_channel::NativeChannel>::{closure#0}
+                               at /Users/leyton.taylor/.cargo/git/checkouts/optimism-852bcbde357560e3/484be19/rust/kona/bin/host/src/single/cfg.rs:185:53
+  21:        0x104b4bcd4 - world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}
+                               at /Users/leyton.taylor/work/world-chain/proofs/succinct/utils/host/src/online.rs:298:71
+  22:        0x104c3ca0c - <core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>> as core[b71867208b3d90dd]::future::future::Future>::poll
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+  23:        0x10475af60 - <tokio[6096b32e12b19689]::runtime::park::CachedParkThread>::block_on::<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>::{closure#0}
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/park.rs:284:71
+  24:        0x10474ea80 - tokio[6096b32e12b19689]::task::coop::with_budget::<core[b71867208b3d90dd]::task::poll::Poll<core[b71867208b3d90dd]::result::Result<world_chain_proof_core[618d524427fb15b]::witness::WorldRangeWitnessData, anyhow[ec1fe7d5ce58b692]::Error>>, <tokio[6096b32e12b19689]::runtime::park::CachedParkThread>::block_on<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>::{closure#0}>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/task/coop/mod.rs:167:5
+  25:        0x10474ea80 - tokio[6096b32e12b19689]::task::coop::budget::<core[b71867208b3d90dd]::task::poll::Poll<core[b71867208b3d90dd]::result::Result<world_chain_proof_core[618d524427fb15b]::witness::WorldRangeWitnessData, anyhow[ec1fe7d5ce58b692]::Error>>, <tokio[6096b32e12b19689]::runtime::park::CachedParkThread>::block_on<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>::{closure#0}>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/task/coop/mod.rs:133:5
+  26:        0x10474ea80 - <tokio[6096b32e12b19689]::runtime::park::CachedParkThread>::block_on::<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/park.rs:284:31
+  27:        0x10475feac - <tokio[6096b32e12b19689]::runtime::context::blocking::BlockingRegionGuard>::block_on::<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/context/blocking.rs:66:14
+  28:        0x103c8d2fc - <tokio[6096b32e12b19689]::runtime::scheduler::multi_thread::MultiThread>::block_on::<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>::{closure#0}
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/scheduler/multi_thread/mod.rs:92:22
+  29:        0x104a61ba8 - tokio[6096b32e12b19689]::runtime::context::runtime::enter_runtime::<<tokio[6096b32e12b19689]::runtime::scheduler::multi_thread::MultiThread>::block_on<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>::{closure#0}, core[b71867208b3d90dd]::result::Result<world_chain_proof_core[618d524427fb15b]::witness::WorldRangeWitnessData, anyhow[ec1fe7d5ce58b692]::Error>>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/context/runtime.rs:65:16
+  30:        0x103c86d74 - <tokio[6096b32e12b19689]::runtime::scheduler::multi_thread::MultiThread>::block_on::<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/scheduler/multi_thread/mod.rs:91:9
+  31:        0x104d9beb8 - <tokio[6096b32e12b19689]::runtime::runtime::Runtime>::block_on_inner::<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/runtime.rs:373:50
+  32:        0x104d9e5d8 - <tokio[6096b32e12b19689]::runtime::runtime::Runtime>::block_on::<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/runtime.rs:343:18
+  33:        0x103bf932c - world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::build_range_input
+                               at /Users/leyton.taylor/work/world-chain/proofs/succinct/utils/host/src/online.rs:269:51
+  34:        0x1023f3d34 - world_chain_proof_succinct_host_utils[47cfad034ce67171]::validity::prove_validity::<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>
+                               at /Users/leyton.taylor/work/world-chain/proofs/succinct/utils/host/src/validity.rs:101:21
+  35:        0x1024e0350 - <world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver> as world_chain_proof_worker[3abf2fe7ddbf72b4]::backend::ProofJobBackend>::prove
+                               at /Users/leyton.taylor/work/world-chain/proofs/sp1-worker/src/backend.rs:69:24
+  36:        0x10261fee8 - world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job::<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}::{closure#0}
+                               at /Users/leyton.taylor/work/world-chain/proofs/worker/src/worker.rs:270:78
+  37:        0x1034cbc74 - <world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}::{closure#0} as core[b71867208b3d90dd]::ops::function::FnOnce<()>>::call_once
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  38:        0x1021bcca4 - <core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}::{closure#0}> as core[b71867208b3d90dd]::ops::function::FnOnce<()>>::call_once
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/panic/unwind_safe.rs:275:9
+  39:        0x102973064 - std[55c15c20934149c]::panicking::catch_unwind::do_call::<core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}::{closure#0}>, core[b71867208b3d90dd]::result::Result<world_chain_prover_service[9cf5d5e078e23852]::types::ProofData, anyhow[ec1fe7d5ce58b692]::Error>>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  40:        0x1032fdd74 - ___rust_try
+  41:        0x1032c9178 - std[55c15c20934149c]::panicking::catch_unwind::<core[b71867208b3d90dd]::result::Result<world_chain_prover_service[9cf5d5e078e23852]::types::ProofData, anyhow[ec1fe7d5ce58b692]::Error>, core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}::{closure#0}>>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  42:        0x1032c9178 - std[55c15c20934149c]::panic::catch_unwind::<core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}::{closure#0}>, core[b71867208b3d90dd]::result::Result<world_chain_prover_service[9cf5d5e078e23852]::types::ProofData, anyhow[ec1fe7d5ce58b692]::Error>>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panic.rs:359:14
+  43:        0x10261f420 - world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job::<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}
+                               at /Users/leyton.taylor/work/world-chain/proofs/worker/src/worker.rs:270:13
+  44:        0x102f68f98 - <tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}> as core[b71867208b3d90dd]::future::future::Future>::poll
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/blocking/task.rs:42:21
+  45:        0x1030745f4 - <tokio[6096b32e12b19689]::runtime::task::core::Core<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>>::poll::{closure#0}
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/core.rs:375:24
+  46:        0x1031d0dc8 - <tokio[6096b32e12b19689]::loom::std::unsafe_cell::UnsafeCell<tokio[6096b32e12b19689]::runtime::task::core::Stage<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>>>>::with_mut::<core[b71867208b3d90dd]::task::poll::Poll<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::FinishedJob>, <tokio[6096b32e12b19689]::runtime::task::core::Core<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>>::poll::{closure#0}>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/loom/std/unsafe_cell.rs:16:9
+  47:        0x1031d0dc8 - <tokio[6096b32e12b19689]::runtime::task::core::Core<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>>::poll
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/core.rs:364:30
+  48:        0x102c93ed8 - tokio[6096b32e12b19689]::runtime::task::harness::poll_future::<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>::{closure#0}
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/harness.rs:535:30
+  49:        0x1021b90dc - <core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<tokio[6096b32e12b19689]::runtime::task::harness::poll_future<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>::{closure#0}> as core[b71867208b3d90dd]::ops::function::FnOnce<()>>::call_once
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/panic/unwind_safe.rs:275:9
+  50:        0x10296d518 - std[55c15c20934149c]::panicking::catch_unwind::do_call::<core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<tokio[6096b32e12b19689]::runtime::task::harness::poll_future<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>::{closure#0}>, core[b71867208b3d90dd]::task::poll::Poll<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::FinishedJob>>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  51:        0x1032fdd74 - ___rust_try
+  52:        0x1032bb21c - std[55c15c20934149c]::panicking::catch_unwind::<core[b71867208b3d90dd]::task::poll::Poll<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::FinishedJob>, core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<tokio[6096b32e12b19689]::runtime::task::harness::poll_future<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>::{closure#0}>>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  53:        0x1032bb21c - std[55c15c20934149c]::panic::catch_unwind::<core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<tokio[6096b32e12b19689]::runtime::task::harness::poll_future<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>::{closure#0}>, core[b71867208b3d90dd]::task::poll::Poll<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::FinishedJob>>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panic.rs:359:14
+  54:        0x102c5adb8 - tokio[6096b32e12b19689]::runtime::task::harness::poll_future::<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/harness.rs:523:18
+  55:        0x102de3e00 - <tokio[6096b32e12b19689]::runtime::task::harness::Harness<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>>::poll_inner
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/harness.rs:210:27
+  56:        0x102de40b0 - <tokio[6096b32e12b19689]::runtime::task::harness::Harness<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>>::poll
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/harness.rs:155:20
+  57:        0x1035c405c - tokio[6096b32e12b19689]::runtime::task::raw::poll::<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/raw.rs:337:13
+  58:        0x10b47af0c - <tokio[6096b32e12b19689]::runtime::task::raw::RawTask>::poll
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/raw.rs:267:18
+  59:        0x10b472c90 - <tokio[6096b32e12b19689]::runtime::task::UnownedTask<tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>>::run
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/mod.rs:547:13
+  60:        0x10b48dd70 - <tokio[6096b32e12b19689]::runtime::blocking::pool::Task>::run
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/blocking/pool.rs:161:19
+  61:        0x10b48f250 - <tokio[6096b32e12b19689]::runtime::blocking::pool::Inner>::run
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/blocking/pool.rs:518:22
+  62:        0x10b48d378 - <tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/blocking/pool.rs:474:47
+  63:        0x10b4afbd4 - std[55c15c20934149c]::sys::backtrace::__rust_begin_short_backtrace::<<tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:166:18
+  64:        0x10b4d3038 - std[55c15c20934149c]::thread::lifecycle::spawn_unchecked::<<tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1}::{closure#0}
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/thread/lifecycle.rs:70:13
+  65:        0x10b4a4e0c - <core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<std[55c15c20934149c]::thread::lifecycle::spawn_unchecked<<tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1}::{closure#0}> as core[b71867208b3d90dd]::ops::function::FnOnce<()>>::call_once
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/panic/unwind_safe.rs:275:9
+  66:        0x10b46524c - std[55c15c20934149c]::panicking::catch_unwind::do_call::<core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<std[55c15c20934149c]::thread::lifecycle::spawn_unchecked<<tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1}::{closure#0}>, ()>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  67:        0x10b4d5b78 - ___rust_try
+  68:        0x10b4d2bdc - std[55c15c20934149c]::panicking::catch_unwind::<(), core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<std[55c15c20934149c]::thread::lifecycle::spawn_unchecked<<tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1}::{closure#0}>>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  69:        0x10b4d2bdc - std[55c15c20934149c]::panic::catch_unwind::<core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<std[55c15c20934149c]::thread::lifecycle::spawn_unchecked<<tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1}::{closure#0}>, ()>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panic.rs:359:14
+  70:        0x10b4d2bdc - std[55c15c20934149c]::thread::lifecycle::spawn_unchecked::<<tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1}
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/thread/lifecycle.rs:68:26
+  71:        0x10b4b019c - <std[55c15c20934149c]::thread::lifecycle::spawn_unchecked<<tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1} as core[b71867208b3d90dd]::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  72:        0x10bd5c244 - <alloc[58d1d8d55be567ee]::boxed::Box<dyn core[b71867208b3d90dd]::ops::function::FnOnce<(), Output = ()> + core[b71867208b3d90dd]::marker::Send> as core[b71867208b3d90dd]::ops::function::FnOnce<()>>::call_once
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/alloc/src/boxed.rs:2277:9
+  73:        0x10bd5c244 - <std[55c15c20934149c]::sys::thread::unix::Thread>::new::thread_start
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/sys/thread/unix.rs:118:17
+  74:        0x188975c58 - __pthread_cond_wait
+2026-06-15T18:02:31.945823Z  WARN proof_job{id=0x6c56f27fad96f8223c44c03247a83b1efaafaef67f0b46de87f6f5785d4d39f2 lane=sp1}: world_chain_proof_worker::worker: proving failed reason=proving panicked: Failed to load slot interval from beacon client: Backend("HTTP request failed: error decoding response body")
+2026-06-15T18:02:31.946071Z DEBUG world_chain_prover_service::service: proof attempt failed, re-queueing proof_id=0x6c56f27fad96f8223c44c03247a83b1efaafaef67f0b46de87f6f5785d4d39f2 attempts=2 reason=proving panicked: Failed to load slot interval from beacon client: Backend("HTTP request failed: error decoding response body")
+2026-06-15T18:02:32.217469Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:32.786982Z  INFO world_chain_tests::it::defender_e2e: waiting for game state game=0xdE8974b2bFF0c20f648669Bc0899E23960EEf445 state=2 target=3 proof_bitmap=0 elapsed_secs=40
+2026-06-15T18:02:33.225627Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:34.223450Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:35.224538Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:36.222752Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:36.738402Z DEBUG world_chain_prover_service::service: proof job leased id=0x6c56f27fad96f8223c44c03247a83b1efaafaef67f0b46de87f6f5785d4d39f2 backend=sp1 attempts=3
+2026-06-15T18:02:36.738686Z  INFO proof_job{id=0x6c56f27fad96f8223c44c03247a83b1efaafaef67f0b46de87f6f5785d4d39f2 lane=sp1}: world_chain_proof_worker::worker: processing proof request game=0xdE8974b2bFF0c20f648669Bc0899E23960EEf445 l2_block_number=10
+2026-06-15T18:02:36.831538Z  INFO proof_job{id=0x6c56f27fad96f8223c44c03247a83b1efaafaef67f0b46de87f6f5785d4d39f2 lane=sp1}: world_chain_proof_succinct_host_utils::validity: building range witness start=1 end=10
+2026-06-15T18:02:36.909763Z  WARN world_chain_el: target=providers::historical_sp message="Attempt to calculate state root for an old block might result in OOM" target=1 process=world-chain-el-0
+2026-06-15T18:02:36.927904Z  WARN world_chain_el: target=providers::historical_sp message="Attempt to calculate state root for an old block might result in OOM" target=11 process=world-chain-el-0
+
+thread 'tokio-rt-worker' (12160984) panicked at /Users/leyton.taylor/.cargo/git/checkouts/optimism-852bcbde357560e3/484be19/rust/kona/crates/providers/providers-alloy/src/blobs.rs:67:14:
+Failed to load slot interval from beacon client: Backend("HTTP request failed: error decoding response body")
+stack backtrace:
+   0:        0x10bd5d4c4 - std[55c15c20934149c]::backtrace_rs::backtrace::libunwind::trace
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/../../backtrace/src/backtrace/libunwind.rs:117:9
+   1:        0x10bd5d4c4 - std[55c15c20934149c]::backtrace_rs::backtrace::trace_unsynchronized::<std[55c15c20934149c]::sys::backtrace::_print_fmt::{closure#1}>
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/../../backtrace/src/backtrace/mod.rs:66:14
+   2:        0x10bd5d4c4 - std[55c15c20934149c]::sys::backtrace::_print_fmt
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/sys/backtrace.rs:74:9
+   3:        0x10bd5d4c4 - <<std[55c15c20934149c]::sys::backtrace::BacktraceLock>::print::DisplayBacktrace as core[b71867208b3d90dd]::fmt::Display>::fmt
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/sys/backtrace.rs:44:26
+   4:        0x10bd76cf0 - <core[b71867208b3d90dd]::fmt::rt::Argument>::fmt
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/core/src/fmt/rt.rs:152:76
+   5:        0x10bd76cf0 - core[b71867208b3d90dd]::fmt::write
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/core/src/fmt/mod.rs:1687:22
+   6:        0x10bd651c0 - std[55c15c20934149c]::io::default_write_fmt::<std[55c15c20934149c]::sys::stdio::unix::Stderr>
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/io/mod.rs:622:11
+   7:        0x10bd651c0 - <std[55c15c20934149c]::sys::stdio::unix::Stderr as std[55c15c20934149c]::io::Write>::write_fmt
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/io/mod.rs:1977:13
+   8:        0x10bd3e0a4 - <std[55c15c20934149c]::sys::backtrace::BacktraceLock>::print
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/sys/backtrace.rs:47:25
+   9:        0x10bd3e0a4 - std[55c15c20934149c]::panicking::default_hook::{closure#0}
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/panicking.rs:292:27
+  10:        0x10bd54eac - std[55c15c20934149c]::panicking::default_hook
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/panicking.rs:319:9
+  11:        0x10bd55290 - std[55c15c20934149c]::panicking::panic_with_hook
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/panicking.rs:825:13
+  12:        0x10bd3e138 - std[55c15c20934149c]::panicking::panic_handler::{closure#0}
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/panicking.rs:698:13
+  13:        0x10bd34a68 - std[55c15c20934149c]::sys::backtrace::__rust_end_short_backtrace::<std[55c15c20934149c]::panicking::panic_handler::{closure#0}, !>
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/sys/backtrace.rs:182:18
+  14:        0x10bd3ef2c - __rustc[7bafd613781bcba]::rust_begin_unwind
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/panicking.rs:689:5
+  15:        0x10bd775b8 - core[b71867208b3d90dd]::panicking::panic_fmt
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/core/src/panicking.rs:80:14
+  16:        0x10bd7735c - core[b71867208b3d90dd]::result::unwrap_failed
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/core/src/result.rs:1867:5
+  17:        0x10468a668 - <core[b71867208b3d90dd]::result::Result<u64, kona_derive[251bc97a9e744d76]::errors::sources::BlobProviderError>>::expect
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/result.rs:1185:23
+  18:        0x104647c98 - <kona_providers_alloy[27ceae08d3b1ed8]::blobs::OnlineBlobProvider<kona_providers_alloy[27ceae08d3b1ed8]::beacon_client::OnlineBeaconClient>>::init::{closure#0}
+                               at /Users/leyton.taylor/.cargo/git/checkouts/optimism-852bcbde357560e3/484be19/rust/kona/crates/providers/providers-alloy/src/blobs.rs:67:14
+  19:        0x103bbfab4 - <kona_host[5612523efc6831e9]::single::cfg::SingleChainHost>::create_providers::{closure#0}
+                               at /Users/leyton.taylor/.cargo/git/checkouts/optimism-852bcbde357560e3/484be19/rust/kona/bin/host/src/single/cfg.rs:280:10
+  20:        0x103bbe240 - <kona_host[5612523efc6831e9]::single::cfg::SingleChainHost>::start_server::<kona_preimage[4413211c16b07727]::native_channel::NativeChannel>::{closure#0}
+                               at /Users/leyton.taylor/.cargo/git/checkouts/optimism-852bcbde357560e3/484be19/rust/kona/bin/host/src/single/cfg.rs:185:53
+  21:        0x104b4bcd4 - world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}
+                               at /Users/leyton.taylor/work/world-chain/proofs/succinct/utils/host/src/online.rs:298:71
+  22:        0x104c3ca0c - <core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>> as core[b71867208b3d90dd]::future::future::Future>::poll
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/future/future.rs:133:9
+  23:        0x10475af60 - <tokio[6096b32e12b19689]::runtime::park::CachedParkThread>::block_on::<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>::{closure#0}
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/park.rs:284:71
+  24:        0x10474ea80 - tokio[6096b32e12b19689]::task::coop::with_budget::<core[b71867208b3d90dd]::task::poll::Poll<core[b71867208b3d90dd]::result::Result<world_chain_proof_core[618d524427fb15b]::witness::WorldRangeWitnessData, anyhow[ec1fe7d5ce58b692]::Error>>, <tokio[6096b32e12b19689]::runtime::park::CachedParkThread>::block_on<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>::{closure#0}>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/task/coop/mod.rs:167:5
+  25:        0x10474ea80 - tokio[6096b32e12b19689]::task::coop::budget::<core[b71867208b3d90dd]::task::poll::Poll<core[b71867208b3d90dd]::result::Result<world_chain_proof_core[618d524427fb15b]::witness::WorldRangeWitnessData, anyhow[ec1fe7d5ce58b692]::Error>>, <tokio[6096b32e12b19689]::runtime::park::CachedParkThread>::block_on<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>::{closure#0}>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/task/coop/mod.rs:133:5
+  26:        0x10474ea80 - <tokio[6096b32e12b19689]::runtime::park::CachedParkThread>::block_on::<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/park.rs:284:31
+  27:        0x10475feac - <tokio[6096b32e12b19689]::runtime::context::blocking::BlockingRegionGuard>::block_on::<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/context/blocking.rs:66:14
+  28:        0x103c8d2fc - <tokio[6096b32e12b19689]::runtime::scheduler::multi_thread::MultiThread>::block_on::<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>::{closure#0}
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/scheduler/multi_thread/mod.rs:92:22
+  29:        0x104a61ba8 - tokio[6096b32e12b19689]::runtime::context::runtime::enter_runtime::<<tokio[6096b32e12b19689]::runtime::scheduler::multi_thread::MultiThread>::block_on<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>::{closure#0}, core[b71867208b3d90dd]::result::Result<world_chain_proof_core[618d524427fb15b]::witness::WorldRangeWitnessData, anyhow[ec1fe7d5ce58b692]::Error>>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/context/runtime.rs:65:16
+  30:        0x103c86d74 - <tokio[6096b32e12b19689]::runtime::scheduler::multi_thread::MultiThread>::block_on::<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/scheduler/multi_thread/mod.rs:91:9
+  31:        0x104d9beb8 - <tokio[6096b32e12b19689]::runtime::runtime::Runtime>::block_on_inner::<core[b71867208b3d90dd]::pin::Pin<alloc[58d1d8d55be567ee]::boxed::Box<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>>>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/runtime.rs:373:50
+  32:        0x104d9e5d8 - <tokio[6096b32e12b19689]::runtime::runtime::Runtime>::block_on::<world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::collect_world_range_witness::{closure#0}>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/runtime.rs:343:18
+  33:        0x103bf932c - world_chain_proof_succinct_host_utils[47cfad034ce67171]::online::build_range_input
+                               at /Users/leyton.taylor/work/world-chain/proofs/succinct/utils/host/src/online.rs:269:51
+  34:        0x1023f3d34 - world_chain_proof_succinct_host_utils[47cfad034ce67171]::validity::prove_validity::<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>
+                               at /Users/leyton.taylor/work/world-chain/proofs/succinct/utils/host/src/validity.rs:101:21
+  35:        0x1024e0350 - <world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver> as world_chain_proof_worker[3abf2fe7ddbf72b4]::backend::ProofJobBackend>::prove
+                               at /Users/leyton.taylor/work/world-chain/proofs/sp1-worker/src/backend.rs:69:24
+  36:        0x10261fee8 - world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job::<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}::{closure#0}
+                               at /Users/leyton.taylor/work/world-chain/proofs/worker/src/worker.rs:270:78
+  37:        0x1034cbc74 - <world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}::{closure#0} as core[b71867208b3d90dd]::ops::function::FnOnce<()>>::call_once
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  38:        0x1021bcca4 - <core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}::{closure#0}> as core[b71867208b3d90dd]::ops::function::FnOnce<()>>::call_once
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/panic/unwind_safe.rs:275:9
+  39:        0x102973064 - std[55c15c20934149c]::panicking::catch_unwind::do_call::<core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}::{closure#0}>, core[b71867208b3d90dd]::result::Result<world_chain_prover_service[9cf5d5e078e23852]::types::ProofData, anyhow[ec1fe7d5ce58b692]::Error>>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  40:        0x1032fdd74 - ___rust_try
+  41:        0x1032c9178 - std[55c15c20934149c]::panicking::catch_unwind::<core[b71867208b3d90dd]::result::Result<world_chain_prover_service[9cf5d5e078e23852]::types::ProofData, anyhow[ec1fe7d5ce58b692]::Error>, core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}::{closure#0}>>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  42:        0x1032c9178 - std[55c15c20934149c]::panic::catch_unwind::<core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}::{closure#0}>, core[b71867208b3d90dd]::result::Result<world_chain_prover_service[9cf5d5e078e23852]::types::ProofData, anyhow[ec1fe7d5ce58b692]::Error>>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panic.rs:359:14
+  43:        0x10261f420 - world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job::<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}
+                               at /Users/leyton.taylor/work/world-chain/proofs/worker/src/worker.rs:270:13
+  44:        0x102f68f98 - <tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}> as core[b71867208b3d90dd]::future::future::Future>::poll
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/blocking/task.rs:42:21
+  45:        0x1030745f4 - <tokio[6096b32e12b19689]::runtime::task::core::Core<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>>::poll::{closure#0}
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/core.rs:375:24
+  46:        0x1031d0dc8 - <tokio[6096b32e12b19689]::loom::std::unsafe_cell::UnsafeCell<tokio[6096b32e12b19689]::runtime::task::core::Stage<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>>>>::with_mut::<core[b71867208b3d90dd]::task::poll::Poll<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::FinishedJob>, <tokio[6096b32e12b19689]::runtime::task::core::Core<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>>::poll::{closure#0}>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/loom/std/unsafe_cell.rs:16:9
+  47:        0x1031d0dc8 - <tokio[6096b32e12b19689]::runtime::task::core::Core<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>>::poll
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/core.rs:364:30
+  48:        0x102c93ed8 - tokio[6096b32e12b19689]::runtime::task::harness::poll_future::<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>::{closure#0}
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/harness.rs:535:30
+  49:        0x1021b90dc - <core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<tokio[6096b32e12b19689]::runtime::task::harness::poll_future<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>::{closure#0}> as core[b71867208b3d90dd]::ops::function::FnOnce<()>>::call_once
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/panic/unwind_safe.rs:275:9
+  50:        0x10296d518 - std[55c15c20934149c]::panicking::catch_unwind::do_call::<core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<tokio[6096b32e12b19689]::runtime::task::harness::poll_future<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>::{closure#0}>, core[b71867208b3d90dd]::task::poll::Poll<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::FinishedJob>>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  51:        0x1032fdd74 - ___rust_try
+  52:        0x1032bb21c - std[55c15c20934149c]::panicking::catch_unwind::<core[b71867208b3d90dd]::task::poll::Poll<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::FinishedJob>, core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<tokio[6096b32e12b19689]::runtime::task::harness::poll_future<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>::{closure#0}>>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  53:        0x1032bb21c - std[55c15c20934149c]::panic::catch_unwind::<core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<tokio[6096b32e12b19689]::runtime::task::harness::poll_future<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>::{closure#0}>, core[b71867208b3d90dd]::task::poll::Poll<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::FinishedJob>>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panic.rs:359:14
+  54:        0x102c5adb8 - tokio[6096b32e12b19689]::runtime::task::harness::poll_future::<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/harness.rs:523:18
+  55:        0x102de3e00 - <tokio[6096b32e12b19689]::runtime::task::harness::Harness<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>>::poll_inner
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/harness.rs:210:27
+  56:        0x102de40b0 - <tokio[6096b32e12b19689]::runtime::task::harness::Harness<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>>::poll
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/harness.rs:155:20
+  57:        0x1035c405c - tokio[6096b32e12b19689]::runtime::task::raw::poll::<tokio[6096b32e12b19689]::runtime::blocking::task::BlockingTask<world_chain_proof_worker[3abf2fe7ddbf72b4]::worker::spawn_job<world_chain_sp1_worker[55e24e1f50d7003f]::backend::Sp1Backend<world_chain_proof_succinct_host_utils[47cfad034ce67171]::env_prover::EnvSuccinctProver>>::{closure#1}>, tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/raw.rs:337:13
+  58:        0x10b47af0c - <tokio[6096b32e12b19689]::runtime::task::raw::RawTask>::poll
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/raw.rs:267:18
+  59:        0x10b472c90 - <tokio[6096b32e12b19689]::runtime::task::UnownedTask<tokio[6096b32e12b19689]::runtime::blocking::schedule::BlockingSchedule>>::run
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/task/mod.rs:547:13
+  60:        0x10b48dd70 - <tokio[6096b32e12b19689]::runtime::blocking::pool::Task>::run
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/blocking/pool.rs:161:19
+  61:        0x10b48f250 - <tokio[6096b32e12b19689]::runtime::blocking::pool::Inner>::run
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/blocking/pool.rs:518:22
+  62:        0x10b48d378 - <tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}
+                               at /Users/leyton.taylor/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio-1.52.3/src/runtime/blocking/pool.rs:474:47
+  63:        0x10b4afbd4 - std[55c15c20934149c]::sys::backtrace::__rust_begin_short_backtrace::<<tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:166:18
+  64:        0x10b4d3038 - std[55c15c20934149c]::thread::lifecycle::spawn_unchecked::<<tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1}::{closure#0}
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/thread/lifecycle.rs:70:13
+  65:        0x10b4a4e0c - <core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<std[55c15c20934149c]::thread::lifecycle::spawn_unchecked<<tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1}::{closure#0}> as core[b71867208b3d90dd]::ops::function::FnOnce<()>>::call_once
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/panic/unwind_safe.rs:275:9
+  66:        0x10b46524c - std[55c15c20934149c]::panicking::catch_unwind::do_call::<core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<std[55c15c20934149c]::thread::lifecycle::spawn_unchecked<<tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1}::{closure#0}>, ()>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  67:        0x10b4d5b78 - ___rust_try
+  68:        0x10b4d2bdc - std[55c15c20934149c]::panicking::catch_unwind::<(), core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<std[55c15c20934149c]::thread::lifecycle::spawn_unchecked<<tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1}::{closure#0}>>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  69:        0x10b4d2bdc - std[55c15c20934149c]::panic::catch_unwind::<core[b71867208b3d90dd]::panic::unwind_safe::AssertUnwindSafe<std[55c15c20934149c]::thread::lifecycle::spawn_unchecked<<tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1}::{closure#0}>, ()>
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/panic.rs:359:14
+  70:        0x10b4d2bdc - std[55c15c20934149c]::thread::lifecycle::spawn_unchecked::<<tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1}
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std/src/thread/lifecycle.rs:68:26
+  71:        0x10b4b019c - <std[55c15c20934149c]::thread::lifecycle::spawn_unchecked<<tokio[6096b32e12b19689]::runtime::blocking::pool::Spawner>::spawn_thread::{closure#0}, ()>::{closure#1} as core[b71867208b3d90dd]::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+                               at /Users/leyton.taylor/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  72:        0x10bd5c244 - <alloc[58d1d8d55be567ee]::boxed::Box<dyn core[b71867208b3d90dd]::ops::function::FnOnce<(), Output = ()> + core[b71867208b3d90dd]::marker::Send> as core[b71867208b3d90dd]::ops::function::FnOnce<()>>::call_once
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/alloc/src/boxed.rs:2277:9
+  73:        0x10bd5c244 - <std[55c15c20934149c]::sys::thread::unix::Thread>::new::thread_start
+                               at /rustc/d1fc603d1788cc3c0eebdb94a45a61c4f33b1674/library/std/src/sys/thread/unix.rs:118:17
+  74:        0x188975c58 - __pthread_cond_wait
+2026-06-15T18:02:36.953248Z  WARN proof_job{id=0x6c56f27fad96f8223c44c03247a83b1efaafaef67f0b46de87f6f5785d4d39f2 lane=sp1}: world_chain_proof_worker::worker: proving failed reason=proving panicked: Failed to load slot interval from beacon client: Backend("HTTP request failed: error decoding response body")
+2026-06-15T18:02:36.953576Z  WARN world_chain_prover_service::service: proof job failed proof_id=0x6c56f27fad96f8223c44c03247a83b1efaafaef67f0b46de87f6f5785d4d39f2 attempts=3 reason=proving panicked: Failed to load slot interval from beacon client: Backend("HTTP request failed: error decoding response body")
+2026-06-15T18:02:37.219628Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:38.219577Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:38.822559Z ERROR world_chain_defender::defender: proving permanently failed; abandoning lane game=0xdE8974b2bFF0c20f648669Bc0899E23960EEf445 lane=ValidityProof attempts=3
+2026-06-15T18:02:38.822624Z ERROR world_chain_defender::defender: defense abandoned without proving all lanes game=0xdE8974b2bFF0c20f648669Bc0899E23960EEf445
+2026-06-15T18:02:39.220722Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:40.222450Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:41.305887Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:42.218314Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:42.794273Z  INFO world_chain_tests::it::defender_e2e: waiting for game state game=0xdE8974b2bFF0c20f648669Bc0899E23960EEf445 state=2 target=3 proof_bitmap=0 elapsed_secs=50
+2026-06-15T18:02:43.224013Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:44.223258Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:45.219683Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:46.220566Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:47.226190Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:48.222093Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:49.217762Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:50.220444Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:51.303868Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:52.218087Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:52.802183Z  INFO world_chain_tests::it::defender_e2e: waiting for game state game=0xdE8974b2bFF0c20f648669Bc0899E23960EEf445 state=2 target=3 proof_bitmap=0 elapsed_secs=60
+2026-06-15T18:02:53.223617Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:54.220331Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:55.221834Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:56.218605Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:57.220285Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:58.219092Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:02:59.219847Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:00.222181Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:01.218317Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:02.217664Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:02.807985Z  INFO world_chain_tests::it::defender_e2e: waiting for game state game=0xdE8974b2bFF0c20f648669Bc0899E23960EEf445 state=2 target=3 proof_bitmap=0 elapsed_secs=70
+2026-06-15T18:03:03.223749Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:04.219821Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:05.224077Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:06.224040Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:07.222094Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:08.217666Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:09.219367Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:10.217632Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:11.220169Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:12.217239Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:12.811597Z  INFO world_chain_tests::it::defender_e2e: waiting for game state game=0xdE8974b2bFF0c20f648669Bc0899E23960EEf445 state=2 target=3 proof_bitmap=0 elapsed_secs=80
+2026-06-15T18:03:13.218979Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:14.223635Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:15.220069Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:16.219634Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:17.219592Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:18.216351Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:19.221871Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:20.223674Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:21.217325Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:22.221343Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:22.816204Z  INFO world_chain_tests::it::defender_e2e: waiting for game state game=0xdE8974b2bFF0c20f648669Bc0899E23960EEf445 state=2 target=3 proof_bitmap=0 elapsed_secs=90
+2026-06-15T18:03:23.226294Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:24.218909Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:25.220418Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:26.220566Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:27.220956Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:28.223808Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:29.216264Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:30.219109Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:31.297148Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:32.221178Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:32.818365Z  INFO world_chain_tests::it::defender_e2e: waiting for game state game=0xdE8974b2bFF0c20f648669Bc0899E23960EEf445 state=2 target=3 proof_bitmap=0 elapsed_secs=100
+2026-06-15T18:03:33.219381Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:34.221583Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:35.223716Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:36.218500Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:37.221400Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:38.220244Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:39.221248Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:40.217196Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:41.293822Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:42.217646Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:42.820723Z  INFO world_chain_tests::it::defender_e2e: waiting for game state game=0xdE8974b2bFF0c20f648669Bc0899E23960EEf445 state=2 target=3 proof_bitmap=0 elapsed_secs=110
+2026-06-15T18:03:43.224441Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:44.220924Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:45.222004Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:46.217486Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:47.223137Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:48.223917Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:49.225900Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:50.222309Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:51.300725Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:52.218800Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:52.823614Z  INFO world_chain_tests::it::defender_e2e: waiting for game state game=0xdE8974b2bFF0c20f648669Bc0899E23960EEf445 state=2 target=3 proof_bitmap=0 elapsed_secs=120
+2026-06-15T18:03:53.222368Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:54.218118Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:55.228298Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher
+2026-06-15T18:03:56.218412Z  WARN op_batcher: msg="publishSignal channel is full, skipping signal" process=op-batcher

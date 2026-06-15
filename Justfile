@@ -30,6 +30,20 @@ test-dev *args='':
 test-verbose *args='':
     RUST_LOG="info,flashblocks=trace,world_chain=trace,bal_executor=trace,payload_builder=trace,engine::tree=trace" cargo nextest run --workspace $@
 
+# Heavy: needs Docker, the SP1 toolchain, and ~32-128GB RAM for `cpu`. Pass `network`
+# (with SP1_PRIVATE_KEY set) to offload proving. Logs default to the defender/proving
+# filter; export RUST_LOG to override (e.g. `RUST_LOG=$PROVING_LOG just defender-e2e`).
+# Run the defender SP1 Groth16 e2e test with real proving (prover=cpu|network).
+defender-e2e prover='cpu' *args='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # The devnet spawns the compiled world-chain node as a subprocess, so build it first.
+    cargo build -p world-chain
+    default_log="warn,world_chain_tests=info,world_chain_defender=trace,world_chain_challenger=trace,world_chain_prover_service=trace,world_chain_sp1_worker=trace,world_chain_proof_worker=debug,world_chain_devnet=info,op_batcher=error"
+    RUST_LOG="${RUST_LOG:-$default_log}" DEVNET_SP1_WORKER_PROVER="{{prover}}" \
+        cargo test -p world-chain-tests -- --ignored --nocapture \
+        defender_finalizes_challenged_game_with_sp1_proof {{args}}
+
 clippy:
     cargo +nightly clippy --workspace --all-targets --all-features
 

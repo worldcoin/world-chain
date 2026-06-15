@@ -625,6 +625,7 @@ impl FullStackWorldDevnet {
                         &artifacts.rollup_path,
                         deployment,
                         kind,
+                        l1_slot_duration_secs,
                     )
                     .await?;
                     (Some(service), Some(worker), Some(url))
@@ -2797,8 +2798,12 @@ async fn start_sp1_worker(
     rollup_path: &Path,
     deployment: &WorldProofSystemDeployment,
     kind: Sp1ProverKind,
+    l1_slot_duration_secs: u64,
 ) -> Result<Sp1WorkerTask> {
     let rollup_config: Value = read_json(rollup_path)?;
+    // The devnet L1 is anvil, which serves `/eth/v1/beacon/genesis` but not
+    // `/eth/v1/config/spec`; without this override kona's blob-provider init panics fetching the
+    // slot interval. Mirrors the op-node `--l1-slot-duration-override` flag.
     let host = OnlineHostConfig::from_rollup_config_value(
         &rollup_config,
         l1_rpc_url.to_string(),
@@ -2807,7 +2812,8 @@ async fn start_sp1_worker(
         Some(rollup_path.to_path_buf()),
         Duration::from_secs(900),
     )
-    .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?;
+    .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?
+    .with_l1_slot_duration_override(l1_slot_duration_secs);
 
     let range_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-range-ethereum");
     let agg_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-aggregation");

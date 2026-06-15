@@ -18639,6 +18639,8 @@ dependencies = [
  "kona-host",
  "kona-preimage",
  "kona-proof",
+ "kona-providers-alloy",
+ "op-alloy-network",
  "reqwest 0.12.28",
  "rkyv",
  "serde",

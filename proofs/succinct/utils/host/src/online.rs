@@ -15,12 +15,21 @@ use std::{
 
 use alloy_primitives::{Address, B256, address, keccak256};
 use anyhow::{Context, anyhow, bail};
-use kona_host::{DataFormat, single::SingleChainHost};
-use kona_preimage::{BidirectionalChannel, HintWriter, NativeChannel, OracleReader};
-use kona_proof::{CachingOracle, l1::OracleBlobProvider};
+use kona_host::{
+    DataFormat, OnlineHostBackend, PreimageServer,
+    eth::rpc_provider,
+    single::{SingleChainHintHandler, SingleChainHost, SingleChainHostError, SingleChainProviders},
+};
+use kona_preimage::{
+    BidirectionalChannel, HintReader, HintWriter, NativeChannel, OracleReader, OracleServer,
+};
+use kona_proof::{CachingOracle, HintType, l1::OracleBlobProvider};
+use kona_providers_alloy::{OnlineBeaconClient, OnlineBlobProvider};
+use op_alloy_network::Optimism;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
+use tokio::task::JoinHandle;
 use world_chain_proof_core::{
     range::{WorldRangeHardforkConfig, WorldRangeSpecId},
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
@@ -60,6 +69,11 @@ pub struct OnlineHostConfig {
     pub rollup_config_path: Option<PathBuf>,
     /// Maximum time to spend generating one witness.
     pub witness_timeout: Duration,
+    /// Overrides the L1 slot duration (seconds) used by the kona blob provider's beacon client.
+    /// Set when the L1 beacon endpoint does not serve `/eth/v1/config/spec` (e.g. the
+    /// anvil-backed devnet, which serves `/eth/v1/beacon/genesis` but not the spec endpoint),
+    /// mirroring op-node's `--l1-slot-duration-override`. `None` queries the beacon for it.
+    pub l1_slot_duration_override: Option<u64>,
 }
 
 impl OnlineHostConfig {
@@ -87,7 +101,15 @@ impl OnlineHostConfig {
             l2_chain_id: None,
             rollup_config_path,
             witness_timeout,
+            l1_slot_duration_override: None,
         })
+    }
+
+    /// Sets the L1 slot-duration override for the beacon client. See
+    /// [`OnlineHostConfig::l1_slot_duration_override`].
+    pub fn with_l1_slot_duration_override(mut self, l1_slot_duration_secs: u64) -> Self {
+        self.l1_slot_duration_override = Some(l1_slot_duration_secs);
+        self
     }
 }
 
@@ -268,6 +290,7 @@ pub fn build_range_input(
 
     let witness = tokio::runtime::Runtime::new()?.block_on(collect_world_range_witness(
         host,
+        config.l1_slot_duration_override,
         config.schedule.clone(),
         config.witness_timeout,
     ))?;
@@ -290,12 +313,14 @@ pub fn build_range_input(
 
 async fn collect_world_range_witness(
     host: SingleChainHost,
+    l1_slot_duration_override: Option<u64>,
     schedule: WorldRangeHardforkConfig,
     timeout: Duration,
 ) -> anyhow::Result<WorldRangeWitnessData> {
     let preimage = BidirectionalChannel::new()?;
     let hint = BidirectionalChannel::new()?;
-    let mut server_task = host.start_server(hint.host, preimage.host).await?;
+    let mut server_task =
+        start_range_server(&host, l1_slot_duration_override, hint.host, preimage.host).await?;
 
     let witness = collect_witness_from_channels(preimage.client, hint.client, schedule);
     tokio::pin!(witness);
@@ -323,6 +348,63 @@ async fn collect_world_range_witness(
         server_task.abort();
     }
     result
+}
+
+/// Starts the kona single-chain preimage server for witness collection.
+///
+/// Mirrors [`SingleChainHost::start_server`], but when `l1_slot_duration_override` is set it
+/// builds the blob provider's beacon client with that override so init does not query the L1
+/// beacon's `/eth/v1/config/spec` endpoint. The anvil-backed devnet L1 serves
+/// `/eth/v1/beacon/genesis` but not `config/spec`, so kona's eager `OnlineBlobProvider::init`
+/// panics; op-node copes the same way via `--l1-slot-duration-override`. Blobs are never
+/// fetched under calldata DA, so the override value only needs to be nonzero.
+///
+/// With no override (production, against a real CL), this defers to kona's own server setup.
+async fn start_range_server(
+    host: &SingleChainHost,
+    l1_slot_duration_override: Option<u64>,
+    hint: NativeChannel,
+    preimage: NativeChannel,
+) -> anyhow::Result<JoinHandle<Result<(), SingleChainHostError>>> {
+    let Some(slot_duration) = l1_slot_duration_override else {
+        return Ok(host.start_server(hint, preimage).await?);
+    };
+
+    let kv_store = host.create_key_value_store()?;
+    let l1_node = host
+        .l1_node_address
+        .clone()
+        .ok_or_else(|| anyhow!("L1 node address must be set"))?;
+    let l1_beacon = host
+        .l1_beacon_address
+        .clone()
+        .ok_or_else(|| anyhow!("L1 beacon address must be set"))?;
+    let l2_node = host
+        .l2_node_address
+        .clone()
+        .ok_or_else(|| anyhow!("L2 node address must be set"))?;
+
+    let beacon =
+        OnlineBeaconClient::new_http(l1_beacon).with_l1_slot_duration_override(slot_duration);
+    let providers = SingleChainProviders {
+        l1: rpc_provider(&l1_node).await,
+        blobs: OnlineBlobProvider::init(beacon).await,
+        l2: rpc_provider::<Optimism>(&l2_node).await,
+    };
+
+    let backend = OnlineHostBackend::new(host.clone(), kv_store, providers, SingleChainHintHandler)
+        .with_proactive_hint(HintType::L2PayloadWitness);
+
+    Ok(tokio::spawn(async move {
+        PreimageServer::new(
+            OracleServer::new(preimage),
+            HintReader::new(hint),
+            Arc::new(backend),
+        )
+        .start()
+        .await
+        .map_err(SingleChainHostError::from)
+    }))
 }
 
 async fn collect_witness_from_channels(
