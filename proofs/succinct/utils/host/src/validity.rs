@@ -4,6 +4,8 @@
 //! a [`WorldSuccinctProver`] backend, and aggregates the results into a single
 //! [`AggregationProofArtifact`] whose outputs commit to the claimed output root.
 
+use std::time::Instant;
+
 use alloy_primitives::{Address, B256};
 use anyhow::{Context, bail};
 use reqwest::blocking::Client;
@@ -98,6 +100,7 @@ where
             end = sub_range.end,
             "building range witness"
         );
+        let witness_started = Instant::now();
         let input = build_range_input(
             host,
             RangeWitnessRequest {
@@ -107,15 +110,25 @@ where
                 allow_unfinalized: request.allow_unfinalized,
             },
         )?;
+        let witness_elapsed = witness_started.elapsed();
 
         tracing::info!(
             start = sub_range.start + 1,
             end = sub_range.end,
+            witness_secs = witness_elapsed.as_secs_f64(),
             "proving range"
         );
         let range_request = RangeProofRequest::from_witness_data(&input.witness, None)
             .context("failed to serialize range witness")?;
+        let prove_started = Instant::now();
         let artifact = prover.prove_range(range_request).map_err(Into::into)?;
+        tracing::info!(
+            start = sub_range.start + 1,
+            end = sub_range.end,
+            witness_secs = witness_elapsed.as_secs_f64(),
+            prove_secs = prove_started.elapsed().as_secs_f64(),
+            "range proof complete"
+        );
 
         if artifact.boot_info.l2PostRoot != input.metadata.l2_post_root {
             bail!(
@@ -135,7 +148,8 @@ where
         serde_cbor::to_vec(&vec![l1_header]).context("CBOR-encoding L1 header failed")?;
 
     tracing::info!(ranges = ranges.len(), "aggregating range proofs");
-    prover
+    let aggregation_started = Instant::now();
+    let result = prover
         .prove_aggregation(AggregationProofRequest {
             inputs: AggregationInputs {
                 boot_infos,
@@ -146,5 +160,11 @@ where
             l1_headers_cbor,
             range_proofs,
         })
-        .map_err(Into::into)
+        .map_err(Into::into);
+    tracing::info!(
+        ranges = ranges.len(),
+        aggregation_secs = aggregation_started.elapsed().as_secs_f64(),
+        "aggregation proof complete"
+    );
+    result
 }

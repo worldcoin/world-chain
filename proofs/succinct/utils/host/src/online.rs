@@ -10,7 +10,7 @@
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use alloy_primitives::{Address, B256, address, keccak256};
@@ -412,6 +412,7 @@ async fn collect_witness_from_channels(
     hint_chan: NativeChannel,
     schedule: WorldRangeHardforkConfig,
 ) -> anyhow::Result<WorldRangeWitnessData> {
+    let collection_started = Instant::now();
     let preimage_witness_store = Arc::new(Mutex::new(PreimageStore::default()));
     let blob_data = Arc::new(Mutex::new(BlobData::default()));
 
@@ -470,6 +471,16 @@ async fn collect_witness_from_channels(
         .lock()
         .map_err(|_| anyhow!("blob data mutex poisoned"))?
         .clone();
+
+    let preimage_count = preimages.preimage_map.len();
+    let preimage_bytes: usize = preimages.preimage_map.values().map(Vec::len).sum();
+    tracing::info!(
+        preimages = preimage_count,
+        preimage_bytes,
+        blobs = blobs.blobs.len(),
+        elapsed_secs = collection_started.elapsed().as_secs_f64(),
+        "witness collection complete"
+    );
 
     Ok(WorldRangeWitnessData::from_parts_with_world_config(
         preimages, blobs, schedule,
