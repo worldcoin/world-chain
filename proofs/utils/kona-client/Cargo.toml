@@ -1,5 +1,5 @@
 [package]
-name = "world-chain-proof-kona-utils"
+name = "world-chain-proof-kona-client-utils"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,20 +10,6 @@ repository.workspace = true
 [lints]
 workspace = true
 
-[features]
-# Enables host-side witness collection (OnlineBlobStore, PreimageWitnessCollector) and the
-# online RPC witness builder (OnlineHostConfig, build_range_input, build_online_config).
-# Requires c-kzg (C FFI) and network I/O — do NOT enable in SP1 guest programs.
-host = [
-    "dep:c-kzg", "alloy-eips/kzg",
-    "dep:hex",
-    "dep:kona-host",
-    "dep:reqwest",
-    "dep:serde_json",
-    "dep:tokio",
-    "dep:world-chain-proof-protocol",
-]
-
 [dependencies]
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
@@ -33,10 +19,7 @@ alloy-primitives = { workspace = true, features = ["serde"] }
 alloy-rlp.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
-c-kzg = { workspace = true, optional = true }
-hex = { workspace = true, optional = true }
 kona-derive.workspace = true
-kona-host = { workspace = true, features = ["single"], optional = true }
 kona-driver.workspace = true
 kona-executor.workspace = true
 kona-genesis.workspace = true
@@ -47,12 +30,8 @@ kzg-rs.workspace = true
 op-alloy-consensus.workspace = true
 op-revm.workspace = true
 revm = { version = "38.0.0", default-features = false }
-reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"], optional = true }
 revm-precompile = { version = "34.0.0", default-features = false }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true, optional = true }
 spin.workspace = true
-tokio = { workspace = true, optional = true }
 tracing.workspace = true
 world-chain-proof-core.workspace = true
-world-chain-proof-protocol = { workspace = true, optional = true }

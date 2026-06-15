@@ -1,7 +1,5 @@
 pub mod client;
 pub mod executor;
-#[cfg(feature = "host")]
-pub mod online;
 pub mod pipeline;
 pub mod precompiles;
 pub mod range;
