@@ -10,7 +10,7 @@ repository.workspace = true
 kona-proof.workspace = true
 sp1-zkvm.workspace = true
 world-chain-proof-core.workspace = true
-world-chain-proof-kona-utils.workspace = true
+world-chain-proof-kona-client-utils.workspace = true
 
 [features]
 tracing-subscriber = ["dep:anyhow", "dep:tracing", "dep:tracing-subscriber"]

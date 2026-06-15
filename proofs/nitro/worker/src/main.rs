@@ -44,7 +44,7 @@ use world_chain_proof_nitro::host::{EnclaveEndpoint, NitroProver};
 #[cfg(target_os = "linux")]
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
 #[cfg(target_os = "linux")]
-use world_chain_proof_kona_utils::online::{
+use world_chain_proof_kona_host_utils::online::{
     OnlineHostConfig, RangeWitnessRequest, build_online_config, build_range_input,
 };
 #[cfg(target_os = "linux")]
