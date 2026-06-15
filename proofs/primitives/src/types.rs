@@ -1,6 +1,7 @@
-use alloy_primitives::{Address, B256, U256, keccak256};
+use alloy_primitives::{Address, B256, BlockNumber, U256, keccak256};
 use alloy_sol_types::SolValue;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 /// Number of distinct lanes required by WIP-1006 for challenged finality.
 pub const PROOF_THRESHOLD: u8 = 2;
@@ -10,6 +11,51 @@ pub const PROOF_LANE_COUNT: u8 = 3;
 
 /// Version of the World Chain proof-domain encoding implemented here.
 pub const PROOF_SYSTEM_VERSION: u64 = 1;
+
+/// The `GameCreated` event.
+#[derive(Debug, Clone, Copy)]
+pub struct GameCreated {
+    pub proposal_key: B256,
+    pub root_id: B256,
+    pub game: Address,
+    pub proposer: Address,
+    pub root_claim: B256,
+    pub l2_block_number: BlockNumber,
+    pub parent_ref: Address,
+    pub l1_origin_hash: B256,
+    pub l1_origin_number: BlockNumber,
+}
+
+/// A game root state.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RootState {
+    None,
+    Proposed,
+    Challenged,
+    Finalized,
+    Invalidated,
+}
+
+#[derive(Debug, Error)]
+pub enum RootStateError {
+    #[error("Invalid root state: {0}")]
+    InvalieRootState(u8),
+}
+
+impl TryFrom<u8> for RootState {
+    type Error = RootStateError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(RootState::None),
+            1 => Ok(RootState::Proposed),
+            2 => Ok(RootState::Challenged),
+            3 => Ok(RootState::Finalized),
+            4 => Ok(RootState::Invalidated),
+            _ => Err(RootStateError::InvalieRootState(value)),
+        }
+    }
+}
 
 /// Domain constants committed into every root id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
