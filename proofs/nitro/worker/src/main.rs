@@ -23,144 +23,35 @@
 //! Uses the generic `ProofWorker` from `world-chain-proof-worker` (introduced in the
 //! sp1-worker PR) for the lease→prove→submit loop, and the real `world-chain-prover-service`
 //! types for the RPC client and proof data types.
+//!
+//! # Devnet mode
+//!
+//! Passing `--dev` (or setting `NITRO_WORKER_DEV=1`) switches the worker into a permissive
+//! dev mode used by the native World Chain devnet:
+//!
+//! - PCR0/PCR1/PCR2 default to [`ExpectedPcrs::PLACEHOLDER`] (all zeros) when none are
+//!   supplied, which tells the host-side verifier to skip attestation/signature checks.
+//! - All other behaviour (witness generation, vsock framing, submission to the
+//!   `prover-service`) is identical to production.
+//!
+//! See `proofs/nitro/worker/README.md` for a full devnet runbook.
 
 #[cfg(target_os = "linux")]
 mod inner {
     use std::{path::PathBuf, sync::Arc, time::Duration};
 
-    use alloy_primitives::{B256, Bytes};
-    use anyhow::{Context, Result, anyhow, bail};
+    use alloy_primitives::B256;
+    use anyhow::{Context, Result, bail};
     use clap::Parser;
     use tracing::{info, warn};
     use world_chain_chainspec::WorldChainSpec;
-    use world_chain_proof_kona_host_utils::online::{
-        OnlineHostConfig, RangeWitnessRequest, build_online_config, build_range_input,
+    use world_chain_nitro_worker::{
+        NitroBackend, NitroBackendConfig, ProofWorker, ProofWorkerConfig,
     };
-    use world_chain_proof_nitro::{
-        ExpectedPcrs, NitroRangeProofRequest,
-        host::{EnclaveEndpoint, NitroProver},
-    };
+    use world_chain_proof_kona_host_utils::online::build_online_config;
+    use world_chain_proof_nitro::ExpectedPcrs;
     use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
-    use world_chain_proof_worker::{ProofJobBackend, ProofWorker, ProofWorkerConfig};
-    use world_chain_prover_service::{
-        ProofBackend, ProofData, ProofRequest, RpcProverServiceClient,
-    };
-
-    // ──────────────────────────────────────────────────────────────────────────────────────
-    // NitroBackend — ProofJobBackend implementation for the Nitro TEE lane
-    // ──────────────────────────────────────────────────────────────────────────────────────
-
-    /// Configuration for [`NitroBackend`].
-    #[derive(Clone, Debug)]
-    struct NitroBackendConfig {
-        block_interval: u64,
-        online: OnlineHostConfig,
-        enclave_cid: u32,
-        enclave_port: u32,
-        expected_pcrs: ExpectedPcrs,
-    }
-
-    /// [`ProofJobBackend`] for the [`ProofBackend::Nitro`] lane: builds witnesses over RPC and
-    /// proves them inside a Nitro Enclave.
-    struct NitroBackend {
-        config: NitroBackendConfig,
-        /// Handle to the async runtime so we can call async enclave methods from `prove`.
-        rt_handle: tokio::runtime::Handle,
-    }
-
-    impl NitroBackend {
-        fn new(config: NitroBackendConfig, rt_handle: tokio::runtime::Handle) -> Self {
-            Self { config, rt_handle }
-        }
-    }
-
-    impl ProofJobBackend for NitroBackend {
-        fn lane(&self) -> ProofBackend {
-            ProofBackend::Nitro
-        }
-
-        fn prove(&self, request: &ProofRequest) -> anyhow::Result<ProofData> {
-            let start_block = request
-                .l2_block_number
-                .checked_sub(self.config.block_interval)
-                .ok_or_else(|| {
-                    anyhow!(
-                        "l2_block_number {} is below block_interval {}",
-                        request.l2_block_number,
-                        self.config.block_interval
-                    )
-                })?;
-
-            let endpoint =
-                EnclaveEndpoint::with_port(self.config.enclave_cid, self.config.enclave_port);
-            let prover = NitroProver::with_runtime(
-                endpoint,
-                self.config.expected_pcrs,
-                self.rt_handle.clone(),
-            );
-
-            let input = build_range_input(
-                &self.config.online,
-                RangeWitnessRequest {
-                    start_block,
-                    end_block: request.l2_block_number,
-                    l1_head: Some(request.l1_head),
-                    allow_unfinalized: false,
-                },
-            )
-            .context("witness generation failed")?;
-
-            let nitro_request = NitroRangeProofRequest::from_witness_data(&input.witness, None)
-                .context("witness serialize")?;
-
-            let artifact = self
-                .rt_handle
-                .block_on(prover.prove_range_async(nitro_request))
-                .context("nitro enclave proving failed")?;
-
-            if artifact.boot_info.l2PostRoot != request.root_claim {
-                bail!(
-                    "enclave post root {:?} != claimed root {:?}",
-                    artifact.boot_info.l2PostRoot,
-                    request.root_claim
-                );
-            }
-            if artifact.boot_info.l2BlockNumber != request.l2_block_number {
-                bail!(
-                    "enclave block number {} != claimed {}",
-                    artifact.boot_info.l2BlockNumber,
-                    request.l2_block_number
-                );
-            }
-            if artifact.boot_info.l1Head != request.l1_head {
-                bail!(
-                    "enclave l1 head {:?} != claimed {:?}",
-                    artifact.boot_info.l1Head,
-                    request.l1_head
-                );
-            }
-            if artifact.boot_info.rollupConfigHash != self.config.online.rollup_config_hash {
-                bail!(
-                    "enclave rollup config hash {:?} != expected {:?}",
-                    artifact.boot_info.rollupConfigHash,
-                    self.config.online.rollup_config_hash
-                );
-            }
-
-            info!(
-                post_root = ?artifact.boot_info.l2PostRoot,
-                block = artifact.boot_info.l2BlockNumber,
-                l1_head = ?artifact.boot_info.l1Head,
-                rollup_config_hash = ?artifact.boot_info.rollupConfigHash,
-                "enclave attested range proof"
-            );
-
-            Ok(ProofData::Nitro {
-                attestation: Bytes::from(artifact.attestation_doc),
-                signature: Bytes::from(artifact.signature),
-            })
-        }
-    }
+    use world_chain_prover_service::RpcProverServiceClient;
 
     // ──────────────────────────────────────────────────────────────────────────────────────
     // CLI / config
@@ -250,6 +141,13 @@ mod inner {
         #[arg(long, env = "PCR2")]
         pcr2: Option<String>,
 
+        /// Run in devnet/development mode: when PCRs are not supplied, fall back to
+        /// placeholder zeros (which disables attestation/signature verification). This
+        /// flag is required for any production-style run that omits PCRs so the worker
+        /// never silently runs with a degraded trust model.
+        #[arg(long, env = "NITRO_WORKER_DEV")]
+        dev: bool,
+
         /// Seconds to sleep between job-queue polls when no work is available.
         #[arg(long, env = "POLL_INTERVAL_SECONDS", default_value_t = 10)]
         poll_interval_seconds: u64,
@@ -292,12 +190,14 @@ mod inner {
             cli.pcr0.as_deref(),
             cli.pcr1.as_deref(),
             cli.pcr2.as_deref(),
+            cli.dev,
         )?;
 
         info!(
             prover_service = %cli.prover_service_url,
             enclave_cid = cli.enclave_cid,
             block_interval = cli.block_interval,
+            dev = cli.dev,
             "nitro-worker starting"
         );
 
@@ -351,6 +251,7 @@ mod inner {
         pcr0: Option<&str>,
         pcr1: Option<&str>,
         pcr2: Option<&str>,
+        dev: bool,
     ) -> Result<ExpectedPcrs> {
         match (pcr0, pcr1, pcr2) {
             (Some(p0), Some(p1), Some(p2)) => Ok(ExpectedPcrs {
@@ -358,13 +259,20 @@ mod inner {
                 pcr1: hex_to_pcr(p1)?,
                 pcr2: hex_to_pcr(p2)?,
             }),
-            (None, None, None) => {
+            (None, None, None) if dev => {
                 warn!(
-                    "PCRs not configured; using placeholder zeros. \
-                     Production REQUIRES --pcr0/--pcr1/--pcr2."
+                    "PCRs not configured and --dev set: using placeholder zeros. \
+                     Attestation and signature verification will be SKIPPED. \
+                     This mode is for the local devnet ONLY — production requires \
+                     --pcr0/--pcr1/--pcr2."
                 );
                 Ok(ExpectedPcrs::PLACEHOLDER)
             }
+            (None, None, None) => bail!(
+                "PCRs are required for production runs; pass --pcr0/--pcr1/--pcr2, \
+                 or use --dev (NITRO_WORKER_DEV=1) for local devnet with placeholder \
+                 PCRs and attestation verification disabled."
+            ),
             _ => bail!("provide all three of --pcr0/--pcr1/--pcr2, or none"),
         }
     }

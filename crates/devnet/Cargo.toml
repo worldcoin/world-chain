@@ -58,3 +58,8 @@ testcontainers.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 url.workspace = true
+
+# Nitro worker — Linux-only because the host crate links AF_VSOCK.
+[target.'cfg(target_os = "linux")'.dependencies]
+world-chain-nitro-worker.workspace = true
+world-chain-proof-nitro = { workspace = true, features = ["aws_nitro"] }

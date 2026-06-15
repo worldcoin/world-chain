@@ -67,6 +67,8 @@ pub enum DevnetComponentKind {
     ProverService,
     /// World Chain defender SP1 proving worker.
     Sp1Worker,
+    /// World Chain defender AWS Nitro TEE proving worker.
+    NitroWorker,
     /// Flashblocks capability on the World Chain execution node.
     Flashblocks,
     /// Deprecated/removed legacy component.
@@ -94,6 +96,7 @@ impl DevnetComponentKind {
             Self::WorldChainDefender => "world-chain-defender",
             Self::ProverService => "prover-service",
             Self::Sp1Worker => "sp1-worker",
+            Self::NitroWorker => "nitro-worker",
             Self::Flashblocks => "flashblocks",
             Self::RemovedLegacyService => "removed-legacy-service",
         }

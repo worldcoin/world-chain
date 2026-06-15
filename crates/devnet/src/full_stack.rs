@@ -54,6 +54,11 @@ use world_chain_prover_service::{
 use world_chain_sp1_worker::{Sp1Backend, Sp1BackendConfig};
 use world_chain_test_utils::DEV_CHAIN_ID;
 
+#[cfg(target_os = "linux")]
+use world_chain_nitro_worker::{NitroBackend, NitroBackendConfig};
+#[cfg(target_os = "linux")]
+use world_chain_proof_nitro::ExpectedPcrs;
+
 use crate::{
     DevnetComponent, DevnetComponentKind, DevnetComponentStatus, DevnetPortMode, L1DevChain,
     L1DevChainConfig, MetricsTarget, ObservabilityStack, WorldChainHardforkConfig,
@@ -87,6 +92,15 @@ const SP1_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// built), and real proving needs the SP1 ELFs. Set a prover backend (`cpu`/`mock`/`network`)
 /// to turn it on.
 const SP1_WORKER_PROVER_ENV: &str = "DEVNET_SP1_WORKER_PROVER";
+/// Poll interval for the in-process Nitro worker leasing jobs from the prover-service.
+#[cfg(target_os = "linux")]
+const NITRO_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
+/// Env var enabling the in-process defender Nitro worker. Off by default: the worker needs a
+/// running Nitro Enclave reachable over vsock. Setting the variable to `cid` (default port) or
+/// `cid:port` starts the worker pointed at that enclave. The worker always runs in dev mode
+/// (placeholder PCRs, attestation/signature verification disabled) for the devnet.
+#[cfg(target_os = "linux")]
+const NITRO_WORKER_ENDPOINT_ENV: &str = "DEVNET_NITRO_WORKER_ENDPOINT";
 /// Bond, in wei, sent with every `WorldChainProofSystemFactory.propose`.
 /// Matches `PROPOSER_BOND` (1 ether) in `scripts/devnet/DeployProofSystem.s.sol`.
 const WORLD_PROPOSER_BOND_WEI: u128 = 1_000_000_000_000_000_000;
@@ -142,6 +156,8 @@ pub struct FullStackWorldDevnet {
     _world_challenger: Option<ChallengerTask>,
     _prover_service: Option<ProverServiceTask>,
     _sp1_worker: Option<Sp1WorkerTask>,
+    #[cfg(target_os = "linux")]
+    _nitro_worker: Option<NitroWorkerTask>,
     prover_service_url: Option<String>,
     _conductors: Vec<ConductorService>,
     _op_nodes: Vec<OpNodeService>,
@@ -291,6 +307,20 @@ struct Sp1WorkerTask {
 }
 
 impl Drop for Sp1WorkerTask {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
+/// In-process defender Nitro TEE proving worker task. Aborted on devnet drop.
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+struct NitroWorkerTask {
+    handle: JoinHandle<()>,
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for NitroWorkerTask {
     fn drop(&mut self) {
         self.handle.abort();
     }
@@ -566,6 +596,50 @@ impl FullStackWorldDevnet {
                 _ => (None, None, None),
             };
 
+        // Defender Nitro worker: opt-in via `DEVNET_NITRO_WORKER_ENDPOINT` (`cid` or
+        // `cid:port`). Requires a running enclave reachable over vsock and the WIP-1006
+        // proof-system contracts on the devnet L1. Runs in dev mode (placeholder PCRs).
+        //
+        // If the env var is set but the prover-service has not been started yet (for example
+        // because the SP1 worker env var is unset), this block lazily starts one so the
+        // worker has a queue to lease jobs from.
+        #[cfg(target_os = "linux")]
+        let (prover_service, prover_service_url, nitro_worker) = {
+            let mut prover_service = prover_service;
+            let mut prover_service_url = prover_service_url;
+            let nitro_worker = match (proof_system.as_ref(), parse_nitro_worker_endpoint()) {
+                (Some(deployment), Some((cid, port))) => {
+                    let l2_rpc = sequencers
+                        .first()
+                        .map(|sequencer| sequencer.rpc_url.clone())
+                        .ok_or_else(|| {
+                            eyre!("full-stack devnet has no sequencer for the Nitro worker")
+                        })?;
+                    if prover_service_url.is_none() {
+                        let (service, url) = start_prover_service().await?;
+                        prover_service = Some(service);
+                        prover_service_url = Some(url);
+                    }
+                    let url = prover_service_url
+                        .as_deref()
+                        .expect("prover-service url just set");
+                    let worker = start_nitro_worker(
+                        &l1_public_rpc,
+                        &l2_rpc,
+                        url,
+                        &artifacts.rollup_path,
+                        deployment,
+                        cid,
+                        port,
+                    )
+                    .await?;
+                    Some(worker)
+                }
+                _ => None,
+            };
+            (prover_service, prover_service_url, nitro_worker)
+        };
+
         let mut metrics_targets = Vec::new();
         metrics_targets.extend(
             sequencers
@@ -606,6 +680,8 @@ impl FullStackWorldDevnet {
             observability.as_ref(),
             &game_factory,
             prover_service_url.as_deref(),
+            #[cfg(target_os = "linux")]
+            nitro_worker.is_some(),
         );
 
         Ok(Self {
@@ -617,6 +693,8 @@ impl FullStackWorldDevnet {
             _world_challenger: world_challenger,
             _prover_service: prover_service,
             _sp1_worker: sp1_worker,
+            #[cfg(target_os = "linux")]
+            _nitro_worker: nitro_worker,
             prover_service_url,
             _conductors: conductors,
             _op_nodes: op_nodes,
@@ -2518,6 +2596,116 @@ async fn start_sp1_worker(
     Ok(Sp1WorkerTask { handle })
 }
 
+/// Parses [`NITRO_WORKER_ENDPOINT_ENV`] into a `(cid, port)` pair.
+///
+/// Accepts either `cid` (uses [`world_chain_proof_nitro::protocol::DEFAULT_VSOCK_PORT`]) or
+/// `cid:port`. Returns `None` if the variable is unset or malformed; a warning is logged in
+/// the malformed case so the operator notices the misconfiguration.
+#[cfg(target_os = "linux")]
+fn parse_nitro_worker_endpoint() -> Option<(u32, u32)> {
+    let raw = std::env::var(NITRO_WORKER_ENDPOINT_ENV).ok()?;
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let (cid_str, port_str) = match raw.split_once(':') {
+        Some((cid, port)) => (cid, Some(port)),
+        None => (raw, None),
+    };
+    let cid = match cid_str.parse::<u32>() {
+        Ok(cid) => cid,
+        Err(_) => {
+            warn!(
+                value = %raw,
+                env = NITRO_WORKER_ENDPOINT_ENV,
+                "invalid Nitro worker endpoint: expected `cid` or `cid:port`; ignoring"
+            );
+            return None;
+        }
+    };
+    let port = match port_str {
+        Some(s) => match s.parse::<u32>() {
+            Ok(port) => port,
+            Err(_) => {
+                warn!(
+                    value = %raw,
+                    env = NITRO_WORKER_ENDPOINT_ENV,
+                    "invalid Nitro worker port: expected `cid:port`; ignoring"
+                );
+                return None;
+            }
+        },
+        None => world_chain_proof_nitro::protocol::DEFAULT_VSOCK_PORT,
+    };
+    Some((cid, port))
+}
+
+/// Spawns the in-process Nitro TEE proving worker.
+///
+/// It leases [`ProofBackend::Nitro`] jobs from the prover-service at `prover_service_url`,
+/// builds range witnesses from the devnet L1/L2 RPCs, sends them to the enclave at
+/// `(cid, port)` for attested derivation, and submits the resulting attestation document +
+/// signature back. Always runs in dev mode (placeholder PCRs disable attestation/signature
+/// verification on the host) because the devnet does not ship a registered enclave image.
+///
+/// [`ProofBackend::Nitro`]: world_chain_prover_service::ProofBackend::Nitro
+#[cfg(target_os = "linux")]
+async fn start_nitro_worker(
+    l1_rpc_url: &str,
+    l2_rpc_url: &str,
+    prover_service_url: &str,
+    rollup_path: &Path,
+    deployment: &WorldProofSystemDeployment,
+    enclave_cid: u32,
+    enclave_port: u32,
+) -> Result<NitroWorkerTask> {
+    let rollup_config: Value = read_json(rollup_path)?;
+    let host = OnlineHostConfig::from_rollup_config_value(
+        &rollup_config,
+        l1_rpc_url.to_string(),
+        l1_rpc_url.to_string(),
+        l2_rpc_url.to_string(),
+        Some(rollup_path.to_path_buf()),
+        Duration::from_secs(900),
+    )
+    .map_err(|error| eyre!("failed to build Nitro worker host config: {error}"))?;
+
+    let backend = NitroBackend::new(
+        NitroBackendConfig {
+            block_interval: deployment.block_interval,
+            online: host,
+            enclave_cid,
+            enclave_port,
+            expected_pcrs: ExpectedPcrs::PLACEHOLDER,
+        },
+        tokio::runtime::Handle::current(),
+    );
+
+    let queue = RpcProverServiceClient::new(prover_service_url)
+        .map_err(|error| eyre!("failed to connect Nitro worker to prover-service: {error}"))?;
+    let worker = ProofWorker::new(
+        queue,
+        backend,
+        ProofWorkerConfig {
+            poll_interval: NITRO_WORKER_POLL_INTERVAL,
+            max_concurrent_jobs: 1,
+        },
+    );
+
+    warn!(
+        prover_service = %prover_service_url,
+        block_interval = deployment.block_interval,
+        enclave_cid,
+        enclave_port,
+        "starting native defender Nitro worker in dev mode \
+         (placeholder PCRs, attestation/signature verification disabled)"
+    );
+
+    let handle =
+        tokio::spawn(worker.instrument(info_span!("nitro-worker", process = "nitro-worker")));
+    Ok(NitroWorkerTask { handle })
+}
+
 async fn start_aux_service(
     id: &str,
     kind: DevnetComponentKind,
@@ -2762,6 +2950,7 @@ fn build_components(
     observability: Option<&ObservabilityStack>,
     game_factory: &str,
     prover_service_url: Option<&str>,
+    #[cfg(target_os = "linux")] nitro_worker_enabled: bool,
 ) -> Vec<DevnetComponent> {
     let mut components = vec![
         DevnetComponent::new(
@@ -2952,6 +3141,23 @@ fn build_components(
                 "native in-process SP1 worker (backend from {SP1_WORKER_PROVER_ENV}); leases jobs, builds witnesses, proves, and submits back"
             )),
         );
+        #[cfg(target_os = "linux")]
+        if nitro_worker_enabled {
+            components.push(
+                DevnetComponent::new(
+                    "nitro-worker",
+                    DevnetComponentKind::NitroWorker,
+                    DevnetComponentStatus::Running,
+                )
+                .with_endpoint("prover-service", url.to_string())
+                .with_note(format!(
+                    "native in-process Nitro worker (enclave from {NITRO_WORKER_ENDPOINT_ENV}); leases jobs, builds witnesses, proves in the enclave, and submits attestations back"
+                ))
+                .with_note(
+                    "runs in dev mode: placeholder PCRs disable attestation/signature verification",
+                ),
+            );
+        }
     }
 
     components.push(
