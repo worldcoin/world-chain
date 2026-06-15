@@ -5,6 +5,8 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "sp1")]
+use alloy_primitives::Address;
 use alloy_primitives::B256;
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand};
