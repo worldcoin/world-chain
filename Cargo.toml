@@ -39,6 +39,8 @@ members = [
     "proofs/proposer",
     "proofs/challenger",
     "proofs/prover-service",
+    "proofs/worker",
+    "proofs/sp1-worker",
     "e2e-tests",
     "xtask",
 ]
@@ -94,6 +96,8 @@ world-chain-proof-succinct-utils = { path = "proofs/succinct/utils/proof", defau
 world-chain-proposer = { path = "proofs/proposer", default-features = false }
 world-chain-challenger = { path = "proofs/challenger", default-features = false }
 world-chain-prover-service = { path = "proofs/prover-service", default-features = false }
+world-chain-proof-worker = { path = "proofs/worker", default-features = false }
+world-chain-sp1-worker = { path = "proofs/sp1-worker", default-features = false }
 
 # reth crates.io
 reth-codecs = { version = "0.3.1", default-features = false }
