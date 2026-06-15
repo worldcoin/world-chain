@@ -37,7 +37,7 @@ use kona_node_service::{
     QueuedNetworkEngineClient, QueuedSequencerAdminAPIClient, QueuedSequencerEngineClient,
     QueuedUnsafePayloadGossipClient, RpcActor, RpcContext, SequencerActor, SequencerConfig,
 };
-use kona_protocol::L2BlockInfo;
+use kona_protocol::{BlockInfo, L2BlockInfo};
 use kona_providers_alloy::{
     AlloyChainProvider, AlloyL2ChainProvider, OnlineBeaconClient, OnlineBlobProvider,
     OnlinePipeline,
@@ -99,6 +99,25 @@ fn load_registered_l1_chain_config(l1_chain_id: u64) -> Arc<L1ChainConfig> {
             Arc::new(L1ChainConfig::default())
         }
     }
+}
+
+/// Clamp a finalized L1 block strictly below the safe head's L1 origin.
+///
+/// kona's `FinalizeTask` rejects a finalize target above the current safe head with a `Critical`
+/// error that tears down the in-process engine (and, since it is reth's only driver, the whole
+/// node). The finalize target is the highest L2 block derived from a finalized L1 block, so holding
+/// the finalized L1 block strictly below the safe head's L1 origin keeps every such L2 block in an
+/// epoch before the safe head's — already safe — and the derived target can never exceed it.
+///
+/// Strictly below (`saturating_sub(1)`), not at: consecutive L2 blocks usually share an L1 origin,
+/// so the safe head's own epoch may still contain an as-yet-unsafe block. Only `BlockInfo::number`
+/// is consumed downstream (the L1 watcher forwards the block unchanged and kona's finalizer keys
+/// solely off the number), so clamping the number is sufficient. In a synced node the finalized L1
+/// block already trails the safe head's origin by far more than this, so the clamp is a no-op; it
+/// only engages while the node replays history behind the finalized point.
+fn clamp_finalized_to_safe_head(mut finalized: BlockInfo, safe_head_l1_origin: u64) -> BlockInfo {
+    finalized.number = finalized.number.clamp(0, safe_head_l1_origin.saturating_sub(1));
+    finalized
 }
 
 /// Inputs required to assemble and run the Kona consensus node in-process.
