@@ -21,7 +21,7 @@ world-chain-prover-service.workspace = true
 world-chain-proof-nitro = { path = "..", features = ["aws_nitro"] }
 
 # Witness generation (shared with sp1-worker)
-world-chain-proof-succinct-host-utils.workspace = true
+world-chain-proof-kona-utils = { workspace = true, features = ["host"] }
 
 # Chain config
 world-chain-chainspec.workspace = true
@@ -32,9 +32,6 @@ alloy-primitives = { workspace = true, features = ["serde"] }
 
 # Async / runtime
 tokio = { workspace = true, features = ["full", "signal"] }
-
-# Serialisation
-serde_json.workspace = true
 
 # Error handling / logging
 anyhow.workspace = true

@@ -39,7 +39,6 @@ enclave = [
     "dep:serde_cbor",
     "dep:tokio-vsock",
     "dep:world-chain-proof-kona-utils",
-    "dep:world-chain-proof-succinct-ethereum-client-utils",
 ]
 # Builds the actual enclave binary entry point. Implies `enclave`.
 enclave-bin = ["enclave", "dep:tracing-subscriber"]
@@ -83,7 +82,6 @@ kona-proof = { workspace = true, optional = true }
 serde_bytes = { version = "0.11", optional = true }
 serde_cbor = { version = "0.11", optional = true }
 world-chain-proof-kona-utils = { workspace = true, optional = true }
-world-chain-proof-succinct-ethereum-client-utils = { workspace = true, optional = true }
 # (k256 is in the top-level [dependencies] as a non-optional dep so it is
 # available to both the enclave-side signing code and the host-side
 # verification code in host.rs.)

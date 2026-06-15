@@ -4,10 +4,8 @@ use alloy_primitives::{Address, B256};
 use alloy_sol_types::SolValue;
 use anyhow::Context;
 use world_chain_proof_core::artifacts::AggregationProofArtifact;
-use world_chain_proof_succinct_host_utils::{
-    online::OnlineHostConfig,
-    validity::{ValidityProofRequest, prove_validity},
-};
+use world_chain_proof_kona_utils::online::OnlineHostConfig;
+use world_chain_proof_succinct_host_utils::validity::{ValidityProofRequest, prove_validity};
 use world_chain_proof_succinct_utils::WorldSuccinctProver;
 use world_chain_proof_worker::ProofJobBackend;
 use world_chain_prover_service::{ProofBackend, ProofData, ProofRequest};
