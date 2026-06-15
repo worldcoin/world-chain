@@ -1,4 +1,4 @@
-//! OP Stack EVM helpers for the zkVM client.
+//! OP Stack EVM helpers for kona execution (host and zkVM).
 
 mod custom;
 pub use custom::CustomCrypto;

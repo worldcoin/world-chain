@@ -13,9 +13,9 @@ use rkyv as _;
 use serde_json as _;
 use sha2 as _;
 
-pub mod client;
-pub mod precompiles;
 pub mod range;
-pub mod witness;
 
-pub use range::{OutputRootWitness, RangeProgramError, WorldRangeWitness, run_range_program};
+pub use range::{RangeProgramError, run_range_program};
+pub use world_chain_proof_kona_utils::{
+    CustomCrypto, OutputRootWitness, WitnessExecutor, WorldRangeWitness, ZkvmOpEvmFactory,
+};

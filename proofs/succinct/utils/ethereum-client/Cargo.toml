@@ -16,4 +16,5 @@ kona-genesis = { workspace = true }
 kona-preimage = { workspace = true }
 kona-proof = { workspace = true }
 spin = { workspace = true }
+world-chain-proof-kona-utils = { workspace = true }
 world-chain-proof-succinct-client-utils = { workspace = true, default-features = false }

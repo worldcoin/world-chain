@@ -409,11 +409,15 @@ fn encode_proof(proof: &ProofData) -> Bytes {
         ProofData::Sp1 {
             proof,
             public_values,
-        } => (public_values.clone(), proof.clone()).abi_encode_params().into(),
+        } => (public_values.clone(), proof.clone())
+            .abi_encode_params()
+            .into(),
         ProofData::Nitro {
             attestation,
             signature,
-        } => (attestation.clone(), signature.clone()).abi_encode_params().into(),
+        } => (attestation.clone(), signature.clone())
+            .abi_encode_params()
+            .into(),
     }
 }
 

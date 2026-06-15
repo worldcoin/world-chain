@@ -1,18 +1,21 @@
 //! Host-side helpers for preparing World Chain OP Succinct Lite proof requests.
 
-pub mod witness_generation;
-
 use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
     RollupConfigHashError,
     boot::{BootInfoStruct, hash_world_rollup_config_generic},
     hash_rollup_config,
-    range::{WorldRangeHardforkConfig, WorldRangeProofInput, WorldRangeProofPublicValues},
+    range::{WorldRangeHardforkConfig, WorldRangeProofPublicValues},
     types::AggregationInputs,
+    witness::WorldRangeWitnessData,
 };
-use world_chain_proof_succinct_client_utils::WorldRangeWitness;
 use world_chain_proof_succinct_utils::{AggregationProofRequest, RangeProofRequest};
+
+#[cfg(feature = "sp1")]
+pub mod env_prover;
+pub mod online;
+pub mod validity;
 
 /// Error returned while constructing host-side proof config.
 #[derive(Debug, thiserror::Error)]
@@ -25,6 +28,8 @@ pub enum WorldSuccinctHostError {
     RollupConfigHash(#[from] RollupConfigHashError),
     #[error("range split count must be one of 1, 2, 4, 8, or 16, got {0}")]
     InvalidRangeSplitCount(u8),
+    #[error("failed to rkyv-serialize range witness: {0}")]
+    WitnessSerialization(#[from] rkyv::rancor::Error),
 }
 
 /// Number of independent range proofs before aggregation.
@@ -245,25 +250,23 @@ impl WorldSuccinctHost {
 
     pub fn range_request(
         &self,
-        input: WorldRangeProofInput,
+        witness: &WorldRangeWitnessData,
         expected_public_values: Option<WorldRangeProofPublicValues>,
     ) -> Result<RangeProofRequest, WorldSuccinctHostError> {
-        let expected_hash = self.config.identity().rollup_config_hash;
-        if input.rollup_config_hash != expected_hash {
-            return Err(WorldSuccinctHostError::RollupConfigHashMismatch {
-                expected: expected_hash,
-                actual: input.rollup_config_hash,
-            });
+        if let Some(expected) = &expected_public_values {
+            let expected_hash = self.config.identity().rollup_config_hash;
+            if expected.boot_info.rollup_config_hash != expected_hash {
+                return Err(WorldSuccinctHostError::RollupConfigHashMismatch {
+                    expected: expected_hash,
+                    actual: expected.boot_info.rollup_config_hash,
+                });
+            }
         }
 
-        Ok(RangeProofRequest {
-            witness: WorldRangeWitness {
-                input,
-                pre_state: None,
-                post_state: None,
-                expected_public_values,
-            },
-        })
+        Ok(RangeProofRequest::from_witness_data(
+            witness,
+            expected_public_values,
+        )?)
     }
 
     pub fn aggregation_request(
@@ -273,6 +276,7 @@ impl WorldSuccinctHost {
         multi_block_vkey: [u32; 8],
         prover_address: Address,
         l1_headers_cbor: Vec<u8>,
+        range_proofs: Vec<Vec<u8>>,
     ) -> AggregationProofRequest {
         AggregationProofRequest {
             inputs: AggregationInputs {
@@ -282,6 +286,7 @@ impl WorldSuccinctHost {
                 prover_address,
             },
             l1_headers_cbor,
+            range_proofs,
         }
     }
 

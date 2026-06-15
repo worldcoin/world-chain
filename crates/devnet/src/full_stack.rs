@@ -4,6 +4,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener},
     path::{Path, PathBuf},
     process::Stdio,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -17,6 +18,7 @@ use base64::prelude::{BASE64_STANDARD, Engine};
 use eyre::eyre::{Context, Result, bail, eyre};
 use flate2::read::GzDecoder;
 use futures::future::try_join_all;
+use jsonrpsee::server::ServerHandle;
 use op_alloy_consensus::{encode_holocene_extra_data, encode_jovian_extra_data};
 use rand::Rng as _;
 use reth_chainspec::EthChainSpec;
@@ -39,8 +41,18 @@ use tracing::{Instrument, debug, info, info_span, warn};
 use url::{Host, Url};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 use world_chain_challenger::{AlloyChallengerClient, ChallengerConfig, WorldChainChallenger};
+use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
+use world_chain_proof_succinct_host_utils::{
+    env_prover::{EnvSuccinctProver, SP1ProofMode, Sp1ProverKind},
+    online::OnlineHostConfig,
+};
+use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig};
 use world_chain_proofs::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
 use world_chain_proposer::{AlloyProofSystemClient, ProposerConfig, WorldChainProposer};
+use world_chain_prover_service::{
+    ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
+};
+use world_chain_sp1_worker::{Sp1Backend, Sp1BackendConfig};
 use world_chain_test_utils::DEV_CHAIN_ID;
 
 use crate::{
@@ -69,6 +81,13 @@ const SERVICE_RPC_PORT: u16 = 8545;
 const SERVICE_METRICS_PORT: u16 = 7300;
 const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 10;
 const PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL: u64 = 5;
+/// Poll interval for the in-process SP1 worker leasing jobs from the prover-service.
+const SP1_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
+/// Env var enabling the in-process defender prover-service + SP1 worker. Off by default: the
+/// worker idles until something enqueues proof requests (the monitoring component is not yet
+/// built), and real proving needs the SP1 ELFs. Set a prover backend (`cpu`/`mock`/`network`)
+/// to turn it on.
+const SP1_WORKER_PROVER_ENV: &str = "DEVNET_SP1_WORKER_PROVER";
 /// Bond, in wei, sent with every `WorldChainProofSystemFactory.propose`.
 /// Matches `PROPOSER_BOND` (1 ether) in `scripts/devnet/DeployProofSystem.s.sol`.
 const WORLD_PROPOSER_BOND_WEI: u128 = 1_000_000_000_000_000_000;
@@ -101,6 +120,27 @@ const CHALLENGER_PRIVATE_KEY: &str =
 /// address is funded via the L1 genesis and staked in the `MockStakingRegistry`.
 const WORLD_CHALLENGER_PRIVATE_KEY: &str =
     "0x7c0c9c6f3f4d8a2b1e5d9a8c7b6e5f4a3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f";
+/// Signing key for the in-process World Chain proof-system defender.
+///
+/// Dedicated dev key (distinct from the proposer, challenger, and op accounts) so the
+/// defender never races them on L1 nonces. The matching address is funded via the L1
+/// genesis; the defender only pays gas for `submitProofLane` (no bond, no staking).
+const WORLD_DEFENDER_PRIVATE_KEY: &str =
+    "0x6b1f3d2c5a4e9876b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d";
+/// Balance, in wei, allocated to the World Chain defender account in the L1 genesis
+/// so it can cover gas for proof-lane submissions. (100 ether)
+const WORLD_DEFENDER_GENESIS_BALANCE_WEI: &str = "0x56bc75e2d63100000";
+/// Delay between World Chain proof-system defender scans.
+const WORLD_DEFENDER_POLL_INTERVAL: Duration = Duration::from_secs(2);
+/// Signing key for an e2e "griefer" that challenges a valid game to exercise the defender.
+///
+/// Dedicated dev key, funded via the L1 genesis. The honest challenger only challenges
+/// invalid roots, so a test needs its own account to challenge a valid game and trigger a
+/// defense. Exposed via [`FullStackWorldDevnet::e2e_griefer_key`] for tests only.
+pub const WORLD_E2E_GRIEFER_PRIVATE_KEY: &str =
+    "0x5d3a1b9e7c4f206d8a1c3e5b7d9f0a2c4e6b8d0f1a3c5e7b9d1f3a5c7e9b0d2f";
+/// Balance, in wei, allocated to the e2e griefer account in the L1 genesis. (100 ether)
+const WORLD_E2E_GRIEFER_GENESIS_BALANCE_WEI: &str = "0x56bc75e2d63100000";
 
 const FLASHBLOCKS_BUILDER_KEYS: [&str; 3] = [
     "40645f645e9e28a3f00637d8d629736e7934ee857154ec3fd336c3cc014ebb62",
@@ -122,6 +162,10 @@ pub struct FullStackWorldDevnet {
     _proof_system: Option<WorldProofSystemDeployment>,
     _world_proposer: Option<ProposerTask>,
     _world_challenger: Option<ChallengerTask>,
+    _world_defender: Option<DefenderTask>,
+    _prover_service: Option<ProverServiceTask>,
+    _sp1_worker: Option<Sp1WorkerTask>,
+    prover_service_url: Option<String>,
     _conductors: Vec<ConductorService>,
     _op_nodes: Vec<OpNodeService>,
     sequencers: Vec<SequencerService>,
@@ -227,6 +271,16 @@ struct WorldProofSystemDeployment {
     intermediate_block_interval: u64,
 }
 
+/// Public view of the deployed proof-system contract addresses, for tests/tools.
+#[derive(Clone, Copy, Debug)]
+pub struct ProofSystemInfo {
+    pub factory: Address,
+    pub staking_registry: Address,
+    pub anchor_state_registry: Address,
+    pub validity_proof_verifier: Address,
+    pub block_interval: u64,
+}
+
 /// In-process World Chain proof-system proposer task. Aborted on devnet drop.
 #[derive(Debug)]
 struct ProposerTask {
@@ -246,6 +300,42 @@ struct ChallengerTask {
 }
 
 impl Drop for ChallengerTask {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
+/// In-process World Chain proof-system defender task. Aborted on devnet drop.
+#[derive(Debug)]
+struct DefenderTask {
+    handle: JoinHandle<()>,
+}
+
+impl Drop for DefenderTask {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
+/// In-process defender prover-service RPC server. Stopped on devnet drop.
+#[derive(Debug)]
+struct ProverServiceTask {
+    handle: ServerHandle,
+}
+
+impl Drop for ProverServiceTask {
+    fn drop(&mut self) {
+        let _ = self.handle.stop();
+    }
+}
+
+/// In-process defender SP1 proving worker task. Aborted on devnet drop.
+#[derive(Debug)]
+struct Sp1WorkerTask {
+    handle: JoinHandle<()>,
+}
+
+impl Drop for Sp1WorkerTask {
     fn drop(&mut self) {
         self.handle.abort();
     }
@@ -315,10 +405,24 @@ impl FullStackWorldDevnet {
             "L1 dev chain has OP contracts loaded"
         );
 
+        // Enabling the SP1 worker (via `DEVNET_SP1_WORKER_PROVER`) also switches the proof
+        // system to the real SP1 Groth16 validity verifier with a single-lane threshold, so a
+        // defended game finalizes on one SP1 proof.
+        let sp1_prover_kind = sp1_worker_prover_kind();
         let proof_system = if config.world_contracts.proof_system {
+            let sp1_vkeys = if sp1_prover_kind.is_some() {
+                Some(compute_sp1_vkeys().await?)
+            } else {
+                None
+            };
             Some(
-                deploy_world_proof_system(&l1_public_rpc, &artifacts.rollup_path, &workdir_path)
-                    .await?,
+                deploy_world_proof_system(
+                    &l1_public_rpc,
+                    &artifacts.rollup_path,
+                    &workdir_path,
+                    sp1_vkeys,
+                )
+                .await?,
             )
         } else {
             None
@@ -494,6 +598,56 @@ impl FullStackWorldDevnet {
             None
         };
 
+        // Defender proving loop: an in-process prover-service plus an SP1 worker, enabled by
+        // the `DEVNET_SP1_WORKER_PROVER` env var. The worker leases SP1 jobs, builds witnesses
+        // from the devnet L1/L2 RPCs, and proves them with the selected backend.
+        let (prover_service, sp1_worker, prover_service_url) =
+            match (proof_system.as_ref(), sp1_prover_kind) {
+                (Some(deployment), Some(kind)) => {
+                    let l2_rpc = sequencers
+                        .first()
+                        .map(|sequencer| sequencer.rpc_url.clone())
+                        .ok_or_else(|| {
+                            eyre!("full-stack devnet has no sequencer for the SP1 worker")
+                        })?;
+                    let (service, url) = start_prover_service().await?;
+                    let worker = start_sp1_worker(
+                        &l1_public_rpc,
+                        &l2_rpc,
+                        &url,
+                        &artifacts.rollup_path,
+                        deployment,
+                        kind,
+                    )
+                    .await?;
+                    (Some(service), Some(worker), Some(url))
+                }
+                _ => (None, None, None),
+            };
+
+        // Defender: requests SP1 proofs from the prover-service for challenged-but-valid games
+        // and submits them on-chain. Only meaningful when the proving loop above is running.
+        let world_defender = match (proof_system.as_ref(), prover_service_url.as_ref()) {
+            (Some(deployment), Some(prover_service_url)) => {
+                let output_root_rpc = op_nodes
+                    .first()
+                    .map(|node| node.rpc_url.clone())
+                    .ok_or_else(|| {
+                        eyre!("full-stack devnet has no op-node for the World Chain defender")
+                    })?;
+                Some(
+                    start_world_chain_defender(
+                        &l1_public_rpc,
+                        &output_root_rpc,
+                        prover_service_url,
+                        deployment,
+                    )
+                    .await?,
+                )
+            }
+            _ => None,
+        };
+
         let mut metrics_targets = Vec::new();
         metrics_targets.extend(
             sequencers
@@ -533,6 +687,7 @@ impl FullStackWorldDevnet {
             proof_system.as_ref(),
             observability.as_ref(),
             &game_factory,
+            prover_service_url.as_deref(),
         );
 
         Ok(Self {
@@ -542,6 +697,10 @@ impl FullStackWorldDevnet {
             _proof_system: proof_system,
             _world_proposer: world_proposer,
             _world_challenger: world_challenger,
+            _world_defender: world_defender,
+            _prover_service: prover_service,
+            _sp1_worker: sp1_worker,
+            prover_service_url,
             _conductors: conductors,
             _op_nodes: op_nodes,
             sequencers,
@@ -559,6 +718,31 @@ impl FullStackWorldDevnet {
 
     pub fn l2_rpc_url(&self) -> &str {
         &self.sequencers[0].rpc_url
+    }
+
+    /// JSON-RPC URL of the in-process defender prover-service, when enabled.
+    #[allow(dead_code)]
+    pub fn prover_service_url(&self) -> Option<&str> {
+        self.prover_service_url.as_deref()
+    }
+
+    /// Deployed proof-system contract addresses, when the proof system is enabled.
+    pub fn proof_system(&self) -> Option<ProofSystemInfo> {
+        self._proof_system.as_ref().and_then(|d| {
+            Some(ProofSystemInfo {
+                factory: d.proof_system_factory.parse().ok()?,
+                staking_registry: d.staking_registry.parse().ok()?,
+                anchor_state_registry: d.anchor_state_registry.parse().ok()?,
+                validity_proof_verifier: d.validity_proof_verifier.parse().ok()?,
+                block_interval: d.block_interval,
+            })
+        })
+    }
+
+    /// Private key of a funded+unused account a test can stake and use to challenge a valid
+    /// game, triggering the defender. Test-only.
+    pub fn e2e_griefer_key(&self) -> &'static str {
+        WORLD_E2E_GRIEFER_PRIVATE_KEY
     }
 
     pub fn sequencer_rpc_url(&self) -> &str {
@@ -763,10 +947,18 @@ l2ContractsLocator = "{}"
     )
 }
 
+/// SP1 verification keys wired into the validity-lane verifier at deploy time.
+#[derive(Clone, Copy, Debug)]
+struct Sp1Vkeys {
+    aggregation_vkey: alloy_primitives::B256,
+    range_vkey_commitment: alloy_primitives::B256,
+}
+
 async fn deploy_world_proof_system(
     l1_rpc_url: &str,
     rollup_path: &Path,
     workdir: &Path,
+    sp1_vkeys: Option<Sp1Vkeys>,
 ) -> Result<WorldProofSystemDeployment> {
     let rollup_config = fs::read(rollup_path)
         .wrap_err_with(|| format!("failed to read rollup config {}", rollup_path.display()))?;
@@ -820,9 +1012,23 @@ async fn deploy_world_proof_system(
         )
         .env("PROOF_SYSTEM_DEPLOYMENT_OUT", &deployment_rel_path);
 
+    // With SP1 proving enabled, deploy the real Groth16 validity verifier (keyed to the
+    // committed ELFs) and finalize a defended game on a single proven lane (threshold = 1).
+    if let Some(vkeys) = sp1_vkeys {
+        command
+            .env("PROOF_SYSTEM_REAL_SP1", "1")
+            .env("PROOF_SYSTEM_THRESHOLD", "1")
+            .env("AGGREGATION_VKEY", vkeys.aggregation_vkey.to_string())
+            .env(
+                "RANGE_VKEY_COMMITMENT",
+                vkeys.range_vkey_commitment.to_string(),
+            );
+    }
+
     info!(
         l1_rpc_url,
         rollup_config_hash = %rollup_config_hash_hex,
+        real_sp1 = sp1_vkeys.is_some(),
         output = %deployment_path.display(),
         "deploying World Chain proof-system contracts"
     );
@@ -893,6 +1099,8 @@ fn write_l1_genesis(state_path: &Path, output_path: &Path) -> Result<()> {
     let mut alloc: Value =
         serde_json::from_str(&alloc_json).wrap_err("invalid l1StateDump JSON")?;
     fund_world_challenger(&mut alloc)?;
+    fund_world_defender(&mut alloc)?;
+    fund_world_e2e_griefer(&mut alloc)?;
     let timestamp = state
         .pointer("/opChainDeployments/0/startBlock/timestamp")
         .and_then(Value::as_str)
@@ -959,6 +1167,48 @@ fn world_challenger_address() -> Result<Address> {
         .parse()
         .wrap_err("invalid World Chain challenger signing key")?;
     Ok(signer.address())
+}
+
+fn world_defender_address() -> Result<Address> {
+    let signer: PrivateKeySigner = WORLD_DEFENDER_PRIVATE_KEY
+        .parse()
+        .wrap_err("invalid World Chain defender signing key")?;
+    Ok(signer.address())
+}
+
+/// Funds the World Chain defender account in the L1 genesis `alloc` so it can pay gas
+/// for `submitProofLane`. Dedicated account, never present in the op-deployer dump.
+fn fund_world_defender(alloc: &mut Value) -> Result<()> {
+    let address = world_defender_address()?;
+    let entry = alloc
+        .as_object_mut()
+        .ok_or_else(|| eyre!("l1 genesis alloc is not a JSON object"))?;
+    entry.insert(
+        address.to_string(),
+        json!({ "balance": WORLD_DEFENDER_GENESIS_BALANCE_WEI }),
+    );
+    Ok(())
+}
+
+fn world_e2e_griefer_address() -> Result<Address> {
+    let signer: PrivateKeySigner = WORLD_E2E_GRIEFER_PRIVATE_KEY
+        .parse()
+        .wrap_err("invalid World Chain e2e griefer signing key")?;
+    Ok(signer.address())
+}
+
+/// Funds the e2e griefer account in the L1 genesis so a test can stake it and challenge a
+/// valid game (covering the challenger bond plus gas).
+fn fund_world_e2e_griefer(alloc: &mut Value) -> Result<()> {
+    let address = world_e2e_griefer_address()?;
+    let entry = alloc
+        .as_object_mut()
+        .ok_or_else(|| eyre!("l1 genesis alloc is not a JSON object"))?;
+    entry.insert(
+        address.to_string(),
+        json!({ "balance": WORLD_E2E_GRIEFER_GENESIS_BALANCE_WEI }),
+    );
+    Ok(())
 }
 
 /// Funds the World Chain challenger account in the L1 genesis `alloc` so it can
@@ -2340,6 +2590,197 @@ async fn start_world_chain_challenger(
     Ok(ChallengerTask { handle })
 }
 
+/// Reads the SP1 worker prover backend from [`SP1_WORKER_PROVER_ENV`], or `None` when the
+/// defender proving loop is disabled.
+fn sp1_worker_prover_kind() -> Option<Sp1ProverKind> {
+    std::env::var(SP1_WORKER_PROVER_ENV)
+        .ok()
+        .and_then(|value| value.parse().ok())
+}
+
+/// Computes the aggregation and range verification keys from the committed SP1 ELFs, for
+/// wiring into the on-chain validity verifier at deploy time.
+///
+/// vkeys are a function of the program ELF, not the proving backend, so this uses the mock
+/// prover for a fast setup — the values match what the CPU/network worker commits.
+async fn compute_sp1_vkeys() -> Result<Sp1Vkeys> {
+    let range_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-range-ethereum");
+    let agg_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-aggregation");
+    let range_elf = fs::read(&range_elf_path)
+        .wrap_err_with(|| format!("failed to read range ELF {}", range_elf_path.display()))?;
+    let agg_elf = fs::read(&agg_elf_path)
+        .wrap_err_with(|| format!("failed to read aggregation ELF {}", agg_elf_path.display()))?;
+
+    let vkeys = tokio::task::spawn_blocking(move || -> Result<Sp1Vkeys> {
+        let prover = EnvSuccinctProver::new(
+            Sp1ProverKind::Mock,
+            range_elf,
+            agg_elf,
+            SP1ProofMode::Groth16,
+        )
+        .map_err(|error| eyre!("failed to set up SP1 prover for vkey computation: {error}"))?;
+        Ok(Sp1Vkeys {
+            aggregation_vkey: prover.aggregation_vkey(),
+            range_vkey_commitment: prover.range_vkey_commitment(),
+        })
+    })
+    .await
+    .wrap_err("SP1 vkey computation task panicked")??;
+
+    info!(
+        aggregation_vkey = %vkeys.aggregation_vkey,
+        range_vkey_commitment = %vkeys.range_vkey_commitment,
+        "computed SP1 vkeys for proof-system deploy"
+    );
+    Ok(vkeys)
+}
+
+/// Spawns the in-process World Chain proof-system defender.
+///
+/// The defender watches `GameCreated` events, and for any challenged game whose root matches
+/// the canonical output root it requests an SP1 validity proof from the prover-service at
+/// `prover_service_url`, then submits the completed proof on-chain via `submitProofLane`,
+/// signing with [`WORLD_DEFENDER_PRIVATE_KEY`] (funded in the L1 genesis).
+async fn start_world_chain_defender(
+    l1_rpc_url: &str,
+    output_root_rpc_url: &str,
+    prover_service_url: &str,
+    deployment: &WorldProofSystemDeployment,
+) -> Result<DefenderTask> {
+    let factory_address: Address = deployment
+        .proof_system_factory
+        .parse()
+        .wrap_err("invalid proof-system factory address")?;
+
+    let signer: PrivateKeySigner = WORLD_DEFENDER_PRIVATE_KEY
+        .parse()
+        .wrap_err("invalid World Chain defender signing key")?;
+    let defender_address = signer.address();
+    let provider = ProviderBuilder::new()
+        .wallet(EthereumWallet::from(signer))
+        .connect_http(Url::parse(l1_rpc_url)?);
+
+    let client = AlloyDefenderClient::new(provider, factory_address);
+    let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
+    let proof_requester = RpcProverServiceClient::new(prover_service_url)
+        .map_err(|error| eyre!("failed to connect defender to prover-service: {error}"))?;
+    let config = DefenderConfig {
+        poll_interval: WORLD_DEFENDER_POLL_INTERVAL,
+        ..DefenderConfig::default()
+    };
+    let mut defender = WorldChainDefender::new(config, client, output_roots, proof_requester);
+
+    info!(
+        l1_rpc_url,
+        output_root_rpc_url,
+        prover_service = %prover_service_url,
+        factory = %deployment.proof_system_factory,
+        defender = %defender_address,
+        "starting native World Chain proof-system defender"
+    );
+
+    let handle = tokio::spawn(
+        async move {
+            if let Err(error) = defender.run_forever().await {
+                warn!(%error, "World Chain proof-system defender stopped");
+            }
+        }
+        .instrument(info_span!(
+            "world-chain-defender",
+            process = "world-chain-defender"
+        )),
+    );
+
+    Ok(DefenderTask { handle })
+}
+
+/// Starts the in-process defender prover-service and returns its task handle and JSON-RPC URL.
+async fn start_prover_service() -> Result<(ProverServiceTask, String)> {
+    let service = Arc::new(
+        ProverService::new(ProverServiceConfig::default())
+            .wrap_err("invalid prover-service config")?,
+    );
+    let (addr, handle) =
+        start_rpc_server("127.0.0.1:0".parse().expect("valid loopback addr"), service)
+            .await
+            .wrap_err("failed to start prover-service RPC server")?;
+    let url = format!("http://{addr}");
+    info!(prover_service = %url, "started native defender prover-service");
+    Ok((ProverServiceTask { handle }, url))
+}
+
+/// Spawns the in-process SP1 proving worker.
+///
+/// It leases SP1 jobs from the prover-service at `prover_service_url`, builds range witnesses
+/// from the devnet L1/L2 RPCs (the L1 dev chain doubles as the beacon endpoint, matching the
+/// op-node configuration), proves them with the selected backend, and submits the proofs back.
+async fn start_sp1_worker(
+    l1_rpc_url: &str,
+    l2_rpc_url: &str,
+    prover_service_url: &str,
+    rollup_path: &Path,
+    deployment: &WorldProofSystemDeployment,
+    kind: Sp1ProverKind,
+) -> Result<Sp1WorkerTask> {
+    let rollup_config: Value = read_json(rollup_path)?;
+    let host = OnlineHostConfig::from_rollup_config_value(
+        &rollup_config,
+        l1_rpc_url.to_string(),
+        l1_rpc_url.to_string(),
+        l2_rpc_url.to_string(),
+        Some(rollup_path.to_path_buf()),
+        Duration::from_secs(900),
+    )
+    .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?;
+
+    let range_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-range-ethereum");
+    let agg_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-aggregation");
+    let range_elf = fs::read(&range_elf_path)
+        .wrap_err_with(|| format!("failed to read range ELF {}", range_elf_path.display()))?;
+    let agg_elf = fs::read(&agg_elf_path)
+        .wrap_err_with(|| format!("failed to read aggregation ELF {}", agg_elf_path.display()))?;
+
+    // `EnvSuccinctProver` owns its own runtime, so build it off the async runtime.
+    let prover = tokio::task::spawn_blocking(move || {
+        EnvSuccinctProver::new(kind, range_elf, agg_elf, SP1ProofMode::Groth16)
+    })
+    .await
+    .wrap_err("SP1 prover setup task panicked")?
+    .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+
+    let backend = Sp1Backend::new(
+        host,
+        prover,
+        Sp1BackendConfig {
+            block_interval: deployment.block_interval,
+            split_count: 1,
+            prover_address: Address::ZERO,
+            allow_unfinalized: false,
+        },
+    );
+
+    let queue = RpcProverServiceClient::new(prover_service_url)
+        .map_err(|error| eyre!("failed to connect SP1 worker to prover-service: {error}"))?;
+    let worker = ProofWorker::new(
+        queue,
+        backend,
+        ProofWorkerConfig {
+            poll_interval: SP1_WORKER_POLL_INTERVAL,
+            max_concurrent_jobs: 1,
+        },
+    );
+
+    info!(
+        prover_service = %prover_service_url,
+        block_interval = deployment.block_interval,
+        prover = ?kind,
+        "starting native defender SP1 worker"
+    );
+
+    let handle = tokio::spawn(worker.instrument(info_span!("sp1-worker", process = "sp1-worker")));
+    Ok(Sp1WorkerTask { handle })
+}
+
 async fn start_aux_service(
     id: &str,
     kind: DevnetComponentKind,
@@ -2583,6 +3024,7 @@ fn build_components(
     proof_system: Option<&WorldProofSystemDeployment>,
     observability: Option<&ObservabilityStack>,
     game_factory: &str,
+    prover_service_url: Option<&str>,
 ) -> Vec<DevnetComponent> {
     let mut components = vec![
         DevnetComponent::new(
@@ -2747,6 +3189,31 @@ fn build_components(
             .with_note(
                 "signs with a dedicated dev key funded in the L1 genesis and staked in the MockStakingRegistry",
             ),
+        );
+    }
+
+    if let Some(url) = prover_service_url {
+        components.push(
+            DevnetComponent::new(
+                "prover-service",
+                DevnetComponentKind::ProverService,
+                DevnetComponentStatus::Running,
+            )
+            .with_endpoint("rpc", url.to_string())
+            .with_note(
+                "in-memory defender proof request queue; enqueue SP1/TEE jobs via the prover JSON-RPC",
+            ),
+        );
+        components.push(
+            DevnetComponent::new(
+                "sp1-worker",
+                DevnetComponentKind::Sp1Worker,
+                DevnetComponentStatus::Running,
+            )
+            .with_endpoint("prover-service", url.to_string())
+            .with_note(format!(
+                "native in-process SP1 worker (backend from {SP1_WORKER_PROVER_ENV}); leases jobs, builds witnesses, proves, and submits back"
+            )),
         );
     }
 

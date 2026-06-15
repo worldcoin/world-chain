@@ -1,6 +1,6 @@
 use crate::{
-    InvalidConfigError, LeaseId, ProofBackend, ProofData, ProofJobQueue, ProofJobQueueError,
-    ProofRequest, ProofRequestError, ProofRequester, ProofResponse, ProofStatus, ProverService,
+    InvalidConfigError, ProofBackend, ProofData, ProofJobQueue, ProofJobQueueError, ProofRequest,
+    ProofRequestError, ProofRequester, ProofResponse, ProofStatus, ProverService,
     ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
 };
 use alloy_primitives::{Address, B256, Bytes};
@@ -27,12 +27,6 @@ fn request(backend: ProofBackend, seed: u8) -> ProofRequest {
         l2_block_number: u64::from(seed) * 100,
         l1_head: B256::with_last_byte(seed.wrapping_add(1)),
     }
-}
-
-fn leased_request(
-    leased: Result<Option<crate::LeasedProof>, ProofJobQueueError>,
-) -> Option<ProofRequest> {
-    leased.unwrap().map(|leased| leased.request)
 }
 
 fn proof_for(req: &ProofRequest) -> ProofResponse {
@@ -86,7 +80,7 @@ async fn full_lifecycle() {
         .await
         .unwrap()
         .expect("job available");
-    assert_eq!(leased.request, req);
+    assert_eq!(leased, req);
     assert_eq!(
         service.proof_status(id).await.unwrap(),
         ProofStatus::InProgress
@@ -120,15 +114,15 @@ async fn jobs_are_routed_per_backend() {
     service.request_proof(nitro.clone()).await.unwrap();
 
     assert_eq!(
-        leased_request(service.get_next_proof(ProofBackend::Nitro).await),
+        service.get_next_proof(ProofBackend::Nitro).await.unwrap(),
         Some(nitro)
     );
     assert_eq!(
-        leased_request(service.get_next_proof(ProofBackend::Nitro).await),
+        service.get_next_proof(ProofBackend::Nitro).await.unwrap(),
         None
     );
     assert_eq!(
-        leased_request(service.get_next_proof(ProofBackend::Sp1).await),
+        service.get_next_proof(ProofBackend::Sp1).await.unwrap(),
         Some(sp1)
     );
 }
@@ -182,14 +176,14 @@ async fn expired_lease_is_requeued_then_failed() {
     );
     tokio::time::sleep(Duration::from_millis(20)).await;
     assert_eq!(
-        leased_request(service.get_next_proof(ProofBackend::Sp1).await),
+        service.get_next_proof(ProofBackend::Sp1).await.unwrap(),
         Some(req)
     );
 
     // Second lease expires too, exhausting `max_attempts`.
     tokio::time::sleep(Duration::from_millis(20)).await;
     assert_eq!(
-        leased_request(service.get_next_proof(ProofBackend::Sp1).await),
+        service.get_next_proof(ProofBackend::Sp1).await.unwrap(),
         None
     );
     assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Failed);
@@ -206,27 +200,17 @@ async fn failed_attempts_are_retried_until_exhausted() {
     let id = service.request_proof(req.clone()).await.unwrap();
 
     // First attempt fails and the job is re-queued.
-    let lease = service
-        .get_next_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("job available")
-        .lease;
+    service.get_next_proof(ProofBackend::Sp1).await.unwrap();
     service
-        .fail_proof(id, lease, "witness generation failed".to_string())
+        .fail_proof(id, "witness generation failed".to_string())
         .await
         .unwrap();
     assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Queued);
 
     // Second attempt fails and exhausts `max_attempts`.
-    let lease = service
-        .get_next_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("job available")
-        .lease;
+    service.get_next_proof(ProofBackend::Sp1).await.unwrap();
     service
-        .fail_proof(id, lease, "enclave rejected".to_string())
+        .fail_proof(id, "enclave rejected".to_string())
         .await
         .unwrap();
     assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Failed);
@@ -241,54 +225,9 @@ async fn failed_attempts_are_retried_until_exhausted() {
     assert_eq!(service.request_proof(req.clone()).await.unwrap(), id);
     assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Queued);
     assert_eq!(
-        leased_request(service.get_next_proof(ProofBackend::Sp1).await),
+        service.get_next_proof(ProofBackend::Sp1).await.unwrap(),
         Some(req)
     );
-}
-
-#[tokio::test]
-async fn stale_failure_report_is_ignored() {
-    let service = service(ProverServiceConfig {
-        lease_timeout: Duration::from_millis(10),
-        max_attempts: 2,
-        ..test_config()
-    });
-    let req = request(ProofBackend::Sp1, 1);
-    let id = service.request_proof(req).await.unwrap();
-
-    // The first worker's lease expires and the job is re-leased
-    // to a second worker.
-    let first = service
-        .get_next_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("job available");
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    let second = service
-        .get_next_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("job available");
-    assert_ne!(first.lease, second.lease);
-
-    // The first worker's late failure report must not disturb the
-    // second worker's lease.
-    service
-        .fail_proof(id, first.lease, "stale".to_string())
-        .await
-        .unwrap();
-    assert_eq!(
-        service.proof_status(id).await.unwrap(),
-        ProofStatus::InProgress
-    );
-
-    // The current lease holder's report is still honored; with both
-    // attempts used the job fails permanently.
-    service
-        .fail_proof(id, second.lease, "real".to_string())
-        .await
-        .unwrap();
-    assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Failed);
 }
 
 #[tokio::test]
@@ -346,9 +285,7 @@ async fn unknown_job_is_rejected() {
         Err(ProofJobQueueError::UnknownJob(_))
     ));
     assert!(matches!(
-        service
-            .fail_proof(req.id(), LeaseId(1), "nope".to_string())
-            .await,
+        service.fail_proof(req.id(), "nope".to_string()).await,
         Err(ProofJobQueueError::UnknownJob(_))
     ));
     assert!(matches!(
@@ -432,14 +369,9 @@ async fn late_submission_after_failure_gets_fresh_eviction_slot() {
     // Exhaust the single attempt so the first job is finished as failed.
     let first = request(ProofBackend::Sp1, 1);
     let id = service.request_proof(first.clone()).await.unwrap();
-    let lease = service
-        .get_next_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("job available")
-        .lease;
+    service.get_next_proof(ProofBackend::Sp1).await.unwrap();
     service
-        .fail_proof(id, lease, "transient".to_string())
+        .fail_proof(id, "transient".to_string())
         .await
         .unwrap();
     assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Failed);
@@ -526,15 +458,9 @@ async fn rpc_end_to_end() {
         .await
         .unwrap()
         .expect("job available");
-    assert_eq!(leased.request, req);
+    assert_eq!(leased, req);
     assert!(matches!(
         client.submit_proof(proof_for(&request(ProofBackend::Sp1, 9))).await,
-        Err(ProofJobQueueError::UnknownJob(unknown)) if unknown == missing
-    ));
-    assert!(matches!(
-        client
-            .fail_proof(missing, leased.lease, "nope".to_string())
-            .await,
         Err(ProofJobQueueError::UnknownJob(unknown)) if unknown == missing
     ));
     client.submit_proof(proof_for(&req)).await.unwrap();
