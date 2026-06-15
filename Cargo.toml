@@ -319,7 +319,7 @@ once_cell = "1.19"
 lru = "0.18"
 either = { version = "1.16.0", default-features = false }
 pin-project = "1.1.13"
-vergen = "9.1.0"
+vergen = "10.0.0"
 vergen-git2 = "9.1.0"
 
 # Test
