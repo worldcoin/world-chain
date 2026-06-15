@@ -7,7 +7,6 @@
 //! 1. PCR / `user_data` invariants needed by the World fault proof flow.
 //! 2. The COSE_Sign1 P-384 signature against the leaf certificate's public key.
 //! 3. That the root certificate in the chain matches the hardcoded AWS Nitro root CA.
-//!
 //! 4. Certificate validity periods (not-before / not-after) for every cert in the chain.
 //! 5. Nonce freshness: the host supplies a per-request nonce that the NSM embeds in the
 //!    signed payload, preventing replay of captured attestation documents.
