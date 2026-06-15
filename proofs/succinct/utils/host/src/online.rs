@@ -263,7 +263,6 @@ pub fn build_range_input(
             .flatten(),
         rollup_config_path: config.rollup_config_path.clone(),
         l1_config_path: None,
-        enable_experimental_witness_endpoint: false,
     };
 
     let witness = tokio::runtime::Runtime::new()?.block_on(collect_world_range_witness(

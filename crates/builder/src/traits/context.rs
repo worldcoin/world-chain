@@ -276,7 +276,7 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<WorldChainEvmConfig, WorldChainSp
         builder: &mut Builder,
         best_txs: Txs,
         _attempt_metrics: &mut PayloadBuildAttemptMetrics,
-        _effective_gas_limit: u64,
+        effective_gas_limit: u64,
         _cumulative_uncompressed_bytes: u64,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
@@ -289,7 +289,7 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<WorldChainEvmConfig, WorldChainSp
             >,
         Txs: PayloadTransactions<Transaction = Self::Transaction>,
     {
-        self.execute_best_transactions(info, builder, best_txs, Some(_effective_gas_limit), None)
+        self.execute_best_transactions(info, builder, best_txs, Some(effective_gas_limit), None)
     }
 
     /// Determines if validator withdrawals should be processed in this block.

@@ -61,6 +61,7 @@ impl PayloadTypes for WorldEngineTypes {
 
     fn block_to_payload(
         block: SealedBlock<BlockTy<<Self::BuiltPayload as BuiltPayload>::Primitives>>,
+        _bal: Option<alloy_primitives::Bytes>,
     ) -> Self::ExecutionData {
         OpExecData::from(OpExecutionData::from_block_unchecked(
             block.hash(),
@@ -301,6 +302,7 @@ where
             rpc_add_ons,
             self.config.builder_config.inner.da_config.clone(),
             self.config.builder_config.inner.gas_limit_config.clone(),
+            Default::default(),
             self.config.args.rollup.sequencer.clone(),
             Default::default(),
             Default::default(),
