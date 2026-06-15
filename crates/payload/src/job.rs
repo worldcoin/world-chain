@@ -386,13 +386,9 @@ where
             .payload_build_metrics()
             .record_committed_payload(
                 cum_bytes.saturating_sub(prev_bytes),
-                cum_bytes,
                 cum_gas.saturating_sub(prev_gas),
-                cum_gas,
                 cum_tx.saturating_sub(prev_tx),
-                cum_tx,
                 cum_fees.saturating_sub(prev_fees).saturating_to::<u128>() as f64,
-                cum_fees.saturating_to::<u128>() as f64,
                 flashblock_index,
             );
     }

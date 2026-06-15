@@ -365,24 +365,14 @@ pub struct PayloadBuildMetrics {
     pub committed_payloads_total: Counter,
     /// Histogram of committed payload size in bytes.
     pub committed_payload_size_bytes: Histogram,
-    /// Latest committed payload size in bytes.
-    pub committed_payload_size_bytes_latest: Gauge,
     /// Histogram of committed payload gas used.
     pub committed_payload_gas_used: Histogram,
-    /// Latest committed payload gas used.
-    pub committed_payload_gas_used_latest: Gauge,
     /// Histogram of committed payload transaction count.
     pub committed_payload_transaction_count: Histogram,
-    /// Latest committed payload transaction count.
-    pub committed_payload_transaction_count_latest: Gauge,
     /// Histogram of committed payload fees in wei.
     pub committed_payload_fees_wei: Histogram,
-    /// Latest committed payload fees in wei.
-    pub committed_payload_fees_wei_latest: Gauge,
     /// Histogram of committed flashblock index values.
     pub committed_flashblock_index: Histogram,
-    /// Latest committed flashblock index value.
-    pub committed_flashblock_index_latest: Gauge,
 }
 
 impl PayloadBuildMetrics {
@@ -542,39 +532,24 @@ impl PayloadBuildMetrics {
             .set(count as f64);
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn record_committed_payload(
         &self,
         incremental_size_bytes: u64,
-        cumulative_size_bytes: u64,
         incremental_gas_used: u64,
-        cumulative_gas_used: u64,
         incremental_tx_count: u64,
-        cumulative_tx_count: u64,
         incremental_fees_wei: f64,
-        cumulative_fees_wei: f64,
         flashblock_index: u64,
     ) {
         self.committed_payloads_total.increment(1);
         self.committed_payload_size_bytes
             .record(incremental_size_bytes as f64);
-        self.committed_payload_size_bytes_latest
-            .set(cumulative_size_bytes as f64);
         self.committed_payload_gas_used
             .record(incremental_gas_used as f64);
-        self.committed_payload_gas_used_latest
-            .set(cumulative_gas_used as f64);
         self.committed_payload_transaction_count
             .record(incremental_tx_count as f64);
-        self.committed_payload_transaction_count_latest
-            .set(cumulative_tx_count as f64);
         self.committed_payload_fees_wei.record(incremental_fees_wei);
-        self.committed_payload_fees_wei_latest
-            .set(cumulative_fees_wei);
         self.committed_flashblock_index
             .record(flashblock_index as f64);
-        self.committed_flashblock_index_latest
-            .set(flashblock_index as f64);
     }
 }
 
