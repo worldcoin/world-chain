@@ -17990,6 +17990,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider 2.0.4",
  "alloy-rpc-types-eth 2.0.4",
+ "alloy-sol-types",
  "async-trait",
  "futures-util",
  "thiserror 2.0.18",

@@ -19,6 +19,7 @@ world-chain-prover-service.workspace = true
 alloy-primitives.workspace = true
 alloy-provider.workspace = true
 alloy-rpc-types-eth.workspace = true
+alloy-sol-types.workspace = true
 
 # misc
 thiserror.workspace = true

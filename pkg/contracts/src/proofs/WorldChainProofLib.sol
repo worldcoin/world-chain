@@ -77,7 +77,7 @@ library WorldChainProofLib {
         }
     }
 
-    function hasThreshold(uint8 bitmap) internal pure returns (bool) {
-        return proofCount(bitmap) >= PROOF_THRESHOLD;
+    function hasThreshold(uint8 bitmap, uint8 threshold) internal pure returns (bool) {
+        return proofCount(bitmap) >= threshold;
     }
 }
