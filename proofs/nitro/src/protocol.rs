@@ -227,7 +227,6 @@ pub fn sha256_b256(bytes: &[u8]) -> B256 {
     B256::from_slice(hasher.finalize().as_ref())
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
