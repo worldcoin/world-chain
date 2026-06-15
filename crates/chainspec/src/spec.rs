@@ -215,7 +215,7 @@ impl OpHardforks for WorldChainSpec {
             OpHardfork::Holocene => self.fork(WorldChainHardfork::Holocene),
             OpHardfork::Isthmus => self.fork(WorldChainHardfork::Isthmus),
             OpHardfork::Jovian => self.fork(WorldChainHardfork::Jovian),
-            OpHardfork::Karst | OpHardfork::Interop => ForkCondition::Never,
+            OpHardfork::Karst => ForkCondition::Never,
             _ => ForkCondition::Never,
         }
     }
@@ -580,22 +580,16 @@ mod tests {
             spec.op_fork_activation(OpHardfork::Karst),
             ForkCondition::Never
         );
-        assert_eq!(
-            spec.op_fork_activation(OpHardfork::Interop),
-            ForkCondition::Never
-        );
     }
 
     #[test]
     fn converting_op_specs_drops_post_jovian_op_forks() {
         let mut spec = WorldChainSpec::from_genesis(Genesis::default());
         spec.set_fork(OpHardfork::Karst, ForkCondition::Timestamp(10));
-        spec.set_fork(OpHardfork::Interop, ForkCondition::Timestamp(20));
 
         let converted = WorldChainSpec::from(spec.inner);
 
         assert_eq!(converted.fork(OpHardfork::Karst), ForkCondition::Never);
-        assert_eq!(converted.fork(OpHardfork::Interop), ForkCondition::Never);
     }
 
     #[test]
@@ -626,12 +620,10 @@ mod tests {
     fn builder_drops_post_jovian_op_forks_from_generic_inputs() {
         let spec = WorldChainSpecBuilder::mainnet()
             .with_fork(OpHardfork::Karst, ForkCondition::Timestamp(10))
-            .with_fork(OpHardfork::Interop, ForkCondition::Timestamp(20))
             .with_fork(OpHardfork::Jovian, ForkCondition::Timestamp(5))
             .build();
 
         assert_eq!(spec.fork(OpHardfork::Karst), ForkCondition::Never);
-        assert_eq!(spec.fork(OpHardfork::Interop), ForkCondition::Never);
         assert_eq!(
             spec.fork(WorldChainHardfork::Jovian),
             ForkCondition::Timestamp(5)

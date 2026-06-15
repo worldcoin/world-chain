@@ -205,7 +205,7 @@ where
             Executor: BlockExecutor<Evm: Evm<DB: StateDB + DatabaseCommit + reth_evm::Database>>,
         >,
     ) -> Result<ExecutionInfo, PayloadBuilderError> {
-        self.inner.execute_sequencer_transactions(builder)
+        self.inner.execute_sequencer_transactions(builder, None)
     }
 
     /// Executes the given best transactions and updates the execution info.
@@ -383,6 +383,7 @@ where
                 }
             };
 
+            let gas_used = gas_used.tx_gas_used();
             attempt_metrics.record_transaction_gas_used(gas_used);
             transactions_executed += 1;
             self.commit_changes(info, base_fee, gas_used, tx_da_size, tx);
@@ -409,6 +410,7 @@ where
             // is not spent rather than sitting in the default execution client's mempool.
             match builder.execute_transaction(tx.clone()) {
                 Ok(gas_used) => {
+                    let gas_used = gas_used.tx_gas_used();
                     let tx_da_size = estimated_da_size_bytes(&tx);
                     self.commit_changes(info, base_fee, gas_used, tx_da_size, tx);
                     attempt_metrics

@@ -11,13 +11,13 @@ use alloy_primitives::Bytes;
 
 use alloy_op_evm::{
     OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory, OpTx,
-    block::receipt_builder::OpReceiptBuilder,
+    block::receipt_builder::OpReceiptBuilder, post_exec::PostExecEvm,
 };
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::bail;
 use op_alloy_consensus::OpReceipt;
 use rayon::prelude::*;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{DeferredTrieData, ExecutedBlock};
 use reth_revm::database::StateProviderDatabase;
 use world_chain_primitives::{
     access_list::FlashblockAccessList, primitives::ExecutionPayloadFlashblockDeltaV1,
@@ -28,9 +28,10 @@ use reth_evm::{
     block::{BlockExecutionError, BlockExecutor, CommitChanges, InternalBlockExecutionError},
     execute::{
         BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
+        GasOutput,
     },
 };
-use reth_node_api::BuiltPayload;
+use reth_node_api::{BuiltPayload, BuiltPayloadExecutedBlock};
 use reth_optimism_evm::{OpBlockAssembler, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
@@ -61,6 +62,13 @@ use world_chain_state::{
 
 /// A type alias for the BAL builder database with a cache layer.
 pub type ValidatorDb<'a, DB> = BalBuilderDb<&'a mut NoOpCommitDB<TemporalDb<DB>>>;
+
+fn into_executed_payload(
+    payload: BuiltPayloadExecutedBlock<OpPrimitives>,
+) -> ExecutedBlock<OpPrimitives> {
+    let trie_data = DeferredTrieData::sort(payload.hashed_state, payload.trie_updates);
+    ExecutedBlock::new(payload.recovered_block, payload.execution_output, trie_data)
+}
 
 pub struct FlashblocksBlockValidator<Evm: ConfigureEvm, T: FlashblockTypes<Evm>> {
     pub chain_spec: Arc<WorldChainSpec>,
@@ -145,7 +153,8 @@ impl<Evm: ConfigureEvm + Clone, T: FlashblockTypes<Evm>> FlashblocksBlockValidat
                     )
                 })?;
 
-            self.validate_payload(&executed.into_executed_payload(), diff_clone)
+            let executed = into_executed_payload(executed);
+            self.validate_payload(&executed, diff_clone)
                 .map_err(|e| BalExecutorError::Other(Box::from(e.to_string())))
                 .inspect_err(|e| {
                     error!(
@@ -242,8 +251,11 @@ where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     DBRef: DatabaseRef + Clone + std::fmt::Debug + 'a,
     E: Evm<DB = ValidatorDb<'a, DBRef>, Tx = OpTx, Spec = OpSpecId, BlockEnv = BlockEnv>,
+    E: PostExecEvm,
     H: StateRootHandle,
     OpTx: FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
+    OpBlockExecutor<E, R, Arc<WorldChainSpec>>:
+        BlockExecutor<Evm = E, Transaction = OpTransactionSigned, Receipt = OpReceipt>,
 {
     /// Creates a new [`FlashblocksBlockBuilder`] with the given executor factory and assembler.
     pub fn new(
@@ -306,9 +318,12 @@ where
             HaltReason = OpHaltReason,
             BlockEnv = BlockEnv,
         >,
+    E: PostExecEvm,
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
     H: StateRootHandle,
     OpTx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
+    OpBlockExecutor<E, R, Arc<WorldChainSpec>>:
+        BlockExecutor<Evm = E, Transaction = OpTransactionSigned, Receipt = OpReceipt>,
 {
     type Primitives = OpPrimitives;
     type Executor = OpBlockExecutor<E, R, Arc<WorldChainSpec>>;
@@ -321,7 +336,7 @@ where
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
         f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result) -> CommitChanges,
-    ) -> Result<Option<u64>, BlockExecutionError> {
+    ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
         if let Some(gas_used) = self
             .inner
@@ -329,7 +344,7 @@ where
             .execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
             self.inner.transactions.push(tx);
-            Ok(Some(gas_used.tx_gas_used()))
+            Ok(Some(gas_used))
         } else {
             Ok(None)
         }
@@ -381,6 +396,7 @@ where
             self.bundle_state.as_ref(),
             &state,
             state_root,
+            None,
         ))?;
         self.attempt_metrics.record_stage_duration(
             PayloadBuildStage::BlockAssembly,
@@ -406,6 +422,7 @@ where
             hashed_state,
             trie_updates,
             block,
+            block_access_list: None,
         })
     }
 
@@ -432,12 +449,15 @@ where
             HaltReason = OpHaltReason,
             BlockEnv = BlockEnv,
         >,
+    E: PostExecEvm,
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>
         + Send
         + Sync
         + Clone,
     H: StateRootHandle,
     OpTx: FromRecoveredTx<OpTransactionSigned> + FromTxWithEncoded<OpTransactionSigned>,
+    OpBlockExecutor<E, R, Arc<WorldChainSpec>>:
+        BlockExecutor<Evm = E, Transaction = OpTransactionSigned, Receipt = OpReceipt>,
 {
     pub fn execute_block<Client>(
         mut self,

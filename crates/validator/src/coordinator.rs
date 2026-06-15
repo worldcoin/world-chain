@@ -3,9 +3,11 @@ use alloy_op_evm::OpBlockExecutionCtx;
 use eyre::eyre::eyre;
 use futures::StreamExt;
 use parking_lot::RwLock;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{DeferredTrieData, ExecutedBlock};
 use reth_evm::ConfigureEvm;
-use reth_node_api::{BuiltPayload as _, Events, FullNodeTypes, NodePrimitives, NodeTypes};
+use reth_node_api::{
+    BuiltPayload as _, BuiltPayloadExecutedBlock, Events, FullNodeTypes, NodePrimitives, NodeTypes,
+};
 use reth_node_builder::BuilderContext;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_node::{OpBuiltPayload, OpEngineTypes};
@@ -111,6 +113,13 @@ impl FlashblocksExecutionCoordinator {
     {
         self.p2p_handle
             .event_stream(provider, move |event| f(event))
+    }
+
+    fn into_executed_payload(
+        payload: BuiltPayloadExecutedBlock<OpPrimitives>,
+    ) -> ExecutedBlock<OpPrimitives> {
+        let trie_data = DeferredTrieData::sort(payload.hashed_state, payload.trie_updates);
+        ExecutedBlock::new(payload.recovered_block, payload.execution_output, trie_data)
     }
 
     pub fn event_hook(
@@ -352,7 +361,7 @@ where
                 latest_payload
                     .0
                     .executed_block()
-                    .map(|p| p.into_executed_payload()),
+                    .map(FlashblocksExecutionCoordinator::into_executed_payload),
             );
             return Ok(());
         }
@@ -408,6 +417,7 @@ where
         parent_hash: base.parent_hash,
         parent_beacon_block_root: Some(base.parent_beacon_block_root),
         extra_data: base.extra_data.clone(),
+        ..Default::default()
     };
 
     let next_block_context = OpNextBlockEnvAttributes {
@@ -470,7 +480,7 @@ where
     pending_block.send_replace(
         next_payload
             .executed_block()
-            .map(|p| p.into_executed_payload()),
+            .map(FlashblocksExecutionCoordinator::into_executed_payload),
     );
     flashblock_validation_metrics.record_into_executed_block(into_executed_block_started.elapsed());
 

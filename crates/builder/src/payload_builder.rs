@@ -610,6 +610,7 @@ where
         block,
         hashed_state,
         trie_updates,
+        block_access_list: _,
     } = build_outcome;
 
     let sealed_block = Arc::new(block.sealed_block().clone());
@@ -623,8 +624,8 @@ where
     let executed_block: BuiltPayloadExecutedBlock<OpPrimitives> = BuiltPayloadExecutedBlock {
         recovered_block: Arc::new(block),
         execution_output: Arc::new(execution_outcome.clone()),
-        hashed_state: either::Left(Arc::new(hashed_state)),
-        trie_updates: either::Left(Arc::new(trie_updates)),
+        hashed_state: Arc::new(hashed_state),
+        trie_updates: Arc::new(trie_updates),
     };
 
     let payload = OpBuiltPayload::new(

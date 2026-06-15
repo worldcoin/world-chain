@@ -55,7 +55,6 @@ semaphore-rs.workspace = true
 crossbeam-channel.workspace = true
 tracing.workspace = true
 eyre.workspace = true
-either.workspace = true
 metrics.workspace = true
 metrics-derive.workspace = true
 

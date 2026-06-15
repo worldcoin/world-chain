@@ -246,7 +246,8 @@ lazy_static::lazy_static! {
     pub static ref BLOCK_EXECUTION_CTX: OpBlockExecutionCtx = OpBlockExecutionCtx {
         parent_beacon_block_root: Some(FixedBytes::ZERO),
         parent_hash: CHAIN_SPEC.genesis_hash(),
-        extra_data: bytes!("0x000000000800000002")
+        extra_data: bytes!("0x000000000800000002"),
+        ..Default::default()
     };
 
     pub static ref NEXT_BLOCK_ENV_ATTRS: OpNextBlockEnvAttributes = OpNextBlockEnvAttributes {

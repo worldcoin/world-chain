@@ -289,7 +289,7 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<WorldChainEvmConfig, WorldChainSp
             >,
         Txs: PayloadTransactions<Transaction = Self::Transaction>,
     {
-        self.execute_best_transactions(info, builder, best_txs)
+        self.execute_best_transactions(info, builder, best_txs, Some(_effective_gas_limit), None)
     }
 
     /// Determines if validator withdrawals should be processed in this block.
@@ -352,6 +352,6 @@ impl PayloadBuilderCtx for OpPayloadBuilderCtx<WorldChainEvmConfig, WorldChainSp
             Executor: BlockExecutor<Evm: Evm<DB: StateDB + DatabaseCommit + reth_evm::Database>>,
         >,
     ) -> Result<ExecutionInfo, PayloadBuilderError> {
-        self.execute_sequencer_transactions(builder)
+        self.execute_sequencer_transactions(builder, None)
     }
 }
