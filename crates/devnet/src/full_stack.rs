@@ -509,11 +509,13 @@ impl FullStackWorldDevnet {
         };
 
         let world_proposer = if let Some(deployment) = proof_system.as_ref() {
-            let output_root_rpc = op_nodes
+            let output_root_rpc = sequencers
                 .first()
-                .map(|node| node.rpc_url.clone())
+                .map(|sequencer| sequencer.kona_rpc_url.clone())
                 .ok_or_else(|| {
-                    eyre!("full-stack devnet has no op-node for the World Chain proposer")
+                    eyre!(
+                        "full-stack devnet has no kona consensus node for the World Chain proposer"
+                    )
                 })?;
             Some(start_world_chain_proposer(&l1_public_rpc, &output_root_rpc, deployment).await?)
         } else {
@@ -521,11 +523,11 @@ impl FullStackWorldDevnet {
         };
 
         let world_challenger = if let Some(deployment) = proof_system.as_ref() {
-            let output_root_rpc = op_nodes
+            let output_root_rpc = sequencers
                 .first()
-                .map(|node| node.rpc_url.clone())
+                .map(|sequencer| sequencer.kona_rpc_url.clone())
                 .ok_or_else(|| {
-                    eyre!("full-stack devnet has no op-node for the World Chain challenger")
+                    eyre!("full-stack devnet has no kona consensus node for the World Chain challenger")
                 })?;
             Some(start_world_chain_challenger(&l1_public_rpc, &output_root_rpc, deployment).await?)
         } else {
