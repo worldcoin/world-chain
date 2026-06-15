@@ -7,7 +7,7 @@ sp1_zkvm::entrypoint!(main);
 
 use rkyv::rancor::Error;
 use world_chain_proof_core::witness::{WitnessData, WorldRangeWitnessData};
-use world_chain_proof_kona_utils::ETHDAWitnessExecutor;
+use world_chain_proof_kona_client_utils::ETHDAWitnessExecutor;
 use world_chain_proof_succinct_range_utils::run_range_program;
 #[cfg(feature = "tracing-subscriber")]
 use world_chain_proof_succinct_range_utils::setup_tracing;

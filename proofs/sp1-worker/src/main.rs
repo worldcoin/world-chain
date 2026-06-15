@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
-use world_chain_proof_kona_utils::online::build_online_config;
+use world_chain_proof_kona_host_utils::online::build_online_config;
 use world_chain_proof_succinct_host_utils::env_prover::{EnvSuccinctProver, SP1ProofMode, Sp1ProverKind};
 use world_chain_prover_service::RpcProverServiceClient;
 use world_chain_sp1_worker::{ProofWorker, ProofWorkerConfig, Sp1Backend, Sp1BackendConfig};

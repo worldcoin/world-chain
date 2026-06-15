@@ -12,7 +12,7 @@ use world_chain_proof_succinct_utils::{
     AggregationProofRequest, RangeProofRequest, WorldSuccinctProver,
 };
 
-use world_chain_proof_kona_utils::online::{
+use world_chain_proof_kona_host_utils::online::{
     OnlineHostConfig, RangeWitnessRequest, build_range_input, fetch_l1_header_by_hash,
     resolve_l1_head,
 };
