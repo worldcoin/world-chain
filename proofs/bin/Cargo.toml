@@ -13,13 +13,10 @@ path = "src/main.rs"
 
 [dependencies]
 alloy-primitives.workspace = true
+anyhow.workspace = true
 clap.workspace = true
-color-eyre = "0.6"
 dotenvy.workspace = true
 hex.workspace = true
-kona-host = { workspace = true, features = ["single"] }
-kona-preimage.workspace = true
-kona-proof.workspace = true
 reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
 rkyv.workspace = true
 serde.workspace = true
@@ -28,14 +25,9 @@ tokio.workspace = true
 world-chain-chainspec.workspace = true
 world-chain-proof-core.workspace = true
 world-chain-proof-protocol.workspace = true
-world-chain-proof-kona-utils = { workspace = true, features = ["host"] }
-world-chain-proof-succinct-client-utils.workspace = true
-world-chain-proof-succinct-ethereum-client-utils.workspace = true
-alloy-consensus = { workspace = true, features = ["serde"], optional = true }
-bincode = { version = "1", optional = true }
-serde_cbor = { version = "0.11", optional = true }
+world-chain-proof-succinct-host-utils.workspace = true
+sp1-sdk = { version = "=6.1.0", features = ["network"], optional = true }
 sha2 = { workspace = true, optional = true }
-sp1-sdk = { version = "=6.2.3", features = ["network"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 world-chain-proof-nitro = { workspace = true, optional = true }
@@ -43,10 +35,4 @@ world-chain-proof-nitro = { workspace = true, optional = true }
 [features]
 default = []
 nitro = ["dep:world-chain-proof-nitro", "world-chain-proof-nitro/aws_nitro"]
-sp1 = [
-    "dep:sp1-sdk",
-    "dep:alloy-consensus",
-    "dep:bincode",
-    "dep:serde_cbor",
-    "dep:sha2",
-]
+sp1 = ["dep:sp1-sdk", "dep:sha2", "world-chain-proof-succinct-host-utils/sp1"]

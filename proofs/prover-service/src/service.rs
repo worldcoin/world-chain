@@ -2,10 +2,7 @@ use crate::{
     config::ProverServiceConfig,
     error::{InvalidConfigError, ProofJobQueueError, ProofRequestError},
     traits::{ProofJobQueue, ProofRequester},
-    types::{
-        LeaseId, LeasedProof, ProofBackend, ProofData, ProofRequest, ProofRequestId, ProofResponse,
-        ProofStatus,
-    },
+    types::{ProofBackend, ProofData, ProofRequest, ProofRequestId, ProofResponse, ProofStatus},
 };
 use async_trait::async_trait;
 use std::{
@@ -22,8 +19,6 @@ enum JobState {
     Queued,
     /// Leased to a worker until `lease_deadline`.
     InProgress {
-        /// The lease the worker holds this job under.
-        lease: LeaseId,
         /// When the lease expires and the job is re-queued.
         lease_deadline: Instant,
     },
@@ -65,16 +60,9 @@ struct State {
     /// Finished (completed or failed) jobs in finishing order,
     /// used to evict the oldest once over capacity.
     finished: VecDeque<ProofRequestId>,
-    /// Monotonic counter backing lease id issuance.
-    last_lease: u64,
 }
 
 impl State {
-    fn next_lease(&mut self) -> LeaseId {
-        self.last_lease += 1;
-        LeaseId(self.last_lease)
-    }
-
     fn queue_mut(&mut self, backend: ProofBackend) -> &mut VecDeque<ProofRequestId> {
         match backend {
             ProofBackend::Sp1 => &mut self.sp1_queue,
@@ -135,7 +123,7 @@ impl ProverService {
                 entry.request.backend == backend
                     && matches!(
                         entry.state,
-                        JobState::InProgress { lease_deadline, .. } if lease_deadline <= now
+                        JobState::InProgress { lease_deadline } if lease_deadline <= now
                     )
             })
             .map(|(id, _)| *id)
@@ -243,7 +231,7 @@ impl ProofJobQueue for ProverService {
     async fn get_next_proof(
         &self,
         backend: ProofBackend,
-    ) -> Result<Option<LeasedProof>, ProofJobQueueError> {
+    ) -> Result<Option<ProofRequest>, ProofJobQueueError> {
         let now = Instant::now();
         let mut state = self.lock();
         self.requeue_expired(&mut state, backend, now);
@@ -251,25 +239,19 @@ impl ProofJobQueue for ProverService {
         while let Some(id) = state.queue_mut(backend).pop_front() {
             // Skip ids whose job was completed, evicted, or re-queued
             // through another path while waiting in the queue.
-            if !matches!(
-                state.jobs.get(&id),
-                Some(entry) if matches!(entry.state, JobState::Queued)
-            ) {
+            let Some(entry) = state.jobs.get_mut(&id) else {
+                continue;
+            };
+            if !matches!(entry.state, JobState::Queued) {
                 continue;
             }
 
-            let lease = state.next_lease();
-            let entry = state.jobs.get_mut(&id).expect("job exists");
             entry.attempts += 1;
             entry.state = JobState::InProgress {
-                lease,
                 lease_deadline: now + self.config.lease_timeout,
             };
-            debug!(%id, %backend, %lease, attempts = entry.attempts, "proof job leased");
-            return Ok(Some(LeasedProof {
-                request: entry.request.clone(),
-                lease,
-            }));
+            debug!(%id, %backend, attempts = entry.attempts, "proof job leased");
+            return Ok(Some(entry.request.clone()));
         }
 
         Ok(None)
@@ -322,7 +304,6 @@ impl ProofJobQueue for ProverService {
     async fn fail_proof(
         &self,
         proof_id: ProofRequestId,
-        lease: LeaseId,
         reason: String,
     ) -> Result<(), ProofJobQueueError> {
         let mut state = self.lock();
@@ -331,19 +312,9 @@ impl ProofJobQueue for ProverService {
             .get_mut(&proof_id)
             .ok_or(ProofJobQueueError::UnknownJob(proof_id))?;
 
-        // Only the current lease holder can fail a job: queued jobs are
-        // already pending a retry, finished jobs keep their outcome, and a
-        // report under an expired lease concerns work that has since been
-        // handed to another worker.
-        let JobState::InProgress {
-            lease: current_lease,
-            ..
-        } = entry.state
-        else {
-            return Ok(());
-        };
-        if lease != current_lease {
-            debug!(%proof_id, %lease, %current_lease, "ignoring failure report from stale lease");
+        // Only an in-progress job can be failed by its worker: queued jobs
+        // are already pending a retry and finished jobs keep their outcome.
+        if !matches!(entry.state, JobState::InProgress { .. }) {
             return Ok(());
         }
 

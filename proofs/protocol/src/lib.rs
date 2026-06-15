@@ -16,9 +16,6 @@ use sha2::{Digest, Sha256};
 pub use world_chain_chainspec::WorldChainHardfork;
 use world_chain_chainspec::WorldChainHardforks;
 
-/// ABI encoding of OP Succinct aggregation outputs is 7 * 32 bytes.
-pub const AGGREGATION_OUTPUTS_SIZE: usize = 7 * 32;
-
 /// Error returned when a rollup config cannot be serialized for hashing.
 #[derive(Debug, thiserror::Error)]
 pub enum RollupConfigHashError {
@@ -207,56 +204,6 @@ impl WorldHardforkConfig {
     /// Returns the proof EVM spec id active at the given L2 block/timestamp.
     pub fn proof_spec_at(&self, block_number: u64, timestamp: u64) -> WorldSpecId {
         WorldSpecId::from_hardfork(self.active_fork_at(block_number, timestamp))
-    }
-
-    /// Returns the canonical ordered schedule used by World proof programs.
-    pub fn ordered_activations(&self) -> [(WorldChainHardfork, ForkCondition); 11] {
-        [
-            (
-                WorldChainHardfork::Bedrock,
-                self.activation(WorldChainHardfork::Bedrock),
-            ),
-            (
-                WorldChainHardfork::Regolith,
-                self.activation(WorldChainHardfork::Regolith),
-            ),
-            (
-                WorldChainHardfork::Canyon,
-                self.activation(WorldChainHardfork::Canyon),
-            ),
-            (
-                WorldChainHardfork::Ecotone,
-                self.activation(WorldChainHardfork::Ecotone),
-            ),
-            (
-                WorldChainHardfork::Fjord,
-                self.activation(WorldChainHardfork::Fjord),
-            ),
-            (
-                WorldChainHardfork::Granite,
-                self.activation(WorldChainHardfork::Granite),
-            ),
-            (
-                WorldChainHardfork::Holocene,
-                self.activation(WorldChainHardfork::Holocene),
-            ),
-            (
-                WorldChainHardfork::Isthmus,
-                self.activation(WorldChainHardfork::Isthmus),
-            ),
-            (
-                WorldChainHardfork::Jovian,
-                self.activation(WorldChainHardfork::Jovian),
-            ),
-            (
-                WorldChainHardfork::Tropo,
-                self.activation(WorldChainHardfork::Tropo),
-            ),
-            (
-                WorldChainHardfork::Strato,
-                self.activation(WorldChainHardfork::Strato),
-            ),
-        ]
     }
 }
 
@@ -447,44 +394,6 @@ pub mod name {
     pub const TROPO: &str = "Tropo";
     /// Strato spec name.
     pub const STRATO: &str = "Strato";
-}
-
-/// Public boot values committed by the range proof.
-///
-/// This is the World equivalent of OP Succinct's `BootInfoStruct`; it keeps the on-chain public
-/// values stable while allowing the rollup config hash to bind Tropo/Strato.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BootInfoPublicValues {
-    /// L1 head used by the derivation pipeline.
-    pub l1_head: B256,
-    /// Agreed pre-state L2 output root.
-    pub l2_pre_root: B256,
-    /// Claimed post-state L2 output root.
-    pub l2_post_root: B256,
-    /// Claimed post-state L2 block number.
-    pub l2_block_number: u64,
-    /// OP Succinct rollup config hash.
-    pub rollup_config_hash: B256,
-}
-
-impl BootInfoPublicValues {
-    /// Creates boot public values from proof roots and an already computed rollup config hash.
-    pub const fn new(
-        l1_head: B256,
-        l2_pre_root: B256,
-        l2_post_root: B256,
-        l2_block_number: u64,
-        rollup_config_hash: B256,
-    ) -> Self {
-        Self {
-            l1_head,
-            l2_pre_root,
-            l2_post_root,
-            l2_block_number,
-            rollup_config_hash,
-        }
-    }
 }
 
 #[cfg(test)]

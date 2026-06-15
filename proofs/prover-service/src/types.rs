@@ -66,29 +66,6 @@ impl std::fmt::Display for ProofRequestId {
     }
 }
 
-/// The identifier of a single proving lease.
-///
-/// A fresh lease id is issued every time a job is handed to a worker, so
-/// the `prover-service` can tell reports from the current lease holder
-/// apart from reports of workers whose lease has already expired.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct LeaseId(pub u64);
-
-impl std::fmt::Display for LeaseId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// A proof request leased to a worker by the `prover-service`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LeasedProof {
-    /// The leased proof request.
-    pub request: ProofRequest,
-    /// The lease under which the worker holds this job.
-    pub lease: LeaseId,
-}
-
 /// The lifecycle state of a proof request inside the `prover-service`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProofStatus {
