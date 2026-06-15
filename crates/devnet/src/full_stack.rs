@@ -998,14 +998,18 @@ async fn forge_create_sp1_verifier(l1_rpc_url: &str, contracts_dir: &Path) -> Re
 
     // `forge create --json` prints a JSON object containing `deployedTo` (pretty-printed across
     // multiple lines), so extract the whole object from the first `{` to the last `}`.
-    let start = stdout
-        .find('{')
-        .ok_or_else(|| eyre!("forge create produced no JSON output:\nstdout:\n{stdout}\nstderr:\n{stderr}"))?;
+    let start = stdout.find('{').ok_or_else(|| {
+        eyre!("forge create produced no JSON output:\nstdout:\n{stdout}\nstderr:\n{stderr}")
+    })?;
     let end = stdout
         .rfind('}')
         .ok_or_else(|| eyre!("forge create JSON was not terminated:\n{stdout}"))?;
-    let parsed: Value = serde_json::from_str(&stdout[start..=end])
-        .wrap_err_with(|| format!("failed to parse forge create JSON:\n{}", &stdout[start..=end]))?;
+    let parsed: Value = serde_json::from_str(&stdout[start..=end]).wrap_err_with(|| {
+        format!(
+            "failed to parse forge create JSON:\n{}",
+            &stdout[start..=end]
+        )
+    })?;
     let address: Address = parsed
         .get("deployedTo")
         .and_then(Value::as_str)
@@ -2765,7 +2769,6 @@ async fn compute_sp1_vkeys() -> Result<Sp1Vkeys> {
     );
     Ok(vkeys)
 }
-
 
 /// Starts the in-process defender prover-service and returns its task handle and JSON-RPC URL.
 async fn start_prover_service() -> Result<(ProverServiceTask, String)> {

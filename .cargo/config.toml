@@ -11,6 +11,7 @@ bvl = "bench --package world-chain-validator --bench flashblock_validation_live_
 [env]
 DEBUG = "info,flashblocks=debug,world_chain=info"
 TRACE = "info,flashblocks=trace,world_chain=trace,engine::tree=trace"
+DEFENDER_LOG = "warn,world_chain_tests=info,world_chain_defender=trace,world_chain_challenger=trace,world_chain_prover_service=trace,world_chain_sp1_worker=trace,world_chain_proof_worker=debug,world_chain_devnet=info"
 
 RUSTFLAGS="-W unused-crate-dependencies"
 RUST_BACKTRACE = { value = "full", force = false }
