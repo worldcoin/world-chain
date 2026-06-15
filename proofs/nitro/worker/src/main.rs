@@ -24,64 +24,54 @@
 //! sp1-worker PR) for the lease→prove→submit loop, and the real `world-chain-prover-service`
 //! types for the RPC client and proof data types.
 
-use std::{
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+#[cfg(target_os = "linux")]
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
+#[cfg(target_os = "linux")]
 use alloy_primitives::{B256, Bytes};
+#[cfg(target_os = "linux")]
 use anyhow::{Context, Result, anyhow, bail};
+#[cfg(target_os = "linux")]
 use clap::Parser;
-use reqwest::blocking::Client as BlockingClient;
-use serde_json::{Value, json};
+#[cfg(target_os = "linux")]
 use tracing::{info, warn};
+#[cfg(target_os = "linux")]
 use world_chain_chainspec::WorldChainSpec;
-use world_chain_proof_core::{
-    range::WorldRangeHardforkConfig,
-    witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
-};
-use world_chain_proof_nitro::{
-    ExpectedPcrs, NitroRangeProofRequest,
-};
+#[cfg(target_os = "linux")]
+use world_chain_proof_nitro::{ExpectedPcrs, NitroRangeProofRequest};
+#[cfg(target_os = "linux")]
+use world_chain_proof_nitro::host::{EnclaveEndpoint, NitroProver};
+#[cfg(target_os = "linux")]
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
-use world_chain_proof_succinct_client_utils::witness::executor::{
-    WitnessExecutor, get_inputs_for_pipeline,
+#[cfg(target_os = "linux")]
+use world_chain_proof_succinct_host_utils::online::{
+    OnlineHostConfig, RangeWitnessRequest, build_range_input, range_hardfork_config,
 };
-use world_chain_proof_succinct_ethereum_client_utils::executor::ETHDAWitnessExecutor;
-use world_chain_proof_succinct_host_utils::witness_generation::{
-    OnlineBlobStore, PreimageWitnessCollector,
-};
+#[cfg(target_os = "linux")]
 use world_chain_proof_worker::ProofJobBackend;
+#[cfg(target_os = "linux")]
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, RpcProverServiceClient,
 };
-
-// Only the host-side NitroProver compiles on Linux (requires tokio-vsock / AF_VSOCK).
 #[cfg(target_os = "linux")]
-use world_chain_proof_nitro::host::{EnclaveEndpoint, NitroProver};
-
-// Re-export ProofWorker and ProofWorkerConfig from the generic worker crate.
 use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig};
 
 // ──────────────────────────────────────────────────────────────────────────────────────
 // NitroBackend — ProofJobBackend implementation for the Nitro TEE lane
 // ──────────────────────────────────────────────────────────────────────────────────────
 
+#[cfg(target_os = "linux")]
 /// Configuration for [`NitroBackend`].
 #[derive(Clone, Debug)]
 struct NitroBackendConfig {
     block_interval: u64,
-    rollup_config_hash: B256,
-    online: OnlineConfig,
-    #[cfg(target_os = "linux")]
+    online: OnlineHostConfig,
     enclave_cid: u32,
-    #[cfg(target_os = "linux")]
     enclave_port: u32,
     expected_pcrs: ExpectedPcrs,
-    schedule: WorldRangeHardforkConfig,
 }
 
+#[cfg(target_os = "linux")]
 /// [`ProofJobBackend`] for the [`ProofBackend::Nitro`] lane: builds witnesses over RPC and
 /// proves them inside a Nitro Enclave.
 struct NitroBackend {
@@ -90,18 +80,19 @@ struct NitroBackend {
     rt_handle: tokio::runtime::Handle,
 }
 
+#[cfg(target_os = "linux")]
 impl NitroBackend {
     fn new(config: NitroBackendConfig, rt_handle: tokio::runtime::Handle) -> Self {
         Self { config, rt_handle }
     }
 }
 
+#[cfg(target_os = "linux")]
 impl ProofJobBackend for NitroBackend {
     fn lane(&self) -> ProofBackend {
         ProofBackend::Nitro
     }
 
-    #[cfg(target_os = "linux")]
     fn prove(&self, request: &ProofRequest) -> anyhow::Result<ProofData> {
         let start_block = request
             .l2_block_number
@@ -124,18 +115,18 @@ impl ProofJobBackend for NitroBackend {
             self.rt_handle.clone(),
         );
 
-        // Build witness on the blocking threadpool.
-        let witness = build_witness(
+        let input = build_range_input(
             &self.config.online,
-            start_block,
-            request.l2_block_number,
-            request.l1_head,
-            self.config.schedule.clone(),
+            RangeWitnessRequest {
+                start_block,
+                end_block: request.l2_block_number,
+                l1_head: Some(request.l1_head),
+                allow_unfinalized: false,
+            },
         )
         .context("witness generation failed")?;
 
-        // Serialize and send to the Nitro Enclave.
-        let nitro_request = NitroRangeProofRequest::from_witness_data(&witness, None)
+        let nitro_request = NitroRangeProofRequest::from_witness_data(&input.witness, None)
             .context("witness serialize")?;
 
         let artifact = self
@@ -143,7 +134,6 @@ impl ProofJobBackend for NitroBackend {
             .block_on(prover.prove_range_async(nitro_request))
             .context("nitro enclave proving failed")?;
 
-        // Verify the attested output matches the claimed game root.
         if artifact.boot_info.l2PostRoot != request.root_claim {
             bail!(
                 "enclave post root {:?} != claimed root {:?}",
@@ -165,11 +155,11 @@ impl ProofJobBackend for NitroBackend {
                 request.l1_head
             );
         }
-        if artifact.boot_info.rollupConfigHash != self.config.rollup_config_hash {
+        if artifact.boot_info.rollupConfigHash != self.config.online.rollup_config_hash {
             bail!(
                 "enclave rollup config hash {:?} != expected {:?}",
                 artifact.boot_info.rollupConfigHash,
-                self.config.rollup_config_hash
+                self.config.online.rollup_config_hash
             );
         }
 
@@ -186,234 +176,13 @@ impl ProofJobBackend for NitroBackend {
             signature: Bytes::from(artifact.signature),
         })
     }
-
-    #[cfg(not(target_os = "linux"))]
-    fn prove(&self, _request: &ProofRequest) -> anyhow::Result<ProofData> {
-        bail!("nitro-worker only supports Linux (requires AF_VSOCK and AWS Nitro Enclaves)")
-    }
-}
-
-// ──────────────────────────────────────────────────────────────────────────────────────
-// Witness generation (adapted from proofs/bin/src/main.rs)
-// ──────────────────────────────────────────────────────────────────────────────────────
-
-use kona_host::{DataFormat, single::SingleChainHost};
-use kona_preimage::{BidirectionalChannel, HintWriter, NativeChannel, OracleReader};
-use kona_proof::{CachingOracle, l1::OracleBlobProvider};
-
-type DefaultOracleBase = CachingOracle<OracleReader<NativeChannel>, HintWriter<NativeChannel>>;
-type WorldPreimageCollector = PreimageWitnessCollector<DefaultOracleBase>;
-type WorldOnlineBlobStore = OnlineBlobStore<OracleBlobProvider<DefaultOracleBase>>;
-type WorldEthWitnessExecutor = ETHDAWitnessExecutor<WorldPreimageCollector, WorldOnlineBlobStore>;
-
-/// RPC-based configuration for online witness generation.
-#[derive(Clone, Debug)]
-struct OnlineConfig {
-    l1_rpc: String,
-    l1_beacon_rpc: String,
-    l2_rpc: String,
-    rollup_config_path: Option<PathBuf>,
-    l2_chain_id: Option<u64>,
-    witness_timeout: Duration,
-}
-
-/// Builds a `WorldRangeWitnessData` for the given block range using online RPC data.
-///
-/// This is synchronous and MUST NOT be called from within an async context.
-/// Call it via `tokio::task::spawn_blocking` from async code.
-fn build_witness(
-    cfg: &OnlineConfig,
-    start_block: u64,
-    end_block: u64,
-    l1_head: B256,
-    schedule: WorldRangeHardforkConfig,
-) -> Result<WorldRangeWitnessData> {
-    let client = BlockingClient::new();
-
-    let pre_root = l2_output_root(&client, &cfg.l2_rpc, start_block)?;
-    let post_root = l2_output_root(&client, &cfg.l2_rpc, end_block)?;
-    let pre_block_hash = l2_block_hash(&client, &cfg.l2_rpc, start_block)?;
-
-    let host = SingleChainHost {
-        l1_head,
-        agreed_l2_head_hash: pre_block_hash,
-        agreed_l2_output_root: pre_root,
-        claimed_l2_output_root: post_root,
-        claimed_l2_block_number: end_block,
-        l2_node_address: Some(trim_rpc_url(&cfg.l2_rpc)),
-        l1_node_address: Some(trim_rpc_url(&cfg.l1_rpc)),
-        l1_beacon_address: Some(trim_rpc_url(&cfg.l1_beacon_rpc)),
-        data_dir: None,
-        data_format: DataFormat::default(),
-        native: false,
-        server: true,
-        l2_chain_id: cfg.l2_chain_id,
-        rollup_config_path: cfg.rollup_config_path.clone(),
-        l1_config_path: None,
-        enable_experimental_witness_endpoint: false,
-    };
-
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("failed to build tokio runtime for witness generation")?;
-
-    rt.block_on(collect_witness_async(host, schedule, cfg.witness_timeout))
-}
-
-async fn collect_witness_async(
-    host: SingleChainHost,
-    schedule: WorldRangeHardforkConfig,
-    timeout: Duration,
-) -> Result<WorldRangeWitnessData> {
-    let preimage = BidirectionalChannel::new()?;
-    let hint = BidirectionalChannel::new()?;
-    let mut server_task = host.start_server(hint.host, preimage.host).await?;
-
-    let witness_fut = collect_from_channels(preimage.client, hint.client, schedule);
-    tokio::pin!(witness_fut);
-
-    let result = tokio::time::timeout(timeout, async {
-        tokio::select! {
-            r = &mut witness_fut => r,
-            server = &mut server_task => match server {
-                Ok(Ok(())) => Err(anyhow!("Kona server exited before witness completed")),
-                Ok(Err(e)) => Err(anyhow!("Kona server failed: {e}")),
-                Err(e) => Err(anyhow!("Kona server task panicked: {e}")),
-            },
-        }
-    })
-    .await
-    .map_err(|_| anyhow!("witness generation timed out after {}s", timeout.as_secs()))??;
-
-    if !server_task.is_finished() {
-        server_task.abort();
-    }
-    Ok(result)
-}
-
-async fn collect_from_channels(
-    preimage_chan: NativeChannel,
-    hint_chan: NativeChannel,
-    schedule: WorldRangeHardforkConfig,
-) -> Result<WorldRangeWitnessData> {
-    let preimage_witness_store = Arc::new(Mutex::new(PreimageStore::default()));
-    let blob_data = Arc::new(Mutex::new(BlobData::default()));
-
-    let preimage_oracle = Arc::new(CachingOracle::new(
-        2048,
-        OracleReader::new(preimage_chan),
-        HintWriter::new(hint_chan),
-    ));
-    let blob_provider = OracleBlobProvider::new(preimage_oracle.clone());
-    let oracle = Arc::new(PreimageWitnessCollector {
-        preimage_oracle,
-        preimage_witness_store: preimage_witness_store.clone(),
-    });
-    let beacon = OnlineBlobStore {
-        provider: blob_provider,
-        store: blob_data.clone(),
-    };
-
-    let executor = WorldEthWitnessExecutor::new();
-    let (boot_info, input) = get_inputs_for_pipeline(oracle.clone())
-        .await
-        .map_err(|e| anyhow!("get_inputs_for_pipeline: {e:?}"))?;
-
-    if let Some((cursor, l1_provider, l2_provider)) = input {
-        let rollup_config = Arc::new(boot_info.rollup_config.clone());
-        let l1_config = Arc::new(boot_info.l1_config.clone());
-        let pipeline = executor
-            .create_pipeline(
-                rollup_config,
-                l1_config,
-                cursor.clone(),
-                oracle,
-                beacon,
-                l1_provider,
-                l2_provider.clone(),
-            )
-            .await
-            .map_err(|e| anyhow!("create_pipeline: {e:?}"))?;
-        executor
-            .run_with_world_schedule(
-                boot_info,
-                pipeline,
-                cursor,
-                l2_provider,
-                Some(schedule.clone()),
-            )
-            .await
-            .map_err(|e| anyhow!("run_with_world_schedule: {e:?}"))?;
-    }
-
-    Ok(WorldRangeWitnessData::from_parts_with_world_config(
-        preimage_witness_store.lock().unwrap().clone(),
-        blob_data.lock().unwrap().clone(),
-        schedule,
-    ))
-}
-
-// ──────────────────────────────────────────────────────────────────────────────────────
-// RPC helper utilities (adapted from proofs/bin/src/main.rs)
-// ──────────────────────────────────────────────────────────────────────────────────────
-
-fn trim_rpc_url(url: &str) -> String {
-    url.trim_end_matches('/').to_string()
-}
-
-fn rpc_post(client: &BlockingClient, url: &str, body: Value) -> Result<Value> {
-    let response = client
-        .post(url)
-        .json(&body)
-        .send()
-        .with_context(|| format!("HTTP POST to {url} failed"))?
-        .json::<Value>()
-        .context("failed to parse JSON response")?;
-    if let Some(err) = response.get("error") {
-        bail!("RPC error from {url}: {err}");
-    }
-    Ok(response["result"].clone())
-}
-
-fn l2_output_root(client: &BlockingClient, l2_rpc: &str, block: u64) -> Result<B256> {
-    let result = rpc_post(
-        client,
-        l2_rpc,
-        json!({
-            "jsonrpc": "2.0",
-            "method": "optimism_outputAtBlock",
-            "params": [format!("0x{block:x}")],
-            "id": 1
-        }),
-    )?;
-    let root_str = result["outputRoot"]
-        .as_str()
-        .ok_or_else(|| anyhow!("missing outputRoot in optimism_outputAtBlock response"))?;
-    root_str.parse().context("failed to parse output root")
-}
-
-fn l2_block_hash(client: &BlockingClient, l2_rpc: &str, block: u64) -> Result<B256> {
-    let result = rpc_post(
-        client,
-        l2_rpc,
-        json!({
-            "jsonrpc": "2.0",
-            "method": "eth_getBlockByNumber",
-            "params": [format!("0x{block:x}"), false],
-            "id": 1
-        }),
-    )?;
-    let hash_str = result["hash"]
-        .as_str()
-        .ok_or_else(|| anyhow!("missing hash in eth_getBlockByNumber response"))?;
-    hash_str.parse().context("failed to parse block hash")
 }
 
 // ──────────────────────────────────────────────────────────────────────────────────────
 // CLI / config
 // ──────────────────────────────────────────────────────────────────────────────────────
 
+#[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum Network {
     #[value(name = "worldchain")]
@@ -422,6 +191,7 @@ enum Network {
     WorldChainSepolia,
 }
 
+#[cfg(target_os = "linux")]
 impl Network {
     fn chain_id(self) -> u64 {
         match self {
@@ -438,6 +208,7 @@ impl Network {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Debug, Parser)]
 #[command(
     name = "nitro-worker",
@@ -516,6 +287,7 @@ struct Cli {
 // Entry point
 // ──────────────────────────────────────────────────────────────────────────────────────
 
+#[cfg(target_os = "linux")]
 fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
@@ -524,22 +296,9 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
-    let (schedule, rollup_config_hash) = proof_config(
-        cli.network,
-        cli.rollup_config.as_deref(),
-        cli.rollup_config_hash,
-    )?;
+    let online = build_online_config(&cli)?;
     let expected_pcrs =
         build_expected_pcrs(cli.pcr0.as_deref(), cli.pcr1.as_deref(), cli.pcr2.as_deref())?;
-
-    let online_cfg = OnlineConfig {
-        l1_rpc: cli.l1_rpc.clone(),
-        l1_beacon_rpc: cli.l1_beacon_rpc.clone(),
-        l2_rpc: cli.l2_rpc.clone(),
-        rollup_config_path: cli.rollup_config.clone(),
-        l2_chain_id: cli.rollup_config.is_none().then_some(cli.network.chain_id()),
-        witness_timeout: Duration::from_secs(cli.witness_timeout_seconds),
-    };
 
     info!(
         prover_service = %cli.prover_service_url,
@@ -558,14 +317,10 @@ fn main() -> Result<()> {
 
     let backend_config = NitroBackendConfig {
         block_interval: cli.block_interval,
-        rollup_config_hash,
-        online: online_cfg,
-        #[cfg(target_os = "linux")]
+        online,
         enclave_cid: cli.enclave_cid,
-        #[cfg(target_os = "linux")]
         enclave_port: cli.enclave_port,
         expected_pcrs,
-        schedule,
     };
 
     let backend = NitroBackend::new(backend_config, runtime.handle().clone());
@@ -582,8 +337,6 @@ fn main() -> Result<()> {
         },
     );
 
-    // Ctrl-C triggers a graceful shutdown: the worker stops leasing, flushes pending
-    // reports, and resolves.
     let token = worker.cancellation_token();
     runtime.spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
@@ -600,47 +353,41 @@ fn main() -> Result<()> {
 // Config helpers
 // ──────────────────────────────────────────────────────────────────────────────────────
 
-fn proof_config(
-    network: Network,
-    rollup_config_path: Option<&Path>,
-    rollup_config_hash: Option<B256>,
-) -> Result<(WorldRangeHardforkConfig, B256)> {
-    use world_chain_proof_protocol::hash_rollup_config;
-
-    if let Some(path) = rollup_config_path {
+#[cfg(target_os = "linux")]
+fn build_online_config(cli: &Cli) -> Result<OnlineHostConfig> {
+    if let Some(path) = &cli.rollup_config {
         let bytes = std::fs::read(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        let value: Value = serde_json::from_slice(&bytes)
+        let value: serde_json::Value = serde_json::from_slice(&bytes)
             .with_context(|| format!("failed to parse {}", path.display()))?;
-        let protocol_cfg = ProtocolHardforkConfig::from_rollup_config_value(&value)
-            .context("failed to parse rollup config hardfork schedule")?;
-        let hash = hash_rollup_config(&value).context("failed to hash rollup config")?;
-        return Ok((range_hardfork_config(&protocol_cfg), hash));
+        return OnlineHostConfig::from_rollup_config_value(
+            &value,
+            cli.l1_rpc.clone(),
+            cli.l1_beacon_rpc.clone(),
+            cli.l2_rpc.clone(),
+            Some(path.clone()),
+            Duration::from_secs(cli.witness_timeout_seconds),
+        );
     }
 
-    let hash = rollup_config_hash
+    let rollup_config_hash = cli
+        .rollup_config_hash
         .context("provide --rollup-config or ROLLUP_CONFIG, or supply --rollup-config-hash")?;
-    let spec = network.chain_spec();
+    let spec = cli.network.chain_spec();
     let protocol_cfg = ProtocolHardforkConfig::from_chain_spec(spec.as_ref());
-    Ok((range_hardfork_config(&protocol_cfg), hash))
+    Ok(OnlineHostConfig {
+        l1_rpc: cli.l1_rpc.clone(),
+        l1_beacon_rpc: cli.l1_beacon_rpc.clone(),
+        l2_rpc: cli.l2_rpc.clone(),
+        schedule: range_hardfork_config(&protocol_cfg),
+        rollup_config_hash,
+        l2_chain_id: Some(cli.network.chain_id()),
+        rollup_config_path: None,
+        witness_timeout: Duration::from_secs(cli.witness_timeout_seconds),
+    })
 }
 
-fn range_hardfork_config(config: &ProtocolHardforkConfig) -> WorldRangeHardforkConfig {
-    WorldRangeHardforkConfig {
-        bedrock_block: config.bedrock_block,
-        regolith_time: config.regolith_time,
-        canyon_time: config.canyon_time,
-        ecotone_time: config.ecotone_time,
-        fjord_time: config.fjord_time,
-        granite_time: config.granite_time,
-        holocene_time: config.holocene_time,
-        isthmus_time: config.isthmus_time,
-        jovian_time: config.jovian_time,
-        tropo_time: config.tropo_time,
-        strato_time: config.strato_time,
-    }
-}
-
+#[cfg(target_os = "linux")]
 fn build_expected_pcrs(
     pcr0: Option<&str>,
     pcr1: Option<&str>,
@@ -663,6 +410,7 @@ fn build_expected_pcrs(
     }
 }
 
+#[cfg(target_os = "linux")]
 fn hex_to_pcr(s: &str) -> Result<[u8; world_chain_proof_nitro::PCR_LEN]> {
     let bytes = hex::decode(s.trim_start_matches("0x"))
         .with_context(|| format!("invalid PCR hex: {s}"))?;

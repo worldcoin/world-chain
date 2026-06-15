@@ -12,7 +12,7 @@ description = "AWS Nitro TEE proving worker: leases jobs from the prover-service
 name = "nitro-worker"
 path = "src/main.rs"
 
-[dependencies]
+[target.'cfg(target_os = "linux")'.dependencies]
 # Generic worker infrastructure
 world-chain-proof-worker.workspace = true
 world-chain-prover-service.workspace = true
@@ -20,18 +20,12 @@ world-chain-prover-service.workspace = true
 # Nitro prover (host-side, requires Linux + aws_nitro feature)
 world-chain-proof-nitro = { path = "..", features = ["aws_nitro"] }
 
-# Proof types and witness generation
-world-chain-chainspec.workspace = true
-world-chain-proof-core.workspace = true
-world-chain-proof-protocol.workspace = true
+# Witness generation (shared with sp1-worker)
 world-chain-proof-succinct-host-utils.workspace = true
-world-chain-proof-succinct-client-utils.workspace = true
-world-chain-proof-succinct-ethereum-client-utils.workspace = true
 
-# Kona host (for online witness generation)
-kona-host = { workspace = true, features = ["single"] }
-kona-preimage.workspace = true
-kona-proof.workspace = true
+# Chain config
+world-chain-chainspec.workspace = true
+world-chain-proof-protocol.workspace = true
 
 # Alloy types
 alloy-primitives = { workspace = true, features = ["serde"] }
@@ -40,12 +34,7 @@ alloy-primitives = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["full", "signal"] }
 
 # Serialisation
-serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-rkyv.workspace = true
-
-# HTTP (blocking) for witness RPC calls
-reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
 
 # Error handling / logging
 anyhow.workspace = true
