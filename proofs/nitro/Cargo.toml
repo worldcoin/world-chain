@@ -63,7 +63,7 @@ world-chain-proof-core.workspace = true
 # target table prevents Cargo from trying to compile AF_VSOCK/NSM deps on
 # non-Linux hosts.
 [target.'cfg(target_os = "linux")'.dependencies]
-tokio-vsock = { version = "0.5", optional = true }
+tokio-vsock = { version = "0.7", optional = true }
 aws-nitro-enclaves-nsm-api = { version = "0.4", optional = true }
 kona-proof = { workspace = true, optional = true }
 serde_bytes = { version = "0.11", optional = true }
