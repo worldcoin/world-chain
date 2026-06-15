@@ -1,9 +1,7 @@
-use crate::{
-    error::ChallengerError,
-    types::{ChallengeSubmission, GameCreated, RootState},
-};
+use crate::{error::ChallengerError, types::ChallengeSubmission};
 use alloy_primitives::{Address, BlockNumber, U256};
 use async_trait::async_trait;
+use world_chain_proofs::{GameCreated, RootState};
 
 #[async_trait]
 pub trait ChallengerClient {

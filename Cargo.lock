@@ -4681,6 +4681,7 @@ dependencies = [
  "ff",
  "generic-array 0.14.7",
  "group",
+ "hkdf",
  "pem-rfc7468",
  "pkcs8",
  "rand_core 0.6.4",
@@ -9529,6 +9530,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cff962f8eaa5f36e0447cee7c241f6b4b475fadf3ee61f154327a26bb4e009ba"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "p384"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe42f1670a52a47d448f14b6a5c61dd78fce51856e68edaa38f7ae3a46b8d6b6"
+dependencies = [
+ "ecdsa",
+ "elliptic-curve",
+ "primeorder",
+ "sha2 0.10.9",
 ]
 
 [[package]]
@@ -19175,6 +19188,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-defender"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-provider 2.0.4",
+ "alloy-rpc-types-eth 2.0.4",
+ "async-trait",
+ "futures-util",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "world-chain-proofs",
+ "world-chain-prover-service",
+]
+
+[[package]]
 name = "world-chain-devnet"
 version = "2.2.0"
 dependencies = [
@@ -19212,6 +19241,7 @@ dependencies = [
  "url",
  "world-chain-chainspec",
  "world-chain-challenger",
+ "world-chain-defender",
  "world-chain-node",
  "world-chain-primitives",
  "world-chain-proof-succinct-host-utils",
@@ -19587,15 +19617,20 @@ dependencies = [
 name = "world-chain-proof-nitro"
 version = "2.2.0"
 dependencies = [
+ "alloy-consensus 2.0.4",
  "alloy-primitives",
  "anyhow",
  "aws-nitro-enclaves-nsm-api",
+ "base64 0.22.1",
  "ciborium",
  "hex",
+ "k256",
  "kona-proof",
+ "p384",
  "rkyv",
  "serde",
  "serde_bytes",
+ "serde_cbor",
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.18",
@@ -19606,6 +19641,7 @@ dependencies = [
  "world-chain-proof-core",
  "world-chain-proof-kona-utils",
  "world-chain-proof-succinct-ethereum-client-utils",
+ "x509-parser",
 ]
 
 [[package]]

@@ -14,6 +14,6 @@ pub use bindings::{
 };
 pub use consensus_provider::{ConsensusError, ConsensusProvider, OptimismConsensusClient};
 pub use types::{
-    PROOF_LANE_COUNT, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD, ProofDomain, ProofLane,
-    ProposalCommitment, RootCommitment, has_threshold, proof_count,
+    GameCreated, PROOF_LANE_COUNT, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD, ProofDomain, ProofLane,
+    ProposalCommitment, RootCommitment, RootState, RootStateError, has_threshold, proof_count,
 };
