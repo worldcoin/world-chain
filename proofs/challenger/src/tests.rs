@@ -1,9 +1,6 @@
 use crate::{
-    challenger::WorldChainChallenger,
-    config::ChallengerConfig,
-    error::ChallengerError,
-    traits::ChallengerClient,
-    types::{ChallengeSubmission, GameCreated, RootState},
+    challenger::WorldChainChallenger, config::ChallengerConfig, error::ChallengerError,
+    traits::ChallengerClient, types::ChallengeSubmission,
 };
 use alloy_primitives::{Address, B256, BlockNumber, U256, address};
 use async_trait::async_trait;
@@ -15,9 +12,8 @@ use std::{
     },
     time::Duration,
 };
-use world_chain_proofs::{ConsensusError, ConsensusProvider};
+use world_chain_proofs::{ConsensusError, ConsensusProvider, GameCreated, RootState};
 
-const FACTORY: Address = address!("0000000000000000000000000000000000001006");
 const GAME_1: Address = address!("0000000000000000000000000000000000000001");
 const GAME_2: Address = address!("0000000000000000000000000000000000000002");
 const FINALIZED_L1_BLOCK: BlockNumber = 10_000;
@@ -41,7 +37,7 @@ struct MockClient {
 impl ChallengerClient for MockClient {
     async fn root_state(&self, game: Address) -> Result<RootState, ChallengerError> {
         let raw = self.states.get(&game).copied().unwrap_or(STATE_PROPOSED);
-        RootState::try_from(raw)
+        RootState::try_from(raw).map_err(Into::into)
     }
 
     async fn finalized_l1_block_num(&self) -> Result<BlockNumber, ChallengerError> {
@@ -58,7 +54,7 @@ impl ChallengerClient for MockClient {
             .iter()
             .map(|&(game, root_claim, l2_block_number)| GameCreated {
                 proposal_key: B256::ZERO,
-                root_it: B256::ZERO,
+                root_id: B256::ZERO,
                 game,
                 proposer: Address::ZERO,
                 root_claim,
@@ -123,7 +119,6 @@ fn mock_output_roots(
 fn config() -> ChallengerConfig {
     ChallengerConfig {
         challenger_bond: U256::from(1),
-        factory_contract: FACTORY,
         poll_interval: Duration::from_secs(1),
         ..ChallengerConfig::default()
     }

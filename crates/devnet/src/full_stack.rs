@@ -2394,7 +2394,6 @@ async fn start_world_chain_challenger(
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let config = ChallengerConfig {
         challenger_bond: U256::from(WORLD_CHALLENGER_BOND_WEI),
-        factory_contract: factory_address,
         poll_interval: WORLD_CHALLENGER_POLL_INTERVAL,
         ..ChallengerConfig::default()
     };
