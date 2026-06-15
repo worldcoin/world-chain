@@ -458,7 +458,7 @@ impl KonaService {
                 .safe_head()
                 .l1_origin
                 .number;
-            finalized.number = finalized.number.min(safe_origin.saturating_sub(1));
+            finalized.number = finalized.number.clamp(0, safe_origin.saturating_sub(1));
             finalized
         })
         .boxed();
