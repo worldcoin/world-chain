@@ -375,9 +375,10 @@ pub struct PayloadBuildMetrics {
     pub committed_payload_transaction_count: Histogram,
     /// Latest committed payload transaction count.
     pub committed_payload_transaction_count_latest: Gauge,
-    /// Histogram of committed payload fees in wei.
+    /// Histogram of marginal fees in wei added by each committed flashblock. Summing this
+    /// over a window yields true per-block revenue (records the delta, not the running total).
     pub committed_payload_fees_wei: Histogram,
-    /// Latest committed payload fees in wei.
+    /// Latest committed payload cumulative fees in wei (full block value at last commit).
     pub committed_payload_fees_wei_latest: Gauge,
     /// Histogram of committed flashblock index values.
     pub committed_flashblock_index: Histogram,
@@ -547,7 +548,8 @@ impl PayloadBuildMetrics {
         size_bytes: u64,
         gas_used: u64,
         tx_count: u64,
-        fees_wei: f64,
+        incremental_fees_wei: f64,
+        cumulative_fees_wei: f64,
         flashblock_index: u64,
     ) {
         self.committed_payloads_total.increment(1);
@@ -560,8 +562,9 @@ impl PayloadBuildMetrics {
             .record(tx_count as f64);
         self.committed_payload_transaction_count_latest
             .set(tx_count as f64);
-        self.committed_payload_fees_wei.record(fees_wei);
-        self.committed_payload_fees_wei_latest.set(fees_wei);
+        self.committed_payload_fees_wei.record(incremental_fees_wei);
+        self.committed_payload_fees_wei_latest
+            .set(cumulative_fees_wei);
         self.committed_flashblock_index
             .record(flashblock_index as f64);
         self.committed_flashblock_index_latest
