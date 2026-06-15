@@ -1,5 +1,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+#[cfg(any(test, feature = "test"))]
+mod dev;
+
 pub mod add_ons;
 pub mod context;
 pub mod engine;

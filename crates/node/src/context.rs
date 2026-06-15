@@ -1,6 +1,6 @@
 // Module defining World Chain Node Preset contexts for components & add-ons.
 
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use crate::{
     add_ons::WorldChainAddOns,
@@ -29,7 +29,8 @@ use reth_optimism_node::{
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::OpEthApiBuilder;
 use world_chain_chainspec::WorldChainSpec;
-use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
+use world_chain_cli::{KonaArgs, WorldChainArgs, WorldChainNodeConfig};
+use world_chain_kona::{AuthorizerKeys, FlashblocksAuthorizationNotifier, KonaConfig};
 use world_chain_p2p::{
     monitor::PeerMonitor,
     protocol::{
@@ -368,11 +369,79 @@ where
             1_000_000,
             self.config.args.simulate_enabled,
         )
+        .with_kona_args(self.config.args.kona.clone())
+        .with_flashblocks_authorizer(self.components_context.as_ref().map(
+            |flashblocks_components_ctx| {
+                // Mirror rollup-boost: when self-authorization keys are configured
+                // (`--flashblocks.override-authorizer-sk` + `--flashblocks.builder-sk`), the
+                // in-process Kona node mints full authorizations for the payloads it builds.
+                let keys = self
+                    .config
+                    .args
+                    .flashblocks
+                    .as_ref()
+                    .and_then(|flashblocks| {
+                        let authorizer_sk = flashblocks.override_authorizer_sk.clone()?;
+                        let builder_sk = flashblocks.builder_sk.as_ref()?;
+                        Some(AuthorizerKeys {
+                            authorizer_sk,
+                            builder_vk: builder_sk.verifying_key(),
+                        })
+                    });
+                FlashblocksAuthorizationNotifier {
+                    to_jobs_generator: flashblocks_components_ctx.to_jobs_generator.clone(),
+                    keys,
+                }
+            },
+        ))
     }
 
     fn ext_context(&self) -> Self::ExtContext {
         self.components_context.clone()
     }
+}
+
+/// Builds a [`KonaConfig`](world_chain_kona::KonaConfig) from the parsed `--kona.*` CLI arguments.
+///
+/// The rollup configuration is loaded from the JSON file referenced by `--kona.rollup-config`,
+/// which is required when Kona is enabled. Returns an error (which the caller propagates to fail
+/// node startup) if the rollup config is missing, unreadable, or unparsable.
+pub(crate) fn build_kona_config(
+    kona_args: &KonaArgs,
+) -> eyre::Result<world_chain_kona::KonaConfig> {
+    let l1_rpc_url = kona_args.l1_rpc_url.parse()?;
+    let l1_beacon_url = kona_args.l1_beacon_url.parse()?;
+
+    let rollup_config_path = kona_args.rollup_config_path.as_ref().ok_or_else(|| {
+        eyre::Report::msg("--kona.rollup-config is required when --kona.enabled is set")
+    })?;
+    let config_json = std::fs::read_to_string(rollup_config_path).map_err(|e| {
+        eyre::Report::msg(format!(
+            "failed to read rollup config from {}: {e}",
+            rollup_config_path.display()
+        ))
+    })?;
+
+    let rollup_config: kona_genesis::RollupConfig = serde_json::from_str(&config_json)
+        .map_err(|e| eyre::Report::msg(format!("failed to parse rollup config: {e}")))?;
+
+    Ok(KonaConfig {
+        rollup_config: Arc::new(rollup_config),
+        l1_rpc_url,
+        l1_beacon_url,
+        l1_trust_rpc: kona_args.l1_trust_rpc,
+        sequencer_mode: kona_args.sequencer,
+        sequencer_stopped: kona_args.sequencer_stopped,
+        sequencer_recovery_mode: kona_args.sequencer_recovery_mode,
+        conductor_rpc_url: kona_args.conductor_rpc.clone(),
+        l1_confs: kona_args.l1_confs,
+        p2p: kona_args.p2p.clone(),
+        rpc_addr: kona_args.rpc_addr,
+        rpc_port: kona_args.rpc_port,
+        rpc_enable_admin: kona_args.rpc_enable_admin,
+        rpc_enabled: !kona_args.rpc_disabled,
+        l1_slot_duration_override: kona_args.l1_slot_duration_override,
+    })
 }
 
 #[derive(Clone, Debug)]

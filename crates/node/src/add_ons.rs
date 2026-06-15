@@ -2,6 +2,10 @@
 
 use core::marker::PhantomData;
 
+use reth_engine_primitives::ConsensusEngineHandle;
+use reth_payload_builder::PayloadStore;
+use reth_tasks::TaskExecutor;
+
 use alloy_consensus::{Block, BlockBody, Header};
 use op_alloy_consensus::OpTransaction;
 use reth_chainspec::ChainSpecProvider;
@@ -14,7 +18,7 @@ use reth_node_builder::rpc::{
 };
 use reth_optimism_chainspec::OpHardfork;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_node::{OpEngineApiBuilder, txpool::OpPooledTx};
+use reth_optimism_node::{OpEngineApiBuilder, OpEngineTypes, txpool::OpPooledTx};
 use reth_optimism_payload_builder::{
     OpPayloadBuilderAttributes, OpPayloadPrimitives,
     config::{OpDAConfig, OpGasLimitConfig},
@@ -34,9 +38,15 @@ use reth_rpc_api::{
 };
 use reth_rpc_server_types::RethRpcModule;
 use reth_transaction_pool::TransactionPool;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 use world_chain_chainspec::WorldChainSpec;
+use world_chain_cli::KonaArgs;
 use world_chain_evm::OpTx;
+use world_chain_kona::{
+    FlashblocksAuthorizationNotifier, KonaConfig, KonaService, KonaServiceHandle, L2RpcEndpoint,
+};
+
+use crate::context::build_kona_config;
 use world_chain_rpc::{
     EthApiExtServer, SequencerClient as WorldChainSequencerClient, Simulate, SimulateApiServer,
     WorldChainEthApiExt,
@@ -108,6 +118,21 @@ pub struct WorldChainAddOns<
     min_suggested_priority_fee: u64,
     /// Enables the World Chain simulate namespace.
     simulate_enabled: bool,
+    /// In-process Kona consensus startup intent (the enabled `--kona.*` CLI args).
+    ///
+    /// When [`Some`], [`launch_add_ons`](NodeAddOns::launch_add_ons) builds the [`KonaConfig`] from
+    /// these args (failing the launch if the rollup config is missing/unreadable/unparsable),
+    /// assembles a [`WorldChainKonaEngineClient`] from reth's engine handle, and spawns the Kona
+    /// consensus node in-process. The build is deferred to launch so misconfiguration aborts node
+    /// startup rather than being silently swallowed.
+    ///
+    /// [`KonaConfig`]: world_chain_kona::KonaConfig
+    /// [`WorldChainKonaEngineClient`]: world_chain_kona::WorldChainKonaEngineClient
+    kona_args: Option<KonaArgs>,
+    /// Flashblocks payload-job authorizer, plumbed into the in-process Kona engine client so a
+    /// forkchoice update with attributes notifies (and optionally authorizes) the generator. See
+    /// [`FlashblocksAuthorizationNotifier`]; [`None`] when Flashblocks is disabled.
+    flashblocks_authorizer: Option<FlashblocksAuthorizationNotifier>,
     /// Transaction type carried by the node primitives.
     _tx: PhantomData<fn() -> Tx>,
 }
@@ -141,6 +166,8 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            kona_args: None,
+            flashblocks_authorizer: None,
             _tx: PhantomData,
         }
     }
@@ -152,6 +179,28 @@ where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
 {
+    /// Sets the enabled `--kona.*` CLI args which signal the add-ons to build a
+    /// [`KonaConfig`](world_chain_kona::KonaConfig) and spawn an in-process Consensus Engine during
+    /// launch.
+    ///
+    /// Passing [`Some`] defers the fallible config build to
+    /// [`launch_add_ons`](NodeAddOns::launch_add_ons), so a misconfigured-but-enabled Kona aborts
+    /// node startup instead of silently disabling consensus.
+    pub fn with_kona_args(mut self, kona_args: Option<KonaArgs>) -> Self {
+        self.kona_args = kona_args;
+        self
+    }
+
+    /// Sets the Flashblocks payload-job authorizer plumbed into the in-process Kona engine client,
+    /// so a forkchoice update with attributes notifies (and optionally authorizes) the generator.
+    pub fn with_flashblocks_authorizer(
+        mut self,
+        flashblocks_authorizer: Option<FlashblocksAuthorizationNotifier>,
+    ) -> Self {
+        self.flashblocks_authorizer = flashblocks_authorizer;
+        self
+    }
+
     /// Maps the [`EngineApiBuilder`] builder type.
     pub fn with_engine_api<T>(
         self,
@@ -297,7 +346,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx> NodeAddOns<N>
     for WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
 where
     N: FullNodeComponents<
-            Types: NodeTypes<ChainSpec = WorldChainSpec>,
+            Types: NodeTypes<ChainSpec = WorldChainSpec, Payload = OpEngineTypes>,
             Evm: ConfigureEvm<
                 NextBlockEnvCtx: BuildNextEnv<
                     OpPayloadBuilderAttributes<Tx>,
@@ -340,8 +389,35 @@ where
             enable_tx_conditional,
             historical_rpc,
             simulate_enabled,
+            kona_args,
+            flashblocks_authorizer,
             ..
         } = self;
+
+        // Capture the inputs the in-process Kona consensus node needs from `ctx` *before*
+        // `launch_add_ons_with` consumes it. The authoritative L2 IPC endpoint is read from the
+        // live RPC server handle after launch (below), so we only stash the engine-layer handles
+        // here. We also fail fast if the IPC server is disabled, since Kona connects over it.
+        //
+        // The [`KonaConfig`](world_chain_kona::KonaConfig) is built here (not in `add_ons`, which
+        // cannot return errors) so that an enabled-but-misconfigured Kona — a missing, unreadable,
+        // or unparsable rollup config — aborts node startup via `?` rather than silently starting
+        // without a consensus engine.
+        let kona_inputs = kona_args
+            .map(|kona_args| -> eyre::Result<_> {
+                let kona_config = build_kona_config(&kona_args)?;
+                let engine_handle = ctx.beacon_engine_handle.clone();
+                let payload_store = PayloadStore::new(ctx.node.payload_builder_handle().clone());
+                let task_executor = ctx.node.task_executor().clone();
+                Ok((
+                    kona_config,
+                    engine_handle,
+                    payload_store,
+                    task_executor,
+                    flashblocks_authorizer,
+                ))
+            })
+            .transpose()?;
 
         let eth_config =
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
@@ -397,7 +473,7 @@ where
         let provider = ctx.node.provider().clone();
         let evm_config = ctx.node.evm_config().clone();
 
-        rpc_add_ons
+        let handle = rpc_add_ons
             .launch_add_ons_with(ctx, move |container| {
                 let reth_node_builder::rpc::RpcModuleContainer {
                     modules,
@@ -443,7 +519,46 @@ where
 
                 Ok(())
             })
-            .await
+            .await?;
+
+        // Now that the RPC server is live, spawn the in-process Kona consensus node (if enabled).
+        // Kona reaches reth's standard (non-engine) L2 RPC over IPC when the IPC server is enabled,
+        // otherwise it falls back to the HTTP RPC endpoint. Both are read from the running server so
+        // they reflect what reth actually bound, rather than being re-derived from config.
+        if let Some((
+            kona_config,
+            engine_handle,
+            payload_store,
+            task_executor,
+            flashblocks_authorizer,
+        )) = kona_inputs
+        {
+            let rpc = &handle.rpc_server_handles.rpc;
+            let l2_endpoint = match rpc.ipc_endpoint() {
+                Some(ipc_path) => L2RpcEndpoint::Ipc(ipc_path),
+                None => {
+                    let http_url = rpc.http_url().ok_or_else(|| {
+                        eyre::Report::msg(
+                            "--kona.enabled requires reth's IPC or HTTP RPC server \
+                             (enable at least one of --ipc / --http)",
+                        )
+                    })?;
+                    L2RpcEndpoint::Http(http_url.parse()?)
+                }
+            };
+
+            spawn_kona(
+                kona_config,
+                engine_handle,
+                payload_store,
+                task_executor,
+                l2_endpoint,
+                flashblocks_authorizer,
+            )
+            .await?;
+        }
+
+        Ok(handle)
     }
 }
 
@@ -451,7 +566,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx> RethRpcAddOns<N>
     for WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
 where
     N: FullNodeComponents<
-            Types: NodeTypes<ChainSpec = WorldChainSpec>,
+            Types: NodeTypes<ChainSpec = WorldChainSpec, Payload = OpEngineTypes>,
             Evm: ConfigureEvm<
                 NextBlockEnvCtx: BuildNextEnv<
                     OpPayloadBuilderAttributes<Tx>,
@@ -501,4 +616,74 @@ where
     fn engine_validator_builder(&self) -> Self::ValidatorBuilder {
         EngineValidatorAddOn::engine_validator_builder(&self.rpc_add_ons)
     }
+}
+
+/// Assembles the in-process Kona consensus node from reth's engine handle and the live RPC
+/// server's IPC endpoint, then spawns it on the node's task executor.
+///
+/// Builds the kona service's in-process engine client from:
+/// - `engine_handle` — reth's `ConsensusEngineHandle`, for the FCU / new-payload consensus hot
+///   path,
+/// - `payload_store` — wrapping reth's payload builder handle, for `get_payload`,
+/// - an L2 alloy provider connected over `l2_endpoint` (the live RPC endpoint reported by the
+///   running server — IPC when enabled, otherwise HTTP — not re-derived from config), for the
+///   infrequent reads the engine actor performs during sync,
+/// - an L1 alloy provider over HTTP from `--kona.l1-rpc-url`.
+///
+/// Connecting the L2 provider may be asynchronous (IPC), so this is an `async fn`. The assembled
+/// [`KonaService`] is then run on the provided `task_executor` for the node's lifetime.
+async fn spawn_kona(
+    kona_config: KonaConfig,
+    engine_handle: ConsensusEngineHandle<OpEngineTypes>,
+    payload_store: PayloadStore<OpEngineTypes>,
+    task_executor: TaskExecutor,
+    l2_endpoint: L2RpcEndpoint,
+    flashblocks_authorizer: Option<FlashblocksAuthorizationNotifier>,
+) -> eyre::Result<()> {
+    let sequencer_mode = kona_config.sequencer_mode;
+    let l1_chain_id = kona_config.rollup_config.l1_chain_id;
+    let l2_chain_id: u64 = kona_config.rollup_config.l2_chain_id.into();
+
+    let service = KonaService::build(
+        kona_config,
+        engine_handle,
+        payload_store,
+        l2_endpoint,
+        flashblocks_authorizer,
+    )
+    .await?;
+
+    info!(
+        target: "world_chain::kona",
+        %l1_chain_id,
+        %l2_chain_id,
+        sequencer = sequencer_mode,
+        "Starting in-process Kona consensus node (direct ConsensusEngineHandle transport)"
+    );
+
+    // Spawn on the node's task executor so the service lives for the node's lifetime.
+    //
+    // The in-process Kona node is reth's only engine driver: if it stops while the node is
+    // running, reth keeps serving but silently stops advancing (no FCU / new-payload), leaving a
+    // half-dead node that liveness probes on the EL don't catch. So its termination is always
+    // fatal. `spawn_critical_task` only notifies reth's `TaskManager` on a panic (normal
+    // completion is ignored), and it wraps the future in `select(on_shutdown, ..)` — during a
+    // legitimate node shutdown `on_shutdown` wins and this future is dropped before `stopped()`
+    // resolves. So panicking here fires only when Kona dies on its own, bringing the whole node
+    // down so the orchestrator restarts the pod and op-conductor fails over.
+    task_executor.spawn_critical_task("kona-consensus", async move {
+        let mut handle = KonaServiceHandle::spawn(service);
+        match handle.stopped().await {
+            Ok(()) => {
+                error!(target: "world_chain::kona", "Kona consensus node stopped unexpectedly; bringing down the node");
+                panic!("Kona consensus node stopped unexpectedly");
+            }
+            Err(error) => {
+                error!(target: "world_chain::kona", %error, "Kona consensus node exited with error; bringing down the node");
+                panic!("Kona consensus node exited with error: {error}");
+            }
+        }
+    });
+
+    Ok(())
 }

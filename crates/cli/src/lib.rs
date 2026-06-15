@@ -7,6 +7,7 @@ pub mod config;
 pub use app::{Cli, CliApp, Commands};
 pub use chainspec::WorldChainSpecParser;
 pub use cli::{
-    BuilderArgs, FlashblocksArgs, PbhArgs, WorldChainArgs, WorldChainRpcModuleValidator,
+    BuilderArgs, FlashblocksArgs, KonaArgs, KonaP2PArgs, KonaSignerArgs, PbhArgs, WorldChainArgs,
+    WorldChainRpcModuleValidator,
 };
 pub use config::{FlashblocksPayloadBuilderConfig, WorldChainNodeConfig};

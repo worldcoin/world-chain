@@ -24,6 +24,7 @@ members = [
     "crates/evm",
     "crates/state",
     "crates/pbh",
+    "crates/kona",
     "proofs/core",
     "proofs/protocol",
     "proofs/nitro",
@@ -84,6 +85,7 @@ world-chain-evm = { path = "crates/evm", default-features = false }
 world-chain-state = { path = "crates/state", default-features = false }
 world-chain-devnet = { path = "crates/devnet", default-features = false }
 world-chain-test-utils = { path = "crates/test-utils", default-features = false }
+world-chain-kona = { path = "crates/kona", default-features = false }
 world-chain-proof-core = { path = "proofs/core", default-features = false }
 world-chain-proof = { path = "proofs/proof", default-features = false }
 world-chain-proof-protocol = { path = "proofs/protocol", default-features = false }
@@ -157,6 +159,7 @@ reth-rpc-layer = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddead
 reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
 reth-storage-api = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
 reth-storage-errors = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
+reth-rpc-builder = { git = "https://github.com/paradigmxyz/reth", rev = "27bfddeada3953edc22759080a3659ccea62ca1f", default-features = false }
 
 # reth-optimism
 reth-optimism-evm = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
@@ -170,6 +173,24 @@ reth-optimism-forks = { git = "https://github.com/ethereum-optimism/optimism", t
 reth-optimism-primitives = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
 reth-optimism-storage = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
 reth-optimism-flashblocks = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
+
+# kona (ethereum-optimism/optimism monorepo, same tag as op-alloy)
+kona-engine = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+kona-node-service = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+kona-rpc = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+kona-protocol = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", features = ["serde", "std"] }
+kona-registry = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+kona-providers-alloy = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+kona-interop = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+kona-disc = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+kona-gossip = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+kona-peers = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+kona-sources = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
+kona-cli = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false, features = ["secrets"] }
+
+discv5 = "0.10.2"
+libp2p = "0.56.0"
+k256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 
 # alloy op
 op-alloy-consensus = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
@@ -251,7 +272,6 @@ kona-preimage = { git = "https://github.com/ethereum-optimism/optimism", tag = "
 ] }
 kona-host = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
 kona-proof = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
-kona-protocol = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false }
 
 # rpc
 jsonrpsee = { version = "0.26.0", features = ["server", "client", "macros"] }
