@@ -52,6 +52,7 @@ op-alloy-rpc-types-engine.workspace = true
 # General
 ed25519-dalek.workspace = true
 async-trait.workspace = true
+futures.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-util.workspace = true
 tracing.workspace = true

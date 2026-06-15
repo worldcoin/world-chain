@@ -19274,6 +19274,7 @@ dependencies = [
  "async-trait",
  "color-eyre",
  "ed25519-dalek",
+ "futures",
  "kona-derive",
  "kona-engine",
  "kona-genesis",

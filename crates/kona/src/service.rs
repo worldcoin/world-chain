@@ -25,6 +25,7 @@ use std::{sync::Arc, time::Duration};
 use alloy_primitives::{Address, B256, U256, b256};
 use alloy_provider::{IpcConnect, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
+use futures::StreamExt as _;
 use kona_derive::StatefulAttributesBuilder;
 use kona_engine::{Engine, EngineClient, EngineState};
 use kona_genesis::{L1ChainConfig, RollupConfig};
@@ -277,10 +278,13 @@ impl KonaService {
         derivation_client: QueuedEngineDerivationClient,
         unsafe_head_tx: watch::Sender<L2BlockInfo>,
         el_sync_finished: bool,
-    ) -> EngineActor<
-        EngineProcessor<WorldChainKonaEngineClient, QueuedEngineDerivationClient>,
-        EngineRpcProcessor<WorldChainKonaEngineClient>,
-    > {
+    ) -> (
+        EngineActor<
+            EngineProcessor<WorldChainKonaEngineClient, QueuedEngineDerivationClient>,
+            EngineRpcProcessor<WorldChainKonaEngineClient>,
+        >,
+        watch::Receiver<EngineState>,
+    ) {
         let engine_state = EngineState {
             el_sync_finished,
             ..Default::default()
@@ -297,6 +301,10 @@ impl KonaService {
             self.sequencer_mode.then_some(unsafe_head_tx),
         );
 
+        // A second receiver on the engine state, handed back to the caller to gate the L1
+        // finality feed on the engine's safe head (see the finalized-stream wiring in `run`).
+        let engine_state_rx_for_gate = engine_state_rx.clone();
+
         let engine_rpc_processor = EngineRpcProcessor::new(
             self.engine_client.clone(),
             self.rollup_config.clone(),
@@ -304,11 +312,14 @@ impl KonaService {
             engine_queue_length_rx,
         );
 
-        EngineActor::new(
-            cancellation,
-            engine_request_rx,
-            engine_processor,
-            engine_rpc_processor,
+        (
+            EngineActor::new(
+                cancellation,
+                engine_request_rx,
+                engine_processor,
+                engine_rpc_processor,
+            ),
+            engine_state_rx_for_gate,
         )
     }
 
@@ -352,8 +363,9 @@ impl KonaService {
             }
         };
 
-        // Engine actor (in-process EL).
-        let engine_actor = self.create_engine_actor(
+        // Engine actor (in-process EL). The returned receiver tracks the engine's safe head and
+        // is used below to gate the L1 finality feed.
+        let (engine_actor, engine_safe_head_rx) = self.create_engine_actor(
             cancellation.clone(),
             engine_actor_request_rx,
             QueuedEngineDerivationClient::new(derivation_actor_request_tx.clone()),
@@ -406,18 +418,50 @@ impl KonaService {
 
         let (l1_query_tx, l1_query_rx) = mpsc::channel(CHANNEL_SIZE);
 
+        // Both streams are boxed to a single concrete type because `L1WatcherActor` is generic
+        // over one `BlockStream` type shared by its head and finalized streams.
         let head_stream = BlockStream::new_as_stream(
             self.l1_provider.clone(),
             alloy_eips::BlockNumberOrTag::Latest,
             Duration::from_secs(HEAD_STREAM_POLL_INTERVAL),
         )
-        .map_err(|e| format!("failed to build L1 head stream: {e}"))?;
+        .map_err(|e| format!("failed to build L1 head stream: {e}"))?
+        .boxed();
+
+        // Clamp the L1 finality feed to the engine's safe head.
+        //
+        // kona's `FinalizeTask` rejects a finalize target above the current safe head with a
+        // `Critical` error, which tears down the in-process engine — and, since the engine is
+        // reth's only driver, the whole node. That target is the highest L2 block derived from a
+        // finalized L1 block, so we clamp each finalized L1 block to strictly below the safe head's
+        // L1 origin. Every L2 block whose L1 origin is `<=` the clamped value then lies in an epoch
+        // before the safe head's, so it is already safe and the derived target can never exceed the
+        // safe head. (Strictly below, not at: consecutive L2 blocks usually share an L1 origin, so
+        // the safe head's own epoch may still contain an as-yet-unsafe block.)
+        //
+        // Only `BlockInfo::number` is consumed downstream — the L1 watcher forwards the block as-is
+        // and kona's finalizer keys solely off the number — so clamping the number suffices. In a
+        // synced node the finalized L1 block already trails the safe head's origin by far more than
+        // this, so the clamp is a no-op; it only engages while the node replays history behind the
+        // finalized point (e.g. a restart bootstrapping derivation from L1 with no unsafe-block
+        // gossip), which is exactly the window where the unclamped feed crashes the node.
         let finalized_stream = BlockStream::new_as_stream(
             self.l1_provider.clone(),
             alloy_eips::BlockNumberOrTag::Finalized,
             Duration::from_secs(FINALIZED_STREAM_POLL_INTERVAL),
         )
-        .map_err(|e| format!("failed to build L1 finalized stream: {e}"))?;
+        .map_err(|e| format!("failed to build L1 finalized stream: {e}"))?
+        .map(move |mut finalized| {
+            let safe_origin = engine_safe_head_rx
+                .borrow()
+                .sync_state
+                .safe_head()
+                .l1_origin
+                .number;
+            finalized.number = finalized.number.min(safe_origin.saturating_sub(1));
+            finalized
+        })
+        .boxed();
 
         let l1_watcher = L1WatcherActor::new(
             self.rollup_config.clone(),
