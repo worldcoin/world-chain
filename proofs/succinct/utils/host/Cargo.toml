@@ -23,7 +23,7 @@ serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 world-chain-proof-core.workspace = true
-world-chain-proof-kona-host-utils.workspace = true
+world-chain-proof-kona-utils = { workspace = true, features = ["host"] }
 world-chain-proof-succinct-utils.workspace = true
 alloy-sol-types = { workspace = true, optional = true }
 bincode = { version = "1", optional = true }
