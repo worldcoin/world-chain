@@ -53,6 +53,23 @@ struct UpArgs {
     #[arg(long)]
     no_flashblocks: bool,
 
+    /// Enable flashblocks block access lists (BAL) on the sequencer nodes.
+    #[arg(long)]
+    bal_enabled: bool,
+
+    /// Automatically run a Contender stress test against the live nodes once
+    /// the devnet is ready. The devnet keeps running until Ctrl-C.
+    #[arg(long)]
+    stress: bool,
+
+    /// Target transactions per second for the automated stress run.
+    #[arg(long, default_value_t = 50, requires = "stress")]
+    stress_tps: u64,
+
+    /// Duration in seconds to sustain the automated stress run.
+    #[arg(long, default_value_t = 60, requires = "stress")]
+    stress_duration: u64,
+
     /// Disable the containerized L1 dependency.
     #[arg(long)]
     no_l1: bool,
@@ -81,6 +98,10 @@ struct UpArgs {
     /// Kept for compatibility; op-challenger is already disabled by default.
     #[arg(long)]
     no_op_challenger: bool,
+
+    /// Do not deploy the WIP-1006 proof-system contracts in the HA devnet.
+    #[arg(long)]
+    no_proof_system: bool,
 
     /// Print the selected topology manifest and exit.
     #[arg(long)]
@@ -185,10 +206,11 @@ async fn up(args: UpArgs) -> Result<()> {
         ObservabilityConfig::default()
     };
 
-    let ha_config = HaSequencerConfig::default()
+    let mut ha_config = HaSequencerConfig::default()
         .with_sequencer_count(args.sequencers)
         .with_op_challenger(args.op_challenger && !args.no_op_challenger)
         .with_observability(observability.clone());
+    ha_config.world_contracts.proof_system = !args.no_proof_system;
 
     let mut builder = WorldDevnetBuilder::new()
         .preset(preset)
@@ -196,6 +218,7 @@ async fn up(args: UpArgs) -> Result<()> {
         .observability(observability)
         .hardforks(hardforks)
         .flashblocks(!args.no_flashblocks)
+        .flashblocks_access_list(args.bal_enabled)
         .block_time(Duration::from_millis(args.block_time_ms))
         .port_mode(if args.stable_ports {
             DevnetPortMode::Stable
@@ -221,11 +244,14 @@ async fn up(args: UpArgs) -> Result<()> {
         preset = ?args.preset,
         block_time_ms = args.block_time_ms,
         flashblocks = !args.no_flashblocks,
+        bal_enabled = args.bal_enabled,
+        stress = args.stress,
         stable_ports = args.stable_ports,
         l1 = !args.no_l1,
         observability = !args.no_observability && (args.observability || preset == WorldDevnetPreset::HaSequencer),
         sequencers = args.sequencers,
         op_challenger = args.op_challenger && !args.no_op_challenger,
+        proof_system = !args.no_proof_system,
         "Starting native World Chain devnet"
     );
 
@@ -241,6 +267,14 @@ async fn up(args: UpArgs) -> Result<()> {
     };
     write_endpoints_file(&devnet, &devnet_endpoints_path())?;
 
+    let stress_task = args.stress.then(|| {
+        spawn_stress_run(
+            devnet.sequencer_rpc_url(),
+            args.stress_tps,
+            args.stress_duration,
+        )
+    });
+
     let signal_task = tokio::spawn(async move {
         match ctrl_c.await {
             Ok(()) => {
@@ -252,7 +286,54 @@ async fn up(args: UpArgs) -> Result<()> {
 
     let result = devnet.run_until_shutdown(shutdown_rx).await;
     signal_task.abort();
+    if let Some(task) = stress_task {
+        // Dropping the join handle's future kills the stress child via
+        // `kill_on_drop` if it is still running.
+        task.abort();
+    }
     result
+}
+
+/// Spawn a background task that drives `scripts/stress/stress.sh` against the
+/// live devnet. The script is responsible for `contender setup` + `spam`; we
+/// just point it at the primary sequencer and pass the rate/duration through.
+fn spawn_stress_run(rpc_url: String, tps: u64, duration: u64) -> tokio::task::JoinHandle<()> {
+    let script = stress_script_path();
+    tokio::spawn(async move {
+        info!(
+            rpc_url = %rpc_url,
+            tps,
+            duration_secs = duration,
+            script = %script.display(),
+            "starting automated stress run against live devnet"
+        );
+
+        let status = tokio::process::Command::new("bash")
+            .arg(&script)
+            .arg("stress")
+            .env("RPC_URL", &rpc_url)
+            .env("TPS", tps.to_string())
+            .env("DURATION", duration.to_string())
+            .kill_on_drop(true)
+            .status()
+            .await;
+
+        match status {
+            Ok(status) if status.success() => info!("automated stress run completed"),
+            Ok(status) => warn!(
+                ?status,
+                "automated stress run exited with a non-zero status"
+            ),
+            Err(err) => warn!(
+                %err,
+                "failed to launch automated stress run; is `contender` installed and on PATH?"
+            ),
+        }
+    })
+}
+
+fn stress_script_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../scripts/stress/stress.sh")
 }
 
 async fn spawn_background(args: UpArgs) -> Result<()> {
@@ -357,6 +438,16 @@ fn background_args(args: &UpArgs) -> Vec<String> {
     if args.no_flashblocks {
         argv.push("--no-flashblocks".to_string());
     }
+    if args.bal_enabled {
+        argv.push("--bal-enabled".to_string());
+    }
+    if args.stress {
+        argv.push("--stress".to_string());
+        argv.push("--stress-tps".to_string());
+        argv.push(args.stress_tps.to_string());
+        argv.push("--stress-duration".to_string());
+        argv.push(args.stress_duration.to_string());
+    }
     if args.no_l1 {
         argv.push("--no-l1".to_string());
     }
@@ -371,6 +462,9 @@ fn background_args(args: &UpArgs) -> Vec<String> {
     }
     if args.op_challenger {
         argv.push("--op-challenger".to_string());
+    }
+    if args.no_proof_system {
+        argv.push("--no-proof-system".to_string());
     }
     argv.push("--sequencers".to_string());
     argv.push(args.sequencers.to_string());

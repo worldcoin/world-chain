@@ -69,7 +69,7 @@ use world_chain_pool::{
 use world_chain_primitives::ed25519_dalek::SigningKey;
 
 pub fn test_config() -> WorldChainNodeConfig {
-    test_config_with_peers_and_gossip(None, false, true)
+    test_config_with_peers_and_gossip(None, false, true, true)
 }
 
 /// Creates a test config with optional transaction propagation peers and gossip control
@@ -77,6 +77,7 @@ pub fn test_config_with_peers_and_gossip(
     tx_peers: Option<Vec<PeerId>>,
     disable_txpool_gossip: bool,
     flashblocks_enabled: bool,
+    access_list: bool,
 ) -> WorldChainNodeConfig {
     use reth_optimism_node::args::RollupArgs;
 
@@ -102,7 +103,7 @@ pub fn test_config_with_peers_and_gossip(
             force_publish: false,
             recommit_interval: 200,
             flashblocks_interval: 200,
-            access_list: true,
+            access_list,
             store: false,
             store_path: None,
             fanout: FanoutArgs::default(),
@@ -128,7 +129,7 @@ pub fn test_config_with_peers_and_gossip(
         },
         builder_config: FlashblocksPayloadBuilderConfig {
             inner: OpBuilderConfig::default(),
-            bal_enabled: true,
+            bal_enabled: access_list,
         },
         flashblocks_store: None,
     }

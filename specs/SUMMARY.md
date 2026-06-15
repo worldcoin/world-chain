@@ -13,4 +13,8 @@
 - [World Chain Improvement Proposals](./wips/README.md)
     - [WIP-1001: WorldID Native Account Abstraction](./wips/wip-1001.md)
     - [WIP-1002: WorldID Gas Accounting](./wips/wip-1002.md)
+    - [WIP-1003: World ID Transaction Subsidies](./wips/wip-1003.md)
+    - [WIP-1004: EdDSA Verification Precompile](./wips/wip-1004.md)
+    - [WIP-1005: Proof System Upgrade](./wips/wip-1005.md)
+    - [WIP-1006: Proof System Architecture](./wips/wip-1006.md)
     - [WIP Template](./wips/wip-template.md)

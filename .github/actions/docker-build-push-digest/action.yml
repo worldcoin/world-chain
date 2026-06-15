@@ -17,6 +17,20 @@ inputs:
   sccache_bucket:
     description: S3 bucket used by sccache and BuildKit cache.
     required: true
+  dockerfile:
+    description: Path to the Dockerfile to build.
+    required: false
+    default: Dockerfile
+  build_args:
+    description: Extra build args passed to docker build (newline-separated KEY=value).
+    required: false
+    default: ""
+  digest_artifact_prefix:
+    description: >-
+      Prefix for the uploaded digest artifact name. Override when a workflow builds
+      more than one image so their digest artifacts do not collide.
+    required: false
+    default: digests
 
 runs:
   using: composite
@@ -28,7 +42,7 @@ runs:
         ref_name='${{ github.ref_name }}'
         echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
         echo "CACHE_SCOPE=${ref_name//\//-}" >> "$GITHUB_ENV"
-        echo "BUILDKIT_CACHE_PREFIX=buildkit/${{ github.repository }}/${platform//\//-}" >> "$GITHUB_ENV"
+        echo "BUILDKIT_CACHE_PREFIX=buildkit/${{ inputs.image_name }}/${platform//\//-}" >> "$GITHUB_ENV"
 
     - name: Log in to Registry
       uses: docker/login-action@v3
@@ -57,12 +71,13 @@ runs:
       uses: docker/build-push-action@v6
       with:
         context: .
-        file: Dockerfile
+        file: ${{ inputs.dockerfile }}
         build-args: |
           VERGEN_GIT_SHA=${{ github.sha }}
           SCCACHE_BUCKET=${{ inputs.sccache_bucket }}
           SCCACHE_REGION=${{ inputs.aws_region }}
           SCCACHE_S3_KEY_PREFIX=sccache/${{ github.repository }}/${{ env.PLATFORM_PAIR }}
+          ${{ inputs.build_args }}
         secrets: |
           aws_access_key_id=${{ env.AWS_ACCESS_KEY_ID }}
           aws_secret_access_key=${{ env.AWS_SECRET_ACCESS_KEY }}
@@ -86,7 +101,7 @@ runs:
     - name: Upload digest
       uses: actions/upload-artifact@v4
       with:
-        name: digests-${{ env.PLATFORM_PAIR }}
+        name: ${{ inputs.digest_artifact_prefix }}-${{ env.PLATFORM_PAIR }}
         path: ${{ runner.temp }}/digests/*
         if-no-files-found: error
         retention-days: 1
