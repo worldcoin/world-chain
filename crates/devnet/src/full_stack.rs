@@ -79,8 +79,10 @@ const CONDUCTOR_HEALTHCHECK_INTERVAL_SECS: &str = "5";
 const CONDUCTOR_HEALTHCHECK_UNSAFE_INTERVAL_SECS: &str = "300";
 const SERVICE_RPC_PORT: u16 = 8545;
 const SERVICE_METRICS_PORT: u16 = 7300;
-const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 10;
-const PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL: u64 = 5;
+// Single-block proving range: witness cost is range_length × O(tip − target), so a 1-block
+// range cuts witness collection ~10× vs the prior 10. Mirrors Base's e2e proving one block.
+const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 1;
+const PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL: u64 = 1;
 /// Poll interval for the in-process SP1 worker leasing jobs from the prover-service.
 const SP1_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// Env var enabling the in-process defender, prover-service, and SP1 worker. Off by default:
