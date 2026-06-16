@@ -18709,8 +18709,8 @@ dependencies = [
 name = "world-chain-proof-kona-host-utils"
 version = "2.2.0"
 dependencies = [
- "alloy-consensus 2.0.4",
- "alloy-eips 2.0.4",
+ "alloy-consensus 2.0.5",
+ "alloy-eips 2.0.5",
  "alloy-primitives",
  "anyhow",
  "async-trait",
@@ -18815,7 +18815,6 @@ dependencies = [
 name = "world-chain-proof-succinct-host-utils"
 version = "2.2.0"
 dependencies = [
- "alloy-consensus 2.0.5",
  "alloy-primitives",
  "alloy-sol-types",
  "anyhow",
