@@ -18640,16 +18640,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "world-chain-proof"
-version = "2.2.0"
-dependencies = [
- "world-chain-proof-core",
- "world-chain-proof-nitro",
- "world-chain-proof-succinct-client-utils",
- "world-chain-proof-succinct-utils",
-]
-
-[[package]]
 name = "world-chain-proof-core"
 version = "2.2.0"
 dependencies = [
