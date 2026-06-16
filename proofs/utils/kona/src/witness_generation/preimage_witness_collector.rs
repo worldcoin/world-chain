@@ -47,6 +47,12 @@ where
     P: CommsClient + FlushableCache + Send + Sync + Clone,
 {
     async fn write(&self, hint: &str) -> PreimageOracleResult<()> {
+        // DIAGNOSTIC: every preimage hint the client sends flows through here. Log the hint
+        // *type* (first token) so we can see the fetch pattern — crucially, whether
+        // `l2-payload-witness` (the bulk `debug_executePayload` prefetch) is emitted at all,
+        // vs. a storm of per-node `l2-state-node` / `l2-account-proof` hints.
+        let kind = hint.split_whitespace().next().unwrap_or("");
+        tracing::trace!(target: "witness", hint = kind, "client hint");
         self.preimage_oracle.write(hint).await
     }
 }

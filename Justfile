@@ -39,7 +39,11 @@ defender-e2e prover='cpu' *args='':
     set -euo pipefail
     # The devnet spawns the compiled world-chain node as a subprocess, so build it first.
     cargo build -p world-chain
-    default_log="warn,world_chain_tests=info,world_chain_defender=trace,world_chain_challenger=trace,world_chain_prover_service=trace,world_chain_sp1_worker=trace,world_chain_proof_worker=debug,world_chain_proof_succinct_host_utils=info,world_chain_devnet=info,op_batcher=error"
+    # Witness-collection progress is surfaced via: `witness` (10s heartbeat + request counter),
+    # `world_chain_proof_succinct_host_utils`/`world_chain_proof_kona_utils` (build/complete +
+    # executor), `block_builder`/`client` (kona per-block execution), and the kona derivation
+    # crates. This shows real forward progress, not just the test's game-state elapsed poll.
+    default_log="warn,witness=trace,world_chain_tests=info,world_chain_proof_succinct_host_utils=trace,world_chain_proof_kona_utils=trace,world_chain_sp1_worker=info,world_chain_proof_worker=debug,world_chain_defender=debug,world_chain_challenger=debug,world_chain_prover_service=debug,block_builder=info,client=info,kona_derive=debug,kona_executor=debug,kona_proof=debug,world_chain_devnet=info,op_batcher=error"
     RUST_LOG="${RUST_LOG:-$default_log}" DEVNET_SP1_WORKER_PROVER="{{prover}}" \
         cargo test -p world-chain-tests -- --ignored --nocapture \
         defender_finalizes_challenged_game_with_sp1_proof {{args}}

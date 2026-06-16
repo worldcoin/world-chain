@@ -11,7 +11,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::AtomicU64,
+        atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -440,6 +440,31 @@ async fn collect_witness_from_channels(
         store: blob_data.clone(),
     };
 
+    // Progress heartbeat: witness collection is RPC-bound and can run for minutes, so log the
+    // live preimage-request count + unique-preimage count every 10s. This shows real forward
+    // progress (and the per-node vs bulk-prefetch regime) instead of just the test's elapsed
+    // poll. Aborted as soon as collection finishes.
+    let heartbeat = {
+        let request_count = oracle.request_count.clone();
+        let witness_store = preimage_witness_store.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(10));
+            tick.tick().await; // skip the immediate first tick
+            loop {
+                tick.tick().await;
+                let requests = request_count.load(Ordering::Relaxed);
+                let unique = witness_store.lock().map(|s| s.preimage_map.len()).unwrap_or(0);
+                tracing::info!(
+                    target: "witness",
+                    requests,
+                    unique_preimages = unique,
+                    elapsed_secs = collection_started.elapsed().as_secs(),
+                    "witness collection in progress"
+                );
+            }
+        })
+    };
+
     let executor = WorldEthWitnessExecutor::new();
     let (boot_info, input) = get_inputs_for_pipeline(oracle.clone())
         .await
@@ -471,6 +496,8 @@ async fn collect_witness_from_channels(
             .await
             .map_err(|err| anyhow!("failed to run Kona derivation/execution: {err:?}"))?;
     }
+
+    heartbeat.abort();
 
     let preimages = preimage_witness_store
         .lock()
