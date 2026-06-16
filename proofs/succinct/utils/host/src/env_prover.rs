@@ -9,8 +9,10 @@ use sp1_sdk::{
     CpuProver, Elf, HashableKey, MockProver, ProveRequest, Prover, ProverClient, ProvingKey,
     SP1Proof, SP1Stdin,
     env::{EnvProver, EnvProvingKey},
-    include_elf,
 };
+
+#[cfg(feature = "embedded-elfs")]
+use sp1_sdk::include_elf;
 
 pub use sp1_sdk::SP1ProofMode;
 use world_chain_proof_core::{
@@ -22,24 +24,50 @@ use world_chain_proof_succinct_utils::{
     AggregationProofRequest, RangeProofRequest, WorldSuccinctProver,
 };
 
-/// World Chain SP1 range program ELF, embedded at compile time.
+/// World Chain SP1 range program ELF.
 ///
-/// The bytes come from `sp1_build::build_program_with_args` (invoked from
-/// `build.rs`) which compiles the guest crate at
-/// `proofs/succinct/programs/range-ethereum` reproducibly via `docker: true`
-/// at the pinned SP1 toolchain tag. The `SP1_ELF_<package-name>` env var
-/// emitted by `sp1-build` is consumed here by `include_elf!()`, mirroring
-/// the OP Succinct upstream pattern (no committed ELF blobs, no runtime
-/// `fs::read`).
+/// With the `embedded-elfs` feature: bytes are baked in at compile time via
+/// `include_elf!()` (requires the SP1 Docker build to have run).  Without it,
+/// the ELF is read at runtime from the path in the `RANGE_ELF_PATH` env var —
+/// panics at startup if the var is unset or the file is unreadable.
 pub fn range_elf() -> Elf {
-    include_elf!("world-chain-proof-succinct-range-ethereum")
+    #[cfg(feature = "embedded-elfs")]
+    {
+        include_elf!("world-chain-proof-succinct-range-ethereum")
+    }
+    #[cfg(not(feature = "embedded-elfs"))]
+    {
+        let path = std::env::var("RANGE_ELF_PATH").expect(
+            "RANGE_ELF_PATH must be set when the `embedded-elfs` feature is disabled",
+        );
+        Elf::from(
+            std::fs::read(&path)
+                .unwrap_or_else(|e| panic!("failed to read range ELF from {path}: {e}")),
+        )
+    }
 }
 
-/// World Chain SP1 aggregation program ELF, embedded at compile time.
+/// World Chain SP1 aggregation program ELF.
 ///
-/// See [`range_elf`] for the build/embed pipeline.
+/// With the `embedded-elfs` feature: bytes are baked in at compile time via
+/// `include_elf!()` (requires the SP1 Docker build to have run).  Without it,
+/// the ELF is read at runtime from the path in the `AGG_ELF_PATH` env var —
+/// panics at startup if the var is unset or the file is unreadable.
 pub fn aggregation_elf() -> Elf {
-    include_elf!("world-chain-proof-succinct-aggregation")
+    #[cfg(feature = "embedded-elfs")]
+    {
+        include_elf!("world-chain-proof-succinct-aggregation")
+    }
+    #[cfg(not(feature = "embedded-elfs"))]
+    {
+        let path = std::env::var("AGG_ELF_PATH").expect(
+            "AGG_ELF_PATH must be set when the `embedded-elfs` feature is disabled",
+        );
+        Elf::from(
+            std::fs::read(&path)
+                .unwrap_or_else(|e| panic!("failed to read aggregation ELF from {path}: {e}")),
+        )
+    }
 }
 
 /// Which sp1-sdk prover backs an [`EnvSuccinctProver`].

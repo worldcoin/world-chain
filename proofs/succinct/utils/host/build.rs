@@ -8,9 +8,12 @@
 //! `fs::read` of an ELF file.
 //!
 //! Behaviour:
-//! - Only runs when the parent crate's `sp1` feature is enabled
-//!   (`CARGO_FEATURE_SP1` is set by Cargo). Builds without the feature
-//!   skip the SP1 compile entirely.
+//! - Only runs when the `embedded-elfs` feature is enabled
+//!   (`CARGO_FEATURE_EMBEDDED_ELFS` is set by Cargo). Builds with the `sp1`
+//!   feature but without `embedded-elfs` skip the SP1 compile entirely and
+//!   load ELFs at runtime from `RANGE_ELF_PATH` / `AGG_ELF_PATH` env vars
+//!   (see `src/env_prover.rs`). This lets CI clippy/lint/test runs proceed
+//!   without Docker or the SP1 toolchain.
 //! - By default uses `docker: true` with the pinned SP1 toolchain tag
 //!   (matches the `=6.1.0` version of `sp1-sdk` / `sp1-zkvm` the workspace
 //!   pins to) for bit-for-bit reproducible ELFs. Set
@@ -24,14 +27,13 @@
 //!   a single full build has populated the target directory.
 
 fn main() {
-    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_SP1");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_EMBEDDED_ELFS");
     println!("cargo:rerun-if-env-changed=SP1_SKIP_PROGRAM_BUILD");
     println!("cargo:rerun-if-env-changed=SP1_BUILD_DOCKER");
 
-    // Non-sp1 builds (witness generation only, nitro-only, etc.) don't need
-    // the guest ELFs and skipping here avoids forcing every consumer to
-    // install Docker + the SP1 toolchain.
-    if std::env::var_os("CARGO_FEATURE_SP1").is_none() {
+    // Without `embedded-elfs`, ELFs are loaded at runtime from env vars — no
+    // compile-time embedding, no Docker build needed. CI builds take this path.
+    if std::env::var_os("CARGO_FEATURE_EMBEDDED_ELFS").is_none() {
         return;
     }
 

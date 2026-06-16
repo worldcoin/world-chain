@@ -10,11 +10,14 @@ build = "build.rs"
 
 [features]
 # SP1 zkVM proving via the sp1-sdk environment provers.
-# Activating `sp1` also turns on the `build.rs` invocation of `sp1_build`,
-# which compiles the World Chain guest programs reproducibly (docker, pinned
-# SP1 toolchain) and embeds the resulting ELFs at compile time via
-# `sp1_sdk::include_elf!()`. See `build.rs` and `src/env_prover.rs`.
 sp1 = ["dep:sp1-sdk", "dep:bincode", "dep:alloy-sol-types"]
+
+# Embed ELF binaries at compile time via `include_elf!()` / `include_bytes!()`,
+# requiring the SP1 Docker build to have run first.  CI clippy/lint/test runs
+# omit this feature so no Docker or SP1 toolchain is needed.  Production
+# binaries (e.g. `world-chain-sp1-worker`) must enable it alongside `sp1`.
+# See `build.rs` and `src/env_prover.rs`.
+embedded-elfs = ["sp1"]
 
 [build-dependencies]
 # Used by `build.rs` to compile the SP1 guest programs when the `sp1`
