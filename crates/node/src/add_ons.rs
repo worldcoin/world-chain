@@ -348,7 +348,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx> NodeAddOns<N>
     for WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
 where
     N: FullNodeComponents<
-            Types: NodeTypes<ChainSpec = WorldChainSpec>,
+            Types: NodeTypes<ChainSpec = WorldChainSpec, Payload = OpEngineTypes>,
             Evm: ConfigurePostExecEvm<
                 NextBlockEnvCtx: BuildNextEnv<
                     OpPayloadBuilderAttributes<Tx>,
@@ -569,7 +569,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx> RethRpcAddOns<N>
     for WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
 where
     N: FullNodeComponents<
-            Types: NodeTypes<ChainSpec = WorldChainSpec>,
+            Types: NodeTypes<ChainSpec = WorldChainSpec, Payload = OpEngineTypes>,
             Evm: ConfigurePostExecEvm<
                 NextBlockEnvCtx: BuildNextEnv<
                     OpPayloadBuilderAttributes<Tx>,

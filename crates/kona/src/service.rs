@@ -26,6 +26,7 @@ use alloy_primitives::{Address, B256, U256, b256};
 use alloy_provider::{IpcConnect, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use futures::StreamExt as _;
+use jsonrpsee::RpcModule;
 use kona_derive::StatefulAttributesBuilder;
 use kona_engine::{Engine, EngineClient, EngineState};
 use kona_genesis::{L1ChainConfig, RollupConfig};
@@ -47,7 +48,6 @@ use kona_rpc::{
     AdminApiServer, AdminRpc, DevEngineApiServer, DevEngineRpc, HealthzApiServer, HealthzRpc,
     OpP2PApiServer, P2pRpc, RollupNodeApiServer, RollupRpc, RpcBuilder, WsRPC, WsServer,
 };
-use jsonrpsee::RpcModule;
 use op_alloy_network::Optimism;
 use std::ops::Not as _;
 use tokio::{
