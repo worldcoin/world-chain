@@ -19383,6 +19383,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-nitro-worker"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "anyhow",
+ "clap",
+ "dotenvy",
+ "hex",
+ "tokio",
+ "tracing",
+ "tracing-subscriber 0.3.23",
+ "world-chain-chainspec",
+ "world-chain-proof-kona-host-utils",
+ "world-chain-proof-nitro",
+ "world-chain-proof-protocol",
+ "world-chain-proof-worker",
+ "world-chain-prover-service",
+]
+
+[[package]]
 name = "world-chain-node"
 version = "2.2.0"
 dependencies = [
@@ -19735,8 +19755,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber 0.3.23",
  "world-chain-proof-core",
- "world-chain-proof-kona-utils",
- "world-chain-proof-succinct-ethereum-client-utils",
+ "world-chain-proof-kona-client-utils",
  "x509-parser 0.16.0",
 ]
 
