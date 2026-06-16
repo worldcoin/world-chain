@@ -14,7 +14,6 @@ use world_chain_proof_succinct_utils::{AggregationProofRequest, RangeProofReques
 
 #[cfg(feature = "sp1")]
 pub mod env_prover;
-pub mod online;
 pub mod validity;
 
 /// Error returned while constructing host-side proof config.
