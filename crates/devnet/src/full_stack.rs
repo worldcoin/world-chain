@@ -2589,16 +2589,13 @@ async fn start_sp1_worker(
     )
     .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?;
 
-    let range_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-range-ethereum");
-    let agg_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-aggregation");
-    let range_elf = fs::read(&range_elf_path)
-        .wrap_err_with(|| format!("failed to read range ELF {}", range_elf_path.display()))?;
-    let agg_elf = fs::read(&agg_elf_path)
-        .wrap_err_with(|| format!("failed to read aggregation ELF {}", agg_elf_path.display()))?;
-
+    // SP1 guest ELFs are embedded into the worker at compile time via
+    // `sp1_sdk::include_elf!()` (see `proofs/succinct/utils/host/build.rs`);
+    // no path-based loading required here.
+    //
     // `EnvSuccinctProver` owns its own runtime, so build it off the async runtime.
     let prover = tokio::task::spawn_blocking(move || {
-        EnvSuccinctProver::new(kind, range_elf, agg_elf, SP1ProofMode::Groth16)
+        EnvSuccinctProver::new(kind, SP1ProofMode::Groth16)
     })
     .await
     .wrap_err("SP1 prover setup task panicked")?

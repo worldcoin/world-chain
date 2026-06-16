@@ -86,28 +86,13 @@ stress *args='':
 prove *args='':
     cargo run -p xtask -- prove $@
 
-# Deterministically build the World range SP1 ELF with cargo-prove/Docker
-build-proof-range-elf:
-    cd proofs/succinct/programs/range-ethereum && cargo prove build --docker --workspace-directory ../../../.. --tag v6.1.0 --ignore-rust-version --elf-name world-chain-range-ethereum --output-directory ../../elf
-
-# Deterministically build the World aggregation SP1 ELF with cargo-prove/Docker
-build-proof-aggregation-elf:
-    cd proofs/succinct/programs/aggregation && cargo prove build --docker --workspace-directory ../../../.. --tag v6.1.0 --ignore-rust-version --elf-name world-chain-aggregation --output-directory ../../elf
-
-# Build all World SP1 proof ELFs
-build-proof-elfs: build-proof-range-elf build-proof-aggregation-elf
-
-# Compute the on-chain verification keys for locally generated SP1 proof ELFs
+# Compute the on-chain verification keys for the SP1 proof ELFs.
+# The ELFs are compiled and embedded at build time by
+# `proofs/succinct/utils/host/build.rs` (sp1_build::build_program_with_args
+# with docker:true at the pinned SP1 toolchain tag), so just running
+# `cargo run` is enough — no separate ELF build step is required.
 proof-vkeys *args='':
-    cargo run --release -p world-chain-prover-sp1 -- vkeys $@
-
-# Build the local SP1 prover Docker image, generating local SP1 proof ELFs first
-build-prover-sp1-image: build-proof-elfs
-    docker buildx build -f Dockerfile.prover --build-arg PROVER_BACKEND=sp1 -t world-chain-prover-sp1:local .
-
-# Build the local Nitro prover Docker image
-build-prover-nitro-image:
-    docker buildx build -f Dockerfile.prover --build-arg PROVER_BACKEND=nitro -t world-chain-prover-nitro:local .
+    cargo run --release -p proof --features sp1 -- sp1 vkeys $@
 
 # Generate CLI reference docs for the mdbook
 docs:

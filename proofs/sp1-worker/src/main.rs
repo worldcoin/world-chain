@@ -2,7 +2,6 @@
 //! submits the proofs back.
 
 use std::{fs, path::PathBuf, sync::Arc, time::Duration};
-
 use alloy_primitives::{Address, B256};
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -90,14 +89,6 @@ struct Cli {
     #[arg(long, default_value_t = 900)]
     witness_timeout_seconds: u64,
 
-    /// Path to the SP1 range ELF binary.
-    #[arg(long, env = "RANGE_ELF_PATH")]
-    range_elf: PathBuf,
-
-    /// Path to the SP1 aggregation ELF binary.
-    #[arg(long, env = "AGG_ELF_PATH")]
-    agg_elf: PathBuf,
-
     /// Prover backend: cpu, mock, or network. Overrides SP1_PROVER env var.
     #[arg(long, env = "SP1_PROVER", default_value = "cpu")]
     prover: Sp1ProverKind,
@@ -141,12 +132,10 @@ fn main() -> Result<()> {
         Duration::from_secs(cli.witness_timeout_seconds),
     )?;
 
-    let range_elf = fs::read(&cli.range_elf)
-        .with_context(|| format!("failed to read {}", cli.range_elf.display()))?;
-    let agg_elf = fs::read(&cli.agg_elf)
-        .with_context(|| format!("failed to read {}", cli.agg_elf.display()))?;
-    // Challenged roots are defended on-chain; Groth16 keeps verification ~100k gas.
-    let prover = EnvSuccinctProver::new(cli.prover, range_elf, agg_elf, SP1ProofMode::Groth16)?;
+    // ELFs are embedded at compile time via `sp1_sdk::include_elf!()`
+    // (see `proofs/succinct/utils/host/build.rs`). Challenged roots are
+    // defended on-chain; Groth16 keeps verification ~100k gas.
+    let prover = EnvSuccinctProver::new(cli.prover, SP1ProofMode::Groth16)?;
 
     let backend = Sp1Backend::new(
         host,

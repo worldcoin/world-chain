@@ -15006,9 +15006,9 @@ dependencies = [
 
 [[package]]
 name = "sp1-build"
-version = "6.2.3"
+version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bb06355982a703c0839b6ca1dc69a50d56a3c85e55d0badc8c3b18ebe8c9fa6"
+checksum = "7321136acefff985b0fb201b84359d609451bbd0a63203d4b601eaabe28da14f"
 dependencies = [
  "anyhow",
  "cargo_metadata 0.18.1",
@@ -18816,6 +18816,7 @@ dependencies = [
  "serde",
  "serde_cbor",
  "serde_json",
+ "sp1-build",
  "sp1-sdk",
  "thiserror 2.0.18",
  "tokio",

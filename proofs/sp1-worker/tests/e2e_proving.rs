@@ -23,7 +23,9 @@
 //!
 //! `SP1_PROVER=mock` validates the full witness + guest-execution + root-binding path cheaply
 //! (the SP1 mock prover still executes the guest); `cpu`/`network` additionally produce a real
-//! SNARK. ELFs default to `proofs/succinct/elf/`; override with `RANGE_ELF_PATH`/`AGG_ELF_PATH`.
+//! SNARK. The SP1 guest ELFs are baked into the worker at compile time via
+//! `sp1_sdk::include_elf!()` (see `proofs/succinct/utils/host/build.rs`); no path-based
+//! overrides are required.
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
@@ -48,17 +50,6 @@ fn required(name: &str) -> Option<String> {
             None
         }
     }
-}
-
-fn elf_path(env: &str, file: &str) -> PathBuf {
-    std::env::var(env).map_or_else(
-        |_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../succinct/elf")
-                .join(file)
-        },
-        PathBuf::from,
-    )
 }
 
 fn prover_kind() -> Sp1ProverKind {
@@ -148,13 +139,9 @@ async fn worker_proves_real_range_end_to_end() {
     .expect("build host config");
 
     let kind = prover_kind();
-    let range_elf = std::fs::read(elf_path("RANGE_ELF_PATH", "world-chain-range-ethereum"))
-        .expect("read range ELF");
-    let agg_elf =
-        std::fs::read(elf_path("AGG_ELF_PATH", "world-chain-aggregation")).expect("read agg ELF");
     // Build the prover off the async runtime: it owns its own runtime internally.
     let prover = tokio::task::spawn_blocking(move || {
-        EnvSuccinctProver::new(kind, range_elf, agg_elf, SP1ProofMode::Groth16)
+        EnvSuccinctProver::new(kind, SP1ProofMode::Groth16)
     })
     .await
     .expect("prover setup task")
@@ -237,14 +224,4 @@ async fn worker_proves_real_range_end_to_end() {
 
     token.cancel();
     let _ = tokio::time::timeout(Duration::from_secs(5), worker_handle).await;
-}
-
-/// Sanity check (always runs): the default ELF paths resolve inside the repo's `elf` dir.
-#[test]
-fn default_elf_paths_resolve_under_elf_dir() {
-    let range = elf_path(
-        "RANGE_ELF_PATH_UNSET_FOR_TEST",
-        "world-chain-range-ethereum",
-    );
-    assert!(range.ends_with("succinct/elf/world-chain-range-ethereum"));
 }

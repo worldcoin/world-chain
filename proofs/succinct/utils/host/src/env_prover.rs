@@ -6,9 +6,10 @@
 
 use anyhow::Context;
 use sp1_sdk::{
-    CpuProver, HashableKey, MockProver, ProveRequest, Prover, ProverClient, ProvingKey, SP1Proof,
-    SP1Stdin,
+    CpuProver, Elf, HashableKey, MockProver, ProveRequest, Prover, ProverClient, ProvingKey,
+    SP1Proof, SP1Stdin,
     env::{EnvProver, EnvProvingKey},
+    include_elf,
 };
 
 pub use sp1_sdk::SP1ProofMode;
@@ -20,6 +21,26 @@ use world_chain_proof_core::{
 use world_chain_proof_succinct_utils::{
     AggregationProofRequest, RangeProofRequest, WorldSuccinctProver,
 };
+
+/// World Chain SP1 range program ELF, embedded at compile time.
+///
+/// The bytes come from `sp1_build::build_program_with_args` (invoked from
+/// `build.rs`) which compiles the guest crate at
+/// `proofs/succinct/programs/range-ethereum` reproducibly via `docker: true`
+/// at the pinned SP1 toolchain tag. The `SP1_ELF_<package-name>` env var
+/// emitted by `sp1-build` is consumed here by `include_elf!()`, mirroring
+/// the OP Succinct upstream pattern (no committed ELF blobs, no runtime
+/// `fs::read`).
+pub fn range_elf() -> Elf {
+    include_elf!("world-chain-proof-succinct-range-ethereum")
+}
+
+/// World Chain SP1 aggregation program ELF, embedded at compile time.
+///
+/// See [`range_elf`] for the build/embed pipeline.
+pub fn aggregation_elf() -> Elf {
+    include_elf!("world-chain-proof-succinct-aggregation")
+}
 
 /// Which sp1-sdk prover backs an [`EnvSuccinctProver`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,13 +99,23 @@ pub struct EnvSuccinctProver {
 }
 
 impl EnvSuccinctProver {
-    /// Creates the prover and runs SP1 setup for the range and aggregation ELFs.
-    pub fn new(
+    /// Creates the prover using the World Chain range and aggregation ELFs
+    /// embedded at compile time via [`range_elf`] / [`aggregation_elf`].
+    pub fn new(kind: Sp1ProverKind, agg_mode: SP1ProofMode) -> anyhow::Result<Self> {
+        Self::new_with_elfs(kind, range_elf(), aggregation_elf(), agg_mode)
+    }
+
+    /// Creates the prover using caller-supplied ELFs. Most callers should
+    /// use [`EnvSuccinctProver::new`]; this exists for tests and custom
+    /// program builds.
+    pub fn new_with_elfs(
         kind: Sp1ProverKind,
-        range_elf: Vec<u8>,
-        agg_elf: Vec<u8>,
+        range_elf: impl Into<Elf>,
+        agg_elf: impl Into<Elf>,
         agg_mode: SP1ProofMode,
     ) -> anyhow::Result<Self> {
+        let range_elf = range_elf.into();
+        let agg_elf = agg_elf.into();
         let runtime = tokio::runtime::Runtime::new().context("failed to create tokio runtime")?;
         let (client, range_pk, agg_pk) = runtime.block_on(async {
             let client = match kind {
@@ -95,11 +126,11 @@ impl EnvSuccinctProver {
                 }
             };
             let range_pk = client
-                .setup(range_elf.into())
+                .setup(range_elf)
                 .await
                 .context("range program setup failed")?;
             let agg_pk = client
-                .setup(agg_elf.into())
+                .setup(agg_elf)
                 .await
                 .context("aggregation program setup failed")?;
             anyhow::Ok((client, range_pk, agg_pk))
