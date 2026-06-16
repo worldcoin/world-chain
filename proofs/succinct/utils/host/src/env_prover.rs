@@ -37,9 +37,8 @@ pub fn range_elf() -> Elf {
     }
     #[cfg(not(feature = "embedded-elfs"))]
     {
-        let path = std::env::var("RANGE_ELF_PATH").expect(
-            "RANGE_ELF_PATH must be set when the `embedded-elfs` feature is disabled",
-        );
+        let path = std::env::var("RANGE_ELF_PATH")
+            .expect("RANGE_ELF_PATH must be set when the `embedded-elfs` feature is disabled");
         Elf::from(
             std::fs::read(&path)
                 .unwrap_or_else(|e| panic!("failed to read range ELF from {path}: {e}")),
@@ -60,9 +59,8 @@ pub fn aggregation_elf() -> Elf {
     }
     #[cfg(not(feature = "embedded-elfs"))]
     {
-        let path = std::env::var("AGG_ELF_PATH").expect(
-            "AGG_ELF_PATH must be set when the `embedded-elfs` feature is disabled",
-        );
+        let path = std::env::var("AGG_ELF_PATH")
+            .expect("AGG_ELF_PATH must be set when the `embedded-elfs` feature is disabled");
         Elf::from(
             std::fs::read(&path)
                 .unwrap_or_else(|e| panic!("failed to read aggregation ELF from {path}: {e}")),

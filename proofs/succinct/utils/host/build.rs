@@ -25,15 +25,46 @@
 //!   `include_elf!()` resolves against a previously-built ELF in
 //!   `target/elf-compilation/...`. Useful for `cargo check`/`clippy` once
 //!   a single full build has populated the target directory.
+//! - When invoked by `cargo clippy` (detected via `RUSTC_WORKSPACE_WRAPPER`),
+//!   stub ELF files are written to `$OUT_DIR` and the `SP1_ELF_*` env vars
+//!   point to them. This lets `include_elf!()` compile without Docker or a
+//!   pre-built ELF cache. The stubs are zero-length and must not be used at
+//!   runtime.
+
+/// Names of the two SP1 guest programs whose ELF paths must be emitted.
+const PROGRAMS: &[&str] = &[
+    "world-chain-proof-succinct-range-ethereum",
+    "world-chain-proof-succinct-aggregation",
+];
 
 fn main() {
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_EMBEDDED_ELFS");
     println!("cargo:rerun-if-env-changed=SP1_SKIP_PROGRAM_BUILD");
     println!("cargo:rerun-if-env-changed=SP1_BUILD_DOCKER");
+    println!("cargo:rerun-if-env-changed=RUSTC_WORKSPACE_WRAPPER");
 
     // Without `embedded-elfs`, ELFs are loaded at runtime from env vars — no
     // compile-time embedding, no Docker build needed. CI builds take this path.
     if std::env::var_os("CARGO_FEATURE_EMBEDDED_ELFS").is_none() {
+        return;
+    }
+
+    // When cargo clippy drives the build (RUSTC_WORKSPACE_WRAPPER points to
+    // clippy-driver), skip the actual SP1/Docker compilation entirely.
+    // sp1_build itself skips the Docker step in this case but still emits env
+    // vars pointing to ELF paths that don't exist on a fresh checkout, causing
+    // `include_elf!()` → `include_bytes!(env!("SP1_ELF_..."))` to fail at
+    // compile time.  We intercept early, write zero-byte stub files to
+    // OUT_DIR (which always exists), and emit vars pointing to those stubs so
+    // that the macro compiles cleanly without Docker or a cached ELF.
+    //
+    // `cargo clippy --all-features` (as used by the rust-ci workflow) is the
+    // primary trigger for this path.
+    let is_clippy = std::env::var("RUSTC_WORKSPACE_WRAPPER")
+        .map(|v| v.contains("clippy-driver"))
+        .unwrap_or(false);
+    if is_clippy {
+        emit_stub_elfs();
         return;
     }
 
@@ -89,4 +120,28 @@ fn main() {
     // (proofs/succinct/utils/host).
     build("../../programs/range-ethereum");
     build("../../programs/aggregation");
+}
+
+/// Write zero-byte stub ELF files to `OUT_DIR` and emit `SP1_ELF_*` env vars
+/// pointing to them.  Used during `cargo clippy` runs so that
+/// `include_elf!()` compiles without a real ELF being present.
+fn emit_stub_elfs() {
+    let out_dir =
+        std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR is always set by Cargo"));
+
+    for name in PROGRAMS {
+        let stub = out_dir.join(format!("{name}.stub.elf"));
+        std::fs::write(&stub, b"").unwrap_or_else(|e| {
+            panic!(
+                "failed to write stub ELF for {name} at {}: {e}",
+                stub.display()
+            )
+        });
+        println!("cargo:rustc-env=SP1_ELF_{name}={}", stub.display());
+    }
+
+    println!(
+        "cargo:warning=embedded-elfs: clippy run detected — stub ELFs emitted. \
+         These are not valid SP1 programs and must not be used at runtime."
+    );
 }
