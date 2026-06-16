@@ -18,6 +18,7 @@ use std::{
 
 use alloy_primitives::{Address, B256, address, keccak256};
 use anyhow::{Context, anyhow, bail};
+use async_trait::async_trait;
 use kona_host::{
     DataFormat, HintHandler, OnlineHostBackend, OnlineHostBackendCfg, PreimageServer,
     SharedKeyValueStore,
@@ -27,7 +28,6 @@ use kona_host::{
 use kona_preimage::{
     BidirectionalChannel, HintReader, HintWriter, NativeChannel, OracleReader, OracleServer,
 };
-use async_trait::async_trait;
 use kona_proof::{CachingOracle, Hint, HintType, l1::OracleBlobProvider};
 use kona_providers_alloy::{OnlineBeaconClient, OnlineBlobProvider};
 use op_alloy_network::Optimism;
@@ -490,7 +490,10 @@ async fn collect_witness_from_channels(
             loop {
                 tick.tick().await;
                 let requests = request_count.load(Ordering::Relaxed);
-                let unique = witness_store.lock().map(|s| s.preimage_map.len()).unwrap_or(0);
+                let unique = witness_store
+                    .lock()
+                    .map(|s| s.preimage_map.len())
+                    .unwrap_or(0);
                 tracing::info!(
                     target: "witness",
                     requests,

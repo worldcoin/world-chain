@@ -335,7 +335,9 @@ fn online_host_config(args: &RpcArgs) -> Result<OnlineHostConfig> {
             .is_none()
             .then_some(args.network.chain_id()),
         rollup_config_path: args.rollup_config.clone(),
+        l1_config_path: None,
         witness_timeout: Duration::from_secs(args.witness_timeout_seconds),
+        l1_slot_duration_override: None,
     })
 }
 

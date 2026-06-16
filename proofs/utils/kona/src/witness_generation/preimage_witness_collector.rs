@@ -74,7 +74,7 @@ where
     /// visible even if witness collection is killed before completing.
     fn tick(&self) {
         let n = self.request_count.fetch_add(1, Ordering::Relaxed) + 1;
-        if n % 1000 == 0 {
+        if n.is_multiple_of(1000) {
             tracing::info!(target: "witness", requests = n, "preimage requests served");
         }
     }

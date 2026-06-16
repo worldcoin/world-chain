@@ -151,7 +151,9 @@ fn main() -> Result<()> {
             .is_none()
             .then_some(cli.network.chain_id()),
         rollup_config_path: cli.rollup_config,
+        l1_config_path: None,
         witness_timeout: Duration::from_secs(cli.witness_timeout_seconds),
+        l1_slot_duration_override: None,
     };
 
     let range_elf = fs::read(&cli.range_elf)
