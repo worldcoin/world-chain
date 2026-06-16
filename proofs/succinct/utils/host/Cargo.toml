@@ -15,6 +15,7 @@ sp1 = ["dep:sp1-sdk", "dep:bincode", "dep:alloy-sol-types"]
 alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-primitives = { workspace = true, features = ["serde"] }
 anyhow.workspace = true
+async-trait.workspace = true
 hex.workspace = true
 kona-host = { workspace = true, features = ["single"] }
 kona-preimage.workspace = true

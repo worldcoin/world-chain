@@ -56,8 +56,8 @@ use world_chain_sp1_worker::{Sp1Backend, Sp1BackendConfig};
 use world_chain_test_utils::DEV_CHAIN_ID;
 
 use crate::{
-    DevnetComponent, DevnetComponentKind, DevnetComponentStatus, DevnetPortMode, L1DevChain,
-    L1DevChainConfig, MetricsTarget, ObservabilityStack, WorldChainHardforkConfig,
+    DevnetComponent, DevnetComponentKind, DevnetComponentStatus, DevnetPortMode, L1Stack,
+    L1StackConfig, MetricsTarget, ObservabilityStack, WorldChainHardforkConfig,
     component::ContainerImage,
     op_stack::{HaSequencerConfig, HaSequencerTopology},
     process_logs::{ProcessLogTarget, container_log_consumer, emit_process_log},
@@ -142,6 +142,14 @@ pub const WORLD_E2E_GRIEFER_PRIVATE_KEY: &str =
 /// Balance, in wei, allocated to the e2e griefer account in the L1 genesis. (100 ether)
 const WORLD_E2E_GRIEFER_GENESIS_BALANCE_WEI: &str = "0x56bc75e2d63100000";
 
+/// Balance, in wei, prefunded to each standard devnet EOA (deployer, batcher, proposer,
+/// op-challenger) in the L1 genesis `alloc`. (1,000,000 ether)
+///
+/// On the anvil L1 these accounts were auto-funded; the reth L1 only credits what the
+/// genesis `alloc` declares, so they must be funded explicitly or the proof-system deploy
+/// and op-batcher/proposer L1 transactions fail with `insufficient funds`.
+const DEVNET_DEV_ACCOUNT_GENESIS_BALANCE_WEI: &str = "0xd3c21bcecceda1000000";
+
 const FLASHBLOCKS_BUILDER_KEYS: [&str; 3] = [
     "40645f645e9e28a3f00637d8d629736e7934ee857154ec3fd336c3cc014ebb62",
     "2bf67f0541606bbffe221c9f00d1d5eddba777c2caa9e2171eae6a2100fe2f70",
@@ -170,7 +178,7 @@ pub struct FullStackWorldDevnet {
     _op_nodes: Vec<OpNodeService>,
     sequencers: Vec<SequencerService>,
     observability: Option<ObservabilityStack>,
-    l1: L1DevChain,
+    l1: L1Stack,
     components: Vec<DevnetComponent>,
     removed_services: Vec<DevnetComponent>,
     _tempdir: TempDir,
@@ -380,20 +388,42 @@ impl FullStackWorldDevnet {
         let artifacts = generate_op_artifacts(&config, &hardforks).await?;
         let workdir_path = artifacts.workdir.path().to_path_buf();
 
-        let mut l1_config = L1DevChainConfig {
-            block_time_secs: block_time.as_secs().max(1),
-            genesis_file: Some(artifacts.l1_genesis_path.clone()),
-            ..L1DevChainConfig::default()
-        };
-        if port_mode == DevnetPortMode::Stable {
-            l1_config.stable_port = Some(ANVIL_RPC_PORT);
-        }
+        // The CL genesis is generated from the EL genesis, so the beacon's eth1 genesis time must
+        // equal the EL genesis `timestamp` (op-deployer startBlock, ~now). Read it back to keep
+        // the EL and CL in agreement.
+        let el_genesis: Value = read_json(&artifacts.l1_genesis_path)?;
+        let genesis_timestamp = el_genesis
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .and_then(|t| u64::from_str_radix(t.trim_start_matches("0x"), 16).ok())
+            .ok_or_else(|| eyre!("L1 EL genesis missing/invalid timestamp"))?;
 
-        let l1 = L1DevChain::start(l1_config)
+        let stable = port_mode == DevnetPortMode::Stable;
+        let l1_config = L1StackConfig {
+            reth_image: "ghcr.io/paradigmxyz/reth".to_string(),
+            reth_tag: "v2.3.0".to_string(),
+            lighthouse_image: "sigp/lighthouse".to_string(),
+            lighthouse_tag: "v8.0.1".to_string(),
+            genesis_generator_image: "ethpandaops/ethereum-genesis-generator".to_string(),
+            genesis_generator_tag: "master".to_string(),
+            chain_id: 31_337,
+            slot_duration_secs: block_time.as_secs().max(1),
+            genesis_timestamp,
+            el_genesis_path: artifacts.l1_genesis_path.clone(),
+            jwt_path: workdir_path.join("jwt.hex"),
+            workdir: workdir_path.clone(),
+            stable_rpc_port: stable.then_some(ANVIL_RPC_PORT),
+            stable_beacon_port: stable.then_some(5052),
+        };
+
+        let l1 = L1Stack::start(l1_config)
             .await
-            .wrap_err("failed to start OP-contract-backed L1 dev chain")?;
+            .wrap_err("failed to start OP-contract-backed L1 (reth + Lighthouse)")?;
         let l1_public_rpc = l1.rpc_url().to_string();
         let l1_internal_rpc = host_internal_url(l1.rpc_url())?;
+        let l1_beacon_internal = host_internal_url(l1.beacon_url())?;
+        // In-process services (SP1 worker) reach the L1 beacon via the host-mapped URL.
+        let l1_public_beacon = l1.beacon_url().to_string();
         let actual_l1_hash = block_hash(&l1_public_rpc, 0)
             .await
             .wrap_err("failed to read Anvil L1 genesis hash")?;
@@ -450,7 +480,6 @@ impl FullStackWorldDevnet {
         let op_node_bootnodes: Vec<_> = (0..sequencer_count)
             .map(|index| op_node_bootnodes(&op_node_plans, index))
             .collect();
-        let l1_slot_duration_secs = block_time.as_secs().max(1);
         let op_nodes = try_join_all((0..sequencer_count).map(|index| {
             start_op_node(
                 index,
@@ -458,8 +487,8 @@ impl FullStackWorldDevnet {
                 &config.images.op_node,
                 &op_node_plans[index],
                 &op_node_bootnodes[index],
-                l1_slot_duration_secs,
                 &l1_internal_rpc,
+                &l1_beacon_internal,
                 &sequencers[index],
                 &conductor_plans[index].rpc_url,
             )
@@ -537,6 +566,7 @@ impl FullStackWorldDevnet {
                     &config.images.op_challenger,
                     &workdir_path,
                     &l1_internal_rpc,
+                    &l1_beacon_internal,
                     &l2_rpc_internal,
                     &conductor_rpc_internal,
                     &game_factory,
@@ -622,12 +652,12 @@ impl FullStackWorldDevnet {
                     let (service, url) = start_prover_service().await?;
                     let worker = start_sp1_worker(
                         &l1_public_rpc,
+                        &l1_public_beacon,
                         &l2_rpc,
                         &url,
                         &artifacts.rollup_path,
                         deployment,
                         kind,
-                        l1_slot_duration_secs,
                     )
                     .await?;
                     (Some(service), Some(worker), Some(url))
@@ -1175,6 +1205,7 @@ fn write_l1_genesis(state_path: &Path, output_path: &Path) -> Result<()> {
     fund_world_challenger(&mut alloc)?;
     fund_world_defender(&mut alloc)?;
     fund_world_e2e_griefer(&mut alloc)?;
+    fund_devnet_dev_accounts(&mut alloc)?;
     let timestamp = state
         .pointer("/opChainDeployments/0/startBlock/timestamp")
         .and_then(Value::as_str)
@@ -1297,6 +1328,44 @@ fn fund_world_challenger(alloc: &mut Value) -> Result<()> {
         address.to_string(),
         json!({ "balance": WORLD_CHALLENGER_GENESIS_BALANCE_WEI }),
     );
+    Ok(())
+}
+
+/// Prefunds the standard devnet EOAs (deployer, batcher, proposer, op-challenger) in the L1
+/// genesis `alloc`. The reth L1 only credits accounts declared in genesis, so without this the
+/// `forge create`/proof-system deploys (DEVNET key) and the op-batcher/op-proposer L1
+/// transactions fail with `insufficient funds`. Existing dump entries (e.g. contract accounts)
+/// are left untouched; only the balance of these EOAs is set.
+fn fund_devnet_dev_accounts(alloc: &mut Value) -> Result<()> {
+    let keys = [
+        DEVNET_PRIVATE_KEY,
+        BATCHER_PRIVATE_KEY,
+        PROPOSER_PRIVATE_KEY,
+        CHALLENGER_PRIVATE_KEY,
+    ];
+    let entry = alloc
+        .as_object_mut()
+        .ok_or_else(|| eyre!("l1 genesis alloc is not a JSON object"))?;
+    for key in keys {
+        let signer: PrivateKeySigner = key
+            .parse()
+            .wrap_err("invalid devnet dev-account signing key")?;
+        // Merge the balance into any existing dump entry (e.g. the deployer's nonce/code)
+        // rather than replacing it, so we don't drop state op-deployer baked in.
+        match entry.entry(signer.address().to_string()) {
+            serde_json::map::Entry::Occupied(mut existing) => {
+                if let Some(obj) = existing.get_mut().as_object_mut() {
+                    obj.insert(
+                        "balance".to_string(),
+                        json!(DEVNET_DEV_ACCOUNT_GENESIS_BALANCE_WEI),
+                    );
+                }
+            }
+            serde_json::map::Entry::Vacant(slot) => {
+                slot.insert(json!({ "balance": DEVNET_DEV_ACCOUNT_GENESIS_BALANCE_WEI }));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -2053,15 +2122,14 @@ async fn start_op_node(
     image: &ContainerImage,
     plan: &OpNodePlan,
     bootnodes: &[String],
-    l1_slot_duration_secs: u64,
     l1_rpc: &str,
+    l1_beacon: &str,
     sequencer: &SequencerService,
     conductor_rpc_url: &str,
 ) -> Result<OpNodeService> {
     let conductor_rpc = host_internal_url(conductor_rpc_url)?;
     let l2_engine_rpc = host_internal_url(&sequencer.auth_url)?;
     let p2p_host_port = plan.p2p_host_port.to_string();
-    let l1_slot_duration_secs = l1_slot_duration_secs.to_string();
     let mut cmd = vec![
         "-vvv".to_string(),
         "--logs.stdout.format=logfmt".to_string(),
@@ -2091,9 +2159,7 @@ async fn start_op_node(
         "--l1-eth-rpc".to_string(),
         l1_rpc.to_string(),
         "--l1-beacon".to_string(),
-        l1_rpc.to_string(),
-        "--l1-slot-duration-override".to_string(),
-        l1_slot_duration_secs,
+        l1_beacon.to_string(),
         "--l1-trust-rpc".to_string(),
         "--l2-engine-rpc".to_string(),
         l2_engine_rpc,
@@ -2498,6 +2564,7 @@ async fn start_challenger(
     image: &ContainerImage,
     workdir: &Path,
     l1_rpc: &str,
+    l1_beacon: &str,
     l2_rpc: &str,
     rollup_rpc: &str,
     game_factory: &str,
@@ -2508,7 +2575,7 @@ async fn start_challenger(
         "--l1-rpc-kind".to_string(),
         "basic".to_string(),
         "--l1-beacon".to_string(),
-        l1_rpc.to_string(),
+        l1_beacon.to_string(),
         "--l2-eth-rpc".to_string(),
         l2_rpc.to_string(),
         "--rollup-rpc".to_string(),
@@ -2795,27 +2862,52 @@ async fn start_prover_service() -> Result<(ProverServiceTask, String)> {
 /// op-node configuration), proves them with the selected backend, and submits the proofs back.
 async fn start_sp1_worker(
     l1_rpc_url: &str,
+    l1_beacon_url: &str,
     l2_rpc_url: &str,
     prover_service_url: &str,
     rollup_path: &Path,
     deployment: &WorldProofSystemDeployment,
     kind: Sp1ProverKind,
-    l1_slot_duration_secs: u64,
 ) -> Result<Sp1WorkerTask> {
     let rollup_config: Value = read_json(rollup_path)?;
-    // The devnet L1 is anvil, which serves `/eth/v1/beacon/genesis` but not
-    // `/eth/v1/config/spec`; without this override kona's blob-provider init panics fetching the
-    // slot interval. Mirrors the op-node `--l1-slot-duration-override` flag.
+
+    // The devnet L1 chain id (31337) is not in kona's bundled `L1_CONFIGS`, so the guest falls
+    // back to requesting the L1 chain config via the local preimage key `L1_CONFIG_KEY`. The kona
+    // host can only serve that from an L1 config file (`alloy_genesis::ChainConfig`, i.e. the
+    // geth-genesis `config` object). Without it, witness collection busy-spins forever in
+    // `get_preimage`. Extract `config` from the devnet L1 genesis and write it standalone.
+    let l1_config_path = {
+        let l1_genesis_path = rollup_path
+            .parent()
+            .map(|dir| dir.join("l1-genesis.json"))
+            .ok_or_else(|| {
+                eyre!(
+                    "cannot derive workdir from rollup path {}",
+                    rollup_path.display()
+                )
+            })?;
+        let l1_genesis: Value = read_json(&l1_genesis_path)?;
+        let l1_config = l1_genesis
+            .get("config")
+            .ok_or_else(|| eyre!("l1-genesis.json missing `config` object"))?;
+        let out = l1_genesis_path.with_file_name("l1-chain-config.json");
+        fs::write(&out, serde_json::to_vec(l1_config)?)
+            .wrap_err("failed to write L1 chain config for the SP1 worker")?;
+        out
+    };
+
+    // The L1 is now reth + Lighthouse, so the beacon (`l1_beacon_url`) serves
+    // `/eth/v1/beacon/genesis` and `/eth/v1/config/spec` — no slot-duration override needed.
     let host = OnlineHostConfig::from_rollup_config_value(
         &rollup_config,
         l1_rpc_url.to_string(),
-        l1_rpc_url.to_string(),
+        l1_beacon_url.to_string(),
         l2_rpc_url.to_string(),
         Some(rollup_path.to_path_buf()),
         Duration::from_secs(900),
     )
     .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?
-    .with_l1_slot_duration_override(l1_slot_duration_secs);
+    .with_l1_config_path(l1_config_path);
 
     let range_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-range-ethereum");
     let agg_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-aggregation");

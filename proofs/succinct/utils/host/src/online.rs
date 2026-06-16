@@ -19,14 +19,16 @@ use std::{
 use alloy_primitives::{Address, B256, address, keccak256};
 use anyhow::{Context, anyhow, bail};
 use kona_host::{
-    DataFormat, OnlineHostBackend, PreimageServer,
+    DataFormat, HintHandler, OnlineHostBackend, OnlineHostBackendCfg, PreimageServer,
+    SharedKeyValueStore,
     eth::rpc_provider,
     single::{SingleChainHintHandler, SingleChainHost, SingleChainHostError, SingleChainProviders},
 };
 use kona_preimage::{
     BidirectionalChannel, HintReader, HintWriter, NativeChannel, OracleReader, OracleServer,
 };
-use kona_proof::{CachingOracle, HintType, l1::OracleBlobProvider};
+use async_trait::async_trait;
+use kona_proof::{CachingOracle, Hint, HintType, l1::OracleBlobProvider};
 use kona_providers_alloy::{OnlineBeaconClient, OnlineBlobProvider};
 use op_alloy_network::Optimism;
 use reqwest::blocking::Client;
@@ -70,6 +72,12 @@ pub struct OnlineHostConfig {
     pub l2_chain_id: Option<u64>,
     /// Rollup config JSON file consumed by the kona host, for chains kona does not bundle.
     pub rollup_config_path: Option<PathBuf>,
+    /// L1 chain config (`alloy_genesis::ChainConfig`, i.e. the `config` object of an L1 geth
+    /// genesis) JSON file. Required when the L1 chain id is not in kona's bundled `L1_CONFIGS`
+    /// (e.g. the anvil devnet, chain 31337): the guest falls back to requesting the L1 config
+    /// via the local preimage key `L1_CONFIG_KEY`, which the host can only serve from this file.
+    /// Without it, `get_preimage(L1_CONFIG_KEY)` finds no key and no hint and busy-spins forever.
+    pub l1_config_path: Option<PathBuf>,
     /// Maximum time to spend generating one witness.
     pub witness_timeout: Duration,
     /// Overrides the L1 slot duration (seconds) used by the kona blob provider's beacon client.
@@ -103,6 +111,7 @@ impl OnlineHostConfig {
             rollup_config_hash,
             l2_chain_id: None,
             rollup_config_path,
+            l1_config_path: None,
             witness_timeout,
             l1_slot_duration_override: None,
         })
@@ -112,6 +121,12 @@ impl OnlineHostConfig {
     /// [`OnlineHostConfig::l1_slot_duration_override`].
     pub fn with_l1_slot_duration_override(mut self, l1_slot_duration_secs: u64) -> Self {
         self.l1_slot_duration_override = Some(l1_slot_duration_secs);
+        self
+    }
+
+    /// Sets the L1 chain config file. See [`OnlineHostConfig::l1_config_path`].
+    pub fn with_l1_config_path(mut self, l1_config_path: PathBuf) -> Self {
+        self.l1_config_path = Some(l1_config_path);
         self
     }
 }
@@ -287,7 +302,7 @@ pub fn build_range_input(
             .then_some(config.l2_chain_id)
             .flatten(),
         rollup_config_path: config.rollup_config_path.clone(),
-        l1_config_path: None,
+        l1_config_path: config.l1_config_path.clone(),
         // Honor the `L2PayloadWitness` hint the executor sends before each block: fetch that
         // block's entire stateless witness in one `debug_executePayload` call (op-reth's
         // `OpDebugWitnessApi`) and bulk-load the KV store. Without this the host ignores the
@@ -358,6 +373,28 @@ async fn collect_world_range_witness(
     result
 }
 
+/// DIAGNOSTIC hint handler: wraps [`SingleChainHintHandler`] and logs the hint type on every
+/// `fetch_hint` call. Kona's `OnlineHostBackend::get_preimage` retries `fetch_hint` for the last
+/// hint "as long as the key is not found", so a preimage the handler can never satisfy shows up
+/// here as the same `hint_type` logged repeatedly — pinpointing the looping fetch.
+#[derive(Clone, Debug, Default)]
+struct LoggingHintHandler;
+
+#[async_trait]
+impl HintHandler for LoggingHintHandler {
+    type Cfg = SingleChainHost;
+
+    async fn fetch_hint(
+        hint: Hint<<Self::Cfg as OnlineHostBackendCfg>::HintType>,
+        cfg: &Self::Cfg,
+        providers: &<Self::Cfg as OnlineHostBackendCfg>::Providers,
+        kv: SharedKeyValueStore,
+    ) -> anyhow::Result<()> {
+        tracing::info!(target: "witness", hint_type = ?hint.ty, "host fetch_hint");
+        SingleChainHintHandler::fetch_hint(hint, cfg, providers, kv).await
+    }
+}
+
 /// Starts the kona single-chain preimage server for witness collection.
 ///
 /// Mirrors [`SingleChainHost::start_server`], but when `l1_slot_duration_override` is set it
@@ -400,7 +437,7 @@ async fn start_range_server(
         l2: rpc_provider::<Optimism>(&l2_node).await,
     };
 
-    let backend = OnlineHostBackend::new(host.clone(), kv_store, providers, SingleChainHintHandler)
+    let backend = OnlineHostBackend::new(host.clone(), kv_store, providers, LoggingHintHandler)
         .with_proactive_hint(HintType::L2PayloadWitness);
 
     Ok(tokio::spawn(async move {
