@@ -53,7 +53,6 @@ tracing.workspace = true
 futures.workspace = true
 eyre.workspace = true
 rayon.workspace = true
-either.workspace = true
 metrics.workspace = true
 metrics-derive.workspace = true
 

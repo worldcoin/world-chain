@@ -73,7 +73,7 @@ lru.workspace = true
 
 [dev-dependencies]
 alloy = { workspace = true, features = ["provider-http"] }
-alloy-provider-v1 = { package = "alloy-provider", version = "1.8.3", default-features = false, features = [
+alloy-provider-v1 = { package = "alloy-provider", version = "2.0.5", default-features = false, features = [
     "reqwest",
 ] }
 alloy-sol-types.workspace = true

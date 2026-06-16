@@ -2,7 +2,7 @@
 
 use alloy_op_evm::{
     OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpTx,
-    block::receipt_builder::OpReceiptBuilder,
+    block::receipt_builder::OpReceiptBuilder, post_exec::PostExecEvm,
 };
 use op_alloy_consensus::OpReceipt;
 use op_revm::{OpHaltReason, OpSpecId};
@@ -27,7 +27,7 @@ use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
 use alloy_primitives::{B256, FixedBytes, U256};
 use reth_evm::{
     block::CommitChanges,
-    execute::{BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx},
+    execute::{BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx, GasOutput},
 };
 use reth_provider::StateProvider;
 use revm::database::states::bundle_state::BundleRetention;
@@ -104,6 +104,9 @@ where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
     DB: StateDB + DatabaseCommit + Database + 'a,
     E: Evm<DB = BalBuilderDb<DB>, Tx = OpTx, Spec = OpSpecId, BlockEnv = BlockEnv>,
+    E: PostExecEvm,
+    OpBlockExecutor<E, R, Arc<WorldChainSpec>>:
+        BlockExecutor<Evm = E, Transaction = OpTransactionSigned, Receipt = OpReceipt>,
 {
     /// Creates a new [`FlashblocksBlockBuilder`] with the given executor factory and assembler.
     pub fn new(
@@ -162,7 +165,10 @@ where
             HaltReason = OpHaltReason,
             BlockEnv = BlockEnv,
         >,
+    E: PostExecEvm,
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
+    OpBlockExecutor<E, R, Arc<WorldChainSpec>>:
+        BlockExecutor<Evm = E, Transaction = OpTransactionSigned, Receipt = OpReceipt>,
 {
     type Primitives = N;
     type Executor = OpBlockExecutor<E, R, Arc<WorldChainSpec>>;
@@ -178,7 +184,7 @@ where
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
         f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result) -> CommitChanges,
-    ) -> Result<Option<u64>, BlockExecutionError> {
+    ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, recovered) = tx.into_parts();
         if let Some(gas_used) = self
             .executor
@@ -187,7 +193,7 @@ where
             self.transactions.push(recovered);
             // only prepare the database index for the next transaction if this one was committed
             self.prepare_database()?;
-            Ok(Some(gas_used.tx_gas_used()))
+            Ok(Some(gas_used))
         } else {
             Ok(None)
         }
@@ -232,7 +238,10 @@ where
             HaltReason = OpHaltReason,
             BlockEnv = BlockEnv,
         >,
+    E: PostExecEvm,
     R: OpReceiptBuilder<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
+    OpBlockExecutor<E, R, Arc<WorldChainSpec>>:
+        BlockExecutor<Evm = E, Transaction = OpTransactionSigned, Receipt = OpReceipt>,
 {
     fn finish_with_bundle(
         self,
@@ -286,6 +295,7 @@ where
             db.bundle_state(),
             &state,
             state_root,
+            None,
         ))?;
         metrics.record_stage_duration(
             PayloadBuildStage::BlockAssembly,
@@ -311,6 +321,7 @@ where
                 hashed_state,
                 trie_updates,
                 block,
+                block_access_list: None,
             },
             bundle,
         ))

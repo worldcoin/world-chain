@@ -37,7 +37,7 @@ use crate::{
     execution_strategy::{FlashblocksBalExecutionStrategy, FlashblocksLegacyExecutionStrategy},
     flashblock_types::{BalFlashblockTypes, LegacyFlashblockTypes},
     flashblock_validation_metrics::FlashblockValidationMetrics,
-    validator::FlashblocksBlockValidator,
+    validator::{FlashblocksBlockValidator, into_executed_payload},
 };
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_evm::WorldChainEvmConfig;
@@ -112,7 +112,6 @@ impl FlashblocksExecutionCoordinator {
         self.p2p_handle
             .event_stream(provider, move |event| f(event))
     }
-
     pub fn event_hook(
         event: &WorldChainEvent<()>,
         pending_block: &tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
@@ -348,12 +347,8 @@ where
             && latest_payload.1 >= flashblock.flashblock.index
         {
             flashblock_validation_metrics.increment_already_processed_flashblocks();
-            pending_block.send_replace(
-                latest_payload
-                    .0
-                    .executed_block()
-                    .map(|p| p.into_executed_payload()),
-            );
+            pending_block
+                .send_replace(latest_payload.0.executed_block().map(into_executed_payload));
             return Ok(());
         }
 
@@ -408,6 +403,8 @@ where
         parent_hash: base.parent_hash,
         parent_beacon_block_root: Some(base.parent_beacon_block_root),
         extra_data: base.extra_data.clone(),
+        no_user_tx_activation_block: Default::default(),
+        post_exec_mode: Default::default(),
     };
 
     let next_block_context = OpNextBlockEnvAttributes {
@@ -467,11 +464,7 @@ where
     }
 
     let into_executed_block_started = Instant::now();
-    pending_block.send_replace(
-        next_payload
-            .executed_block()
-            .map(|p| p.into_executed_payload()),
-    );
+    pending_block.send_replace(next_payload.executed_block().map(into_executed_payload));
     flashblock_validation_metrics.record_into_executed_block(into_executed_block_started.elapsed());
 
     trace!(

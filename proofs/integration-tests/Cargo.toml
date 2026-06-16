@@ -1,0 +1,28 @@
+[package]
+name = "world-chain-proof-integration-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+world-chain-challenger.workspace = true
+world-chain-defender.workspace = true
+world-chain-proof-worker.workspace = true
+world-chain-proofs.workspace = true
+world-chain-proposer.workspace = true
+world-chain-prover-service.workspace = true
+
+alloy-primitives.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+tokio-util.workspace = true

@@ -376,26 +376,39 @@ where
     pub(crate) fn record_payload_metrics(
         &self,
         payload: &OpBuiltPayload<OpPrimitives>,
+        prev_totals: Option<(u64, u64, u64, U256)>,
         flashblock_index: u64,
     ) {
-        let block = payload.block();
-        let payload_bytes: usize = block
-            .body()
-            .transactions()
-            .map(|tx| tx.encoded_2718().len())
-            .sum();
-        let gas_used = block.header().gas_used;
-        let tx_count = block.body().transactions().count();
+        let (cum_bytes, cum_gas, cum_tx, cum_fees) = payload_totals(payload);
+        let (prev_bytes, prev_gas, prev_tx, prev_fees) =
+            prev_totals.unwrap_or((0, 0, 0, U256::ZERO));
         self.builder
             .payload_build_metrics()
             .record_committed_payload(
-                payload_bytes as u64,
-                gas_used,
-                tx_count as u64,
-                payload.fees().saturating_to::<u128>() as f64,
+                cum_bytes.saturating_sub(prev_bytes),
+                cum_gas.saturating_sub(prev_gas),
+                cum_tx.saturating_sub(prev_tx),
+                cum_fees.saturating_sub(prev_fees).saturating_to::<u128>() as f64,
                 flashblock_index,
             );
     }
+}
+
+fn payload_totals(payload: &OpBuiltPayload<OpPrimitives>) -> (u64, u64, u64, U256) {
+    let block = payload.block();
+    let payload_bytes: usize = block
+        .body()
+        .transactions()
+        .map(|tx| tx.encoded_2718().len())
+        .sum();
+    let gas_used = block.header().gas_used;
+    let tx_count = block.body().transactions().count();
+    (
+        payload_bytes as u64,
+        gas_used,
+        tx_count as u64,
+        payload.fees(),
+    )
 }
 
 impl<Builder> Future for FlashblocksPayloadJob<Builder>
@@ -516,10 +529,12 @@ where
                     }
                 }
 
+                let prev_totals = this.committed_payload.payload().map(payload_totals);
+
                 // commit to the best payload
                 this.committed_payload =
                     CommittedPayloadState::from((this.best_payload.0.clone(), access_list));
-                this.record_payload_metrics(&payload, this.block_index);
+                this.record_payload_metrics(&payload, prev_totals, this.block_index);
 
                 // increment the pre-confirmation index
                 this.block_index += 1;

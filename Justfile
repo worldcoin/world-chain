@@ -1,4 +1,5 @@
 set positional-arguments := true
+set dotenv-load := true
 
 # default recipe to display help information
 default:
@@ -84,6 +85,21 @@ stress *args='':
 # Prove a PBH transaction
 prove *args='':
     cargo run -p xtask -- prove $@
+
+# Deterministically build the World range SP1 ELF with cargo-prove/Docker
+build-proof-range-elf:
+    cd proofs/succinct/programs/range-ethereum && cargo prove build --docker --workspace-directory ../../../.. --tag v6.1.0 --ignore-rust-version --elf-name world-chain-range-ethereum --output-directory ../../elf
+
+# Deterministically build the World aggregation SP1 ELF with cargo-prove/Docker
+build-proof-aggregation-elf:
+    cd proofs/succinct/programs/aggregation && cargo prove build --docker --workspace-directory ../../../.. --tag v6.1.0 --ignore-rust-version --elf-name world-chain-aggregation --output-directory ../../elf
+
+# Build all World SP1 proof ELFs
+build-proof-elfs: build-proof-range-elf build-proof-aggregation-elf
+
+# Compute the on-chain verification keys for the committed SP1 proof ELFs
+proof-vkeys *args='':
+    cargo run --release -p proof --features sp1 -- sp1 vkeys $@
 
 # Generate CLI reference docs for the mdbook
 docs:

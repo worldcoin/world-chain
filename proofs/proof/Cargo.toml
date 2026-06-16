@@ -1,0 +1,28 @@
+[package]
+name = "world-chain-proof"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "World Chain fault-proof library. Enable backends via feature flags."
+
+[features]
+default = []
+# SP1/Succinct zkVM backend.
+sp1 = [
+    "dep:world-chain-proof-succinct-client-utils",
+    "dep:world-chain-proof-succinct-utils",
+]
+# AWS Nitro TEE backend. Only compiles on Linux (requires AF_VSOCK).
+aws_nitro = [
+    "dep:world-chain-proof-nitro",
+    "world-chain-proof-nitro/aws_nitro",
+]
+
+[dependencies]
+world-chain-proof-core.workspace = true
+world-chain-proof-nitro = { workspace = true, optional = true }
+world-chain-proof-succinct-client-utils = { workspace = true, optional = true }
+world-chain-proof-succinct-utils = { workspace = true, optional = true }

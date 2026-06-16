@@ -2,6 +2,15 @@ name: docker
 
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or SHA to build.
+        required: false
+        default: main
+      image_tag:
+        description: Custom image tag to publish (e.g. "nightly").
+        required: false
+        default: nightly
   push:
     branches: [main]
 
@@ -16,8 +25,9 @@ jobs:
     name: build and deploy devnet
     uses: ./.github/workflows/docker-build-deploy.yml
     with:
+      ref: ${{ inputs.ref || github.sha }}
       dispatch_event_type: bump-world-chain-dev
       # Only bump the devnet on a real push to main; manual runs just rebuild the image.
       deploy: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-      additional_tags: type=raw,value=nightly
+      additional_tags: type=raw,value=${{ inputs.image_tag || 'nightly' }}
     secrets: inherit

@@ -1,0 +1,238 @@
+use std::time::Duration;
+
+use alloy_primitives::{B256, U256};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
+use world_chain_challenger::{ChallengerConfig, WorldChainChallenger};
+use world_chain_defender::{DefenderConfig, WorldChainDefender};
+use world_chain_proof_integration_tests::{
+    BLOCK_INTERVAL, FakeConsensus, FakeExecution, FakeProofBackend, SharedProverService,
+};
+use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig};
+use world_chain_proofs::{ProofLane, RootState};
+use world_chain_proposer::{ProposerConfig, WorldChainProposer};
+use world_chain_prover_service::{ProofBackend, ProverServiceConfig};
+
+fn proposer_config() -> ProposerConfig {
+    ProposerConfig {
+        block_interval: BLOCK_INTERVAL,
+        proposer_bond: U256::from(1),
+        poll_interval: Duration::from_secs(1),
+    }
+}
+
+fn challenger_config() -> ChallengerConfig {
+    ChallengerConfig {
+        challenger_bond: U256::from(1),
+        poll_interval: Duration::from_secs(1),
+        ..ChallengerConfig::default()
+    }
+}
+
+fn defender_config() -> DefenderConfig {
+    DefenderConfig {
+        poll_interval: Duration::from_secs(1),
+        max_proof_attempts: 2,
+        ..DefenderConfig::default()
+    }
+}
+
+fn assert_defense_lanes(lanes: Vec<ProofLane>) {
+    assert_eq!(lanes.len(), 2);
+    assert!(lanes.contains(&ProofLane::ValidityProof));
+    assert!(lanes.contains(&ProofLane::TeeAttestation));
+}
+
+struct ProofStack {
+    service: SharedProverService,
+    tokens: Vec<CancellationToken>,
+    handles: Vec<JoinHandle<()>>,
+}
+
+fn start_proof_stack() -> ProofStack {
+    start_proof_stack_with(
+        FakeProofBackend::new(ProofBackend::Sp1),
+        FakeProofBackend::new(ProofBackend::Nitro),
+    )
+}
+
+fn start_proof_stack_with(
+    sp1_backend: FakeProofBackend,
+    nitro_backend: FakeProofBackend,
+) -> ProofStack {
+    let service = SharedProverService::new(ProverServiceConfig {
+        lease_timeout: Duration::from_secs(5),
+        max_attempts: 2,
+        max_queue_len: 16,
+        max_finished_jobs: 16,
+    })
+    .expect("valid prover-service config");
+
+    let sp1_worker = ProofWorker::new(
+        service.clone(),
+        sp1_backend,
+        ProofWorkerConfig {
+            poll_interval: Duration::from_millis(5),
+            max_concurrent_jobs: 1,
+        },
+    );
+    let sp1_cancel = sp1_worker.cancellation_token();
+    let sp1_handle = tokio::spawn(sp1_worker);
+
+    let nitro_worker = ProofWorker::new(
+        service.clone(),
+        nitro_backend,
+        ProofWorkerConfig {
+            poll_interval: Duration::from_millis(5),
+            max_concurrent_jobs: 1,
+        },
+    );
+    let nitro_cancel = nitro_worker.cancellation_token();
+    let nitro_handle = tokio::spawn(nitro_worker);
+
+    ProofStack {
+        service,
+        tokens: vec![sp1_cancel, nitro_cancel],
+        handles: vec![sp1_handle, nitro_handle],
+    }
+}
+
+async fn stop_proof_stack(stack: ProofStack) {
+    for token in stack.tokens {
+        token.cancel();
+    }
+    for handle in stack.handles {
+        handle.await.expect("worker shuts down");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn invalid_root_is_challenged_by_real_challenger() {
+    let chain = FakeExecution::new();
+    let canonical_root = B256::repeat_byte(0x20);
+    let bad_root = B256::repeat_byte(0x99);
+    let bad_proposer_consensus =
+        FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, bad_root);
+    let honest_consensus =
+        FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
+
+    let proposer =
+        WorldChainProposer::new(proposer_config(), chain.clone(), bad_proposer_consensus);
+    proposer.propose_once().await.expect("bad proposal posted");
+    let game = chain.latest_game().expect("game created").game;
+
+    let mut challenger =
+        WorldChainChallenger::new(challenger_config(), chain.clone(), honest_consensus);
+    challenger
+        .scan_once()
+        .await
+        .expect("challenger scan succeeds");
+
+    assert_eq!(chain.game_state(game), RootState::Challenged);
+    assert_eq!(chain.challenge_count(game), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn valid_challenged_root_is_defended_through_workers() {
+    let chain = FakeExecution::new();
+    let canonical_root = B256::repeat_byte(0x20);
+    let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
+
+    let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus.clone());
+    proposer.propose_once().await.expect("proposal posted");
+    let game = chain.latest_game().expect("game created").game;
+    chain.challenge_game(game);
+
+    let stack = start_proof_stack();
+    let mut defender = WorldChainDefender::new(
+        defender_config(),
+        chain.clone(),
+        consensus,
+        stack.service.clone(),
+    );
+
+    for _ in 0..200 {
+        defender.scan_once().await.expect("defender scan succeeds");
+        if chain.game_state(game) == RootState::Finalized {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    assert_eq!(chain.game_state(game), RootState::Finalized);
+    assert_defense_lanes(chain.submitted_lanes(game));
+
+    stop_proof_stack(stack).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn valid_challenged_root_survives_transient_proof_failure() {
+    let chain = FakeExecution::new();
+    let canonical_root = B256::repeat_byte(0x20);
+    let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
+
+    let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus.clone());
+    proposer.propose_once().await.expect("proposal posted");
+    let game = chain.latest_game().expect("game created").game;
+    chain.challenge_game(game);
+
+    let stack = start_proof_stack_with(
+        FakeProofBackend::flaky(ProofBackend::Sp1, 1),
+        FakeProofBackend::new(ProofBackend::Nitro),
+    );
+    let mut defender = WorldChainDefender::new(
+        defender_config(),
+        chain.clone(),
+        consensus,
+        stack.service.clone(),
+    );
+
+    for _ in 0..200 {
+        defender.scan_once().await.expect("defender scan succeeds");
+        if chain.game_state(game) == RootState::Finalized {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    assert_eq!(chain.game_state(game), RootState::Finalized);
+    assert_defense_lanes(chain.submitted_lanes(game));
+
+    stop_proof_stack(stack).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn defender_ignores_challenged_invalid_root() {
+    let chain = FakeExecution::new();
+    let canonical_root = B256::repeat_byte(0x20);
+    let bad_root = B256::repeat_byte(0x99);
+    let bad_proposer_consensus =
+        FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, bad_root);
+    let honest_consensus =
+        FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
+
+    let proposer =
+        WorldChainProposer::new(proposer_config(), chain.clone(), bad_proposer_consensus);
+    proposer.propose_once().await.expect("bad proposal posted");
+    let game = chain.latest_game().expect("game created").game;
+    chain.challenge_game(game);
+
+    let stack = start_proof_stack();
+    let mut defender = WorldChainDefender::new(
+        defender_config(),
+        chain.clone(),
+        honest_consensus,
+        stack.service.clone(),
+    );
+
+    for _ in 0..10 {
+        defender.scan_once().await.expect("defender scan succeeds");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    assert_eq!(chain.game_state(game), RootState::Challenged);
+    assert_eq!(chain.proof_bitmap(game), 0);
+    assert!(chain.submitted_lanes(game).is_empty());
+
+    stop_proof_stack(stack).await;
+}

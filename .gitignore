@@ -1,5 +1,7 @@
 book
 /target
+**/target/
+/proofs/succinct/programs/target
 .env
 .vscode
 .report
