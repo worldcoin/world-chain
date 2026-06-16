@@ -30,7 +30,7 @@ thiserror = "2"
 tracing = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3.18", features = ["fmt"] }
 world-chain-proof-core = { path = "../../core", default-features = false }
-world-chain-proof-kona-utils = { path = "../../utils/kona" }
+world-chain-proof-kona-client-utils = { path = "../../utils/kona-client" }
 world-chain-proof-succinct-client-utils = { path = "../utils/client", default-features = false }
 world-chain-proof-succinct-ethereum-client-utils = { path = "../utils/ethereum-client", default-features = false }
 world-chain-proof-succinct-range-utils = { path = "range-utils", default-features = false }

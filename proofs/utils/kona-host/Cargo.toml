@@ -1,0 +1,34 @@
+[package]
+name = "world-chain-proof-kona-host-utils"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-consensus.workspace = true
+alloy-eips = { workspace = true, features = ["kzg"] }
+alloy-primitives = { workspace = true, features = ["serde"] }
+anyhow.workspace = true
+async-trait.workspace = true
+c-kzg.workspace = true
+hex.workspace = true
+kona-derive.workspace = true
+kona-host = { workspace = true, features = ["single"] }
+kona-preimage.workspace = true
+kona-proof.workspace = true
+kona-protocol.workspace = true
+kzg-rs.workspace = true
+reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+world-chain-proof-core.workspace = true
+world-chain-proof-kona-client-utils.workspace = true
+world-chain-proof-protocol.workspace = true

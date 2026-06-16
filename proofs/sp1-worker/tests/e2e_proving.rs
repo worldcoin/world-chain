@@ -28,9 +28,9 @@
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use alloy_primitives::Address;
-use world_chain_proof_succinct_host_utils::{
-    env_prover::{EnvSuccinctProver, SP1ProofMode, Sp1ProverKind},
-    online::{OnlineHostConfig, resolve_l1_head},
+use world_chain_proof_kona_host_utils::online::{OnlineHostConfig, resolve_l1_head};
+use world_chain_proof_succinct_host_utils::env_prover::{
+    EnvSuccinctProver, SP1ProofMode, Sp1ProverKind,
 };
 use world_chain_proofs::{ConsensusProvider, OptimismConsensusClient};
 use world_chain_prover_service::{

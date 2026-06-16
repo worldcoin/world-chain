@@ -4729,7 +4729,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "world-chain-proof-kona-utils"
+name = "world-chain-proof-kona-client-utils"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus",
@@ -4788,23 +4788,7 @@ dependencies = [
  "sha2",
  "thiserror",
  "world-chain-proof-core",
- "world-chain-proof-kona-utils",
-]
-
-[[package]]
-name = "world-chain-proof-succinct-ethereum-client-utils"
-version = "2.2.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "kona-derive",
- "kona-driver",
- "kona-genesis",
- "kona-preimage",
- "kona-proof",
- "spin 0.10.0",
- "world-chain-proof-kona-utils",
- "world-chain-proof-succinct-client-utils",
+ "world-chain-proof-kona-client-utils",
 ]
 
 [[package]]
@@ -4815,8 +4799,8 @@ dependencies = [
  "rkyv",
  "sp1-zkvm",
  "world-chain-proof-core",
+ "world-chain-proof-kona-client-utils",
  "world-chain-proof-succinct-client-utils",
- "world-chain-proof-succinct-ethereum-client-utils",
  "world-chain-proof-succinct-range-utils",
 ]
 
@@ -4830,7 +4814,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "world-chain-proof-core",
- "world-chain-proof-kona-utils",
+ "world-chain-proof-kona-client-utils",
 ]
 
 [[package]]

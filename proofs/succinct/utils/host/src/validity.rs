@@ -12,14 +12,12 @@ use world_chain_proof_succinct_utils::{
     AggregationProofRequest, RangeProofRequest, WorldSuccinctProver,
 };
 
-use crate::{
-    L2BlockRange,
-    online::{
-        OnlineHostConfig, RangeWitnessRequest, build_range_input, fetch_l1_header_by_hash,
-        resolve_l1_head,
-    },
-    split_range,
+use world_chain_proof_kona_host_utils::online::{
+    OnlineHostConfig, RangeWitnessRequest, build_range_input, fetch_l1_header_by_hash,
+    resolve_l1_head,
 };
+
+use crate::{L2BlockRange, split_range};
 
 /// One validity-proof job covering L2 blocks `(start_block, end_block]`.
 #[derive(Clone, Copy, Debug)]
