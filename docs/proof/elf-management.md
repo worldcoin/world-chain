@@ -104,24 +104,28 @@ Workflow updates (`elf.yml` removal, `release-proof.yml` simplifications) are li
 description for a maintainer with `workflows` scope to apply — the agent that opened this PR
 cannot write to `.github/workflows/**`.
 
-## Comparison with Base's op-enclave
+## Comparison with op-succinct
 
-Base's [op-enclave](https://github.com/base/op-enclave) commits its TEE PCR measurements in
-source and rebuilds the enclave image from a pinned Dockerfile. The on-chain verifier registers
-PCR0/1/2, and CI gates merges on PCR reproducibility.
+[succinctlabs/op-succinct](https://github.com/succinctlabs/op-succinct) is the upstream SP1
+proof system that World Chain's proof system is based on. It uses exactly the same pattern:
+`sp1_build::build_program_with_args` in `build.rs` compiles the guest ELF at host `cargo build`
+time, and `sp1_sdk::include_elf!()` embeds it into the host binary. No ELF binaries or SHA-256
+hash manifests are committed to source control — the build is fully automatic and reproducible
+via the pinned `cargo-prove` toolchain.
 
-We achieve the same property one level deeper for the SP1 lane:
+World Chain follows this pattern directly:
 
-| Layer | Base op-enclave | World Chain proof system |
+| Layer | op-succinct | World Chain proof system |
 |:---|:---|:---|
-| Source-of-truth artifact | Nitro enclave EIF | SP1 guest ELF |
-| Build reproducibility    | `Dockerfile` + apt snapshot pin | `cargo prove build --docker --tag v6.1.0` (via `sp1_build`) |
-| On-chain anchor          | PCR registry entry | SP1 vkey on `OPSuccinctFaultDisputeGame` |
-| Where the artifact lives | Built and shipped as `.eif`     | **Embedded into the host binary via `include_elf!()`** |
+| Source-of-truth artifact | SP1 guest ELF | SP1 guest ELF |
+| Build reproducibility    | `build_program_with_args` + pinned SP1 toolchain tag | `build_program_with_args` + pinned `tag` in `build.rs` (`docker: true`) |
+| On-chain anchor          | SP1 vkey on `OPSuccinctL2OutputOracle` | SP1 vkey on `OPSuccinctFaultDisputeGame` |
+| Where the artifact lives | **Embedded into the host binary via `include_elf!()`** | **Embedded into the host binary via `include_elf!()`** |
+| Committed ELF / hash file | None | None |
 
-For World Chain's Nitro lane (`proofs/nitro/`), the PCR-commit pattern is still in use; the SP1
-lane has moved to the OP Succinct embed-at-compile-time pattern, which avoids carrying any
-ELF artifacts (committed bytes or committed SHA-256s) in source control at all.
+For World Chain's Nitro lane (`proofs/nitro/`), a separate PCR-commit pattern is used for the
+TEE enclave image; the SP1 lane follows the op-succinct embed-at-compile-time pattern, which
+avoids carrying any ELF artifacts (committed bytes or committed SHA-256s) in source control.
 
 ## Files of interest
 
