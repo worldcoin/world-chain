@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: Custom image tag to publish (e.g. "my-feature"). The commit SHA is always tagged too.
+        description: Custom image tag to publish (e.g. "nightly").
         required: false
-        default: ""
+        default: nightly
   push:
     branches: [main]
 
@@ -61,8 +61,7 @@ jobs:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ inputs.image_tag }},enable=${{ inputs.image_tag != '' }}
-            type=raw,value=nightly,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=raw,value=${{ inputs.image_tag || 'nightly' }}
             type=sha
 
   dispatch-devnet-bump:
