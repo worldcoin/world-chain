@@ -12,7 +12,7 @@ rkyv.workspace = true
 sp1-zkvm.workspace = true
 world-chain-proof-core.workspace = true
 world-chain-proof-succinct-client-utils.workspace = true
-world-chain-proof-succinct-ethereum-client-utils.workspace = true
+world-chain-proof-kona-client-utils.workspace = true
 world-chain-proof-succinct-range-utils.workspace = true
 
 [features]

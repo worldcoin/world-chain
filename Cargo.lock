@@ -10154,6 +10154,7 @@ dependencies = [
  "tokio",
  "world-chain-chainspec",
  "world-chain-proof-core",
+ "world-chain-proof-kona-host-utils",
  "world-chain-proof-nitro",
  "world-chain-proof-protocol",
  "world-chain-proof-succinct-host-utils",
@@ -19295,6 +19296,7 @@ dependencies = [
  "world-chain-defender",
  "world-chain-node",
  "world-chain-primitives",
+ "world-chain-proof-kona-host-utils",
  "world-chain-proof-succinct-host-utils",
  "world-chain-proof-worker",
  "world-chain-proofs",
@@ -19634,7 +19636,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "world-chain-proof-kona-utils"
+name = "world-chain-proof-integration-tests"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "anyhow",
+ "async-trait",
+ "tokio",
+ "tokio-util",
+ "world-chain-challenger",
+ "world-chain-defender",
+ "world-chain-proof-worker",
+ "world-chain-proofs",
+ "world-chain-proposer",
+ "world-chain-prover-service",
+]
+
+[[package]]
+name = "world-chain-proof-kona-client-utils"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus 2.0.4",
@@ -19645,7 +19664,6 @@ dependencies = [
  "alloy-rlp",
  "anyhow",
  "async-trait",
- "c-kzg",
  "kona-derive",
  "kona-driver",
  "kona-executor",
@@ -19662,6 +19680,33 @@ dependencies = [
  "spin 0.10.0",
  "tracing",
  "world-chain-proof-core",
+]
+
+[[package]]
+name = "world-chain-proof-kona-host-utils"
+version = "2.2.0"
+dependencies = [
+ "alloy-consensus 2.0.4",
+ "alloy-eips 2.0.4",
+ "alloy-primitives",
+ "anyhow",
+ "async-trait",
+ "c-kzg",
+ "hex",
+ "kona-derive",
+ "kona-host",
+ "kona-preimage",
+ "kona-proof",
+ "kona-protocol",
+ "kzg-rs",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "world-chain-proof-core",
+ "world-chain-proof-kona-client-utils",
+ "world-chain-proof-protocol",
 ]
 
 [[package]]
@@ -19725,7 +19770,7 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.18",
  "world-chain-proof-core",
- "world-chain-proof-kona-utils",
+ "world-chain-proof-kona-client-utils",
 ]
 
 [[package]]
@@ -19740,7 +19785,7 @@ dependencies = [
  "kona-preimage",
  "kona-proof",
  "spin 0.10.0",
- "world-chain-proof-kona-utils",
+ "world-chain-proof-kona-client-utils",
  "world-chain-proof-succinct-client-utils",
 ]
 
@@ -19748,15 +19793,10 @@ dependencies = [
 name = "world-chain-proof-succinct-host-utils"
 version = "2.2.0"
 dependencies = [
- "alloy-consensus 2.0.4",
  "alloy-primitives",
  "alloy-sol-types",
  "anyhow",
  "bincode 1.3.3",
- "hex",
- "kona-host",
- "kona-preimage",
- "kona-proof",
  "reqwest 0.12.28",
  "rkyv",
  "serde",
@@ -19767,9 +19807,7 @@ dependencies = [
  "tokio",
  "tracing",
  "world-chain-proof-core",
- "world-chain-proof-kona-utils",
- "world-chain-proof-protocol",
- "world-chain-proof-succinct-ethereum-client-utils",
+ "world-chain-proof-kona-host-utils",
  "world-chain-proof-succinct-utils",
 ]
 
@@ -19915,6 +19953,7 @@ dependencies = [
  "tracing-subscriber 0.3.23",
  "world-chain-chainspec",
  "world-chain-proof-core",
+ "world-chain-proof-kona-host-utils",
  "world-chain-proof-protocol",
  "world-chain-proof-succinct-host-utils",
  "world-chain-proof-succinct-utils",

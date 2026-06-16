@@ -41,8 +41,9 @@ use world_chain_proof_core::{
     types::AggregationInputs,
     witness::{WitnessData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
-use world_chain_proof_kona_utils::{WitnessExecutor, get_inputs_for_pipeline};
-use world_chain_proof_succinct_ethereum_client_utils::executor::ETHDAWitnessExecutor;
+use world_chain_proof_kona_client_utils::{
+    ETHDAWitnessExecutor, WitnessExecutor, get_inputs_for_pipeline,
+};
 
 use crate::protocol::{
     self, DEFAULT_VSOCK_PORT, EnclaveRequest, EnclaveResponse, PROTOCOL_VERSION,

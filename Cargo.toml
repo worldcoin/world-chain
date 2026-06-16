@@ -28,8 +28,10 @@ members = [
     "proofs/core",
     "proofs/protocol",
     "proofs/nitro",
+    "proofs/nitro/worker",
     "proofs/proof",
-    "proofs/utils/kona",
+    "proofs/utils/kona-client",
+    "proofs/utils/kona-host",
     "proofs/succinct/utils/client",
     "proofs/succinct/utils/ethereum-client",
     "proofs/succinct/utils/host",
@@ -43,6 +45,7 @@ members = [
     "proofs/worker",
     "proofs/sp1-worker",
     "proofs/defender",
+    "proofs/integration-tests",
     "e2e-tests",
     "xtask",
 ]
@@ -91,7 +94,9 @@ world-chain-proof-core = { path = "proofs/core", default-features = false }
 world-chain-proof = { path = "proofs/proof", default-features = false }
 world-chain-proof-protocol = { path = "proofs/protocol", default-features = false }
 world-chain-proof-nitro = { path = "proofs/nitro", default-features = false }
-world-chain-proof-kona-utils = { path = "proofs/utils/kona", default-features = false }
+world-chain-proof-kona-client-utils = { path = "proofs/utils/kona-client", default-features = false }
+world-chain-proof-kona-host-utils = { path = "proofs/utils/kona-host", default-features = false }
+world-chain-nitro-worker = { path = "proofs/nitro/worker", default-features = false }
 world-chain-proof-succinct-client-utils = { path = "proofs/succinct/utils/client", default-features = false }
 world-chain-proof-succinct-ethereum-client-utils = { path = "proofs/succinct/utils/ethereum-client", default-features = false }
 world-chain-proof-succinct-host-utils = { path = "proofs/succinct/utils/host", default-features = false }

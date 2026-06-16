@@ -42,9 +42,9 @@ use url::{Host, Url};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 use world_chain_challenger::{AlloyChallengerClient, ChallengerConfig, WorldChainChallenger};
 use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
-use world_chain_proof_succinct_host_utils::{
-    env_prover::{EnvSuccinctProver, SP1ProofMode, Sp1ProverKind},
-    online::OnlineHostConfig,
+use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
+use world_chain_proof_succinct_host_utils::env_prover::{
+    EnvSuccinctProver, SP1ProofMode, Sp1ProverKind,
 };
 use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig};
 use world_chain_proofs::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};

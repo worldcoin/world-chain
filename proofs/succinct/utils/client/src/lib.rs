@@ -16,6 +16,6 @@ use sha2 as _;
 pub mod range;
 
 pub use range::{RangeProgramError, run_range_program};
-pub use world_chain_proof_kona_utils::{
+pub use world_chain_proof_kona_client_utils::{
     CustomCrypto, OutputRootWitness, WitnessExecutor, WorldRangeWitness, ZkvmOpEvmFactory,
 };
