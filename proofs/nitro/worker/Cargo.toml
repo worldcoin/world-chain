@@ -8,6 +8,9 @@ homepage.workspace = true
 repository.workspace = true
 description = "AWS Nitro TEE proving worker: leases jobs from the prover-service, proves them inside a Nitro Enclave, and submits the signed attestations back."
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "nitro-worker"
 path = "src/main.rs"
