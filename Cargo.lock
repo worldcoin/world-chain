@@ -660,6 +660,7 @@ dependencies = [
  "alloy-pubsub",
  "alloy-rpc-client",
  "alloy-rpc-types-debug",
+ "alloy-rpc-types-engine",
  "alloy-rpc-types-eth 2.0.5",
  "alloy-rpc-types-trace",
  "alloy-signer 2.0.5",
@@ -4447,6 +4448,38 @@ dependencies = [
 [[package]]
 name = "discv5"
 version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c7999df38d0bd8f688212e1a4fae31fd2fea6d218649b9cd7c40bf3ec1318fc"
+dependencies = [
+ "aes",
+ "aes-gcm",
+ "alloy-rlp",
+ "arrayvec",
+ "ctr",
+ "delay_map",
+ "enr",
+ "fnv",
+ "futures",
+ "hashlink 0.11.0",
+ "hex",
+ "hkdf",
+ "lazy_static",
+ "libp2p-identity",
+ "more-asserts",
+ "multiaddr",
+ "parking_lot",
+ "rand 0.8.6",
+ "smallvec",
+ "socket2 0.6.3",
+ "tokio",
+ "tracing",
+ "uint 0.10.0",
+ "zeroize",
+]
+
+[[package]]
+name = "discv5"
+version = "0.10.4"
 source = "git+https://github.com/sigp/discv5?rev=7663c00#7663c00ee0837ea98547caaedede95d9d6736f4d"
 dependencies = [
  "aes",
@@ -5638,6 +5671,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46"
 
 [[package]]
+name = "hex_fmt"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b07f60793ff0a4d9cef0f18e63b5357e06209987153a64648c972c1e5aff336f"
+
+[[package]]
 name = "hickory-net"
 version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5649,11 +5688,37 @@ dependencies = [
  "futures-channel",
  "futures-io",
  "futures-util",
- "hickory-proto",
+ "hickory-proto 0.26.1",
  "idna",
  "ipnet",
  "jni 0.22.4",
  "rand 0.10.1",
+ "thiserror 2.0.18",
+ "tinyvec",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "hickory-proto"
+version = "0.25.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8a6fe56c0038198998a6f217ca4e7ef3a5e51f46163bd6dd60b5c71ca6c6502"
+dependencies = [
+ "async-trait",
+ "cfg-if",
+ "data-encoding",
+ "enum-as-inner",
+ "futures-channel",
+ "futures-io",
+ "futures-util",
+ "idna",
+ "ipnet",
+ "once_cell",
+ "rand 0.9.4",
+ "ring",
+ "socket2 0.5.10",
  "thiserror 2.0.18",
  "tinyvec",
  "tokio",
@@ -5684,6 +5749,27 @@ dependencies = [
 
 [[package]]
 name = "hickory-resolver"
+version = "0.25.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc62a9a99b0bfb44d2ab95a7208ac952d31060efc16241c87eaf36406fecf87a"
+dependencies = [
+ "cfg-if",
+ "futures-util",
+ "hickory-proto 0.25.2",
+ "ipconfig",
+ "moka",
+ "once_cell",
+ "parking_lot",
+ "rand 0.9.4",
+ "resolv-conf",
+ "smallvec",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "hickory-resolver"
 version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0d58d28879ceecde6607729660c2667a081ccdc082e082675042793960f178c"
@@ -5691,7 +5777,7 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "hickory-net",
- "hickory-proto",
+ "hickory-proto 0.26.1",
  "ipconfig",
  "ipnet",
  "jni 0.22.4",
@@ -6160,6 +6246,60 @@ checksum = "bf39cc0423ee66021dc5eccface85580e4a001e0c5288bae8bea7ecb69225e90"
 dependencies = [
  "libc",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "if-addrs"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0a05c691e1fae256cf7013d99dad472dc52d5543322761f83ec8d47eab40d2b"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "if-watch"
+version = "3.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71c02a5161c313f0cbdbadc511611893584a10a7b6153cb554bdf83ddce99ec2"
+dependencies = [
+ "async-io",
+ "core-foundation 0.9.4",
+ "fnv",
+ "futures",
+ "if-addrs 0.15.0",
+ "ipnet",
+ "log",
+ "netlink-packet-core",
+ "netlink-packet-route",
+ "netlink-proto",
+ "netlink-sys",
+ "rtnetlink",
+ "system-configuration",
+ "tokio",
+ "windows 0.62.2",
+]
+
+[[package]]
+name = "igd-next"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "516893339c97f6011282d5825ac94fc1c7aad5cad26bdc2d0cee068c0bf97f97"
+dependencies = [
+ "async-trait",
+ "attohttpc",
+ "bytes",
+ "futures",
+ "http 1.4.0",
+ "http-body-util",
+ "hyper 1.9.0",
+ "hyper-util",
+ "log",
+ "rand 0.9.4",
+ "tokio",
+ "url",
+ "xmltree",
 ]
 
 [[package]]
@@ -6850,12 +6990,12 @@ dependencies = [
 [[package]]
 name = "kona-disc"
 version = "0.1.2"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.0#484be19f69054f74bc736b5df229e896e338d9a3"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=423d93e6374a65f3a83c1ed5e29c5998c972a5da#423d93e6374a65f3a83c1ed5e29c5998c972a5da"
 dependencies = [
  "alloy-rlp",
  "backon",
  "derive_more 2.1.1",
- "discv5",
+ "discv5 0.10.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "kona-genesis",
  "kona-macros",
  "kona-peers",
@@ -6890,18 +7030,19 @@ dependencies = [
 [[package]]
 name = "kona-engine"
 version = "0.1.2"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.0#484be19f69054f74bc736b5df229e896e338d9a3"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=423d93e6374a65f3a83c1ed5e29c5998c972a5da#423d93e6374a65f3a83c1ed5e29c5998c972a5da"
 dependencies = [
- "alloy-consensus 2.0.4",
- "alloy-eips 2.0.4",
- "alloy-network 2.0.4",
+ "alloy-consensus 2.0.5",
+ "alloy-eips 2.0.5",
+ "alloy-hardforks",
+ "alloy-network 2.0.5",
  "alloy-primitives",
- "alloy-provider 2.0.4",
- "alloy-rpc-client 2.0.4",
+ "alloy-provider",
+ "alloy-rpc-client",
  "alloy-rpc-types-engine",
- "alloy-rpc-types-eth 2.0.4",
- "alloy-transport 2.0.4",
- "alloy-transport-http 2.0.4",
+ "alloy-rpc-types-eth 2.0.5",
+ "alloy-transport",
+ "alloy-transport-http",
  "async-trait",
  "derive_more 2.1.1",
  "http-body-util",
@@ -6970,15 +7111,15 @@ dependencies = [
 [[package]]
 name = "kona-gossip"
 version = "0.1.2"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.0#484be19f69054f74bc736b5df229e896e338d9a3"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=423d93e6374a65f3a83c1ed5e29c5998c972a5da#423d93e6374a65f3a83c1ed5e29c5998c972a5da"
 dependencies = [
- "alloy-consensus 2.0.4",
- "alloy-eips 2.0.4",
+ "alloy-consensus 2.0.5",
+ "alloy-eips 2.0.5",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
  "derive_more 2.1.1",
- "discv5",
+ "discv5 0.10.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures",
  "ipnet",
  "kona-disc",
@@ -7107,24 +7248,24 @@ dependencies = [
 [[package]]
 name = "kona-node-service"
 version = "0.1.3"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.0#484be19f69054f74bc736b5df229e896e338d9a3"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=423d93e6374a65f3a83c1ed5e29c5998c972a5da#423d93e6374a65f3a83c1ed5e29c5998c972a5da"
 dependencies = [
  "alloy-chains",
- "alloy-eips 2.0.4",
+ "alloy-eips 2.0.5",
  "alloy-primitives",
- "alloy-provider 2.0.4",
- "alloy-rpc-client 2.0.4",
+ "alloy-provider",
+ "alloy-rpc-client",
  "alloy-rpc-types-engine",
- "alloy-rpc-types-eth 2.0.4",
- "alloy-signer 2.0.4",
- "alloy-signer-local 2.0.4",
- "alloy-transport 2.0.4",
- "alloy-transport-http 2.0.4",
+ "alloy-rpc-types-eth 2.0.5",
+ "alloy-signer 2.0.5",
+ "alloy-signer-local 2.0.5",
+ "alloy-transport",
+ "alloy-transport-http",
  "async-stream",
  "async-trait",
  "backon",
  "derive_more 2.1.1",
- "discv5",
+ "discv5 0.10.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures",
  "http-body-util",
  "jsonrpsee",
@@ -7158,13 +7299,13 @@ dependencies = [
 [[package]]
 name = "kona-peers"
 version = "0.1.2"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.0#484be19f69054f74bc736b5df229e896e338d9a3"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=423d93e6374a65f3a83c1ed5e29c5998c972a5da#423d93e6374a65f3a83c1ed5e29c5998c972a5da"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "derive_more 2.1.1",
  "dirs 6.0.0",
- "discv5",
+ "discv5 0.10.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "kona-registry",
  "lazy_static",
  "libp2p",
@@ -7348,9 +7489,9 @@ dependencies = [
 [[package]]
 name = "kona-rpc"
 version = "0.3.2"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.0#484be19f69054f74bc736b5df229e896e338d9a3"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=423d93e6374a65f3a83c1ed5e29c5998c972a5da#423d93e6374a65f3a83c1ed5e29c5998c972a5da"
 dependencies = [
- "alloy-eips 2.0.4",
+ "alloy-eips 2.0.5",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "async-trait",
@@ -7378,14 +7519,14 @@ dependencies = [
 [[package]]
 name = "kona-sources"
 version = "0.1.2"
-source = "git+https://github.com/ethereum-optimism/optimism?tag=op-reth%2Fv2.2.0#484be19f69054f74bc736b5df229e896e338d9a3"
+source = "git+https://github.com/ethereum-optimism/optimism?rev=423d93e6374a65f3a83c1ed5e29c5998c972a5da#423d93e6374a65f3a83c1ed5e29c5998c972a5da"
 dependencies = [
  "alloy-primitives",
- "alloy-rpc-client 2.0.4",
- "alloy-signer 2.0.4",
- "alloy-signer-local 2.0.4",
- "alloy-transport 2.0.4",
- "alloy-transport-http 2.0.4",
+ "alloy-rpc-client",
+ "alloy-signer 2.0.5",
+ "alloy-signer-local 2.0.5",
+ "alloy-transport",
+ "alloy-transport-http",
  "derive_more 2.1.1",
  "notify",
  "op-alloy-rpc-types-engine",
@@ -7621,7 +7762,7 @@ checksum = "0b770c1c8476736ca98c578cba4b505104ff8e842c2876b528925f9766379f9a"
 dependencies = [
  "async-trait",
  "futures",
- "hickory-resolver",
+ "hickory-resolver 0.25.2",
  "libp2p-core",
  "libp2p-identity",
  "parking_lot",
@@ -7707,7 +7848,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c66872d0f1ffcded2788683f76931be1c52e27f343edb93bc6d0bcd8887be443"
 dependencies = [
  "futures",
- "hickory-proto",
+ "hickory-proto 0.25.2",
  "if-watch",
  "libp2p-core",
  "libp2p-identity",
@@ -8523,6 +8664,54 @@ name = "ndk-context"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
+
+[[package]]
+name = "netlink-packet-core"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3463cbb78394cb0141e2c926b93fc2197e473394b761986eca3b9da2c63ae0f4"
+dependencies = [
+ "paste",
+]
+
+[[package]]
+name = "netlink-packet-route"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ce3636fa715e988114552619582b530481fd5ef176a1e5c1bf024077c2c9445"
+dependencies = [
+ "bitflags 2.11.1",
+ "libc",
+ "log",
+ "netlink-packet-core",
+]
+
+[[package]]
+name = "netlink-proto"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b65d130ee111430e47eed7896ea43ca693c387f097dd97376bffafbf25812128"
+dependencies = [
+ "bytes",
+ "futures",
+ "log",
+ "netlink-packet-core",
+ "netlink-sys",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "netlink-sys"
+version = "0.8.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd6c30ed10fa69cc491d491b85cc971f6bdeb8e7367b7cde2ee6cc878d583fae"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "libc",
+ "log",
+ "tokio",
+]
 
 [[package]]
 name = "nix"
@@ -11217,7 +11406,7 @@ source = "git+https://github.com/paradigmxyz/reth?tag=v2.3.0#9384bc53d8c0c77e59c
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
- "discv5",
+ "discv5 0.10.4 (git+https://github.com/sigp/discv5?rev=7663c00)",
  "enr",
  "itertools 0.14.0",
  "parking_lot",
@@ -11243,7 +11432,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "derive_more 2.1.1",
- "discv5",
+ "discv5 0.10.4 (git+https://github.com/sigp/discv5?rev=7663c00)",
  "enr",
  "futures",
  "itertools 0.14.0",
@@ -11268,7 +11457,7 @@ dependencies = [
  "dashmap",
  "data-encoding",
  "enr",
- "hickory-resolver",
+ "hickory-resolver 0.26.1",
  "linked_hash_set",
  "reth-ethereum-forks",
  "reth-network-peers",
@@ -12051,7 +12240,7 @@ dependencies = [
  "aquamarine",
  "auto_impl",
  "derive_more 2.1.1",
- "discv5",
+ "discv5 0.10.4 (git+https://github.com/sigp/discv5?rev=7663c00)",
  "enr",
  "futures",
  "itertools 0.14.0",
@@ -19212,7 +19401,7 @@ dependencies = [
  "alloy-signer-local 2.0.5",
  "clap",
  "color-eyre",
- "discv5",
+ "discv5 0.10.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "ed25519-dalek",
  "futures-util",
  "hex",
@@ -19354,19 +19543,20 @@ dependencies = [
 name = "world-chain-kona"
 version = "2.2.0"
 dependencies = [
- "alloy-eips 2.0.4",
- "alloy-network 2.0.4",
+ "alloy-eips 2.0.5",
+ "alloy-network 2.0.5",
  "alloy-primitives",
- "alloy-provider 2.0.4",
- "alloy-rpc-client 2.0.4",
+ "alloy-provider",
+ "alloy-rpc-client",
  "alloy-rpc-types-engine",
- "alloy-rpc-types-eth 2.0.4",
- "alloy-transport 2.0.4",
- "alloy-transport-http 2.0.4",
+ "alloy-rpc-types-eth 2.0.5",
+ "alloy-transport",
+ "alloy-transport-http",
  "async-trait",
  "color-eyre",
  "ed25519-dalek",
  "futures",
+ "jsonrpsee",
  "kona-derive",
  "kona-engine",
  "kona-genesis",

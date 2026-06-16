@@ -4,7 +4,7 @@
 //! via [`kona_node_service::RollupNode::start`], which hard-wires its [`EngineActor`] to an
 //! [`kona_engine::OpEngineClient`]. To run the consensus hot path **in-process**, we reproduce the
 //! same actor graph here but inject an [`WorldChainKonaEngineClient`](crate::WorldChainKonaEngineClient) into
-//! the [`EngineProcessor`]/[`EngineRpcProcessor`].
+//! the [`EngineActor`]/[`EngineRpcActor`].
 //!
 //! The actor graph is identical to upstream:
 //!
@@ -31,11 +31,11 @@ use kona_engine::{Engine, EngineClient, EngineState};
 use kona_genesis::{L1ChainConfig, RollupConfig};
 use kona_node_service::{
     BlockStream, ConductorClient, DelayedL1OriginSelectorProvider, DerivationActor, EngineActor,
-    EngineProcessor, EngineRpcProcessor, L1OriginSelector, L1WatcherActor, NetworkActor,
-    NetworkBuilder, NetworkConfig, NetworkInboundData, NodeActor, QueuedDerivationEngineClient,
+    EngineRpcActor, JsonrpseeServerLauncher, L1OriginSelector, L1WatcherActor, NetworkActor,
+    NetworkBuilder, NetworkConfig, NetworkHandler, NodeActor, QueuedDerivationEngineClient,
     QueuedEngineDerivationClient, QueuedEngineRpcClient, QueuedL1WatcherDerivationClient,
     QueuedNetworkEngineClient, QueuedSequencerAdminAPIClient, QueuedSequencerEngineClient,
-    QueuedUnsafePayloadGossipClient, RpcActor, RpcContext, SequencerActor, SequencerConfig,
+    QueuedUnsafePayloadGossipClient, RpcActor, RpcServerLauncher, SequencerActor, SequencerConfig,
 };
 use kona_protocol::L2BlockInfo;
 use kona_providers_alloy::{
@@ -43,7 +43,11 @@ use kona_providers_alloy::{
     OnlinePipeline,
 };
 use kona_registry::L1Config as RegisteredL1Config;
-use kona_rpc::RpcBuilder;
+use kona_rpc::{
+    AdminApiServer, AdminRpc, DevEngineApiServer, DevEngineRpc, HealthzApiServer, HealthzRpc,
+    OpP2PApiServer, P2pRpc, RollupNodeApiServer, RollupRpc, RpcBuilder, WsRPC, WsServer,
+};
+use jsonrpsee::RpcModule;
 use op_alloy_network::Optimism;
 use std::ops::Not as _;
 use tokio::{
@@ -257,11 +261,11 @@ impl KonaService {
         )
     }
 
-    /// Assembles the [`EngineActor`] around our [`WorldChainKonaEngineClient`].
+    /// Assembles the [`EngineActor`] and [`EngineRpcActor`] around our
+    /// [`WorldChainKonaEngineClient`].
     ///
-    /// This mirrors `RollupNode::create_engine_actor`, but constructs the processors from the
-    /// injected in-process client instead of building an [`kona_engine::OpEngineClient`] from an
-    /// [`kona_node_service::EngineConfig`].
+    /// This mirrors `RollupNode::build_engine_actors`, but injects the in-process client instead of
+    /// building an [`kona_engine::OpEngineClient`] from an [`kona_node_service::EngineConfig`].
     ///
     /// When `el_sync_finished` is `true`, the engine starts with EL sync already considered
     /// complete. This is used when reth's execution layer already holds a chain (a restart from an
@@ -271,18 +275,16 @@ impl KonaService {
     /// forkchoice update) so derivation can proceed from L1. This mirrors Base's follower, which
     /// seeds its engine from the local EL head on startup.
     #[allow(clippy::type_complexity)]
-    fn create_engine_actor(
+    fn create_engine_actors(
         &self,
-        cancellation: CancellationToken,
         engine_request_rx: mpsc::Receiver<kona_node_service::EngineActorRequest>,
+        engine_rpc_request_rx: mpsc::Receiver<kona_node_service::EngineRpcRequest>,
         derivation_client: QueuedEngineDerivationClient,
         unsafe_head_tx: watch::Sender<L2BlockInfo>,
         el_sync_finished: bool,
     ) -> (
-        EngineActor<
-            EngineProcessor<WorldChainKonaEngineClient, QueuedEngineDerivationClient>,
-            EngineRpcProcessor<WorldChainKonaEngineClient>,
-        >,
+        EngineActor<WorldChainKonaEngineClient, QueuedEngineDerivationClient>,
+        EngineRpcActor<WorldChainKonaEngineClient>,
         watch::Receiver<EngineState>,
     ) {
         let engine_state = EngineState {
@@ -293,34 +295,31 @@ impl KonaService {
         let (engine_queue_length_tx, engine_queue_length_rx) = watch::channel(0);
         let engine = Engine::new(engine_state, engine_state_tx, engine_queue_length_tx);
 
-        let engine_processor = EngineProcessor::new(
+        // The unsafe-head feed is only meaningful in sequencer mode; validators ignore it.
+        let unsafe_head_tx_opt = self.sequencer_mode.then_some(unsafe_head_tx);
+
+        let engine_actor = EngineActor::new(
             self.engine_client.clone(),
             self.rollup_config.clone(),
             derivation_client,
             engine,
-            self.sequencer_mode.then_some(unsafe_head_tx),
+            unsafe_head_tx_opt,
+            engine_request_rx,
         );
 
         // A second receiver on the engine state, handed back to the caller to gate the L1
         // finality feed on the engine's safe head (see the finalized-stream wiring in `run`).
         let engine_state_rx_for_gate = engine_state_rx.clone();
 
-        let engine_rpc_processor = EngineRpcProcessor::new(
+        let engine_rpc_actor = EngineRpcActor::new(
             self.engine_client.clone(),
             self.rollup_config.clone(),
             engine_state_rx,
             engine_queue_length_rx,
+            engine_rpc_request_rx,
         );
 
-        (
-            EngineActor::new(
-                cancellation,
-                engine_request_rx,
-                engine_processor,
-                engine_rpc_processor,
-            ),
-            engine_state_rx_for_gate,
-        )
+        (engine_actor, engine_rpc_actor, engine_state_rx_for_gate)
     }
 
     /// Spawns the full Kona actor graph on the current tokio runtime and runs to completion.
@@ -329,10 +328,21 @@ impl KonaService {
     /// The provided `cancellation` token is shared by all actors and is the same token the caller
     /// can use to trigger a graceful shutdown.
     pub async fn run(self, cancellation: CancellationToken) -> Result<(), String> {
+        // Cross-actor channels. The network actor's inbound channels (signer, p2p RPC, network
+        // admin, gossip payload) were previously surfaced via `NetworkInboundData`; upstream now
+        // requires the caller to own them, so we create them here.
         let (derivation_actor_request_tx, derivation_actor_request_rx) =
             mpsc::channel(CHANNEL_SIZE);
         let (engine_actor_request_tx, engine_actor_request_rx) = mpsc::channel(CHANNEL_SIZE);
+        let (engine_rpc_request_tx, engine_rpc_request_rx) = mpsc::channel(CHANNEL_SIZE);
+        let (l1_query_tx, l1_query_rx) = mpsc::channel(CHANNEL_SIZE);
+        let (sequencer_admin_api_tx, sequencer_admin_api_rx) = mpsc::channel(CHANNEL_SIZE);
+        let (signer_tx, signer_rx) = mpsc::channel(CHANNEL_SIZE);
+        let (p2p_rpc_tx, p2p_rpc_rx) = mpsc::channel(CHANNEL_SIZE);
+        let (network_admin_tx, network_admin_rx) = mpsc::channel(CHANNEL_SIZE);
+        let (gossip_payload_tx, gossip_payload_rx) = mpsc::channel(CHANNEL_SIZE);
         let (unsafe_head_tx, unsafe_head_rx) = watch::channel(L2BlockInfo::default());
+        let (l1_head_updates_tx, l1_head_updates_rx) = watch::channel(None);
 
         // Determine whether reth's EL already holds a chain beyond genesis. If so, EL sync needs no
         // gossip-driven snap sync to bootstrap: mark EL sync complete up front so the engine
@@ -363,11 +373,11 @@ impl KonaService {
             }
         };
 
-        // Engine actor (in-process EL). The returned receiver tracks the engine's safe head and
+        // Engine actors (in-process EL). The returned receiver tracks the engine's safe head and
         // is used below to gate the L1 finality feed.
-        let (engine_actor, engine_safe_head_rx) = self.create_engine_actor(
-            cancellation.clone(),
+        let (engine_actor, engine_rpc_actor, engine_safe_head_rx) = self.create_engine_actors(
             engine_actor_request_rx,
+            engine_rpc_request_rx,
             QueuedEngineDerivationClient::new(derivation_actor_request_tx.clone()),
             unsafe_head_tx,
             el_sync_finished,
@@ -378,30 +388,30 @@ impl KonaService {
             QueuedDerivationEngineClient {
                 engine_actor_request_tx: engine_actor_request_tx.clone(),
             },
-            cancellation.clone(),
             derivation_actor_request_rx,
             self.create_pipeline().await,
         );
 
-        // Network (p2p) actor.
-        let (
-            NetworkInboundData {
-                signer,
-                p2p_rpc: network_rpc,
-                gossip_payload_tx,
-                admin_rpc: net_admin_rpc,
-            },
-            network,
-        ) = NetworkActor::new(
+        // Network (p2p) actor. The libp2p swarm is built and started first so the constructor
+        // stays synchronous, mirroring upstream `RollupNode::start`.
+        let network_handler: NetworkHandler = NetworkBuilder::from(self.p2p_config.clone())
+            .build()
+            .map_err(|e| format!("failed to build network: {e:?}"))?
+            .start()
+            .await
+            .map_err(|e| format!("failed to start network: {e:?}"))?;
+        let network = NetworkActor::new(
             QueuedNetworkEngineClient {
                 engine_actor_request_tx: engine_actor_request_tx.clone(),
             },
-            cancellation.clone(),
-            NetworkBuilder::from(self.p2p_config.clone()),
+            network_handler,
+            signer_rx,
+            p2p_rpc_rx,
+            network_admin_rx,
+            gossip_payload_rx,
         );
 
         // L1 origin selection (sequencer only) + L1 watcher.
-        let (l1_head_updates_tx, l1_head_updates_rx) = watch::channel(None);
         let delayed_l1_provider = DelayedL1OriginSelectorProvider::new(
             self.l1_provider.clone(),
             l1_head_updates_rx,
@@ -415,8 +425,6 @@ impl KonaService {
             .conductor_rpc_url
             .clone()
             .map(ConductorClient::new_http);
-
-        let (l1_query_tx, l1_query_rx) = mpsc::channel(CHANNEL_SIZE);
 
         // Both streams are boxed to a single concrete type because `L1WatcherActor` is generic
         // over one `BlockStream` type shared by its head and finalized streams.
@@ -471,84 +479,109 @@ impl KonaService {
             QueuedL1WatcherDerivationClient {
                 derivation_actor_request_tx,
             },
-            signer,
-            cancellation.clone(),
+            signer_tx,
             head_stream,
             finalized_stream,
         );
 
         // Optional sequencer actor.
-        let (sequencer_actor, sequencer_admin_client) = if self.sequencer_mode {
+        let sequencer_actor = if self.sequencer_mode {
             let sequencer_engine_client = QueuedSequencerEngineClient {
                 engine_actor_request_tx: engine_actor_request_tx.clone(),
                 unsafe_head_rx,
             };
-            let (sequencer_admin_api_tx, sequencer_admin_api_rx) = mpsc::channel(CHANNEL_SIZE);
-            let queued_gossip_client =
-                QueuedUnsafePayloadGossipClient::new(gossip_payload_tx.clone());
+            let queued_gossip_client = QueuedUnsafePayloadGossipClient::new(gossip_payload_tx);
 
-            (
-                Some(SequencerActor {
-                    admin_api_rx: sequencer_admin_api_rx,
-                    attributes_builder: self.create_attributes_builder(),
-                    cancellation_token: cancellation.clone(),
-                    conductor,
-                    engine_client: sequencer_engine_client,
-                    is_active: self.sequencer_config.sequencer_stopped.not(),
-                    in_recovery_mode: self.sequencer_config.sequencer_recovery_mode,
-                    origin_selector: delayed_origin_selector,
-                    rollup_config: self.rollup_config.clone(),
-                    unsafe_payload_gossip_client: queued_gossip_client,
-                }),
-                Some(QueuedSequencerAdminAPIClient::new(sequencer_admin_api_tx)),
-            )
+            Some(SequencerActor::new(
+                sequencer_admin_api_rx,
+                self.create_attributes_builder(),
+                conductor,
+                sequencer_engine_client,
+                self.sequencer_config.sequencer_stopped.not(),
+                self.sequencer_config.sequencer_recovery_mode,
+                delayed_origin_selector,
+                self.rollup_config.clone(),
+                queued_gossip_client,
+            ))
         } else {
-            (None, None)
+            None
+        };
+        let sequencer_admin_client = sequencer_actor
+            .is_some()
+            .then(|| QueuedSequencerAdminAPIClient::new(sequencer_admin_api_tx));
+
+        // Optional RPC actor. Upstream `RollupNode::build_rpc_actor` now assembles the JSON-RPC
+        // module set, performs the initial server launch, and hands the live handle to the actor;
+        // the actor is no longer driven by an `RpcContext`.
+        let rpc = if let Some(config) = self.rpc_builder.clone() {
+            let engine_rpc_client = QueuedEngineRpcClient::new(engine_rpc_request_tx);
+            let mut modules = RpcModule::new(());
+            modules
+                .merge(HealthzApiServer::into_rpc(HealthzRpc {}))
+                .map_err(|e| format!("failed to register healthz module: {e:?}"))?;
+            modules
+                .merge(P2pRpc::new(p2p_rpc_tx).into_rpc())
+                .map_err(|e| format!("failed to register p2p module: {e:?}"))?;
+            modules
+                .merge(AdminRpc::new(sequencer_admin_client, network_admin_tx).into_rpc())
+                .map_err(|e| format!("failed to register admin module: {e:?}"))?;
+            modules
+                .merge(RollupRpc::new(engine_rpc_client.clone(), l1_query_tx).into_rpc())
+                .map_err(|e| format!("failed to register rollup module: {e:?}"))?;
+            if config.dev_enabled() {
+                modules
+                    .merge(DevEngineRpc::new(engine_rpc_client.clone()).into_rpc())
+                    .map_err(|e| format!("failed to register dev engine module: {e:?}"))?;
+            }
+            if config.ws_enabled() {
+                modules
+                    .merge(WsRPC::new(engine_rpc_client.clone()).into_rpc())
+                    .map_err(|e| format!("failed to register ws module: {e:?}"))?;
+            }
+
+            let restarts_remaining = config.restart_count();
+            let launcher = JsonrpseeServerLauncher::new(config);
+            let handle = launcher
+                .launch(modules.clone())
+                .await
+                .map_err(|e: std::io::Error| format!("failed to launch rpc server: {e:?}"))?;
+            Some(RpcActor::new(launcher, modules, handle, restarts_remaining))
+        } else {
+            None
         };
 
-        // Optional RPC actor.
-        let rpc = self.rpc_builder.clone().map(|b| {
-            RpcActor::new(
-                b,
-                QueuedEngineRpcClient::new(engine_actor_request_tx.clone()),
-                sequencer_admin_client,
-            )
-        });
-
         // Spawn all actors, cancelling the rest on first failure. This reimplements kona's
-        // crate-private `spawn_and_wait!` macro and `shutdown_signal()` helper.
+        // crate-private `spawn_and_wait!` macro and `shutdown_signal()` helper: each actor's
+        // `step` is driven in a loop until it errors or the shared cancellation token fires.
         let mut tasks: JoinSet<Result<(), String>> = JoinSet::new();
 
         macro_rules! spawn_actor {
-            ($actor:expr, $ctx:expr) => {{
-                let cancel = cancellation.clone();
-                let actor = $actor;
-                let ctx = $ctx;
-                tasks.spawn(async move {
-                    let _guard = cancel.drop_guard();
-                    actor.start(ctx).await.map_err(|e| format!("{e:?}"))
-                });
+            ($actor:expr) => {{
+                if let Some(mut actor) = $actor {
+                    let cancel = cancellation.clone();
+                    tasks.spawn(async move {
+                        let _guard = cancel.clone().drop_guard();
+                        loop {
+                            tokio::select! {
+                                biased;
+                                _ = cancel.cancelled() => return Ok(()),
+                                result = actor.step() => {
+                                    result.map_err(|e| format!("{e:?}"))?;
+                                }
+                            }
+                        }
+                    });
+                }
             }};
         }
 
-        if let Some(rpc) = rpc {
-            spawn_actor!(
-                rpc,
-                RpcContext {
-                    cancellation: cancellation.clone(),
-                    p2p_network: network_rpc,
-                    network_admin: net_admin_rpc,
-                    l1_watcher_queries: l1_query_tx,
-                }
-            );
-        }
-        if let Some(sequencer_actor) = sequencer_actor {
-            spawn_actor!(sequencer_actor, ());
-        }
-        spawn_actor!(network, ());
-        spawn_actor!(l1_watcher, ());
-        spawn_actor!(derivation, ());
-        spawn_actor!(engine_actor, ());
+        spawn_actor!(rpc);
+        spawn_actor!(sequencer_actor);
+        spawn_actor!(Some(network));
+        spawn_actor!(Some(l1_watcher));
+        spawn_actor!(Some(derivation));
+        spawn_actor!(Some(engine_actor));
+        spawn_actor!(Some(engine_rpc_actor));
 
         let shutdown = shutdown_signal();
         tokio::pin!(shutdown);

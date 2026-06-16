@@ -352,6 +352,15 @@ where
         Ok(self.on_get_payload(payload_id).await?.into())
     }
 
+    async fn get_payload_v5(
+        &self,
+        payload_id: PayloadId,
+    ) -> TransportResult<OpExecutionPayloadEnvelopeV4> {
+        // Osaka (Karst on the OP Stack) bumps the engine method version but adds no new payload
+        // fields on L2, so the V4-shaped envelope is reused.
+        Ok(self.on_get_payload(payload_id).await?.into())
+    }
+
     async fn get_payload_bodies_by_hash_v1(
         &self,
         block_hashes: Vec<BlockHash>,

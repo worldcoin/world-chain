@@ -180,19 +180,18 @@ reth-optimism-primitives = { git = "https://github.com/ethereum-optimism/optimis
 reth-optimism-storage = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da", default-features = false }
 reth-optimism-flashblocks = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da", default-features = false }
 
-# kona (ethereum-optimism/optimism monorepo, same tag as op-alloy)
-kona-engine = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
-kona-node-service = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
-kona-rpc = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
-kona-protocol = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", features = ["serde", "std"] }
-kona-registry = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
-kona-providers-alloy = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
-kona-interop = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
-kona-disc = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
-kona-gossip = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
-kona-peers = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
-kona-sources = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0" }
-kona-cli = { git = "https://github.com/ethereum-optimism/optimism", tag = "op-reth/v2.2.0", default-features = false, features = ["secrets"] }
+# kona (ethereum-optimism/optimism monorepo, same rev as op-alloy/reth-optimism)
+kona-engine = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da" }
+kona-node-service = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da" }
+kona-rpc = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da" }
+kona-registry = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da" }
+kona-providers-alloy = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da" }
+kona-interop = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da" }
+kona-disc = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da" }
+kona-gossip = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da" }
+kona-peers = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da" }
+kona-sources = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da" }
+kona-cli = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da", default-features = false, features = ["secrets"] }
 
 discv5 = "0.10.2"
 libp2p = "0.56.0"
