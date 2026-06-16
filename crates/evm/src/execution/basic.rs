@@ -2,6 +2,7 @@ use alloy_consensus::{Block, Header};
 use alloy_op_evm::{
     OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory,
     block::{OpTxEnv, receipt_builder::OpReceiptBuilder},
+    post_exec::PostExecEvm,
 };
 
 use alloy_primitives::B256;
@@ -11,6 +12,7 @@ use reth_evm::{
     block::{BlockExecutionError, BlockExecutor, CommitChanges},
     execute::{
         BasicBlockBuilder, BlockAssemblerInput, BlockBuilder, BlockBuilderOutcome, ExecutorTx,
+        GasOutput,
     },
 };
 use reth_node_api::NodePrimitives;
@@ -78,6 +80,7 @@ where
             HaltReason = OpHaltReason,
             BlockEnv = BlockEnv,
         >,
+    E: PostExecEvm,
     OpBlockExecutor<E, R, WorldChainSpec>:
         BlockExecutor<Evm = E, Transaction = OpTransactionSigned, Receipt = OpReceipt>,
 {
@@ -92,7 +95,7 @@ where
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
         f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result) -> CommitChanges,
-    ) -> Result<Option<u64>, BlockExecutionError> {
+    ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, tx) = tx.into_parts();
         if let Some(gas_used) = self
             .inner
@@ -100,7 +103,7 @@ where
             .execute_transaction_with_commit_condition((tx_env, &tx), f)?
         {
             self.inner.transactions.push(tx);
-            Ok(Some(gas_used.tx_gas_used()))
+            Ok(Some(gas_used))
         } else {
             Ok(None)
         }
@@ -147,6 +150,7 @@ where
             HaltReason = OpHaltReason,
             BlockEnv = BlockEnv,
         >,
+    E: PostExecEvm,
     OpBlockExecutor<E, R, WorldChainSpec>:
         BlockExecutor<Evm = E, Transaction = OpTransactionSigned, Receipt = OpReceipt>,
 {
@@ -203,6 +207,7 @@ where
             db.bundle_state(),
             &state,
             state_root,
+            None,
         ))?;
         metrics.record_stage_duration(
             PayloadBuildStage::BlockAssembly,
@@ -217,6 +222,7 @@ where
                 hashed_state,
                 trie_updates,
                 block,
+                block_access_list: None,
             },
             db.take_bundle(),
         ))

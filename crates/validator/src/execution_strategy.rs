@@ -270,6 +270,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             block,
             hashed_state,
             trie_updates,
+            block_access_list: _,
         } = outcome;
 
         let sealed_block = Arc::new(block.sealed_block().clone());
@@ -280,8 +281,8 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
         let executed_block: BuiltPayloadExecutedBlock<OpPrimitives> = BuiltPayloadExecutedBlock {
             recovered_block: Arc::new(block),
             execution_output: Arc::new(execution_output),
-            hashed_state: either::Left(Arc::new(hashed_state)),
-            trie_updates: either::Left(Arc::new(trie_updates)),
+            hashed_state: Arc::new(hashed_state),
+            trie_updates: Arc::new(trie_updates),
         };
 
         Ok(OpBuiltPayload::new(
@@ -367,7 +368,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
                 let miner_fee = tx
                     .effective_tip_per_gas(basefee)
                     .expect("fee is always valid; execution succeeded");
-                fees += U256::from(gas_used) * U256::from(miner_fee);
+                fees += U256::from(gas_used.tx_gas_used()) * U256::from(miner_fee);
             }
         }
         ctx.attempt_metrics.record_stage_duration(
@@ -432,6 +433,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
                 db.bundle_state(),
                 finish_state_provider.as_ref(),
                 state_root,
+                None,
             ))?;
         ctx.attempt_metrics.record_stage_duration(
             PayloadBuildStage::BlockAssembly,
@@ -452,8 +454,8 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
         let executed_block: BuiltPayloadExecutedBlock<OpPrimitives> = BuiltPayloadExecutedBlock {
             recovered_block: Arc::new(block),
             execution_output: Arc::new(execution_output),
-            hashed_state: either::Left(Arc::new(hashed_state)),
-            trie_updates: either::Left(Arc::new(trie_updates)),
+            hashed_state: Arc::new(hashed_state),
+            trie_updates: Arc::new(trie_updates),
         };
 
         Ok(OpBuiltPayload::new(

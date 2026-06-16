@@ -171,7 +171,7 @@ impl WorldHardforkConfig {
             OpHardfork::Holocene => self.activation(WorldChainHardfork::Holocene),
             OpHardfork::Isthmus => self.activation(WorldChainHardfork::Isthmus),
             OpHardfork::Jovian => self.activation(WorldChainHardfork::Jovian),
-            OpHardfork::Karst | OpHardfork::Interop => ForkCondition::Never,
+            OpHardfork::Karst => ForkCondition::Never,
             _ => ForkCondition::Never,
         }
     }
@@ -453,10 +453,6 @@ mod tests {
         );
         assert_eq!(
             config.op_activation(OpHardfork::Karst),
-            ForkCondition::Never
-        );
-        assert_eq!(
-            config.op_activation(OpHardfork::Interop),
             ForkCondition::Never
         );
     }

@@ -12,7 +12,7 @@ alloy-eips.workspace = true
 alloy-primitives = { workspace = true, features = ["serde"] }
 alloy-sol-types.workspace = true
 cfg-if = "1"
-revm-precompile = { version = "34.0.0", default-features = false }
+revm-precompile.workspace = true
 rkyv.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

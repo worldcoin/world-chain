@@ -1,5 +1,6 @@
 use std::{fmt::Debug, sync::Arc};
 
+use alloy_op_evm::{block::OpAlloyReceiptBuilder, post_exec::PostExecEvmFactoryAdapter};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use kona_derive::{
@@ -78,14 +79,17 @@ pub trait WitnessExecutor {
         let boot_clone = boot.clone();
         let rollup_config = Arc::new(boot.rollup_config);
 
+        let evm_factory = world_schedule.map_or_else(
+            ZkvmOpEvmFactory::new,
+            ZkvmOpEvmFactory::new_with_world_schedule,
+        );
+
         let executor = KonaExecutor::new(
             rollup_config.as_ref(),
             l2_provider.clone(),
             l2_provider,
-            world_schedule.map_or_else(
-                ZkvmOpEvmFactory::new,
-                ZkvmOpEvmFactory::new_with_world_schedule,
-            ),
+            PostExecEvmFactoryAdapter::new(evm_factory),
+            OpAlloyReceiptBuilder::default(),
             None,
         );
         let mut driver = Driver::new(cursor, executor, pipeline);

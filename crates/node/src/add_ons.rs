@@ -7,7 +7,8 @@ use reth_payload_builder::PayloadStore;
 use reth_tasks::TaskExecutor;
 
 use alloy_consensus::{Block, BlockBody, Header};
-use op_alloy_consensus::OpTransaction;
+use alloy_primitives::Sealed;
+use op_alloy_consensus::{OpTransaction, TxPostExec};
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::{ConfigureEvm, EvmFactory, block::BlockExecutorFactory};
 use reth_node_api::{BuildNextEnv, FullNodeComponents, NodeAddOns, NodeTypes, PrimitivesTy};
@@ -17,6 +18,7 @@ use reth_node_builder::rpc::{
     RethRpcServerHandles, RpcAddOns, RpcContext, RpcHandle,
 };
 use reth_optimism_chainspec::OpHardfork;
+use reth_optimism_evm::ConfigurePostExecEvm;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{OpEngineApiBuilder, OpEngineTypes, txpool::OpPooledTx};
 use reth_optimism_payload_builder::{
@@ -346,8 +348,8 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx> NodeAddOns<N>
     for WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
 where
     N: FullNodeComponents<
-            Types: NodeTypes<ChainSpec = WorldChainSpec, Payload = OpEngineTypes>,
-            Evm: ConfigureEvm<
+            Types: NodeTypes<ChainSpec = WorldChainSpec>,
+            Evm: ConfigurePostExecEvm<
                 NextBlockEnvCtx: BuildNextEnv<
                     OpPayloadBuilderAttributes<Tx>,
                     Header,
@@ -370,7 +372,7 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
-    Tx: FullSignedTx + OpTransaction,
+    Tx: FullSignedTx + OpTransaction + From<Sealed<TxPostExec>>,
     <<N::Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory:
         EvmFactory<Tx = OpTx>,
 {
@@ -439,15 +441,17 @@ where
 
         let rpc_add_ons = rpc_add_ons.option_layer_rpc_middleware(maybe_pre_bedrock_historical_rpc);
 
+        let evm_config = ctx.node.evm_config().clone();
         let builder = reth_optimism_payload_builder::OpPayloadBuilder::new(
             ctx.node.pool().clone(),
             ctx.node.provider().clone(),
-            ctx.node.evm_config().clone(),
+            evm_config.clone(),
         );
         let debug_ext = OpDebugWitnessApi::<_, _, _, OpPayloadBuilderAttributes<Tx>>::new(
             ctx.node.provider().clone(),
             ctx.node.task_executor().clone(),
             builder,
+            evm_config.clone(),
         );
         let miner_ext = OpMinerExtApi::new(da_config, gas_limit_config);
 
@@ -471,7 +475,6 @@ where
         );
         let flashblocks_op_api = FlashblocksOpApi;
         let provider = ctx.node.provider().clone();
-        let evm_config = ctx.node.evm_config().clone();
 
         let handle = rpc_add_ons
             .launch_add_ons_with(ctx, move |container| {
@@ -566,8 +569,8 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx> RethRpcAddOns<N>
     for WorldChainAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware, Tx>
 where
     N: FullNodeComponents<
-            Types: NodeTypes<ChainSpec = WorldChainSpec, Payload = OpEngineTypes>,
-            Evm: ConfigureEvm<
+            Types: NodeTypes<ChainSpec = WorldChainSpec>,
+            Evm: ConfigurePostExecEvm<
                 NextBlockEnvCtx: BuildNextEnv<
                     OpPayloadBuilderAttributes<Tx>,
                     Header,
@@ -590,7 +593,7 @@ where
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
-    Tx: FullSignedTx + OpTransaction,
+    Tx: FullSignedTx + OpTransaction + From<Sealed<TxPostExec>>,
     <<N::Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::EvmFactory:
         EvmFactory<Tx = OpTx>,
 {
