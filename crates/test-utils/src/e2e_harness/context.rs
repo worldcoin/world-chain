@@ -29,7 +29,7 @@ use reth_primitives_traits::{Block as _, BlockTy, SealedBlock};
 use reth_rpc_api::eth::RpcTypes;
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
-use world_chain_evm::WorldChainEvmConfig;
+use world_chain_evm::{OpRethReceiptBuilder, WorldChainEvmConfig};
 use world_chain_node::{
     context::{FlashblocksComponentsContext, WorldChainNetworkBuilder},
     engine::FlashblocksEngineApiBuilder,
@@ -116,6 +116,10 @@ impl OpReceiptBuilder for WorldReceiptBuilder {
 
     fn build_deposit_receipt(&self, inner: OpDepositReceipt) -> Self::Receipt {
         OpReceipt::Deposit(inner)
+    }
+
+    fn strip_deposit_nonce(&self, receipt: &mut Self::Receipt) {
+        OpRethReceiptBuilder::default().strip_deposit_nonce(receipt);
     }
 }
 
