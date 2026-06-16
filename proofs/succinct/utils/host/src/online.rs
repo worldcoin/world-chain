@@ -9,8 +9,11 @@
 
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex},
-    time::Duration,
+    sync::{
+        Arc, Mutex,
+        atomic::AtomicU64,
+    },
+    time::{Duration, Instant},
 };
 
 use alloy_primitives::{Address, B256, address, keccak256};
@@ -285,7 +288,12 @@ pub fn build_range_input(
             .flatten(),
         rollup_config_path: config.rollup_config_path.clone(),
         l1_config_path: None,
-        enable_experimental_witness_endpoint: false,
+        // Honor the `L2PayloadWitness` hint the executor sends before each block: fetch that
+        // block's entire stateless witness in one `debug_executePayload` call (op-reth's
+        // `OpDebugWitnessApi`) and bulk-load the KV store. Without this the host ignores the
+        // hint and falls back to on-demand, per-trie-node preimage fetching — thousands of
+        // sequential RPC round-trips that make range-witness collection take many minutes.
+        enable_experimental_witness_endpoint: true,
     };
 
     let witness = tokio::runtime::Runtime::new()?.block_on(collect_world_range_witness(
@@ -412,6 +420,7 @@ async fn collect_witness_from_channels(
     hint_chan: NativeChannel,
     schedule: WorldRangeHardforkConfig,
 ) -> anyhow::Result<WorldRangeWitnessData> {
+    let collection_started = Instant::now();
     let preimage_witness_store = Arc::new(Mutex::new(PreimageStore::default()));
     let blob_data = Arc::new(Mutex::new(BlobData::default()));
 
@@ -424,6 +433,7 @@ async fn collect_witness_from_channels(
     let oracle = Arc::new(PreimageWitnessCollector {
         preimage_oracle,
         preimage_witness_store: preimage_witness_store.clone(),
+        request_count: Arc::new(AtomicU64::new(0)),
     });
     let beacon = OnlineBlobStore {
         provider: blob_provider,
@@ -470,6 +480,16 @@ async fn collect_witness_from_channels(
         .lock()
         .map_err(|_| anyhow!("blob data mutex poisoned"))?
         .clone();
+
+    let preimage_count = preimages.preimage_map.len();
+    let preimage_bytes: usize = preimages.preimage_map.values().map(Vec::len).sum();
+    tracing::info!(
+        preimages = preimage_count,
+        preimage_bytes,
+        blobs = blobs.blobs.len(),
+        elapsed_secs = collection_started.elapsed().as_secs_f64(),
+        "witness collection complete"
+    );
 
     Ok(WorldRangeWitnessData::from_parts_with_world_config(
         preimages, blobs, schedule,

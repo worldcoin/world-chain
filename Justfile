@@ -39,7 +39,7 @@ defender-e2e prover='cpu' *args='':
     set -euo pipefail
     # The devnet spawns the compiled world-chain node as a subprocess, so build it first.
     cargo build -p world-chain
-    default_log="warn,world_chain_tests=info,world_chain_defender=trace,world_chain_challenger=trace,world_chain_prover_service=trace,world_chain_sp1_worker=trace,world_chain_proof_worker=debug,world_chain_devnet=info,op_batcher=error"
+    default_log="warn,world_chain_tests=info,world_chain_defender=trace,world_chain_challenger=trace,world_chain_prover_service=trace,world_chain_sp1_worker=trace,world_chain_proof_worker=debug,world_chain_proof_succinct_host_utils=info,world_chain_devnet=info,op_batcher=error"
     RUST_LOG="${RUST_LOG:-$default_log}" DEVNET_SP1_WORKER_PROVER="{{prover}}" \
         cargo test -p world-chain-tests -- --ignored --nocapture \
         defender_finalizes_challenged_game_with_sp1_proof {{args}}
