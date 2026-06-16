@@ -24,7 +24,7 @@
 //! `SP1_PROVER=mock` validates the full witness + guest-execution + root-binding path cheaply
 //! (the SP1 mock prover still executes the guest); `cpu`/`network` additionally produce a real
 //! SNARK. The SP1 guest ELFs are baked into the worker at compile time via
-//! `sp1_sdk::include_elf!()` (see `proofs/succinct/utils/host/build.rs`); no path-based
+//! `sp1_sdk::include_elf!()` (see `proofs/succinct/elfs/build.rs`); no path-based
 //! overrides are required.
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -141,7 +141,12 @@ async fn worker_proves_real_range_end_to_end() {
     let kind = prover_kind();
     // Build the prover off the async runtime: it owns its own runtime internally.
     let prover =
-        tokio::task::spawn_blocking(move || EnvSuccinctProver::new(kind, SP1ProofMode::Groth16))
+        tokio::task::spawn_blocking(move || EnvSuccinctProver::new_with_elfs(
+            kind,
+            world_chain_proof_succinct_elfs::range_elf(),
+            world_chain_proof_succinct_elfs::aggregation_elf(),
+            SP1ProofMode::Groth16,
+        ))
             .await
             .expect("prover setup task")
             .expect("build prover");

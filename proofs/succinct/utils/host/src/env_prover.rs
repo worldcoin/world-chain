@@ -11,9 +11,6 @@ use sp1_sdk::{
     env::{EnvProver, EnvProvingKey},
 };
 
-#[cfg(feature = "embedded-elfs")]
-use sp1_sdk::include_elf;
-
 pub use sp1_sdk::SP1ProofMode;
 use world_chain_proof_core::{
     artifacts::{AggregationProofArtifact, RangeProofArtifact},
@@ -24,48 +21,32 @@ use world_chain_proof_succinct_utils::{
     AggregationProofRequest, RangeProofRequest, WorldSuccinctProver,
 };
 
-/// World Chain SP1 range program ELF.
+/// World Chain SP1 range program ELF loaded at runtime from `RANGE_ELF_PATH`.
 ///
-/// With the `embedded-elfs` feature: bytes are baked in at compile time via
-/// `include_elf!()` (requires the SP1 Docker build to have run).  Without it,
-/// the ELF is read at runtime from the path in the `RANGE_ELF_PATH` env var —
-/// panics at startup if the var is unset or the file is unreadable.
+/// For production binaries that need ELFs embedded at compile time, use
+/// `world_chain_proof_succinct_elfs::range_elf()` and pass it to
+/// [`EnvSuccinctProver::new_with_elfs`] instead.
 pub fn range_elf() -> Elf {
-    #[cfg(feature = "embedded-elfs")]
-    {
-        include_elf!("world-chain-proof-succinct-range-ethereum")
-    }
-    #[cfg(not(feature = "embedded-elfs"))]
-    {
-        let path = std::env::var("RANGE_ELF_PATH")
-            .expect("RANGE_ELF_PATH must be set when the `embedded-elfs` feature is disabled");
-        Elf::from(
-            std::fs::read(&path)
-                .unwrap_or_else(|e| panic!("failed to read range ELF from {path}: {e}")),
-        )
-    }
+    let path = std::env::var("RANGE_ELF_PATH")
+        .expect("RANGE_ELF_PATH must be set (or use EnvSuccinctProver::new_with_elfs with embedded ELFs)");
+    Elf::from(
+        std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("failed to read range ELF from {path}: {e}")),
+    )
 }
 
-/// World Chain SP1 aggregation program ELF.
+/// World Chain SP1 aggregation program ELF loaded at runtime from `AGG_ELF_PATH`.
 ///
-/// With the `embedded-elfs` feature: bytes are baked in at compile time via
-/// `include_elf!()` (requires the SP1 Docker build to have run).  Without it,
-/// the ELF is read at runtime from the path in the `AGG_ELF_PATH` env var —
-/// panics at startup if the var is unset or the file is unreadable.
+/// For production binaries that need ELFs embedded at compile time, use
+/// `world_chain_proof_succinct_elfs::aggregation_elf()` and pass it to
+/// [`EnvSuccinctProver::new_with_elfs`] instead.
 pub fn aggregation_elf() -> Elf {
-    #[cfg(feature = "embedded-elfs")]
-    {
-        include_elf!("world-chain-proof-succinct-aggregation")
-    }
-    #[cfg(not(feature = "embedded-elfs"))]
-    {
-        let path = std::env::var("AGG_ELF_PATH")
-            .expect("AGG_ELF_PATH must be set when the `embedded-elfs` feature is disabled");
-        Elf::from(
-            std::fs::read(&path)
-                .unwrap_or_else(|e| panic!("failed to read aggregation ELF from {path}: {e}")),
-        )
-    }
+    let path = std::env::var("AGG_ELF_PATH")
+        .expect("AGG_ELF_PATH must be set (or use EnvSuccinctProver::new_with_elfs with embedded ELFs)");
+    Elf::from(
+        std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("failed to read aggregation ELF from {path}: {e}")),
+    )
 }
 
 /// Which sp1-sdk prover backs an [`EnvSuccinctProver`].
@@ -125,15 +106,18 @@ pub struct EnvSuccinctProver {
 }
 
 impl EnvSuccinctProver {
-    /// Creates the prover using the World Chain range and aggregation ELFs
-    /// embedded at compile time via [`range_elf`] / [`aggregation_elf`].
+    /// Creates the prover loading ELFs at runtime from the `RANGE_ELF_PATH` and
+    /// `AGG_ELF_PATH` environment variables.
+    ///
+    /// For production binaries that embed ELFs at compile time, prefer
+    /// [`EnvSuccinctProver::new_with_elfs`] with
+    /// `world_chain_proof_succinct_elfs::{range_elf, aggregation_elf}`.
     pub fn new(kind: Sp1ProverKind, agg_mode: SP1ProofMode) -> anyhow::Result<Self> {
         Self::new_with_elfs(kind, range_elf(), aggregation_elf(), agg_mode)
     }
 
-    /// Creates the prover using caller-supplied ELFs. Most callers should
-    /// use [`EnvSuccinctProver::new`]; this exists for tests and custom
-    /// program builds.
+    /// Creates the prover using caller-supplied ELFs. Use this in production binaries with
+    /// ELFs embedded at compile time via `world_chain_proof_succinct_elfs`.
     pub fn new_with_elfs(
         kind: Sp1ProverKind,
         range_elf: impl Into<Elf>,

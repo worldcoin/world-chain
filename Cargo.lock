@@ -18788,6 +18788,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-proof-succinct-elfs"
+version = "2.2.0"
+dependencies = [
+ "sp1-build",
+ "sp1-sdk",
+]
+
+[[package]]
 name = "world-chain-proof-succinct-ethereum-client-utils"
 version = "2.3.0"
 dependencies = [
@@ -18816,7 +18824,6 @@ dependencies = [
  "serde",
  "serde_cbor",
  "serde_json",
- "sp1-build",
  "sp1-sdk",
  "thiserror 2.0.18",
  "tokio",
@@ -19030,6 +19037,7 @@ dependencies = [
  "world-chain-proof-core",
  "world-chain-proof-kona-host-utils",
  "world-chain-proof-protocol",
+ "world-chain-proof-succinct-elfs",
  "world-chain-proof-succinct-host-utils",
  "world-chain-proof-succinct-utils",
  "world-chain-proof-worker",

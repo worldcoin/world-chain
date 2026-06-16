@@ -36,6 +36,7 @@ members = [
     "proofs/succinct/utils/ethereum-client",
     "proofs/succinct/utils/host",
     "proofs/succinct/utils/proof",
+    "proofs/succinct/elfs",
     "crates/devnet",
     "crates/test-utils",
     "proofs/primitives",
@@ -100,6 +101,7 @@ world-chain-proof-kona-host-utils = { path = "proofs/kona-host", default-feature
 world-chain-nitro-worker = { path = "proofs/nitro/worker", default-features = false }
 world-chain-proof-succinct-client-utils = { path = "proofs/succinct/utils/client", default-features = false }
 world-chain-proof-succinct-ethereum-client-utils = { path = "proofs/succinct/utils/ethereum-client", default-features = false }
+world-chain-proof-succinct-elfs = { path = "proofs/succinct/elfs" }
 world-chain-proof-succinct-host-utils = { path = "proofs/succinct/utils/host", default-features = false }
 world-chain-proof-succinct-utils = { path = "proofs/succinct/utils/proof", default-features = false }
 world-chain-proposer = { path = "proofs/proposer", default-features = false }

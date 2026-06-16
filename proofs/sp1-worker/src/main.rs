@@ -133,9 +133,14 @@ fn main() -> Result<()> {
     )?;
 
     // ELFs are embedded at compile time via `sp1_sdk::include_elf!()`
-    // (see `proofs/succinct/utils/host/build.rs`). Challenged roots are
+    // (see `proofs/succinct/elfs/build.rs`). Challenged roots are
     // defended on-chain; Groth16 keeps verification ~100k gas.
-    let prover = EnvSuccinctProver::new(cli.prover, SP1ProofMode::Groth16)?;
+    let prover = EnvSuccinctProver::new_with_elfs(
+        cli.prover,
+        world_chain_proof_succinct_elfs::range_elf(),
+        world_chain_proof_succinct_elfs::aggregation_elf(),
+        SP1ProofMode::Groth16,
+    )?;
 
     let backend = Sp1Backend::new(
         host,
