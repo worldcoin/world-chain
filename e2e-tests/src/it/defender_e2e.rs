@@ -170,7 +170,16 @@ async fn defender_finalizes_challenged_game_with_sp1_proof() -> eyre::Result<()>
     Ok(())
 }
 
-/// Polls `GameCreated` logs until a game in the `PROPOSED` state appears, returning its address.
+/// Polls `GameCreated` logs until a game in the `PROPOSED` state appears, returning the address
+/// of the one with the **highest** L2 block number.
+///
+/// Picking the newest proposal (nearest the safe head) rather than the first keeps the
+/// `tip - target` gap small at proving time. The witness host builds the range via
+/// `debug_executionWitness`, which forces reth's `HistoricalStateProvider` to reconstruct
+/// historical state by unwinding changesets from the chain tip back to the target block —
+/// cost O(tip - target). Targeting an old game (e.g. the first, near genesis) makes that
+/// unwind grow without bound as the devnet keeps minting blocks, so witness collection never
+/// outpaces block production. A near-head target keeps every unwind cheap.
 async fn wait_for_proposed_game<P: Provider>(
     provider: &P,
     factory: &IWorldChainProofSystemFactory::IWorldChainProofSystemFactoryInstance<P>,
@@ -184,17 +193,23 @@ async fn wait_for_proposed_game<P: Provider>(
             .query()
             .await?;
         let games_seen = logs.len();
+
+        let mut newest: Option<(u64, Address)> = None;
         for (event, _log) in logs {
             let game = IWorldChainProofSystemGame::new(event.game, provider);
             if game.state().call().await? == ROOT_STATE_PROPOSED {
-                info!(
-                    game = %event.game,
-                    l2_block = %event.l2BlockNumber,
-                    "found a PROPOSED game"
-                );
-                return Ok(event.game);
+                let l2_block = event.l2BlockNumber.to::<u64>();
+                if newest.is_none_or(|(best, _)| l2_block > best) {
+                    newest = Some((l2_block, event.game));
+                }
             }
         }
+
+        if let Some((l2_block, game)) = newest {
+            info!(%game, l2_block, "challenging the newest PROPOSED game (near safe head)");
+            return Ok(game);
+        }
+
         info!(games_seen, "no PROPOSED game yet; polling");
         if Instant::now() >= deadline {
             return Err(eyre!(
