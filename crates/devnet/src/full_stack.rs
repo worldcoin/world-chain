@@ -561,42 +561,40 @@ impl FullStackWorldDevnet {
         // enabled by the `DEVNET_SP1_WORKER_PROVER` env var. The defender enqueues proof
         // requests for challenged valid games; the worker leases SP1 jobs, builds witnesses
         // from the devnet L1/L2 RPCs, and proves them with the selected backend.
-        let (prover_service, sp1_worker, world_defender, prover_service_url) =
-            match (proof_system.as_ref(), sp1_worker_prover_kind()) {
-                (Some(deployment), Some(kind)) => {
-                    let output_root_rpc = op_nodes
+        let (prover_service, sp1_worker, world_defender, prover_service_url) = match (
+            proof_system.as_ref(),
+            sp1_worker_prover_kind(),
+        ) {
+            (Some(deployment), Some(kind)) => {
+                let output_root_rpc = sequencers
                         .first()
-                        .map(|node| node.rpc_url.clone())
+                        .map(|sequencer| sequencer.kona_rpc_url.clone())
                         .ok_or_else(|| {
-                            eyre!("full-stack devnet has no op-node for the World Chain defender")
+                            eyre!("full-stack devnet has no kona consensus node for the World Chain defender")
                         })?;
-                    let l2_rpc = sequencers
-                        .first()
-                        .map(|sequencer| sequencer.rpc_url.clone())
-                        .ok_or_else(|| {
-                            eyre!("full-stack devnet has no sequencer for the SP1 worker")
-                        })?;
-                    let (service, url) = start_prover_service().await?;
-                    let defender = start_world_chain_defender(
-                        &l1_public_rpc,
-                        &output_root_rpc,
-                        &url,
-                        deployment,
-                    )
-                    .await?;
-                    let worker = start_sp1_worker(
-                        &l1_public_rpc,
-                        &l2_rpc,
-                        &url,
-                        &artifacts.rollup_path,
-                        deployment,
-                        kind,
-                    )
-                    .await?;
-                    (Some(service), Some(worker), Some(defender), Some(url))
-                }
-                _ => (None, None, None, None),
-            };
+                let l2_rpc = sequencers
+                    .first()
+                    .map(|sequencer| sequencer.rpc_url.clone())
+                    .ok_or_else(|| {
+                        eyre!("full-stack devnet has no sequencer for the SP1 worker")
+                    })?;
+                let (service, url) = start_prover_service().await?;
+                let defender =
+                    start_world_chain_defender(&l1_public_rpc, &output_root_rpc, &url, deployment)
+                        .await?;
+                let worker = start_sp1_worker(
+                    &l1_public_rpc,
+                    &l2_rpc,
+                    &url,
+                    &artifacts.rollup_path,
+                    deployment,
+                    kind,
+                )
+                .await?;
+                (Some(service), Some(worker), Some(defender), Some(url))
+            }
+            _ => (None, None, None, None),
+        };
 
         let mut metrics_targets = Vec::new();
         metrics_targets.extend(
