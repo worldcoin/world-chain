@@ -2,7 +2,7 @@ use world_chain_proof_core::{
     boot::BootInfoStruct,
     range::{WorldRangeProofValidationError, validate_public_values},
 };
-use world_chain_proof_kona_utils::WorldRangeWitness;
+use world_chain_proof_kona_client_utils::WorldRangeWitness;
 
 /// Error returned by the range public-value wrapper.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]

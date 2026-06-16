@@ -9,7 +9,7 @@ use world_chain_proof_core::{
     range::WorldRangeHardforkConfig,
     witness::preimage_store::PreimageStore,
 };
-use world_chain_proof_kona_utils::{WitnessExecutor, get_inputs_for_pipeline};
+use world_chain_proof_kona_client_utils::{WitnessExecutor, get_inputs_for_pipeline};
 
 /// Sets up tracing for the range program.
 #[cfg(feature = "tracing-subscriber")]
