@@ -2594,12 +2594,11 @@ async fn start_sp1_worker(
     // no path-based loading required here.
     //
     // `EnvSuccinctProver` owns its own runtime, so build it off the async runtime.
-    let prover = tokio::task::spawn_blocking(move || {
-        EnvSuccinctProver::new(kind, SP1ProofMode::Groth16)
-    })
-    .await
-    .wrap_err("SP1 prover setup task panicked")?
-    .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+    let prover =
+        tokio::task::spawn_blocking(move || EnvSuccinctProver::new(kind, SP1ProofMode::Groth16))
+            .await
+            .wrap_err("SP1 prover setup task panicked")?
+            .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
 
     let backend = Sp1Backend::new(
         host,
