@@ -38,9 +38,7 @@ use world_chain_proof_nitro::{
 };
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
 use world_chain_proof_worker::{ProofJobBackend, ProofWorker, ProofWorkerConfig};
-use world_chain_prover_service::{
-    ProofBackend, ProofData, ProofRequest, RpcProverServiceClient,
-};
+use world_chain_prover_service::{ProofBackend, ProofData, ProofRequest, RpcProverServiceClient};
 
 // ──────────────────────────────────────────────────────────────────────────────────────
 // NitroBackend — ProofJobBackend implementation for the Nitro TEE lane
@@ -86,11 +84,8 @@ impl ProofJobBackend for NitroBackend {
 
         let endpoint =
             EnclaveEndpoint::with_port(self.config.enclave_cid, self.config.enclave_port);
-        let prover = NitroProver::with_runtime(
-            endpoint,
-            self.config.expected_pcrs,
-            self.rt_handle.clone(),
-        );
+        let prover =
+            NitroProver::with_runtime(endpoint, self.config.expected_pcrs, self.rt_handle.clone());
 
         let input = build_range_input(
             &self.config.online,
@@ -281,8 +276,11 @@ pub fn run() -> Result<()> {
         &protocol_cfg,
         Duration::from_secs(cli.witness_timeout_seconds),
     )?;
-    let expected_pcrs =
-        build_expected_pcrs(cli.pcr0.as_deref(), cli.pcr1.as_deref(), cli.pcr2.as_deref())?;
+    let expected_pcrs = build_expected_pcrs(
+        cli.pcr0.as_deref(),
+        cli.pcr1.as_deref(),
+        cli.pcr2.as_deref(),
+    )?;
 
     info!(
         prover_service = %cli.prover_service_url,
@@ -360,8 +358,8 @@ fn build_expected_pcrs(
 }
 
 fn hex_to_pcr(s: &str) -> Result<[u8; world_chain_proof_nitro::PCR_LEN]> {
-    let bytes = hex::decode(s.trim_start_matches("0x"))
-        .with_context(|| format!("invalid PCR hex: {s}"))?;
+    let bytes =
+        hex::decode(s.trim_start_matches("0x")).with_context(|| format!("invalid PCR hex: {s}"))?;
     if bytes.len() != world_chain_proof_nitro::PCR_LEN {
         bail!(
             "PCR must be {} bytes, got {}",
