@@ -18537,7 +18537,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "world-chain-proof-kona-client-utils"
+name = "world-chain-proof-integration-tests"
+version = "2.2.0"
+dependencies = [
+ "alloy-primitives",
+ "anyhow",
+ "async-trait",
+ "tokio",
+ "tokio-util",
+ "world-chain-challenger",
+ "world-chain-defender",
+ "world-chain-proof-worker",
+ "world-chain-proofs",
+ "world-chain-proposer",
+ "world-chain-prover-service",
+]
+
+[[package]]
+name = "world-chain-proof-kona-utils"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus 2.0.4",

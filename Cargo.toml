@@ -44,6 +44,7 @@ members = [
     "proofs/worker",
     "proofs/sp1-worker",
     "proofs/defender",
+    "proofs/integration-tests",
     "e2e-tests",
     "xtask",
 ]
