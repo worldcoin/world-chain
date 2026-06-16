@@ -50,12 +50,13 @@ use world_chain_test_utils::{
 };
 
 use full_stack::FullStackWorldDevnet;
+pub use full_stack::ProofSystemInfo;
 
 pub use component::{
     ContainerImage, DevnetComponent, DevnetComponentKind, DevnetComponentStatus, DevnetEndpoint,
 };
 pub use hardforks::{WORLD_CHAIN_DEVNET_HARDFORK_ORDER, WorldChainHardforkConfig};
-pub use l1::{L1DevChain, L1DevChainConfig};
+pub use l1::{L1DevChain, L1DevChainConfig, L1Stack, L1StackConfig};
 pub use observability::{MetricsTarget, ObservabilityConfig, ObservabilityStack};
 pub use op_stack::{
     DEFAULT_OP_CONTRACT_ARTIFACTS_LOCATOR, HaSequencerConfig, HaSequencerTopology,
@@ -446,6 +447,27 @@ impl WorldDevnet {
     /// Canonical L2 RPC URL.
     pub fn l2_rpc_url(&self) -> String {
         self.sequencer_rpc_url()
+    }
+
+    /// JSON-RPC URL of the in-process defender prover-service, when enabled.
+    pub fn prover_service_url(&self) -> Option<&str> {
+        self.full_stack
+            .as_ref()
+            .and_then(FullStackWorldDevnet::prover_service_url)
+    }
+
+    /// Deployed proof-system contract addresses, when the proof system is enabled.
+    pub fn proof_system(&self) -> Option<ProofSystemInfo> {
+        self.full_stack
+            .as_ref()
+            .and_then(FullStackWorldDevnet::proof_system)
+    }
+
+    /// Private key of a funded account a test can stake and use to challenge a valid game.
+    pub fn e2e_griefer_key(&self) -> Option<&'static str> {
+        self.full_stack
+            .as_ref()
+            .map(FullStackWorldDevnet::e2e_griefer_key)
     }
 
     /// Direct sequencer RPC URL.

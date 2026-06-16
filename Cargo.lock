@@ -18172,6 +18172,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider 2.0.4",
  "alloy-rpc-types-eth 2.0.4",
+ "alloy-sol-types",
  "async-trait",
  "futures-util",
  "thiserror 2.0.18",
@@ -18633,11 +18634,14 @@ dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
  "anyhow",
+ "async-trait",
  "bincode 1.3.3",
  "hex",
  "kona-host",
  "kona-preimage",
  "kona-proof",
+ "kona-providers-alloy",
+ "op-alloy-network",
  "reqwest 0.12.28",
  "rkyv",
  "serde",
@@ -18912,6 +18916,7 @@ name = "world-chain-tests"
 version = "2.2.0"
 dependencies = [
  "alloy-consensus 2.0.4",
+ "alloy-contract",
  "alloy-eips 2.0.4",
  "alloy-network 2.0.4",
  "alloy-primitives",
@@ -18965,6 +18970,7 @@ dependencies = [
  "world-chain-node",
  "world-chain-p2p",
  "world-chain-primitives",
+ "world-chain-proofs",
  "world-chain-test-utils",
  "world-chain-validator",
 ]

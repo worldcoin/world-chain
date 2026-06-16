@@ -10,14 +10,17 @@ pub struct DefenderSubmission {
 }
 
 /// Number of proof lanes the defender drives.
-pub(crate) const DEFENDED_LANE_COUNT: usize = 2;
+///
+/// Currently SP1-only: the defender defends a challenged game with a single
+/// validity proof. This matches the SP1-only devnet, where the proof system is
+/// deployed with `proofThreshold = 1`. Re-add the TEE lane here once a Nitro
+/// worker exists to service the `Nitro` backend queue.
+pub(crate) const DEFENDED_LANE_COUNT: usize = 1;
 
 /// The proof lanes the defender drives, paired with the prover-service
 /// backend that generates each proof.
-pub(crate) const DEFENDED_LANES: [(ProofLane, ProofBackend); DEFENDED_LANE_COUNT] = [
-    (ProofLane::ValidityProof, ProofBackend::Sp1),
-    (ProofLane::TeeAttestation, ProofBackend::Nitro),
-];
+pub(crate) const DEFENDED_LANES: [(ProofLane, ProofBackend); DEFENDED_LANE_COUNT] =
+    [(ProofLane::ValidityProof, ProofBackend::Sp1)];
 
 /// A game watched until it leaves the `Proposed` state.
 #[derive(Debug, Clone, Copy)]

@@ -44,6 +44,12 @@
   "lib/safe-modules": {
     "rev": "08282851e9815a53c13621334628ccb7b656f25a"
   },
+  "lib/sp1-contracts": {
+    "tag": {
+      "name": "v6.1.0",
+      "rev": "2ac5ecbbe473421a963d67e55f182e9a36576f7c"
+    }
+  },
   "lib/world-id-contracts": {
     "rev": "0187d2fdfa9bdb13b47b0ff1b0fd1c3ad7c5356b"
   }

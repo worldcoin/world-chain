@@ -261,13 +261,12 @@ async fn scan_once_defends_challenged_valid_root() {
         WorldChainDefender::new(config(), client.clone(), output_roots, prover.clone());
 
     // first tick: the challenged game is promoted to an active defense and
-    // both lane proofs are requested
+    // the SP1 validity-lane proof is requested
     defender.scan_once().await.unwrap();
 
     let requests = prover.requests();
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].backend, ProofBackend::Sp1);
-    assert_eq!(requests[1].backend, ProofBackend::Nitro);
     for request in &requests {
         assert_eq!(request.game, GAME_1);
         assert_eq!(request.root_claim, canonical_root);
@@ -276,15 +275,12 @@ async fn scan_once_defends_challenged_valid_root() {
     }
     assert!(client.submissions().is_empty());
 
-    // second tick: both proofs are completed, fetched and submitted on-chain
+    // second tick: the proof is completed, fetched and submitted on-chain
     defender.scan_once().await.unwrap();
 
     assert_eq!(
         client.submissions(),
-        vec![
-            (GAME_1, ProofLane::ValidityProof as u8),
-            (GAME_1, ProofLane::TeeAttestation as u8),
-        ]
+        vec![(GAME_1, ProofLane::ValidityProof as u8)]
     );
     assert!(defender.active_defenses().is_empty());
     assert!(defender.watched_games().is_empty());
@@ -309,7 +305,7 @@ async fn scan_once_waits_for_proposed_game_to_be_challenged() {
     client.set_state(GAME_1, STATE_CHALLENGED);
     defender.scan_once().await.unwrap();
 
-    assert_eq!(prover.requests().len(), 2);
+    assert_eq!(prover.requests().len(), 1);
     assert_eq!(defender.active_defenses(), [GAME_1]);
 }
 
@@ -358,7 +354,7 @@ async fn scan_once_defers_validity_check_until_l2_block_is_finalized() {
     finalized_l2_block.store(L2_BLOCK, Ordering::SeqCst);
     defender.scan_once().await.unwrap();
 
-    assert_eq!(prover.requests().len(), 2);
+    assert_eq!(prover.requests().len(), 1);
     assert_eq!(defender.active_defenses(), [GAME_1]);
 }
 
@@ -382,14 +378,10 @@ async fn scan_once_skips_lane_already_proven() {
     defender.scan_once().await.unwrap();
     defender.scan_once().await.unwrap();
 
-    // the validity lane is already proven on-chain: only the TEE lane runs
-    let requests = prover.requests();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].backend, ProofBackend::Nitro);
-    assert_eq!(
-        client.submissions(),
-        vec![(GAME_1, ProofLane::TeeAttestation as u8)]
-    );
+    // the only (validity) lane is already proven on-chain by someone else, so the
+    // defender requests nothing and the defense completes immediately.
+    assert!(prover.requests().is_empty());
+    assert!(client.submissions().is_empty());
     assert!(defender.active_defenses().is_empty());
 }
 
@@ -414,13 +406,13 @@ async fn failed_proofs_are_rerequested_up_to_the_attempt_bound() {
         prover.clone(),
     );
 
-    // tick 1: first request per lane; tick 2: failed, re-requested once per
-    // lane; tick 3: failed again, attempts exhausted, lanes abandoned
+    // tick 1: first request; tick 2: failed, re-requested once; tick 3: failed
+    // again, attempts exhausted, lane abandoned
     defender.scan_once().await.unwrap();
     defender.scan_once().await.unwrap();
     defender.scan_once().await.unwrap();
 
-    assert_eq!(prover.requests().len(), 4);
+    assert_eq!(prover.requests().len(), 2);
     assert!(client.submissions().is_empty());
     assert!(defender.active_defenses().is_empty());
 }

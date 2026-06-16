@@ -15,6 +15,7 @@ contract WorldChainProofSystemTest is Test {
     uint64 internal constant PROOF_PERIOD = 7 days;
     uint256 internal constant PROPOSER_BOND = 1 ether;
     uint256 internal constant CHALLENGER_BOND = 0.1 ether;
+    uint8 internal constant PROOF_THRESHOLD = 2;
 
     address internal proposer = address(0xA11CE);
     address internal challenger = address(0xB0B);
@@ -54,6 +55,7 @@ contract WorldChainProofSystemTest is Test {
             PROOF_PERIOD,
             PROPOSER_BOND,
             CHALLENGER_BOND,
+            PROOF_THRESHOLD,
             validityVerifier,
             teeVerifier,
             councilVerifier,
@@ -212,6 +214,77 @@ contract WorldChainProofSystemTest is Test {
         (WorldChainProofSystemGame lower,) = _finalizedGame(5);
         vm.expectRevert();
         anchor.setAnchorState(address(lower));
+    }
+
+    function testThresholdOneFinalizesOnSingleLane() public {
+        WorldChainProofSystemFactory thresholdOneFactory = new WorldChainProofSystemFactory(
+            WorldChainProofLib.Domain({
+                chainId: 4801,
+                proofSystemVersion: 1,
+                rollupConfigHash: keccak256("world-chain-devnet-rollup-config"),
+                blockInterval: 10,
+                intermediateBlockInterval: 5
+            }),
+            CHALLENGE_PERIOD,
+            PROOF_PERIOD,
+            PROPOSER_BOND,
+            CHALLENGER_BOND,
+            1,
+            validityVerifier,
+            teeVerifier,
+            councilVerifier,
+            staking
+        );
+
+        vm.prank(proposer);
+        (address gameAddress, bytes32 rootId) = thresholdOneFactory.propose{value: PROPOSER_BOND}(
+            address(anchor), keccak256("root-threshold-one"), 10, keccak256("intermediate-threshold-one")
+        );
+        WorldChainProofSystemGame game = WorldChainProofSystemGame(payable(gameAddress));
+        _challenge(game, challenger);
+
+        game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
+
+        assertEq(game.proofCount(), 1);
+        assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.FINALIZED));
+    }
+
+    function testFactoryRejectsZeroOrOversizedThreshold() public {
+        WorldChainProofLib.Domain memory domain = WorldChainProofLib.Domain({
+            chainId: 4801,
+            proofSystemVersion: 1,
+            rollupConfigHash: keccak256("world-chain-devnet-rollup-config"),
+            blockInterval: 10,
+            intermediateBlockInterval: 5
+        });
+
+        vm.expectRevert(WorldChainProofSystemFactory.InvalidActivationParameters.selector);
+        new WorldChainProofSystemFactory(
+            domain,
+            CHALLENGE_PERIOD,
+            PROOF_PERIOD,
+            PROPOSER_BOND,
+            CHALLENGER_BOND,
+            0,
+            validityVerifier,
+            teeVerifier,
+            councilVerifier,
+            staking
+        );
+
+        vm.expectRevert(WorldChainProofSystemFactory.InvalidActivationParameters.selector);
+        new WorldChainProofSystemFactory(
+            domain,
+            CHALLENGE_PERIOD,
+            PROOF_PERIOD,
+            PROPOSER_BOND,
+            CHALLENGER_BOND,
+            4,
+            validityVerifier,
+            teeVerifier,
+            councilVerifier,
+            staking
+        );
     }
 
     function _propose(uint256 l2BlockNumber) internal returns (WorldChainProofSystemGame game, bytes32 rootId) {

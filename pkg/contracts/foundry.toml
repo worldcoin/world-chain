@@ -25,7 +25,14 @@ remappings = [
   "@forge-std/=lib/forge-std/src/",
   "forge-std/=lib/forge-std/src/",
   "@solady=lib/solady/src/utils/",
+  "@sp1-contracts/=lib/sp1-contracts/contracts/",
 ]
+
+# Note: the vendored SP1 Groth16 verifier (lib/sp1-contracts/.../v6.1.0) hard-pins solc
+# 0.8.20 (pre-cancun). It is intentionally NOT imported by any src/script/test file, so it
+# is never part of this project's 0.8.28 build. It is deployed standalone via `forge create
+# --use 0.8.20 --evm-version shanghai` (see crates/devnet deploy_world_proof_system), and the
+# proof-system deploy receives the deployed address through SP1_VERIFIER_ADDRESS.
 
 [profile.ci]
 

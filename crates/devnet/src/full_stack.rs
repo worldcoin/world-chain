@@ -56,8 +56,8 @@ use world_chain_sp1_worker::{Sp1Backend, Sp1BackendConfig};
 use world_chain_test_utils::DEV_CHAIN_ID;
 
 use crate::{
-    DevnetComponent, DevnetComponentKind, DevnetComponentStatus, DevnetPortMode, L1DevChain,
-    L1DevChainConfig, MetricsTarget, ObservabilityStack, WorldChainHardforkConfig,
+    DevnetComponent, DevnetComponentKind, DevnetComponentStatus, DevnetPortMode, L1Stack,
+    L1StackConfig, MetricsTarget, ObservabilityStack, WorldChainHardforkConfig,
     component::ContainerImage,
     op_stack::{HaSequencerConfig, HaSequencerTopology},
     process_logs::{ProcessLogTarget, container_log_consumer, emit_process_log},
@@ -79,8 +79,10 @@ const CONDUCTOR_HEALTHCHECK_INTERVAL_SECS: &str = "5";
 const CONDUCTOR_HEALTHCHECK_UNSAFE_INTERVAL_SECS: &str = "300";
 const SERVICE_RPC_PORT: u16 = 8545;
 const SERVICE_METRICS_PORT: u16 = 7300;
-const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 10;
-const PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL: u64 = 5;
+// Single-block proving range: witness cost is range_length × O(tip − target), so a 1-block
+// range cuts witness collection ~10× vs the prior 10. Mirrors Base's e2e proving one block.
+const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 1;
+const PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL: u64 = 1;
 /// Poll interval for the in-process SP1 worker leasing jobs from the prover-service.
 const SP1_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// Env var enabling the in-process defender, prover-service, and SP1 worker. Off by default:
@@ -125,10 +127,28 @@ const WORLD_CHALLENGER_PRIVATE_KEY: &str =
     "0x7c0c9c6f3f4d8a2b1e5d9a8c7b6e5f4a3c2d1e0f9a8b7c6d5e4f3a2b1c0d9e8f";
 /// Signing key for the in-process World Chain proof-system defender.
 ///
-/// Dedicated key, distinct from the proposer and challengers, so proof-lane
-/// submissions never race another local service on L1 nonces.
+/// Dedicated dev key (distinct from the proposer, challenger, and op accounts) so the
+/// defender never races them on L1 nonces. The matching address is funded via the L1
+/// genesis; the defender only pays gas for `submitProofLane` (no bond, no staking).
 const WORLD_DEFENDER_PRIVATE_KEY: &str =
-    "0x5e2f0f1d8a7c6b5e4d3c2b1a09182736455463728190a0b0c0d0e0f102132435";
+    "0x6b1f3d2c5a4e9876b0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6d";
+/// Signing key for an e2e "griefer" that challenges a valid game to exercise the defender.
+///
+/// Dedicated dev key, funded via the L1 genesis. The honest challenger only challenges
+/// invalid roots, so a test needs its own account to challenge a valid game and trigger a
+/// defense. Exposed via [`FullStackWorldDevnet::e2e_griefer_key`] for tests only.
+pub const WORLD_E2E_GRIEFER_PRIVATE_KEY: &str =
+    "0x5d3a1b9e7c4f206d8a1c3e5b7d9f0a2c4e6b8d0f1a3c5e7b9d1f3a5c7e9b0d2f";
+/// Balance, in wei, allocated to the e2e griefer account in the L1 genesis. (100 ether)
+const WORLD_E2E_GRIEFER_GENESIS_BALANCE_WEI: &str = "0x56bc75e2d63100000";
+
+/// Balance, in wei, prefunded to each standard devnet EOA (deployer, batcher, proposer,
+/// op-challenger) in the L1 genesis `alloc`. (1,000,000 ether)
+///
+/// On the anvil L1 these accounts were auto-funded; the reth L1 only credits what the
+/// genesis `alloc` declares, so they must be funded explicitly or the proof-system deploy
+/// and op-batcher/proposer L1 transactions fail with `insufficient funds`.
+const DEVNET_DEV_ACCOUNT_GENESIS_BALANCE_WEI: &str = "0xd3c21bcecceda1000000";
 
 const FLASHBLOCKS_BUILDER_KEYS: [&str; 3] = [
     "40645f645e9e28a3f00637d8d629736e7934ee857154ec3fd336c3cc014ebb62",
@@ -158,7 +178,7 @@ pub struct FullStackWorldDevnet {
     _op_nodes: Vec<OpNodeService>,
     sequencers: Vec<SequencerService>,
     observability: Option<ObservabilityStack>,
-    l1: L1DevChain,
+    l1: L1Stack,
     components: Vec<DevnetComponent>,
     removed_services: Vec<DevnetComponent>,
     _tempdir: TempDir,
@@ -257,6 +277,16 @@ struct WorldProofSystemDeployment {
     proof_system_version: u64,
     block_interval: u64,
     intermediate_block_interval: u64,
+}
+
+/// Public view of the deployed proof-system contract addresses, for tests/tools.
+#[derive(Clone, Copy, Debug)]
+pub struct ProofSystemInfo {
+    pub factory: Address,
+    pub staking_registry: Address,
+    pub anchor_state_registry: Address,
+    pub validity_proof_verifier: Address,
+    pub block_interval: u64,
 }
 
 /// In-process World Chain proof-system proposer task. Aborted on devnet drop.
@@ -358,20 +388,42 @@ impl FullStackWorldDevnet {
         let artifacts = generate_op_artifacts(&config, &hardforks).await?;
         let workdir_path = artifacts.workdir.path().to_path_buf();
 
-        let mut l1_config = L1DevChainConfig {
-            block_time_secs: block_time.as_secs().max(1),
-            genesis_file: Some(artifacts.l1_genesis_path.clone()),
-            ..L1DevChainConfig::default()
-        };
-        if port_mode == DevnetPortMode::Stable {
-            l1_config.stable_port = Some(ANVIL_RPC_PORT);
-        }
+        // The CL genesis is generated from the EL genesis, so the beacon's eth1 genesis time must
+        // equal the EL genesis `timestamp` (op-deployer startBlock, ~now). Read it back to keep
+        // the EL and CL in agreement.
+        let el_genesis: Value = read_json(&artifacts.l1_genesis_path)?;
+        let genesis_timestamp = el_genesis
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .and_then(|t| u64::from_str_radix(t.trim_start_matches("0x"), 16).ok())
+            .ok_or_else(|| eyre!("L1 EL genesis missing/invalid timestamp"))?;
 
-        let l1 = L1DevChain::start(l1_config)
+        let stable = port_mode == DevnetPortMode::Stable;
+        let l1_config = L1StackConfig {
+            reth_image: "ghcr.io/paradigmxyz/reth".to_string(),
+            reth_tag: "v2.3.0".to_string(),
+            lighthouse_image: "sigp/lighthouse".to_string(),
+            lighthouse_tag: "v8.0.1".to_string(),
+            genesis_generator_image: "ethpandaops/ethereum-genesis-generator".to_string(),
+            genesis_generator_tag: "master".to_string(),
+            chain_id: 31_337,
+            slot_duration_secs: block_time.as_secs().max(1),
+            genesis_timestamp,
+            el_genesis_path: artifacts.l1_genesis_path.clone(),
+            jwt_path: workdir_path.join("jwt.hex"),
+            workdir: workdir_path.clone(),
+            stable_rpc_port: stable.then_some(ANVIL_RPC_PORT),
+            stable_beacon_port: stable.then_some(5052),
+        };
+
+        let l1 = L1Stack::start(l1_config)
             .await
-            .wrap_err("failed to start OP-contract-backed L1 dev chain")?;
+            .wrap_err("failed to start OP-contract-backed L1 (reth + Lighthouse)")?;
         let l1_public_rpc = l1.rpc_url().to_string();
         let l1_internal_rpc = host_internal_url(l1.rpc_url())?;
+        let l1_beacon_internal = host_internal_url(l1.beacon_url())?;
+        // In-process services (SP1 worker) reach the L1 beacon via the host-mapped URL.
+        let l1_public_beacon = l1.beacon_url().to_string();
         let actual_l1_hash = block_hash(&l1_public_rpc, 0)
             .await
             .wrap_err("failed to read Anvil L1 genesis hash")?;
@@ -383,14 +435,14 @@ impl FullStackWorldDevnet {
             "L1 dev chain has OP contracts loaded"
         );
 
-        let proof_system = if config.world_contracts.proof_system {
-            Some(
-                deploy_world_proof_system(&l1_public_rpc, &artifacts.rollup_path, &workdir_path)
-                    .await?,
-            )
-        } else {
-            None
-        };
+        // Enabling the SP1 worker (via `DEVNET_SP1_WORKER_PROVER`) also switches the proof
+        // system to the real SP1 Groth16 validity verifier with a single-lane threshold, so a
+        // defended game finalizes on one SP1 proof. The proof-system deploy itself happens
+        // *after* the L2 sequencers and conductor are healthy (see below): with the real SP1
+        // path it computes vkeys and runs two forge invocations, which is slow enough that
+        // doing it before L2 boot lets the L1 race ahead and the op-conductor health check
+        // times out.
+        let sp1_prover_kind = sp1_worker_prover_kind();
 
         let sequencer_count = config.sequencer_count.max(1) as usize;
         let sequencer_plans = (0..sequencer_count)
@@ -428,7 +480,6 @@ impl FullStackWorldDevnet {
         let op_node_bootnodes: Vec<_> = (0..sequencer_count)
             .map(|index| op_node_bootnodes(&op_node_plans, index))
             .collect();
-        let l1_slot_duration_secs = block_time.as_secs().max(1);
         let op_nodes = try_join_all((0..sequencer_count).map(|index| {
             start_op_node(
                 index,
@@ -436,8 +487,8 @@ impl FullStackWorldDevnet {
                 &config.images.op_node,
                 &op_node_plans[index],
                 &op_node_bootnodes[index],
-                l1_slot_duration_secs,
                 &l1_internal_rpc,
+                &l1_beacon_internal,
                 &sequencers[index],
                 &conductor_plans[index].rpc_url,
             )
@@ -515,6 +566,7 @@ impl FullStackWorldDevnet {
                     &config.images.op_challenger,
                     &workdir_path,
                     &l1_internal_rpc,
+                    &l1_beacon_internal,
                     &l2_rpc_internal,
                     &conductor_rpc_internal,
                     &game_factory,
@@ -536,6 +588,28 @@ impl FullStackWorldDevnet {
                 ),
             )?;
             (Some(batcher), Some(proposer), None)
+        };
+
+        // Deploy the proof system now that the L2 sequencers and conductor are healthy. With
+        // the real SP1 path this computes vkeys and runs two forge invocations (slow), so it
+        // must not block L2 boot above. The proposer/challenger/defender below consume it.
+        let proof_system = if config.world_contracts.proof_system {
+            let sp1_vkeys = if sp1_prover_kind.is_some() {
+                Some(compute_sp1_vkeys().await?)
+            } else {
+                None
+            };
+            Some(
+                deploy_world_proof_system(
+                    &l1_public_rpc,
+                    &artifacts.rollup_path,
+                    &workdir_path,
+                    sp1_vkeys,
+                )
+                .await?,
+            )
+        } else {
+            None
         };
 
         let world_proposer = if let Some(deployment) = proof_system.as_ref() {
@@ -566,15 +640,9 @@ impl FullStackWorldDevnet {
         // enabled by the `DEVNET_SP1_WORKER_PROVER` env var. The defender enqueues proof
         // requests for challenged valid games; the worker leases SP1 jobs, builds witnesses
         // from the devnet L1/L2 RPCs, and proves them with the selected backend.
-        let (prover_service, sp1_worker, world_defender, prover_service_url) =
-            match (proof_system.as_ref(), sp1_worker_prover_kind()) {
+        let (prover_service, sp1_worker, prover_service_url) =
+            match (proof_system.as_ref(), sp1_prover_kind) {
                 (Some(deployment), Some(kind)) => {
-                    let output_root_rpc = op_nodes
-                        .first()
-                        .map(|node| node.rpc_url.clone())
-                        .ok_or_else(|| {
-                            eyre!("full-stack devnet has no op-node for the World Chain defender")
-                        })?;
                     let l2_rpc = sequencers
                         .first()
                         .map(|sequencer| sequencer.rpc_url.clone())
@@ -582,15 +650,9 @@ impl FullStackWorldDevnet {
                             eyre!("full-stack devnet has no sequencer for the SP1 worker")
                         })?;
                     let (service, url) = start_prover_service().await?;
-                    let defender = start_world_chain_defender(
-                        &l1_public_rpc,
-                        &output_root_rpc,
-                        &url,
-                        deployment,
-                    )
-                    .await?;
                     let worker = start_sp1_worker(
                         &l1_public_rpc,
+                        &l1_public_beacon,
                         &l2_rpc,
                         &url,
                         &artifacts.rollup_path,
@@ -598,10 +660,33 @@ impl FullStackWorldDevnet {
                         kind,
                     )
                     .await?;
-                    (Some(service), Some(worker), Some(defender), Some(url))
+                    (Some(service), Some(worker), Some(url))
                 }
-                _ => (None, None, None, None),
+                _ => (None, None, None),
             };
+
+        // Defender: requests SP1 proofs from the prover-service for challenged-but-valid games
+        // and submits them on-chain. Only meaningful when the proving loop above is running.
+        let world_defender = match (proof_system.as_ref(), prover_service_url.as_ref()) {
+            (Some(deployment), Some(prover_service_url)) => {
+                let output_root_rpc = op_nodes
+                    .first()
+                    .map(|node| node.rpc_url.clone())
+                    .ok_or_else(|| {
+                        eyre!("full-stack devnet has no op-node for the World Chain defender")
+                    })?;
+                Some(
+                    start_world_chain_defender(
+                        &l1_public_rpc,
+                        &output_root_rpc,
+                        prover_service_url,
+                        deployment,
+                    )
+                    .await?,
+                )
+            }
+            _ => None,
+        };
 
         let mut metrics_targets = Vec::new();
         metrics_targets.extend(
@@ -679,6 +764,25 @@ impl FullStackWorldDevnet {
     #[allow(dead_code)]
     pub fn prover_service_url(&self) -> Option<&str> {
         self.prover_service_url.as_deref()
+    }
+
+    /// Deployed proof-system contract addresses, when the proof system is enabled.
+    pub fn proof_system(&self) -> Option<ProofSystemInfo> {
+        self._proof_system.as_ref().and_then(|d| {
+            Some(ProofSystemInfo {
+                factory: d.proof_system_factory.parse().ok()?,
+                staking_registry: d.staking_registry.parse().ok()?,
+                anchor_state_registry: d.anchor_state_registry.parse().ok()?,
+                validity_proof_verifier: d.validity_proof_verifier.parse().ok()?,
+                block_interval: d.block_interval,
+            })
+        })
+    }
+
+    /// Private key of a funded+unused account a test can stake and use to challenge a valid
+    /// game, triggering the defender. Test-only.
+    pub fn e2e_griefer_key(&self) -> &'static str {
+        WORLD_E2E_GRIEFER_PRIVATE_KEY
     }
 
     pub fn sequencer_rpc_url(&self) -> &str {
@@ -883,10 +987,78 @@ l2ContractsLocator = "{}"
     )
 }
 
+/// SP1 verification keys wired into the validity-lane verifier at deploy time.
+#[derive(Clone, Copy, Debug)]
+struct Sp1Vkeys {
+    aggregation_vkey: alloy_primitives::B256,
+    range_vkey_commitment: alloy_primitives::B256,
+}
+
+/// Deploys the standalone Succinct SP1 Groth16 verifier via `forge create`.
+///
+/// That contract pins solc 0.8.20 (pre-cancun), so it is compiled in isolation with explicit
+/// `--use 0.8.20 --evm-version shanghai` and never enters the 0.8.28 project build. Returns
+/// the deployed address, which the proof-system deploy receives via `SP1_VERIFIER_ADDRESS`.
+async fn forge_create_sp1_verifier(l1_rpc_url: &str, contracts_dir: &Path) -> Result<Address> {
+    let output = Command::new("forge")
+        .current_dir(contracts_dir)
+        .arg("create")
+        .arg("lib/sp1-contracts/contracts/src/v6.1.0/SP1VerifierGroth16.sol:SP1Verifier")
+        .arg("--rpc-url")
+        .arg(l1_rpc_url)
+        .arg("--private-key")
+        .arg(DEVNET_PRIVATE_KEY)
+        .arg("--use")
+        .arg("0.8.20")
+        .arg("--evm-version")
+        .arg("shanghai")
+        .arg("--broadcast")
+        .arg("--json")
+        .output()
+        .await
+        .wrap_err("failed to spawn forge create for the SP1 verifier")?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() {
+        bail!(
+            "forge create SP1 verifier failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+            output.status.code(),
+            stdout,
+            stderr
+        );
+    }
+
+    // `forge create --json` prints a JSON object containing `deployedTo` (pretty-printed across
+    // multiple lines), so extract the whole object from the first `{` to the last `}`.
+    let start = stdout.find('{').ok_or_else(|| {
+        eyre!("forge create produced no JSON output:\nstdout:\n{stdout}\nstderr:\n{stderr}")
+    })?;
+    let end = stdout
+        .rfind('}')
+        .ok_or_else(|| eyre!("forge create JSON was not terminated:\n{stdout}"))?;
+    let parsed: Value = serde_json::from_str(&stdout[start..=end]).wrap_err_with(|| {
+        format!(
+            "failed to parse forge create JSON:\n{}",
+            &stdout[start..=end]
+        )
+    })?;
+    let address: Address = parsed
+        .get("deployedTo")
+        .and_then(Value::as_str)
+        .ok_or_else(|| eyre!("forge create JSON missing deployedTo: {parsed}"))?
+        .parse()
+        .wrap_err("invalid SP1 verifier address from forge create")?;
+
+    info!(sp1_verifier = %address, "deployed standalone SP1 Groth16 verifier");
+    Ok(address)
+}
+
 async fn deploy_world_proof_system(
     l1_rpc_url: &str,
     rollup_path: &Path,
     workdir: &Path,
+    sp1_vkeys: Option<Sp1Vkeys>,
 ) -> Result<WorldProofSystemDeployment> {
     let rollup_config = fs::read(rollup_path)
         .wrap_err_with(|| format!("failed to read rollup config {}", rollup_path.display()))?;
@@ -940,9 +1112,27 @@ async fn deploy_world_proof_system(
         )
         .env("PROOF_SYSTEM_DEPLOYMENT_OUT", &deployment_rel_path);
 
+    // With SP1 proving enabled, deploy the real Groth16 validity verifier (keyed to the
+    // committed ELFs) and finalize a defended game on a single proven lane (threshold = 1).
+    // The Succinct Groth16 verifier pins solc 0.8.20, so it is deployed standalone first and
+    // passed in by address; this 0.8.28 script never imports it.
+    if let Some(vkeys) = sp1_vkeys {
+        let sp1_verifier = forge_create_sp1_verifier(l1_rpc_url, &contracts_dir).await?;
+        command
+            .env("PROOF_SYSTEM_REAL_SP1", "1")
+            .env("PROOF_SYSTEM_THRESHOLD", "1")
+            .env("SP1_VERIFIER_ADDRESS", sp1_verifier.to_string())
+            .env("AGGREGATION_VKEY", vkeys.aggregation_vkey.to_string())
+            .env(
+                "RANGE_VKEY_COMMITMENT",
+                vkeys.range_vkey_commitment.to_string(),
+            );
+    }
+
     info!(
         l1_rpc_url,
         rollup_config_hash = %rollup_config_hash_hex,
+        real_sp1 = sp1_vkeys.is_some(),
         output = %deployment_path.display(),
         "deploying World Chain proof-system contracts"
     );
@@ -1014,6 +1204,8 @@ fn write_l1_genesis(state_path: &Path, output_path: &Path) -> Result<()> {
         serde_json::from_str(&alloc_json).wrap_err("invalid l1StateDump JSON")?;
     fund_world_challenger(&mut alloc)?;
     fund_world_defender(&mut alloc)?;
+    fund_world_e2e_griefer(&mut alloc)?;
+    fund_devnet_dev_accounts(&mut alloc)?;
     let timestamp = state
         .pointer("/opChainDeployments/0/startBlock/timestamp")
         .and_then(Value::as_str)
@@ -1082,12 +1274,46 @@ fn world_challenger_address() -> Result<Address> {
     Ok(signer.address())
 }
 
-/// Returns the address used by the in-process World Chain proof-system defender.
 fn world_defender_address() -> Result<Address> {
     let signer: PrivateKeySigner = WORLD_DEFENDER_PRIVATE_KEY
         .parse()
         .wrap_err("invalid World Chain defender signing key")?;
     Ok(signer.address())
+}
+
+/// Funds the World Chain defender account in the L1 genesis `alloc` so it can pay gas
+/// for `submitProofLane`. Dedicated account, never present in the op-deployer dump.
+fn fund_world_defender(alloc: &mut Value) -> Result<()> {
+    let address = world_defender_address()?;
+    let entry = alloc
+        .as_object_mut()
+        .ok_or_else(|| eyre!("l1 genesis alloc is not a JSON object"))?;
+    entry.insert(
+        address.to_string(),
+        json!({ "balance": WORLD_DEFENDER_GENESIS_BALANCE_WEI }),
+    );
+    Ok(())
+}
+
+fn world_e2e_griefer_address() -> Result<Address> {
+    let signer: PrivateKeySigner = WORLD_E2E_GRIEFER_PRIVATE_KEY
+        .parse()
+        .wrap_err("invalid World Chain e2e griefer signing key")?;
+    Ok(signer.address())
+}
+
+/// Funds the e2e griefer account in the L1 genesis so a test can stake it and challenge a
+/// valid game (covering the challenger bond plus gas).
+fn fund_world_e2e_griefer(alloc: &mut Value) -> Result<()> {
+    let address = world_e2e_griefer_address()?;
+    let entry = alloc
+        .as_object_mut()
+        .ok_or_else(|| eyre!("l1 genesis alloc is not a JSON object"))?;
+    entry.insert(
+        address.to_string(),
+        json!({ "balance": WORLD_E2E_GRIEFER_GENESIS_BALANCE_WEI }),
+    );
+    Ok(())
 }
 
 /// Funds the World Chain challenger account in the L1 genesis `alloc` so it can
@@ -1105,17 +1331,41 @@ fn fund_world_challenger(alloc: &mut Value) -> Result<()> {
     Ok(())
 }
 
-/// Funds the World Chain defender account in the L1 genesis `alloc` so it can
-/// pay gas for proof-lane submissions.
-fn fund_world_defender(alloc: &mut Value) -> Result<()> {
-    let address = world_defender_address()?;
+/// Prefunds the standard devnet EOAs (deployer, batcher, proposer, op-challenger) in the L1
+/// genesis `alloc`. The reth L1 only credits accounts declared in genesis, so without this the
+/// `forge create`/proof-system deploys (DEVNET key) and the op-batcher/op-proposer L1
+/// transactions fail with `insufficient funds`. Existing dump entries (e.g. contract accounts)
+/// are left untouched; only the balance of these EOAs is set.
+fn fund_devnet_dev_accounts(alloc: &mut Value) -> Result<()> {
+    let keys = [
+        DEVNET_PRIVATE_KEY,
+        BATCHER_PRIVATE_KEY,
+        PROPOSER_PRIVATE_KEY,
+        CHALLENGER_PRIVATE_KEY,
+    ];
     let entry = alloc
         .as_object_mut()
         .ok_or_else(|| eyre!("l1 genesis alloc is not a JSON object"))?;
-    entry.insert(
-        address.to_string(),
-        json!({ "balance": WORLD_DEFENDER_GENESIS_BALANCE_WEI }),
-    );
+    for key in keys {
+        let signer: PrivateKeySigner = key
+            .parse()
+            .wrap_err("invalid devnet dev-account signing key")?;
+        // Merge the balance into any existing dump entry (e.g. the deployer's nonce/code)
+        // rather than replacing it, so we don't drop state op-deployer baked in.
+        match entry.entry(signer.address().to_string()) {
+            serde_json::map::Entry::Occupied(mut existing) => {
+                if let Some(obj) = existing.get_mut().as_object_mut() {
+                    obj.insert(
+                        "balance".to_string(),
+                        json!(DEVNET_DEV_ACCOUNT_GENESIS_BALANCE_WEI),
+                    );
+                }
+            }
+            serde_json::map::Entry::Vacant(slot) => {
+                slot.insert(json!({ "balance": DEVNET_DEV_ACCOUNT_GENESIS_BALANCE_WEI }));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1430,6 +1680,11 @@ async fn start_world_chain_el(
         jwt_arg,
         "--metrics".to_string(),
         metrics_arg,
+        // Serve historical `eth_getProof` so the SP1 worker can build witnesses for past
+        // blocks (defaults to 0 = tip only, which fails witness generation). Use reth's max
+        // (`MAX_ETH_PROOF_WINDOW` = 1_209_600) so deep ranges stay provable.
+        "--rpc.eth-proof-window".to_string(),
+        "1209600".to_string(),
         "--disable-discovery".to_string(),
     ];
     if !trusted_peers.is_empty() {
@@ -1867,15 +2122,14 @@ async fn start_op_node(
     image: &ContainerImage,
     plan: &OpNodePlan,
     bootnodes: &[String],
-    l1_slot_duration_secs: u64,
     l1_rpc: &str,
+    l1_beacon: &str,
     sequencer: &SequencerService,
     conductor_rpc_url: &str,
 ) -> Result<OpNodeService> {
     let conductor_rpc = host_internal_url(conductor_rpc_url)?;
     let l2_engine_rpc = host_internal_url(&sequencer.auth_url)?;
     let p2p_host_port = plan.p2p_host_port.to_string();
-    let l1_slot_duration_secs = l1_slot_duration_secs.to_string();
     let mut cmd = vec![
         "-vvv".to_string(),
         "--logs.stdout.format=logfmt".to_string(),
@@ -1905,9 +2159,7 @@ async fn start_op_node(
         "--l1-eth-rpc".to_string(),
         l1_rpc.to_string(),
         "--l1-beacon".to_string(),
-        l1_rpc.to_string(),
-        "--l1-slot-duration-override".to_string(),
-        l1_slot_duration_secs,
+        l1_beacon.to_string(),
         "--l1-trust-rpc".to_string(),
         "--l2-engine-rpc".to_string(),
         l2_engine_rpc,
@@ -2312,6 +2564,7 @@ async fn start_challenger(
     image: &ContainerImage,
     workdir: &Path,
     l1_rpc: &str,
+    l1_beacon: &str,
     l2_rpc: &str,
     rollup_rpc: &str,
     game_factory: &str,
@@ -2322,7 +2575,7 @@ async fn start_challenger(
         "--l1-rpc-kind".to_string(),
         "basic".to_string(),
         "--l1-beacon".to_string(),
-        l1_rpc.to_string(),
+        l1_beacon.to_string(),
         "--l2-eth-rpc".to_string(),
         l2_rpc.to_string(),
         "--rollup-rpc".to_string(),
@@ -2550,6 +2803,43 @@ fn sp1_worker_prover_kind() -> Option<Sp1ProverKind> {
         .and_then(|value| value.parse().ok())
 }
 
+/// Computes the aggregation and range verification keys from the committed SP1 ELFs, for
+/// wiring into the on-chain validity verifier at deploy time.
+///
+/// vkeys are a function of the program ELF, not the proving backend, so this uses the mock
+/// prover for a fast setup — the values match what the CPU/network worker commits.
+async fn compute_sp1_vkeys() -> Result<Sp1Vkeys> {
+    let range_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-range-ethereum");
+    let agg_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-aggregation");
+    let range_elf = fs::read(&range_elf_path)
+        .wrap_err_with(|| format!("failed to read range ELF {}", range_elf_path.display()))?;
+    let agg_elf = fs::read(&agg_elf_path)
+        .wrap_err_with(|| format!("failed to read aggregation ELF {}", agg_elf_path.display()))?;
+
+    let vkeys = tokio::task::spawn_blocking(move || -> Result<Sp1Vkeys> {
+        let prover = EnvSuccinctProver::new(
+            Sp1ProverKind::Mock,
+            range_elf,
+            agg_elf,
+            SP1ProofMode::Groth16,
+        )
+        .map_err(|error| eyre!("failed to set up SP1 prover for vkey computation: {error}"))?;
+        Ok(Sp1Vkeys {
+            aggregation_vkey: prover.aggregation_vkey(),
+            range_vkey_commitment: prover.range_vkey_commitment(),
+        })
+    })
+    .await
+    .wrap_err("SP1 vkey computation task panicked")??;
+
+    info!(
+        aggregation_vkey = %vkeys.aggregation_vkey,
+        range_vkey_commitment = %vkeys.range_vkey_commitment,
+        "computed SP1 vkeys for proof-system deploy"
+    );
+    Ok(vkeys)
+}
+
 /// Starts the in-process defender prover-service and returns its task handle and JSON-RPC URL.
 async fn start_prover_service() -> Result<(ProverServiceTask, String)> {
     let service = Arc::new(
@@ -2572,6 +2862,7 @@ async fn start_prover_service() -> Result<(ProverServiceTask, String)> {
 /// op-node configuration), proves them with the selected backend, and submits the proofs back.
 async fn start_sp1_worker(
     l1_rpc_url: &str,
+    l1_beacon_url: &str,
     l2_rpc_url: &str,
     prover_service_url: &str,
     rollup_path: &Path,
@@ -2579,15 +2870,44 @@ async fn start_sp1_worker(
     kind: Sp1ProverKind,
 ) -> Result<Sp1WorkerTask> {
     let rollup_config: Value = read_json(rollup_path)?;
+
+    // The devnet L1 chain id (31337) is not in kona's bundled `L1_CONFIGS`, so the guest falls
+    // back to requesting the L1 chain config via the local preimage key `L1_CONFIG_KEY`. The kona
+    // host can only serve that from an L1 config file (`alloy_genesis::ChainConfig`, i.e. the
+    // geth-genesis `config` object). Without it, witness collection busy-spins forever in
+    // `get_preimage`. Extract `config` from the devnet L1 genesis and write it standalone.
+    let l1_config_path = {
+        let l1_genesis_path = rollup_path
+            .parent()
+            .map(|dir| dir.join("l1-genesis.json"))
+            .ok_or_else(|| {
+                eyre!(
+                    "cannot derive workdir from rollup path {}",
+                    rollup_path.display()
+                )
+            })?;
+        let l1_genesis: Value = read_json(&l1_genesis_path)?;
+        let l1_config = l1_genesis
+            .get("config")
+            .ok_or_else(|| eyre!("l1-genesis.json missing `config` object"))?;
+        let out = l1_genesis_path.with_file_name("l1-chain-config.json");
+        fs::write(&out, serde_json::to_vec(l1_config)?)
+            .wrap_err("failed to write L1 chain config for the SP1 worker")?;
+        out
+    };
+
+    // The L1 is now reth + Lighthouse, so the beacon (`l1_beacon_url`) serves
+    // `/eth/v1/beacon/genesis` and `/eth/v1/config/spec` — no slot-duration override needed.
     let host = OnlineHostConfig::from_rollup_config_value(
         &rollup_config,
         l1_rpc_url.to_string(),
-        l1_rpc_url.to_string(),
+        l1_beacon_url.to_string(),
         l2_rpc_url.to_string(),
         Some(rollup_path.to_path_buf()),
         Duration::from_secs(900),
     )
-    .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?;
+    .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?
+    .with_l1_config_path(l1_config_path);
 
     let range_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-range-ethereum");
     let agg_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-aggregation");

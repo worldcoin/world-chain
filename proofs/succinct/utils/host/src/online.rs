@@ -9,18 +9,32 @@
 
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex},
-    time::Duration,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
 };
 
 use alloy_primitives::{Address, B256, address, keccak256};
 use anyhow::{Context, anyhow, bail};
-use kona_host::{DataFormat, single::SingleChainHost};
-use kona_preimage::{BidirectionalChannel, HintWriter, NativeChannel, OracleReader};
-use kona_proof::{CachingOracle, l1::OracleBlobProvider};
+use kona_host::{
+    DataFormat, HintHandler, OnlineHostBackend, OnlineHostBackendCfg, PreimageServer,
+    SharedKeyValueStore,
+    eth::rpc_provider,
+    single::{SingleChainHintHandler, SingleChainHost, SingleChainHostError, SingleChainProviders},
+};
+use kona_preimage::{
+    BidirectionalChannel, HintReader, HintWriter, NativeChannel, OracleReader, OracleServer,
+};
+use async_trait::async_trait;
+use kona_proof::{CachingOracle, Hint, HintType, l1::OracleBlobProvider};
+use kona_providers_alloy::{OnlineBeaconClient, OnlineBlobProvider};
+use op_alloy_network::Optimism;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
+use tokio::task::JoinHandle;
 use world_chain_proof_core::{
     range::{WorldRangeHardforkConfig, WorldRangeSpecId},
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
@@ -58,8 +72,19 @@ pub struct OnlineHostConfig {
     pub l2_chain_id: Option<u64>,
     /// Rollup config JSON file consumed by the kona host, for chains kona does not bundle.
     pub rollup_config_path: Option<PathBuf>,
+    /// L1 chain config (`alloy_genesis::ChainConfig`, i.e. the `config` object of an L1 geth
+    /// genesis) JSON file. Required when the L1 chain id is not in kona's bundled `L1_CONFIGS`
+    /// (e.g. the anvil devnet, chain 31337): the guest falls back to requesting the L1 config
+    /// via the local preimage key `L1_CONFIG_KEY`, which the host can only serve from this file.
+    /// Without it, `get_preimage(L1_CONFIG_KEY)` finds no key and no hint and busy-spins forever.
+    pub l1_config_path: Option<PathBuf>,
     /// Maximum time to spend generating one witness.
     pub witness_timeout: Duration,
+    /// Overrides the L1 slot duration (seconds) used by the kona blob provider's beacon client.
+    /// Set when the L1 beacon endpoint does not serve `/eth/v1/config/spec` (e.g. the
+    /// anvil-backed devnet, which serves `/eth/v1/beacon/genesis` but not the spec endpoint),
+    /// mirroring op-node's `--l1-slot-duration-override`. `None` queries the beacon for it.
+    pub l1_slot_duration_override: Option<u64>,
 }
 
 impl OnlineHostConfig {
@@ -86,8 +111,23 @@ impl OnlineHostConfig {
             rollup_config_hash,
             l2_chain_id: None,
             rollup_config_path,
+            l1_config_path: None,
             witness_timeout,
+            l1_slot_duration_override: None,
         })
+    }
+
+    /// Sets the L1 slot-duration override for the beacon client. See
+    /// [`OnlineHostConfig::l1_slot_duration_override`].
+    pub fn with_l1_slot_duration_override(mut self, l1_slot_duration_secs: u64) -> Self {
+        self.l1_slot_duration_override = Some(l1_slot_duration_secs);
+        self
+    }
+
+    /// Sets the L1 chain config file. See [`OnlineHostConfig::l1_config_path`].
+    pub fn with_l1_config_path(mut self, l1_config_path: PathBuf) -> Self {
+        self.l1_config_path = Some(l1_config_path);
+        self
     }
 }
 
@@ -262,12 +302,18 @@ pub fn build_range_input(
             .then_some(config.l2_chain_id)
             .flatten(),
         rollup_config_path: config.rollup_config_path.clone(),
-        l1_config_path: None,
-        enable_experimental_witness_endpoint: false,
+        l1_config_path: config.l1_config_path.clone(),
+        // Honor the `L2PayloadWitness` hint the executor sends before each block: fetch that
+        // block's entire stateless witness in one `debug_executePayload` call (op-reth's
+        // `OpDebugWitnessApi`) and bulk-load the KV store. Without this the host ignores the
+        // hint and falls back to on-demand, per-trie-node preimage fetching — thousands of
+        // sequential RPC round-trips that make range-witness collection take many minutes.
+        enable_experimental_witness_endpoint: true,
     };
 
     let witness = tokio::runtime::Runtime::new()?.block_on(collect_world_range_witness(
         host,
+        config.l1_slot_duration_override,
         config.schedule.clone(),
         config.witness_timeout,
     ))?;
@@ -290,12 +336,14 @@ pub fn build_range_input(
 
 async fn collect_world_range_witness(
     host: SingleChainHost,
+    l1_slot_duration_override: Option<u64>,
     schedule: WorldRangeHardforkConfig,
     timeout: Duration,
 ) -> anyhow::Result<WorldRangeWitnessData> {
     let preimage = BidirectionalChannel::new()?;
     let hint = BidirectionalChannel::new()?;
-    let mut server_task = host.start_server(hint.host, preimage.host).await?;
+    let mut server_task =
+        start_range_server(&host, l1_slot_duration_override, hint.host, preimage.host).await?;
 
     let witness = collect_witness_from_channels(preimage.client, hint.client, schedule);
     tokio::pin!(witness);
@@ -325,11 +373,91 @@ async fn collect_world_range_witness(
     result
 }
 
+/// DIAGNOSTIC hint handler: wraps [`SingleChainHintHandler`] and logs the hint type on every
+/// `fetch_hint` call. Kona's `OnlineHostBackend::get_preimage` retries `fetch_hint` for the last
+/// hint "as long as the key is not found", so a preimage the handler can never satisfy shows up
+/// here as the same `hint_type` logged repeatedly — pinpointing the looping fetch.
+#[derive(Clone, Debug, Default)]
+struct LoggingHintHandler;
+
+#[async_trait]
+impl HintHandler for LoggingHintHandler {
+    type Cfg = SingleChainHost;
+
+    async fn fetch_hint(
+        hint: Hint<<Self::Cfg as OnlineHostBackendCfg>::HintType>,
+        cfg: &Self::Cfg,
+        providers: &<Self::Cfg as OnlineHostBackendCfg>::Providers,
+        kv: SharedKeyValueStore,
+    ) -> anyhow::Result<()> {
+        tracing::info!(target: "witness", hint_type = ?hint.ty, "host fetch_hint");
+        SingleChainHintHandler::fetch_hint(hint, cfg, providers, kv).await
+    }
+}
+
+/// Starts the kona single-chain preimage server for witness collection.
+///
+/// Mirrors [`SingleChainHost::start_server`], but when `l1_slot_duration_override` is set it
+/// builds the blob provider's beacon client with that override so init does not query the L1
+/// beacon's `/eth/v1/config/spec` endpoint. The anvil-backed devnet L1 serves
+/// `/eth/v1/beacon/genesis` but not `config/spec`, so kona's eager `OnlineBlobProvider::init`
+/// panics; op-node copes the same way via `--l1-slot-duration-override`. Blobs are never
+/// fetched under calldata DA, so the override value only needs to be nonzero.
+///
+/// With no override (production, against a real CL), this defers to kona's own server setup.
+async fn start_range_server(
+    host: &SingleChainHost,
+    l1_slot_duration_override: Option<u64>,
+    hint: NativeChannel,
+    preimage: NativeChannel,
+) -> anyhow::Result<JoinHandle<Result<(), SingleChainHostError>>> {
+    let Some(slot_duration) = l1_slot_duration_override else {
+        return Ok(host.start_server(hint, preimage).await?);
+    };
+
+    let kv_store = host.create_key_value_store()?;
+    let l1_node = host
+        .l1_node_address
+        .clone()
+        .ok_or_else(|| anyhow!("L1 node address must be set"))?;
+    let l1_beacon = host
+        .l1_beacon_address
+        .clone()
+        .ok_or_else(|| anyhow!("L1 beacon address must be set"))?;
+    let l2_node = host
+        .l2_node_address
+        .clone()
+        .ok_or_else(|| anyhow!("L2 node address must be set"))?;
+
+    let beacon =
+        OnlineBeaconClient::new_http(l1_beacon).with_l1_slot_duration_override(slot_duration);
+    let providers = SingleChainProviders {
+        l1: rpc_provider(&l1_node).await,
+        blobs: OnlineBlobProvider::init(beacon).await,
+        l2: rpc_provider::<Optimism>(&l2_node).await,
+    };
+
+    let backend = OnlineHostBackend::new(host.clone(), kv_store, providers, LoggingHintHandler)
+        .with_proactive_hint(HintType::L2PayloadWitness);
+
+    Ok(tokio::spawn(async move {
+        PreimageServer::new(
+            OracleServer::new(preimage),
+            HintReader::new(hint),
+            Arc::new(backend),
+        )
+        .start()
+        .await
+        .map_err(SingleChainHostError::from)
+    }))
+}
+
 async fn collect_witness_from_channels(
     preimage_chan: NativeChannel,
     hint_chan: NativeChannel,
     schedule: WorldRangeHardforkConfig,
 ) -> anyhow::Result<WorldRangeWitnessData> {
+    let collection_started = Instant::now();
     let preimage_witness_store = Arc::new(Mutex::new(PreimageStore::default()));
     let blob_data = Arc::new(Mutex::new(BlobData::default()));
 
@@ -342,10 +470,36 @@ async fn collect_witness_from_channels(
     let oracle = Arc::new(PreimageWitnessCollector {
         preimage_oracle,
         preimage_witness_store: preimage_witness_store.clone(),
+        request_count: Arc::new(AtomicU64::new(0)),
     });
     let beacon = OnlineBlobStore {
         provider: blob_provider,
         store: blob_data.clone(),
+    };
+
+    // Progress heartbeat: witness collection is RPC-bound and can run for minutes, so log the
+    // live preimage-request count + unique-preimage count every 10s. This shows real forward
+    // progress (and the per-node vs bulk-prefetch regime) instead of just the test's elapsed
+    // poll. Aborted as soon as collection finishes.
+    let heartbeat = {
+        let request_count = oracle.request_count.clone();
+        let witness_store = preimage_witness_store.clone();
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(10));
+            tick.tick().await; // skip the immediate first tick
+            loop {
+                tick.tick().await;
+                let requests = request_count.load(Ordering::Relaxed);
+                let unique = witness_store.lock().map(|s| s.preimage_map.len()).unwrap_or(0);
+                tracing::info!(
+                    target: "witness",
+                    requests,
+                    unique_preimages = unique,
+                    elapsed_secs = collection_started.elapsed().as_secs(),
+                    "witness collection in progress"
+                );
+            }
+        })
     };
 
     let executor = WorldEthWitnessExecutor::new();
@@ -380,6 +534,8 @@ async fn collect_witness_from_channels(
             .map_err(|err| anyhow!("failed to run Kona derivation/execution: {err:?}"))?;
     }
 
+    heartbeat.abort();
+
     let preimages = preimage_witness_store
         .lock()
         .map_err(|_| anyhow!("preimage witness store mutex poisoned"))?
@@ -388,6 +544,16 @@ async fn collect_witness_from_channels(
         .lock()
         .map_err(|_| anyhow!("blob data mutex poisoned"))?
         .clone();
+
+    let preimage_count = preimages.preimage_map.len();
+    let preimage_bytes: usize = preimages.preimage_map.values().map(Vec::len).sum();
+    tracing::info!(
+        preimages = preimage_count,
+        preimage_bytes,
+        blobs = blobs.blobs.len(),
+        elapsed_secs = collection_started.elapsed().as_secs_f64(),
+        "witness collection complete"
+    );
 
     Ok(WorldRangeWitnessData::from_parts_with_world_config(
         preimages, blobs, schedule,

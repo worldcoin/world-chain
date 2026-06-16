@@ -11,11 +11,12 @@ use sp1_sdk::{
     env::{EnvProver, EnvProvingKey},
 };
 
+use alloy_primitives::B256;
 pub use sp1_sdk::SP1ProofMode;
 use world_chain_proof_core::{
     artifacts::{AggregationProofArtifact, RangeProofArtifact},
     boot::BootInfoStruct,
-    types::AggregationOutputs,
+    types::{AggregationOutputs, u32_to_u8},
 };
 use world_chain_proof_succinct_utils::{
     AggregationProofRequest, RangeProofRequest, WorldSuccinctProver,
@@ -74,7 +75,19 @@ pub struct EnvSuccinctProver {
     agg_pk: EnvProvingKey,
     multi_block_vkey: [u32; 8],
     agg_mode: SP1ProofMode,
-    runtime: tokio::runtime::Runtime,
+    // `Option` so [`Drop`] can take and shut it down without blocking: a `Runtime` dropped
+    // inside an async context (e.g. when the worker task is aborted) otherwise panics.
+    runtime: Option<tokio::runtime::Runtime>,
+}
+
+impl Drop for EnvSuccinctProver {
+    fn drop(&mut self) {
+        if let Some(runtime) = self.runtime.take() {
+            // Non-blocking shutdown; avoids "Cannot drop a runtime in a context where blocking
+            // is not allowed" when the owning worker future is dropped on an async runtime.
+            runtime.shutdown_background();
+        }
+    }
 }
 
 impl EnvSuccinctProver {
@@ -113,8 +126,27 @@ impl EnvSuccinctProver {
             agg_pk,
             multi_block_vkey,
             agg_mode,
-            runtime,
+            runtime: Some(runtime),
         })
+    }
+
+    /// The owned Tokio runtime; present for the prover's whole lifetime (taken only on drop).
+    fn rt(&self) -> &tokio::runtime::Runtime {
+        self.runtime
+            .as_ref()
+            .expect("EnvSuccinctProver runtime is present until drop")
+    }
+
+    /// The aggregation program's verification key, as the `bytes32` digest the on-chain
+    /// SP1 verifier expects as its `programVKey`.
+    pub fn aggregation_vkey(&self) -> B256 {
+        self.agg_pk.verifying_key().bytes32_raw().into()
+    }
+
+    /// The range program's vkey commitment (`multiBlockVKey`), as `bytes32`. This is the value
+    /// the aggregation proof commits to and the on-chain verifier pins.
+    pub fn range_vkey_commitment(&self) -> B256 {
+        B256::from(u32_to_u8(self.multi_block_vkey))
     }
 }
 
@@ -130,7 +162,7 @@ impl WorldSuccinctProver for EnvSuccinctProver {
         stdin.write_vec(request.witness_rkyv);
 
         let proof = self
-            .runtime
+            .rt()
             .block_on(async { self.client.prove(&self.range_pk, stdin).compressed().await })
             .context("range proving failed")?;
 
@@ -174,7 +206,7 @@ impl WorldSuccinctProver for EnvSuccinctProver {
         stdin.write_vec(request.l1_headers_cbor);
 
         let proof = self
-            .runtime
+            .rt()
             .block_on(async {
                 let mut prove = self.client.prove(&self.agg_pk, stdin).mode(self.agg_mode);
                 if self.kind == Sp1ProverKind::Mock {

@@ -13,6 +13,7 @@ workspace = true
 [dev-dependencies]
 # World Chain
 world-chain-node.workspace = true
+world-chain-proofs.workspace = true
 world-chain-devnet.workspace = true
 world-chain-test-utils = { workspace = true}
 world-chain-primitives.workspace = true
@@ -44,6 +45,7 @@ reth-tracing.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
+alloy-contract.workspace = true
 alloy-eips.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
