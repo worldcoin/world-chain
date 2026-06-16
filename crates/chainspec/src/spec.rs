@@ -160,9 +160,9 @@ impl EthChainSpec for WorldChainSpec {
 
     fn next_block_base_fee(&self, parent: &Header, target_timestamp: u64) -> Option<u64> {
         if WorldChainHardforks::is_jovian_active_at_timestamp(self, parent.timestamp()) {
-            compute_jovian_base_fee(self, parent, target_timestamp).ok()
+            compute_jovian_base_fee(parent).ok()
         } else if WorldChainHardforks::is_holocene_active_at_timestamp(self, parent.timestamp()) {
-            decode_holocene_base_fee(self, parent, target_timestamp).ok()
+            decode_holocene_base_fee(parent).ok()
         } else {
             self.inner.next_block_base_fee(parent, target_timestamp)
         }

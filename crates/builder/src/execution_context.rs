@@ -295,6 +295,8 @@ where
                 block_da_limit,
                 tx.gas_limit(),
                 da_footprint_gas_scalar,
+                tx_uncompressed_size,
+                self.block_uncompressed_size_limit,
             ) {
                 attempt_metrics.increment_rejection(PayloadBuildRejectionReason::OverLimits);
                 // we can't fit this transaction into the block, so we need to mark it as

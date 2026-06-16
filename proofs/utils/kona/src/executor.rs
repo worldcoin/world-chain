@@ -1,6 +1,6 @@
 use std::{fmt::Debug, sync::Arc};
 
-use alloy_op_evm::post_exec::PostExecEvmFactoryAdapter;
+use alloy_op_evm::{block::OpAlloyReceiptBuilder, post_exec::PostExecEvmFactoryAdapter};
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use kona_derive::{
@@ -86,6 +86,7 @@ pub trait WitnessExecutor {
             l2_provider.clone(),
             l2_provider,
             PostExecEvmFactoryAdapter::new(evm_factory),
+            OpAlloyReceiptBuilder::default(),
             None,
         );
         let mut driver = Driver::new(cursor, executor, pipeline);

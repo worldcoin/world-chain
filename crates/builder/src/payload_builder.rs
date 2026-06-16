@@ -306,6 +306,7 @@ fn convert_build_args(
             parent_header: config.parent_header,
             attributes: builder_attrs,
             payload_id,
+            parent_block_info: config.parent_block_info,
         },
         cached_reads,
         execution_cache,
@@ -539,10 +540,15 @@ where
         committed_payload.map_or(ExecutionInfo::default(), |p| ExecutionInfo {
             total_fees: p.fees(),
             cumulative_gas_used: p.block().gas_used(),
+            cumulative_evm_gas_used: p.block().gas_used(),
             cumulative_da_bytes_used: committed_state
                 .transactions_iter()
                 .filter(|tx| !tx.tx().is_deposit())
                 .map(estimated_da_size_bytes)
+                .sum(),
+            cumulative_uncompressed_bytes: committed_state
+                .transactions_iter()
+                .map(|tx| tx.tx().encode_2718_len() as u64)
                 .sum(),
         })
     };

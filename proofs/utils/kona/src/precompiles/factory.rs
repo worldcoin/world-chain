@@ -8,7 +8,7 @@ use op_revm::{
 };
 use revm::{
     Context, Inspector, MainContext,
-    context::{BlockEnv, result::EVMError},
+    context::{BlockEnv, CfgEnv, DBErrorMarker, result::EVMError},
     inspector::NoOpInspector,
 };
 
@@ -61,6 +61,7 @@ impl ZkvmOpEvmFactory {
         OpEvm::new(
             Context::mainnet()
                 .with_tx(OpTx(OpTransaction::builder().build_fill()))
+                .with_cfg(CfgEnv::new_with_spec(OpSpecId::BEDROCK))
                 .with_chain(L1BlockInfo::default())
                 .with_db(db)
                 .with_block(input.block_env)
@@ -118,7 +119,7 @@ impl EvmFactory for ZkvmOpEvmFactory {
     type Evm<DB: Database, I: Inspector<OpEvmContext<DB>>> = OpEvm<DB, I, PrecompilesMap, OpTx>;
     type Context<DB: Database> = OpEvmContext<DB>;
     type Tx = OpTx;
-    type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError, OpTxError>;
+    type Error<DBError: DBErrorMarker> = EVMError<DBError, OpTxError>;
     type HaltReason = OpHaltReason;
     type Spec = OpSpecId;
     type BlockEnv = BlockEnv;

@@ -7,7 +7,7 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives_traits::Recovered;
 use reth_transaction_pool::{
     AddedTransactionOutcome, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
-    BestTransactionsAttributes, BlobStoreError, BlockInfo, GetPooledTransactionLimit,
+    BestTransactionsAttributes, BlobStore, BlobStoreError, BlockInfo, GetPooledTransactionLimit,
     NewBlobSidecar, NewTransactionEvent, PoolResult, PoolSize, PoolTransaction,
     PropagatedTransactions, TransactionEvents, TransactionListenerKind, TransactionOrigin,
     TransactionPool, ValidPoolTransaction, error::PoolError, noop::NoopTransactionPool,
@@ -238,6 +238,16 @@ impl TransactionPool for NoopWorldChainTransactionPool {
     where
         A: HandleMempoolData,
     {
+    }
+
+    fn retain_contains<A>(&self, _announcement: &mut A)
+    where
+        A: HandleMempoolData,
+    {
+    }
+
+    fn blob_store(&self) -> Box<dyn BlobStore> {
+        self.inner.blob_store()
     }
 
     fn get(&self, _tx_hash: &TxHash) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {

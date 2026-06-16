@@ -17,7 +17,7 @@ use reth_node_core::{
 };
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
-use reth_tracing::{FileWorkerGuard, Layers};
+use reth_tracing::{Layers, TracingGuards};
 use tracing::{info, warn};
 use world_chain_chainspec::WorldChainSpec;
 
@@ -123,7 +123,7 @@ pub struct CliApp<Spec: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcM
     cli: Cli<Spec, Ext, Rpc>,
     runner: Option<CliRunner>,
     layers: Option<Layers>,
-    guard: Option<FileWorkerGuard>,
+    guard: Option<TracingGuards>,
 }
 
 impl<C, Ext, Rpc> CliApp<C, Ext, Rpc>
@@ -231,7 +231,7 @@ where
             let otlp_status = runner.block_on(self.cli.traces.init_otlp_tracing(&mut layers))?;
             let otlp_logs_status = runner.block_on(self.cli.traces.init_otlp_logs(&mut layers))?;
 
-            self.guard = self.cli.logs.init_tracing_with_layers(layers, false)?;
+            self.guard = Some(self.cli.logs.init_tracing_with_layers(layers, false)?);
             info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
 
             match otlp_status {

@@ -403,7 +403,8 @@ where
         parent_hash: base.parent_hash,
         parent_beacon_block_root: Some(base.parent_beacon_block_root),
         extra_data: base.extra_data.clone(),
-        ..Default::default()
+        no_user_tx_activation_block: Default::default(),
+        post_exec_mode: Default::default(),
     };
 
     let next_block_context = OpNextBlockEnvAttributes {

@@ -153,6 +153,13 @@ where
             .await?)
     }
 
+    async fn get_payload_v5(
+        &self,
+        _payload_id: PayloadId,
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV5> {
+        unimplemented!("get_payload_v5 is not yet supported by the flashblocks engine API")
+    }
+
     async fn get_payload_bodies_by_hash_v1(
         &self,
         block_hashes: Vec<BlockHash>,
