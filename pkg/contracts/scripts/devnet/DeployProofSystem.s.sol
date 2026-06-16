@@ -31,6 +31,7 @@ contract DeployProofSystem is Script {
         bytes32 rollupConfigHash = vm.envBytes32("ROLLUP_CONFIG_HASH");
         uint256 blockInterval = vm.envOr("PROOF_SYSTEM_BLOCK_INTERVAL", uint256(10));
         uint256 intermediateBlockInterval = vm.envOr("PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL", uint256(5));
+        uint8 proofThreshold = uint8(vm.envOr("PROOF_THRESHOLD", uint256(WorldChainProofLib.PROOF_THRESHOLD)));
 
         vm.startBroadcast(privateKey);
 
@@ -56,6 +57,7 @@ contract DeployProofSystem is Script {
             PROOF_PERIOD,
             PROPOSER_BOND,
             CHALLENGER_BOND,
+            proofThreshold,
             deployment.validityVerifier,
             deployment.teeVerifier,
             deployment.councilVerifier,
@@ -64,7 +66,9 @@ contract DeployProofSystem is Script {
 
         vm.stopBroadcast();
 
-        _writeDeployment(deployment, rollupConfigHash, l2ChainId, blockInterval, intermediateBlockInterval);
+        _writeDeployment(
+            deployment, rollupConfigHash, l2ChainId, blockInterval, intermediateBlockInterval, proofThreshold
+        );
     }
 
     function _writeDeployment(
@@ -72,7 +76,8 @@ contract DeployProofSystem is Script {
         bytes32 rollupConfigHash,
         uint256 l2ChainId,
         uint256 blockInterval,
-        uint256 intermediateBlockInterval
+        uint256 intermediateBlockInterval,
+        uint8 proofThreshold
     ) internal {
         string memory out = vm.envOr("PROOF_SYSTEM_DEPLOYMENT_OUT", string(""));
         if (bytes(out).length == 0) return;
@@ -88,6 +93,7 @@ contract DeployProofSystem is Script {
         vm.serializeUint(root, "l2ChainId", l2ChainId);
         vm.serializeUint(root, "proofSystemVersion", 1);
         vm.serializeUint(root, "blockInterval", blockInterval);
+        vm.serializeUint(root, "proofThreshold", proofThreshold);
         string memory json = vm.serializeUint(root, "intermediateBlockInterval", intermediateBlockInterval);
         vm.writeJson(json, out);
     }

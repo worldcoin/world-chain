@@ -99,11 +99,9 @@ jobs:
           path: vkeys.json
           if-no-files-found: error
 
-  # Prover docker image (the `proof` CLI with sp1 + nitro backends).
-  # When the sp1-worker binary lands on main, add a second build/merge job pair
-  # with build_args:
-  #   PROVER_PACKAGE=world-chain-sp1-worker PROVER_BIN=sp1-worker FEATURES=
-  # and digest_artifact_prefix: digests-sp1-worker.
+  # Prover docker image (the `proof` CLI with sp1 + nitro backends). The service
+  # deployables (sp1-worker, proposer, challenger, defender, prover-service) are
+  # built from the same Dockerfile.proof in build-service-images below.
   build-proof-image:
     name: build proof image
     environment: dev
@@ -145,6 +143,68 @@ jobs:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.PROOF_IMAGE_NAME }}
           digest_artifact_prefix: digests-proof
+          tags: |
+            type=raw,value=${{ needs.extract-version.outputs.VERSION }}
+            type=sha
+
+  # Service deployable images, built from the same Dockerfile.proof via
+  # PROVER_PACKAGE/PROVER_BIN/FEATURES build-args. Each pushes to its own
+  # `<repo>-proof-<service>` image so tags do not collide with the `proof` image.
+  build-service-images:
+    name: build ${{ matrix.service.bin }} image
+    environment: dev
+    needs: [verify-elfs]
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { suffix: -sp1-worker, package: world-chain-sp1-worker, bin: sp1-worker, prefix: digests-sp1-worker }
+          - { suffix: -proposer, package: world-chain-proposer, bin: world-chain-proposer, prefix: digests-proposer }
+          - { suffix: -challenger, package: world-chain-challenger, bin: world-chain-challenger, prefix: digests-challenger }
+          - { suffix: -defender, package: world-chain-defender, bin: world-chain-defender, prefix: digests-defender }
+          - { suffix: -prover-service, package: world-chain-prover-service, bin: world-chain-prover-service, prefix: digests-prover-service }
+        platform:
+          - { runner: arc-public-8xlarge-amd64-runner, platform: linux/amd64 }
+          - { runner: ubuntu-24.04-arm, platform: linux/arm64 }
+    runs-on: ${{ matrix.platform.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: ${{ matrix.platform.platform }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.PROOF_IMAGE_NAME }}${{ matrix.service.suffix }}
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          dockerfile: Dockerfile.proof
+          build_args: |
+            PROVER_PACKAGE=${{ matrix.service.package }}
+            PROVER_BIN=${{ matrix.service.bin }}
+            FEATURES=
+          digest_artifact_prefix: ${{ matrix.service.prefix }}
+
+  merge-service-images:
+    name: merge ${{ matrix.service.bin }} image manifest
+    needs: [extract-version, build-service-images]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { suffix: -sp1-worker, prefix: digests-sp1-worker }
+          - { suffix: -proposer, prefix: digests-proposer }
+          - { suffix: -challenger, prefix: digests-challenger }
+          - { suffix: -defender, prefix: digests-defender }
+          - { suffix: -prover-service, prefix: digests-prover-service }
+    steps:
+      - uses: actions/checkout@v6
+      - name: Merge multi-arch manifest
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.PROOF_IMAGE_NAME }}${{ matrix.service.suffix }}
+          digest_artifact_prefix: ${{ matrix.service.prefix }}
           tags: |
             type=raw,value=${{ needs.extract-version.outputs.VERSION }}
             type=sha

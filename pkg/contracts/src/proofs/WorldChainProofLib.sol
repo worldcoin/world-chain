@@ -2,6 +2,9 @@
 pragma solidity 0.8.28;
 
 library WorldChainProofLib {
+    /// Default number of distinct proof lanes required to finalize a challenged
+    /// root. Deployments may override this per-factory (see
+    /// `WorldChainProofSystemFactory`'s `proofThreshold`).
     uint8 internal constant PROOF_THRESHOLD = 2;
     uint8 internal constant PROOF_LANE_COUNT = 3;
 
@@ -77,7 +80,7 @@ library WorldChainProofLib {
         }
     }
 
-    function hasThreshold(uint8 bitmap) internal pure returns (bool) {
-        return proofCount(bitmap) >= PROOF_THRESHOLD;
+    function hasThreshold(uint8 bitmap, uint8 threshold) internal pure returns (bool) {
+        return proofCount(bitmap) >= threshold;
     }
 }
