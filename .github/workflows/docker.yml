@@ -3,6 +3,10 @@ name: docker
 on:
   workflow_dispatch:
     inputs:
+      ref:
+        description: Branch, tag, or SHA to build.
+        required: false
+        default: main
       image_tag:
         description: Custom image tag to publish (e.g. "nightly").
         required: false
@@ -39,6 +43,8 @@ jobs:
     steps:
       - name: Check Out Repo
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
