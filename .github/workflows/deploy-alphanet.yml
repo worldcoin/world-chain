@@ -70,7 +70,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.issue.number }}
-          ACTOR: ${{ github.event.comment.user.login }}
         shell: bash
         run: |
           set -euo pipefail
@@ -90,14 +89,13 @@ jobs:
 
           # Hand off to the build workflow. --ref main pins the build workflow + its local
           # composite actions to the trusted default branch; the PR code is only consumed as
-          # an immutable SHA input to checkout/build.
+          # an immutable SHA input to checkout/build. The build derives the image tag from the
+          # SHA, so we only pass the SHA and the PR number to comment on.
           gh workflow run deploy-alphanet-build.yml \
             --repo "${REPO}" \
             --ref main \
             -f sha="${HEAD_SHA}" \
-            -f tag="${TAG}" \
-            -f pr="${PR_NUMBER}" \
-            -f issuer="${ACTOR:-${PR_NUMBER}}"
+            -f pr="${PR_NUMBER}"
 
           gh pr comment "${PR_NUMBER}" --repo "${REPO}" \
             --body "🛠️ Building \`${TAG}\` and dispatching an **alphanet** deploy. Track it in the [deploy-alphanet-build runs](https://github.com/${REPO}/actions/workflows/deploy-alphanet-build.yml)."
