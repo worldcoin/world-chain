@@ -17,13 +17,13 @@ and keeps measurement changes reviewable on their own.
 | Artifact | Notes |
 |:---|:---|
 | `manifest.json` | Single source of truth binding git SHA, ELF sha256s, vkeys, PCRs, and image digests |
-| `vkeys.json` | Range vkey commitment + aggregation vkey, computed from the committed ELFs |
+| `vkeys.json` | Range vkey commitment + aggregation vkey, computed from the release-generated ELFs |
 | `pcrs.json` | PCR0/PCR1/PCR2 of the enclave EIF |
 | `world-chain-nitro-enclave.eif` | Enclave image, built reproducibly (see below) |
-| `world-chain-range-ethereum`, `world-chain-aggregation` | The committed SP1 guest ELFs |
+| `world-chain-range-ethereum`, `world-chain-aggregation` | SP1 guest ELFs generated during the release |
 | `world-chain-prover-<version>-<target>.tar.gz` (+ `.asc`) | GPG-signed `world-chain-prover-sp1` and `world-chain-prover-nitro` binaries (linux x86_64 / aarch64) |
-| `ghcr.io/worldcoin/world-chain-proof-sp1:<version>` | Multi-arch SP1 prover image (ELFs baked in) |
-| `ghcr.io/worldcoin/world-chain-proof-nitro:<version>` | Multi-arch Nitro host prover image (ELFs baked in) |
+| `ghcr.io/worldcoin/world-chain-proof-sp1:<version>` | Multi-arch SP1 prover image; mount or download the release ELF artifacts at runtime |
+| `ghcr.io/worldcoin/world-chain-proof-nitro:<version>` | Multi-arch Nitro host prover image; mount or download the release ELF artifacts at runtime |
 
 The draft release notes include a measurements section that diffs the vkeys/PCRs against the
 previous `proof/v*` release and flags when an on-chain registry update is required.
@@ -35,18 +35,15 @@ git tag proof/v0.1.0 <sha-on-main>
 git push origin proof/v0.1.0
 ```
 
-The workflow gates everything on ELF reproducibility (`just build-proof-elfs` must reproduce the
-committed ELFs bit-for-bit), then builds all artifacts and opens a **draft** release for human
-review. Review the measurements section, then publish.
-
-`workflow_dispatch` runs the same pipeline without creating a release (images are tagged
-`dev-<sha>`); use it to validate changes to the pipeline itself.
+The workflow builds the SP1 ELFs from source, computes vkeys from those generated ELFs, then builds
+all artifacts and opens a **draft** release for human review. Review the measurements section, then
+publish.
 
 ## Reproducibility requirements
 
-- **SP1 ELFs** are built with `cargo prove build --docker` at a pinned SP1 toolchain tag and
-  committed under `proofs/succinct/elf/`. CI (`elf.yml` and the release gate) rebuilds and diffs
-  them.
+- **SP1 ELFs** are built with `cargo prove build --docker` at a pinned SP1 toolchain tag. They are
+  generated only during proof releases, uploaded as release artifacts, and ignored locally under
+  `proofs/succinct/elf/` for development builds.
 - **The enclave EIF** must be bit-for-bit reproducible so anyone can re-derive the registered
   PCRs from source: `proofs/nitro/Dockerfile` pins base images by digest and apt packages to a
   fixed snapshot.debian.org timestamp, and `scripts/build-eif.sh` pins the nitro-cli version that
@@ -64,6 +61,10 @@ scripts/build-eif.sh
 ```
 
 Compare the output against the release's `manifest.json`.
+
+For local Docker testing after `just build-proof-elfs`, pass
+`--build-arg INCLUDE_LOCAL_ELFS=1` to `Dockerfile.prover` to bake the locally generated ELFs into
+the image. CI and release builds leave this unset and use the release ELF artifacts instead.
 
 ## Adding a prover binary to the release
 

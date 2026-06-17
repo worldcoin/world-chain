@@ -97,7 +97,7 @@ build-proof-aggregation-elf:
 # Build all World SP1 proof ELFs
 build-proof-elfs: build-proof-range-elf build-proof-aggregation-elf
 
-# Compute the on-chain verification keys for the committed SP1 proof ELFs
+# Compute the on-chain verification keys for locally generated SP1 proof ELFs
 proof-vkeys *args='':
     cargo run --release -p world-chain-prover-sp1 -- vkeys $@
 
