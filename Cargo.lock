@@ -9180,30 +9180,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "proof"
-version = "2.3.0"
-dependencies = [
- "alloy-primitives",
- "anyhow",
- "clap",
- "dotenvy",
- "hex",
- "reqwest 0.12.28",
- "rkyv",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sp1-sdk",
- "tokio",
- "world-chain-chainspec",
- "world-chain-proof-core",
- "world-chain-proof-kona-host-utils",
- "world-chain-proof-nitro",
- "world-chain-proof-protocol",
- "world-chain-proof-succinct-host-utils",
-]
-
-[[package]]
 name = "proptest"
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -18900,6 +18876,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-prover"
+version = "2.3.0"
+dependencies = [
+ "alloy-primitives",
+ "anyhow",
+ "clap",
+ "reqwest 0.12.28",
+ "rkyv",
+ "serde",
+ "serde_json",
+ "world-chain-chainspec",
+ "world-chain-proof-core",
+ "world-chain-proof-kona-host-utils",
+ "world-chain-proof-protocol",
+]
+
+[[package]]
+name = "world-chain-prover-nitro"
+version = "2.3.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dotenvy",
+ "hex",
+ "serde_json",
+ "tokio",
+ "world-chain-proof-nitro",
+ "world-chain-prover",
+]
+
+[[package]]
 name = "world-chain-prover-service"
 version = "2.3.0"
 dependencies = [
@@ -18915,6 +18922,24 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber 0.3.23",
+]
+
+[[package]]
+name = "world-chain-prover-sp1"
+version = "2.3.0"
+dependencies = [
+ "alloy-primitives",
+ "anyhow",
+ "clap",
+ "dotenvy",
+ "hex",
+ "serde_json",
+ "sha2 0.10.9",
+ "sp1-sdk",
+ "tokio",
+ "world-chain-proof-core",
+ "world-chain-proof-succinct-host-utils",
+ "world-chain-prover",
 ]
 
 [[package]]

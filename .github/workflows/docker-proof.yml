@@ -34,20 +34,20 @@ permissions:
   id-token: write
 
 jobs:
-  # Prover docker image (the `proof` CLI with sp1 + nitro backends). Built from
-  # Dockerfile.proof defaults, so no build args are passed.
-  build-proof-image:
-    name: build proof image
+  # Backend prover images. Each image contains one host-side prover binary.
+  build-prover-images:
+    name: build ${{ matrix.prover.bin }} image
     environment: dev
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: arc-public-8xlarge-amd64-runner
-            platform: linux/amd64
-          - runner: ubuntu-24.04-arm
-            platform: linux/arm64
-    runs-on: ${{ matrix.runner }}
+        prover:
+          - { suffix: sp1, backend: sp1, bin: world-chain-prover-sp1, prefix: digests-prover-sp1 }
+          - { suffix: nitro, backend: nitro, bin: world-chain-prover-nitro, prefix: digests-prover-nitro }
+        platform:
+          - { runner: arc-public-8xlarge-amd64-runner, platform: linux/amd64 }
+          - { runner: ubuntu-24.04-arm, platform: linux/arm64 }
+    runs-on: ${{ matrix.platform.runner }}
     steps:
       - name: Check Out Repo
         uses: actions/checkout@v6
@@ -56,18 +56,26 @@ jobs:
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
-          platform: ${{ matrix.platform }}
+          platform: ${{ matrix.platform.platform }}
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.IMAGE_NAME }}
+          image_name: ${{ env.IMAGE_NAME }}-${{ matrix.prover.suffix }}
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
-          dockerfile: Dockerfile.proof
-          digest_artifact_prefix: digests-proof
+          dockerfile: Dockerfile.prover
+          build_args: |
+            PROVER_BACKEND=${{ matrix.prover.backend }}
+          digest_artifact_prefix: ${{ matrix.prover.prefix }}
 
-  merge-proof-image:
-    name: merge proof image manifest
-    needs: [build-proof-image]
+  merge-prover-images:
+    name: merge ${{ matrix.prover.suffix }} prover image manifest
+    needs: [build-prover-images]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        prover:
+          - { suffix: sp1, prefix: digests-prover-sp1 }
+          - { suffix: nitro, prefix: digests-prover-nitro }
     steps:
       - name: Check Out Repo
         uses: actions/checkout@v6
@@ -75,15 +83,15 @@ jobs:
         uses: ./.github/actions/docker-merge-manifest
         with:
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.IMAGE_NAME }}
-          digest_artifact_prefix: digests-proof
+          image_name: ${{ env.IMAGE_NAME }}-${{ matrix.prover.suffix }}
+          digest_artifact_prefix: ${{ matrix.prover.prefix }}
           tags: |
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
             type=sha
 
-  # Service deployable images, built from the same Dockerfile.proof via
-  # PROVER_PACKAGE/PROVER_BIN/FEATURES build-args. Each pushes to its own
-  # `<repo>-proof-<service>` image so tags do not collide with the `proof` image.
+  # Service deployable images, built from the same Dockerfile.prover via
+  # PROVER_PACKAGE/PROVER_BIN build args. Each pushes to its own
+  # `<repo>-proof-<service>` image so tags do not collide with backend prover images.
   build-service-images:
     name: build ${{ matrix.service.bin }} image
     environment: dev
@@ -113,11 +121,10 @@ jobs:
           image_name: ${{ env.IMAGE_NAME }}${{ matrix.service.suffix }}
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
-          dockerfile: Dockerfile.proof
+          dockerfile: Dockerfile.prover
           build_args: |
             PROVER_PACKAGE=${{ matrix.service.package }}
             PROVER_BIN=${{ matrix.service.bin }}
-            FEATURES=
           digest_artifact_prefix: ${{ matrix.service.prefix }}
 
   merge-service-images:

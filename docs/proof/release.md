@@ -21,8 +21,9 @@ and keeps measurement changes reviewable on their own.
 | `pcrs.json` | PCR0/PCR1/PCR2 of the enclave EIF |
 | `world-chain-nitro-enclave.eif` | Enclave image, built reproducibly (see below) |
 | `world-chain-range-ethereum`, `world-chain-aggregation` | The committed SP1 guest ELFs |
-| `world-chain-proof-<version>-<target>.tar.gz` (+ `.asc`) | GPG-signed `proof` CLI binaries (linux x86_64 / aarch64) |
-| `ghcr.io/worldcoin/world-chain-proof:<version>` | Multi-arch prover image (sp1 + nitro backends, ELFs baked in) |
+| `world-chain-prover-<version>-<target>.tar.gz` (+ `.asc`) | GPG-signed `world-chain-prover-sp1` and `world-chain-prover-nitro` binaries (linux x86_64 / aarch64) |
+| `ghcr.io/worldcoin/world-chain-proof-sp1:<version>` | Multi-arch SP1 prover image (ELFs baked in) |
+| `ghcr.io/worldcoin/world-chain-proof-nitro:<version>` | Multi-arch Nitro host prover image (ELFs baked in) |
 
 The draft release notes include a measurements section that diffs the vkeys/PCRs against the
 previous `proof/v*` release and flags when an on-chain registry update is required.
@@ -69,7 +70,7 @@ Compare the output against the release's `manifest.json`.
 When a new prover deployable lands on `main` (e.g. the `sp1-worker`):
 
 1. Add a build/merge job pair in `release-proof.yml`, passing
-   `PROVER_PACKAGE`/`PROVER_BIN`/`FEATURES` build args to `Dockerfile.proof` and a unique
+   `PROVER_BACKEND` or `PROVER_PACKAGE`/`PROVER_BIN` build args to `Dockerfile.prover` and a unique
    `digest_artifact_prefix`.
 2. Add a matrix entry to the `build-binaries` job for the signed tarball.
 3. Record the new image digest in the manifest step.
