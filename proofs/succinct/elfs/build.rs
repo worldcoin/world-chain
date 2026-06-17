@@ -19,10 +19,47 @@
 //!   `include_elf!()` resolves against a previously-built ELF in
 //!   `target/elf-compilation/...`. Useful for `cargo check`/`clippy` once
 //!   a single full build has populated the target directory.
+//! - Under `cargo clippy` (detected via `RUSTC_WORKSPACE_WRAPPER` pointing
+//!   to `clippy-driver`): skips the Docker build and creates zero-byte stub
+//!   ELF files in `OUT_DIR` so `include_elf!()` resolves without requiring
+//!   real ELF binaries. This avoids the "couldn't read …/elf-compilation/…"
+//!   compile error that otherwise aborts the clippy run.
 
 fn main() {
     println!("cargo:rerun-if-env-changed=SP1_SKIP_PROGRAM_BUILD");
     println!("cargo:rerun-if-env-changed=SP1_BUILD_DOCKER");
+    println!("cargo:rerun-if-env-changed=RUSTC_WORKSPACE_WRAPPER");
+
+    // When `cargo clippy` runs, Cargo sets `RUSTC_WORKSPACE_WRAPPER` to the
+    // path of `clippy-driver`.  `sp1_build` already detects this and skips
+    // the Docker build, but it still emits `SP1_ELF_*` env vars that point
+    // into `target/elf-compilation/…` — a directory that only exists after a
+    // real Docker build.  `include_elf!()` expands those vars at *compile
+    // time* via `include_bytes!()`, so the missing files cause a hard error.
+    //
+    // Fix: when running under clippy, short-circuit here.  Create zero-byte
+    // stub ELF files in `OUT_DIR` (which Cargo always creates) and emit the
+    // `SP1_ELF_*` vars pointing at those stubs.  The stubs satisfy
+    // `include_bytes!()` without requiring a Docker build, letting clippy
+    // analyse the rest of the codebase without errors.
+    let is_clippy = std::env::var("RUSTC_WORKSPACE_WRAPPER")
+        .map(|val| val.contains("clippy-driver"))
+        .unwrap_or(false);
+
+    if is_clippy {
+        let out_dir = std::path::PathBuf::from(
+            std::env::var("OUT_DIR").expect("OUT_DIR must be set by cargo"),
+        );
+        for name in &[
+            "world-chain-proof-succinct-range-ethereum",
+            "world-chain-proof-succinct-aggregation",
+        ] {
+            let stub = out_dir.join(name);
+            std::fs::write(&stub, b"").expect("failed to write stub ELF for clippy");
+            println!("cargo:rustc-env=SP1_ELF_{}={}", name, stub.display());
+        }
+        return;
+    }
 
     let docker = std::env::var("SP1_BUILD_DOCKER")
         .map(|v| !matches!(v.as_str(), "0" | "false" | "False" | "FALSE"))
