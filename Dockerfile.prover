@@ -55,8 +55,10 @@ ARG SCCACHE_S3_KEY_PREFIX
 
 # Use the locally-installed SP1 toolchain (installed in the `base` stage)
 # instead of `docker: true` since the Docker daemon isn't reachable from
-# inside this image build. The pinned `cargo-prove` version still produces
-# reproducible RISC-V ELFs for the World Chain guest programs.
+# inside this image build. The `vkeys` CI step also sets
+# SP1_BUILD_DOCKER=false with the same pinned v6.1.0 toolchain, so the
+# ELFs embedded in this image and the committed vkeys.json are always
+# produced by the same toolchain invocation.
 ENV SP1_BUILD_DOCKER=false
 
 COPY --from=planner /app/recipe.json recipe.json

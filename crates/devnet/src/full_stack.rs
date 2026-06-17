@@ -2589,9 +2589,10 @@ async fn start_sp1_worker(
     )
     .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?;
 
-    // SP1 guest ELFs are embedded into the worker at compile time via
-    // `sp1_sdk::include_elf!()` (see `proofs/succinct/utils/host/build.rs`);
-    // no path-based loading required here.
+    // ELFs are loaded at runtime from the `RANGE_ELF_PATH` and `AGG_ELF_PATH`
+    // environment variables.  Production binaries that need compile-time
+    // embedded ELFs (e.g. `sp1-worker`) use
+    // `EnvSuccinctProver::new_with_elfs` with `world_chain_proof_succinct_elfs`.
     //
     // `EnvSuccinctProver` owns its own runtime, so build it off the async runtime.
     let prover =

@@ -18789,7 +18789,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-succinct-elfs"
-version = "2.2.0"
+version = "2.3.0"
 dependencies = [
  "sp1-build",
  "sp1-sdk",
