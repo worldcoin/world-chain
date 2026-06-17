@@ -41,6 +41,7 @@ contract WorldChainProofSystemFactory {
     uint64 public immutable proofPeriod;
     uint256 public immutable proposerBond;
     uint256 public immutable challengerBond;
+    uint8 public immutable proofThreshold;
 
     IWorldChainProofVerifier public immutable validityProofVerifier;
     IWorldChainProofVerifier public immutable teeVerifier;
@@ -55,6 +56,7 @@ contract WorldChainProofSystemFactory {
         uint64 proofPeriod_,
         uint256 proposerBond_,
         uint256 challengerBond_,
+        uint8 proofThreshold_,
         IWorldChainProofVerifier validityProofVerifier_,
         IWorldChainProofVerifier teeVerifier_,
         IWorldChainProofVerifier securityCouncil_,
@@ -63,7 +65,8 @@ contract WorldChainProofSystemFactory {
         if (
             challengePeriod_ == 0 || proofPeriod_ == 0 || domain_.chainId == 0 || domain_.proofSystemVersion == 0
                 || domain_.blockInterval == 0 || domain_.intermediateBlockInterval == 0
-                || domain_.blockInterval % domain_.intermediateBlockInterval != 0
+                || domain_.blockInterval % domain_.intermediateBlockInterval != 0 || proofThreshold_ == 0
+                || proofThreshold_ > WorldChainProofLib.PROOF_LANE_COUNT
         ) {
             revert InvalidActivationParameters();
         }
@@ -74,6 +77,7 @@ contract WorldChainProofSystemFactory {
         proofPeriod = proofPeriod_;
         proposerBond = proposerBond_;
         challengerBond = challengerBond_;
+        proofThreshold = proofThreshold_;
         validityProofVerifier = validityProofVerifier_;
         teeVerifier = teeVerifier_;
         securityCouncil = securityCouncil_;
@@ -114,6 +118,7 @@ contract WorldChainProofSystemFactory {
                     proofPeriod: proofPeriod,
                     proposerBond: proposerBond,
                     challengerBond: challengerBond,
+                    proofThreshold: proofThreshold,
                     validityProofVerifier: validityProofVerifier,
                     teeVerifier: teeVerifier,
                     securityCouncil: securityCouncil,

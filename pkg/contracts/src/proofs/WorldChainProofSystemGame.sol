@@ -24,6 +24,7 @@ contract WorldChainProofSystemGame {
         uint64 proofPeriod;
         uint256 proposerBond;
         uint256 challengerBond;
+        uint8 proofThreshold;
         IWorldChainProofVerifier validityProofVerifier;
         IWorldChainProofVerifier teeVerifier;
         IWorldChainProofVerifier securityCouncil;
@@ -48,7 +49,9 @@ contract WorldChainProofSystemGame {
     event Finalized(bytes32 indexed rootId);
     event Invalidated(bytes32 indexed rootId);
 
-    uint8 public constant PROOF_THRESHOLD = WorldChainProofLib.PROOF_THRESHOLD;
+    /// Number of distinct proof lanes required to finalize a challenged root.
+    /// Set per-deployment by the factory (defaults to `WorldChainProofLib.PROOF_THRESHOLD`).
+    uint8 public immutable PROOF_THRESHOLD;
     uint8 public constant PROOF_LANE_COUNT = WorldChainProofLib.PROOF_LANE_COUNT;
 
     address payable public immutable proposer;
@@ -107,6 +110,7 @@ contract WorldChainProofSystemGame {
         proofPeriod = config.proofPeriod;
         proposerBond = config.proposerBond;
         challengerBond = config.challengerBond;
+        PROOF_THRESHOLD = config.proofThreshold;
         validityProofVerifier = config.validityProofVerifier;
         teeVerifier = config.teeVerifier;
         securityCouncil = config.securityCouncil;
@@ -169,7 +173,7 @@ contract WorldChainProofSystemGame {
         proofBitmap |= mask;
         emit ProofLaneSupported(lane, rootId, proofBitmap);
 
-        if (WorldChainProofLib.hasThreshold(proofBitmap)) {
+        if (WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
             _finalize();
         }
     }
@@ -184,7 +188,7 @@ contract WorldChainProofSystemGame {
         }
 
         if (state == WorldChainProofLib.RootState.CHALLENGED) {
-            if (!WorldChainProofLib.hasThreshold(proofBitmap)) {
+            if (!WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
                 revert InvalidState(WorldChainProofLib.RootState.FINALIZED, state);
             }
             _finalize();
@@ -201,7 +205,7 @@ contract WorldChainProofSystemGame {
         if (block.timestamp < proofDeadline) {
             revert ProofPeriodOpen(block.timestamp, proofDeadline);
         }
-        if (WorldChainProofLib.hasThreshold(proofBitmap)) {
+        if (WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
             revert InvalidState(WorldChainProofLib.RootState.INVALIDATED, state);
         }
 

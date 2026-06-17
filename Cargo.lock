@@ -18240,10 +18240,15 @@ dependencies = [
 name = "world-chain-challenger"
 version = "2.3.0"
 dependencies = [
+ "alloy-network 2.0.5",
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-types-eth 2.0.5",
+ "alloy-signer-local 2.0.5",
+ "anyhow",
  "async-trait",
+ "clap",
+ "dotenvy",
  "futures-util",
  "reqwest 0.12.28",
  "serde",
@@ -18251,6 +18256,8 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tracing-subscriber 0.3.23",
+ "url",
  "world-chain-proofs",
 ]
 
@@ -18292,14 +18299,21 @@ dependencies = [
 name = "world-chain-defender"
 version = "2.3.0"
 dependencies = [
+ "alloy-network 2.0.5",
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-types-eth 2.0.5",
+ "alloy-signer-local 2.0.5",
+ "anyhow",
  "async-trait",
+ "clap",
+ "dotenvy",
  "futures-util",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tracing-subscriber 0.3.23",
+ "url",
  "world-chain-proofs",
  "world-chain-prover-service",
 ]
@@ -18626,16 +18640,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "world-chain-proof"
-version = "2.3.0"
-dependencies = [
- "world-chain-proof-core",
- "world-chain-proof-nitro",
- "world-chain-proof-succinct-client-utils",
- "world-chain-proof-succinct-utils",
-]
-
-[[package]]
 name = "world-chain-proof-core"
 version = "2.3.0"
 dependencies = [
@@ -18876,15 +18880,22 @@ dependencies = [
 name = "world-chain-proposer"
 version = "2.3.0"
 dependencies = [
+ "alloy-network 2.0.5",
  "alloy-primitives",
  "alloy-provider",
+ "alloy-signer-local 2.0.5",
+ "anyhow",
  "async-trait",
+ "clap",
+ "dotenvy",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tracing-subscriber 0.3.23",
+ "url",
  "world-chain-proofs",
 ]
 
@@ -18893,13 +18904,17 @@ name = "world-chain-prover-service"
 version = "2.3.0"
 dependencies = [
  "alloy-primitives",
+ "anyhow",
  "async-trait",
+ "clap",
+ "dotenvy",
  "jsonrpsee",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tracing-subscriber 0.3.23",
 ]
 
 [[package]]

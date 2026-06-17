@@ -1,7 +1,22 @@
 name: docker-proof
 
+# Image-only path for the prover deployables: builds and pushes the prover docker
+# images to ghcr on merge to main (tag `nightly`) or via manual dispatch with a
+# chosen `image_tag` (e.g. `alpha-v0.1.0`). It does NOT cut a release — versioned
+# releases (manifest.json, signed binaries, EIF, vkeys) are cut by release-proof.yml
+# on `proof/v*` tag pushes once the services are ready.
+
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or SHA to build.
+        required: false
+        default: main
+      image_tag:
+        description: Custom image tag to publish (e.g. "alpha-v0.1.0").
+        required: false
+        default: nightly
   push:
     branches: [main]
 
@@ -19,8 +34,10 @@ permissions:
   id-token: write
 
 jobs:
-  build-and-push:
-    name: build and push prover docker
+  # Prover docker image (the `proof` CLI with sp1 + nitro backends). Built from
+  # Dockerfile.proof defaults, so no build args are passed.
+  build-proof-image:
+    name: build proof image
     environment: dev
     strategy:
       fail-fast: false
@@ -34,6 +51,8 @@ jobs:
     steps:
       - name: Check Out Repo
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -43,11 +62,12 @@ jobs:
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           dockerfile: Dockerfile.proof
+          digest_artifact_prefix: digests-proof
 
-  merge:
+  merge-proof-image:
+    name: merge proof image manifest
+    needs: [build-proof-image]
     runs-on: ubuntu-latest
-    needs:
-      - build-and-push
     steps:
       - name: Check Out Repo
         uses: actions/checkout@v6
@@ -56,6 +76,72 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}
+          digest_artifact_prefix: digests-proof
           tags: |
-            type=raw,value=nightly
+            type=raw,value=${{ inputs.image_tag || 'nightly' }}
+            type=sha
+
+  # Service deployable images, built from the same Dockerfile.proof via
+  # PROVER_PACKAGE/PROVER_BIN/FEATURES build-args. Each pushes to its own
+  # `<repo>-proof-<service>` image so tags do not collide with the `proof` image.
+  build-service-images:
+    name: build ${{ matrix.service.bin }} image
+    environment: dev
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { suffix: -sp1-worker, package: world-chain-sp1-worker, bin: sp1-worker, prefix: digests-sp1-worker }
+          - { suffix: -proposer, package: world-chain-proposer, bin: world-chain-proposer, prefix: digests-proposer }
+          - { suffix: -challenger, package: world-chain-challenger, bin: world-chain-challenger, prefix: digests-challenger }
+          - { suffix: -defender, package: world-chain-defender, bin: world-chain-defender, prefix: digests-defender }
+          - { suffix: -prover-service, package: world-chain-prover-service, bin: world-chain-prover-service, prefix: digests-prover-service }
+        platform:
+          - { runner: arc-public-8xlarge-amd64-runner, platform: linux/amd64 }
+          - { runner: ubuntu-24.04-arm, platform: linux/arm64 }
+    runs-on: ${{ matrix.platform.runner }}
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: ${{ matrix.platform.platform }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}${{ matrix.service.suffix }}
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          dockerfile: Dockerfile.proof
+          build_args: |
+            PROVER_PACKAGE=${{ matrix.service.package }}
+            PROVER_BIN=${{ matrix.service.bin }}
+            FEATURES=
+          digest_artifact_prefix: ${{ matrix.service.prefix }}
+
+  merge-service-images:
+    name: merge ${{ matrix.service.bin }} image manifest
+    needs: [build-service-images]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { suffix: -sp1-worker, prefix: digests-sp1-worker }
+          - { suffix: -proposer, prefix: digests-proposer }
+          - { suffix: -challenger, prefix: digests-challenger }
+          - { suffix: -defender, prefix: digests-defender }
+          - { suffix: -prover-service, prefix: digests-prover-service }
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+      - name: Merge multi-arch manifest
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}${{ matrix.service.suffix }}
+          digest_artifact_prefix: ${{ matrix.service.prefix }}
+          tags: |
+            type=raw,value=${{ inputs.image_tag || 'nightly' }}
             type=sha
