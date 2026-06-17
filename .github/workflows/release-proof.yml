@@ -35,8 +35,16 @@ permissions:
   id-token: write
 
 jobs:
+  approve-release:
+    name: approve release
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - run: true
+
   extract-version:
     name: extract version
+    needs: approve-release
     runs-on: ubuntu-latest
     steps:
       - name: Extract version
@@ -57,6 +65,7 @@ jobs:
   # other artifact embeds or ships these ELFs, so nothing builds if this fails.
   verify-elfs:
     name: verify ELFs
+    needs: approve-release
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
       - uses: actions/checkout@v6
