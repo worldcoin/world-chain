@@ -27,8 +27,9 @@ use world_chain_proof_succinct_utils::{
 /// `world_chain_proof_succinct_elfs::range_elf()` and pass it to
 /// [`EnvSuccinctProver::new_with_elfs`] instead.
 pub fn range_elf() -> Elf {
-    let path = std::env::var("RANGE_ELF_PATH")
-        .expect("RANGE_ELF_PATH must be set (or use EnvSuccinctProver::new_with_elfs with embedded ELFs)");
+    let path = std::env::var("RANGE_ELF_PATH").expect(
+        "RANGE_ELF_PATH must be set (or use EnvSuccinctProver::new_with_elfs with embedded ELFs)",
+    );
     Elf::from(
         std::fs::read(&path)
             .unwrap_or_else(|e| panic!("failed to read range ELF from {path}: {e}")),
@@ -41,8 +42,9 @@ pub fn range_elf() -> Elf {
 /// `world_chain_proof_succinct_elfs::aggregation_elf()` and pass it to
 /// [`EnvSuccinctProver::new_with_elfs`] instead.
 pub fn aggregation_elf() -> Elf {
-    let path = std::env::var("AGG_ELF_PATH")
-        .expect("AGG_ELF_PATH must be set (or use EnvSuccinctProver::new_with_elfs with embedded ELFs)");
+    let path = std::env::var("AGG_ELF_PATH").expect(
+        "AGG_ELF_PATH must be set (or use EnvSuccinctProver::new_with_elfs with embedded ELFs)",
+    );
     Elf::from(
         std::fs::read(&path)
             .unwrap_or_else(|e| panic!("failed to read aggregation ELF from {path}: {e}")),

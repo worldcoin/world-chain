@@ -140,16 +140,17 @@ async fn worker_proves_real_range_end_to_end() {
 
     let kind = prover_kind();
     // Build the prover off the async runtime: it owns its own runtime internally.
-    let prover =
-        tokio::task::spawn_blocking(move || EnvSuccinctProver::new_with_elfs(
+    let prover = tokio::task::spawn_blocking(move || {
+        EnvSuccinctProver::new_with_elfs(
             kind,
             world_chain_proof_succinct_elfs::range_elf(),
             world_chain_proof_succinct_elfs::aggregation_elf(),
             SP1ProofMode::Groth16,
-        ))
-            .await
-            .expect("prover setup task")
-            .expect("build prover");
+        )
+    })
+    .await
+    .expect("prover setup task")
+    .expect("build prover");
 
     let backend = Sp1Backend::new(
         host,
