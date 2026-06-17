@@ -1,6 +1,7 @@
 [profile.default]
 failure-output = "immediate-final"
 success-output = "never"
+retries = 2
 
 [profile.default.junit]
 path = "target/nextest/junit.xml"
