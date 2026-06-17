@@ -17,6 +17,10 @@ inputs:
   sccache_bucket:
     description: S3 bucket used by sccache and BuildKit cache.
     required: true
+  git_sha:
+    description: Git commit SHA to embed via VERGEN_GIT_SHA (defaults to the triggering commit).
+    required: false
+    default: ${{ github.sha }}
   dockerfile:
     description: Path to the Dockerfile to build.
     required: false
@@ -73,7 +77,7 @@ runs:
         context: .
         file: ${{ inputs.dockerfile }}
         build-args: |
-          VERGEN_GIT_SHA=${{ github.sha }}
+          VERGEN_GIT_SHA=${{ inputs.git_sha }}
           SCCACHE_BUCKET=${{ inputs.sccache_bucket }}
           SCCACHE_REGION=${{ inputs.aws_region }}
           SCCACHE_S3_KEY_PREFIX=sccache/${{ github.repository }}/${{ env.PLATFORM_PAIR }}
