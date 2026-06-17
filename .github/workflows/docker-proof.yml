@@ -34,20 +34,79 @@ permissions:
   id-token: write
 
 jobs:
-  # Backend prover images. Each image contains one host-side prover binary.
-  build-prover-images:
-    name: build ${{ matrix.prover.bin }} image
+  build-elfs:
+    name: build ELFs
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: taiki-e/install-action@just
+      - name: Install SP1 toolchain
+        run: |
+          curl -L https://sp1.succinct.xyz | bash
+          ~/.sp1/bin/sp1up --version v6.1.0
+          echo "$HOME/.sp1/bin" >> $GITHUB_PATH
+      - name: Build ELFs
+        run: just build-proof-elfs
+      - name: Upload ELFs
+        uses: actions/upload-artifact@v4
+        with:
+          name: proof-elfs
+          path: |
+            proofs/succinct/elf/world-chain-range-ethereum
+            proofs/succinct/elf/world-chain-aggregation
+          if-no-files-found: error
+
+  build-sp1-prover-image:
+    name: build world-chain-prover-sp1 image
+    environment: dev
+    needs: [build-elfs]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: arc-public-8xlarge-amd64-runner
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Download ELFs
+        uses: actions/download-artifact@v4
+        with:
+          name: proof-elfs
+          path: proofs/succinct/elf
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: ${{ matrix.platform }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}-sp1
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          dockerfile: Dockerfile.prover
+          build_args: |
+            PROVER_BACKEND=sp1
+          digest_artifact_prefix: digests-prover-sp1
+
+  build-nitro-prover-image:
+    name: build world-chain-prover-nitro image
     environment: dev
     strategy:
       fail-fast: false
       matrix:
-        prover:
-          - { suffix: sp1, backend: sp1, bin: world-chain-prover-sp1, prefix: digests-prover-sp1 }
-          - { suffix: nitro, backend: nitro, bin: world-chain-prover-nitro, prefix: digests-prover-nitro }
-        platform:
-          - { runner: arc-public-8xlarge-amd64-runner, platform: linux/amd64 }
-          - { runner: ubuntu-24.04-arm, platform: linux/arm64 }
-    runs-on: ${{ matrix.platform.runner }}
+        include:
+          - runner: arc-public-8xlarge-amd64-runner
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Check Out Repo
         uses: actions/checkout@v6
@@ -56,19 +115,19 @@ jobs:
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
-          platform: ${{ matrix.platform.platform }}
+          platform: ${{ matrix.platform }}
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.IMAGE_NAME }}-${{ matrix.prover.suffix }}
+          image_name: ${{ env.IMAGE_NAME }}-nitro
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           dockerfile: Dockerfile.prover
           build_args: |
-            PROVER_BACKEND=${{ matrix.prover.backend }}
-          digest_artifact_prefix: ${{ matrix.prover.prefix }}
+            PROVER_BACKEND=nitro
+          digest_artifact_prefix: digests-prover-nitro
 
   merge-prover-images:
     name: merge ${{ matrix.prover.suffix }} prover image manifest
-    needs: [build-prover-images]
+    needs: [build-sp1-prover-image, build-nitro-prover-image]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -95,6 +154,7 @@ jobs:
   build-service-images:
     name: build ${{ matrix.service.bin }} image
     environment: dev
+    needs: [build-elfs]
     strategy:
       fail-fast: false
       matrix:
@@ -113,6 +173,12 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref }}
+      - name: Download ELFs
+        if: matrix.service.bin == 'sp1-worker'
+        uses: actions/download-artifact@v4
+        with:
+          name: proof-elfs
+          path: proofs/succinct/elf
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
