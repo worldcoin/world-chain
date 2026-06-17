@@ -22,8 +22,8 @@ and keeps measurement changes reviewable on their own.
 | `world-chain-nitro-enclave.eif` | Enclave image, built reproducibly (see below) |
 | `world-chain-range-ethereum`, `world-chain-aggregation` | SP1 guest ELFs generated during the release |
 | `world-chain-prover-<version>-<target>.tar.gz` (+ `.asc`) | GPG-signed `world-chain-prover-sp1` and `world-chain-prover-nitro` binaries (linux x86_64 / aarch64) |
-| `ghcr.io/worldcoin/world-chain-proof-sp1:<version>` | Multi-arch SP1 prover image; mount or download the release ELF artifacts at runtime |
-| `ghcr.io/worldcoin/world-chain-proof-nitro:<version>` | Multi-arch Nitro host prover image; mount or download the release ELF artifacts at runtime |
+| `ghcr.io/worldcoin/world-chain-proof-sp1:<version>` | Multi-arch SP1 prover image with release-generated ELFs included |
+| `ghcr.io/worldcoin/world-chain-proof-nitro:<version>` | Multi-arch Nitro host prover image |
 
 The draft release notes include a measurements section that diffs the vkeys/PCRs against the
 previous `proof/v*` release and flags when an on-chain registry update is required.
@@ -62,9 +62,10 @@ scripts/build-eif.sh
 
 Compare the output against the release's `manifest.json`.
 
-For local Docker testing after `just build-proof-elfs`, pass
-`--build-arg INCLUDE_LOCAL_ELFS=1` to `Dockerfile.prover` to bake the locally generated ELFs into
-the image. CI and release builds leave this unset and use the release ELF artifacts instead.
+For local Docker testing, use `just build-prover-sp1-image` or `just build-prover-nitro-image`.
+The SP1 recipe generates local ELFs before invoking `Dockerfile.prover`. Direct SP1 Docker builds
+fail unless `proofs/succinct/elf/world-chain-range-ethereum` and
+`proofs/succinct/elf/world-chain-aggregation` already exist.
 
 ## Adding a prover binary to the release
 

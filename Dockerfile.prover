@@ -91,32 +91,28 @@ RUN apt-get update && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists/*
 
-ARG INCLUDE_LOCAL_ELFS="0"
-
 COPY --from=builder /tmp/prover-bin /usr/local/bin/entrypoint
 COPY --from=builder /tmp/prover-bin-name /tmp/prover-bin-name
-RUN chmod +x /usr/local/bin/entrypoint && \
+# SP1 guest ELFs are generated artifacts, not source-controlled inputs. Images
+# that execute SP1 guests require them in proofs/succinct/elf; run
+# `just build-proof-elfs` locally or download the release-generated ELF artifact
+# in CI before building those images.
+RUN --mount=type=bind,source=proofs/succinct/elf,target=/tmp/local-elfs,readonly \
+  chmod +x /usr/local/bin/entrypoint && \
   bin_name="$(cat /tmp/prover-bin-name)" && \
   ln -s /usr/local/bin/entrypoint "/usr/local/bin/${bin_name}" && \
+  case "$bin_name" in \
+    world-chain-prover-sp1|sp1-worker) \
+      test -f /tmp/local-elfs/world-chain-range-ethereum || \
+        (echo "missing proofs/succinct/elf/world-chain-range-ethereum; run just build-proof-elfs first or download release ELFs" >&2; exit 1); \
+      test -f /tmp/local-elfs/world-chain-aggregation || \
+        (echo "missing proofs/succinct/elf/world-chain-aggregation; run just build-proof-elfs first or download release ELFs" >&2; exit 1); \
+      mkdir -p /usr/local/share/world-chain/elf; \
+      cp /tmp/local-elfs/world-chain-range-ethereum /usr/local/share/world-chain/elf/world-chain-range-ethereum; \
+      cp /tmp/local-elfs/world-chain-aggregation /usr/local/share/world-chain/elf/world-chain-aggregation; \
+      ;; \
+  esac && \
   rm /tmp/prover-bin-name
-
-# SP1 guest ELFs are release artifacts, not source-controlled Docker inputs. By
-# default, mount or download them to this directory at runtime. Local builds can
-# bake generated ELFs in with `--build-arg INCLUDE_LOCAL_ELFS=1` after running
-# `just build-proof-elfs`.
-RUN --mount=type=bind,source=proofs/succinct/elf,target=/tmp/local-elfs,readonly \
-  if [ "$INCLUDE_LOCAL_ELFS" = "1" ]; then \
-    test -f /tmp/local-elfs/world-chain-range-ethereum || \
-      (echo "missing proofs/succinct/elf/world-chain-range-ethereum; run just build-proof-elfs first" >&2; exit 1); \
-    test -f /tmp/local-elfs/world-chain-aggregation || \
-      (echo "missing proofs/succinct/elf/world-chain-aggregation; run just build-proof-elfs first" >&2; exit 1); \
-    mkdir -p /usr/local/share/world-chain/elf; \
-    cp /tmp/local-elfs/world-chain-range-ethereum /usr/local/share/world-chain/elf/world-chain-range-ethereum; \
-    cp /tmp/local-elfs/world-chain-aggregation /usr/local/share/world-chain/elf/world-chain-aggregation; \
-  elif [ "$INCLUDE_LOCAL_ELFS" != "0" ]; then \
-    echo "INCLUDE_LOCAL_ELFS must be 0 or 1" >&2; \
-    exit 1; \
-  fi
 ENV WORLD_CHAIN_RANGE_ELF=/usr/local/share/world-chain/elf/world-chain-range-ethereum \
     WORLD_CHAIN_AGGREGATION_ELF=/usr/local/share/world-chain/elf/world-chain-aggregation \
     RANGE_ELF_PATH=/usr/local/share/world-chain/elf/world-chain-range-ethereum \

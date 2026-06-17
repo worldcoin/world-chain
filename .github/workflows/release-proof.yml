@@ -94,6 +94,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Download ELFs
+        if: matrix.service.bin == 'sp1-worker'
         uses: actions/download-artifact@v4
         with:
           name: proof-elfs
@@ -120,7 +121,7 @@ jobs:
   build-sp1-prover-image:
     name: build world-chain-prover-sp1 image
     environment: dev
-    needs: approve-release
+    needs: [approve-release, build-elfs]
     strategy:
       fail-fast: false
       matrix:
@@ -132,6 +133,12 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
+      - name: Download ELFs
+        if: matrix.service.bin == 'sp1-worker'
+        uses: actions/download-artifact@v4
+        with:
+          name: proof-elfs
+          path: proofs/succinct/elf
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -217,7 +224,7 @@ jobs:
   build-service-images:
     name: build ${{ matrix.service.bin }} image
     environment: dev
-    needs: approve-release
+    needs: [approve-release, build-elfs]
     strategy:
       fail-fast: false
       matrix:
@@ -233,6 +240,12 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - uses: actions/checkout@v6
+      - name: Download ELFs
+        if: matrix.service.bin == 'sp1-worker'
+        uses: actions/download-artifact@v4
+        with:
+          name: proof-elfs
+          path: proofs/succinct/elf
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
