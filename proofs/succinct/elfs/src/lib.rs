@@ -9,6 +9,9 @@
 //! `RANGE_ELF_PATH` / `AGG_ELF_PATH` env vars instead via
 //! `world_chain_proof_succinct_host_utils::env_prover::EnvSuccinctProver::new`.
 
+#[cfg(clippy)]
+use sp1_sdk::Elf;
+#[cfg(not(clippy))]
 use sp1_sdk::{Elf, include_elf};
 
 /// Returns the compile-time embedded World Chain range-proof guest ELF.
