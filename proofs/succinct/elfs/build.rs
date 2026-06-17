@@ -14,11 +14,16 @@
 //!   `SP1_BUILD_DOCKER=false` to use a locally-installed `cargo-prove` /
 //!   `sp1up` toolchain instead — useful inside container builds where the
 //!   Docker daemon isn't reachable.
-//! - Honours `SP1_SKIP_PROGRAM_BUILD=true` for fast iteration: when set, the
-//!   build is skipped but the `SP1_ELF_*` env vars are still emitted so
-//!   `include_elf!()` resolves against a previously-built ELF in
-//!   `target/elf-compilation/...`. Useful for `cargo check`/`clippy` once
-//!   a single full build has populated the target directory.
+//! - Honours `SP1_SKIP_PROGRAM_BUILD=true` for fast iteration: `sp1_build`
+//!   checks this variable internally — when set, it skips the Docker/local
+//!   guest compilation but **still emits** the `SP1_ELF_*` cargo env-vars so
+//!   `include_elf!()` resolves against previously-cached ELFs in
+//!   `target/elf-compilation/...`. Our `main` does not need a separate
+//!   early-return for this flag; the delegation to `sp1_build` is sufficient.
+//!   Useful for `cargo check` once a single full build has populated the
+//!   target directory. (Under `cargo clippy` the `#[cfg(clippy)]` guards in
+//!   `src/lib.rs` already prevent `include_elf!()` from expanding, so no
+//!   build is needed at all.)
 //! - Under `cargo clippy`, the `#[cfg(clippy)]` guards in `src/lib.rs`
 //!   prevent `include_elf!()` from expanding, so no ELF files need to exist.
 

@@ -2590,10 +2590,31 @@ async fn start_sp1_worker(
     .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?;
 
     // ELFs are loaded at runtime from the `RANGE_ELF_PATH` and `AGG_ELF_PATH`
-    // environment variables.  Production binaries that need compile-time
-    // embedded ELFs (e.g. `sp1-worker`) use
-    // `EnvSuccinctProver::new_with_elfs` with `world_chain_proof_succinct_elfs`.
+    // environment variables.  Production binaries that embed ELFs at compile time
+    // (e.g. `sp1-worker`) use `EnvSuccinctProver::new_with_elfs` with
+    // `world_chain_proof_succinct_elfs`.
     //
+    // Validate the paths here so the error surfaces as a clear `Result::Err` with
+    // actionable guidance rather than a panic inside `spawn_blocking`.
+    for (var, label) in [("RANGE_ELF_PATH", "range"), ("AGG_ELF_PATH", "aggregation")] {
+        match std::env::var(var) {
+            Err(_) => {
+                return Err(eyre!(
+                    "{var} is not set — the devnet SP1 worker loads guest ELFs at runtime. \
+                     Set {var} to the path of the compiled {label} SP1 guest ELF, or build \
+                     `world-chain-sp1-worker` with the `embedded-elfs` feature for \
+                     compile-time embedding."
+                ));
+            }
+            Ok(ref path) if !std::path::Path::new(path).exists() => {
+                return Err(eyre!(
+                    "{var}={path} does not exist — check the path to the {label} SP1 guest ELF"
+                ));
+            }
+            Ok(_) => {}
+        }
+    }
+
     // `EnvSuccinctProver` owns its own runtime, so build it off the async runtime.
     let prover =
         tokio::task::spawn_blocking(move || EnvSuccinctProver::new(kind, SP1ProofMode::Groth16))
