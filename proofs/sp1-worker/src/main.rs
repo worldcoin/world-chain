@@ -4,7 +4,7 @@
 use alloy_primitives::{Address, B256};
 use anyhow::{Context, Result};
 use clap::Parser;
-use std::{fs, path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_kona_host_utils::online::build_online_config;
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
