@@ -8,7 +8,7 @@
 # on-chain, in a single manifest.json:
 #   - SP1 guest ELF sha256s + range vkey commitment + aggregation vkey
 #   - Nitro enclave EIF PCR0/PCR1/PCR2
-#   - prover docker image digest
+#   - prover docker image digests
 # plus the deployable artifacts themselves (docker images, GPG-signed binary
 # tarballs, the guest ELFs, and the enclave EIF).
 #
@@ -107,11 +107,12 @@ jobs:
           path: vkeys.json
           if-no-files-found: error
 
-  # Prover docker image (the `proof` CLI with sp1 + nitro backends). The service
-  # deployables (sp1-worker, proposer, challenger, defender, prover-service) are
-  # built from the same Dockerfile.proof in build-service-images below.
-  build-proof-image:
-    name: build proof image
+  # Backend prover images. Each image contains one host-side prover binary. The
+  # service deployables (sp1-worker, proposer, challenger, defender,
+  # prover-service) are built from the same Dockerfile.prover in
+  # build-service-images below.
+  build-sp1-prover-image:
+    name: build world-chain-prover-sp1 image
     environment: dev
     needs: [verify-elfs]
     strategy:
@@ -130,15 +131,17 @@ jobs:
         with:
           platform: ${{ matrix.platform }}
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.PROOF_IMAGE_NAME }}
+          image_name: ${{ env.PROOF_IMAGE_NAME }}-sp1
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
-          dockerfile: Dockerfile.proof
-          digest_artifact_prefix: digests-proof
+          dockerfile: Dockerfile.prover
+          build_args: |
+            PROVER_BACKEND=sp1
+          digest_artifact_prefix: digests-prover-sp1
 
-  merge-proof-image:
-    name: merge proof image manifest
-    needs: [extract-version, build-proof-image]
+  merge-sp1-prover-image:
+    name: merge world-chain-prover-sp1 image manifest
+    needs: [extract-version, build-sp1-prover-image]
     runs-on: ubuntu-latest
     outputs:
       digest: ${{ steps.merge.outputs.digest }}
@@ -149,15 +152,62 @@ jobs:
         uses: ./.github/actions/docker-merge-manifest
         with:
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.PROOF_IMAGE_NAME }}
-          digest_artifact_prefix: digests-proof
+          image_name: ${{ env.PROOF_IMAGE_NAME }}-sp1
+          digest_artifact_prefix: digests-prover-sp1
           tags: |
             type=raw,value=${{ needs.extract-version.outputs.VERSION }}
             type=sha
 
-  # Service deployable images, built from the same Dockerfile.proof via
-  # PROVER_PACKAGE/PROVER_BIN/FEATURES build-args. Each pushes to its own
-  # `<repo>-proof-<service>` image so tags do not collide with the `proof` image.
+  build-nitro-prover-image:
+    name: build world-chain-prover-nitro image
+    environment: dev
+    needs: [verify-elfs]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: arc-public-8xlarge-amd64-runner
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: ${{ matrix.platform }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.PROOF_IMAGE_NAME }}-nitro
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          dockerfile: Dockerfile.prover
+          build_args: |
+            PROVER_BACKEND=nitro
+          digest_artifact_prefix: digests-prover-nitro
+
+  merge-nitro-prover-image:
+    name: merge world-chain-prover-nitro image manifest
+    needs: [extract-version, build-nitro-prover-image]
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.merge.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Merge multi-arch manifest
+        id: merge
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.PROOF_IMAGE_NAME }}-nitro
+          digest_artifact_prefix: digests-prover-nitro
+          tags: |
+            type=raw,value=${{ needs.extract-version.outputs.VERSION }}
+            type=sha
+
+  # Service deployable images, built from the same Dockerfile.prover via
+  # PROVER_PACKAGE/PROVER_BIN build args. Each pushes to its own
+  # `<repo>-proof-<service>` image so tags do not collide with backend prover images.
   build-service-images:
     name: build ${{ matrix.service.bin }} image
     environment: dev
@@ -185,11 +235,10 @@ jobs:
           image_name: ${{ env.PROOF_IMAGE_NAME }}${{ matrix.service.suffix }}
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
-          dockerfile: Dockerfile.proof
+          dockerfile: Dockerfile.prover
           build_args: |
             PROVER_PACKAGE=${{ matrix.service.package }}
             PROVER_BIN=${{ matrix.service.bin }}
-            FEATURES=
           digest_artifact_prefix: ${{ matrix.service.prefix }}
 
   merge-service-images:
@@ -243,12 +292,15 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
       - name: Cargo Build Release
-        run: cargo build --release --locked -p proof --bin proof --features sp1,nitro --target ${{ matrix.target }}
+        run: |
+          cargo build --release --locked -p world-chain-prover-sp1 --target ${{ matrix.target }}
+          cargo build --release --locked -p world-chain-prover-nitro --target ${{ matrix.target }}
 
-      - name: Move binary
+      - name: Move binaries
         run: |
           mkdir artifacts
-          mv "target/${{ matrix.target }}/release/proof" ./artifacts
+          mv "target/${{ matrix.target }}/release/world-chain-prover-sp1" ./artifacts
+          mv "target/${{ matrix.target }}/release/world-chain-prover-nitro" ./artifacts
 
       - name: Configure GPG and create artifacts
         env:
@@ -258,16 +310,16 @@ jobs:
           export GPG_TTY=$(tty)
           echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --batch --import
           cd artifacts
-          tar -czf world-chain-proof-${{ env.VERSION }}-${{ matrix.target }}.tar.gz proof*
-          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab world-chain-proof-${{ env.VERSION }}-${{ matrix.target }}.tar.gz
+          tar -czf world-chain-prover-${{ env.VERSION }}-${{ matrix.target }}.tar.gz world-chain-prover-*
+          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab world-chain-prover-${{ env.VERSION }}-${{ matrix.target }}.tar.gz
           mv *tar.gz* ..
         shell: bash
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: world-chain-proof-${{ env.VERSION }}-${{ matrix.target }}
-          path: world-chain-proof-${{ env.VERSION }}-${{ matrix.target }}.tar.gz*
+          name: world-chain-prover-${{ env.VERSION }}-${{ matrix.target }}
+          path: world-chain-prover-${{ env.VERSION }}-${{ matrix.target }}.tar.gz*
           if-no-files-found: error
 
   # Nitro enclave EIF + PCR measurements. Does not require Nitro hardware.
@@ -296,7 +348,8 @@ jobs:
     needs:
       - extract-version
       - vkeys
-      - merge-proof-image
+      - merge-sp1-prover-image
+      - merge-nitro-prover-image
       - build-binaries
       - build-eif
     runs-on: ubuntu-latest
@@ -304,7 +357,8 @@ jobs:
       contents: write
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
-      PROOF_IMAGE_DIGEST: ${{ needs.merge-proof-image.outputs.digest }}
+      SP1_PROVER_IMAGE_DIGEST: ${{ needs.merge-sp1-prover-image.outputs.digest }}
+      NITRO_PROVER_IMAGE_DIGEST: ${{ needs.merge-nitro-prover-image.outputs.digest }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -321,7 +375,7 @@ jobs:
           cp artifacts/vkeys/vkeys.json assets/
           cp artifacts/nitro-enclave/pcrs.json assets/
           cp artifacts/nitro-enclave/world-chain-nitro-enclave.eif assets/
-          cp artifacts/world-chain-proof-*/*.tar.gz* assets/
+          cp artifacts/world-chain-prover-*/*.tar.gz* assets/
           cp proofs/succinct/elf/world-chain-range-ethereum assets/
           cp proofs/succinct/elf/world-chain-aggregation assets/
 
@@ -330,8 +384,10 @@ jobs:
           jq -n \
             --arg version "$VERSION" \
             --arg git_sha "$GITHUB_SHA" \
-            --arg image "${REGISTRY}/${PROOF_IMAGE_NAME}:${VERSION}" \
-            --arg image_digest "$PROOF_IMAGE_DIGEST" \
+            --arg sp1_image "${REGISTRY}/${PROOF_IMAGE_NAME}-sp1:${VERSION}" \
+            --arg sp1_image_digest "$SP1_PROVER_IMAGE_DIGEST" \
+            --arg nitro_image "${REGISTRY}/${PROOF_IMAGE_NAME}-nitro:${VERSION}" \
+            --arg nitro_image_digest "$NITRO_PROVER_IMAGE_DIGEST" \
             --slurpfile vkeys assets/vkeys.json \
             --slurpfile pcrs assets/pcrs.json \
             '{
@@ -339,7 +395,10 @@ jobs:
               git_sha: $git_sha,
               sp1: $vkeys[0],
               nitro_enclave: { pcrs: $pcrs[0] },
-              images: { proof: { name: $image, digest: $image_digest } }
+              images: {
+                sp1_prover: { name: $sp1_image, digest: $sp1_image_digest },
+                nitro_prover: { name: $nitro_image, digest: $nitro_image_digest }
+              }
             }' > assets/manifest.json
           cat assets/manifest.json
 
@@ -375,7 +434,7 @@ jobs:
           {
             echo "CHANGELOG<<EOF"
             if [[ -n "$prev" ]]; then
-              git log --pretty=format:"- %s" "${prev}..proof/${VERSION}" -- proofs/ Dockerfile.proof scripts/build-eif.sh
+              git log --pretty=format:"- %s" "${prev}..proof/${VERSION}" -- proofs/ Dockerfile.prover scripts/build-eif.sh
             else
               echo "- Initial prover release"
             fi
@@ -407,8 +466,9 @@ jobs:
           | `pcrs.json` | Nitro enclave PCR0/PCR1/PCR2 |
           | `world-chain-nitro-enclave.eif` | Enclave image (measurements in `pcrs.json`) |
           | `world-chain-range-ethereum`, `world-chain-aggregation` | SP1 guest ELFs (reproducible via `just build-proof-elfs`) |
-          | `world-chain-proof-*.tar.gz` | `proof` CLI binaries, signed with PGP key `C75F BC64 E9D4 8E89 FB60 418B 8949 B352 D042 2E74` |
-          | Docker | `ghcr.io/${{ env.PROOF_IMAGE_NAME }}:${{ env.VERSION }}` |
+          | `world-chain-prover-*.tar.gz` | `world-chain-prover-sp1` and `world-chain-prover-nitro` binaries, signed with PGP key `C75F BC64 E9D4 8E89 FB60 418B 8949 B352 D042 2E74` |
+          | SP1 Docker | `ghcr.io/${{ env.PROOF_IMAGE_NAME }}-sp1:${{ env.VERSION }}` |
+          | Nitro Docker | `ghcr.io/${{ env.PROOF_IMAGE_NAME }}-nitro:${{ env.VERSION }}` |
           ENDBODY
           )
           gh release create --draft -t "proof/${VERSION}" -F - "proof/${VERSION}" assets/* <<< "$body"
