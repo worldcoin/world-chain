@@ -68,7 +68,7 @@ fn main() -> Result<()> {
 
 #[cfg(target_os = "linux")]
 fn nitro_prove(args: NitroArgs) -> Result<()> {
-    use anyhow::{Context, anyhow};
+    use anyhow::anyhow;
     use world_chain_proof_nitro::{
         ExpectedPcrs, NitroRangeProofRequest,
         attestation::parse_and_check_pcrs,
