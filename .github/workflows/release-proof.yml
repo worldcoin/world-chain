@@ -94,7 +94,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Download ELFs
-        if: matrix.service.bin == 'sp1-worker'
         uses: actions/download-artifact@v4
         with:
           name: proof-elfs
@@ -134,7 +133,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Download ELFs
-        if: matrix.service.bin == 'sp1-worker'
         uses: actions/download-artifact@v4
         with:
           name: proof-elfs
