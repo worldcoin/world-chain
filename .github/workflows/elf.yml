@@ -1,14 +1,13 @@
 name: ELF
 
 on:
-  push:
-    branches: [main]
   merge_group:
   pull_request:
+    branches: [main]
     paths:
       - 'proofs/succinct/programs/**'
       - 'proofs/core/**'
-      - 'proofs/utils/kona/**'
+      - 'proofs/kona-client/**'
       - 'proofs/succinct/utils/client/**'
       - 'proofs/succinct/utils/ethereum-client/**'
   workflow_dispatch:
