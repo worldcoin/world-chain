@@ -216,9 +216,9 @@ jobs:
             type=raw,value=${{ needs.extract-version.outputs.VERSION }}
             type=sha
 
-  # Service deployable images, built from the same Dockerfile.prover via
-  # PROVER_PACKAGE/PROVER_BIN build args. Each pushes to its own
-  # `<repo>-proof-<service>` image so tags do not collide with backend prover images.
+  # Service deployable images, built from the same Dockerfile.proof via
+  # PROVER_PACKAGE/PROVER_BIN/FEATURES build-args. Each pushes to its own
+  # `<repo>-<service>` image so tags do not collide with the `proof` image.
   build-service-images:
     name: build ${{ matrix.service.bin }} image
     environment: dev
@@ -249,7 +249,7 @@ jobs:
         with:
           platform: ${{ matrix.platform.platform }}
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.PROOF_IMAGE_NAME }}${{ matrix.service.suffix }}
+          image_name: ${{ github.repository }}${{ matrix.service.suffix }}
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           dockerfile: Dockerfile.prover
@@ -277,7 +277,7 @@ jobs:
         uses: ./.github/actions/docker-merge-manifest
         with:
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.PROOF_IMAGE_NAME }}${{ matrix.service.suffix }}
+          image_name: ${{ github.repository }}${{ matrix.service.suffix }}
           digest_artifact_prefix: ${{ matrix.service.prefix }}
           tags: |
             type=raw,value=${{ needs.extract-version.outputs.VERSION }}
