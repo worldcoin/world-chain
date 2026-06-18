@@ -26,6 +26,18 @@ const WORLD_CHAIN_DEVNET_SAFE_4337_WALLET_DEPLOYER: Address =
 const WORLD_CHAIN_DEVNET_ENTRY_POINT_V0_7: Address =
     address!("0000000071727De22E5E9d8BAf0edAc6f37da032");
 
+struct UserOperationProfileDefaults {
+    wallet_count: usize,
+    deploy_concurrency: usize,
+    operations_per_wallet: u64,
+    operation_concurrency: usize,
+}
+
+enum UserOperationProfile {
+    Heavy,
+    ProdSmoke,
+}
+
 #[derive(Clone)]
 pub(super) struct Config {
     pub(super) network: String,
@@ -132,6 +144,7 @@ fn bundler_config_from_env(
     let Some(rpc_url) = optional_env("ACCEPTANCE_BUNDLER_RPC_URL") else {
         return Ok(None);
     };
+    let profile_defaults = user_operation_profile_from_env()?.map(|profile| profile.defaults());
 
     Ok(Some(BundlerConfig {
         rpc_url: rpc_url
@@ -153,20 +166,30 @@ fn bundler_config_from_env(
             expected_chain_id,
             WORLD_CHAIN_DEVNET_SAFE_4337_WALLET_DEPLOYER,
         )?,
-        wallet_count: parse_optional_value(
+        wallet_count: parse_optional_profiled_value(
             "ACCEPTANCE_4337_WALLET_COUNT",
+            profile_defaults.as_ref().map(|defaults| defaults.wallet_count),
             DEFAULT_USER_OPERATION_WALLET_COUNT,
         )?,
-        deploy_concurrency: parse_optional_value(
+        deploy_concurrency: parse_optional_profiled_value(
             "ACCEPTANCE_4337_DEPLOY_CONCURRENCY",
+            profile_defaults
+                .as_ref()
+                .map(|defaults| defaults.deploy_concurrency),
             DEFAULT_USER_OPERATION_DEPLOY_CONCURRENCY,
         )?,
-        operations_per_wallet: parse_optional_value(
+        operations_per_wallet: parse_optional_profiled_value(
             "ACCEPTANCE_4337_OPS_PER_WALLET",
+            profile_defaults
+                .as_ref()
+                .map(|defaults| defaults.operations_per_wallet),
             DEFAULT_USER_OPERATION_OPS_PER_WALLET,
         )?,
-        operation_concurrency: parse_optional_value(
+        operation_concurrency: parse_optional_profiled_value(
             "ACCEPTANCE_4337_OP_CONCURRENCY",
+            profile_defaults
+                .as_ref()
+                .map(|defaults| defaults.operation_concurrency),
             DEFAULT_USER_OPERATION_OP_CONCURRENCY,
         )?,
         nonce_concurrency: parse_optional_value(
@@ -218,6 +241,37 @@ fn bundler_cloudflare_access_from_env(
     }
 }
 
+impl UserOperationProfile {
+    fn defaults(&self) -> UserOperationProfileDefaults {
+        match self {
+            Self::Heavy => UserOperationProfileDefaults {
+                wallet_count: 200,
+                deploy_concurrency: 10,
+                operations_per_wallet: 50,
+                operation_concurrency: 200,
+            },
+            Self::ProdSmoke => UserOperationProfileDefaults {
+                wallet_count: 20,
+                deploy_concurrency: 10,
+                operations_per_wallet: 2,
+                operation_concurrency: 20,
+            },
+        }
+    }
+}
+
+fn user_operation_profile_from_env() -> eyre::Result<Option<UserOperationProfile>> {
+    optional_env("ACCEPTANCE_4337_PROFILE")
+        .map(|value| match value.as_str() {
+            "heavy" => Ok(UserOperationProfile::Heavy),
+            "prod-smoke" => Ok(UserOperationProfile::ProdSmoke),
+            _ => bail!(
+                "unsupported ACCEPTANCE_4337_PROFILE {value:?}; expected one of: heavy, prod-smoke"
+            ),
+        })
+        .transpose()
+}
+
 fn parse_optional_address(
     name: &str,
     expected_chain_id: u64,
@@ -247,6 +301,21 @@ where
         .map(|value| parse_value(name, &value))
         .transpose()
         .map(|value| value.unwrap_or(default))
+}
+
+fn parse_optional_profiled_value<T>(
+    name: &str,
+    profile_default: Option<T>,
+    default: T,
+) -> eyre::Result<T>
+where
+    T: FromStr,
+    T::Err: std::error::Error + Send + Sync + 'static,
+{
+    optional_env(name)
+        .map(|value| parse_value(name, &value))
+        .transpose()
+        .map(|value| value.or(profile_default).unwrap_or(default))
 }
 
 fn parse_optional_value_from_str<T>(name: &str, default: &str) -> eyre::Result<T>
