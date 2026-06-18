@@ -8,14 +8,14 @@
 //! Communication with the host happens over vsock using the framing defined in
 //! [`world_chain_proof_nitro::protocol`].
 //!
-//! Build with the `enclave-bin` feature:
+//! Build with the `enclave` feature:
 //!
 //! ```sh
 //! cargo build --release --bin world-chain-nitro-enclave \
-//!     -p world-chain-proof-nitro --features enclave-bin
+//!     -p world-chain-proof-nitro --features enclave
 //! ```
 
-#![cfg(feature = "enclave-bin")]
+#![cfg(feature = "enclave")]
 
 #[cfg(target_os = "linux")]
 use anyhow::Result;

@@ -21,4 +21,4 @@ tokio.workspace = true
 world-chain-prover.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-world-chain-proof-nitro = { workspace = true, features = ["aws_nitro"] }
+world-chain-proof-nitro = { workspace = true, features = ["enclave"] }
