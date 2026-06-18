@@ -1,13 +1,10 @@
 name: deploy-alphanet-build
 
-# Build + push a world-chain image for a pinned commit and dispatch an alphanet tag bump to
-# worldcoin/crypto-apps. Triggered (workflow_dispatch) by deploy-alphanet.yml after it has
-# authorized the commenter and resolved the PR head. It receives an immutable `sha` input, so
-# there is no time-of-check/time-of-use window.
-#
-# This mirrors docker.yml's devnet build/push/merge, but builds an arbitrary (PR) commit and
-# bumps the alphanet apps instead of devnet. Run it only via the /deploy-alphanet command (or
-# a manual dispatch by a maintainer with a known-good SHA).
+# Build + push a world-chain image for a pinned commit to the mutable `alphanet`
+# tag. Argo CD Image Updater watches that tag and handles the rollout.
+# Triggered (workflow_dispatch) by deploy-alphanet.yml after it has authorized
+# the commenter and resolved the PR head. It receives an immutable `sha` input,
+# so there is no time-of-check/time-of-use window.
 
 on:
   workflow_dispatch:
@@ -44,9 +41,7 @@ jobs:
       - name: Resolve tag
         id: tag
         shell: bash
-        env:
-          SHA: ${{ inputs.sha }}
-        run: echo "tag=sha-${SHA:0:7}" >> "$GITHUB_OUTPUT"
+        run: echo "tag=alphanet" >> "$GITHUB_OUTPUT"
 
   build-and-push:
     name: build and push docker
@@ -93,46 +88,15 @@ jobs:
           tags: |
             type=raw,value=${{ needs.prep.outputs.tag }}
 
-  dispatch:
-    name: dispatch alphanet bump to crypto-apps
+  comment-result:
+    name: comment result
     needs:
       - prep
       - merge
+    if: ${{ inputs.pr != '' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Mint app token
-        id: app-token
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ vars.DEVNET_DEPLOYMENT_APPID }}
-          private-key: ${{ secrets.DEVNET_DEPLOYMENT_SECRET }}
-          owner: worldcoin
-          repositories: crypto-apps
-
-      - name: Send repository_dispatch
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          TAG: ${{ needs.prep.outputs.tag }}
-          SHA: ${{ inputs.sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          PR_NUMBER: ${{ inputs.pr }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          args=(
-            -f "event_type=bump-world-chain-alphanet"
-            -f "client_payload[tag]=${TAG}"
-            -f "client_payload[sha]=${SHA}"
-            -f "client_payload[issuer]=${RUN_URL}"
-          )
-          if [[ -n "${PR_NUMBER}" ]]; then
-            args+=(-f "client_payload[pr]=${PR_NUMBER}")
-          fi
-          gh api repos/worldcoin/crypto-apps/dispatches "${args[@]}"
-          echo "Dispatched bump-world-chain-alphanet with tag ${TAG}"
-
-      - name: Comment dispatch result
-        if: ${{ inputs.pr != '' }}
+      - name: Comment build result
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -142,4 +106,4 @@ jobs:
         run: |
           set -euo pipefail
           gh pr comment "${PR_NUMBER}" --repo "${REPO}" \
-            --body "🚀 Built \`${REGISTRY}/${IMAGE_NAME}:${TAG}\` and dispatched an **alphanet** deploy to [worldcoin/crypto-apps](https://github.com/worldcoin/crypto-apps/actions/workflows/bump-world-chain-alphanet.yaml). A bump PR will open there and auto-merge once checks pass."
+            --body "Built \`${REGISTRY}/${IMAGE_NAME}:${TAG}\`. Argo CD Image Updater will detect the new digest and sync alphanet."
