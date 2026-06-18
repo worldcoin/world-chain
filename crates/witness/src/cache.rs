@@ -9,44 +9,49 @@ use crate::types::{BlockWitness, RangeWitness};
 /// Default number of block witnesses to retain in memory.
 pub const DEFAULT_WITNESS_CAP: usize = 1024;
 
-/// A bounded, reorg-safe in-memory cache of [`BlockWitness`]es keyed by block number.
-///
-/// Behaves as a circular ring buffer over block numbers: when the number of cached blocks exceeds
-/// `CAPACITY`, the lowest block numbers are evicted. Inserting a block number that already exists
-/// overwrites the entry, so a reorg that re-imports a height simply replaces the stale witness.
+/// A bounded circular ring buffer of [`BlockWitness`]es keyed by block number.
 #[derive(Debug)]
-pub struct WitnessCache<const CAPACITY: usize = DEFAULT_WITNESS_CAP> {
+pub struct WitnessCache {
     inner: Mutex<Inner>,
+    /// Ring-buffer depth: the maximum number of block witnesses retained before the lowest are
+    /// evicted. Set at runtime from `--witness.depth`.
+    depth: usize,
 }
 
 #[derive(Debug, Default)]
 struct Inner(BTreeMap<u64, BlockWitness>);
 
-impl<const CAPACITY: usize> Default for WitnessCache<CAPACITY> {
+impl Default for WitnessCache {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const CAPACITY: usize> WitnessCache<CAPACITY> {
-    /// Creates an empty cache holding at most `CAPACITY` block witnesses.
-    ///
-    /// `CAPACITY` must be non-zero; a cache that retains nothing is never useful. Instantiating
-    /// the cache with a zero `CAPACITY` is a compile-time error.
+impl WitnessCache {
+    /// Creates an empty cache with the default ring-buffer depth ([`DEFAULT_WITNESS_CAP`]).
     #[must_use]
     pub fn new() -> Self {
-        const { assert!(CAPACITY > 0, "WitnessCache: CAPACITY must be non-zero") };
+        Self::with_depth(DEFAULT_WITNESS_CAP)
+    }
+
+    /// Creates an empty cache with a runtime ring-buffer `depth` (the maximum number of block
+    /// witnesses retained).
+    ///
+    /// A `depth` of zero is clamped to one, since a cache that retains nothing is never useful.
+    #[must_use]
+    pub fn with_depth(depth: usize) -> Self {
         Self {
             inner: Mutex::new(Inner::default()),
+            depth: depth.max(1),
         }
     }
 
     /// Inserts (or replaces) the witness for its block number, evicting the lowest block numbers
-    /// if the cache is over `CAPACITY`.
+    /// if the cache is over its [`depth`](Self::with_depth).
     pub fn insert(&self, witness: BlockWitness) {
         let mut inner = self.inner.lock();
         inner.0.insert(witness.block_number, witness);
-        while inner.0.len() > CAPACITY {
+        while inner.0.len() > self.depth {
             inner.0.pop_first();
         }
     }
@@ -107,7 +112,7 @@ mod tests {
 
     #[test]
     fn evicts_lowest_over_capacity() {
-        let cache = WitnessCache::<3>::new();
+        let cache = WitnessCache::with_depth(3);
         for n in 1..=5 {
             cache.insert(witness(n));
         }
@@ -119,8 +124,17 @@ mod tests {
     }
 
     #[test]
+    fn zero_depth_is_clamped() {
+        // Zero depth is clamped to retain at least one block.
+        let cache = WitnessCache::with_depth(0);
+        cache.insert(witness(7));
+        cache.insert(witness(8));
+        assert_eq!(cache.bounds(), Some((8, 8)));
+    }
+
+    #[test]
     fn reorg_overwrites_in_place() {
-        let cache = WitnessCache::<8>::new();
+        let cache = WitnessCache::with_depth(8);
         cache.insert(witness(10));
         let original = cache.get(10).unwrap().block_hash;
 
@@ -136,7 +150,7 @@ mod tests {
 
     #[test]
     fn range_requires_every_block() {
-        let cache = WitnessCache::<16>::new();
+        let cache = WitnessCache::with_depth(16);
         for n in [11, 12, 14] {
             cache.insert(witness(n));
         }

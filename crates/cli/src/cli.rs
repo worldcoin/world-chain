@@ -134,11 +134,30 @@ mod validator_tests {
 }
 
 /// Arguments controlling the live pre-image witness oracle.
-#[derive(Debug, Clone, Default, clap::Args)]
+#[derive(Debug, Clone, clap::Args)]
 pub struct WitnessArgs {
     /// Enable live pre-image witness collection for the proof system.
     #[arg(long = "witness.collect", default_value_t = false)]
     pub collect: bool,
+    /// Ring-buffer depth: the maximum number of recent block witnesses retained in the in-memory
+    /// cache served over `debug_collectRangeWitness`.
+    #[arg(long = "witness.depth", default_value_t = Self::DEFAULT_DEPTH)]
+    pub depth: usize,
+}
+
+impl WitnessArgs {
+    /// Default ring-buffer depth, matching the [`WitnessCache`](world_chain_witness::WitnessCache)
+    /// compile-time default capacity.
+    const DEFAULT_DEPTH: usize = 1024;
+}
+
+impl Default for WitnessArgs {
+    fn default() -> Self {
+        Self {
+            collect: false,
+            depth: Self::DEFAULT_DEPTH,
+        }
+    }
 }
 
 #[derive(Debug, Clone, clap::Args)]
@@ -481,12 +500,15 @@ mod tests {
     fn witness_args_default_off() {
         let args = CommandParser::parse_from(["bin"]).world;
         assert!(!args.witness.collect);
+        assert_eq!(args.witness.depth, 1024);
     }
 
     #[test]
     fn witness_args_parsed() {
-        let args = CommandParser::parse_from(["bin", "--witness.collect"]).world;
+        let args =
+            CommandParser::parse_from(["bin", "--witness.collect", "--witness.depth", "32"]).world;
         assert!(args.witness.collect);
+        assert_eq!(args.witness.depth, 32);
     }
 
     #[test]

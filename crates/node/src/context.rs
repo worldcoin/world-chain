@@ -415,7 +415,7 @@ impl From<WorldChainNodeConfig> for WorldChainDefaultContext {
             .map(|_flashblocks_args| value.clone().into());
 
         let witness = value.args.witness.collect.then(|| {
-            let cache = Arc::new(WitnessCache::new());
+            let cache = Arc::new(WitnessCache::with_depth(value.args.witness.depth));
             let (sender, receiver) = crossbeam_channel::unbounded();
             WitnessChannels {
                 cache,

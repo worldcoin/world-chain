@@ -179,10 +179,12 @@ Lives in `crates/evm` (next to the existing execution module) since it is EVM/re
 
 ### Phase 3 — CLI (`crates/cli`)
 
-- `--witness.collect` (bool, default `false`), threaded through `WorldChainNodeConfig`. When set:
-  the context creates the shared `WitnessCache` + channel, the executor builder installs the
-  capturing wrapper (sender), and the add-ons spawn the collector + install the RPC. Cache
-  retention is the compile-time `WitnessCache` `CAPACITY` (default 1024), not a runtime flag.
+- `--witness.collect` (bool, default `false`) and `--witness.depth` (usize, default 1024),
+  threaded through `WorldChainNodeConfig`. When `collect` is set: the context creates the shared
+  `WitnessCache` (sized to `--witness.depth` via `WitnessCache::with_depth`) + channel, the executor
+  builder installs the capturing wrapper (sender), and the add-ons spawn the collector + install the
+  RPC. `--witness.depth` is the ring-buffer depth (max recent block witnesses retained); the
+  compile-time `WitnessCache` `CAPACITY` remains the default.
 
 ### Phase 4 — RPC (`crates/rpc` + `crates/node/src/add_ons.rs`)
 
