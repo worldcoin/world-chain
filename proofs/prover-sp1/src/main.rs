@@ -1,4 +1,5 @@
 use std::{fs, path::PathBuf};
+use sha2::{Digest, Sha256};
 
 use alloy_primitives::{Address, B256};
 use anyhow::{Context, Result};
@@ -85,22 +86,6 @@ struct Sp1ProveArgs {
 
 #[derive(Debug, Args)]
 struct Sp1VkeysArgs {
-    /// Path to the SP1 range ELF binary.
-    #[arg(
-        long,
-        env = "RANGE_ELF_PATH",
-        default_value = "proofs/succinct/elf/world-chain-range-ethereum"
-    )]
-    range_elf: PathBuf,
-
-    /// Path to the SP1 aggregation ELF binary.
-    #[arg(
-        long,
-        env = "AGG_ELF_PATH",
-        default_value = "proofs/succinct/elf/world-chain-aggregation"
-    )]
-    agg_elf: PathBuf,
-
     /// Output path for the vkeys JSON. Printed to stdout when unset.
     #[arg(long)]
     output: Option<PathBuf>,
@@ -201,27 +186,25 @@ fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
 
 fn sp1_vkeys(args: Sp1VkeysArgs) -> Result<()> {
     use anyhow::anyhow;
-    use sha2::{Digest, Sha256};
     use sp1_sdk::{CpuProver, HashableKey, Prover, ProvingKey, env::EnvProver};
     use world_chain_proof_core::types::u32_to_u8;
+    use world_chain_proof_succinct_host_utils::env_prover::{aggregation_elf, range_elf};
 
-    let range_elf = fs::read(&args.range_elf)
-        .with_context(|| format!("failed to read ELF {}", args.range_elf.display()))?;
-    let agg_elf = fs::read(&args.agg_elf)
-        .with_context(|| format!("failed to read ELF {}", args.agg_elf.display()))?;
+    let range_elf_bytes = range_elf();
+    let agg_elf_bytes = aggregation_elf();
 
-    let range_elf_sha256 = hex::encode(Sha256::digest(&range_elf));
-    let agg_elf_sha256 = hex::encode(Sha256::digest(&agg_elf));
+    let range_elf_sha256 = hex::encode(Sha256::digest(range_elf_bytes.as_ref()));
+    let agg_elf_sha256 = hex::encode(Sha256::digest(agg_elf_bytes.as_ref()));
 
     let (range_vkey_commitment, aggregation_vkey) =
         tokio::runtime::Runtime::new()?.block_on(async {
             let client = EnvProver::Cpu(CpuProver::new().await);
             let range_pk = client
-                .setup(range_elf.into())
+                .setup(range_elf_bytes)
                 .await
                 .map_err(|e| anyhow!("range setup failed: {e}"))?;
             let agg_pk = client
-                .setup(agg_elf.into())
+                .setup(agg_elf_bytes)
                 .await
                 .map_err(|e| anyhow!("aggregation setup failed: {e}"))?;
             let range_vkey_commitment = B256::from(u32_to_u8(range_pk.verifying_key().hash_u32()));
@@ -229,16 +212,19 @@ fn sp1_vkeys(args: Sp1VkeysArgs) -> Result<()> {
             anyhow::Ok((range_vkey_commitment, aggregation_vkey))
         })?;
 
+    let range_elf_path = std::env::var("RANGE_ELF_PATH").unwrap_or_default();
+    let agg_elf_path = std::env::var("AGG_ELF_PATH").unwrap_or_default();
+
     let out = serde_json::to_string_pretty(&json!({
         "range_vkey_commitment": range_vkey_commitment,
         "aggregation_vkey": aggregation_vkey,
         "elfs": {
             "world-chain-range-ethereum": {
-                "path": args.range_elf,
+                "path": range_elf_path,
                 "sha256": range_elf_sha256,
             },
             "world-chain-aggregation": {
-                "path": args.agg_elf,
+                "path": agg_elf_path,
                 "sha256": agg_elf_sha256,
             },
         },
