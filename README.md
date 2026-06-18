@@ -50,7 +50,9 @@ World Chain is a blockchain designed for humans. It prioritizes scalability and 
 
 | Crate | Description |
 |-------|-------------|
-| [`world-chain-proof`](./proofs/proof) | Fault-proof library with pluggable SP1 and Nitro TEE backends. |
+| [`world-chain-prover`](./proofs/prover) | Shared host-side prover library. |
+| [`world-chain-prover-sp1`](./proofs/prover-sp1) | SP1 zkVM prover CLI. |
+| [`world-chain-prover-nitro`](./proofs/prover-nitro) | AWS Nitro TEE host prover CLI. |
 | [`world-chain-proof-core`](./proofs/core) | Shared primitives for SP1 and Nitro TEE fault-proof backends. |
 | [`world-chain-proof-nitro`](./proofs/nitro) | AWS Nitro TEE attestation prover for OP Succinct Lite fault proofs. |
 | [`world-chain-proof-protocol`](./proofs/protocol) | Fault-proof protocol definitions and interfaces. |

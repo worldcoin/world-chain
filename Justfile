@@ -97,9 +97,17 @@ build-proof-aggregation-elf:
 # Build all World SP1 proof ELFs
 build-proof-elfs: build-proof-range-elf build-proof-aggregation-elf
 
-# Compute the on-chain verification keys for the committed SP1 proof ELFs
+# Compute the on-chain verification keys for locally generated SP1 proof ELFs
 proof-vkeys *args='':
-    cargo run --release -p proof --features sp1 -- sp1 vkeys $@
+    cargo run --release -p world-chain-prover-sp1 -- vkeys $@
+
+# Build the local SP1 prover Docker image, generating local SP1 proof ELFs first
+build-prover-sp1-image: build-proof-elfs
+    docker buildx build -f Dockerfile.prover --build-arg PROVER_BACKEND=sp1 -t world-chain-prover-sp1:local .
+
+# Build the local Nitro prover Docker image
+build-prover-nitro-image:
+    docker buildx build -f Dockerfile.prover --build-arg PROVER_BACKEND=nitro -t world-chain-prover-nitro:local .
 
 # Generate CLI reference docs for the mdbook
 docs:
