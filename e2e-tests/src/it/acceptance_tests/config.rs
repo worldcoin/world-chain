@@ -35,7 +35,7 @@ struct UserOperationProfileDefaults {
 
 enum UserOperationProfile {
     Heavy,
-    ProdSmoke,
+    Smoke,
 }
 
 #[derive(Clone)]
@@ -252,7 +252,7 @@ impl UserOperationProfile {
                 operations_per_wallet: 50,
                 operation_concurrency: 200,
             },
-            Self::ProdSmoke => UserOperationProfileDefaults {
+            Self::Smoke => UserOperationProfileDefaults {
                 wallet_count: 20,
                 deploy_concurrency: 10,
                 operations_per_wallet: 2,
@@ -266,9 +266,9 @@ fn user_operation_profile_from_env() -> eyre::Result<Option<UserOperationProfile
     optional_env("ACCEPTANCE_4337_PROFILE")
         .map(|value| match value.as_str() {
             "heavy" => Ok(UserOperationProfile::Heavy),
-            "prod-smoke" => Ok(UserOperationProfile::ProdSmoke),
+            "smoke" => Ok(UserOperationProfile::Smoke),
             _ => bail!(
-                "unsupported ACCEPTANCE_4337_PROFILE {value:?}; expected one of: heavy, prod-smoke"
+                "unsupported ACCEPTANCE_4337_PROFILE {value:?}; expected one of: heavy, smoke"
             ),
         })
         .transpose()

@@ -47,7 +47,7 @@ jobs:
             include_in_all: false
             rpc_url: https://worldchain-mainnet.g.alchemy.com/public
             bundler_checks_enabled: true
-            acceptance_profile: prod-smoke
+            acceptance_profile: smoke
             bundler_rpc_url: https://rundler-mainnet.worldcoin.dev
             entry_point: "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
             safe_4337_module: ""

@@ -26,7 +26,7 @@ The MVP checks:
 | `ACCEPTANCE_4337_ENTRY_POINT` | no on chain `69420`; yes otherwise | `0x0000000071727De22E5E9d8BAf0edAc6f37da032` on chain `69420` | ERC-4337 v0.7 EntryPoint address. |
 | `ACCEPTANCE_4337_MODULE` | no on chain `69420`; yes otherwise | `0x70673A08a5B1086585d39979Fb2d84FDC0bB6Aaf` on chain `69420` | Safe4337 module used to sign Safe user operations. |
 | `ACCEPTANCE_4337_WALLET_DEPLOYER` | no on chain `69420`; yes otherwise | `0xd1f0B51940DbD6e73891D2a41Ef14483fDC5Cb6e` on chain `69420` | Safe4337 wallet deployer used as the v0.7 factory. |
-| `ACCEPTANCE_4337_PROFILE` | no | unset | Named user-operation load profile. Supported values: `heavy`, `prod-smoke`. Explicit per-knob env vars still override the profile. |
+| `ACCEPTANCE_4337_PROFILE` | no | unset | Named user-operation load profile. Supported values: `heavy`, `smoke`. Explicit per-knob env vars still override the profile. |
 | `ACCEPTANCE_4337_WALLET_COUNT` | no | `20` | Number of ephemeral Safe wallets to deploy through sponsored user operations. |
 | `ACCEPTANCE_4337_DEPLOY_CONCURRENCY` | no | `10` | Max number of wallet-deploying user operations sent and awaited concurrently. Kept at Rundler's unstaked-factory in-flight limit because all deploy ops use the same Safe factory. |
 | `ACCEPTANCE_4337_OPS_PER_WALLET` | no | `3` | Number of post-deploy sponsored no-op user operations to send for each wallet. |
