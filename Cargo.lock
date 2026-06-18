@@ -18958,6 +18958,7 @@ dependencies = [
  "sp1-sdk",
  "tokio",
  "world-chain-proof-core",
+ "world-chain-proof-succinct-elfs",
  "world-chain-proof-succinct-host-utils",
  "world-chain-prover",
 ]

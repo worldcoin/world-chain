@@ -1,12 +1,14 @@
 {
-  "range_vkey_commitment": "0x0000000000000000000000000000000000000000000000000000000000000000",
-  "aggregation_vkey": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "aggregation_vkey": "0x00aa5077b04b567b1ba5c15acf7b784eff66f733cdbc0378c412b96c45c29552",
   "elfs": {
-    "world-chain-proof-succinct-range-ethereum": {
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    "world-chain-aggregation": {
+      "path": "",
+      "sha256": "d808c93c807c155ac08e1f71415bb986ab68adbe35ddfb80d3cc5964b9bc4960"
     },
-    "world-chain-proof-succinct-aggregation": {
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    "world-chain-range-ethereum": {
+      "path": "",
+      "sha256": "eca05f5d04081e10d59ca74ea7c574910764b34719d0d36ff84cd3ae70cc2055"
     }
-  }
+  },
+  "range_vkey_commitment": "0x31dd800942425b8c4bff8d5b0b3bfa722b7fd4805645b5146a77f35f106795c8"
 }
