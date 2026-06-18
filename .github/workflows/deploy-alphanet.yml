@@ -2,7 +2,7 @@ name: deploy-alphanet
 
 # Maintainer-triggered deploy of a PR's code to the world-chain-alphanet devnet.
 # Comment `/deploy-alphanet` on a PR to build that PR's HEAD into a tagged image and
-# dispatch a tag bump to worldcoin/crypto-apps (alphanet apps).
+# publish it to the mutable `alphanet` image tag watched by Argo CD Image Updater.
 #
 # This workflow is privileged (issue_comment runs the copy on the DEFAULT branch with
 # write tokens + secrets). It therefore does NOT check out or execute any PR code; it only
@@ -78,6 +78,13 @@ jobs:
               --json headRefOid,headRepositoryOwner \
               --jq '[.headRefOid, .headRepositoryOwner.login] | @tsv'
           )
+          HEAD_SHA="${HEAD_SHA,,}"
+          if [[ ! "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            gh pr comment "${PR_NUMBER}" --repo "${REPO}" \
+              --body "Could not resolve a valid head SHA for PR #${PR_NUMBER}; deploy aborted."
+            echo "::error::Could not resolve valid PR head SHA: ${HEAD_SHA}"
+            exit 1
+          fi
           OWNER="${REPO%%/*}"
           if [[ "${HEAD_OWNER}" != "${OWNER}" ]]; then
             gh pr comment "${PR_NUMBER}" --repo "${REPO}" \
@@ -85,12 +92,9 @@ jobs:
             echo "::error::Refusing to build fork PR head owned by ${HEAD_OWNER}"
             exit 1
           fi
-          TAG="sha-${HEAD_SHA:0:7}"
-
-          # Hand off to the build workflow. --ref main pins the build workflow + its local
-          # composite actions to the trusted default branch; the PR code is only consumed as
-          # an immutable SHA input to checkout/build. The build derives the image tag from the
-          # SHA, so we only pass the SHA and the PR number to comment on.
+          # Hand off to the build workflow. --ref main selects the trusted workflow
+          # definition; deploy-alphanet-build checks out this immutable SHA as the
+          # Docker context while using trusted local actions from main.
           gh workflow run deploy-alphanet-build.yml \
             --repo "${REPO}" \
             --ref main \
@@ -98,4 +102,4 @@ jobs:
             -f pr="${PR_NUMBER}"
 
           gh pr comment "${PR_NUMBER}" --repo "${REPO}" \
-            --body "🛠️ Building \`${TAG}\` and dispatching an **alphanet** deploy. Track it in the [deploy-alphanet-build runs](https://github.com/${REPO}/actions/workflows/deploy-alphanet-build.yml)."
+            --body "Building \`ghcr.io/${REPO}:alphanet\` from PR #${PR_NUMBER} at \`${HEAD_SHA:0:12}\` and handing deployment to Argo CD Image Updater. Track it in the [deploy-alphanet-build runs](https://github.com/${REPO}/actions/workflows/deploy-alphanet-build.yml)."

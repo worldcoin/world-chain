@@ -34,10 +34,69 @@ permissions:
   id-token: write
 
 jobs:
-  # Prover docker image (the `proof` CLI with sp1 + nitro backends). Built from
-  # Dockerfile.proof defaults, so no build args are passed.
-  build-proof-image:
-    name: build proof image
+  build-elfs:
+    name: build ELFs
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: taiki-e/install-action@just
+      - name: Install SP1 toolchain
+        run: |
+          curl -L https://sp1.succinct.xyz | bash
+          ~/.sp1/bin/sp1up --version v6.1.0
+          echo "$HOME/.sp1/bin" >> $GITHUB_PATH
+      - name: Build ELFs
+        run: just build-proof-elfs
+      - name: Upload ELFs
+        uses: actions/upload-artifact@v4
+        with:
+          name: proof-elfs
+          path: |
+            proofs/succinct/elf/world-chain-range-ethereum
+            proofs/succinct/elf/world-chain-aggregation
+          if-no-files-found: error
+
+  build-sp1-prover-image:
+    name: build world-chain-prover-sp1 image
+    environment: dev
+    needs: [build-elfs]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: arc-public-8xlarge-amd64-runner
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Download ELFs
+        uses: actions/download-artifact@v4
+        with:
+          name: proof-elfs
+          path: proofs/succinct/elf
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: ${{ matrix.platform }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}-sp1
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          dockerfile: Dockerfile.prover
+          build_args: |
+            PROVER_BACKEND=sp1
+          digest_artifact_prefix: digests-prover-sp1
+
+  build-nitro-prover-image:
+    name: build world-chain-prover-nitro image
     environment: dev
     strategy:
       fail-fast: false
@@ -58,16 +117,24 @@ jobs:
         with:
           platform: ${{ matrix.platform }}
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.IMAGE_NAME }}
+          image_name: ${{ env.IMAGE_NAME }}-nitro
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
-          dockerfile: Dockerfile.proof
-          digest_artifact_prefix: digests-proof
+          dockerfile: Dockerfile.prover
+          build_args: |
+            PROVER_BACKEND=nitro
+          digest_artifact_prefix: digests-prover-nitro
 
-  merge-proof-image:
-    name: merge proof image manifest
-    needs: [build-proof-image]
+  merge-prover-images:
+    name: merge ${{ matrix.prover.suffix }} prover image manifest
+    needs: [build-sp1-prover-image, build-nitro-prover-image]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        prover:
+          - { suffix: sp1, prefix: digests-prover-sp1 }
+          - { suffix: nitro, prefix: digests-prover-nitro }
     steps:
       - name: Check Out Repo
         uses: actions/checkout@v6
@@ -75,18 +142,19 @@ jobs:
         uses: ./.github/actions/docker-merge-manifest
         with:
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.IMAGE_NAME }}
-          digest_artifact_prefix: digests-proof
+          image_name: ${{ env.IMAGE_NAME }}-${{ matrix.prover.suffix }}
+          digest_artifact_prefix: ${{ matrix.prover.prefix }}
           tags: |
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
             type=sha
 
   # Service deployable images, built from the same Dockerfile.proof via
   # PROVER_PACKAGE/PROVER_BIN/FEATURES build-args. Each pushes to its own
-  # `<repo>-proof-<service>` image so tags do not collide with the `proof` image.
+  # `<repo>-<service>` image so tags do not collide with the `proof` image.
   build-service-images:
     name: build ${{ matrix.service.bin }} image
     environment: dev
+    needs: [build-elfs]
     strategy:
       fail-fast: false
       matrix:
@@ -105,19 +173,24 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref }}
+      - name: Download ELFs
+        if: matrix.service.bin == 'sp1-worker'
+        uses: actions/download-artifact@v4
+        with:
+          name: proof-elfs
+          path: proofs/succinct/elf
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
           platform: ${{ matrix.platform.platform }}
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.IMAGE_NAME }}${{ matrix.service.suffix }}
+          image_name: ${{ github.repository }}${{ matrix.service.suffix }}
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
-          dockerfile: Dockerfile.proof
+          dockerfile: Dockerfile.prover
           build_args: |
             PROVER_PACKAGE=${{ matrix.service.package }}
             PROVER_BIN=${{ matrix.service.bin }}
-            FEATURES=
           digest_artifact_prefix: ${{ matrix.service.prefix }}
 
   merge-service-images:
@@ -140,7 +213,7 @@ jobs:
         uses: ./.github/actions/docker-merge-manifest
         with:
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.IMAGE_NAME }}${{ matrix.service.suffix }}
+          image_name: ${{ github.repository }}${{ matrix.service.suffix }}
           digest_artifact_prefix: ${{ matrix.service.prefix }}
           tags: |
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
