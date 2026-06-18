@@ -3,8 +3,9 @@ name: deploy-alphanet-build
 # Build + push a world-chain image for a pinned commit to the mutable `alphanet`
 # tag. Argo CD Image Updater watches that tag and handles the rollout.
 # Triggered (workflow_dispatch) by deploy-alphanet.yml after it has authorized
-# the commenter and resolved the PR head. It receives an immutable `sha` input,
-# so there is no time-of-check/time-of-use window.
+# the commenter and resolved the PR head. It receives the PR number plus an
+# immutable `sha` input, checks out trusted local actions from the workflow ref,
+# checks out the Docker source at that SHA, and verifies it before building.
 
 on:
   workflow_dispatch:
@@ -30,6 +31,7 @@ permissions:
   packages: write
   id-token: write
   pull-requests: write
+  issues: write
 
 jobs:
   prep:
@@ -57,19 +59,69 @@ jobs:
             platform: linux/arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Check Out commit
+      - name: Resolve build target
+        id: target
+        env:
+          INPUT_SHA: ${{ inputs.sha }}
+          PR_NUMBER: ${{ inputs.pr }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="${INPUT_SHA,,}"
+          if [[ ! "${sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Invalid sha input: ${INPUT_SHA}"
+            exit 1
+          fi
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+          if [[ -n "${PR_NUMBER}" ]]; then
+            if [[ ! "${PR_NUMBER}" =~ ^[0-9]+$ ]]; then
+              echo "::error::Invalid PR input: ${PR_NUMBER}"
+              exit 1
+            fi
+            echo "cache_scope=alphanet-pr-${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          else
+            echo "cache_scope=alphanet-${sha:0:12}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check Out workflow actions
         uses: actions/checkout@v6
         with:
-          ref: ${{ inputs.sha }}
+          ref: ${{ github.sha }}
+          path: workflow
+
+      - name: Check Out PR source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          path: source
+
+      - name: Verify checked out commit
+        env:
+          EXPECTED_SHA: ${{ steps.target.outputs.sha }}
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Expected PR source ${EXPECTED_SHA}, checked out ${actual_sha}"
+            exit 1
+          fi
+          echo "Building PR source at ${actual_sha}"
+
       - name: Build and push digest
-        uses: ./.github/actions/docker-build-push-digest
+        uses: ./workflow/.github/actions/docker-build-push-digest
         with:
           platform: ${{ matrix.platform }}
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}
           aws_region: ${{ env.AWS_REGION }}
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
-          git_sha: ${{ inputs.sha }}
+          git_sha: ${{ steps.target.outputs.sha }}
+          context: source
+          dockerfile: source/Dockerfile
+          cache_scope: ${{ steps.target.outputs.cache_scope }}
 
   merge:
     name: merge multi-arch manifest
@@ -78,10 +130,13 @@ jobs:
       - build-and-push
     runs-on: ubuntu-latest
     steps:
-      - name: Check Out Repo
+      - name: Check Out workflow actions
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: workflow
       - name: Merge multi-arch manifest
-        uses: ./.github/actions/docker-merge-manifest
+        uses: ./workflow/.github/actions/docker-merge-manifest
         with:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}
@@ -102,8 +157,9 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ inputs.pr }}
           TAG: ${{ needs.prep.outputs.tag }}
+          SHA: ${{ inputs.sha }}
         shell: bash
         run: |
           set -euo pipefail
           gh pr comment "${PR_NUMBER}" --repo "${REPO}" \
-            --body "Built \`${REGISTRY}/${IMAGE_NAME}:${TAG}\`. Argo CD Image Updater will detect the new digest and sync alphanet."
+            --body "Built \`${REGISTRY}/${IMAGE_NAME}:${TAG}\` from PR #${PR_NUMBER} at \`${SHA:0:12}\`. Argo CD Image Updater will detect the new digest and sync alphanet."
