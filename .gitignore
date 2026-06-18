@@ -16,3 +16,4 @@ pkg/contracts/sepolia_load_test.json
 **/proptest-regressions/
 /proofs/succinct/elf/*
 !/proofs/succinct/elf/manifest.toml
+!/proofs/succinct/elf/vkeys.json

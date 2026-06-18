@@ -94,6 +94,18 @@ prove *args='':
 proof-vkeys *args='':
     cargo run --release -p proof --features sp1 -- sp1 vkeys $@
 
+# Recompute vkeys from the embedded ELFs and update proofs/succinct/elf/vkeys.json.
+# Requires the SP1 toolchain (sp1up v6.1.0). Set SP1_BUILD_DOCKER=false to skip Docker
+# and use a locally installed sp1-build toolchain instead.
+update-proof-vkeys:
+    SP1_BUILD_DOCKER=false cargo run -p proof --features sp1 -- sp1 vkeys --output proofs/succinct/elf/vkeys.json
+
+# Verify that the committed vkeys.json matches what the current source produces.
+# Used by CI. Fails if they differ.
+verify-proof-vkeys:
+    SP1_BUILD_DOCKER=false cargo run -p proof --features sp1 -- sp1 vkeys --output /tmp/vkeys-actual.json
+    diff proofs/succinct/elf/vkeys.json /tmp/vkeys-actual.json || (echo "ERROR: vkeys.json is out of date. Run 'just update-proof-vkeys' to regenerate." && exit 1)
+
 # Generate CLI reference docs for the mdbook
 docs:
     cargo xtask docs
