@@ -34,33 +34,30 @@ use world_chain_proof_core::{
     witness::WorldRangeWitnessData,
 };
 
-// Used only by the feature-gated `enclave`/`aws_nitro` modules; bind with `as _`
+// Used only by the feature-gated `enclave` module; bind with `as _`
 // so the default build doesn't trip `unused_crate_dependencies`.
 use anyhow as _;
-// `alloy-primitives` is used by the `aws_nitro` host module and the test modules; bind it
+// `alloy-primitives` is used by the `enclave` host module and the test modules; bind it
 // here so the default non-test lib build doesn't trip `unused_crate_dependencies`.
 use alloy_primitives as _;
 use k256 as _;
 use tracing as _;
 // `tracing-subscriber` is only used by the `enclave`/`test-attestation` bins, not the
-// lib; bind it here under the features that pull it in so the lib target doesn't trip
+// lib; bind it here under the feature that pulls it in so the lib target doesn't trip
 // `unused_crate_dependencies`.
-#[cfg(all(
-    any(feature = "aws_nitro", feature = "enclave-bin"),
-    target_os = "linux"
-))]
+#[cfg(all(feature = "enclave", target_os = "linux"))]
 use tracing_subscriber as _;
 
 pub mod attestation;
 
-#[cfg(all(feature = "aws_nitro", target_os = "linux"))]
+#[cfg(all(feature = "enclave", target_os = "linux"))]
 pub mod host;
 pub mod protocol;
 
 #[cfg(all(feature = "enclave", target_os = "linux"))]
 pub mod enclave;
 
-#[cfg(all(feature = "aws_nitro", target_os = "linux"))]
+#[cfg(all(feature = "enclave", target_os = "linux"))]
 pub use host::{NitroProver, NitroProverError};
 
 /// Length, in bytes, of a Nitro PCR slot value (SHA-384 digest).
@@ -243,7 +240,7 @@ pub mod prelude {
         NitroRangeProofArtifact, NitroRangeProofRequest, WorldNitroProver, range_user_data,
         signing_commitment,
     };
-    #[cfg(all(feature = "aws_nitro", target_os = "linux"))]
+    #[cfg(all(feature = "enclave", target_os = "linux"))]
     pub use crate::{NitroProver, NitroProverError};
 }
 

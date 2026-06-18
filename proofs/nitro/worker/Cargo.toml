@@ -20,8 +20,8 @@ path = "src/main.rs"
 world-chain-proof-worker.workspace = true
 world-chain-prover-service.workspace = true
 
-# Nitro prover (host-side, requires Linux + aws_nitro feature)
-world-chain-proof-nitro = { path = "..", features = ["aws_nitro"] }
+# Nitro prover (host-side, requires Linux + enclave feature)
+world-chain-proof-nitro = { path = "..", features = ["enclave"] }
 
 # Witness generation (shared with sp1-worker)
 world-chain-proof-kona-host-utils.workspace = true

@@ -1,0 +1,109 @@
+name: deploy-alphanet-build
+
+# Build + push a world-chain image for a pinned commit to the mutable `alphanet`
+# tag. Argo CD Image Updater watches that tag and handles the rollout.
+# Triggered (workflow_dispatch) by deploy-alphanet.yml after it has authorized
+# the commenter and resolved the PR head. It receives an immutable `sha` input,
+# so there is no time-of-check/time-of-use window.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit SHA to build (immutable, 40-char)."
+        required: true
+        type: string
+      pr:
+        description: "PR number to comment the result on (optional)."
+        required: false
+        type: string
+
+env:
+  IMAGE_NAME: ${{ github.repository }}
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  AWS_REGION: us-east-1
+  SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  pull-requests: write
+
+jobs:
+  prep:
+    name: resolve tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: echo "tag=alphanet" >> "$GITHUB_OUTPUT"
+
+  build-and-push:
+    name: build and push docker
+    needs: prep
+    environment: dev
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: arc-public-8xlarge-amd64-runner
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check Out commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.sha }}
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: ${{ matrix.platform }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          git_sha: ${{ inputs.sha }}
+
+  merge:
+    name: merge multi-arch manifest
+    needs:
+      - prep
+      - build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+      - name: Merge multi-arch manifest
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.prep.outputs.tag }}
+
+  comment-result:
+    name: comment result
+    needs:
+      - prep
+      - merge
+    if: ${{ inputs.pr != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment build result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr }}
+          TAG: ${{ needs.prep.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh pr comment "${PR_NUMBER}" --repo "${REPO}" \
+            --body "Built \`${REGISTRY}/${IMAGE_NAME}:${TAG}\`. Argo CD Image Updater will detect the new digest and sync alphanet."

@@ -54,6 +54,7 @@ contract WorldChainProofSystemTest is Test {
             PROOF_PERIOD,
             PROPOSER_BOND,
             CHALLENGER_BOND,
+            WorldChainProofLib.PROOF_THRESHOLD,
             validityVerifier,
             teeVerifier,
             councilVerifier,
@@ -114,6 +115,52 @@ contract WorldChainProofSystemTest is Test {
 
         assertEq(game.proofCount(), 2);
         assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.FINALIZED));
+    }
+
+    function testThresholdOneFinalizesWithSingleLane() public {
+        WorldChainProofSystemFactory thresholdOne = _thresholdFactory(1);
+
+        vm.prank(proposer);
+        (address gameAddress, bytes32 rootId) = thresholdOne.propose{value: PROPOSER_BOND}(
+            address(anchor), keccak256("threshold-one-root"), 10, keccak256("threshold-one-intermediate")
+        );
+        WorldChainProofSystemGame game = WorldChainProofSystemGame(payable(gameAddress));
+        assertEq(game.PROOF_THRESHOLD(), 1);
+
+        _challenge(game, challenger);
+        game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
+
+        assertEq(game.proofCount(), 1);
+        assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.FINALIZED));
+    }
+
+    function testFactoryRejectsOutOfRangeThreshold() public {
+        vm.expectRevert(WorldChainProofSystemFactory.InvalidActivationParameters.selector);
+        _thresholdFactory(0);
+
+        vm.expectRevert(WorldChainProofSystemFactory.InvalidActivationParameters.selector);
+        _thresholdFactory(WorldChainProofLib.PROOF_LANE_COUNT + 1);
+    }
+
+    function _thresholdFactory(uint8 threshold) internal returns (WorldChainProofSystemFactory) {
+        return new WorldChainProofSystemFactory(
+            WorldChainProofLib.Domain({
+                chainId: 4801,
+                proofSystemVersion: 1,
+                rollupConfigHash: keccak256("world-chain-devnet-rollup-config"),
+                blockInterval: 10,
+                intermediateBlockInterval: 5
+            }),
+            CHALLENGE_PERIOD,
+            PROOF_PERIOD,
+            PROPOSER_BOND,
+            CHALLENGER_BOND,
+            threshold,
+            validityVerifier,
+            teeVerifier,
+            councilVerifier,
+            staking
+        );
     }
 
     function testChallengedRootInvalidatesAfterProofDeadlineWithInsufficientLanes() public {
