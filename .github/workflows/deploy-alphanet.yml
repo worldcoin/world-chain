@@ -78,6 +78,13 @@ jobs:
               --json headRefOid,headRepositoryOwner \
               --jq '[.headRefOid, .headRepositoryOwner.login] | @tsv'
           )
+          HEAD_SHA="${HEAD_SHA,,}"
+          if [[ ! "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            gh pr comment "${PR_NUMBER}" --repo "${REPO}" \
+              --body "Could not resolve a valid head SHA for PR #${PR_NUMBER}; deploy aborted."
+            echo "::error::Could not resolve valid PR head SHA: ${HEAD_SHA}"
+            exit 1
+          fi
           OWNER="${REPO%%/*}"
           if [[ "${HEAD_OWNER}" != "${OWNER}" ]]; then
             gh pr comment "${PR_NUMBER}" --repo "${REPO}" \
@@ -85,10 +92,9 @@ jobs:
             echo "::error::Refusing to build fork PR head owned by ${HEAD_OWNER}"
             exit 1
           fi
-          # Hand off to the build workflow. --ref main pins the build workflow + its local
-          # composite actions to the trusted default branch; the PR code is only consumed as
-          # an immutable SHA input to checkout/build. The build publishes the mutable alphanet
-          # image tag, so Image Updater can deploy it automatically.
+          # Hand off to the build workflow. --ref main selects the trusted workflow
+          # definition; deploy-alphanet-build checks out this immutable SHA as the
+          # Docker context while using trusted local actions from main.
           gh workflow run deploy-alphanet-build.yml \
             --repo "${REPO}" \
             --ref main \
@@ -96,4 +102,4 @@ jobs:
             -f pr="${PR_NUMBER}"
 
           gh pr comment "${PR_NUMBER}" --repo "${REPO}" \
-            --body "Building \`ghcr.io/${REPO}:alphanet\` and handing deployment to Argo CD Image Updater. Track it in the [deploy-alphanet-build runs](https://github.com/${REPO}/actions/workflows/deploy-alphanet-build.yml)."
+            --body "Building \`ghcr.io/${REPO}:alphanet\` from PR #${PR_NUMBER} at \`${HEAD_SHA:0:12}\` and handing deployment to Argo CD Image Updater. Track it in the [deploy-alphanet-build runs](https://github.com/${REPO}/actions/workflows/deploy-alphanet-build.yml)."
