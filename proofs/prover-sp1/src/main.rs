@@ -1,5 +1,5 @@
-use std::{fs, path::PathBuf};
 use sha2::{Digest, Sha256};
+use std::{fs, path::PathBuf};
 
 use alloy_primitives::{Address, B256};
 use anyhow::{Context, Result};
@@ -155,7 +155,9 @@ fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
         prover = args.prover,
     );
 
-    let prover = EnvSuccinctProver::new(args.prover, mode)?;
+    let range_elf = world_chain_proof_succinct_elfs::range_elf();
+    let agg_elf = world_chain_proof_succinct_elfs::aggregation_elf();
+    let prover = EnvSuccinctProver::new_with_elfs(args.prover, range_elf, agg_elf, mode)?;
     let artifact = prove_validity(
         &host,
         &prover,
@@ -188,10 +190,8 @@ fn sp1_vkeys(args: Sp1VkeysArgs) -> Result<()> {
     use anyhow::anyhow;
     use sp1_sdk::{CpuProver, HashableKey, Prover, ProvingKey, env::EnvProver};
     use world_chain_proof_core::types::u32_to_u8;
-    use world_chain_proof_succinct_host_utils::env_prover::{aggregation_elf, range_elf};
-
-    let range_elf_bytes = range_elf();
-    let agg_elf_bytes = aggregation_elf();
+    let range_elf_bytes = world_chain_proof_succinct_elfs::range_elf();
+    let agg_elf_bytes = world_chain_proof_succinct_elfs::aggregation_elf();
 
     let range_elf_sha256 = hex::encode(Sha256::digest(range_elf_bytes.as_ref()));
     let agg_elf_sha256 = hex::encode(Sha256::digest(agg_elf_bytes.as_ref()));
