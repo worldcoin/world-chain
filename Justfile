@@ -95,17 +95,16 @@ proof-vkeys *args='':
     cargo run --release -p world-chain-prover-sp1 -- vkeys $@
 
 # Recompute vkeys from the embedded ELFs and update proofs/succinct/elf/vkeys.json.
-# Requires the SP1 toolchain (sp1up v6.1.0). Set SP1_BUILD_DOCKER=false to skip Docker
-# and use a locally installed sp1-build toolchain instead.
+# Requires Docker and the SP1 toolchain (sp1up v6.1.0) for reproducible ELF builds.
 update-proof-vkeys:
-    SP1_BUILD_DOCKER=false cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-update.json
+    cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-update.json
     jq -S . /tmp/vkeys-update.json > proofs/succinct/elf/vkeys.json
 
 # Verify that the committed vkeys.json matches what the current source produces.
 # Uses jq -S to normalize key ordering before comparing, so the diff is not
 # sensitive to JSON insertion order. Used by CI. Fails if they differ.
 verify-proof-vkeys:
-    SP1_BUILD_DOCKER=false cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-actual.json
+    cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-actual.json
     jq -S . proofs/succinct/elf/vkeys.json > /tmp/vkeys-committed.json
     jq -S . /tmp/vkeys-actual.json > /tmp/vkeys-actual-normalized.json
     diff /tmp/vkeys-committed.json /tmp/vkeys-actual-normalized.json || (echo "ERROR: vkeys.json is out of date. Run 'just update-proof-vkeys' to regenerate." && exit 1)
