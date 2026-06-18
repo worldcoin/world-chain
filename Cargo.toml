@@ -103,6 +103,7 @@ world-chain-proof-succinct-host-utils = { path = "proofs/succinct/utils/host", d
 world-chain-proof-succinct-utils = { path = "proofs/succinct/utils/proof", default-features = false }
 world-chain-proposer = { path = "proofs/proposer", default-features = false }
 world-chain-challenger = { path = "proofs/challenger", default-features = false }
+world-chain-prover = { path = "proofs/prover", default-features = false }
 world-chain-prover-service = { path = "proofs/prover-service", default-features = false }
 world-chain-proof-worker = { path = "proofs/worker", default-features = false }
 world-chain-sp1-worker = { path = "proofs/sp1-worker", default-features = false }
