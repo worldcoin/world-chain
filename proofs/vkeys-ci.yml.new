@@ -8,9 +8,7 @@
 #   - `just verify-proof-vkeys` recipe in Justfile (already added)
 #   - proofs/succinct/elf/vkeys.json committed (already added)
 #
-# The `proof` package (proofs/bin) must be added to the workspace Cargo.toml
-# for `cargo run -p proof` to resolve. Until then this job will fail at the
-# cargo step — add the Cargo.toml for proofs/bin before enabling.
+# Uses the `world-chain-prover-sp1` package for the `vkeys` subcommand.
 name: verify-vkeys
 
 on:
