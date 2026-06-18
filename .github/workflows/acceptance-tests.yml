@@ -100,6 +100,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         if: ${{ (inputs.network == 'all' && matrix.include_in_all) || inputs.network == matrix.network }}
 
+      - uses: arduino/setup-protoc@v3
+        if: ${{ (inputs.network == 'all' && matrix.include_in_all) || inputs.network == matrix.network }}
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Cache
         if: ${{ (inputs.network == 'all' && matrix.include_in_all) || inputs.network == matrix.network }}
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.05
