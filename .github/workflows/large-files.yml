@@ -1,0 +1,23 @@
+name: Large Files
+
+on:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-large-files:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+
+      - uses: pre-commit/action@v3.0.1
+        with:
+          extra_args: check-added-large-files --from-ref ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'origin/main' }} --to-ref HEAD
