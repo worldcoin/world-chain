@@ -145,15 +145,12 @@ proof sp1 execute --witness <FILE>
 | Flag | Env | Description |
 |---|---|---|
 | `--witness <FILE>` | `WITNESS_PATH` | rkyv witness produced by `proof witness` |
-
-The SP1 range ELF is embedded into the `proof` binary at compile time via
-`sp1_sdk::include_elf!()` (see [`elf-management.md`](./elf-management.md)) — no `--elf` flag
-or `RANGE_ELF_PATH` lookup.
+| `--elf <FILE>` | `RANGE_ELF_PATH` | SP1 range ELF binary to execute |
 
 **Example**
 
 ```bash
-proof sp1 execute --witness ./witness.bin
+proof sp1 execute --witness ./witness.bin --elf ./range-elf
 ```
 
 ### `sp1 prove`
@@ -377,13 +374,14 @@ proof nitro prove [RPC flags] [--cid <N>] [--pcr0/1/2 <HEX>] [--output <FILE>]
 | `--rollup-config <FILE>` | `ROLLUP_CONFIG` | — | |
 | `--rollup-config-hash <HASH>` | `ROLLUP_CONFIG_HASH` | — | |
 | `--cid <N>` | `ENCLAVE_CID` | `16` | vsock CID of the Nitro enclave |
-| `--pcr0 <HEX>` | `PCR0` | — | Expected PCR0 (48-byte hex). Omit all three to skip image verification |
-| `--pcr1 <HEX>` | `PCR1` | — | Expected PCR1 |
-| `--pcr2 <HEX>` | `PCR2` | — | Expected PCR2 |
+| `--pcr0 <HEX>` | `PCR0` | — | Expected PCR0 (48-byte hex) — required |
+| `--pcr1 <HEX>` | `PCR1` | — | Expected PCR1 — required |
+| `--pcr2 <HEX>` | `PCR2` | — | Expected PCR2 — required |
 | `--output <FILE>` | — | — | Write JSON artifact (boot info + attestation doc hex) |
 
-Providing any one of `--pcr0/1/2` without the other two is an error. Omitting all three skips PCR
-verification — only appropriate in development.
+All three of `--pcr0`, `--pcr1`, and `--pcr2` must be provided; providing only a subset is
+an error. PCR values are the hex-encoded 48-byte enclave measurements that identify the
+exact EIF image running in the Nitro enclave.
 
 **Example**
 

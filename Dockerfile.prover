@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1.10
 # Image for the host-side prover binaries (proofs/*). PROVER_PACKAGE and PROVER_BIN are
-# required build args (no defaults); pass FEATURES to override the default ("sp1,nitro").
-# Example: PROVER_PACKAGE=proof PROVER_BIN=proof (or world-chain-sp1-worker / sp1-worker).
+# required build args (no defaults). FEATURES defaults to empty (package default features
+# apply); pass an explicit comma-separated list to enable additional cargo features.
+# Examples:
+#   PROVER_PACKAGE=world-chain-prover-sp1  PROVER_BIN=world-chain-prover-sp1  FEATURES=
+#   PROVER_PACKAGE=world-chain-sp1-worker  PROVER_BIN=sp1-worker               FEATURES=
 # Mirrors the caching strategy of the main Dockerfile (cargo-chef + sccache/S3).
 FROM public.ecr.aws/docker/library/rust:1.95.0-bookworm AS base
 
@@ -48,7 +51,9 @@ WORKDIR /app
 ARG PROVER_PACKAGE
 ARG PROVER_BIN
 ARG PROFILE="maxperf"
-ARG FEATURES="sp1,nitro"
+# Default empty: package default features apply. Pass an explicit comma-separated
+# list (e.g. FEATURES=embedded-elfs) to enable additional features.
+ARG FEATURES=""
 ARG SCCACHE_BUCKET
 ARG SCCACHE_REGION
 ARG SCCACHE_S3_KEY_PREFIX

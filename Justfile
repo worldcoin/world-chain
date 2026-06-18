@@ -88,7 +88,7 @@ prove *args='':
 
 # Compute the on-chain verification keys for the SP1 proof ELFs.
 # The ELFs are compiled and embedded at build time by
-# `proofs/succinct/utils/host/build.rs` (sp1_build::build_program_with_args
+# `proofs/succinct/elfs/build.rs` (sp1_build::build_program_with_args
 # with docker:true at the pinned SP1 toolchain tag), so just running
 # `cargo run` is enough — no separate ELF build step is required.
 proof-vkeys *args='':
@@ -98,13 +98,15 @@ proof-vkeys *args='':
 # Requires the SP1 toolchain (sp1up v6.1.0). Set SP1_BUILD_DOCKER=false to skip Docker
 # and use a locally installed sp1-build toolchain instead.
 update-proof-vkeys:
-    SP1_BUILD_DOCKER=false cargo run -p world-chain-prover-sp1 -- vkeys --output proofs/succinct/elf/vkeys.json
+    SP1_BUILD_DOCKER=false cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-update.json
+    jq -S . /tmp/vkeys-update.json > proofs/succinct/elf/vkeys.json
 
 # Verify that the committed vkeys.json matches what the current source produces.
-# Used by CI. Fails if they differ.
+# Uses jq -S to normalize key ordering before comparing, so the diff is not
+# sensitive to JSON insertion order. Used by CI. Fails if they differ.
 verify-proof-vkeys:
     SP1_BUILD_DOCKER=false cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-actual.json
-    diff proofs/succinct/elf/vkeys.json /tmp/vkeys-actual.json || (echo "ERROR: vkeys.json is out of date. Run 'just update-proof-vkeys' to regenerate." && exit 1)
+    diff <(jq -S . proofs/succinct/elf/vkeys.json) <(jq -S . /tmp/vkeys-actual.json) || (echo "ERROR: vkeys.json is out of date. Run 'just update-proof-vkeys' to regenerate." && exit 1)
 
 # Generate CLI reference docs for the mdbook
 docs:
