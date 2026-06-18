@@ -66,14 +66,6 @@ struct Sp1ProveArgs {
     #[arg(long, default_value_t = 1)]
     ranges: u64,
 
-    /// Path to the SP1 range ELF binary.
-    #[arg(long, env = "RANGE_ELF_PATH")]
-    range_elf: PathBuf,
-
-    /// Path to the SP1 aggregation ELF binary.
-    #[arg(long, env = "AGG_ELF_PATH")]
-    agg_elf: PathBuf,
-
     /// Prover backend: cpu, mock, or network. Overrides SP1_PROVER env var.
     #[arg(long, env = "SP1_PROVER", default_value = "cpu")]
     prover: world_chain_proof_succinct_host_utils::env_prover::Sp1ProverKind,
@@ -162,11 +154,6 @@ fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
 
     let host = online_host_config(&args.rpc)?;
 
-    let range_elf = fs::read(&args.range_elf)
-        .with_context(|| format!("failed to read {}", args.range_elf.display()))?;
-    let agg_elf = fs::read(&args.agg_elf)
-        .with_context(|| format!("failed to read {}", args.agg_elf.display()))?;
-
     let mode = match args.mode {
         Sp1Mode::Core => SP1ProofMode::Core,
         Sp1Mode::Compressed => SP1ProofMode::Compressed,
@@ -183,7 +170,7 @@ fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
         prover = args.prover,
     );
 
-    let prover = EnvSuccinctProver::new(args.prover, range_elf, agg_elf, mode)?;
+    let prover = EnvSuccinctProver::new(args.prover, mode)?;
     let artifact = prove_validity(
         &host,
         &prover,
