@@ -1,6 +1,9 @@
 use crossbeam_channel::Sender;
-use reth_evm::{ConfigureEvm, Database, EvmEnvFor, ExecutionCtxFor};
+use reth_evm::{
+    ConfigureEngineEvm, ConfigureEvm, Database, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor,
+};
 use reth_optimism_evm::{ConfigurePostExecEvm, PostExecMode};
+use reth_optimism_payload_builder::OpExecData;
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 use reth_revm::{State, witness::ExecutionWitnessRecord};
 
@@ -138,6 +141,26 @@ impl ConfigurePostExecEvm for WitnessCapturingEvmConfig {
     > {
         self.inner
             .post_exec_builder_for_next_block(db, parent, attributes, post_exec_mode)
+    }
+}
+
+impl ConfigureEngineEvm<OpExecData> for WitnessCapturingEvmConfig {
+    fn evm_env_for_payload(&self, payload: &OpExecData) -> Result<EvmEnvFor<Self>, Self::Error> {
+        self.inner.evm_env_for_payload(payload)
+    }
+
+    fn context_for_payload<'a>(
+        &self,
+        payload: &'a OpExecData,
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
+        self.inner.context_for_payload(payload)
+    }
+
+    fn tx_iterator_for_payload(
+        &self,
+        payload: &OpExecData,
+    ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
+        self.inner.tx_iterator_for_payload(payload)
     }
 }
 

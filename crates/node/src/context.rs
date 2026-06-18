@@ -43,7 +43,7 @@ use world_chain_rpc::eth::FlashblocksEthApiBuilder;
 use tracing::info;
 use world_chain_builder::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_evm::{WitnessCapturingEvmConfig, WorldChainExecutorBuilder};
-use world_chain_pool::BasicWorldChainPool;
+use world_chain_pool::{BasicWorldChainPool, tx::WorldChainPooledTransaction};
 use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
 
 use crate::tx_propagation::WorldChainTransactionPropagationPolicy;
@@ -188,9 +188,13 @@ impl<N: FullNodeTypes<Types = WorldChainNode<WorldChainDefaultContext>>> WorldCh
 where
     FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
-    >: PayloadServiceBuilder<N, BasicWorldChainPool<N>, WitnessCapturingEvmConfig>,
+    >: PayloadServiceBuilder<
+            N,
+            BasicWorldChainPool<N, WorldChainPooledTransaction, WitnessCapturingEvmConfig>,
+            WitnessCapturingEvmConfig,
+        >,
 {
-    type Pool = BasicWorldChainPool<N>;
+    type Pool = BasicWorldChainPool<N, WorldChainPooledTransaction, WitnessCapturingEvmConfig>;
     type Net = WorldChainNetworkBuilder;
     type Evm = WitnessCapturingEvmConfig;
     type PayloadServiceBuilder = FlashblocksPayloadServiceBuilder<
