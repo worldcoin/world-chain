@@ -18396,6 +18396,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
+ "reth-tasks",
  "reth-trie-common",
  "revm",
  "revm-database",
@@ -18439,6 +18440,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth 2.0.5",
  "color-eyre",
+ "crossbeam-channel",
  "ed25519-dalek",
  "hex",
  "op-alloy-consensus",
@@ -18485,6 +18487,7 @@ dependencies = [
  "world-chain-rpc",
  "world-chain-test-utils",
  "world-chain-validator",
+ "world-chain-witness",
 ]
 
 [[package]]
@@ -18932,6 +18935,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-types",
+ "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
  "alloy-sol-types",
  "color-eyre",
@@ -18975,6 +18979,7 @@ dependencies = [
  "tracing",
  "world-chain-evm",
  "world-chain-primitives",
+ "world-chain-witness",
 ]
 
 [[package]]

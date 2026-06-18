@@ -4,28 +4,35 @@ use alloy_consensus::Header;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::Bytes;
 use alloy_rpc_types_debug::ExecutionWitness;
-use crossbeam_channel::Sender;
+use crossbeam_channel::Receiver;
 use reth_primitives_traits::{Block, BlockBody};
 use reth_provider::{
     BlockReader, HeaderProvider, ProviderError, ProviderResult, StateProviderFactory,
 };
 use reth_revm::witness::ExecutionWitnessRecord;
+use reth_tasks::TaskExecutor;
 use world_chain_witness::{BlockWitness, WitnessCache};
 
 use super::CapturedBlock;
 
-/// Spawns a background thread that turns each [`CapturedBlock`] into a [`BlockWitness`] and inserts
-/// it into the shared [`WitnessCache`].
+/// Spawns a background thread that drains `receiver`, turning each [`CapturedBlock`] into a
+/// [`BlockWitness`] and inserting it into the shared [`WitnessCache`].
+///
+/// The matching [`Sender`](crossbeam_channel::Sender) is created upstream and handed to the
+/// capturing EVM config, so this takes only the receiving half.
 ///
 /// Assembly is intentionally blocking (state-proof generation and block reads go through the
 /// synchronous reth provider / trie), so this runs on a dedicated [`std::thread`] rather than the
-/// async runtime. Returns the [`Sender`] half of an unbounded channel; the capturing EVM config
-/// holds the sender and the collector owns the receiver.
+/// async runtime.
 ///
 /// Per-block assembly errors are logged and skipped; a single failed block never tears down the
-/// collector loop. The thread exits cleanly once every [`Sender`] is dropped.
-pub fn spawn_witness_collector<P>(provider: P, cache: Arc<WitnessCache>) -> Sender<CapturedBlock>
-where
+/// collector loop. The thread exits cleanly once every sender is dropped.
+pub fn spawn_witness_collector<P>(
+    provider: P,
+    cache: Arc<WitnessCache>,
+    receiver: Receiver<CapturedBlock>,
+    tasks: TaskExecutor,
+) where
     P: StateProviderFactory
         + HeaderProvider<Header = Header>
         + BlockReader<Block: Block<Body: BlockBody<Transaction: Encodable2718>>>
@@ -34,29 +41,22 @@ where
         + Sync
         + 'static,
 {
-    let (tx, rx) = crossbeam_channel::unbounded::<CapturedBlock>();
-
-    std::thread::Builder::new()
-        .name("world-chain-witness-collector".to_string())
-        .spawn(move || {
-            while let Ok(captured) = rx.recv() {
-                let block_number = captured.block_number;
-                match assemble_block_witness(&provider, captured) {
-                    Ok(witness) => cache.insert(witness),
-                    Err(err) => {
-                        tracing::warn!(
-                            target: "world_chain::witness",
-                            block_number,
-                            %err,
-                            "failed to assemble block witness; skipping",
-                        );
-                    }
+    tasks.spawn_critical_task("world-chain-witness-collector", async move {
+        while let Ok(captured) = receiver.recv() {
+            let block_number = captured.block_number;
+            match assemble_block_witness(&provider, captured) {
+                Ok(witness) => cache.insert(witness),
+                Err(err) => {
+                    tracing::warn!(
+                        target: "world_chain::witness",
+                        block_number,
+                        %err,
+                        "failed to assemble block witness; skipping",
+                    );
                 }
             }
-        })
-        .expect("failed to spawn witness collector thread");
-
-    tx
+        }
+    });
 }
 
 /// Assembles a [`BlockWitness`] from a [`CapturedBlock`] by resolving the pre-state proofs and the
@@ -75,6 +75,7 @@ where
         block_number,
         record,
     } = captured;
+
     let ExecutionWitnessRecord {
         hashed_state,
         codes,

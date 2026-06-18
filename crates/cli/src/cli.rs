@@ -133,6 +133,14 @@ mod validator_tests {
     }
 }
 
+/// Arguments controlling the live pre-image witness oracle.
+#[derive(Debug, Clone, Default, clap::Args)]
+pub struct WitnessArgs {
+    /// Enable live pre-image witness collection for the proof system.
+    #[arg(long = "witness.collect", default_value_t = false)]
+    pub collect: bool,
+}
+
 #[derive(Debug, Clone, clap::Args)]
 pub struct WorldChainArgs {
     /// op rollup args
@@ -150,6 +158,10 @@ pub struct WorldChainArgs {
     /// Flashblock args
     #[command(flatten)]
     pub flashblocks: Option<FlashblocksArgs>,
+
+    /// Witness oracle args
+    #[command(flatten)]
+    pub witness: WitnessArgs,
 
     /// Comma-separated list of peer IDs to which transactions should be propagated
     #[arg(long = "tx-peers", value_delimiter = ',', value_name = "PEER_ID")]
@@ -466,6 +478,18 @@ mod tests {
     }
 
     #[test]
+    fn witness_args_default_off() {
+        let args = CommandParser::parse_from(["bin"]).world;
+        assert!(!args.witness.collect);
+    }
+
+    #[test]
+    fn witness_args_parsed() {
+        let args = CommandParser::parse_from(["bin", "--witness.collect"]).world;
+        assert!(args.witness.collect);
+    }
+
+    #[test]
     fn flashblocks_enabled_should_materialize_flashblocks_args() {
         let args = CommandParser::parse_from(["bin", "--flashblocks.enabled"]).world;
         assert!(
@@ -545,6 +569,7 @@ mod tests {
                 block_uncompressed_size_limit: None,
             },
             flashblocks: None,
+            witness: WitnessArgs::default(),
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
             disable_bootnodes: true,
             simulate_enabled: false,

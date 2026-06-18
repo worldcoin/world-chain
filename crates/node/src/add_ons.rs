@@ -1,6 +1,9 @@
 //! World Chain node add-ons.
 
 use core::marker::PhantomData;
+use std::sync::Arc;
+
+use crossbeam_channel::Receiver;
 
 use alloy_consensus::{Block, BlockBody, Header};
 use alloy_primitives::Sealed;
@@ -38,12 +41,13 @@ use reth_rpc_server_types::RethRpcModule;
 use reth_transaction_pool::TransactionPool;
 use tracing::{debug, info};
 use world_chain_chainspec::WorldChainSpec;
-use world_chain_evm::OpTx;
+use world_chain_evm::{CapturedBlock, OpTx, spawn_witness_collector};
 use world_chain_rpc::{
-    EthApiExtServer, SequencerClient as WorldChainSequencerClient, Simulate, SimulateApiServer,
-    WorldChainEthApiExt,
+    DebugWitnessOracle, DebugWitnessOracleApiServer, EthApiExtServer,
+    SequencerClient as WorldChainSequencerClient, Simulate, SimulateApiServer, WorldChainEthApiExt,
     op::{FlashblocksOpApi, OpApiExtServer},
 };
+use world_chain_witness::WitnessCache;
 
 /// Primitive bounds required by the OP RPC extensions used by World Chain.
 pub trait WorldChainRpcPrimitives<Tx>:
@@ -110,6 +114,9 @@ pub struct WorldChainAddOns<
     min_suggested_priority_fee: u64,
     /// Enables the World Chain simulate namespace.
     simulate_enabled: bool,
+    /// Witness oracle plumbing: the shared cache and the receiver drained by the collector thread.
+    /// `Some` only when `--witness.collect` is set.
+    witness: Option<(Arc<WitnessCache>, Receiver<CapturedBlock>)>,
     /// Transaction type carried by the node primitives.
     _tx: PhantomData<fn() -> Tx>,
 }
@@ -132,6 +139,7 @@ where
         enable_tx_conditional: bool,
         min_suggested_priority_fee: u64,
         simulate_enabled: bool,
+        witness: Option<(Arc<WitnessCache>, Receiver<CapturedBlock>)>,
     ) -> Self {
         Self {
             rpc_add_ons,
@@ -143,6 +151,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            witness,
             _tx: PhantomData,
         }
     }
@@ -169,6 +178,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            witness,
             ..
         } = self;
         WorldChainAddOns::new(
@@ -181,6 +191,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            witness,
         )
     }
 
@@ -199,6 +210,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            witness,
             ..
         } = self;
         WorldChainAddOns::new(
@@ -211,6 +223,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            witness,
         )
     }
 
@@ -229,6 +242,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            witness,
             ..
         } = self;
         WorldChainAddOns::new(
@@ -241,6 +255,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            witness,
         )
     }
 
@@ -259,6 +274,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            witness,
             ..
         } = self;
         WorldChainAddOns::new(
@@ -271,6 +287,7 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
+            witness,
         )
     }
 
@@ -342,8 +359,23 @@ where
             enable_tx_conditional,
             historical_rpc,
             simulate_enabled,
+            witness,
             ..
         } = self;
+
+        // Spawn the witness collector and prepare the oracle RPC when collection is enabled. The
+        // collector drains the receiver fed by the capturing EVM config and populates the shared
+        // cache; the oracle serves that cache over `debug_collectRangeWitness`.
+        let witness_oracle = witness.map(|(cache, receiver)| {
+            info!(target: "reth::cli", "Spawning live pre-image witness collector");
+            spawn_witness_collector(
+                ctx.node.provider().clone(),
+                cache.clone(),
+                receiver,
+                ctx.node.task_executor().clone(),
+            );
+            DebugWitnessOracle::new(cache)
+        });
 
         let eth_config =
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
@@ -412,6 +444,14 @@ where
 
                 debug!(target: "reth::cli", "Installing debug payload witness rpc endpoint");
                 modules.merge_if_module_configured(RethRpcModule::Debug, debug_ext.into_rpc())?;
+
+                if let Some(witness_oracle) = witness_oracle {
+                    debug!(target: "reth::cli", "Installing debug witness oracle rpc endpoint");
+                    modules.merge_if_module_configured(
+                        RethRpcModule::Debug,
+                        witness_oracle.into_rpc(),
+                    )?;
+                }
 
                 modules.add_or_replace_if_module_configured(
                     RethRpcModule::Miner,

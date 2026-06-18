@@ -127,9 +127,9 @@ is set; when disabled it is a pure pass-through and the node behaves byte-identi
 
 ### Phase 1 — `crates/witness` (new crate): types + cache
 
-- `WitnessCache`: a bounded ring buffer behind a `parking_lot::Mutex<…>`, keyed by block number,
-  capacity from CLI.
-  Reorg-safe (entries overwritten by block number; stale higher numbers dropped).
+- `WitnessCache<const CAPACITY: usize = 1024>`: a bounded ring buffer behind a
+  `parking_lot::Mutex<…>`, keyed by block number, with a compile-time `CAPACITY`.
+  Reorg-safe (entries overwritten by block number; stale lowest numbers evicted past `CAPACITY`).
 - `BlockWitness { execution_witness: ExecutionWitness, header_rlp: Bytes, transactions: … }`.
   No separate `L2ToL1MessagePasser` proof is stored: post-Isthmus the message-passer storage root
   is carried in the block header's `withdrawals_root`, so the output root
@@ -177,9 +177,10 @@ Lives in `crates/evm` (next to the existing execution module) since it is EVM/re
 
 ### Phase 3 — CLI (`crates/cli`)
 
-- `--witness.collect` (bool, default `false`) and `--witness.cache-size <N>` (default `1024`).
-  Threaded through `WorldChainNodeConfig`. When set: the executor builder installs the capturing
-  wrapper and the add-ons install the RPC.
+- `--witness.collect` (bool, default `false`), threaded through `WorldChainNodeConfig`. When set:
+  the context creates the shared `WitnessCache` + channel, the executor builder installs the
+  capturing wrapper (sender), and the add-ons spawn the collector + install the RPC. Cache
+  retention is the compile-time `WitnessCache` `CAPACITY` (default 1024), not a runtime flag.
 
 ### Phase 4 — RPC (`crates/rpc` + `crates/node/src/add_ons.rs`)
 

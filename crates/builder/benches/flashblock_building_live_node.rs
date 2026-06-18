@@ -1,31 +1,31 @@
 use std::sync::Arc;
 
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, B256, Bytes};
 use alloy_rpc_types_engine::PayloadAttributes as RpcPayloadAttributes;
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadConfig};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::{
-    payload::OpPayloadAttrs, utils::optimism_payload_attributes, OpPayloadAttributes,
+    OpPayloadAttributes, payload::OpPayloadAttrs, utils::optimism_payload_attributes,
 };
 use reth_optimism_payload_builder::config::OpBuilderConfig;
 use reth_payload_primitives::PayloadAttributes as _;
 use reth_provider::{StateProvider, StateProviderFactory};
 use world_chain_builder::{
-    payload_builder::FlashblocksPayloadBuilder, traits::payload_builder::FlashblockPayloadBuilder,
-    WorldChainPayloadBuilderCtxBuilder,
+    WorldChainPayloadBuilderCtxBuilder, payload_builder::FlashblocksPayloadBuilder,
+    traits::payload_builder::FlashblockPayloadBuilder,
 };
 use world_chain_evm::WorldChainEvmConfig;
 use world_chain_node::context::WorldChainDefaultContext;
 use world_chain_test_utils::{
-    builder::{
-        build_flashblock_fixture_eth_transfers_with_provider,
-        build_flashblock_fixture_fib_with_provider,
-        build_flashblock_fixture_world_id_like_bn254_with_provider, CHAIN_SPEC,
-    },
-    e2e_harness::setup::{encode_eip1559_params, WorldChainTestBuilder, TX_SET_L1_BLOCK},
-    utils::signer,
     PBH_DEV_ENTRYPOINT, PBH_DEV_SIGNATURE_AGGREGATOR,
+    builder::{
+        CHAIN_SPEC, build_flashblock_fixture_eth_transfers_with_provider,
+        build_flashblock_fixture_fib_with_provider,
+        build_flashblock_fixture_world_id_like_bn254_with_provider,
+    },
+    e2e_harness::setup::{TX_SET_L1_BLOCK, WorldChainTestBuilder, encode_eip1559_params},
+    utils::signer,
 };
 
 const TOTAL_TX_COUNTS: [usize; 3] = [50, 500, 1000];

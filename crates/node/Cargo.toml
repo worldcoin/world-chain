@@ -21,6 +21,7 @@ world-chain-cli.workspace = true
 world-chain-payload.workspace = true
 world-chain-chainspec.workspace = true
 world-chain-evm.workspace = true
+world-chain-witness.workspace = true
 
 reth-node-builder.workspace = true
 reth-chainspec.workspace = true
@@ -63,6 +64,7 @@ eyre.workspace = true
 tracing.workspace = true
 ed25519-dalek.workspace = true
 hex.workspace = true
+crossbeam-channel.workspace = true
 
 [build-dependencies]
 vergen.workspace = true

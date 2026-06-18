@@ -42,7 +42,7 @@ impl<const CAPACITY: usize> WitnessCache<CAPACITY> {
     }
 
     /// Inserts (or replaces) the witness for its block number, evicting the lowest block numbers
-    /// if the cache is over capacity.
+    /// if the cache is over `CAPACITY`.
     pub fn insert(&self, witness: BlockWitness) {
         let mut inner = self.inner.lock();
         inner.0.insert(witness.block_number, witness);

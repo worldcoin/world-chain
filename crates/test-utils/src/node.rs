@@ -123,6 +123,7 @@ pub fn test_config_with_peers_and_gossip(
             builder,
             pbh,
             flashblocks,
+            witness: Default::default(),
             tx_peers,
             disable_bootnodes: true,
             simulate_enabled: false,
