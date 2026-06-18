@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.10
-# Image for the host-side prover binaries (proofs/*). Defaults to the `proof` CLI built
-# with the sp1 + nitro backends; pass PROVER_PACKAGE/PROVER_BIN/FEATURES to build others
-# (e.g. PROVER_PACKAGE=world-chain-sp1-worker PROVER_BIN=sp1-worker FEATURES="").
+# Image for the host-side prover binaries (proofs/*). PROVER_PACKAGE and PROVER_BIN are
+# required build args (no defaults); pass FEATURES to override the default ("sp1,nitro").
+# Example: PROVER_PACKAGE=proof PROVER_BIN=proof (or world-chain-sp1-worker / sp1-worker).
 # Mirrors the caching strategy of the main Dockerfile (cargo-chef + sccache/S3).
 FROM public.ecr.aws/docker/library/rust:1.95.0-bookworm AS base
 
@@ -45,13 +45,16 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM base AS builder
 WORKDIR /app
 
-ARG PROVER_PACKAGE="proof"
-ARG PROVER_BIN="proof"
+ARG PROVER_PACKAGE
+ARG PROVER_BIN
 ARG PROFILE="maxperf"
 ARG FEATURES="sp1,nitro"
 ARG SCCACHE_BUCKET
 ARG SCCACHE_REGION
 ARG SCCACHE_S3_KEY_PREFIX
+
+RUN test -n "${PROVER_PACKAGE}" || (echo "ERROR: PROVER_PACKAGE build arg is required" && exit 1)
+RUN test -n "${PROVER_BIN}" || (echo "ERROR: PROVER_BIN build arg is required" && exit 1)
 
 # Use the locally-installed SP1 toolchain (installed in the `base` stage)
 # instead of `docker: true` since the Docker daemon isn't reachable from
@@ -94,7 +97,8 @@ RUN apt-get update && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists/*
 
-ARG PROVER_BIN="proof"
+ARG PROVER_BIN
+RUN test -n "${PROVER_BIN}" || (echo "ERROR: PROVER_BIN build arg is required" && exit 1)
 ARG PROFILE="maxperf"
 COPY --from=builder /app/target/${PROFILE}/${PROVER_BIN} /usr/local/bin/${PROVER_BIN}
 RUN ln -s /usr/local/bin/${PROVER_BIN} /usr/local/bin/entrypoint
