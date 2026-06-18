@@ -29,6 +29,7 @@ pub mod witness;
 pub use metrics::{FlashblockExecutionMetrics, PayloadBuildStage};
 pub use witness::{
     CapturedBlock, WitnessBlockExecutorFactory, WitnessCapturingEvmConfig, WitnessExecutor,
+    spawn_witness_collector,
 };
 pub use world_chain_state::{StateDB, access_list, database, state_db};
 
@@ -49,9 +50,23 @@ pub type WorldChainEvmConfig<
     EvmFactory = OpEvmFactory<OpTx>,
 > = OpEvmConfig<WorldChainSpec, N, R, EvmFactory>;
 
-/// Executor builder that constructs [`WorldChainEvmConfig`].
-#[derive(Debug, Copy, Clone, Default)]
-pub struct WorldChainExecutorBuilder;
+/// Executor builder that constructs a [`WitnessCapturingEvmConfig`] over [`WorldChainEvmConfig`].
+///
+/// When a witness sender is provided, the resulting EVM captures each block's execution witness
+/// during import and forwards it over the channel. With no sender (the [`Default`]) the wrapper is
+/// a pure passthrough and the EVM behaves identically to the unwrapped [`WorldChainEvmConfig`].
+#[derive(Debug, Clone, Default)]
+pub struct WorldChainExecutorBuilder {
+    /// Optional channel for forwarding captured block witnesses to the collector.
+    witness_sender: Option<crossbeam_channel::Sender<CapturedBlock>>,
+}
+
+impl WorldChainExecutorBuilder {
+    /// Creates a builder that forwards captured block witnesses over `witness_sender`.
+    pub const fn new(witness_sender: Option<crossbeam_channel::Sender<CapturedBlock>>) -> Self {
+        Self { witness_sender }
+    }
+}
 
 impl<Node> ExecutorBuilder<Node> for WorldChainExecutorBuilder
 where
@@ -59,13 +74,11 @@ where
             Types: reth_node_api::NodeTypes<ChainSpec = WorldChainSpec, Primitives = OpPrimitives>,
         >,
 {
-    type EVM = WorldChainEvmConfig;
+    type EVM = WitnessCapturingEvmConfig;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        Ok(WorldChainEvmConfig::new(
-            ctx.chain_spec(),
-            OpRethReceiptBuilder::default(),
-        ))
+        let inner = WorldChainEvmConfig::new(ctx.chain_spec(), OpRethReceiptBuilder::default());
+        Ok(WitnessCapturingEvmConfig::new(inner, self.witness_sender))
     }
 }
 

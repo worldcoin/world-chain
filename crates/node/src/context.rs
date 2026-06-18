@@ -42,7 +42,7 @@ use world_chain_rpc::eth::FlashblocksEthApiBuilder;
 
 use tracing::info;
 use world_chain_builder::WorldChainPayloadBuilderCtxBuilder;
-use world_chain_evm::{WorldChainEvmConfig, WorldChainExecutorBuilder};
+use world_chain_evm::{WitnessCapturingEvmConfig, WorldChainExecutorBuilder};
 use world_chain_pool::BasicWorldChainPool;
 use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
 
@@ -188,11 +188,11 @@ impl<N: FullNodeTypes<Types = WorldChainNode<WorldChainDefaultContext>>> WorldCh
 where
     FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
-    >: PayloadServiceBuilder<N, BasicWorldChainPool<N>, WorldChainEvmConfig>,
+    >: PayloadServiceBuilder<N, BasicWorldChainPool<N>, WitnessCapturingEvmConfig>,
 {
     type Pool = BasicWorldChainPool<N>;
     type Net = WorldChainNetworkBuilder;
-    type Evm = WorldChainEvmConfig;
+    type Evm = WitnessCapturingEvmConfig;
     type PayloadServiceBuilder = FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
     >;
@@ -278,7 +278,9 @@ where
                 pbh.signature_aggregator,
                 pbh.world_id,
             ))
-            .executor(WorldChainExecutorBuilder)
+            // TODO(witness-oracle): thread the collector's `Sender<CapturedBlock>` here once the
+            // CLI flag is wired (Phase 3). `None` keeps the wrapper a pure passthrough.
+            .executor(WorldChainExecutorBuilder::new(None))
             .payload(FlashblocksPayloadServiceBuilder::new(
                 FlashblocksPayloadBuilderBuilder::new(
                     ctx_builder,

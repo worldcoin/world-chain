@@ -18378,6 +18378,8 @@ dependencies = [
  "alloy-eips 2.0.5",
  "alloy-op-evm",
  "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types-debug",
  "auto_impl",
  "bon",
  "color-eyre",
@@ -18403,6 +18405,7 @@ dependencies = [
  "world-chain-chainspec",
  "world-chain-primitives",
  "world-chain-state",
+ "world-chain-witness",
 ]
 
 [[package]]

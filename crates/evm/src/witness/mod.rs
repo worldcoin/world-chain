@@ -7,10 +7,12 @@
 //! The capture is opt-in: when constructed without a sender the wrappers are pure passthroughs over
 //! the inner config, and the EVM behaves identically to the unwrapped configuration.
 
+mod collector;
 mod config;
 mod executor;
 mod factory;
 
+pub use collector::spawn_witness_collector;
 pub use config::{CapturedBlock, WitnessCapturingEvmConfig};
 pub use executor::WitnessExecutor;
 pub use factory::WitnessBlockExecutorFactory;

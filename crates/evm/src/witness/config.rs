@@ -41,6 +41,18 @@ impl WitnessCapturingEvmConfig {
             WitnessBlockExecutorFactory::new(inner.block_executor_factory().clone(), sender);
         Self { inner, factory }
     }
+
+    /// Returns a reference to the wrapped [`WorldChainEvmConfig`].
+    pub const fn inner(&self) -> &WorldChainEvmConfig {
+        &self.inner
+    }
+
+    /// Consumes the wrapper and returns the wrapped [`WorldChainEvmConfig`].
+    ///
+    /// Used at boundaries (e.g. the block-builder path) that operate on the inner config directly.
+    pub fn into_inner(self) -> WorldChainEvmConfig {
+        self.inner
+    }
 }
 
 impl ConfigureEvm for WitnessCapturingEvmConfig {
