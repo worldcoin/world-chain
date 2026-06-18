@@ -22,15 +22,13 @@ required-features = ["enclave-bin"]
 [[bin]]
 name = "test-attestation"
 path = "src/bin/test_attestation.rs"
-required-features = ["aws_nitro"]
+required-features = ["enclave"]
 
 [features]
 default = []
-# Enables the host-side prover that talks to a running Nitro enclave over vsock.
+# Enables both the host-side prover (talks to a running Nitro enclave over vsock)
+# and the enclave-side code path.
 # Requires Linux (AF_VSOCK is not available on macOS or Windows).
-aws_nitro = ["dep:tokio-vsock", "dep:tracing-subscriber"]
-# Enables the enclave-side code path. The actual `[[bin]]` target additionally
-# requires the `enclave-bin` feature so it is only built for the enclave image.
 enclave = [
     "dep:alloy-consensus",
     "dep:aws-nitro-enclaves-nsm-api",
@@ -38,10 +36,11 @@ enclave = [
     "dep:serde_bytes",
     "dep:serde_cbor",
     "dep:tokio-vsock",
+    "dep:tracing-subscriber",
     "dep:world-chain-proof-kona-client-utils",
 ]
 # Builds the actual enclave binary entry point. Implies `enclave`.
-enclave-bin = ["enclave", "dep:tracing-subscriber"]
+enclave-bin = ["enclave"]
 
 [dependencies]
 # Shared (host + enclave) ----------------------------------------------------
@@ -71,7 +70,7 @@ k256 = { version = "0.13", features = ["ecdsa"] }
 # Linux-only host/enclave deps ----------------------------------------------
 #
 # Cargo features are target-independent, so `--all-features` on macOS still
-# enables `aws_nitro`/`enclave`. Keeping the platform-specific crates in this
+# enables `enclave`. Keeping the platform-specific crates in this
 # target table prevents Cargo from trying to compile AF_VSOCK/NSM deps on
 # non-Linux hosts.
 [target.'cfg(target_os = "linux")'.dependencies]
