@@ -11,13 +11,13 @@ description = "AWS Nitro TEE attestation prover for World Chain OP Succinct Lite
 [lib]
 path = "src/lib.rs"
 
-# Binary that runs inside the Nitro Enclave. Only built when the `enclave-bin`
+# Binary that runs inside the Nitro Enclave. Only built when the `enclave`
 # feature is enabled because it depends on the full kona derivation stack and
 # the NSM device interface that is only available inside the enclave runtime.
 [[bin]]
 name = "world-chain-nitro-enclave"
 path = "src/bin/enclave.rs"
-required-features = ["enclave-bin"]
+required-features = ["enclave"]
 
 [[bin]]
 name = "test-attestation"
@@ -39,8 +39,6 @@ enclave = [
     "dep:tracing-subscriber",
     "dep:world-chain-proof-kona-client-utils",
 ]
-# Builds the actual enclave binary entry point. Implies `enclave`.
-enclave-bin = ["enclave"]
 
 [dependencies]
 # Shared (host + enclave) ----------------------------------------------------
