@@ -1,0 +1,21 @@
+[package]
+name = "world-chain-witness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+alloy-primitives.workspace = true
+alloy-rpc-types-debug.workspace = true
+
+parking_lot.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

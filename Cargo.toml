@@ -23,6 +23,7 @@ members = [
     "crates/pool",
     "crates/evm",
     "crates/state",
+    "crates/witness",
     "crates/pbh",
     "proofs/core",
     "proofs/protocol",
@@ -85,6 +86,7 @@ world-chain-rpc = { path = "crates/rpc", default-features = false }
 world-chain-pool = { path = "crates/pool", default-features = false }
 world-chain-evm = { path = "crates/evm", default-features = false }
 world-chain-state = { path = "crates/state", default-features = false }
+world-chain-witness = { path = "crates/witness", default-features = false }
 world-chain-devnet = { path = "crates/devnet", default-features = false }
 world-chain-test-utils = { path = "crates/test-utils", default-features = false }
 world-chain-proof-core = { path = "proofs/core", default-features = false }

@@ -1,4 +1,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
+// `min_specialization` is required by the witness-capturing block executor to record a witness only
+// when its database is a `State` cache while still implementing the fully generic
+// `BlockExecutorFactory`/`BlockExecutor` traits. See [`witness`].
+#![feature(min_specialization)]
 
 //! World Chain EVM configuration.
 
@@ -20,8 +24,12 @@ use world_chain_chainspec::WorldChainSpec;
 pub mod execution;
 pub mod metrics;
 pub mod utils;
+pub mod witness;
 
 pub use metrics::{FlashblockExecutionMetrics, PayloadBuildStage};
+pub use witness::{
+    CapturedBlock, WitnessBlockExecutorFactory, WitnessCapturingEvmConfig, WitnessExecutor,
+};
 pub use world_chain_state::{StateDB, access_list, database, state_db};
 
 pub trait BlockBuilderExt: BlockBuilder {

@@ -18393,6 +18393,7 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-revm",
  "reth-trie-common",
  "revm",
  "revm-database",
@@ -19211,6 +19212,17 @@ dependencies = [
  "world-chain-state",
  "world-chain-test-utils",
  "world-chain-validator",
+]
+
+[[package]]
+name = "world-chain-witness"
+version = "2.3.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rpc-types-debug",
+ "parking_lot",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
