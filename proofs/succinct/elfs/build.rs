@@ -14,6 +14,15 @@
 //!   `SP1_BUILD_DOCKER=false` to use a locally-installed `cargo-prove` /
 //!   `sp1up` toolchain instead — useful inside container builds where the
 //!   Docker daemon isn't reachable.
+//! - When building locally (without Docker), reproducibility flags are
+//!   injected via `BuildArgs::rustflags` so the resulting ELF bytes are
+//!   identical regardless of where the repository is checked out or which
+//!   user runs the build:
+//!     * `-C debuginfo=0`           – no DWARF sections (no embedded paths)
+//!     * `--remap-path-prefix`      – normalize workspace, cargo-home, and
+//!                                    rustup-home to canonical placeholders
+//!   Docker builds don't need these flags because the container's fixed paths
+//!   already guarantee reproducibility.
 //! - Honours `SP1_SKIP_PROGRAM_BUILD=true` for fast iteration: `sp1_build`
 //!   checks this variable internally — when set, it skips the Docker/local
 //!   guest compilation but **still emits** the `SP1_ELF_*` cargo env-vars so
@@ -62,10 +71,59 @@ fn main() {
         .nth(3)
         .expect("build.rs is expected to live at <repo>/proofs/succinct/elfs")
         .to_path_buf();
+    // Canonicalize so that rustc's --remap-path-prefix matches the actual
+    // absolute paths it sees (resolves any symlinks in the checkout path).
     let workspace_root = workspace_root
+        .canonicalize()
+        .unwrap_or(workspace_root)
         .to_str()
         .expect("workspace root path must be valid UTF-8")
         .to_string();
+
+    // Reproducibility flags for local (non-Docker) builds.
+    //
+    // Without Docker the guest ELF is compiled on the host machine, which
+    // means absolute file paths (embedded by rustc for panic messages and
+    // any residual debug info) vary across machines and checkout locations.
+    // We fix this with --remap-path-prefix so the compiler always sees the
+    // same canonical placeholder strings, producing byte-for-bit identical
+    // ELFs on every machine.
+    //
+    // BuildArgs::rustflags entries are appended to CARGO_ENCODED_RUSTFLAGS
+    // by sp1-build as \x1f-separated tokens, so each flag *word* must be a
+    // separate Vec element (e.g. ["--remap-path-prefix", "old=new"]).
+    //
+    // Docker builds don't need these: the container mounts the repo at a
+    // fixed path (/root/program) so all embedded paths are already uniform.
+    let reproducibility_flags: Vec<String> = if docker {
+        vec![]
+    } else {
+        let cargo_home = std::env::var("CARGO_HOME").unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+            format!("{home}/.cargo")
+        });
+        let rustup_home = std::env::var("RUSTUP_HOME").unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+            format!("{home}/.rustup")
+        });
+
+        vec![
+            // Strip any residual debug info so DWARF sections (which can
+            // embed full source paths) are not present in the ELF.
+            "-C".to_string(),
+            "debuginfo=0".to_string(),
+            // Remap workspace source paths (e.g. /home/alice/world-chain →
+            // /build) so panic location strings are machine-independent.
+            "--remap-path-prefix".to_string(),
+            format!("{workspace_root}=/build"),
+            // Remap cargo registry / git source paths.
+            "--remap-path-prefix".to_string(),
+            format!("{cargo_home}=/cargo"),
+            // Remap rustup toolchain / stdlib sysroot paths.
+            "--remap-path-prefix".to_string(),
+            format!("{rustup_home}=/rustup"),
+        ]
+    };
 
     let build = |program_dir: &str| {
         sp1_build::build_program_with_args(
@@ -75,6 +133,7 @@ fn main() {
                 tag: "v6.1.0".to_string(),
                 ignore_rust_version: true,
                 workspace_directory: Some(workspace_root.clone()),
+                rustflags: reproducibility_flags.clone(),
                 ..Default::default()
             },
         );
