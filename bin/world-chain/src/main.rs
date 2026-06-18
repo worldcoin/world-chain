@@ -8,7 +8,7 @@ use world_chain_chainspec::WorldChainSpec;
 use world_chain_cli::{
     Cli, WorldChainArgs, WorldChainNodeConfig, WorldChainRpcModuleValidator, WorldChainSpecParser,
 };
-use world_chain_evm::{WitnessCapturingEvmConfig, WorldChainEvmConfig};
+use world_chain_evm::WorldChainEvmConfig;
 use world_chain_node::{context::WorldChainDefaultContext, node::WorldChainNode};
 
 #[cfg(all(feature = "jemalloc", unix))]
@@ -52,14 +52,10 @@ fn main() {
                 Ok(())
             },
             |chain_spec: Arc<WorldChainSpec>| {
-                // Offline CLI commands never capture witnesses, so wrap with no sender (the wrapper
-                // is a pure passthrough). The node's `Evm` type is `WitnessCapturingEvmConfig`, so
-                // this matches `Components::Evm`.
+                // Offline CLI commands never capture witnesses; the config defaults to a pure
+                // passthrough (no sender), matching `Components::Evm`.
                 (
-                    WitnessCapturingEvmConfig::new(
-                        WorldChainEvmConfig::optimism(chain_spec.clone()),
-                        None,
-                    ),
+                    WorldChainEvmConfig::optimism(chain_spec.clone()),
                     Arc::new(OpBeaconConsensus::new(chain_spec)),
                 )
             },

@@ -1,21 +1,18 @@
 use std::sync::Arc;
 
-use alloy_consensus::Header;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::Bytes;
 use alloy_rpc_types_debug::ExecutionWitness;
 use crossbeam_channel::Receiver;
 use reth_primitives_traits::{Block, BlockBody};
-use reth_provider::{
-    BlockReader, HeaderProvider, ProviderError, ProviderResult, StateProviderFactory,
-};
+use reth_provider::{ProviderError, ProviderResult};
 use reth_revm::witness::ExecutionWitnessRecord;
 use reth_tasks::TaskExecutor;
 use world_chain_witness::{BlockWitness, WitnessCache};
 
-use super::CapturedBlock;
+use crate::{BlockExecutionWitness, ProviderBounds};
 
-/// Spawns a background thread that drains `receiver`, turning each [`CapturedBlock`] into a
+/// Spawns a background thread that drains `receiver`, turning each [`BlockExecutionWitness`] into a
 /// [`BlockWitness`] and inserting it into the shared [`WitnessCache`].
 ///
 /// The matching [`Sender`](crossbeam_channel::Sender) is created upstream and handed to the
@@ -27,20 +24,12 @@ use super::CapturedBlock;
 ///
 /// Per-block assembly errors are logged and skipped; a single failed block never tears down the
 /// collector loop. The thread exits cleanly once every sender is dropped.
-pub fn spawn_witness_collector<P>(
+pub fn spawn_witness_collector<P: ProviderBounds>(
     provider: P,
     cache: Arc<WitnessCache>,
-    receiver: Receiver<CapturedBlock>,
+    receiver: Receiver<BlockExecutionWitness>,
     tasks: TaskExecutor,
-) where
-    P: StateProviderFactory
-        + HeaderProvider<Header = Header>
-        + BlockReader<Block: Block<Body: BlockBody<Transaction: Encodable2718>>>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-{
+) {
     tasks.spawn_critical_task("world-chain-witness-collector", async move {
         while let Ok(captured) = receiver.recv() {
             let block_number = captured.block_number;
@@ -59,19 +48,17 @@ pub fn spawn_witness_collector<P>(
     });
 }
 
-/// Assembles a [`BlockWitness`] from a [`CapturedBlock`] by resolving the pre-state proofs and the
+/// Assembles a [`BlockWitness`] from a [`BlockExecutionWitness`] by resolving the pre-state proofs and the
 /// block's header and transactions from the provider.
 ///
 /// Mirrors the stock reth witness assembly
 /// ([`ExecutionWitnessRecord::into_execution_witness`]): state-trie nodes come from the parent
 /// state provider, and ancestor headers are pulled for the BLOCKHASH range.
-fn assemble_block_witness<P>(provider: &P, captured: CapturedBlock) -> ProviderResult<BlockWitness>
-where
-    P: StateProviderFactory
-        + HeaderProvider<Header = Header>
-        + BlockReader<Block: Block<Body: BlockBody<Transaction: Encodable2718>>>,
-{
-    let CapturedBlock {
+fn assemble_block_witness<P: ProviderBounds>(
+    provider: &P,
+    captured: BlockExecutionWitness,
+) -> ProviderResult<BlockWitness> {
+    let BlockExecutionWitness {
         block_number,
         record,
     } = captured;

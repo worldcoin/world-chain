@@ -147,7 +147,7 @@ fn bench_build_flashblock_case<F>(
         let builder = build_live_payload_builder(
             node.node.inner.pool.clone(),
             provider,
-            node.node.inner.evm_config.clone().into_inner(),
+            node.node.inner.evm_config.clone(),
             bal_enabled,
         );
 

@@ -16,7 +16,7 @@ use reth_provider::{
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::sync::Arc;
 use world_chain_chainspec::WorldChainSpec;
-use world_chain_evm::{WitnessCapturingEvmConfig, WorldChainEvmConfig};
+use world_chain_evm::WorldChainEvmConfig;
 #[derive(Debug, Clone)]
 pub struct FlashblocksPayloadBuilderBuilder<CtxBuilder> {
     pub ctx_builder: CtxBuilder,
@@ -91,52 +91,5 @@ where
         };
 
         Ok(payload_builder)
-    }
-}
-
-/// Bridges the node's [`WitnessCapturingEvmConfig`] (`Node::Evm`) to the block-builder path, which
-/// operates on the inner [`WorldChainEvmConfig`] directly. Witness capture is only relevant to the
-/// execution (`newPayload`) path, so the builder unwraps the wrapper and proceeds unchanged.
-impl<Node, Pool, CtxBuilder> PayloadBuilderBuilder<Node, Pool, WitnessCapturingEvmConfig>
-    for FlashblocksPayloadBuilderBuilder<CtxBuilder>
-where
-    Node: FullNodeTypes,
-    Node::Provider: StateProviderFactory
-        + ChainSpecProvider<ChainSpec = WorldChainSpec>
-        + Clone
-        + DatabaseProviderFactory<Provider: HeaderProvider<Header = alloy_consensus::Header>>
-        + HeaderProvider<Header = alloy_consensus::Header>,
-    Node::Types: NodeTypes<
-            ChainSpec = WorldChainSpec,
-            Payload: PayloadTypes<
-                BuiltPayload = OpBuiltPayload,
-                PayloadAttributes = OpPayloadAttrs,
-            >,
-        >,
-    Pool: TransactionPool<Transaction: OpPooledTx + PoolTransaction<Consensus = OpTxEnvelope>>
-        + Unpin
-        + 'static,
-    CtxBuilder: PayloadBuilderCtxBuilder<
-            Node::Provider,
-            WorldChainEvmConfig,
-            WorldChainSpec,
-            PayloadBuilderCtx: PayloadBuilderCtx<Transaction = Pool::Transaction>,
-        > + 'static,
-{
-    type PayloadBuilder = FlashblocksPayloadBuilder<Pool, Node::Provider, CtxBuilder, ()>;
-
-    async fn build_payload_builder(
-        self,
-        ctx: &BuilderContext<Node>,
-        pool: Pool,
-        evm_config: WitnessCapturingEvmConfig,
-    ) -> eyre::Result<Self::PayloadBuilder> {
-        <Self as PayloadBuilderBuilder<Node, Pool, WorldChainEvmConfig>>::build_payload_builder(
-            self,
-            ctx,
-            pool,
-            evm_config.into_inner(),
-        )
-        .await
     }
 }

@@ -41,7 +41,7 @@ use reth_rpc_server_types::RethRpcModule;
 use reth_transaction_pool::TransactionPool;
 use tracing::{debug, info};
 use world_chain_chainspec::WorldChainSpec;
-use world_chain_evm::{CapturedBlock, OpTx, spawn_witness_collector};
+use world_chain_evm::{BlockExecutionWitness, OpTx, spawn_witness_collector};
 use world_chain_rpc::{
     DebugWitnessOracle, DebugWitnessOracleApiServer, EthApiExtServer,
     SequencerClient as WorldChainSequencerClient, Simulate, SimulateApiServer, WorldChainEthApiExt,
@@ -116,7 +116,7 @@ pub struct WorldChainAddOns<
     simulate_enabled: bool,
     /// Witness oracle plumbing: the shared cache and the receiver drained by the collector thread.
     /// `Some` only when `--witness.collect` is set.
-    witness: Option<(Arc<WitnessCache>, Receiver<CapturedBlock>)>,
+    witness: Option<(Arc<WitnessCache>, Receiver<BlockExecutionWitness>)>,
     /// Transaction type carried by the node primitives.
     _tx: PhantomData<fn() -> Tx>,
 }
@@ -139,7 +139,7 @@ where
         enable_tx_conditional: bool,
         min_suggested_priority_fee: u64,
         simulate_enabled: bool,
-        witness: Option<(Arc<WitnessCache>, Receiver<CapturedBlock>)>,
+        witness: Option<(Arc<WitnessCache>, Receiver<BlockExecutionWitness>)>,
     ) -> Self {
         Self {
             rpc_add_ons,

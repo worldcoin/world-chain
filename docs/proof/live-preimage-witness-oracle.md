@@ -144,30 +144,32 @@ is set; when disabled it is a pure pass-through and the node behaves byte-identi
 Lives in `crates/evm` (next to the existing execution module) since it is EVM/reth-coupled;
 `crates/witness` stays the minimal shared cache/wire layer.
 
-- `WitnessCapturingEvmConfig`: a newtype over `WorldChainEvmConfig` holding an
-  `Option<Sender<CapturedBlock>>`. Implements `ConfigureEvm` + `ConfigurePostExecEvm` by delegation.
-  Its `type BlockExecutorFactory = WitnessBlockExecutorFactory` wraps the inner
-  `OpBlockExecutorFactory`; `create_executor` returns a `WitnessExecutor` that delegates every
-  method to the inner executor and, in `finish()`, snapshots
+- The capture lives **directly on `WorldChainEvmConfig`** (no separate wrapper type).
+  `WorldChainEvmConfig<N, R, EvmFactory>` becomes a struct holding the inner `OpEvmConfig` plus an
+  optional witness `Sender<BlockExecutionWitness>` (carried by its block-executor factory). It implements
+  `ConfigureEvm` + `ConfigurePostExecEvm` + `ConfigureEngineEvm` by delegating to the inner config,
+  except its `BlockExecutorFactory` wraps `OpBlockExecutorFactory`: `create_executor` returns a
+  `WitnessExecutor` that delegates every method to the inner executor and, in `finish()`, snapshots
   `ExecutionWitnessRecord::from_executed_state(self.inner.evm().db(), mode)` from the live revm
-  `State` cache (full read+write set, **zero re-execution**) and sends `CapturedBlock { block_number,
-  record }` to the collector. When the sender is `None`, every path delegates straight through —
-  exactly today's behavior.
-- Capture is on the **validator** path only: `BasicEngineValidator<Node::Provider, Node::Evm, …>`
-  (`reth … rpc.rs:1457,1472`) is hard-tied to `Node::Evm` and executes via
-  `evm_config.create_executor` (`payload_validator.rs:1053`; the BAL path
-  `bal/execute.rs:143` routes through the same factory). So making `Node::Evm` the wrapper captures
-  all `newPayload` execution.
-- `WorldChainExecutorBuilder` (`crates/evm/src/lib.rs:46`, installed at `context.rs:281`) outputs
-  `WitnessCapturingEvmConfig` and, when collection is enabled, spawns the collector and installs the
-  sender. The **block-builder path is unaffected**: it constructs `OpBlockExecutor` standalone
-  (`crates/builder/src/payload_builder.rs:684`), not via the config factory. The only coupling is
-  the `Ctx: PayloadBuilderCtx<Evm = WorldChainEvmConfig>` type bound, satisfied by unwrapping the
-  inner config at the payload-service-builder boundary (`crates/node/src/payload.rs`). `Node::Evm`
-  is thus always the wrapper but inert (sender `None`) unless the flag is set, so default behavior
-  is byte-identical.
+  `State` cache (full read+write set, **zero re-execution**) and sends `BlockExecutionWitness { block_number,
+  record }` to the collector. `WorldChainEvmConfig::new`/`optimism` leave the sender `None` (pure
+  passthrough — today's behavior); `with_witness_sender(Some(..))` arms capture.
+  The `&mut State<_>` check that gates capture is `min_specialization`-based, so on the
+  block-builder path (where the DB is `BalBuilderDb`, not `State`) it is a no-op — capture fires
+  only on the validator's `newPayload` `&mut State` import path.
+- Capture is on the **validator** path: `BasicEngineValidator<Node::Provider, Node::Evm, …>`
+  (`reth … rpc.rs:1457,1472`) is hard-tied to `Node::Evm` (= `WorldChainEvmConfig`) and executes via
+  `evm_config.create_executor` (`payload_validator.rs:1053`; the BAL path `bal/execute.rs:143`
+  routes through the same factory). Because the capture lives on `WorldChainEvmConfig` itself,
+  `Node::Evm` needs no swap and there is no wrapper/inner bridging.
+- `WorldChainExecutorBuilder` (`crates/evm/src/lib.rs`, installed at `context.rs:281`) builds the
+  config and, when collection is enabled, arms it via `with_witness_sender`. The **block-builder
+  path is unaffected**: it constructs `OpBlockExecutor` standalone
+  (`crates/builder/src/payload_builder.rs:684`), not via the config factory, and `Ctx::Evm` is
+  already `WorldChainEvmConfig` — no unwrapping needed. Capture is inert (sender `None`) unless the
+  flag is set, so default behavior is byte-identical.
 - **Collector** (`crates/evm`, spawned with the node's `Provider` + task executor): receives
-  `CapturedBlock`s, runs the deferred trie walk `provider.state_by_block_id(parent)?.witness(…,
+  `BlockExecutionWitness`s, runs the deferred trie walk `provider.state_by_block_id(parent)?.witness(…,
   record.hashed_state, mode)` for the `state` nodes (off the hot validation path), fills `headers`
   from `record.lowest_block_number`, reconstructs `header_rlp` + transactions from the provider by
   number, assembles the `BlockWitness`, and inserts it into the `WitnessCache`. Keyed by block

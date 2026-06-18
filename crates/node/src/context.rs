@@ -45,8 +45,8 @@ use std::sync::Arc;
 use crossbeam_channel::{Receiver, Sender};
 use tracing::info;
 use world_chain_builder::WorldChainPayloadBuilderCtxBuilder;
-use world_chain_evm::{CapturedBlock, WitnessCapturingEvmConfig, WorldChainExecutorBuilder};
-use world_chain_pool::{BasicWorldChainPool, tx::WorldChainPooledTransaction};
+use world_chain_evm::{BlockExecutionWitness, WorldChainEvmConfig, WorldChainExecutorBuilder};
+use world_chain_pool::BasicWorldChainPool;
 use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
 use world_chain_witness::WitnessCache;
 
@@ -183,8 +183,8 @@ where
 #[derive(Clone, Debug)]
 struct WitnessChannels {
     cache: Arc<WitnessCache>,
-    sender: Sender<CapturedBlock>,
-    receiver: Receiver<CapturedBlock>,
+    sender: Sender<BlockExecutionWitness>,
+    receiver: Receiver<BlockExecutionWitness>,
 }
 
 #[derive(Clone, Debug)]
@@ -205,15 +205,11 @@ impl<N: FullNodeTypes<Types = WorldChainNode<WorldChainDefaultContext>>> WorldCh
 where
     FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
-    >: PayloadServiceBuilder<
-            N,
-            BasicWorldChainPool<N, WorldChainPooledTransaction, WitnessCapturingEvmConfig>,
-            WitnessCapturingEvmConfig,
-        >,
+    >: PayloadServiceBuilder<N, BasicWorldChainPool<N>, WorldChainEvmConfig>,
 {
-    type Pool = BasicWorldChainPool<N, WorldChainPooledTransaction, WitnessCapturingEvmConfig>;
+    type Pool = BasicWorldChainPool<N>;
     type Net = WorldChainNetworkBuilder;
-    type Evm = WitnessCapturingEvmConfig;
+    type Evm = WorldChainEvmConfig;
     type PayloadServiceBuilder = FlashblocksPayloadServiceBuilder<
         FlashblocksPayloadBuilderBuilder<WorldChainPayloadBuilderCtxBuilder>,
     >;
