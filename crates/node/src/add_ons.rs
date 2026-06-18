@@ -1,9 +1,10 @@
 //! World Chain node add-ons.
 
 use core::marker::PhantomData;
+use std::time::{Duration, Instant};
 
 use reth_engine_primitives::ConsensusEngineHandle;
-use reth_payload_builder::PayloadStore;
+use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
 use reth_tasks::TaskExecutor;
 
 use alloy_consensus::{Block, BlockBody, Header};
@@ -409,12 +410,15 @@ where
             .map(|kona_args| -> eyre::Result<_> {
                 let kona_config = build_kona_config(&kona_args)?;
                 let engine_handle = ctx.beacon_engine_handle.clone();
-                let payload_store = PayloadStore::new(ctx.node.payload_builder_handle().clone());
+                // Carry the (cloneable) payload builder handle rather than a `PayloadStore`: the
+                // Kona supervisor rebuilds a fresh `PayloadStore` on each (re)start, and
+                // `PayloadStore` is not itself `Clone`.
+                let payload_builder_handle = ctx.node.payload_builder_handle().clone();
                 let task_executor = ctx.node.task_executor().clone();
                 Ok((
                     kona_config,
                     engine_handle,
-                    payload_store,
+                    payload_builder_handle,
                     task_executor,
                     flashblocks_authorizer,
                 ))
@@ -531,7 +535,7 @@ where
         if let Some((
             kona_config,
             engine_handle,
-            payload_store,
+            payload_builder_handle,
             task_executor,
             flashblocks_authorizer,
         )) = kona_inputs
@@ -553,7 +557,7 @@ where
             spawn_kona(
                 kona_config,
                 engine_handle,
-                payload_store,
+                payload_builder_handle,
                 task_executor,
                 l2_endpoint,
                 flashblocks_authorizer,
@@ -638,7 +642,7 @@ where
 async fn spawn_kona(
     kona_config: KonaConfig,
     engine_handle: ConsensusEngineHandle<OpEngineTypes>,
-    payload_store: PayloadStore<OpEngineTypes>,
+    payload_builder_handle: PayloadBuilderHandle<OpEngineTypes>,
     task_executor: TaskExecutor,
     l2_endpoint: L2RpcEndpoint,
     flashblocks_authorizer: Option<FlashblocksAuthorizationNotifier>,
@@ -647,12 +651,15 @@ async fn spawn_kona(
     let l1_chain_id = kona_config.rollup_config.l1_chain_id;
     let l2_chain_id: u64 = kona_config.rollup_config.l2_chain_id.into();
 
-    let service = KonaService::build(
-        kona_config,
-        engine_handle,
-        payload_store,
-        l2_endpoint,
-        flashblocks_authorizer,
+    // Build once up front so a misconfigured Kona (missing/unparsable rollup config, unreachable
+    // endpoints) aborts node startup via `?` rather than starting a node without a working
+    // consensus engine.
+    let initial_service = build_kona_service(
+        &kona_config,
+        &engine_handle,
+        &payload_builder_handle,
+        &l2_endpoint,
+        &flashblocks_authorizer,
     )
     .await?;
 
@@ -668,25 +675,115 @@ async fn spawn_kona(
     //
     // The in-process Kona node is reth's only engine driver: if it stops while the node is
     // running, reth keeps serving but silently stops advancing (no FCU / new-payload), leaving a
-    // half-dead node that liveness probes on the EL don't catch. So its termination is always
-    // fatal. `spawn_critical_task` only notifies reth's `TaskManager` on a panic (normal
-    // completion is ignored), and it wraps the future in `select(on_shutdown, ..)` — during a
-    // legitimate node shutdown `on_shutdown` wins and this future is dropped before `stopped()`
-    // resolves. So panicking here fires only when Kona dies on its own, bringing the whole node
-    // down so the orchestrator restarts the pod and op-conductor fails over.
+    // half-dead node that liveness probes on the EL don't catch — so Kona staying down is fatal.
+    //
+    // A *transient* Kona stop, however, is recoverable and must not be fatal. A node that has
+    // fallen far behind (its safe head's L1 origin is beyond the sequencing window) while gossip
+    // drives its unsafe head to the tip can hit a consolidation seal race
+    // (`Consolidate(SealTaskFailed(UnsafeHeadChangedSinceBuild))`), which kona's engine classifies
+    // as a critical error and tears the consensus node down. Rebuilding the service re-reads
+    // reth's *current* EL head and re-initialises the engine forkchoice/derivation from there,
+    // letting the node catch up — exactly the recovery a fresh start would perform. So we supervise
+    // the consensus node with bounded restart-and-backoff instead of panicking the whole process on
+    // the first stop. A node that genuinely cannot stay up (too many restarts inside the quiet
+    // period) still panics, bringing the pod down so the orchestrator restarts it and op-conductor
+    // fails over.
+    //
+    // `spawn_critical_task` only notifies reth's `TaskManager` on a panic (normal completion is
+    // ignored), and it wraps the future in `select(on_shutdown, ..)` — during a legitimate node
+    // shutdown `on_shutdown` wins and this future is dropped before the loop observes a stop. So the
+    // panic below fires only when Kona cannot stay alive on its own.
+    const MAX_CONSECUTIVE_RESTARTS: u32 = 10;
+    const RESTART_QUIET_PERIOD: Duration = Duration::from_secs(60);
+    const RESTART_BACKOFF: Duration = Duration::from_secs(2);
+
     task_executor.spawn_critical_task("kona-consensus", async move {
-        let mut handle = KonaServiceHandle::spawn(service);
-        match handle.stopped().await {
-            Ok(()) => {
-                error!(target: "world_chain::kona", "Kona consensus node stopped unexpectedly; bringing down the node");
-                panic!("Kona consensus node stopped unexpectedly");
+        let mut next_service = Some(initial_service);
+        let mut consecutive_restarts = 0u32;
+
+        loop {
+            let service = match next_service.take() {
+                Some(service) => service,
+                None => match build_kona_service(
+                    &kona_config,
+                    &engine_handle,
+                    &payload_builder_handle,
+                    &l2_endpoint,
+                    &flashblocks_authorizer,
+                )
+                .await
+                {
+                    Ok(service) => service,
+                    Err(error) => {
+                        error!(target: "world_chain::kona", %error, "Failed to rebuild Kona consensus node; bringing down the node");
+                        panic!("Failed to rebuild Kona consensus node: {error}");
+                    }
+                },
+            };
+
+            // Run the service to completion. Dropping the handle here (before the rebuild/backoff)
+            // cancels the old service's tasks and releases its P2P listener socket.
+            let started = Instant::now();
+            let outcome = {
+                let mut handle = KonaServiceHandle::spawn(service);
+                handle.stopped().await
+            };
+
+            // Treat a run that stayed up for the quiet period as healthy: reset the counter so only
+            // a tight crash loop trips the fatal limit.
+            if started.elapsed() >= RESTART_QUIET_PERIOD {
+                consecutive_restarts = 0;
             }
-            Err(error) => {
-                error!(target: "world_chain::kona", %error, "Kona consensus node exited with error; bringing down the node");
-                panic!("Kona consensus node exited with error: {error}");
+            consecutive_restarts += 1;
+
+            match outcome {
+                Ok(()) => error!(
+                    target: "world_chain::kona",
+                    restart = consecutive_restarts,
+                    "Kona consensus node stopped unexpectedly; restarting"
+                ),
+                Err(error) => error!(
+                    target: "world_chain::kona",
+                    %error,
+                    restart = consecutive_restarts,
+                    "Kona consensus node exited with error; restarting"
+                ),
             }
+
+            if consecutive_restarts >= MAX_CONSECUTIVE_RESTARTS {
+                error!(
+                    target: "world_chain::kona",
+                    restarts = consecutive_restarts,
+                    "Kona consensus node restarted too many times without staying up; bringing down the node"
+                );
+                panic!("Kona consensus node restarted {consecutive_restarts} times without staying up");
+            }
+
+            tokio::time::sleep(RESTART_BACKOFF).await;
         }
     });
 
     Ok(())
+}
+
+/// Builds a fresh [`KonaService`] from the supervisor's retained, cloneable inputs.
+///
+/// A fresh `PayloadStore` is constructed per call from the (cloneable) payload builder handle since
+/// `PayloadStore` is not itself `Clone`. Used both for the initial build and for each supervised
+/// restart, so each (re)start re-reads reth's current head when re-initialising derivation.
+async fn build_kona_service(
+    kona_config: &KonaConfig,
+    engine_handle: &ConsensusEngineHandle<OpEngineTypes>,
+    payload_builder_handle: &PayloadBuilderHandle<OpEngineTypes>,
+    l2_endpoint: &L2RpcEndpoint,
+    flashblocks_authorizer: &Option<FlashblocksAuthorizationNotifier>,
+) -> eyre::Result<KonaService> {
+    KonaService::build(
+        kona_config.clone(),
+        engine_handle.clone(),
+        PayloadStore::new(payload_builder_handle.clone()),
+        l2_endpoint.clone(),
+        flashblocks_authorizer.clone(),
+    )
+    .await
 }
