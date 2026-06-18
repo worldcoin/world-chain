@@ -97,12 +97,12 @@ pub(crate) type OpConfig =
 /// `ConfigureEvm` that meets these (e.g. [`OpConfig`]) is blanket-implemented.
 pub trait InnerEvm:
     ConfigureEvm<
-            BlockExecutorFactory: Clone + core::fmt::Debug + Send + Sync + Unpin,
-            BlockAssembler: BlockAssembler<
-                WorldChainBlockExecutorFactory<Self>,
-                Block = <Self::Primitives as NodePrimitives>::Block,
-            >,
-        > + 'static
+        BlockExecutorFactory: Clone + core::fmt::Debug + Send + Sync + Unpin,
+        BlockAssembler: BlockAssembler<
+            WorldChainBlockExecutorFactory<Self>,
+            Block = <Self::Primitives as NodePrimitives>::Block,
+        >,
+    > + 'static
 {
 }
 

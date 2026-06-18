@@ -1,11 +1,11 @@
 use crossbeam_channel::Sender;
 use reth_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor, StateDB},
     ConfigureEvm, EvmFactory,
+    block::{BlockExecutorFactory, BlockExecutorFor, StateDB},
 };
 use revm::Inspector;
 
-use crate::{execution::WorldChainBlockExecutor, BlockExecutionWitness};
+use crate::{BlockExecutionWitness, execution::WorldChainBlockExecutor};
 
 /// A [`BlockExecutorFactory`] that wraps the executors produced by `E`'s block executor factory in
 /// a [`WorldChainBlockExecutor`], threading through an optional capture channel.
