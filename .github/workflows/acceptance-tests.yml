@@ -10,6 +10,7 @@ on:
         type: choice
         options:
           - all
+          - prod
           - stage
           - dev-us-east-1
           - dev-eu-central-2
@@ -41,6 +42,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - network: prod
+            environment: prod
+            include_in_all: false
+            rpc_url: https://worldchain-mainnet.g.alchemy.com/public
+            bundler_checks_enabled: true
+            acceptance_profile: prod-smoke
+            bundler_rpc_url: https://rundler-mainnet.worldcoin.dev
+            entry_point: "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
+            safe_4337_module: ""
+            safe_4337_wallet_deployer: ""
+            expected_chain_id: "480"
+            allow_failure: false
           - network: stage
             environment: stage
             include_in_all: true

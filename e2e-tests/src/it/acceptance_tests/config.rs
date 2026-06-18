@@ -168,7 +168,9 @@ fn bundler_config_from_env(
         )?,
         wallet_count: parse_optional_profiled_value(
             "ACCEPTANCE_4337_WALLET_COUNT",
-            profile_defaults.as_ref().map(|defaults| defaults.wallet_count),
+            profile_defaults
+                .as_ref()
+                .map(|defaults| defaults.wallet_count),
             DEFAULT_USER_OPERATION_WALLET_COUNT,
         )?,
         deploy_concurrency: parse_optional_profiled_value(
