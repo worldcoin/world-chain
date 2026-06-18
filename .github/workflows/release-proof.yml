@@ -114,7 +114,9 @@ jobs:
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           dockerfile: Dockerfile.prover
           build_args: |
-            PROVER_BACKEND=sp1
+            PROVER_PACKAGE=world-chain-prover-sp1
+            PROVER_BIN=world-chain-prover-sp1
+            FEATURES=
           digest_artifact_prefix: digests-prover-sp1
 
   merge-sp1-prover-image:
@@ -161,7 +163,9 @@ jobs:
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           dockerfile: Dockerfile.prover
           build_args: |
-            PROVER_BACKEND=nitro
+            PROVER_PACKAGE=world-chain-prover-nitro
+            PROVER_BIN=world-chain-prover-nitro
+            FEATURES=
           digest_artifact_prefix: digests-prover-nitro
 
   merge-nitro-prover-image:
