@@ -193,8 +193,8 @@ fn sp1_vkeys(args: Sp1VkeysArgs) -> Result<()> {
     let range_elf_bytes = world_chain_proof_succinct_elfs::range_elf();
     let agg_elf_bytes = world_chain_proof_succinct_elfs::aggregation_elf();
 
-    let range_elf_sha256 = hex::encode(Sha256::digest(range_elf_bytes.as_ref()));
-    let agg_elf_sha256 = hex::encode(Sha256::digest(agg_elf_bytes.as_ref()));
+    let range_elf_sha256 = hex::encode(Sha256::digest(&*range_elf_bytes));
+    let agg_elf_sha256 = hex::encode(Sha256::digest(&*agg_elf_bytes));
 
     let (range_vkey_commitment, aggregation_vkey) =
         tokio::runtime::Runtime::new()?.block_on(async {
