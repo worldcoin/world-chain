@@ -107,7 +107,8 @@ update-proof-vkeys:
 verify-proof-vkeys:
     SP1_BUILD_DOCKER=false cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-actual.json
     jq -S . proofs/succinct/elf/vkeys.json > /tmp/vkeys-committed.json
-    diff /tmp/vkeys-committed.json /tmp/vkeys-actual.json || (echo "ERROR: vkeys.json is out of date. Run 'just update-proof-vkeys' to regenerate." && exit 1)
+    jq -S . /tmp/vkeys-actual.json > /tmp/vkeys-actual-normalized.json
+    diff /tmp/vkeys-committed.json /tmp/vkeys-actual-normalized.json || (echo "ERROR: vkeys.json is out of date. Run 'just update-proof-vkeys' to regenerate." && exit 1)
 
 # Generate CLI reference docs for the mdbook
 docs:
