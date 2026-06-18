@@ -255,6 +255,9 @@ Computes the on-chain verification keys for the range and aggregation ELFs: the 
 commitment (`multiBlockVKey` committed by the aggregation guest) and the aggregation vkey
 registered with the SP1 verifier. Runs SP1 setup locally — no proving, no RPC.
 
+The default ELF paths point at the local development output directory. Run `just build-proof-elfs`
+first, or pass paths to ELFs downloaded from a proof release.
+
 ```
 world-chain-prover-sp1 vkeys [--range-elf <FILE>] [--agg-elf <FILE>] [--output <FILE>]
 ```
@@ -268,7 +271,8 @@ world-chain-prover-sp1 vkeys [--range-elf <FILE>] [--agg-elf <FILE>] [--output <
 **Example**
 
 ```bash
-# From the repo root, against the committed ELFs:
+# From the repo root, against locally generated ELFs:
+just build-proof-elfs
 just proof-vkeys
 ```
 

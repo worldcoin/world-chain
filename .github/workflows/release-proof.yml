@@ -10,10 +10,10 @@
 #   - Nitro enclave EIF PCR0/PCR1/PCR2
 #   - prover docker image digests
 # plus the deployable artifacts themselves (docker images, GPG-signed binary
-# tarballs, the guest ELFs, and the enclave EIF).
+# tarballs, release-generated guest ELFs, and the enclave EIF).
 #
-# Everything gates on verify-elfs: a release is only cut if the committed ELFs
-# are bit-for-bit reproducible from source.
+# Guest ELFs are generated only for proof releases and uploaded as release
+# artifacts. They are not committed to git.
 
 name: release-proof
 
@@ -61,10 +61,10 @@ jobs:
       VERSION: ${{ steps.extract_version.outputs.VERSION }}
       IS_RELEASE: ${{ steps.extract_version.outputs.IS_RELEASE }}
 
-  # Gate: the committed guest ELFs must be reproducible from source. Every
-  # other artifact embeds or ships these ELFs, so nothing builds if this fails.
-  verify-elfs:
-    name: verify ELFs
+  # Build the SP1 guest ELFs for this release. The generated files are passed to
+  # downstream jobs as artifacts and staged into the GitHub release.
+  build-elfs:
+    name: build ELFs
     needs: approve-release
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
@@ -77,21 +77,27 @@ jobs:
           echo "$HOME/.sp1/bin" >> $GITHUB_PATH
       - name: Build ELFs
         run: just build-proof-elfs
-      - name: Verify ELFs unchanged
-        run: |
-          if [[ -n $(git diff proofs/succinct/elf/) ]]; then
-            echo "ELF files changed after rebuild — commit the updated ELFs"
-            git diff proofs/succinct/elf/
-            exit 1
-          fi
+      - name: Upload ELFs
+        uses: actions/upload-artifact@v4
+        with:
+          name: proof-elfs
+          path: |
+            proofs/succinct/elf/world-chain-range-ethereum
+            proofs/succinct/elf/world-chain-aggregation
+          if-no-files-found: error
 
-  # Compute the on-chain verification keys for the committed ELFs.
+  # Compute the on-chain verification keys for the release-generated ELFs.
   vkeys:
     name: compute vkeys
-    needs: [verify-elfs]
+    needs: [build-elfs]
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
       - uses: actions/checkout@v6
+      - name: Download ELFs
+        uses: actions/download-artifact@v4
+        with:
+          name: proof-elfs
+          path: proofs/succinct/elf
       - uses: taiki-e/install-action@just
       - uses: dtolnay/rust-toolchain@stable
       - uses: arduino/setup-protoc@v3
@@ -114,7 +120,7 @@ jobs:
   build-sp1-prover-image:
     name: build world-chain-prover-sp1 image
     environment: dev
-    needs: [verify-elfs]
+    needs: [approve-release, build-elfs]
     strategy:
       fail-fast: false
       matrix:
@@ -126,6 +132,11 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
+      - name: Download ELFs
+        uses: actions/download-artifact@v4
+        with:
+          name: proof-elfs
+          path: proofs/succinct/elf
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -161,7 +172,7 @@ jobs:
   build-nitro-prover-image:
     name: build world-chain-prover-nitro image
     environment: dev
-    needs: [verify-elfs]
+    needs: approve-release
     strategy:
       fail-fast: false
       matrix:
@@ -211,7 +222,7 @@ jobs:
   build-service-images:
     name: build ${{ matrix.service.bin }} image
     environment: dev
-    needs: [verify-elfs]
+    needs: [approve-release, build-elfs]
     strategy:
       fail-fast: false
       matrix:
@@ -227,6 +238,12 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - uses: actions/checkout@v6
+      - name: Download ELFs
+        if: matrix.service.bin == 'sp1-worker'
+        uses: actions/download-artifact@v4
+        with:
+          name: proof-elfs
+          path: proofs/succinct/elf
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -269,7 +286,7 @@ jobs:
   # GPG-signed binary tarballs, mirroring the node release conventions.
   build-binaries:
     name: build binaries
-    needs: [extract-version, verify-elfs]
+    needs: [extract-version]
     strategy:
       fail-fast: false
       matrix:
@@ -325,7 +342,7 @@ jobs:
   # Nitro enclave EIF + PCR measurements. Does not require Nitro hardware.
   build-eif:
     name: build enclave EIF
-    needs: [verify-elfs]
+    needs: approve-release
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
       - uses: actions/checkout@v6
@@ -347,6 +364,7 @@ jobs:
     if: needs.extract-version.outputs.IS_RELEASE == 'true'
     needs:
       - extract-version
+      - build-elfs
       - vkeys
       - merge-sp1-prover-image
       - merge-nitro-prover-image
@@ -373,11 +391,11 @@ jobs:
         run: |
           mkdir -p assets
           cp artifacts/vkeys/vkeys.json assets/
+          cp artifacts/proof-elfs/world-chain-range-ethereum assets/
+          cp artifacts/proof-elfs/world-chain-aggregation assets/
           cp artifacts/nitro-enclave/pcrs.json assets/
           cp artifacts/nitro-enclave/world-chain-nitro-enclave.eif assets/
           cp artifacts/world-chain-prover-*/*.tar.gz* assets/
-          cp proofs/succinct/elf/world-chain-range-ethereum assets/
-          cp proofs/succinct/elf/world-chain-aggregation assets/
 
       - name: Build manifest
         run: |
