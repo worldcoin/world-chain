@@ -1,0 +1,445 @@
+# Versioned releases for the World Chain prover deployables.
+#
+# Triggered by `proof/vX.Y.Z` tags (kept separate from the node's `v*` tags so
+# prover releases — which are governance events whenever the vkeys or PCRs
+# change — advance on their own cadence).
+#
+# A release binds together every measurement the proof system registers
+# on-chain, in a single manifest.json:
+#   - SP1 range vkey commitment + aggregation vkey (derived from guest ELFs
+#     embedded at compile time via sp1_build / include_elf!())
+#   - Nitro enclave EIF PCR0/PCR1/PCR2
+#   - prover docker image digests
+# plus the deployable artifacts themselves (docker images, GPG-signed binary
+# tarballs, and the enclave EIF).
+
+name: release-proof
+
+on:
+  push:
+    tags:
+      - proof/v*
+
+env:
+  CARGO_TERM_COLOR: always
+  REGISTRY: ghcr.io
+  PROOF_IMAGE_NAME: ${{ github.repository }}-proof
+  AWS_REGION: us-east-1
+  SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  approve-release:
+    name: approve release
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - run: true
+
+  extract-version:
+    name: extract version
+    needs: approve-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract version
+        id: extract_version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/proof/* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/proof/}" >> "$GITHUB_OUTPUT"
+            echo "IS_RELEASE=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "VERSION=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "IS_RELEASE=false" >> "$GITHUB_OUTPUT"
+          fi
+    outputs:
+      VERSION: ${{ steps.extract_version.outputs.VERSION }}
+      IS_RELEASE: ${{ steps.extract_version.outputs.IS_RELEASE }}
+
+  # Compute the on-chain verification keys. The SP1 guest ELFs are compiled
+  # inline via sp1_build (include_elf!()) — no separate build step required.
+  vkeys:
+    name: compute vkeys
+    needs: approve-release
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install SP1 toolchain
+        run: |
+          curl -L https://sp1.succinct.xyz | bash
+          ~/.sp1/bin/sp1up --version v6.1.0
+          echo "$HOME/.sp1/bin" >> $GITHUB_PATH
+      - uses: taiki-e/install-action@just
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Compute vkeys
+        env:
+          SP1_BUILD_DOCKER: "false"
+        run: just proof-vkeys --output vkeys.json && cat vkeys.json
+      - name: Upload vkeys
+        uses: actions/upload-artifact@v4
+        with:
+          name: vkeys
+          path: vkeys.json
+          if-no-files-found: error
+
+  build-sp1-prover-image:
+    name: build world-chain-prover-sp1 image
+    environment: dev
+    needs: approve-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: arc-public-8xlarge-amd64-runner
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: ${{ matrix.platform }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.PROOF_IMAGE_NAME }}-sp1
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          dockerfile: Dockerfile.prover
+          build_args: |
+            PROVER_PACKAGE=world-chain-prover-sp1
+            PROVER_BIN=world-chain-prover-sp1
+            FEATURES=
+          digest_artifact_prefix: digests-prover-sp1
+
+  merge-sp1-prover-image:
+    name: merge world-chain-prover-sp1 image manifest
+    needs: [extract-version, build-sp1-prover-image]
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.merge.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Merge multi-arch manifest
+        id: merge
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.PROOF_IMAGE_NAME }}-sp1
+          digest_artifact_prefix: digests-prover-sp1
+          tags: |
+            type=raw,value=${{ needs.extract-version.outputs.VERSION }}
+            type=sha
+
+  build-nitro-prover-image:
+    name: build world-chain-prover-nitro image
+    environment: dev
+    needs: approve-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: arc-public-8xlarge-amd64-runner
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: ${{ matrix.platform }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.PROOF_IMAGE_NAME }}-nitro
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          dockerfile: Dockerfile.prover
+          build_args: |
+            PROVER_PACKAGE=world-chain-prover-nitro
+            PROVER_BIN=world-chain-prover-nitro
+            FEATURES=
+          digest_artifact_prefix: digests-prover-nitro
+
+  merge-nitro-prover-image:
+    name: merge world-chain-prover-nitro image manifest
+    needs: [extract-version, build-nitro-prover-image]
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.merge.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Merge multi-arch manifest
+        id: merge
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.PROOF_IMAGE_NAME }}-nitro
+          digest_artifact_prefix: digests-prover-nitro
+          tags: |
+            type=raw,value=${{ needs.extract-version.outputs.VERSION }}
+            type=sha
+
+  build-service-images:
+    name: build ${{ matrix.service.bin }} image
+    environment: dev
+    needs: approve-release
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { suffix: -sp1-worker, package: world-chain-sp1-worker, bin: sp1-worker, prefix: digests-sp1-worker }
+          - { suffix: -proposer, package: world-chain-proposer, bin: world-chain-proposer, prefix: digests-proposer }
+          - { suffix: -challenger, package: world-chain-challenger, bin: world-chain-challenger, prefix: digests-challenger }
+          - { suffix: -defender, package: world-chain-defender, bin: world-chain-defender, prefix: digests-defender }
+          - { suffix: -prover-service, package: world-chain-prover-service, bin: world-chain-prover-service, prefix: digests-prover-service }
+        platform:
+          - { runner: arc-public-8xlarge-amd64-runner, platform: linux/amd64 }
+          - { runner: ubuntu-24.04-arm, platform: linux/arm64 }
+    runs-on: ${{ matrix.platform.runner }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: ${{ matrix.platform.platform }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.PROOF_IMAGE_NAME }}${{ matrix.service.suffix }}
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          dockerfile: Dockerfile.prover
+          build_args: |
+            PROVER_PACKAGE=${{ matrix.service.package }}
+            PROVER_BIN=${{ matrix.service.bin }}
+          digest_artifact_prefix: ${{ matrix.service.prefix }}
+
+  merge-service-images:
+    name: merge ${{ matrix.service.bin }} image manifest
+    needs: [extract-version, build-service-images]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - { suffix: -sp1-worker, prefix: digests-sp1-worker }
+          - { suffix: -proposer, prefix: digests-proposer }
+          - { suffix: -challenger, prefix: digests-challenger }
+          - { suffix: -defender, prefix: digests-defender }
+          - { suffix: -prover-service, prefix: digests-prover-service }
+    steps:
+      - uses: actions/checkout@v6
+      - name: Merge multi-arch manifest
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.PROOF_IMAGE_NAME }}${{ matrix.service.suffix }}
+          digest_artifact_prefix: ${{ matrix.service.prefix }}
+          tags: |
+            type=raw,value=${{ needs.extract-version.outputs.VERSION }}
+            type=sha
+
+  build-binaries:
+    name: build binaries
+    needs: [extract-version]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ needs.extract-version.outputs.VERSION }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install SP1 toolchain
+        run: |
+          curl -L https://sp1.succinct.xyz | bash
+          ~/.sp1/bin/sp1up --version v6.1.0
+          echo "$HOME/.sp1/bin" >> $GITHUB_PATH
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Cargo Build Release
+        env:
+          SP1_BUILD_DOCKER: "false"
+        run: |
+          cargo build --release --locked -p world-chain-prover-sp1 --target ${{ matrix.target }}
+          cargo build --release --locked -p world-chain-prover-nitro --target ${{ matrix.target }}
+      - name: Move binaries
+        run: |
+          mkdir artifacts
+          mv "target/${{ matrix.target }}/release/world-chain-prover-sp1" ./artifacts
+          mv "target/${{ matrix.target }}/release/world-chain-prover-nitro" ./artifacts
+      - name: Configure GPG and create artifacts
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          export GPG_TTY=$(tty)
+          echo -n "$GPG_SIGNING_KEY" | base64 --decode | gpg --batch --import
+          cd artifacts
+          tar -czf world-chain-prover-${{ env.VERSION }}-${{ matrix.target }}.tar.gz world-chain-prover-*
+          echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab world-chain-prover-${{ env.VERSION }}-${{ matrix.target }}.tar.gz
+          mv *tar.gz* ..
+        shell: bash
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-chain-prover-${{ env.VERSION }}-${{ matrix.target }}
+          path: world-chain-prover-${{ env.VERSION }}-${{ matrix.target }}.tar.gz*
+          if-no-files-found: error
+
+  build-eif:
+    name: build enclave EIF
+    needs: approve-release
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build EIF
+        run: scripts/build-eif.sh target/eif
+      - name: Upload EIF and PCRs
+        uses: actions/upload-artifact@v4
+        with:
+          name: nitro-enclave
+          path: |
+            target/eif/world-chain-nitro-enclave.eif
+            target/eif/pcrs.json
+          if-no-files-found: error
+
+  draft-release:
+    name: draft release
+    if: needs.extract-version.outputs.IS_RELEASE == 'true'
+    needs:
+      - extract-version
+      - vkeys
+      - merge-sp1-prover-image
+      - merge-nitro-prover-image
+      - build-binaries
+      - build-eif
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.extract-version.outputs.VERSION }}
+      SP1_PROVER_IMAGE_DIGEST: ${{ needs.merge-sp1-prover-image.outputs.digest }}
+      NITRO_PROVER_IMAGE_DIGEST: ${{ needs.merge-nitro-prover-image.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Stage release assets
+        run: |
+          mkdir -p assets
+          cp artifacts/vkeys/vkeys.json assets/
+          cp artifacts/nitro-enclave/pcrs.json assets/
+          cp artifacts/nitro-enclave/world-chain-nitro-enclave.eif assets/
+          cp artifacts/world-chain-prover-*/*.tar.gz* assets/
+      - name: Build manifest
+        run: |
+          jq -n \
+            --arg version "$VERSION" \
+            --arg git_sha "$GITHUB_SHA" \
+            --arg sp1_image "${REGISTRY}/${PROOF_IMAGE_NAME}-sp1:${VERSION}" \
+            --arg sp1_image_digest "$SP1_PROVER_IMAGE_DIGEST" \
+            --arg nitro_image "${REGISTRY}/${PROOF_IMAGE_NAME}-nitro:${VERSION}" \
+            --arg nitro_image_digest "$NITRO_PROVER_IMAGE_DIGEST" \
+            --slurpfile vkeys assets/vkeys.json \
+            --slurpfile pcrs assets/pcrs.json \
+            '{
+              version: $version,
+              git_sha: $git_sha,
+              sp1: $vkeys[0],
+              nitro_enclave: { pcrs: $pcrs[0] },
+              images: {
+                sp1_prover: { name: $sp1_image, digest: $sp1_image_digest },
+                nitro_prover: { name: $nitro_image, digest: $nitro_image_digest }
+              }
+            }' > assets/manifest.json
+          cat assets/manifest.json
+      - name: Compare measurements with previous release
+        id: measurements
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          prev_tag=$(gh release list --json tagName --jq '[.[].tagName | select(startswith("proof/v"))][0] // empty')
+          {
+            echo "MEASUREMENTS<<EOF"
+            echo '```json'
+            jq '{sp1: {range_vkey_commitment: .sp1.range_vkey_commitment, aggregation_vkey: .sp1.aggregation_vkey}, nitro_enclave: .nitro_enclave.pcrs}' assets/manifest.json
+            echo '```'
+            if [[ -n "$prev_tag" ]] && gh release download "$prev_tag" --pattern manifest.json --output prev-manifest.json 2>/dev/null; then
+              if diff <(jq -S '{sp1: {r: .sp1.range_vkey_commitment, a: .sp1.aggregation_vkey}, pcrs: .nitro_enclave.pcrs}' prev-manifest.json) \
+                      <(jq -S '{sp1: {r: .sp1.range_vkey_commitment, a: .sp1.aggregation_vkey}, pcrs: .nitro_enclave.pcrs}' assets/manifest.json) > /dev/null; then
+                echo "Unchanged since ${prev_tag}."
+              else
+                echo "> [!WARNING]"
+                echo "> Measurements CHANGED since ${prev_tag} — the on-chain verifier registrations (SP1 vkeys and/or TEE PCRs) must be updated before this release is deployed."
+              fi
+            else
+              echo "No previous proof release manifest found to compare against."
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: Generate changelog
+        id: changelog
+        run: |
+          prev=$(git describe --tags --abbrev=0 --match 'proof/v*' "proof/${VERSION}^" 2>/dev/null || true)
+          {
+            echo "CHANGELOG<<EOF"
+            if [[ -n "$prev" ]]; then
+              git log --pretty=format:"- %s" "${prev}..proof/${VERSION}" -- proofs/ Dockerfile.prover scripts/build-eif.sh
+            else
+              echo "- Initial prover release"
+            fi
+            echo ""
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: Create release draft
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body=$(cat <<- "ENDBODY"
+          ## Measurements
+
+          The values below are what the on-chain proof-lane registries must hold for this release (`manifest.json` is the machine-readable source of truth):
+
+          ${{ steps.measurements.outputs.MEASUREMENTS }}
+
+          ## Prover Changes
+
+          ${{ steps.changelog.outputs.CHANGELOG }}
+
+          ## Artifacts
+
+          | Artifact | Purpose |
+          |:---|:---|
+          | `manifest.json` | Binds git SHA, vkeys, PCRs, and image digests for this release |
+          | `vkeys.json` | SP1 range vkey commitment + aggregation vkey |
+          | `pcrs.json` | Nitro enclave PCR0/PCR1/PCR2 |
+          | `world-chain-nitro-enclave.eif` | Enclave image (measurements in `pcrs.json`) |
+          | `world-chain-prover-*.tar.gz` | `world-chain-prover-sp1` and `world-chain-prover-nitro` binaries, signed with PGP key `C75F BC64 E9D4 8E89 FB60 418B 8949 B352 D042 2E74` |
+          | SP1 Docker | `ghcr.io/${{ env.PROOF_IMAGE_NAME }}-sp1:${{ env.VERSION }}` |
+          | Nitro Docker | `ghcr.io/${{ env.PROOF_IMAGE_NAME }}-nitro:${{ env.VERSION }}` |
+          ENDBODY
+          )
+          gh release create --draft -t "proof/${VERSION}" -F - "proof/${VERSION}" assets/* <<< "$body"
