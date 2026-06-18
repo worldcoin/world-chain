@@ -46,7 +46,6 @@ jobs:
             environment: prod
             include_in_all: false
             rpc_url: https://worldchain-mainnet.g.alchemy.com/public
-            bundler_checks_enabled: true
             acceptance_profile: smoke
             bundler_rpc_url: https://rundler-mainnet.worldcoin.dev
             entry_point: "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
@@ -58,7 +57,6 @@ jobs:
             environment: stage
             include_in_all: true
             rpc_url: https://wc-node-sepolia.worldcoin.dev
-            bundler_checks_enabled: true
             acceptance_profile: heavy
             bundler_rpc_url: https://rundler-sepolia.worldcoin.dev
             entry_point: "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
@@ -70,7 +68,6 @@ jobs:
             environment: dev
             include_in_all: true
             rpc_url: https://wc-node-devnet.worldcoin.dev
-            bundler_checks_enabled: false
             acceptance_profile: ""
             bundler_rpc_url: ""
             entry_point: ""
@@ -82,7 +79,6 @@ jobs:
             environment: dev-eu-central-2
             include_in_all: true
             rpc_url: https://tx-proxy-devnet-eu-central-2.worldcoin.dev
-            bundler_checks_enabled: true
             acceptance_profile: heavy
             bundler_rpc_url: https://rundler-devnet-eu-central-2.worldcoin.dev
             expected_chain_id: "69420"
@@ -133,7 +129,7 @@ jobs:
         env:
           ACCEPTANCE_NETWORK: ${{ matrix.network }}
           ACCEPTANCE_RPC_URL: ${{ matrix.rpc_url }}
-          ACCEPTANCE_BUNDLER_RPC_URL: ${{ matrix.bundler_checks_enabled && (matrix.network == 'dev-eu-central-2' && inputs.bundler_rpc_url || matrix.bundler_rpc_url) || '' }}
+          ACCEPTANCE_BUNDLER_RPC_URL: ${{ matrix.network == 'dev-eu-central-2' && inputs.bundler_rpc_url != '' && inputs.bundler_rpc_url || matrix.bundler_rpc_url }}
           ACCEPTANCE_CHAIN_ID: ${{ matrix.expected_chain_id }}
           ACCEPTANCE_4337_ENTRY_POINT: ${{ matrix.entry_point }}
           ACCEPTANCE_4337_MODULE: ${{ matrix.safe_4337_module }}
