@@ -2570,6 +2570,16 @@ async fn start_prover_service() -> Result<(ProverServiceTask, String)> {
 /// It leases SP1 jobs from the prover-service at `prover_service_url`, builds range witnesses
 /// from the devnet L1/L2 RPCs (the L1 dev chain doubles as the beacon endpoint, matching the
 /// op-node configuration), proves them with the selected backend, and submits the proofs back.
+///
+/// # Environment variables
+///
+/// This function loads guest ELFs at **runtime** from two required environment variables:
+/// - `RANGE_ELF_PATH` — path to the compiled SP1 range program ELF.
+/// - `AGG_ELF_PATH` — path to the compiled SP1 aggregation program ELF.
+///
+/// These must be set before enabling `DEVNET_SP1_WORKER_PROVER`. The standalone
+/// `world-chain-sp1-worker` binary embeds ELFs at **compile time** (via
+/// `world_chain_proof_succinct_elfs`) and does not require these variables.
 async fn start_sp1_worker(
     l1_rpc_url: &str,
     l2_rpc_url: &str,
