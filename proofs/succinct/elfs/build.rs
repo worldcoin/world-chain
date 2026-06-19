@@ -8,13 +8,16 @@
 //! `fs::read` of an ELF file.
 //!
 //! Behaviour:
-//! - Always uses `docker: true` with the pinned SP1 toolchain tag
+//! - Uses `docker: true` by default with the pinned SP1 toolchain tag
 //!   (matches the `=6.1.0` version of `sp1-sdk` / `sp1-zkvm` the workspace
 //!   pins to) for bit-for-bit reproducible ELFs. This is the ecosystem
 //!   standard used by op-succinct, sp1-helios, and all other SP1 adopters.
 //!   Docker provides reproducibility by fixing the build environment path
-//!   layout inside the container. The only exception is `Dockerfile.prover`
-//!   where Docker-in-Docker is genuinely unavailable.
+//!   layout inside the container.
+//! - Set `SP1_BUILD_DOCKER=false` to use a locally-installed `cargo-prove`
+//!   instead of the Docker image. This is required in `Dockerfile.prover`
+//!   where Docker-in-Docker is unavailable, and optional for local development
+//!   when a compatible `sp1up` toolchain is already installed.
 //! - Honours `SP1_SKIP_PROGRAM_BUILD=true` for fast iteration: `sp1_build`
 //!   checks this variable internally — when set, it skips the Docker/local
 //!   guest compilation but **still emits** the `SP1_ELF_*` cargo env-vars so
@@ -22,14 +25,31 @@
 //!   `target/elf-compilation/...`. Our `main` does not need a separate
 //!   early-return for this flag; the delegation to `sp1_build` is sufficient.
 //!   Useful for `cargo check` once a single full build has populated the
-//!   target directory. (Under `cargo clippy` the `#[cfg(clippy)]` guards in
-//!   `src/lib.rs` already prevent `include_elf!()` from expanding, so no
-//!   build is needed at all.)
-//! - Under `cargo clippy`, the `#[cfg(clippy)]` guards in `src/lib.rs`
-//!   prevent `include_elf!()` from expanding, so no ELF files need to exist.
+//!   target directory.
+//! - Under `cargo clippy`, build scripts receive `CARGO_CFG_CLIPPY=1`.
+//!   This script exits early in that case because the `#[cfg(clippy)]` guards
+//!   in `src/lib.rs` prevent `include_elf!()` from expanding, so no ELF
+//!   files need to exist and no SP1 build is required.
 
 fn main() {
     println!("cargo:rerun-if-env-changed=SP1_SKIP_PROGRAM_BUILD");
+    println!("cargo:rerun-if-env-changed=SP1_BUILD_DOCKER");
+
+    // Under `cargo clippy` the build script receives `CARGO_CFG_CLIPPY=1`.
+    // The `#[cfg(clippy)]` guards in `src/lib.rs` prevent `include_elf!()`
+    // from expanding in that mode, so no ELF files need to exist and we can
+    // skip the SP1 guest build entirely.
+    if std::env::var("CARGO_CFG_CLIPPY").is_ok() {
+        return;
+    }
+
+    // Respect `SP1_BUILD_DOCKER` to allow callers to opt out of Docker-based
+    // compilation. Defaults to `true` for reproducible builds; set to `false`
+    // when Docker-in-Docker is unavailable (e.g. inside `Dockerfile.prover`)
+    // or when a local `cargo-prove` installation is preferred.
+    let docker = std::env::var("SP1_BUILD_DOCKER")
+        .map(|v| v.to_lowercase() != "false")
+        .unwrap_or(true);
 
     // The SP1 guest programs live in their own nested cargo workspace at
     // `proofs/succinct/programs/`, but they have path dependencies that
@@ -71,7 +91,7 @@ fn main() {
         sp1_build::build_program_with_args(
             program_dir,
             sp1_build::BuildArgs {
-                docker: true,
+                docker,
                 tag: "v6.1.0".to_string(),
                 ignore_rust_version: true,
                 workspace_directory: Some(workspace_root.clone()),

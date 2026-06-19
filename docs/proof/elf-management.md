@@ -33,7 +33,7 @@ There is no committed ELF blob and no manifest of SHA-256s. The `proof` CLI and 
 SP1 worker load ELFs at runtime from `RANGE_ELF_PATH` / `AGG_ELF_PATH` env vars via
 `EnvSuccinctProver::new`. The on-chain governance anchor is the SP1 vkey computed from the
 embedded bytes (`just proof-vkeys`), which is exactly what we register on
-`OPSuccinctFaultDisputeGame`.
+`OPSuccinctFaultDisputeGame` (name subject to change once World Chain ships its own proof system).
 
 ## Reproducibility
 
