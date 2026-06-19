@@ -125,16 +125,16 @@ jobs:
             PROVER_BACKEND=nitro
           digest_artifact_prefix: digests-prover-nitro
 
-  merge-prover-images:
-    name: merge ${{ matrix.prover.suffix }} prover image manifest
-    needs: [build-sp1-prover-image, build-nitro-prover-image]
+  # Each prover's merge depends ONLY on its own build jobs. docker-build-push-digest
+  # pushes untagged (by-digest) manifests, which GHCR garbage-collects within minutes.
+  # The nitro build has no build-elfs dependency and finishes ~13 min before sp1, so a
+  # single merge gated on both builds let nitro's digests be collected before it ran
+  # ("manifest ... not found"). Splitting mirrors release-proof.yml and keeps each merge
+  # running right after its own builds.
+  merge-sp1-prover-image:
+    name: merge world-chain-prover-sp1 image manifest
+    needs: [build-sp1-prover-image]
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        prover:
-          - { suffix: sp1, prefix: digests-prover-sp1 }
-          - { suffix: nitro, prefix: digests-prover-nitro }
     steps:
       - name: Check Out Repo
         uses: actions/checkout@v6
@@ -142,8 +142,25 @@ jobs:
         uses: ./.github/actions/docker-merge-manifest
         with:
           registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.IMAGE_NAME }}-${{ matrix.prover.suffix }}
-          digest_artifact_prefix: ${{ matrix.prover.prefix }}
+          image_name: ${{ env.IMAGE_NAME }}-sp1
+          digest_artifact_prefix: digests-prover-sp1
+          tags: |
+            type=raw,value=${{ inputs.image_tag || 'nightly' }}
+            type=sha
+
+  merge-nitro-prover-image:
+    name: merge world-chain-prover-nitro image manifest
+    needs: [build-nitro-prover-image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+      - name: Merge multi-arch manifest
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}-nitro
+          digest_artifact_prefix: digests-prover-nitro
           tags: |
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
             type=sha
