@@ -52,8 +52,6 @@ fn main() {
                 Ok(())
             },
             |chain_spec: Arc<WorldChainSpec>| {
-                // Offline CLI commands never capture witnesses; the config defaults to a pure
-                // passthrough (no sender), matching `Components::Evm`.
                 (
                     WorldChainEvmConfig::optimism(chain_spec.clone()),
                     Arc::new(OpBeaconConsensus::new(chain_spec)),
