@@ -1,8 +1,6 @@
 //! World Chain node add-ons.
 
 use core::marker::PhantomData;
-use std::sync::Arc;
-
 use crossbeam_channel::Receiver;
 
 use alloy_consensus::{Block, BlockBody, Header};
@@ -47,7 +45,7 @@ use world_chain_rpc::{
     SequencerClient as WorldChainSequencerClient, Simulate, SimulateApiServer, WorldChainEthApiExt,
     op::{FlashblocksOpApi, OpApiExtServer},
 };
-use world_chain_witness::WitnessCache;
+use world_chain_witness::ExecutionWitnessHandle;
 
 /// Primitive bounds required by the OP RPC extensions used by World Chain.
 pub trait WorldChainRpcPrimitives<Tx>:
@@ -116,7 +114,7 @@ pub struct WorldChainAddOns<
     simulate_enabled: bool,
     /// Witness oracle plumbing: the shared cache and the receiver drained by the collector thread.
     /// `Some` only when `--witness.collect` is set.
-    witness: Option<(Arc<WitnessCache>, Receiver<BlockExecutionWitness>)>,
+    witness: Option<(ExecutionWitnessHandle, Receiver<BlockExecutionWitness>)>,
     /// Transaction type carried by the node primitives.
     _tx: PhantomData<fn() -> Tx>,
 }
@@ -139,7 +137,7 @@ where
         enable_tx_conditional: bool,
         min_suggested_priority_fee: u64,
         simulate_enabled: bool,
-        witness: Option<(Arc<WitnessCache>, Receiver<BlockExecutionWitness>)>,
+        witness: Option<(ExecutionWitnessHandle, Receiver<BlockExecutionWitness>)>,
     ) -> Self {
         Self {
             rpc_add_ons,

@@ -10,12 +10,10 @@
 //! See `docs/proof/live-preimage-witness-oracle.md` for the full design.
 
 mod cache;
-mod types;
-
-pub use cache::WitnessCache;
-pub use types::{BlockWitness, RangeWitness};
 
 use std::sync::Arc;
 
-/// Shared handle to the [`WitnessCache`], cloned between the capture path and the RPC handler.
-pub type WitnessCacheHandle = Arc<WitnessCache>;
+pub use crate::cache::{DEFAULT_WITNESS_CAP, WitnessCache};
+
+/// Thread safe handle to the [`WitnessCache`].
+pub type ExecutionWitnessHandle = Arc<WitnessCache>;

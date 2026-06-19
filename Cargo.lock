@@ -18366,8 +18366,6 @@ dependencies = [
  "alloy-eips 2.0.5",
  "alloy-op-evm",
  "alloy-primitives",
- "alloy-rlp",
- "alloy-rpc-types-debug",
  "auto_impl",
  "bon",
  "color-eyre",
@@ -19266,8 +19264,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-debug",
  "parking_lot",
- "serde",
- "serde_json",
 ]
 
 [[package]]

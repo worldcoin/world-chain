@@ -39,6 +39,7 @@ use world_chain_p2p::{
 };
 use world_chain_primitives::p2p::Authorization;
 use world_chain_rpc::eth::FlashblocksEthApiBuilder;
+use world_chain_witness::{ExecutionWitnessHandle, WitnessCache};
 
 use std::sync::Arc;
 
@@ -48,7 +49,6 @@ use world_chain_builder::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_evm::{BlockExecutionWitness, WorldChainEvmConfig, WorldChainExecutorBuilder};
 use world_chain_pool::BasicWorldChainPool;
 use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
-use world_chain_witness::WitnessCache;
 
 use crate::tx_propagation::WorldChainTransactionPropagationPolicy;
 use reth_network::PeersInfo;
@@ -182,7 +182,7 @@ where
 /// spawned and the RPC oracle is installed.
 #[derive(Clone, Debug)]
 struct WitnessChannels {
-    cache: Arc<WitnessCache>,
+    cache: ExecutionWitnessHandle,
     sender: Sender<BlockExecutionWitness>,
     receiver: Receiver<BlockExecutionWitness>,
 }

@@ -8,14 +8,11 @@ homepage.workspace = true
 repository.workspace = true
 
 [dependencies]
-alloy-primitives.workspace = true
 alloy-rpc-types-debug.workspace = true
-
 parking_lot.workspace = true
-serde.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
+alloy-primitives.workspace = true
 
 [lints]
 workspace = true

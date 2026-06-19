@@ -16,6 +16,8 @@ world-chain-evm.workspace = true
 world-chain-primitives.workspace = true
 world-chain-witness.workspace = true
 
+alloy-rpc-types-debug.workspace = true
+
 # reth
 reth-chainspec.workspace = true
 reth-provider.workspace = true
@@ -61,7 +63,7 @@ tokio.workspace = true
 
 # misc
 hex.workspace = true
-serde.workspace = true
+serde = { workspace = true, features = ["rc"] }
 tracing.workspace = true
 jsonrpsee.workspace = true
 jsonrpsee-core.workspace = true

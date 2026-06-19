@@ -1,25 +1,19 @@
-//! Bounded in-memory cache of per-block pre-image witnesses.
+//! Bounded in-memory cache of per-block execution witnesses.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
+use alloy_rpc_types_debug::ExecutionWitness;
 use parking_lot::Mutex;
 
-use crate::types::{BlockWitness, RangeWitness};
-
-/// Default number of block witnesses to retain in memory.
+/// Default number of execution witnesses to retain in memory.
 pub const DEFAULT_WITNESS_CAP: usize = 1024;
 
-/// A bounded circular ring buffer of [`BlockWitness`]es keyed by block number.
+/// A bounded, reorg-safe in-memory ring buffer of [`ExecutionWitness`]es keyed by block number.
 #[derive(Debug)]
 pub struct WitnessCache {
-    inner: Mutex<Inner>,
-    /// Ring-buffer depth: the maximum number of block witnesses retained before the lowest are
-    /// evicted. Set at runtime from `--witness.depth`.
+    inner: Mutex<BTreeMap<u64, Arc<ExecutionWitness>>>,
     depth: usize,
 }
-
-#[derive(Debug, Default)]
-struct Inner(BTreeMap<u64, BlockWitness>);
 
 impl Default for WitnessCache {
     fn default() -> Self {
@@ -34,89 +28,83 @@ impl WitnessCache {
         Self::with_depth(DEFAULT_WITNESS_CAP)
     }
 
-    /// Creates an empty cache with a runtime ring-buffer `depth` (the maximum number of block
-    /// witnesses retained).
+    /// Creates an empty cache with a runtime ring-buffer `depth` (the maximum number of witnesses
+    /// retained).
     ///
     /// A `depth` of zero is clamped to one, since a cache that retains nothing is never useful.
     #[must_use]
     pub fn with_depth(depth: usize) -> Self {
         Self {
-            inner: Mutex::new(Inner::default()),
+            inner: Mutex::new(BTreeMap::new()),
             depth: depth.max(1),
         }
     }
 
-    /// Inserts (or replaces) the witness for its block number, evicting the lowest block numbers
-    /// if the cache is over its [`depth`](Self::with_depth).
-    pub fn insert(&self, witness: BlockWitness) {
+    /// Inserts (or replaces) the execution witness for `block_number`, evicting the lowest block(s)
+    /// once `depth` is exceeded.
+    pub fn insert(&self, block_number: u64, witness: ExecutionWitness) {
         let mut inner = self.inner.lock();
-        inner.0.insert(witness.block_number, witness);
-        while inner.0.len() > self.depth {
-            inner.0.pop_first();
+        inner.insert(block_number, Arc::new(witness));
+        while inner.len() > self.depth {
+            inner.pop_first();
         }
     }
 
-    /// Returns a clone of the witness for `block_number`, if cached.
+    /// Returns the execution witness for `block_number`, if cached. Zero-copy: clones only the
+    /// [`Arc`].
     #[must_use]
-    pub fn get(&self, block_number: u64) -> Option<BlockWitness> {
-        self.inner.lock().0.get(&block_number).cloned()
+    pub fn get(&self, block_number: u64) -> Option<Arc<ExecutionWitness>> {
+        self.inner.lock().get(&block_number).cloned()
     }
 
     /// Returns the lowest and highest cached block numbers, if any.
     #[must_use]
     pub fn bounds(&self) -> Option<(u64, u64)> {
         let inner = self.inner.lock();
-        let (&lowest, _) = inner.0.first_key_value()?;
-        let (&highest, _) = inner.0.last_key_value()?;
-        Some((lowest, highest))
+        Some((*inner.first_key_value()?.0, *inner.last_key_value()?.0))
     }
 
-    /// Collects a contiguous [`RangeWitness`] for the L2 range `(start_block, end_block]`.
+    /// Collects the execution witnesses for the contiguous, inclusive L2 range
+    /// `[start_block, end_block]` (`start_block == end_block` yields a single block).
     ///
-    /// Returns `None` if `end_block <= start_block` or if any block in the range is missing from
-    /// the cache; the range proof requires every block, so a partial range is not served.
+    /// Returns `None` if the range is inverted (`end_block < start_block`) or if any block in it is
+    /// missing; the range proof requires every block, so a partial range is never served. Zero-copy:
+    /// only the per-block [`Arc`]s are cloned, never the witness data.
     #[must_use]
-    pub fn range(&self, start_block: u64, end_block: u64) -> Option<RangeWitness> {
-        if end_block <= start_block {
+    pub fn range(&self, start_block: u64, end_block: u64) -> Option<Vec<Arc<ExecutionWitness>>> {
+        if end_block < start_block {
             return None;
         }
         let inner = self.inner.lock();
-        let mut blocks = Vec::with_capacity((end_block - start_block) as usize);
-        for number in (start_block + 1)..=end_block {
-            blocks.push(inner.0.get(&number)?.clone());
-        }
-        Some(RangeWitness {
-            start_block,
-            end_block,
-            blocks,
-        })
+        let witnesses: Vec<_> = inner
+            .range(start_block..=end_block)
+            .map(|(_, witness)| Arc::clone(witness))
+            .collect();
+        // Every block in `[start_block, end_block]` must be present.
+        (witnesses.len() as u64 == end_block - start_block + 1).then_some(witnesses)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::B256;
-    use alloy_rpc_types_debug::ExecutionWitness;
+    use alloy_primitives::Bytes;
 
     use super::*;
 
-    fn witness(number: u64) -> BlockWitness {
-        BlockWitness {
-            block_number: number,
-            block_hash: B256::with_last_byte(number as u8),
-            execution_witness: ExecutionWitness::default(),
-            header_rlp: Default::default(),
-            transactions: Vec::new(),
+    /// Tags a witness with a distinguishable `keys` entry so identity/order can be asserted.
+    fn witness(tag: u8) -> ExecutionWitness {
+        ExecutionWitness {
+            keys: vec![Bytes::from(vec![tag])],
+            ..Default::default()
         }
     }
 
     #[test]
-    fn evicts_lowest_over_capacity() {
+    fn evicts_lowest_over_depth() {
         let cache = WitnessCache::with_depth(3);
         for n in 1..=5 {
-            cache.insert(witness(n));
+            cache.insert(n, witness(n as u8));
         }
-        // 1 and 2 evicted; 3,4,5 retained.
         assert!(cache.get(1).is_none());
         assert!(cache.get(2).is_none());
         assert!(cache.get(3).is_some());
@@ -125,51 +113,40 @@ mod tests {
 
     #[test]
     fn zero_depth_is_clamped() {
-        // Zero depth is clamped to retain at least one block.
         let cache = WitnessCache::with_depth(0);
-        cache.insert(witness(7));
-        cache.insert(witness(8));
+        cache.insert(7, witness(7));
+        cache.insert(8, witness(8));
         assert_eq!(cache.bounds(), Some((8, 8)));
     }
 
     #[test]
     fn reorg_overwrites_in_place() {
         let cache = WitnessCache::with_depth(8);
-        cache.insert(witness(10));
-        let original = cache.get(10).unwrap().block_hash;
-
-        let mut replacement = witness(10);
-        replacement.block_hash = B256::repeat_byte(0xab);
-        cache.insert(replacement);
-
-        let stored = cache.get(10).unwrap().block_hash;
-        assert_ne!(stored, original);
-        assert_eq!(stored, B256::repeat_byte(0xab));
+        cache.insert(10, witness(1));
+        cache.insert(10, witness(2));
+        assert_eq!(cache.get(10).unwrap().keys, vec![Bytes::from(vec![2])]);
         assert_eq!(cache.bounds(), Some((10, 10)));
     }
 
     #[test]
     fn range_requires_every_block() {
         let cache = WitnessCache::with_depth(16);
-        for n in [11, 12, 14] {
-            cache.insert(witness(n));
+        for n in [11u64, 12, 14] {
+            cache.insert(n, witness(n as u8));
         }
-        // (10, 12] = {11, 12} present.
-        let range = cache.range(10, 12).expect("contiguous range present");
-        assert_eq!(range.start_block, 10);
-        assert_eq!(range.end_block, 12);
+
+        // [11, 12] inclusive = {11, 12}, in ascending order.
+        let range = cache.range(11, 12).expect("contiguous range present");
         assert_eq!(
-            range
-                .blocks
-                .iter()
-                .map(|b| b.block_number)
-                .collect::<Vec<_>>(),
-            vec![11, 12]
+            range.iter().map(|w| w.keys.clone()).collect::<Vec<_>>(),
+            vec![vec![Bytes::from(vec![11])], vec![Bytes::from(vec![12])]],
         );
-        // (12, 14] is missing 13.
+
+        // `start == end` yields a single block.
+        assert_eq!(cache.range(12, 12).unwrap().len(), 1);
+        // [12, 14] is missing 13.
         assert!(cache.range(12, 14).is_none());
-        // empty / inverted ranges are rejected.
-        assert!(cache.range(12, 12).is_none());
+        // Inverted ranges are rejected.
         assert!(cache.range(14, 12).is_none());
     }
 }
