@@ -5,6 +5,7 @@ use reth_evm::{
 };
 use reth_revm::{State, witness::ExecutionWitnessRecord};
 use revm::context::Block;
+use tracing::{error, warn};
 
 use crate::BlockExecutionWitness;
 
@@ -75,21 +76,9 @@ where
                 record,
             };
 
-            // Non-blocking: never stall block execution on a slow collector. A full queue
-            // drops the witness (a recoverable cache hole) rather than applying backpressure.
-            match sender.try_send(captured) {
-                Ok(()) => {}
-                Err(TrySendError::Full(_)) => tracing::debug!(
-                    target: "world_chain::witness",
-                    %block_number,
-                    "witness collector queue full; dropping captured witness",
-                ),
-                Err(TrySendError::Disconnected(_)) => tracing::warn!(
-                    target: "world_chain::witness",
-                    %block_number,
-                    "witness collector disconnected; dropping captured witness",
-                ),
-            }
+            let _ = sender.try_send(captured).inspect_err(|e| {
+                error!(target: "world_chain::witness", %block_number, %e, "failed to send captured witness");
+            });
         }
 
         self.inner.finish()
