@@ -1,0 +1,123 @@
+# syntax=docker/dockerfile:1.10
+# Nitro parent/host image: packages the nitro-worker binary alongside nitro-cli
+# for deployments on AWS Nitro-enabled EC2 instances.
+#
+# The container runs on the HOST instance (not inside the enclave). It uses
+# nitro-cli to manage enclave lifecycle (start/stop) and the nitro-worker
+# binary to poll for proof jobs and communicate with the enclave over vsock.
+#
+# Requirements at runtime:
+#   - Nitro-enabled EC2 instance (e.g. m5.xlarge with enclave support)
+#   - /dev/nitro_enclaves device mounted into the container
+#   - Hugepages allocated on the host (for enclave memory)
+#   - Container runs with --privileged or appropriate device + capability grants
+#   - The enclave EIF file must be provided (e.g. via volume mount or S3 download)
+#
+# Only built for linux/amd64 — Nitro Enclaves are x86_64-only on most instance
+# types.
+#
+# Build:
+#   docker build -t world-chain-nitro-parent \
+#     -f Dockerfile.nitro-parent .
+#
+# Mirrors the caching strategy of Dockerfile.prover (cargo-chef + sccache/S3).
+
+FROM public.ecr.aws/docker/library/rust:1.95.0-bookworm AS base
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+  --mount=type=cache,target=/usr/local/cargo/git \
+  cargo install --locked sccache --version ^0.9 \
+  && cargo install --locked cargo-chef --version ^0.1
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends clang libclang-dev gcc curl protobuf-compiler libprotobuf-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+ENV CARGO_HOME=/usr/local/cargo \
+    RUSTC_WRAPPER=sccache \
+    SCCACHE_DIR=/sccache
+
+FROM base AS planner
+WORKDIR /app
+
+COPY . .
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+  --mount=type=cache,target=/usr/local/cargo/git \
+  --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+  cargo chef prepare --recipe-path recipe.json
+
+# --- Build the nitro-worker binary -----------------------------------------
+FROM base AS builder
+WORKDIR /app
+
+ARG PROFILE="maxperf"
+ARG SCCACHE_BUCKET
+ARG SCCACHE_REGION
+ARG SCCACHE_S3_KEY_PREFIX
+
+COPY --from=planner /app/recipe.json recipe.json
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+    --mount=type=secret,id=aws_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=aws_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=secret,id=aws_session_token,env=AWS_SESSION_TOKEN \
+    if [ -z "$SCCACHE_BUCKET" ]; then unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; fi && \
+    cargo chef cook --locked --profile ${PROFILE} -p world-chain-nitro-worker --bin nitro-worker --recipe-path recipe.json
+
+ARG VERGEN_GIT_SHA
+COPY . .
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=$SCCACHE_DIR,sharing=locked \
+    --mount=type=secret,id=aws_access_key_id,env=AWS_ACCESS_KEY_ID \
+    --mount=type=secret,id=aws_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
+    --mount=type=secret,id=aws_session_token,env=AWS_SESSION_TOKEN \
+    if [ -z "$SCCACHE_BUCKET" ]; then unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; fi && \
+    cargo build --locked --profile ${PROFILE} -p world-chain-nitro-worker --bin nitro-worker && \
+    cp "target/${PROFILE}/nitro-worker" /tmp/nitro-worker
+
+# --- Build nitro-cli from source (pinned version) --------------------------
+FROM public.ecr.aws/docker/library/rust:1.95.0-bookworm AS nitro-cli-builder
+WORKDIR /build
+
+ARG NITRO_CLI_VERSION=v1.4.2
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch ${NITRO_CLI_VERSION} \
+      https://github.com/aws/aws-nitro-enclaves-cli . && \
+    cargo build --release --bin nitro-cli && \
+    cp target/release/nitro-cli /tmp/nitro-cli
+
+# --- Final image -----------------------------------------------------------
+FROM public.ecr.aws/docker/library/debian:bookworm-slim
+WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      tzdata \
+      jq \
+      # docker CLI — needed by nitro-cli build-enclave (not needed at runtime
+      # if you pre-build the EIF, but useful for enclave management)
+      docker.io && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /tmp/nitro-worker /usr/local/bin/nitro-worker
+COPY --from=nitro-cli-builder /tmp/nitro-cli /usr/local/bin/nitro-cli
+# nitro-cli needs its blobs directory for build-enclave; for run-enclave it
+# needs access to the Nitro hypervisor socket which is bind-mounted at runtime.
+COPY --from=nitro-cli-builder /build/blobs /usr/share/nitro_enclaves/blobs
+
+RUN chmod +x /usr/local/bin/nitro-worker /usr/local/bin/nitro-cli
+
+ENV RUST_LOG=info
+
+ENTRYPOINT ["/usr/local/bin/nitro-worker"]
