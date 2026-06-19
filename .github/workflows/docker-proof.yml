@@ -235,3 +235,104 @@ jobs:
           tags: |
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
             type=sha
+
+  # Nitro enclave EIF build. Produces the EIF artifact and PCR measurements for
+  # nightly validation. Does not require Nitro hardware — only Linux x86_64.
+  build-eif:
+    name: build enclave EIF
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build EIF
+        run: scripts/build-eif.sh target/eif
+      - name: Upload EIF and PCRs
+        uses: actions/upload-artifact@v4
+        with:
+          name: nitro-enclave
+          path: |
+            target/eif/world-chain-nitro-enclave.eif
+            target/eif/pcrs.json
+          if-no-files-found: error
+          retention-days: 7
+
+  # nitro-worker: host-side binary that communicates with the enclave over vsock.
+  # Runs in the Kubernetes pod. No nitro-cli needed.
+  build-nitro-worker-image:
+    name: build nitro-worker image
+    environment: dev
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: linux/amd64
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ github.repository }}-nitro-worker
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          dockerfile: Dockerfile.worker
+          digest_artifact_prefix: digests-nitro-worker
+
+  merge-nitro-worker-image:
+    name: merge nitro-worker image manifest
+    needs: [build-nitro-worker-image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+      - name: Merge manifest
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ github.repository }}-nitro-worker
+          digest_artifact_prefix: digests-nitro-worker
+          tags: |
+            type=raw,value=${{ inputs.image_tag || 'nightly' }}
+            type=sha
+
+  # nitro-worker-enclave: enclave binary built into an EIF separately.
+  # The Docker image is an intermediate artifact used by nitro-cli / build-eif.sh.
+  build-nitro-worker-enclave-image:
+    name: build nitro-worker-enclave image
+    environment: dev
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: linux/amd64
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ github.repository }}-nitro-worker-enclave
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          dockerfile: proofs/nitro/Dockerfile
+          digest_artifact_prefix: digests-nitro-worker-enclave
+
+  merge-nitro-worker-enclave-image:
+    name: merge nitro-worker-enclave image manifest
+    needs: [build-nitro-worker-enclave-image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+      - name: Merge manifest
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ github.repository }}-nitro-worker-enclave
+          digest_artifact_prefix: digests-nitro-worker-enclave
+          tags: |
+            type=raw,value=${{ inputs.image_tag || 'nightly' }}
+            type=sha
