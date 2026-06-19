@@ -2589,20 +2589,38 @@ async fn start_sp1_worker(
     )
     .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?;
 
-    let range_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-range-ethereum");
-    let agg_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-aggregation");
-    let range_elf = fs::read(&range_elf_path)
-        .wrap_err_with(|| format!("failed to read range ELF {}", range_elf_path.display()))?;
-    let agg_elf = fs::read(&agg_elf_path)
-        .wrap_err_with(|| format!("failed to read aggregation ELF {}", agg_elf_path.display()))?;
+    // ELFs are loaded at runtime from the `RANGE_ELF_PATH` and `AGG_ELF_PATH`
+    // environment variables.  Production binaries that embed ELFs at compile time
+    // (e.g. `sp1-worker`) use `EnvSuccinctProver::new_with_elfs` with
+    // `world_chain_proof_succinct_elfs`.
+    //
+    // Validate the paths here so the error surfaces as a clear `Result::Err` with
+    // actionable guidance rather than a panic inside `spawn_blocking`.
+    for (var, label) in [("RANGE_ELF_PATH", "range"), ("AGG_ELF_PATH", "aggregation")] {
+        match std::env::var(var) {
+            Err(_) => {
+                return Err(eyre!(
+                    "{var} is not set — the devnet SP1 worker loads guest ELFs at runtime. \
+                     Set {var} to the path of the compiled {label} SP1 guest ELF, or build \
+                     `world-chain-sp1-worker` with the `embedded-elfs` feature for \
+                     compile-time embedding."
+                ));
+            }
+            Ok(ref path) if !std::path::Path::new(path).exists() => {
+                return Err(eyre!(
+                    "{var}={path} does not exist — check the path to the {label} SP1 guest ELF"
+                ));
+            }
+            Ok(_) => {}
+        }
+    }
 
     // `EnvSuccinctProver` owns its own runtime, so build it off the async runtime.
-    let prover = tokio::task::spawn_blocking(move || {
-        EnvSuccinctProver::new(kind, range_elf, agg_elf, SP1ProofMode::Groth16)
-    })
-    .await
-    .wrap_err("SP1 prover setup task panicked")?
-    .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+    let prover =
+        tokio::task::spawn_blocking(move || EnvSuccinctProver::new(kind, SP1ProofMode::Groth16))
+            .await
+            .wrap_err("SP1 prover setup task panicked")?
+            .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
 
     let backend = Sp1Backend::new(
         host,

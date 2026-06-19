@@ -6,8 +6,8 @@
 
 use anyhow::Context;
 use sp1_sdk::{
-    CpuProver, HashableKey, MockProver, ProveRequest, Prover, ProverClient, ProvingKey, SP1Proof,
-    SP1Stdin,
+    CpuProver, Elf, HashableKey, MockProver, ProveRequest, Prover, ProverClient, ProvingKey,
+    SP1Proof, SP1Stdin,
     env::{EnvProver, EnvProvingKey},
 };
 
@@ -20,6 +20,36 @@ use world_chain_proof_core::{
 use world_chain_proof_succinct_utils::{
     AggregationProofRequest, RangeProofRequest, WorldSuccinctProver,
 };
+
+/// World Chain SP1 range program ELF loaded at runtime from `RANGE_ELF_PATH`.
+///
+/// For production binaries that need ELFs embedded at compile time, use
+/// `world_chain_proof_succinct_elfs::range_elf()` and pass it to
+/// [`EnvSuccinctProver::new_with_elfs`] instead.
+pub fn range_elf() -> Elf {
+    let path = std::env::var("RANGE_ELF_PATH").expect(
+        "RANGE_ELF_PATH must be set (or use EnvSuccinctProver::new_with_elfs with embedded ELFs)",
+    );
+    Elf::from(
+        std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("failed to read range ELF from {path}: {e}")),
+    )
+}
+
+/// World Chain SP1 aggregation program ELF loaded at runtime from `AGG_ELF_PATH`.
+///
+/// For production binaries that need ELFs embedded at compile time, use
+/// `world_chain_proof_succinct_elfs::aggregation_elf()` and pass it to
+/// [`EnvSuccinctProver::new_with_elfs`] instead.
+pub fn aggregation_elf() -> Elf {
+    let path = std::env::var("AGG_ELF_PATH").expect(
+        "AGG_ELF_PATH must be set (or use EnvSuccinctProver::new_with_elfs with embedded ELFs)",
+    );
+    Elf::from(
+        std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("failed to read aggregation ELF from {path}: {e}")),
+    )
+}
 
 /// Which sp1-sdk prover backs an [`EnvSuccinctProver`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,13 +108,26 @@ pub struct EnvSuccinctProver {
 }
 
 impl EnvSuccinctProver {
-    /// Creates the prover and runs SP1 setup for the range and aggregation ELFs.
-    pub fn new(
+    /// Creates the prover loading ELFs at runtime from the `RANGE_ELF_PATH` and
+    /// `AGG_ELF_PATH` environment variables.
+    ///
+    /// For production binaries that embed ELFs at compile time, prefer
+    /// [`EnvSuccinctProver::new_with_elfs`] with
+    /// `world_chain_proof_succinct_elfs::{range_elf, aggregation_elf}`.
+    pub fn new(kind: Sp1ProverKind, agg_mode: SP1ProofMode) -> anyhow::Result<Self> {
+        Self::new_with_elfs(kind, range_elf(), aggregation_elf(), agg_mode)
+    }
+
+    /// Creates the prover using caller-supplied ELFs. Use this in production binaries with
+    /// ELFs embedded at compile time via `world_chain_proof_succinct_elfs`.
+    pub fn new_with_elfs(
         kind: Sp1ProverKind,
-        range_elf: Vec<u8>,
-        agg_elf: Vec<u8>,
+        range_elf: impl Into<Elf>,
+        agg_elf: impl Into<Elf>,
         agg_mode: SP1ProofMode,
     ) -> anyhow::Result<Self> {
+        let range_elf = range_elf.into();
+        let agg_elf = agg_elf.into();
         let runtime = tokio::runtime::Runtime::new().context("failed to create tokio runtime")?;
         let (client, range_pk, agg_pk) = runtime.block_on(async {
             let client = match kind {
@@ -95,11 +138,11 @@ impl EnvSuccinctProver {
                 }
             };
             let range_pk = client
-                .setup(range_elf.into())
+                .setup(range_elf)
                 .await
                 .context("range program setup failed")?;
             let agg_pk = client
-                .setup(agg_elf.into())
+                .setup(agg_elf)
                 .await
                 .context("aggregation program setup failed")?;
             anyhow::Ok((client, range_pk, agg_pk))

@@ -34,35 +34,9 @@ permissions:
   id-token: write
 
 jobs:
-  build-elfs:
-    name: build ELFs
-    runs-on: arc-public-8xlarge-amd64-runner
-    steps:
-      - name: Check Out Repo
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ inputs.ref }}
-      - uses: taiki-e/install-action@just
-      - name: Install SP1 toolchain
-        run: |
-          curl -L https://sp1.succinct.xyz | bash
-          ~/.sp1/bin/sp1up --version v6.1.0
-          echo "$HOME/.sp1/bin" >> $GITHUB_PATH
-      - name: Build ELFs
-        run: just build-proof-elfs
-      - name: Upload ELFs
-        uses: actions/upload-artifact@v4
-        with:
-          name: proof-elfs
-          path: |
-            proofs/succinct/elf/world-chain-range-ethereum
-            proofs/succinct/elf/world-chain-aggregation
-          if-no-files-found: error
-
   build-sp1-prover-image:
     name: build world-chain-prover-sp1 image
     environment: dev
-    needs: [build-elfs]
     strategy:
       fail-fast: false
       matrix:
@@ -77,11 +51,6 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref }}
-      - name: Download ELFs
-        uses: actions/download-artifact@v4
-        with:
-          name: proof-elfs
-          path: proofs/succinct/elf
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -92,7 +61,9 @@ jobs:
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           dockerfile: Dockerfile.prover
           build_args: |
-            PROVER_BACKEND=sp1
+            PROVER_PACKAGE=world-chain-prover-sp1
+            PROVER_BIN=world-chain-prover-sp1
+            FEATURES=
           digest_artifact_prefix: digests-prover-sp1
 
   build-nitro-prover-image:
@@ -122,7 +93,9 @@ jobs:
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           dockerfile: Dockerfile.prover
           build_args: |
-            PROVER_BACKEND=nitro
+            PROVER_PACKAGE=world-chain-prover-nitro
+            PROVER_BIN=world-chain-prover-nitro
+            FEATURES=
           digest_artifact_prefix: digests-prover-nitro
 
   # Each prover's merge depends ONLY on its own build jobs. docker-build-push-digest
@@ -171,7 +144,6 @@ jobs:
   build-service-images:
     name: build ${{ matrix.service.bin }} image
     environment: dev
-    needs: [build-elfs]
     strategy:
       fail-fast: false
       matrix:
@@ -190,12 +162,6 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref }}
-      - name: Download ELFs
-        if: matrix.service.bin == 'sp1-worker'
-        uses: actions/download-artifact@v4
-        with:
-          name: proof-elfs
-          path: proofs/succinct/elf
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
