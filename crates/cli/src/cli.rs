@@ -146,7 +146,7 @@ pub struct WitnessArgs {
 }
 
 impl WitnessArgs {
-    /// Default ring-buffer depth, matching the [`WitnessCache`](world_chain_witness::WitnessCache)
+    /// Default ring-buffer depth, matching the witness cache's
     /// compile-time default capacity.
     const DEFAULT_DEPTH: usize = 1024;
 }

@@ -1,7 +1,4 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-// `min_specialization` is required by the witness-capturing block executor to record a witness only
-// when its database is a `State` cache while still implementing the fully generic
-// `BlockExecutorFactory`/`BlockExecutor` traits. See [`witness`].
 #![feature(min_specialization)]
 
 //! World Chain EVM configuration.
@@ -25,18 +22,23 @@ use reth_provider::{BlockReader, HeaderProvider, StateProvider, StateProviderFac
 use revm_database::BundleState;
 use world_chain_chainspec::WorldChainSpec;
 
+mod cache;
 mod collector;
 pub mod execution;
 pub mod factory;
 pub mod metrics;
 pub mod utils;
 
+pub use cache::{DEFAULT_WITNESS_CAP, WitnessCache};
 pub use collector::spawn_witness_collector;
 pub use metrics::{FlashblockExecutionMetrics, PayloadBuildStage};
 
 pub use world_chain_state::{StateDB, access_list, database, state_db};
 
 use std::sync::Arc;
+
+/// Thread-safe handle to the shared [`WitnessCache`].
+pub type ExecutionWitnessHandle = Arc<WitnessCache>;
 
 use crossbeam_channel::Sender;
 use reth_evm::{
@@ -95,7 +97,7 @@ pub(crate) type OpConfig =
 /// inner block-executor factory must be cloneable/debuggable and thread-safe, and the inner
 /// assembler must assemble blocks for the wrapping [`WorldChainBlockExecutorFactory`]. Any
 /// `ConfigureEvm` that meets these (e.g. [`OpConfig`]) is blanket-implemented.
-pub trait InnerEvm:
+pub trait EvmBounds:
     ConfigureEvm<
         BlockExecutorFactory: Clone + core::fmt::Debug + Send + Sync + Unpin,
         BlockAssembler: BlockAssembler<
@@ -106,7 +108,7 @@ pub trait InnerEvm:
 {
 }
 
-impl<E> InnerEvm for E where
+impl<E> EvmBounds for E where
     E: ConfigureEvm<
             BlockExecutorFactory: Clone + core::fmt::Debug + Send + Sync + Unpin,
             BlockAssembler: BlockAssembler<
@@ -118,14 +120,14 @@ impl<E> InnerEvm for E where
 }
 
 /// World Chain EVM configuration.
-pub struct WorldChainEvmConfig<E: ConfigureEvm + 'static = OpConfig> {
+pub struct WorldChainEvmConfig<E: EvmBounds = OpConfig> {
     /// The underlying EVM configuration.
     inner: E,
-    /// The (optionally) witness-capturing block executor factory built from `inner`'s factory.
+    /// The [`WorldChainBlockExecutorFactory`] built from `inner`'s factory.
     factory: WorldChainBlockExecutorFactory<E>,
 }
 
-impl<E: InnerEvm> Clone for WorldChainEvmConfig<E> {
+impl<E: EvmBounds> Clone for WorldChainEvmConfig<E> {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
@@ -134,7 +136,7 @@ impl<E: InnerEvm> Clone for WorldChainEvmConfig<E> {
     }
 }
 
-impl<E: InnerEvm> core::fmt::Debug for WorldChainEvmConfig<E> {
+impl<E: EvmBounds> core::fmt::Debug for WorldChainEvmConfig<E> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("WorldChainEvmConfig")
             .field("inner", &self.inner)
@@ -181,7 +183,7 @@ impl WorldChainEvmConfig<OpConfig> {
     }
 }
 
-impl<E: InnerEvm> ConfigureEvm for WorldChainEvmConfig<E> {
+impl<E: EvmBounds> ConfigureEvm for WorldChainEvmConfig<E> {
     type Primitives = E::Primitives;
     type Error = E::Error;
     type NextBlockEnvCtx = E::NextBlockEnvCtx;
@@ -227,7 +229,7 @@ impl<E: InnerEvm> ConfigureEvm for WorldChainEvmConfig<E> {
     }
 }
 
-impl<E: InnerEvm + ConfigurePostExecEvm> ConfigurePostExecEvm for WorldChainEvmConfig<E> {
+impl<E: EvmBounds + ConfigurePostExecEvm> ConfigurePostExecEvm for WorldChainEvmConfig<E> {
     fn post_exec_executor_for_block<'a, DB: Database>(
         &'a self,
         db: &'a mut State<DB>,
@@ -267,7 +269,7 @@ impl<E: InnerEvm + ConfigurePostExecEvm> ConfigurePostExecEvm for WorldChainEvmC
     }
 }
 
-impl<E: InnerEvm + ConfigureEngineEvm<OpExecData>> ConfigureEngineEvm<OpExecData>
+impl<E: EvmBounds + ConfigureEngineEvm<OpExecData>> ConfigureEngineEvm<OpExecData>
     for WorldChainEvmConfig<E>
 {
     fn evm_env_for_payload(&self, payload: &OpExecData) -> Result<EvmEnvFor<Self>, Self::Error> {

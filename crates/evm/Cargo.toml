@@ -11,15 +11,17 @@ repository.workspace = true
 world-chain-chainspec.workspace = true
 world-chain-primitives.workspace = true
 world-chain-state.workspace = true
-world-chain-witness.workspace = true
 
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-op-evm.workspace = true
 alloy-primitives.workspace = true
+alloy-rpc-types-debug.workspace = true
 
 auto_impl.workspace = true
 crossbeam-channel.workspace = true
+futures.workspace = true
+parking_lot.workspace = true
 eyre.workspace = true
 op-alloy-consensus.workspace = true
 op-revm.workspace = true
@@ -34,8 +36,9 @@ reth-payload-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-revm = { workspace = true, features = ["witness"] }
-reth-trie-common.workspace = true
 reth-tasks.workspace = true
+tokio.workspace = true
+reth-trie-common.workspace = true
 
 revm.workspace = true
 revm-database.workspace = true

@@ -693,6 +693,7 @@ where
         ctx.spec().clone().into(),
         R::default(),
     );
+
     executor.gas_used = committed_state.gas_used;
     executor.da_footprint_used = committed_state.blob_gas_used;
     executor.receipts = committed_state.receipts_iter().cloned().collect();

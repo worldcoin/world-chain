@@ -39,14 +39,16 @@ use world_chain_p2p::{
 };
 use world_chain_primitives::p2p::Authorization;
 use world_chain_rpc::eth::FlashblocksEthApiBuilder;
-use world_chain_witness::{ExecutionWitnessHandle, WitnessCache};
 
 use std::sync::Arc;
 
 use crossbeam_channel::{Receiver, Sender};
 use tracing::info;
 use world_chain_builder::WorldChainPayloadBuilderCtxBuilder;
-use world_chain_evm::{BlockExecutionWitness, WorldChainEvmConfig, WorldChainExecutorBuilder};
+use world_chain_evm::{
+    BlockExecutionWitness, ExecutionWitnessHandle, WitnessCache, WorldChainEvmConfig,
+    WorldChainExecutorBuilder,
+};
 use world_chain_pool::BasicWorldChainPool;
 use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
 
@@ -416,7 +418,9 @@ impl From<WorldChainNodeConfig> for WorldChainDefaultContext {
 
         let witness = value.args.witness.collect.then(|| {
             let cache = Arc::new(WitnessCache::with_depth(value.args.witness.depth));
-            let (sender, receiver) = crossbeam_channel::unbounded();
+            // Bounded so a slow collector applies backpressure (dropped witnesses) instead of growing
+            // memory without limit; sized to the same retention as the cache.
+            let (sender, receiver) = crossbeam_channel::bounded(value.args.witness.depth);
             WitnessChannels {
                 cache,
                 sender,

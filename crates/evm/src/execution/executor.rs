@@ -1,4 +1,4 @@
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Sender, TrySendError};
 use reth_evm::{
     Evm,
     block::{BlockExecutionError, BlockExecutionResult, BlockExecutor, ExecutableTx},
@@ -75,13 +75,20 @@ where
                 record,
             };
 
-            if let Err(err) = sender.send(captured) {
-                tracing::warn!(
+            // Non-blocking: never stall block execution on a slow collector. A full queue
+            // drops the witness (a recoverable cache hole) rather than applying backpressure.
+            match sender.try_send(captured) {
+                Ok(()) => {}
+                Err(TrySendError::Full(_)) => tracing::debug!(
                     target: "world_chain::witness",
                     %block_number,
-                    %err,
-                    "failed to forward captured execution witness",
-                );
+                    "witness collector queue full; dropping captured witness",
+                ),
+                Err(TrySendError::Disconnected(_)) => tracing::warn!(
+                    target: "world_chain::witness",
+                    %block_number,
+                    "witness collector disconnected; dropping captured witness",
+                ),
             }
         }
 

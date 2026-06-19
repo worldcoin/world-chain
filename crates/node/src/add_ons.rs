@@ -31,7 +31,9 @@ use reth_optimism_rpc::{
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
 };
 use reth_primitives_traits::{FullSignedTx, NodePrimitives};
-use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderFactory};
+use reth_provider::{
+    BlockReaderIdExt, CanonStateSubscriptions, HeaderProvider, StateProviderFactory,
+};
 use reth_rpc_api::{
     DebugApiServer, EthConfigApiServer, L2EthApiExtServer, eth::helpers::config::EthConfigHandler,
 };
@@ -39,13 +41,14 @@ use reth_rpc_server_types::RethRpcModule;
 use reth_transaction_pool::TransactionPool;
 use tracing::{debug, info};
 use world_chain_chainspec::WorldChainSpec;
-use world_chain_evm::{BlockExecutionWitness, OpTx, spawn_witness_collector};
+use world_chain_evm::{
+    BlockExecutionWitness, ExecutionWitnessHandle, OpTx, spawn_witness_collector,
+};
 use world_chain_rpc::{
     DebugWitnessOracle, DebugWitnessOracleApiServer, EthApiExtServer,
     SequencerClient as WorldChainSequencerClient, Simulate, SimulateApiServer, WorldChainEthApiExt,
     op::{FlashblocksOpApi, OpApiExtServer},
 };
-use world_chain_witness::ExecutionWitnessHandle;
 
 /// Primitive bounds required by the OP RPC extensions used by World Chain.
 pub trait WorldChainRpcPrimitives<Tx>:
@@ -329,6 +332,7 @@ where
         + ChainSpecProvider<ChainSpec = WorldChainSpec>
         + HeaderProvider<Header = Header>
         + StateProviderFactory
+        + CanonStateSubscriptions
         + Clone
         + Send
         + Sync
@@ -370,7 +374,7 @@ where
                 ctx.node.provider().clone(),
                 cache.clone(),
                 receiver,
-                ctx.node.task_executor().clone(),
+                ctx.node.task_executor(),
             );
             DebugWitnessOracle::new(cache)
         });

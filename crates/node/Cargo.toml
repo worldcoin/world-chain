@@ -21,7 +21,6 @@ world-chain-cli.workspace = true
 world-chain-payload.workspace = true
 world-chain-chainspec.workspace = true
 world-chain-evm.workspace = true
-world-chain-witness.workspace = true
 
 reth-node-builder.workspace = true
 reth-chainspec.workspace = true

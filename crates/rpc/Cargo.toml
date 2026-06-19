@@ -14,7 +14,6 @@ workspace = true
 # internal
 world-chain-evm.workspace = true
 world-chain-primitives.workspace = true
-world-chain-witness.workspace = true
 
 alloy-rpc-types-debug.workspace = true
 
