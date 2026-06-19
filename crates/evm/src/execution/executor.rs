@@ -1,11 +1,11 @@
-use crossbeam_channel::{Sender, TrySendError};
+use crossbeam_channel::Sender;
 use reth_evm::{
     Evm,
     block::{BlockExecutionError, BlockExecutionResult, BlockExecutor, ExecutableTx},
 };
 use reth_revm::{State, witness::ExecutionWitnessRecord};
 use revm::context::Block;
-use tracing::{error, warn};
+use tracing::error;
 
 use crate::BlockExecutionWitness;
 
