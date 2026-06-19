@@ -31,6 +31,9 @@ pub enum ProofRequestError {
         /// The reason reported on the last attempt.
         reason: String,
     },
+    /// Internal service or storage error.
+    #[error("prover-service error: {0}")]
+    Internal(String),
     /// RPC transport error.
     #[error("RPC error: {0}")]
     Rpc(String),
@@ -42,6 +45,12 @@ pub enum ProofJobQueueError {
     /// No proof request with the given id is known.
     #[error("unknown proof job {0}")]
     UnknownJob(ProofRequestId),
+    /// No backend proof job with the given id is known.
+    #[error("unknown backend proof job {0}")]
+    UnknownBackendJob(i64),
+    /// The lease token no longer owns the row being updated.
+    #[error("stale lease for proof job update")]
+    StaleLease,
     /// The submitted proof does not match the requested job.
     #[error("invalid proof for job {id}: {reason}")]
     InvalidProof {
@@ -50,6 +59,9 @@ pub enum ProofJobQueueError {
         /// Why the proof was rejected.
         reason: String,
     },
+    /// Internal service or storage error.
+    #[error("prover-service error: {0}")]
+    Internal(String),
     /// RPC transport error.
     #[error("RPC error: {0}")]
     Rpc(String),

@@ -27,9 +27,13 @@
 //! `sp1_sdk::include_elf!()` (see `proofs/succinct/elfs/build.rs`); no path-based
 //! overrides are required.
 
+#![cfg(feature = "embedded-elfs")]
+
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use alloy_primitives::Address;
+use testcontainers::runners::AsyncRunner;
+use testcontainers_modules::postgres;
 use world_chain_proof_kona_host_utils::online::{OnlineHostConfig, resolve_l1_head};
 use world_chain_proof_succinct_host_utils::prover::{SP1ProofMode, Sp1ProverKind, SuccinctProver};
 use world_chain_proofs::{ConsensusProvider, OptimismConsensusClient};
@@ -155,8 +159,27 @@ async fn worker_proves_real_range_end_to_end() {
         },
     );
 
-    // Real prover-service over JSON-RPC, just like production.
-    let service = Arc::new(ProverService::new(ProverServiceConfig::default()).expect("config"));
+    // Real Postgres-backed prover-service over JSON-RPC, just like production.
+    let postgres = match postgres::Postgres::default().start().await {
+        Ok(postgres) => postgres,
+        Err(error) => {
+            eprintln!("skipping e2e_proving: failed to start postgres: {error}");
+            return;
+        }
+    };
+    let database_url = format!(
+        "postgres://postgres:postgres@{}:{}/postgres",
+        postgres.get_host().await.expect("postgres host"),
+        postgres
+            .get_host_port_ipv4(5432)
+            .await
+            .expect("postgres port")
+    );
+    let service = Arc::new(
+        ProverService::connect(&database_url, ProverServiceConfig::default())
+            .await
+            .expect("config"),
+    );
     let (addr, _server) = start_rpc_server("127.0.0.1:0".parse().unwrap(), service)
         .await
         .expect("start prover-service");

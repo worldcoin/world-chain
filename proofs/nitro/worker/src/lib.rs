@@ -38,7 +38,9 @@ use world_chain_proof_nitro::{
 };
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
 use world_chain_proof_worker::{ProofJobBackend, ProofWorker, ProofWorkerConfig};
-use world_chain_prover_service::{ProofBackend, ProofData, ProofRequest, RpcProverServiceClient};
+use world_chain_prover_service::{
+    BackendProofState, BackendUpdate, ProofBackend, ProofData, ProofRequest, RpcProverServiceClient,
+};
 
 // ──────────────────────────────────────────────────────────────────────────────────────
 // NitroBackend — ProofJobBackend implementation for the Nitro TEE lane
@@ -70,7 +72,7 @@ impl ProofJobBackend for NitroBackend {
         ProofBackend::Nitro
     }
 
-    fn prove(&self, request: &ProofRequest) -> anyhow::Result<ProofData> {
+    fn start(&self, request: &ProofRequest) -> anyhow::Result<BackendUpdate> {
         let start_block = request
             .l2_block_number
             .checked_sub(self.config.block_interval)
@@ -143,10 +145,18 @@ impl ProofJobBackend for NitroBackend {
             "enclave attested range proof"
         );
 
-        Ok(ProofData::Nitro {
+        Ok(BackendUpdate::Complete(ProofData::Nitro {
             attestation: Bytes::from(artifact.attestation_doc),
             signature: Bytes::from(artifact.signature),
-        })
+        }))
+    }
+
+    fn advance(
+        &self,
+        _request: &ProofRequest,
+        _state: BackendProofState,
+    ) -> anyhow::Result<BackendUpdate> {
+        bail!("Nitro backend does not support durable backend jobs")
     }
 }
 

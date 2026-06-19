@@ -3,9 +3,11 @@
 use std::{sync::Arc, time::Duration};
 
 use alloy_primitives::{Address, B256, Bytes};
+use testcontainers::{ContainerAsync, runners::AsyncRunner};
+use testcontainers_modules::postgres;
 use world_chain_prover_service::{
-    ProofBackend, ProofData, ProofRequest, ProofRequester, ProofStatus, ProverService,
-    ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
+    BackendProofState, BackendUpdate, ProofBackend, ProofData, ProofRequest, ProofRequester,
+    ProofStatus, ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
 };
 use world_chain_sp1_worker::{ProofJobBackend, ProofWorker, ProofWorkerConfig};
 
@@ -17,18 +19,51 @@ impl ProofJobBackend for MockBackend {
         ProofBackend::Sp1
     }
 
-    fn prove(&self, _request: &ProofRequest) -> anyhow::Result<ProofData> {
-        Ok(ProofData::Sp1 {
+    fn start(&self, _request: &ProofRequest) -> anyhow::Result<BackendUpdate> {
+        Ok(BackendUpdate::Complete(ProofData::Sp1 {
             proof: Bytes::from_static(&[0xaa, 0xbb]),
             public_values: Bytes::from_static(&[0x01]),
-        })
+        }))
     }
+
+    fn advance(
+        &self,
+        _request: &ProofRequest,
+        _state: BackendProofState,
+    ) -> anyhow::Result<BackendUpdate> {
+        anyhow::bail!("mock backend has no durable backend jobs")
+    }
+}
+
+async fn postgres_service() -> Option<(Arc<ProverService>, ContainerAsync<postgres::Postgres>)> {
+    let postgres = match postgres::Postgres::default().start().await {
+        Ok(postgres) => postgres,
+        Err(error) => {
+            eprintln!("skipping postgres-backed sp1-worker RPC test: {error}");
+            return None;
+        }
+    };
+    let database_url = format!(
+        "postgres://postgres:postgres@{}:{}/postgres",
+        postgres.get_host().await.expect("postgres host"),
+        postgres
+            .get_host_port_ipv4(5432)
+            .await
+            .expect("postgres port")
+    );
+    let service = Arc::new(
+        ProverService::connect(&database_url, ProverServiceConfig::default())
+            .await
+            .expect("postgres-backed service"),
+    );
+    Some((service, postgres))
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn worker_completes_requested_proof_over_rpc() {
-    let service =
-        Arc::new(ProverService::new(ProverServiceConfig::default()).expect("valid default config"));
+    let Some((service, _postgres)) = postgres_service().await else {
+        return;
+    };
     let (addr, server) = start_rpc_server("127.0.0.1:0".parse().expect("addr"), service)
         .await
         .expect("rpc server starts");

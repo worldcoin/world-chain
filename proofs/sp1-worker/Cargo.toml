@@ -10,6 +10,7 @@ repository.workspace = true
 [[bin]]
 name = "sp1-worker"
 path = "src/main.rs"
+required-features = ["embedded-elfs"]
 
 [lints]
 workspace = true
@@ -33,6 +34,8 @@ alloy-sol-types.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
+reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
+serde_cbor = "0.11"
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "signal", "time"] }
@@ -40,6 +43,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
+testcontainers.workspace = true
+testcontainers-modules.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 world-chain-proofs.workspace = true

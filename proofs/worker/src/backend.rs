@@ -1,20 +1,26 @@
 //! The backend abstraction the worker dispatches leased jobs to.
 
-use world_chain_prover_service::{ProofBackend, ProofData, ProofRequest};
+use world_chain_prover_service::{BackendProofState, BackendUpdate, ProofBackend, ProofRequest};
 
 /// A proving backend for one [`ProofBackend`] lane.
 ///
-/// The backend turns a leased [`ProofRequest`] into the lane-shaped [`ProofData`] the worker
-/// submits verbatim. It is responsible for validating that the proof actually defends the
-/// requested root — how a proof binds to a root is lane-specific (a validity proof commits to
-/// it in its public values, an attestation signs over it) — and returning an error otherwise.
+/// The backend starts or advances lane-specific proving work and returns a generic
+/// [`BackendUpdate`] that the worker submits verbatim.
 ///
-/// `prove` is synchronous and long-running (witness generation plus proving); the worker runs
-/// it on a blocking thread.
+/// `start` and `advance` are synchronous and may be long-running; the worker runs them on a
+/// blocking thread. Backends are responsible for validating that final proofs actually defend the
+/// requested root.
 pub trait ProofJobBackend: Send + Sync + 'static {
     /// The queue lane this backend leases jobs from.
     fn lane(&self) -> ProofBackend;
 
-    /// Proves the transition the request defends and returns the lane-shaped proof.
-    fn prove(&self, request: &ProofRequest) -> anyhow::Result<ProofData>;
+    /// Starts backend work for a user-facing proof request.
+    fn start(&self, request: &ProofRequest) -> anyhow::Result<BackendUpdate>;
+
+    /// Advances durable backend work.
+    fn advance(
+        &self,
+        request: &ProofRequest,
+        state: BackendProofState,
+    ) -> anyhow::Result<BackendUpdate>;
 }

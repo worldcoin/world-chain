@@ -2,148 +2,80 @@ use crate::{
     config::ProverServiceConfig,
     error::{InvalidConfigError, ProofJobQueueError, ProofRequestError},
     traits::{ProofJobQueue, ProofRequester},
-    types::{ProofBackend, ProofData, ProofRequest, ProofRequestId, ProofResponse, ProofStatus},
+    types::{
+        BackendProofId, BackendProofJobStatus, BackendProofState, BackendProofWork, BackendUpdate,
+        LeaseToken, LeasedBackendProofWork, LeasedProofRequest, ProofBackend, ProofData,
+        ProofRequest, ProofRequestId, ProofResponse, ProofStatus, ProofSubmissionLease,
+    },
 };
+use alloy_primitives::{Address, B256};
 use async_trait::async_trait;
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::Mutex,
-    time::Instant,
+use sqlx::{
+    PgPool, Postgres, Row, Transaction,
+    migrate::{MigrateError, Migrator},
+    postgres::{PgPoolOptions, PgRow},
 };
+use std::{str::FromStr, time::Duration};
 use tracing::{debug, info, warn};
 
-/// The in-memory state of a single proof job.
-#[derive(Debug)]
-enum JobState {
-    /// Waiting in its backend queue.
-    Queued,
-    /// Leased to a worker until `lease_deadline`.
-    InProgress {
-        /// When the lease expires and the job is re-queued.
-        lease_deadline: Instant,
-    },
-    /// Proof available.
-    Completed(ProofData),
-    /// Permanently failed.
-    Failed {
-        /// The reason reported on the last attempt.
-        reason: String,
-    },
-}
+static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
-impl JobState {
-    const fn status(&self) -> ProofStatus {
-        match self {
-            Self::Queued => ProofStatus::Queued,
-            Self::InProgress { .. } => ProofStatus::InProgress,
-            Self::Completed(_) => ProofStatus::Completed,
-            Self::Failed { .. } => ProofStatus::Failed,
-        }
-    }
-}
-
-/// A proof job tracked by the `prover-service`.
-#[derive(Debug)]
-struct JobEntry {
-    request: ProofRequest,
-    state: JobState,
-    /// Number of leases handed out for this job.
-    attempts: u32,
-}
-
-/// Mutable service state guarded by a single lock.
-#[derive(Debug, Default)]
-struct State {
-    jobs: HashMap<ProofRequestId, JobEntry>,
-    sp1_queue: VecDeque<ProofRequestId>,
-    nitro_queue: VecDeque<ProofRequestId>,
-    /// Finished (completed or failed) jobs in finishing order,
-    /// used to evict the oldest once over capacity.
-    finished: VecDeque<ProofRequestId>,
-}
-
-impl State {
-    fn queue_mut(&mut self, backend: ProofBackend) -> &mut VecDeque<ProofRequestId> {
-        match backend {
-            ProofBackend::Sp1 => &mut self.sp1_queue,
-            ProofBackend::Nitro => &mut self.nitro_queue,
-        }
-    }
-
-    /// Record a job as finished and evict the oldest finished jobs
-    /// beyond `max_finished_jobs`.
-    fn finish_job(&mut self, id: ProofRequestId, max_finished_jobs: usize) {
-        self.finished.push_back(id);
-        while self.finished.len() > max_finished_jobs {
-            if let Some(evicted) = self.finished.pop_front() {
-                self.jobs.remove(&evicted);
-                debug!(id = %evicted, "evicted finished proof job");
-            }
-        }
-    }
-}
-
-/// The central orchestration service between defenders and proof
-/// generation backends.
+/// The central orchestration service between defenders and proof generation backends.
 ///
-/// It keeps a per-backend FIFO queue of proof requests and an in-memory
-/// proof store. Jobs handed to workers are leased: a job that is neither
-/// submitted nor failed before [`ProverServiceConfig::lease_timeout`]
-/// elapses is re-queued, until [`ProverServiceConfig::max_attempts`]
-/// leases are exhausted and the job is marked as failed.
-#[derive(Debug)]
+/// State is durable in Postgres. All worker-facing mutations validate the lease token returned
+/// by the corresponding claim method, so stale workers cannot overwrite rows after their lease
+/// expires and another worker takes over.
+#[derive(Debug, Clone)]
 pub struct ProverService {
     config: ProverServiceConfig,
-    state: Mutex<State>,
+    pool: PgPool,
 }
 
 impl ProverService {
-    /// Create a new `ProverService` with the given configuration.
-    pub fn new(config: ProverServiceConfig) -> Result<Self, InvalidConfigError> {
+    /// Create a service over an existing Postgres pool.
+    pub fn new(pool: PgPool, config: ProverServiceConfig) -> Result<Self, InvalidConfigError> {
         config.validate()?;
-        Ok(Self {
-            config,
-            state: Mutex::new(State::default()),
-        })
+        Ok(Self { config, pool })
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state
-            .lock()
-            .expect("prover-service state mutex poisoned")
+    /// Connect to Postgres, run migrations, and create the service.
+    pub async fn connect(
+        database_url: &str,
+        config: ProverServiceConfig,
+    ) -> Result<Self, ProverServiceInitError> {
+        config.validate()?;
+        let pool = PgPoolOptions::new()
+            .max_connections(10)
+            .connect(database_url)
+            .await?;
+        Self::migrate(&pool).await?;
+        Ok(Self { config, pool })
     }
 
-    /// Move expired leases for `backend` back to the queue, failing jobs
-    /// that exhausted their attempts.
-    fn requeue_expired(&self, state: &mut State, backend: ProofBackend, now: Instant) {
-        let expired: Vec<ProofRequestId> = state
-            .jobs
-            .iter()
-            .filter(|(_, entry)| {
-                entry.request.backend == backend
-                    && matches!(
-                        entry.state,
-                        JobState::InProgress { lease_deadline } if lease_deadline <= now
-                    )
-            })
-            .map(|(id, _)| *id)
-            .collect();
-
-        for id in expired {
-            let entry = state.jobs.get_mut(&id).expect("job exists");
-            if entry.attempts >= self.config.max_attempts {
-                warn!(%id, attempts = entry.attempts, "proof job failed: lease expired");
-                entry.state = JobState::Failed {
-                    reason: format!("lease expired after {} attempts", entry.attempts),
-                };
-                state.finish_job(id, self.config.max_finished_jobs);
-            } else {
-                debug!(%id, attempts = entry.attempts, "proof job lease expired, re-queueing");
-                entry.state = JobState::Queued;
-                state.queue_mut(backend).push_front(id);
-            }
-        }
+    /// Run database migrations for the prover-service schema.
+    pub async fn migrate(pool: &PgPool) -> Result<(), MigrateError> {
+        MIGRATOR.run(pool).await
     }
+
+    /// Access the underlying pool.
+    #[must_use]
+    pub const fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+}
+
+/// Error raised while initializing a Postgres-backed [`ProverService`].
+#[derive(Debug, thiserror::Error)]
+pub enum ProverServiceInitError {
+    /// Invalid service configuration.
+    #[error(transparent)]
+    InvalidConfig(#[from] InvalidConfigError),
+    /// Failed to connect to Postgres.
+    #[error(transparent)]
+    Sqlx(#[from] sqlx::Error),
+    /// Failed to run migrations.
+    #[error(transparent)]
+    Migration(#[from] MigrateError),
 }
 
 #[async_trait]
@@ -154,36 +86,75 @@ impl ProofRequester for ProverService {
     ) -> Result<ProofRequestId, ProofRequestError> {
         let id = proof_request.id();
         let backend = proof_request.backend;
-        let mut state = self.lock();
+        let proof_id = proof_id_bytes(id);
+        let mut tx = self.begin_request_tx().await?;
 
-        if let Some(entry) = state.jobs.get_mut(&id) {
-            // Re-requesting a failed proof re-queues it; any other state
-            // already has the proof queued, running, or available.
-            if matches!(entry.state, JobState::Failed { .. }) {
-                entry.state = JobState::Queued;
-                entry.attempts = 0;
-                state.finished.retain(|finished| *finished != id);
-                state.queue_mut(backend).push_back(id);
+        if let Some(row) =
+            sqlx::query("select status from proof_jobs where proof_id = $1 for update")
+                .bind(&proof_id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(request_db)?
+        {
+            let status = parse_status(row.try_get("status").map_err(request_db)?)?;
+            if status == ProofStatus::Failed {
+                sqlx::query("delete from proof_backend_jobs where proof_id = $1")
+                    .bind(&proof_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(request_db)?;
+                sqlx::query(
+                    "update proof_jobs
+                     set status = 'queued',
+                         proof_data = null,
+                         failure_reason = null,
+                         start_attempts = 0,
+                         locked_until = null,
+                         lease_token = null,
+                         updated_at = now(),
+                         finished_at = null
+                     where proof_id = $1",
+                )
+                .bind(&proof_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(request_db)?;
                 info!(%id, %backend, "failed proof request re-queued");
             }
+            tx.commit().await.map_err(request_db)?;
             return Ok(id);
         }
 
-        if state.queue_mut(backend).len() >= self.config.max_queue_len {
+        let queued: i64 = sqlx::query_scalar(
+            "select count(*) from proof_jobs where backend = $1 and status = 'queued'",
+        )
+        .bind(backend.as_str())
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(request_db)?;
+        if queued as usize >= self.config.max_queue_len {
             return Err(ProofRequestError::QueueFull(backend));
         }
 
-        state.jobs.insert(
-            id,
-            JobEntry {
-                request: proof_request,
-                state: JobState::Queued,
-                attempts: 0,
-            },
-        );
-        state.queue_mut(backend).push_back(id);
-        info!(%id, %backend, "proof request queued");
+        sqlx::query(
+            "insert into proof_jobs (
+                proof_id, backend, game, root_claim, l2_block_number, l1_head,
+                status, created_at, updated_at
+             )
+             values ($1, $2, $3, $4, $5, $6, 'queued', now(), now())",
+        )
+        .bind(&proof_id)
+        .bind(backend.as_str())
+        .bind(proof_request.game.as_slice())
+        .bind(proof_request.root_claim.as_slice())
+        .bind(l2_to_i64(proof_request.l2_block_number)?)
+        .bind(proof_request.l1_head.as_slice())
+        .execute(&mut *tx)
+        .await
+        .map_err(request_db)?;
 
+        tx.commit().await.map_err(request_db)?;
+        info!(%id, %backend, "proof request queued");
         Ok(id)
     }
 
@@ -191,36 +162,51 @@ impl ProofRequester for ProverService {
         &self,
         proof_id: ProofRequestId,
     ) -> Result<ProofStatus, ProofRequestError> {
-        let state = self.lock();
-        state
-            .jobs
-            .get(&proof_id)
-            .map(|entry| entry.state.status())
-            .ok_or(ProofRequestError::NotFound(proof_id))
+        let row = sqlx::query("select status from proof_jobs where proof_id = $1")
+            .bind(proof_id_bytes(proof_id))
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(request_db)?
+            .ok_or(ProofRequestError::NotFound(proof_id))?;
+        parse_status(row.try_get("status").map_err(request_db)?)
     }
 
     async fn get_proof(
         &self,
         proof_id: ProofRequestId,
     ) -> Result<ProofResponse, ProofRequestError> {
-        let state = self.lock();
-        let entry = state
-            .jobs
-            .get(&proof_id)
-            .ok_or(ProofRequestError::NotFound(proof_id))?;
+        let row = sqlx::query(
+            "select status, proof_data, failure_reason from proof_jobs where proof_id = $1",
+        )
+        .bind(proof_id_bytes(proof_id))
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(request_db)?
+        .ok_or(ProofRequestError::NotFound(proof_id))?;
 
-        match &entry.state {
-            JobState::Completed(proof) => Ok(ProofResponse {
+        let status = parse_status(row.try_get("status").map_err(request_db)?)?;
+        match status {
+            ProofStatus::Completed => {
+                let data: Vec<u8> = row
+                    .try_get("proof_data")
+                    .map_err(|err| ProofRequestError::Internal(err.to_string()))?;
+                let proof = serde_json::from_slice(&data)
+                    .map_err(|err| ProofRequestError::Internal(err.to_string()))?;
+                Ok(ProofResponse {
+                    id: proof_id,
+                    proof,
+                })
+            }
+            ProofStatus::Failed => Err(ProofRequestError::Failed {
                 id: proof_id,
-                proof: proof.clone(),
+                reason: row
+                    .try_get::<Option<String>, _>("failure_reason")
+                    .map_err(request_db)?
+                    .unwrap_or_else(|| "proof job failed".to_string()),
             }),
-            JobState::Failed { reason } => Err(ProofRequestError::Failed {
+            status => Err(ProofRequestError::Pending {
                 id: proof_id,
-                reason: reason.clone(),
-            }),
-            state => Err(ProofRequestError::Pending {
-                id: proof_id,
-                status: state.status(),
+                status,
             }),
         }
     }
@@ -231,104 +217,758 @@ impl ProofJobQueue for ProverService {
     async fn get_next_proof(
         &self,
         backend: ProofBackend,
-    ) -> Result<Option<ProofRequest>, ProofJobQueueError> {
-        let now = Instant::now();
-        let mut state = self.lock();
-        self.requeue_expired(&mut state, backend, now);
-
-        while let Some(id) = state.queue_mut(backend).pop_front() {
-            // Skip ids whose job was completed, evicted, or re-queued
-            // through another path while waiting in the queue.
-            let Some(entry) = state.jobs.get_mut(&id) else {
-                continue;
+    ) -> Result<Option<LeasedProofRequest>, ProofJobQueueError> {
+        let mut tx = self.begin_queue_tx().await?;
+        loop {
+            let Some(row) = sqlx::query(
+                "select proof_id, backend, game, root_claim, l2_block_number, l1_head,
+                        start_attempts
+                 from proof_jobs
+                 where backend = $1
+                   and (
+                     status = 'queued'
+                     or (status = 'starting' and locked_until < now())
+                   )
+                 order by created_at
+                 for update skip locked
+                 limit 1",
+            )
+            .bind(backend.as_str())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(queue_db)?
+            else {
+                tx.commit().await.map_err(queue_db)?;
+                return Ok(None);
             };
-            if !matches!(entry.state, JobState::Queued) {
+
+            let proof_id = proof_id_from_row(&row).map_err(ProofJobQueueError::Internal)?;
+            let attempts: i32 = row.try_get("start_attempts").map_err(queue_db)?;
+            if attempts as u32 >= self.config.max_attempts {
+                let reason = format!("start lease expired after {attempts} attempts");
+                mark_proof_failed(&mut tx, proof_id, &reason)
+                    .await
+                    .map_err(queue_db)?;
+                warn!(%proof_id, attempts, "proof job failed: start attempts exhausted");
                 continue;
             }
 
-            entry.attempts += 1;
-            entry.state = JobState::InProgress {
-                lease_deadline: now + self.config.lease_timeout,
-            };
-            debug!(%id, %backend, attempts = entry.attempts, "proof job leased");
-            return Ok(Some(entry.request.clone()));
-        }
+            let request = request_from_row(&row).map_err(ProofJobQueueError::Internal)?;
+            let lease_token = LeaseToken::new();
+            sqlx::query(
+                "update proof_jobs
+                 set status = 'starting',
+                     locked_until = now() + ($2::bigint * interval '1 millisecond'),
+                     lease_token = $3,
+                     start_attempts = start_attempts + 1,
+                     updated_at = now()
+                 where proof_id = $1",
+            )
+            .bind(proof_id_bytes(proof_id))
+            .bind(duration_millis(self.config.lease_timeout))
+            .bind(lease_token.0)
+            .execute(&mut *tx)
+            .await
+            .map_err(queue_db)?;
 
-        Ok(None)
+            tx.commit().await.map_err(queue_db)?;
+            debug!(%proof_id, %backend, attempts = attempts + 1, "proof job leased");
+            return Ok(Some(LeasedProofRequest {
+                request,
+                lease_token,
+            }));
+        }
     }
 
-    async fn submit_proof(&self, proof: ProofResponse) -> Result<(), ProofJobQueueError> {
-        let mut state = self.lock();
-        let entry = state
-            .jobs
-            .get_mut(&proof.id)
-            .ok_or(ProofJobQueueError::UnknownJob(proof.id))?;
+    async fn submit_backend_proof_state(
+        &self,
+        proof_id: ProofRequestId,
+        backend_proof_state: BackendProofState,
+        lease_token: LeaseToken,
+    ) -> Result<(), ProofJobQueueError> {
+        let mut tx = self.begin_queue_tx().await?;
+        let backend: Option<String> = sqlx::query_scalar(
+            "update proof_jobs
+             set status = 'backend_pending',
+                 locked_until = null,
+                 lease_token = null,
+                 updated_at = now()
+             where proof_id = $1
+               and lease_token = $2
+               and status = 'starting'
+             returning backend",
+        )
+        .bind(proof_id_bytes(proof_id))
+        .bind(lease_token.0)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(queue_db)?;
 
-        // A duplicate submission for an already completed job is a no-op.
-        if matches!(entry.state, JobState::Completed(_)) {
-            return Ok(());
-        }
+        let Some(backend) = backend else {
+            return Err(classify_proof_update(&mut tx, proof_id).await);
+        };
 
-        if proof.proof.backend() != entry.request.backend {
-            return Err(ProofJobQueueError::InvalidProof {
-                id: proof.id,
-                reason: format!(
-                    "backend mismatch: expected {}, got {}",
-                    entry.request.backend,
-                    proof.proof.backend()
-                ),
-            });
-        }
+        sqlx::query(
+            "insert into proof_backend_jobs (
+                proof_id, backend, phase, backend_proof_id, status,
+                next_poll_at, created_at, updated_at
+             )
+             values ($1, $2, $3, $4, 'requested', now(), now(), now())",
+        )
+        .bind(proof_id_bytes(proof_id))
+        .bind(backend)
+        .bind(backend_proof_state.phase())
+        .bind(backend_proof_state.id().to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(queue_db)?;
 
-        // Accept proofs from expired or already failed jobs too: a valid
-        // proof is useful no matter how late it arrives.
-        let was_queued = matches!(entry.state, JobState::Queued);
-        let backend = entry.request.backend;
-        entry.state = JobState::Completed(proof.proof);
-        if was_queued {
-            // The job was re-queued after its lease expired; drop the queue
-            // entry so it cannot be leased again or count as queued work.
-            state
-                .queue_mut(backend)
-                .retain(|queued| *queued != proof.id);
-        }
-        // Give jobs that were already finished (failed) a fresh eviction
-        // slot, so the completed proof is not evicted in failure order.
-        state.finished.retain(|finished| *finished != proof.id);
-        state.finish_job(proof.id, self.config.max_finished_jobs);
-        info!(id = %proof.id, "proof job completed");
-
+        tx.commit().await.map_err(queue_db)?;
+        info!(%proof_id, phase = backend_proof_state.phase(), "backend proof state submitted");
         Ok(())
+    }
+
+    async fn get_next_backend_proof(
+        &self,
+        backend: ProofBackend,
+    ) -> Result<Option<LeasedBackendProofWork>, ProofJobQueueError> {
+        let mut tx = self.begin_queue_tx().await?;
+        loop {
+            let Some(row) = sqlx::query(
+                "select
+                     bj.id as backend_job_id,
+                     bj.phase,
+                     bj.backend_proof_id,
+                     bj.advance_attempts,
+                     pj.proof_id,
+                     pj.backend,
+                     pj.game,
+                     pj.root_claim,
+                     pj.l2_block_number,
+                     pj.l1_head
+                 from proof_backend_jobs bj
+                 join proof_jobs pj on pj.proof_id = bj.proof_id
+                 where bj.backend = $1
+                   and bj.status = 'requested'
+                   and bj.next_poll_at <= now()
+                   and (bj.locked_until is null or bj.locked_until < now())
+                 order by bj.next_poll_at
+                 for update of bj skip locked
+                 limit 1",
+            )
+            .bind(backend.as_str())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(queue_db)?
+            else {
+                tx.commit().await.map_err(queue_db)?;
+                return Ok(None);
+            };
+
+            let backend_job_id: i64 = row.try_get("backend_job_id").map_err(queue_db)?;
+            let proof_id = proof_id_from_row(&row).map_err(ProofJobQueueError::Internal)?;
+            let attempts: i32 = row.try_get("advance_attempts").map_err(queue_db)?;
+            if attempts as u32 >= self.config.max_attempts {
+                let reason = format!("backend lease expired after {attempts} attempts");
+                mark_backend_failed(&mut tx, backend_job_id, proof_id, &reason)
+                    .await
+                    .map_err(queue_db)?;
+                warn!(%proof_id, backend_job_id, attempts, "backend proof job failed: attempts exhausted");
+                continue;
+            }
+
+            let request = request_from_row(&row).map_err(ProofJobQueueError::Internal)?;
+            let phase: String = row.try_get("phase").map_err(queue_db)?;
+            let backend_proof_id: String = row.try_get("backend_proof_id").map_err(queue_db)?;
+            let state = BackendProofState::from_phase(
+                &phase,
+                BackendProofId(
+                    B256::from_str(&backend_proof_id)
+                        .map_err(|err| ProofJobQueueError::Internal(err.to_string()))?,
+                ),
+            )
+            .map_err(ProofJobQueueError::Internal)?;
+
+            let lease_token = LeaseToken::new();
+            sqlx::query(
+                "update proof_backend_jobs
+                 set locked_until = now() + ($2::bigint * interval '1 millisecond'),
+                     lease_token = $3,
+                     advance_attempts = advance_attempts + 1,
+                     updated_at = now()
+                 where id = $1",
+            )
+            .bind(backend_job_id)
+            .bind(duration_millis(self.config.lease_timeout))
+            .bind(lease_token.0)
+            .execute(&mut *tx)
+            .await
+            .map_err(queue_db)?;
+
+            tx.commit().await.map_err(queue_db)?;
+            debug!(%proof_id, backend_job_id, %backend, attempts = attempts + 1, "backend proof job leased");
+            return Ok(Some(LeasedBackendProofWork {
+                backend_job_id,
+                work: BackendProofWork {
+                    proof_request: request,
+                    state,
+                },
+                lease_token,
+            }));
+        }
+    }
+
+    async fn complete_backend_proof_job(
+        &self,
+        backend_job_id: i64,
+        lease_token: LeaseToken,
+        next_update: BackendUpdate,
+    ) -> Result<(), ProofJobQueueError> {
+        match next_update {
+            BackendUpdate::Noop => self.noop_backend_job(backend_job_id, lease_token).await,
+            BackendUpdate::Pending { state } => {
+                self.advance_backend_job(backend_job_id, lease_token, state)
+                    .await
+            }
+            BackendUpdate::Failed(reason) => {
+                self.fail_backend_job(backend_job_id, lease_token, &reason)
+                    .await
+            }
+            BackendUpdate::Complete(proof) => {
+                let proof_id = self
+                    .backend_job_proof_id(backend_job_id, lease_token)
+                    .await?;
+                self.submit_proof(
+                    ProofResponse {
+                        id: proof_id,
+                        proof,
+                    },
+                    ProofSubmissionLease::BackendJob {
+                        backend_job_id,
+                        lease_token,
+                    },
+                )
+                .await
+            }
+        }
+    }
+
+    async fn submit_proof(
+        &self,
+        proof: ProofResponse,
+        lease: ProofSubmissionLease,
+    ) -> Result<(), ProofJobQueueError> {
+        match lease {
+            ProofSubmissionLease::ProofJob { lease_token } => {
+                self.submit_proof_from_proof_job(proof, lease_token).await
+            }
+            ProofSubmissionLease::BackendJob {
+                backend_job_id,
+                lease_token,
+            } => {
+                self.submit_proof_from_backend_job(proof, backend_job_id, lease_token)
+                    .await
+            }
+        }
     }
 
     async fn fail_proof(
         &self,
         proof_id: ProofRequestId,
         reason: String,
+        lease_token: LeaseToken,
     ) -> Result<(), ProofJobQueueError> {
-        let mut state = self.lock();
-        let entry = state
-            .jobs
-            .get_mut(&proof_id)
-            .ok_or(ProofJobQueueError::UnknownJob(proof_id))?;
+        let mut tx = self.begin_queue_tx().await?;
+        let row = sqlx::query(
+            "select start_attempts, backend
+             from proof_jobs
+             where proof_id = $1
+               and lease_token = $2
+               and status = 'starting'
+             for update",
+        )
+        .bind(proof_id_bytes(proof_id))
+        .bind(lease_token.0)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(queue_db)?;
 
-        // Only an in-progress job can be failed by its worker: queued jobs
-        // are already pending a retry and finished jobs keep their outcome.
-        if !matches!(entry.state, JobState::InProgress { .. }) {
-            return Ok(());
-        }
+        let Some(row) = row else {
+            return Err(classify_proof_update(&mut tx, proof_id).await);
+        };
 
-        if entry.attempts >= self.config.max_attempts {
-            warn!(%proof_id, attempts = entry.attempts, %reason, "proof job failed");
-            entry.state = JobState::Failed { reason };
-            state.finish_job(proof_id, self.config.max_finished_jobs);
+        let attempts: i32 = row.try_get("start_attempts").map_err(queue_db)?;
+        if attempts as u32 >= self.config.max_attempts {
+            mark_proof_failed(&mut tx, proof_id, &reason)
+                .await
+                .map_err(queue_db)?;
+            warn!(%proof_id, attempts, %reason, "proof job failed");
         } else {
-            debug!(%proof_id, attempts = entry.attempts, %reason, "proof attempt failed, re-queueing");
-            let backend = entry.request.backend;
-            entry.state = JobState::Queued;
-            state.queue_mut(backend).push_back(proof_id);
+            sqlx::query(
+                "update proof_jobs
+                 set status = 'queued',
+                     locked_until = null,
+                     lease_token = null,
+                     updated_at = now()
+                 where proof_id = $1",
+            )
+            .bind(proof_id_bytes(proof_id))
+            .execute(&mut *tx)
+            .await
+            .map_err(queue_db)?;
+            debug!(%proof_id, attempts, %reason, "proof attempt failed, re-queueing");
         }
 
+        tx.commit().await.map_err(queue_db)?;
         Ok(())
     }
+}
+
+impl ProverService {
+    async fn begin_request_tx(&self) -> Result<Transaction<'_, Postgres>, ProofRequestError> {
+        self.pool.begin().await.map_err(request_db)
+    }
+
+    async fn begin_queue_tx(&self) -> Result<Transaction<'_, Postgres>, ProofJobQueueError> {
+        self.pool.begin().await.map_err(queue_db)
+    }
+
+    async fn noop_backend_job(
+        &self,
+        backend_job_id: i64,
+        lease_token: LeaseToken,
+    ) -> Result<(), ProofJobQueueError> {
+        let mut tx = self.begin_queue_tx().await?;
+        let result = sqlx::query(
+            "update proof_backend_jobs
+             set locked_until = null,
+                 lease_token = null,
+                 next_poll_at = now() + ($3::bigint * interval '1 millisecond'),
+                 updated_at = now()
+             where id = $1
+               and lease_token = $2
+               and status = 'requested'",
+        )
+        .bind(backend_job_id)
+        .bind(lease_token.0)
+        .bind(duration_millis(self.config.backend_poll_interval))
+        .execute(&mut *tx)
+        .await
+        .map_err(queue_db)?;
+
+        if result.rows_affected() == 0 {
+            return Err(classify_backend_update(&mut tx, backend_job_id).await);
+        }
+        tx.commit().await.map_err(queue_db)?;
+        Ok(())
+    }
+
+    async fn advance_backend_job(
+        &self,
+        backend_job_id: i64,
+        lease_token: LeaseToken,
+        state: BackendProofState,
+    ) -> Result<(), ProofJobQueueError> {
+        let mut tx = self.begin_queue_tx().await?;
+        let row = sqlx::query(
+            "update proof_backend_jobs
+             set status = 'completed',
+                 locked_until = null,
+                 lease_token = null,
+                 updated_at = now(),
+                 completed_at = now()
+             where id = $1
+               and lease_token = $2
+               and status = 'requested'
+             returning proof_id, backend",
+        )
+        .bind(backend_job_id)
+        .bind(lease_token.0)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(queue_db)?;
+
+        let Some(row) = row else {
+            return Err(classify_backend_update(&mut tx, backend_job_id).await);
+        };
+        let proof_id: Vec<u8> = row.try_get("proof_id").map_err(queue_db)?;
+        let backend: String = row.try_get("backend").map_err(queue_db)?;
+
+        sqlx::query(
+            "insert into proof_backend_jobs (
+                proof_id, backend, phase, backend_proof_id, status,
+                next_poll_at, created_at, updated_at
+             )
+             values ($1, $2, $3, $4, 'requested', now(), now(), now())",
+        )
+        .bind(proof_id)
+        .bind(backend)
+        .bind(state.phase())
+        .bind(state.id().to_string())
+        .execute(&mut *tx)
+        .await
+        .map_err(queue_db)?;
+
+        tx.commit().await.map_err(queue_db)?;
+        Ok(())
+    }
+
+    async fn fail_backend_job(
+        &self,
+        backend_job_id: i64,
+        lease_token: LeaseToken,
+        reason: &str,
+    ) -> Result<(), ProofJobQueueError> {
+        let mut tx = self.begin_queue_tx().await?;
+        let row = sqlx::query(
+            "update proof_backend_jobs
+             set status = 'failed',
+                 failure_reason = $3,
+                 locked_until = null,
+                 lease_token = null,
+                 updated_at = now(),
+                 completed_at = now()
+             where id = $1
+               and lease_token = $2
+               and status = 'requested'
+             returning proof_id",
+        )
+        .bind(backend_job_id)
+        .bind(lease_token.0)
+        .bind(reason)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(queue_db)?;
+
+        let Some(row) = row else {
+            return Err(classify_backend_update(&mut tx, backend_job_id).await);
+        };
+        let proof_id = proof_id_from_bytes(row.try_get("proof_id").map_err(queue_db)?)
+            .map_err(ProofJobQueueError::Internal)?;
+        mark_proof_failed(&mut tx, proof_id, reason)
+            .await
+            .map_err(queue_db)?;
+        tx.commit().await.map_err(queue_db)?;
+        Ok(())
+    }
+
+    async fn backend_job_proof_id(
+        &self,
+        backend_job_id: i64,
+        lease_token: LeaseToken,
+    ) -> Result<ProofRequestId, ProofJobQueueError> {
+        let mut tx = self.begin_queue_tx().await?;
+        let row = sqlx::query(
+            "select proof_id
+             from proof_backend_jobs
+             where id = $1
+               and lease_token = $2
+               and status = 'requested'",
+        )
+        .bind(backend_job_id)
+        .bind(lease_token.0)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(queue_db)?;
+        let Some(row) = row else {
+            return Err(classify_backend_update(&mut tx, backend_job_id).await);
+        };
+        let proof_id = proof_id_from_bytes(row.try_get("proof_id").map_err(queue_db)?)
+            .map_err(ProofJobQueueError::Internal)?;
+        tx.commit().await.map_err(queue_db)?;
+        Ok(proof_id)
+    }
+
+    async fn submit_proof_from_proof_job(
+        &self,
+        proof: ProofResponse,
+        lease_token: LeaseToken,
+    ) -> Result<(), ProofJobQueueError> {
+        let mut tx = self.begin_queue_tx().await?;
+        let row = sqlx::query(
+            "select backend
+             from proof_jobs
+             where proof_id = $1
+               and lease_token = $2
+               and status = 'starting'
+             for update",
+        )
+        .bind(proof_id_bytes(proof.id))
+        .bind(lease_token.0)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(queue_db)?;
+
+        let Some(row) = row else {
+            return Err(classify_proof_update(&mut tx, proof.id).await);
+        };
+        let expected = parse_backend(row.try_get("backend").map_err(queue_db)?)?;
+        validate_proof_backend(proof.id, &proof.proof, expected)?;
+        complete_proof(&mut tx, proof).await.map_err(queue_db)?;
+        tx.commit().await.map_err(queue_db)?;
+        Ok(())
+    }
+
+    async fn submit_proof_from_backend_job(
+        &self,
+        proof: ProofResponse,
+        backend_job_id: i64,
+        lease_token: LeaseToken,
+    ) -> Result<(), ProofJobQueueError> {
+        let mut tx = self.begin_queue_tx().await?;
+        let row = sqlx::query(
+            "select bj.proof_id, pj.backend
+             from proof_backend_jobs bj
+             join proof_jobs pj on pj.proof_id = bj.proof_id
+             where bj.id = $1
+               and bj.lease_token = $2
+               and bj.status = 'requested'
+             for update of bj, pj",
+        )
+        .bind(backend_job_id)
+        .bind(lease_token.0)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(queue_db)?;
+
+        let Some(row) = row else {
+            return Err(classify_backend_update(&mut tx, backend_job_id).await);
+        };
+        let expected_id = proof_id_from_bytes(row.try_get("proof_id").map_err(queue_db)?)
+            .map_err(ProofJobQueueError::Internal)?;
+        if expected_id != proof.id {
+            return Err(ProofJobQueueError::InvalidProof {
+                id: proof.id,
+                reason: format!("backend job belongs to proof {expected_id}"),
+            });
+        }
+        let expected_backend = parse_backend(row.try_get("backend").map_err(queue_db)?)?;
+        validate_proof_backend(proof.id, &proof.proof, expected_backend)?;
+
+        sqlx::query(
+            "update proof_backend_jobs
+             set status = 'completed',
+                 locked_until = null,
+                 lease_token = null,
+                 updated_at = now(),
+                 completed_at = now()
+             where id = $1",
+        )
+        .bind(backend_job_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(queue_db)?;
+        complete_proof(&mut tx, proof).await.map_err(queue_db)?;
+        tx.commit().await.map_err(queue_db)?;
+        Ok(())
+    }
+}
+
+fn proof_id_bytes(id: ProofRequestId) -> Vec<u8> {
+    id.0.as_slice().to_vec()
+}
+
+fn proof_id_from_row(row: &PgRow) -> Result<ProofRequestId, String> {
+    proof_id_from_bytes(row.try_get("proof_id").map_err(|err| err.to_string())?)
+}
+
+fn proof_id_from_bytes(bytes: Vec<u8>) -> Result<ProofRequestId, String> {
+    Ok(ProofRequestId(b256_from_bytes("proof_id", bytes)?))
+}
+
+fn b256_from_bytes(field: &str, bytes: Vec<u8>) -> Result<B256, String> {
+    if bytes.len() != 32 {
+        return Err(format!("{field} has {} bytes, expected 32", bytes.len()));
+    }
+    Ok(B256::from_slice(&bytes))
+}
+
+fn address_from_bytes(field: &str, bytes: Vec<u8>) -> Result<Address, String> {
+    if bytes.len() != 20 {
+        return Err(format!("{field} has {} bytes, expected 20", bytes.len()));
+    }
+    Ok(Address::from_slice(&bytes))
+}
+
+fn request_from_row(row: &PgRow) -> Result<ProofRequest, String> {
+    let l2_block_number: i64 = row
+        .try_get("l2_block_number")
+        .map_err(|err| err.to_string())?;
+    if l2_block_number < 0 {
+        return Err(format!("l2_block_number is negative: {l2_block_number}"));
+    }
+
+    Ok(ProofRequest {
+        backend: ProofBackend::try_from(
+            row.try_get::<String, _>("backend")
+                .map_err(|err| err.to_string())?
+                .as_str(),
+        )?,
+        game: address_from_bytes("game", row.try_get("game").map_err(|err| err.to_string())?)?,
+        root_claim: b256_from_bytes(
+            "root_claim",
+            row.try_get("root_claim").map_err(|err| err.to_string())?,
+        )?,
+        l2_block_number: l2_block_number as u64,
+        l1_head: b256_from_bytes(
+            "l1_head",
+            row.try_get("l1_head").map_err(|err| err.to_string())?,
+        )?,
+    })
+}
+
+fn parse_status(status: String) -> Result<ProofStatus, ProofRequestError> {
+    ProofStatus::try_from(status.as_str()).map_err(ProofRequestError::Internal)
+}
+
+fn parse_backend(backend: String) -> Result<ProofBackend, ProofJobQueueError> {
+    ProofBackend::try_from(backend.as_str()).map_err(ProofJobQueueError::Internal)
+}
+
+fn l2_to_i64(value: u64) -> Result<i64, ProofRequestError> {
+    i64::try_from(value)
+        .map_err(|_| ProofRequestError::Internal(format!("l2 block number {value} exceeds i64")))
+}
+
+fn duration_millis(duration: Duration) -> i64 {
+    i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)
+}
+
+fn request_db(err: sqlx::Error) -> ProofRequestError {
+    ProofRequestError::Internal(err.to_string())
+}
+
+fn queue_db(err: sqlx::Error) -> ProofJobQueueError {
+    ProofJobQueueError::Internal(err.to_string())
+}
+
+async fn classify_proof_update(
+    tx: &mut Transaction<'_, Postgres>,
+    proof_id: ProofRequestId,
+) -> ProofJobQueueError {
+    let exists = sqlx::query_scalar::<_, bool>(
+        "select exists(select 1 from proof_jobs where proof_id = $1)",
+    )
+    .bind(proof_id_bytes(proof_id))
+    .fetch_one(&mut **tx)
+    .await
+    .unwrap_or(false);
+    if exists {
+        ProofJobQueueError::StaleLease
+    } else {
+        ProofJobQueueError::UnknownJob(proof_id)
+    }
+}
+
+async fn classify_backend_update(
+    tx: &mut Transaction<'_, Postgres>,
+    backend_job_id: i64,
+) -> ProofJobQueueError {
+    let exists = sqlx::query_scalar::<_, bool>(
+        "select exists(select 1 from proof_backend_jobs where id = $1)",
+    )
+    .bind(backend_job_id)
+    .fetch_one(&mut **tx)
+    .await
+    .unwrap_or(false);
+    if exists {
+        ProofJobQueueError::StaleLease
+    } else {
+        ProofJobQueueError::UnknownBackendJob(backend_job_id)
+    }
+}
+
+async fn mark_proof_failed(
+    tx: &mut Transaction<'_, Postgres>,
+    proof_id: ProofRequestId,
+    reason: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "update proof_jobs
+         set status = 'failed',
+             proof_data = null,
+             failure_reason = $2,
+             locked_until = null,
+             lease_token = null,
+             updated_at = now(),
+             finished_at = now()
+         where proof_id = $1",
+    )
+    .bind(proof_id_bytes(proof_id))
+    .bind(reason)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn mark_backend_failed(
+    tx: &mut Transaction<'_, Postgres>,
+    backend_job_id: i64,
+    proof_id: ProofRequestId,
+    reason: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "update proof_backend_jobs
+         set status = 'failed',
+             failure_reason = $2,
+             locked_until = null,
+             lease_token = null,
+             updated_at = now(),
+             completed_at = now()
+         where id = $1",
+    )
+    .bind(backend_job_id)
+    .bind(reason)
+    .execute(&mut **tx)
+    .await?;
+    mark_proof_failed(tx, proof_id, reason).await
+}
+
+async fn complete_proof(
+    tx: &mut Transaction<'_, Postgres>,
+    proof: ProofResponse,
+) -> Result<(), sqlx::Error> {
+    let proof_data =
+        serde_json::to_vec(&proof.proof).map_err(|err| sqlx::Error::Decode(Box::new(err)))?;
+    sqlx::query(
+        "update proof_jobs
+         set status = 'completed',
+             proof_data = $2,
+             failure_reason = null,
+             locked_until = null,
+             lease_token = null,
+             updated_at = now(),
+             finished_at = now()
+         where proof_id = $1",
+    )
+    .bind(proof_id_bytes(proof.id))
+    .bind(proof_data)
+    .execute(&mut **tx)
+    .await?;
+    info!(id = %proof.id, "proof job completed");
+    Ok(())
+}
+
+fn validate_proof_backend(
+    id: ProofRequestId,
+    proof: &ProofData,
+    expected: ProofBackend,
+) -> Result<(), ProofJobQueueError> {
+    if proof.backend() == expected {
+        Ok(())
+    } else {
+        Err(ProofJobQueueError::InvalidProof {
+            id,
+            reason: format!(
+                "backend mismatch: expected {}, got {}",
+                expected,
+                proof.backend()
+            ),
+        })
+    }
+}
+
+#[allow(dead_code)]
+fn backend_job_status(status: BackendProofJobStatus) -> &'static str {
+    status.as_str()
 }

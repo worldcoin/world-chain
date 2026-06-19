@@ -1,6 +1,8 @@
 use std::time::Duration;
 
 use alloy_primitives::{B256, U256};
+use testcontainers::{ContainerAsync, runners::AsyncRunner};
+use testcontainers_modules::postgres;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use world_chain_challenger::{ChallengerConfig, WorldChainChallenger};
@@ -45,27 +47,49 @@ fn assert_defense_lanes(lanes: Vec<ProofLane>) {
 
 struct ProofStack {
     service: SharedProverService,
+    _postgres: ContainerAsync<postgres::Postgres>,
     tokens: Vec<CancellationToken>,
     handles: Vec<JoinHandle<()>>,
 }
 
-fn start_proof_stack() -> ProofStack {
+async fn start_proof_stack() -> Option<ProofStack> {
     start_proof_stack_with(
         FakeProofBackend::new(ProofBackend::Sp1),
         FakeProofBackend::new(ProofBackend::Nitro),
     )
+    .await
 }
 
-fn start_proof_stack_with(
+async fn start_proof_stack_with(
     sp1_backend: FakeProofBackend,
     nitro_backend: FakeProofBackend,
-) -> ProofStack {
-    let service = SharedProverService::new(ProverServiceConfig {
-        lease_timeout: Duration::from_secs(5),
-        max_attempts: 2,
-        max_queue_len: 16,
-        max_finished_jobs: 16,
-    })
+) -> Option<ProofStack> {
+    let postgres = match postgres::Postgres::default().start().await {
+        Ok(postgres) => postgres,
+        Err(error) => {
+            eprintln!("skipping postgres-backed orchestration test: {error}");
+            return None;
+        }
+    };
+    let database_url = format!(
+        "postgres://postgres:postgres@{}:{}/postgres",
+        postgres.get_host().await.expect("postgres host"),
+        postgres
+            .get_host_port_ipv4(5432)
+            .await
+            .expect("postgres port")
+    );
+    let service = SharedProverService::connect(
+        &database_url,
+        ProverServiceConfig {
+            lease_timeout: Duration::from_secs(5),
+            max_attempts: 2,
+            max_queue_len: 16,
+            backend_poll_interval: Duration::from_millis(5),
+            max_finished_jobs: 16,
+        },
+    )
+    .await
     .expect("valid prover-service config");
 
     let sp1_worker = ProofWorker::new(
@@ -90,11 +114,12 @@ fn start_proof_stack_with(
     let nitro_cancel = nitro_worker.cancellation_token();
     let nitro_handle = tokio::spawn(nitro_worker);
 
-    ProofStack {
+    Some(ProofStack {
         service,
+        _postgres: postgres,
         tokens: vec![sp1_cancel, nitro_cancel],
         handles: vec![sp1_handle, nitro_handle],
-    }
+    })
 }
 
 async fn stop_proof_stack(stack: ProofStack) {
@@ -106,7 +131,7 @@ async fn stop_proof_stack(stack: ProofStack) {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn invalid_root_is_challenged_by_real_challenger() {
     let chain = FakeExecution::new();
     let canonical_root = B256::repeat_byte(0x20);
@@ -132,7 +157,7 @@ async fn invalid_root_is_challenged_by_real_challenger() {
     assert_eq!(chain.challenge_count(game), 1);
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn valid_challenged_root_is_defended_through_workers() {
     let chain = FakeExecution::new();
     let canonical_root = B256::repeat_byte(0x20);
@@ -143,7 +168,9 @@ async fn valid_challenged_root_is_defended_through_workers() {
     let game = chain.latest_game().expect("game created").game;
     chain.challenge_game(game);
 
-    let stack = start_proof_stack();
+    let Some(stack) = start_proof_stack().await else {
+        return;
+    };
     let mut defender = WorldChainDefender::new(
         defender_config(),
         chain.clone(),
@@ -165,7 +192,7 @@ async fn valid_challenged_root_is_defended_through_workers() {
     stop_proof_stack(stack).await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn valid_challenged_root_survives_transient_proof_failure() {
     let chain = FakeExecution::new();
     let canonical_root = B256::repeat_byte(0x20);
@@ -176,10 +203,14 @@ async fn valid_challenged_root_survives_transient_proof_failure() {
     let game = chain.latest_game().expect("game created").game;
     chain.challenge_game(game);
 
-    let stack = start_proof_stack_with(
+    let Some(stack) = start_proof_stack_with(
         FakeProofBackend::flaky(ProofBackend::Sp1, 1),
         FakeProofBackend::new(ProofBackend::Nitro),
-    );
+    )
+    .await
+    else {
+        return;
+    };
     let mut defender = WorldChainDefender::new(
         defender_config(),
         chain.clone(),
@@ -201,7 +232,7 @@ async fn valid_challenged_root_survives_transient_proof_failure() {
     stop_proof_stack(stack).await;
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn defender_ignores_challenged_invalid_root() {
     let chain = FakeExecution::new();
     let canonical_root = B256::repeat_byte(0x20);
@@ -217,7 +248,9 @@ async fn defender_ignores_challenged_invalid_root() {
     let game = chain.latest_game().expect("game created").game;
     chain.challenge_game(game);
 
-    let stack = start_proof_stack();
+    let Some(stack) = start_proof_stack().await else {
+        return;
+    };
     let mut defender = WorldChainDefender::new(
         defender_config(),
         chain.clone(),

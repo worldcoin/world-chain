@@ -1,5 +1,6 @@
 use alloy_primitives::{Address, B256, BlockNumber, Bytes, keccak256};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// The proving backend that should generate a proof.
 ///
@@ -18,6 +19,29 @@ impl std::fmt::Display for ProofBackend {
         match self {
             Self::Sp1 => write!(f, "sp1"),
             Self::Nitro => write!(f, "nitro"),
+        }
+    }
+}
+
+impl ProofBackend {
+    /// Stable database representation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Sp1 => "sp1",
+            Self::Nitro => "nitro",
+        }
+    }
+}
+
+impl TryFrom<&str> for ProofBackend {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "sp1" => Ok(Self::Sp1),
+            "nitro" => Ok(Self::Nitro),
+            other => Err(format!("unknown proof backend {other:?}")),
         }
     }
 }
@@ -71,8 +95,10 @@ impl std::fmt::Display for ProofRequestId {
 pub enum ProofStatus {
     /// Waiting in the backend queue for a worker.
     Queued,
-    /// Leased to a worker that is generating the proof.
-    InProgress,
+    /// Leased to a worker that is starting backend work.
+    Starting,
+    /// External backend work has been requested and is being polled.
+    BackendPending,
     /// Proof generated and available via `get_proof`.
     Completed,
     /// Permanently failed after exhausting all attempts.
@@ -83,9 +109,39 @@ impl std::fmt::Display for ProofStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Queued => write!(f, "queued"),
-            Self::InProgress => write!(f, "in progress"),
+            Self::Starting => write!(f, "starting"),
+            Self::BackendPending => write!(f, "backend pending"),
             Self::Completed => write!(f, "completed"),
             Self::Failed => write!(f, "failed"),
+        }
+    }
+}
+
+impl ProofStatus {
+    /// Stable database representation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Starting => "starting",
+            Self::BackendPending => "backend_pending",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl TryFrom<&str> for ProofStatus {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "queued" => Ok(Self::Queued),
+            "starting" => Ok(Self::Starting),
+            "backend_pending" => Ok(Self::BackendPending),
+            "completed" => Ok(Self::Completed),
+            "failed" => Ok(Self::Failed),
+            other => Err(format!("unknown proof status {other:?}")),
         }
     }
 }
@@ -131,4 +187,173 @@ pub struct ProofResponse {
     pub id: ProofRequestId,
     /// The generated proof.
     pub proof: ProofData,
+}
+
+/// Durable status of an external backend proof job.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BackendProofJobStatus {
+    /// External backend work was requested and is awaiting polling.
+    Requested,
+    /// External backend work completed successfully.
+    Completed,
+    /// External backend work reached a terminal failure.
+    Failed,
+}
+
+impl BackendProofJobStatus {
+    /// Stable database representation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Requested => "requested",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// External backend request identifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BackendProofId(pub B256);
+
+impl std::fmt::Display for BackendProofId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Opaque token proving ownership of a leased row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct LeaseToken(pub Uuid);
+
+impl LeaseToken {
+    /// Generate a fresh lease token.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl Default for LeaseToken {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Display for LeaseToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Initial proof request leased from `proof_jobs`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeasedProofRequest {
+    /// The user-facing proof request.
+    pub request: ProofRequest,
+    /// Token required for updates to the leased proof job.
+    pub lease_token: LeaseToken,
+}
+
+/// Durable external backend state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BackendProofState {
+    /// SP1 compressed range proof.
+    Range {
+        /// External backend request id.
+        id: BackendProofId,
+    },
+    /// SP1 aggregation proof.
+    Aggregation {
+        /// External backend request id.
+        id: BackendProofId,
+    },
+    /// One backend request directly produces the final proof.
+    Single {
+        /// External backend request id.
+        id: BackendProofId,
+    },
+}
+
+impl BackendProofState {
+    /// Stable database phase string.
+    #[must_use]
+    pub const fn phase(self) -> &'static str {
+        match self {
+            Self::Range { .. } => "range",
+            Self::Aggregation { .. } => "aggregation",
+            Self::Single { .. } => "single",
+        }
+    }
+
+    /// The contained external backend request id.
+    #[must_use]
+    pub const fn id(self) -> BackendProofId {
+        match self {
+            Self::Range { id } | Self::Aggregation { id } | Self::Single { id } => id,
+        }
+    }
+
+    /// Rebuild from database phase and backend request id.
+    pub fn from_phase(phase: &str, id: BackendProofId) -> Result<Self, String> {
+        match phase {
+            "range" => Ok(Self::Range { id }),
+            "aggregation" => Ok(Self::Aggregation { id }),
+            "single" => Ok(Self::Single { id }),
+            other => Err(format!("unknown backend proof phase {other:?}")),
+        }
+    }
+}
+
+/// Backend work returned from a durable backend job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackendProofWork {
+    /// The original user-facing proof request.
+    pub proof_request: ProofRequest,
+    /// Opaque backend state to advance.
+    pub state: BackendProofState,
+}
+
+/// Durable backend job leased from `proof_backend_jobs`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LeasedBackendProofWork {
+    /// Database identifier of the backend job row.
+    pub backend_job_id: i64,
+    /// Backend work to advance.
+    pub work: BackendProofWork,
+    /// Token required for updates to the leased backend job.
+    pub lease_token: LeaseToken,
+}
+
+/// Lease location for final proof submission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProofSubmissionLease {
+    /// Final proof was produced while starting a user-facing proof job.
+    ProofJob {
+        /// Token for the leased `proof_jobs` row.
+        lease_token: LeaseToken,
+    },
+    /// Final proof was produced while advancing a durable backend job.
+    BackendJob {
+        /// Database identifier of the backend job row.
+        backend_job_id: i64,
+        /// Token for the leased `proof_backend_jobs` row.
+        lease_token: LeaseToken,
+    },
+}
+
+/// Result of starting or advancing backend work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BackendUpdate {
+    /// Backend work was requested externally and must be polled later.
+    Pending {
+        /// Durable backend state.
+        state: BackendProofState,
+    },
+    /// Final proof is complete.
+    Complete(ProofData),
+    /// Terminal backend failure.
+    Failed(String),
+    /// No state change; poll again later.
+    Noop,
 }

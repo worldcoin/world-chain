@@ -2,7 +2,11 @@ use crate::{
     error::{ProofJobQueueError, ProofRequestError},
     service::ProverService,
     traits::{ProofJobQueue, ProofRequester},
-    types::{ProofBackend, ProofRequest, ProofRequestId, ProofResponse, ProofStatus},
+    types::{
+        BackendProofState, BackendUpdate, LeaseToken, LeasedBackendProofWork, LeasedProofRequest,
+        ProofBackend, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
+        ProofSubmissionLease,
+    },
 };
 use jsonrpsee::{
     core::{RpcResult, async_trait, client::Error as ClientError},
@@ -26,6 +30,10 @@ pub mod error_code {
     pub const FAILED: i32 = -32004;
     /// No proof job with the given id is known.
     pub const UNKNOWN_JOB: i32 = -32011;
+    /// No backend proof job with the given id is known.
+    pub const UNKNOWN_BACKEND_JOB: i32 = -32013;
+    /// A worker tried to update a row using an expired or superseded lease.
+    pub const STALE_LEASE: i32 = -32014;
     /// The submitted proof does not match the requested job;
     /// the error data holds the reason.
     pub const INVALID_PROOF: i32 = -32012;
@@ -49,15 +57,49 @@ pub trait ProverServiceApi {
 
     /// Lease the next queued proof request for the given backend.
     #[method(name = "getNextProof")]
-    async fn get_next_proof(&self, backend: ProofBackend) -> RpcResult<Option<ProofRequest>>;
+    async fn get_next_proof(&self, backend: ProofBackend) -> RpcResult<Option<LeasedProofRequest>>;
+
+    /// Persist durable backend work created while starting a proof job.
+    #[method(name = "submitBackendProofState")]
+    async fn submit_backend_proof_state(
+        &self,
+        proof_id: ProofRequestId,
+        backend_proof_state: BackendProofState,
+        lease_token: LeaseToken,
+    ) -> RpcResult<()>;
+
+    /// Lease the next durable backend proof job for the given backend.
+    #[method(name = "getNextBackendProof")]
+    async fn get_next_backend_proof(
+        &self,
+        backend: ProofBackend,
+    ) -> RpcResult<Option<LeasedBackendProofWork>>;
+
+    /// Apply a non-final durable backend proof update.
+    #[method(name = "completeBackendProofJob")]
+    async fn complete_backend_proof_job(
+        &self,
+        backend_job_id: i64,
+        lease_token: LeaseToken,
+        next_update: BackendUpdate,
+    ) -> RpcResult<()>;
 
     /// Submit a generated proof.
     #[method(name = "submitProof")]
-    async fn submit_proof(&self, proof: ProofResponse) -> RpcResult<()>;
+    async fn submit_proof(
+        &self,
+        proof: ProofResponse,
+        lease: ProofSubmissionLease,
+    ) -> RpcResult<()>;
 
     /// Report that proving failed for the given job.
     #[method(name = "failProof")]
-    async fn fail_proof(&self, proof_id: ProofRequestId, reason: String) -> RpcResult<()>;
+    async fn fail_proof(
+        &self,
+        proof_id: ProofRequestId,
+        reason: String,
+        lease_token: LeaseToken,
+    ) -> RpcResult<()>;
 }
 
 impl From<ProofRequestError> for ErrorObjectOwned {
@@ -76,6 +118,9 @@ impl From<ProofRequestError> for ErrorObjectOwned {
             ProofRequestError::Failed { reason, .. } => {
                 ErrorObject::owned(error_code::FAILED, message, Some(reason))
             }
+            ProofRequestError::Internal(_) => {
+                ErrorObject::owned(INTERNAL_ERROR_CODE, message, None::<()>)
+            }
             ProofRequestError::Rpc(_) => {
                 ErrorObject::owned(INTERNAL_ERROR_CODE, message, None::<()>)
             }
@@ -90,8 +135,17 @@ impl From<ProofJobQueueError> for ErrorObjectOwned {
             ProofJobQueueError::UnknownJob(_) => {
                 ErrorObject::owned(error_code::UNKNOWN_JOB, message, None::<()>)
             }
+            ProofJobQueueError::UnknownBackendJob(_) => {
+                ErrorObject::owned(error_code::UNKNOWN_BACKEND_JOB, message, None::<()>)
+            }
+            ProofJobQueueError::StaleLease => {
+                ErrorObject::owned(error_code::STALE_LEASE, message, None::<()>)
+            }
             ProofJobQueueError::InvalidProof { reason, .. } => {
                 ErrorObject::owned(error_code::INVALID_PROOF, message, Some(reason))
+            }
+            ProofJobQueueError::Internal(_) => {
+                ErrorObject::owned(INTERNAL_ERROR_CODE, message, None::<()>)
             }
             ProofJobQueueError::Rpc(_) => {
                 ErrorObject::owned(INTERNAL_ERROR_CODE, message, None::<()>)
@@ -127,16 +181,59 @@ impl ProverServiceApiServer for ProverServiceRpc {
         Ok(self.service.get_proof(proof_id).await?)
     }
 
-    async fn get_next_proof(&self, backend: ProofBackend) -> RpcResult<Option<ProofRequest>> {
+    async fn get_next_proof(&self, backend: ProofBackend) -> RpcResult<Option<LeasedProofRequest>> {
         Ok(self.service.get_next_proof(backend).await?)
     }
 
-    async fn submit_proof(&self, proof: ProofResponse) -> RpcResult<()> {
-        Ok(self.service.submit_proof(proof).await?)
+    async fn submit_backend_proof_state(
+        &self,
+        proof_id: ProofRequestId,
+        backend_proof_state: BackendProofState,
+        lease_token: LeaseToken,
+    ) -> RpcResult<()> {
+        Ok(self
+            .service
+            .submit_backend_proof_state(proof_id, backend_proof_state, lease_token)
+            .await?)
     }
 
-    async fn fail_proof(&self, proof_id: ProofRequestId, reason: String) -> RpcResult<()> {
-        Ok(self.service.fail_proof(proof_id, reason).await?)
+    async fn get_next_backend_proof(
+        &self,
+        backend: ProofBackend,
+    ) -> RpcResult<Option<LeasedBackendProofWork>> {
+        Ok(self.service.get_next_backend_proof(backend).await?)
+    }
+
+    async fn complete_backend_proof_job(
+        &self,
+        backend_job_id: i64,
+        lease_token: LeaseToken,
+        next_update: BackendUpdate,
+    ) -> RpcResult<()> {
+        Ok(self
+            .service
+            .complete_backend_proof_job(backend_job_id, lease_token, next_update)
+            .await?)
+    }
+
+    async fn submit_proof(
+        &self,
+        proof: ProofResponse,
+        lease: ProofSubmissionLease,
+    ) -> RpcResult<()> {
+        Ok(self.service.submit_proof(proof, lease).await?)
+    }
+
+    async fn fail_proof(
+        &self,
+        proof_id: ProofRequestId,
+        reason: String,
+        lease_token: LeaseToken,
+    ) -> RpcResult<()> {
+        Ok(self
+            .service
+            .fail_proof(proof_id, reason, lease_token)
+            .await?)
     }
 }
 
@@ -208,10 +305,22 @@ fn map_job_error(err: ClientError, id: ProofRequestId) -> ProofJobQueueError {
     };
     match err.code() {
         error_code::UNKNOWN_JOB => ProofJobQueueError::UnknownJob(id),
+        error_code::STALE_LEASE => ProofJobQueueError::StaleLease,
         error_code::INVALID_PROOF => ProofJobQueueError::InvalidProof {
             id,
             reason: error_data(&err).unwrap_or_else(|| err.message().to_string()),
         },
+        _ => ProofJobQueueError::Rpc(format!("{} (code {})", err.message(), err.code())),
+    }
+}
+
+fn map_backend_job_error(err: ClientError, backend_job_id: i64) -> ProofJobQueueError {
+    let ClientError::Call(err) = err else {
+        return ProofJobQueueError::Rpc(err.to_string());
+    };
+    match err.code() {
+        error_code::UNKNOWN_BACKEND_JOB => ProofJobQueueError::UnknownBackendJob(backend_job_id),
+        error_code::STALE_LEASE => ProofJobQueueError::StaleLease,
         _ => ProofJobQueueError::Rpc(format!("{} (code {})", err.message(), err.code())),
     }
 }
@@ -253,15 +362,60 @@ impl ProofJobQueue for RpcProverServiceClient {
     async fn get_next_proof(
         &self,
         backend: ProofBackend,
-    ) -> Result<Option<ProofRequest>, ProofJobQueueError> {
+    ) -> Result<Option<LeasedProofRequest>, ProofJobQueueError> {
         ProverServiceApiClient::get_next_proof(&self.client, backend)
             .await
             .map_err(|err| ProofJobQueueError::Rpc(err.to_string()))
     }
 
-    async fn submit_proof(&self, proof: ProofResponse) -> Result<(), ProofJobQueueError> {
+    async fn submit_backend_proof_state(
+        &self,
+        proof_id: ProofRequestId,
+        backend_proof_state: BackendProofState,
+        lease_token: LeaseToken,
+    ) -> Result<(), ProofJobQueueError> {
+        ProverServiceApiClient::submit_backend_proof_state(
+            &self.client,
+            proof_id,
+            backend_proof_state,
+            lease_token,
+        )
+        .await
+        .map_err(|err| map_job_error(err, proof_id))
+    }
+
+    async fn get_next_backend_proof(
+        &self,
+        backend: ProofBackend,
+    ) -> Result<Option<LeasedBackendProofWork>, ProofJobQueueError> {
+        ProverServiceApiClient::get_next_backend_proof(&self.client, backend)
+            .await
+            .map_err(|err| ProofJobQueueError::Rpc(err.to_string()))
+    }
+
+    async fn complete_backend_proof_job(
+        &self,
+        backend_job_id: i64,
+        lease_token: LeaseToken,
+        next_update: BackendUpdate,
+    ) -> Result<(), ProofJobQueueError> {
+        ProverServiceApiClient::complete_backend_proof_job(
+            &self.client,
+            backend_job_id,
+            lease_token,
+            next_update,
+        )
+        .await
+        .map_err(|err| map_backend_job_error(err, backend_job_id))
+    }
+
+    async fn submit_proof(
+        &self,
+        proof: ProofResponse,
+        lease: ProofSubmissionLease,
+    ) -> Result<(), ProofJobQueueError> {
         let id = proof.id;
-        ProverServiceApiClient::submit_proof(&self.client, proof)
+        ProverServiceApiClient::submit_proof(&self.client, proof, lease)
             .await
             .map_err(|err| map_job_error(err, id))
     }
@@ -270,8 +424,9 @@ impl ProofJobQueue for RpcProverServiceClient {
         &self,
         proof_id: ProofRequestId,
         reason: String,
+        lease_token: LeaseToken,
     ) -> Result<(), ProofJobQueueError> {
-        ProverServiceApiClient::fail_proof(&self.client, proof_id, reason)
+        ProverServiceApiClient::fail_proof(&self.client, proof_id, reason, lease_token)
             .await
             .map_err(|err| map_job_error(err, proof_id))
     }

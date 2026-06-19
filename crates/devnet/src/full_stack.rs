@@ -2550,9 +2550,13 @@ fn sp1_worker_prover_kind() -> Option<Sp1ProverKind> {
 
 /// Starts the in-process defender prover-service and returns its task handle and JSON-RPC URL.
 async fn start_prover_service() -> Result<(ProverServiceTask, String)> {
+    let database_url = std::env::var("PROVER_SERVICE_DATABASE_URL")
+        .or_else(|_| std::env::var("DATABASE_URL"))
+        .wrap_err("PROVER_SERVICE_DATABASE_URL or DATABASE_URL must be set for prover-service")?;
     let service = Arc::new(
-        ProverService::new(ProverServiceConfig::default())
-            .wrap_err("invalid prover-service config")?,
+        ProverService::connect(&database_url, ProverServiceConfig::default())
+            .await
+            .wrap_err("failed to initialize postgres-backed prover-service")?,
     );
     let (addr, handle) =
         start_rpc_server("127.0.0.1:0".parse().expect("valid loopback addr"), service)
