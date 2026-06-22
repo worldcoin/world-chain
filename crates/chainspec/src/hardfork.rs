@@ -3,7 +3,7 @@ use reth_chainspec::{EthereumHardforks, ForkCondition, hardfork};
 hardfork!(
     /// The name of a World Chain hardfork.
     ///
-    /// World Chain follows the OP Stack upgrade sequence through Jovian, then uses
+    /// World Chain follows the OP Stack upgrade sequence through Karst, then uses
     /// World Chain specific upgrade names as the canonical schedule diverges.
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Default)]
@@ -27,9 +27,11 @@ hardfork!(
         /// Jovian: OP Stack Jovian upgrade. World Chain is already on this hardfork.
         #[default]
         Jovian,
-        /// Tropo: the first World Chain specific hardfork after Jovian.
+        /// Karst: OP Stack Karst upgrade.
+        Karst,
+        /// Tropo: the first World Chain specific hardfork after Karst.
         Tropo,
-        /// Strato: the second World Chain specific hardfork after Jovian.
+        /// Strato: the second World Chain specific hardfork after Karst.
         Strato,
     }
 );
@@ -102,6 +104,12 @@ pub trait WorldChainHardforks: EthereumHardforks {
             .active_at_timestamp(timestamp)
     }
 
+    /// Returns `true` if [`Karst`](WorldChainHardfork::Karst) is active.
+    fn is_karst_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.world_chain_fork_activation(WorldChainHardfork::Karst)
+            .active_at_timestamp(timestamp)
+    }
+
     /// Returns `true` if [`Tropo`](WorldChainHardfork::Tropo) is active.
     fn is_tropo_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.world_chain_fork_activation(WorldChainHardfork::Tropo)
@@ -123,6 +131,10 @@ mod tests {
 
     #[test]
     fn parses_case_insensitive_hardfork_names() {
+        assert_eq!(
+            WorldChainHardfork::from_str("kArSt").unwrap(),
+            WorldChainHardfork::Karst
+        );
         assert_eq!(
             WorldChainHardfork::from_str("tRoPo").unwrap(),
             WorldChainHardfork::Tropo

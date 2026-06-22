@@ -46,6 +46,9 @@ pub struct WorldRangeHardforkConfig {
     /// Jovian activation timestamp.
     #[serde(default, alias = "jovianTime")]
     pub jovian_time: Option<u64>,
+    /// Karst activation timestamp.
+    #[serde(default, alias = "karstTime")]
+    pub karst_time: Option<u64>,
     /// Tropo activation timestamp. This is a World-only fork.
     #[serde(default, alias = "tropoTime")]
     pub tropo_time: Option<u64>,
@@ -71,6 +74,7 @@ impl WorldRangeHardforkConfig {
             WorldRangeHardfork::Holocene => timestamp_active(self.holocene_time, timestamp),
             WorldRangeHardfork::Isthmus => timestamp_active(self.isthmus_time, timestamp),
             WorldRangeHardfork::Jovian => timestamp_active(self.jovian_time, timestamp),
+            WorldRangeHardfork::Karst => timestamp_active(self.karst_time, timestamp),
             WorldRangeHardfork::Tropo => timestamp_active(self.tropo_time, timestamp),
             WorldRangeHardfork::Strato => timestamp_active(self.strato_time, timestamp),
         }
@@ -81,6 +85,7 @@ impl WorldRangeHardforkConfig {
         [
             WorldRangeHardfork::Strato,
             WorldRangeHardfork::Tropo,
+            WorldRangeHardfork::Karst,
             WorldRangeHardfork::Jovian,
             WorldRangeHardfork::Isthmus,
             WorldRangeHardfork::Holocene,
@@ -130,6 +135,8 @@ pub enum WorldRangeHardfork {
     Isthmus,
     /// Jovian hardfork.
     Jovian,
+    /// Karst hardfork.
+    Karst,
     /// Tropo hardfork.
     Tropo,
     /// Strato hardfork.
@@ -159,6 +166,8 @@ pub enum WorldRangeSpecId {
     ISTHMUS,
     /// Jovian spec id.
     JOVIAN,
+    /// Karst spec id.
+    KARST,
     /// Tropo spec id.
     TROPO,
     /// Strato spec id.
@@ -178,6 +187,7 @@ impl WorldRangeSpecId {
             WorldRangeHardfork::Holocene => Self::HOLOCENE,
             WorldRangeHardfork::Isthmus => Self::ISTHMUS,
             WorldRangeHardfork::Jovian => Self::JOVIAN,
+            WorldRangeHardfork::Karst => Self::KARST,
             WorldRangeHardfork::Tropo => Self::TROPO,
             WorldRangeHardfork::Strato => Self::STRATO,
         }
@@ -196,6 +206,7 @@ impl From<WorldRangeSpecId> for &'static str {
             WorldRangeSpecId::HOLOCENE => "Holocene",
             WorldRangeSpecId::ISTHMUS => "Isthmus",
             WorldRangeSpecId::JOVIAN => "Jovian",
+            WorldRangeSpecId::KARST => "Karst",
             WorldRangeSpecId::TROPO => "Tropo",
             WorldRangeSpecId::STRATO => "Strato",
         }

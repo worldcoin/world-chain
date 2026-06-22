@@ -31,7 +31,7 @@ pub const JOVIAN_UPGRADE_TIMESTAMP_MAINNET: u64 = 1_777_593_600;
 /// World Chain spec type.
 ///
 /// This wraps reth's generic [`ChainSpec`] the same way the OP stack spec does, while using World
-/// Chain hardfork names as the canonical post-Jovian schedule.
+/// Chain hardfork names as the canonical post-Karst schedule.
 #[derive(Debug, Clone, Deref, Into, Constructor, PartialEq, Eq)]
 pub struct WorldChainSpec {
     /// Inner reth chain spec.
@@ -215,7 +215,7 @@ impl OpHardforks for WorldChainSpec {
             OpHardfork::Holocene => self.fork(WorldChainHardfork::Holocene),
             OpHardfork::Isthmus => self.fork(WorldChainHardfork::Isthmus),
             OpHardfork::Jovian => self.fork(WorldChainHardfork::Jovian),
-            OpHardfork::Karst => ForkCondition::Never,
+            OpHardfork::Karst => self.fork(WorldChainHardfork::Karst),
             _ => ForkCondition::Never,
         }
     }
@@ -337,6 +337,7 @@ impl From<Genesis> for WorldChainSpec {
                 EthereumHardfork::Prague.boxed(),
                 op_genesis_info.isthmus_time,
             ),
+            (EthereumHardfork::Osaka.boxed(), op_genesis_info.karst_time),
             (
                 WorldChainHardfork::Regolith.boxed(),
                 op_genesis_info.regolith_time,
@@ -368,6 +369,10 @@ impl From<Genesis> for WorldChainSpec {
             (
                 WorldChainHardfork::Jovian.boxed(),
                 op_genesis_info.jovian_time,
+            ),
+            (
+                WorldChainHardfork::Karst.boxed(),
+                op_genesis_info.karst_time,
             ),
             (WorldChainHardfork::Tropo.boxed(), genesis_info.tropo_time),
             (WorldChainHardfork::Strato.boxed(), genesis_info.strato_time),
@@ -470,12 +475,14 @@ fn extra_timestamp(genesis: &Genesis, key: &str) -> Option<u64> {
 }
 
 pub(crate) fn convert_op_hardforks(hardforks: &ChainHardforks) -> ChainHardforks {
-    ChainHardforks::new(
-        hardforks
-            .forks_iter()
-            .filter_map(|(fork, condition)| convert_op_hardfork(fork).map(|fork| (fork, condition)))
-            .collect(),
-    )
+    let mut converted = ChainHardforks::default();
+    for (fork, condition) in hardforks.forks_iter() {
+        let Some(fork) = convert_op_hardfork(fork) else {
+            continue;
+        };
+        converted.insert(fork, condition);
+    }
+    converted
 }
 
 pub(crate) fn convert_op_hardfork(fork: &dyn Hardfork) -> Option<Box<dyn Hardfork>> {
@@ -489,7 +496,8 @@ pub(crate) fn convert_op_hardfork(fork: &dyn Hardfork) -> Option<Box<dyn Hardfor
         "Holocene" => Some(WorldChainHardfork::Holocene.boxed()),
         "Isthmus" => Some(WorldChainHardfork::Isthmus.boxed()),
         "Jovian" => Some(WorldChainHardfork::Jovian.boxed()),
-        "Karst" | "Interop" => None,
+        "Karst" => Some(WorldChainHardfork::Karst.boxed()),
+        "Interop" => None,
         other if other.eq_ignore_ascii_case("tropo") => Some(WorldChainHardfork::Tropo.boxed()),
         other if other.eq_ignore_ascii_case("strato") => Some(WorldChainHardfork::Strato.boxed()),
         _ => EthereumHardfork::VARIANTS
@@ -524,6 +532,7 @@ fn order_world_hardforks(
         WorldChainHardfork::Holocene.boxed(),
         WorldChainHardfork::Isthmus.boxed(),
         WorldChainHardfork::Jovian.boxed(),
+        WorldChainHardfork::Karst.boxed(),
         WorldChainHardfork::Tropo.boxed(),
         WorldChainHardfork::Strato.boxed(),
     ];
@@ -559,41 +568,55 @@ mod tests {
             spec.fork(WorldChainHardfork::Jovian),
             ForkCondition::Timestamp(JOVIAN_UPGRADE_TIMESTAMP_MAINNET)
         );
+        assert_eq!(spec.fork(WorldChainHardfork::Karst), ForkCondition::Never);
     }
 
     #[test]
-    fn world_specific_hardforks_default_inactive_for_custom_genesis() {
+    fn post_jovian_hardforks_default_inactive_for_custom_genesis() {
         let spec = WorldChainSpec::from_genesis(Genesis::default());
+        assert_eq!(spec.fork(WorldChainHardfork::Karst), ForkCondition::Never);
         assert_eq!(spec.fork(WorldChainHardfork::Tropo), ForkCondition::Never);
         assert_eq!(spec.fork(WorldChainHardfork::Strato), ForkCondition::Never);
     }
 
     #[test]
-    fn world_specific_hardforks_do_not_activate_post_jovian_op_forks() {
+    fn world_specific_hardforks_keep_karst_activation() {
         let spec = WorldChainSpecBuilder::mainnet()
             .jovian_activated()
+            .karst_activated()
             .tropo_activated()
             .strato_activated()
             .build();
 
         assert_eq!(
             spec.op_fork_activation(OpHardfork::Karst),
-            ForkCondition::Never
+            ForkCondition::Timestamp(0)
+        );
+        assert_eq!(
+            spec.fork(EthereumHardfork::Osaka),
+            ForkCondition::Timestamp(0)
         );
     }
 
     #[test]
-    fn converting_op_specs_drops_post_jovian_op_forks() {
+    fn converting_op_specs_preserves_karst() {
         let mut spec = WorldChainSpec::from_genesis(Genesis::default());
         spec.set_fork(OpHardfork::Karst, ForkCondition::Timestamp(10));
 
         let converted = WorldChainSpec::from(spec.inner);
 
-        assert_eq!(converted.fork(OpHardfork::Karst), ForkCondition::Never);
+        assert_eq!(
+            converted.fork(WorldChainHardfork::Karst),
+            ForkCondition::Timestamp(10)
+        );
+        assert_eq!(
+            converted.op_fork_activation(OpHardfork::Karst),
+            ForkCondition::Timestamp(10)
+        );
     }
 
     #[test]
-    fn world_hardfork_order_skips_post_jovian_op_forks() {
+    fn world_hardfork_order_places_karst_before_world_specific_forks() {
         let hardforks = order_world_hardforks(vec![
             (
                 WorldChainHardfork::Strato.boxed(),
@@ -607,23 +630,30 @@ mod tests {
                 WorldChainHardfork::Jovian.boxed(),
                 ForkCondition::Timestamp(10),
             ),
+            (
+                WorldChainHardfork::Karst.boxed(),
+                ForkCondition::Timestamp(15),
+            ),
         ]);
         let names = hardforks
             .forks_iter()
             .map(|(fork, _)| fork.name())
             .collect::<Vec<_>>();
 
-        assert_eq!(names, vec!["Jovian", "Tropo", "Strato"]);
+        assert_eq!(names, vec!["Jovian", "Karst", "Tropo", "Strato"]);
     }
 
     #[test]
-    fn builder_drops_post_jovian_op_forks_from_generic_inputs() {
+    fn builder_preserves_karst_from_generic_inputs() {
         let spec = WorldChainSpecBuilder::mainnet()
             .with_fork(OpHardfork::Karst, ForkCondition::Timestamp(10))
             .with_fork(OpHardfork::Jovian, ForkCondition::Timestamp(5))
             .build();
 
-        assert_eq!(spec.fork(OpHardfork::Karst), ForkCondition::Never);
+        assert_eq!(
+            spec.fork(WorldChainHardfork::Karst),
+            ForkCondition::Timestamp(10)
+        );
         assert_eq!(
             spec.fork(WorldChainHardfork::Jovian),
             ForkCondition::Timestamp(5)

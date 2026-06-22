@@ -1176,6 +1176,11 @@ fn patch_l2_hardforks(
     );
     set_time(
         genesis_config,
+        "karstTime",
+        hardforks.is_active(WorldChainHardfork::Karst),
+    );
+    set_time(
+        genesis_config,
         "tropoTime",
         hardforks.is_active(WorldChainHardfork::Tropo),
     );
@@ -1239,6 +1244,11 @@ fn patch_l2_hardforks(
         rollup_config,
         "jovian_time",
         hardforks.is_active(WorldChainHardfork::Jovian),
+    );
+    set_time(
+        rollup_config,
+        "karst_time",
+        hardforks.is_active(WorldChainHardfork::Karst),
     );
     set_time(
         rollup_config,
@@ -3466,7 +3476,7 @@ mod tests {
                 "eip1559Elasticity": 10
             }
         });
-        let hardforks = WorldChainHardforkConfig::through(WorldChainHardfork::Jovian);
+        let hardforks = WorldChainHardforkConfig::through(WorldChainHardfork::Karst);
 
         patch_l2_genesis_base_fee_extra_data(&mut genesis, rollup.as_object().unwrap(), &hardforks)
             .unwrap();
@@ -3478,8 +3488,8 @@ mod tests {
     fn renders_op_deployer_intent_with_tagged_contract_locators() {
         let intent = render_intent(&HaSequencerConfig::default());
 
-        assert!(intent.contains("l1ContractsLocator = \"tag://op-contracts/v3.0.0-rc.2\""));
-        assert!(intent.contains("l2ContractsLocator = \"tag://op-contracts/v3.0.0-rc.2\""));
+        assert!(intent.contains("l1ContractsLocator = \"tag://op-contracts/v7.0.0-rc.4\""));
+        assert!(intent.contains("l2ContractsLocator = \"tag://op-contracts/v7.0.0-rc.4\""));
         assert!(!intent.contains("https://storage.googleapis.com/oplabs-contract-artifacts"));
     }
 }
