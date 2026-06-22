@@ -52,4 +52,10 @@ where
     fn evm_memory_limit(&self) -> u64 {
         self.inner.evm_memory_limit()
     }
+
+    fn compute_state_root_for_eth_simulate(&self) -> bool {
+        unimplemented!(
+            "compute_state_root_for_eth_simulate is not supported by the flashblocks eth API"
+        )
+    }
 }

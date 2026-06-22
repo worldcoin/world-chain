@@ -1,4 +1,5 @@
 set positional-arguments := true
+set dotenv-load := true
 
 # default recipe to display help information
 default:
@@ -23,6 +24,9 @@ test-dev *args='':
 test-verbose *args='':
     RUST_LOG="info,flashblocks=trace,world_chain=trace,bal_executor=trace,payload_builder=trace,engine::tree=trace" cargo nextest run --workspace $@
 
+clippy:
+    cargo +nightly clippy --workspace --all-targets --all-features
+
 fmt: fmt-fix fmt-check contracts-fmt
 
 contracts-fmt:
@@ -39,21 +43,65 @@ playground *args='':
     RUST_LOG="info" cargo run -p xtask --release -- launch-node $@
 
 # Manage the native Rust HA devnet. Use `just devnet up -d` to run in the background and `just devnet down` to stop it.
+# Set BAL=1 to enable flashblocks block access lists on the sequencer nodes.
 devnet command='up' *args='':
     #!/usr/bin/env bash
     set -euo pipefail
+    EXTRA_ARGS=()
     if [ "{{command}}" = "up" ]; then
         cargo build -p world-chain
+        if [ "${BAL:-0}" = "1" ]; then
+            EXTRA_ARGS+=(--bal-enabled)
+        fi
     fi
-    RUST_LOG="${RUST_LOG:-info,flashblocks=trace,engine_driver=info}" cargo run -p xtask -- devnet {{command}} {{args}}
+    RUST_LOG="${RUST_LOG:-info,flashblocks=trace,engine_driver=info}" cargo run -p xtask -- devnet {{command}} {{args}} ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 
-# Run stress tests against a live network
+# Tail world-chain execution client logs from the running devnet (e.g. `just devnet-logs` or `just devnet-logs 0` for a specific sequencer).
+devnet-logs index='':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    LOG_FILE="${WORLD_CHAIN_DEVNET_LOG_FILE:-target/devnet/logs/devnet.log}"
+    if [ ! -f "$LOG_FILE" ]; then
+        echo "no devnet log file at $LOG_FILE; is the devnet running?" >&2
+        exit 1
+    fi
+    if [ -n "{{index}}" ]; then
+        PATTERN="world-chain-el-{{index}} "
+    else
+        PATTERN="world-chain-el-"
+    fi
+    tail -n 200 -F "$LOG_FILE" | grep --line-buffered -- "$PATTERN"
+
+# Run Contender stress tests against a running native Rust devnet.
 stress *args='':
-    RUST_LOG="info" cargo run -p xtask --release -- stress $@
+    @scripts/stress/stress.sh $@
 
 # Prove a PBH transaction
 prove *args='':
     cargo run -p xtask -- prove $@
+
+# Compute the on-chain verification keys for the SP1 proof ELFs.
+# The ELFs are compiled and embedded at build time by
+# `proofs/succinct/elfs/build.rs` (sp1_build::build_program_with_args
+# with docker:true at the pinned SP1 toolchain tag), so just running
+# `cargo run` is enough — no separate ELF build step is required.
+proof-vkeys *args='':
+    cargo run --release -p world-chain-prover-sp1 -- vkeys $@
+
+# Recompute vkeys from the embedded ELFs and update proofs/succinct/elf/vkeys.json.
+# Requires Docker and the SP1 toolchain (sp1up v6.1.0) for reproducible ELF builds.
+update-proof-vkeys:
+    cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-update.json
+    jq -S . /tmp/vkeys-update.json > proofs/succinct/elf/vkeys.json
+
+# Verify that the committed vkeys.json matches what the current source produces.
+# Uses jq -S to normalize key ordering before comparing, so the diff is not
+# sensitive to JSON insertion order. Used by CI. Fails if they differ.
+verify-proof-vkeys:
+    cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-actual.json
+    jq -S . proofs/succinct/elf/vkeys.json > /tmp/vkeys-committed.json
+    jq -S . /tmp/vkeys-actual.json > /tmp/vkeys-actual-normalized.json
+    diff /tmp/vkeys-committed.json /tmp/vkeys-actual-normalized.json || (echo "ERROR: vkeys.json is out of date. Run 'just update-proof-vkeys' to regenerate." && exit 1)
 
 # Generate CLI reference docs for the mdbook
 docs:

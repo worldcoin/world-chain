@@ -14,7 +14,7 @@ const DEFAULT_DEVNET_PRIVATE_KEY: &str =
 /// OP Stack container images used by the HA topology.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpStackImages {
-    /// OP Node image.
+    /// OP Node-compatible rollup node image.
     pub op_node: ContainerImage,
     /// OP Deployer image.
     pub op_deployer: ContainerImage,
@@ -32,8 +32,8 @@ impl Default for OpStackImages {
     fn default() -> Self {
         Self {
             op_node: ContainerImage::new(
-                "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node",
-                "develop",
+                "us-docker.pkg.dev/oplabs-tools-artifacts/images/kona-node",
+                "v1.5.0",
             ),
             op_deployer: ContainerImage::new(
                 "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-deployer",
@@ -78,8 +78,10 @@ impl Default for OpContractDeploymentConfig {
 }
 
 /// World Chain contract deployment scope for the native devnet.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorldContractsDeploymentConfig {
+    /// Deploy WIP-1006 proof-system contracts on the local L1.
+    pub proof_system: bool,
     /// Deploy fee-vault contracts with mock price oracles.
     ///
     /// This is disabled for the native devnet. The fee vault contracts are not
@@ -93,10 +95,30 @@ pub struct WorldContractsDeploymentConfig {
     pub pbh_contracts: bool,
 }
 
+impl Default for WorldContractsDeploymentConfig {
+    fn default() -> Self {
+        Self {
+            proof_system: true,
+            fee_vaults: false,
+            pbh_contracts: false,
+        }
+    }
+}
+
 impl WorldContractsDeploymentConfig {
     /// Contracts intentionally covered by the native devnet deployment scope.
     pub fn planned_contracts(&self) -> Vec<&'static str> {
         let mut contracts = Vec::new();
+        if self.proof_system {
+            contracts.extend([
+                "WorldChainAnchorStateRegistry",
+                "WorldChainProofSystemFactory",
+                "MockRootIdVerifier(VALIDITY_PROOF)",
+                "MockRootIdVerifier(TEE_ATTESTATION)",
+                "MockRootIdVerifier(SECURITY_COUNCIL)",
+                "MockStakingRegistry",
+            ]);
+        }
         if self.fee_vaults {
             contracts.extend([
                 "MockChainLinkPriceFeed(WLD/USD)",
@@ -392,6 +414,33 @@ impl HaSequencerTopology {
             .with_note("posts L2 output roots / dispute-game proposals to L1"),
         );
 
+        if config.world_contracts.proof_system {
+            components.push(
+                DevnetComponent::new(
+                    "world-proof-system",
+                    DevnetComponentKind::WorldProofSystem,
+                    DevnetComponentStatus::Planned,
+                )
+                .with_note("deploys WIP-1006 proof-system contracts to the local L1"),
+            );
+            components.push(
+                DevnetComponent::new(
+                    "world-chain-proposer",
+                    DevnetComponentKind::WorldChainProposer,
+                    DevnetComponentStatus::Planned,
+                )
+                .with_note("native proposer posting OP output roots to the WIP-1006 proof system"),
+            );
+            components.push(
+                DevnetComponent::new(
+                    "world-chain-challenger",
+                    DevnetComponentKind::WorldChainChallenger,
+                    DevnetComponentStatus::Planned,
+                )
+                .with_note("native challenger disputing invalid WIP-1006 proof-system games"),
+            );
+        }
+
         let challenger_config = config.op_challenger.then(OpChallengerConfig::local);
         if config.op_challenger {
             components.push(
@@ -409,9 +458,17 @@ impl HaSequencerTopology {
             DevnetComponent::new(
                 "world-contracts-deployer",
                 DevnetComponentKind::WorldContractsDeployer,
-                DevnetComponentStatus::Deferred,
+                if config.world_contracts.proof_system {
+                    DevnetComponentStatus::Planned
+                } else {
+                    DevnetComponentStatus::Deferred
+                },
             )
-            .with_note("not part of native devnet startup; FeeEscrow and FeeRecipient are intentionally not deployed")
+            .with_note(if config.world_contracts.proof_system {
+                "deploys the WIP-1006 proof-system suite with Foundry"
+            } else {
+                "not part of native devnet startup; FeeEscrow and FeeRecipient are intentionally not deployed"
+            })
             .with_note("PBH contracts are deprecated and intentionally omitted"),
         );
 
@@ -470,9 +527,13 @@ mod tests {
         assert_eq!(count(DevnetComponentKind::Prometheus), 1);
         assert_eq!(count(DevnetComponentKind::Grafana), 1);
         assert_eq!(count(DevnetComponentKind::WorldContractsDeployer), 1);
+        assert_eq!(count(DevnetComponentKind::WorldProofSystem), 1);
+        assert_eq!(count(DevnetComponentKind::WorldChainProposer), 1);
+        assert_eq!(count(DevnetComponentKind::WorldChainChallenger), 1);
         assert!(topology.components.iter().any(|component| component.kind
             == DevnetComponentKind::WorldContractsDeployer
-            && component.status == DevnetComponentStatus::Deferred));
+            && component.status == DevnetComponentStatus::Planned));
+        assert!(topology.config.world_contracts.proof_system);
         assert!(!topology.config.world_contracts.fee_vaults);
         assert!(!topology.config.world_contracts.pbh_contracts);
     }

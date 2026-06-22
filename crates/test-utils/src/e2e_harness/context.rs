@@ -1,22 +1,10 @@
-//! Native account-abstraction node context for the e2e harness.
-//!
-//! The production node context uses Optimism primitives, where the node-level
-//! signed transaction is `OpTransactionSigned`. WIP-1001 needs a node whose
-//! primitive transaction type is [`WorldChainTxEnvelope`], otherwise a
-//! `0x1d` transaction can only be handled after it has already been rejected by
-//! the node's primitive surface.
-//!
-//! [`Wip1001NodeContext`] is intentionally a normal reth node context rather
-//! than a collection of harness aliases. The existing `setup<T>` path can build
-//! `WorldChainNode<Wip1001NodeContext>` through
-//! `NodeBuilder::with_types_and_provider`, and the associated types below
-//! describe the concrete component stack needed for that node.
+//! Example on how to build a custom context for the world chain node.
 
-use alloy_consensus::{Block, BlockBody, Eip658Value, Header, Receipt};
+use alloy_consensus::{Eip658Value, Header, Receipt};
 use alloy_evm::{Evm, eth::receipt_builder::ReceiptBuilderCtx};
 use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1};
-use op_alloy_consensus::OpDepositReceipt;
+use op_alloy_consensus::{OpDepositReceipt, OpTxEnvelope, OpTxType};
 use op_alloy_rpc_types::{OpTransactionReceipt, OpTransactionRequest};
 use op_alloy_rpc_types_engine::{
     OpExecutionData, OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4,
@@ -36,12 +24,12 @@ use reth_optimism_node::{
     rpc::OpEthApiBuilder, txpool::OpPooledTransaction,
 };
 use reth_optimism_payload_builder::{OpExecData, OpPayloadAttrs};
-use reth_optimism_primitives::OpReceipt;
+use reth_optimism_primitives::{OpBlock, OpBlockBody, OpReceipt, OpTransactionSigned};
 use reth_primitives_traits::{Block as _, BlockTy, SealedBlock};
 use reth_rpc_api::eth::RpcTypes;
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
-use world_chain_evm::WorldChainEvmConfig;
+use world_chain_evm::{OpRethReceiptBuilder, WorldChainEvmConfig};
 use world_chain_node::{
     context::{FlashblocksComponentsContext, WorldChainNetworkBuilder},
     engine::FlashblocksEngineApiBuilder,
@@ -49,41 +37,31 @@ use world_chain_node::{
     pool::WorldChainPoolBuilder,
 };
 use world_chain_pool::BasicWorldChainPool;
-use world_chain_primitives::transaction::{WorldChainTxEnvelope, WorldChainTxType};
 
-/// Node primitives for WIP-1001 e2e tests.
-///
-/// This is the central type-level change for native account abstraction: blocks
-/// still use the standard alloy block/header shape, but their signed
-/// transaction type is [`WorldChainTxEnvelope`]. That lets the traditional reth
-/// harness launch a node that can decode, validate, pool, execute, and persist
-/// WIP-1001 transactions.
+/// Node primitives for world chain.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct Wip1001Primitives;
+pub struct WorldPrimitives;
 
-impl NodePrimitives for Wip1001Primitives {
-    type Block = Block<WorldChainTxEnvelope>;
+impl NodePrimitives for WorldPrimitives {
+    type Block = OpBlock;
     type BlockHeader = Header;
-    type BlockBody = BlockBody<WorldChainTxEnvelope>;
-    type SignedTx = WorldChainTxEnvelope;
+    type BlockBody = OpBlockBody;
+    type SignedTx = OpTransactionSigned;
     type Receipt = OpReceipt;
 }
 
-/// Engine payload type set for WIP-1001 nodes.
-///
-/// This mirrors the OP engine API envelope shapes while removing upstream
-/// `OpEngineTypes`' restriction that the built payload primitives must be
-/// `OpPrimitives`.
+/// Engine payload type set for world chain.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
-pub struct Wip1001EngineTypes;
+pub struct WorldEngineTypes;
 
-impl PayloadTypes for Wip1001EngineTypes {
+impl PayloadTypes for WorldEngineTypes {
     type ExecutionData = OpExecData;
-    type BuiltPayload = OpBuiltPayload<Wip1001Primitives>;
+    type BuiltPayload = OpBuiltPayload<WorldPrimitives>;
     type PayloadAttributes = OpPayloadAttrs;
 
     fn block_to_payload(
         block: SealedBlock<BlockTy<<Self::BuiltPayload as BuiltPayload>::Primitives>>,
+        _bal: Option<alloy_primitives::Bytes>,
     ) -> Self::ExecutionData {
         OpExecData::from(OpExecutionData::from_block_unchecked(
             block.hash(),
@@ -92,7 +70,7 @@ impl PayloadTypes for Wip1001EngineTypes {
     }
 }
 
-impl EngineTypes for Wip1001EngineTypes {
+impl EngineTypes for WorldEngineTypes {
     type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = OpExecutionPayloadEnvelopeV3;
@@ -101,40 +79,36 @@ impl EngineTypes for Wip1001EngineTypes {
     type ExecutionPayloadEnvelopeV6 = OpExecutionPayloadEnvelopeV4;
 }
 
-/// Receipt builder for the WIP-1001 e2e primitive set.
-///
-/// OP receipts do not yet have a dedicated `0x1d` variant. For now the WIP
-/// transaction receives an EIP-1559-shaped receipt, matching its fee semantics.
-/// The native-AA transaction type remains preserved in the block body.
+/// Receipt builder for world chain.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct Wip1001ReceiptBuilder;
+pub struct WorldReceiptBuilder;
 
-impl OpReceiptBuilder for Wip1001ReceiptBuilder {
-    type Transaction = WorldChainTxEnvelope;
+impl OpReceiptBuilder for WorldReceiptBuilder {
+    type Transaction = OpTransactionSigned;
     type Receipt = OpReceipt;
 
     fn build_receipt<'a, E: Evm>(
         &self,
-        ctx: ReceiptBuilderCtx<'a, WorldChainTxType, E>,
-    ) -> Result<Self::Receipt, ReceiptBuilderCtx<'a, WorldChainTxType, E>> {
+        ctx: ReceiptBuilderCtx<'a, OpTxType, E>,
+    ) -> Result<Self::Receipt, ReceiptBuilderCtx<'a, OpTxType, E>> {
         match ctx.tx_type {
-            WorldChainTxType::Deposit => Err(ctx),
+            OpTxType::Deposit => Err(ctx),
             ty => {
                 let receipt = Receipt {
+                    // Success flag was added in `EIP-658: Embedding transaction status code in
+                    // receipts`.
                     status: Eip658Value::Eip658(ctx.result.is_success()),
                     cumulative_gas_used: ctx.cumulative_gas_used,
                     logs: ctx.result.into_logs(),
                 };
 
                 Ok(match ty {
-                    WorldChainTxType::Legacy => OpReceipt::Legacy(receipt),
-                    WorldChainTxType::Eip2930 => OpReceipt::Eip2930(receipt),
-                    WorldChainTxType::Eip1559 | WorldChainTxType::Wip1001 => {
-                        OpReceipt::Eip1559(receipt)
-                    }
-                    WorldChainTxType::Eip7702 => OpReceipt::Eip7702(receipt),
-                    WorldChainTxType::PostExec => OpReceipt::PostExec(receipt),
-                    WorldChainTxType::Deposit => unreachable!(),
+                    OpTxType::Legacy => OpReceipt::Legacy(receipt),
+                    OpTxType::Eip1559 => OpReceipt::Eip1559(receipt),
+                    OpTxType::Eip2930 => OpReceipt::Eip2930(receipt),
+                    OpTxType::Eip7702 => OpReceipt::Eip7702(receipt),
+                    OpTxType::PostExec => OpReceipt::PostExec(receipt),
+                    OpTxType::Deposit => unreachable!(),
                 })
             }
         }
@@ -143,60 +117,56 @@ impl OpReceiptBuilder for Wip1001ReceiptBuilder {
     fn build_deposit_receipt(&self, inner: OpDepositReceipt) -> Self::Receipt {
         OpReceipt::Deposit(inner)
     }
+
+    fn strip_deposit_nonce(&self, receipt: &mut Self::Receipt) {
+        OpRethReceiptBuilder::default().strip_deposit_nonce(receipt);
+    }
 }
 
-/// Executor builder that ties OP execution to [`Wip1001Primitives`].
+/// Executor builder for world chain.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct Wip1001ExecutorBuilder;
+pub struct WorldExecutorBuilder;
 
-impl<Node> ExecutorBuilder<Node> for Wip1001ExecutorBuilder
+impl<Node> ExecutorBuilder<Node> for WorldExecutorBuilder
 where
-    Node:
-        FullNodeTypes<Types: NodeTypes<ChainSpec = WorldChainSpec, Primitives = Wip1001Primitives>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = WorldChainSpec, Primitives = WorldPrimitives>>,
 {
-    type EVM = WorldChainEvmConfig<Wip1001Primitives, Wip1001ReceiptBuilder>;
+    type EVM = WorldChainEvmConfig<WorldPrimitives, WorldReceiptBuilder>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         Ok(WorldChainEvmConfig::new(
             ctx.chain_spec(),
-            Wip1001ReceiptBuilder,
+            WorldReceiptBuilder,
         ))
     }
 }
 
-/// RPC type adapter for OP RPC requests over [`WorldChainTxEnvelope`] blocks.
+/// RPC type adapter for world chain.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct Wip1001RpcTypes;
+pub struct WorldRpcTypes;
 
-impl RpcTypes for Wip1001RpcTypes {
+impl RpcTypes for WorldRpcTypes {
     type Header = alloy_rpc_types_eth::Header<Header>;
     type Receipt = OpTransactionReceipt;
     type TransactionRequest = OpTransactionRequest;
-    type TransactionResponse = op_alloy_rpc_types::Transaction<WorldChainTxEnvelope>;
+    type TransactionResponse = op_alloy_rpc_types::Transaction<OpTxEnvelope>;
 }
 
-/// World Chain e2e context that launches a WIP-1001-capable node.
-///
-/// This context keeps the World Chain-specific network builder so flashblocks
-/// sub-protocol registration and engine RPC hooks are present when flashblocks
-/// are enabled in the test config. The payload builder is the generic OP
-/// payload builder because the production flashblocks payload builder is still
-/// specialized to `OpPrimitives`; generic flashblocks payload execution can be
-/// layered on top of this context separately.
+/// World Chain e2e context that launches a world chain node.
 #[derive(Clone, Debug)]
-pub struct Wip1001NodeContext {
+pub struct WorldNodeContext {
     config: WorldChainNodeConfig,
     components_context: Option<FlashblocksComponentsContext>,
 }
 
-impl Wip1001NodeContext {
+impl WorldNodeContext {
     /// Returns the node configuration captured when the context was created.
     pub fn config(&self) -> &WorldChainNodeConfig {
         &self.config
     }
 }
 
-impl From<WorldChainNodeConfig> for Wip1001NodeContext {
+impl From<WorldChainNodeConfig> for WorldNodeContext {
     fn from(config: WorldChainNodeConfig) -> Self {
         let components_context = config
             .args
@@ -211,44 +181,40 @@ impl From<WorldChainNodeConfig> for Wip1001NodeContext {
     }
 }
 
-impl WorldChainNodePrimitiveTypes for Wip1001NodeContext {
-    type Primitives = Wip1001Primitives;
-    type Payload = Wip1001EngineTypes;
+impl WorldChainNodePrimitiveTypes for WorldNodeContext {
+    type Primitives = WorldPrimitives;
+    type Payload = WorldEngineTypes;
     type ChainSpec = WorldChainSpec;
 }
 
-impl<N> WorldChainNodeContext<N> for Wip1001NodeContext
+impl<N> WorldChainNodeContext<N> for WorldNodeContext
 where
     N: FullNodeTypes<Types = WorldChainNode<Self>>,
     BasicPayloadServiceBuilder<OpPayloadBuilder>: PayloadServiceBuilder<
             N,
             BasicWorldChainPool<
                 N,
-                OpPooledTransaction<WorldChainTxEnvelope, WorldChainTxEnvelope>,
-                WorldChainEvmConfig<Wip1001Primitives, Wip1001ReceiptBuilder>,
+                OpPooledTransaction,
+                WorldChainEvmConfig<WorldPrimitives, WorldReceiptBuilder>,
             >,
-            WorldChainEvmConfig<Wip1001Primitives, Wip1001ReceiptBuilder>,
+            WorldChainEvmConfig<WorldPrimitives, WorldReceiptBuilder>,
         >,
 {
-    type Evm = WorldChainEvmConfig<Wip1001Primitives, Wip1001ReceiptBuilder>;
-    type Pool = BasicWorldChainPool<
-        N,
-        OpPooledTransaction<WorldChainTxEnvelope, WorldChainTxEnvelope>,
-        Self::Evm,
-    >;
+    type Evm = WorldChainEvmConfig<WorldPrimitives, WorldReceiptBuilder>;
+    type Pool = BasicWorldChainPool<N, OpPooledTransaction, Self::Evm>;
     type Net = WorldChainNetworkBuilder;
     type PayloadServiceBuilder = BasicPayloadServiceBuilder<OpPayloadBuilder>;
     type ComponentsBuilder = ComponentsBuilder<
         N,
-        WorldChainPoolBuilder<OpPooledTransaction<WorldChainTxEnvelope, WorldChainTxEnvelope>>,
+        WorldChainPoolBuilder<OpPooledTransaction>,
         Self::PayloadServiceBuilder,
         Self::Net,
-        Wip1001ExecutorBuilder,
+        WorldExecutorBuilder,
         OpConsensusBuilder,
     >;
     type AddOns = OpAddOns<
         NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
-        OpEthApiBuilder<Wip1001RpcTypes>,
+        OpEthApiBuilder<WorldRpcTypes>,
         OpEngineValidatorBuilder,
         FlashblocksEngineApiBuilder<OpEngineValidatorBuilder>,
         BasicEngineValidatorBuilder<OpEngineValidatorBuilder>,
@@ -296,7 +262,7 @@ where
                 pbh.signature_aggregator,
                 pbh.world_id,
             ))
-            .executor(Wip1001ExecutorBuilder)
+            .executor(WorldExecutorBuilder)
             .payload(BasicPayloadServiceBuilder::new(OpPayloadBuilder::new(
                 compute_pending_block,
             )))
@@ -321,7 +287,7 @@ where
                 .as_ref()
                 .map(|flashblocks_components_ctx| flashblocks_components_ctx.authorizer_vk),
         };
-        let op_eth_api_builder = OpEthApiBuilder::<Wip1001RpcTypes>::default()
+        let op_eth_api_builder = OpEthApiBuilder::<WorldRpcTypes>::default()
             .with_sequencer(self.config.args.rollup.sequencer.clone());
 
         let engine_validator_builder =
@@ -340,6 +306,7 @@ where
             rpc_add_ons,
             self.config.builder_config.inner.da_config.clone(),
             self.config.builder_config.inner.gas_limit_config.clone(),
+            Default::default(),
             self.config.args.rollup.sequencer.clone(),
             Default::default(),
             Default::default(),

@@ -1,5 +1,7 @@
 book
 /target
+**/target/
+/proofs/succinct/programs/target
 .env
 .vscode
 .report
@@ -12,3 +14,6 @@ pkg/contracts/sepolia_load_test.json
 .DS_Store
 **/.DS_Store
 **/proptest-regressions/
+/proofs/succinct/elf/*
+!/proofs/succinct/elf/manifest.toml
+!/proofs/succinct/elf/vkeys.json

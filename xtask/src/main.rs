@@ -5,10 +5,12 @@ use eyre::eyre::Context;
 use tracing::{
     Event, Subscriber,
     field::{Field, Visit},
+    span::{Attributes, Id},
 };
 use tracing_subscriber::{
+    Layer,
     fmt::{FmtContext, FormatEvent, FormatFields, format::Writer},
-    layer::SubscriberExt,
+    layer::{Context as LayerContext, SubscriberExt},
     registry::LookupSpan,
     util::SubscriberInitExt,
 };
@@ -69,11 +71,33 @@ async fn main() -> eyre::Result<()> {
     }
 }
 
+/// Tracing targets used for the auxiliary devnet services, i.e. everything that
+/// is not a World Chain execution node. These are suppressed on stdout so the
+/// main terminal only shows the World Chain nodes (and the devnet harness's own
+/// lifecycle), but they are still written to the devnet log file for debugging.
+///
+/// Set `DEVNET_LOG_ALL=1` to keep these on stdout as well.
+const AUX_SERVICE_TARGETS: &[&str] = &[
+    "l1_dev_chain",
+    "op_deployer",
+    "op_node",
+    "op_conductor",
+    "op_batcher",
+    "op_proposer",
+    "op_challenger",
+    "op_stack_service",
+    "prometheus",
+    "grafana",
+];
+
+fn devnet_env_filter() -> tracing_subscriber::EnvFilter {
+    tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+}
+
 fn init_devnet_tracing(
     reset_log: bool,
 ) -> eyre::Result<tracing_appender::non_blocking::WorkerGuard> {
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     let log_path = devnet_log_path();
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent)
@@ -90,16 +114,32 @@ fn init_devnet_tracing(
         .wrap_err_with(|| format!("failed to open {}", log_path.display()))?;
     let (file_writer, guard) = tracing_appender::non_blocking(file);
 
+    // The file keeps the full firehose; stdout is filtered down to the World
+    // Chain nodes unless DEVNET_LOG_ALL is set.
+    let file_filter = devnet_env_filter();
+    let mut stdout_filter = devnet_env_filter();
+    if std::env::var_os("DEVNET_LOG_ALL").is_none() {
+        for target in AUX_SERVICE_TARGETS {
+            stdout_filter = stdout_filter.add_directive(
+                format!("{target}=off")
+                    .parse()
+                    .expect("valid tracing directive"),
+            );
+        }
+    }
+
     let stdout_layer = tracing_subscriber::fmt::layer()
         .event_format(DevnetLogFormatter)
-        .with_ansi(true);
+        .with_ansi(true)
+        .with_filter(stdout_filter);
     let file_layer = tracing_subscriber::fmt::layer()
         .event_format(DevnetLogFormatter)
         .with_ansi(false)
-        .with_writer(file_writer);
+        .with_writer(file_writer)
+        .with_filter(file_filter);
 
     tracing_subscriber::registry()
-        .with(env_filter)
+        .with(ProcessSpanLayer)
         .with(stdout_layer)
         .with(file_layer)
         .init();
@@ -123,16 +163,21 @@ where
 {
     fn format_event(
         &self,
-        _ctx: &FmtContext<'_, S, N>,
+        ctx: &FmtContext<'_, S, N>,
         mut writer: Writer<'_>,
         event: &Event<'_>,
     ) -> fmt::Result {
         let mut fields = DevnetEventFields::default();
         event.record(&mut fields);
 
+        // In-process subsystems (e.g. the World Chain proposer/challenger) carry
+        // their component label on an enclosing span instead of every event, so
+        // fall back to the nearest span's `process` value.
+        let process = fields.process.clone().or_else(|| process_from_spans(ctx));
+
         write_level(&mut writer, event.metadata().level())?;
         writer.write_char(' ')?;
-        if let Some(process) = fields.process.as_deref() {
+        if let Some(process) = process.as_deref() {
             write_process(&mut writer, process)?;
             writer.write_char(' ')?;
         }
@@ -150,6 +195,43 @@ where
         }
         writer.write_char('\n')
     }
+}
+
+/// Component label captured from a span's `process` field and stored in the
+/// span's extensions so [`DevnetLogFormatter`] can render it for every event
+/// emitted within that span.
+#[derive(Clone)]
+struct ProcessLabel(String);
+
+/// Layer that records a span's `process` field into [`ProcessLabel`] extensions.
+struct ProcessSpanLayer;
+
+impl<S> Layer<S> for ProcessSpanLayer
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+{
+    fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: LayerContext<'_, S>) {
+        let mut fields = DevnetEventFields::default();
+        attrs.record(&mut fields);
+        if let Some(process) = fields.process
+            && let Some(span) = ctx.span(id)
+        {
+            span.extensions_mut().insert(ProcessLabel(process));
+        }
+    }
+}
+
+/// Finds the nearest enclosing span carrying a [`ProcessLabel`].
+fn process_from_spans<S, N>(ctx: &FmtContext<'_, S, N>) -> Option<String>
+where
+    S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+    N: for<'writer> FormatFields<'writer> + 'static,
+{
+    ctx.event_scope()?.find_map(|span| {
+        span.extensions()
+            .get::<ProcessLabel>()
+            .map(|label| label.0.clone())
+    })
 }
 
 #[derive(Default)]

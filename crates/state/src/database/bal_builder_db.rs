@@ -469,7 +469,7 @@ mod tests {
         Database, DatabaseCommit,
         database::InMemoryDB,
         primitives::{HashMap, KECCAK_EMPTY},
-        state::{Account, AccountInfo, AccountStatus, Bytecode, EvmStorageSlot},
+        state::{Account, AccountInfo, AccountStatus, Bytecode, EvmStorageSlot, TransactionId},
     };
 
     // Helper function to create a simple account
@@ -481,6 +481,14 @@ mod tests {
             code_hash: code.as_ref().map(|c| c.hash_slow()).unwrap_or(KECCAK_EMPTY),
             code,
         }
+    }
+
+    fn touched_account(info: AccountInfo, transaction_id: TransactionId) -> Account {
+        let mut account = Account::default();
+        account.info = info;
+        account.status = AccountStatus::Touched;
+        account.transaction_id = transaction_id;
+        account
     }
 
     fn bal_db_with_mirror(db: InMemoryDB) -> AsyncBalBuilderDb<InMemoryDB> {
@@ -509,13 +517,7 @@ mod tests {
         let mut changes = HashMap::default();
         changes.insert(
             addr,
-            Account {
-                info: create_account(U256::from(1), 0, None),
-                original_info: Default::default(),
-                status: AccountStatus::Touched,
-                storage: Default::default(),
-                transaction_id: 0,
-            },
+            touched_account(create_account(U256::from(1), 0, None), TransactionId::ZERO),
         );
         bal_db.commit(changes);
 
@@ -523,13 +525,10 @@ mod tests {
         let mut changes = HashMap::default();
         changes.insert(
             addr,
-            Account {
-                info: create_account(uint!(2_U256), 0, None),
-                original_info: Default::default(),
-                status: AccountStatus::Touched,
-                storage: Default::default(),
-                transaction_id: 1,
-            },
+            touched_account(
+                create_account(uint!(2_U256), 0, None),
+                TransactionId::new(1).unwrap(),
+            ),
         );
         bal_db.commit(changes);
 
@@ -619,13 +618,10 @@ mod tests {
 
         // Create a change
         let mut changes = HashMap::default();
-        let new_account = Account {
-            info: create_account(uint!(2000_U256), 5, None),
-            original_info: Default::default(),
-            status: AccountStatus::Touched,
-            storage: Default::default(),
-            transaction_id: 0,
-        };
+        let new_account = touched_account(
+            create_account(uint!(2000_U256), 5, None),
+            TransactionId::ZERO,
+        );
         changes.insert(addr, new_account);
 
         bal_db.commit(changes);
@@ -650,13 +646,10 @@ mod tests {
         bal_db.set_index(0);
 
         let mut changes = HashMap::default();
-        let new_account = Account {
-            info: create_account(uint!(1000_U256), 6, None),
-            original_info: Default::default(),
-            status: AccountStatus::Touched,
-            storage: Default::default(),
-            transaction_id: 0,
-        };
+        let new_account = touched_account(
+            create_account(uint!(1000_U256), 6, None),
+            TransactionId::ZERO,
+        );
         changes.insert(addr, new_account);
 
         bal_db.commit(changes);
@@ -681,13 +674,10 @@ mod tests {
 
         let new_bytecode = Bytecode::new_raw(vec![0x60, 0x00, 0x60, 0x00].into());
         let mut changes = HashMap::default();
-        let new_account = Account {
-            info: create_account(uint!(1000_U256), 5, Some(new_bytecode.clone())),
-            original_info: Default::default(),
-            status: AccountStatus::Touched,
-            storage: Default::default(),
-            transaction_id: 0,
-        };
+        let new_account = touched_account(
+            create_account(uint!(1000_U256), 5, Some(new_bytecode.clone())),
+            TransactionId::ZERO,
+        );
         changes.insert(addr, new_account);
 
         bal_db.commit(changes);
@@ -725,13 +715,11 @@ mod tests {
             },
         );
 
-        let new_account = Account {
-            info: create_account(uint!(1000_U256), 5, None),
-            original_info: Default::default(),
-            status: AccountStatus::Touched,
-            storage,
-            transaction_id: 0,
-        };
+        let mut new_account = touched_account(
+            create_account(uint!(1000_U256), 5, None),
+            TransactionId::ZERO,
+        );
+        new_account.storage = storage;
         changes.insert(addr, new_account);
 
         bal_db.commit(changes);
@@ -757,13 +745,7 @@ mod tests {
 
         // Commit same values (no change)
         let mut changes = HashMap::default();
-        let new_account = Account {
-            info: initial_account.clone(),
-            original_info: Default::default(),
-            status: AccountStatus::Touched,
-            storage: Default::default(),
-            transaction_id: 0,
-        };
+        let new_account = touched_account(initial_account.clone(), TransactionId::ZERO);
         changes.insert(addr, new_account);
 
         bal_db.commit(changes);
@@ -788,13 +770,10 @@ mod tests {
         let mut changes = HashMap::default();
         changes.insert(
             addr,
-            Account {
-                info: create_account(uint!(1500_U256), 0, None),
-                original_info: Default::default(),
-                status: AccountStatus::Touched,
-                storage: Default::default(),
-                transaction_id: 0,
-            },
+            touched_account(
+                create_account(uint!(1500_U256), 0, None),
+                TransactionId::ZERO,
+            ),
         );
         bal_db.commit(changes);
 
@@ -803,13 +782,10 @@ mod tests {
         let mut repeat_changes = HashMap::default();
         repeat_changes.insert(
             addr,
-            Account {
-                info: create_account(uint!(1500_U256), 0, None),
-                original_info: Default::default(),
-                status: AccountStatus::Touched,
-                storage: Default::default(),
-                transaction_id: 1,
-            },
+            touched_account(
+                create_account(uint!(1500_U256), 0, None),
+                TransactionId::new(1).unwrap(),
+            ),
         );
         bal_db.commit(repeat_changes);
 
@@ -832,13 +808,10 @@ mod tests {
         let bytecode = Bytecode::new_raw(vec![0x60, 0x00].into());
 
         let mut changes = HashMap::default();
-        let new_account = Account {
-            info: create_account(uint!(1000_U256), 1, Some(bytecode.clone())),
-            original_info: Default::default(),
-            status: AccountStatus::Touched,
-            storage: Default::default(),
-            transaction_id: 0,
-        };
+        let new_account = touched_account(
+            create_account(uint!(1000_U256), 1, Some(bytecode.clone())),
+            TransactionId::ZERO,
+        );
         changes.insert(addr, new_account);
 
         bal_db.commit(changes);
@@ -869,13 +842,10 @@ mod tests {
         let mut changes = HashMap::default();
         changes.insert(
             addr,
-            Account {
-                info: create_account(uint!(900_U256), 6, None),
-                original_info: Default::default(),
-                status: AccountStatus::Touched,
-                storage: Default::default(),
-                transaction_id: 0,
-            },
+            touched_account(
+                create_account(uint!(900_U256), 6, None),
+                TransactionId::ZERO,
+            ),
         );
         bal_db.commit(changes);
 
@@ -884,13 +854,10 @@ mod tests {
         let mut changes = HashMap::default();
         changes.insert(
             addr,
-            Account {
-                info: create_account(uint!(800_U256), 7, None),
-                original_info: Default::default(),
-                status: AccountStatus::Touched,
-                storage: Default::default(),
-                transaction_id: 0,
-            },
+            touched_account(
+                create_account(uint!(800_U256), 7, None),
+                TransactionId::ZERO,
+            ),
         );
         bal_db.commit(changes);
 

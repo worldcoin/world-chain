@@ -41,6 +41,7 @@ just devnet up --disable-hardfork jovian
 just devnet up --sequencers 3
 just devnet up --block-time-ms 2000
 just devnet up --op-challenger
+just devnet up --no-proof-system
 just devnet up --no-observability
 ```
 
@@ -63,6 +64,7 @@ The default HA preset starts:
 - Three `op-conductor` containers with a local raft cluster.
 - `op-batcher`.
 - `op-proposer`.
+- WIP-1006 proof-system contracts deployed to the local L1.
 - Prometheus.
 - Grafana with World Chain flashblocks dashboards provisioned.
 
@@ -74,8 +76,11 @@ Local flashblocks use the node's dev-only override authorizer and force-publish 
 still drives normal Engine API payload jobs, while the native World Chain EL self-authorizes
 flashblock publication for the active local sequencer.
 
-World contract deployment is intentionally deferred. `FeeEscrow`, `FeeRecipient`, PBH contracts,
-and account-abstraction support contracts are not part of the native default HA path.
+The native HA devnet deploys the WIP-1006 proof-system suite by default: the anchor-state
+registry, proof-system factory, mock validity/TEE/security-council verifiers, and a mock staking
+registry. Disable that deployment with `just devnet up --no-proof-system` when testing a topology
+without proof contracts. `FeeEscrow`, `FeeRecipient`, PBH contracts, rollup-boost, tx-proxy, and
+rundler, and account-abstraction support contracts are not part of the native default HA path.
 
 `op-challenger` is disabled by default because the native devnet does not yet generate the Cannon
 prestates required to play local permissioned dispute games. Enable it explicitly with
@@ -246,9 +251,14 @@ upstream Reth dashboard is skipped with a warning and the rest of the devnet sti
 # Run E2E tests
 just e2e-test -n
 
-# Run stress tests with contender, if installed
-just stress-test <stress | stress-precompile>
+# Run Contender stress tests against a running native Rust devnet
+just devnet up -d
+just stress
+
+# Optional knobs
+TPS=100 DURATION=120 just stress
+just stress stress-precompile
 
 # Generate a performance report
-just stress-test report
+just stress report
 ```

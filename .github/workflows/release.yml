@@ -23,8 +23,16 @@ permissions:
   id-token: write
 
 jobs:
+  approve-release:
+    name: approve release
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - run: true
+
   extract-version:
     name: extract version
+    needs: approve-release
     runs-on: ubuntu-latest
     steps:
       - name: Extract version
