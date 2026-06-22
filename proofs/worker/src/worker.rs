@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use backon::{ConstantBuilder, Retryable};
 use futures_util::{FutureExt, StreamExt, future::BoxFuture, stream::FuturesUnordered};
 use pin_project::pin_project;
 use tokio::{
@@ -31,6 +32,9 @@ pub const DEFAULT_MAX_CONCURRENT_JOBS: usize = 1;
 
 /// Default sleep between lease attempts when no work is available.
 pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(10);
+
+const REPORT_UPDATE_MAX_RETRIES: usize = 2;
+const REPORT_UPDATE_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 type Job<T> = Pin<Box<dyn Future<Output = Result<T, ProofJobQueueError>> + Send>>;
 
@@ -415,14 +419,65 @@ async fn report_backend_update<Q>(
 ) where
     Q: ProofJobQueue + Send + Sync + 'static,
 {
-    let result = queue
-        .complete_backend_proof_job(backend_job_id, lease_token, update)
+    let report = || {
+        let queue = Arc::clone(&queue);
+        let update = update.clone();
+        async move {
+            queue
+                .complete_backend_proof_job(backend_job_id, lease_token, update)
+                .await
+        }
+    };
+    let backoff = ConstantBuilder::default()
+        .with_delay(REPORT_UPDATE_RETRY_DELAY)
+        .with_max_times(REPORT_UPDATE_MAX_RETRIES);
+    let result = report
+        .retry(backoff)
+        .when(should_retry_report_error)
+        .notify(|error, delay| {
+            warn!(
+                %error,
+                ?delay,
+                backend_job_id,
+                "failed to submit backend proof job update; retrying"
+            );
+        })
         .await;
 
-    match result {
-        Ok(()) => info!("backend proof job update submitted"),
-        Err(error) => warn!(%error, backend_job_id, "failed to submit backend proof job update"),
+    let Err(error) = result else {
+        info!("backend proof job update submitted");
+        return;
+    };
+
+    warn!(%error, backend_job_id, "failed to submit backend proof job update");
+
+    if should_release_backend_lease_after_report_error(&update, &error) {
+        let reason = format!("failed to submit backend proof job update: {error}");
+        if let Err(fail_error) = queue
+            .fail_backend_proof_job(backend_job_id, reason, lease_token)
+            .await
+        {
+            warn!(
+                %fail_error,
+                backend_job_id,
+                "failed to release backend proof job after report failure"
+            );
+        }
     }
+}
+
+fn should_retry_report_error(error: &ProofJobQueueError) -> bool {
+    matches!(
+        error,
+        ProofJobQueueError::Internal(_) | ProofJobQueueError::Rpc(_)
+    )
+}
+
+fn should_release_backend_lease_after_report_error(
+    update: &BackendUpdate,
+    error: &ProofJobQueueError,
+) -> bool {
+    should_retry_report_error(error) && !matches!(update, BackendUpdate::Failed(_))
 }
 
 async fn report_failure<Q>(queue: Arc<Q>, lease: JobLease, reason: String)
@@ -469,7 +524,9 @@ mod tests {
     use alloy_primitives::{Address, B256, Bytes};
     use anyhow::Context as _;
     use async_trait::async_trait;
-    use world_chain_prover_service::{BackendProofState, ProofData, ProofRequestId};
+    use world_chain_prover_service::{
+        BackendProofId, BackendProofState, BackendProofWork, ProofData, ProofRequestId,
+    };
 
     use super::*;
 
@@ -477,6 +534,10 @@ mod tests {
     #[derive(Clone, Default)]
     struct MockQueue {
         jobs: Arc<Mutex<VecDeque<LeasedProofRequest>>>,
+        backend_jobs: Arc<Mutex<VecDeque<LeasedBackendProofWork>>>,
+        backend_updates: Arc<Mutex<Vec<(i64, BackendUpdate)>>>,
+        backend_failures: Arc<Mutex<Vec<(i64, String)>>>,
+        backend_complete_failures: Arc<Mutex<usize>>,
         submitted: Arc<Mutex<Vec<ProofResponse>>>,
         failed: Arc<Mutex<Vec<(ProofRequestId, String)>>>,
     }
@@ -494,6 +555,34 @@ mod tests {
                 )),
                 ..Self::default()
             }
+        }
+
+        fn with_backend_jobs(jobs: impl IntoIterator<Item = LeasedBackendProofWork>) -> Self {
+            Self {
+                backend_jobs: Arc::new(Mutex::new(jobs.into_iter().collect())),
+                ..Self::default()
+            }
+        }
+
+        fn fail_backend_complete_attempts(&self, attempts: usize) {
+            *self
+                .backend_complete_failures
+                .lock()
+                .expect("backend complete failures poisoned") = attempts;
+        }
+
+        fn backend_updates(&self) -> Vec<(i64, BackendUpdate)> {
+            self.backend_updates
+                .lock()
+                .expect("backend updates poisoned")
+                .clone()
+        }
+
+        fn backend_failures(&self) -> Vec<(i64, String)> {
+            self.backend_failures
+                .lock()
+                .expect("backend failures poisoned")
+                .clone()
         }
 
         fn submitted(&self) -> Vec<ProofResponse> {
@@ -527,24 +616,46 @@ mod tests {
             &self,
             _backend: ProofBackend,
         ) -> Result<Option<LeasedBackendProofWork>, ProofJobQueueError> {
-            Ok(None)
+            Ok(self
+                .backend_jobs
+                .lock()
+                .expect("backend jobs poisoned")
+                .pop_front())
         }
 
         async fn complete_backend_proof_job(
             &self,
-            _backend_job_id: i64,
+            backend_job_id: i64,
             _lease_token: LeaseToken,
-            _next_update: BackendUpdate,
+            next_update: BackendUpdate,
         ) -> Result<(), ProofJobQueueError> {
+            let mut failures = self
+                .backend_complete_failures
+                .lock()
+                .expect("backend complete failures poisoned");
+            if *failures > 0 {
+                *failures -= 1;
+                return Err(ProofJobQueueError::Internal(
+                    "temporary report failure".to_string(),
+                ));
+            }
+            self.backend_updates
+                .lock()
+                .expect("backend updates poisoned")
+                .push((backend_job_id, next_update));
             Ok(())
         }
 
         async fn fail_backend_proof_job(
             &self,
-            _backend_job_id: i64,
-            _reason: String,
+            backend_job_id: i64,
+            reason: String,
             _lease_token: LeaseToken,
         ) -> Result<(), ProofJobQueueError> {
+            self.backend_failures
+                .lock()
+                .expect("backend failures poisoned")
+                .push((backend_job_id, reason));
             Ok(())
         }
 
@@ -587,6 +698,7 @@ mod tests {
         Ok,
         Fails,
         Panics,
+        AdvancePending(BackendProofState),
         /// Completes only once `n` jobs rendezvous, proving they ran concurrently.
         Rendezvous(Arc<Barrier>),
     }
@@ -602,6 +714,9 @@ mod tests {
                 Self::Fails => Err(anyhow::anyhow!("witness generation failed"))
                     .context("building range witness"),
                 Self::Panics => panic!("prover exploded"),
+                Self::AdvancePending(_) => {
+                    anyhow::bail!("advance-only mock backend cannot start proof jobs")
+                }
                 Self::Rendezvous(barrier) => {
                     barrier.wait();
                     Ok(BackendUpdate::Complete(proof_data()))
@@ -614,7 +729,33 @@ mod tests {
             _request: &ProofRequest,
             _state: BackendProofState,
         ) -> anyhow::Result<BackendUpdate> {
-            anyhow::bail!("mock backend has no durable backend jobs")
+            match self {
+                Self::AdvancePending(state) => Ok(BackendUpdate::Pending {
+                    state: state.clone(),
+                }),
+                _ => anyhow::bail!("mock backend has no durable backend jobs"),
+            }
+        }
+    }
+
+    fn backend_state(seed: u8) -> BackendProofState {
+        BackendProofState::Range {
+            id: BackendProofId(B256::with_last_byte(seed)),
+        }
+    }
+
+    fn backend_work(
+        backend_job_id: i64,
+        request: ProofRequest,
+        state: BackendProofState,
+    ) -> LeasedBackendProofWork {
+        LeasedBackendProofWork {
+            backend_job_id,
+            work: BackendProofWork {
+                proof_request: request,
+                state,
+            },
+            lease_token: LeaseToken::new(),
         }
     }
 
@@ -665,6 +806,64 @@ mod tests {
         assert_eq!(submitted[0].id, request.id());
         assert_eq!(submitted[0].proof, proof_data());
         assert!(queue.failed().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn retries_backend_update_report_with_same_pending_state() {
+        let request = request();
+        let backend_job_id = 42;
+        let next_state = BackendProofState::Aggregation {
+            id: BackendProofId(B256::repeat_byte(0x22)),
+        };
+        let queue =
+            MockQueue::with_backend_jobs([backend_work(backend_job_id, request, backend_state(1))]);
+        queue.fail_backend_complete_attempts(1);
+        let worker = ProofWorker::new(
+            queue.clone(),
+            MockBackend::AdvancePending(next_state.clone()),
+            config(),
+        );
+        let handle = tokio::spawn(worker);
+
+        assert!(wait_for(|| !queue.backend_updates().is_empty()).await);
+        handle.abort();
+
+        assert_eq!(
+            queue.backend_updates(),
+            vec![(backend_job_id, BackendUpdate::Pending { state: next_state })]
+        );
+        assert!(queue.backend_failures().is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn releases_backend_lease_after_exhausted_report_retries() {
+        let request = request();
+        let backend_job_id = 43;
+        let next_state = BackendProofState::Aggregation {
+            id: BackendProofId(B256::repeat_byte(0x23)),
+        };
+        let queue =
+            MockQueue::with_backend_jobs([backend_work(backend_job_id, request, backend_state(1))]);
+        queue.fail_backend_complete_attempts(REPORT_UPDATE_MAX_RETRIES + 1);
+        let worker = ProofWorker::new(
+            queue.clone(),
+            MockBackend::AdvancePending(next_state),
+            config(),
+        );
+        let handle = tokio::spawn(worker);
+
+        assert!(wait_for(|| !queue.backend_failures().is_empty()).await);
+        handle.abort();
+
+        assert!(queue.backend_updates().is_empty());
+        let failures = queue.backend_failures();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].0, backend_job_id);
+        assert!(
+            failures[0].1.contains("temporary report failure"),
+            "reason: {}",
+            failures[0].1
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

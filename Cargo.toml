@@ -317,7 +317,7 @@ dashmap = { version = "6.2.1", features = ["rayon"] }
 spin = "0.10"
 rkyv = { version = "0.8", features = ["hashbrown-0_15", "std"] }
 tower = "0.5.0"
-backon = "1"
+backon = { version = "1", default-features = false, features = ["std", "tokio-sleep"] }
 arbitrary = { version = "=1.4.2", features = ["derive"] }
 blake3 = "1.8.4"
 ed25519-dalek = { version = "2", features = ["serde"] }
