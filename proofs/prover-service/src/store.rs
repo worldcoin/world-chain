@@ -711,6 +711,36 @@ impl ProverServiceStore {
         backend_job_id: i64,
         lease_token: LeaseToken,
     ) -> Result<(), ProofJobQueueError> {
+        match self
+            .try_submit_proof_from_backend_job(proof, backend_job_id, lease_token)
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                if let Some(action) = backend_submission_failure_action(&error) {
+                    if let Err(cleanup_error) = self
+                        .handle_failed_backend_submission(backend_job_id, lease_token, action)
+                        .await
+                    {
+                        warn!(
+                            %error,
+                            %cleanup_error,
+                            backend_job_id,
+                            "failed to account for backend proof completion error"
+                        );
+                    }
+                }
+                Err(error)
+            }
+        }
+    }
+
+    async fn try_submit_proof_from_backend_job(
+        &self,
+        proof: ProofResponse,
+        backend_job_id: i64,
+        lease_token: LeaseToken,
+    ) -> Result<(), ProofJobQueueError> {
         let mut tx = self.begin_queue_tx().await?;
         let row = sqlx::query(
             "select bj.proof_id, pj.backend
@@ -757,6 +787,24 @@ impl ProverServiceStore {
         complete_proof(&mut tx, proof).await.map_err(queue_db)?;
         tx.commit().await.map_err(queue_db)?;
         Ok(())
+    }
+
+    async fn handle_failed_backend_submission(
+        &self,
+        backend_job_id: i64,
+        lease_token: LeaseToken,
+        action: BackendSubmissionFailureAction,
+    ) -> Result<(), ProofJobQueueError> {
+        match action {
+            BackendSubmissionFailureAction::Terminal(reason) => {
+                self.fail_backend_job(backend_job_id, lease_token, &reason)
+                    .await
+            }
+            BackendSubmissionFailureAction::Retry(reason) => {
+                self.fail_backend_proof_job(backend_job_id, reason, lease_token)
+                    .await
+            }
+        }
     }
 
     async fn begin_request_tx(&self) -> Result<Transaction<'_, Postgres>, ProofRequestError> {
@@ -844,6 +892,29 @@ fn request_db(err: sqlx::Error) -> ProofRequestError {
 
 fn queue_db(err: sqlx::Error) -> ProofJobQueueError {
     ProofJobQueueError::Internal(err.to_string())
+}
+
+enum BackendSubmissionFailureAction {
+    Terminal(String),
+    Retry(String),
+}
+
+fn backend_submission_failure_action(
+    error: &ProofJobQueueError,
+) -> Option<BackendSubmissionFailureAction> {
+    match error {
+        ProofJobQueueError::StaleLease
+        | ProofJobQueueError::UnknownBackendJob(_)
+        | ProofJobQueueError::UnknownJob(_) => None,
+        ProofJobQueueError::InvalidProof { .. } => {
+            Some(BackendSubmissionFailureAction::Terminal(error.to_string()))
+        }
+        ProofJobQueueError::Internal(_) | ProofJobQueueError::Rpc(_) => {
+            Some(BackendSubmissionFailureAction::Retry(format!(
+                "failed to submit completed backend proof: {error}"
+            )))
+        }
+    }
 }
 
 async fn classify_proof_update(
