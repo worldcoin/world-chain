@@ -730,9 +730,7 @@ mod tests {
             _state: BackendProofState,
         ) -> anyhow::Result<BackendUpdate> {
             match self {
-                Self::AdvancePending(state) => Ok(BackendUpdate::Pending {
-                    state: state.clone(),
-                }),
+                Self::AdvancePending(state) => Ok(BackendUpdate::Pending { state: *state }),
                 _ => anyhow::bail!("mock backend has no durable backend jobs"),
             }
         }
@@ -820,7 +818,7 @@ mod tests {
         queue.fail_backend_complete_attempts(1);
         let worker = ProofWorker::new(
             queue.clone(),
-            MockBackend::AdvancePending(next_state.clone()),
+            MockBackend::AdvancePending(next_state),
             config(),
         );
         let handle = tokio::spawn(worker);

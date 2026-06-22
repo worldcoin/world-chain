@@ -717,18 +717,17 @@ impl ProverServiceStore {
         {
             Ok(()) => Ok(()),
             Err(error) => {
-                if let Some(action) = backend_submission_failure_action(&error) {
-                    if let Err(cleanup_error) = self
+                if let Some(action) = backend_submission_failure_action(&error)
+                    && let Err(cleanup_error) = self
                         .handle_failed_backend_submission(backend_job_id, lease_token, action)
                         .await
-                    {
-                        warn!(
-                            %error,
-                            %cleanup_error,
-                            backend_job_id,
-                            "failed to account for backend proof completion error"
-                        );
-                    }
+                {
+                    warn!(
+                        %error,
+                        %cleanup_error,
+                        backend_job_id,
+                        "failed to account for backend proof completion error"
+                    );
                 }
                 Err(error)
             }
