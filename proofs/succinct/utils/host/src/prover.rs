@@ -6,8 +6,8 @@
 
 use anyhow::Context;
 use sp1_sdk::{
-    CpuProver, Elf, HashableKey, MockProver, ProveRequest, Prover, ProverClient, ProvingKey,
-    SP1Proof, SP1Stdin,
+    CpuProver, HashableKey, MockProver, ProveRequest, Prover, ProverClient, ProvingKey, SP1Proof,
+    SP1Stdin,
     env::{EnvProver, EnvProvingKey},
 };
 
