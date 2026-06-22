@@ -1,6 +1,6 @@
 //! Full end-to-end proving test for the SP1 worker.
 //!
-//! Runs the real worker against a real `prover-service` and a real [`EnvSuccinctProver`],
+//! Runs the real worker against a real `prover-service` and a real [`SuccinctProver`],
 //! generating a witness from live RPC endpoints and proving it (mock, CPU, or network). This
 //! is the highest-fidelity test of the worker — it exercises lease → witness → prove →
 //! submit end to end — but it needs external infrastructure, so it is `#[ignore]`d and only
@@ -31,9 +31,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use alloy_primitives::Address;
 use world_chain_proof_kona_host_utils::online::{OnlineHostConfig, resolve_l1_head};
-use world_chain_proof_succinct_host_utils::env_prover::{
-    EnvSuccinctProver, SP1ProofMode, Sp1ProverKind,
-};
+use world_chain_proof_succinct_host_utils::prover::{SP1ProofMode, Sp1ProverKind, SuccinctProver};
 use world_chain_proofs::{ConsensusProvider, OptimismConsensusClient};
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequester, ProofStatus, ProverService,
@@ -140,17 +138,11 @@ async fn worker_proves_real_range_end_to_end() {
 
     let kind = prover_kind();
     // Build the prover off the async runtime: it owns its own runtime internally.
-    let prover = tokio::task::spawn_blocking(move || {
-        EnvSuccinctProver::new_with_elfs(
-            kind,
-            world_chain_proof_succinct_elfs::range_elf(),
-            world_chain_proof_succinct_elfs::aggregation_elf(),
-            SP1ProofMode::Groth16,
-        )
-    })
-    .await
-    .expect("prover setup task")
-    .expect("build prover");
+    let prover =
+        tokio::task::spawn_blocking(move || SuccinctProver::new(kind, SP1ProofMode::Groth16))
+            .await
+            .expect("prover setup task")
+            .expect("build prover");
 
     let backend = Sp1Backend::new(
         host,

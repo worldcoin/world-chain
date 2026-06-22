@@ -21,37 +21,7 @@ use world_chain_proof_succinct_utils::{
     AggregationProofRequest, RangeProofRequest, WorldSuccinctProver,
 };
 
-/// World Chain SP1 range program ELF loaded at runtime from `RANGE_ELF_PATH`.
-///
-/// For production binaries that need ELFs embedded at compile time, use
-/// `world_chain_proof_succinct_elfs::range_elf()` and pass it to
-/// [`EnvSuccinctProver::new_with_elfs`] instead.
-pub fn range_elf() -> Elf {
-    let path = std::env::var("RANGE_ELF_PATH").expect(
-        "RANGE_ELF_PATH must be set (or use EnvSuccinctProver::new_with_elfs with embedded ELFs)",
-    );
-    Elf::from(
-        std::fs::read(&path)
-            .unwrap_or_else(|e| panic!("failed to read range ELF from {path}: {e}")),
-    )
-}
-
-/// World Chain SP1 aggregation program ELF loaded at runtime from `AGG_ELF_PATH`.
-///
-/// For production binaries that need ELFs embedded at compile time, use
-/// `world_chain_proof_succinct_elfs::aggregation_elf()` and pass it to
-/// [`EnvSuccinctProver::new_with_elfs`] instead.
-pub fn aggregation_elf() -> Elf {
-    let path = std::env::var("AGG_ELF_PATH").expect(
-        "AGG_ELF_PATH must be set (or use EnvSuccinctProver::new_with_elfs with embedded ELFs)",
-    );
-    Elf::from(
-        std::fs::read(&path)
-            .unwrap_or_else(|e| panic!("failed to read aggregation ELF from {path}: {e}")),
-    )
-}
-
-/// Which sp1-sdk prover backs an [`EnvSuccinctProver`].
+/// Which sp1-sdk prover backs an [`SuccinctProver`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sp1ProverKind {
     /// Local CPU prover (requires 32–128 GB RAM).
@@ -77,10 +47,10 @@ impl std::str::FromStr for Sp1ProverKind {
     }
 }
 
-/// Structured failures specific to [`EnvSuccinctProver`]; surfaced wrapped in
+/// Structured failures specific to [`SuccinctProver`]; surfaced wrapped in
 /// [`anyhow::Error`] so callers can downcast when they need to match on them.
 #[derive(Debug, thiserror::Error)]
-pub enum EnvSuccinctProverError {
+pub enum SuccinctProverError {
     /// The guest committed boot info that differs from the host-computed expectation.
     #[error("range proof boot info mismatch: expected {expected:?}, got {actual:?}")]
     BootInfoMismatch {
@@ -97,7 +67,7 @@ pub enum EnvSuccinctProverError {
 /// Synchronous like the trait it implements: holds its own Tokio runtime and blocks on the
 /// async sp1-sdk calls, mirroring `NitroProver`. Construct and call it from blocking-capable
 /// threads only.
-pub struct EnvSuccinctProver {
+pub struct SuccinctProver {
     kind: Sp1ProverKind,
     client: EnvProver,
     range_pk: EnvProvingKey,
@@ -107,27 +77,12 @@ pub struct EnvSuccinctProver {
     runtime: tokio::runtime::Runtime,
 }
 
-impl EnvSuccinctProver {
-    /// Creates the prover loading ELFs at runtime from the `RANGE_ELF_PATH` and
-    /// `AGG_ELF_PATH` environment variables.
-    ///
-    /// For production binaries that embed ELFs at compile time, prefer
-    /// [`EnvSuccinctProver::new_with_elfs`] with
-    /// `world_chain_proof_succinct_elfs::{range_elf, aggregation_elf}`.
-    pub fn new(kind: Sp1ProverKind, agg_mode: SP1ProofMode) -> anyhow::Result<Self> {
-        Self::new_with_elfs(kind, range_elf(), aggregation_elf(), agg_mode)
-    }
-
+impl SuccinctProver {
     /// Creates the prover using caller-supplied ELFs. Use this in production binaries with
     /// ELFs embedded at compile time via `world_chain_proof_succinct_elfs`.
-    pub fn new_with_elfs(
-        kind: Sp1ProverKind,
-        range_elf: impl Into<Elf>,
-        agg_elf: impl Into<Elf>,
-        agg_mode: SP1ProofMode,
-    ) -> anyhow::Result<Self> {
-        let range_elf = range_elf.into();
-        let agg_elf = agg_elf.into();
+    pub fn new(kind: Sp1ProverKind, agg_mode: SP1ProofMode) -> anyhow::Result<Self> {
+        let range_elf = world_chain_proof_succinct_elfs::range_elf();
+        let agg_elf = world_chain_proof_succinct_elfs::aggregation_elf();
         let runtime = tokio::runtime::Runtime::new().context("failed to create tokio runtime")?;
         let (client, range_pk, agg_pk) = runtime.block_on(async {
             let client = match kind {
@@ -161,7 +116,7 @@ impl EnvSuccinctProver {
     }
 }
 
-impl WorldSuccinctProver for EnvSuccinctProver {
+impl WorldSuccinctProver for SuccinctProver {
     type Error = anyhow::Error;
 
     fn multi_block_vkey(&self) -> [u32; 8] {
@@ -183,7 +138,7 @@ impl WorldSuccinctProver for EnvSuccinctProver {
         if let Some(expected) = request.expected_public_values {
             let expected_boot = BootInfoStruct::from(expected.boot_info);
             if expected_boot != boot_info {
-                return Err(EnvSuccinctProverError::BootInfoMismatch {
+                return Err(SuccinctProverError::BootInfoMismatch {
                     expected: Box::new(expected_boot),
                     actual: Box::new(boot_info),
                 }
@@ -209,7 +164,7 @@ impl WorldSuccinctProver for EnvSuccinctProver {
             let proof: sp1_sdk::SP1ProofWithPublicValues =
                 bincode::deserialize(proof_bytes).context("range proof deserialization failed")?;
             let SP1Proof::Compressed(inner) = proof.proof else {
-                return Err(EnvSuccinctProverError::NotCompressed.into());
+                return Err(SuccinctProverError::NotCompressed.into());
             };
             stdin.write_proof(*inner, range_vk.clone());
         }

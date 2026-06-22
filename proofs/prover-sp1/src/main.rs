@@ -69,7 +69,7 @@ struct Sp1ProveArgs {
 
     /// Prover backend: cpu, mock, or network. Overrides SP1_PROVER env var.
     #[arg(long, env = "SP1_PROVER", default_value = "cpu")]
-    prover: world_chain_proof_succinct_host_utils::env_prover::Sp1ProverKind,
+    prover: world_chain_proof_succinct_host_utils::prover::Sp1ProverKind,
 
     /// Aggregation proof mode.
     #[arg(long, default_value = "groth16")]
@@ -133,7 +133,7 @@ fn sp1_execute(args: Sp1ExecuteArgs) -> Result<()> {
 fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
     use sp1_sdk::SP1ProofMode;
     use world_chain_proof_succinct_host_utils::{
-        env_prover::EnvSuccinctProver,
+        prover::SuccinctProver,
         validity::{ValidityProofRequest, prove_validity},
     };
 
@@ -155,9 +155,7 @@ fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
         prover = args.prover,
     );
 
-    let range_elf = world_chain_proof_succinct_elfs::range_elf();
-    let agg_elf = world_chain_proof_succinct_elfs::aggregation_elf();
-    let prover = EnvSuccinctProver::new_with_elfs(args.prover, range_elf, agg_elf, mode)?;
+    let prover = SuccinctProver::new(args.prover, mode)?;
     let artifact = prove_validity(
         &host,
         &prover,

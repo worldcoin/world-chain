@@ -18830,6 +18830,7 @@ dependencies = [
  "tracing",
  "world-chain-proof-core",
  "world-chain-proof-kona-host-utils",
+ "world-chain-proof-succinct-elfs",
  "world-chain-proof-succinct-utils",
 ]
 
@@ -19038,7 +19039,6 @@ dependencies = [
  "world-chain-proof-core",
  "world-chain-proof-kona-host-utils",
  "world-chain-proof-protocol",
- "world-chain-proof-succinct-elfs",
  "world-chain-proof-succinct-host-utils",
  "world-chain-proof-succinct-utils",
  "world-chain-proof-worker",
