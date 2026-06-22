@@ -20,13 +20,18 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends clang libclang-dev gcc curl protobuf-compiler libprotobuf-dev git \
   && rm -rf /var/lib/apt/lists/*
 
-# No SP1 toolchain is installed here: the guest ELFs are NOT compiled inside
-# this image (the Docker daemon isn't reachable from inside a docker build, and
-# a local cargo-prove build would not be reproducible). Instead the prover
-# image consumes prebuilt, reproducibly-built ELFs produced once by the
-# `build-elfs` CI job (`docker: true`) and injected via SP1_PREBUILT_ELF_DIR in
-# the builder stage below, which `proofs/succinct/elfs/build.rs` embeds with
-# `sp1_sdk::include_elf!()`.
+# Install the SP1 toolchain (cargo-prove + risc-v target) for the in-image
+# guest build used by the non-release prover images. The Docker daemon isn't
+# reachable from inside a docker build, so `proofs/succinct/elfs/build.rs` runs
+# a *local* SP1 build (SP1_BUILD_DOCKER=false, set in the builder stage) at the
+# fixed /app WORKDIR with the pinned tag — consistent across the image-build
+# matrix. Release images instead embed prebuilt, reproducibly-built ELFs via
+# SP1_PREBUILT_ELF_DIR (which takes precedence and skips this toolchain). Only
+# in the build layers, not the final runtime image.
+ENV PATH=/root/.sp1/bin:$PATH
+RUN curl -L https://sp1.succinct.xyz | bash \
+  && /root/.sp1/bin/sp1up --version v6.1.0
+
 ENV CARGO_HOME=/usr/local/cargo \
     RUSTC_WRAPPER=sccache \
     SCCACHE_DIR=/sccache
@@ -57,15 +62,25 @@ ARG SCCACHE_S3_KEY_PREFIX
 RUN test -n "${PROVER_PACKAGE}" || (echo "ERROR: PROVER_PACKAGE build arg is required" && exit 1)
 RUN test -n "${PROVER_BIN}" || (echo "ERROR: PROVER_BIN build arg is required" && exit 1)
 
-# Embed the prebuilt, reproducibly-built guest ELFs instead of compiling them
-# in-image. The `build-elfs` CI job builds them once via the SP1 Docker
-# reproducibility builder and the prover-sp1 / sp1-worker image jobs download
-# them into `proofs/succinct/elf/`, which `COPY . .` (below) brings in at this
-# path. `proofs/succinct/elfs/build.rs` reads this var and points
-# `include_elf!()` at those bytes; for non-SP1 binaries (which don't depend on
-# the elfs crate) it is simply ignored. The path must be absolute so
-# `include_bytes!` resolves it independently of the source file location.
-ENV SP1_PREBUILT_ELF_DIR=/app/proofs/succinct/elf
+# Guest-ELF source, resolved by `proofs/succinct/elfs/build.rs`:
+#
+# - Release (default): embed prebuilt, reproducibly-built ELFs. The release
+#   `build-elfs` CI job builds them once via the SP1 Docker reproducibility
+#   builder and the prover-sp1 / sp1-worker jobs download them into
+#   `proofs/succinct/elf/`, which `COPY . .` brings in at this absolute path.
+#   build.rs points `include_elf!()` at those bytes (no in-image compile) and
+#   fails loudly if a file is missing. The path takes precedence over
+#   SP1_BUILD_DOCKER, so the in-image toolchain is unused on this path.
+# - Non-release: the image jobs override this to empty (`SP1_PREBUILT_ELF_DIR=`),
+#   which makes build.rs compile the guests locally via the in-image toolchain
+#   (SP1_BUILD_DOCKER=false) — no reproducible artifact required for nightly/dev.
+#
+# For non-SP1 binaries (which don't depend on the elfs crate) both are ignored.
+ARG SP1_PREBUILT_ELF_DIR=/app/proofs/succinct/elf
+ENV SP1_PREBUILT_ELF_DIR=${SP1_PREBUILT_ELF_DIR}
+# Local in-image guest build when no prebuilt ELFs are supplied (non-release).
+ARG SP1_BUILD_DOCKER=false
+ENV SP1_BUILD_DOCKER=${SP1_BUILD_DOCKER}
 
 COPY --from=planner /app/recipe.json recipe.json
 
@@ -108,8 +123,8 @@ RUN ln -s /usr/local/bin/${PROVER_BIN} /usr/local/bin/entrypoint
 
 # SP1 guest ELFs are embedded into the prover binary at compile time via
 # `sp1_sdk::include_elf!()` (see `proofs/succinct/elfs/`). The bytes come from
-# the prebuilt, reproducibly-built ELFs injected via SP1_PREBUILT_ELF_DIR in
-# the builder stage, so they ship inside the binary itself — this final image
-# needs no extra ELF files baked in.
+# either the prebuilt ELFs (release) or the local in-image guest build
+# (non-release) selected in the builder stage, so they ship inside the binary
+# itself — this final image needs no extra ELF files baked in.
 
 ENTRYPOINT ["/usr/local/bin/entrypoint"]

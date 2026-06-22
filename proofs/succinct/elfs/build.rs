@@ -8,26 +8,30 @@
 //! binary at link time via `include_elf!()` — there is no runtime
 //! `fs::read` of an ELF file.
 //!
-//! ELFs MUST be bit-for-bit reproducible, because their SHA-256 and the
-//! derived on-chain verification keys are governance-tracked and must be
-//! identical across every build (including each arch of a multi-arch image).
-//! Two mutually exclusive modes provide that:
+//! The release-tracked vkey (governance-tracked SHA-256 of each ELF) MUST come
+//! from a bit-for-bit reproducible build. Three modes are supported, selected
+//! by environment, in priority order:
 //!
-//! - **Build via the SP1 Docker reproducibility builder** (`docker: true`,
-//!   pinned tag `v6.1.0` matching the `=6.1.0` `sp1-sdk` pin). The container
-//!   fixes the toolchain and path layout, so the ELF is identical regardless
-//!   of host. This is the default and is used wherever a Docker daemon is
-//!   reachable (CI runners, dev machines, the `build-elfs` job). A *local*
-//!   `cargo-prove` build is deliberately NOT offered as a fallback: local
-//!   builds are not reproducible (host arch / paths leak into the ELF), which
-//!   would diverge the vkey.
+//! - **Embed prebuilt ELFs** via `SP1_PREBUILT_ELF_DIR=<dir>` (highest
+//!   priority). When set, this script points `include_elf!()` at
+//!   `<dir>/<program>` and does NOT compile anything. This is the *release*
+//!   path: the ELFs are produced once by the reproducible `build-elfs` CI job
+//!   (`docker: true`) and injected so every release image/binary embeds the
+//!   same canonical, vkey-matching bytes. The files must exist at link time;
+//!   `include_bytes!` fails loudly if one is missing (no silent fallback).
 //!
-//! - **Embed prebuilt ELFs** via `SP1_PREBUILT_ELF_DIR=<dir>`. When set, this
-//!   script points `include_elf!()` at `<dir>/<program>` and does NOT compile
-//!   anything. This is for environments without a Docker daemon — notably the
-//!   prover image build (`Dockerfile.prover`, no Docker-in-Docker) — where the
-//!   ELFs produced once by the `build-elfs` CI job (`docker: true`) are
-//!   downloaded and injected, so every image embeds the same canonical bytes.
+//! - **Local (non-Docker) in-image build** via `SP1_BUILD_DOCKER=false`. Used
+//!   by the non-release prover image builds (`Dockerfile.prover`): the guest is
+//!   compiled by the in-image SP1 toolchain at the fixed `/app` WORKDIR with
+//!   the pinned tag, so it is consistent across the image-build matrix without
+//!   needing a Docker daemon or the artifact plumbing. These nightly/dev images
+//!   are NOT vkey-canonical — releases use the prebuilt path above.
+//!
+//! - **SP1 Docker reproducibility builder** (`docker: true`, default). The
+//!   container fixes the toolchain and path layout, so the ELF is identical
+//!   regardless of host. Used wherever a Docker daemon is reachable and no
+//!   prebuilt ELFs were supplied (dev machines, the `vkeys` / `build-elfs` CI
+//!   jobs).
 //!
 //! Under `cargo clippy`, the `#[cfg(clippy)]` guards in `src/lib.rs` prevent
 //! `include_elf!()` from expanding, so no ELF files need to exist.
@@ -41,18 +45,32 @@ const PROGRAMS: [&str; 2] = [
 
 fn main() {
     println!("cargo:rerun-if-env-changed=SP1_PREBUILT_ELF_DIR");
+    println!("cargo:rerun-if-env-changed=SP1_BUILD_DOCKER");
 
     // Fast path for environments without a Docker daemon: embed prebuilt,
     // reproducibly-built ELFs instead of compiling. `include_elf!(name)` reads
     // `SP1_ELF_<name>`, so emitting an absolute path here makes it embed those
     // exact bytes with no guest compile. The files must exist at link time;
     // `include_bytes!` fails loudly if one is missing (no silent fallback).
+    // Treat an empty value as unset so callers can opt out with `KEY=`.
     if let Ok(dir) = std::env::var("SP1_PREBUILT_ELF_DIR") {
-        for program in PROGRAMS {
-            println!("cargo:rustc-env=SP1_ELF_{program}={dir}/{program}");
+        if !dir.trim().is_empty() {
+            for program in PROGRAMS {
+                println!("cargo:rustc-env=SP1_ELF_{program}={dir}/{program}");
+            }
+            return;
         }
-        return;
     }
+
+    // No prebuilt ELFs supplied: compile the guests. Use the SP1 Docker
+    // reproducibility builder by default; `SP1_BUILD_DOCKER=false` switches to a
+    // local in-image build (sp1-build does not read this var itself, so we honor
+    // it here). The non-release prover image build sets it to compile the guests
+    // with the in-image toolchain.
+    let docker = !matches!(
+        std::env::var("SP1_BUILD_DOCKER").as_deref(),
+        Ok("false") | Ok("0")
+    );
 
     // The SP1 guest programs live in their own nested cargo workspace at
     // `proofs/succinct/programs/`, but they have path dependencies that
@@ -94,9 +112,11 @@ fn main() {
         sp1_build::build_program_with_args(
             program_dir,
             sp1_build::BuildArgs {
-                docker: true,
+                docker,
                 tag: "v6.1.0".to_string(),
                 ignore_rust_version: true,
+                // Only consumed by the Docker builder (mounts the repo root so
+                // out-of-workspace path deps resolve); ignored by a local build.
                 workspace_directory: Some(workspace_root.clone()),
                 ..Default::default()
             },

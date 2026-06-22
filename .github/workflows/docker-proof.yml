@@ -34,41 +34,14 @@ permissions:
   id-token: write
 
 jobs:
-  # Build the SP1 guest ELFs ONCE, reproducibly, via the SP1 Docker
-  # reproducibility builder (`cargo prove build --docker`, pinned v6.1.0). The
-  # prover-sp1 / sp1-worker image builds cannot do this themselves (no
-  # Docker-in-Docker inside the image build), and a local build would not be
-  # reproducible, so the ELFs are produced here and downloaded into those image
-  # builds as the `proof-elfs` artifact. One build => one canonical vkey shared
-  # by every arch of the multi-arch image.
-  build-elfs:
-    name: build ELFs
-    runs-on: arc-public-8xlarge-amd64-runner
-    steps:
-      - name: Check Out Repo
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ inputs.ref }}
-      - uses: taiki-e/install-action@just
-      - name: Install SP1 toolchain
-        run: |
-          curl -L https://sp1.succinct.xyz | bash
-          ~/.sp1/bin/sp1up --version v6.1.0
-          echo "$HOME/.sp1/bin" >> $GITHUB_PATH
-      - name: Build ELFs
-        run: just build-proof-elfs
-      - name: Upload ELFs
-        uses: actions/upload-artifact@v4
-        with:
-          name: proof-elfs
-          path: |
-            proofs/succinct/elf/world-chain-proof-succinct-range-ethereum
-            proofs/succinct/elf/world-chain-proof-succinct-aggregation
-          if-no-files-found: error
-
+  # Non-release images: the SP1 guest ELFs are compiled locally inside the image
+  # build (Dockerfile.prover, SP1_BUILD_DOCKER=false) rather than built once
+  # reproducibly and shared as an artifact. Nightly/dev images don't need the
+  # canonical, vkey-matching ELFs — that reproducibility (build-elfs job +
+  # `proof-elfs` artifact) is reserved for release-proof.yml. Passing
+  # `SP1_PREBUILT_ELF_DIR=` opts out of the Dockerfile's default prebuilt path.
   build-sp1-prover-image:
     name: build world-chain-prover-sp1 image
-    needs: [build-elfs]
     environment: dev
     strategy:
       fail-fast: false
@@ -84,11 +57,6 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref }}
-      - name: Download ELFs
-        uses: actions/download-artifact@v4
-        with:
-          name: proof-elfs
-          path: proofs/succinct/elf
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -102,6 +70,7 @@ jobs:
             PROVER_PACKAGE=world-chain-prover-sp1
             PROVER_BIN=world-chain-prover-sp1
             FEATURES=
+            SP1_PREBUILT_ELF_DIR=
           digest_artifact_prefix: digests-prover-sp1
 
   build-nitro-prover-image:
@@ -138,10 +107,10 @@ jobs:
 
   # Each prover's merge depends ONLY on its own build jobs. docker-build-push-digest
   # pushes untagged (by-digest) manifests, which GHCR garbage-collects within minutes.
-  # The nitro build has no build-elfs dependency and finishes ~13 min before sp1, so a
-  # single merge gated on both builds let nitro's digests be collected before it ran
-  # ("manifest ... not found"). Splitting mirrors release-proof.yml and keeps each merge
-  # running right after its own builds.
+  # The nitro and sp1 builds finish at different times, so a single merge gated on both
+  # builds could let the faster prover's digests be collected before it ran ("manifest
+  # ... not found"). Splitting mirrors release-proof.yml and keeps each merge running
+  # right after its own builds.
   merge-sp1-prover-image:
     name: merge world-chain-prover-sp1 image manifest
     needs: [build-sp1-prover-image]
@@ -181,7 +150,6 @@ jobs:
   # `<repo>-<service>` image so tags do not collide with the `proof` image.
   build-service-images:
     name: build ${{ matrix.service.bin }} image
-    needs: [build-elfs]
     environment: dev
     strategy:
       fail-fast: false
@@ -201,14 +169,10 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref }}
-      # Only sp1-worker embeds the SP1 guest ELFs; the other services don't
-      # depend on the elfs crate, so they need no ELF artifact.
-      - name: Download ELFs
-        if: matrix.service.bin == 'sp1-worker'
-        uses: actions/download-artifact@v4
-        with:
-          name: proof-elfs
-          path: proofs/succinct/elf
+      # Only sp1-worker embeds the SP1 guest ELFs; it compiles them locally
+      # in-image (SP1_PREBUILT_ELF_DIR= opts out of the Dockerfile's prebuilt
+      # default). The other services don't depend on the elfs crate, so the
+      # empty value is simply ignored for them.
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -221,6 +185,7 @@ jobs:
           build_args: |
             PROVER_PACKAGE=${{ matrix.service.package }}
             PROVER_BIN=${{ matrix.service.bin }}
+            SP1_PREBUILT_ELF_DIR=
           digest_artifact_prefix: ${{ matrix.service.prefix }}
 
   merge-service-images:
