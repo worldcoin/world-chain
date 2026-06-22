@@ -222,6 +222,48 @@ impl std::fmt::Display for BackendProofId {
     }
 }
 
+/// Durable backend proof phase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum BackendProofPhase {
+    /// SP1 compressed range proof phase.
+    Range,
+    /// SP1 aggregation proof phase.
+    Aggregation,
+    /// Single external backend request phase.
+    Single,
+}
+
+impl BackendProofPhase {
+    /// Stable database representation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Range => "range",
+            Self::Aggregation => "aggregation",
+            Self::Single => "single",
+        }
+    }
+}
+
+impl std::fmt::Display for BackendProofPhase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl TryFrom<&str> for BackendProofPhase {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "range" => Ok(Self::Range),
+            "aggregation" => Ok(Self::Aggregation),
+            "single" => Ok(Self::Single),
+            other => Err(format!("unknown backend proof phase {other:?}")),
+        }
+    }
+}
+
 /// Opaque token proving ownership of a leased row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct LeaseToken(pub Uuid);
@@ -276,13 +318,13 @@ pub enum BackendProofState {
 }
 
 impl BackendProofState {
-    /// Stable database phase string.
+    /// Durable phase for this backend proof state.
     #[must_use]
-    pub const fn phase(self) -> &'static str {
+    pub const fn phase(self) -> BackendProofPhase {
         match self {
-            Self::Range { .. } => "range",
-            Self::Aggregation { .. } => "aggregation",
-            Self::Single { .. } => "single",
+            Self::Range { .. } => BackendProofPhase::Range,
+            Self::Aggregation { .. } => BackendProofPhase::Aggregation,
+            Self::Single { .. } => BackendProofPhase::Single,
         }
     }
 
@@ -294,13 +336,13 @@ impl BackendProofState {
         }
     }
 
-    /// Rebuild from database phase and backend request id.
-    pub fn from_phase(phase: &str, id: BackendProofId) -> Result<Self, String> {
+    /// Rebuild from phase and backend request id.
+    #[must_use]
+    pub const fn from_phase(phase: BackendProofPhase, id: BackendProofId) -> Self {
         match phase {
-            "range" => Ok(Self::Range { id }),
-            "aggregation" => Ok(Self::Aggregation { id }),
-            "single" => Ok(Self::Single { id }),
-            other => Err(format!("unknown backend proof phase {other:?}")),
+            BackendProofPhase::Range => Self::Range { id },
+            BackendProofPhase::Aggregation => Self::Aggregation { id },
+            BackendProofPhase::Single => Self::Single { id },
         }
     }
 }

@@ -3,9 +3,10 @@ use crate::{
     error::{InvalidConfigError, ProofJobQueueError, ProofRequestError},
     traits::{ProofJobQueue, ProofRequester},
     types::{
-        BackendProofId, BackendProofJobStatus, BackendProofState, BackendProofWork, BackendUpdate,
-        LeaseToken, LeasedBackendProofWork, LeasedProofRequest, ProofBackend, ProofData,
-        ProofRequest, ProofRequestId, ProofResponse, ProofStatus, ProofSubmissionLease,
+        BackendProofId, BackendProofJobStatus, BackendProofPhase, BackendProofState,
+        BackendProofWork, BackendUpdate, LeaseToken, LeasedBackendProofWork, LeasedProofRequest,
+        ProofBackend, ProofData, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
+        ProofSubmissionLease,
     },
 };
 use alloy_primitives::{Address, B256};
@@ -317,14 +318,14 @@ impl ProofJobQueue for ProverService {
         )
         .bind(proof_id_bytes(proof_id))
         .bind(backend)
-        .bind(backend_proof_state.phase())
+        .bind(backend_proof_state.phase().as_str())
         .bind(backend_proof_state.id().to_string())
         .execute(&mut *tx)
         .await
         .map_err(queue_db)?;
 
         tx.commit().await.map_err(queue_db)?;
-        info!(%proof_id, phase = backend_proof_state.phase(), "backend proof state submitted");
+        info!(%proof_id, phase = %backend_proof_state.phase(), "backend proof state submitted");
         Ok(())
     }
 
@@ -379,15 +380,16 @@ impl ProofJobQueue for ProverService {
 
             let request = request_from_row(&row).map_err(ProofJobQueueError::Internal)?;
             let phase: String = row.try_get("phase").map_err(queue_db)?;
+            let phase = BackendProofPhase::try_from(phase.as_str())
+                .map_err(ProofJobQueueError::Internal)?;
             let backend_proof_id: String = row.try_get("backend_proof_id").map_err(queue_db)?;
             let state = BackendProofState::from_phase(
-                &phase,
+                phase,
                 BackendProofId(
                     B256::from_str(&backend_proof_id)
                         .map_err(|err| ProofJobQueueError::Internal(err.to_string()))?,
                 ),
-            )
-            .map_err(ProofJobQueueError::Internal)?;
+            );
 
             let lease_token = LeaseToken::new();
             sqlx::query(
@@ -603,7 +605,7 @@ impl ProverService {
         )
         .bind(proof_id)
         .bind(backend)
-        .bind(state.phase())
+        .bind(state.phase().as_str())
         .bind(state.id().to_string())
         .execute(&mut *tx)
         .await
