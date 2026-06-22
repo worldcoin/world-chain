@@ -87,8 +87,6 @@ fn main() {
         .expect("workspace root path must be valid UTF-8")
         .to_string();
 
-    println!("cargo:warning=workspace_root: {}", workspace_root);
-
     let build = |program_dir: &str| {
         sp1_build::build_program_with_args(
             program_dir,
