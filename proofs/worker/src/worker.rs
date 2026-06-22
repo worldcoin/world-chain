@@ -19,8 +19,7 @@ use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 use tracing::{Instrument, info, info_span, warn};
 use world_chain_prover_service::{
     BackendUpdate, LeaseToken, LeasedBackendProofWork, LeasedProofRequest, ProofBackend,
-    ProofJobQueue, ProofJobQueueError, ProofRequest, ProofRequestId, ProofResponse,
-    ProofSubmissionLease,
+    ProofJobQueue, ProofJobQueueError, ProofRequest, ProofResponse, ProofSubmissionLease,
 };
 
 use crate::backend::ProofJobBackend;
@@ -361,9 +360,9 @@ where
         } => report_start_update(queue, request, lease_token, update).await,
         JobLease::Backend {
             backend_job_id,
-            request,
             lease_token,
-        } => report_backend_update(queue, backend_job_id, request.id(), lease_token, update).await,
+            ..
+        } => report_backend_update(queue, backend_job_id, lease_token, update).await,
     }
 }
 
@@ -411,30 +410,14 @@ async fn report_start_update<Q>(
 async fn report_backend_update<Q>(
     queue: Arc<Q>,
     backend_job_id: i64,
-    id: ProofRequestId,
     lease_token: LeaseToken,
     update: BackendUpdate,
 ) where
     Q: ProofJobQueue + Send + Sync + 'static,
 {
-    let result = match update {
-        BackendUpdate::Complete(proof) => {
-            queue
-                .submit_proof(
-                    ProofResponse { id, proof },
-                    ProofSubmissionLease::BackendJob {
-                        backend_job_id,
-                        lease_token,
-                    },
-                )
-                .await
-        }
-        update => {
-            queue
-                .complete_backend_proof_job(backend_job_id, lease_token, update)
-                .await
-        }
-    };
+    let result = queue
+        .complete_backend_proof_job(backend_job_id, lease_token, update)
+        .await;
 
     match result {
         Ok(()) => info!("backend proof job update submitted"),
