@@ -75,13 +75,22 @@ pub trait ProverServiceApi {
         backend: ProofBackend,
     ) -> RpcResult<Option<LeasedBackendProofWork>>;
 
-    /// Apply a non-final durable backend proof update.
+    /// Apply a durable backend proof update.
     #[method(name = "completeBackendProofJob")]
     async fn complete_backend_proof_job(
         &self,
         backend_job_id: i64,
         lease_token: LeaseToken,
         next_update: BackendUpdate,
+    ) -> RpcResult<()>;
+
+    /// Report that advancing a durable backend proof job failed for this attempt.
+    #[method(name = "failBackendProofJob")]
+    async fn fail_backend_proof_job(
+        &self,
+        backend_job_id: i64,
+        reason: String,
+        lease_token: LeaseToken,
     ) -> RpcResult<()>;
 
     /// Submit a generated proof.
@@ -213,6 +222,18 @@ impl ProverServiceApiServer for ProverServiceRpc {
         Ok(self
             .service
             .complete_backend_proof_job(backend_job_id, lease_token, next_update)
+            .await?)
+    }
+
+    async fn fail_backend_proof_job(
+        &self,
+        backend_job_id: i64,
+        reason: String,
+        lease_token: LeaseToken,
+    ) -> RpcResult<()> {
+        Ok(self
+            .service
+            .fail_backend_proof_job(backend_job_id, reason, lease_token)
             .await?)
     }
 
@@ -404,6 +425,22 @@ impl ProofJobQueue for RpcProverServiceClient {
             backend_job_id,
             lease_token,
             next_update,
+        )
+        .await
+        .map_err(|err| map_backend_job_error(err, backend_job_id))
+    }
+
+    async fn fail_backend_proof_job(
+        &self,
+        backend_job_id: i64,
+        reason: String,
+        lease_token: LeaseToken,
+    ) -> Result<(), ProofJobQueueError> {
+        ProverServiceApiClient::fail_backend_proof_job(
+            &self.client,
+            backend_job_id,
+            reason,
+            lease_token,
         )
         .await
         .map_err(|err| map_backend_job_error(err, backend_job_id))

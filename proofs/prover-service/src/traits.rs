@@ -61,12 +61,23 @@ pub trait ProofJobQueue {
         backend: ProofBackend,
     ) -> Result<Option<LeasedBackendProofWork>, ProofJobQueueError>;
 
-    /// Apply a non-final update produced while advancing a durable backend job.
+    /// Apply an update produced while advancing a durable backend job.
     async fn complete_backend_proof_job(
         &self,
         backend_job_id: i64,
         lease_token: LeaseToken,
         next_update: BackendUpdate,
+    ) -> Result<(), ProofJobQueueError>;
+
+    /// Report that advancing a durable backend job failed for this attempt.
+    ///
+    /// The backend job is re-scheduled until its attempts are exhausted, after
+    /// which it and its parent proof job are marked as permanently failed.
+    async fn fail_backend_proof_job(
+        &self,
+        backend_job_id: i64,
+        reason: String,
+        lease_token: LeaseToken,
     ) -> Result<(), ProofJobQueueError>;
 
     /// Submit a final proof response to the `prover-service`.

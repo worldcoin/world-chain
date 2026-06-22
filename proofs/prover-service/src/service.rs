@@ -133,6 +133,17 @@ impl ProofJobQueue for ProverService {
         }
     }
 
+    async fn fail_backend_proof_job(
+        &self,
+        backend_job_id: i64,
+        reason: String,
+        lease_token: LeaseToken,
+    ) -> Result<(), ProofJobQueueError> {
+        self.store
+            .fail_backend_proof_job(backend_job_id, reason, lease_token)
+            .await
+    }
+
     async fn submit_proof(
         &self,
         proof: ProofResponse,

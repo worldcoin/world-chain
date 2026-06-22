@@ -522,6 +522,62 @@ impl ProverServiceStore {
         Ok(())
     }
 
+    pub(crate) async fn fail_backend_proof_job(
+        &self,
+        backend_job_id: i64,
+        reason: String,
+        lease_token: LeaseToken,
+    ) -> Result<(), ProofJobQueueError> {
+        let mut tx = self.begin_queue_tx().await?;
+        let row = sqlx::query(
+            "select proof_id, advance_attempts
+             from proof_backend_jobs
+             where id = $1
+               and lease_token = $2
+               and status = 'requested'
+             for update",
+        )
+        .bind(backend_job_id)
+        .bind(lease_token.0)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(queue_db)?;
+
+        let Some(row) = row else {
+            return Err(classify_backend_update(&mut tx, backend_job_id).await);
+        };
+        let proof_id = proof_id_from_bytes(row.try_get("proof_id").map_err(queue_db)?)
+            .map_err(ProofJobQueueError::Internal)?;
+        let attempts: i32 = row.try_get("advance_attempts").map_err(queue_db)?;
+        if attempts as u32 >= self.config.max_attempts {
+            mark_backend_failed(&mut tx, backend_job_id, proof_id, &reason)
+                .await
+                .map_err(queue_db)?;
+            warn!(%proof_id, backend_job_id, attempts, %reason, "backend proof job failed");
+        } else {
+            sqlx::query(
+                "update proof_backend_jobs
+                 set locked_until = null,
+                     lease_token = null,
+                     next_poll_at = now() + ($3::bigint * interval '1 millisecond'),
+                     updated_at = now()
+                 where id = $1
+                   and lease_token = $2
+                   and status = 'requested'",
+            )
+            .bind(backend_job_id)
+            .bind(lease_token.0)
+            .bind(duration_millis(self.config.backend_poll_interval))
+            .execute(&mut *tx)
+            .await
+            .map_err(queue_db)?;
+            debug!(%proof_id, backend_job_id, attempts, %reason, "backend proof attempt failed, re-scheduling");
+        }
+
+        tx.commit().await.map_err(queue_db)?;
+        Ok(())
+    }
+
     pub(crate) async fn fail_backend_job(
         &self,
         backend_job_id: i64,

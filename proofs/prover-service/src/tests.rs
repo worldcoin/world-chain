@@ -318,6 +318,71 @@ async fn failed_attempts_retry_until_exhausted() {
 }
 
 #[tokio::test]
+async fn backend_attempt_errors_retry_until_exhausted() {
+    let Some(ctx) = service(test_config()).await else {
+        return;
+    };
+    let service = ctx.service;
+    let req = request(ProofBackend::Sp1, 5);
+    let id = service.request_proof(req.clone()).await.unwrap();
+    let leased = service
+        .get_next_proof(ProofBackend::Sp1)
+        .await
+        .unwrap()
+        .expect("start lease");
+    service
+        .submit_backend_proof_state(
+            id,
+            BackendProofState::Range { id: backend_id(1) },
+            leased.lease_token,
+        )
+        .await
+        .unwrap();
+
+    let first = service
+        .get_next_backend_proof(ProofBackend::Sp1)
+        .await
+        .unwrap()
+        .expect("first backend lease");
+    service
+        .fail_backend_proof_job(
+            first.backend_job_id,
+            "temporary SP1 poll failure".to_string(),
+            first.lease_token,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        service.proof_status(id).await.unwrap(),
+        ProofStatus::BackendPending
+    );
+    assert!(
+        service
+            .get_next_backend_proof(ProofBackend::Sp1)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    tokio::time::sleep(Duration::from_millis(30)).await;
+
+    let second = service
+        .get_next_backend_proof(ProofBackend::Sp1)
+        .await
+        .unwrap()
+        .expect("second backend lease");
+    assert_eq!(second.backend_job_id, first.backend_job_id);
+    service
+        .fail_backend_proof_job(
+            second.backend_job_id,
+            "temporary SP1 poll failure".to_string(),
+            second.lease_token,
+        )
+        .await
+        .unwrap();
+    assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Failed);
+}
+
+#[tokio::test]
 async fn rpc_end_to_end() {
     let Some(ctx) = service(test_config()).await else {
         return;

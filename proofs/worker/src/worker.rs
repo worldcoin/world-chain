@@ -440,11 +440,7 @@ where
             ..
         } => {
             queue
-                .complete_backend_proof_job(
-                    backend_job_id,
-                    lease_token,
-                    BackendUpdate::Failed(reason),
-                )
+                .fail_backend_proof_job(backend_job_id, reason, lease_token)
                 .await
         }
     };
@@ -539,6 +535,15 @@ mod tests {
             _backend_job_id: i64,
             _lease_token: LeaseToken,
             _next_update: BackendUpdate,
+        ) -> Result<(), ProofJobQueueError> {
+            Ok(())
+        }
+
+        async fn fail_backend_proof_job(
+            &self,
+            _backend_job_id: i64,
+            _reason: String,
+            _lease_token: LeaseToken,
         ) -> Result<(), ProofJobQueueError> {
             Ok(())
         }

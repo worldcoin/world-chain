@@ -166,6 +166,7 @@ overloading the simple status enum.
 - `submit_backend_proof_state(proof_id, backend_proof_state, lease_token)`
 - `get_next_backend_proof(ProofBackend) -> Option<LeasedBackendProofWork>`
 - `complete_backend_proof_job(backend_job_id, lease_token, next_update)`
+- `fail_backend_proof_job(backend_job_id, reason, lease_token)`
 - `submit_proof(ProofResponse, ProofSubmissionLease)`
 - `fail_proof(proof_id, reason, lease_token)`
 
@@ -180,6 +181,12 @@ returned by the SP1 network, and transitions the user-facing proof job to `Backe
 - mark the current backend job complete and insert the next backend job for `Pending`;
 - mark the backend job and proof job failed for `Failed`;
 - mark the backend job complete and store the final proof for `Complete`.
+
+`fail_backend_proof_job` reports that a worker failed to advance a durable backend job during this
+attempt. It mirrors `fail_proof` for the start phase: the service clears the lease, schedules the
+backend job for another poll, and only marks the backend job plus parent proof job `Failed` once
+`advance_attempts` reaches the configured maximum. This is for worker or transient backend errors;
+`BackendUpdate::Failed` remains a terminal backend result.
 
 `submit_proof` stores the final proof and marks the user-facing proof job `Completed`. It accepts a
 `ProofSubmissionLease` because final proofs can come from two places:
@@ -651,6 +658,11 @@ An SP1 range backend job and an SP1 aggregation backend job each have their own
 If `advance_attempts` reaches the configured maximum for a backend job, the service should mark the
 backend job `Failed` and also mark the parent proof job `Failed`, unless the failure is classified
 as indefinitely retryable.
+
+When `advance()` returns a worker error, the worker reports it through `fail_backend_proof_job`, so
+transient polling or network errors retry according to `advance_attempts`. When `advance()` returns
+`BackendUpdate::Failed`, the service treats it as terminal backend failure and fails the backend job
+plus parent proof job immediately.
 
 ## Why `next_poll_at` Exists
 
