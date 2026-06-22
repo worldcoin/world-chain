@@ -51,6 +51,26 @@ enum BackendProofJobStatus {
 
 struct BackendProofId(B256);
 
+enum BackendProofPhase {
+    /// SP1 compressed range proof phase.
+    Range,
+    /// SP1 aggregation proof phase.
+    Aggregation,
+    /// One external backend request directly produces the final proof.
+    Single,
+}
+
+impl BackendProofPhase {
+    /// Stable database representation stored in `proof_backend_jobs.phase`.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Range => "range",
+            Self::Aggregation => "aggregation",
+            Self::Single => "single",
+        }
+    }
+}
+
 /// Opaque token returned by the `prover-service` when a worker leases a DB row.
 ///
 /// Every update for that leased row must include the same token. This prevents an old worker from
@@ -97,6 +117,12 @@ enum BackendProofState {
     /// Not used by Nitro today because Nitro completes synchronously, but useful if Nitro becomes
     /// async later.
     Single { id: BackendProofId },
+}
+
+impl BackendProofState {
+    fn phase(self) -> BackendProofPhase;
+    fn id(self) -> BackendProofId;
+    fn from_phase(phase: BackendProofPhase, id: BackendProofId) -> Self;
 }
 
 enum BackendUpdate {
@@ -152,7 +178,8 @@ returned by the SP1 network, and transitions the user-facing proof job to `Backe
 
 - clear the backend job lease and schedule another poll for `Noop`;
 - mark the current backend job complete and insert the next backend job for `Pending`;
-- mark the backend job and proof job failed for `Failed`.
+- mark the backend job and proof job failed for `Failed`;
+- mark the backend job complete and store the final proof for `Complete`.
 
 `submit_proof` stores the final proof and marks the user-facing proof job `Completed`. It accepts a
 `ProofSubmissionLease` because final proofs can come from two places:
@@ -160,7 +187,8 @@ returned by the SP1 network, and transitions the user-facing proof job to `Backe
 - Nitro currently completes directly from `backend.start`, so submission must validate the
   `proof_jobs.lease_token`.
 - SP1 completes from `backend.advance` on the aggregation backend job, so submission must validate
-  the `proof_backend_jobs.lease_token` for the aggregation row and mark that row `Completed`.
+  the `proof_backend_jobs.lease_token` for the aggregation row and mark that row `Completed`. The
+  worker reports that path through `complete_backend_proof_job(..., BackendUpdate::Complete(_))`.
 
 The final method names can be adjusted, but every worker update should carry the lease token for
 the row being updated.
@@ -252,33 +280,22 @@ an intermediate proof or a final proof.
     BackendUpdate::Complete(proof_data)
     ```
 
-26. Worker crafts the final response:
+26. Worker reports the final update for the leased aggregation backend job:
 
     ```rust
-    ProofResponse {
-        id: request.id(),
-        proof: proof_data,
-    }
-    ```
-
-27. Worker calls:
-
-    ```rust
-    submit_proof(
-        proof_response,
-        ProofSubmissionLease::BackendJob {
-            backend_job_id,
-            lease_token,
-        },
+    complete_backend_proof_job(
+        backend_job_id,
+        lease_token,
+        BackendUpdate::Complete(proof_data),
     )
     ```
 
     Here `backend_job_id` and `lease_token` are the values returned by
     `get_next_backend_proof(Sp1)` for the aggregation backend job.
 
-28. `prover-service` accepts the submission only if the aggregation
+27. `prover-service` accepts the submission only if the aggregation
     `proof_backend_jobs.lease_token` still matches.
-29. `prover-service` marks the aggregation backend job `Completed`, clears its lease, stores the
+28. `prover-service` marks the aggregation backend job `Completed`, clears its lease, stores the
     final proof in `proof_jobs.proof_data`, and marks the proof job `Completed`.
 
 ### Nitro TEE
@@ -361,8 +378,8 @@ create index proof_jobs_starting_lease_idx
 Durable external backend work.
 
 The Rust API passes backend progress around as `BackendProofState`. The database stores that enum as
-two columns: `phase` for the variant name and `backend_proof_id` for the contained id. Keeping
-`phase` in SQL makes the state queryable and lets Postgres enforce uniqueness like
+two columns: `phase`, serialized from `BackendProofPhase`, and `backend_proof_id` for the contained
+id. Keeping `phase` in SQL makes the state queryable and lets Postgres enforce uniqueness like
 `unique (proof_id, phase)`.
 
 ```sql
