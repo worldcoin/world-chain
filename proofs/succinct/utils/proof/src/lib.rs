@@ -73,22 +73,14 @@ pub trait WorldSuccinctProver {
     }
 
     /// Request a range proof from an external backend without waiting for completion.
-    fn request_range(&self, _request: RangeProofRequest) -> Result<B256, Self::Error> {
-        panic!("request_range called on a synchronous WorldSuccinctProver")
-    }
+    fn request_range(&self, request: RangeProofRequest) -> Result<B256, Self::Error>;
 
     /// Poll a previously requested range proof.
-    fn poll_range(&self, _id: B256) -> Result<Option<RangeProofArtifact>, Self::Error> {
-        panic!("poll_range called on a synchronous WorldSuccinctProver")
-    }
+    fn poll_range(&self, id: B256) -> Result<Option<RangeProofArtifact>, Self::Error>;
 
     /// Request an aggregation proof from an external backend without waiting for completion.
-    fn request_aggregation(&self, _request: AggregationProofRequest) -> Result<B256, Self::Error> {
-        panic!("request_aggregation called on a synchronous WorldSuccinctProver")
-    }
+    fn request_aggregation(&self, request: AggregationProofRequest) -> Result<B256, Self::Error>;
 
     /// Poll a previously requested aggregation proof.
-    fn poll_aggregation(&self, _id: B256) -> Result<Option<AggregationProofArtifact>, Self::Error> {
-        panic!("poll_aggregation called on a synchronous WorldSuccinctProver")
-    }
+    fn poll_aggregation(&self, id: B256) -> Result<Option<AggregationProofArtifact>, Self::Error>;
 }
