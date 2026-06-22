@@ -355,3 +355,62 @@ testcontainers-modules = { version = "0.14", features = ["redis"] }
 tracing-test = { version = "0.2", features = ["no-env-filter"] }
 lazy_static = "1.4"
 proptest = "1.9.0"
+
+# Temporary override: source all optimism (op-reth/kona) crates from the fork, which is
+# `ethereum-optimism/optimism@423d93e6` + a single kona-engine change (ConsolidateTask
+# reconciles to the safe head / EL-sync instead of build_and_seal when the local unsafe head
+# has diverged, so a node on an orphaned fork self-heals instead of crash-looping on
+# `UnsafeHeadChangedSinceBuild`). Patching the whole source (not just kona-engine) keeps a
+# single source revision and avoids duplicate-crate conflicts. Revert once upstreamed.
+[patch."https://github.com/ethereum-optimism/optimism"]
+alloy-op-evm = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+alloy-op-hardforks = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-cli = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-client = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-derive = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-disc = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-driver = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-engine = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-executor = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-genesis = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-gossip = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-hardforks = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-host = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-interop = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-macros = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-mpt = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-node-service = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-peers = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-preimage = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-proof = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-proof-interop = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-protocol = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-providers-alloy = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-registry = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-rpc = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-sources = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-std-fpvm = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+kona-std-fpvm-proc = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+op-alloy = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+op-alloy-consensus = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+op-alloy-network = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+op-alloy-provider = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+op-alloy-rpc-jsonrpsee = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+op-alloy-rpc-types = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+op-alloy-rpc-types-engine = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+op-revm = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+reth-optimism-chainspec = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+reth-optimism-cli = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+reth-optimism-consensus = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+reth-optimism-evm = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+reth-optimism-exex = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+reth-optimism-flashblocks = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+reth-optimism-forks = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+reth-optimism-node = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+reth-optimism-payload-builder = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+reth-optimism-post-exec-replay = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+reth-optimism-primitives = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+reth-optimism-rpc = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+reth-optimism-storage = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+reth-optimism-trie = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
+reth-optimism-txpool = { git = "https://github.com/0xOsiris/optimism.git", branch = "osiris/fix-kona" }
