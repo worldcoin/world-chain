@@ -42,7 +42,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Ensure filepaths are same as in docker
+        run: |
+          ln -s /home/runner/_work/world-chain/world-chain /app
+
       - name: Verify vkeys
         env:
           SP1_BUILD_DOCKER: "false"
+        working-directory: /app
         run: just verify-proof-vkeys
