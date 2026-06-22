@@ -13,9 +13,6 @@ pub const DEFAULT_MAX_QUEUE_LEN: usize = 1024;
 /// Default delay before polling an unchanged backend job again.
 pub const DEFAULT_BACKEND_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
-/// Default maximum number of finished (completed or failed) jobs retained.
-pub const DEFAULT_MAX_FINISHED_JOBS: usize = 1024;
-
 /// Configuration for the `prover-service`.
 #[derive(Debug, Clone)]
 pub struct ProverServiceConfig {
@@ -29,10 +26,6 @@ pub struct ProverServiceConfig {
     pub max_queue_len: usize,
     /// Delay before a backend job that returned `Noop` becomes pollable again.
     pub backend_poll_interval: Duration,
-    /// Maximum number of finished (completed or failed) jobs retained
-    /// by legacy in-memory implementations. Postgres-backed service keeps
-    /// finished rows durably and does not use this value.
-    pub max_finished_jobs: usize,
 }
 
 impl ProverServiceConfig {
@@ -55,11 +48,6 @@ impl ProverServiceConfig {
                 "backend_poll_interval must be greater than zero",
             ));
         }
-        if self.max_finished_jobs == 0 {
-            return Err(InvalidConfigError(
-                "max_finished_jobs must be greater than zero",
-            ));
-        }
         Ok(())
     }
 }
@@ -71,7 +59,6 @@ impl Default for ProverServiceConfig {
             max_attempts: DEFAULT_MAX_ATTEMPTS,
             max_queue_len: DEFAULT_MAX_QUEUE_LEN,
             backend_poll_interval: DEFAULT_BACKEND_POLL_INTERVAL,
-            max_finished_jobs: DEFAULT_MAX_FINISHED_JOBS,
         }
     }
 }

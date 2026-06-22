@@ -25,11 +25,7 @@ struct Cli {
 
     /// Postgres connection URL for durable prover-service state.
     #[arg(long, env = "PROVER_SERVICE_DATABASE_URL")]
-    database_url: Option<String>,
-
-    /// Fallback Postgres connection URL.
-    #[arg(long, env = "DATABASE_URL", hide = true)]
-    fallback_database_url: Option<String>,
+    database_url: String,
 
     /// Seconds a worker holds a job lease before it is re-queued.
     #[arg(long, env = "LEASE_TIMEOUT_SECONDS", default_value_t = 1800)]
@@ -46,10 +42,6 @@ struct Cli {
     /// Seconds to wait before polling an unchanged backend job again.
     #[arg(long, env = "BACKEND_POLL_INTERVAL_SECONDS", default_value_t = 30)]
     backend_poll_interval_seconds: u64,
-
-    /// Maximum number of finished jobs retained in memory.
-    #[arg(long, env = "MAX_FINISHED_JOBS", default_value_t = 1024)]
-    max_finished_jobs: usize,
 }
 
 #[tokio::main]
@@ -66,14 +58,9 @@ async fn main() -> Result<()> {
         max_attempts: cli.max_attempts,
         max_queue_len: cli.max_queue_len,
         backend_poll_interval: Duration::from_secs(cli.backend_poll_interval_seconds),
-        max_finished_jobs: cli.max_finished_jobs,
     };
-    let database_url = cli
-        .database_url
-        .or(cli.fallback_database_url)
-        .context("PROVER_SERVICE_DATABASE_URL or DATABASE_URL must be set")?;
     let service = Arc::new(
-        ProverService::connect(&database_url, config)
+        ProverService::connect(&cli.database_url, config)
             .await
             .context("failed to initialize postgres-backed prover-service")?,
     );

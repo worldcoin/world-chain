@@ -15,7 +15,6 @@ fn test_config() -> ProverServiceConfig {
         max_attempts: 2,
         max_queue_len: 4,
         backend_poll_interval: Duration::from_millis(25),
-        max_finished_jobs: 4,
     }
 }
 
