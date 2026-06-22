@@ -1,10 +1,25 @@
 use crate::types::{ProofBackend, ProofRequestId, ProofStatus};
+use sqlx::migrate::MigrateError;
 use thiserror::Error;
 
 /// Invalid `prover-service` configuration.
 #[derive(Error, Debug)]
 #[error("invalid prover-service config: {0}")]
 pub struct InvalidConfigError(pub &'static str);
+
+/// Error raised while initializing a Postgres-backed `ProverService`.
+#[derive(Debug, Error)]
+pub enum ProverServiceInitError {
+    /// Invalid service configuration.
+    #[error(transparent)]
+    InvalidConfig(#[from] InvalidConfigError),
+    /// Failed to connect to Postgres.
+    #[error(transparent)]
+    Sqlx(#[from] sqlx::Error),
+    /// Failed to run migrations.
+    #[error(transparent)]
+    Migration(#[from] MigrateError),
+}
 
 /// Error returned to a defender by the `prover-service`.
 #[derive(Error, Debug)]

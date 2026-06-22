@@ -80,12 +80,14 @@ pub use config::{
     DEFAULT_BACKEND_POLL_INTERVAL, DEFAULT_LEASE_TIMEOUT, DEFAULT_MAX_ATTEMPTS,
     DEFAULT_MAX_QUEUE_LEN, ProverServiceConfig,
 };
-pub use error::{InvalidConfigError, ProofJobQueueError, ProofRequestError};
+pub use error::{
+    InvalidConfigError, ProofJobQueueError, ProofRequestError, ProverServiceInitError,
+};
 pub use rpc::{
     ProverServiceApiClient, ProverServiceApiServer, ProverServiceRpc, RpcProverServiceClient,
     start_rpc_server,
 };
-pub use service::{ProverService, ProverServiceInitError};
+pub use service::ProverService;
 pub use traits::{ProofJobQueue, ProofRequester};
 pub use types::{
     BackendProofId, BackendProofJobStatus, BackendProofPhase, BackendProofState, BackendProofWork,

@@ -1,6 +1,6 @@
 use crate::{
     config::ProverServiceConfig,
-    error::{InvalidConfigError, ProofJobQueueError, ProofRequestError},
+    error::{InvalidConfigError, ProofJobQueueError, ProofRequestError, ProverServiceInitError},
     traits::{ProofJobQueue, ProofRequester},
     types::{
         BackendProofId, BackendProofJobStatus, BackendProofPhase, BackendProofState,
@@ -63,20 +63,6 @@ impl ProverService {
     pub const fn pool(&self) -> &PgPool {
         &self.pool
     }
-}
-
-/// Error raised while initializing a Postgres-backed [`ProverService`].
-#[derive(Debug, thiserror::Error)]
-pub enum ProverServiceInitError {
-    /// Invalid service configuration.
-    #[error(transparent)]
-    InvalidConfig(#[from] InvalidConfigError),
-    /// Failed to connect to Postgres.
-    #[error(transparent)]
-    Sqlx(#[from] sqlx::Error),
-    /// Failed to run migrations.
-    #[error(transparent)]
-    Migration(#[from] MigrateError),
 }
 
 #[async_trait]
