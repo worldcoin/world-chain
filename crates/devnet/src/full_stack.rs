@@ -77,6 +77,7 @@ const CONDUCTOR_HEALTHCHECK_INTERVAL_SECS: &str = "5";
 const CONDUCTOR_HEALTHCHECK_UNSAFE_INTERVAL_SECS: &str = "300";
 const SERVICE_RPC_PORT: u16 = 8545;
 const SERVICE_METRICS_PORT: u16 = 7300;
+const PROVER_SERVICE_POSTGRES_PORT: u16 = 5432;
 const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 10;
 const PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL: u64 = 5;
 /// Poll interval for the in-process SP1 worker leasing jobs from the prover-service.
@@ -297,6 +298,8 @@ impl Drop for DefenderTask {
 #[derive(Debug)]
 struct ProverServiceTask {
     handle: ServerHandle,
+    _postgres: Option<ContainerAsync<GenericImage>>,
+    _postgres_data_dir: Option<TempDir>,
 }
 
 impl Drop for ProverServiceTask {
@@ -2550,8 +2553,7 @@ fn sp1_worker_prover_kind() -> Option<Sp1ProverKind> {
 
 /// Starts the in-process defender prover-service and returns its task handle and JSON-RPC URL.
 async fn start_prover_service() -> Result<(ProverServiceTask, String)> {
-    let database_url = std::env::var("PROVER_SERVICE_DATABASE_URL")
-        .wrap_err("PROVER_SERVICE_DATABASE_URL must be set for prover-service")?;
+    let (database_url, postgres, postgres_data_dir) = prover_service_database_url().await?;
     let service = Arc::new(
         ProverService::connect(&database_url, ProverServiceConfig::default())
             .await
@@ -2563,7 +2565,60 @@ async fn start_prover_service() -> Result<(ProverServiceTask, String)> {
             .wrap_err("failed to start prover-service RPC server")?;
     let url = format!("http://{addr}");
     info!(prover_service = %url, "started native defender prover-service");
-    Ok((ProverServiceTask { handle }, url))
+    Ok((
+        ProverServiceTask {
+            handle,
+            _postgres: postgres,
+            _postgres_data_dir: postgres_data_dir,
+        },
+        url,
+    ))
+}
+
+async fn prover_service_database_url() -> Result<(
+    String,
+    Option<ContainerAsync<GenericImage>>,
+    Option<TempDir>,
+)> {
+    if let Ok(database_url) = std::env::var("PROVER_SERVICE_DATABASE_URL") {
+        return Ok((database_url, None, None));
+    }
+
+    let data_dir = tempfile::Builder::new()
+        .prefix("world-chain-prover-service-postgres-")
+        .tempdir()
+        .wrap_err("failed to create prover-service postgres tempdir")?;
+    let data_dir_path = data_dir.path().to_string_lossy().to_string();
+    let container = GenericImage::new("postgres", "16-alpine")
+        .with_wait_for(WaitFor::message_on_stderr(
+            "database system is ready to accept connections",
+        ))
+        .with_exposed_port(PROVER_SERVICE_POSTGRES_PORT.tcp())
+        .with_env_var("POSTGRES_USER", "postgres")
+        .with_env_var("POSTGRES_PASSWORD", "postgres")
+        .with_env_var("POSTGRES_DB", "postgres")
+        .with_mount(Mount::bind_mount(data_dir_path, "/var/lib/postgresql/data"))
+        .with_startup_timeout(Duration::from_secs(60))
+        .start()
+        .await
+        .wrap_err("failed to start local prover-service postgres")?;
+
+    let host = container
+        .get_host()
+        .await
+        .wrap_err("failed to read prover-service postgres host")?;
+    let port = container
+        .get_host_port_ipv4(PROVER_SERVICE_POSTGRES_PORT)
+        .await
+        .wrap_err("failed to read prover-service postgres port")?;
+    let database_url = format!("postgres://postgres:postgres@{host}:{port}/postgres");
+    info!(
+        %host,
+        port,
+        data_dir = %data_dir.path().display(),
+        "started temporary prover-service postgres"
+    );
+    Ok((database_url, Some(container), Some(data_dir)))
 }
 
 /// Spawns the in-process SP1 proving worker.
