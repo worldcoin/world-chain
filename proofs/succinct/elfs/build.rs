@@ -8,13 +8,19 @@
 //! `fs::read` of an ELF file.
 //!
 //! Behaviour:
-//! - Always uses `docker: true` with the pinned SP1 toolchain tag
+//! - Defaults to `docker: true` with the pinned SP1 toolchain tag
 //!   (matches the `=6.1.0` version of `sp1-sdk` / `sp1-zkvm` the workspace
 //!   pins to) for bit-for-bit reproducible ELFs. This is the ecosystem
 //!   standard used by op-succinct, sp1-helios, and all other SP1 adopters.
 //!   Docker provides reproducibility by fixing the build environment path
-//!   layout inside the container. The only exception is `Dockerfile.prover`
-//!   where Docker-in-Docker is genuinely unavailable.
+//!   layout inside the container.
+//! - Honours `SP1_BUILD_DOCKER=false` to fall back to the locally-installed
+//!   `cargo-prove` toolchain instead of the Docker reproducibility builder.
+//!   This is required wherever the Docker daemon is unreachable from inside
+//!   the build — notably `Dockerfile.prover` (no Docker-in-Docker) and the
+//!   `vkeys` CI step, both of which install the pinned `v6.1.0` toolchain via
+//!   `sp1up` and set this variable. `sp1_build` does not read this variable
+//!   itself, so we map it onto `BuildArgs.docker` here.
 //! - Honours `SP1_SKIP_PROGRAM_BUILD=true` for fast iteration: `sp1_build`
 //!   checks this variable internally — when set, it skips the Docker/local
 //!   guest compilation but **still emits** the `SP1_ELF_*` cargo env-vars so
@@ -30,6 +36,15 @@
 
 fn main() {
     println!("cargo:rerun-if-env-changed=SP1_SKIP_PROGRAM_BUILD");
+    println!("cargo:rerun-if-env-changed=SP1_BUILD_DOCKER");
+
+    // Use the Docker reproducibility builder by default; allow opting out via
+    // `SP1_BUILD_DOCKER=false` for environments where the Docker daemon is
+    // unreachable (Dockerfile.prover, vkeys CI). Any value other than an
+    // explicit "false" keeps the default Docker build.
+    let use_docker = std::env::var("SP1_BUILD_DOCKER")
+        .map(|v| !v.eq_ignore_ascii_case("false"))
+        .unwrap_or(true);
 
     // The SP1 guest programs live in their own nested cargo workspace at
     // `proofs/succinct/programs/`, but they have path dependencies that
@@ -71,7 +86,7 @@ fn main() {
         sp1_build::build_program_with_args(
             program_dir,
             sp1_build::BuildArgs {
-                docker: true,
+                docker: use_docker,
                 tag: "v6.1.0".to_string(),
                 ignore_rust_version: true,
                 workspace_directory: Some(workspace_root.clone()),
