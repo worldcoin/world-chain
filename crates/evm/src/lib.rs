@@ -22,7 +22,6 @@ pub mod metrics;
 pub mod utils;
 
 pub use metrics::{FlashblockExecutionMetrics, PayloadBuildStage};
-pub use world_chain_state::{StateDB, access_list, database, state_db};
 
 pub trait BlockBuilderExt: BlockBuilder {
     /// Completes block building and returns the [`BlockBuilderOutcome`] plus the accumulated

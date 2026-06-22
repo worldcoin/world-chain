@@ -16,7 +16,8 @@ use reth_optimism_primitives::OpTransactionSigned;
 use reth_payload_primitives::BuiltPayload;
 use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader};
 use reth_trie_common::updates::TrieUpdates;
-use revm::{DatabaseCommit, context::BlockEnv, database::BundleState};
+use revm::{context::BlockEnv, database::BundleState};
+use revm_database::State;
 use tracing::trace;
 
 use crate::{
@@ -24,6 +25,7 @@ use crate::{
     PayloadBuildStage,
 };
 use alloy_consensus::{Block, BlockHeader, Header, transaction::TxHashRef};
+use alloy_eip7928::BlockAccessIndex;
 use alloy_primitives::{B256, FixedBytes, U256};
 use reth_evm::{
     block::CommitChanges,
@@ -34,9 +36,6 @@ use revm::database::states::bundle_state::BundleRetention;
 use std::{sync::Arc, time::Instant};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_primitives::access_list::FlashblockAccessList;
-use world_chain_state::{
-    StateDB, access_list::BlockAccessIndex, database::bal_builder_db::BalBuilderDb,
-};
 
 #[derive(thiserror::Error, Debug, serde::Serialize)]
 pub enum BalValidationError {
@@ -102,8 +101,8 @@ pub struct BalBlockBuilder<'a, R: OpReceiptBuilder, N: NodePrimitives, Evm> {
 impl<'a, DB, R, N: NodePrimitives, E> BalBlockBuilder<'a, R, N, E>
 where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>,
-    DB: StateDB + DatabaseCommit + Database + 'a,
-    E: Evm<DB = BalBuilderDb<DB>, Tx = OpTx, Spec = OpSpecId, BlockEnv = BlockEnv>,
+    DB: Database + 'a,
+    E: Evm<DB = &'a mut State<DB>, Tx = OpTx, Spec = OpSpecId, BlockEnv = BlockEnv>,
     E: PostExecEvm,
     OpBlockExecutor<E, R, Arc<WorldChainSpec>>:
         BlockExecutor<Evm = E, Transaction = OpTransactionSigned, Receipt = OpReceipt>,
@@ -123,7 +122,10 @@ where
             transactions.len() as u16 + 1
         };
 
-        executor.evm_mut().db_mut().set_index(start_index);
+        executor
+            .evm_mut()
+            .db_mut()
+            .set_bal_index(BlockAccessIndex::new(start_index as u64));
         let counter = BlockAccessIndexCounter::new(start_index);
 
         trace!(target: "bal_executor", parent = %parent.hash(), block_access_index = %start_index, "Setting initial database index for block builder");
@@ -144,14 +146,14 @@ where
         let db = self.executor.evm_mut().db_mut();
         let current = self.counter.inc();
         trace!(target: "bal_executor", block_access_index = %current,  receipts_length = %length, "Preparing database for next transaction with index");
-        db.set_index(current);
+        db.set_bal_index(BlockAccessIndex::new(current as u64));
         Ok(())
     }
 }
 
 impl<'a, DB, R, N, E> BlockBuilder for BalBlockBuilder<'a, R, N, E>
 where
-    DB: StateDB + DatabaseCommit + Database + 'a,
+    DB: Database + 'a,
     N: NodePrimitives<
             Receipt = OpReceipt,
             SignedTx = OpTransactionSigned,
@@ -159,7 +161,7 @@ where
             BlockHeader = Header,
         >,
     E: Evm<
-            DB = BalBuilderDb<DB>,
+            DB = &'a mut State<DB>,
             Tx = OpTx,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,
@@ -224,7 +226,7 @@ where
 
 impl<'a, DB, R, N, E> BlockBuilderExt for BalBlockBuilder<'a, R, N, E>
 where
-    DB: StateDB + DatabaseCommit + Database + 'a,
+    DB: Database + 'a,
     N: NodePrimitives<
             Receipt = OpReceipt,
             SignedTx = OpTransactionSigned,
@@ -232,7 +234,7 @@ where
             BlockHeader = Header,
         >,
     E: Evm<
-            DB = BalBuilderDb<DB>,
+            DB = &'a mut State<DB>,
             Tx = OpTx,
             Spec = OpSpecId,
             HaltReason = OpHaltReason,
@@ -249,7 +251,7 @@ where
         mut metrics: impl FlashblockExecutionMetrics,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError> {
         let (evm, result) = self.executor.finish()?;
-        let (mut db, evm_env) = evm.finish();
+        let (db, evm_env) = evm.finish();
 
         // merge all transitions into bundle state
         let merge_started = Instant::now();
@@ -264,12 +266,12 @@ where
         //
         // This keeps `bundle_state.reverts.len() == 1`, which matches the expectation that this
         // bundle represents a single block worth of changes even if we built multiple payloads.
-        let flattened = crate::utils::flatten_reverts(&db.bundle_state().reverts);
-        db.bundle_state_mut().reverts = flattened;
+        let flattened = crate::utils::flatten_reverts(&db.bundle_state.reverts);
+        db.bundle_state.reverts = flattened;
 
         // calculate the state root
         let state_root_started = Instant::now();
-        let hashed_state = state.hashed_post_state(db.bundle_state());
+        let hashed_state = state.hashed_post_state(&db.bundle_state);
         let (state_root, trie_updates) = state
             .state_root_with_updates(hashed_state.clone())
             .map_err(BlockExecutionError::other)?;
@@ -292,7 +294,7 @@ where
             self.parent,
             transactions,
             &result,
-            db.bundle_state(),
+            &db.bundle_state,
             &state,
             state_root,
             None,
@@ -306,10 +308,13 @@ where
 
         let bundle = db.take_bundle();
 
-        let access_list = db
-            .finish()
-            .map_err(InternalBlockExecutionError::other)?
-            .build(self.counter.finish());
+        let block_access_list = db
+            .take_built_alloy_bal()
+            .ok_or_else(|| InternalBlockExecutionError::msg("missing BAL builder state"))?;
+        let access_list = FlashblockAccessList::from_block_access_list(
+            block_access_list.clone(),
+            self.counter.finish(),
+        );
 
         self.access_list_sender
             .send(access_list)
@@ -321,7 +326,7 @@ where
                 hashed_state,
                 trie_updates,
                 block,
-                block_access_list: None,
+                block_access_list: Some(block_access_list),
             },
             bundle,
         ))
@@ -369,9 +374,9 @@ pub struct CommittedState<R: OpReceiptBuilder + Default = OpRethReceiptBuilder> 
     /// The bundle state accumulated so far from the State Transitions
     pub bundle: BundleState,
     /// Ordered receipts of previous committed transactions.
-    pub receipts: Vec<(BlockAccessIndex, R::Receipt)>,
+    pub receipts: Vec<(u16, R::Receipt)>,
     /// Ordered transactions which have been executed
-    pub transactions: Vec<(BlockAccessIndex, Recovered<R::Transaction>)>,
+    pub transactions: Vec<(u16, Recovered<R::Transaction>)>,
 }
 
 impl<R> CommittedState<R>
@@ -431,7 +436,7 @@ where
                 .recovered_block
                 .clone_transactions_recovered()
                 .enumerate()
-                .map(|(index, tx)| (index as BlockAccessIndex, tx))
+                .map(|(index, tx)| (index as u16, tx))
                 .collect();
 
             let receipts: Vec<_> = executed_block
@@ -441,7 +446,7 @@ where
                 .iter()
                 .cloned()
                 .enumerate()
-                .map(|(index, r)| (index as BlockAccessIndex, r))
+                .map(|(index, r)| (index as u16, r))
                 .collect();
 
             Ok(Self {

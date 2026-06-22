@@ -20,8 +20,8 @@ use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::StateProvider;
 use reth_trie_common::updates::TrieUpdates;
-use revm::{DatabaseCommit, context::BlockEnv, database::states::bundle_state::BundleRetention};
-use revm_database::BundleState;
+use revm::{context::BlockEnv, database::states::bundle_state::BundleRetention};
+use revm_database::{BundleState, State};
 use std::{sync::Arc, time::Instant};
 
 use crate::{
@@ -29,7 +29,6 @@ use crate::{
     PayloadBuildStage,
 };
 use world_chain_chainspec::WorldChainSpec;
-use world_chain_state::StateDB;
 /// A wrapper around the [`BasicBlockBuilder`] for flashblocks.
 pub struct FlashblocksBlockBuilder<'a, N: NodePrimitives, Evm, R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt>  + 'static = OpRethReceiptBuilder> {
     pub inner: BasicBlockBuilder<
@@ -62,8 +61,9 @@ impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, N, Evm> {
     }
 }
 
-impl<'a, N, E, R> BlockBuilder for FlashblocksBlockBuilder<'a, N, E, R>
+impl<'a, DB, N, E, R> BlockBuilder for FlashblocksBlockBuilder<'a, N, E, R>
 where
+    DB: Database + 'a,
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + 'static,
     N: NodePrimitives<
             Receipt = OpReceipt,
@@ -72,7 +72,7 @@ where
             BlockHeader = alloy_consensus::Header,
         >,
     E: Evm<
-            DB: StateDB + reth_evm::block::StateDB + DatabaseCommit + Database + 'a,
+            DB = &'a mut State<DB>,
             Tx: FromRecoveredTx<OpTransactionSigned>
                     + FromTxWithEncoded<OpTransactionSigned>
                     + OpTxEnv,
@@ -132,8 +132,9 @@ where
     }
 }
 
-impl<'a, N, E, R> BlockBuilderExt for FlashblocksBlockBuilder<'a, N, E, R>
+impl<'a, DB, N, E, R> BlockBuilderExt for FlashblocksBlockBuilder<'a, N, E, R>
 where
+    DB: Database + 'a,
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + 'static,
     N: NodePrimitives<
             Receipt = OpReceipt,
@@ -142,7 +143,7 @@ where
             BlockHeader = Header,
         >,
     E: Evm<
-            DB: StateDB + reth_evm::block::StateDB + DatabaseCommit + Database + 'a,
+            DB = &'a mut State<DB>,
             Tx: FromRecoveredTx<OpTransactionSigned>
                     + FromTxWithEncoded<OpTransactionSigned>
                     + OpTxEnv,
@@ -160,7 +161,7 @@ where
         mut metrics: impl FlashblockExecutionMetrics,
     ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError> {
         let (evm, result) = self.inner.executor.finish()?;
-        let (mut db, evm_env) = evm.finish();
+        let (db, evm_env) = evm.finish();
 
         // merge all transitions into bundle state
         let merge_started = Instant::now();
@@ -175,12 +176,12 @@ where
         //
         // This keeps `bundle_state.reverts.len() == 1`, which matches the expectation that this
         // bundle represents a single block worth of changes even if we built multiple payloads.
-        let flattened = crate::utils::flatten_reverts(&db.bundle_state().reverts);
-        db.bundle_state_mut().reverts = flattened;
+        let flattened = crate::utils::flatten_reverts(&db.bundle_state.reverts);
+        db.bundle_state.reverts = flattened;
 
         // calculate the state root
         let state_root_started = Instant::now();
-        let hashed_state = state.hashed_post_state(db.bundle_state());
+        let hashed_state = state.hashed_post_state(&db.bundle_state);
         let (state_root, trie_updates) = state
             .state_root_with_updates(hashed_state.clone())
             .map_err(BlockExecutionError::other)?;
@@ -204,7 +205,7 @@ where
             self.inner.parent,
             transactions,
             &result,
-            db.bundle_state(),
+            &db.bundle_state,
             &state,
             state_root,
             None,

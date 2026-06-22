@@ -3944,7 +3944,6 @@ dependencies = [
  "lock_api",
  "once_cell",
  "parking_lot_core",
- "rayon",
  "serde",
 ]
 
@@ -18198,7 +18197,6 @@ dependencies = [
  "world-chain-node",
  "world-chain-pool",
  "world-chain-primitives",
- "world-chain-state",
  "world-chain-test-utils",
 ]
 
@@ -18363,6 +18361,7 @@ name = "world-chain-evm"
 version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
+ "alloy-eip7928 0.4.3",
  "alloy-eips 2.0.5",
  "alloy-op-evm",
  "alloy-primitives",
@@ -18389,7 +18388,6 @@ dependencies = [
  "tracing",
  "world-chain-chainspec",
  "world-chain-primitives",
- "world-chain-state",
 ]
 
 [[package]]
@@ -18599,7 +18597,7 @@ name = "world-chain-primitives"
 version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
- "alloy-eip7928 0.3.7",
+ "alloy-eip7928 0.4.3",
  "alloy-eips 2.0.5",
  "alloy-primitives",
  "alloy-rlp",
@@ -19047,25 +19045,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "world-chain-state"
-version = "2.3.0"
-dependencies = [
- "alloy-eips 2.0.5",
- "alloy-primitives",
- "color-eyre",
- "crossbeam-channel",
- "dashmap",
- "rayon",
- "reth-revm",
- "reth-tracing",
- "revm",
- "revm-database",
- "serde_json",
- "tracing",
- "world-chain-primitives",
-]
-
-[[package]]
 name = "world-chain-test-utils"
 version = "2.3.0"
 dependencies = [
@@ -19146,7 +19125,6 @@ dependencies = [
  "world-chain-pool",
  "world-chain-primitives",
  "world-chain-rpc",
- "world-chain-state",
 ]
 
 [[package]]
@@ -19216,6 +19194,7 @@ name = "world-chain-validator"
 version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
+ "alloy-eip7928 0.4.3",
  "alloy-eips 2.0.5",
  "alloy-op-evm",
  "alloy-primitives",
@@ -19227,8 +19206,6 @@ dependencies = [
  "futures",
  "metrics",
  "metrics-derive",
- "op-alloy-consensus",
- "op-revm",
  "parking_lot",
  "rayon",
  "reth-chain-state",
@@ -19255,7 +19232,6 @@ dependencies = [
  "world-chain-node",
  "world-chain-p2p",
  "world-chain-primitives",
- "world-chain-state",
  "world-chain-test-utils",
  "world-chain-validator",
 ]

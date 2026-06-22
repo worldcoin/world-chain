@@ -1,5 +1,6 @@
 use alloy_eip7928::{
-    AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
+    AccountChanges, BalanceChange, BlockAccessList, CodeChange, NonceChange, SlotChanges,
+    StorageChange,
 };
 use alloy_primitives::{Address, B256, Bytes, FixedBytes, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
@@ -37,6 +38,28 @@ pub struct FlashblockAccessList {
 }
 
 impl FlashblockAccessList {
+    /// Creates a flashblock access list sidecar from an upstream block access list.
+    pub fn from_block_access_list(
+        changes: BlockAccessList,
+        (min_tx_index, max_tx_index): (u16, u16),
+    ) -> Self {
+        Self {
+            changes,
+            min_tx_index,
+            max_tx_index,
+        }
+    }
+
+    /// Returns the upstream block access list contents carried by this flashblock sidecar.
+    pub fn as_block_access_list(&self) -> BlockAccessList {
+        self.changes.clone()
+    }
+
+    /// Consumes the flashblock sidecar and returns the upstream block access list contents.
+    pub fn into_block_access_list(self) -> BlockAccessList {
+        self.changes
+    }
+
     /// Removes duplicate entries by key, keeping the last occurrence (highest block_access_index).
     /// Results are re-ordered ascending by block_access_index.
     pub fn flush(&mut self) {
@@ -244,7 +267,7 @@ fn merge_account_changes(existing: &mut AccountChanges, other: &AccountChanges) 
     for slot_changes in &existing.storage_changes {
         let mut changes_map = BTreeMap::new();
         for change in &slot_changes.changes {
-            changes_map.insert(change.block_access_index, change.clone());
+            changes_map.insert(change.block_access_index.get(), change.clone());
         }
         storage_map.insert(slot_changes.slot.into(), changes_map);
     }
@@ -257,7 +280,7 @@ fn merge_account_changes(existing: &mut AccountChanges, other: &AccountChanges) 
                 slot_changes
                     .changes
                     .iter()
-                    .map(|c| (c.block_access_index, c.clone())),
+                    .map(|c| (c.block_access_index.get(), c.clone())),
             );
     }
 
@@ -280,28 +303,28 @@ fn merge_account_changes(existing: &mut AccountChanges, other: &AccountChanges) 
 
     let mut balance_map: BTreeMap<u64, BalanceChange> = BTreeMap::new();
     for change in &existing.balance_changes {
-        balance_map.insert(change.block_access_index, change.clone());
+        balance_map.insert(change.block_access_index.get(), change.clone());
     }
     for change in &other.balance_changes {
-        balance_map.insert(change.block_access_index, change.clone());
+        balance_map.insert(change.block_access_index.get(), change.clone());
     }
     existing.balance_changes = balance_map.into_values().collect();
 
     let mut nonce_map: BTreeMap<u64, NonceChange> = BTreeMap::new();
     for change in &existing.nonce_changes {
-        nonce_map.insert(change.block_access_index, change.clone());
+        nonce_map.insert(change.block_access_index.get(), change.clone());
     }
     for change in &other.nonce_changes {
-        nonce_map.insert(change.block_access_index, change.clone());
+        nonce_map.insert(change.block_access_index.get(), change.clone());
     }
     existing.nonce_changes = nonce_map.into_values().collect();
 
     let mut code_map: BTreeMap<u64, CodeChange> = BTreeMap::new();
     for change in &existing.code_changes {
-        code_map.insert(change.block_access_index, change.clone());
+        code_map.insert(change.block_access_index.get(), change.clone());
     }
     for change in &other.code_changes {
-        code_map.insert(change.block_access_index, change.clone());
+        code_map.insert(change.block_access_index.get(), change.clone());
     }
     existing.code_changes = code_map.into_values().collect();
 }
@@ -315,7 +338,7 @@ pub fn access_list_hash(access_list: &FlashblockAccessList) -> B256 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip7928::BalanceChange;
+    use alloy_eip7928::{BalanceChange, BlockAccessIndex};
     use alloy_primitives::{address, map::HashMap};
     use reth_revm::{db::AccountStatus, primitives::KECCAK_EMPTY};
     use std::convert::Infallible;
@@ -392,7 +415,7 @@ mod tests {
         access_list.changes.push(AccountChanges {
             address: account,
             balance_changes: vec![BalanceChange {
-                block_access_index: 1,
+                block_access_index: BlockAccessIndex::new(1),
                 post_balance: U256::from(1500),
             }],
             ..Default::default()
@@ -451,7 +474,7 @@ mod tests {
         access_list.changes.push(AccountChanges {
             address: account,
             balance_changes: vec![BalanceChange {
-                block_access_index: 1,
+                block_access_index: BlockAccessIndex::new(1),
                 post_balance: U256::from(6000),
             }],
             ..Default::default()

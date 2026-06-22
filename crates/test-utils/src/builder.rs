@@ -56,7 +56,6 @@ use world_chain_primitives::{
     access_list::{FlashblockAccessListData, access_list_hash},
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
-use world_chain_state::database::bal_builder_db::BalBuilderDb;
 
 const WORLD_ID_ALT_INPUT_INTERVAL: usize = 5;
 const WORLD_ID_TREE_DEPTH: u64 = 30;
@@ -678,14 +677,14 @@ where
         .with_database(db)
         .with_bundle_prestate(bundle.clone())
         .with_bundle_update()
+        .with_bal_builder()
         .build();
 
-    let database = BalBuilderDb::new(&mut state);
     let prev_transaction = prev_outcome
         .as_ref()
         .map(|(o, _)| o.block.clone_transactions_recovered().collect());
 
-    let evm = OpEvmFactory::default().create_evm(database, EVM_ENV.clone());
+    let evm = OpEvmFactory::default().create_evm(&mut state, EVM_ENV.clone());
 
     let mut executor = OpBlockExecutor::new(
         evm,
