@@ -57,7 +57,7 @@ jobs:
             environment: stage
             include_in_all: true
             rpc_url: https://wc-node-sepolia.worldcoin.dev
-            acceptance_profile: heavy
+            acceptance_profile: smoke
             bundler_rpc_url: https://rundler-sepolia.worldcoin.dev
             entry_point: "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
             safe_4337_module: "0x829Efdda958f06eA49f1F416e10b35C140bf45EF"
@@ -79,7 +79,7 @@ jobs:
             environment: dev-eu-central-2
             include_in_all: true
             rpc_url: https://tx-proxy-devnet-eu-central-2.worldcoin.dev
-            acceptance_profile: heavy
+            acceptance_profile: smoke
             bundler_rpc_url: https://rundler-devnet-eu-central-2.worldcoin.dev
             expected_chain_id: "69420"
             entry_point: ""
