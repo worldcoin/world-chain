@@ -312,6 +312,7 @@ impl ProverServiceStore {
                      bj.phase,
                      bj.backend_proof_id,
                      bj.advance_attempts,
+                     bj.locked_until is not null and bj.locked_until < now() as lease_expired,
                      pj.proof_id,
                      pj.backend,
                      pj.game,
@@ -340,7 +341,13 @@ impl ProverServiceStore {
             let backend_job_id: i64 = row.try_get("backend_job_id").map_err(queue_db)?;
             let proof_id = proof_id_from_row(&row).map_err(ProofJobQueueError::Internal)?;
             let attempts: i32 = row.try_get("advance_attempts").map_err(queue_db)?;
-            if attempts as u32 >= self.config.max_attempts {
+            let lease_expired: bool = row.try_get("lease_expired").map_err(queue_db)?;
+            let attempts = if lease_expired {
+                attempts.saturating_add(1)
+            } else {
+                attempts
+            };
+            if lease_expired && attempts as u32 >= self.config.max_attempts {
                 let reason = format!("backend lease expired after {attempts} attempts");
                 mark_backend_failed(&mut tx, backend_job_id, proof_id, &reason)
                     .await
@@ -367,19 +374,20 @@ impl ProverServiceStore {
                 "update proof_backend_jobs
                  set locked_until = now() + ($2::bigint * interval '1 millisecond'),
                      lease_token = $3,
-                     advance_attempts = advance_attempts + 1,
+                     advance_attempts = $4,
                      updated_at = now()
                  where id = $1",
             )
             .bind(backend_job_id)
             .bind(duration_millis(self.config.lease_timeout))
             .bind(lease_token.0)
+            .bind(attempts)
             .execute(&mut *tx)
             .await
             .map_err(queue_db)?;
 
             tx.commit().await.map_err(queue_db)?;
-            debug!(%proof_id, backend_job_id, %backend, attempts = attempts + 1, "backend proof job leased");
+            debug!(%proof_id, backend_job_id, %backend, failed_attempts = attempts, "backend proof job leased");
             return Ok(Some(LeasedBackendProofWork {
                 backend_job_id,
                 work: BackendProofWork {
@@ -549,6 +557,7 @@ impl ProverServiceStore {
         let proof_id = proof_id_from_bytes(row.try_get("proof_id").map_err(queue_db)?)
             .map_err(ProofJobQueueError::Internal)?;
         let attempts: i32 = row.try_get("advance_attempts").map_err(queue_db)?;
+        let attempts = attempts.saturating_add(1);
         if attempts as u32 >= self.config.max_attempts {
             mark_backend_failed(&mut tx, backend_job_id, proof_id, &reason)
                 .await
@@ -560,6 +569,7 @@ impl ProverServiceStore {
                  set locked_until = null,
                      lease_token = null,
                      next_poll_at = now() + ($3::bigint * interval '1 millisecond'),
+                     advance_attempts = $4,
                      updated_at = now()
                  where id = $1
                    and lease_token = $2
@@ -568,6 +578,7 @@ impl ProverServiceStore {
             .bind(backend_job_id)
             .bind(lease_token.0)
             .bind(duration_millis(self.config.backend_poll_interval))
+            .bind(attempts)
             .execute(&mut *tx)
             .await
             .map_err(queue_db)?;

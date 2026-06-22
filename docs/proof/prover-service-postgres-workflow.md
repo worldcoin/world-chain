@@ -248,8 +248,7 @@ an intermediate proof or a final proof.
 
 10. Later, any SP1 `ProofWorker` calls `get_next_backend_proof(Sp1)`.
 11. `prover-service` claims a due `proof_backend_jobs` row, writes `locked_until`, writes a fresh
-    `lease_token`, increments `advance_attempts`, and returns the original request plus
-    `BackendProofState::Range { id }`.
+    `lease_token`, and returns the original request plus `BackendProofState::Range { id }`.
 12. Worker calls `sp1_backend.advance(request, BackendProofState::Range { id })`.
 13. SP1 backend polls SP1 network for the range proof status.
 14. If the range proof is still pending, SP1 backend returns:
@@ -539,7 +538,6 @@ Then:
 update proof_backend_jobs
 set locked_until = now() + $backend_job_lease_timeout,
     lease_token = $lease_token,
-    advance_attempts = advance_attempts + 1,
     updated_at = now()
 where id = $backend_job_id;
 ```
@@ -639,14 +637,16 @@ instead of requeueing it.
 
 ### `proof_backend_jobs.advance_attempts`
 
-`advance_attempts` counts how many times workers tried to advance an already-created external
-backend job.
+`advance_attempts` counts failed attempts to advance an already-created external backend job. It
+must not count healthy polls where the backend is still working.
 
-It increments when `get_next_backend_proof` successfully leases a requested backend job.
+It increments when a worker reports an advance error through `fail_backend_proof_job`, or when
+`get_next_backend_proof` reclaims an expired backend lease from a worker that died or stopped
+responding. A normal lease does not increment it, and `BackendUpdate::Noop` does not increment it.
 
 It covers failures after the external backend id is known:
 
-- transient SP1 status polling errors;
+- transient SP1 status polling errors, but not ordinary "still pending" statuses;
 - worker dies while polling or fetching the completed SP1 proof;
 - range proof completes, but requesting the aggregation proof fails;
 - transient serialization or validation errors while building the next phase;
