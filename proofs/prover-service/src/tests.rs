@@ -655,3 +655,54 @@ async fn rpc_end_to_end() {
     handle.stop().unwrap();
     handle.stopped().await;
 }
+
+#[tokio::test]
+async fn rpc_backend_invalid_proof_maps_to_typed_error() {
+    let Some(ctx) = service(test_config()).await else {
+        return;
+    };
+    let service = Arc::new(ctx.service);
+    let (addr, handle) = start_rpc_server("127.0.0.1:0".parse().unwrap(), Arc::clone(&service))
+        .await
+        .unwrap();
+    let client = RpcProverServiceClient::new(format!("http://{addr}")).unwrap();
+
+    let req = request(ProofBackend::Sp1, 10);
+    let id = client.request_proof(req.clone()).await.unwrap();
+    let leased = client
+        .get_next_proof(ProofBackend::Sp1)
+        .await
+        .unwrap()
+        .expect("start lease");
+    client
+        .submit_backend_proof_state(
+            id,
+            BackendProofState::Range { id: backend_id(1) },
+            leased.lease_token,
+        )
+        .await
+        .unwrap();
+    let backend = client
+        .get_next_backend_proof(ProofBackend::Sp1)
+        .await
+        .unwrap()
+        .expect("backend lease");
+
+    let invalid_proof = ProofData::Nitro {
+        attestation: Bytes::from(vec![0xcc]),
+        signature: Bytes::from(vec![0xdd]),
+    };
+    assert!(matches!(
+        client
+            .complete_backend_proof_job(
+                backend.backend_job_id,
+                backend.lease_token,
+                BackendUpdate::Complete(invalid_proof),
+            )
+            .await,
+        Err(ProofJobQueueError::InvalidProof { id: error_id, .. }) if error_id == id
+    ));
+
+    handle.stop().unwrap();
+    handle.stopped().await;
+}

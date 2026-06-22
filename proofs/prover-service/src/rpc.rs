@@ -35,8 +35,14 @@ pub mod error_code {
     /// A worker tried to update a row using an expired or superseded lease.
     pub const STALE_LEASE: i32 = -32014;
     /// The submitted proof does not match the requested job;
-    /// the error data holds the reason.
+    /// the error data holds the proof id and reason.
     pub const INVALID_PROOF: i32 = -32012;
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+struct InvalidProofErrorData {
+    id: ProofRequestId,
+    reason: String,
 }
 
 /// The `prover-service` JSON-RPC API, covering both the defender-facing
@@ -150,9 +156,11 @@ impl From<ProofJobQueueError> for ErrorObjectOwned {
             ProofJobQueueError::StaleLease => {
                 ErrorObject::owned(error_code::STALE_LEASE, message, None::<()>)
             }
-            ProofJobQueueError::InvalidProof { reason, .. } => {
-                ErrorObject::owned(error_code::INVALID_PROOF, message, Some(reason))
-            }
+            ProofJobQueueError::InvalidProof { id, reason } => ErrorObject::owned(
+                error_code::INVALID_PROOF,
+                message,
+                Some(InvalidProofErrorData { id, reason }),
+            ),
             ProofJobQueueError::Internal(_) => {
                 ErrorObject::owned(INTERNAL_ERROR_CODE, message, None::<()>)
             }
@@ -297,6 +305,12 @@ fn error_data<T: serde::de::DeserializeOwned>(err: &ErrorObjectOwned) -> Option<
         .and_then(|raw| serde_json::from_str(raw.get()).ok())
 }
 
+fn invalid_proof_reason(err: &ErrorObjectOwned) -> Option<String> {
+    error_data::<InvalidProofErrorData>(err)
+        .map(|data| data.reason)
+        .or_else(|| error_data(err))
+}
+
 fn map_request_error(
     err: ClientError,
     id: ProofRequestId,
@@ -329,7 +343,7 @@ fn map_job_error(err: ClientError, id: ProofRequestId) -> ProofJobQueueError {
         error_code::STALE_LEASE => ProofJobQueueError::StaleLease,
         error_code::INVALID_PROOF => ProofJobQueueError::InvalidProof {
             id,
-            reason: error_data(&err).unwrap_or_else(|| err.message().to_string()),
+            reason: invalid_proof_reason(&err).unwrap_or_else(|| err.message().to_string()),
         },
         _ => ProofJobQueueError::Rpc(format!("{} (code {})", err.message(), err.code())),
     }
@@ -342,6 +356,16 @@ fn map_backend_job_error(err: ClientError, backend_job_id: i64) -> ProofJobQueue
     match err.code() {
         error_code::UNKNOWN_BACKEND_JOB => ProofJobQueueError::UnknownBackendJob(backend_job_id),
         error_code::STALE_LEASE => ProofJobQueueError::StaleLease,
+        error_code::INVALID_PROOF => {
+            if let Some(data) = error_data::<InvalidProofErrorData>(&err) {
+                ProofJobQueueError::InvalidProof {
+                    id: data.id,
+                    reason: data.reason,
+                }
+            } else {
+                ProofJobQueueError::Rpc(format!("{} (code {})", err.message(), err.code()))
+            }
+        }
         _ => ProofJobQueueError::Rpc(format!("{} (code {})", err.message(), err.code())),
     }
 }
