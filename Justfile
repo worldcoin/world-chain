@@ -100,6 +100,18 @@ update-proof-vkeys:
     cargo run -p world-chain-prover-sp1 -- vkeys --output /tmp/vkeys-update.json
     jq -S . /tmp/vkeys-update.json > proofs/succinct/elf/vkeys.json
 
+# Build the SP1 guest ELFs reproducibly (docker:true, pinned v6.1.0) into
+# proofs/succinct/elf/ so the prover image build can embed them via
+# SP1_PREBUILT_ELF_DIR. The --elf-name values match the include_elf!() args in
+# proofs/succinct/elfs/src/lib.rs (and SP1_ELF_<name> emitted by build.rs), and
+# `cargo prove build --docker` produces bytes identical to the elfs crate's
+# build.rs (same sp1_build/docker/tag), so the embedded ELF matches the vkey
+# computed by `verify-proof-vkeys`. Requires a reachable Docker daemon + sp1up
+# v6.1.0. Run by the `build-elfs` CI job and usable locally.
+build-proof-elfs:
+    cd proofs/succinct/programs/range-ethereum && cargo prove build --docker --workspace-directory ../../../.. --tag v6.1.0 --ignore-rust-version --elf-name world-chain-proof-succinct-range-ethereum --output-directory ../../elf
+    cd proofs/succinct/programs/aggregation && cargo prove build --docker --workspace-directory ../../../.. --tag v6.1.0 --ignore-rust-version --elf-name world-chain-proof-succinct-aggregation --output-directory ../../elf
+
 # Verify that the committed vkeys.json matches what the current source produces.
 # Uses jq -S to normalize key ordering before comparing, so the diff is not
 # sensitive to JSON insertion order. Used by CI. Fails if they differ.

@@ -1,50 +1,58 @@
-//! Build script: compile the World Chain SP1 guest programs and emit
-//! `SP1_ELF_<crate>` environment variables for `sp1_sdk::include_elf!()`.
+//! Build script: make the World Chain SP1 guest program ELFs available to
+//! `sp1_sdk::include_elf!()` by emitting the `SP1_ELF_<crate>` environment
+//! variables it reads (`include_elf!(name)` expands to
+//! `include_bytes!(env!("SP1_ELF_<name>"))`).
 //!
 //! This is the OP Succinct upstream pattern (see `utils/build/` in
-//! `succinctlabs/op-succinct`): the ELF bytes live entirely as compile-time
-//! build artifacts, embedded into the host binary at link time via
-//! `include_elf!()`. There are no committed ELF blobs and no runtime
+//! `succinctlabs/op-succinct`): the ELF bytes are embedded into the host
+//! binary at link time via `include_elf!()` — there is no runtime
 //! `fs::read` of an ELF file.
 //!
-//! Behaviour:
-//! - Defaults to `docker: true` with the pinned SP1 toolchain tag
-//!   (matches the `=6.1.0` version of `sp1-sdk` / `sp1-zkvm` the workspace
-//!   pins to) for bit-for-bit reproducible ELFs. This is the ecosystem
-//!   standard used by op-succinct, sp1-helios, and all other SP1 adopters.
-//!   Docker provides reproducibility by fixing the build environment path
-//!   layout inside the container.
-//! - Honours `SP1_BUILD_DOCKER=false` to fall back to the locally-installed
-//!   `cargo-prove` toolchain instead of the Docker reproducibility builder.
-//!   This is required wherever the Docker daemon is unreachable from inside
-//!   the build — notably `Dockerfile.prover` (no Docker-in-Docker) and the
-//!   `vkeys` CI step, both of which install the pinned `v6.1.0` toolchain via
-//!   `sp1up` and set this variable. `sp1_build` does not read this variable
-//!   itself, so we map it onto `BuildArgs.docker` here.
-//! - Honours `SP1_SKIP_PROGRAM_BUILD=true` for fast iteration: `sp1_build`
-//!   checks this variable internally — when set, it skips the Docker/local
-//!   guest compilation but **still emits** the `SP1_ELF_*` cargo env-vars so
-//!   `include_elf!()` resolves against previously-cached ELFs in
-//!   `target/elf-compilation/...`. Our `main` does not need a separate
-//!   early-return for this flag; the delegation to `sp1_build` is sufficient.
-//!   Useful for `cargo check` once a single full build has populated the
-//!   target directory. (Under `cargo clippy` the `#[cfg(clippy)]` guards in
-//!   `src/lib.rs` already prevent `include_elf!()` from expanding, so no
-//!   build is needed at all.)
-//! - Under `cargo clippy`, the `#[cfg(clippy)]` guards in `src/lib.rs`
-//!   prevent `include_elf!()` from expanding, so no ELF files need to exist.
+//! ELFs MUST be bit-for-bit reproducible, because their SHA-256 and the
+//! derived on-chain verification keys are governance-tracked and must be
+//! identical across every build (including each arch of a multi-arch image).
+//! Two mutually exclusive modes provide that:
+//!
+//! - **Build via the SP1 Docker reproducibility builder** (`docker: true`,
+//!   pinned tag `v6.1.0` matching the `=6.1.0` `sp1-sdk` pin). The container
+//!   fixes the toolchain and path layout, so the ELF is identical regardless
+//!   of host. This is the default and is used wherever a Docker daemon is
+//!   reachable (CI runners, dev machines, the `build-elfs` job). A *local*
+//!   `cargo-prove` build is deliberately NOT offered as a fallback: local
+//!   builds are not reproducible (host arch / paths leak into the ELF), which
+//!   would diverge the vkey.
+//!
+//! - **Embed prebuilt ELFs** via `SP1_PREBUILT_ELF_DIR=<dir>`. When set, this
+//!   script points `include_elf!()` at `<dir>/<program>` and does NOT compile
+//!   anything. This is for environments without a Docker daemon — notably the
+//!   prover image build (`Dockerfile.prover`, no Docker-in-Docker) — where the
+//!   ELFs produced once by the `build-elfs` CI job (`docker: true`) are
+//!   downloaded and injected, so every image embeds the same canonical bytes.
+//!
+//! Under `cargo clippy`, the `#[cfg(clippy)]` guards in `src/lib.rs` prevent
+//! `include_elf!()` from expanding, so no ELF files need to exist.
+
+/// Guest program bin-target names, matching the `include_elf!(...)` arguments
+/// in `src/lib.rs` and the file names produced/consumed by the build-elfs job.
+const PROGRAMS: [&str; 2] = [
+    "world-chain-proof-succinct-range-ethereum",
+    "world-chain-proof-succinct-aggregation",
+];
 
 fn main() {
-    println!("cargo:rerun-if-env-changed=SP1_SKIP_PROGRAM_BUILD");
-    println!("cargo:rerun-if-env-changed=SP1_BUILD_DOCKER");
+    println!("cargo:rerun-if-env-changed=SP1_PREBUILT_ELF_DIR");
 
-    // Use the Docker reproducibility builder by default; allow opting out via
-    // `SP1_BUILD_DOCKER=false` for environments where the Docker daemon is
-    // unreachable (Dockerfile.prover, vkeys CI). Any value other than an
-    // explicit "false" keeps the default Docker build.
-    let use_docker = std::env::var("SP1_BUILD_DOCKER")
-        .map(|v| !v.eq_ignore_ascii_case("false"))
-        .unwrap_or(true);
+    // Fast path for environments without a Docker daemon: embed prebuilt,
+    // reproducibly-built ELFs instead of compiling. `include_elf!(name)` reads
+    // `SP1_ELF_<name>`, so emitting an absolute path here makes it embed those
+    // exact bytes with no guest compile. The files must exist at link time;
+    // `include_bytes!` fails loudly if one is missing (no silent fallback).
+    if let Ok(dir) = std::env::var("SP1_PREBUILT_ELF_DIR") {
+        for program in PROGRAMS {
+            println!("cargo:rustc-env=SP1_ELF_{program}={dir}/{program}");
+        }
+        return;
+    }
 
     // The SP1 guest programs live in their own nested cargo workspace at
     // `proofs/succinct/programs/`, but they have path dependencies that
@@ -86,7 +94,7 @@ fn main() {
         sp1_build::build_program_with_args(
             program_dir,
             sp1_build::BuildArgs {
-                docker: use_docker,
+                docker: true,
                 tag: "v6.1.0".to_string(),
                 ignore_rust_version: true,
                 workspace_directory: Some(workspace_root.clone()),

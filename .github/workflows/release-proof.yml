@@ -59,19 +59,47 @@ jobs:
       VERSION: ${{ steps.extract_version.outputs.VERSION }}
       IS_RELEASE: ${{ steps.extract_version.outputs.IS_RELEASE }}
 
-  # Compute the on-chain verification keys. The SP1 guest ELFs are compiled
-  # inline via sp1_build (include_elf!()) — no separate build step required.
-  vkeys:
-    name: compute vkeys
+  # Build the SP1 guest ELFs ONCE, reproducibly, via the SP1 Docker
+  # reproducibility builder (`cargo prove build --docker`, pinned v6.1.0). Every
+  # downstream consumer (vkeys manifest, prover images, signed binaries) embeds
+  # these exact bytes via SP1_PREBUILT_ELF_DIR, so the released vkey is a single
+  # canonical value derived from one build — no per-job rebuilds, no arch drift.
+  build-elfs:
+    name: build ELFs
     needs: approve-release
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
       - uses: actions/checkout@v6
+      - uses: taiki-e/install-action@just
       - name: Install SP1 toolchain
         run: |
           curl -L https://sp1.succinct.xyz | bash
           ~/.sp1/bin/sp1up --version v6.1.0
           echo "$HOME/.sp1/bin" >> $GITHUB_PATH
+      - name: Build ELFs
+        run: just build-proof-elfs
+      - name: Upload ELFs
+        uses: actions/upload-artifact@v4
+        with:
+          name: proof-elfs
+          path: |
+            proofs/succinct/elf/world-chain-proof-succinct-range-ethereum
+            proofs/succinct/elf/world-chain-proof-succinct-aggregation
+          if-no-files-found: error
+
+  # Compute the on-chain verification keys from the prebuilt reproducible ELFs,
+  # so the manifest vkey matches exactly what the prover images embed.
+  vkeys:
+    name: compute vkeys
+    needs: [approve-release, build-elfs]
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download ELFs
+        uses: actions/download-artifact@v4
+        with:
+          name: proof-elfs
+          path: proofs/succinct/elf
       - uses: taiki-e/install-action@just
       - uses: dtolnay/rust-toolchain@stable
       - uses: arduino/setup-protoc@v3
@@ -80,7 +108,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Compute vkeys
         env:
-          SP1_BUILD_DOCKER: "false"
+          SP1_PREBUILT_ELF_DIR: ${{ github.workspace }}/proofs/succinct/elf
         run: just proof-vkeys --output vkeys.json && cat vkeys.json
       - name: Upload vkeys
         uses: actions/upload-artifact@v4
@@ -92,7 +120,7 @@ jobs:
   build-sp1-prover-image:
     name: build world-chain-prover-sp1 image
     environment: dev
-    needs: approve-release
+    needs: [approve-release, build-elfs]
     strategy:
       fail-fast: false
       matrix:
@@ -104,6 +132,11 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
+      - name: Download ELFs
+        uses: actions/download-artifact@v4
+        with:
+          name: proof-elfs
+          path: proofs/succinct/elf
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -193,7 +226,7 @@ jobs:
   build-service-images:
     name: build ${{ matrix.service.bin }} image
     environment: dev
-    needs: approve-release
+    needs: [approve-release, build-elfs]
     strategy:
       fail-fast: false
       matrix:
@@ -209,6 +242,14 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - uses: actions/checkout@v6
+      # Only sp1-worker embeds the SP1 guest ELFs; other services don't depend
+      # on the elfs crate, so they need no ELF artifact.
+      - name: Download ELFs
+        if: matrix.service.bin == 'sp1-worker'
+        uses: actions/download-artifact@v4
+        with:
+          name: proof-elfs
+          path: proofs/succinct/elf
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -250,7 +291,7 @@ jobs:
 
   build-binaries:
     name: build binaries
-    needs: [extract-version]
+    needs: [extract-version, build-elfs]
     strategy:
       fail-fast: false
       matrix:
@@ -264,11 +305,11 @@ jobs:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
     steps:
       - uses: actions/checkout@v6
-      - name: Install SP1 toolchain
-        run: |
-          curl -L https://sp1.succinct.xyz | bash
-          ~/.sp1/bin/sp1up --version v6.1.0
-          echo "$HOME/.sp1/bin" >> $GITHUB_PATH
+      - name: Download ELFs
+        uses: actions/download-artifact@v4
+        with:
+          name: proof-elfs
+          path: proofs/succinct/elf
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -277,9 +318,11 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
+      # Embed the prebuilt reproducible ELFs (no in-build SP1 compile), so the
+      # signed prover-sp1 binary carries the same canonical vkey as the images.
       - name: Cargo Build Release
         env:
-          SP1_BUILD_DOCKER: "false"
+          SP1_PREBUILT_ELF_DIR: ${{ github.workspace }}/proofs/succinct/elf
         run: |
           cargo build --release --locked -p world-chain-prover-sp1 --target ${{ matrix.target }}
           cargo build --release --locked -p world-chain-prover-nitro --target ${{ matrix.target }}

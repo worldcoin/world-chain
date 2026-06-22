@@ -34,8 +34,41 @@ permissions:
   id-token: write
 
 jobs:
+  # Build the SP1 guest ELFs ONCE, reproducibly, via the SP1 Docker
+  # reproducibility builder (`cargo prove build --docker`, pinned v6.1.0). The
+  # prover-sp1 / sp1-worker image builds cannot do this themselves (no
+  # Docker-in-Docker inside the image build), and a local build would not be
+  # reproducible, so the ELFs are produced here and downloaded into those image
+  # builds as the `proof-elfs` artifact. One build => one canonical vkey shared
+  # by every arch of the multi-arch image.
+  build-elfs:
+    name: build ELFs
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: taiki-e/install-action@just
+      - name: Install SP1 toolchain
+        run: |
+          curl -L https://sp1.succinct.xyz | bash
+          ~/.sp1/bin/sp1up --version v6.1.0
+          echo "$HOME/.sp1/bin" >> $GITHUB_PATH
+      - name: Build ELFs
+        run: just build-proof-elfs
+      - name: Upload ELFs
+        uses: actions/upload-artifact@v4
+        with:
+          name: proof-elfs
+          path: |
+            proofs/succinct/elf/world-chain-proof-succinct-range-ethereum
+            proofs/succinct/elf/world-chain-proof-succinct-aggregation
+          if-no-files-found: error
+
   build-sp1-prover-image:
     name: build world-chain-prover-sp1 image
+    needs: [build-elfs]
     environment: dev
     strategy:
       fail-fast: false
@@ -51,6 +84,11 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref }}
+      - name: Download ELFs
+        uses: actions/download-artifact@v4
+        with:
+          name: proof-elfs
+          path: proofs/succinct/elf
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -143,6 +181,7 @@ jobs:
   # `<repo>-<service>` image so tags do not collide with the `proof` image.
   build-service-images:
     name: build ${{ matrix.service.bin }} image
+    needs: [build-elfs]
     environment: dev
     strategy:
       fail-fast: false
@@ -162,6 +201,14 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref }}
+      # Only sp1-worker embeds the SP1 guest ELFs; the other services don't
+      # depend on the elfs crate, so they need no ELF artifact.
+      - name: Download ELFs
+        if: matrix.service.bin == 'sp1-worker'
+        uses: actions/download-artifact@v4
+        with:
+          name: proof-elfs
+          path: proofs/succinct/elf
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:

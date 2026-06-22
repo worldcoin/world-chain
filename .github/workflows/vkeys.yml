@@ -42,7 +42,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # No SP1_BUILD_DOCKER override: build the guest ELFs via the SP1 Docker
+      # reproducibility builder (the runner has a Docker daemon), so the vkeys
+      # derived here match the committed vkeys.json and the reproducible ELFs
+      # embedded in the prover image by the `build-elfs` job.
       - name: Verify vkeys
-        env:
-          SP1_BUILD_DOCKER: "false"
         run: just verify-proof-vkeys
