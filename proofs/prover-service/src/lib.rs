@@ -72,6 +72,7 @@ mod config;
 mod error;
 mod rpc;
 mod service;
+mod store;
 mod traits;
 mod types;
 
