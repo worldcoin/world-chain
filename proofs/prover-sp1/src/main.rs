@@ -210,19 +210,14 @@ fn sp1_vkeys(args: Sp1VkeysArgs) -> Result<()> {
             anyhow::Ok((range_vkey_commitment, aggregation_vkey))
         })?;
 
-    let range_elf_path = std::env::var("RANGE_ELF_PATH").unwrap_or_default();
-    let agg_elf_path = std::env::var("AGG_ELF_PATH").unwrap_or_default();
-
     let out = serde_json::to_string_pretty(&json!({
         "range_vkey_commitment": range_vkey_commitment,
         "aggregation_vkey": aggregation_vkey,
         "elfs": {
             "world-chain-range-ethereum": {
-                "path": range_elf_path,
                 "sha256": range_elf_sha256,
             },
             "world-chain-aggregation": {
-                "path": agg_elf_path,
                 "sha256": agg_elf_sha256,
             },
         },
