@@ -60,10 +60,12 @@ jobs:
       IS_RELEASE: ${{ steps.extract_version.outputs.IS_RELEASE }}
 
   # Build the SP1 guest ELFs ONCE, reproducibly, via the SP1 Docker
-  # reproducibility builder (`cargo prove build --docker`, pinned v6.1.0). Every
-  # downstream consumer (vkeys manifest, prover images, signed binaries) embeds
-  # these exact bytes via SP1_PREBUILT_ELF_DIR, so the released vkey is a single
-  # canonical value derived from one build — no per-job rebuilds, no arch drift.
+  # reproducibility builder (`cargo prove build --docker`, pinned v6.1.0), and
+  # publish them as the `proof-elfs` artifact. Consumed by the builds that
+  # can't (or shouldn't) run the Docker builder in place: the prover images
+  # (no Docker-in-Docker) and the release binaries (the arm runner would
+  # otherwise emulate the amd64 SP1 builder). The vkeys job builds via
+  # `docker: true` directly — reproducible, so it yields the same bytes.
   build-elfs:
     name: build ELFs
     needs: approve-release
@@ -87,19 +89,15 @@ jobs:
             proofs/succinct/elf/world-chain-proof-succinct-aggregation
           if-no-files-found: error
 
-  # Compute the on-chain verification keys from the prebuilt reproducible ELFs,
-  # so the manifest vkey matches exactly what the prover images embed.
+  # Compute the on-chain verification keys. Builds the guest ELFs via the SP1
+  # Docker reproducibility builder (the runner has Docker), so the manifest vkey
+  # matches the reproducible ELFs embedded in the prover images by `build-elfs`.
   vkeys:
     name: compute vkeys
-    needs: [approve-release, build-elfs]
+    needs: approve-release
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
       - uses: actions/checkout@v6
-      - name: Download ELFs
-        uses: actions/download-artifact@v4
-        with:
-          name: proof-elfs
-          path: proofs/succinct/elf
       - uses: taiki-e/install-action@just
       - uses: dtolnay/rust-toolchain@stable
       - uses: arduino/setup-protoc@v3
@@ -107,8 +105,6 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
       - name: Compute vkeys
-        env:
-          SP1_PREBUILT_ELF_DIR: ${{ github.workspace }}/proofs/succinct/elf
         run: just proof-vkeys --output vkeys.json && cat vkeys.json
       - name: Upload vkeys
         uses: actions/upload-artifact@v4
