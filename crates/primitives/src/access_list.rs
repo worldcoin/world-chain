@@ -31,17 +31,17 @@ pub struct FlashblockAccessList {
     /// All [`AccountChanges`] constructed during the execution of transactions from `min_tx_index` to `max_tx_index`
     pub changes: Vec<AccountChanges>,
     /// The Minimum transaction index in the global indexing of the block.
-    pub min_tx_index: u16,
+    pub min_tx_index: u64,
     /// The Maximum transaction index in the global indexing of the block.
     /// Note: This will always correspond to the System Transaction e.g. Balance Increments
-    pub max_tx_index: u16,
+    pub max_tx_index: u64,
 }
 
 impl FlashblockAccessList {
     /// Creates a flashblock access list sidecar from an upstream block access list.
     pub fn from_block_access_list(
         changes: BlockAccessList,
-        (min_tx_index, max_tx_index): (u16, u16),
+        (min_tx_index, max_tx_index): (u64, u64),
     ) -> Self {
         Self {
             changes,

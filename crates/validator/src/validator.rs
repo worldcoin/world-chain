@@ -176,8 +176,8 @@ impl<Evm: ConfigureEvm + Clone, T: FlashblockTypes<Evm>> FlashblocksBlockValidat
 /// Decodes transactions from raw bytes and recovers signer addresses.
 pub fn decode_transactions_with_indices(
     encoded_transactions: &[Bytes],
-    start_index: u16,
-) -> Result<Vec<(u16, Recovered<OpTransactionSigned>)>, BalExecutorError> {
+    start_index: u64,
+) -> Result<Vec<(u64, Recovered<OpTransactionSigned>)>, BalExecutorError> {
     encoded_transactions
         .iter()
         .enumerate()
@@ -190,7 +190,7 @@ pub fn decode_transactions_with_indices(
                 .map_err(BalExecutorError::other)?;
             let recovered = Recovered::new_unchecked(tx_envelope, signer);
 
-            Ok((start_index + i as u16, recovered))
+            Ok((start_index + i as u64, recovered))
         })
         .collect()
 }

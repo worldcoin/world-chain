@@ -38,13 +38,14 @@ use world_chain_chainspec::WorldChainSpec;
 use world_chain_evm::{
     PayloadBuildStage, WorldChainEvmConfig,
     execution::{
-        bal::{BalExecutorError, BalValidationError, CommittedState},
+        bal::{BalExecutorError, BalValidationError, CommittedState, record_l1_block_bal_reads},
         basic::FlashblocksBlockBuilder,
     },
+    utils::{cache_prestate_from_bundle, extend_flashblock_bundle},
 };
 
 struct BalWorkerOutput<R> {
-    index: u16,
+    index: u64,
     transaction: reth_primitives_traits::Recovered<OpTransactionSigned>,
     result: R,
 }
@@ -133,11 +134,11 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
 
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(finish_state_provider.as_ref()))
-            .with_bundle_prestate(committed_state.bundle.clone())
+            .with_cached_prestate(cache_prestate_from_bundle(&committed_state.bundle))
             .with_bundle_update()
             .with_bal_builder()
             .build();
-        db.set_bal_index(BlockAccessIndex::new(min_tx_index as u64));
+        db.set_bal_index(BlockAccessIndex::new(min_tx_index));
 
         let evm = OpEvmFactory::<OpTx>::default().create_evm(&mut db, ctx.evm_env.clone());
         let mut canonical_executor: OpBlockExecutor<_, OpRethReceiptBuilder, Arc<WorldChainSpec>> =
@@ -172,7 +173,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             );
         }
 
-        let transactions_offset = committed_state.transactions.len() as u16 + 1;
+        let transactions_offset = committed_state.transactions.len() as u64 + 1;
         let transactions =
             decode_transactions_with_indices(&diff.transactions, transactions_offset)?;
 
@@ -196,11 +197,11 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
 
                     let mut worker_state = State::builder()
                         .with_database(StateProviderDatabase::new(state_provider.as_ref()))
-                        .with_bundle_prestate((*fallback_bundle_state).clone())
+                        .with_cached_prestate(cache_prestate_from_bundle(&fallback_bundle_state))
                         .with_bundle_update()
                         .with_bal(received_bal.clone())
                         .build();
-                    worker_state.set_bal_index(BlockAccessIndex::new(index as u64));
+                    worker_state.set_bal_index(BlockAccessIndex::new(index));
 
                     let evm = OpEvmFactory::<OpTx>::default()
                         .create_evm(&mut worker_state, evm_env.clone());
@@ -239,7 +240,10 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             canonical_executor
                 .evm_mut()
                 .db_mut()
-                .set_bal_index(BlockAccessIndex::new(output.index as u64));
+                .set_bal_index(BlockAccessIndex::new(output.index));
+            if !output.transaction.is_deposit() {
+                record_l1_block_bal_reads(canonical_executor.evm_mut().db_mut());
+            }
             let gas_output = canonical_executor.commit_transaction(output.result);
 
             if !output.transaction.is_deposit() {
@@ -256,7 +260,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
         canonical_executor
             .evm_mut()
             .db_mut()
-            .set_bal_index(BlockAccessIndex::new(max_tx_index as u64));
+            .set_bal_index(BlockAccessIndex::new(max_tx_index));
 
         let finalize_started = Instant::now();
         let (evm, execution_result) = canonical_executor.finish()?;
@@ -296,15 +300,12 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
         ctx.attempt_metrics
             .record_stage_duration(PayloadBuildStage::MergeTransitions, merge_started.elapsed());
 
-        let flattened = world_chain_evm::utils::flatten_reverts(&db.bundle_state.reverts);
-        db.bundle_state.reverts = flattened;
+        let bundle = extend_flashblock_bundle(&committed_state.bundle, db.take_bundle());
 
         let state_root_started = Instant::now();
-        let state_root_handle = ctx.state_root_strategy.prepare(
-            client.clone(),
-            parent_hash,
-            db.bundle_state.clone(),
-        )?;
+        let state_root_handle =
+            ctx.state_root_strategy
+                .prepare(client.clone(), parent_hash, bundle.clone())?;
         let StateRootResult {
             state_root,
             trie_updates,
@@ -330,7 +331,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             ctx.parent,
             transactions,
             &execution_result,
-            &db.bundle_state,
+            &bundle,
             finish_state_provider.as_ref(),
             state_root,
             None,
@@ -340,7 +341,6 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             block_assembly_started.elapsed(),
         );
 
-        let bundle = db.take_bundle();
         let block = RecoveredBlock::new_unhashed(block, senders);
 
         ctx.attempt_metrics
@@ -437,7 +437,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
 
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(state_provider.as_ref()))
-            .with_bundle_prestate(bundle_state)
+            .with_cached_prestate(cache_prestate_from_bundle(&bundle_state))
             .with_bundle_update()
             .build();
 
@@ -460,6 +460,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             executor,
             committed_state.transactions_iter().cloned().collect(),
             ctx.chain_spec.clone(),
+            bundle_state,
         );
 
         // Apply pre-execution changes on the first flashblock (no prior committed state).
@@ -475,7 +476,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
         let basefee = ctx.evm_env.block_env.basefee;
         let transactions = decode_transactions_with_indices(
             &diff.transactions,
-            committed_state.transactions_iter().count() as u16,
+            committed_state.transactions_iter().count() as u64,
         )?;
 
         let mut fees = U256::ZERO;
@@ -517,12 +518,10 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
         ctx.attempt_metrics
             .record_stage_duration(PayloadBuildStage::MergeTransitions, merge_started.elapsed());
 
-        let flattened = world_chain_evm::utils::flatten_reverts(&db.bundle_state.reverts);
-        db.bundle_state.reverts = flattened;
+        let bundle = extend_flashblock_bundle(&committed_state.bundle, db.take_bundle());
 
         let state_root_started = Instant::now();
-        let state_root_handle =
-            state_root_strategy.prepare(client, parent_hash, db.bundle_state.clone())?;
+        let state_root_handle = state_root_strategy.prepare(client, parent_hash, bundle.clone())?;
         let StateRootResult {
             state_root,
             trie_updates,
@@ -552,7 +551,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
                 builder.inner.parent,
                 transactions,
                 &execution_result,
-                &db.bundle_state,
+                &bundle,
                 finish_state_provider.as_ref(),
                 state_root,
                 None,
@@ -562,7 +561,6 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             block_assembly_started.elapsed(),
         );
 
-        let bundle = db.take_bundle();
         let block = RecoveredBlock::new_unhashed(block, senders);
 
         ctx.attempt_metrics

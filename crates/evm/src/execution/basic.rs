@@ -38,6 +38,7 @@ pub struct FlashblocksBlockBuilder<'a, N: NodePrimitives, Evm, R: OpReceiptBuild
         OpBlockAssembler<WorldChainSpec>,
         N,
     >,
+    pub committed_bundle: BundleState,
 }
 
 impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, N, Evm> {
@@ -48,6 +49,7 @@ impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, N, Evm> {
         executor: OpBlockExecutor<Evm, OpRethReceiptBuilder, WorldChainSpec>,
         transactions: Vec<Recovered<N::SignedTx>>,
         chain_spec: Arc<WorldChainSpec>,
+        committed_bundle: BundleState,
     ) -> Self {
         Self {
             inner: BasicBlockBuilder {
@@ -57,6 +59,7 @@ impl<'a, N: NodePrimitives, Evm> FlashblocksBlockBuilder<'a, N, Evm> {
                 parent,
                 transactions,
             },
+            committed_bundle,
         }
     }
 }
@@ -176,12 +179,12 @@ where
         //
         // This keeps `bundle_state.reverts.len() == 1`, which matches the expectation that this
         // bundle represents a single block worth of changes even if we built multiple payloads.
-        let flattened = crate::utils::flatten_reverts(&db.bundle_state.reverts);
-        db.bundle_state.reverts = flattened;
+        let bundle =
+            crate::utils::extend_flashblock_bundle(&self.committed_bundle, db.take_bundle());
 
         // calculate the state root
         let state_root_started = Instant::now();
-        let hashed_state = state.hashed_post_state(&db.bundle_state);
+        let hashed_state = state.hashed_post_state(&bundle);
         let (state_root, trie_updates) = state
             .state_root_with_updates(hashed_state.clone())
             .map_err(BlockExecutionError::other)?;
@@ -205,7 +208,7 @@ where
             self.inner.parent,
             transactions,
             &result,
-            &db.bundle_state,
+            &bundle,
             &state,
             state_root,
             None,
@@ -225,7 +228,7 @@ where
                 block,
                 block_access_list: None,
             },
-            db.take_bundle(),
+            bundle,
         ))
     }
 }

@@ -5,7 +5,13 @@ use alloy_op_evm::{
     block::receipt_builder::OpReceiptBuilder, post_exec::PostExecEvm,
 };
 use op_alloy_consensus::OpReceipt;
-use op_revm::{OpHaltReason, OpSpecId};
+use op_revm::{
+    OpHaltReason, OpSpecId,
+    constants::{
+        DA_FOOTPRINT_GAS_SCALAR_SLOT, ECOTONE_L1_BLOB_BASE_FEE_SLOT, ECOTONE_L1_FEE_SCALARS_SLOT,
+        L1_BASE_FEE_SLOT, L1_BLOCK_CONTRACT, L1_OVERHEAD_SLOT, L1_SCALAR_SLOT,
+    },
+};
 use reth_evm::{
     Database, Evm,
     block::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
@@ -36,6 +42,28 @@ use revm::database::states::bundle_state::BundleRetention;
 use std::{sync::Arc, time::Instant};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_primitives::access_list::FlashblockAccessList;
+
+const L1_BLOCK_BAL_READ_SLOTS: [U256; 6] = [
+    L1_BASE_FEE_SLOT,
+    L1_OVERHEAD_SLOT,
+    L1_SCALAR_SLOT,
+    ECOTONE_L1_BLOB_BASE_FEE_SLOT,
+    ECOTONE_L1_FEE_SCALARS_SLOT,
+    DA_FOOTPRINT_GAS_SCALAR_SLOT,
+];
+
+/// Records the OP L1 block predeploy slots that OP fee logic reads outside the
+/// transaction result state.
+pub fn record_l1_block_bal_reads<DB>(db: &mut State<DB>) {
+    let Some(bal_builder) = &mut db.bal_state.bal_builder else {
+        return;
+    };
+
+    let account = bal_builder.accounts.entry(L1_BLOCK_CONTRACT).or_default();
+    for slot in L1_BLOCK_BAL_READ_SLOTS {
+        account.storage.storage.entry(slot).or_default();
+    }
+}
 
 #[derive(thiserror::Error, Debug, serde::Serialize)]
 pub enum BalValidationError {
@@ -96,6 +124,7 @@ pub struct BalBlockBuilder<'a, R: OpReceiptBuilder, N: NodePrimitives, Evm> {
     pub assembler: OpBlockAssembler<WorldChainSpec>,
     pub access_list_sender: crossbeam_channel::Sender<FlashblockAccessList>,
     pub counter: BlockAccessIndexCounter,
+    pub committed_bundle: BundleState,
 }
 
 impl<'a, DB, R, N: NodePrimitives, E> BalBlockBuilder<'a, R, N, E>
@@ -115,17 +144,18 @@ where
         transactions: Vec<Recovered<N::SignedTx>>,
         chain_spec: Arc<WorldChainSpec>,
         tx: crossbeam_channel::Sender<FlashblockAccessList>,
+        committed_bundle: BundleState,
     ) -> Self {
         let start_index = if transactions.is_empty() {
             0
         } else {
-            transactions.len() as u16 + 1
+            transactions.len() as u64 + 1
         };
 
         executor
             .evm_mut()
             .db_mut()
-            .set_bal_index(BlockAccessIndex::new(start_index as u64));
+            .set_bal_index(BlockAccessIndex::new(start_index));
         let counter = BlockAccessIndexCounter::new(start_index);
 
         trace!(target: "bal_executor", parent = %parent.hash(), block_access_index = %start_index, "Setting initial database index for block builder");
@@ -138,15 +168,16 @@ where
             assembler: OpBlockAssembler::new(chain_spec),
             access_list_sender: tx,
             counter,
+            committed_bundle,
         }
     }
 
     pub fn prepare_database(&mut self) -> Result<(), BlockExecutionError> {
-        let length = self.transactions.len() as u16;
+        let length = self.transactions.len() as u64;
         let db = self.executor.evm_mut().db_mut();
         let current = self.counter.inc();
         trace!(target: "bal_executor", block_access_index = %current,  receipts_length = %length, "Preparing database for next transaction with index");
-        db.set_bal_index(BlockAccessIndex::new(current as u64));
+        db.set_bal_index(BlockAccessIndex::new(current));
         Ok(())
     }
 }
@@ -188,6 +219,9 @@ where
         f: impl FnOnce(&<Self::Executor as BlockExecutor>::Result) -> CommitChanges,
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, recovered) = tx.into_parts();
+        if !recovered.is_deposit() {
+            record_l1_block_bal_reads(self.executor.evm_mut().db_mut());
+        }
         if let Some(gas_used) = self
             .executor
             .execute_transaction_with_commit_condition((tx_env, &recovered), f)?
@@ -266,12 +300,12 @@ where
         //
         // This keeps `bundle_state.reverts.len() == 1`, which matches the expectation that this
         // bundle represents a single block worth of changes even if we built multiple payloads.
-        let flattened = crate::utils::flatten_reverts(&db.bundle_state.reverts);
-        db.bundle_state.reverts = flattened;
+        let bundle =
+            crate::utils::extend_flashblock_bundle(&self.committed_bundle, db.take_bundle());
 
         // calculate the state root
         let state_root_started = Instant::now();
-        let hashed_state = state.hashed_post_state(&db.bundle_state);
+        let hashed_state = state.hashed_post_state(&bundle);
         let (state_root, trie_updates) = state
             .state_root_with_updates(hashed_state.clone())
             .map_err(BlockExecutionError::other)?;
@@ -294,7 +328,7 @@ where
             self.parent,
             transactions,
             &result,
-            &db.bundle_state,
+            &bundle,
             &state,
             state_root,
             None,
@@ -305,8 +339,6 @@ where
         );
 
         let block = RecoveredBlock::new_unhashed(block, senders);
-
-        let bundle = db.take_bundle();
 
         let block_access_list = db
             .take_built_alloy_bal()
@@ -335,24 +367,24 @@ where
 
 /// Simple counter to track sub pre-confirmation block access index bounds.
 pub struct BlockAccessIndexCounter {
-    current_index: u16,
-    start_index: u16,
+    current_index: u64,
+    start_index: u64,
 }
 
 impl BlockAccessIndexCounter {
-    pub fn new(start_index: u16) -> Self {
+    pub fn new(start_index: u64) -> Self {
         Self {
             current_index: start_index,
             start_index,
         }
     }
 
-    pub fn inc(&mut self) -> u16 {
+    pub fn inc(&mut self) -> u64 {
         self.current_index += 1;
         self.current_index
     }
 
-    pub fn finish(self) -> (u16, u16) {
+    pub fn finish(self) -> (u64, u64) {
         (self.start_index, self.current_index)
     }
 }
@@ -374,9 +406,9 @@ pub struct CommittedState<R: OpReceiptBuilder + Default = OpRethReceiptBuilder> 
     /// The bundle state accumulated so far from the State Transitions
     pub bundle: BundleState,
     /// Ordered receipts of previous committed transactions.
-    pub receipts: Vec<(u16, R::Receipt)>,
+    pub receipts: Vec<(u64, R::Receipt)>,
     /// Ordered transactions which have been executed
-    pub transactions: Vec<(u16, Recovered<R::Transaction>)>,
+    pub transactions: Vec<(u64, Recovered<R::Transaction>)>,
 }
 
 impl<R> CommittedState<R>
@@ -436,7 +468,7 @@ where
                 .recovered_block
                 .clone_transactions_recovered()
                 .enumerate()
-                .map(|(index, tx)| (index as u16, tx))
+                .map(|(index, tx)| (index as u64, tx))
                 .collect();
 
             let receipts: Vec<_> = executed_block
@@ -446,7 +478,7 @@ where
                 .iter()
                 .cloned()
                 .enumerate()
-                .map(|(index, r)| (index as u16, r))
+                .map(|(index, r)| (index as u64, r))
                 .collect();
 
             Ok(Self {

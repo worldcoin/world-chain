@@ -21,7 +21,7 @@ use world_chain_evm::{
         bal::{BalBlockBuilder, CommittedState},
         basic::FlashblocksBlockBuilder,
     },
-    utils::estimated_da_size_bytes,
+    utils::{cache_prestate_from_bundle, estimated_da_size_bytes},
 };
 
 use alloy_consensus::{BlockHeader, Header};
@@ -395,7 +395,7 @@ where
     if bal_enabled {
         let mut state = State::builder()
             .with_database(db)
-            .with_bundle_prestate(bundle_state)
+            .with_cached_prestate(cache_prestate_from_bundle(&bundle_state))
             .with_bundle_update()
             .with_bal_builder()
             .build();
@@ -429,7 +429,7 @@ where
     } else {
         let mut state = State::builder()
             .with_database(db)
-            .with_bundle_prestate(bundle_state)
+            .with_cached_prestate(cache_prestate_from_bundle(&bundle_state))
             .with_bundle_update()
             .build();
 
@@ -702,6 +702,7 @@ where
         committed_state.transactions_iter().cloned().collect(),
         ctx.spec().clone().into(),
         tx,
+        committed_state.bundle.clone(),
     );
 
     Ok(builder)
@@ -750,6 +751,7 @@ where
         executor,
         committed_state.transactions_iter().cloned().collect(),
         ctx.spec().clone().into(),
+        committed_state.bundle.clone(),
     );
 
     Ok(builder)
