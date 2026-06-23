@@ -23,6 +23,7 @@ alloy-primitives = { workspace = true, features = ["serde"] }
 # misc
 anyhow.workspace = true
 async-trait.workspace = true
+chrono.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
 jsonrpsee.workspace = true
