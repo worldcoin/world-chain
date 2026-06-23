@@ -435,6 +435,13 @@ create index proof_backend_jobs_lease_idx
     where status = 'requested';
 ```
 
+## Transaction Isolation
+
+Every request or worker mutation runs inside an explicit Postgres transaction. The current store
+uses `READ COMMITTED` for these transactions, including queue claims that use
+`for update skip locked`. If a future workflow needs a stronger isolation level, the Rust transaction
+helper can add another isolation variant and the affected call sites can opt into it explicitly.
+
 For future SP1 split ranges, add:
 
 ```sql
@@ -449,8 +456,13 @@ and remove or replace `unique (proof_id, phase)`.
 `locked_until` is a durable lease timestamp. A row is available to claim when:
 
 ```sql
-locked_until is null or locked_until < now()
+locked_until is null or locked_until < $now
 ```
+
+`$now`, `$locked_until`, and `$next_poll_at` should be computed in Rust, for example from
+`chrono::Utc::now()` plus the configured lease or poll duration. Runtime status values should be
+bound from the Rust enums, such as `ProofStatus::Queued.as_str()` and
+`BackendProofJobStatus::Requested.as_str()`, rather than embedded as SQL literals.
 
 It prevents two workers from owning the same state transition after the database transaction that
 claimed the row has committed.
@@ -471,8 +483,8 @@ select proof_id
 from proof_jobs
 where backend = $1
   and (
-    status = 'queued'
-    or (status = 'starting' and locked_until < now())
+    status = $queued_status
+    or (status = $starting_status and locked_until < $now)
   )
 order by created_at
 for update skip locked
@@ -483,11 +495,11 @@ Then:
 
 ```sql
 update proof_jobs
-set status = 'starting',
-    locked_until = now() + $start_lease_timeout,
+set status = $starting_status,
+    locked_until = $locked_until,
     lease_token = $lease_token,
     start_attempts = start_attempts + 1,
-    updated_at = now()
+    updated_at = $now
 where proof_id = $proof_id;
 ```
 
@@ -524,9 +536,9 @@ Claiming backend work should happen inside a transaction:
 select id
 from proof_backend_jobs
 where backend = $1
-  and status = 'requested'
-  and next_poll_at <= now()
-  and (locked_until is null or locked_until < now())
+  and status = $requested_status
+  and next_poll_at <= $now
+  and (locked_until is null or locked_until < $now)
 order by next_poll_at
 for update skip locked
 limit 1;
@@ -536,9 +548,9 @@ Then:
 
 ```sql
 update proof_backend_jobs
-set locked_until = now() + $backend_job_lease_timeout,
+set locked_until = $locked_until,
     lease_token = $lease_token,
-    updated_at = now()
+    updated_at = $now
 where id = $backend_job_id;
 ```
 
@@ -548,14 +560,14 @@ If `advance()` returns `Noop`, clear the lease and schedule the next poll:
 update proof_backend_jobs
 set locked_until = null,
     lease_token = null,
-    next_poll_at = now() + $poll_interval,
-    updated_at = now()
+    next_poll_at = $next_poll_at,
+    updated_at = $now
 where id = $backend_job_id
   and lease_token = $lease_token;
 ```
 
 If the worker dies while advancing backend work, it never clears the lease. After
-`locked_until < now()`, another worker can claim and retry that backend job.
+`locked_until < $now`, another worker can claim and retry that backend job.
 
 ## Why Lease Tokens Are Needed
 
@@ -568,7 +580,7 @@ Example:
 
    ```text
    status = Starting
-   locked_until = now() + 10 minutes
+   locked_until = $now + 10 minutes
    lease_token = A
    ```
 
@@ -577,7 +589,7 @@ Example:
 
    ```text
    status = Starting
-   locked_until = now() + 10 minutes
+   locked_until = $now + 10 minutes
    lease_token = B
    ```
 
@@ -589,14 +601,14 @@ Every update should therefore include the lease token, and the SQL update should
 
 ```sql
 update proof_jobs
-set status = 'failed',
+set status = $failed_status,
     failure_reason = $reason,
     locked_until = null,
     lease_token = null,
-    finished_at = now(),
-    updated_at = now()
+    finished_at = $now,
+    updated_at = $now
 where proof_id = $proof_id
-  and status = 'starting'
+  and status = $starting_status
   and lease_token = $lease_token;
 ```
 
@@ -671,8 +683,8 @@ Workers can wake up periodically, but the database should decide which backend j
 `next_poll_at` allows per-job scheduling and backoff:
 
 ```sql
-where status = 'requested'
-  and next_poll_at <= now()
+where status = $requested_status
+  and next_poll_at <= $now
 ```
 
 Without `next_poll_at`, every worker wake-up would scan or poll every pending SP1 backend job. That
