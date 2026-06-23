@@ -1,3 +1,4 @@
+use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
     range::WorldRangeProofPublicValues, types::AggregationInputs, witness::WorldRangeWitnessData,
@@ -65,4 +66,21 @@ pub trait WorldSuccinctProver {
         &self,
         request: AggregationProofRequest,
     ) -> Result<AggregationProofArtifact, Self::Error>;
+
+    /// Whether this prover can create durable external proof requests.
+    fn supports_async_requests(&self) -> bool {
+        false
+    }
+
+    /// Request a range proof from an external backend without waiting for completion.
+    fn request_range(&self, request: RangeProofRequest) -> Result<B256, Self::Error>;
+
+    /// Poll a previously requested range proof.
+    fn poll_range(&self, id: B256) -> Result<Option<RangeProofArtifact>, Self::Error>;
+
+    /// Request an aggregation proof from an external backend without waiting for completion.
+    fn request_aggregation(&self, request: AggregationProofRequest) -> Result<B256, Self::Error>;
+
+    /// Poll a previously requested aggregation proof.
+    fn poll_aggregation(&self, id: B256) -> Result<Option<AggregationProofArtifact>, Self::Error>;
 }

@@ -1,8 +1,8 @@
 //! Proof protocol types for World Chain OP Succinct Lite fault proofs.
 //!
-//! The prover follows the OP Stack schedule through Jovian. Tropo and Strato are
+//! The prover follows the OP Stack schedule through Karst. Tropo and Strato are
 //! World-only hardforks and are carried in the proof config/hash instead of being
-//! represented as OP Karst or Interop activations.
+//! represented as later OP activations.
 
 use core::str::FromStr;
 
@@ -107,6 +107,9 @@ pub struct WorldHardforkConfig {
     /// Jovian activation timestamp.
     #[serde(default, alias = "jovianTime")]
     pub jovian_time: Option<u64>,
+    /// Karst activation timestamp.
+    #[serde(default, alias = "karstTime")]
+    pub karst_time: Option<u64>,
     /// Tropo activation timestamp. This is a World-only fork.
     #[serde(default, alias = "tropoTime")]
     pub tropo_time: Option<u64>,
@@ -131,6 +134,7 @@ impl WorldHardforkConfig {
             holocene_time: timestamp(chain_spec, WorldChainHardfork::Holocene),
             isthmus_time: timestamp(chain_spec, WorldChainHardfork::Isthmus),
             jovian_time: timestamp(chain_spec, WorldChainHardfork::Jovian),
+            karst_time: timestamp(chain_spec, WorldChainHardfork::Karst),
             tropo_time: timestamp(chain_spec, WorldChainHardfork::Tropo),
             strato_time: timestamp(chain_spec, WorldChainHardfork::Strato),
         }
@@ -153,13 +157,14 @@ impl WorldHardforkConfig {
             WorldChainHardfork::Holocene => timestamp_condition(self.holocene_time),
             WorldChainHardfork::Isthmus => timestamp_condition(self.isthmus_time),
             WorldChainHardfork::Jovian => timestamp_condition(self.jovian_time),
+            WorldChainHardfork::Karst => timestamp_condition(self.karst_time),
             WorldChainHardfork::Tropo => timestamp_condition(self.tropo_time),
             WorldChainHardfork::Strato => timestamp_condition(self.strato_time),
             _ => ForkCondition::Never,
         }
     }
 
-    /// Returns the OP-compatible activation condition through Jovian only.
+    /// Returns the OP-compatible activation condition through Karst.
     pub fn op_activation(&self, fork: OpHardfork) -> ForkCondition {
         match fork {
             OpHardfork::Bedrock => self.activation(WorldChainHardfork::Bedrock),
@@ -171,7 +176,7 @@ impl WorldHardforkConfig {
             OpHardfork::Holocene => self.activation(WorldChainHardfork::Holocene),
             OpHardfork::Isthmus => self.activation(WorldChainHardfork::Isthmus),
             OpHardfork::Jovian => self.activation(WorldChainHardfork::Jovian),
-            OpHardfork::Karst => ForkCondition::Never,
+            OpHardfork::Karst => self.activation(WorldChainHardfork::Karst),
             _ => ForkCondition::Never,
         }
     }
@@ -187,6 +192,7 @@ impl WorldHardforkConfig {
         [
             WorldChainHardfork::Strato,
             WorldChainHardfork::Tropo,
+            WorldChainHardfork::Karst,
             WorldChainHardfork::Jovian,
             WorldChainHardfork::Isthmus,
             WorldChainHardfork::Holocene,
@@ -227,9 +233,9 @@ fn timestamp_condition(timestamp: Option<u64>) -> ForkCondition {
 
 /// World-specific proof spec id.
 ///
-/// This mirrors OP `OpSpecId` through Jovian. Tropo and Strato intentionally do not map to OP
-/// Karst/Interop schedule activations, but they do use the Osaka EVM revision like the Base
-/// post-Jovian proof implementation.
+/// This mirrors OP `OpSpecId` through Karst. Tropo and Strato intentionally do not introduce
+/// additional OP schedule activations, but they do use the Osaka EVM revision like the Base
+/// post-Karst proof implementation.
 #[repr(u8)]
 #[derive(
     Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize,
@@ -255,6 +261,8 @@ pub enum WorldSpecId {
     /// Jovian spec id.
     #[default]
     JOVIAN,
+    /// Karst spec id.
+    KARST,
     /// Tropo spec id.
     TROPO,
     /// Strato spec id.
@@ -277,6 +285,7 @@ impl WorldSpecId {
             WorldChainHardfork::Holocene => Self::HOLOCENE,
             WorldChainHardfork::Isthmus => Self::ISTHMUS,
             WorldChainHardfork::Jovian => Self::JOVIAN,
+            WorldChainHardfork::Karst => Self::KARST,
             WorldChainHardfork::Tropo => Self::TROPO,
             WorldChainHardfork::Strato => Self::STRATO,
             _ => Self::LATEST,
@@ -290,14 +299,14 @@ impl WorldSpecId {
             Self::CANYON => SpecId::SHANGHAI,
             Self::ECOTONE | Self::FJORD | Self::GRANITE | Self::HOLOCENE => SpecId::CANCUN,
             Self::ISTHMUS | Self::JOVIAN => SpecId::PRAGUE,
-            Self::TROPO | Self::STRATO => SpecId::OSAKA,
+            Self::KARST | Self::TROPO | Self::STRATO => SpecId::OSAKA,
         }
     }
 
     /// Compatibility bridge for EVM factories that still accept `OpSpecId`.
     ///
-    /// Returning `KARST` for Tropo/Strato selects the Osaka EVM revision in `op-revm`; it must not
-    /// be used as evidence that OP Karst is active in the World hardfork schedule.
+    /// Returning `KARST` for Tropo/Strato selects the Osaka EVM revision in `op-revm`; the World
+    /// fork schedule still distinguishes those forks from the OP Karst activation.
     pub const fn into_op_revm_spec(self) -> OpSpecId {
         match self {
             Self::BEDROCK => OpSpecId::BEDROCK,
@@ -309,7 +318,7 @@ impl WorldSpecId {
             Self::HOLOCENE => OpSpecId::HOLOCENE,
             Self::ISTHMUS => OpSpecId::ISTHMUS,
             Self::JOVIAN => OpSpecId::JOVIAN,
-            Self::TROPO | Self::STRATO => OpSpecId::KARST,
+            Self::KARST | Self::TROPO | Self::STRATO => OpSpecId::KARST,
         }
     }
 
@@ -345,6 +354,7 @@ impl FromStr for WorldSpecId {
             name::HOLOCENE => Ok(Self::HOLOCENE),
             name::ISTHMUS => Ok(Self::ISTHMUS),
             name::JOVIAN => Ok(Self::JOVIAN),
+            name::KARST => Ok(Self::KARST),
             name::TROPO => Ok(Self::TROPO),
             name::STRATO => Ok(Self::STRATO),
             _ => Err(UnknownHardfork),
@@ -364,6 +374,7 @@ impl From<WorldSpecId> for &'static str {
             WorldSpecId::HOLOCENE => name::HOLOCENE,
             WorldSpecId::ISTHMUS => name::ISTHMUS,
             WorldSpecId::JOVIAN => name::JOVIAN,
+            WorldSpecId::KARST => name::KARST,
             WorldSpecId::TROPO => name::TROPO,
             WorldSpecId::STRATO => name::STRATO,
         }
@@ -390,6 +401,8 @@ pub mod name {
     pub const ISTHMUS: &str = "Isthmus";
     /// Jovian spec name.
     pub const JOVIAN: &str = "Jovian";
+    /// Karst spec name.
+    pub const KARST: &str = "Karst";
     /// Tropo spec name.
     pub const TROPO: &str = "Tropo";
     /// Strato spec name.
@@ -407,43 +420,50 @@ mod tests {
     fn parses_snake_and_camel_world_fork_times() {
         let snake: WorldHardforkConfig = serde_json::from_value(json!({
             "jovian_time": 10,
-            "tropo_time": 20,
-            "strato_time": 30
+            "karst_time": 20,
+            "tropo_time": 30,
+            "strato_time": 40
         }))
         .unwrap();
         let camel: WorldHardforkConfig = serde_json::from_value(json!({
             "jovianTime": 10,
-            "tropoTime": 20,
-            "stratoTime": 30
+            "karstTime": 20,
+            "tropoTime": 30,
+            "stratoTime": 40
         }))
         .unwrap();
 
         assert_eq!(snake, camel);
-        assert_eq!(snake.tropo_time, Some(20));
-        assert_eq!(snake.strato_time, Some(30));
+        assert_eq!(snake.karst_time, Some(20));
+        assert_eq!(snake.tropo_time, Some(30));
+        assert_eq!(snake.strato_time, Some(40));
     }
 
     #[test]
-    fn world_schedule_activates_tropo_and_strato() {
+    fn world_schedule_activates_karst_tropo_and_strato() {
         let config = WorldHardforkConfig {
             jovian_time: Some(10),
-            tropo_time: Some(20),
-            strato_time: Some(30),
+            karst_time: Some(20),
+            tropo_time: Some(30),
+            strato_time: Some(40),
             ..Default::default()
         };
 
         assert_eq!(config.active_fork_at(1, 19), WorldChainHardfork::Jovian);
-        assert_eq!(config.active_fork_at(1, 20), WorldChainHardfork::Tropo);
-        assert_eq!(config.active_fork_at(1, 30), WorldChainHardfork::Strato);
-        assert_eq!(config.proof_spec_at(1, 30), WorldSpecId::STRATO);
+        assert_eq!(config.active_fork_at(1, 20), WorldChainHardfork::Karst);
+        assert_eq!(config.active_fork_at(1, 30), WorldChainHardfork::Tropo);
+        assert_eq!(config.active_fork_at(1, 40), WorldChainHardfork::Strato);
+        assert_eq!(config.proof_spec_at(1, 20), WorldSpecId::KARST);
+        assert_eq!(config.proof_spec_at(1, 40), WorldSpecId::STRATO);
     }
 
     #[test]
-    fn op_schedule_stops_at_jovian_for_world() {
+    fn op_schedule_includes_karst_for_world() {
         let config = WorldHardforkConfig {
             jovian_time: Some(10),
-            tropo_time: Some(20),
-            strato_time: Some(30),
+            karst_time: Some(20),
+            tropo_time: Some(30),
+            strato_time: Some(40),
             ..Default::default()
         };
 
@@ -453,14 +473,16 @@ mod tests {
         );
         assert_eq!(
             config.op_activation(OpHardfork::Karst),
-            ForkCondition::Never
+            ForkCondition::Timestamp(20)
         );
     }
 
     #[test]
-    fn world_specs_map_post_jovian_to_osaka_without_activating_op_karst() {
+    fn world_specs_map_karst_and_world_specific_forks_to_osaka() {
+        assert_eq!(WorldSpecId::KARST.into_eth_spec(), SpecId::OSAKA);
         assert_eq!(WorldSpecId::TROPO.into_eth_spec(), SpecId::OSAKA);
         assert_eq!(WorldSpecId::STRATO.into_eth_spec(), SpecId::OSAKA);
+        assert_eq!(WorldSpecId::KARST.into_op_revm_spec(), OpSpecId::KARST);
         assert_eq!(WorldSpecId::TROPO.into_op_revm_spec(), OpSpecId::KARST);
         assert!(WorldSpecId::STRATO.is_enabled_in(WorldSpecId::TROPO));
     }

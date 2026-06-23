@@ -102,6 +102,7 @@ pub fn range_hardfork_config(config: &WorldHardforkConfig) -> WorldRangeHardfork
         holocene_time: config.holocene_time,
         isthmus_time: config.isthmus_time,
         jovian_time: config.jovian_time,
+        karst_time: config.karst_time,
         tropo_time: config.tropo_time,
         strato_time: config.strato_time,
     }

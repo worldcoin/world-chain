@@ -2,12 +2,7 @@
 //!
 //! This crate is a **production-only** dependency: it runs the SP1 Docker
 //! build at compile time (via `build.rs`) and bakes the resulting ELF bytes
-//! into the binary with `sp1_sdk::include_elf!()`.  Only binaries that
-//! genuinely need embedded ELFs (e.g. `world-chain-sp1-worker`) should
-//! depend on it directly.  Host-utility crates that only need the ELF path
-//! at runtime (CI, testing) should NOT depend on this crate; load ELFs from
-//! `RANGE_ELF_PATH` / `AGG_ELF_PATH` env vars instead via
-//! `world_chain_proof_succinct_host_utils::env_prover::EnvSuccinctProver::new`.
+//! into the binary with `sp1_sdk::include_elf!()`.
 
 #[cfg(clippy)]
 use sp1_sdk::Elf;

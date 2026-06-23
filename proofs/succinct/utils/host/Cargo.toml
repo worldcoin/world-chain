@@ -9,7 +9,7 @@ repository.workspace = true
 
 [features]
 # SP1 zkVM proving via the sp1-sdk environment provers.
-sp1 = ["dep:sp1-sdk", "dep:bincode", "dep:alloy-sol-types"]
+sp1 = ["dep:sp1-sdk", "dep:bincode", "dep:alloy-sol-types", "dep:world-chain-proof-succinct-elfs"]
 
 [dependencies]
 alloy-primitives = { workspace = true, features = ["serde"] }
@@ -24,6 +24,7 @@ tokio.workspace = true
 tracing.workspace = true
 world-chain-proof-core.workspace = true
 world-chain-proof-kona-host-utils.workspace = true
+world-chain-proof-succinct-elfs = { workspace = true, optional = true }
 world-chain-proof-succinct-utils.workspace = true
 alloy-sol-types = { workspace = true, optional = true }
 bincode = { version = "1", optional = true }

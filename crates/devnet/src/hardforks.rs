@@ -5,7 +5,7 @@ use reth_chainspec::{EthereumHardfork, ForkCondition};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 
 /// Canonical hardfork order for local World Chain devnets.
-pub const WORLD_CHAIN_DEVNET_HARDFORK_ORDER: [WorldChainHardfork; 11] = [
+pub const WORLD_CHAIN_DEVNET_HARDFORK_ORDER: [WorldChainHardfork; 12] = [
     WorldChainHardfork::Bedrock,
     WorldChainHardfork::Regolith,
     WorldChainHardfork::Canyon,
@@ -15,14 +15,15 @@ pub const WORLD_CHAIN_DEVNET_HARDFORK_ORDER: [WorldChainHardfork; 11] = [
     WorldChainHardfork::Holocene,
     WorldChainHardfork::Isthmus,
     WorldChainHardfork::Jovian,
+    WorldChainHardfork::Karst,
     WorldChainHardfork::Tropo,
     WorldChainHardfork::Strato,
 ];
 
 /// Typed World Chain hardfork selection for local devnets.
 ///
-/// Defaults match current local-dev expectations: all OP/World hardforks
-/// through Jovian are active at genesis, while the World-specific Tropo and
+/// Defaults match the post-Karst local-dev baseline: all OP/World hardforks
+/// through Karst are active at genesis, while the World-specific Tropo and
 /// Strato forks are disabled until explicitly selected.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorldChainHardforkConfig {
@@ -31,7 +32,7 @@ pub struct WorldChainHardforkConfig {
 
 impl Default for WorldChainHardforkConfig {
     fn default() -> Self {
-        Self::through(WorldChainHardfork::Jovian)
+        Self::through(WorldChainHardfork::Karst)
     }
 }
 
@@ -125,6 +126,14 @@ impl WorldChainHardforkConfig {
                 ForkCondition::Never
             },
         );
+        spec.set_fork(
+            EthereumHardfork::Osaka,
+            if self.active.contains(&WorldChainHardfork::Karst) {
+                ForkCondition::Timestamp(0)
+            } else {
+                ForkCondition::Never
+            },
+        );
 
         spec
     }
@@ -133,14 +142,33 @@ impl WorldChainHardforkConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_chainspec::Hardforks;
 
     #[test]
-    fn default_local_devnet_hardforks_stop_at_jovian() {
+    fn default_local_devnet_hardforks_stop_at_karst() {
         let hardforks = WorldChainHardforkConfig::default();
 
         assert!(hardforks.is_active(WorldChainHardfork::Jovian));
+        assert!(hardforks.is_active(WorldChainHardfork::Karst));
         assert!(!hardforks.is_active(WorldChainHardfork::Tropo));
         assert!(!hardforks.is_active(WorldChainHardfork::Strato));
+    }
+
+    #[test]
+    fn karst_local_devnet_activates_osaka_without_world_specific_forks() {
+        let hardforks = WorldChainHardforkConfig::through(WorldChainHardfork::Karst);
+        let spec = hardforks.apply_to(WorldChainSpec::dev().as_ref().clone());
+
+        assert!(hardforks.is_active(WorldChainHardfork::Karst));
+        assert!(!hardforks.is_active(WorldChainHardfork::Tropo));
+        assert_eq!(
+            spec.fork(WorldChainHardfork::Karst),
+            ForkCondition::Timestamp(0)
+        );
+        assert_eq!(
+            spec.fork(EthereumHardfork::Osaka),
+            ForkCondition::Timestamp(0)
+        );
     }
 
     #[test]
