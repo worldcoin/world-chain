@@ -22,8 +22,10 @@ use world_chain_proposer::{
     ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
 };
 use world_chain_prover_service::{
+    BackendProofState, BackendUpdate, LeaseToken, LeasedBackendProofWork, LeasedProofRequest,
     ProofBackend, ProofData, ProofJobQueue, ProofJobQueueError, ProofRequest, ProofRequestError,
-    ProofRequestId, ProofRequester, ProofResponse, ProofStatus, ProverService, ProverServiceConfig,
+    ProofRequestId, ProofRequester, ProofResponse, ProofStatus, ProofSubmissionLease,
+    ProverService, ProverServiceConfig,
 };
 
 pub const BLOCK_INTERVAL: u64 = 10;
@@ -518,7 +520,7 @@ impl ProofJobBackend for FakeProofBackend {
         self.lane
     }
 
-    fn prove(&self, request: &ProofRequest) -> anyhow::Result<ProofData> {
+    fn start(&self, request: &ProofRequest) -> anyhow::Result<BackendUpdate> {
         let id = request.id();
         let mut attempts = self.attempts.lock().expect("fake backend mutex poisoned");
         let count = attempts.entry(id).or_default();
@@ -528,7 +530,7 @@ impl ProofJobBackend for FakeProofBackend {
         }
         *count += 1;
 
-        Ok(match self.lane {
+        Ok(BackendUpdate::Complete(match self.lane {
             ProofBackend::Sp1 => ProofData::Sp1 {
                 public_values: request.root_claim.as_slice().to_vec().into(),
                 proof: vec![0x51, request.l2_block_number as u8].into(), // mock proof
@@ -537,7 +539,15 @@ impl ProofJobBackend for FakeProofBackend {
                 attestation: request.l1_head.as_slice().to_vec().into(),
                 signature: vec![0x7e, request.l2_block_number as u8].into(), // mock signature
             },
-        })
+        }))
+    }
+
+    fn advance(
+        &self,
+        _request: &ProofRequest,
+        _state: BackendProofState,
+    ) -> anyhow::Result<BackendUpdate> {
+        anyhow::bail!("fake backend does not support durable backend jobs")
     }
 }
 
@@ -547,11 +557,12 @@ pub struct SharedProverService {
 }
 
 impl SharedProverService {
-    pub fn new(
+    pub async fn connect(
+        database_url: &str,
         config: ProverServiceConfig,
-    ) -> Result<Self, world_chain_prover_service::InvalidConfigError> {
+    ) -> Result<Self, world_chain_prover_service::ProverServiceInitError> {
         Ok(Self {
-            service: Arc::new(ProverService::new(config)?),
+            service: Arc::new(ProverService::connect(database_url, config).await?),
         })
     }
 }
@@ -585,19 +596,64 @@ impl ProofJobQueue for SharedProverService {
     async fn get_next_proof(
         &self,
         backend: ProofBackend,
-    ) -> Result<Option<ProofRequest>, ProofJobQueueError> {
+    ) -> Result<Option<LeasedProofRequest>, ProofJobQueueError> {
         self.service.get_next_proof(backend).await
     }
 
-    async fn submit_proof(&self, proof: ProofResponse) -> Result<(), ProofJobQueueError> {
-        self.service.submit_proof(proof).await
+    async fn submit_backend_proof_state(
+        &self,
+        proof_id: ProofRequestId,
+        backend_proof_state: BackendProofState,
+        lease_token: LeaseToken,
+    ) -> Result<(), ProofJobQueueError> {
+        self.service
+            .submit_backend_proof_state(proof_id, backend_proof_state, lease_token)
+            .await
+    }
+
+    async fn get_next_backend_proof(
+        &self,
+        backend: ProofBackend,
+    ) -> Result<Option<LeasedBackendProofWork>, ProofJobQueueError> {
+        self.service.get_next_backend_proof(backend).await
+    }
+
+    async fn complete_backend_proof_job(
+        &self,
+        backend_job_id: i64,
+        lease_token: LeaseToken,
+        next_update: BackendUpdate,
+    ) -> Result<(), ProofJobQueueError> {
+        self.service
+            .complete_backend_proof_job(backend_job_id, lease_token, next_update)
+            .await
+    }
+
+    async fn fail_backend_proof_job(
+        &self,
+        backend_job_id: i64,
+        reason: String,
+        lease_token: LeaseToken,
+    ) -> Result<(), ProofJobQueueError> {
+        self.service
+            .fail_backend_proof_job(backend_job_id, reason, lease_token)
+            .await
+    }
+
+    async fn submit_proof(
+        &self,
+        proof: ProofResponse,
+        lease: ProofSubmissionLease,
+    ) -> Result<(), ProofJobQueueError> {
+        self.service.submit_proof(proof, lease).await
     }
 
     async fn fail_proof(
         &self,
         proof_id: ProofRequestId,
         reason: String,
+        lease_token: LeaseToken,
     ) -> Result<(), ProofJobQueueError> {
-        self.service.fail_proof(proof_id, reason).await
+        self.service.fail_proof(proof_id, reason, lease_token).await
     }
 }

@@ -1,6 +1,10 @@
 use crate::{
     error::{ProofJobQueueError, ProofRequestError},
-    types::{ProofBackend, ProofRequest, ProofRequestId, ProofResponse, ProofStatus},
+    types::{
+        BackendProofState, BackendUpdate, LeaseToken, LeasedBackendProofWork, LeasedProofRequest,
+        ProofBackend, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
+        ProofSubmissionLease,
+    },
 };
 use async_trait::async_trait;
 
@@ -33,7 +37,7 @@ pub trait ProofRequester {
 /// new proof requests and submits proof responses.
 #[async_trait]
 pub trait ProofJobQueue {
-    /// Look for a new proof request to process on the given backend.
+    /// Look for a new proof request to start on the given backend.
     ///
     /// Returns `None` when no work is available. Returned jobs are leased:
     /// a job that is neither submitted nor failed before the lease expires
@@ -41,10 +45,47 @@ pub trait ProofJobQueue {
     async fn get_next_proof(
         &self,
         backend: ProofBackend,
-    ) -> Result<Option<ProofRequest>, ProofJobQueueError>;
+    ) -> Result<Option<LeasedProofRequest>, ProofJobQueueError>;
 
-    /// Submit a proof response to the `prover-service`.
-    async fn submit_proof(&self, proof: ProofResponse) -> Result<(), ProofJobQueueError>;
+    /// Persist durable backend work created while starting a proof job.
+    async fn submit_backend_proof_state(
+        &self,
+        proof_id: ProofRequestId,
+        backend_proof_state: BackendProofState,
+        lease_token: LeaseToken,
+    ) -> Result<(), ProofJobQueueError>;
+
+    /// Lease durable backend work that is due for polling or advancement.
+    async fn get_next_backend_proof(
+        &self,
+        backend: ProofBackend,
+    ) -> Result<Option<LeasedBackendProofWork>, ProofJobQueueError>;
+
+    /// Apply an update produced while advancing a durable backend job.
+    async fn complete_backend_proof_job(
+        &self,
+        backend_job_id: i64,
+        lease_token: LeaseToken,
+        next_update: BackendUpdate,
+    ) -> Result<(), ProofJobQueueError>;
+
+    /// Report that advancing a durable backend job failed for this attempt.
+    ///
+    /// The backend job is re-scheduled until its attempts are exhausted, after
+    /// which it and its parent proof job are marked as permanently failed.
+    async fn fail_backend_proof_job(
+        &self,
+        backend_job_id: i64,
+        reason: String,
+        lease_token: LeaseToken,
+    ) -> Result<(), ProofJobQueueError>;
+
+    /// Submit a final proof response to the `prover-service`.
+    async fn submit_proof(
+        &self,
+        proof: ProofResponse,
+        lease: ProofSubmissionLease,
+    ) -> Result<(), ProofJobQueueError>;
 
     /// Report that proving failed for the given job.
     ///
@@ -54,5 +95,6 @@ pub trait ProofJobQueue {
         &self,
         proof_id: ProofRequestId,
         reason: String,
+        lease_token: LeaseToken,
     ) -> Result<(), ProofJobQueueError>;
 }
