@@ -815,3 +815,109 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::account_post_state;
+    use alloy_consensus::constants::KECCAK_EMPTY;
+    use alloy_eip7928::{
+        AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
+        StorageChange,
+    };
+    use alloy_primitives::{Address, Bytes, U256, keccak256};
+    use reth_primitives_traits::Account;
+    use revm::database::AccountStatus;
+
+    fn addr() -> Address {
+        Address::with_last_byte(0x42)
+    }
+
+    #[test]
+    fn pure_read_returns_none() {
+        // An account that only appears as a storage read produces no post-state change.
+        let changes = AccountChanges::new(addr()).with_storage_read(U256::from(1));
+        assert!(account_post_state(&changes, None).is_none());
+    }
+
+    #[test]
+    fn storage_only_change_inherits_prestate_account_info() {
+        let pre = Account {
+            nonce: 7,
+            balance: U256::from(1000),
+            bytecode_hash: Some(keccak256([0x60, 0x00])),
+        };
+        let changes = AccountChanges::new(addr()).with_storage_change(SlotChanges::new(
+            U256::from(3),
+            vec![StorageChange::new(
+                BlockAccessIndex::new(1),
+                U256::from(0xbeef),
+            )],
+        ));
+
+        let account = account_post_state(&changes, Some(pre)).expect("changed account");
+        let info = account.info.expect("non-empty account keeps info");
+        // Unchanged fields come from the parent account.
+        assert_eq!(info.nonce, 7);
+        assert_eq!(info.balance, U256::from(1000));
+        assert_eq!(info.code_hash, pre.bytecode_hash.unwrap());
+        assert_eq!(
+            account.storage.get(&U256::from(3)).unwrap().present_value,
+            U256::from(0xbeef)
+        );
+        assert!(!account.status.was_destroyed());
+    }
+
+    #[test]
+    fn latest_balance_and_nonce_change_wins_regardless_of_order() {
+        // Changes are not guaranteed sorted; selection is by block access index, not position.
+        let changes = AccountChanges::new(addr())
+            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(5), U256::from(70)))
+            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(2), U256::from(30)))
+            .with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 1))
+            .with_nonce_change(NonceChange::new(BlockAccessIndex::new(9), 4));
+
+        let account = account_post_state(&changes, None).expect("changed account");
+        let info = account.info.expect("non-empty account keeps info");
+        assert_eq!(info.balance, U256::from(70));
+        assert_eq!(info.nonce, 4);
+    }
+
+    #[test]
+    fn code_change_sets_keccak_of_new_code() {
+        let code = Bytes::from_static(&[0x60, 0x01, 0x60, 0x02]);
+        let changes = AccountChanges::new(addr())
+            .with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 1))
+            .with_code_change(CodeChange::new(BlockAccessIndex::new(1), code.clone()));
+
+        let account = account_post_state(&changes, None).expect("changed account");
+        let info = account.info.expect("contract keeps info");
+        assert_eq!(info.code_hash, keccak256(&code));
+        assert!(!account.status.was_destroyed());
+    }
+
+    #[test]
+    fn account_that_ends_empty_is_encoded_as_destroyed() {
+        // A balance drained to zero with no nonce/code leaves an empty account (EIP-158), which is
+        // pruned from the trie. It must be encoded as destroyed with no info so the leaf is removed.
+        let changes = AccountChanges::new(addr())
+            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::ZERO));
+
+        let account = account_post_state(&changes, None).expect("changed account");
+        assert!(account.info.is_none());
+        assert_eq!(account.status, AccountStatus::Destroyed);
+        assert!(account.status.was_destroyed());
+    }
+
+    #[test]
+    fn empty_prestate_account_with_code_is_kept() {
+        // Newly deployed contract: no parent account, code change makes it non-empty.
+        let code = Bytes::from_static(&[0xfe]);
+        let changes = AccountChanges::new(addr())
+            .with_code_change(CodeChange::new(BlockAccessIndex::new(1), code.clone()));
+
+        let account = account_post_state(&changes, None).expect("created contract");
+        let info = account.info.expect("contract is non-empty");
+        assert_eq!(info.code_hash, keccak256(&code));
+        assert_ne!(info.code_hash, KECCAK_EMPTY);
+    }
+}
