@@ -2,11 +2,9 @@
   "aggregation_vkey": "0x00201f2e25cbd892cefc0078e2baa67b571ec0726060a82a238d3725aca67228",
   "elfs": {
     "world-chain-aggregation": {
-      "path": "",
       "sha256": "2c0ce4c7e62888a609aeaf82071c6fa02adf59fe06750f8fe51c1ebf1014ef23"
     },
     "world-chain-range-ethereum": {
-      "path": "",
       "sha256": "ada7b4ef9649a87787564509d58d6e7fde35e08ee2060f71ac979f86edda2a39"
     }
   },

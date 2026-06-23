@@ -14,21 +14,12 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
-[features]
-# Embed the SP1 guest ELFs at compile time via `sp1_sdk::include_elf!()`.
-# Enabled by default for production binaries. Dependents that only need the
-# library (e.g. devnet, which loads ELFs at runtime from env vars) can opt
-# out with `default-features = false` to avoid triggering the SP1 build.
-default = ["embedded-elfs"]
-embedded-elfs = ["dep:world-chain-proof-succinct-elfs"]
-
 [dependencies]
 # workspace
 world-chain-chainspec.workspace = true
 world-chain-proof-core.workspace = true
 world-chain-proof-kona-host-utils.workspace = true
 world-chain-proof-protocol.workspace = true
-world-chain-proof-succinct-elfs = { workspace = true, optional = true }
 world-chain-proof-succinct-host-utils = { workspace = true, features = ["sp1"] }
 world-chain-proof-succinct-utils.workspace = true
 world-chain-proof-worker.workspace = true

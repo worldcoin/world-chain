@@ -43,9 +43,7 @@ use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 use world_chain_challenger::{AlloyChallengerClient, ChallengerConfig, WorldChainChallenger};
 use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
 use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
-use world_chain_proof_succinct_host_utils::env_prover::{
-    EnvSuccinctProver, SP1ProofMode, Sp1ProverKind,
-};
+use world_chain_proof_succinct_host_utils::prover::{SP1ProofMode, Sp1ProverKind, SuccinctProver};
 use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig};
 use world_chain_proofs::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
 use world_chain_proposer::{AlloyProofSystemClient, ProposerConfig, WorldChainProposer};
@@ -2570,6 +2568,16 @@ async fn start_prover_service() -> Result<(ProverServiceTask, String)> {
 /// It leases SP1 jobs from the prover-service at `prover_service_url`, builds range witnesses
 /// from the devnet L1/L2 RPCs (the L1 dev chain doubles as the beacon endpoint, matching the
 /// op-node configuration), proves them with the selected backend, and submits the proofs back.
+///
+/// # Environment variables
+///
+/// This function loads guest ELFs at **runtime** from two required environment variables:
+/// - `RANGE_ELF_PATH` — path to the compiled SP1 range program ELF.
+/// - `AGG_ELF_PATH` — path to the compiled SP1 aggregation program ELF.
+///
+/// These must be set before enabling `DEVNET_SP1_WORKER_PROVER`. The standalone
+/// `world-chain-sp1-worker` binary embeds ELFs at **compile time** (via
+/// `world_chain_proof_succinct_elfs`) and does not require these variables.
 async fn start_sp1_worker(
     l1_rpc_url: &str,
     l2_rpc_url: &str,
@@ -2589,35 +2597,9 @@ async fn start_sp1_worker(
     )
     .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?;
 
-    // ELFs are loaded at runtime from the `RANGE_ELF_PATH` and `AGG_ELF_PATH`
-    // environment variables.  Production binaries that embed ELFs at compile time
-    // (e.g. `sp1-worker`) use `EnvSuccinctProver::new_with_elfs` with
-    // `world_chain_proof_succinct_elfs`.
-    //
-    // Validate the paths here so the error surfaces as a clear `Result::Err` with
-    // actionable guidance rather than a panic inside `spawn_blocking`.
-    for (var, label) in [("RANGE_ELF_PATH", "range"), ("AGG_ELF_PATH", "aggregation")] {
-        match std::env::var(var) {
-            Err(_) => {
-                return Err(eyre!(
-                    "{var} is not set — the devnet SP1 worker loads guest ELFs at runtime. \
-                     Set {var} to the path of the compiled {label} SP1 guest ELF, or build \
-                     `world-chain-sp1-worker` with the `embedded-elfs` feature for \
-                     compile-time embedding."
-                ));
-            }
-            Ok(ref path) if !std::path::Path::new(path).exists() => {
-                return Err(eyre!(
-                    "{var}={path} does not exist — check the path to the {label} SP1 guest ELF"
-                ));
-            }
-            Ok(_) => {}
-        }
-    }
-
-    // `EnvSuccinctProver` owns its own runtime, so build it off the async runtime.
+    // `SuccinctProver` owns its own runtime, so build it off the async runtime.
     let prover =
-        tokio::task::spawn_blocking(move || EnvSuccinctProver::new(kind, SP1ProofMode::Groth16))
+        tokio::task::spawn_blocking(move || SuccinctProver::new(kind, SP1ProofMode::Groth16))
             .await
             .wrap_err("SP1 prover setup task panicked")?
             .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
