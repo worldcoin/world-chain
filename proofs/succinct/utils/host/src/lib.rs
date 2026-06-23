@@ -13,7 +13,7 @@ use world_chain_proof_core::{
 use world_chain_proof_succinct_utils::{AggregationProofRequest, RangeProofRequest};
 
 #[cfg(feature = "sp1")]
-pub mod env_prover;
+pub mod prover;
 pub mod validity;
 
 /// Error returned while constructing host-side proof config.

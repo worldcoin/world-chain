@@ -558,7 +558,7 @@ pub static CHAIN_SPEC: LazyLock<WorldChainSpec> = LazyLock::new(|| {
                 GenesisAccount::default().with_balance(U256::from(100_000_000_000_000_000u64)),
             )]),
         )
-        .jovian_activated()
+        .karst_activated()
         .build()
 });
 

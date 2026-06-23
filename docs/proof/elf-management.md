@@ -29,11 +29,10 @@ We use the OP Succinct upstream pattern (see [succinctlabs/op-succinct/utils/bui
 
 Net effect: the ELFs are never on disk for the host crate to find — they're statically baked
 into every binary that links `world-chain-proof-succinct-elfs` (e.g. `world-chain-sp1-worker`).
-There is no committed ELF blob and no manifest of SHA-256s. The `proof` CLI and the devnet
-SP1 worker load ELFs at runtime from `RANGE_ELF_PATH` / `AGG_ELF_PATH` env vars via
-`EnvSuccinctProver::new`. The on-chain governance anchor is the SP1 vkey computed from the
-embedded bytes (`just proof-vkeys`), which is exactly what we register on
-`OPSuccinctFaultDisputeGame`.
+There is committed ELF blob and manifest of SHA-256s. The on-chain governance anchor is the
+SP1 vkey computed from the embedded bytes (`just proof-vkeys`), which is exactly what we
+register on `OPSuccinctFaultDisputeGame` (name subject to change once World Chain ships its own
+proof system).
 
 ## Reproducibility
 

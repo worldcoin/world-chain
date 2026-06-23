@@ -14,21 +14,12 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
-[features]
-# Embed the SP1 guest ELFs at compile time via `sp1_sdk::include_elf!()`.
-# Enabled by default for production binaries. Dependents that only need the
-# library (e.g. devnet, which loads ELFs at runtime from env vars) can opt
-# out with `default-features = false` to avoid triggering the SP1 build.
-default = ["embedded-elfs"]
-embedded-elfs = ["dep:world-chain-proof-succinct-elfs"]
-
 [dependencies]
 # workspace
 world-chain-chainspec.workspace = true
 world-chain-proof-core.workspace = true
 world-chain-proof-kona-host-utils.workspace = true
 world-chain-proof-protocol.workspace = true
-world-chain-proof-succinct-elfs = { workspace = true, optional = true }
 world-chain-proof-succinct-host-utils = { workspace = true, features = ["sp1"] }
 world-chain-proof-succinct-utils.workspace = true
 world-chain-proof-worker.workspace = true
@@ -42,6 +33,8 @@ alloy-sol-types.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
+reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
+serde_cbor = "0.11"
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "signal", "time"] }
@@ -49,6 +42,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
+testcontainers.workspace = true
+testcontainers-modules.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 world-chain-proofs.workspace = true

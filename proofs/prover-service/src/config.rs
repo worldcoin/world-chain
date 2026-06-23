@@ -10,8 +10,8 @@ pub const DEFAULT_MAX_ATTEMPTS: u32 = 3;
 /// Default maximum number of requests queued per backend.
 pub const DEFAULT_MAX_QUEUE_LEN: usize = 1024;
 
-/// Default maximum number of finished (completed or failed) jobs retained.
-pub const DEFAULT_MAX_FINISHED_JOBS: usize = 1024;
+/// Default delay before polling an unchanged backend job again.
+pub const DEFAULT_BACKEND_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Configuration for the `prover-service`.
 #[derive(Debug, Clone)]
@@ -24,9 +24,8 @@ pub struct ProverServiceConfig {
     pub max_attempts: u32,
     /// Maximum number of requests queued per backend.
     pub max_queue_len: usize,
-    /// Maximum number of finished (completed or failed) jobs retained
-    /// in memory; the oldest are evicted first.
-    pub max_finished_jobs: usize,
+    /// Delay before a backend job that returned `Noop` becomes pollable again.
+    pub backend_poll_interval: Duration,
 }
 
 impl ProverServiceConfig {
@@ -44,9 +43,9 @@ impl ProverServiceConfig {
                 "max_queue_len must be greater than zero",
             ));
         }
-        if self.max_finished_jobs == 0 {
+        if self.backend_poll_interval.is_zero() {
             return Err(InvalidConfigError(
-                "max_finished_jobs must be greater than zero",
+                "backend_poll_interval must be greater than zero",
             ));
         }
         Ok(())
@@ -59,7 +58,7 @@ impl Default for ProverServiceConfig {
             lease_timeout: DEFAULT_LEASE_TIMEOUT,
             max_attempts: DEFAULT_MAX_ATTEMPTS,
             max_queue_len: DEFAULT_MAX_QUEUE_LEN,
-            max_finished_jobs: DEFAULT_MAX_FINISHED_JOBS,
+            backend_poll_interval: DEFAULT_BACKEND_POLL_INTERVAL,
         }
     }
 }

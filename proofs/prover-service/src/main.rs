@@ -23,6 +23,10 @@ struct Cli {
     #[arg(long, env = "LISTEN_ADDR", default_value = "0.0.0.0:8080")]
     listen_addr: SocketAddr,
 
+    /// Postgres connection URL for durable prover-service state.
+    #[arg(long, env = "PROVER_SERVICE_DATABASE_URL")]
+    database_url: String,
+
     /// Seconds a worker holds a job lease before it is re-queued.
     #[arg(long, env = "LEASE_TIMEOUT_SECONDS", default_value_t = 1800)]
     lease_timeout_seconds: u64,
@@ -35,9 +39,9 @@ struct Cli {
     #[arg(long, env = "MAX_QUEUE_LEN", default_value_t = 1024)]
     max_queue_len: usize,
 
-    /// Maximum number of finished jobs retained in memory.
-    #[arg(long, env = "MAX_FINISHED_JOBS", default_value_t = 1024)]
-    max_finished_jobs: usize,
+    /// Seconds to wait before polling an unchanged backend job again.
+    #[arg(long, env = "BACKEND_POLL_INTERVAL_SECONDS", default_value_t = 30)]
+    backend_poll_interval_seconds: u64,
 }
 
 #[tokio::main]
@@ -53,9 +57,13 @@ async fn main() -> Result<()> {
         lease_timeout: Duration::from_secs(cli.lease_timeout_seconds),
         max_attempts: cli.max_attempts,
         max_queue_len: cli.max_queue_len,
-        max_finished_jobs: cli.max_finished_jobs,
+        backend_poll_interval: Duration::from_secs(cli.backend_poll_interval_seconds),
     };
-    let service = Arc::new(ProverService::new(config).context("invalid prover-service config")?);
+    let service = Arc::new(
+        ProverService::connect(&cli.database_url, config)
+            .await
+            .context("failed to initialize postgres-backed prover-service")?,
+    );
     let (addr, handle) = start_rpc_server(cli.listen_addr, service)
         .await
         .context("failed to start prover-service RPC server")?;

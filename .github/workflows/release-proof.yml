@@ -248,6 +248,81 @@ jobs:
             type=raw,value=${{ needs.extract-version.outputs.VERSION }}
             type=sha
 
+  # nitro-worker is Linux x86_64 only (requires AF_VSOCK), so it is built
+  # outside the multi-arch service matrix.
+  build-nitro-worker-image:
+    name: build nitro-worker image
+    environment: dev
+    needs: approve-release
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: linux/amd64
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ github.repository }}-nitro-worker
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          dockerfile: Dockerfile.prover
+          build_args: |
+            PROVER_PACKAGE=world-chain-nitro-worker
+            PROVER_BIN=nitro-worker
+          digest_artifact_prefix: digests-nitro-worker
+
+  merge-nitro-worker-image:
+    name: merge nitro-worker image manifest
+    needs: [extract-version, build-nitro-worker-image]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Merge multi-arch manifest
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ github.repository }}-nitro-worker
+          digest_artifact_prefix: digests-nitro-worker
+          digest_artifact_pattern: digests-nitro-worker-linux-*
+          tags: |
+            type=raw,value=${{ needs.extract-version.outputs.VERSION }}
+            type=sha
+
+  # nitro-worker-enclave uses its own Dockerfile and is x86_64 only.
+  build-nitro-worker-enclave-image:
+    name: build nitro-worker-enclave image
+    environment: dev
+    needs: approve-release
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: linux/amd64
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ github.repository }}-nitro-worker-enclave
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          dockerfile: proofs/nitro/Dockerfile
+          digest_artifact_prefix: digests-nitro-worker-enclave
+
+  merge-nitro-worker-enclave-image:
+    name: merge nitro-worker-enclave image manifest
+    needs: [extract-version, build-nitro-worker-enclave-image]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Merge multi-arch manifest
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ github.repository }}-nitro-worker-enclave
+          digest_artifact_prefix: digests-nitro-worker-enclave
+          tags: |
+            type=raw,value=${{ needs.extract-version.outputs.VERSION }}
+            type=sha
+
   build-binaries:
     name: build binaries
     needs: [extract-version]

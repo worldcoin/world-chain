@@ -44,5 +44,5 @@ jobs:
 
       - name: Verify vkeys
         env:
-          SP1_BUILD_DOCKER: "false"
+          SP1_BUILD_DOCKER: "true"
         run: just verify-proof-vkeys
