@@ -188,6 +188,34 @@ contract TestFeeEscrow is Test {
     function test_BurnInvalid_RevertsInsufficientBurn() public {
         deal(address(escrow), 1 ether);
         vm.warp(block.timestamp + MINIMUM_INTERVAL + 1);
+
+        // Force `expectedBurn` far above any plausible swap output so the burn is
+        // deterministically insufficient, independent of the live pool/oracle spread.
+        // A very low WLD price inflates the required WLD-per-ETH well beyond what a
+        // 1 ETH swap can deliver.
+        vm.mockCall(
+            ETH_USD_ORACLE,
+            abi.encodeWithSelector(IChainLinkPriceFeed.priceFeed.selector),
+            abi.encode(
+                IChainLinkPriceFeed.PriceFeedData({
+                    price: int192(2500e8),
+                    timestamp: uint32(block.timestamp),
+                    expiresAt: uint32(block.timestamp + 1 hours)
+                })
+            )
+        );
+        vm.mockCall(
+            WLD_USD_ORACLE,
+            abi.encodeWithSelector(IChainLinkPriceFeed.priceFeed.selector),
+            abi.encode(
+                IChainLinkPriceFeed.PriceFeedData({
+                    price: int192(0.01e8),
+                    timestamp: uint32(block.timestamp),
+                    expiresAt: uint32(block.timestamp + 1 hours)
+                })
+            )
+        );
+
         burnExecutor.setShouldRepay(false);
         vm.prank(address(burnExecutor));
         vm.expectPartialRevert(FeeEscrow.InsufficientBurn.selector);

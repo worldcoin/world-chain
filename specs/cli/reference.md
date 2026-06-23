@@ -231,6 +231,298 @@ Flashblocks:
           
           [env: FLASHBLOCKS_FORCE_RECEIVE_PEERS=]
 
+Kona Consensus Node:
+      --kona.enabled
+          Enable the in-process Kona consensus node.
+          
+          When enabled, the world-chain binary acts as both the execution and consensus client.
+
+      --kona.l1-rpc-url <kona.l1_rpc_url>
+          L1 execution RPC URL for fetching deposits, batches, and finalization signals
+          
+          [env: KONA_L1_RPC_URL=]
+          [default: http://localhost:8545]
+
+      --kona.l1-beacon-url <kona.l1_beacon_url>
+          L1 beacon API URL for fetching blob data (required post-Dencun)
+          
+          [env: KONA_L1_BEACON_URL=]
+          [default: http://localhost:5052]
+
+      --kona.l1-trust-rpc
+          Trust the L1 RPC without additional receipt verification
+
+Kona P2P:
+      --p2p.no-discovery
+          Disable Discv5 (node discovery)
+          
+          [env: KONA_NODE_P2P_NO_DISCOVERY=]
+
+      --p2p.priv.path <kona.priv_path>
+          Read the hex-encoded 32-byte private key for the peer ID from this txt file. Created if not already exists. Important to persist to keep the same network identity after restarting
+          
+          [env: KONA_NODE_P2P_PRIV_PATH=]
+
+      --p2p.priv.raw <kona.private_key>
+          The hex-encoded 32-byte private key for the peer ID
+          
+          [env: KONA_NODE_P2P_PRIV_RAW=]
+
+      --p2p.advertise.ip <kona.advertise_ip>
+          IP address or DNS hostname to advertise to external peers from Discv5. Uses `p2p.listen.ip` if not set. Setting this disables dynamic ENR updates
+          
+          [env: KONA_NODE_P2P_ADVERTISE_IP=]
+
+      --p2p.advertise.tcp <kona.advertise_tcp_port>
+          TCP port to advertise. Same as `p2p.listen.tcp` if not set
+          
+          [env: KONA_NODE_P2P_ADVERTISE_TCP_PORT=]
+
+      --p2p.advertise.udp <kona.advertise_udp_port>
+          UDP port to advertise. Same as `p2p.listen.udp` if not set
+          
+          [env: KONA_NODE_P2P_ADVERTISE_UDP_PORT=]
+
+      --p2p.listen.ip <kona.listen_ip>
+          IP address or DNS hostname to bind LibP2P/Discv5 to
+          
+          [env: KONA_NODE_P2P_LISTEN_IP=]
+          [default: 0.0.0.0]
+
+      --p2p.listen.tcp <kona.listen_tcp_port>
+          TCP port to bind LibP2P to. Any available system port if set to 0
+          
+          [env: KONA_NODE_P2P_LISTEN_TCP_PORT=]
+          [default: 9222]
+
+      --p2p.listen.udp <kona.listen_udp_port>
+          UDP port to bind Discv5 to. Same as TCP port if left 0
+          
+          [env: KONA_NODE_P2P_LISTEN_UDP_PORT=]
+          [default: 9223]
+
+      --p2p.peers.lo <kona.peers_lo>
+          Low-tide peer count. The node actively searches for new peer connections if below this
+          
+          [env: KONA_NODE_P2P_PEERS_LO=]
+          [default: 20]
+
+      --p2p.peers.hi <kona.peers_hi>
+          High-tide peer count. The node starts pruning peer connections after reaching this
+          
+          [env: KONA_NODE_P2P_PEERS_HI=]
+          [default: 30]
+
+      --p2p.peers.grace <kona.peers_grace>
+          Grace period (seconds) to keep a newly connected peer around
+          
+          [env: KONA_NODE_P2P_PEERS_GRACE=]
+          [default: 30]
+
+      --p2p.gossip.mesh.d <kona.gossip_mesh_d>
+          GossipSub topic stable mesh target count (desired outbound degree)
+          
+          [env: KONA_NODE_P2P_GOSSIP_MESH_D=]
+          [default: 8]
+
+      --p2p.gossip.mesh.lo <kona.gossip_mesh_dlo>
+          GossipSub topic stable mesh low watermark
+          
+          [env: KONA_NODE_P2P_GOSSIP_MESH_DLO=]
+          [default: 6]
+
+      --p2p.gossip.mesh.dhi <kona.gossip_mesh_dhi>
+          GossipSub topic stable mesh high watermark
+          
+          [env: KONA_NODE_P2P_GOSSIP_MESH_DHI=]
+          [default: 12]
+
+      --p2p.gossip.mesh.dlazy <kona.gossip_mesh_dlazy>
+          GossipSub gossip target (announcements of IHAVE)
+          
+          [env: KONA_NODE_P2P_GOSSIP_MESH_DLAZY=]
+          [default: 6]
+
+      --p2p.gossip.mesh.floodpublish
+          Publish messages to all known peers on the topic, outside of the mesh
+          
+          [env: KONA_NODE_P2P_GOSSIP_FLOOD_PUBLISH=]
+
+      --p2p.scoring <kona.scoring>
+          Peer scoring strategy: none or light
+          
+          [env: KONA_NODE_P2P_SCORING=]
+          [default: light]
+
+      --p2p.ban.peers
+          Ban peers based on their score
+          
+          [env: KONA_NODE_P2P_BAN_PEERS=]
+
+      --p2p.ban.threshold <kona.ban_threshold>
+          Score threshold below which peers are banned
+          
+          [env: KONA_NODE_P2P_BAN_THRESHOLD=]
+          [default: -100]
+
+      --p2p.ban.duration <kona.ban_duration>
+          Duration in minutes to ban a peer for
+          
+          [env: KONA_NODE_P2P_BAN_DURATION=]
+          [default: 60]
+
+      --p2p.discovery.interval <kona.discovery_interval>
+          Interval in seconds to find peers using the discovery service
+          
+          [env: KONA_NODE_P2P_DISCOVERY_INTERVAL=]
+          [default: 5]
+
+      --p2p.discovery.randomize <kona.discovery_randomize>
+          Seconds to wait before removing a random peer from discovery to rotate the peer set
+          
+          [env: KONA_NODE_P2P_DISCOVERY_RANDOMIZE=]
+
+      --p2p.bootstore <kona.bootstore>
+          Directory to store the bootstore
+          
+          [env: KONA_NODE_P2P_BOOTSTORE=]
+
+      --p2p.no-bootstore
+          Disable the bootstore
+          
+          [env: KONA_NODE_P2P_NO_BOOTSTORE=]
+
+      --p2p.redial <kona.peer_redial>
+          Max redial attempts for a disconnected peer. 0 = unlimited
+          
+          [env: KONA_NODE_P2P_REDIAL=]
+          [default: 500]
+
+      --p2p.redial.period <kona.redial_period>
+          Duration in minutes of the peer dial period
+          
+          [env: KONA_NODE_P2P_REDIAL_PERIOD=]
+          [default: 60]
+
+      --p2p.bootnodes <kona.bootnodes>
+          Comma-separated list of bootnode ENRs or enode URLs
+          
+          [env: KONA_NODE_P2P_BOOTNODES=]
+
+      --p2p.topic-scoring
+          Enable topic scoring (being phased out, for backwards-compat/debugging only)
+          
+          [env: KONA_NODE_P2P_TOPIC_SCORING=]
+
+      --p2p.unsafe.block.signer <kona.unsafe_block_signer>
+          Override the unsafe block signer address. By default fetched from rollup config's system config on L1
+          
+          [env: KONA_NODE_P2P_UNSAFE_BLOCK_SIGNER=]
+
+      --p2p.sequencer.key <kona.sequencer_key>
+          Local private key for the sequencer to sign unsafe blocks
+          
+          [env: KONA_NODE_P2P_SEQUENCER_KEY=]
+
+      --p2p.sequencer.key.path <kona.sequencer_key_path>
+          Path to a file containing the sequencer private key
+          
+          [env: KONA_NODE_P2P_SEQUENCER_KEY_PATH=]
+
+      --p2p.signer.endpoint <kona.endpoint>
+          URL of the remote signer endpoint
+          
+          [env: KONA_NODE_P2P_SIGNER_ENDPOINT=]
+
+      --p2p.signer.address <kona.address>
+          Address to sign transactions for (required with remote signer)
+          
+          [env: KONA_NODE_P2P_SIGNER_ADDRESS=]
+
+      --p2p.signer.header <kona.header>
+          Headers for the remote signer. Format: `key=value`
+          
+          [env: KONA_NODE_P2P_SIGNER_HEADER=]
+
+      --p2p.signer.tls.ca <kona.ca_cert>
+          Path to CA certificates for the remote signer
+          
+          [env: KONA_NODE_P2P_SIGNER_TLS_CA=]
+
+      --p2p.signer.tls.cert <kona.cert>
+          Path to the client certificate for the remote signer
+          
+          [env: KONA_NODE_P2P_SIGNER_TLS_CERT=]
+
+      --p2p.signer.tls.key <kona.key>
+          Path to the client key for the remote signer
+          
+          [env: KONA_NODE_P2P_SIGNER_TLS_KEY=]
+
+      --kona.rollup-config <kona.rollup_config_path>
+          Path to the OP Stack rollup configuration JSON file.
+          
+          This file defines the rollup parameters (chain ID, block time, hardfork activation timestamps, genesis hashes, etc.) used by the Kona consensus node. It follows the same format as op-node's `--rollup.config` flag.
+          
+          [env: KONA_ROLLUP_CONFIG=]
+
+      --kona.sequencer
+          Run the Kona consensus node in sequencer mode.
+          
+          When set, the node builds and gossips unsafe blocks rather than only following the chain.
+          
+          [env: KONA_SEQUENCER=]
+
+      --kona.sequencer.stopped
+          Start the sequencer in the stopped state.
+          
+          Block production must be resumed explicitly (e.g. via the admin RPC or op-conductor).
+          
+          [env: KONA_SEQUENCER_STOPPED=]
+
+      --kona.sequencer.recover
+          Run the sequencer in recovery mode
+          
+          [env: KONA_SEQUENCER_RECOVER=]
+
+      --kona.sequencer.l1-confs <kona.l1_confs>
+          Number of L1 confirmations the sequencer waits on before building from an L1 origin
+          
+          [env: KONA_SEQUENCER_L1_CONFS=]
+          [default: 4]
+
+      --kona.conductor.rpc <kona.conductor_rpc>
+          URL of the op-conductor RPC endpoint. When set, the conductor service is enabled
+          
+          [env: KONA_CONDUCTOR_RPC=]
+
+      --kona.rpc.addr <kona.rpc_addr>
+          IP address the Kona node RPC server binds to
+          
+          [env: KONA_RPC_ADDR=]
+          [default: 0.0.0.0]
+
+      --kona.rpc.port <kona.rpc_port>
+          Port the Kona node RPC server binds to
+          
+          [env: KONA_RPC_PORT=]
+          [default: 8547]
+
+      --kona.rpc.enable-admin
+          Enable the admin namespace on the Kona node RPC server
+          
+          [env: KONA_RPC_ENABLE_ADMIN=]
+
+      --kona.rpc.disabled
+          Disable the Kona node RPC server entirely
+          
+          [env: KONA_RPC_DISABLED=]
+
+      --kona.l1-slot-duration-override <kona.l1_slot_duration_override>
+          Override the L1 slot duration (in seconds) used by the L1 watcher
+          
+          [env: KONA_L1_SLOT_DURATION_OVERRIDE=]
+
       --tx-peers <PEER_ID>
           Comma-separated list of peer IDs to which transactions should be propagated
 
