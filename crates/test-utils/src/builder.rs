@@ -235,7 +235,7 @@ lazy_static::lazy_static! {
         WorldChainSpecBuilder::default()
             .chain(GENESIS.config.chain_id.into())
             .genesis(GENESIS.clone())
-            .isthmus_activated()
+            .karst_activated()
             .build()
     );
 

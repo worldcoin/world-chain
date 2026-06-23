@@ -70,7 +70,9 @@ async fn direct_sequencer_devnet_smoke() -> eyre::Result<()> {
 
     let chain_spec = devnet.chain_spec();
     assert!(chain_spec.is_jovian_active_at_timestamp(0));
+    assert!(chain_spec.is_karst_active_at_timestamp(0));
     assert!(!chain_spec.is_tropo_active_at_timestamp(0));
+    assert!(devnet.hardforks().is_active(WorldChainHardfork::Karst));
     assert!(!devnet.hardforks().is_active(WorldChainHardfork::Tropo));
 
     Ok(())
