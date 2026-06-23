@@ -122,6 +122,21 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
 
         let min_tx_index = access_list.min_tx_index;
         let max_tx_index = access_list.max_tx_index;
+        let transactions_offset = committed_state.transactions.len() as u64 + 1;
+        let expected_min_tx_index = if committed_state.is_first {
+            0
+        } else {
+            transactions_offset
+        };
+        if min_tx_index != expected_min_tx_index {
+            return Err(BalValidationError::BalIndexMismatch {
+                expected: expected_min_tx_index,
+                got: min_tx_index,
+            }
+            .boxed()
+            .into());
+        }
+
         let received_bal = Arc::new(
             revm::state::bal::Bal::try_from(access_list.as_block_access_list())
                 .map_err(BalExecutorError::other)?,
@@ -156,7 +171,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
         let mut canonical_transactions: Vec<_> =
             committed_state.transactions_iter().cloned().collect();
 
-        if min_tx_index == 0 {
+        if committed_state.is_first {
             let pre_execution_changes_started = Instant::now();
             canonical_executor
                 .evm_mut()
@@ -173,7 +188,6 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             );
         }
 
-        let transactions_offset = committed_state.transactions.len() as u64 + 1;
         let transactions =
             decode_transactions_with_indices(&diff.transactions, transactions_offset)?;
 
@@ -242,7 +256,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
                 .db_mut()
                 .set_bal_index(BlockAccessIndex::new(output.index));
             if !output.transaction.is_deposit() {
-                record_l1_block_bal_reads(canonical_executor.evm_mut().db_mut());
+                record_l1_block_bal_reads(canonical_executor.evm_mut().db_mut())?;
             }
             let gas_output = canonical_executor.commit_transaction(output.result);
 
@@ -280,6 +294,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
                 target: "flashblocks::state_executor",
                 ?expected_access_list_hash,
                 expected = ?expected_access_list_hash,
+                got = ?computed_access_list_hash,
                 access_list = ?computed_access_list,
                 expected_access_list = ?access_list.clone(),
                 execution_context = ?ctx.execution_context,

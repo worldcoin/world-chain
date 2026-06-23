@@ -54,26 +54,30 @@ const L1_BLOCK_BAL_READ_SLOTS: [U256; 6] = [
 
 /// Records the OP L1 block predeploy slots that OP fee logic reads outside the
 /// transaction result state.
-pub fn record_l1_block_bal_reads<DB>(db: &mut State<DB>) {
+pub fn record_l1_block_bal_reads<DB>(db: &mut State<DB>) -> Result<(), BlockExecutionError> {
     let Some(bal_builder) = &mut db.bal_state.bal_builder else {
-        return;
+        return Err(BlockExecutionError::msg("missing BAL builder state"));
     };
 
     let account = bal_builder.accounts.entry(L1_BLOCK_CONTRACT).or_default();
     for slot in L1_BLOCK_BAL_READ_SLOTS {
         account.storage.storage.entry(slot).or_default();
     }
+
+    Ok(())
 }
 
 #[derive(thiserror::Error, Debug, serde::Serialize)]
 pub enum BalValidationError {
-    #[error("Block execution error")]
+    #[error("BAL hash mismatch: expected {expected:?}, got {got:?}")]
     BalHashMismatch {
         expected: FixedBytes<32>,
         got: FixedBytes<32>,
         expected_bal: FlashblockAccessList,
         got_bal: FlashblockAccessList,
     },
+    #[error("BAL transaction index mismatch: expected min tx index {expected}, got {got}")]
+    BalIndexMismatch { expected: u64, got: u64 },
     #[error("State Root Mismatch: expected {expected:?}, got {got:?}")]
     StateRootMismatch {
         expected: FixedBytes<32>,
@@ -207,10 +211,9 @@ where
     type Executor = OpBlockExecutor<E, R, Arc<WorldChainSpec>>;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        let res = self.executor.apply_pre_execution_changes();
+        self.executor.apply_pre_execution_changes()?;
         // prepare the transaction index for the next transaction 1
-        self.prepare_database()?;
-        res
+        self.prepare_database()
     }
 
     fn execute_transaction_with_commit_condition(
@@ -220,7 +223,7 @@ where
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, recovered) = tx.into_parts();
         if !recovered.is_deposit() {
-            record_l1_block_bal_reads(self.executor.evm_mut().db_mut());
+            record_l1_block_bal_reads(self.executor.evm_mut().db_mut())?;
         }
         if let Some(gas_used) = self
             .executor

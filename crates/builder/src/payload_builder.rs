@@ -635,7 +635,7 @@ where
     let payload = OpBuiltPayload::new(
         ctx.payload_id(),
         sealed_block,
-        info.total_fees + committed_state.fees,
+        info.total_fees,
         Some(executed_block),
     );
 
