@@ -17,6 +17,14 @@ inputs:
       digest_artifact_prefix given to docker-build-push-digest).
     required: false
     default: digests
+  digest_artifact_pattern:
+    description: >-
+      Optional explicit glob pattern for downloading digests. When set,
+      overrides the default `{digest_artifact_prefix}-*` pattern. Useful
+      when the prefix is a substring of another image's prefix and the
+      default wildcard would match both.
+    required: false
+    default: ""
 
 outputs:
   digest:
@@ -30,7 +38,7 @@ runs:
       uses: actions/download-artifact@v4
       with:
         path: ${{ runner.temp }}/digests
-        pattern: ${{ inputs.digest_artifact_prefix }}-*
+        pattern: ${{ inputs.digest_artifact_pattern || format('{0}-*', inputs.digest_artifact_prefix) }}
         merge-multiple: true
 
     - name: Log in to Registry

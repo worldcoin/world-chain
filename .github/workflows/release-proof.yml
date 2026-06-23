@@ -283,6 +283,7 @@ jobs:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ github.repository }}-nitro-worker
           digest_artifact_prefix: digests-nitro-worker
+          digest_artifact_pattern: digests-nitro-worker-linux-*
           tags: |
             type=raw,value=${{ needs.extract-version.outputs.VERSION }}
             type=sha
