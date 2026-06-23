@@ -10,7 +10,6 @@ repository.workspace = true
 [[bin]]
 name = "sp1-worker"
 path = "src/main.rs"
-required-features = ["embedded-elfs"]
 
 [lints]
 workspace = true

@@ -7,8 +7,8 @@
 use alloy_primitives::B256;
 use anyhow::Context;
 use sp1_sdk::{
-    CpuProver, Elf, HashableKey, MockProver, ProveRequest, Prover, ProverClient, ProvingKey,
-    SP1Proof, SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin,
+    CpuProver, HashableKey, MockProver, ProveRequest, Prover, ProverClient, ProvingKey, SP1Proof,
+    SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin,
     env::{EnvProver, EnvProvingKey},
 };
 
@@ -293,7 +293,7 @@ impl WorldSuccinctProver for SuccinctProver {
             let proof: sp1_sdk::SP1ProofWithPublicValues =
                 bincode::deserialize(proof_bytes).context("range proof deserialization failed")?;
             let SP1Proof::Compressed(inner) = proof.proof else {
-                return Err(EnvSuccinctProverError::NotCompressed.into());
+                return Err(SuccinctProverError::NotCompressed.into());
             };
             stdin.write_proof(*inner, range_vk.clone());
         }

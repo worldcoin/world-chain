@@ -27,8 +27,6 @@
 //! `sp1_sdk::include_elf!()` (see `proofs/succinct/elfs/build.rs`); no path-based
 //! overrides are required.
 
-#![cfg(feature = "embedded-elfs")]
-
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use alloy_primitives::Address;
