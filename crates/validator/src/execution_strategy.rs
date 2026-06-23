@@ -11,17 +11,20 @@ use rayon::prelude::*;
 use reth_evm::{
     ConfigureEvm, Evm, EvmEnvFor, EvmFactory,
     block::{BlockExecutionError, CommitChanges},
-    execute::{BlockAssemblerInput, BlockBuilder, BlockExecutor},
+    execute::{BlockAssemblerInput, BlockBuilder, BlockExecutor, BlockExecutorFactory},
 };
 use reth_node_api::BuiltPayloadExecutedBlock;
 use reth_optimism_evm::{OpBlockAssembler, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
-use reth_primitives_traits::{RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader};
 use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};
-use revm::database::{BundleAccount, states::bundle_state::BundleRetention};
+use revm::{
+    database::{BundleAccount, states::bundle_state::BundleRetention},
+    state::bal::Bal,
+};
 use revm_database::State;
 use tracing::error;
 use world_chain_primitives::{
@@ -38,16 +41,17 @@ use world_chain_chainspec::WorldChainSpec;
 use world_chain_evm::{
     PayloadBuildStage, WorldChainEvmConfig,
     execution::{
-        bal::{BalExecutorError, BalValidationError, CommittedState, record_l1_block_bal_reads},
+        bal::{BalExecutorError, BalValidationError, CommittedState, record_op_l1_block_bal_reads},
         basic::FlashblocksBlockBuilder,
     },
-    utils::{cache_prestate_from_bundle, extend_flashblock_bundle},
+    utils::{cache_prestate_from_bundle, extend_flashblock_bundle, flatten_reverts},
 };
 
-struct BalWorkerOutput<R> {
+struct BalWorkerOutput {
     index: u64,
-    transaction: reth_primitives_traits::Recovered<OpTransactionSigned>,
-    result: R,
+    transaction: Recovered<OpTransactionSigned>,
+    result:
+        <OpBlockExecutorFactory<OpRethReceiptBuilder, Arc<WorldChainSpec>> as BlockExecutorFactory>::TxExecutionResult,
 }
 
 /// Result of computing the state root from a bundle state.
@@ -112,24 +116,45 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
         committed_state: CommittedState<OpRethReceiptBuilder>,
         payload_id: PayloadId,
     ) -> Result<OpBuiltPayload, BalExecutorError> {
-        let FlashblockAccessListData {
-            access_list,
-            access_list_hash: expected_access_list_hash,
-        } = diff
-            .access_list_data
-            .ok_or(BalValidationError::MissingAccessListData.boxed())
-            .map_err(BalExecutorError::from)?;
+        BalBlockValidator::new(ctx).execute_block(client, diff, committed_state, payload_id)
+    }
+}
 
-        let min_tx_index = access_list.min_tx_index;
-        let max_tx_index = access_list.max_tx_index;
-        let transactions_offset = committed_state.transactions.len() as u64 + 1;
+/// Validator for BAL-backed flashblock execution.
+struct BalBlockValidator<'a, S: StateRootStrategy> {
+    ctx: ValidationCtx<'a, WorldChainEvmConfig, S>,
+}
+
+impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
+    fn new(ctx: ValidationCtx<'a, WorldChainEvmConfig, S>) -> Self {
+        Self { ctx }
+    }
+
+    fn executor_factory(
+        &self,
+    ) -> OpBlockExecutorFactory<OpRethReceiptBuilder, Arc<WorldChainSpec>> {
+        OpBlockExecutorFactory::new(
+            OpRethReceiptBuilder::default(),
+            self.ctx.chain_spec.clone(),
+            OpEvmFactory::<OpTx>::default(),
+        )
+    }
+
+    fn validate_min_tx_index(
+        &self,
+        min_tx_index: u64,
+        transactions_offset: u64,
+        committed_state: &CommittedState<OpRethReceiptBuilder>,
+    ) -> Result<(), BalExecutorError> {
         let expected_min_tx_index = if committed_state.is_first {
             0
         } else {
             transactions_offset
         };
+
         if min_tx_index != expected_min_tx_index {
             return Err(BalValidationError::BalIndexMismatch {
+                index: "min",
                 expected: expected_min_tx_index,
                 got: min_tx_index,
             }
@@ -137,68 +162,52 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             .into());
         }
 
-        let received_bal = Arc::new(
-            revm::state::bal::Bal::try_from(access_list.as_block_access_list())
-                .map_err(BalExecutorError::other)?,
-        );
+        Ok(())
+    }
 
-        let parent_hash = ctx.parent.hash();
-        let finish_state_provider = client
-            .state_by_block_hash(parent_hash)
-            .map_err(BalExecutorError::other)?;
+    fn validate_max_tx_index(
+        &self,
+        max_tx_index: u64,
+        transactions_offset: u64,
+        transactions: &[(u64, Recovered<OpTransactionSigned>)],
+    ) -> Result<(), BalExecutorError> {
+        let expected_max_tx_index = transactions
+            .last()
+            .map(|(index, _)| index + 1)
+            .unwrap_or(transactions_offset);
 
-        let mut db = State::builder()
-            .with_database(StateProviderDatabase::new(finish_state_provider.as_ref()))
-            .with_cached_prestate(cache_prestate_from_bundle(&committed_state.bundle))
-            .with_bundle_update()
-            .with_bal_builder()
-            .build();
-        db.set_bal_index(BlockAccessIndex::new(min_tx_index));
-
-        let evm = OpEvmFactory::<OpTx>::default().create_evm(&mut db, ctx.evm_env.clone());
-        let mut canonical_executor: OpBlockExecutor<_, OpRethReceiptBuilder, Arc<WorldChainSpec>> =
-            OpBlockExecutor::new(
-                evm,
-                ctx.execution_context.clone(),
-                ctx.chain_spec.clone(),
-                OpRethReceiptBuilder::default(),
-            );
-
-        canonical_executor.gas_used = committed_state.gas_used;
-        canonical_executor.da_footprint_used = committed_state.blob_gas_used;
-        canonical_executor.receipts = committed_state.receipts_iter().cloned().collect();
-
-        let mut canonical_transactions: Vec<_> =
-            committed_state.transactions_iter().cloned().collect();
-
-        if committed_state.is_first {
-            let pre_execution_changes_started = Instant::now();
-            canonical_executor
-                .evm_mut()
-                .db_mut()
-                .set_bal_index(BlockAccessIndex::new(0));
-            canonical_executor.apply_pre_execution_changes()?;
-            canonical_executor
-                .evm_mut()
-                .db_mut()
-                .set_bal_index(BlockAccessIndex::new(1));
-            ctx.attempt_metrics.record_stage_duration(
-                PayloadBuildStage::PreExecutionChanges,
-                pre_execution_changes_started.elapsed(),
-            );
+        if max_tx_index != expected_max_tx_index {
+            return Err(BalValidationError::BalIndexMismatch {
+                index: "max",
+                expected: expected_max_tx_index,
+                got: max_tx_index,
+            }
+            .boxed()
+            .into());
         }
 
-        let transactions =
-            decode_transactions_with_indices(&diff.transactions, transactions_offset)?;
+        Ok(())
+    }
 
-        let spec = ctx.chain_spec.clone();
-        let execution_context = ctx.execution_context.clone();
-        let evm_env = ctx.evm_env.clone();
-        let fallback_bundle_state = Arc::new(committed_state.bundle.clone());
+    fn execute_workers<C>(
+        &mut self,
+        client: &C,
+        parent_hash: B256,
+        transactions: &[(u64, Recovered<OpTransactionSigned>)],
+        received_bal: Arc<Bal>,
+        committed_bundle: &revm_database::BundleState,
+    ) -> Result<Vec<BalWorkerOutput>, BalExecutorError>
+    where
+        C: StateProviderFactory + Clone + Sync + 'static,
+    {
+        let spec = self.ctx.chain_spec.clone();
+        let execution_context = self.ctx.execution_context.clone();
+        let evm_env = self.ctx.evm_env.clone();
+        let fallback_bundle_state = Arc::new(committed_bundle.clone());
 
         let txs_execution_started = Instant::now();
         let mut worker_outputs = transactions
-            .clone()
+            .to_vec()
             .into_par_iter()
             .map_init(
                 || client.state_by_block_hash(parent_hash),
@@ -217,18 +226,16 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
                         .build();
                     worker_state.set_bal_index(BlockAccessIndex::new(index));
 
-                    let evm = OpEvmFactory::<OpTx>::default()
-                        .create_evm(&mut worker_state, evm_env.clone());
-                    let mut worker_executor: OpBlockExecutor<
-                        _,
-                        OpRethReceiptBuilder,
-                        Arc<WorldChainSpec>,
-                    > = OpBlockExecutor::new(
-                        evm,
-                        execution_context.clone(),
-                        spec.clone(),
+                    let executor_factory = OpBlockExecutorFactory::new(
                         OpRethReceiptBuilder::default(),
+                        spec.clone(),
+                        OpEvmFactory::<OpTx>::default(),
                     );
+                    let evm = executor_factory
+                        .evm_factory()
+                        .create_evm(&mut worker_state, evm_env.clone());
+                    let mut worker_executor =
+                        executor_factory.create_executor(evm, execution_context.clone());
 
                     let result = worker_executor
                         .execute_transaction_without_commit(tx.clone())
@@ -243,12 +250,94 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             )
             .collect::<Result<Vec<_>, BalExecutorError>>()?;
         worker_outputs.sort_unstable_by_key(|output| output.index);
-        ctx.attempt_metrics.record_stage_duration(
+        self.ctx.attempt_metrics.record_stage_duration(
             PayloadBuildStage::SequencerTxExecution,
             txs_execution_started.elapsed(),
         );
 
-        let basefee = ctx.evm_env.block_env.basefee;
+        Ok(worker_outputs)
+    }
+
+    fn execute_block<C>(
+        mut self,
+        client: C,
+        diff: ExecutionPayloadFlashblockDeltaV1,
+        committed_state: CommittedState<OpRethReceiptBuilder>,
+        payload_id: PayloadId,
+    ) -> Result<OpBuiltPayload, BalExecutorError>
+    where
+        C: StateProviderFactory + Clone + Sync + 'static,
+    {
+        let FlashblockAccessListData {
+            access_list,
+            access_list_hash: expected_access_list_hash,
+        } = diff
+            .access_list_data
+            .ok_or(BalValidationError::MissingAccessListData.boxed())
+            .map_err(BalExecutorError::from)?;
+
+        let min_tx_index = access_list.min_tx_index;
+        let max_tx_index = access_list.max_tx_index;
+        let transactions_offset = committed_state.transactions.len() as u64 + 1;
+        self.validate_min_tx_index(min_tx_index, transactions_offset, &committed_state)?;
+
+        let transactions =
+            decode_transactions_with_indices(&diff.transactions, transactions_offset)?;
+        self.validate_max_tx_index(max_tx_index, transactions_offset, &transactions)?;
+
+        let received_bal = Arc::new(
+            Bal::try_from(access_list.as_block_access_list()).map_err(BalExecutorError::other)?,
+        );
+
+        let parent_hash = self.ctx.parent.hash();
+        let finish_state_provider = client
+            .state_by_block_hash(parent_hash)
+            .map_err(BalExecutorError::other)?;
+
+        let mut db = State::builder()
+            .with_database(StateProviderDatabase::new(finish_state_provider.as_ref()))
+            .with_cached_prestate(cache_prestate_from_bundle(&committed_state.bundle))
+            .with_bundle_update()
+            .with_bal_builder()
+            .build();
+        db.set_bal_index(BlockAccessIndex::new(min_tx_index));
+
+        let executor_factory = self.executor_factory();
+        let evm = executor_factory
+            .evm_factory()
+            .create_evm(&mut db, self.ctx.evm_env.clone());
+        let mut canonical_executor =
+            executor_factory.create_executor(evm, self.ctx.execution_context.clone());
+
+        canonical_executor.gas_used = committed_state.gas_used;
+        canonical_executor.da_footprint_used = committed_state.blob_gas_used;
+        canonical_executor.receipts = committed_state.receipts_iter().cloned().collect();
+
+        let mut canonical_transactions: Vec<_> =
+            committed_state.transactions_iter().cloned().collect();
+
+        if committed_state.is_first {
+            let pre_execution_changes_started = Instant::now();
+            canonical_executor
+                .evm_mut()
+                .db_mut()
+                .set_bal_index(BlockAccessIndex::new(0));
+            canonical_executor.apply_pre_execution_changes()?;
+            self.ctx.attempt_metrics.record_stage_duration(
+                PayloadBuildStage::PreExecutionChanges,
+                pre_execution_changes_started.elapsed(),
+            );
+        }
+
+        let worker_outputs = self.execute_workers(
+            &client,
+            parent_hash,
+            &transactions,
+            received_bal,
+            &committed_state.bundle,
+        )?;
+
+        let basefee = self.ctx.evm_env.block_env.basefee;
         let mut fees = U256::ZERO;
         for output in worker_outputs {
             canonical_executor
@@ -256,7 +345,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
                 .db_mut()
                 .set_bal_index(BlockAccessIndex::new(output.index));
             if !output.transaction.is_deposit() {
-                record_l1_block_bal_reads(canonical_executor.evm_mut().db_mut())?;
+                record_op_l1_block_bal_reads(canonical_executor.evm_mut().db_mut())?;
             }
             let gas_output = canonical_executor.commit_transaction(output.result);
 
@@ -297,7 +386,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
                 got = ?computed_access_list_hash,
                 access_list = ?computed_access_list,
                 expected_access_list = ?access_list.clone(),
-                execution_context = ?ctx.execution_context,
+                execution_context = ?self.ctx.execution_context,
                 "Access list hash mismatch"
             );
             return Err(BalValidationError::BalHashMismatch {
@@ -312,21 +401,26 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
 
         let merge_started = Instant::now();
         db.merge_transitions(BundleRetention::Reverts);
-        ctx.attempt_metrics
+        self.ctx
+            .attempt_metrics
             .record_stage_duration(PayloadBuildStage::MergeTransitions, merge_started.elapsed());
 
+        let flattened = flatten_reverts(&db.bundle_state.reverts);
+        db.bundle_state.reverts = flattened;
         let bundle = extend_flashblock_bundle(&committed_state.bundle, db.take_bundle());
 
         let state_root_started = Instant::now();
         let state_root_handle =
-            ctx.state_root_strategy
+            self.ctx
+                .state_root_strategy
                 .prepare(client.clone(), parent_hash, bundle.clone())?;
         let StateRootResult {
             state_root,
             trie_updates,
             hashed_state,
         } = state_root_handle.finish()?;
-        ctx.attempt_metrics
+        self.ctx
+            .attempt_metrics
             .record_stage_duration(PayloadBuildStage::StateRoot, state_root_started.elapsed());
 
         let (transactions, senders) = canonical_transactions
@@ -335,15 +429,15 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             .unzip();
 
         let block_assembly_started = Instant::now();
-        let assembler = OpBlockAssembler::new(ctx.chain_spec.clone());
+        let assembler = OpBlockAssembler::new(self.ctx.chain_spec.clone());
         let block = assembler.assemble_block(BlockAssemblerInput::<
             '_,
             '_,
-            OpBlockExecutorFactory<OpRethReceiptBuilder, WorldChainSpec>,
+            OpBlockExecutorFactory<OpRethReceiptBuilder, Arc<WorldChainSpec>>,
         >::new(
             evm_env,
-            ctx.execution_context,
-            ctx.parent,
+            self.ctx.execution_context,
+            self.ctx.parent,
             transactions,
             &execution_result,
             &bundle,
@@ -351,14 +445,15 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             state_root,
             None,
         ))?;
-        ctx.attempt_metrics.record_stage_duration(
+        self.ctx.attempt_metrics.record_stage_duration(
             PayloadBuildStage::BlockAssembly,
             block_assembly_started.elapsed(),
         );
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
-        ctx.attempt_metrics
+        self.ctx
+            .attempt_metrics
             .record_stage_duration(PayloadBuildStage::Finalize, finalize_started.elapsed());
 
         if block.receipts_root != diff.receipts_root {

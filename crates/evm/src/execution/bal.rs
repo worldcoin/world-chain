@@ -43,7 +43,7 @@ use std::{sync::Arc, time::Instant};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_primitives::access_list::FlashblockAccessList;
 
-const L1_BLOCK_BAL_READ_SLOTS: [U256; 6] = [
+const OP_L1_BLOCK_BAL_READ_SLOTS: [U256; 6] = [
     L1_BASE_FEE_SLOT,
     L1_OVERHEAD_SLOT,
     L1_SCALAR_SLOT,
@@ -52,15 +52,21 @@ const L1_BLOCK_BAL_READ_SLOTS: [U256; 6] = [
     DA_FOOTPRINT_GAS_SCALAR_SLOT,
 ];
 
-/// Records the OP L1 block predeploy slots that OP fee logic reads outside the
-/// transaction result state.
-pub fn record_l1_block_bal_reads<DB>(db: &mut State<DB>) -> Result<(), BlockExecutionError> {
+/// Records the OP L1 block predeploy slots that OP fee accounting reads through
+/// the database outside the returned transaction state.
+///
+/// The L1 info deposit updates the predeploy through normal EVM execution, but
+/// Jovian DA-footprint and post-exec fee accounting read these slots before the
+/// transaction result is committed. Upstream BAL construction only sees the
+/// committed result state, so these read-only slots need to be inserted into
+/// upstream's BAL builder explicitly.
+pub fn record_op_l1_block_bal_reads<DB>(db: &mut State<DB>) -> Result<(), BlockExecutionError> {
     let Some(bal_builder) = &mut db.bal_state.bal_builder else {
         return Err(BlockExecutionError::msg("missing BAL builder state"));
     };
 
     let account = bal_builder.accounts.entry(L1_BLOCK_CONTRACT).or_default();
-    for slot in L1_BLOCK_BAL_READ_SLOTS {
+    for slot in OP_L1_BLOCK_BAL_READ_SLOTS {
         account.storage.storage.entry(slot).or_default();
     }
 
@@ -76,8 +82,12 @@ pub enum BalValidationError {
         expected_bal: FlashblockAccessList,
         got_bal: FlashblockAccessList,
     },
-    #[error("BAL transaction index mismatch: expected min tx index {expected}, got {got}")]
-    BalIndexMismatch { expected: u64, got: u64 },
+    #[error("BAL {index} tx index mismatch: expected {expected}, got {got}")]
+    BalIndexMismatch {
+        index: &'static str,
+        expected: u64,
+        got: u64,
+    },
     #[error("State Root Mismatch: expected {expected:?}, got {got:?}")]
     StateRootMismatch {
         expected: FixedBytes<32>,
@@ -223,7 +233,7 @@ where
     ) -> Result<Option<GasOutput>, BlockExecutionError> {
         let (tx_env, recovered) = tx.into_parts();
         if !recovered.is_deposit() {
-            record_l1_block_bal_reads(self.executor.evm_mut().db_mut())?;
+            record_op_l1_block_bal_reads(self.executor.evm_mut().db_mut())?;
         }
         if let Some(gas_used) = self
             .executor
