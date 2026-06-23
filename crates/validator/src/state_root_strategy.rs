@@ -51,13 +51,19 @@ impl StateRootStrategy for AsyncStateRootStrategy {
         let state_root_provider = client
             .state_by_block_hash(parent_hash)
             .map_err(BlockExecutionError::other)?;
-        rayon::spawn(move || {
-            let result = execution_strategy::compute_state_root(
-                state_root_provider.into(),
-                bundle_state.state.iter(),
-            );
-            let _ = sender.send(result);
-        });
+        // Run the trie walk on a dedicated OS thread rather than the rayon pool: it overlaps with
+        // the rayon `par_iter` transaction execution in the BAL executor, and a long blocking walk
+        // on a rayon worker would starve that parallel execution.
+        std::thread::Builder::new()
+            .name("flashblock-state-root".to_string())
+            .spawn(move || {
+                let result = execution_strategy::compute_state_root(
+                    state_root_provider.into(),
+                    bundle_state.state.iter(),
+                );
+                let _ = sender.send(result);
+            })
+            .map_err(BlockExecutionError::other)?;
         Ok(ChannelStateRootHandle { receiver })
     }
 }
