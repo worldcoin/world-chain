@@ -212,8 +212,8 @@ impl ProverServiceStore {
         &self,
         backend: ProofBackend,
     ) -> Result<Option<LeasedProofRequest>, ProofJobQueueError> {
-        let mut tx = self.begin_queue_tx().await?;
         loop {
+            let mut tx = self.begin_queue_tx().await?;
             let now = db_now();
             let Some(row) = sqlx::query(
                 "select proof_id, backend, game, root_claim, l2_block_number, l1_head,
@@ -248,6 +248,7 @@ impl ProverServiceStore {
                     .await
                     .map_err(queue_db)?;
                 warn!(%proof_id, attempts, "proof job failed: start attempts exhausted");
+                tx.commit().await.map_err(queue_db)?;
                 continue;
             }
 
@@ -339,8 +340,8 @@ impl ProverServiceStore {
         &self,
         backend: ProofBackend,
     ) -> Result<Option<LeasedBackendProofWork>, ProofJobQueueError> {
-        let mut tx = self.begin_queue_tx().await?;
         loop {
+            let mut tx = self.begin_queue_tx().await?;
             let now = db_now();
             let Some(row) = sqlx::query(
                 "select
@@ -391,6 +392,7 @@ impl ProverServiceStore {
                     .await
                     .map_err(queue_db)?;
                 warn!(%proof_id, backend_job_id, attempts, "backend proof job failed: attempts exhausted");
+                tx.commit().await.map_err(queue_db)?;
                 continue;
             }
 
