@@ -5,7 +5,7 @@ use alloy_eip7928::BlockAccessIndex;
 use alloy_op_evm::{
     OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory, OpTx,
 };
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{B256, U256};
 use alloy_rpc_types_engine::PayloadId;
 use rayon::prelude::*;
 use reth_evm::{
@@ -18,13 +18,10 @@ use reth_optimism_evm::{OpBlockAssembler, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader};
-use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
+use reth_provider::{BlockExecutionOutput, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};
-use revm::{
-    database::{BundleAccount, states::bundle_state::BundleRetention},
-    state::bal::Bal,
-};
+use revm::{database::states::bundle_state::BundleRetention, state::bal::Bal};
 use revm_database::State;
 use tracing::error;
 use world_chain_primitives::{
@@ -47,11 +44,10 @@ use world_chain_evm::{
     utils::{cache_prestate_from_bundle, extend_flashblock_bundle, flatten_reverts},
 };
 
-struct BalWorkerOutput {
+struct BalWorkerOutput<F: BlockExecutorFactory> {
     index: u64,
-    transaction: Recovered<OpTransactionSigned>,
-    result:
-        <OpBlockExecutorFactory<OpRethReceiptBuilder, Arc<WorldChainSpec>> as BlockExecutorFactory>::TxExecutionResult,
+    transaction: Recovered<F::Transaction>,
+    result: F::TxExecutionResult,
 }
 
 /// Result of computing the state root from a bundle state.
@@ -59,21 +55,6 @@ pub struct StateRootResult {
     pub state_root: B256,
     pub trie_updates: TrieUpdates,
     pub hashed_state: HashedPostState,
-}
-
-pub fn compute_state_root<'a>(
-    state_provider: Arc<dyn StateProvider + Send>,
-    bundle_state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
-) -> Result<StateRootResult, BlockExecutionError> {
-    let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state);
-    let (state_root, trie_updates) = state_provider
-        .state_root_with_updates(hashed_state.clone())
-        .map_err(BlockExecutionError::other)?;
-    Ok(StateRootResult {
-        state_root,
-        trie_updates,
-        hashed_state,
-    })
 }
 
 /// Context passed to an [`ExecutionStrategy`] for each flashblock.
@@ -196,7 +177,10 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
         transactions: &[(u64, Recovered<OpTransactionSigned>)],
         received_bal: Arc<Bal>,
         committed_bundle: &revm_database::BundleState,
-    ) -> Result<Vec<BalWorkerOutput>, BalExecutorError>
+    ) -> Result<
+        Vec<BalWorkerOutput<OpBlockExecutorFactory<OpRethReceiptBuilder, Arc<WorldChainSpec>>>>,
+        BalExecutorError,
+    >
     where
         C: StateProviderFactory + Clone + Sync + 'static,
     {
@@ -249,7 +233,9 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
                 },
             )
             .collect::<Result<Vec<_>, BalExecutorError>>()?;
+
         worker_outputs.sort_unstable_by_key(|output| output.index);
+
         self.ctx.attempt_metrics.record_stage_duration(
             PayloadBuildStage::SequencerTxExecution,
             txs_execution_started.elapsed(),
@@ -293,6 +279,22 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
         let finish_state_provider = client
             .state_by_block_hash(parent_hash)
             .map_err(BalExecutorError::other)?;
+
+        // Compute the state root in the background from extending the committed [`HashedPostState`] with
+        // the [`HashedPostState`] from the current [`FlashblockAccessList`].
+        let state_root_started = Instant::now();
+        let committed_hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(
+            committed_state.bundle.state.iter(),
+        );
+        let predicted_hashed_state = access_list
+            .clone()
+            .into_hashed_post_state(finish_state_provider.as_ref(), committed_hashed_state)
+            .map_err(BalExecutorError::other)?;
+        let state_root_handle = self.ctx.state_root_strategy.prepare(
+            client.clone(),
+            parent_hash,
+            predicted_hashed_state,
+        )?;
 
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(finish_state_provider.as_ref()))
@@ -409,11 +411,8 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
         db.bundle_state.reverts = flattened;
         let bundle = extend_flashblock_bundle(&committed_state.bundle, db.take_bundle());
 
-        let state_root_started = Instant::now();
-        let state_root_handle =
-            self.ctx
-                .state_root_strategy
-                .prepare(client.clone(), parent_hash, bundle.clone())?;
+        // Block on the background trie walk kicked off before execution. The result is derived from
+        // the received access list and validated against `diff.state_root` during block assembly.
         let StateRootResult {
             state_root,
             trie_updates,
@@ -631,7 +630,9 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
         let bundle = extend_flashblock_bundle(&committed_state.bundle, db.take_bundle());
 
         let state_root_started = Instant::now();
-        let state_root_handle = state_root_strategy.prepare(client, parent_hash, bundle.clone())?;
+        let hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state.iter());
+        let state_root_handle = state_root_strategy.prepare(client, parent_hash, hashed_state)?;
         let StateRootResult {
             state_root,
             trie_updates,
