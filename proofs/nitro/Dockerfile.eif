@@ -2,4 +2,4 @@
 # Used by Kubernetes init containers to copy the EIF onto a shared volume
 # before the nitro-worker pod launches the enclave.
 FROM scratch
-COPY world-chain-nitro-enclave.eif /enclave/world-chain-nitro-enclave.eif
+COPY world-chain-nitro-worker-enclave.eif /enclave/world-chain-nitro-worker-enclave.eif
