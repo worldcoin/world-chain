@@ -280,13 +280,8 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
             .state_by_block_hash(parent_hash)
             .map_err(BalExecutorError::other)?;
 
-        // Compute the state root from the *received* access list, overlapping the trie walk with
-        // parallel transaction execution below. The access list carries the claimed post-state, so
-        // deriving the cumulative hashed post-state from it (the committed prior-flashblock state
-        // extended with this flashblock's changes) lets the state root computation start before
-        // execution finishes. The trie walk is dispatched to a background thread; we block on the
-        // handle only after execution and BAL hash validation succeed. A wrong access list yields a
-        // mismatching state root, so this stays consensus-safe.
+        // Compute the state root in the background from extending the committed [`HashedPostState`] with
+        // the [`HashedPostState`] from the current [`FlashblockAccessList`].
         let state_root_started = Instant::now();
         let committed_hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(
             committed_state.bundle.state.iter(),
