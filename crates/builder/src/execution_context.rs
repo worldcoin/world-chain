@@ -36,7 +36,7 @@ use reth_primitives_traits::{HeaderTy, Recovered, SealedHeader, TxTy};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_revm::cancelled::CancelOnDrop;
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::{Database as RevmDatabase, DatabaseCommit, context::BlockEnv};
+use revm::{Database as RevmDatabase, context::BlockEnv};
 use revm_database::State;
 use semaphore_rs::Field;
 use std::{collections::HashSet, fmt::Debug, sync::Arc, time::Instant};
@@ -47,7 +47,6 @@ use world_chain_pool::{
     bindings::IPBHEntryPoint::spendNullifierHashesCall,
     tx::{WorldChainPoolTransaction, WorldChainPooledTransaction},
 };
-use world_chain_state::StateDB;
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug, Clone)]
@@ -202,7 +201,7 @@ where
         &self,
         builder: &mut impl BlockBuilder<
             Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            Executor: BlockExecutor<Evm: Evm<DB: StateDB + DatabaseCommit + reth_evm::Database>>,
+            Executor: BlockExecutor<Evm: Evm<DB: reth_evm::block::StateDB + reth_evm::Database>>,
         >,
     ) -> Result<ExecutionInfo, PayloadBuilderError> {
         self.inner.execute_sequencer_transactions(builder, None)
@@ -227,7 +226,7 @@ where
                 Primitives = <Self::Evm as ConfigureEvm>::Primitives,
                 Executor: BlockExecutor<
                     Evm: Evm<
-                        DB: StateDB + DatabaseCommit + reth_evm::Database,
+                        DB: reth_evm::block::StateDB + reth_evm::Database,
                         BlockEnv = BlockEnv,
                     >,
                 >,
