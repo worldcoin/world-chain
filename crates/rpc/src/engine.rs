@@ -2,7 +2,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::{B256, BlockHash, U64};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
-    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
 use jsonrpsee::{proc_macros::rpc, types::ErrorObject};
 use jsonrpsee_core::{RpcResult, async_trait, server::RpcModule};
@@ -48,15 +48,26 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
         }
     }
 
-    /// Blocks until the flashblock claiming `block_hash` has been executed and
-    /// cached in the engine tree (or a short timeout elapses), so the subsequent
-    /// `newPayload` finalizes from cache instead of re-executing.
-    fn resolve_pending(&self, block_hash: B256) -> impl Future<Output = ()> {
-        let pending_state = self.pending_state.clone();
-        async move {
-            if let Some(state) = pending_state {
-                state.resolve_pending(block_hash).await;
+    /// Races full payload validation against resolution of the pending flashblock
+    /// claiming `block_hash`, returning whichever finishes first. Both are started
+    /// together: if the flashblock's executed payload is broadcast (and thus cached
+    /// in the engine tree) first, it is already fully validated, so we return
+    /// `VALID` immediately; otherwise the engine's full validation result is used.
+    async fn resolve_or_validate(
+        &self,
+        block_hash: B256,
+        validate: impl Future<Output = RpcResult<PayloadStatus>>,
+    ) -> RpcResult<PayloadStatus> {
+        let Some(state) = &self.pending_state else {
+            return validate.await;
+        };
+
+        tokio::select! {
+            biased;
+            () = state.resolve_pending(block_hash) => {
+                Ok(PayloadStatus::new(PayloadStatusEnum::Valid, Some(block_hash)))
             }
+            result = validate => result,
         }
     }
 }
@@ -81,12 +92,12 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
-        self.resolve_pending(payload.payload_inner.payload_inner.block_hash)
-            .await;
-        Ok(self
-            .inner
-            .new_payload_v3(payload, versioned_hashes, parent_beacon_block_root)
-            .await?)
+        let block_hash = payload.payload_inner.payload_inner.block_hash;
+        let validate =
+            self.inner
+                .new_payload_v3(payload, versioned_hashes, parent_beacon_block_root);
+
+        self.resolve_or_validate(block_hash, validate).await
     }
 
     async fn new_payload_v4(
@@ -96,17 +107,14 @@ where
         parent_beacon_block_root: B256,
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
-        self.resolve_pending(payload.payload_inner.payload_inner.payload_inner.block_hash)
-            .await;
-        Ok(self
-            .inner
-            .new_payload_v4(
-                payload,
-                versioned_hashes,
-                parent_beacon_block_root,
-                execution_requests,
-            )
-            .await?)
+        let block_hash = payload.payload_inner.payload_inner.payload_inner.block_hash;
+        let validate = self.inner.new_payload_v4(
+            payload,
+            versioned_hashes,
+            parent_beacon_block_root,
+            execution_requests,
+        );
+        self.resolve_or_validate(block_hash, validate).await
     }
 
     async fn fork_choice_updated_v1(

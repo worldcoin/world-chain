@@ -2,7 +2,7 @@ use alloy_consensus::BlockHeader;
 use alloy_op_evm::OpBlockExecutionCtx;
 use alloy_primitives::B256;
 use eyre::eyre::eyre;
-use futures::{FutureExt, StreamExt, future::OptionFuture};
+use futures::{StreamExt, future::OptionFuture};
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlock;
 use reth_evm::ConfigureEvm;
@@ -24,7 +24,7 @@ use reth_provider::{
 use std::{
     future::Future,
     sync::{Arc, LazyLock},
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tokio::{
     sync::{
@@ -49,9 +49,6 @@ use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};
 /// Task-level permit to ensure only one flashblock is processed at a time.
 static SEMAPHORE_TASK_PERMIT: LazyLock<Arc<Semaphore>> =
     LazyLock::new(|| Arc::new(Semaphore::const_new(1)));
-
-/// Max time `newPayload` waits for the matching flashblock's executed payload
-const RESOLVE_PENDING_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// The current state of all known pre confirmations received over the P2P layer
 /// or generated from the payload building job of this node.
@@ -97,10 +94,11 @@ impl FlashblocksExecutionCoordinator {
         }
     }
 
-    /// Returns a future that resolves when either:
-    /// - `hash` does not match a flashblock pending execution resolution, or
-    /// - `hash` matches a pending flashblock and its executed payload has been
-    ///   broadcast (or `RESOLVE_PENDING_TIMEOUT` elapses before execution finishes).
+    /// Returns a future that resolves once the pending flashblock claiming `hash`
+    /// has its executed payload broadcast (and thus inserted into the engine tree
+    /// cache). If no streamed flashblock claims `hash`, or its payload is never
+    /// broadcast, the future never resolves: callers race it against full payload
+    /// validation, so the unresolved arm simply loses.
     pub fn resolve_pending(&self, hash: B256) -> impl Future<Output = ()> {
         let rx = {
             let inner = self.inner.read();
@@ -109,18 +107,23 @@ impl FlashblocksExecutionCoordinator {
                 .flatten()
         };
 
-        OptionFuture::from(rx.map(|rx| {
-            tokio::time::timeout(
-                RESOLVE_PENDING_TIMEOUT,
+        async move {
+            let matched = OptionFuture::from(rx.map(|rx| {
                 BroadcastStream::new(rx).any(move |event| {
                     std::future::ready(matches!(
                         event,
                         Ok(Events::BuiltPayload(payload)) if payload.block().hash() == hash
                     ))
-                }),
-            )
-        }))
-        .map(drop)
+                })
+            }))
+            .await
+            .unwrap_or(false);
+
+            // Pend forever when unmatched so the caller's full validation wins the race.
+            if !matched {
+                std::future::pending::<()>().await;
+            }
+        }
     }
 
     /// Maps a closure over the [`WorldChainEventStream<T>`] from the P2P handle.
@@ -522,6 +525,8 @@ mod tests {
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_primitives::U256;
     use alloy_rpc_types_engine::PayloadId;
+    use std::time::Duration;
+
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_primitives_traits::SealedBlock;
     use world_chain_primitives::{
@@ -578,12 +583,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_pending_gate_miss_returns_immediately() {
+    async fn resolve_pending_never_resolves_on_gate_miss() {
         let (coordinator, _events_tx) = test_coordinator();
-        // No streamed flashblock claims this hash → resolve without waiting.
-        let started = Instant::now();
-        coordinator.resolve_pending(B256::repeat_byte(7)).await;
-        assert!(started.elapsed() < RESOLVE_PENDING_TIMEOUT);
+        // No streamed flashblock claims this hash → never resolves.
+        let resolved = tokio::time::timeout(
+            Duration::from_millis(50),
+            coordinator.resolve_pending(B256::repeat_byte(7)),
+        )
+        .await;
+        assert!(resolved.is_err());
     }
 
     #[tokio::test]
@@ -592,29 +600,33 @@ mod tests {
         let (payload, hash) = built_payload(1);
         set_last_flashblock(&coordinator, hash);
 
-        let started = Instant::now();
         let task = {
             let coordinator = coordinator.clone();
             tokio::spawn(async move { coordinator.resolve_pending(hash).await })
         };
 
         // Let the task subscribe before the payload is broadcast.
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
         events_tx.send(Events::BuiltPayload(payload)).unwrap();
-        task.await.unwrap();
 
-        // Resolved by the broadcast, well before the timeout.
-        assert!(started.elapsed() < RESOLVE_PENDING_TIMEOUT);
+        // Resolves once the matching payload is broadcast.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), task)
+                .await
+                .is_ok()
+        );
     }
 
     #[tokio::test]
-    async fn resolve_pending_times_out_without_broadcast() {
+    async fn resolve_pending_never_resolves_without_broadcast() {
         let (coordinator, _events_tx) = test_coordinator();
         let hash = B256::repeat_byte(9);
         set_last_flashblock(&coordinator, hash);
 
-        let started = Instant::now();
-        coordinator.resolve_pending(hash).await;
-        assert!(started.elapsed() >= RESOLVE_PENDING_TIMEOUT);
+        // Gate matches but nothing is broadcast → never resolves.
+        let resolved =
+            tokio::time::timeout(Duration::from_millis(50), coordinator.resolve_pending(hash))
+                .await;
+        assert!(resolved.is_err());
     }
 }
