@@ -50,10 +50,7 @@ use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};
 static SEMAPHORE_TASK_PERMIT: LazyLock<Arc<Semaphore>> =
     LazyLock::new(|| Arc::new(Semaphore::const_new(1)));
 
-/// Max time `newPayload` waits for the matching flashblock's executed payload to
-/// land on the broadcast stream (and thus the engine tree cache) before falling
-/// through to normal execution. Bounded to roughly one flashblock interval so the
-/// engine is never stalled if the flashblock errors or never arrives.
+/// Max time `newPayload` waits for the matching flashblock's executed payload
 const RESOLVE_PENDING_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// The current state of all known pre confirmations received over the P2P layer
@@ -100,15 +97,11 @@ impl FlashblocksExecutionCoordinator {
         }
     }
 
-    /// If the most recently streamed flashblock claims `hash`, blocks until its
-    /// executed payload is broadcast (and thus inserted into the engine tree
-    /// cache) or a short timeout elapses, so a subsequent `newPayload` for the
-    /// same block finalizes from cache instead of re-executing.
-    ///
-    /// Resolves immediately when no streamed flashblock claims `hash`.
+    /// Returns a future that resolves when either:
+    /// - `hash` does not match a flashblock pending execution resolution, or
+    /// - `hash` matches a pending flashblock and its executed payload has been
+    ///   broadcast (or `RESOLVE_PENDING_TIMEOUT` elapses before execution finishes).
     pub fn resolve_pending(&self, hash: B256) -> impl Future<Output = ()> {
-        // Synchronously gate on the last seen flashblock and subscribe; the
-        // returned future never holds the lock.
         let rx = {
             let inner = self.inner.read();
             (inner.flashblocks.last().diff().block_hash == hash)
