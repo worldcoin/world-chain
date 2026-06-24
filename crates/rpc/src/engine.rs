@@ -29,6 +29,7 @@ pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, Chain
     /// A (optional) watch channel notifier to the jobs generator.
     to_jobs_generator: Option<tokio::sync::watch::Sender<Option<Authorization>>>,
     /// An (optional) handle to the [`FlashblocksExecutionCoordinator`]
+    ///  - `Some` when flashblocks is enabled, `None` otherwise.
     pending_state: Option<FlashblocksExecutionCoordinator>,
 }
 
