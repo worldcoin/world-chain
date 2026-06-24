@@ -18980,6 +18980,8 @@ dependencies = [
  "reth-optimism-node",
  "reth-optimism-primitives",
  "reth-primitives-traits",
+ "reth-storage-api",
+ "reth-trie-common",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

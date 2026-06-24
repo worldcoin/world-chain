@@ -1,11 +1,11 @@
 use std::{io::Error, sync::Arc, time::Instant};
 
-use alloy_consensus::{Header, Transaction, constants::KECCAK_EMPTY};
-use alloy_eip7928::{AccountChanges, BlockAccessIndex};
+use alloy_consensus::{Header, Transaction};
+use alloy_eip7928::BlockAccessIndex;
 use alloy_op_evm::{
     OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory, OpTx,
 };
-use alloy_primitives::{Address, B256, U256, keccak256};
+use alloy_primitives::{B256, U256};
 use alloy_rpc_types_engine::PayloadId;
 use rayon::prelude::*;
 use reth_evm::{
@@ -17,18 +17,12 @@ use reth_node_api::BuiltPayloadExecutedBlock;
 use reth_optimism_evm::{OpBlockAssembler, OpRethReceiptBuilder};
 use reth_optimism_node::OpBuiltPayload;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
-use reth_primitives_traits::{Account, Recovered, RecoveredBlock, SealedHeader};
-use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
+use reth_primitives_traits::{Recovered, RecoveredBlock, SealedHeader};
+use reth_provider::{BlockExecutionOutput, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher, updates::TrieUpdates};
-use revm::{
-    database::{
-        AccountStatus, BundleAccount, StorageWithOriginalValues,
-        states::{StorageSlot, bundle_state::BundleRetention},
-    },
-    state::{AccountInfo, bal::Bal},
-};
-use revm_database::{BundleState, State};
+use revm::{database::states::bundle_state::BundleRetention, state::bal::Bal};
+use revm_database::State;
 use tracing::error;
 use world_chain_primitives::{
     access_list::{FlashblockAccessList, FlashblockAccessListData, access_list_hash},
@@ -61,118 +55,6 @@ pub struct StateRootResult {
     pub state_root: B256,
     pub trie_updates: TrieUpdates,
     pub hashed_state: HashedPostState,
-}
-
-pub fn compute_state_root<'a>(
-    state_provider: Arc<dyn StateProvider + Send>,
-    bundle_state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
-) -> Result<StateRootResult, BlockExecutionError> {
-    let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state);
-    let (state_root, trie_updates) = state_provider
-        .state_root_with_updates(hashed_state.clone())
-        .map_err(BlockExecutionError::other)?;
-    Ok(StateRootResult {
-        state_root,
-        trie_updates,
-        hashed_state,
-    })
-}
-
-/// Reconstructs the post-state [`BundleAccount`] for a single account from its recorded BAL
-/// changes, falling back to `pre` (the parent-block account) for any field the BAL does not record.
-///
-/// The BAL is a sparse diff: it only records the fields that changed during the flashblock, so the
-/// unchanged fields of an account's leaf must come from the parent state. The latest recorded
-/// change per field wins (changes are not guaranteed pre-sorted, so we select by block access
-/// index rather than position).
-///
-/// Returns `None` for accounts that only appear as storage reads (no state change), so the
-/// predicted bundle contains the same set of accounts an execution bundle would.
-fn account_post_state(changes: &AccountChanges, pre: Option<Account>) -> Option<BundleAccount> {
-    if changes.storage_changes.is_empty()
-        && changes.balance_changes.is_empty()
-        && changes.nonce_changes.is_empty()
-        && changes.code_changes.is_empty()
-    {
-        return None;
-    }
-
-    let balance = changes
-        .balance_changes()
-        .iter()
-        .max_by_key(|change| change.block_access_index.0)
-        .map(|change| change.post_balance);
-    let nonce = changes
-        .nonce_changes()
-        .iter()
-        .max_by_key(|change| change.block_access_index.0)
-        .map(|change| change.new_nonce);
-    let code_hash = changes
-        .code_changes()
-        .iter()
-        .max_by_key(|change| change.block_access_index.0)
-        .map(|change| keccak256(&change.new_code));
-
-    let info = AccountInfo {
-        balance: balance
-            .or(pre.map(|account| account.balance))
-            .unwrap_or_default(),
-        nonce: nonce
-            .or(pre.map(|account| account.nonce))
-            .unwrap_or_default(),
-        code_hash: code_hash
-            .or(pre.and_then(|account| account.bytecode_hash))
-            .unwrap_or(KECCAK_EMPTY),
-        account_id: None,
-        code: None,
-    };
-
-    let mut storage = StorageWithOriginalValues::default();
-    for (slot, value) in changes.storage_post_states() {
-        // Only the present value affects the state root; the original value is unused.
-        storage.insert(slot, StorageSlot::new_changed(U256::ZERO, value));
-    }
-
-    // EIP-158: an account that ends empty is pruned from the trie. Encode it as destroyed with no
-    // account info so `HashedPostState::from_bundle_state` removes the leaf and wipes its storage.
-    Some(if info.is_empty() {
-        BundleAccount::new(None, None, storage, AccountStatus::Destroyed)
-    } else {
-        BundleAccount::new(None, Some(info), storage, AccountStatus::InMemoryChange)
-    })
-}
-
-/// Builds the cumulative post-state bundle for the block from the received `access_list`, composed
-/// on top of the already-committed prior-flashblock bundle.
-///
-/// This lets the state root be computed from the *received* BAL (the claimed post-state) without
-/// waiting for parallel transaction execution. If the BAL is wrong, the resulting state root will
-/// not match `diff.state_root` and validation fails, so this is consensus-safe.
-fn predicted_post_state_bundle(
-    access_list: &FlashblockAccessList,
-    state_provider: &(impl StateProvider + ?Sized),
-    committed_bundle: &BundleState,
-) -> Result<BundleState, BalExecutorError> {
-    let mut bal_bundle = BundleState::default();
-    for changes in &access_list.changes {
-        // Read the parent account only when the BAL omits a field we need to complete the leaf.
-        let needs_prestate = changes.balance_changes.is_empty()
-            || changes.nonce_changes.is_empty()
-            || changes.code_changes.is_empty();
-        let pre = if needs_prestate {
-            state_provider
-                .basic_account(&changes.address)
-                .map_err(BalExecutorError::other)?
-        } else {
-            None
-        };
-
-        if let Some(account) = account_post_state(changes, pre) {
-            bal_bundle.state.insert(changes.address, account);
-        }
-    }
-
-    Ok(extend_flashblock_bundle(committed_bundle, bal_bundle))
 }
 
 /// Context passed to an [`ExecutionStrategy`] for each flashblock.
@@ -400,21 +282,24 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
 
         // Compute the state root from the *received* access list, overlapping the trie walk with
         // parallel transaction execution below. The access list carries the claimed post-state, so
-        // reconstructing the cumulative block bundle from it (composed with the prior committed
-        // bundle) lets the state root computation start before execution finishes. The trie walk is
-        // dispatched to a background thread; we block on the handle only after execution and BAL
-        // hash validation succeed. A wrong access list yields a mismatching state root, so this
-        // stays consensus-safe.
+        // deriving the cumulative hashed post-state from it (the committed prior-flashblock state
+        // extended with this flashblock's changes) lets the state root computation start before
+        // execution finishes. The trie walk is dispatched to a background thread; we block on the
+        // handle only after execution and BAL hash validation succeed. A wrong access list yields a
+        // mismatching state root, so this stays consensus-safe.
         let state_root_started = Instant::now();
-        let predicted_bundle = predicted_post_state_bundle(
-            &access_list,
-            finish_state_provider.as_ref(),
-            &committed_state.bundle,
+        let committed_hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(
+            committed_state.bundle.state.iter(),
+        );
+        let predicted_hashed_state = access_list
+            .clone()
+            .into_hashed_post_state(finish_state_provider.as_ref(), committed_hashed_state)
+            .map_err(BalExecutorError::other)?;
+        let state_root_handle = self.ctx.state_root_strategy.prepare(
+            client.clone(),
+            parent_hash,
+            predicted_hashed_state,
         )?;
-        let state_root_handle =
-            self.ctx
-                .state_root_strategy
-                .prepare(client.clone(), parent_hash, predicted_bundle)?;
 
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(finish_state_provider.as_ref()))
@@ -750,7 +635,9 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
         let bundle = extend_flashblock_bundle(&committed_state.bundle, db.take_bundle());
 
         let state_root_started = Instant::now();
-        let state_root_handle = state_root_strategy.prepare(client, parent_hash, bundle.clone())?;
+        let hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle.state.iter());
+        let state_root_handle = state_root_strategy.prepare(client, parent_hash, hashed_state)?;
         let StateRootResult {
             state_root,
             trie_updates,
@@ -813,111 +700,5 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             committed_state.fees + fees,
             Some(executed_block),
         ))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::account_post_state;
-    use alloy_consensus::constants::KECCAK_EMPTY;
-    use alloy_eip7928::{
-        AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
-        StorageChange,
-    };
-    use alloy_primitives::{Address, Bytes, U256, keccak256};
-    use reth_primitives_traits::Account;
-    use revm::database::AccountStatus;
-
-    fn addr() -> Address {
-        Address::with_last_byte(0x42)
-    }
-
-    #[test]
-    fn pure_read_returns_none() {
-        // An account that only appears as a storage read produces no post-state change.
-        let changes = AccountChanges::new(addr()).with_storage_read(U256::from(1));
-        assert!(account_post_state(&changes, None).is_none());
-    }
-
-    #[test]
-    fn storage_only_change_inherits_prestate_account_info() {
-        let pre = Account {
-            nonce: 7,
-            balance: U256::from(1000),
-            bytecode_hash: Some(keccak256([0x60, 0x00])),
-        };
-        let changes = AccountChanges::new(addr()).with_storage_change(SlotChanges::new(
-            U256::from(3),
-            vec![StorageChange::new(
-                BlockAccessIndex::new(1),
-                U256::from(0xbeef),
-            )],
-        ));
-
-        let account = account_post_state(&changes, Some(pre)).expect("changed account");
-        let info = account.info.expect("non-empty account keeps info");
-        // Unchanged fields come from the parent account.
-        assert_eq!(info.nonce, 7);
-        assert_eq!(info.balance, U256::from(1000));
-        assert_eq!(info.code_hash, pre.bytecode_hash.unwrap());
-        assert_eq!(
-            account.storage.get(&U256::from(3)).unwrap().present_value,
-            U256::from(0xbeef)
-        );
-        assert!(!account.status.was_destroyed());
-    }
-
-    #[test]
-    fn latest_balance_and_nonce_change_wins_regardless_of_order() {
-        // Changes are not guaranteed sorted; selection is by block access index, not position.
-        let changes = AccountChanges::new(addr())
-            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(5), U256::from(70)))
-            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(2), U256::from(30)))
-            .with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 1))
-            .with_nonce_change(NonceChange::new(BlockAccessIndex::new(9), 4));
-
-        let account = account_post_state(&changes, None).expect("changed account");
-        let info = account.info.expect("non-empty account keeps info");
-        assert_eq!(info.balance, U256::from(70));
-        assert_eq!(info.nonce, 4);
-    }
-
-    #[test]
-    fn code_change_sets_keccak_of_new_code() {
-        let code = Bytes::from_static(&[0x60, 0x01, 0x60, 0x02]);
-        let changes = AccountChanges::new(addr())
-            .with_nonce_change(NonceChange::new(BlockAccessIndex::new(1), 1))
-            .with_code_change(CodeChange::new(BlockAccessIndex::new(1), code.clone()));
-
-        let account = account_post_state(&changes, None).expect("changed account");
-        let info = account.info.expect("contract keeps info");
-        assert_eq!(info.code_hash, keccak256(&code));
-        assert!(!account.status.was_destroyed());
-    }
-
-    #[test]
-    fn account_that_ends_empty_is_encoded_as_destroyed() {
-        // A balance drained to zero with no nonce/code leaves an empty account (EIP-158), which is
-        // pruned from the trie. It must be encoded as destroyed with no info so the leaf is removed.
-        let changes = AccountChanges::new(addr())
-            .with_balance_change(BalanceChange::new(BlockAccessIndex::new(1), U256::ZERO));
-
-        let account = account_post_state(&changes, None).expect("changed account");
-        assert!(account.info.is_none());
-        assert_eq!(account.status, AccountStatus::Destroyed);
-        assert!(account.status.was_destroyed());
-    }
-
-    #[test]
-    fn empty_prestate_account_with_code_is_kept() {
-        // Newly deployed contract: no parent account, code change makes it non-empty.
-        let code = Bytes::from_static(&[0xfe]);
-        let changes = AccountChanges::new(addr())
-            .with_code_change(CodeChange::new(BlockAccessIndex::new(1), code.clone()));
-
-        let account = account_post_state(&changes, None).expect("created contract");
-        let info = account.info.expect("contract is non-empty");
-        assert_eq!(info.code_hash, keccak256(&code));
-        assert_ne!(info.code_hash, KECCAK_EMPTY);
     }
 }

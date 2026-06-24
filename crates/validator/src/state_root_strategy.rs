@@ -1,8 +1,25 @@
-use crate::execution_strategy::{self, ExecutionStrategy, StateRootResult};
+use std::sync::Arc;
+
+use crate::execution_strategy::{ExecutionStrategy, StateRootResult};
 use alloy_primitives::B256;
 use reth_evm::{ConfigureEvm, block::BlockExecutionError};
-use reth_provider::StateProviderFactory;
-use revm_database::BundleState;
+use reth_provider::{StateProvider, StateProviderFactory};
+use reth_trie_common::HashedPostState;
+
+/// Walks the trie to compute the state root for the given hashed post-state.
+pub fn compute_state_root(
+    state_provider: Arc<dyn StateProvider + Send>,
+    hashed_state: HashedPostState,
+) -> Result<StateRootResult, BlockExecutionError> {
+    let (state_root, trie_updates) = state_provider
+        .state_root_with_updates(hashed_state.clone())
+        .map_err(BlockExecutionError::other)?;
+    Ok(StateRootResult {
+        state_root,
+        trie_updates,
+        hashed_state,
+    })
+}
 
 /// Strategy for state root computation.
 pub trait StateRootStrategy: Send + Sync {
@@ -12,7 +29,7 @@ pub trait StateRootStrategy: Send + Sync {
         &self,
         client: impl StateProviderFactory + Clone + 'static,
         parent_hash: B256,
-        bundle_state: BundleState,
+        hashed_state: HashedPostState,
     ) -> Result<Self::Handle, BlockExecutionError>;
 }
 
@@ -45,7 +62,7 @@ impl StateRootStrategy for AsyncStateRootStrategy {
         &self,
         client: impl StateProviderFactory + Clone + 'static,
         parent_hash: B256,
-        bundle_state: BundleState,
+        hashed_state: HashedPostState,
     ) -> Result<Self::Handle, BlockExecutionError> {
         let (sender, receiver) = crossbeam_channel::bounded(1);
         let state_root_provider = client
@@ -55,10 +72,7 @@ impl StateRootStrategy for AsyncStateRootStrategy {
         std::thread::Builder::new()
             .name("flashblock-state-root".to_string())
             .spawn(move || {
-                let result = execution_strategy::compute_state_root(
-                    state_root_provider.into(),
-                    bundle_state.state.iter(),
-                );
+                let result = compute_state_root(state_root_provider.into(), hashed_state);
                 let _ = sender.send(result);
             })
             .map_err(BlockExecutionError::other)?;
@@ -85,15 +99,12 @@ impl StateRootStrategy for SyncStateRootStrategy {
         &self,
         client: impl StateProviderFactory + Clone + 'static,
         parent_hash: B256,
-        bundle_state: BundleState,
+        hashed_state: HashedPostState,
     ) -> Result<Self::Handle, BlockExecutionError> {
         let state_root_provider = client
             .state_by_block_hash(parent_hash)
             .map_err(BlockExecutionError::other)?;
-        let result = execution_strategy::compute_state_root(
-            state_root_provider.into(),
-            bundle_state.state.iter(),
-        );
+        let result = compute_state_root(state_root_provider.into(), hashed_state);
         Ok(SyncStateRootHandle(result))
     }
 }
