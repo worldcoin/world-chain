@@ -1,7 +1,8 @@
 use alloy_consensus::BlockHeader;
 use alloy_op_evm::OpBlockExecutionCtx;
+use alloy_primitives::B256;
 use eyre::eyre::eyre;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt, future::OptionFuture};
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlock;
 use reth_evm::ConfigureEvm;
@@ -21,8 +22,9 @@ use reth_provider::{
     StateProviderFactory,
 };
 use std::{
+    future::Future,
     sync::{Arc, LazyLock},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::{
     sync::{
@@ -31,6 +33,7 @@ use tokio::{
     },
     task::JoinSet,
 };
+use tokio_stream::wrappers::BroadcastStream;
 use tracing::{error, trace};
 
 use crate::{
@@ -46,6 +49,12 @@ use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};
 /// Task-level permit to ensure only one flashblock is processed at a time.
 static SEMAPHORE_TASK_PERMIT: LazyLock<Arc<Semaphore>> =
     LazyLock::new(|| Arc::new(Semaphore::const_new(1)));
+
+/// Max time `newPayload` waits for the matching flashblock's executed payload to
+/// land on the broadcast stream (and thus the engine tree cache) before falling
+/// through to normal execution. Bounded to roughly one flashblock interval so the
+/// engine is never stalled if the flashblock errors or never arrives.
+const RESOLVE_PENDING_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// The current state of all known pre confirmations received over the P2P layer
 /// or generated from the payload building job of this node.
@@ -91,6 +100,36 @@ impl FlashblocksExecutionCoordinator {
         }
     }
 
+    /// If the most recently streamed flashblock claims `hash`, blocks until its
+    /// executed payload is broadcast (and thus inserted into the engine tree
+    /// cache) or a short timeout elapses, so a subsequent `newPayload` for the
+    /// same block finalizes from cache instead of re-executing.
+    ///
+    /// Resolves immediately when no streamed flashblock claims `hash`.
+    pub fn resolve_pending(&self, hash: B256) -> impl Future<Output = ()> {
+        // Synchronously gate on the last seen flashblock and subscribe; the
+        // returned future never holds the lock.
+        let rx = {
+            let inner = self.inner.read();
+            (inner.flashblocks.last().diff().block_hash == hash)
+                .then(|| inner.payload_events.as_ref().map(Sender::subscribe))
+                .flatten()
+        };
+
+        OptionFuture::from(rx.map(|rx| {
+            tokio::time::timeout(
+                RESOLVE_PENDING_TIMEOUT,
+                BroadcastStream::new(rx).any(move |event| {
+                    std::future::ready(matches!(
+                        event,
+                        Ok(Events::BuiltPayload(payload)) if payload.block().hash() == hash
+                    ))
+                }),
+            )
+        }))
+        .map(drop)
+    }
+
     /// Maps a closure over the [`WorldChainEventStream<T>`] from the P2P handle.
     pub fn map_worldchain_event_stream<N, P, T, F>(
         &self,
@@ -112,6 +151,7 @@ impl FlashblocksExecutionCoordinator {
         self.p2p_handle
             .event_stream(provider, move |event| f(event))
     }
+
     pub fn event_hook(
         event: &WorldChainEvent<()>,
         pending_block: &tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
@@ -481,4 +521,107 @@ where
     flashblock_validation_metrics
         .record_full_process_flashblock(process_flashblock_started.elapsed());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::{Block, BlockBody, Header};
+    use alloy_primitives::U256;
+    use alloy_rpc_types_engine::PayloadId;
+    use reth_optimism_primitives::OpTransactionSigned;
+    use reth_primitives_traits::SealedBlock;
+    use world_chain_primitives::{
+        ed25519_dalek::SigningKey,
+        primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1},
+    };
+
+    fn test_coordinator() -> (
+        FlashblocksExecutionCoordinator,
+        broadcast::Sender<Events<OpEngineTypes>>,
+    ) {
+        let sk = SigningKey::from_bytes(&[1u8; 32]);
+        let handle = FlashblocksHandle::new(sk.verifying_key(), Some(sk));
+        let (pending_tx, _pending_rx) = tokio::sync::watch::channel(None);
+        let coordinator = FlashblocksExecutionCoordinator::new(handle, pending_tx);
+        let (events_tx, _events_rx) = broadcast::channel(16);
+        coordinator.register_payload_events(events_tx.clone());
+        (coordinator, events_tx)
+    }
+
+    /// Builds an [`OpBuiltPayload`] over an empty block; `number` seeds a distinct
+    /// block hash. Returns the payload and its block hash.
+    fn built_payload(number: u64) -> (OpBuiltPayload, B256) {
+        let header = Header {
+            number,
+            ..Default::default()
+        };
+        let block = SealedBlock::seal_slow(Block {
+            header,
+            body: BlockBody::<OpTransactionSigned>::default(),
+        });
+        let hash = block.hash();
+        let payload =
+            OpBuiltPayload::new(PayloadId::new([0u8; 8]), Arc::new(block), U256::ZERO, None);
+        (payload, hash)
+    }
+
+    /// Sets the coordinator's last seen flashblock to claim `hash`, so the gate
+    /// in [`FlashblocksExecutionCoordinator::resolve_pending`] matches.
+    fn set_last_flashblock(coordinator: &FlashblocksExecutionCoordinator, hash: B256) {
+        let flashblock = Flashblock {
+            flashblock: FlashblocksPayloadV1 {
+                payload_id: PayloadId::new([0u8; 8]),
+                index: 0,
+                base: Some(ExecutionPayloadBaseV1::default()),
+                diff: ExecutionPayloadFlashblockDeltaV1 {
+                    block_hash: hash,
+                    ..Default::default()
+                },
+                metadata: Default::default(),
+            },
+        };
+        coordinator.inner.write().flashblocks.0 = vec![flashblock];
+    }
+
+    #[tokio::test]
+    async fn resolve_pending_gate_miss_returns_immediately() {
+        let (coordinator, _events_tx) = test_coordinator();
+        // No streamed flashblock claims this hash → resolve without waiting.
+        let started = Instant::now();
+        coordinator.resolve_pending(B256::repeat_byte(7)).await;
+        assert!(started.elapsed() < RESOLVE_PENDING_TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn resolve_pending_resolves_on_broadcast() {
+        let (coordinator, events_tx) = test_coordinator();
+        let (payload, hash) = built_payload(1);
+        set_last_flashblock(&coordinator, hash);
+
+        let started = Instant::now();
+        let task = {
+            let coordinator = coordinator.clone();
+            tokio::spawn(async move { coordinator.resolve_pending(hash).await })
+        };
+
+        // Let the task subscribe before the payload is broadcast.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        events_tx.send(Events::BuiltPayload(payload)).unwrap();
+        task.await.unwrap();
+
+        // Resolved by the broadcast, well before the timeout.
+        assert!(started.elapsed() < RESOLVE_PENDING_TIMEOUT);
+    }
+
+    #[tokio::test]
+    async fn resolve_pending_times_out_without_broadcast() {
+        let (coordinator, _events_tx) = test_coordinator();
+        let hash = B256::repeat_byte(9);
+        set_last_flashblock(&coordinator, hash);
+
+        let started = Instant::now();
+        coordinator.resolve_pending(hash).await;
+        assert!(started.elapsed() >= RESOLVE_PENDING_TIMEOUT);
+    }
 }

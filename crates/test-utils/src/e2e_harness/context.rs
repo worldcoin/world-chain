@@ -286,6 +286,12 @@ where
                 .components_context
                 .as_ref()
                 .map(|flashblocks_components_ctx| flashblocks_components_ctx.authorizer_vk),
+            flashblocks_state: self
+                .components_context
+                .as_ref()
+                .map(|flashblocks_components_ctx| {
+                    flashblocks_components_ctx.flashblocks_state.clone()
+                }),
         };
         let op_eth_api_builder = OpEthApiBuilder::<WorldRpcTypes>::default()
             .with_sequencer(self.config.args.rollup.sequencer.clone());

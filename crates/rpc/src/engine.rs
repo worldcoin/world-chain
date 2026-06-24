@@ -14,11 +14,13 @@ use reth_optimism_rpc::{OpEngineApi, OpEngineApiServer};
 use reth_provider::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_transaction_pool::TransactionPool;
+use std::future::Future;
 use tracing::trace;
 use world_chain_primitives::{
     p2p::Authorization,
     payload_id::{force_op_payload_id_v3, op_reth_payload_id_v4_lookup},
 };
+use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
 
 #[derive(Debug, Clone)]
 pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
@@ -26,6 +28,8 @@ pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, Chain
     inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
     /// A (optional) watch channel notifier to the jobs generator.
     to_jobs_generator: Option<tokio::sync::watch::Sender<Option<Authorization>>>,
+    /// An (optional) handle to the [`FlashblocksExecutionCoordinator`]
+    pending_state: Option<FlashblocksExecutionCoordinator>,
 }
 
 impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
@@ -35,10 +39,24 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
     pub fn new(
         inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
         to_jobs_generator: Option<tokio::sync::watch::Sender<Option<Authorization>>>,
+        pending_state: Option<FlashblocksExecutionCoordinator>,
     ) -> Self {
         Self {
             inner,
             to_jobs_generator,
+            pending_state,
+        }
+    }
+
+    /// Blocks until the flashblock claiming `block_hash` has been executed and
+    /// cached in the engine tree (or a short timeout elapses), so the subsequent
+    /// `newPayload` finalizes from cache instead of re-executing.
+    fn resolve_pending(&self, block_hash: B256) -> impl Future<Output = ()> {
+        let pending_state = self.pending_state.clone();
+        async move {
+            if let Some(state) = pending_state {
+                state.resolve_pending(block_hash).await;
+            }
         }
     }
 }
@@ -63,6 +81,8 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
+        self.resolve_pending(payload.payload_inner.payload_inner.block_hash)
+            .await;
         Ok(self
             .inner
             .new_payload_v3(payload, versioned_hashes, parent_beacon_block_root)
@@ -76,6 +96,8 @@ where
         parent_beacon_block_root: B256,
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
+        self.resolve_pending(payload.payload_inner.payload_inner.payload_inner.block_hash)
+            .await;
         Ok(self
             .inner
             .new_payload_v4(

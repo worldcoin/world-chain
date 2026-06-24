@@ -15,6 +15,7 @@ use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
 use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_primitives::p2p::Authorization;
 use world_chain_rpc::engine::OpEngineApiExt;
+use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
 
 /// Builder for basic [`OpEngineApiExt`] implementation.
 pub struct FlashblocksEngineApiBuilder<EV> {
@@ -26,6 +27,9 @@ pub struct FlashblocksEngineApiBuilder<EV> {
     pub to_jobs_generator: Option<tokio::sync::watch::Sender<Option<Authorization>>>,
     /// Verifying key for authorizations.
     pub authorizer_vk: Option<VerifyingKey>,
+    /// The flashblocks execution coordinator, used to block `newPayload` on an
+    /// in-flight flashblock execution so the engine tree finalizes from cache.
+    pub flashblocks_state: Option<FlashblocksExecutionCoordinator>,
 }
 
 impl<EV: Default> Default for FlashblocksEngineApiBuilder<EV> {
@@ -35,6 +39,7 @@ impl<EV: Default> Default for FlashblocksEngineApiBuilder<EV> {
             flashblocks_handle: None,
             to_jobs_generator: None,
             authorizer_vk: None,
+            flashblocks_state: None,
         }
     }
 }
@@ -65,6 +70,7 @@ where
         let Self {
             engine_validator_builder,
             to_jobs_generator,
+            flashblocks_state,
             ..
         } = self;
 
@@ -99,7 +105,8 @@ where
         );
 
         let op_engine_api = OpEngineApi::new(inner);
-        let op_engine_api_ext = OpEngineApiExt::new(op_engine_api, to_jobs_generator);
+        let op_engine_api_ext =
+            OpEngineApiExt::new(op_engine_api, to_jobs_generator, flashblocks_state);
 
         Ok(op_engine_api_ext)
     }
