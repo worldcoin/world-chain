@@ -6,15 +6,16 @@
 # Required file in context: world-chain-nitro-worker-enclave.eif
 #
 # Environment variables (defaults shown):
-#   EIF_PATH            /home/world-chain-nitro-worker-enclave.eif
-#   ENCLAVE_CPU_COUNT   2
-#   ENCLAVE_MEMORY_SIZE 512   (MiB)
+#   EIF_PATH              /home/world-chain-nitro-worker-enclave.eif
+#   ENCLAVE_CPU_COUNT     2
+#   ENCLAVE_MEMORY_SIZE   512   (MiB)
+#   ENCLAVE_DEBUG_MODE    false  (set to "true" or "1" to pass --debug-mode)
 
 ######## dependency extraction stage ########
-FROM public.ecr.aws/amazonlinux/amazonlinux:2 AS full_image
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023 AS full_image
 
-RUN amazon-linux-extras install aws-nitro-enclaves-cli && \
-    yum install aws-nitro-enclaves-cli-devel jq -y
+RUN dnf install aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel jq -y && \
+    dnf clean all
 
 WORKDIR /ne-deps
 
@@ -40,7 +41,7 @@ RUN mkdir -p /ne-deps/etc/nitro_enclaves \
     cp -f /etc/nitro_enclaves/allocator.yaml /ne-deps/etc/nitro_enclaves/allocator.yaml
 
 ######## final launcher image ########
-FROM public.ecr.aws/amazonlinux/amazonlinux:2
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023
 
 # Copy only the pre-extracted binaries, libraries, and config.
 COPY --from=full_image /ne-deps/etc /etc
@@ -55,24 +56,32 @@ COPY world-chain-nitro-worker-enclave.eif /home/world-chain-nitro-worker-enclave
 # Defaults; override at runtime via -e / K8s env:.
 ENV EIF_PATH="/home/world-chain-nitro-worker-enclave.eif" \
     ENCLAVE_CPU_COUNT=2 \
-    ENCLAVE_MEMORY_SIZE=512
+    ENCLAVE_MEMORY_SIZE=512 \
+    ENCLAVE_DEBUG_MODE=false
 
 # Embed the launcher script directly (no external file needed in the build context).
 COPY <<'EOF' /home/run.sh
 #!/bin/bash
 set -euo pipefail
 
-echo "[run.sh] Starting enclave: eif=${EIF_PATH} cpu=${ENCLAVE_CPU_COUNT} mem=${ENCLAVE_MEMORY_SIZE}MiB"
+echo "[run.sh] Starting enclave: eif=${EIF_PATH} cpu=${ENCLAVE_CPU_COUNT} mem=${ENCLAVE_MEMORY_SIZE}MiB debug=${ENCLAVE_DEBUG_MODE}"
+
+DEBUG_FLAG=""
+if [[ "${ENCLAVE_DEBUG_MODE}" == "true" || "${ENCLAVE_DEBUG_MODE}" == "1" ]]; then
+    DEBUG_FLAG="--debug-mode"
+fi
 
 nitro-cli run-enclave \
     --cpu-count  "${ENCLAVE_CPU_COUNT}" \
     --memory     "${ENCLAVE_MEMORY_SIZE}" \
-    --eif-path   "${EIF_PATH}"
+    --eif-path   "${EIF_PATH}" \
+    ${DEBUG_FLAG}
 
 enclave_id=$(nitro-cli describe-enclaves | jq -r '.[0].EnclaveID')
 echo "[run.sh] Enclave started: ${enclave_id}"
 
 # Attach to the enclave console (blocking — keeps the container alive).
+# In non-debug mode the console produces no output but still blocks correctly.
 nitro-cli console --enclave-id "${enclave_id}"
 EOF
 
