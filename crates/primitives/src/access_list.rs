@@ -94,16 +94,22 @@ impl FlashblockAccessList {
                 .accounts
                 .insert(hashed_address, (!destroyed).then_some(account));
 
+            // `wiped` is carried on the storage itself: a destroyed account wipes any committed
+            // storage when merged below.
             let mut storage = HashedStorage::new(destroyed);
             for (slot, value) in changes.storage_post_states() {
                 storage.storage.insert(keccak256(B256::from(slot)), value);
             }
-            // Merge onto any storage already committed for this account; the new entries win.
-            hashed_post_state
-                .storages
-                .entry(hashed_address)
-                .or_insert_with(|| HashedStorage::new(false))
-                .extend(&storage);
+            // Skip live accounts with no storage writes (matches `from_bundle_state`, which omits
+            // empty storages); otherwise merge onto any committed storage, with the new entries
+            // winning.
+            if !storage.is_empty() {
+                hashed_post_state
+                    .storages
+                    .entry(hashed_address)
+                    .and_modify(|committed| committed.extend(&storage))
+                    .or_insert(storage);
+            }
         }
 
         Ok(hashed_post_state)
