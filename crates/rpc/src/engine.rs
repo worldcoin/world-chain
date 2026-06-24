@@ -2,7 +2,7 @@ use alloy_eips::eip7685::Requests;
 use alloy_primitives::{B256, BlockHash, U64};
 use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
-    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
+    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
 use jsonrpsee::{proc_macros::rpc, types::ErrorObject};
 use jsonrpsee_core::{RpcResult, async_trait, server::RpcModule};
@@ -49,7 +49,7 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
         }
     }
 
-    /// Races full payload validation against resolution of the pending flashblock.
+    /// Starts payload validation while waiting for a matching pending flashblock to resolve.
     async fn race_pending_payload(
         &self,
         block_hash: B256,
@@ -61,12 +61,13 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
 
         // Poll validation first: `resolve_pending` may never resolve, so it must
         // not short-circuit before the engine is handed the payload to validate.
+        tokio::pin!(validate);
         tokio::select! {
             biased;
-            result = validate => result,
-            () = state.resolve_pending(block_hash) => {
-                Ok(PayloadStatus::new(PayloadStatusEnum::Valid, Some(block_hash)))
-            }
+            result = &mut validate => result,
+            // Use the event to unblock/cache the pending payload path, but still return
+            // the engine's validation result for this `newPayload` request.
+            () = state.resolve_pending(block_hash) => validate.await,
         }
     }
 }
