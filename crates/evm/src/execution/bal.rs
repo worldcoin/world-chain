@@ -448,16 +448,6 @@ where
     pub fn receipts_iter(&self) -> impl Iterator<Item = &'_ R::Receipt> + '_ {
         self.receipts.iter().map(|(_, r)| r)
     }
-
-    /// Returns true when the [`CommittedState`] is empty.
-    pub fn is_empty(&self) -> bool {
-        self.gas_used == 0
-            && self.blob_gas_used == 0
-            && self.fees == U256::ZERO
-            && self.bundle.is_empty()
-            && self.receipts.is_empty()
-            && self.transactions.is_empty()
-    }
 }
 
 impl<R> TryFrom<Option<&OpBuiltPayload>> for CommittedState<R>
