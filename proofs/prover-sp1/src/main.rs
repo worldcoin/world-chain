@@ -1,3 +1,4 @@
+use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
 
 use alloy_primitives::{Address, B256};
@@ -66,17 +67,9 @@ struct Sp1ProveArgs {
     #[arg(long, default_value_t = 1)]
     ranges: u64,
 
-    /// Path to the SP1 range ELF binary.
-    #[arg(long, env = "RANGE_ELF_PATH")]
-    range_elf: PathBuf,
-
-    /// Path to the SP1 aggregation ELF binary.
-    #[arg(long, env = "AGG_ELF_PATH")]
-    agg_elf: PathBuf,
-
     /// Prover backend: cpu, mock, or network. Overrides SP1_PROVER env var.
     #[arg(long, env = "SP1_PROVER", default_value = "cpu")]
-    prover: world_chain_proof_succinct_host_utils::env_prover::Sp1ProverKind,
+    prover: world_chain_proof_succinct_host_utils::prover::Sp1ProverKind,
 
     /// Aggregation proof mode.
     #[arg(long, default_value = "groth16")]
@@ -93,22 +86,6 @@ struct Sp1ProveArgs {
 
 #[derive(Debug, Args)]
 struct Sp1VkeysArgs {
-    /// Path to the SP1 range ELF binary.
-    #[arg(
-        long,
-        env = "RANGE_ELF_PATH",
-        default_value = "proofs/succinct/elf/world-chain-range-ethereum"
-    )]
-    range_elf: PathBuf,
-
-    /// Path to the SP1 aggregation ELF binary.
-    #[arg(
-        long,
-        env = "AGG_ELF_PATH",
-        default_value = "proofs/succinct/elf/world-chain-aggregation"
-    )]
-    agg_elf: PathBuf,
-
     /// Output path for the vkeys JSON. Printed to stdout when unset.
     #[arg(long)]
     output: Option<PathBuf>,
@@ -156,16 +133,11 @@ fn sp1_execute(args: Sp1ExecuteArgs) -> Result<()> {
 fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
     use sp1_sdk::SP1ProofMode;
     use world_chain_proof_succinct_host_utils::{
-        env_prover::EnvSuccinctProver,
+        prover::SuccinctProver,
         validity::{ValidityProofRequest, prove_validity},
     };
 
     let host = online_host_config(&args.rpc)?;
-
-    let range_elf = fs::read(&args.range_elf)
-        .with_context(|| format!("failed to read {}", args.range_elf.display()))?;
-    let agg_elf = fs::read(&args.agg_elf)
-        .with_context(|| format!("failed to read {}", args.agg_elf.display()))?;
 
     let mode = match args.mode {
         Sp1Mode::Core => SP1ProofMode::Core,
@@ -183,7 +155,7 @@ fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
         prover = args.prover,
     );
 
-    let prover = EnvSuccinctProver::new(args.prover, range_elf, agg_elf, mode)?;
+    let prover = SuccinctProver::new(args.prover, mode)?;
     let artifact = prove_validity(
         &host,
         &prover,
@@ -214,27 +186,23 @@ fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
 
 fn sp1_vkeys(args: Sp1VkeysArgs) -> Result<()> {
     use anyhow::anyhow;
-    use sha2::{Digest, Sha256};
     use sp1_sdk::{CpuProver, HashableKey, Prover, ProvingKey, env::EnvProver};
     use world_chain_proof_core::types::u32_to_u8;
+    let range_elf_bytes = world_chain_proof_succinct_elfs::range_elf();
+    let agg_elf_bytes = world_chain_proof_succinct_elfs::aggregation_elf();
 
-    let range_elf = fs::read(&args.range_elf)
-        .with_context(|| format!("failed to read ELF {}", args.range_elf.display()))?;
-    let agg_elf = fs::read(&args.agg_elf)
-        .with_context(|| format!("failed to read ELF {}", args.agg_elf.display()))?;
-
-    let range_elf_sha256 = hex::encode(Sha256::digest(&range_elf));
-    let agg_elf_sha256 = hex::encode(Sha256::digest(&agg_elf));
+    let range_elf_sha256 = hex::encode(Sha256::digest(&*range_elf_bytes));
+    let agg_elf_sha256 = hex::encode(Sha256::digest(&*agg_elf_bytes));
 
     let (range_vkey_commitment, aggregation_vkey) =
         tokio::runtime::Runtime::new()?.block_on(async {
             let client = EnvProver::Cpu(CpuProver::new().await);
             let range_pk = client
-                .setup(range_elf.into())
+                .setup(range_elf_bytes)
                 .await
                 .map_err(|e| anyhow!("range setup failed: {e}"))?;
             let agg_pk = client
-                .setup(agg_elf.into())
+                .setup(agg_elf_bytes)
                 .await
                 .map_err(|e| anyhow!("aggregation setup failed: {e}"))?;
             let range_vkey_commitment = B256::from(u32_to_u8(range_pk.verifying_key().hash_u32()));
@@ -247,11 +215,9 @@ fn sp1_vkeys(args: Sp1VkeysArgs) -> Result<()> {
         "aggregation_vkey": aggregation_vkey,
         "elfs": {
             "world-chain-range-ethereum": {
-                "path": args.range_elf,
                 "sha256": range_elf_sha256,
             },
             "world-chain-aggregation": {
-                "path": args.agg_elf,
                 "sha256": agg_elf_sha256,
             },
         },

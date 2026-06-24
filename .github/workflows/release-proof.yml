@@ -6,14 +6,12 @@
 #
 # A release binds together every measurement the proof system registers
 # on-chain, in a single manifest.json:
-#   - SP1 guest ELF sha256s + range vkey commitment + aggregation vkey
+#   - SP1 range vkey commitment + aggregation vkey (derived from guest ELFs
+#     embedded at compile time via sp1_build / include_elf!())
 #   - Nitro enclave EIF PCR0/PCR1/PCR2
 #   - prover docker image digests
 # plus the deployable artifacts themselves (docker images, GPG-signed binary
-# tarballs, release-generated guest ELFs, and the enclave EIF).
-#
-# Guest ELFs are generated only for proof releases and uploaded as release
-# artifacts. They are not committed to git.
+# tarballs, and the enclave EIF).
 
 name: release-proof
 
@@ -61,43 +59,19 @@ jobs:
       VERSION: ${{ steps.extract_version.outputs.VERSION }}
       IS_RELEASE: ${{ steps.extract_version.outputs.IS_RELEASE }}
 
-  # Build the SP1 guest ELFs for this release. The generated files are passed to
-  # downstream jobs as artifacts and staged into the GitHub release.
-  build-elfs:
-    name: build ELFs
+  # Compute the on-chain verification keys. The SP1 guest ELFs are compiled
+  # inline via sp1_build (include_elf!()) — no separate build step required.
+  vkeys:
+    name: compute vkeys
     needs: approve-release
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
       - uses: actions/checkout@v6
-      - uses: taiki-e/install-action@just
       - name: Install SP1 toolchain
         run: |
           curl -L https://sp1.succinct.xyz | bash
           ~/.sp1/bin/sp1up --version v6.1.0
           echo "$HOME/.sp1/bin" >> $GITHUB_PATH
-      - name: Build ELFs
-        run: just build-proof-elfs
-      - name: Upload ELFs
-        uses: actions/upload-artifact@v4
-        with:
-          name: proof-elfs
-          path: |
-            proofs/succinct/elf/world-chain-range-ethereum
-            proofs/succinct/elf/world-chain-aggregation
-          if-no-files-found: error
-
-  # Compute the on-chain verification keys for the release-generated ELFs.
-  vkeys:
-    name: compute vkeys
-    needs: [build-elfs]
-    runs-on: arc-public-8xlarge-amd64-runner
-    steps:
-      - uses: actions/checkout@v6
-      - name: Download ELFs
-        uses: actions/download-artifact@v4
-        with:
-          name: proof-elfs
-          path: proofs/succinct/elf
       - uses: taiki-e/install-action@just
       - uses: dtolnay/rust-toolchain@stable
       - uses: arduino/setup-protoc@v3
@@ -105,6 +79,8 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
       - name: Compute vkeys
+        env:
+          SP1_BUILD_DOCKER: "false"
         run: just proof-vkeys --output vkeys.json && cat vkeys.json
       - name: Upload vkeys
         uses: actions/upload-artifact@v4
@@ -113,14 +89,10 @@ jobs:
           path: vkeys.json
           if-no-files-found: error
 
-  # Backend prover images. Each image contains one host-side prover binary. The
-  # service deployables (sp1-worker, proposer, challenger, defender,
-  # prover-service) are built from the same Dockerfile.prover in
-  # build-service-images below.
   build-sp1-prover-image:
     name: build world-chain-prover-sp1 image
     environment: dev
-    needs: [approve-release, build-elfs]
+    needs: approve-release
     strategy:
       fail-fast: false
       matrix:
@@ -132,11 +104,6 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
-      - name: Download ELFs
-        uses: actions/download-artifact@v4
-        with:
-          name: proof-elfs
-          path: proofs/succinct/elf
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -147,7 +114,9 @@ jobs:
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           dockerfile: Dockerfile.prover
           build_args: |
-            PROVER_BACKEND=sp1
+            PROVER_PACKAGE=world-chain-prover-sp1
+            PROVER_BIN=world-chain-prover-sp1
+            FEATURES=
           digest_artifact_prefix: digests-prover-sp1
 
   merge-sp1-prover-image:
@@ -194,7 +163,9 @@ jobs:
           sccache_bucket: ${{ env.SCCACHE_BUCKET }}
           dockerfile: Dockerfile.prover
           build_args: |
-            PROVER_BACKEND=nitro
+            PROVER_PACKAGE=world-chain-prover-nitro
+            PROVER_BIN=world-chain-prover-nitro
+            FEATURES=
           digest_artifact_prefix: digests-prover-nitro
 
   merge-nitro-prover-image:
@@ -222,7 +193,7 @@ jobs:
   build-service-images:
     name: build ${{ matrix.service.bin }} image
     environment: dev
-    needs: [approve-release, build-elfs]
+    needs: approve-release
     strategy:
       fail-fast: false
       matrix:
@@ -238,12 +209,6 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     steps:
       - uses: actions/checkout@v6
-      - name: Download ELFs
-        if: matrix.service.bin == 'sp1-worker'
-        uses: actions/download-artifact@v4
-        with:
-          name: proof-elfs
-          path: proofs/succinct/elf
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -283,7 +248,81 @@ jobs:
             type=raw,value=${{ needs.extract-version.outputs.VERSION }}
             type=sha
 
-  # GPG-signed binary tarballs, mirroring the node release conventions.
+  # nitro-worker is Linux x86_64 only (requires AF_VSOCK), so it is built
+  # outside the multi-arch service matrix.
+  build-nitro-worker-image:
+    name: build nitro-worker image
+    environment: dev
+    needs: approve-release
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: linux/amd64
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ github.repository }}-nitro-worker
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          dockerfile: Dockerfile.prover
+          build_args: |
+            PROVER_PACKAGE=world-chain-nitro-worker
+            PROVER_BIN=nitro-worker
+          digest_artifact_prefix: digests-nitro-worker
+
+  merge-nitro-worker-image:
+    name: merge nitro-worker image manifest
+    needs: [extract-version, build-nitro-worker-image]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Merge multi-arch manifest
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ github.repository }}-nitro-worker
+          digest_artifact_prefix: digests-nitro-worker
+          digest_artifact_pattern: digests-nitro-worker-linux-*
+          tags: |
+            type=raw,value=${{ needs.extract-version.outputs.VERSION }}
+            type=sha
+
+  # nitro-worker-enclave uses its own Dockerfile and is x86_64 only.
+  build-nitro-worker-enclave-image:
+    name: build nitro-worker-enclave image
+    environment: dev
+    needs: approve-release
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: linux/amd64
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ github.repository }}-nitro-worker-enclave
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          dockerfile: proofs/nitro/Dockerfile
+          digest_artifact_prefix: digests-nitro-worker-enclave
+
+  merge-nitro-worker-enclave-image:
+    name: merge nitro-worker-enclave image manifest
+    needs: [extract-version, build-nitro-worker-enclave-image]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Merge multi-arch manifest
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ github.repository }}-nitro-worker-enclave
+          digest_artifact_prefix: digests-nitro-worker-enclave
+          tags: |
+            type=raw,value=${{ needs.extract-version.outputs.VERSION }}
+            type=sha
+
   build-binaries:
     name: build binaries
     needs: [extract-version]
@@ -300,6 +339,11 @@ jobs:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
     steps:
       - uses: actions/checkout@v6
+      - name: Install SP1 toolchain
+        run: |
+          curl -L https://sp1.succinct.xyz | bash
+          ~/.sp1/bin/sp1up --version v6.1.0
+          echo "$HOME/.sp1/bin" >> $GITHUB_PATH
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -309,16 +353,16 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
       - name: Cargo Build Release
+        env:
+          SP1_BUILD_DOCKER: "false"
         run: |
           cargo build --release --locked -p world-chain-prover-sp1 --target ${{ matrix.target }}
           cargo build --release --locked -p world-chain-prover-nitro --target ${{ matrix.target }}
-
       - name: Move binaries
         run: |
           mkdir artifacts
           mv "target/${{ matrix.target }}/release/world-chain-prover-sp1" ./artifacts
           mv "target/${{ matrix.target }}/release/world-chain-prover-nitro" ./artifacts
-
       - name: Configure GPG and create artifacts
         env:
           GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
@@ -331,7 +375,6 @@ jobs:
           echo "$GPG_PASSPHRASE" | gpg --passphrase-fd 0 --pinentry-mode loopback --batch -ab world-chain-prover-${{ env.VERSION }}-${{ matrix.target }}.tar.gz
           mv *tar.gz* ..
         shell: bash
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -339,7 +382,6 @@ jobs:
           path: world-chain-prover-${{ env.VERSION }}-${{ matrix.target }}.tar.gz*
           if-no-files-found: error
 
-  # Nitro enclave EIF + PCR measurements. Does not require Nitro hardware.
   build-eif:
     name: build enclave EIF
     needs: approve-release
@@ -358,13 +400,11 @@ jobs:
             target/eif/pcrs.json
           if-no-files-found: error
 
-  # Assemble manifest.json and the draft release. Tag pushes only.
   draft-release:
     name: draft release
     if: needs.extract-version.outputs.IS_RELEASE == 'true'
     needs:
       - extract-version
-      - build-elfs
       - vkeys
       - merge-sp1-prover-image
       - merge-nitro-prover-image
@@ -381,22 +421,17 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-
       - name: Stage release assets
         run: |
           mkdir -p assets
           cp artifacts/vkeys/vkeys.json assets/
-          cp artifacts/proof-elfs/world-chain-range-ethereum assets/
-          cp artifacts/proof-elfs/world-chain-aggregation assets/
           cp artifacts/nitro-enclave/pcrs.json assets/
           cp artifacts/nitro-enclave/world-chain-nitro-enclave.eif assets/
           cp artifacts/world-chain-prover-*/*.tar.gz* assets/
-
       - name: Build manifest
         run: |
           jq -n \
@@ -419,7 +454,6 @@ jobs:
               }
             }' > assets/manifest.json
           cat assets/manifest.json
-
       - name: Compare measurements with previous release
         id: measurements
         env:
@@ -444,7 +478,6 @@ jobs:
             fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-
       - name: Generate changelog
         id: changelog
         run: |
@@ -459,7 +492,6 @@ jobs:
             echo ""
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-
       - name: Create release draft
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -479,11 +511,10 @@ jobs:
 
           | Artifact | Purpose |
           |:---|:---|
-          | `manifest.json` | Binds git SHA, ELF hashes, vkeys, PCRs, and image digests for this release |
+          | `manifest.json` | Binds git SHA, vkeys, PCRs, and image digests for this release |
           | `vkeys.json` | SP1 range vkey commitment + aggregation vkey |
           | `pcrs.json` | Nitro enclave PCR0/PCR1/PCR2 |
           | `world-chain-nitro-enclave.eif` | Enclave image (measurements in `pcrs.json`) |
-          | `world-chain-range-ethereum`, `world-chain-aggregation` | SP1 guest ELFs (reproducible via `just build-proof-elfs`) |
           | `world-chain-prover-*.tar.gz` | `world-chain-prover-sp1` and `world-chain-prover-nitro` binaries, signed with PGP key `C75F BC64 E9D4 8E89 FB60 418B 8949 B352 D042 2E74` |
           | SP1 Docker | `ghcr.io/${{ env.PROOF_IMAGE_NAME }}-sp1:${{ env.VERSION }}` |
           | Nitro Docker | `ghcr.io/${{ env.PROOF_IMAGE_NAME }}-nitro:${{ env.VERSION }}` |

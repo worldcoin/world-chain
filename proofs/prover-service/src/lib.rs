@@ -72,15 +72,18 @@ mod config;
 mod error;
 mod rpc;
 mod service;
+mod store;
 mod traits;
 mod types;
 
 // re-exports
 pub use config::{
-    DEFAULT_LEASE_TIMEOUT, DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_FINISHED_JOBS, DEFAULT_MAX_QUEUE_LEN,
-    ProverServiceConfig,
+    DEFAULT_BACKEND_POLL_INTERVAL, DEFAULT_LEASE_TIMEOUT, DEFAULT_MAX_ATTEMPTS,
+    DEFAULT_MAX_QUEUE_LEN, ProverServiceConfig,
 };
-pub use error::{InvalidConfigError, ProofJobQueueError, ProofRequestError};
+pub use error::{
+    InvalidConfigError, ProofJobQueueError, ProofRequestError, ProverServiceInitError,
+};
 pub use rpc::{
     ProverServiceApiClient, ProverServiceApiServer, ProverServiceRpc, RpcProverServiceClient,
     start_rpc_server,
@@ -88,7 +91,9 @@ pub use rpc::{
 pub use service::ProverService;
 pub use traits::{ProofJobQueue, ProofRequester};
 pub use types::{
-    ProofBackend, ProofData, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
+    BackendProofId, BackendProofJobStatus, BackendProofPhase, BackendProofState, BackendProofWork,
+    BackendUpdate, LeaseToken, LeasedBackendProofWork, LeasedProofRequest, ProofBackend, ProofData,
+    ProofRequest, ProofRequestId, ProofResponse, ProofStatus, ProofSubmissionLease,
 };
 
 #[cfg(test)]

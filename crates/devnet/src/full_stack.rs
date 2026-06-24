@@ -43,9 +43,7 @@ use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 use world_chain_challenger::{AlloyChallengerClient, ChallengerConfig, WorldChainChallenger};
 use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
 use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
-use world_chain_proof_succinct_host_utils::env_prover::{
-    EnvSuccinctProver, SP1ProofMode, Sp1ProverKind,
-};
+use world_chain_proof_succinct_host_utils::prover::{SP1ProofMode, Sp1ProverKind, SuccinctProver};
 use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig};
 use world_chain_proofs::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
 use world_chain_proposer::{AlloyProofSystemClient, ProposerConfig, WorldChainProposer};
@@ -79,6 +77,7 @@ const CONDUCTOR_HEALTHCHECK_INTERVAL_SECS: &str = "5";
 const CONDUCTOR_HEALTHCHECK_UNSAFE_INTERVAL_SECS: &str = "300";
 const SERVICE_RPC_PORT: u16 = 8545;
 const SERVICE_METRICS_PORT: u16 = 7300;
+const PROVER_SERVICE_POSTGRES_PORT: u16 = 5432;
 const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 10;
 const PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL: u64 = 5;
 /// Poll interval for the in-process SP1 worker leasing jobs from the prover-service.
@@ -299,6 +298,8 @@ impl Drop for DefenderTask {
 #[derive(Debug)]
 struct ProverServiceTask {
     handle: ServerHandle,
+    _postgres: Option<ContainerAsync<GenericImage>>,
+    _postgres_data_dir: Option<TempDir>,
 }
 
 impl Drop for ProverServiceTask {
@@ -1176,6 +1177,11 @@ fn patch_l2_hardforks(
     );
     set_time(
         genesis_config,
+        "karstTime",
+        hardforks.is_active(WorldChainHardfork::Karst),
+    );
+    set_time(
+        genesis_config,
         "tropoTime",
         hardforks.is_active(WorldChainHardfork::Tropo),
     );
@@ -1239,6 +1245,11 @@ fn patch_l2_hardforks(
         rollup_config,
         "jovian_time",
         hardforks.is_active(WorldChainHardfork::Jovian),
+    );
+    set_time(
+        rollup_config,
+        "karst_time",
+        hardforks.is_active(WorldChainHardfork::Karst),
     );
     set_time(
         rollup_config,
@@ -2552,9 +2563,11 @@ fn sp1_worker_prover_kind() -> Option<Sp1ProverKind> {
 
 /// Starts the in-process defender prover-service and returns its task handle and JSON-RPC URL.
 async fn start_prover_service() -> Result<(ProverServiceTask, String)> {
+    let (database_url, postgres, postgres_data_dir) = prover_service_database_url().await?;
     let service = Arc::new(
-        ProverService::new(ProverServiceConfig::default())
-            .wrap_err("invalid prover-service config")?,
+        ProverService::connect(&database_url, ProverServiceConfig::default())
+            .await
+            .wrap_err("failed to initialize postgres-backed prover-service")?,
     );
     let (addr, handle) =
         start_rpc_server("127.0.0.1:0".parse().expect("valid loopback addr"), service)
@@ -2562,7 +2575,60 @@ async fn start_prover_service() -> Result<(ProverServiceTask, String)> {
             .wrap_err("failed to start prover-service RPC server")?;
     let url = format!("http://{addr}");
     info!(prover_service = %url, "started native defender prover-service");
-    Ok((ProverServiceTask { handle }, url))
+    Ok((
+        ProverServiceTask {
+            handle,
+            _postgres: postgres,
+            _postgres_data_dir: postgres_data_dir,
+        },
+        url,
+    ))
+}
+
+async fn prover_service_database_url() -> Result<(
+    String,
+    Option<ContainerAsync<GenericImage>>,
+    Option<TempDir>,
+)> {
+    if let Ok(database_url) = std::env::var("PROVER_SERVICE_DATABASE_URL") {
+        return Ok((database_url, None, None));
+    }
+
+    let data_dir = tempfile::Builder::new()
+        .prefix("world-chain-prover-service-postgres-")
+        .tempdir()
+        .wrap_err("failed to create prover-service postgres tempdir")?;
+    let data_dir_path = data_dir.path().to_string_lossy().to_string();
+    let container = GenericImage::new("postgres", "16-alpine")
+        .with_wait_for(WaitFor::message_on_stderr(
+            "database system is ready to accept connections",
+        ))
+        .with_exposed_port(PROVER_SERVICE_POSTGRES_PORT.tcp())
+        .with_env_var("POSTGRES_USER", "postgres")
+        .with_env_var("POSTGRES_PASSWORD", "postgres")
+        .with_env_var("POSTGRES_DB", "postgres")
+        .with_mount(Mount::bind_mount(data_dir_path, "/var/lib/postgresql/data"))
+        .with_startup_timeout(Duration::from_secs(60))
+        .start()
+        .await
+        .wrap_err("failed to start local prover-service postgres")?;
+
+    let host = container
+        .get_host()
+        .await
+        .wrap_err("failed to read prover-service postgres host")?;
+    let port = container
+        .get_host_port_ipv4(PROVER_SERVICE_POSTGRES_PORT)
+        .await
+        .wrap_err("failed to read prover-service postgres port")?;
+    let database_url = format!("postgres://postgres:postgres@{host}:{port}/postgres");
+    info!(
+        %host,
+        port,
+        data_dir = %data_dir.path().display(),
+        "started temporary prover-service postgres"
+    );
+    Ok((database_url, Some(container), Some(data_dir)))
 }
 
 /// Spawns the in-process SP1 proving worker.
@@ -2570,6 +2636,16 @@ async fn start_prover_service() -> Result<(ProverServiceTask, String)> {
 /// It leases SP1 jobs from the prover-service at `prover_service_url`, builds range witnesses
 /// from the devnet L1/L2 RPCs (the L1 dev chain doubles as the beacon endpoint, matching the
 /// op-node configuration), proves them with the selected backend, and submits the proofs back.
+///
+/// # Environment variables
+///
+/// This function loads guest ELFs at **runtime** from two required environment variables:
+/// - `RANGE_ELF_PATH` — path to the compiled SP1 range program ELF.
+/// - `AGG_ELF_PATH` — path to the compiled SP1 aggregation program ELF.
+///
+/// These must be set before enabling `DEVNET_SP1_WORKER_PROVER`. The standalone
+/// `world-chain-sp1-worker` binary embeds ELFs at **compile time** (via
+/// `world_chain_proof_succinct_elfs`) and does not require these variables.
 async fn start_sp1_worker(
     l1_rpc_url: &str,
     l2_rpc_url: &str,
@@ -2589,20 +2665,12 @@ async fn start_sp1_worker(
     )
     .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?;
 
-    let range_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-range-ethereum");
-    let agg_elf_path = repo_root()?.join("proofs/succinct/elf/world-chain-aggregation");
-    let range_elf = fs::read(&range_elf_path)
-        .wrap_err_with(|| format!("failed to read range ELF {}", range_elf_path.display()))?;
-    let agg_elf = fs::read(&agg_elf_path)
-        .wrap_err_with(|| format!("failed to read aggregation ELF {}", agg_elf_path.display()))?;
-
-    // `EnvSuccinctProver` owns its own runtime, so build it off the async runtime.
-    let prover = tokio::task::spawn_blocking(move || {
-        EnvSuccinctProver::new(kind, range_elf, agg_elf, SP1ProofMode::Groth16)
-    })
-    .await
-    .wrap_err("SP1 prover setup task panicked")?
-    .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+    // `SuccinctProver` owns its own runtime, so build it off the async runtime.
+    let prover =
+        tokio::task::spawn_blocking(move || SuccinctProver::new(kind, SP1ProofMode::Groth16))
+            .await
+            .wrap_err("SP1 prover setup task panicked")?
+            .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
 
     let backend = Sp1Backend::new(
         host,
@@ -3448,7 +3516,7 @@ mod tests {
                 "eip1559Elasticity": 10
             }
         });
-        let hardforks = WorldChainHardforkConfig::through(WorldChainHardfork::Jovian);
+        let hardforks = WorldChainHardforkConfig::through(WorldChainHardfork::Karst);
 
         patch_l2_genesis_base_fee_extra_data(&mut genesis, rollup.as_object().unwrap(), &hardforks)
             .unwrap();
@@ -3460,8 +3528,8 @@ mod tests {
     fn renders_op_deployer_intent_with_tagged_contract_locators() {
         let intent = render_intent(&HaSequencerConfig::default());
 
-        assert!(intent.contains("l1ContractsLocator = \"tag://op-contracts/v3.0.0-rc.2\""));
-        assert!(intent.contains("l2ContractsLocator = \"tag://op-contracts/v3.0.0-rc.2\""));
+        assert!(intent.contains("l1ContractsLocator = \"tag://op-contracts/v7.0.0-rc.4\""));
+        assert!(intent.contains("l2ContractsLocator = \"tag://op-contracts/v7.0.0-rc.4\""));
         assert!(!intent.contains("https://storage.googleapis.com/oplabs-contract-artifacts"));
     }
 }

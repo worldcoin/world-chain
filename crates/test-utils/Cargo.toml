@@ -22,7 +22,6 @@ world-chain-chainspec.workspace = true
 world-chain-cli.workspace = true
 world-chain-evm.workspace = true
 world-chain-rpc.workspace = true
-world-chain-state.workspace = true
 
 reth-optimism-node.workspace = true
 reth-optimism-primitives.workspace = true

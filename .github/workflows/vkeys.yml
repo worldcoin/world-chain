@@ -1,0 +1,48 @@
+# Staged CI workflow — copy to .github/workflows/vkeys.yml to activate.
+#
+# Verifies that proofs/succinct/elf/vkeys.json matches the vkeys derived from
+# the current SP1 guest programs. Runs on PRs that touch proof program sources
+# or the committed vkeys.json itself.
+#
+# Prerequisites in the repo:
+#   - `just verify-proof-vkeys` recipe in Justfile (already added)
+#   - proofs/succinct/elf/vkeys.json committed (already added)
+#
+# Uses the `world-chain-prover-sp1` package for the `vkeys` subcommand.
+name: verify-vkeys
+
+on:
+  pull_request:
+    paths:
+      - 'proofs/succinct/programs/**'
+      - 'proofs/succinct/elfs/**'
+      - 'proofs/succinct/elf/vkeys.json'
+      - 'Justfile'
+
+jobs:
+  verify-vkeys:
+    name: verify vkeys match source
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SP1 toolchain
+        run: |
+          curl -L https://sp1.succinct.xyz | bash
+          ~/.sp1/bin/sp1up --version v6.1.0
+          echo "$HOME/.sp1/bin" >> $GITHUB_PATH
+
+      - uses: taiki-e/install-action@just
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Verify vkeys
+        env:
+          SP1_BUILD_DOCKER: "true"
+        run: just verify-proof-vkeys

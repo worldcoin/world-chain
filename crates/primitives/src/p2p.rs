@@ -617,8 +617,9 @@ mod tests {
 
     use super::*;
 
-    use alloy_eips::eip7928::{
-        AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
+    use alloy_eip7928::{
+        AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
+        StorageChange,
     };
     use alloy_primitives::{Address, B256, Bloom, U256};
     use alloy_rlp::{Decodable, Encodable, encode};
@@ -671,21 +672,21 @@ mod tests {
                 storage_changes: vec![SlotChanges {
                     slot: U256::from(0x2),
                     changes: vec![StorageChange {
-                        block_access_index: 1,
+                        block_access_index: BlockAccessIndex::new(1),
                         new_value: U256::from(0x3),
                     }],
                 }],
                 code_changes: vec![CodeChange {
-                    block_access_index: 2,
+                    block_access_index: BlockAccessIndex::new(2),
                     new_code: Bytes::from_static(b"\xCA\xFE"),
                 }],
                 storage_reads: vec![U256::from(0x4)],
                 balance_changes: vec![BalanceChange {
-                    block_access_index: 3,
+                    block_access_index: BlockAccessIndex::new(3),
                     post_balance: U256::from(1_000_000u64),
                 }],
                 nonce_changes: vec![NonceChange {
-                    block_access_index: 4,
+                    block_access_index: BlockAccessIndex::new(4),
                     new_nonce: 42,
                 }],
             }],

@@ -1,6 +1,6 @@
 //! Full end-to-end proving test for the SP1 worker.
 //!
-//! Runs the real worker against a real `prover-service` and a real [`EnvSuccinctProver`],
+//! Runs the real worker against a real `prover-service` and a real [`SuccinctProver`],
 //! generating a witness from live RPC endpoints and proving it (mock, CPU, or network). This
 //! is the highest-fidelity test of the worker — it exercises lease → witness → prove →
 //! submit end to end — but it needs external infrastructure, so it is `#[ignore]`d and only
@@ -23,15 +23,17 @@
 //!
 //! `SP1_PROVER=mock` validates the full witness + guest-execution + root-binding path cheaply
 //! (the SP1 mock prover still executes the guest); `cpu`/`network` additionally produce a real
-//! SNARK. ELFs default to `proofs/succinct/elf/`; override with `RANGE_ELF_PATH`/`AGG_ELF_PATH`.
+//! SNARK. The SP1 guest ELFs are baked into the worker at compile time via
+//! `sp1_sdk::include_elf!()` (see `proofs/succinct/elfs/build.rs`); no path-based
+//! overrides are required.
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use alloy_primitives::Address;
+use testcontainers::runners::AsyncRunner;
+use testcontainers_modules::postgres;
 use world_chain_proof_kona_host_utils::online::{OnlineHostConfig, resolve_l1_head};
-use world_chain_proof_succinct_host_utils::env_prover::{
-    EnvSuccinctProver, SP1ProofMode, Sp1ProverKind,
-};
+use world_chain_proof_succinct_host_utils::prover::{SP1ProofMode, Sp1ProverKind, SuccinctProver};
 use world_chain_proofs::{ConsensusProvider, OptimismConsensusClient};
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequester, ProofStatus, ProverService,
@@ -48,17 +50,6 @@ fn required(name: &str) -> Option<String> {
             None
         }
     }
-}
-
-fn elf_path(env: &str, file: &str) -> PathBuf {
-    std::env::var(env).map_or_else(
-        |_| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../succinct/elf")
-                .join(file)
-        },
-        PathBuf::from,
-    )
 }
 
 fn prover_kind() -> Sp1ProverKind {
@@ -148,17 +139,12 @@ async fn worker_proves_real_range_end_to_end() {
     .expect("build host config");
 
     let kind = prover_kind();
-    let range_elf = std::fs::read(elf_path("RANGE_ELF_PATH", "world-chain-range-ethereum"))
-        .expect("read range ELF");
-    let agg_elf =
-        std::fs::read(elf_path("AGG_ELF_PATH", "world-chain-aggregation")).expect("read agg ELF");
     // Build the prover off the async runtime: it owns its own runtime internally.
-    let prover = tokio::task::spawn_blocking(move || {
-        EnvSuccinctProver::new(kind, range_elf, agg_elf, SP1ProofMode::Groth16)
-    })
-    .await
-    .expect("prover setup task")
-    .expect("build prover");
+    let prover =
+        tokio::task::spawn_blocking(move || SuccinctProver::new(kind, SP1ProofMode::Groth16))
+            .await
+            .expect("prover setup task")
+            .expect("build prover");
 
     let backend = Sp1Backend::new(
         host,
@@ -171,8 +157,27 @@ async fn worker_proves_real_range_end_to_end() {
         },
     );
 
-    // Real prover-service over JSON-RPC, just like production.
-    let service = Arc::new(ProverService::new(ProverServiceConfig::default()).expect("config"));
+    // Real Postgres-backed prover-service over JSON-RPC, just like production.
+    let postgres = match postgres::Postgres::default().start().await {
+        Ok(postgres) => postgres,
+        Err(error) => {
+            eprintln!("skipping e2e_proving: failed to start postgres: {error}");
+            return;
+        }
+    };
+    let database_url = format!(
+        "postgres://postgres:postgres@{}:{}/postgres",
+        postgres.get_host().await.expect("postgres host"),
+        postgres
+            .get_host_port_ipv4(5432)
+            .await
+            .expect("postgres port")
+    );
+    let service = Arc::new(
+        ProverService::connect(&database_url, ProverServiceConfig::default())
+            .await
+            .expect("config"),
+    );
     let (addr, _server) = start_rpc_server("127.0.0.1:0".parse().unwrap(), service)
         .await
         .expect("start prover-service");
@@ -237,14 +242,4 @@ async fn worker_proves_real_range_end_to_end() {
 
     token.cancel();
     let _ = tokio::time::timeout(Duration::from_secs(5), worker_handle).await;
-}
-
-/// Sanity check (always runs): the default ELF paths resolve inside the repo's `elf` dir.
-#[test]
-fn default_elf_paths_resolve_under_elf_dir() {
-    let range = elf_path(
-        "RANGE_ELF_PATH_UNSET_FOR_TEST",
-        "world-chain-range-ethereum",
-    );
-    assert!(range.ends_with("succinct/elf/world-chain-range-ethereum"));
 }

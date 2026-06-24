@@ -23,15 +23,20 @@ alloy-primitives = { workspace = true, features = ["serde"] }
 # misc
 anyhow.workspace = true
 async-trait.workspace = true
+chrono.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
 jsonrpsee.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sqlx.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
+testcontainers.workspace = true
+testcontainers-modules.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

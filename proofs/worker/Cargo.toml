@@ -16,6 +16,7 @@ world-chain-prover-service.workspace = true
 
 # misc
 anyhow.workspace = true
+backon.workspace = true
 futures-util.workspace = true
 pin-project.workspace = true
 tokio = { workspace = true, features = ["rt", "sync", "time"] }

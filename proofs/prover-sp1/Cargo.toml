@@ -24,3 +24,4 @@ tokio.workspace = true
 world-chain-prover.workspace = true
 world-chain-proof-core.workspace = true
 world-chain-proof-succinct-host-utils = { workspace = true, features = ["sp1"] }
+world-chain-proof-succinct-elfs.workspace = true

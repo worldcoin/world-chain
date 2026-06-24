@@ -1060,7 +1060,7 @@ where
 
             tokio::time::sleep(self.block_interval).await;
             let payload =
-                EngineApiClient::<OpEngineTypes>::get_payload_v4(&engine, payload_id).await?;
+                EngineApiClient::<OpEngineTypes>::get_payload_v5(&engine, payload_id).await?;
 
             info!(
                 "Mined block {} with {} txs",
@@ -1202,7 +1202,7 @@ pub type MidBuildCallback = Box<
 /// 1. Generates payload attributes for the next block
 /// 2. Sends `forkchoiceUpdatedV3` with attributes to start building
 /// 3. Waits for `block_interval` (the build deadline)
-/// 4. Calls `getPayloadV4` to retrieve the built payload
+/// 4. Calls `getPayloadV5` to retrieve the built payload
 /// 5. Sends `newPayloadV4` + `forkchoiceUpdated` on all follower nodes
 /// 6. Invokes the optional `on_block` callback
 /// 7. Advances to the next cycle with the new block as head
@@ -1325,9 +1325,9 @@ where
                     during_build(block_num).await?;
                 }
 
-                // 4. getPayloadV4
+                // 4. getPayloadV5
                 let payload =
-                    EngineApiClient::<OpEngineTypes>::get_payload_v4(&engine, payload_id).await?;
+                    EngineApiClient::<OpEngineTypes>::get_payload_v5(&engine, payload_id).await?;
 
                 let block_hash = payload
                     .execution_payload

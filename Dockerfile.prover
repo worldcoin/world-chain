@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1.10
-# Image for host-side prover binaries. Defaults to the SP1 prover; pass
-# PROVER_BACKEND=nitro to build the Nitro prover. Service images can still pass
-# PROVER_PACKAGE/PROVER_BIN directly.
+# Image for the host-side prover binaries (proofs/*). PROVER_PACKAGE and PROVER_BIN are
+# required build args (no defaults). FEATURES defaults to empty (package default features
+# apply); pass an explicit comma-separated list to enable additional cargo features.
+# Examples:
+#   PROVER_PACKAGE=world-chain-prover-sp1  PROVER_BIN=world-chain-prover-sp1  FEATURES=
+#   PROVER_PACKAGE=world-chain-sp1-worker  PROVER_BIN=sp1-worker               FEATURES=
 # Mirrors the caching strategy of the main Dockerfile (cargo-chef + sccache/S3).
 FROM public.ecr.aws/docker/library/rust:1.95.0-bookworm AS base
 
@@ -14,8 +17,19 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # (gRPC) client — libprotobuf-dev provides the well-known type .proto files
 # (google/protobuf/*.proto) under /usr/include that protoc resolves imports against.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends clang libclang-dev gcc curl protobuf-compiler libprotobuf-dev \
+  && apt-get install -y --no-install-recommends clang libclang-dev gcc curl protobuf-compiler libprotobuf-dev git \
   && rm -rf /var/lib/apt/lists/*
+
+# Install the SP1 toolchain (cargo-prove + risc-v target). The host-utils
+# `build.rs` invokes `sp1_build::build_program_with_args` to compile the
+# guest ELFs at `cargo build` time and embed them with
+# `sp1_sdk::include_elf!()`. Inside this Dockerfile we use the locally
+# installed toolchain rather than the docker:true reproducibility builder
+# (the Docker daemon isn't reachable from inside a docker build).
+# `SP1_BUILD_DOCKER=false` is set in the builder stage below to switch.
+ENV PATH=/root/.sp1/bin:$PATH
+RUN curl -L https://sp1.succinct.xyz | bash \
+  && /root/.sp1/bin/sp1up --version v6.1.0
 
 ENV CARGO_HOME=/usr/local/cargo \
     RUSTC_WRAPPER=sccache \
@@ -34,13 +48,26 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM base AS builder
 WORKDIR /app
 
-ARG PROVER_BACKEND="sp1"
-ARG PROVER_PACKAGE=""
-ARG PROVER_BIN=""
+ARG PROVER_PACKAGE
+ARG PROVER_BIN
 ARG PROFILE="maxperf"
+# Default empty: package default features apply. Pass an explicit comma-separated
+# list (e.g. FEATURES=embedded-elfs) to enable additional features.
+ARG FEATURES=""
 ARG SCCACHE_BUCKET
 ARG SCCACHE_REGION
 ARG SCCACHE_S3_KEY_PREFIX
+
+RUN test -n "${PROVER_PACKAGE}" || (echo "ERROR: PROVER_PACKAGE build arg is required" && exit 1)
+RUN test -n "${PROVER_BIN}" || (echo "ERROR: PROVER_BIN build arg is required" && exit 1)
+
+# Use the locally-installed SP1 toolchain (installed in the `base` stage)
+# instead of `docker: true` since the Docker daemon isn't reachable from
+# inside this image build. The `vkeys` CI step also sets
+# SP1_BUILD_DOCKER=false with the same pinned v6.1.0 toolchain, so the
+# ELFs embedded in this image and the committed vkeys.json are always
+# produced by the same toolchain invocation.
+ENV SP1_BUILD_DOCKER=false
 
 COPY --from=planner /app/recipe.json recipe.json
 
@@ -51,14 +78,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=secret,id=aws_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=secret,id=aws_session_token,env=AWS_SESSION_TOKEN \
     if [ -z "$SCCACHE_BUCKET" ]; then unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; fi && \
-    case "$PROVER_BACKEND" in \
-      sp1) DEFAULT_PROVER_PACKAGE="world-chain-prover-sp1"; DEFAULT_PROVER_BIN="world-chain-prover-sp1" ;; \
-      nitro) DEFAULT_PROVER_PACKAGE="world-chain-prover-nitro"; DEFAULT_PROVER_BIN="world-chain-prover-nitro" ;; \
-      *) echo "unsupported PROVER_BACKEND: $PROVER_BACKEND" >&2; exit 1 ;; \
-    esac && \
-    PROVER_PACKAGE="${PROVER_PACKAGE:-$DEFAULT_PROVER_PACKAGE}" && \
-    PROVER_BIN="${PROVER_BIN:-$DEFAULT_PROVER_BIN}" && \
-    cargo chef cook --locked --profile ${PROFILE} -p ${PROVER_PACKAGE} --bin ${PROVER_BIN} --recipe-path recipe.json
+    cargo chef cook --locked --profile ${PROFILE} -p ${PROVER_PACKAGE} --bin ${PROVER_BIN} ${FEATURES:+--features ${FEATURES}} --recipe-path recipe.json
 
 ARG VERGEN_GIT_SHA
 COPY . .
@@ -70,16 +90,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=secret,id=aws_secret_access_key,env=AWS_SECRET_ACCESS_KEY \
     --mount=type=secret,id=aws_session_token,env=AWS_SESSION_TOKEN \
     if [ -z "$SCCACHE_BUCKET" ]; then unset SCCACHE_BUCKET SCCACHE_REGION SCCACHE_S3_KEY_PREFIX; fi && \
-    case "$PROVER_BACKEND" in \
-      sp1) DEFAULT_PROVER_PACKAGE="world-chain-prover-sp1"; DEFAULT_PROVER_BIN="world-chain-prover-sp1" ;; \
-      nitro) DEFAULT_PROVER_PACKAGE="world-chain-prover-nitro"; DEFAULT_PROVER_BIN="world-chain-prover-nitro" ;; \
-      *) echo "unsupported PROVER_BACKEND: $PROVER_BACKEND" >&2; exit 1 ;; \
-    esac && \
-    PROVER_PACKAGE="${PROVER_PACKAGE:-$DEFAULT_PROVER_PACKAGE}" && \
-    PROVER_BIN="${PROVER_BIN:-$DEFAULT_PROVER_BIN}" && \
-    cargo build --locked --profile ${PROFILE} -p ${PROVER_PACKAGE} --bin ${PROVER_BIN} && \
-    cp "target/${PROFILE}/${PROVER_BIN}" /tmp/prover-bin && \
-    printf '%s\n' "$PROVER_BIN" > /tmp/prover-bin-name
+    cargo build --locked --profile ${PROFILE} -p ${PROVER_PACKAGE} ${FEATURES:+--features ${FEATURES}} --bin ${PROVER_BIN}
 
 FROM public.ecr.aws/docker/library/debian:bookworm-slim
 WORKDIR /app
@@ -91,31 +102,17 @@ RUN apt-get update && \
   apt-get clean && \
   rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /tmp/prover-bin /usr/local/bin/entrypoint
-COPY --from=builder /tmp/prover-bin-name /tmp/prover-bin-name
-# SP1 guest ELFs are generated artifacts, not source-controlled inputs. Images
-# that execute SP1 guests require them in proofs/succinct/elf; run
-# `just build-proof-elfs` locally or download the release-generated ELF artifact
-# in CI before building those images.
-RUN --mount=type=bind,source=proofs/succinct/elf,target=/tmp/local-elfs,readonly \
-  chmod +x /usr/local/bin/entrypoint && \
-  bin_name="$(cat /tmp/prover-bin-name)" && \
-  ln -s /usr/local/bin/entrypoint "/usr/local/bin/${bin_name}" && \
-  case "$bin_name" in \
-    world-chain-prover-sp1|sp1-worker) \
-      test -f /tmp/local-elfs/world-chain-range-ethereum || \
-        (echo "missing proofs/succinct/elf/world-chain-range-ethereum; run just build-proof-elfs first or download release ELFs" >&2; exit 1); \
-      test -f /tmp/local-elfs/world-chain-aggregation || \
-        (echo "missing proofs/succinct/elf/world-chain-aggregation; run just build-proof-elfs first or download release ELFs" >&2; exit 1); \
-      mkdir -p /usr/local/share/world-chain/elf; \
-      cp /tmp/local-elfs/world-chain-range-ethereum /usr/local/share/world-chain/elf/world-chain-range-ethereum; \
-      cp /tmp/local-elfs/world-chain-aggregation /usr/local/share/world-chain/elf/world-chain-aggregation; \
-      ;; \
-  esac && \
-  rm /tmp/prover-bin-name
-ENV WORLD_CHAIN_RANGE_ELF=/usr/local/share/world-chain/elf/world-chain-range-ethereum \
-    WORLD_CHAIN_AGGREGATION_ELF=/usr/local/share/world-chain/elf/world-chain-aggregation \
-    RANGE_ELF_PATH=/usr/local/share/world-chain/elf/world-chain-range-ethereum \
-    AGG_ELF_PATH=/usr/local/share/world-chain/elf/world-chain-aggregation
+ARG PROVER_BIN
+RUN test -n "${PROVER_BIN}" || (echo "ERROR: PROVER_BIN build arg is required" && exit 1)
+ARG PROFILE="maxperf"
+COPY --from=builder /app/target/${PROFILE}/${PROVER_BIN} /usr/local/bin/${PROVER_BIN}
+RUN ln -s /usr/local/bin/${PROVER_BIN} /usr/local/bin/entrypoint
+
+# SP1 guest ELFs are compiled at `cargo build` time by
+# `proofs/succinct/utils/host/build.rs` (sp1_build::build_program_with_args)
+# and embedded into the prover binary at compile time via
+# `sp1_sdk::include_elf!()` (see `proofs/succinct/utils/host/src/env_prover.rs`).
+# This image therefore needs no extra ELF files baked in — the bytes ship
+# inside the binary itself, matching the OP Succinct upstream pattern.
 
 ENTRYPOINT ["/usr/local/bin/entrypoint"]

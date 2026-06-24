@@ -51,12 +51,12 @@ use world_chain_chainspec::{WorldChainSpec, WorldChainSpecBuilder};
 use world_chain_evm::{
     BlockBuilderExt, OpRethReceiptBuilder, WorldChainEvmConfig,
     execution::bal::{BalBlockBuilder, CommittedState},
+    utils::cache_prestate_from_bundle,
 };
 use world_chain_primitives::{
     access_list::{FlashblockAccessListData, access_list_hash},
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
-use world_chain_state::database::bal_builder_db::BalBuilderDb;
 
 const WORLD_ID_ALT_INPUT_INTERVAL: usize = 5;
 const WORLD_ID_TREE_DEPTH: u64 = 30;
@@ -235,7 +235,7 @@ lazy_static::lazy_static! {
         WorldChainSpecBuilder::default()
             .chain(GENESIS.config.chain_id.into())
             .genesis(GENESIS.clone())
-            .isthmus_activated()
+            .karst_activated()
             .build()
     );
 
@@ -610,13 +610,13 @@ where
                     .clone()
                     .iter()
                     .enumerate()
-                    .map(|(idx, r)| (idx as u16, r.clone()))
+                    .map(|(idx, r)| (idx as u64, r.clone()))
                     .collect(),
                 transactions: o
                     .block
                     .clone_transactions_recovered()
                     .enumerate()
-                    .map(|(idx, tx)| (idx as u16, tx.clone()))
+                    .map(|(idx, tx)| (idx as u64, tx.clone()))
                     .collect(),
             }),
         ));
@@ -676,16 +676,16 @@ where
 
     let mut state = State::builder()
         .with_database(db)
-        .with_bundle_prestate(bundle.clone())
+        .with_cached_prestate(cache_prestate_from_bundle(&bundle))
         .with_bundle_update()
+        .with_bal_builder()
         .build();
 
-    let database = BalBuilderDb::new(&mut state);
     let prev_transaction = prev_outcome
         .as_ref()
         .map(|(o, _)| o.block.clone_transactions_recovered().collect());
 
-    let evm = OpEvmFactory::default().create_evm(database, EVM_ENV.clone());
+    let evm = OpEvmFactory::default().create_evm(&mut state, EVM_ENV.clone());
 
     let mut executor = OpBlockExecutor::new(
         evm,
@@ -708,6 +708,7 @@ where
         prev_transaction.unwrap_or_default(),
         CHAIN_SPEC.clone(),
         access_list_tx,
+        bundle,
     );
 
     if prev_outcome.is_none() {

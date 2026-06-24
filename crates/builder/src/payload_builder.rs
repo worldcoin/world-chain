@@ -21,9 +21,8 @@ use world_chain_evm::{
         bal::{BalBlockBuilder, CommittedState},
         basic::FlashblocksBlockBuilder,
     },
-    utils::estimated_da_size_bytes,
+    utils::{cache_prestate_from_bundle, estimated_da_size_bytes},
 };
-use world_chain_state::{StateDB, database::bal_builder_db::BalBuilderDb};
 
 use alloy_consensus::{BlockHeader, Header};
 
@@ -61,7 +60,7 @@ use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, ProviderError, StateProviderFactory};
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::{DatabaseCommit, context::BlockEnv, inspector::NoOpInspector};
+use revm::{context::BlockEnv, inspector::NoOpInspector};
 use std::{fmt::Debug, sync::Arc, time::Instant};
 use tracing::span;
 use world_chain_chainspec::WorldChainSpec;
@@ -396,17 +395,16 @@ where
     if bal_enabled {
         let mut state = State::builder()
             .with_database(db)
-            .with_bundle_prestate(bundle_state)
+            .with_cached_prestate(cache_prestate_from_bundle(&bundle_state))
             .with_bundle_update()
+            .with_bal_builder()
             .build();
-
-        let bal_builder_db = BalBuilderDb::new(&mut state);
 
         // 2. Create the block builder
         let (tx, access_list_rx) = crossbeam_channel::bounded(1);
 
         let builder = bal_block_builder(
-            bal_builder_db,
+            &mut state,
             execution_conext,
             evm_env,
             &committed_state,
@@ -431,7 +429,7 @@ where
     } else {
         let mut state = State::builder()
             .with_database(db)
-            .with_bundle_prestate(bundle_state)
+            .with_cached_prestate(cache_prestate_from_bundle(&bundle_state))
             .with_bundle_update()
             .build();
 
@@ -480,7 +478,7 @@ fn build_inner<'a, Txs, Ctx, Pool, R>(
     mut builder: impl BlockBuilderExt<
         Primitives = OpPrimitives,
         Executor: BlockExecutor<
-            Evm: Evm<DB: StateDB + DatabaseCommit + Database + 'a, BlockEnv = BlockEnv>,
+            Evm: Evm<DB: reth_evm::block::StateDB + Database + 'a, BlockEnv = BlockEnv>,
             Receipt = R::Receipt,
             Transaction = R::Transaction,
         >,
@@ -637,7 +635,7 @@ where
     let payload = OpBuiltPayload::new(
         ctx.payload_id(),
         sealed_block,
-        info.total_fees + committed_state.fees,
+        info.total_fees,
         Some(executed_block),
     );
 
@@ -659,14 +657,14 @@ where
 }
 
 pub fn bal_block_builder<'a, Ctx, DB, R, N, Tx>(
-    state: BalBuilderDb<&'a mut DB>,
+    state: &'a mut State<DB>,
     execution_context: OpBlockExecutionCtx,
     evm_env: EvmEnv<OpSpecId>,
     committed_state: &CommittedState<R>,
     ctx: &'a Ctx,
     tx: crossbeam_channel::Sender<FlashblockAccessList>,
 ) -> Result<
-    BalBlockBuilder<'a, R, N, OpEvm<BalBuilderDb<&'a mut DB>, NoOpInspector, PrecompilesMap>>,
+    BalBlockBuilder<'a, R, N, OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>>,
     PayloadBuilderError,
 >
 where
@@ -677,14 +675,14 @@ where
             Receipt = OpReceipt,
             SignedTx = OpTransactionSigned,
         >,
-    DB: StateDB + DatabaseCommit + Database<Error: Send + Sync + 'a> + 'a,
+    DB: Database<Error: Send + Sync + 'a> + 'a,
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + Default,
     Ctx: PayloadBuilderCtx<Evm = WorldChainEvmConfig, Transaction = Tx, ChainSpec = WorldChainSpec>,
 {
     let evm = OpEvmFactory::default().create_evm(state, evm_env);
 
     let mut executor = OpBlockExecutor::<
-        OpEvm<BalBuilderDb<&'a mut DB>, NoOpInspector, PrecompilesMap>,
+        OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>,
         R,
         Arc<WorldChainSpec>,
     >::new(
@@ -705,13 +703,14 @@ where
         committed_state.transactions_iter().cloned().collect(),
         ctx.spec().clone().into(),
         tx,
+        committed_state.bundle.clone(),
     );
 
     Ok(builder)
 }
 
 pub fn flashblocks_block_builder<'a, Ctx, DB, Tx>(
-    state: &'a mut DB,
+    state: &'a mut State<DB>,
     execution_context: OpBlockExecutionCtx,
     evm_env: EvmEnv<OpSpecId>,
     committed_state: &CommittedState<OpRethReceiptBuilder>,
@@ -720,7 +719,7 @@ pub fn flashblocks_block_builder<'a, Ctx, DB, Tx>(
     impl BlockBuilderExt<
         Primitives = OpPrimitives,
         Executor = OpBlockExecutor<
-            OpEvm<&'a mut DB, NoOpInspector, PrecompilesMap>,
+            OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>,
             OpRethReceiptBuilder,
             WorldChainSpec,
         >,
@@ -731,11 +730,7 @@ where
     OpBlockExecutorFactory<OpRethReceiptBuilder>:
         BlockExecutorFactory<Receipt = OpReceipt, Transaction = OpTransactionSigned>,
     Tx: PoolTransaction + OpPooledTx,
-    DB: StateDB
-        + reth_evm::block::StateDB
-        + DatabaseCommit
-        + reth_evm::Database<Error: Send + Sync + 'a>
-        + 'a,
+    DB: reth_evm::Database<Error: Send + Sync + 'a> + 'a,
     Ctx: PayloadBuilderCtx<Evm = WorldChainEvmConfig, Transaction = Tx, ChainSpec = WorldChainSpec>,
 {
     let evm = OpEvmFactory::default().create_evm(state, evm_env);
@@ -757,6 +752,7 @@ where
         executor,
         committed_state.transactions_iter().cloned().collect(),
         ctx.spec().clone().into(),
+        committed_state.bundle.clone(),
     );
 
     Ok(builder)

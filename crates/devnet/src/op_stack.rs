@@ -6,7 +6,7 @@ use crate::{
 };
 
 /// OP contract artifacts supported by the pinned op-deployer image.
-pub const DEFAULT_OP_CONTRACT_ARTIFACTS_LOCATOR: &str = "tag://op-contracts/v3.0.0-rc.2";
+pub const DEFAULT_OP_CONTRACT_ARTIFACTS_LOCATOR: &str = "tag://op-contracts/v7.0.0-rc.4";
 
 const DEFAULT_DEVNET_PRIVATE_KEY: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
@@ -33,11 +33,11 @@ impl Default for OpStackImages {
         Self {
             op_node: ContainerImage::new(
                 "us-docker.pkg.dev/oplabs-tools-artifacts/images/kona-node",
-                "v1.5.0",
+                "v1.6.0",
             ),
             op_deployer: ContainerImage::new(
                 "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-deployer",
-                "v0.4.0-rc.2",
+                "v0.7.0-rc.1",
             ),
             op_batcher: ContainerImage::new(
                 "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher",
@@ -49,7 +49,7 @@ impl Default for OpStackImages {
             ),
             op_challenger: ContainerImage::new(
                 "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-challenger",
-                "develop",
+                "v1.9.3",
             ),
             op_conductor: ContainerImage::new(
                 "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-conductor",
@@ -567,11 +567,11 @@ mod tests {
     fn default_op_contract_locator_uses_supported_tag_scheme() {
         assert_eq!(
             OpContractDeploymentConfig::default().l1_artifacts_locator,
-            "tag://op-contracts/v3.0.0-rc.2"
+            "tag://op-contracts/v7.0.0-rc.4"
         );
         assert_eq!(
             OpContractDeploymentConfig::default().l2_artifacts_locator,
-            "tag://op-contracts/v3.0.0-rc.2"
+            "tag://op-contracts/v7.0.0-rc.4"
         );
     }
 

@@ -11,7 +11,6 @@ world-chain-primitives.workspace = true
 world-chain-p2p.workspace = true
 world-chain-chainspec.workspace = true
 world-chain-evm.workspace = true
-world-chain-state.workspace = true
 
 # reth
 reth-chain-state.workspace = true
@@ -30,18 +29,15 @@ reth-optimism-evm.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
+alloy-eip7928.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-op-evm.workspace = true
 alloy-rpc-types-engine.workspace = true
-op-alloy-consensus.workspace = true
 
 # revm
 revm.workspace = true
 revm-database.workspace = true
-
-# op-revm
-op-revm.workspace = true
 
 # tokio
 tokio.workspace = true

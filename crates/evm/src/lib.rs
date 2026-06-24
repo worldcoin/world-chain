@@ -33,8 +33,6 @@ pub use cache::{DEFAULT_WITNESS_CAP, WitnessCache};
 pub use collector::spawn_witness_collector;
 pub use metrics::{FlashblockExecutionMetrics, PayloadBuildStage};
 
-pub use world_chain_state::{StateDB, access_list, database, state_db};
-
 use std::sync::Arc;
 
 /// Thread-safe handle to the shared [`WitnessCache`].
