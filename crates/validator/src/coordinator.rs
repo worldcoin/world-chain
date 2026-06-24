@@ -94,18 +94,17 @@ impl FlashblocksExecutionCoordinator {
         }
     }
 
-    /// Returns a future that resolves once the pending flashblock claiming `hash`
-    /// has its executed payload broadcast (and thus inserted into the engine tree
-    /// cache). If no streamed flashblock claims `hash`, or its payload is never
-    /// broadcast, the future never resolves: callers race it against full payload
-    /// validation, so the unresolved arm simply loses.
+    /// Returns a future that resolves once the flashblock executing `hash` broadcasts
+    /// its executed payload. If `hash` was already executed and broadcast, the caller's
+    /// validation gets a full engine-tree cache hit and wins the race instead; if no
+    /// flashblock produces `hash`, this future never resolves and simply loses.
     pub fn resolve_pending(&self, hash: B256) -> impl Future<Output = ()> {
-        let rx = {
-            let inner = self.inner.read();
-            (inner.flashblocks.last().diff().block_hash == hash)
-                .then(|| inner.payload_events.as_ref().map(Sender::subscribe))
-                .flatten()
-        };
+        let rx = self
+            .inner
+            .read()
+            .payload_events
+            .as_ref()
+            .map(Sender::subscribe);
 
         async move {
             let matched = OptionFuture::from(rx.map(|rx| {
@@ -529,10 +528,7 @@ mod tests {
 
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_primitives_traits::SealedBlock;
-    use world_chain_primitives::{
-        ed25519_dalek::SigningKey,
-        primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1},
-    };
+    use world_chain_primitives::ed25519_dalek::SigningKey;
 
     fn test_coordinator() -> (
         FlashblocksExecutionCoordinator,
@@ -564,41 +560,10 @@ mod tests {
         (payload, hash)
     }
 
-    /// Sets the coordinator's last seen flashblock to claim `hash`, so the gate
-    /// in [`FlashblocksExecutionCoordinator::resolve_pending`] matches.
-    fn set_last_flashblock(coordinator: &FlashblocksExecutionCoordinator, hash: B256) {
-        let flashblock = Flashblock {
-            flashblock: FlashblocksPayloadV1 {
-                payload_id: PayloadId::new([0u8; 8]),
-                index: 0,
-                base: Some(ExecutionPayloadBaseV1::default()),
-                diff: ExecutionPayloadFlashblockDeltaV1 {
-                    block_hash: hash,
-                    ..Default::default()
-                },
-                metadata: Default::default(),
-            },
-        };
-        coordinator.inner.write().flashblocks.0 = vec![flashblock];
-    }
-
-    #[tokio::test]
-    async fn resolve_pending_never_resolves_on_gate_miss() {
-        let (coordinator, _events_tx) = test_coordinator();
-        // No streamed flashblock claims this hash → never resolves.
-        let resolved = tokio::time::timeout(
-            Duration::from_millis(50),
-            coordinator.resolve_pending(B256::repeat_byte(7)),
-        )
-        .await;
-        assert!(resolved.is_err());
-    }
-
     #[tokio::test]
     async fn resolve_pending_resolves_on_broadcast() {
         let (coordinator, events_tx) = test_coordinator();
         let (payload, hash) = built_payload(1);
-        set_last_flashblock(&coordinator, hash);
 
         let task = {
             let coordinator = coordinator.clone();
@@ -620,13 +585,31 @@ mod tests {
     #[tokio::test]
     async fn resolve_pending_never_resolves_without_broadcast() {
         let (coordinator, _events_tx) = test_coordinator();
-        let hash = B256::repeat_byte(9);
-        set_last_flashblock(&coordinator, hash);
 
-        // Gate matches but nothing is broadcast → never resolves.
-        let resolved =
-            tokio::time::timeout(Duration::from_millis(50), coordinator.resolve_pending(hash))
-                .await;
+        // Nothing is broadcast → never resolves, leaving validation to win the race.
+        let resolved = tokio::time::timeout(
+            Duration::from_millis(50),
+            coordinator.resolve_pending(B256::repeat_byte(9)),
+        )
+        .await;
+        assert!(resolved.is_err());
+    }
+
+    #[tokio::test]
+    async fn resolve_pending_ignores_nonmatching_broadcast() {
+        let (coordinator, events_tx) = test_coordinator();
+        let (other_payload, _other_hash) = built_payload(1);
+
+        let task = {
+            let coordinator = coordinator.clone();
+            tokio::spawn(async move { coordinator.resolve_pending(B256::repeat_byte(9)).await })
+        };
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        events_tx.send(Events::BuiltPayload(other_payload)).unwrap();
+
+        // A broadcast for a different block hash must not resolve the future.
+        let resolved = tokio::time::timeout(Duration::from_millis(50), task).await;
         assert!(resolved.is_err());
     }
 }

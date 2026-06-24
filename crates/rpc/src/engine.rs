@@ -48,12 +48,8 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
         }
     }
 
-    /// Races full payload validation against resolution of the pending flashblock
-    /// claiming `block_hash`, returning whichever finishes first. Both are started
-    /// together: if the flashblock's executed payload is broadcast (and thus cached
-    /// in the engine tree) first, it is already fully validated, so we return
-    /// `VALID` immediately; otherwise the engine's full validation result is used.
-    async fn resolve_or_validate(
+    /// Races full payload validation against resolution of the pending flashblock.
+    async fn race_pending_payload(
         &self,
         block_hash: B256,
         validate: impl Future<Output = RpcResult<PayloadStatus>>,
@@ -62,12 +58,14 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
             return validate.await;
         };
 
+        // Poll validation first: `resolve_pending` may never resolve, so it must
+        // not short-circuit before the engine is handed the payload to validate.
         tokio::select! {
             biased;
+            result = validate => result,
             () = state.resolve_pending(block_hash) => {
                 Ok(PayloadStatus::new(PayloadStatusEnum::Valid, Some(block_hash)))
             }
-            result = validate => result,
         }
     }
 }
@@ -97,7 +95,7 @@ where
             self.inner
                 .new_payload_v3(payload, versioned_hashes, parent_beacon_block_root);
 
-        self.resolve_or_validate(block_hash, validate).await
+        self.race_pending_payload(block_hash, validate).await
     }
 
     async fn new_payload_v4(
@@ -114,7 +112,7 @@ where
             parent_beacon_block_root,
             execution_requests,
         );
-        self.resolve_or_validate(block_hash, validate).await
+        self.race_pending_payload(block_hash, validate).await
     }
 
     async fn fork_choice_updated_v1(
