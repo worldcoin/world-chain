@@ -283,3 +283,59 @@ jobs:
           tags: |
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
             type=sha
+
+  # Build the Nitro Enclave Image Format (EIF) file from the enclave Docker image,
+  # then package it into a minimal OCI carrier image pushed to GHCR so Kubernetes
+  # pods can pull it via an init container (AWS Nitro Enclaves K8s device plugin pattern).
+  build-eif:
+    name: build nitro EIF
+    needs: [build-nitro-worker-enclave-image]
+    runs-on: arc-public-8xlarge-amd64-runner
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build EIF
+        run: scripts/build-eif.sh target/eif
+      - name: Upload EIF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nitro-eif
+          path: |
+            target/eif/world-chain-nitro-enclave.eif
+            target/eif/pcrs.json
+          retention-days: 7
+
+  build-nitro-eif-image:
+    name: build nitro EIF carrier image
+    needs: [build-eif]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+      - name: Download EIF artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nitro-eif
+          path: eif-context
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build and push EIF carrier image
+        uses: docker/build-push-action@v6
+        with:
+          context: eif-context
+          file: Dockerfile.nitro-eif
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}-nitro-eif:${{ inputs.image_tag || 'nightly' }}
+            ${{ env.REGISTRY }}/${{ github.repository }}-nitro-eif:sha-${{ github.sha }}
