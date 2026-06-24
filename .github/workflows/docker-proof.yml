@@ -305,7 +305,7 @@ jobs:
         with:
           name: nitro-eif
           path: |
-            target/eif/world-chain-nitro-enclave.eif
+            target/eif/world-chain-nitro-worker-enclave.eif
             target/eif/pcrs.json
           retention-days: 7
 
