@@ -287,8 +287,8 @@ jobs:
   # Build the Nitro Enclave Image Format (EIF) file from the enclave Docker image,
   # then package it into a minimal OCI carrier image pushed to GHCR so Kubernetes
   # pods can pull it via an init container (AWS Nitro Enclaves K8s device plugin pattern).
-  build-eif:
-    name: build nitro EIF
+  build-nitro-worker-enclave-eif-image:
+    name: build nitro-worker-enclave EIF carrier image
     needs: [build-nitro-worker-enclave-image]
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
@@ -300,27 +300,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Build EIF
         run: scripts/build-eif.sh target/eif
-      - name: Upload EIF artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: nitro-eif
-          path: |
-            target/eif/world-chain-nitro-worker-enclave.eif
-            target/eif/pcrs.json
-          retention-days: 7
-
-  build-nitro-eif-image:
-    name: build nitro EIF carrier image
-    needs: [build-eif]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check Out Repo
-        uses: actions/checkout@v6
-      - name: Download EIF artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: nitro-eif
-          path: eif-context
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -332,8 +311,8 @@ jobs:
       - name: Build and push EIF carrier image
         uses: docker/build-push-action@v6
         with:
-          context: eif-context
-          file: Dockerfile.nitro-eif
+          context: target/eif
+          file: proofs/nitro/Dockerfile.eif
           push: true
           platforms: linux/amd64
           tags: |
