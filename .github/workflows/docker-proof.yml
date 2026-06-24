@@ -337,5 +337,5 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: |
-            ${{ env.REGISTRY }}/${{ github.repository }}-nitro-eif:${{ inputs.image_tag || 'nightly' }}
-            ${{ env.REGISTRY }}/${{ github.repository }}-nitro-eif:sha-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ github.repository }}-nitro-worker-enclave-eif:${{ inputs.image_tag || 'nightly' }}
+            ${{ env.REGISTRY }}/${{ github.repository }}-nitro-worker-enclave-eif:sha-${{ github.sha }}
