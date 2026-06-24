@@ -1,0 +1,5 @@
+# Carrier image for the Nitro Enclave Image Format (EIF) file.
+# Used by Kubernetes init containers to copy the EIF onto a shared volume
+# before the nitro-worker pod launches the enclave.
+FROM scratch
+COPY world-chain-nitro-enclave.eif /enclave/world-chain-nitro-enclave.eif
