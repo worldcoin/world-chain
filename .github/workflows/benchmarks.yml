@@ -2,8 +2,12 @@ name: Benchmark Regression Check
 
 on:
   pull_request:
+    # Only run when core execution crates change. These crates host the
+    # benchmarked code paths (flashblock validation / payload building).
     paths:
-      - 'crates/**'
+      - 'crates/payload/**'
+      - 'crates/validator/**'
+      - 'crates/builder/**'
       - '.github/workflows/benchmarks.yml'
   workflow_dispatch:
 
@@ -122,19 +126,96 @@ jobs:
       - name: Post benchmark comparison
         if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
+        env:
+          THRESHOLD: '10'
         with:
           script: |
             const { execSync } = require('child_process');
+            const threshold = Number(process.env.THRESHOLD);
+
+            // Parse critcmp's column output into structured rows. Each data row
+            // holds a benchmark name followed by, per baseline, a ratio (the
+            // fastest baseline is 1.00) and an estimate token containing "±".
+            // We anchor on the "±" tokens so any optional throughput columns
+            // are skipped reliably.
+            function parse(output) {
+              const rows = [];
+              for (const line of output.split('\n')) {
+                const tokens = line.trim().split(/\s+/).filter(Boolean);
+                const timeIdx = tokens.flatMap((t, i) => (t.includes('±') ? [i] : []));
+                if (timeIdx.length !== 2) continue; // header/separator/blank
+                const [bi, pi] = timeIdx;
+                const name = tokens.slice(0, bi - 1).join(' ');
+                if (!name) continue;
+                rows.push({
+                  name,
+                  baseRatio: Number(tokens[bi - 1]),
+                  baseTime: tokens[bi],
+                  prRatio: Number(tokens[pi - 1]),
+                  prTime: tokens[pi],
+                });
+              }
+              return rows;
+            }
+
+            function render(rows) {
+              const header =
+                '| Benchmark | Base | PR | Change |\n| --- | --- | --- | --- |';
+              const lines = rows.map((r) => {
+                // Ratios are relative to the fastest baseline; PR vs base delta.
+                const pct =
+                  Number.isFinite(r.baseRatio) && r.baseRatio > 0
+                    ? (r.prRatio / r.baseRatio - 1) * 100
+                    : NaN;
+                let change = 'n/a';
+                if (Number.isFinite(pct)) {
+                  const sign = pct >= 0 ? '+' : '';
+                  let icon = '🟢'; // faster
+                  if (pct > threshold) icon = '🔴';
+                  else if (pct > 0) icon = '🟡';
+                  change = `${icon} ${sign}${pct.toFixed(2)}%`;
+                }
+                return `| \`${r.name}\` | ${r.baseTime} | ${r.prTime} | ${change} |`;
+              });
+              return [header, ...lines].join('\n');
+            }
+
             try {
-              const output = execSync('critcmp base pr --color never', { encoding: 'utf-8' });
-              const body = `## Benchmark Results\n\nCompared on the same runner in the same workflow run.\n\n\`\`\`\n${output}\n\`\`\`\n\n> Threshold: 10% regression triggers failure`;
+              const output = execSync('critcmp base pr --color never', {
+                encoding: 'utf-8',
+              });
+              const rows = parse(output);
+              const table = rows.length
+                ? render(rows)
+                : '_Could not parse benchmark output; see raw results below._';
+
+              const body = [
+                '## Benchmark Results',
+                '',
+                'Base and PR measured on the same runner in the same workflow run.',
+                '',
+                table,
+                '',
+                `> 🔴 regression > ${threshold}% &nbsp;·&nbsp; 🟡 slower &nbsp;·&nbsp; 🟢 faster. A regression > ${threshold}% fails the check.`,
+                '',
+                '<details><summary>Raw <code>critcmp</code> output</summary>',
+                '',
+                '```',
+                output.trimEnd(),
+                '```',
+                '',
+                '</details>',
+              ].join('\n');
+
               // Check for existing comment to update
               const { data: comments } = await github.rest.issues.listComments({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
               });
-              const existing = comments.find(c => c.body.startsWith('## Benchmark Results'));
+              const existing = comments.find((c) =>
+                c.body.startsWith('## Benchmark Results')
+              );
               if (existing) {
                 await github.rest.issues.updateComment({
                   comment_id: existing.id,
