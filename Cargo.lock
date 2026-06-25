@@ -19388,6 +19388,7 @@ dependencies = [
  "tracing",
  "world-chain-evm",
  "world-chain-primitives",
+ "world-chain-validator",
 ]
 
 [[package]]
@@ -19601,6 +19602,7 @@ dependencies = [
  "revm",
  "revm-database",
  "tokio",
+ "tokio-stream",
  "tracing",
  "world-chain-chainspec",
  "world-chain-evm",

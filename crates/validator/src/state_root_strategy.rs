@@ -76,6 +76,7 @@ impl StateRootStrategy for AsyncStateRootStrategy {
                 let _ = sender.send(result);
             })
             .map_err(BlockExecutionError::other)?;
+
         Ok(ChannelStateRootHandle { receiver })
     }
 }

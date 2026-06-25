@@ -1,7 +1,8 @@
 use alloy_consensus::BlockHeader;
 use alloy_op_evm::OpBlockExecutionCtx;
+use alloy_primitives::B256;
 use eyre::eyre::eyre;
-use futures::StreamExt;
+use futures::{StreamExt, future::OptionFuture};
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlock;
 use reth_evm::ConfigureEvm;
@@ -21,6 +22,7 @@ use reth_provider::{
     StateProviderFactory,
 };
 use std::{
+    future::Future,
     sync::{Arc, LazyLock},
     time::Instant,
 };
@@ -31,6 +33,7 @@ use tokio::{
     },
     task::JoinSet,
 };
+use tokio_stream::wrappers::BroadcastStream;
 use tracing::{error, trace};
 
 use crate::{
@@ -91,6 +94,37 @@ impl FlashblocksExecutionCoordinator {
         }
     }
 
+    /// Returns a future that resolves once the flashblock executing `hash` broadcasts
+    /// its executed payload. If `hash` was already executed and broadcast, the caller's
+    /// validation gets a full engine-tree cache hit and wins the race instead; if no
+    /// flashblock produces `hash`, this future never resolves and simply loses.
+    pub fn resolve_pending(&self, hash: B256) -> impl Future<Output = ()> {
+        let rx = self
+            .inner
+            .read()
+            .payload_events
+            .as_ref()
+            .map(Sender::subscribe);
+
+        async move {
+            let matched = OptionFuture::from(rx.map(|rx| {
+                BroadcastStream::new(rx).any(move |event| {
+                    std::future::ready(matches!(
+                        event,
+                        Ok(Events::BuiltPayload(payload)) if payload.block().hash() == hash
+                    ))
+                })
+            }))
+            .await
+            .unwrap_or(false);
+
+            // Pend forever when unmatched so the caller's full validation wins the race.
+            if !matched {
+                std::future::pending::<()>().await;
+            }
+        }
+    }
+
     /// Maps a closure over the [`WorldChainEventStream<T>`] from the P2P handle.
     pub fn map_worldchain_event_stream<N, P, T, F>(
         &self,
@@ -112,6 +146,7 @@ impl FlashblocksExecutionCoordinator {
         self.p2p_handle
             .event_stream(provider, move |event| f(event))
     }
+
     pub fn event_hook(
         event: &WorldChainEvent<()>,
         pending_block: &tokio::sync::watch::Sender<Option<ExecutedBlock<OpPrimitives>>>,
@@ -481,4 +516,100 @@ where
     flashblock_validation_metrics
         .record_full_process_flashblock(process_flashblock_started.elapsed());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::{Block, BlockBody, Header};
+    use alloy_primitives::U256;
+    use alloy_rpc_types_engine::PayloadId;
+    use std::time::Duration;
+
+    use reth_optimism_primitives::OpTransactionSigned;
+    use reth_primitives_traits::SealedBlock;
+    use world_chain_primitives::ed25519_dalek::SigningKey;
+
+    fn test_coordinator() -> (
+        FlashblocksExecutionCoordinator,
+        broadcast::Sender<Events<OpEngineTypes>>,
+    ) {
+        let sk = SigningKey::from_bytes(&[1u8; 32]);
+        let handle = FlashblocksHandle::new(sk.verifying_key(), Some(sk));
+        let (pending_tx, _pending_rx) = tokio::sync::watch::channel(None);
+        let coordinator = FlashblocksExecutionCoordinator::new(handle, pending_tx);
+        let (events_tx, _events_rx) = broadcast::channel(16);
+        coordinator.register_payload_events(events_tx.clone());
+        (coordinator, events_tx)
+    }
+
+    /// Builds an [`OpBuiltPayload`] over an empty block; `number` seeds a distinct
+    /// block hash. Returns the payload and its block hash.
+    fn built_payload(number: u64) -> (OpBuiltPayload, B256) {
+        let header = Header {
+            number,
+            ..Default::default()
+        };
+        let block = SealedBlock::seal_slow(Block {
+            header,
+            body: BlockBody::<OpTransactionSigned>::default(),
+        });
+        let hash = block.hash();
+        let payload =
+            OpBuiltPayload::new(PayloadId::new([0u8; 8]), Arc::new(block), U256::ZERO, None);
+        (payload, hash)
+    }
+
+    #[tokio::test]
+    async fn resolve_pending_resolves_on_broadcast() {
+        let (coordinator, events_tx) = test_coordinator();
+        let (payload, hash) = built_payload(1);
+
+        let task = {
+            let coordinator = coordinator.clone();
+            tokio::spawn(async move { coordinator.resolve_pending(hash).await })
+        };
+
+        // Let the task subscribe before the payload is broadcast.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        events_tx.send(Events::BuiltPayload(payload)).unwrap();
+
+        // Resolves once the matching payload is broadcast.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), task)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_pending_never_resolves_without_broadcast() {
+        let (coordinator, _events_tx) = test_coordinator();
+
+        // Nothing is broadcast → never resolves, leaving validation to win the race.
+        let resolved = tokio::time::timeout(
+            Duration::from_millis(50),
+            coordinator.resolve_pending(B256::repeat_byte(9)),
+        )
+        .await;
+        assert!(resolved.is_err());
+    }
+
+    #[tokio::test]
+    async fn resolve_pending_ignores_nonmatching_broadcast() {
+        let (coordinator, events_tx) = test_coordinator();
+        let (other_payload, _other_hash) = built_payload(1);
+
+        let task = {
+            let coordinator = coordinator.clone();
+            tokio::spawn(async move { coordinator.resolve_pending(B256::repeat_byte(9)).await })
+        };
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        events_tx.send(Events::BuiltPayload(other_payload)).unwrap();
+
+        // A broadcast for a different block hash must not resolve the future.
+        let resolved = tokio::time::timeout(Duration::from_millis(50), task).await;
+        assert!(resolved.is_err());
+    }
 }
