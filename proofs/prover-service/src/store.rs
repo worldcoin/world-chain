@@ -1035,13 +1035,12 @@ async fn classify_backend_update(
     tx: &mut Transaction<'_, Postgres>,
     backend_job_id: i64,
 ) -> ProofJobQueueError {
-    let exists = sqlx::query_scalar::<_, bool>(
-        "select exists(select 1 from proof_sessions where id = $1)",
-    )
-    .bind(backend_job_id)
-    .fetch_one(&mut **tx)
-    .await
-    .unwrap_or(false);
+    let exists =
+        sqlx::query_scalar::<_, bool>("select exists(select 1 from proof_sessions where id = $1)")
+            .bind(backend_job_id)
+            .fetch_one(&mut **tx)
+            .await
+            .unwrap_or(false);
     if exists {
         ProofJobQueueError::StaleLease
     } else {
