@@ -152,7 +152,7 @@ fn main() -> Result<()> {
 
     let queue = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
-    let worker_id = cli.worker_id;
+    let worker_id = format!("{}-sp1-worker", cli.worker_id);
     let worker = ProofWorker::new(
         queue,
         backend,

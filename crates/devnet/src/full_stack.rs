@@ -2689,6 +2689,7 @@ async fn start_sp1_worker(
         queue,
         backend,
         ProofWorkerConfig {
+            worker_id: "devnet-sp1-worker".to_string(),
             poll_interval: SP1_WORKER_POLL_INTERVAL,
             max_concurrent_jobs: 1,
         },

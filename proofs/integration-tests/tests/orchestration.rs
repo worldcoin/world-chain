@@ -95,6 +95,7 @@ async fn start_proof_stack_with(
         service.clone(),
         sp1_backend,
         ProofWorkerConfig {
+            worker_id: "orchestration-sp1-worker".to_string(),
             poll_interval: Duration::from_millis(5),
             max_concurrent_jobs: 1,
         },
@@ -106,6 +107,7 @@ async fn start_proof_stack_with(
         service.clone(),
         nitro_backend,
         ProofWorkerConfig {
+            worker_id: "orchestration-nitro-worker".to_string(),
             poll_interval: Duration::from_millis(5),
             max_concurrent_jobs: 1,
         },
