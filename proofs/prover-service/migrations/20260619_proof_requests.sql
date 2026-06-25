@@ -1,4 +1,4 @@
-create table proof_jobs (
+create table proof_requests (
     proof_id            bytea primary key,
     backend             text not null,
     game                bytea not null,
@@ -18,21 +18,21 @@ create table proof_jobs (
     updated_at          timestamptz not null,
     finished_at         timestamptz null,
 
-    constraint proof_jobs_status_check
+    constraint proof_requests_status_check
         check (status in ('queued', 'starting', 'backend_pending', 'completed', 'failed'))
 );
 
-create index proof_jobs_queued_idx
-    on proof_jobs (backend, created_at)
+create index proof_requests_queued_idx
+    on proof_requests (backend, created_at)
     where status = 'queued';
 
-create index proof_jobs_starting_lease_idx
-    on proof_jobs (locked_until)
+create index proof_requests_starting_lease_idx
+    on proof_requests (locked_until)
     where status = 'starting';
 
-create table proof_backend_jobs (
+create table proof_sessions (
     id                  bigserial primary key,
-    proof_id            bytea not null references proof_jobs(proof_id),
+    proof_id            bytea not null references proof_requests(proof_id),
 
     backend             text not null,
     phase               text not null,
@@ -54,16 +54,16 @@ create table proof_backend_jobs (
     unique (backend, backend_proof_id),
     unique (proof_id, phase),
 
-    constraint proof_backend_jobs_status_check
+    constraint proof_sessions_status_check
         check (status in ('requested', 'completed', 'failed')),
-    constraint proof_backend_jobs_phase_check
+    constraint proof_sessions_phase_check
         check (phase in ('single', 'range', 'aggregation'))
 );
 
-create index proof_backend_jobs_due_idx
-    on proof_backend_jobs (backend, next_poll_at)
+create index proof_sessions_due_idx
+    on proof_sessions (backend, next_poll_at)
     where status = 'requested';
 
-create index proof_backend_jobs_lease_idx
-    on proof_backend_jobs (locked_until)
+create index proof_sessions_lease_idx
+    on proof_sessions (locked_until)
     where status = 'requested';
