@@ -288,7 +288,7 @@ impl std::fmt::Display for LeaseToken {
     }
 }
 
-/// Initial proof request leased from `proof_jobs`.
+/// Initial proof request leased from `proof_requests`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LeasedProofRequest {
     /// The user-facing proof request.
@@ -356,7 +356,7 @@ pub struct BackendProofWork {
     pub state: BackendProofState,
 }
 
-/// Durable backend job leased from `proof_backend_jobs`.
+/// Durable backend job leased from `proof_sessions`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LeasedBackendProofWork {
     /// Database identifier of the backend job row.
@@ -372,14 +372,14 @@ pub struct LeasedBackendProofWork {
 pub enum ProofSubmissionLease {
     /// Final proof was produced while starting a user-facing proof job.
     ProofJob {
-        /// Token for the leased `proof_jobs` row.
+        /// Token for the leased `proof_requests` row.
         lease_token: LeaseToken,
     },
     /// Final proof was produced while advancing a durable backend job.
     BackendJob {
         /// Database identifier of the backend job row.
         backend_job_id: i64,
-        /// Token for the leased `proof_backend_jobs` row.
+        /// Token for the leased `proof_sessions` row.
         lease_token: LeaseToken,
     },
 }

@@ -3953,7 +3953,6 @@ dependencies = [
  "lock_api",
  "once_cell",
  "parking_lot_core",
- "rayon",
  "serde",
 ]
 
@@ -18560,7 +18559,6 @@ dependencies = [
  "world-chain-node",
  "world-chain-pool",
  "world-chain-primitives",
- "world-chain-state",
  "world-chain-test-utils",
 ]
 
@@ -18725,6 +18723,7 @@ name = "world-chain-evm"
 version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
+ "alloy-eip7928 0.4.3",
  "alloy-eips 2.0.5",
  "alloy-op-evm",
  "alloy-primitives",
@@ -18751,7 +18750,6 @@ dependencies = [
  "tracing",
  "world-chain-chainspec",
  "world-chain-primitives",
- "world-chain-state",
 ]
 
 [[package]]
@@ -18961,7 +18959,7 @@ name = "world-chain-primitives"
 version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
- "alloy-eip7928 0.3.7",
+ "alloy-eip7928 0.4.3",
  "alloy-eips 2.0.5",
  "alloy-primitives",
  "alloy-rlp",
@@ -18982,7 +18980,8 @@ dependencies = [
  "reth-optimism-node",
  "reth-optimism-primitives",
  "reth-primitives-traits",
- "reth-revm",
+ "reth-storage-api",
+ "reth-trie-common",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -19389,6 +19388,7 @@ dependencies = [
  "tracing",
  "world-chain-evm",
  "world-chain-primitives",
+ "world-chain-validator",
 ]
 
 [[package]]
@@ -19418,25 +19418,6 @@ dependencies = [
  "world-chain-proof-worker",
  "world-chain-proofs",
  "world-chain-prover-service",
-]
-
-[[package]]
-name = "world-chain-state"
-version = "2.3.0"
-dependencies = [
- "alloy-eips 2.0.5",
- "alloy-primitives",
- "color-eyre",
- "crossbeam-channel",
- "dashmap",
- "rayon",
- "reth-revm",
- "reth-tracing",
- "revm",
- "revm-database",
- "serde_json",
- "tracing",
- "world-chain-primitives",
 ]
 
 [[package]]
@@ -19520,7 +19501,6 @@ dependencies = [
  "world-chain-pool",
  "world-chain-primitives",
  "world-chain-rpc",
- "world-chain-state",
 ]
 
 [[package]]
@@ -19590,6 +19570,7 @@ name = "world-chain-validator"
 version = "2.3.0"
 dependencies = [
  "alloy-consensus 2.0.5",
+ "alloy-eip7928 0.4.3",
  "alloy-eips 2.0.5",
  "alloy-op-evm",
  "alloy-primitives",
@@ -19601,8 +19582,6 @@ dependencies = [
  "futures",
  "metrics",
  "metrics-derive",
- "op-alloy-consensus",
- "op-revm",
  "parking_lot",
  "rayon",
  "reth-chain-state",
@@ -19623,13 +19602,13 @@ dependencies = [
  "revm",
  "revm-database",
  "tokio",
+ "tokio-stream",
  "tracing",
  "world-chain-chainspec",
  "world-chain-evm",
  "world-chain-node",
  "world-chain-p2p",
  "world-chain-primitives",
- "world-chain-state",
  "world-chain-test-utils",
  "world-chain-validator",
 ]

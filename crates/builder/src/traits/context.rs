@@ -15,10 +15,9 @@ use reth_optimism_payload_builder::{
 use reth_payload_util::PayloadTransactions;
 use reth_primitives_traits::{SealedHeader, TxTy};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::{DatabaseCommit, context::BlockEnv};
+use revm::context::BlockEnv;
 use revm_database::State;
 use world_chain_evm::utils::effective_gas_limit;
-use world_chain_state::StateDB;
 
 /// Context trait for building payloads with flashblock support.
 ///
@@ -134,7 +133,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
         &self,
         builder: &mut impl BlockBuilder<
             Primitives = <Self::Evm as ConfigureEvm>::Primitives,
-            Executor: BlockExecutor<Evm: Evm<DB: StateDB + DatabaseCommit + reth_evm::Database>>,
+            Executor: BlockExecutor<Evm: Evm<DB: reth_evm::block::StateDB + reth_evm::Database>>,
         >,
     ) -> Result<ExecutionInfo, PayloadBuilderError>;
 
@@ -157,7 +156,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
                 Primitives = <Self::Evm as ConfigureEvm>::Primitives,
                 Executor: BlockExecutor<
                     Evm: Evm<
-                        DB: StateDB + DatabaseCommit + reth_evm::Database,
+                        DB: reth_evm::block::StateDB + reth_evm::Database,
                         BlockEnv = BlockEnv,
                     >,
                 >,

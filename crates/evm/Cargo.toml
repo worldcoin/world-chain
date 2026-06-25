@@ -10,9 +10,9 @@ repository.workspace = true
 [dependencies]
 world-chain-chainspec.workspace = true
 world-chain-primitives.workspace = true
-world-chain-state.workspace = true
 
 alloy-consensus.workspace = true
+alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-op-evm.workspace = true
 alloy-primitives.workspace = true

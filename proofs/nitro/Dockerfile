@@ -48,7 +48,7 @@ RUN cargo build \
         --locked \
         --bin world-chain-nitro-enclave \
         -p world-chain-proof-nitro \
-        --features enclave-bin
+        --features enclave
 
 # ---- runtime image (kept minimal so PCR0 stays stable) ---------------------
 # debian:bookworm-slim

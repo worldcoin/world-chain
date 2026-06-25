@@ -14,6 +14,7 @@ workspace = true
 # internal
 world-chain-evm.workspace = true
 world-chain-primitives.workspace = true
+world-chain-validator.workspace = true
 
 # reth
 reth-chainspec.workspace = true
