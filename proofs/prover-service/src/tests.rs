@@ -462,7 +462,7 @@ async fn failed_completed_backend_submission_releases_lease() {
         .unwrap()
         .expect("backend lease");
 
-    sqlx::query("update proof_jobs set backend = 'corrupt' where proof_id = $1")
+    sqlx::query("update proof_requests set backend = 'corrupt' where proof_id = $1")
         .bind(id.0.as_slice())
         .execute(service.pool())
         .await
@@ -482,7 +482,7 @@ async fn failed_completed_backend_submission_releases_lease() {
     let row = sqlx::query(
         "select status, advance_attempts, locked_until is null as unlocked,
                 lease_token is null as lease_cleared
-         from proof_backend_jobs
+         from proof_sessions
          where id = $1",
     )
     .bind(backend.backend_job_id)
