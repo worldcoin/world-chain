@@ -187,6 +187,7 @@ async fn worker_proves_real_range_end_to_end() {
         RpcProverServiceClient::new(&url).expect("client"),
         backend,
         ProofWorkerConfig {
+            worker_id: "test-worker".to_string(),
             poll_interval: Duration::from_millis(500),
             max_concurrent_jobs: 1,
         },

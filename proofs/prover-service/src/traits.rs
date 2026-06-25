@@ -1,9 +1,9 @@
 use crate::{
     error::{ProofJobQueueError, ProofRequestError},
     types::{
-        BackendProofState, BackendUpdate, LeaseToken, LeasedBackendProofWork, LeasedProofRequest,
+        BackendProofState, BackendUpdate, LockId, LockedBackendProofWork, LockedProofRequest,
         ProofBackend, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
-        ProofSubmissionLease,
+        ProofSubmissionLock,
     },
 };
 use async_trait::async_trait;
@@ -45,27 +45,27 @@ pub trait ProofJobQueue {
     async fn get_next_proof(
         &self,
         backend: ProofBackend,
-    ) -> Result<Option<LeasedProofRequest>, ProofJobQueueError>;
+    ) -> Result<Option<LockedProofRequest>, ProofJobQueueError>;
 
     /// Persist durable backend work created while starting a proof job.
     async fn submit_backend_proof_state(
         &self,
         proof_id: ProofRequestId,
         backend_proof_state: BackendProofState,
-        lease_token: LeaseToken,
+        lease_token: LockId,
     ) -> Result<(), ProofJobQueueError>;
 
     /// Lease durable backend work that is due for polling or advancement.
     async fn get_next_backend_proof(
         &self,
         backend: ProofBackend,
-    ) -> Result<Option<LeasedBackendProofWork>, ProofJobQueueError>;
+    ) -> Result<Option<LockedBackendProofWork>, ProofJobQueueError>;
 
     /// Apply an update produced while advancing a durable backend job.
     async fn complete_backend_proof_job(
         &self,
         backend_job_id: i64,
-        lease_token: LeaseToken,
+        lease_token: LockId,
         next_update: BackendUpdate,
     ) -> Result<(), ProofJobQueueError>;
 
@@ -77,14 +77,14 @@ pub trait ProofJobQueue {
         &self,
         backend_job_id: i64,
         reason: String,
-        lease_token: LeaseToken,
+        lease_token: LockId,
     ) -> Result<(), ProofJobQueueError>;
 
     /// Submit a final proof response to the `prover-service`.
     async fn submit_proof(
         &self,
         proof: ProofResponse,
-        lease: ProofSubmissionLease,
+        lease: ProofSubmissionLock,
     ) -> Result<(), ProofJobQueueError>;
 
     /// Report that proving failed for the given job.
@@ -95,6 +95,6 @@ pub trait ProofJobQueue {
         &self,
         proof_id: ProofRequestId,
         reason: String,
-        lease_token: LeaseToken,
+        lease_token: LockId,
     ) -> Result<(), ProofJobQueueError>;
 }

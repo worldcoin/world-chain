@@ -107,6 +107,10 @@ struct Cli {
     /// the Succinct proving network.
     #[arg(long, default_value_t = 1)]
     max_concurrent_jobs: usize,
+
+    /// The unique worker id.
+    #[arg(long)]
+    worker_id: String,
 }
 
 fn main() -> Result<()> {
@@ -148,10 +152,12 @@ fn main() -> Result<()> {
 
     let queue = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
+    let worker_id = cli.worker_id;
     let worker = ProofWorker::new(
         queue,
         backend,
         ProofWorkerConfig {
+            worker_id,
             poll_interval: Duration::from_secs(cli.poll_interval_seconds),
             max_concurrent_jobs: cli.max_concurrent_jobs,
         },

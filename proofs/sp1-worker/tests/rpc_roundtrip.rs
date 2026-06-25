@@ -89,6 +89,7 @@ async fn worker_completes_requested_proof_over_rpc() {
         queue,
         MockBackend,
         ProofWorkerConfig {
+            worker_id: "test-worker".to_string(),
             poll_interval: Duration::from_millis(10),
             max_concurrent_jobs: 1,
         },

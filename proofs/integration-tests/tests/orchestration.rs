@@ -82,7 +82,7 @@ async fn start_proof_stack_with(
     let service = SharedProverService::connect(
         &database_url,
         ProverServiceConfig {
-            lease_timeout: Duration::from_secs(5),
+            lock_timeout: Duration::from_secs(5),
             max_attempts: 2,
             max_queue_len: 16,
             backend_poll_interval: Duration::from_millis(5),

@@ -19,8 +19,8 @@ use tokio::{
 use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 use tracing::{Instrument, info, info_span, warn};
 use world_chain_prover_service::{
-    BackendUpdate, LeaseToken, LeasedBackendProofWork, LeasedProofRequest, ProofBackend,
-    ProofJobQueue, ProofJobQueueError, ProofRequest, ProofResponse, ProofSubmissionLease,
+    BackendUpdate, LockId, LockedBackendProofWork, LockedProofRequest, ProofBackend, ProofJobQueue,
+    ProofJobQueueError, ProofRequest, ProofResponse, ProofSubmissionLock,
 };
 
 use crate::backend::ProofJobBackend;
@@ -44,13 +44,15 @@ type ReportFuture = BoxFuture<'static, ()>;
 
 /// Work leased from either the user-facing proof queue or the durable backend-job queue.
 enum LeasedWork {
-    Start(LeasedProofRequest),
-    Backend(LeasedBackendProofWork),
+    Start(LockedProofRequest),
+    Backend(LockedBackendProofWork),
 }
 
 /// Configuration for a [`ProofWorker`].
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct ProofWorkerConfig {
+    /// The worker id.
+    pub worker_id: String,
     /// Sleep between lease attempts when no work is available.
     pub poll_interval: Duration,
     /// Maximum number of jobs this worker proves concurrently. Per-worker, not global, so an
@@ -58,11 +60,14 @@ pub struct ProofWorkerConfig {
     pub max_concurrent_jobs: usize,
 }
 
-impl Default for ProofWorkerConfig {
-    fn default() -> Self {
+impl ProofWorkerConfig {
+    /// Create a new `ProofWorkerConfig` with the provided `worker_id`
+    /// `poll_interval` and `max_concurrent_jobs`.
+    pub fn new(worker_id: String, poll_interval: Duration, max_concurrent_jobs: usize) -> Self {
         Self {
-            poll_interval: DEFAULT_POLL_INTERVAL,
-            max_concurrent_jobs: DEFAULT_MAX_CONCURRENT_JOBS,
+            worker_id,
+            poll_interval,
+            max_concurrent_jobs,
         }
     }
 }
@@ -77,12 +82,12 @@ struct FinishedJob {
 enum JobLease {
     Start {
         request: ProofRequest,
-        lease_token: LeaseToken,
+        lease_token: LockId,
     },
     Backend {
         backend_job_id: i64,
         request: ProofRequest,
-        lease_token: LeaseToken,
+        lease_token: LockId,
     },
 }
 
@@ -302,12 +307,12 @@ fn spawn_job<B>(
         let lease = match work {
             LeasedWork::Start(leased) => JobLease::Start {
                 request: leased.request,
-                lease_token: leased.lease_token,
+                lease_token: leased.lock_id,
             },
             LeasedWork::Backend(leased) => JobLease::Backend {
                 backend_job_id: leased.backend_job_id,
                 request: leased.work.proof_request,
-                lease_token: leased.lease_token,
+                lease_token: leased.lock_id,
             },
         };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &lease {
@@ -373,7 +378,7 @@ where
 async fn report_start_update<Q>(
     queue: Arc<Q>,
     request: ProofRequest,
-    lease_token: LeaseToken,
+    lease_token: LockId,
     update: BackendUpdate,
 ) where
     Q: ProofJobQueue + Send + Sync + 'static,
@@ -389,7 +394,9 @@ async fn report_start_update<Q>(
             queue
                 .submit_proof(
                     ProofResponse { id, proof },
-                    ProofSubmissionLease::ProofJob { lease_token },
+                    ProofSubmissionLock::ProofJob {
+                        lock_id: lease_token,
+                    },
                 )
                 .await
         }
@@ -414,7 +421,7 @@ async fn report_start_update<Q>(
 async fn report_backend_update<Q>(
     queue: Arc<Q>,
     backend_job_id: i64,
-    lease_token: LeaseToken,
+    lease_token: LockId,
     update: BackendUpdate,
 ) where
     Q: ProofJobQueue + Send + Sync + 'static,
@@ -533,8 +540,8 @@ mod tests {
     /// In-memory queue with shared interior so tests keep a handle for assertions.
     #[derive(Clone, Default)]
     struct MockQueue {
-        jobs: Arc<Mutex<VecDeque<LeasedProofRequest>>>,
-        backend_jobs: Arc<Mutex<VecDeque<LeasedBackendProofWork>>>,
+        jobs: Arc<Mutex<VecDeque<LockedProofRequest>>>,
+        backend_jobs: Arc<Mutex<VecDeque<LockedBackendProofWork>>>,
         backend_updates: Arc<Mutex<Vec<(i64, BackendUpdate)>>>,
         backend_failures: Arc<Mutex<Vec<(i64, String)>>>,
         backend_complete_failures: Arc<Mutex<usize>>,
@@ -547,9 +554,9 @@ mod tests {
             Self {
                 jobs: Arc::new(Mutex::new(
                     jobs.into_iter()
-                        .map(|request| LeasedProofRequest {
+                        .map(|request| LockedProofRequest {
                             request,
-                            lease_token: LeaseToken::new(),
+                            lock_id: LockId::new(),
                         })
                         .collect(),
                 )),
@@ -557,7 +564,7 @@ mod tests {
             }
         }
 
-        fn with_backend_jobs(jobs: impl IntoIterator<Item = LeasedBackendProofWork>) -> Self {
+        fn with_backend_jobs(jobs: impl IntoIterator<Item = LockedBackendProofWork>) -> Self {
             Self {
                 backend_jobs: Arc::new(Mutex::new(jobs.into_iter().collect())),
                 ..Self::default()
@@ -599,7 +606,7 @@ mod tests {
         async fn get_next_proof(
             &self,
             _backend: ProofBackend,
-        ) -> Result<Option<LeasedProofRequest>, ProofJobQueueError> {
+        ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
             Ok(self.jobs.lock().expect("jobs poisoned").pop_front())
         }
 
@@ -607,7 +614,7 @@ mod tests {
             &self,
             _proof_id: ProofRequestId,
             _backend_proof_state: BackendProofState,
-            _lease_token: LeaseToken,
+            _lease_token: LockId,
         ) -> Result<(), ProofJobQueueError> {
             Ok(())
         }
@@ -615,7 +622,7 @@ mod tests {
         async fn get_next_backend_proof(
             &self,
             _backend: ProofBackend,
-        ) -> Result<Option<LeasedBackendProofWork>, ProofJobQueueError> {
+        ) -> Result<Option<LockedBackendProofWork>, ProofJobQueueError> {
             Ok(self
                 .backend_jobs
                 .lock()
@@ -626,7 +633,7 @@ mod tests {
         async fn complete_backend_proof_job(
             &self,
             backend_job_id: i64,
-            _lease_token: LeaseToken,
+            _lease_token: LockId,
             next_update: BackendUpdate,
         ) -> Result<(), ProofJobQueueError> {
             let mut failures = self
@@ -650,7 +657,7 @@ mod tests {
             &self,
             backend_job_id: i64,
             reason: String,
-            _lease_token: LeaseToken,
+            _lease_token: LockId,
         ) -> Result<(), ProofJobQueueError> {
             self.backend_failures
                 .lock()
@@ -662,7 +669,7 @@ mod tests {
         async fn submit_proof(
             &self,
             proof: ProofResponse,
-            _lease: ProofSubmissionLease,
+            _lease: ProofSubmissionLock,
         ) -> Result<(), ProofJobQueueError> {
             self.submitted
                 .lock()
@@ -675,7 +682,7 @@ mod tests {
             &self,
             proof_id: ProofRequestId,
             reason: String,
-            _lease_token: LeaseToken,
+            _lease_token: LockId,
         ) -> Result<(), ProofJobQueueError> {
             self.failed
                 .lock()
@@ -746,14 +753,14 @@ mod tests {
         backend_job_id: i64,
         request: ProofRequest,
         state: BackendProofState,
-    ) -> LeasedBackendProofWork {
-        LeasedBackendProofWork {
+    ) -> LockedBackendProofWork {
+        LockedBackendProofWork {
             backend_job_id,
             work: BackendProofWork {
                 proof_request: request,
                 state,
             },
-            lease_token: LeaseToken::new(),
+            lock_id: LockId::new(),
         }
     }
 
@@ -773,6 +780,7 @@ mod tests {
 
     fn config() -> ProofWorkerConfig {
         ProofWorkerConfig {
+            worker_id: "test-worker".to_string(),
             poll_interval: Duration::from_millis(10),
             max_concurrent_jobs: 1,
         }

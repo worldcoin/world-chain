@@ -4,9 +4,9 @@ use crate::{
     store::ProverServiceStore,
     traits::{ProofJobQueue, ProofRequester},
     types::{
-        BackendProofState, BackendUpdate, LeaseToken, LeasedBackendProofWork, LeasedProofRequest,
+        BackendProofState, BackendUpdate, LockId, LockedBackendProofWork, LockedProofRequest,
         ProofBackend, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
-        ProofSubmissionLease,
+        ProofSubmissionLock,
     },
 };
 use async_trait::async_trait;
@@ -81,7 +81,7 @@ impl ProofJobQueue for ProverService {
     async fn get_next_proof(
         &self,
         backend: ProofBackend,
-    ) -> Result<Option<LeasedProofRequest>, ProofJobQueueError> {
+    ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
         self.store.get_next_proof(backend).await
     }
 
@@ -89,7 +89,7 @@ impl ProofJobQueue for ProverService {
         &self,
         proof_id: ProofRequestId,
         backend_proof_state: BackendProofState,
-        lease_token: LeaseToken,
+        lease_token: LockId,
     ) -> Result<(), ProofJobQueueError> {
         self.store
             .submit_backend_proof_state(proof_id, backend_proof_state, lease_token)
@@ -99,14 +99,14 @@ impl ProofJobQueue for ProverService {
     async fn get_next_backend_proof(
         &self,
         backend: ProofBackend,
-    ) -> Result<Option<LeasedBackendProofWork>, ProofJobQueueError> {
+    ) -> Result<Option<LockedBackendProofWork>, ProofJobQueueError> {
         self.store.get_next_backend_proof(backend).await
     }
 
     async fn complete_backend_proof_job(
         &self,
         backend_job_id: i64,
-        lease_token: LeaseToken,
+        lease_token: LockId,
         next_update: BackendUpdate,
     ) -> Result<(), ProofJobQueueError> {
         match next_update {
@@ -137,7 +137,7 @@ impl ProofJobQueue for ProverService {
         &self,
         backend_job_id: i64,
         reason: String,
-        lease_token: LeaseToken,
+        lease_token: LockId,
     ) -> Result<(), ProofJobQueueError> {
         self.store
             .fail_backend_proof_job(backend_job_id, reason, lease_token)
@@ -147,20 +147,18 @@ impl ProofJobQueue for ProverService {
     async fn submit_proof(
         &self,
         proof: ProofResponse,
-        lease: ProofSubmissionLease,
+        lock: ProofSubmissionLock,
     ) -> Result<(), ProofJobQueueError> {
-        match lease {
-            ProofSubmissionLease::ProofJob { lease_token } => {
-                self.store
-                    .submit_proof_from_proof_job(proof, lease_token)
-                    .await
+        match lock {
+            ProofSubmissionLock::ProofJob { lock_id } => {
+                self.store.submit_proof_from_proof_job(proof, lock_id).await
             }
-            ProofSubmissionLease::BackendJob {
+            ProofSubmissionLock::BackendJob {
                 backend_job_id,
-                lease_token,
+                lock_id,
             } => {
                 self.store
-                    .submit_proof_from_backend_job(proof, backend_job_id, lease_token)
+                    .submit_proof_from_backend_job(proof, backend_job_id, lock_id)
                     .await
             }
         }
@@ -170,7 +168,7 @@ impl ProofJobQueue for ProverService {
         &self,
         proof_id: ProofRequestId,
         reason: String,
-        lease_token: LeaseToken,
+        lease_token: LockId,
     ) -> Result<(), ProofJobQueueError> {
         self.store.fail_proof(proof_id, reason, lease_token).await
     }

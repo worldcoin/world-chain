@@ -63,9 +63,9 @@ pub enum ProofJobQueueError {
     /// No backend proof job with the given id is known.
     #[error("unknown backend proof job {0}")]
     UnknownBackendJob(i64),
-    /// The lease token no longer owns the row being updated.
-    #[error("stale lease for proof job update")]
-    StaleLease,
+    /// The lock token no longer owns the row being updated.
+    #[error("stale lock for proof job update")]
+    StaleLocked,
     /// The submitted proof does not match the requested job.
     #[error("invalid proof for job {id}: {reason}")]
     InvalidProof {

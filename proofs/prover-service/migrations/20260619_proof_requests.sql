@@ -10,9 +10,11 @@ create table proof_requests (
     proof_data          bytea null,
     failure_reason      text null,
 
+    worker_id           text null,
+    lock_id             uuid null,
+
     start_attempts      integer not null default 0,
-    locked_until        timestamptz null,
-    lease_token         uuid null,
+    lock_expires_at     timestamp with time zone null,
 
     created_at          timestamptz not null,
     updated_at          timestamptz not null,
@@ -26,8 +28,8 @@ create index proof_requests_queued_idx
     on proof_requests (backend, created_at)
     where status = 'queued';
 
-create index proof_requests_starting_lease_idx
-    on proof_requests (locked_until)
+create index proof_requests_starting_lock_idx
+    on proof_requests (lock_expires_at)
     where status = 'starting';
 
 create table proof_sessions (
@@ -41,8 +43,8 @@ create table proof_sessions (
     status              text not null,
     advance_attempts    integer not null default 0,
     next_poll_at        timestamptz not null,
-    locked_until        timestamptz null,
-    lease_token         uuid null,
+    lock_expires_at        timestamptz null,
+    lock_id         uuid null,
 
     artifact            bytea null,
     failure_reason      text null,
@@ -64,6 +66,6 @@ create index proof_sessions_due_idx
     on proof_sessions (backend, next_poll_at)
     where status = 'requested';
 
-create index proof_sessions_lease_idx
-    on proof_sessions (locked_until)
+create index proof_sessions_lock_idx
+    on proof_sessions (lock_expires_at)
     where status = 'requested';
