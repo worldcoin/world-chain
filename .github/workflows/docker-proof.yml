@@ -111,6 +111,8 @@ jobs:
     steps:
       - name: Check Out Repo
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
       - name: Merge multi-arch manifest
         uses: ./.github/actions/docker-merge-manifest
         with:
@@ -128,6 +130,8 @@ jobs:
     steps:
       - name: Check Out Repo
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
       - name: Merge multi-arch manifest
         uses: ./.github/actions/docker-merge-manifest
         with:
@@ -192,6 +196,8 @@ jobs:
     steps:
       - name: Check Out Repo
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
       - name: Merge multi-arch manifest
         uses: ./.github/actions/docker-merge-manifest
         with:
@@ -234,6 +240,8 @@ jobs:
     steps:
       - name: Check Out Repo
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
       - name: Merge multi-arch manifest
         uses: ./.github/actions/docker-merge-manifest
         with:
@@ -274,6 +282,8 @@ jobs:
     steps:
       - name: Check Out Repo
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
       - name: Merge multi-arch manifest
         uses: ./.github/actions/docker-merge-manifest
         with:
