@@ -6,28 +6,28 @@ import {INitroAttestationVerifier} from "./INitroAttestationVerifier.sol";
 
 /// @title NitroEnclaveKeyRegistry
 /// @author Worldcoin
-/// @notice Registry of AWS Nitro enclave public keys, indexed by PCR0/PCR1/PCR2.
-/// @dev Keys are registered after their attestation document has been verified by an
-///      {INitroAttestationVerifier}. The owner may revoke any registered key.
+/// @notice Registry of AWS Nitro enclave secp256k1 public keys, indexed by
+///         PCR0/PCR1/PCR2 measurements.
+/// @dev Registration goes through a fully on-chain {INitroAttestationVerifier} which:
+///        - validates the COSE_Sign1 P-384 signature;
+///        - validates the X.509 cert chain to the AWS Nitro root CA (via the cached
+///          {ICertManager});
+///        - confirms PCR0/1/2 match the supplied digests;
+///        - returns the embedded SEC1-uncompressed secp256k1 public key.
 ///
-///      A `(pcr0, pcr1, pcr2)` triple uniquely identifies an enclave image. Different
-///      enclave launches of the same image produce different ephemeral keys, so the
-///      registry stores only the *most recent* key for a given PCR triple. The
-///      previous key for that triple is implicitly superseded — call sites that need
-///      to detect rotation should listen for {KeyRegistered} events.
+///      The registry stores the returned key keyed by PCR triple and exposes views
+///      for the verifier-side proof contracts ({NitroProofVerifier}). The owner can
+///      revoke any key at any time (e.g. on enclave compromise).
 contract NitroEnclaveKeyRegistry is Ownable {
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Thrown when the attestation verifier rejects the supplied document.
-    error AttestationRejected();
-
     /// @notice Thrown when {revokeKey} is called for a key that is not registered.
     error KeyNotRegistered();
 
-    /// @notice Thrown when an empty public key is supplied.
-    error EmptyPublicKey();
+    /// @notice Thrown when the verifier returns a malformed public key.
+    error InvalidPublicKey();
 
     /*//////////////////////////////////////////////////////////////
                                  EVENTS
@@ -43,7 +43,7 @@ contract NitroEnclaveKeyRegistry is Ownable {
                                 STORAGE
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Attestation verifier used to gate registration.
+    /// @notice On-chain Nitro attestation verifier.
     INitroAttestationVerifier public immutable verifier;
 
     /// @notice keccak256(publicKey) => registered flag. Cleared on revoke.
@@ -57,8 +57,8 @@ contract NitroEnclaveKeyRegistry is Ownable {
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
-    /// @param verifier_ Attestation verifier used to validate documents at
-    ///                  registration time.
+    /// @param verifier_ The Nitro attestation verifier used to validate
+    ///                  attestation documents on-chain at registration time.
     /// @param owner_    Initial owner allowed to revoke keys.
     constructor(INitroAttestationVerifier verifier_, address owner_) Ownable(owner_) {
         verifier = verifier_;
@@ -68,30 +68,28 @@ contract NitroEnclaveKeyRegistry is Ownable {
                              REGISTRATION
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Registers `publicKey` as the enclave key bound to the given PCRs by
-    ///         `attestationDoc`.
-    /// @dev The call reverts unless {INitroAttestationVerifier.verifyAttestation}
-    ///      returns `true` for the supplied tuple. If a key was already registered
-    ///      for the same PCR triple, it is superseded (the old key remains in
-    ///      {isKeyRegistered} until revoked).
+    /// @notice Verify an AWS Nitro attestation document on-chain and register the
+    ///         enclave public key it certifies.
     ///
-    /// @param attestationDoc Raw NSM/COSE_Sign1 attestation document bytes.
-    /// @param publicKey      65-byte SEC1-uncompressed secp256k1 enclave key.
-    /// @param pcr0           PCR0 of the attested image.
-    /// @param pcr1           PCR1 of the attested image.
-    /// @param pcr2           PCR2 of the attested image.
+    /// @dev The full COSE_Sign1 / X.509 / P-384 verification is delegated to
+    ///      {INitroAttestationVerifier.verifyAttestation}; this function only
+    ///      stores the resulting key. Reverts on any verification failure.
+    ///
+    /// @param attestationTbs The COSE_Sign1 TBS bytes (from
+    ///                       `NitroValidator.decodeAttestationTbs`).
+    /// @param signature      The 96-byte (r||s) P-384 attestation signature.
+    /// @param pcr0           Expected `keccak256(rawPcr0)`.
+    /// @param pcr1           Expected `keccak256(rawPcr1)`.
+    /// @param pcr2           Expected `keccak256(rawPcr2)`.
     function registerKey(
-        bytes memory attestationDoc,
-        bytes calldata publicKey,
+        bytes calldata attestationTbs,
+        bytes calldata signature,
         bytes32 pcr0,
         bytes32 pcr1,
         bytes32 pcr2
-    ) external {
-        if (publicKey.length == 0) revert EmptyPublicKey();
-
-        if (!verifier.verifyAttestation(attestationDoc, publicKey, pcr0, pcr1, pcr2)) {
-            revert AttestationRejected();
-        }
+    ) external returns (bytes memory publicKey) {
+        publicKey = verifier.verifyAttestation(attestationTbs, signature, pcr0, pcr1, pcr2);
+        if (publicKey.length != 65 || publicKey[0] != 0x04) revert InvalidPublicKey();
 
         _registered[keccak256(publicKey)] = true;
         _keyByPCRs[_pcrHash(pcr0, pcr1, pcr2)] = publicKey;
@@ -103,10 +101,10 @@ contract NitroEnclaveKeyRegistry is Ownable {
                                REVOCATION
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Revokes a previously registered enclave key.
-    /// @dev Only callable by the owner. Does not clear the key stored in
+    /// @notice Revoke a previously registered enclave key.
+    /// @dev Only callable by the owner. Does not clear the key returned by
     ///      {getKeyByPCRs} — callers must additionally consult {isKeyRegistered}
-    ///      before trusting the returned bytes.
+    ///      before trusting that key.
     function revokeKey(bytes calldata publicKey) external onlyOwner {
         bytes32 keyHash = keccak256(publicKey);
         if (!_registered[keyHash]) revert KeyNotRegistered();
@@ -123,8 +121,8 @@ contract NitroEnclaveKeyRegistry is Ownable {
         return _registered[keccak256(publicKey)];
     }
 
-    /// @notice Returns the latest registered key for a given PCR triple, or an empty
-    ///         byte string if none has been registered.
+    /// @notice Returns the latest registered key for a given PCR triple, or an
+    ///         empty byte string if none has been registered.
     function getKeyByPCRs(bytes32 pcr0, bytes32 pcr1, bytes32 pcr2)
         external
         view

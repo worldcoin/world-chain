@@ -2,38 +2,37 @@
 pragma solidity ^0.8.28;
 
 import {Test, Vm} from "forge-std/Test.sol";
-import {NitroAttestationVerifier} from "../../src/proofs/nitro/NitroAttestationVerifier.sol";
 import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyRegistry.sol";
 import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol";
+import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier.sol";
 
 contract NitroProofVerifierTest is Test {
-    NitroAttestationVerifier attestationVerifier;
+    MockNitroAttestationVerifier attestationVerifier;
     NitroEnclaveKeyRegistry registry;
     NitroProofVerifier proofVerifier;
 
     address owner = makeAddr("owner");
-    address relayer = makeAddr("relayer");
 
     bytes32 constant PCR0 = bytes32(uint256(0xa));
     bytes32 constant PCR1 = bytes32(uint256(0xb));
     bytes32 constant PCR2 = bytes32(uint256(0xc));
 
-    bytes constant DOC = hex"deadbeef";
+    bytes constant TBS = hex"deadbeef";
+    bytes constant SIG = hex"cafebabe";
 
     Vm.Wallet enclaveWallet;
     bytes enclavePubKey;
 
     function setUp() public {
-        attestationVerifier = new NitroAttestationVerifier(owner, relayer);
+        attestationVerifier = new MockNitroAttestationVerifier();
         registry = new NitroEnclaveKeyRegistry(attestationVerifier, owner);
         proofVerifier = new NitroProofVerifier(registry);
 
         enclaveWallet = vm.createWallet("enclave");
         enclavePubKey = _uncompressedKey(enclaveWallet.publicKeyX, enclaveWallet.publicKeyY);
 
-        vm.prank(relayer);
-        attestationVerifier.attestVerified(DOC, enclavePubKey, PCR0, PCR1, PCR2);
-        registry.registerKey(DOC, enclavePubKey, PCR0, PCR1, PCR2);
+        attestationVerifier.setExpectation(TBS, SIG, PCR0, PCR1, PCR2, enclavePubKey);
+        registry.registerKey(TBS, SIG, PCR0, PCR1, PCR2);
     }
 
     function _uncompressedKey(uint256 x, uint256 y) internal pure returns (bytes memory out) {

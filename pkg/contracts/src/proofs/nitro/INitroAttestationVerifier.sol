@@ -3,33 +3,32 @@ pragma solidity 0.8.28;
 
 /// @title INitroAttestationVerifier
 /// @author Worldcoin
-/// @notice Verifies AWS Nitro NSM / COSE_Sign1 attestation documents and exposes the
-///         enclave-certified public key plus the PCR measurements that bind it to a
-///         specific enclave image.
-/// @dev Full on-chain verification of the COSE_Sign1 P-384 signature and the AWS Nitro
-///      certificate chain is intentionally out of scope for the initial deployment — the
-///      verification logic is non-trivial and gas-prohibitive. Instead, a trusted
-///      off-chain relayer (set as the contract owner) is allowed to attest that an
-///      attestation document has been verified off-chain. Future upgrades may replace
-///      this with a fully on-chain verifier; the interface is designed so that the
-///      switch is transparent to callers.
+/// @notice Interface for fully on-chain AWS Nitro Enclaves attestation document
+///         verification. An implementation MUST:
+///           1. parse the COSE_Sign1 to-be-signed (TBS) bytes;
+///           2. verify the entire X.509 cert bundle up to the pinned AWS Nitro root CA;
+///           3. verify the P-384 signature over the TBS;
+///           4. ensure the document is fresh (not stale);
+///           5. ensure the PCR0/1/2 values in the doc match the caller's expectations;
+///           6. return the certified enclave public key (65-byte SEC1 uncompressed
+///              secp256k1).
 interface INitroAttestationVerifier {
-    /// @notice Verifies an attestation document and returns whether it is valid.
+    /// @notice Verify an attestation document and return its certified secp256k1
+    ///         public key.
     ///
-    /// @param attestationDoc Raw NSM/COSE_Sign1 attestation document bytes.
-    /// @param publicKey      The 65-byte uncompressed secp256k1 enclave key claimed
-    ///                       by the attestation document.
-    /// @param pcr0           Expected PCR0 measurement.
-    /// @param pcr1           Expected PCR1 measurement.
-    /// @param pcr2           Expected PCR2 measurement.
-    ///
-    /// @return ok `true` if the document is valid and binds `publicKey` to the
-    ///            supplied PCRs.
+    /// @param attestationTbs The COSE_Sign1 TBS bytes produced by
+    ///                       `NitroValidator.decodeAttestationTbs`.
+    /// @param signature      The 96-byte (r||s) P-384 signature over the TBS.
+    /// @param pcr0           Expected `keccak256(rawPcr0)` (raw PCR is 48 bytes).
+    /// @param pcr1           Expected `keccak256(rawPcr1)`.
+    /// @param pcr2           Expected `keccak256(rawPcr2)`.
+    /// @return publicKey The 65-byte SEC1-uncompressed secp256k1 enclave key
+    ///                   embedded in the document.
     function verifyAttestation(
-        bytes calldata attestationDoc,
-        bytes calldata publicKey,
+        bytes calldata attestationTbs,
+        bytes calldata signature,
         bytes32 pcr0,
         bytes32 pcr1,
         bytes32 pcr2
-    ) external view returns (bool ok);
+    ) external returns (bytes memory publicKey);
 }
