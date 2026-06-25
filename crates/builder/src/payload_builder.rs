@@ -481,6 +481,7 @@ fn build_inner<'a, Txs, Ctx, Pool, R>(
             Evm: Evm<DB: reth_evm::block::StateDB + Database + 'a, BlockEnv = BlockEnv>,
             Receipt = R::Receipt,
             Transaction = R::Transaction,
+            Result: alloy_op_evm::block::PreRefundGasUsed,
         >,
     >,
     mut attempt_metrics: &mut PayloadBuildAttemptMetrics,
@@ -538,7 +539,8 @@ where
         committed_payload.map_or(ExecutionInfo::default(), |p| ExecutionInfo {
             total_fees: p.fees(),
             cumulative_gas_used: p.block().gas_used(),
-            cumulative_evm_gas_used: p.block().gas_used(),
+            // The amount of EVM gas used gas_used() + gas_refunded() for an individual flashblock.
+            cumulative_evm_gas_used: 0,
             cumulative_da_bytes_used: committed_state
                 .transactions_iter()
                 .filter(|tx| !tx.tx().is_deposit())

@@ -5,6 +5,7 @@ use crate::{
 use alloy_consensus::{Block, SignableTransaction, Transaction, transaction::SignerRecoverable};
 use alloy_eips::{Encodable2718, Typed2718};
 use alloy_network::{TransactionBuilder, TxSignerSync};
+use alloy_op_evm::block::PreRefundGasUsed;
 use alloy_primitives::{Address, U256};
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
@@ -83,12 +84,15 @@ where
         info: &mut ExecutionInfo,
         base_fee: u64,
         gas_used: u64,
+        evm_gas_used: u64,
         tx_da_size: u64,
         tx: Recovered<OpTransactionSigned>,
     ) {
         // add gas used by the transaction to cumulative gas used, before creating the
         // receipt
         info.cumulative_gas_used += gas_used;
+
+        info.cumulative_evm_gas_used += evm_gas_used;
         info.cumulative_da_bytes_used += tx_da_size;
 
         // update add to total fees
@@ -229,6 +233,7 @@ where
                         DB: reth_evm::block::StateDB + reth_evm::Database,
                         BlockEnv = BlockEnv,
                     >,
+                    Result: PreRefundGasUsed,
                 >,
             >,
         Txs: PayloadTransactions<
@@ -339,7 +344,12 @@ where
             }
 
             let tx_execution_started = Instant::now();
-            let execution_result = builder.execute_transaction(tx.clone());
+
+            let mut evm_gas_used = 0u64;
+            let execution_result =
+                builder.execute_transaction_with_result_closure(tx.clone(), |result| {
+                    evm_gas_used = result.evm_gas_used();
+                });
             attempt_metrics.record_transaction_execution_duration(tx_execution_started.elapsed());
             let gas_used = match execution_result {
                 Ok(res) => {
@@ -387,7 +397,7 @@ where
             let gas_used = gas_used.tx_gas_used();
             attempt_metrics.record_transaction_gas_used(gas_used);
             transactions_executed += 1;
-            self.commit_changes(info, base_fee, gas_used, tx_da_size, tx);
+            self.commit_changes(info, base_fee, gas_used, evm_gas_used, tx_da_size, tx);
         }
 
         if !spent_nullifier_hashes.is_empty() {
@@ -409,11 +419,14 @@ where
             // insufficient funds, continue with the built payload. This ensures that
             // PBH transactions still receive priority inclusion, even if the PBH nullifier
             // is not spent rather than sitting in the default execution client's mempool.
-            match builder.execute_transaction(tx.clone()) {
+            let mut evm_gas_used = 0u64;
+            match builder.execute_transaction_with_result_closure(tx.clone(), |result| {
+                evm_gas_used = result.evm_gas_used();
+            }) {
                 Ok(gas_used) => {
                     let gas_used = gas_used.tx_gas_used();
                     let tx_da_size = estimated_da_size_bytes(&tx);
-                    self.commit_changes(info, base_fee, gas_used, tx_da_size, tx);
+                    self.commit_changes(info, base_fee, gas_used, evm_gas_used, tx_da_size, tx);
                     attempt_metrics
                         .record_spend_nullifiers_outcome(PayloadBuildTaskOutcome::Success);
                 }
