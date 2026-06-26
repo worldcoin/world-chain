@@ -43,8 +43,8 @@ create table proof_sessions (
     status              text not null,
     advance_attempts    integer not null default 0,
     next_poll_at        timestamptz not null,
-    lock_expires_at        timestamptz null,
-    lock_id         uuid null,
+    lock_expires_at     timestamptz null,
+    lock_id             uuid null,
 
     artifact            bytea null,
     failure_reason      text null,

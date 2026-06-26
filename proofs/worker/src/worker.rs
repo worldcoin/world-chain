@@ -115,7 +115,12 @@ impl WorkerState {
     }
 
     /// Transitions to leasing the next queued job for `lane`.
-    fn leasing<Q>(queue: &Arc<Q>, lane: ProofBackend, permit: OwnedSemaphorePermit) -> Self
+    fn leasing<Q>(
+        queue: &Arc<Q>,
+        lane: ProofBackend,
+        worker_id: String,
+        permit: OwnedSemaphorePermit,
+    ) -> Self
     where
         Q: ProofJobQueue + Send + Sync + 'static,
     {
@@ -125,7 +130,10 @@ impl WorkerState {
                 if let Some(work) = queue.get_next_backend_proof(lane).await? {
                     return Ok(Some(LeasedWork::Backend(work)));
                 }
-                Ok(queue.get_next_proof(lane).await?.map(LeasedWork::Start))
+                Ok(queue
+                    .get_next_proof(lane, worker_id)
+                    .await?
+                    .map(LeasedWork::Start))
             }),
             permit: Some(permit),
         }
@@ -159,6 +167,7 @@ pub struct ProofWorker<Q, B> {
     jobs: JoinSet<FinishedJob>,
     /// In-flight result reports to the `prover-service`.
     reports: FuturesUnordered<ReportFuture>,
+    worker_id: String,
 
     #[pin]
     lock: WorkerState,
@@ -183,6 +192,7 @@ where
             cancelled,
             jobs: JoinSet::new(),
             reports: FuturesUnordered::new(),
+            worker_id: config.worker_id,
             lock: WorkerState::Ready,
         }
     }
@@ -225,8 +235,12 @@ where
                     LeaseStateProj::Ready => match Arc::clone(this.concurrency).try_acquire_owned()
                     {
                         Ok(permit) => {
-                            this.lock
-                                .set(WorkerState::leasing(this.queue, *this.lane, permit));
+                            this.lock.set(WorkerState::leasing(
+                                this.queue,
+                                *this.lane,
+                                this.worker_id.clone(),
+                                permit,
+                            ));
                         }
                         // Every permit is proving. A finishing job wakes this task and frees
                         // its permit; the idle backoff is a safety net in case it does not.
@@ -600,6 +614,7 @@ mod tests {
         async fn get_next_proof(
             &self,
             _backend: ProofBackend,
+            _worker_id: String,
         ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
             Ok(self.jobs.lock().expect("jobs poisoned").pop_front())
         }

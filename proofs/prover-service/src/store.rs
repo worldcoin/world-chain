@@ -211,6 +211,7 @@ impl ProverServiceStore {
     pub(crate) async fn get_next_proof(
         &self,
         backend: ProofBackend,
+        worker_id: String,
     ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
         loop {
             let mut tx = self.begin_queue_tx().await?;
@@ -261,7 +262,8 @@ impl ProverServiceStore {
                      lock_expires_at = $3,
                      lock_id = $4,
                      start_attempts = start_attempts + 1,
-                     updated_at = $5
+                     updated_at = $5,
+                     worker_id = $6
                  where proof_id = $1",
             )
             .bind(proof_id_bytes(proof_id))
@@ -269,6 +271,7 @@ impl ProverServiceStore {
             .bind(lock_expires_at)
             .bind(lock_id.0)
             .bind(now)
+            .bind(worker_id)
             .execute(&mut *tx)
             .await
             .map_err(queue_db)?;

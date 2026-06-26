@@ -81,8 +81,9 @@ impl ProofJobQueue for ProverService {
     async fn get_next_proof(
         &self,
         backend: ProofBackend,
+        worker_id: String,
     ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
-        self.store.get_next_proof(backend).await
+        self.store.get_next_proof(backend, worker_id).await
     }
 
     async fn submit_backend_proof_state(

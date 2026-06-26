@@ -45,6 +45,7 @@ pub trait ProofJobQueue {
     async fn get_next_proof(
         &self,
         backend: ProofBackend,
+        worker_id: String,
     ) -> Result<Option<LockedProofRequest>, ProofJobQueueError>;
 
     /// Persist durable backend work created while starting a proof job.
@@ -53,6 +54,7 @@ pub trait ProofJobQueue {
         proof_id: ProofRequestId,
         backend_proof_state: BackendProofState,
         lock_id: LockId,
+        worker_id: String,
     ) -> Result<(), ProofJobQueueError>;
 
     /// Lock durable backend work that is due for polling or advancement.
@@ -66,6 +68,7 @@ pub trait ProofJobQueue {
         &self,
         backend_job_id: i64,
         lock_id: LockId,
+        worker_id: String,
         next_update: BackendUpdate,
     ) -> Result<(), ProofJobQueueError>;
 
