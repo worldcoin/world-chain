@@ -37,8 +37,6 @@ if [[ "${ENCLAVE_DEBUG_MODE}" == "true" || "${ENCLAVE_DEBUG_MODE}" == "1" ]]; th
 fi
 
 # Capture run-enclave output to extract EnclaveID reliably.
-# Using describe-enclaves with .[0] would pick the wrong enclave if
-# another enclave is already running on the parent instance.
 run_output=$(nitro-cli run-enclave \
     --cpu-count  "${ENCLAVE_CPU_COUNT}" \
     --memory     "${ENCLAVE_MEMORY_SIZE}" \
