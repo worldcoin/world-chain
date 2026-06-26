@@ -5,6 +5,7 @@ import {Test, Vm} from "forge-std/Test.sol";
 import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyRegistry.sol";
 import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol";
 import {Secp256k1} from "../../src/proofs/nitro/libraries/Secp256k1.sol";
+import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
 import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier.sol";
 
 contract NitroProofVerifierTest is Test {
@@ -25,6 +26,13 @@ contract NitroProofVerifierTest is Test {
     bytes32 constant L2_POST_ROOT = keccak256("l2-post-root");
     uint64 constant L2_BLOCK = 123_456;
     bytes32 constant ROLLUP_CFG = keccak256("rollup-cfg");
+
+    // Context fields needed to rebuild rootId in the generic verify() hook.
+    bytes32 constant DOMAIN_HASH = keccak256("domain");
+    address constant PARENT_REF = address(0xBEEF);
+    bytes32 constant INTERMEDIATE_ROOTS = keccak256("intermediate-roots");
+    bytes32 constant L1_ORIGIN_HASH = keccak256("l1-origin");
+    uint256 constant L1_ORIGIN_NUMBER = 9_001;
 
     Vm.Wallet enclaveWallet;
     bytes enclavePubKey;
@@ -94,9 +102,7 @@ contract NitroProofVerifierTest is Test {
     function test_VerifyProof_AcceptsCompressedKey() public {
         bytes32 commitment = _commitment();
         bytes memory sig = _sign(commitment);
-        assertTrue(
-            proofVerifier.verifyProof(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG, sig, enclavePubKeyCompressed)
-        );
+        assertTrue(proofVerifier.verifyProof(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG, sig, enclavePubKeyCompressed));
     }
 
     function test_VerifyProof_FalseForUnregisteredKey() public {
@@ -131,9 +137,7 @@ contract NitroProofVerifierTest is Test {
         // block number — the recomputed digest will not match.
         bytes32 commitment = _commitment();
         bytes memory sig = _sign(commitment);
-        assertFalse(
-            proofVerifier.verifyProof(L2_POST_ROOT, L2_BLOCK + 1, ROLLUP_CFG, sig, enclavePubKey)
-        );
+        assertFalse(proofVerifier.verifyProof(L2_POST_ROOT, L2_BLOCK + 1, ROLLUP_CFG, sig, enclavePubKey));
     }
 
     function test_VerifyProof_RevertsForBadSignatureLength() public {
@@ -157,24 +161,55 @@ contract NitroProofVerifierTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function _proofBytes(bytes memory sig, bytes memory pub) internal pure returns (bytes memory) {
-        return abi.encode(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG, sig, pub);
+        return abi.encode(
+            DOMAIN_HASH,
+            PARENT_REF,
+            INTERMEDIATE_ROOTS,
+            L1_ORIGIN_HASH,
+            L1_ORIGIN_NUMBER,
+            ROLLUP_CFG,
+            L2_POST_ROOT,
+            L2_BLOCK,
+            sig,
+            pub
+        );
+    }
+
+    function _expectedRootId() internal pure returns (bytes32) {
+        return WorldChainProofLib.rootId(
+            DOMAIN_HASH,
+            PARENT_REF,
+            L2_POST_ROOT,
+            uint256(L2_BLOCK),
+            INTERMEDIATE_ROOTS,
+            L1_ORIGIN_HASH,
+            L1_ORIGIN_NUMBER
+        );
     }
 
     function test_Verify_GenericInterface() public {
         bytes32 commitment = _commitment();
         bytes memory sig = _sign(commitment);
-        assertTrue(proofVerifier.verify(bytes32(0), _proofBytes(sig, enclavePubKey)));
+        assertTrue(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
     }
 
     function test_Verify_GenericInterface_AcceptsCompressedKey() public {
         bytes32 commitment = _commitment();
         bytes memory sig = _sign(commitment);
-        assertTrue(proofVerifier.verify(bytes32(0), _proofBytes(sig, enclavePubKeyCompressed)));
+        assertTrue(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKeyCompressed)));
+    }
+
+    function test_Verify_GenericInterface_FalseForWrongRootId() public {
+        // Honest signature + boot_info, but the game asks about a different rootId
+        // — the verifier must NOT validate.
+        bytes32 commitment = _commitment();
+        bytes memory sig = _sign(commitment);
+        assertFalse(proofVerifier.verify(bytes32(uint256(0xdead)), _proofBytes(sig, enclavePubKey)));
     }
 
     function test_Verify_GenericInterface_FalseOnRevert() public {
         // Malformed signature → verifyProof reverts → verify returns false.
-        assertFalse(proofVerifier.verify(bytes32(0), _proofBytes(hex"1234", enclavePubKey)));
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(hex"1234", enclavePubKey)));
     }
 
     function test_Verify_GenericInterface_FalseForGarbage() public view {
@@ -189,13 +224,14 @@ contract NitroProofVerifierTest is Test {
 
     function test_Verify_GenericInterface_FalseForBadKey() public view {
         // 7-byte key cannot be SEC1-decoded → Secp256k1.normalizeToUncompressed
-        // reverts → verify() returns false.
+        // reverts → verify() returns false. We must still supply a valid rootId
+        // so the binding check doesn't short-circuit before reaching the key.
         bytes memory badKey = hex"01020304050607";
-        assertFalse(proofVerifier.verify(bytes32(0), _proofBytes(hex"00", badKey)));
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(hex"00", badKey)));
     }
 
     function test_DecodeAndVerify_NotCallableExternally() public {
         vm.expectRevert(bytes("internal"));
-        proofVerifier._decodeAndVerify(hex"00");
+        proofVerifier._decodeAndVerify(bytes32(0), hex"00");
     }
 }

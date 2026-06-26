@@ -28,8 +28,7 @@ contract DeployNitro is Script {
         CertManager certManager = new CertManager();
         console.log("CertManager:", address(certManager));
 
-        NitroAttestationVerifier verifier =
-            new NitroAttestationVerifier(ICertManager(address(certManager)));
+        NitroAttestationVerifier verifier = new NitroAttestationVerifier(ICertManager(address(certManager)));
         console.log("NitroAttestationVerifier:", address(verifier));
 
         NitroEnclaveKeyRegistry registry = new NitroEnclaveKeyRegistry(verifier, owner);

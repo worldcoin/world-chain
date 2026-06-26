@@ -74,12 +74,7 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier {
     /// @param pcr2              keccak256 of raw PCR2.
     /// @param timestamp         The `timestamp` field from the attestation document.
     event AttestationVerified(
-        bytes32 indexed attestationDigest,
-        bytes publicKey,
-        bytes32 pcr0,
-        bytes32 pcr1,
-        bytes32 pcr2,
-        uint64 timestamp
+        bytes32 indexed attestationDigest, bytes publicKey, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2, uint64 timestamp
     );
 
     /*//////////////////////////////////////////////////////////////
@@ -146,9 +141,7 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier {
         bytes memory rawKey = tbsMem.slice(ptrs.publicKey.start(), keyLen);
         publicKey = Secp256k1.normalizeToUncompressed(rawKey);
 
-        emit AttestationVerified(
-            keccak256(attestationTbs), publicKey, pcr0, pcr1, pcr2, ptrs.timestamp
-        );
+        emit AttestationVerified(keccak256(attestationTbs), publicKey, pcr0, pcr1, pcr2, ptrs.timestamp);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -172,12 +165,7 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier {
 
     /// @dev Slices the raw PCR bytes out of `tbs` and asserts
     ///      `keccak256(rawPcr) == expected`.
-    function _requirePcr(
-        bytes calldata tbs,
-        CborElement pcrPtr,
-        bytes32 expected,
-        uint8 index
-    ) internal pure {
+    function _requirePcr(bytes calldata tbs, CborElement pcrPtr, bytes32 expected, uint8 index) internal pure {
         uint256 start = pcrPtr.start();
         uint256 len = pcrPtr.length();
         bytes32 hash;
