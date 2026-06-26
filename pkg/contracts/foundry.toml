@@ -36,4 +36,4 @@ max_test_rejects = 150000
 runs = 100
 
 [fmt]
-ignore = ["lib", "src/proofs/nitro/vendor/**/*.sol"]
+ignore = ["lib"]
