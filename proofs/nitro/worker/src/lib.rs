@@ -260,6 +260,10 @@ struct Cli {
     /// proving, so this can be higher than for SP1 workers.
     #[arg(long, default_value_t = 1)]
     max_concurrent_jobs: usize,
+
+    /// The unique worker id.
+    #[arg(long)]
+    worker_id: String,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────────────
@@ -320,10 +324,12 @@ pub fn run() -> Result<()> {
     let queue = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
 
+    let worker_id = format!("{}-nitro-worker", cli.worker_id);
     let worker = ProofWorker::new(
         queue,
         backend,
         ProofWorkerConfig {
+            worker_id,
             poll_interval: Duration::from_secs(cli.poll_interval_seconds),
             max_concurrent_jobs: cli.max_concurrent_jobs,
         },

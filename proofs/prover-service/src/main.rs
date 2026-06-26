@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let config = ProverServiceConfig {
-        lease_timeout: Duration::from_secs(cli.lease_timeout_seconds),
+        lock_timeout: Duration::from_secs(cli.lease_timeout_seconds),
         max_attempts: cli.max_attempts,
         max_queue_len: cli.max_queue_len,
         backend_poll_interval: Duration::from_secs(cli.backend_poll_interval_seconds),
