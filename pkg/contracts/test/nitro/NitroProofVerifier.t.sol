@@ -104,17 +104,20 @@ contract NitroProofVerifierTest is Test {
         assertFalse(proofVerifier.verify(commitment, proof));
     }
 
-    function test_Verify_GenericInterface_FalseForGarbage() public {
-        // Garbage proof bytes that don't decode into (bytes, bytes) should be caught.
-        bytes memory proof = hex"00";
-        // abi.decode on unknown bytes may revert in `verify` itself, not in the
-        // try/catch. Wrap in a low-level call so we observe a revert without
-        // failing the test.
-        (bool ok,) = address(proofVerifier).staticcall(
-            abi.encodeCall(proofVerifier.verify, (bytes32(0), proof))
-        );
-        // Either it returns false, or it reverts on bad ABI decode — both are
-        // acceptable refusals.
-        assertTrue(!ok || true);
+    function test_Verify_GenericInterface_FalseForGarbage() public view {
+        // Garbage proof bytes that don't decode into (bytes, bytes) must be
+        // surfaced as `false` — the ABI decode lives inside the try/catch so
+        // verify() never reverts on malformed input.
+        assertFalse(proofVerifier.verify(bytes32(0), hex"00"));
+    }
+
+    function test_Verify_GenericInterface_FalseForEmptyProof() public view {
+        assertFalse(proofVerifier.verify(bytes32(0), ""));
+    }
+
+    function test_DecodeAndVerify_NotCallableExternally() public {
+        // The helper must reject direct calls so it can only be invoked via verify().
+        vm.expectRevert(bytes("internal"));
+        proofVerifier._decodeAndVerify(bytes32(0), hex"00");
     }
 }

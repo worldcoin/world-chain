@@ -100,15 +100,29 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
 
     /// @inheritdoc IWorldChainProofVerifier
     /// @dev `proof` is the ABI encoding `abi.encode(bytes signature, bytes
-    ///      expectedPublicKey)` produced by the off-chain prover. Reverts that occur
-    ///      inside {verifyProof} are caught and surfaced as `false` so that this
-    ///      hook obeys the verifier contract's "boolean predicate" semantics.
+    ///      expectedPublicKey)` produced by the off-chain prover. Both the ABI
+    ///      decode and the inner verification call are wrapped so that any
+    ///      malformed input — garbage bytes, wrong arity, invalid public key,
+    ///      bad signature length, etc. — returns `false` rather than reverting,
+    ///      matching the boolean-predicate contract of {IWorldChainProofVerifier}.
     function verify(bytes32 rootId, bytes calldata proof) external view returns (bool) {
-        (bytes memory signature, bytes memory expectedPublicKey) = abi.decode(proof, (bytes, bytes));
-        try this.verifyProof(rootId, signature, expectedPublicKey) returns (bool ok) {
+        try this._decodeAndVerify(rootId, proof) returns (bool ok) {
             return ok;
         } catch {
             return false;
         }
+    }
+
+    /// @notice External helper used only by {verify}; MUST NOT be called directly.
+    /// @dev External so that {verify} can invoke it via `this.` and trap reverts
+    ///      (including the ABI decode revert) in a try/catch.
+    function _decodeAndVerify(bytes32 rootId, bytes calldata proof)
+        external
+        view
+        returns (bool)
+    {
+        require(msg.sender == address(this), "internal");
+        (bytes memory signature, bytes memory expectedPublicKey) = abi.decode(proof, (bytes, bytes));
+        return this.verifyProof(rootId, signature, expectedPublicKey);
     }
 }

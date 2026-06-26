@@ -6,6 +6,14 @@ import {NitroAttestationVerifier} from "../../src/proofs/nitro/NitroAttestationV
 import {CertManager} from "../../src/proofs/nitro/vendor/nitro-validator/CertManager.sol";
 import {ICertManager} from "../../src/proofs/nitro/vendor/nitro-validator/ICertManager.sol";
 
+/// @dev Test harness exposing the internal freshness check so we can exercise
+///      both the stale and the future-dated branches without constructing a
+///      full Nitro attestation document.
+contract NitroAttestationVerifierHarness is NitroAttestationVerifier {
+    constructor(ICertManager cm) NitroAttestationVerifier(cm) {}
+    function checkFreshness(uint64 timestampMs) external view { _checkFreshness(timestampMs); }
+}
+
 /// @dev Smoke tests for {NitroAttestationVerifier}. The full happy-path verification
 ///      of a real Nitro attestation document requires a fresh, signed AWS NSM
 ///      document and the full intermediate cert bundle, which is not practical to
@@ -23,10 +31,12 @@ import {ICertManager} from "../../src/proofs/nitro/vendor/nitro-validator/ICertM
 contract NitroAttestationVerifierTest is Test {
     CertManager certManager;
     NitroAttestationVerifier verifier;
+    NitroAttestationVerifierHarness harness;
 
     function setUp() public {
         certManager = new CertManager();
         verifier = new NitroAttestationVerifier(ICertManager(address(certManager)));
+        harness = new NitroAttestationVerifierHarness(ICertManager(address(certManager)));
     }
 
     function test_Constructor_WiresCertManager() public view {
@@ -43,5 +53,32 @@ contract NitroAttestationVerifierTest is Test {
         // just that random bytes do not silently verify.
         vm.expectRevert();
         verifier.verifyAttestation(hex"00", hex"00", bytes32(0), bytes32(0), bytes32(0));
+    }
+
+    function test_Freshness_AcceptsCurrentTimestamp() public {
+        vm.warp(1_000_000);
+        harness.checkFreshness(uint64(1_000_000 * 1000)); // milliseconds
+    }
+
+    function test_Freshness_RejectsStale() public {
+        vm.warp(1_000_000);
+        uint64 staleMs = uint64((1_000_000 - 3601) * 1000); // 1h + 1s in the past
+        vm.expectRevert(abi.encodeWithSelector(NitroAttestationVerifier.AttestationStale.selector, 3601));
+        harness.checkFreshness(staleMs);
+    }
+
+    function test_Freshness_AcceptsSlightlyFuture() public {
+        vm.warp(1_000_000);
+        // 4 minutes in the future is within CLOCK_SKEW_TOLERANCE (5 minutes).
+        uint64 futureMs = uint64((1_000_000 + 4 * 60) * 1000);
+        harness.checkFreshness(futureMs);
+    }
+
+    function test_Freshness_RejectsFarFuture() public {
+        vm.warp(1_000_000);
+        // 6 minutes in the future exceeds CLOCK_SKEW_TOLERANCE.
+        uint64 futureMs = uint64((1_000_000 + 6 * 60) * 1000);
+        vm.expectRevert(abi.encodeWithSelector(NitroAttestationVerifier.AttestationFromFuture.selector, 360));
+        harness.checkFreshness(futureMs);
     }
 }
