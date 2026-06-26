@@ -30,7 +30,7 @@ use crate::backend::ProofJobBackend;
 /// Succinct proving network) or that are cheap and local (TEE attestation).
 pub const DEFAULT_MAX_CONCURRENT_JOBS: usize = 1;
 
-/// Default sleep between lease attempts when no work is available.
+/// Default sleep between lock attempts when no work is available.
 pub const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 const REPORT_UPDATE_MAX_RETRIES: usize = 2;
@@ -53,7 +53,7 @@ enum LeasedWork {
 pub struct ProofWorkerConfig {
     /// The worker id.
     pub worker_id: String,
-    /// Sleep between lease attempts when no work is available.
+    /// Sleep between lock attempts when no work is available.
     pub poll_interval: Duration,
     /// Maximum number of jobs this worker proves concurrently. Per-worker, not global, so an
     /// SP1 worker and a TEE worker in the same process throttle independently.
@@ -72,32 +72,32 @@ impl ProofWorkerConfig {
     }
 }
 
-/// A backend update paired with the lease it answers.
+/// A backend update paired with the lock it answers.
 struct FinishedJob {
-    lease: JobLease,
+    lock: JobLock,
     result: anyhow::Result<BackendUpdate>,
 }
 
-/// The leased row that must be used when reporting a finished task.
-enum JobLease {
+/// The locked row that must be used when reporting a finished task.
+enum JobLock {
     Start {
         request: ProofRequest,
-        lease_token: LockId,
+        lock_id: LockId,
     },
     Backend {
         backend_job_id: i64,
         request: ProofRequest,
-        lease_token: LockId,
+        lock_id: LockId,
     },
 }
 
-/// Lease sub-state: at most one `getNextProof` request is in flight at a time, and a lease is
+/// Locked sub-state: at most one `getNextProof` request is in flight at a time, and a lock is
 /// only started once a concurrency permit is held for the job it may return.
 #[pin_project(project = LeaseStateProj)]
 enum WorkerState {
-    /// Acquire a permit and start a lease on the next poll.
+    /// Acquire a permit and start a lock on the next poll.
     Ready,
-    /// Sleeping out the poll interval after an empty or failed lease attempt.
+    /// Sleeping out the poll interval after an empty or failed lock attempt.
     Idle(Pin<Box<Sleep>>),
     /// Waiting on `getNextProof`, holding the permit for the prospective job.
     Leasing {
@@ -109,7 +109,7 @@ enum WorkerState {
 }
 
 impl WorkerState {
-    /// Transitions to sleeping out the poll interval before the next lease attempt.
+    /// Transitions to sleeping out the poll interval before the next lock attempt.
     fn idle(poll_interval: Duration) -> Self {
         Self::Idle(Box::pin(tokio::time::sleep(poll_interval)))
     }
@@ -135,7 +135,7 @@ impl WorkerState {
 /// Worker that leases proof jobs for one backend lane from the `prover-service`, proves them
 /// with a [`ProofJobBackend`], and submits the results back.
 ///
-/// The worker is a [`Future`] driving three sources concurrently: a lease loop throttled by a
+/// The worker is a [`Future`] driving three sources concurrently: a lock loop throttled by a
 /// per-worker concurrency semaphore, a [`JoinSet`] of proving tasks on the blocking pool, and
 /// the in-flight result reports. It is generic over the backend, so a process can run one
 /// instance per lane (an SP1 worker, a TEE worker) — each its own future with independent
@@ -161,7 +161,7 @@ pub struct ProofWorker<Q, B> {
     reports: FuturesUnordered<ReportFuture>,
 
     #[pin]
-    lease: WorkerState,
+    lock: WorkerState,
 }
 
 impl<Q, B> ProofWorker<Q, B>
@@ -183,7 +183,7 @@ where
             cancelled,
             jobs: JoinSet::new(),
             reports: FuturesUnordered::new(),
-            lease: WorkerState::Ready,
+            lock: WorkerState::Ready,
         }
     }
 
@@ -209,34 +209,34 @@ where
         // pushed ones register their wakers in this same pass.
         while let Poll::Ready(Some(joined)) = this.jobs.poll_join_next(cx) {
             match joined {
-                Ok(FinishedJob { lease, result }) => {
-                    this.reports.push(report(this.queue, lease, result));
+                Ok(FinishedJob { lock, result }) => {
+                    this.reports.push(report(this.queue, lock, result));
                 }
                 Err(join_error) => warn!(%join_error, "proving task failed to join"),
             }
         }
         while let Poll::Ready(Some(())) = this.reports.poll_next_unpin(cx) {}
 
-        // Lease new work while concurrency permits are available. The loop only exits through
+        // Lock new work while concurrency permits are available. The loop only exits through
         // a `break` once an inner future returns `Pending`.
         if !shutting_down {
             loop {
-                match this.lease.as_mut().project() {
+                match this.lock.as_mut().project() {
                     LeaseStateProj::Ready => match Arc::clone(this.concurrency).try_acquire_owned()
                     {
                         Ok(permit) => {
-                            this.lease
+                            this.lock
                                 .set(WorkerState::leasing(this.queue, *this.lane, permit));
                         }
                         // Every permit is proving. A finishing job wakes this task and frees
                         // its permit; the idle backoff is a safety net in case it does not.
-                        Err(_) => this.lease.set(WorkerState::idle(*this.poll_interval)),
+                        Err(_) => this.lock.set(WorkerState::idle(*this.poll_interval)),
                     },
                     LeaseStateProj::Idle(sleep) => {
                         if sleep.as_mut().poll(cx).is_pending() {
                             break;
                         }
-                        this.lease.set(WorkerState::Ready);
+                        this.lock.set(WorkerState::Ready);
                     }
                     LeaseStateProj::Leasing { future, permit } => match future.as_mut().poll(cx) {
                         Poll::Pending => break,
@@ -245,14 +245,14 @@ where
                                 .take()
                                 .expect("leasing state holds its permit until the job spawns");
                             spawn_job(this.jobs, this.backend, work, permit);
-                            this.lease.set(WorkerState::Ready);
+                            this.lock.set(WorkerState::Ready);
                         }
                         Poll::Ready(Ok(None)) => {
-                            this.lease.set(WorkerState::idle(*this.poll_interval));
+                            this.lock.set(WorkerState::idle(*this.poll_interval));
                         }
                         Poll::Ready(Err(error)) => {
-                            warn!(%error, "failed to lease next proof job");
-                            this.lease.set(WorkerState::idle(*this.poll_interval));
+                            warn!(%error, "failed to lock next proof job");
+                            this.lock.set(WorkerState::idle(*this.poll_interval));
                         }
                     },
                 }
@@ -276,7 +276,7 @@ where
 /// Dispatches a leased job to the blocking pool under a per-job tracing span, holding its
 /// concurrency permit until the proof completes.
 ///
-/// Panics are contained so a crashed job is failed promptly instead of waiting out its lease.
+/// Panics are contained so a crashed job is failed promptly instead of waiting out its lock.
 /// The task is not interruptible once started: on worker shutdown it is abandoned and its
 /// result discarded.
 fn spawn_job<B>(
@@ -304,20 +304,20 @@ fn spawn_job<B>(
     jobs.spawn_blocking(move || {
         let _guard = span.enter();
         let _permit = permit;
-        let lease = match work {
-            LeasedWork::Start(leased) => JobLease::Start {
+        let lock = match work {
+            LeasedWork::Start(leased) => JobLock::Start {
                 request: leased.request,
-                lease_token: leased.lock_id,
+                lock_id: leased.lock_id,
             },
-            LeasedWork::Backend(leased) => JobLease::Backend {
+            LeasedWork::Backend(leased) => JobLock::Backend {
                 backend_job_id: leased.backend_job_id,
                 request: leased.work.proof_request,
-                lease_token: leased.lock_id,
+                lock_id: leased.lock_id,
             },
         };
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &lease {
-            JobLease::Start { request, .. } => backend.start(request),
-            JobLease::Backend { request, .. } => {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &lock {
+            JobLock::Start { request, .. } => backend.start(request),
+            JobLock::Backend { request, .. } => {
                 let state = backend_state.expect("backend work has state");
                 backend.advance(request, state)
             }
@@ -328,17 +328,17 @@ fn spawn_job<B>(
                 panic_message(&*panic)
             ))
         });
-        FinishedJob { lease, result }
+        FinishedJob { lock, result }
     });
 }
 
 /// Builds the future that reports one finished job (submit or fail) and logs the outcome.
-fn report<Q>(queue: &Arc<Q>, lease: JobLease, result: anyhow::Result<BackendUpdate>) -> ReportFuture
+fn report<Q>(queue: &Arc<Q>, lock: JobLock, result: anyhow::Result<BackendUpdate>) -> ReportFuture
 where
     Q: ProofJobQueue + Send + Sync + 'static,
 {
-    let (id, lane) = match &lease {
-        JobLease::Start { request, .. } | JobLease::Backend { request, .. } => {
+    let (id, lane) = match &lock {
+        JobLock::Start { request, .. } | JobLock::Backend { request, .. } => {
             (request.id(), request.backend)
         }
     };
@@ -347,38 +347,37 @@ where
 
     // `{:#}` renders the full anyhow context chain into the failure reason.
     match result.map_err(|error| format!("{error:#}")) {
-        Ok(update) => report_update(queue, lease, update).instrument(span).boxed(),
+        Ok(update) => report_update(queue, lock, update).instrument(span).boxed(),
         Err(reason) => Box::pin(
             async move {
                 warn!(%reason, "proving failed");
-                report_failure(queue, lease, reason).await;
+                report_failure(queue, lock, reason).await;
             }
             .instrument(span),
         ),
     }
 }
 
-async fn report_update<Q>(queue: Arc<Q>, lease: JobLease, update: BackendUpdate)
+async fn report_update<Q>(queue: Arc<Q>, lock: JobLock, update: BackendUpdate)
 where
     Q: ProofJobQueue + Send + Sync + 'static,
 {
-    match lease {
-        JobLease::Start {
-            request,
-            lease_token,
-        } => report_start_update(queue, request, lease_token, update).await,
-        JobLease::Backend {
+    match lock {
+        JobLock::Start { request, lock_id } => {
+            report_start_update(queue, request, lock_id, update).await
+        }
+        JobLock::Backend {
             backend_job_id,
-            lease_token,
+            lock_id,
             ..
-        } => report_backend_update(queue, backend_job_id, lease_token, update).await,
+        } => report_backend_update(queue, backend_job_id, lock_id, update).await,
     }
 }
 
 async fn report_start_update<Q>(
     queue: Arc<Q>,
     request: ProofRequest,
-    lease_token: LockId,
+    lock_id: LockId,
     update: BackendUpdate,
 ) where
     Q: ProofJobQueue + Send + Sync + 'static,
@@ -386,27 +385,23 @@ async fn report_start_update<Q>(
     let id = request.id();
     let result = match update {
         BackendUpdate::Pending { state } => {
-            queue
-                .submit_backend_proof_state(id, state, lease_token)
-                .await
+            queue.submit_backend_proof_state(id, state, lock_id).await
         }
         BackendUpdate::Complete(proof) => {
             queue
                 .submit_proof(
                     ProofResponse { id, proof },
-                    ProofSubmissionLock::ProofJob {
-                        lock_id: lease_token,
-                    },
+                    ProofSubmissionLock::ProofJob { lock_id: lock_id },
                 )
                 .await
         }
-        BackendUpdate::Failed(reason) => queue.fail_proof(id, reason, lease_token).await,
+        BackendUpdate::Failed(reason) => queue.fail_proof(id, reason, lock_id).await,
         BackendUpdate::Noop => {
             queue
                 .fail_proof(
                     id,
                     "backend start returned no state update".to_string(),
-                    lease_token,
+                    lock_id,
                 )
                 .await
         }
@@ -421,7 +416,7 @@ async fn report_start_update<Q>(
 async fn report_backend_update<Q>(
     queue: Arc<Q>,
     backend_job_id: i64,
-    lease_token: LockId,
+    lock_id: LockId,
     update: BackendUpdate,
 ) where
     Q: ProofJobQueue + Send + Sync + 'static,
@@ -431,7 +426,7 @@ async fn report_backend_update<Q>(
         let update = update.clone();
         async move {
             queue
-                .complete_backend_proof_job(backend_job_id, lease_token, update)
+                .complete_backend_proof_job(backend_job_id, lock_id, update)
                 .await
         }
     };
@@ -458,10 +453,10 @@ async fn report_backend_update<Q>(
 
     warn!(%error, backend_job_id, "failed to submit backend proof job update");
 
-    if should_release_backend_lease_after_report_error(&update, &error) {
+    if should_release_backend_lock_after_report_error(&update, &error) {
         let reason = format!("failed to submit backend proof job update: {error}");
         if let Err(fail_error) = queue
-            .fail_backend_proof_job(backend_job_id, reason, lease_token)
+            .fail_backend_proof_job(backend_job_id, reason, lock_id)
             .await
         {
             warn!(
@@ -480,29 +475,28 @@ fn should_retry_report_error(error: &ProofJobQueueError) -> bool {
     )
 }
 
-fn should_release_backend_lease_after_report_error(
+fn should_release_backend_lock_after_report_error(
     update: &BackendUpdate,
     error: &ProofJobQueueError,
 ) -> bool {
     should_retry_report_error(error) && !matches!(update, BackendUpdate::Failed(_))
 }
 
-async fn report_failure<Q>(queue: Arc<Q>, lease: JobLease, reason: String)
+async fn report_failure<Q>(queue: Arc<Q>, lock: JobLock, reason: String)
 where
     Q: ProofJobQueue + Send + Sync + 'static,
 {
-    let result = match lease {
-        JobLease::Start {
-            request,
-            lease_token,
-        } => queue.fail_proof(request.id(), reason, lease_token).await,
-        JobLease::Backend {
+    let result = match lock {
+        JobLock::Start { request, lock_id } => {
+            queue.fail_proof(request.id(), reason, lock_id).await
+        }
+        JobLock::Backend {
             backend_job_id,
-            lease_token,
+            lock_id,
             ..
         } => {
             queue
-                .fail_backend_proof_job(backend_job_id, reason, lease_token)
+                .fail_backend_proof_job(backend_job_id, reason, lock_id)
                 .await
         }
     };
@@ -614,7 +608,7 @@ mod tests {
             &self,
             _proof_id: ProofRequestId,
             _backend_proof_state: BackendProofState,
-            _lease_token: LockId,
+            _lock_id: LockId,
         ) -> Result<(), ProofJobQueueError> {
             Ok(())
         }
@@ -633,7 +627,7 @@ mod tests {
         async fn complete_backend_proof_job(
             &self,
             backend_job_id: i64,
-            _lease_token: LockId,
+            _lock_id: LockId,
             next_update: BackendUpdate,
         ) -> Result<(), ProofJobQueueError> {
             let mut failures = self
@@ -657,7 +651,7 @@ mod tests {
             &self,
             backend_job_id: i64,
             reason: String,
-            _lease_token: LockId,
+            _lock_id: LockId,
         ) -> Result<(), ProofJobQueueError> {
             self.backend_failures
                 .lock()
@@ -669,7 +663,7 @@ mod tests {
         async fn submit_proof(
             &self,
             proof: ProofResponse,
-            _lease: ProofSubmissionLock,
+            _lock: ProofSubmissionLock,
         ) -> Result<(), ProofJobQueueError> {
             self.submitted
                 .lock()
@@ -682,7 +676,7 @@ mod tests {
             &self,
             proof_id: ProofRequestId,
             reason: String,
-            _lease_token: LockId,
+            _lock_id: LockId,
         ) -> Result<(), ProofJobQueueError> {
             self.failed
                 .lock()
@@ -842,7 +836,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn releases_backend_lease_after_exhausted_report_retries() {
+    async fn releases_backend_lock_after_exhausted_report_retries() {
         let request = request();
         let backend_job_id = 43;
         let next_state = BackendProofState::Aggregation {

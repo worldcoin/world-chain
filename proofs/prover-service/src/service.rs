@@ -14,8 +14,8 @@ use sqlx::{PgPool, migrate::MigrateError};
 
 /// The central orchestration service between defenders and proof generation backends.
 ///
-/// State is durable in Postgres. All worker-facing mutations validate the lease token returned
-/// by the corresponding claim method, so stale workers cannot overwrite rows after their lease
+/// State is durable in Postgres. All worker-facing mutations validate the lock token returned
+/// by the corresponding claim method, so stale workers cannot overwrite rows after their lock
 /// expires and another worker takes over.
 #[derive(Debug, Clone)]
 pub struct ProverService {
@@ -89,10 +89,10 @@ impl ProofJobQueue for ProverService {
         &self,
         proof_id: ProofRequestId,
         backend_proof_state: BackendProofState,
-        lease_token: LockId,
+        lock_id: LockId,
     ) -> Result<(), ProofJobQueueError> {
         self.store
-            .submit_backend_proof_state(proof_id, backend_proof_state, lease_token)
+            .submit_backend_proof_state(proof_id, backend_proof_state, lock_id)
             .await
     }
 
@@ -106,28 +106,24 @@ impl ProofJobQueue for ProverService {
     async fn complete_backend_proof_job(
         &self,
         backend_job_id: i64,
-        lease_token: LockId,
+        lock_id: LockId,
         next_update: BackendUpdate,
     ) -> Result<(), ProofJobQueueError> {
         match next_update {
-            BackendUpdate::Noop => {
-                self.store
-                    .noop_backend_job(backend_job_id, lease_token)
-                    .await
-            }
+            BackendUpdate::Noop => self.store.noop_backend_job(backend_job_id, lock_id).await,
             BackendUpdate::Pending { state } => {
                 self.store
-                    .advance_backend_job(backend_job_id, lease_token, state)
+                    .advance_backend_job(backend_job_id, lock_id, state)
                     .await
             }
             BackendUpdate::Failed(reason) => {
                 self.store
-                    .fail_backend_job(backend_job_id, lease_token, &reason)
+                    .fail_backend_job(backend_job_id, lock_id, &reason)
                     .await
             }
             BackendUpdate::Complete(proof) => {
                 self.store
-                    .submit_completed_backend_proof(backend_job_id, lease_token, proof)
+                    .submit_completed_backend_proof(backend_job_id, lock_id, proof)
                     .await
             }
         }
@@ -137,10 +133,10 @@ impl ProofJobQueue for ProverService {
         &self,
         backend_job_id: i64,
         reason: String,
-        lease_token: LockId,
+        lock_id: LockId,
     ) -> Result<(), ProofJobQueueError> {
         self.store
-            .fail_backend_proof_job(backend_job_id, reason, lease_token)
+            .fail_backend_proof_job(backend_job_id, reason, lock_id)
             .await
     }
 
@@ -168,8 +164,8 @@ impl ProofJobQueue for ProverService {
         &self,
         proof_id: ProofRequestId,
         reason: String,
-        lease_token: LockId,
+        lock_id: LockId,
     ) -> Result<(), ProofJobQueueError> {
-        self.store.fail_proof(proof_id, reason, lease_token).await
+        self.store.fail_proof(proof_id, reason, lock_id).await
     }
 }
