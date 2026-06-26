@@ -26,6 +26,11 @@ contract NitroEnclaveKeyRegistry is Ownable {
     /// @notice Thrown when {revokeKey} is called for a key that is not registered.
     error KeyNotRegistered();
 
+    /// @notice Thrown when {registerKey} is called for a key that was previously
+    ///         revoked. Revocation is permanent — a compromised enclave key must
+    ///         not be silently restored by re-submitting its attestation document.
+    error KeyRevokedPermanently();
+
     /// @notice Thrown when the verifier returns a malformed public key.
     error InvalidPublicKey();
 
@@ -48,6 +53,11 @@ contract NitroEnclaveKeyRegistry is Ownable {
 
     /// @notice keccak256(publicKey) => registered flag. Cleared on revoke.
     mapping(bytes32 keyHash => bool registered) private _registered;
+
+    /// @notice keccak256(publicKey) => permanently revoked flag. Set on revoke and
+    ///         never cleared, so a revoked key cannot be re-registered even if a
+    ///         valid attestation document for it is replayed.
+    mapping(bytes32 keyHash => bool revoked) private _revoked;
 
     /// @notice keccak256(abi.encode(pcr0, pcr1, pcr2)) => current public key for the
     ///         enclave image identified by those PCRs.
@@ -91,7 +101,9 @@ contract NitroEnclaveKeyRegistry is Ownable {
         publicKey = verifier.verifyAttestation(attestationTbs, signature, pcr0, pcr1, pcr2);
         if (publicKey.length != 65 || publicKey[0] != 0x04) revert InvalidPublicKey();
 
-        _registered[keccak256(publicKey)] = true;
+        bytes32 keyHash = keccak256(publicKey);
+        if (_revoked[keyHash]) revert KeyRevokedPermanently();
+        _registered[keyHash] = true;
         _keyByPCRs[_pcrHash(pcr0, pcr1, pcr2)] = publicKey;
 
         emit KeyRegistered(publicKey, pcr0, pcr1, pcr2);
@@ -109,6 +121,7 @@ contract NitroEnclaveKeyRegistry is Ownable {
         bytes32 keyHash = keccak256(publicKey);
         if (!_registered[keyHash]) revert KeyNotRegistered();
         _registered[keyHash] = false;
+        _revoked[keyHash] = true;
         emit KeyRevoked(publicKey);
     }
 
@@ -119,6 +132,11 @@ contract NitroEnclaveKeyRegistry is Ownable {
     /// @notice Returns whether `publicKey` is currently registered (and not revoked).
     function isKeyRegistered(bytes calldata publicKey) external view returns (bool) {
         return _registered[keccak256(publicKey)];
+    }
+
+    /// @notice Returns whether `publicKey` has been permanently revoked.
+    function isKeyRevoked(bytes calldata publicKey) external view returns (bool) {
+        return _revoked[keccak256(publicKey)];
     }
 
     /// @notice Returns the latest registered key for a given PCR triple, or an

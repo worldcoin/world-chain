@@ -45,6 +45,11 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier {
     /// @notice The attestation document is older than {MAX_AGE}.
     error AttestationStale(uint256 ageSeconds);
 
+    /// @notice The attestation document is dated more than {CLOCK_SKEW_TOLERANCE}
+    ///         seconds in the future. Without this guard a forged future timestamp
+    ///         would be perpetually fresh.
+    error AttestationFromFuture(uint256 driftSeconds);
+
     /// @notice The number of PCRs in the doc is less than 3 (PCR0/1/2 required).
     error InsufficientPcrs(uint256 found);
 
@@ -84,6 +89,12 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier {
     ///         NSM-signed timestamp; rejecting old ones prevents naive replay.
     uint256 public constant MAX_AGE = 60 minutes;
 
+    /// @notice Tolerated forward drift between the NSM-signed timestamp and
+    ///         `block.timestamp`. Anything beyond this is treated as either a
+    ///         misconfigured enclave clock or an attempt to bypass {MAX_AGE} by
+    ///         dating the document into the future.
+    uint256 public constant CLOCK_SKEW_TOLERANCE = 5 minutes;
+
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
@@ -110,11 +121,8 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier {
         // 1. Full on-chain COSE_Sign1 + cert chain + P-384 verification.
         Ptrs memory ptrs = validateAttestation(attestationTbs, signature);
 
-        // 2. Freshness check. ptrs.timestamp is milliseconds since the Unix epoch.
-        uint256 docSeconds = uint256(ptrs.timestamp) / 1000;
-        if (block.timestamp > docSeconds && block.timestamp - docSeconds > MAX_AGE) {
-            revert AttestationStale(block.timestamp - docSeconds);
-        }
+        // 2. Freshness check.
+        _checkFreshness(ptrs.timestamp);
 
         // 3. PCR0/1/2 match. We hash the raw PCR bytes (48 bytes for SHA-384) so
         //    that callers can use a stable bytes32 identifier.
@@ -141,6 +149,21 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier {
     /*//////////////////////////////////////////////////////////////
                                 INTERNAL
     //////////////////////////////////////////////////////////////*/
+
+    /// @dev Enforces the freshness window. `timestampMs` is the NSM-signed
+    ///      timestamp in milliseconds since the Unix epoch.
+    /// @custom:reverts AttestationStale if older than {MAX_AGE}.
+    /// @custom:reverts AttestationFromFuture if dated more than
+    ///                 {CLOCK_SKEW_TOLERANCE} ahead of `block.timestamp`.
+    function _checkFreshness(uint64 timestampMs) internal view {
+        uint256 docSeconds = uint256(timestampMs) / 1000;
+        if (docSeconds > block.timestamp) {
+            uint256 drift = docSeconds - block.timestamp;
+            if (drift > CLOCK_SKEW_TOLERANCE) revert AttestationFromFuture(drift);
+        } else if (block.timestamp - docSeconds > MAX_AGE) {
+            revert AttestationStale(block.timestamp - docSeconds);
+        }
+    }
 
     /// @dev Slices the raw PCR bytes out of `tbs` and asserts
     ///      `keccak256(rawPcr) == expected`.

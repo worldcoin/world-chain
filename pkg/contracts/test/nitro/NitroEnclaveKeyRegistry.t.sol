@@ -109,4 +109,38 @@ contract NitroEnclaveKeyRegistryTest is Test {
         assertEq(registry.owner(), owner);
         assertEq(address(registry.verifier()), address(attestationVerifier));
     }
+
+    function test_RevokeKey_PreventsReregistration() public {
+        registry.registerKey(TBS, SIG, PCR0, PCR1, PCR2);
+
+        vm.prank(owner);
+        registry.revokeKey(pubKey);
+        assertFalse(registry.isKeyRegistered(pubKey));
+        assertTrue(registry.isKeyRevoked(pubKey));
+
+        // Anyone re-submitting the same attestation must fail.
+        vm.expectRevert(NitroEnclaveKeyRegistry.KeyRevokedPermanently.selector);
+        registry.registerKey(TBS, SIG, PCR0, PCR1, PCR2);
+
+        assertFalse(registry.isKeyRegistered(pubKey));
+    }
+
+    function test_RevokeKey_AlsoBlocksRegistrationUnderDifferentPCRs() public {
+        registry.registerKey(TBS, SIG, PCR0, PCR1, PCR2);
+
+        vm.prank(owner);
+        registry.revokeKey(pubKey);
+
+        // Even if a doc later asserted the same key under different PCRs, the
+        // revoke must be sticky on the key itself.
+        bytes32 otherPcr0 = bytes32(uint256(0xff));
+        attestationVerifier.setExpectation(hex"1234", SIG, otherPcr0, PCR1, PCR2, pubKey);
+        vm.expectRevert(NitroEnclaveKeyRegistry.KeyRevokedPermanently.selector);
+        registry.registerKey(hex"1234", SIG, otherPcr0, PCR1, PCR2);
+    }
+
+    function test_IsKeyRevoked_FalseBeforeRevoke() public {
+        registry.registerKey(TBS, SIG, PCR0, PCR1, PCR2);
+        assertFalse(registry.isKeyRevoked(pubKey));
+    }
 }
