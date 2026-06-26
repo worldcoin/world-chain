@@ -68,7 +68,6 @@ pub trait ProofJobQueue {
         &self,
         backend_job_id: i64,
         lock_id: LockId,
-        worker_id: String,
         next_update: BackendUpdate,
     ) -> Result<(), ProofJobQueueError>;
 
@@ -99,5 +98,6 @@ pub trait ProofJobQueue {
         proof_id: ProofRequestId,
         reason: String,
         lock_id: LockId,
+        worker_id: String,
     ) -> Result<(), ProofJobQueueError>;
 }

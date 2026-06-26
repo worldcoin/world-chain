@@ -76,6 +76,7 @@ pub trait ProverServiceApi {
         proof_id: ProofRequestId,
         backend_proof_state: BackendProofState,
         lock_id: LockId,
+        worker_id: String,
     ) -> RpcResult<()>;
 
     /// Lock the next durable backend proof job for the given backend.
@@ -114,6 +115,7 @@ pub trait ProverServiceApi {
         proof_id: ProofRequestId,
         reason: String,
         lock_id: LockId,
+        worker_id: String,
     ) -> RpcResult<()>;
 }
 
@@ -211,10 +213,11 @@ impl ProverServiceApiServer for ProverServiceRpc {
         proof_id: ProofRequestId,
         backend_proof_state: BackendProofState,
         lock_id: LockId,
+        worker_id: String,
     ) -> RpcResult<()> {
         Ok(self
             .service
-            .submit_backend_proof_state(proof_id, backend_proof_state, lock_id)
+            .submit_backend_proof_state(proof_id, backend_proof_state, lock_id, worker_id)
             .await?)
     }
 
@@ -258,8 +261,12 @@ impl ProverServiceApiServer for ProverServiceRpc {
         proof_id: ProofRequestId,
         reason: String,
         lock_id: LockId,
+        worker_id: String,
     ) -> RpcResult<()> {
-        Ok(self.service.fail_proof(proof_id, reason, lock_id).await?)
+        Ok(self
+            .service
+            .fail_proof(proof_id, reason, lock_id, worker_id)
+            .await?)
     }
 }
 
@@ -416,12 +423,14 @@ impl ProofJobQueue for RpcProverServiceClient {
         proof_id: ProofRequestId,
         backend_proof_state: BackendProofState,
         lock_id: LockId,
+        worker_id: String,
     ) -> Result<(), ProofJobQueueError> {
         ProverServiceApiClient::submit_backend_proof_state(
             &self.client,
             proof_id,
             backend_proof_state,
             lock_id,
+            worker_id,
         )
         .await
         .map_err(|err| map_job_error(err, proof_id))
@@ -484,8 +493,9 @@ impl ProofJobQueue for RpcProverServiceClient {
         proof_id: ProofRequestId,
         reason: String,
         lock_id: LockId,
+        worker_id: String,
     ) -> Result<(), ProofJobQueueError> {
-        ProverServiceApiClient::fail_proof(&self.client, proof_id, reason, lock_id)
+        ProverServiceApiClient::fail_proof(&self.client, proof_id, reason, lock_id, worker_id)
             .await
             .map_err(|err| map_job_error(err, proof_id))
     }

@@ -368,7 +368,7 @@ pub struct LockedBackendProofWork {
 }
 
 /// Locked location for final proof submission.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProofSubmissionLock {
     /// Final proof was produced while starting a user-facing proof job.
     ProofJob {

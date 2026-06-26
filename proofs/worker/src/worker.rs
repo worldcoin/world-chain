@@ -220,7 +220,8 @@ where
         while let Poll::Ready(Some(joined)) = this.jobs.poll_join_next(cx) {
             match joined {
                 Ok(FinishedJob { lock, result }) => {
-                    this.reports.push(report(this.queue, lock, result));
+                    this.reports
+                        .push(report(this.queue, lock, this.worker_id.clone(), result));
                 }
                 Err(join_error) => warn!(%join_error, "proving task failed to join"),
             }
@@ -347,7 +348,12 @@ fn spawn_job<B>(
 }
 
 /// Builds the future that reports one finished job (submit or fail) and logs the outcome.
-fn report<Q>(queue: &Arc<Q>, lock: JobLock, result: anyhow::Result<BackendUpdate>) -> ReportFuture
+fn report<Q>(
+    queue: &Arc<Q>,
+    lock: JobLock,
+    worker_id: String,
+    result: anyhow::Result<BackendUpdate>,
+) -> ReportFuture
 where
     Q: ProofJobQueue + Send + Sync + 'static,
 {
@@ -361,24 +367,26 @@ where
 
     // `{:#}` renders the full anyhow context chain into the failure reason.
     match result.map_err(|error| format!("{error:#}")) {
-        Ok(update) => report_update(queue, lock, update).instrument(span).boxed(),
+        Ok(update) => report_update(queue, lock, worker_id, update)
+            .instrument(span)
+            .boxed(),
         Err(reason) => Box::pin(
             async move {
                 warn!(%reason, "proving failed");
-                report_failure(queue, lock, reason).await;
+                report_failure(queue, lock, worker_id, reason).await;
             }
             .instrument(span),
         ),
     }
 }
 
-async fn report_update<Q>(queue: Arc<Q>, lock: JobLock, update: BackendUpdate)
+async fn report_update<Q>(queue: Arc<Q>, lock: JobLock, worker_id: String, update: BackendUpdate)
 where
     Q: ProofJobQueue + Send + Sync + 'static,
 {
     match lock {
         JobLock::Start { request, lock_id } => {
-            report_start_update(queue, request, lock_id, update).await
+            report_start_update(queue, request, lock_id, worker_id, update).await
         }
         JobLock::Backend {
             backend_job_id,
@@ -392,6 +400,7 @@ async fn report_start_update<Q>(
     queue: Arc<Q>,
     request: ProofRequest,
     lock_id: LockId,
+    worker_id: String,
     update: BackendUpdate,
 ) where
     Q: ProofJobQueue + Send + Sync + 'static,
@@ -399,7 +408,9 @@ async fn report_start_update<Q>(
     let id = request.id();
     let result = match update {
         BackendUpdate::Pending { state } => {
-            queue.submit_backend_proof_state(id, state, lock_id).await
+            queue
+                .submit_backend_proof_state(id, state, lock_id, worker_id)
+                .await
         }
         BackendUpdate::Complete(proof) => {
             queue
@@ -409,13 +420,14 @@ async fn report_start_update<Q>(
                 )
                 .await
         }
-        BackendUpdate::Failed(reason) => queue.fail_proof(id, reason, lock_id).await,
+        BackendUpdate::Failed(reason) => queue.fail_proof(id, reason, lock_id, worker_id).await,
         BackendUpdate::Noop => {
             queue
                 .fail_proof(
                     id,
                     "backend start returned no state update".to_string(),
                     lock_id,
+                    worker_id,
                 )
                 .await
         }
@@ -496,13 +508,15 @@ fn should_release_backend_lock_after_report_error(
     should_retry_report_error(error) && !matches!(update, BackendUpdate::Failed(_))
 }
 
-async fn report_failure<Q>(queue: Arc<Q>, lock: JobLock, reason: String)
+async fn report_failure<Q>(queue: Arc<Q>, lock: JobLock, worker_id: String, reason: String)
 where
     Q: ProofJobQueue + Send + Sync + 'static,
 {
     let result = match lock {
         JobLock::Start { request, lock_id } => {
-            queue.fail_proof(request.id(), reason, lock_id).await
+            queue
+                .fail_proof(request.id(), reason, lock_id, worker_id)
+                .await
         }
         JobLock::Backend {
             backend_job_id,
@@ -624,6 +638,7 @@ mod tests {
             _proof_id: ProofRequestId,
             _backend_proof_state: BackendProofState,
             _lock_id: LockId,
+            _worker_id: String,
         ) -> Result<(), ProofJobQueueError> {
             Ok(())
         }
@@ -692,6 +707,7 @@ mod tests {
             proof_id: ProofRequestId,
             reason: String,
             _lock_id: LockId,
+            _worker_id: String,
         ) -> Result<(), ProofJobQueueError> {
             self.failed
                 .lock()
