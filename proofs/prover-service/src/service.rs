@@ -81,8 +81,9 @@ impl ProofJobQueue for ProverService {
     async fn get_next_proof(
         &self,
         backend: ProofBackend,
+        worker_id: String,
     ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
-        self.store.get_next_proof(backend).await
+        self.store.get_next_proof(backend, worker_id).await
     }
 
     async fn submit_backend_proof_state(
@@ -90,9 +91,10 @@ impl ProofJobQueue for ProverService {
         proof_id: ProofRequestId,
         backend_proof_state: BackendProofState,
         lock_id: LockId,
+        worker_id: String,
     ) -> Result<(), ProofJobQueueError> {
         self.store
-            .submit_backend_proof_state(proof_id, backend_proof_state, lock_id)
+            .submit_backend_proof_state(proof_id, backend_proof_state, lock_id, worker_id)
             .await
     }
 
@@ -165,7 +167,10 @@ impl ProofJobQueue for ProverService {
         proof_id: ProofRequestId,
         reason: String,
         lock_id: LockId,
+        worker_id: String,
     ) -> Result<(), ProofJobQueueError> {
-        self.store.fail_proof(proof_id, reason, lock_id).await
+        self.store
+            .fail_proof(proof_id, reason, lock_id, worker_id)
+            .await
     }
 }

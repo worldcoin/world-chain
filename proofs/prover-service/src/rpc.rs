@@ -63,7 +63,11 @@ pub trait ProverServiceApi {
 
     /// Lock the next queued proof request for the given backend.
     #[method(name = "getNextProof")]
-    async fn get_next_proof(&self, backend: ProofBackend) -> RpcResult<Option<LockedProofRequest>>;
+    async fn get_next_proof(
+        &self,
+        backend: ProofBackend,
+        worker_id: String,
+    ) -> RpcResult<Option<LockedProofRequest>>;
 
     /// Persist durable backend work created while starting a proof job.
     #[method(name = "submitBackendProofState")]
@@ -72,6 +76,7 @@ pub trait ProverServiceApi {
         proof_id: ProofRequestId,
         backend_proof_state: BackendProofState,
         lock_id: LockId,
+        worker_id: String,
     ) -> RpcResult<()>;
 
     /// Lock the next durable backend proof job for the given backend.
@@ -110,6 +115,7 @@ pub trait ProverServiceApi {
         proof_id: ProofRequestId,
         reason: String,
         lock_id: LockId,
+        worker_id: String,
     ) -> RpcResult<()>;
 }
 
@@ -194,8 +200,12 @@ impl ProverServiceApiServer for ProverServiceRpc {
         Ok(self.service.get_proof(proof_id).await?)
     }
 
-    async fn get_next_proof(&self, backend: ProofBackend) -> RpcResult<Option<LockedProofRequest>> {
-        Ok(self.service.get_next_proof(backend).await?)
+    async fn get_next_proof(
+        &self,
+        backend: ProofBackend,
+        worker_id: String,
+    ) -> RpcResult<Option<LockedProofRequest>> {
+        Ok(self.service.get_next_proof(backend, worker_id).await?)
     }
 
     async fn submit_backend_proof_state(
@@ -203,10 +213,11 @@ impl ProverServiceApiServer for ProverServiceRpc {
         proof_id: ProofRequestId,
         backend_proof_state: BackendProofState,
         lock_id: LockId,
+        worker_id: String,
     ) -> RpcResult<()> {
         Ok(self
             .service
-            .submit_backend_proof_state(proof_id, backend_proof_state, lock_id)
+            .submit_backend_proof_state(proof_id, backend_proof_state, lock_id, worker_id)
             .await?)
     }
 
@@ -250,8 +261,12 @@ impl ProverServiceApiServer for ProverServiceRpc {
         proof_id: ProofRequestId,
         reason: String,
         lock_id: LockId,
+        worker_id: String,
     ) -> RpcResult<()> {
-        Ok(self.service.fail_proof(proof_id, reason, lock_id).await?)
+        Ok(self
+            .service
+            .fail_proof(proof_id, reason, lock_id, worker_id)
+            .await?)
     }
 }
 
@@ -396,8 +411,9 @@ impl ProofJobQueue for RpcProverServiceClient {
     async fn get_next_proof(
         &self,
         backend: ProofBackend,
+        worker_id: String,
     ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
-        ProverServiceApiClient::get_next_proof(&self.client, backend)
+        ProverServiceApiClient::get_next_proof(&self.client, backend, worker_id)
             .await
             .map_err(|err| ProofJobQueueError::Rpc(err.to_string()))
     }
@@ -407,12 +423,14 @@ impl ProofJobQueue for RpcProverServiceClient {
         proof_id: ProofRequestId,
         backend_proof_state: BackendProofState,
         lock_id: LockId,
+        worker_id: String,
     ) -> Result<(), ProofJobQueueError> {
         ProverServiceApiClient::submit_backend_proof_state(
             &self.client,
             proof_id,
             backend_proof_state,
             lock_id,
+            worker_id,
         )
         .await
         .map_err(|err| map_job_error(err, proof_id))
@@ -475,8 +493,9 @@ impl ProofJobQueue for RpcProverServiceClient {
         proof_id: ProofRequestId,
         reason: String,
         lock_id: LockId,
+        worker_id: String,
     ) -> Result<(), ProofJobQueueError> {
-        ProverServiceApiClient::fail_proof(&self.client, proof_id, reason, lock_id)
+        ProverServiceApiClient::fail_proof(&self.client, proof_id, reason, lock_id, worker_id)
             .await
             .map_err(|err| map_job_error(err, proof_id))
     }

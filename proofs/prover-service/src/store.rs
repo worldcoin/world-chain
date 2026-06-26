@@ -103,6 +103,7 @@ impl ProverServiceStore {
                          start_attempts = 0,
                          lock_expires_at = null,
                          lock_id = null,
+                         worker_id = null,
                          updated_at = $3,
                          finished_at = null
                      where proof_id = $1",
@@ -211,6 +212,7 @@ impl ProverServiceStore {
     pub(crate) async fn get_next_proof(
         &self,
         backend: ProofBackend,
+        worker_id: String,
     ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
         loop {
             let mut tx = self.begin_queue_tx().await?;
@@ -261,7 +263,8 @@ impl ProverServiceStore {
                      lock_expires_at = $3,
                      lock_id = $4,
                      start_attempts = start_attempts + 1,
-                     updated_at = $5
+                     updated_at = $5,
+                     worker_id = $6
                  where proof_id = $1",
             )
             .bind(proof_id_bytes(proof_id))
@@ -269,6 +272,7 @@ impl ProverServiceStore {
             .bind(lock_expires_at)
             .bind(lock_id.0)
             .bind(now)
+            .bind(worker_id)
             .execute(&mut *tx)
             .await
             .map_err(queue_db)?;
@@ -284,6 +288,7 @@ impl ProverServiceStore {
         proof_id: ProofRequestId,
         backend_proof_state: BackendProofState,
         lock_id: LockId,
+        worker_id: String,
     ) -> Result<(), ProofJobQueueError> {
         let now = db_now();
         let mut tx = self.begin_queue_tx().await?;
@@ -292,10 +297,12 @@ impl ProverServiceStore {
              set status = $3,
                  lock_expires_at = null,
                  lock_id = null,
+                 worker_id = null,
                  updated_at = $4
              where proof_id = $1
                and lock_id = $2
                and status = $5
+               and worker_id = $6
              returning backend",
         )
         .bind(proof_id_bytes(proof_id))
@@ -303,6 +310,7 @@ impl ProverServiceStore {
         .bind(ProofStatus::BackendPending.as_str())
         .bind(now)
         .bind(ProofStatus::Starting.as_str())
+        .bind(worker_id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(queue_db)?;
@@ -443,6 +451,7 @@ impl ProverServiceStore {
         proof_id: ProofRequestId,
         reason: String,
         lock_id: LockId,
+        worker_id: String,
     ) -> Result<(), ProofJobQueueError> {
         let mut tx = self.begin_queue_tx().await?;
         let row = sqlx::query(
@@ -451,11 +460,13 @@ impl ProverServiceStore {
              where proof_id = $1
                and lock_id = $2
                and status = $3
+               and worker_id = $4
              for update",
         )
         .bind(proof_id_bytes(proof_id))
         .bind(lock_id.0)
         .bind(ProofStatus::Starting.as_str())
+        .bind(worker_id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(queue_db)?;
@@ -477,6 +488,7 @@ impl ProverServiceStore {
                  set status = $2,
                      lock_expires_at = null,
                      lock_id = null,
+                     worker_id = null,
                      updated_at = $3
                  where proof_id = $1",
             )
@@ -1056,6 +1068,7 @@ async fn mark_proof_failed(
              failure_reason = $3,
              lock_expires_at = null,
              lock_id = null,
+             worker_id = null,
              updated_at = $4,
              finished_at = $4
          where proof_id = $1",
@@ -1109,6 +1122,7 @@ async fn complete_proof(
              failure_reason = null,
              lock_expires_at = null,
              lock_id = null,
+             worker_id = null,
              updated_at = $4,
              finished_at = $4
          where proof_id = $1",
