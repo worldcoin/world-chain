@@ -1,6 +1,7 @@
 use std::{env, str::FromStr, time::Duration};
 
 use alloy_primitives::{Address, U256, address};
+use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::{WrapErr, bail};
 use url::Url;
 
@@ -18,6 +19,8 @@ const DEFAULT_USER_OPERATION_NONCE_CONCURRENCY: usize = 2;
 const DEFAULT_USER_OPERATION_OWNER_START_INDEX: u32 = 1000;
 const DEFAULT_USER_OPERATION_SPONSORSHIP_VALIDITY_SECS: u64 = 60;
 const DEFAULT_USER_OPERATION_SPONSORSHIP_MAX_COST_WEI: &str = "1000000000000000000";
+const DEFAULT_TX_TIMEOUT_SECS: u64 = 60;
+const DEFAULT_TX_POLL_INTERVAL_MS: u64 = 500;
 const WORLD_CHAIN_DEVNET_CHAIN_ID: u64 = 69420;
 const WORLD_CHAIN_DEVNET_SAFE_4337_MODULE: Address =
     address!("70673A08a5B1086585d39979Fb2d84FDC0bB6Aaf");
@@ -46,8 +49,12 @@ pub(super) struct Config {
     pub(super) block_advance_timeout: Duration,
     pub(super) block_poll_interval: Duration,
     pub(super) min_block_increments: u64,
+    pub(super) tx_timeout: Duration,
+    pub(super) tx_poll_interval: Duration,
+    pub(super) l2_key: Option<PrivateKeySigner>,
     pub(super) cloudflare_access: Option<CloudflareAccess>,
     pub(super) bundler: Option<BundlerConfig>,
+    pub(super) karst_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -88,6 +95,11 @@ impl Config {
         let expected_chain_id = parse_value("ACCEPTANCE_CHAIN_ID", &chain_id)?;
         let cloudflare_access = cloudflare_access_from_env()?;
         let bundler = bundler_config_from_env(expected_chain_id, cloudflare_access.as_ref())?;
+        let l2_key = l2_key_from_env()?;
+        let karst_enabled = parse_optional_value("ACCEPTANCE_KARST_ENABLED", false)?;
+        if karst_enabled && l2_key.is_none() {
+            bail!("ACCEPTANCE_L2_KEY is required when ACCEPTANCE_KARST_ENABLED=true");
+        }
 
         Ok(Some(Self {
             network: optional_env("ACCEPTANCE_NETWORK").unwrap_or_else(|| "local".to_string()),
@@ -107,8 +119,18 @@ impl Config {
                 "ACCEPTANCE_MIN_BLOCK_INCREMENTS",
                 DEFAULT_MIN_BLOCK_INCREMENTS,
             )?,
+            tx_timeout: Duration::from_secs(parse_optional_value(
+                "ACCEPTANCE_TX_TIMEOUT_SECS",
+                DEFAULT_TX_TIMEOUT_SECS,
+            )?),
+            tx_poll_interval: Duration::from_millis(parse_optional_value(
+                "ACCEPTANCE_TX_POLL_INTERVAL_MS",
+                DEFAULT_TX_POLL_INTERVAL_MS,
+            )?),
+            l2_key,
             cloudflare_access,
             bundler,
+            karst_enabled,
         }))
     }
 
@@ -223,6 +245,12 @@ fn bundler_config_from_env(
             DEFAULT_USER_OPERATION_SPONSORSHIP_VALIDITY_SECS,
         )?),
     }))
+}
+
+fn l2_key_from_env() -> eyre::Result<Option<PrivateKeySigner>> {
+    optional_env("ACCEPTANCE_L2_KEY")
+        .map(|l2_key| parse_value("ACCEPTANCE_L2_KEY", &l2_key))
+        .transpose()
 }
 
 fn bundler_cloudflare_access_from_env(
