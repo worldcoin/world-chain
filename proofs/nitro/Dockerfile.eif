@@ -17,7 +17,7 @@ RUN dnf install -y aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel jq && \
     dnf clean all
 
 # EIF file from the build context (target/eif/).
-COPY world-chain-nitro-worker-enclave.eif /home/world-chain-nitro-worker-enclave.eif
+COPY target/eif/world-chain-nitro-worker-enclave.eif /home/world-chain-nitro-worker-enclave.eif
 
 # Defaults; override at runtime via -e / K8s env:.
 ENV EIF_PATH="/home/world-chain-nitro-worker-enclave.eif" \
