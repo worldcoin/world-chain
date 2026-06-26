@@ -333,17 +333,20 @@ jobs:
   # pods can pull it via an init container (AWS Nitro Enclaves K8s device plugin pattern).
   build-nitro-worker-enclave-eif-image:
     name: build nitro-worker-enclave EIF carrier image
-    needs: [build-nitro-worker-enclave-image, extract-version]
+    # Depends on build-eif so we package the exact same EIF whose PCRs land
+    # in pcrs.json / manifest.json — not a second independent build.
+    needs: [build-nitro-worker-enclave-image, extract-version, build-eif]
     runs-on: arc-public-8xlarge-amd64-runner
     outputs:
       digest: ${{ steps.push_eif_image.outputs.digest }}
     steps:
       - name: Check Out Repo
         uses: actions/checkout@v6
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - name: Build EIF
-        run: scripts/build-eif.sh target/eif
+      - name: Download EIF artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nitro-enclave
+          path: target/eif
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
