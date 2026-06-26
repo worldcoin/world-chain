@@ -3,23 +3,38 @@ pragma solidity 0.8.28;
 
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
 import {NitroEnclaveKeyRegistry} from "./NitroEnclaveKeyRegistry.sol";
+import {Secp256k1} from "./libraries/Secp256k1.sol";
 
 /// @title NitroProofVerifier
 /// @author Worldcoin
-/// @notice TEE-attestation proof lane verifier compatible with WIP-1006's multi-proof
-///         system ({IWorldChainProofVerifier}).
-/// @dev The enclave produces an ECDSA (secp256k1) signature over a `signingCommitment`
-///      using its NSM-certified key. This contract checks that:
-///        1. the supplied `expectedPublicKey` is currently registered in
-///           {NitroEnclaveKeyRegistry}; and
-///        2. `ecrecover(signingCommitment, signature)` matches the Ethereum address
-///           derived from `expectedPublicKey`.
+/// @notice TEE-attestation proof lane verifier compatible with WIP-1006's
+///         multi-proof system ({IWorldChainProofVerifier}).
+/// @dev The enclave produces an ECDSA (secp256k1) signature over the
+///      `signing_commitment` computed in `proofs/nitro/src/protocol.rs`:
 ///
-///      Two entry points are provided:
-///        - {verifyProof}      — the explicit Nitro-typed API.
-///        - {verify}           — the generic {IWorldChainProofVerifier} hook used by
-///                                {WorldChainProofSystemGame}. The `proof` calldata
-///                                is `abi.encode(signature, expectedPublicKey)`.
+///         signingCommitment =
+///             keccak256( l2PostRoot || uint64BE(l2BlockNumber) || rollupConfigHash )
+///
+///      This contract:
+///        1. checks that the supplied `expectedPublicKey` is currently registered
+///           in {NitroEnclaveKeyRegistry};
+///        2. recomputes the signing commitment from the boot-info fields supplied
+///           in the proof;
+///        3. recovers the signer via `ecrecover` and matches it against the
+///           Ethereum address derived from `expectedPublicKey`.
+///
+///      Three entry points are provided:
+///        - {verifyProof}             — explicit Nitro-typed API. Caller passes
+///                                       the boot-info fields directly.
+///        - {verifyProofPrecomputed}  — caller already has the 32-byte signing
+///                                       commitment (e.g. computed in a parent
+///                                       contract).
+///        - {verify}                  — the generic {IWorldChainProofVerifier}
+///                                       hook used by {WorldChainProofSystemGame}.
+///                                       `proof = abi.encode(bytes32 l2PostRoot,
+///                                       uint64 l2BlockNumber, bytes32
+///                                       rollupConfigHash, bytes signature,
+///                                       bytes expectedPublicKey)`.
 contract NitroProofVerifier is IWorldChainProofVerifier {
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
@@ -28,8 +43,8 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     /// @notice Thrown when {verifyProof} is called with a malformed signature.
     error InvalidSignatureLength();
 
-    /// @notice Thrown when the supplied public key is not a 65-byte SEC1-uncompressed
-    ///         secp256k1 key (`0x04 || X || Y`).
+    /// @notice Thrown when the supplied public key is not a valid SEC1
+    ///         encoding (65-byte uncompressed or 33-byte compressed).
     error InvalidPublicKey();
 
     /*//////////////////////////////////////////////////////////////
@@ -49,64 +64,109 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     }
 
     /*//////////////////////////////////////////////////////////////
+                          SIGNING COMMITMENT
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Reconstructs the 32-byte commitment the enclave actually signed,
+    ///         matching `signing_commitment(boot_info)` in
+    ///         `proofs/nitro/src/protocol.rs`.
+    /// @dev Layout: `l2PostRoot (32) || uint64BE(l2BlockNumber) (8) ||
+    ///      rollupConfigHash (32)`, hashed with keccak256.
+    function signingCommitment(
+        bytes32 l2PostRoot,
+        uint64 l2BlockNumber,
+        bytes32 rollupConfigHash
+    ) public pure returns (bytes32) {
+        return keccak256(abi.encodePacked(l2PostRoot, l2BlockNumber, rollupConfigHash));
+    }
+
+    /*//////////////////////////////////////////////////////////////
                           PROOF VERIFICATION
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Verifies that `signature` was produced by the enclave key
-    ///         `expectedPublicKey` over `signingCommitment`, and that this key is
-    ///         currently registered with {NitroEnclaveKeyRegistry}.
-    ///
-    /// @param signingCommitment The 32-byte commitment that was signed (typically the
-    ///                          `rootId` produced by `WorldChainProofLib`).
-    /// @param signature         A 65-byte ECDSA signature (`r || s || v`).
-    /// @param expectedPublicKey The 65-byte SEC1-uncompressed secp256k1 enclave key.
-    ///
-    /// @return ok `true` if the signature is valid and the key is registered.
+    /// @notice Verifies a Nitro TEE proof by reconstructing the signing
+    ///         commitment from `(l2PostRoot, l2BlockNumber, rollupConfigHash)`
+    ///         and recovering the signer.
     function verifyProof(
-        bytes32 signingCommitment,
+        bytes32 l2PostRoot,
+        uint64 l2BlockNumber,
+        bytes32 rollupConfigHash,
         bytes calldata signature,
         bytes calldata expectedPublicKey
-    ) external view returns (bool ok) {
-        if (!registry.isKeyRegistered(expectedPublicKey)) return false;
-        if (expectedPublicKey.length != 65 || expectedPublicKey[0] != 0x04) {
-            revert InvalidPublicKey();
-        }
+    ) external view returns (bool) {
+        return verifyProofPrecomputed(
+            signingCommitment(l2PostRoot, l2BlockNumber, rollupConfigHash),
+            signature,
+            expectedPublicKey
+        );
+    }
+
+    /// @notice Lower-level variant of {verifyProof} when the caller has already
+    ///         computed the 32-byte signing commitment.
+    /// @param commitment        The keccak256 commitment the enclave signed.
+    /// @param signature         A 65-byte ECDSA signature (`r || s || v`).
+    /// @param expectedPublicKey Either a 65-byte SEC1-uncompressed or a 33-byte
+    ///                          SEC1-compressed secp256k1 key. The registry
+    ///                          stores keys in uncompressed form, so compressed
+    ///                          inputs are normalized first.
+    function verifyProofPrecomputed(
+        bytes32 commitment,
+        bytes calldata signature,
+        bytes calldata expectedPublicKey
+    ) public view returns (bool) {
+        // Normalize compressed keys to uncompressed so callers can pass either
+        // form. Reverts on bad SEC1 encoding — surfaced via verify()'s
+        // try/catch as a `false` result.
+        bytes memory uncompressed = Secp256k1.normalizeToUncompressed(expectedPublicKey);
+
+        // Look up by the canonical (uncompressed) form, since that is what the
+        // registry stores.
+        if (!registry.isKeyRegistered(uncompressed)) return false;
+
         if (signature.length != 65) revert InvalidSignatureLength();
 
         bytes32 r;
         bytes32 s;
         uint8 v;
-        // Calldata layout: signature[0..32] = r, [32..64] = s, [64] = v.
         assembly ("memory-safe") {
             r := calldataload(signature.offset)
             s := calldataload(add(signature.offset, 32))
             v := byte(0, calldataload(add(signature.offset, 64)))
         }
 
-        // Reject signatures with high-s as per EIP-2 to prevent malleability.
+        // EIP-2 low-s rejection.
         if (uint256(s) > 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0) {
             return false;
         }
         if (v != 27 && v != 28) return false;
 
-        address recovered = ecrecover(signingCommitment, v, r, s);
+        address recovered = ecrecover(commitment, v, r, s);
         if (recovered == address(0)) return false;
 
-        // Ethereum address = last 20 bytes of keccak256(pubkey[1:65]).
-        // The 0x04 prefix is excluded.
-        address expected = address(uint160(uint256(keccak256(expectedPublicKey[1:65]))));
-        return recovered == expected;
+        return recovered == Secp256k1.ethAddressFromUncompressed(uncompressed);
     }
 
+    /*//////////////////////////////////////////////////////////////
+                         GENERIC VERIFIER HOOK
+    //////////////////////////////////////////////////////////////*/
+
     /// @inheritdoc IWorldChainProofVerifier
-    /// @dev `proof` is the ABI encoding `abi.encode(bytes signature, bytes
-    ///      expectedPublicKey)` produced by the off-chain prover. Both the ABI
-    ///      decode and the inner verification call are wrapped so that any
-    ///      malformed input — garbage bytes, wrong arity, invalid public key,
-    ///      bad signature length, etc. — returns `false` rather than reverting,
-    ///      matching the boolean-predicate contract of {IWorldChainProofVerifier}.
-    function verify(bytes32 rootId, bytes calldata proof) external view returns (bool) {
-        try this._decodeAndVerify(rootId, proof) returns (bool ok) {
+    /// @dev `rootId` is **ignored** for the digest — the digest the enclave
+    ///      signed is reconstructed from the boot-info fields inside `proof`.
+    ///      The game contract is responsible for ensuring those boot-info
+    ///      fields are consistent with the proposal that produced `rootId`
+    ///      (e.g. by comparing `l2PostRoot` against the proposal's stored
+    ///      `rootClaim` before dispatching).
+    ///
+    ///      `proof = abi.encode(bytes32 l2PostRoot, uint64 l2BlockNumber,
+    ///                          bytes32 rollupConfigHash, bytes signature,
+    ///                          bytes expectedPublicKey)`.
+    ///
+    ///      Any decode or verification failure is surfaced as `false` (never
+    ///      a revert) to honour the boolean-predicate contract of
+    ///      {IWorldChainProofVerifier}.
+    function verify(bytes32, bytes calldata proof) external view returns (bool) {
+        try this._decodeAndVerify(proof) returns (bool ok) {
             return ok;
         } catch {
             return false;
@@ -116,13 +176,17 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     /// @notice External helper used only by {verify}; MUST NOT be called directly.
     /// @dev External so that {verify} can invoke it via `this.` and trap reverts
     ///      (including the ABI decode revert) in a try/catch.
-    function _decodeAndVerify(bytes32 rootId, bytes calldata proof)
-        external
-        view
-        returns (bool)
-    {
+    function _decodeAndVerify(bytes calldata proof) external view returns (bool) {
         require(msg.sender == address(this), "internal");
-        (bytes memory signature, bytes memory expectedPublicKey) = abi.decode(proof, (bytes, bytes));
-        return this.verifyProof(rootId, signature, expectedPublicKey);
+        (
+            bytes32 l2PostRoot,
+            uint64 l2BlockNumber,
+            bytes32 rollupConfigHash,
+            bytes memory signature,
+            bytes memory expectedPublicKey
+        ) = abi.decode(proof, (bytes32, uint64, bytes32, bytes, bytes));
+        return this.verifyProof(
+            l2PostRoot, l2BlockNumber, rollupConfigHash, signature, expectedPublicKey
+        );
     }
 }
