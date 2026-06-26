@@ -11,44 +11,10 @@
 #   ENCLAVE_MEMORY_SIZE   512   (MiB)
 #   ENCLAVE_DEBUG_MODE    false  (set to "true" or "1" to pass --debug-mode)
 
-######## dependency extraction stage ########
-FROM public.ecr.aws/amazonlinux/amazonlinux:2023 AS full_image
-
-RUN dnf install aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel jq -y && \
-    dnf clean all
-
-WORKDIR /ne-deps
-
-# Copy nitro-cli, jq, and all their shared-library dependencies into /ne-deps
-# so the final image only contains what is strictly required.
-RUN BINS=" \
-        /usr/bin/nitro-cli \
-        /usr/bin/jq \
-    " && \
-    for bin in $BINS; do \
-        { echo "$bin"; ldd "$bin" | grep -Eo "/.*lib.*/[^ ]+"; } | \
-            while read path; do \
-                mkdir -p ".$(dirname "$path")"; \
-                cp -fL "$path" ".$path"; \
-            done; \
-    done
-
-# Prepare required nitro-cli config files and runtime directories.
-RUN mkdir -p /ne-deps/etc/nitro_enclaves \
-             /ne-deps/run/nitro_enclaves \
-             /ne-deps/var/log/nitro_enclaves && \
-    cp -rf /usr/share/nitro_enclaves/ /ne-deps/usr/share/ && \
-    cp -f /etc/nitro_enclaves/allocator.yaml /ne-deps/etc/nitro_enclaves/allocator.yaml
-
-######## final launcher image ########
 FROM public.ecr.aws/amazonlinux/amazonlinux:2023
 
-# Copy only the pre-extracted binaries, libraries, and config.
-COPY --from=full_image /ne-deps/etc /etc
-COPY --from=full_image /ne-deps/lib64 /lib64
-COPY --from=full_image /ne-deps/run /run
-COPY --from=full_image /ne-deps/usr /usr
-COPY --from=full_image /ne-deps/var /var
+RUN dnf install -y aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel jq && \
+    dnf clean all
 
 # EIF file from the build context (target/eif/).
 COPY world-chain-nitro-worker-enclave.eif /home/world-chain-nitro-worker-enclave.eif
@@ -59,7 +25,6 @@ ENV EIF_PATH="/home/world-chain-nitro-worker-enclave.eif" \
     ENCLAVE_MEMORY_SIZE=512 \
     ENCLAVE_DEBUG_MODE=false
 
-# Embed the launcher script directly (no external file needed in the build context).
 COPY <<'EOF' /home/run.sh
 #!/bin/bash
 set -euo pipefail
