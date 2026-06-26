@@ -517,7 +517,6 @@ impl ProverServiceStore {
             "update proof_sessions
              set lock_expires_at = null,
                  lock_id = null,
-                 worker_id = null,
                  next_poll_at = $3,
                  updated_at = $4
              where id = $1
