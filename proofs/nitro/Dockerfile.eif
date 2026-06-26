@@ -36,13 +36,16 @@ if [[ "${ENCLAVE_DEBUG_MODE}" == "true" || "${ENCLAVE_DEBUG_MODE}" == "1" ]]; th
     DEBUG_FLAG="--debug-mode"
 fi
 
-nitro-cli run-enclave \
+# Capture run-enclave output to extract EnclaveID reliably.
+# Using describe-enclaves with .[0] would pick the wrong enclave if
+# another enclave is already running on the parent instance.
+run_output=$(nitro-cli run-enclave \
     --cpu-count  "${ENCLAVE_CPU_COUNT}" \
     --memory     "${ENCLAVE_MEMORY_SIZE}" \
     --eif-path   "${EIF_PATH}" \
-    ${DEBUG_FLAG}
+    ${DEBUG_FLAG})
 
-enclave_id=$(nitro-cli describe-enclaves | jq -r '.[0].EnclaveID')
+enclave_id=$(echo "${run_output}" | jq -r '.EnclaveID')
 echo "[run.sh] Enclave started: ${enclave_id}"
 
 # Attach to the enclave console (blocking — keeps the container alive).
