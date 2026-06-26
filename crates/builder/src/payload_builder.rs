@@ -369,13 +369,14 @@ where
 
     let effective_gas_limit = ctx
         .effective_gas_limit()
-        .saturating_sub(committed_state.gas_used);
+        .saturating_sub(committed_state.evm_gas_used);
 
     trace!(
         target: "flashblocks::payload_builder",
         gas_limit = attributes.gas_limit,
         effective_gas_limit,
         committed_gas_used = committed_state.gas_used,
+        committed_evm_gas_used = committed_state.evm_gas_used,
         timestamp = ctx.attributes().timestamp(),
         "building new payload"
     );
@@ -539,7 +540,8 @@ where
         committed_payload.map_or(ExecutionInfo::default(), |p| ExecutionInfo {
             total_fees: p.fees(),
             cumulative_gas_used: p.block().gas_used(),
-            // The amount of EVM gas used gas_used() + gas_refunded() for an individual flashblock.
+            // `effective_gas_limit` already excludes committed pre-refund gas, so this tracks only
+            // new transactions executed in the continuation build.
             cumulative_evm_gas_used: 0,
             cumulative_da_bytes_used: committed_state
                 .transactions_iter()
@@ -694,6 +696,7 @@ where
         R::default(),
     );
     executor.gas_used = committed_state.gas_used;
+    executor.evm_gas_used = committed_state.evm_gas_used;
     executor.da_footprint_used = committed_state.blob_gas_used;
     executor.receipts = committed_state.receipts_iter().cloned().collect();
 
@@ -744,6 +747,7 @@ where
     );
 
     executor.gas_used = committed_state.gas_used;
+    executor.evm_gas_used = committed_state.evm_gas_used;
     executor.da_footprint_used = committed_state.blob_gas_used;
     executor.receipts = committed_state.receipts_iter().cloned().collect();
 

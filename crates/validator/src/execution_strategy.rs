@@ -312,6 +312,7 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
             executor_factory.create_executor(evm, self.ctx.execution_context.clone());
 
         canonical_executor.gas_used = committed_state.gas_used;
+        canonical_executor.evm_gas_used = committed_state.evm_gas_used;
         canonical_executor.da_footprint_used = committed_state.blob_gas_used;
         canonical_executor.receipts = committed_state.receipts_iter().cloned().collect();
 
@@ -560,6 +561,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
         );
 
         executor.gas_used = committed_state.gas_used;
+        executor.evm_gas_used = committed_state.evm_gas_used;
         executor.da_footprint_used = committed_state.blob_gas_used;
         executor.receipts = committed_state.receipts_iter().cloned().collect();
 

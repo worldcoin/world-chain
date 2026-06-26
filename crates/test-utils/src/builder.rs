@@ -50,7 +50,7 @@ use world_chain_builder::payload_builder_metrics::PayloadBuildAttemptMetrics;
 use world_chain_chainspec::{WorldChainSpec, WorldChainSpecBuilder};
 use world_chain_evm::{
     BlockBuilderExt, OpRethReceiptBuilder, WorldChainEvmConfig,
-    execution::bal::{BalBlockBuilder, CommittedState},
+    execution::bal::{BalBlockBuilder, CommittedState, pre_refund_gas_used},
     utils::cache_prestate_from_bundle,
 };
 use world_chain_primitives::{
@@ -598,26 +598,34 @@ where
 
         payloads.push((
             payload,
-            prev_outcome.as_ref().map(|(o, state)| CommittedState {
-                is_first: false,
-                gas_used: o.block.gas_used(),
-                blob_gas_used: o.block.blob_gas_used().unwrap_or_default(),
-                fees: U256::ZERO,
-                bundle: state.clone(),
-                receipts: o
-                    .execution_result
-                    .receipts
-                    .clone()
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, r)| (idx as u64, r.clone()))
-                    .collect(),
-                transactions: o
+            prev_outcome.as_ref().map(|(o, state)| {
+                let gas_used = o.block.gas_used();
+                let transactions: Vec<_> = o
                     .block
                     .clone_transactions_recovered()
                     .enumerate()
                     .map(|(idx, tx)| (idx as u64, tx.clone()))
-                    .collect(),
+                    .collect();
+                let evm_gas_used =
+                    pre_refund_gas_used(gas_used, transactions.iter().map(|(_, tx)| tx));
+
+                CommittedState {
+                    is_first: false,
+                    gas_used,
+                    evm_gas_used,
+                    blob_gas_used: o.block.blob_gas_used().unwrap_or_default(),
+                    fees: U256::ZERO,
+                    bundle: state.clone(),
+                    receipts: o
+                        .execution_result
+                        .receipts
+                        .clone()
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, r)| (idx as u64, r.clone()))
+                        .collect(),
+                    transactions,
+                }
             }),
         ));
 
