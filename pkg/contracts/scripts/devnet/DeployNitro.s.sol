@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 import {Script} from "forge-std/Script.sol";
 import {console} from "forge-std/console.sol";
-import {CertManager} from "../../src/proofs/nitro/vendor/nitro-validator/CertManager.sol";
-import {ICertManager} from "../../src/proofs/nitro/vendor/nitro-validator/ICertManager.sol";
+import {CertManager} from "@nitro-validator/CertManager.sol";
+import {ICertManager} from "@nitro-validator/ICertManager.sol";
 import {NitroAttestationVerifier} from "../../src/proofs/nitro/NitroAttestationVerifier.sol";
 import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyRegistry.sol";
 import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol";

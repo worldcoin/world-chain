@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {NitroValidator} from "./vendor/nitro-validator/NitroValidator.sol";
-import {ICertManager} from "./vendor/nitro-validator/ICertManager.sol";
-import {CborElement, LibCborElement, CborDecode} from "./vendor/nitro-validator/CborDecode.sol";
-import {LibBytes} from "./vendor/nitro-validator/LibBytes.sol";
+import {NitroValidator} from "@nitro-validator/NitroValidator.sol";
+import {ICertManager} from "@nitro-validator/ICertManager.sol";
+import {CborElement, LibCborElement, CborDecode} from "@nitro-validator/CborDecode.sol";
+import {LibBytes} from "@nitro-validator/LibBytes.sol";
 import {Secp256k1} from "./libraries/Secp256k1.sol";
 import {INitroAttestationVerifier} from "./INitroAttestationVerifier.sol";
 

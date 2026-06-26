@@ -3,8 +3,8 @@ pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {NitroAttestationVerifier} from "../../src/proofs/nitro/NitroAttestationVerifier.sol";
-import {CertManager} from "../../src/proofs/nitro/vendor/nitro-validator/CertManager.sol";
-import {ICertManager} from "../../src/proofs/nitro/vendor/nitro-validator/ICertManager.sol";
+import {CertManager} from "@nitro-validator/CertManager.sol";
+import {ICertManager} from "@nitro-validator/ICertManager.sol";
 
 /// @dev Test harness exposing the internal freshness check so we can exercise
 ///      both the stale and the future-dated branches without constructing a
@@ -22,7 +22,7 @@ contract NitroAttestationVerifierHarness is NitroAttestationVerifier {
 ///      document and the full intermediate cert bundle, which is not practical to
 ///      check in via fixtures. The underlying parser/cert-chain/P-384 verification
 ///      logic is exhaustively tested upstream in Base's `nitro-validator` repo
-///      (vendored under `src/proofs/nitro/vendor/nitro-validator`).
+///      (vendored under `base/nitro-validator`).
 ///
 ///      These tests confirm that:
 ///        - the contract deploys and wires {CertManager} correctly;

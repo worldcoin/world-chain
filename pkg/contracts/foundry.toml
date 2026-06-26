@@ -25,6 +25,8 @@ remappings = [
   "@forge-std/=lib/forge-std/src/",
   "forge-std/=lib/forge-std/src/",
   "@solady=lib/solady/src/utils/",
+  "@nitro-validator/=lib/nitro-validator/src/",
+  "@solarity/=lib/nitro-validator/lib/solidity-lib/contracts/",
 ]
 
 [profile.ci]
@@ -34,4 +36,4 @@ max_test_rejects = 150000
 runs = 100
 
 [fmt]
-ignore = ["lib", "src/proofs/nitro/vendor/**/*.sol"]
+ignore = ["lib"]
