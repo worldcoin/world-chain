@@ -141,11 +141,7 @@ contract NitroEnclaveKeyRegistry is Ownable {
 
     /// @notice Returns the latest registered key for a given PCR triple, or an
     ///         empty byte string if none has been registered.
-    function getKeyByPCRs(bytes32 pcr0, bytes32 pcr1, bytes32 pcr2)
-        external
-        view
-        returns (bytes memory publicKey)
-    {
+    function getKeyByPCRs(bytes32 pcr0, bytes32 pcr1, bytes32 pcr2) external view returns (bytes memory publicKey) {
         return _keyByPCRs[_pcrHash(pcr0, pcr1, pcr2)];
     }
 

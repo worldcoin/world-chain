@@ -10,6 +10,7 @@ contract Secp256k1Caller {
     function normalize(bytes memory key) external view returns (bytes memory) {
         return Secp256k1.normalizeToUncompressed(key);
     }
+
     function ethAddress(bytes memory key) external pure returns (address) {
         return Secp256k1.ethAddressFromUncompressed(key);
     }
@@ -21,6 +22,7 @@ contract Secp256k1Test is Test {
     function setUp() public {
         caller = new Secp256k1Caller();
     }
+
     function _split(bytes memory key65) internal pure returns (uint256 x, uint256 y) {
         assembly {
             x := mload(add(key65, 33))

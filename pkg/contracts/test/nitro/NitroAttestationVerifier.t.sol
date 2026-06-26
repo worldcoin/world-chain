@@ -11,7 +11,10 @@ import {ICertManager} from "../../src/proofs/nitro/vendor/nitro-validator/ICertM
 ///      full Nitro attestation document.
 contract NitroAttestationVerifierHarness is NitroAttestationVerifier {
     constructor(ICertManager cm) NitroAttestationVerifier(cm) {}
-    function checkFreshness(uint64 timestampMs) external view { _checkFreshness(timestampMs); }
+
+    function checkFreshness(uint64 timestampMs) external view {
+        _checkFreshness(timestampMs);
+    }
 }
 
 /// @dev Smoke tests for {NitroAttestationVerifier}. The full happy-path verification

@@ -11,12 +11,10 @@ pragma solidity 0.8.28;
 ///      is `rhs^((p+1)/4) mod p`, computed via the modexp precompile (0x05).
 library Secp256k1 {
     /// @notice secp256k1 field modulus p.
-    uint256 internal constant P =
-        0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F;
+    uint256 internal constant P = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F;
 
     /// @notice (p + 1) / 4, used to take square roots in F_p.
-    uint256 internal constant SQRT_EXP =
-        0x3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBFFFFF0C;
+    uint256 internal constant SQRT_EXP = 0x3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBFFFFF0C;
 
     /// @notice Thrown when the input has an unexpected length or prefix.
     error InvalidSec1Encoding();
