@@ -391,7 +391,7 @@ async fn report_start_update<Q>(
             queue
                 .submit_proof(
                     ProofResponse { id, proof },
-                    ProofSubmissionLock::ProofJob { lock_id: lock_id },
+                    ProofSubmissionLock::ProofJob { lock_id },
                 )
                 .await
         }
