@@ -80,6 +80,10 @@ fn backend_id(seed: u8) -> BackendProofId {
     BackendProofId(B256::with_last_byte(seed))
 }
 
+fn worker_id() -> String {
+    "test-worker".to_string()
+}
+
 #[test]
 fn request_id_is_deterministic() {
     let sp1 = request(ProofBackend::Sp1, 1);
@@ -100,7 +104,7 @@ async fn nitro_style_full_lifecycle() {
     assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Queued);
 
     let locked = service
-        .get_next_proof(ProofBackend::Nitro)
+        .get_next_proof(ProofBackend::Nitro, worker_id())
         .await
         .unwrap()
         .expect("job available");
@@ -146,14 +150,19 @@ async fn backend_job_workflow_reaches_final_proof() {
         request: locked_req,
         lock_id,
     } = service
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
         .expect("job available");
     assert_eq!(locked_req, req);
 
     service
-        .submit_backend_proof_state(id, BackendProofState::Range { id: backend_id(1) }, lock_id)
+        .submit_backend_proof_state(
+            id,
+            BackendProofState::Range { id: backend_id(1) },
+            lock_id,
+            worker_id(),
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -240,13 +249,13 @@ async fn stale_start_lock_is_rejected() {
     let req = request(ProofBackend::Sp1, 3);
     let id = service.request_proof(req.clone()).await.unwrap();
     let first = service
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
         .expect("first lock");
     tokio::time::sleep(Duration::from_millis(20)).await;
     let second = service
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
         .expect("second lock");
@@ -288,23 +297,33 @@ async fn failed_attempts_retry_until_exhausted() {
     let id = service.request_proof(req.clone()).await.unwrap();
 
     let first = service
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
         .expect("first lock");
     service
-        .fail_proof(id, "witness generation failed".to_string(), first.lock_id)
+        .fail_proof(
+            id,
+            "witness generation failed".to_string(),
+            first.lock_id,
+            worker_id(),
+        )
         .await
         .unwrap();
     assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Queued);
 
     let second = service
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
         .expect("second lock");
     service
-        .fail_proof(id, "backend rejected".to_string(), second.lock_id)
+        .fail_proof(
+            id,
+            "backend rejected".to_string(),
+            second.lock_id,
+            worker_id(),
+        )
         .await
         .unwrap();
     assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Failed);
@@ -319,7 +338,7 @@ async fn backend_attempt_errors_retry_until_exhausted() {
     let req = request(ProofBackend::Sp1, 5);
     let id = service.request_proof(req.clone()).await.unwrap();
     let locked = service
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
         .expect("start lock");
@@ -328,6 +347,7 @@ async fn backend_attempt_errors_retry_until_exhausted() {
             id,
             BackendProofState::Range { id: backend_id(1) },
             locked.lock_id,
+            worker_id(),
         )
         .await
         .unwrap();
@@ -384,7 +404,7 @@ async fn invalid_completed_backend_proof_fails_immediately() {
     let req = request(ProofBackend::Sp1, 6);
     let id = service.request_proof(req.clone()).await.unwrap();
     let locked = service
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
         .expect("start lock");
@@ -393,6 +413,7 @@ async fn invalid_completed_backend_proof_fails_immediately() {
             id,
             BackendProofState::Range { id: backend_id(1) },
             locked.lock_id,
+            worker_id(),
         )
         .await
         .unwrap();
@@ -436,7 +457,7 @@ async fn failed_completed_backend_submission_relocks_lock() {
     let req = request(ProofBackend::Sp1, 7);
     let id = service.request_proof(req.clone()).await.unwrap();
     let locked = service
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
         .expect("start lock");
@@ -445,6 +466,7 @@ async fn failed_completed_backend_submission_relocks_lock() {
             id,
             BackendProofState::Range { id: backend_id(1) },
             locked.lock_id,
+            worker_id(),
         )
         .await
         .unwrap();
@@ -496,7 +518,7 @@ async fn backend_noop_polling_does_not_exhaust_attempts() {
     let req = request(ProofBackend::Sp1, 8);
     let id = service.request_proof(req.clone()).await.unwrap();
     let locked = service
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
         .expect("start lock");
@@ -505,6 +527,7 @@ async fn backend_noop_polling_does_not_exhaust_attempts() {
             id,
             BackendProofState::Range { id: backend_id(1) },
             locked.lock_id,
+            worker_id(),
         )
         .await
         .unwrap();
@@ -571,7 +594,7 @@ async fn expired_backend_locks_count_toward_attempts() {
     let req = request(ProofBackend::Sp1, 9);
     let id = service.request_proof(req.clone()).await.unwrap();
     let locked = service
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
         .expect("start lock");
@@ -580,6 +603,7 @@ async fn expired_backend_locks_count_toward_attempts() {
             id,
             BackendProofState::Range { id: backend_id(1) },
             locked.lock_id,
+            worker_id(),
         )
         .await
         .unwrap();
@@ -628,7 +652,7 @@ async fn rpc_end_to_end() {
     assert_eq!(client.proof_status(id).await.unwrap(), ProofStatus::Queued);
 
     let locked = client
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
         .expect("job available");
@@ -662,7 +686,7 @@ async fn rpc_backend_invalid_proof_maps_to_typed_error() {
     let req = request(ProofBackend::Sp1, 10);
     let id = client.request_proof(req.clone()).await.unwrap();
     let locked = client
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
         .expect("start lock");
@@ -671,6 +695,7 @@ async fn rpc_backend_invalid_proof_maps_to_typed_error() {
             id,
             BackendProofState::Range { id: backend_id(1) },
             locked.lock_id,
+            worker_id(),
         )
         .await
         .unwrap();
