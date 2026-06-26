@@ -321,7 +321,7 @@ jobs:
       - name: Build and push EIF carrier image
         uses: docker/build-push-action@v6
         with:
-          context: target/eif
+          context: .
           file: proofs/nitro/Dockerfile.eif
           push: true
           platforms: linux/amd64

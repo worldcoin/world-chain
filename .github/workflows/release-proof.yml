@@ -359,7 +359,7 @@ jobs:
         id: push_eif_image
         uses: docker/build-push-action@v6
         with:
-          context: target/eif
+          context: .
           file: proofs/nitro/Dockerfile.eif
           push: true
           platforms: linux/amd64
