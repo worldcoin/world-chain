@@ -5,16 +5,16 @@
 //! from `world-chain-builder`'s internal `test_utils` module so that
 //! downstream test and fuzz crates can depend on `world-chain-test-utils` alone.
 
-use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader, TxEip1559};
-use alloy_eips::{eip2718::Encodable2718, BlockNumHash};
+use alloy_consensus::{BlockHeader, TxEip1559, constants::KECCAK_EMPTY};
+use alloy_eips::{BlockNumHash, eip2718::Encodable2718};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory};
 use alloy_primitives::{
-    bytes, hex, keccak256, Address, Bytes, FixedBytes, StorageKey, TxKind, B256, U256,
+    Address, B256, Bytes, FixedBytes, StorageKey, TxKind, U256, bytes, hex, keccak256,
 };
 use alloy_rpc_types_engine::PayloadId;
 use alloy_signer_local::PrivateKeySigner;
-use alloy_sol_types::{sol, SolCall};
+use alloy_sol_types::{SolCall, sol};
 use alloy_trie::TrieAccount;
 use crossbeam_channel::bounded;
 use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
@@ -22,8 +22,8 @@ use op_alloy_network::TxSignerSync;
 use op_revm::OpSpecId;
 use reth_chainspec::ChainInfo;
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, EvmEnv, EvmFactory,
+    execute::{BlockBuilder, BlockBuilderOutcome},
 };
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
@@ -33,12 +33,12 @@ use reth_provider::{
     HeaderProvider, NodePrimitivesProvider, ProviderResult, StateProvider, StateProviderBox,
     StateProviderFactory,
 };
-use reth_revm::{database::StateProviderDatabase, State};
+use reth_revm::{State, database::StateProviderDatabase};
 use reth_trie_common::{ExecutionWitnessMode, HashedPostState};
 use revm::{
+    DatabaseRef,
     database::{BundleState, InMemoryDB},
     state::AccountInfo,
-    DatabaseRef,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -49,12 +49,12 @@ use tracing::error;
 use world_chain_builder::payload_builder_metrics::PayloadBuildAttemptMetrics;
 use world_chain_chainspec::{WorldChainSpec, WorldChainSpecBuilder};
 use world_chain_evm::{
-    execution::bal::{pre_refund_gas_used, BalBlockBuilder, CommittedState},
-    utils::cache_prestate_from_bundle,
     BlockBuilderExt, OpRethReceiptBuilder, WorldChainEvmConfig,
+    execution::bal::{BalBlockBuilder, CommittedState, pre_refund_gas_used},
+    utils::cache_prestate_from_bundle,
 };
 use world_chain_primitives::{
-    access_list::{access_list_hash, FlashblockAccessListData},
+    access_list::{FlashblockAccessListData, access_list_hash},
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
 
