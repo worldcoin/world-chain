@@ -13,7 +13,7 @@ use op_revm::{
     },
 };
 use reth_evm::{
-    Database, Evm,
+    Database, Evm, RecoveredTx,
     block::{BlockExecutionError, BlockExecutor, InternalBlockExecutionError},
 };
 use reth_node_api::NodePrimitives;
@@ -71,6 +71,24 @@ pub fn record_op_l1_block_bal_reads<DB>(db: &mut State<DB>) -> Result<(), BlockE
     }
 
     Ok(())
+}
+
+/// Reconstructs pre-refund EVM gas for committed transactions.
+///
+/// The block header and receipts carry canonical gas after SDM/post-exec refunds. The matching
+/// post-exec transaction carries the refund entries, so adding them back gives the executor's
+/// pre-refund gas counter for the committed payload.
+pub fn pre_refund_gas_used<'a>(
+    gas_used: u64,
+    transactions: impl IntoIterator<Item = &'a Recovered<OpTransactionSigned>>,
+) -> u64 {
+    let gas_refunded = transactions
+        .into_iter()
+        .filter_map(|tx| tx.tx().as_post_exec())
+        .flat_map(|tx| tx.inner().payload.gas_refund_entries.iter())
+        .fold(0u64, |sum, entry| sum.saturating_add(entry.gas_refund));
+
+    gas_used.saturating_add(gas_refunded)
 }
 
 #[derive(thiserror::Error, Debug, serde::Serialize)]
@@ -408,8 +426,10 @@ impl BlockAccessIndexCounter {
 pub struct CommittedState<R: OpReceiptBuilder + Default = OpRethReceiptBuilder> {
     /// True when there is no prior committed payload (i.e. this is the first flashblock).
     pub is_first: bool,
-    /// The total gas used in previous committed transactions.
+    /// The total canonical gas used in previous committed transactions.
     pub gas_used: u64,
+    /// The total pre-refund EVM gas used in previous committed transactions.
+    pub evm_gas_used: u64,
     /// The total DA footprint in previous committed transactions.
     ///
     /// Post-Jovian this is stored in the block header's `blob_gas_used` field.
@@ -483,6 +503,7 @@ where
                 .enumerate()
                 .map(|(index, tx)| (index as u64, tx))
                 .collect();
+            let evm_gas_used = pre_refund_gas_used(gas_used, transactions.iter().map(|(_, tx)| tx));
 
             let receipts: Vec<_> = executed_block
                 .execution_output
@@ -499,6 +520,7 @@ where
                 transactions,
                 receipts,
                 gas_used,
+                evm_gas_used,
                 blob_gas_used,
                 fees,
                 bundle,
@@ -509,6 +531,7 @@ where
                 transactions: vec![],
                 receipts: vec![],
                 gas_used: 0,
+                evm_gas_used: 0,
                 blob_gas_used: 0,
                 fees: U256::ZERO,
                 bundle: BundleState::default(),
@@ -519,7 +542,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::BlockAccessIndexCounter;
+    use super::{BlockAccessIndexCounter, pre_refund_gas_used};
+    use alloy_consensus::Sealable;
+    use alloy_primitives::Address;
+    use op_alloy_consensus::{SDMGasEntry, build_post_exec_tx};
+    use reth_optimism_primitives::OpTransactionSigned;
+    use reth_primitives_traits::Recovered;
 
     #[test]
     fn test_block_access_index_counter_finish() {
@@ -535,5 +563,28 @@ mod tests {
         let (start, end) = counter.finish();
         assert_eq!(start, 5);
         assert_eq!(end, 8);
+    }
+
+    #[test]
+    fn pre_refund_gas_used_adds_post_exec_refunds() {
+        let post_exec = OpTransactionSigned::from(
+            build_post_exec_tx(
+                42,
+                vec![
+                    SDMGasEntry {
+                        index: 0,
+                        gas_refund: 7,
+                    },
+                    SDMGasEntry {
+                        index: 1,
+                        gas_refund: 11,
+                    },
+                ],
+            )
+            .seal_slow(),
+        );
+        let transactions = [Recovered::new_unchecked(post_exec, Address::ZERO)];
+
+        assert_eq!(pre_refund_gas_used(100, transactions.iter()), 118);
     }
 }
