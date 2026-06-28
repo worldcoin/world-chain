@@ -27,7 +27,7 @@ The MVP checks:
 | `ACCEPTANCE_MIN_BLOCK_INCREMENTS` | no | `1` | Minimum required block-number increase. |
 | `ACCEPTANCE_TX_TIMEOUT_SECS` | no | `60` | Max time to wait for an acceptance test L2 transaction receipt. |
 | `ACCEPTANCE_TX_POLL_INTERVAL_MS` | no | `500` | Poll interval while waiting for acceptance test L2 transaction receipts. |
-| `ACCEPTANCE_L2_KEY` | yes when Karst checks are enabled | unset | Funded L2 EOA key used by acceptance checks that submit L2 transactions. |
+| `ACCEPTANCE_L2_KEY` | yes when Karst checks are enabled outside `dev-us-east-1` | Anvil L2 faucet key on `dev-us-east-1` when Karst checks are enabled | Funded L2 EOA key used by acceptance checks that submit L2 transactions. |
 | `ACCEPTANCE_KARST_ENABLED` | no | `false` | Enables Karst L2 execution checks. Requires `ACCEPTANCE_L2_KEY`. |
 | `ACCEPTANCE_BUNDLER_RPC_URL` | no | unset | Rundler RPC endpoint. If unset, ERC-4337 checks are skipped. |
 | `ACCEPTANCE_4337_ENTRY_POINT` | no on chain `69420`; yes otherwise | `0x0000000071727De22E5E9d8BAf0edAc6f37da032` on chain `69420` | ERC-4337 v0.7 EntryPoint address. |

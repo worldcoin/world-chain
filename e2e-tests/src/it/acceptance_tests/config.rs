@@ -22,6 +22,9 @@ const DEFAULT_USER_OPERATION_SPONSORSHIP_MAX_COST_WEI: &str = "10000000000000000
 const DEFAULT_TX_TIMEOUT_SECS: u64 = 60;
 const DEFAULT_TX_POLL_INTERVAL_MS: u64 = 500;
 const WORLD_CHAIN_DEVNET_CHAIN_ID: u64 = 69420;
+const DEV_US_EAST_1_NETWORK: &str = "dev-us-east-1";
+const ANVIL_L2_FAUCET_PRIVATE_KEY: &str =
+    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const WORLD_CHAIN_DEVNET_SAFE_4337_MODULE: Address =
     address!("70673A08a5B1086585d39979Fb2d84FDC0bB6Aaf");
 const WORLD_CHAIN_DEVNET_SAFE_4337_WALLET_DEPLOYER: Address =
@@ -95,14 +98,15 @@ impl Config {
         let expected_chain_id = parse_value("ACCEPTANCE_CHAIN_ID", &chain_id)?;
         let cloudflare_access = cloudflare_access_from_env()?;
         let bundler = bundler_config_from_env(expected_chain_id, cloudflare_access.as_ref())?;
-        let l2_key = l2_key_from_env()?;
+        let network = optional_env("ACCEPTANCE_NETWORK").unwrap_or_else(|| "local".to_string());
         let karst_enabled = parse_optional_value("ACCEPTANCE_KARST_ENABLED", false)?;
+        let l2_key = l2_key_from_env(&network, karst_enabled)?;
         if karst_enabled && l2_key.is_none() {
             bail!("ACCEPTANCE_L2_KEY is required when ACCEPTANCE_KARST_ENABLED=true");
         }
 
         Ok(Some(Self {
-            network: optional_env("ACCEPTANCE_NETWORK").unwrap_or_else(|| "local".to_string()),
+            network,
             rpc_url: rpc_url
                 .parse()
                 .wrap_err("failed to parse acceptance test RPC URL")?,
@@ -247,10 +251,17 @@ fn bundler_config_from_env(
     }))
 }
 
-fn l2_key_from_env() -> eyre::Result<Option<PrivateKeySigner>> {
-    optional_env("ACCEPTANCE_L2_KEY")
-        .map(|l2_key| parse_value("ACCEPTANCE_L2_KEY", &l2_key))
-        .transpose()
+fn l2_key_from_env(network: &str, karst_enabled: bool) -> eyre::Result<Option<PrivateKeySigner>> {
+    if let Some(l2_key) = optional_env("ACCEPTANCE_L2_KEY") {
+        return parse_value("ACCEPTANCE_L2_KEY", &l2_key).map(Some);
+    }
+
+    if karst_enabled && network == DEV_US_EAST_1_NETWORK {
+        // Public Anvil test key used by the us-east-1 devnet L2 faucet.
+        return parse_value("ANVIL_L2_FAUCET_PRIVATE_KEY", ANVIL_L2_FAUCET_PRIVATE_KEY).map(Some);
+    }
+
+    Ok(None)
 }
 
 fn bundler_cloudflare_access_from_env(
