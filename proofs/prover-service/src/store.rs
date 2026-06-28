@@ -3,7 +3,7 @@ use crate::{
     error::{InvalidConfigError, ProofJobQueueError, ProofRequestError, ProverServiceInitError},
     types::{
         BackendProofId, BackendProofJobStatus, BackendProofPhase, BackendProofState,
-        BackendProofWork, LeaseToken, LeasedBackendProofWork, LeasedProofRequest, ProofBackend,
+        BackendProofWork, LockId, LockedBackendProofWork, LockedProofRequest, ProofBackend,
         ProofData, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
     },
 };
@@ -82,7 +82,7 @@ impl ProverServiceStore {
         let mut tx = self.begin_request_tx().await?;
 
         if let Some(row) =
-            sqlx::query("select status from proof_jobs where proof_id = $1 for update")
+            sqlx::query("select status from proof_requests where proof_id = $1 for update")
                 .bind(&proof_id)
                 .fetch_optional(&mut *tx)
                 .await
@@ -90,19 +90,20 @@ impl ProverServiceStore {
         {
             let status = parse_status(row.try_get("status").map_err(request_db)?)?;
             if status == ProofStatus::Failed {
-                sqlx::query("delete from proof_backend_jobs where proof_id = $1")
+                sqlx::query("delete from proof_sessions where proof_id = $1")
                     .bind(&proof_id)
                     .execute(&mut *tx)
                     .await
                     .map_err(request_db)?;
                 sqlx::query(
-                    "update proof_jobs
+                    "update proof_requests
                      set status = $2,
                          proof_data = null,
                          failure_reason = null,
                          start_attempts = 0,
-                         locked_until = null,
-                         lease_token = null,
+                         lock_expires_at = null,
+                         lock_id = null,
+                         worker_id = null,
                          updated_at = $3,
                          finished_at = null
                      where proof_id = $1",
@@ -120,7 +121,7 @@ impl ProverServiceStore {
         }
 
         let queued: i64 = sqlx::query_scalar(
-            "select count(*) from proof_jobs where backend = $1 and status = $2",
+            "select count(*) from proof_requests where backend = $1 and status = $2",
         )
         .bind(backend.as_str())
         .bind(ProofStatus::Queued.as_str())
@@ -132,7 +133,7 @@ impl ProverServiceStore {
         }
 
         sqlx::query(
-            "insert into proof_jobs (
+            "insert into proof_requests (
                 proof_id, backend, game, root_claim, l2_block_number, l1_head,
                 status, created_at, updated_at
              )
@@ -159,7 +160,7 @@ impl ProverServiceStore {
         &self,
         proof_id: ProofRequestId,
     ) -> Result<ProofStatus, ProofRequestError> {
-        let row = sqlx::query("select status from proof_jobs where proof_id = $1")
+        let row = sqlx::query("select status from proof_requests where proof_id = $1")
             .bind(proof_id_bytes(proof_id))
             .fetch_optional(&self.pool)
             .await
@@ -173,7 +174,7 @@ impl ProverServiceStore {
         proof_id: ProofRequestId,
     ) -> Result<ProofResponse, ProofRequestError> {
         let row = sqlx::query(
-            "select status, proof_data, failure_reason from proof_jobs where proof_id = $1",
+            "select status, proof_data, failure_reason from proof_requests where proof_id = $1",
         )
         .bind(proof_id_bytes(proof_id))
         .fetch_optional(&self.pool)
@@ -211,18 +212,19 @@ impl ProverServiceStore {
     pub(crate) async fn get_next_proof(
         &self,
         backend: ProofBackend,
-    ) -> Result<Option<LeasedProofRequest>, ProofJobQueueError> {
+        worker_id: String,
+    ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
         loop {
             let mut tx = self.begin_queue_tx().await?;
             let now = db_now();
             let Some(row) = sqlx::query(
                 "select proof_id, backend, game, root_claim, l2_block_number, l1_head,
                         start_attempts
-                 from proof_jobs
+                 from proof_requests
                  where backend = $1
                    and (
                      status = $2
-                     or (status = $3 and locked_until < $4)
+                     or (status = $3 and lock_expires_at < $4)
                    )
                  order by created_at
                  for update skip locked
@@ -243,7 +245,7 @@ impl ProverServiceStore {
             let proof_id = proof_id_from_row(&row).map_err(ProofJobQueueError::Internal)?;
             let attempts: i32 = row.try_get("start_attempts").map_err(queue_db)?;
             if attempts as u32 >= self.config.max_attempts {
-                let reason = format!("start lease expired after {attempts} attempts");
+                let reason = format!("start lock expired after {attempts} attempts");
                 mark_proof_failed(&mut tx, proof_id, &reason, db_now())
                     .await
                     .map_err(queue_db)?;
@@ -253,32 +255,31 @@ impl ProverServiceStore {
             }
 
             let request = request_from_row(&row).map_err(ProofJobQueueError::Internal)?;
-            let lease_token = LeaseToken::new();
-            let locked_until = timestamp_after(now, self.config.lease_timeout);
+            let lock_id = LockId::new();
+            let lock_expires_at = timestamp_after(now, self.config.lock_timeout);
             sqlx::query(
-                "update proof_jobs
+                "update proof_requests
                  set status = $2,
-                     locked_until = $3,
-                     lease_token = $4,
+                     lock_expires_at = $3,
+                     lock_id = $4,
                      start_attempts = start_attempts + 1,
-                     updated_at = $5
+                     updated_at = $5,
+                     worker_id = $6
                  where proof_id = $1",
             )
             .bind(proof_id_bytes(proof_id))
             .bind(ProofStatus::Starting.as_str())
-            .bind(locked_until)
-            .bind(lease_token.0)
+            .bind(lock_expires_at)
+            .bind(lock_id.0)
             .bind(now)
+            .bind(worker_id)
             .execute(&mut *tx)
             .await
             .map_err(queue_db)?;
 
             tx.commit().await.map_err(queue_db)?;
-            debug!(%proof_id, %backend, attempts = attempts + 1, "proof job leased");
-            return Ok(Some(LeasedProofRequest {
-                request,
-                lease_token,
-            }));
+            debug!(%proof_id, %backend, attempts = attempts + 1, "proof job locked");
+            return Ok(Some(LockedProofRequest { request, lock_id }));
         }
     }
 
@@ -286,26 +287,30 @@ impl ProverServiceStore {
         &self,
         proof_id: ProofRequestId,
         backend_proof_state: BackendProofState,
-        lease_token: LeaseToken,
+        lock_id: LockId,
+        worker_id: String,
     ) -> Result<(), ProofJobQueueError> {
         let now = db_now();
         let mut tx = self.begin_queue_tx().await?;
         let backend: Option<String> = sqlx::query_scalar(
-            "update proof_jobs
+            "update proof_requests
              set status = $3,
-                 locked_until = null,
-                 lease_token = null,
+                 lock_expires_at = null,
+                 lock_id = null,
+                 worker_id = null,
                  updated_at = $4
              where proof_id = $1
-               and lease_token = $2
+               and lock_id = $2
                and status = $5
+               and worker_id = $6
              returning backend",
         )
         .bind(proof_id_bytes(proof_id))
-        .bind(lease_token.0)
+        .bind(lock_id.0)
         .bind(ProofStatus::BackendPending.as_str())
         .bind(now)
         .bind(ProofStatus::Starting.as_str())
+        .bind(worker_id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(queue_db)?;
@@ -315,7 +320,7 @@ impl ProverServiceStore {
         };
 
         sqlx::query(
-            "insert into proof_backend_jobs (
+            "insert into proof_sessions (
                 proof_id, backend, phase, backend_proof_id, status,
                 next_poll_at, created_at, updated_at
              )
@@ -339,7 +344,7 @@ impl ProverServiceStore {
     pub(crate) async fn get_next_backend_proof(
         &self,
         backend: ProofBackend,
-    ) -> Result<Option<LeasedBackendProofWork>, ProofJobQueueError> {
+    ) -> Result<Option<LockedBackendProofWork>, ProofJobQueueError> {
         loop {
             let mut tx = self.begin_queue_tx().await?;
             let now = db_now();
@@ -349,19 +354,19 @@ impl ProverServiceStore {
                      bj.phase,
                      bj.backend_proof_id,
                      bj.advance_attempts,
-                     (bj.locked_until is not null and bj.locked_until < $3) as lease_expired,
+                     (bj.lock_expires_at is not null and bj.lock_expires_at < $3) as lock_expired,
                      pj.proof_id,
                      pj.backend,
                      pj.game,
                      pj.root_claim,
                      pj.l2_block_number,
                      pj.l1_head
-                 from proof_backend_jobs bj
-                 join proof_jobs pj on pj.proof_id = bj.proof_id
+                 from proof_sessions bj
+                 join proof_requests pj on pj.proof_id = bj.proof_id
                  where bj.backend = $1
                    and bj.status = $2
                    and bj.next_poll_at <= $3
-                   and (bj.locked_until is null or bj.locked_until < $3)
+                   and (bj.lock_expires_at is null or bj.lock_expires_at < $3)
                  order by bj.next_poll_at
                  for update of bj skip locked
                  limit 1",
@@ -380,14 +385,14 @@ impl ProverServiceStore {
             let backend_job_id: i64 = row.try_get("backend_job_id").map_err(queue_db)?;
             let proof_id = proof_id_from_row(&row).map_err(ProofJobQueueError::Internal)?;
             let attempts: i32 = row.try_get("advance_attempts").map_err(queue_db)?;
-            let lease_expired: bool = row.try_get("lease_expired").map_err(queue_db)?;
-            let attempts = if lease_expired {
+            let lock_expired: bool = row.try_get("lock_expired").map_err(queue_db)?;
+            let attempts = if lock_expired {
                 attempts.saturating_add(1)
             } else {
                 attempts
             };
-            if lease_expired && attempts as u32 >= self.config.max_attempts {
-                let reason = format!("backend lease expired after {attempts} attempts");
+            if lock_expired && attempts as u32 >= self.config.max_attempts {
+                let reason = format!("backend lock expired after {attempts} attempts");
                 mark_backend_failed(&mut tx, backend_job_id, proof_id, &reason, db_now())
                     .await
                     .map_err(queue_db)?;
@@ -409,19 +414,19 @@ impl ProverServiceStore {
                 ),
             );
 
-            let lease_token = LeaseToken::new();
-            let locked_until = timestamp_after(now, self.config.lease_timeout);
+            let lock_id = LockId::new();
+            let lock_expires_at = timestamp_after(now, self.config.lock_timeout);
             sqlx::query(
-                "update proof_backend_jobs
-                 set locked_until = $2,
-                     lease_token = $3,
+                "update proof_sessions
+                 set lock_expires_at = $2,
+                     lock_id = $3,
                      advance_attempts = $4,
                      updated_at = $5
                  where id = $1",
             )
             .bind(backend_job_id)
-            .bind(locked_until)
-            .bind(lease_token.0)
+            .bind(lock_expires_at)
+            .bind(lock_id.0)
             .bind(attempts)
             .bind(now)
             .execute(&mut *tx)
@@ -429,14 +434,14 @@ impl ProverServiceStore {
             .map_err(queue_db)?;
 
             tx.commit().await.map_err(queue_db)?;
-            debug!(%proof_id, backend_job_id, %backend, failed_attempts = attempts, "backend proof job leased");
-            return Ok(Some(LeasedBackendProofWork {
+            debug!(%proof_id, backend_job_id, %backend, failed_attempts = attempts, "backend proof job locked");
+            return Ok(Some(LockedBackendProofWork {
                 backend_job_id,
                 work: BackendProofWork {
                     proof_request: request,
                     state,
                 },
-                lease_token,
+                lock_id,
             }));
         }
     }
@@ -445,20 +450,23 @@ impl ProverServiceStore {
         &self,
         proof_id: ProofRequestId,
         reason: String,
-        lease_token: LeaseToken,
+        lock_id: LockId,
+        worker_id: String,
     ) -> Result<(), ProofJobQueueError> {
         let mut tx = self.begin_queue_tx().await?;
         let row = sqlx::query(
             "select start_attempts, backend
-             from proof_jobs
+             from proof_requests
              where proof_id = $1
-               and lease_token = $2
+               and lock_id = $2
                and status = $3
+               and worker_id = $4
              for update",
         )
         .bind(proof_id_bytes(proof_id))
-        .bind(lease_token.0)
+        .bind(lock_id.0)
         .bind(ProofStatus::Starting.as_str())
+        .bind(worker_id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(queue_db)?;
@@ -476,10 +484,11 @@ impl ProverServiceStore {
         } else {
             let now = db_now();
             sqlx::query(
-                "update proof_jobs
+                "update proof_requests
                  set status = $2,
-                     locked_until = null,
-                     lease_token = null,
+                     lock_expires_at = null,
+                     lock_id = null,
+                     worker_id = null,
                      updated_at = $3
                  where proof_id = $1",
             )
@@ -499,23 +508,23 @@ impl ProverServiceStore {
     pub(crate) async fn noop_backend_job(
         &self,
         backend_job_id: i64,
-        lease_token: LeaseToken,
+        lock_id: LockId,
     ) -> Result<(), ProofJobQueueError> {
         let now = db_now();
         let next_poll_at = timestamp_after(now, self.config.backend_poll_interval);
         let mut tx = self.begin_queue_tx().await?;
         let result = sqlx::query(
-            "update proof_backend_jobs
-             set locked_until = null,
-                 lease_token = null,
+            "update proof_sessions
+             set lock_expires_at = null,
+                 lock_id = null,
                  next_poll_at = $3,
                  updated_at = $4
              where id = $1
-               and lease_token = $2
+               and lock_id = $2
                and status = $5",
         )
         .bind(backend_job_id)
-        .bind(lease_token.0)
+        .bind(lock_id.0)
         .bind(next_poll_at)
         .bind(now)
         .bind(BackendProofJobStatus::Requested.as_str())
@@ -533,25 +542,25 @@ impl ProverServiceStore {
     pub(crate) async fn advance_backend_job(
         &self,
         backend_job_id: i64,
-        lease_token: LeaseToken,
+        lock_id: LockId,
         state: BackendProofState,
     ) -> Result<(), ProofJobQueueError> {
         let now = db_now();
         let mut tx = self.begin_queue_tx().await?;
         let row = sqlx::query(
-            "update proof_backend_jobs
+            "update proof_sessions
              set status = $3,
-                 locked_until = null,
-                 lease_token = null,
+                 lock_expires_at = null,
+                 lock_id = null,
                  updated_at = $4,
                  completed_at = $4
              where id = $1
-               and lease_token = $2
+               and lock_id = $2
                and status = $5
              returning proof_id, backend",
         )
         .bind(backend_job_id)
-        .bind(lease_token.0)
+        .bind(lock_id.0)
         .bind(BackendProofJobStatus::Completed.as_str())
         .bind(now)
         .bind(BackendProofJobStatus::Requested.as_str())
@@ -566,7 +575,7 @@ impl ProverServiceStore {
         let backend: String = row.try_get("backend").map_err(queue_db)?;
 
         sqlx::query(
-            "insert into proof_backend_jobs (
+            "insert into proof_sessions (
                 proof_id, backend, phase, backend_proof_id, status,
                 next_poll_at, created_at, updated_at
              )
@@ -590,19 +599,19 @@ impl ProverServiceStore {
         &self,
         backend_job_id: i64,
         reason: String,
-        lease_token: LeaseToken,
+        lock_id: LockId,
     ) -> Result<(), ProofJobQueueError> {
         let mut tx = self.begin_queue_tx().await?;
         let row = sqlx::query(
             "select proof_id, advance_attempts
-             from proof_backend_jobs
+             from proof_sessions
              where id = $1
-               and lease_token = $2
+               and lock_id = $2
                and status = $3
              for update",
         )
         .bind(backend_job_id)
-        .bind(lease_token.0)
+        .bind(lock_id.0)
         .bind(BackendProofJobStatus::Requested.as_str())
         .fetch_optional(&mut *tx)
         .await
@@ -624,18 +633,18 @@ impl ProverServiceStore {
             let now = db_now();
             let next_poll_at = timestamp_after(now, self.config.backend_poll_interval);
             sqlx::query(
-                "update proof_backend_jobs
-                 set locked_until = null,
-                     lease_token = null,
+                "update proof_sessions
+                 set lock_expires_at = null,
+                     lock_id = null,
                      next_poll_at = $3,
                      advance_attempts = $4,
                      updated_at = $5
                  where id = $1
-                   and lease_token = $2
+                   and lock_id = $2
                    and status = $6",
             )
             .bind(backend_job_id)
-            .bind(lease_token.0)
+            .bind(lock_id.0)
             .bind(next_poll_at)
             .bind(attempts)
             .bind(now)
@@ -653,26 +662,26 @@ impl ProverServiceStore {
     pub(crate) async fn fail_backend_job(
         &self,
         backend_job_id: i64,
-        lease_token: LeaseToken,
+        lock_id: LockId,
         reason: &str,
     ) -> Result<(), ProofJobQueueError> {
         let now = db_now();
         let mut tx = self.begin_queue_tx().await?;
         let row = sqlx::query(
-            "update proof_backend_jobs
+            "update proof_sessions
              set status = $3,
                  failure_reason = $4,
-                 locked_until = null,
-                 lease_token = null,
+                 lock_expires_at = null,
+                 lock_id = null,
                  updated_at = $5,
                  completed_at = $5
              where id = $1
-               and lease_token = $2
+               and lock_id = $2
                and status = $6
              returning proof_id",
         )
         .bind(backend_job_id)
-        .bind(lease_token.0)
+        .bind(lock_id.0)
         .bind(BackendProofJobStatus::Failed.as_str())
         .bind(reason)
         .bind(now)
@@ -696,19 +705,17 @@ impl ProverServiceStore {
     pub(crate) async fn submit_completed_backend_proof(
         &self,
         backend_job_id: i64,
-        lease_token: LeaseToken,
+        lock_id: LockId,
         proof: ProofData,
     ) -> Result<(), ProofJobQueueError> {
-        let proof_id = self
-            .backend_job_proof_id(backend_job_id, lease_token)
-            .await?;
+        let proof_id = self.backend_job_proof_id(backend_job_id, lock_id).await?;
         self.submit_proof_from_backend_job(
             ProofResponse {
                 id: proof_id,
                 proof,
             },
             backend_job_id,
-            lease_token,
+            lock_id,
         )
         .await
     }
@@ -716,18 +723,18 @@ impl ProverServiceStore {
     async fn backend_job_proof_id(
         &self,
         backend_job_id: i64,
-        lease_token: LeaseToken,
+        lock_id: LockId,
     ) -> Result<ProofRequestId, ProofJobQueueError> {
         let mut tx = self.begin_queue_tx().await?;
         let row = sqlx::query(
             "select proof_id
-             from proof_backend_jobs
+             from proof_sessions
              where id = $1
-               and lease_token = $2
+               and lock_id = $2
                and status = $3",
         )
         .bind(backend_job_id)
-        .bind(lease_token.0)
+        .bind(lock_id.0)
         .bind(BackendProofJobStatus::Requested.as_str())
         .fetch_optional(&mut *tx)
         .await
@@ -744,19 +751,19 @@ impl ProverServiceStore {
     pub(crate) async fn submit_proof_from_proof_job(
         &self,
         proof: ProofResponse,
-        lease_token: LeaseToken,
+        lock_id: LockId,
     ) -> Result<(), ProofJobQueueError> {
         let mut tx = self.begin_queue_tx().await?;
         let row = sqlx::query(
             "select backend
-             from proof_jobs
+             from proof_requests
              where proof_id = $1
-               and lease_token = $2
+               and lock_id = $2
                and status = $3
              for update",
         )
         .bind(proof_id_bytes(proof.id))
-        .bind(lease_token.0)
+        .bind(lock_id.0)
         .bind(ProofStatus::Starting.as_str())
         .fetch_optional(&mut *tx)
         .await
@@ -778,17 +785,17 @@ impl ProverServiceStore {
         &self,
         proof: ProofResponse,
         backend_job_id: i64,
-        lease_token: LeaseToken,
+        lock_id: LockId,
     ) -> Result<(), ProofJobQueueError> {
         match self
-            .try_submit_proof_from_backend_job(proof, backend_job_id, lease_token)
+            .try_submit_proof_from_backend_job(proof, backend_job_id, lock_id)
             .await
         {
             Ok(()) => Ok(()),
             Err(error) => {
                 if let Some(action) = backend_submission_failure_action(&error)
                     && let Err(cleanup_error) = self
-                        .handle_failed_backend_submission(backend_job_id, lease_token, action)
+                        .handle_failed_backend_submission(backend_job_id, lock_id, action)
                         .await
                 {
                     warn!(
@@ -807,20 +814,20 @@ impl ProverServiceStore {
         &self,
         proof: ProofResponse,
         backend_job_id: i64,
-        lease_token: LeaseToken,
+        lock_id: LockId,
     ) -> Result<(), ProofJobQueueError> {
         let mut tx = self.begin_queue_tx().await?;
         let row = sqlx::query(
             "select bj.proof_id, pj.backend
-             from proof_backend_jobs bj
-             join proof_jobs pj on pj.proof_id = bj.proof_id
+             from proof_sessions bj
+             join proof_requests pj on pj.proof_id = bj.proof_id
              where bj.id = $1
-               and bj.lease_token = $2
+               and bj.lock_id = $2
                and bj.status = $3
              for update of bj, pj",
         )
         .bind(backend_job_id)
-        .bind(lease_token.0)
+        .bind(lock_id.0)
         .bind(BackendProofJobStatus::Requested.as_str())
         .fetch_optional(&mut *tx)
         .await
@@ -842,10 +849,10 @@ impl ProverServiceStore {
 
         let now = db_now();
         sqlx::query(
-            "update proof_backend_jobs
+            "update proof_sessions
              set status = $2,
-                 locked_until = null,
-                 lease_token = null,
+                 lock_expires_at = null,
+                 lock_id = null,
                  updated_at = $3,
                  completed_at = $3
              where id = $1",
@@ -866,16 +873,16 @@ impl ProverServiceStore {
     async fn handle_failed_backend_submission(
         &self,
         backend_job_id: i64,
-        lease_token: LeaseToken,
+        lock_id: LockId,
         action: BackendSubmissionFailureAction,
     ) -> Result<(), ProofJobQueueError> {
         match action {
             BackendSubmissionFailureAction::Terminal(reason) => {
-                self.fail_backend_job(backend_job_id, lease_token, &reason)
+                self.fail_backend_job(backend_job_id, lock_id, &reason)
                     .await
             }
             BackendSubmissionFailureAction::Retry(reason) => {
-                self.fail_backend_proof_job(backend_job_id, reason, lease_token)
+                self.fail_backend_proof_job(backend_job_id, reason, lock_id)
                     .await
             }
         }
@@ -999,7 +1006,7 @@ fn backend_submission_failure_action(
     error: &ProofJobQueueError,
 ) -> Option<BackendSubmissionFailureAction> {
     match error {
-        ProofJobQueueError::StaleLease
+        ProofJobQueueError::StaleLocked
         | ProofJobQueueError::UnknownBackendJob(_)
         | ProofJobQueueError::UnknownJob(_) => None,
         ProofJobQueueError::InvalidProof { .. } => {
@@ -1018,14 +1025,14 @@ async fn classify_proof_update(
     proof_id: ProofRequestId,
 ) -> ProofJobQueueError {
     let exists = sqlx::query_scalar::<_, bool>(
-        "select exists(select 1 from proof_jobs where proof_id = $1)",
+        "select exists(select 1 from proof_requests where proof_id = $1)",
     )
     .bind(proof_id_bytes(proof_id))
     .fetch_one(&mut **tx)
     .await
     .unwrap_or(false);
     if exists {
-        ProofJobQueueError::StaleLease
+        ProofJobQueueError::StaleLocked
     } else {
         ProofJobQueueError::UnknownJob(proof_id)
     }
@@ -1035,15 +1042,14 @@ async fn classify_backend_update(
     tx: &mut Transaction<'_, Postgres>,
     backend_job_id: i64,
 ) -> ProofJobQueueError {
-    let exists = sqlx::query_scalar::<_, bool>(
-        "select exists(select 1 from proof_backend_jobs where id = $1)",
-    )
-    .bind(backend_job_id)
-    .fetch_one(&mut **tx)
-    .await
-    .unwrap_or(false);
+    let exists =
+        sqlx::query_scalar::<_, bool>("select exists(select 1 from proof_sessions where id = $1)")
+            .bind(backend_job_id)
+            .fetch_one(&mut **tx)
+            .await
+            .unwrap_or(false);
     if exists {
-        ProofJobQueueError::StaleLease
+        ProofJobQueueError::StaleLocked
     } else {
         ProofJobQueueError::UnknownBackendJob(backend_job_id)
     }
@@ -1056,12 +1062,13 @@ async fn mark_proof_failed(
     now: DbTimestamp,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "update proof_jobs
+        "update proof_requests
          set status = $2,
              proof_data = null,
              failure_reason = $3,
-             locked_until = null,
-             lease_token = null,
+             lock_expires_at = null,
+             lock_id = null,
+             worker_id = null,
              updated_at = $4,
              finished_at = $4
          where proof_id = $1",
@@ -1083,11 +1090,11 @@ async fn mark_backend_failed(
     now: DbTimestamp,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "update proof_backend_jobs
+        "update proof_sessions
          set status = $2,
              failure_reason = $3,
-             locked_until = null,
-             lease_token = null,
+             lock_expires_at = null,
+             lock_id = null,
              updated_at = $4,
              completed_at = $4
          where id = $1",
@@ -1109,12 +1116,13 @@ async fn complete_proof(
     let proof_data =
         serde_json::to_vec(&proof.proof).map_err(|err| sqlx::Error::Decode(Box::new(err)))?;
     sqlx::query(
-        "update proof_jobs
+        "update proof_requests
          set status = $2,
              proof_data = $3,
              failure_reason = null,
-             locked_until = null,
-             lease_token = null,
+             lock_expires_at = null,
+             lock_id = null,
+             worker_id = null,
              updated_at = $4,
              finished_at = $4
          where proof_id = $1",

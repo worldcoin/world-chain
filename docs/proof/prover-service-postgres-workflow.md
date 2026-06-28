@@ -16,7 +16,7 @@ job table can be extended with a `phase_index` column.
 - Keep SP1-specific range and aggregation logic inside the SP1 backend, not inside the
   `prover-service`.
 - Prevent duplicate workers from advancing the same proof state concurrently.
-- Reject stale updates from workers whose lease expired and was taken over by another worker.
+- Reject stale updates from workers whose lock expired and was taken over by another worker.
 
 ## New Types
 
@@ -61,7 +61,7 @@ enum BackendProofPhase {
 }
 
 impl BackendProofPhase {
-    /// Stable database representation stored in `proof_backend_jobs.phase`.
+    /// Stable database representation stored in `proof_sessions.phase`.
     fn as_str(self) -> &'static str {
         match self {
             Self::Range => "range",
@@ -71,15 +71,15 @@ impl BackendProofPhase {
     }
 }
 
-/// Opaque token returned by the `prover-service` when a worker leases a DB row.
+/// Opaque id returned by the `prover-service` when a worker locks a DB row.
 ///
-/// Every update for that leased row must include the same token. This prevents an old worker from
-/// overwriting state after its lease expired and another worker reclaimed the row.
-struct LeaseToken(uuid::Uuid);
+/// Every update for that locked row must include the same id. This prevents an old worker from
+/// overwriting state after its lock expired and another worker reclaimed the row.
+struct LockId(uuid::Uuid);
 
-struct LeasedProofRequest {
+struct LockedProofRequest {
     request: ProofRequest,
-    lease_token: LeaseToken,
+    lock_id: LockId,
 }
 
 struct BackendProofWork {
@@ -87,23 +87,23 @@ struct BackendProofWork {
     state: BackendProofState,
 }
 
-struct LeasedBackendProofWork {
+struct LockedBackendProofWork {
     backend_job_id: i64,
     work: BackendProofWork,
-    lease_token: LeaseToken,
+    lock_id: LockId,
 }
 
-enum ProofSubmissionLease {
+enum ProofSubmissionLock {
     /// Final proof was produced while starting the user-facing proof job.
     ///
     /// This is the current Nitro path.
-    ProofJob { lease_token: LeaseToken },
+    ProofJob { lock_id: LockId },
     /// Final proof was produced while advancing a durable backend job.
     ///
     /// This is the SP1 aggregation path.
     BackendJob {
         backend_job_id: i64,
-        lease_token: LeaseToken,
+        lock_id: LockId,
     },
 }
 
@@ -130,7 +130,7 @@ enum BackendUpdate {
     Pending {
         state: BackendProofState,
     },
-    /// Final proof is complete and can be stored in `proof_jobs.proof_data`.
+    /// Final proof is complete and can be stored in `proof_requests.proof_data`.
     ///
     /// Intermediate SP1 range proofs must not be returned as `Complete`. The SP1 backend consumes
     /// completed range proofs internally and returns
@@ -156,19 +156,19 @@ The defender-facing API stays unchanged:
 - `proof_status(ProofRequestId) -> ProofStatus`
 - `get_proof(ProofRequestId) -> ProofResponse`
 
-`proof_status` returns the high-level `proof_jobs.status`. It should not expose backend polling
+`proof_status` returns the high-level `proof_requests.status`. It should not expose backend polling
 details by default. If operators need more detail later, add a separate detail API instead of
 overloading the simple status enum.
 
 ### Worker API - `ProofJobQueue`
 
-- `get_next_proof(ProofBackend) -> Option<LeasedProofRequest>`
-- `submit_backend_proof_state(proof_id, backend_proof_state, lease_token)`
-- `get_next_backend_proof(ProofBackend) -> Option<LeasedBackendProofWork>`
-- `complete_backend_proof_job(backend_job_id, lease_token, next_update)`
-- `fail_backend_proof_job(backend_job_id, reason, lease_token)`
-- `submit_proof(ProofResponse, ProofSubmissionLease)`
-- `fail_proof(proof_id, reason, lease_token)`
+- `get_next_proof(ProofBackend) -> Option<LockedProofRequest>`
+- `submit_backend_proof_state(proof_id, backend_proof_state, lock_id)`
+- `get_next_backend_proof(ProofBackend) -> Option<LockedBackendProofWork>`
+- `complete_backend_proof_job(backend_job_id, lock_id, next_update)`
+- `fail_backend_proof_job(backend_job_id, reason, lock_id)`
+- `submit_proof(ProofResponse, ProofSubmissionLock)`
+- `fail_proof(proof_id, reason, lock_id)`
 
 `submit_backend_proof_state` is used after `backend.start` successfully launches external backend
 work. For SP1 this stores `BackendProofState::Range { id }`, where `id` is the range proof id
@@ -177,27 +177,27 @@ returned by the SP1 network, and transitions the user-facing proof job to `Backe
 `complete_backend_proof_job` is a generic name for applying a `BackendUpdate` produced by
 `backend.advance`. It can:
 
-- clear the backend job lease and schedule another poll for `Noop`;
+- clear the backend job lock and schedule another poll for `Noop`;
 - mark the current backend job complete and insert the next backend job for `Pending`;
 - mark the backend job and proof job failed for `Failed`;
 - mark the backend job complete and store the final proof for `Complete`.
 
 `fail_backend_proof_job` reports that a worker failed to advance a durable backend job during this
-attempt. It mirrors `fail_proof` for the start phase: the service clears the lease, schedules the
+attempt. It mirrors `fail_proof` for the start phase: the service clears the lock, schedules the
 backend job for another poll, and only marks the backend job plus parent proof job `Failed` once
 `advance_attempts` reaches the configured maximum. This is for worker or transient backend errors;
 `BackendUpdate::Failed` remains a terminal backend result.
 
 `submit_proof` stores the final proof and marks the user-facing proof job `Completed`. It accepts a
-`ProofSubmissionLease` because final proofs can come from two places:
+`ProofSubmissionLock` because final proofs can come from two places:
 
 - Nitro currently completes directly from `backend.start`, so submission must validate the
-  `proof_jobs.lease_token`.
+  `proof_requests.lock_id`.
 - SP1 completes from `backend.advance` on the aggregation backend job, so submission must validate
-  the `proof_backend_jobs.lease_token` for the aggregation row and mark that row `Completed`. The
+  the `proof_sessions.lock_id` for the aggregation row and mark that row `Completed`. The
   worker reports that path through `complete_backend_proof_job(..., BackendUpdate::Complete(_))`.
 
-The final method names can be adjusted, but every worker update should carry the lease token for
+The final method names can be adjusted, but every worker update should carry the lock id for
 the row being updated.
 
 ### Worker Backend API - `ProofJobBackend`
@@ -206,9 +206,9 @@ the row being updated.
 - `start(request: &ProofRequest) -> BackendUpdate`
 - `advance(request: &ProofRequest, state: BackendProofState) -> BackendUpdate`
 
-`start` is called once a user-facing proof request is leased from `proof_jobs`.
+`start` is called once a user-facing proof request is locked from `proof_requests`.
 
-`advance` is called for already-created external backend work stored in `proof_backend_jobs`.
+`advance` is called for already-created external backend work stored in `proof_sessions`.
 
 The generic worker does not understand SP1 range or aggregation internals. It only applies
 `BackendUpdate` values. The concrete backend decides whether a completed external backend request is
@@ -219,9 +219,9 @@ an intermediate proof or a final proof.
 ### SP1
 
 1. `ProofWorker` calls `get_next_proof(Sp1)` to get the next SP1 proof request to satisfy.
-2. `prover-service` claims one queued SP1 `proof_jobs` row, sets it to `Starting`, writes
-   `locked_until`, writes a fresh `lease_token`, increments `start_attempts`, and returns
-   `LeasedProofRequest`.
+2. `prover-service` claims one queued SP1 `proof_requests` row, sets it to `Starting`, writes
+   `lock_expires_at`, writes a fresh `lock_id`, increments `start_attempts`, and returns
+   `LockedProofRequest`.
 3. Worker calls `sp1_backend.start(request)`.
 4. SP1 backend builds the witness for the entire block range.
 5. SP1 backend calls SP1 network `.request()` for the compressed range proof.
@@ -235,20 +235,20 @@ an intermediate proof or a final proof.
    }
    ```
 
-7. Worker calls `submit_backend_proof_state(proof_id, Range { id }, lease_token)`.
-8. `prover-service` accepts the update only if the `proof_jobs.lease_token` still matches.
-9. `prover-service` inserts a `proof_backend_jobs` row for the SP1 range proof and transitions the
+7. Worker calls `submit_backend_proof_state(proof_id, Range { id }, lock_id)`.
+8. `prover-service` accepts the update only if the `proof_requests.lock_id` still matches.
+9. `prover-service` inserts a `proof_sessions` row for the SP1 range proof and transitions the
    proof job to:
 
    ```text
    status = BackendPending
-   locked_until = null
-   lease_token = null
+   lock_expires_at = null
+   lock_id = null
    ```
 
 10. Later, any SP1 `ProofWorker` calls `get_next_backend_proof(Sp1)`.
-11. `prover-service` claims a due `proof_backend_jobs` row, writes `locked_until`, writes a fresh
-    `lease_token`, and returns the original request plus `BackendProofState::Range { id }`.
+11. `prover-service` claims a due `proof_sessions` row, writes `lock_expires_at`, writes a fresh
+    `lock_id`, and returns the original request plus `BackendProofState::Range { id }`.
 12. Worker calls `sp1_backend.advance(request, BackendProofState::Range { id })`.
 13. SP1 backend polls SP1 network for the range proof status.
 14. If the range proof is still pending, SP1 backend returns:
@@ -257,7 +257,7 @@ an intermediate proof or a final proof.
     BackendUpdate::Noop
     ```
 
-15. Worker reports the `Noop` update. `prover-service` clears the backend job lease and sets
+15. Worker reports the `Noop` update. `prover-service` clears the backend job lock and sets
     `next_poll_at` to a future timestamp.
 16. If the range proof is complete, SP1 backend fetches the range proof, builds the aggregation
     proof request, and calls SP1 network `.request()` for the aggregation proof.
@@ -271,9 +271,9 @@ an intermediate proof or a final proof.
     }
     ```
 
-18. Worker reports the `Pending` update for the leased range backend job.
+18. Worker reports the `Pending` update for the locked range backend job.
 19. `prover-service` marks the range backend job `Completed` and inserts a new
-    `proof_backend_jobs` row for the aggregation proof.
+    `proof_sessions` row for the aggregation proof.
 20. Later, any SP1 worker calls `get_next_backend_proof(Sp1)` again.
 21. `prover-service` returns the original request plus `BackendProofState::Aggregation { id }`.
 22. SP1 backend polls SP1 network for the aggregation proof status.
@@ -286,30 +286,30 @@ an intermediate proof or a final proof.
     BackendUpdate::Complete(proof_data)
     ```
 
-26. Worker reports the final update for the leased aggregation backend job:
+26. Worker reports the final update for the locked aggregation backend job:
 
     ```rust
     complete_backend_proof_job(
         backend_job_id,
-        lease_token,
+        lock_id,
         BackendUpdate::Complete(proof_data),
     )
     ```
 
-    Here `backend_job_id` and `lease_token` are the values returned by
+    Here `backend_job_id` and `lock_id` are the values returned by
     `get_next_backend_proof(Sp1)` for the aggregation backend job.
 
 27. `prover-service` accepts the submission only if the aggregation
-    `proof_backend_jobs.lease_token` still matches.
-28. `prover-service` marks the aggregation backend job `Completed`, clears its lease, stores the
-    final proof in `proof_jobs.proof_data`, and marks the proof job `Completed`.
+    `proof_sessions.lock_id` still matches.
+28. `prover-service` marks the aggregation backend job `Completed`, clears its lock, stores the
+    final proof in `proof_requests.proof_data`, and marks the proof job `Completed`.
 
 ### Nitro TEE
 
 1. `ProofWorker` calls `get_next_proof(Nitro)` to get the next Nitro proof request to satisfy.
-2. `prover-service` claims one queued Nitro `proof_jobs` row, sets it to `Starting`, writes
-   `locked_until`, writes a fresh `lease_token`, increments `start_attempts`, and returns
-   `LeasedProofRequest`.
+2. `prover-service` claims one queued Nitro `proof_requests` row, sets it to `Starting`, writes
+   `lock_expires_at`, writes a fresh `lock_id`, increments `start_attempts`, and returns
+   `LockedProofRequest`.
 3. Worker calls `nitro_backend.start(request)`.
 4. Nitro backend builds the witness for the entire block range and immediately produces the proof.
 5. Nitro backend returns:
@@ -323,25 +323,25 @@ an intermediate proof or a final proof.
    ```rust
    submit_proof(
        proof_response,
-       ProofSubmissionLease::ProofJob { lease_token },
+       ProofSubmissionLock::ProofJob { lock_id },
    )
    ```
 
-7. `prover-service` accepts the update only if the `proof_jobs.lease_token` still matches, stores
+7. `prover-service` accepts the update only if the `proof_requests.lock_id` still matches, stores
    the proof, and marks the proof job `Completed`.
 
-Nitro does not need `proof_backend_jobs` today. If Nitro later becomes async, `nitro_backend.start`
+Nitro does not need `proof_sessions` today. If Nitro later becomes async, `nitro_backend.start`
 can return `Pending { state: BackendProofState::Single { id } }`, and the same backend job polling
 machinery can resume it.
 
 ## Postgres Tables
 
-### `proof_jobs`
+### `proof_requests`
 
 One row per user-facing proof request.
 
 ```sql
-create table proof_jobs (
+create table proof_requests (
     proof_id            bytea primary key,
     backend             text not null,
     game                bytea not null,
@@ -353,9 +353,11 @@ create table proof_jobs (
     proof_data          bytea null,
     failure_reason      text null,
 
+    worker_id           text null,
+    lock_id             uuid null,
+
     start_attempts      integer not null default 0,
-    locked_until        timestamptz null,
-    lease_token         uuid null,
+    lock_expires_at     timestamptz null,
 
     created_at          timestamptz not null,
     updated_at          timestamptz not null,
@@ -363,23 +365,26 @@ create table proof_jobs (
 );
 ```
 
+`worker_id` is reserved for worker attribution and observability. In the current implementation it
+is not written by the store yet, so existing rows keep it `null`.
+
 Recommended constraints:
 
 ```sql
-alter table proof_jobs
-    add constraint proof_jobs_status_check
+alter table proof_requests
+    add constraint proof_requests_status_check
     check (status in ('queued', 'starting', 'backend_pending', 'completed', 'failed'));
 
-create index proof_jobs_queued_idx
-    on proof_jobs (backend, created_at)
+create index proof_requests_queued_idx
+    on proof_requests (backend, created_at)
     where status = 'queued';
 
-create index proof_jobs_starting_lease_idx
-    on proof_jobs (locked_until)
+create index proof_requests_starting_lock_idx
+    on proof_requests (lock_expires_at)
     where status = 'starting';
 ```
 
-### `proof_backend_jobs`
+### `proof_sessions`
 
 Durable external backend work.
 
@@ -389,9 +394,9 @@ id. Keeping `phase` in SQL makes the state queryable and lets Postgres enforce u
 `unique (proof_id, phase)`.
 
 ```sql
-create table proof_backend_jobs (
+create table proof_sessions (
     id                  bigserial primary key,
-    proof_id            bytea not null references proof_jobs(proof_id),
+    proof_id            bytea not null references proof_requests(proof_id),
 
     backend             text not null,
     phase               text not null,
@@ -400,8 +405,8 @@ create table proof_backend_jobs (
     status              text not null,
     advance_attempts    integer not null default 0,
     next_poll_at        timestamptz not null,
-    locked_until        timestamptz null,
-    lease_token         uuid null,
+    lock_expires_at     timestamptz null,
+    lock_id             uuid null,
 
     artifact            bytea null,
     failure_reason      text null,
@@ -418,20 +423,20 @@ create table proof_backend_jobs (
 Recommended constraints:
 
 ```sql
-alter table proof_backend_jobs
-    add constraint proof_backend_jobs_status_check
+alter table proof_sessions
+    add constraint proof_sessions_status_check
     check (status in ('requested', 'completed', 'failed'));
 
-alter table proof_backend_jobs
-    add constraint proof_backend_jobs_phase_check
+alter table proof_sessions
+    add constraint proof_sessions_phase_check
     check (phase in ('single', 'range', 'aggregation'));
 
-create index proof_backend_jobs_due_idx
-    on proof_backend_jobs (backend, next_poll_at)
+create index proof_sessions_due_idx
+    on proof_sessions (backend, next_poll_at)
     where status = 'requested';
 
-create index proof_backend_jobs_lease_idx
-    on proof_backend_jobs (locked_until)
+create index proof_sessions_lock_idx
+    on proof_sessions (lock_expires_at)
     where status = 'requested';
 ```
 
@@ -451,25 +456,25 @@ unique (proof_id, phase, phase_index)
 
 and remove or replace `unique (proof_id, phase)`.
 
-## How `locked_until` Works
+## How `lock_expires_at` Works
 
-`locked_until` is a durable lease timestamp. A row is available to claim when:
+`lock_expires_at` is a durable lock timestamp. A row is available to claim when:
 
 ```sql
-locked_until is null or locked_until < $now
+lock_expires_at is null or lock_expires_at < $now
 ```
 
-`$now`, `$locked_until`, and `$next_poll_at` should be computed in Rust, for example from
-`chrono::Utc::now()` plus the configured lease or poll duration. Runtime status values should be
+`$now`, `$lock_expires_at`, and `$next_poll_at` should be computed in Rust, for example from
+`chrono::Utc::now()` plus the configured lock or poll duration. Runtime status values should be
 bound from the Rust enums, such as `ProofStatus::Queued.as_str()` and
 `BackendProofJobStatus::Requested.as_str()`, rather than embedded as SQL literals.
 
 It prevents two workers from owning the same state transition after the database transaction that
 claimed the row has committed.
 
-### `proof_jobs.locked_until`
+### `proof_requests.lock_expires_at`
 
-`proof_jobs.locked_until` protects only the short initial start phase.
+`proof_requests.lock_expires_at` protects only the short initial start phase.
 
 It is used when a worker claims a queued proof via `get_next_proof`. The worker owns the row while
 it calls `backend.start(request)`.
@@ -480,11 +485,11 @@ back to `Queued`, or directly in the claim query. The direct approach looks like
 
 ```sql
 select proof_id
-from proof_jobs
+from proof_requests
 where backend = $1
   and (
     status = $queued_status
-    or (status = $starting_status and locked_until < $now)
+    or (status = $starting_status and lock_expires_at < $now)
   )
 order by created_at
 for update skip locked
@@ -494,38 +499,38 @@ limit 1;
 Then:
 
 ```sql
-update proof_jobs
+update proof_requests
 set status = $starting_status,
-    locked_until = $locked_until,
-    lease_token = $lease_token,
+    lock_expires_at = $lock_expires_at,
+    lock_id = $lock_id,
     start_attempts = start_attempts + 1,
     updated_at = $now
 where proof_id = $proof_id;
 ```
 
 If the selected row was an expired `Starting` row and `start_attempts` has already reached the
-configured maximum, the service should mark it `Failed` instead of leasing it again.
+configured maximum, the service should mark it `Failed` instead of locking it again.
 
-For SP1, this lease should cover witness generation and the SP1 network `.request()` call. It should
+For SP1, this lock should cover witness generation and the SP1 network `.request()` call. It should
 not cover the time spent waiting for SP1 network proof generation.
 
 Once SP1 `start()` successfully returns a range backend id, the proof job moves to:
 
 ```text
 status = BackendPending
-locked_until = null
-lease_token = null
+lock_expires_at = null
+lock_id = null
 ```
 
-At that point, the long-running proof generation is represented by `proof_backend_jobs`, and the
-original proof job must not be leased by `get_next_proof` again.
+At that point, the long-running proof generation is represented by `proof_sessions`, and the
+original proof job must not be locked by `get_next_proof` again.
 
-If the worker dies during `start()`, `locked_until` eventually expires. The job can then be retried
+If the worker dies during `start()`, `lock_expires_at` eventually expires. The job can then be retried
 by another worker.
 
-### `proof_backend_jobs.locked_until`
+### `proof_sessions.lock_expires_at`
 
-`proof_backend_jobs.locked_until` protects backend polling and phase advancement.
+`proof_sessions.lock_expires_at` protects backend polling and phase advancement.
 
 It is used when a worker claims backend work via `get_next_backend_proof`. This prevents duplicate
 workers from polling the same completed SP1 range proof and both requesting aggregation proofs.
@@ -534,11 +539,11 @@ Claiming backend work should happen inside a transaction:
 
 ```sql
 select id
-from proof_backend_jobs
+from proof_sessions
 where backend = $1
   and status = $requested_status
   and next_poll_at <= $now
-  and (locked_until is null or locked_until < $now)
+  and (lock_expires_at is null or lock_expires_at < $now)
 order by next_poll_at
 for update skip locked
 limit 1;
@@ -547,31 +552,31 @@ limit 1;
 Then:
 
 ```sql
-update proof_backend_jobs
-set locked_until = $locked_until,
-    lease_token = $lease_token,
+update proof_sessions
+set lock_expires_at = $lock_expires_at,
+    lock_id = $lock_id,
     updated_at = $now
 where id = $backend_job_id;
 ```
 
-If `advance()` returns `Noop`, clear the lease and schedule the next poll:
+If `advance()` returns `Noop`, clear the lock and schedule the next poll:
 
 ```sql
-update proof_backend_jobs
-set locked_until = null,
-    lease_token = null,
+update proof_sessions
+set lock_expires_at = null,
+    lock_id = null,
     next_poll_at = $next_poll_at,
     updated_at = $now
 where id = $backend_job_id
-  and lease_token = $lease_token;
+  and lock_id = $lock_id;
 ```
 
-If the worker dies while advancing backend work, it never clears the lease. After
-`locked_until < $now`, another worker can claim and retry that backend job.
+If the worker dies while advancing backend work, it never clears the lock. After
+`lock_expires_at < $now`, another worker can claim and retry that backend job.
 
-## Why Lease Tokens Are Needed
+## Why Lock IDs Are Needed
 
-`locked_until` alone prevents simultaneous claims, but it does not protect against stale updates
+`lock_expires_at` alone prevents simultaneous claims, but it does not protect against stale updates
 from slow workers.
 
 Example:
@@ -580,42 +585,42 @@ Example:
 
    ```text
    status = Starting
-   locked_until = $now + 10 minutes
-   lease_token = A
+   lock_expires_at = $now + 10 minutes
+   lock_id = A
    ```
 
-2. Worker A is slow and the lease expires.
+2. Worker A is slow and the lock expires.
 3. Worker B claims the same proof:
 
    ```text
    status = Starting
-   locked_until = $now + 10 minutes
-   lease_token = B
+   lock_expires_at = $now + 10 minutes
+   lock_id = B
    ```
 
 4. Worker A returns a failure.
 
-The service must ignore Worker A's update because it carries stale token `A`.
+The service must ignore Worker A's update because it carries stale lock id `A`.
 
-Every update should therefore include the lease token, and the SQL update should check it:
+Every update should therefore include the lock id, and the SQL update should check it:
 
 ```sql
-update proof_jobs
+update proof_requests
 set status = $failed_status,
     failure_reason = $reason,
-    locked_until = null,
-    lease_token = null,
+    lock_expires_at = null,
+    lock_id = null,
     finished_at = $now,
     updated_at = $now
 where proof_id = $proof_id
   and status = $starting_status
-  and lease_token = $lease_token;
+  and lock_id = $lock_id;
 ```
 
-If this update affects zero rows, the lease is stale. The service should return a stale lease error
+If this update affects zero rows, the lock is stale. The service should return a stale lock error
 or treat it as a no-op. It must not overwrite the newer owner.
 
-The same rule applies to `proof_backend_jobs`. A stale worker must not be able to:
+The same rule applies to `proof_sessions`. A stale worker must not be able to:
 
 - mark a backend job failed after another worker reclaimed it;
 - request and persist a duplicate next phase;
@@ -625,12 +630,12 @@ The same rule applies to `proof_backend_jobs`. A stale worker must not be able t
 
 The two attempts counters measure different retry layers.
 
-### `proof_jobs.start_attempts`
+### `proof_requests.start_attempts`
 
 `start_attempts` counts how many times workers tried to start backend work for the user-facing proof
 request.
 
-It increments when `get_next_proof` successfully leases a queued proof job and transitions it to
+It increments when `get_next_proof` successfully locks a queued proof job and transitions it to
 `Starting`.
 
 It covers failures before durable external backend work has been persisted:
@@ -639,22 +644,22 @@ It covers failures before durable external backend work has been persisted:
 - SP1 network `.request()` fails before returning an SP1 proof id;
 - Nitro enclave proving fails;
 - worker dies while the proof job is `Starting`;
-- the proof job start lease expires before the worker reports an update.
+- the proof job start lock expires before the worker reports an update.
 
 For SP1, once `start()` succeeds and the range `backend_proof_id` is persisted,
-`start_attempts` should stop changing. Further progress is tracked by `proof_backend_jobs`.
+`start_attempts` should stop changing. Further progress is tracked by `proof_sessions`.
 
 If `start_attempts` reaches the configured maximum, the service should mark the proof job `Failed`
 instead of requeueing it.
 
-### `proof_backend_jobs.advance_attempts`
+### `proof_sessions.advance_attempts`
 
 `advance_attempts` counts failed attempts to advance an already-created external backend job. It
 must not count healthy polls where the backend is still working.
 
 It increments when a worker reports an advance error through `fail_backend_proof_job`, or when
-`get_next_backend_proof` reclaims an expired backend lease from a worker that died or stopped
-responding. A normal lease does not increment it, and `BackendUpdate::Noop` does not increment it.
+`get_next_backend_proof` reclaims an expired backend lock from a worker that died or stopped
+responding. A normal lock does not increment it, and `BackendUpdate::Noop` does not increment it.
 
 It covers failures after the external backend id is known:
 
@@ -662,7 +667,7 @@ It covers failures after the external backend id is known:
 - worker dies while polling or fetching the completed SP1 proof;
 - range proof completes, but requesting the aggregation proof fails;
 - transient serialization or validation errors while building the next phase;
-- stale backend job lease expiry.
+- stale backend job lock expiry.
 
 An SP1 range backend job and an SP1 aggregation backend job each have their own
 `advance_attempts`.
@@ -702,13 +707,13 @@ With `next_poll_at`:
 ### SP1 success path
 
 ```text
-proof_jobs:
+proof_requests:
 Queued
   -> Starting
   -> BackendPending
   -> Completed
 
-proof_backend_jobs:
+proof_sessions:
 Range Requested
   -> Range Completed
   -> Aggregation Requested
@@ -718,35 +723,35 @@ Range Requested
 ### Nitro success path
 
 ```text
-proof_jobs:
+proof_requests:
 Queued
   -> Starting
   -> Completed
 
-proof_backend_jobs:
+proof_sessions:
 no rows
 ```
 
 ### SP1 range still pending
 
 ```text
-proof_jobs:
+proof_requests:
 BackendPending
 
-proof_backend_jobs:
+proof_sessions:
 Range Requested
-  locked_until = null
+  lock_expires_at = null
   next_poll_at = future timestamp
 ```
 
 ### Worker dies during SP1 `start`
 
 ```text
-proof_jobs:
-Starting with expired locked_until
+proof_requests:
+Starting with expired lock_expires_at
   -> claimed again as Starting by another worker, or requeued by a background reaper
 
-proof_backend_jobs:
+proof_sessions:
 no row unless the first worker successfully persisted a backend id
 ```
 
@@ -757,11 +762,11 @@ pre-submission record. For a first version, this is an acceptable tradeoff to do
 ### Worker dies while polling SP1 backend work
 
 ```text
-proof_jobs:
+proof_requests:
 BackendPending
 
-proof_backend_jobs:
-Requested with expired locked_until
+proof_sessions:
+Requested with expired lock_expires_at
   -> claimed by another worker
 ```
 
