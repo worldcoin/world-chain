@@ -54,6 +54,7 @@ fn unwrap_committed_state(
     state.unwrap_or_else(|| CommittedState {
         is_first: true,
         gas_used: 0,
+        evm_gas_used: 0,
         fees: U256::ZERO,
         receipts: vec![],
         transactions: vec![],
