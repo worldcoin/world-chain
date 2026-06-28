@@ -5,16 +5,16 @@
 //! from `world-chain-builder`'s internal `test_utils` module so that
 //! downstream test and fuzz crates can depend on `world-chain-test-utils` alone.
 
-use alloy_consensus::{BlockHeader, TxEip1559, constants::KECCAK_EMPTY};
-use alloy_eips::{BlockNumHash, eip2718::Encodable2718};
+use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader, TxEip1559};
+use alloy_eips::{eip2718::Encodable2718, BlockNumHash};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvmFactory};
 use alloy_primitives::{
-    Address, B256, Bytes, FixedBytes, StorageKey, TxKind, U256, bytes, hex, keccak256,
+    bytes, hex, keccak256, Address, Bytes, FixedBytes, StorageKey, TxKind, B256, U256,
 };
 use alloy_rpc_types_engine::PayloadId;
 use alloy_signer_local::PrivateKeySigner;
-use alloy_sol_types::{SolCall, sol};
+use alloy_sol_types::{sol, SolCall};
 use alloy_trie::TrieAccount;
 use crossbeam_channel::bounded;
 use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
@@ -22,8 +22,8 @@ use op_alloy_network::TxSignerSync;
 use op_revm::OpSpecId;
 use reth_chainspec::ChainInfo;
 use reth_evm::{
-    ConfigureEvm, EvmEnv, EvmFactory,
     execute::{BlockBuilder, BlockBuilderOutcome},
+    ConfigureEvm, EvmEnv, EvmFactory,
 };
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
@@ -33,12 +33,12 @@ use reth_provider::{
     HeaderProvider, NodePrimitivesProvider, ProviderResult, StateProvider, StateProviderBox,
     StateProviderFactory,
 };
-use reth_revm::{State, database::StateProviderDatabase};
+use reth_revm::{database::StateProviderDatabase, State};
 use reth_trie_common::{ExecutionWitnessMode, HashedPostState};
 use revm::{
-    DatabaseRef,
     database::{BundleState, InMemoryDB},
     state::AccountInfo,
+    DatabaseRef,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -49,12 +49,12 @@ use tracing::error;
 use world_chain_builder::payload_builder_metrics::PayloadBuildAttemptMetrics;
 use world_chain_chainspec::{WorldChainSpec, WorldChainSpecBuilder};
 use world_chain_evm::{
-    BlockBuilderExt, OpRethReceiptBuilder, WorldChainEvmConfig,
-    execution::bal::{BalBlockBuilder, CommittedState, pre_refund_gas_used},
+    execution::bal::{pre_refund_gas_used, BalBlockBuilder, CommittedState},
     utils::cache_prestate_from_bundle,
+    BlockBuilderExt, OpRethReceiptBuilder, WorldChainEvmConfig,
 };
 use world_chain_primitives::{
-    access_list::{FlashblockAccessListData, access_list_hash},
+    access_list::{access_list_hash, FlashblockAccessListData},
     primitives::{ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1},
 };
 
@@ -464,13 +464,25 @@ impl TxOp {
 
     /// Creates a signed transaction from this operation
     pub fn to_signed_tx(&self, nonce: u64) -> Recovered<OpTransactionSigned> {
+        self.to_signed_tx_with_gas_limit(nonce, self.gas_limit())
+    }
+
+    /// Creates a signed transaction from this operation with an explicit gas limit.
+    ///
+    /// Used by gas-limit fuzzing to set the transaction's `gas_limit` field independently of the
+    /// operation's estimated cost.
+    pub fn to_signed_tx_with_gas_limit(
+        &self,
+        nonce: u64,
+        gas_limit: u64,
+    ) -> Recovered<OpTransactionSigned> {
         let mut tx = TxEip1559 {
             chain_id: CHAIN_SPEC.chain().id(),
             nonce,
             max_fee_per_gas: CHAIN_SPEC.genesis_header().base_fee_per_gas.unwrap_or(1) as u128 * 2,
             max_priority_fee_per_gas: 1,
             to: self.target(),
-            gas_limit: self.gas_limit(),
+            gas_limit,
             value: self.value(),
             input: self.encode_calldata(),
             access_list: Default::default(),
@@ -486,7 +498,12 @@ impl TxOp {
 
     /// Encodes transaction to bytes
     pub fn to_encoded_bytes(&self, nonce: u64) -> Bytes {
-        let tx = self.to_signed_tx(nonce);
+        self.to_encoded_bytes_with_gas_limit(nonce, self.gas_limit())
+    }
+
+    /// Encodes transaction to bytes with an explicit gas limit.
+    pub fn to_encoded_bytes_with_gas_limit(&self, nonce: u64, gas_limit: u64) -> Bytes {
+        let tx = self.to_signed_tx_with_gas_limit(nonce, gas_limit);
         let mut buf = Vec::new();
         tx.inner().encode_2718(&mut buf);
         Bytes::from(buf)
@@ -551,6 +568,60 @@ pub fn build_chained_payloads_with_provider<P>(
 where
     P: StateProvider + ?Sized,
 {
+    // Default each transaction's gas limit to the operation's estimate.
+    let sequence = sequence
+        .into_iter()
+        .map(|(op, nonce)| {
+            let gas_limit = op.gas_limit();
+            (op, nonce, gas_limit)
+        })
+        .collect();
+    build_chained_payloads_with_provider_and_gas(state_provider, sequence, max_flashblocks, bal)
+}
+
+/// Builds chained payloads using an explicit per-transaction gas limit.
+///
+/// Mirrors [`build_chained_payloads`] but lets callers fuzz each transaction's `gas_limit` field
+/// independently of the operation's estimated cost. Uses a mock [`TestStateProvider`] as the
+/// backing database.
+pub fn build_chained_payloads_with_gas_limits(
+    sequence: Vec<(TxOp, u64, u64)>,
+    max_flashblocks: usize,
+    bal: bool,
+) -> Result<
+    Vec<(
+        ExecutionPayloadFlashblockDeltaV1,
+        Option<CommittedState<OpRethReceiptBuilder>>,
+    )>,
+    Box<dyn std::error::Error + Send + Sync>,
+> {
+    let state_provider = create_test_state_provider();
+    build_chained_payloads_with_provider_and_gas(
+        state_provider.as_ref(),
+        sequence,
+        max_flashblocks,
+        bal,
+    )
+}
+
+/// Backing implementation for the `build_chained_payloads*` family.
+///
+/// Each sequence entry is `(operation, nonce, gas_limit)`.
+fn build_chained_payloads_with_provider_and_gas<P>(
+    state_provider: &P,
+    sequence: Vec<(TxOp, u64, u64)>,
+    max_flashblocks: usize,
+    bal: bool,
+) -> Result<
+    Vec<(
+        ExecutionPayloadFlashblockDeltaV1,
+        Option<CommittedState<OpRethReceiptBuilder>>,
+    )>,
+    Box<dyn std::error::Error + Send + Sync>,
+>
+where
+    P: StateProvider + ?Sized,
+{
     let mut payloads = Vec::with_capacity(max_flashblocks);
     let mut prev_outcome: Option<(BlockBuilderOutcome<OpPrimitives>, BundleState)> = None;
 
@@ -559,8 +630,11 @@ where
     let sequences = sequence.chunks(chunk_size).collect::<Vec<_>>();
 
     for sequence in sequences.into_iter() {
-        // Convert transaction ops to signed transactions
-        let transactions = transaction_op_sequence_to_transactions(sequence);
+        // Convert transaction ops to signed transactions, honoring the explicit gas limit.
+        let transactions: Vec<_> = sequence
+            .iter()
+            .map(|(op, nonce, gas_limit)| op.to_signed_tx_with_gas_limit(*nonce, *gas_limit))
+            .collect();
 
         // Execute over the previous outcome, if any
         let (outcome, bal_data, bundle_state) =
@@ -580,8 +654,11 @@ where
                 .into());
             }
         }
-        // Encode transactions for the payload
-        let encoded_txs = transaction_sequence_to_encoded(sequence);
+        // Encode transactions for the payload, honoring the explicit gas limit.
+        let encoded_txs: Vec<_> = sequence
+            .iter()
+            .map(|(op, nonce, gas_limit)| op.to_encoded_bytes_with_gas_limit(*nonce, *gas_limit))
+            .collect();
 
         // Construct the payload
         let payload = ExecutionPayloadFlashblockDeltaV1 {

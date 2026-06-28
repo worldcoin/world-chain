@@ -76,7 +76,7 @@ mod property_tests {
     use crate::fuzz::{
         fixtures::{
             ALICE, BOB, ChaosTarget, TxOp, arb_execution_payload, arb_execution_payload_sequence,
-            build_chained_payloads,
+            arb_execution_payload_sequence_with_fuzzed_gas, build_chained_payloads,
         },
         proptest::{unwrap_committed_state, validate},
     };
@@ -295,6 +295,26 @@ mod property_tests {
                             debug_output(e);
                         }
                     prop_assert!(payload.is_ok(), "Parallel execution failed: {:#?}", payload.err());
+                }
+
+                /// Fuzz the per-transaction `gas_limit` field across chained flashblocks.
+                ///
+                /// Over-provisioning gas exercises the EVM gas-refund accounting that the builder
+                /// tracks via `CommittedState::evm_gas_used`: each committed flashblock's pre-refund
+                /// gas must flow into the next flashblock's validation. This guards against the
+                /// builder mis-accounting the effective gas limit when continuation builds inherit
+                /// committed state. Validation of every flashblock must succeed.
+                #[test]
+                fn prop_validate_fuzzed_gas_limits(payloads in (1usize..200, 1usize..20).prop_flat_map(|(max_txs, max_flashblocks)| { arb_execution_payload_sequence_with_fuzzed_gas(max_txs, max_flashblocks) })) {
+                    for (diff, committed_state) in payloads.into_iter() {
+                        let committed = unwrap_committed_state(committed_state);
+                        let payload = validate(&diff, committed);
+                        if let Err(err) = &payload
+                            && let Some(e) = err.downcast_ref::<BalExecutorError>() {
+                                debug_output(e);
+                            }
+                        prop_assert!(payload.is_ok(), "Parallel execution failed: {:#?}", payload.err());
+                    }
                 }
     }
 }
