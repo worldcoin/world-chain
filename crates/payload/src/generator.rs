@@ -32,7 +32,7 @@ use world_chain_primitives::{
 
 use crate::job::{CommittedPayloadState, FlashblocksPayloadJob};
 use world_chain_builder::traits::payload_builder::FlashblockPayloadBuilder;
-use world_chain_primitives::flashblocks::Flashblock;
+use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};
 use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
 
 /// A type that initiates payload building jobs on the [`crate::builder::FlashblocksPayloadBuilder`].
@@ -342,33 +342,47 @@ where
         Option<(Builder::BuiltPayload, u64, Option<FlashblockAccessList>)>,
         PayloadBuilderError,
     > {
+        let payload = self.flashblocks_state.latest_payload();
+
+        let Some(latest) = payload.filter(|latest| latest.id() == id) else {
+            return Ok(None);
+        };
+
         // check for any pending pre state received over p2p
         let flashblocks = self.flashblocks_state.flashblocks();
 
-        let flashblock = Flashblock::reduce(flashblocks).map_err(|e| {
+        let payload_hash = latest.block().hash();
+
+        // treat this as fatal as this should never hit.
+        let executed_pos = flashblocks
+            .flashblocks()
+            .iter()
+            .position(|fb| fb.diff().block_hash == payload_hash)
+            .ok_or_else(|| {
+                PayloadBuilderError::Other(
+                    eyre!("No flashblock matching payload hash {payload_hash}").into(),
+                )
+            })?;
+
+        let composed_flashblock = Flashblock::reduce(Flashblocks(
+            flashblocks.flashblocks()[..=executed_pos].to_vec(),
+        ))
+        .map_err(|e| {
             PayloadBuilderError::Other(eyre!("Failed to reduce flashblocks: {}", e).into())
         })?;
 
-        let latest_payload = self.flashblocks_state.latest_payload();
+        // If we have a pre-confirmed state, we can use it to build the payload
+        debug!(target: "flashblocks::payload_builder", payload_id = %id, "Using pre-confirmed state for payload");
 
-        if let Some(latest) = latest_payload
-            && latest.id() == id
-        {
-            // If we have a pre-confirmed state, we can use it to build the payload
-            debug!(target: "flashblocks::payload_builder", payload_id = %id, "Using pre-confirmed state for payload");
-
-            return Ok(Some((
-                latest,
-                flashblock.flashblock().index + 1,
-                flashblock
-                    .diff()
-                    .access_list_data
-                    .as_ref()
-                    .map(|d| d.access_list.clone()),
-            )));
-        }
-
-        Ok(None)
+        Ok(Some((
+            latest,
+            composed_flashblock.flashblock().index + 1,
+            composed_flashblock
+                .diff()
+                .access_list_data
+                .as_ref()
+                .map(|d| d.access_list.clone()),
+        )))
     }
 }
 
