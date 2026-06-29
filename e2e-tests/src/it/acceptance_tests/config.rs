@@ -26,6 +26,7 @@ const DEFAULT_DEPOSIT_POLL_INTERVAL_MS: u64 = 2_000;
 const DEFAULT_DEPOSIT_VALUE_WEI: &str = "0";
 const DEFAULT_DEPOSIT_MAX_L1_GAS: u64 = 20_000_000;
 const WORLD_CHAIN_ACCEPTANCE_DEVNET_CHAIN_ID: u64 = 69420;
+// Public Anvil test key used as the default acceptance-test sender.
 const FALLBACK_L2_PRIVATE_KEY: &str =
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const WORLD_CHAIN_DEVNET_SAFE_4337_MODULE: Address =

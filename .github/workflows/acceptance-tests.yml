@@ -53,6 +53,8 @@ jobs:
             safe_4337_wallet_deployer: "0xd1f0B51940DbD6e73891D2a41Ef14483fDC5Cb6e"
             expected_chain_id: "480"
             karst_enabled: "false"
+            karst_deposit_enabled: "false"
+            optimism_portal: ""
             allow_failure: false
           - network: stage
             environment: stage
@@ -65,6 +67,8 @@ jobs:
             safe_4337_wallet_deployer: "0x6966cAE939Cbbb2DE66E1e7c67Ddb9143fDbA36c"
             expected_chain_id: "4801"
             karst_enabled: "false"
+            karst_deposit_enabled: "false"
+            optimism_portal: ""
             allow_failure: false
           - network: dev-us-east-1
             environment: dev
@@ -77,6 +81,8 @@ jobs:
             safe_4337_wallet_deployer: ""
             expected_chain_id: "4801222"
             karst_enabled: "true"
+            karst_deposit_enabled: "true"
+            optimism_portal: "0x081a60097c9e1fbe7f55a950eaf77c81dbe3c7af"
             allow_failure: true
           - network: dev-eu-central-2
             environment: dev-eu-central-2
@@ -89,6 +95,8 @@ jobs:
             safe_4337_module: ""
             safe_4337_wallet_deployer: ""
             karst_enabled: "false"
+            karst_deposit_enabled: "false"
+            optimism_portal: ""
             allow_failure: true
     steps:
       - name: Skip unselected network
@@ -138,16 +146,16 @@ jobs:
         env:
           ACCEPTANCE_NETWORK: ${{ matrix.network }}
           ACCEPTANCE_RPC_URL: ${{ matrix.rpc_url }}
-          ACCEPTANCE_L1_RPC_URL: ${{ vars.ACCEPTANCE_L1_RPC_URL }}
+          ACCEPTANCE_L1_RPC_URL: ${{ secrets.ACCEPTANCE_L1_RPC_URL }}
           ACCEPTANCE_BUNDLER_RPC_URL: ${{ matrix.network == 'dev-eu-central-2' && inputs.bundler_rpc_url != '' && inputs.bundler_rpc_url || matrix.bundler_rpc_url }}
           ACCEPTANCE_CHAIN_ID: ${{ matrix.expected_chain_id }}
           ACCEPTANCE_4337_ENTRY_POINT: ${{ matrix.entry_point }}
           ACCEPTANCE_4337_MODULE: ${{ matrix.safe_4337_module }}
           ACCEPTANCE_4337_WALLET_DEPLOYER: ${{ matrix.safe_4337_wallet_deployer }}
           ACCEPTANCE_KARST_ENABLED: ${{ matrix.karst_enabled }}
-          ACCEPTANCE_KARST_DEPOSIT_ENABLED: ${{ matrix.karst_enabled == 'true' && (vars.ACCEPTANCE_KARST_DEPOSIT_ENABLED || 'false') || 'false' }}
+          ACCEPTANCE_KARST_DEPOSIT_ENABLED: ${{ matrix.karst_deposit_enabled }}
           ACCEPTANCE_L1_KEY: ${{ secrets.ACCEPTANCE_L1_KEY }}
-          ACCEPTANCE_OPTIMISM_PORTAL: ${{ vars.ACCEPTANCE_OPTIMISM_PORTAL }}
+          ACCEPTANCE_OPTIMISM_PORTAL: ${{ matrix.optimism_portal }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           ACCEPTANCE_BUNDLER_CF_ACCESS_CLIENT_ID: ${{ secrets.ACCEPTANCE_BUNDLER_CF_ACCESS_CLIENT_ID }}
