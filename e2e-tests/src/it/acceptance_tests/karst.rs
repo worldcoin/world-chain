@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use alloy_consensus::TxReceipt;
 use alloy_primitives::{Address, B256, Bytes, TxKind, U256, address};
-use alloy_provider::{Provider, ProviderBuilder, RootProvider};
+use alloy_provider::{DynProvider, Provider, ProviderBuilder, RootProvider};
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use alloy_sol_types::{SolCall, sol};
@@ -254,6 +254,8 @@ async fn check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env: &RpcEnv) -> eyre:
         .erased();
     let request =
         deposit_transaction_request(l1_sender, config.optimism_portal, config.deposit_value);
+    // Portal metering reads tx.gasprice during eth_estimateGas, before send-time fillers run.
+    let request = with_estimated_l1_fees(&l1_provider, request).await?;
 
     let estimated_gas = match l1_provider.estimate_gas(request.clone()).await {
         Ok(estimated_gas) if estimated_gas <= config.deposit_max_l1_gas => estimated_gas,
@@ -272,6 +274,8 @@ async fn check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env: &RpcEnv) -> eyre:
         l1_sender = %l1_sender,
         optimism_portal = %config.optimism_portal,
         estimated_gas,
+        max_fee_per_gas = ?request.max_fee_per_gas,
+        max_priority_fee_per_gas = ?request.max_priority_fee_per_gas,
         max_l1_gas = config.deposit_max_l1_gas,
         deposit_gas_limit = MAX_TX_GAS + 1,
         "EIP-7825 deposit bypass preflight succeeded"
@@ -382,6 +386,20 @@ fn parse_deposit_receipt(
         status: receipt.inner.inner.status(),
         block_number,
     })
+}
+
+async fn with_estimated_l1_fees(
+    provider: &DynProvider,
+    request: TransactionRequest,
+) -> eyre::Result<TransactionRequest> {
+    let fees = provider
+        .estimate_eip1559_fees()
+        .await
+        .context("failed to estimate L1 fees for Karst deposit")?;
+
+    Ok(request
+        .max_fee_per_gas(fees.max_fee_per_gas)
+        .max_priority_fee_per_gas(fees.max_priority_fee_per_gas))
 }
 
 fn deposit_transaction_request(
