@@ -65,7 +65,7 @@ static SIGNING_KEY: OnceLock<SigningKey> = OnceLock::new();
 ///
 /// Uses [`NsmRequest::GetRandom`] to obtain 32 bytes of hardware-backed entropy and
 /// constructs a secp256k1 [`SigningKey`] from them. The key is stored in
-/// [`SIGNING_KEY`] and the public key (compressed SEC1, 33 bytes) is returned.
+/// [`SIGNING_KEY`] and the public key (uncompressed SEC1, 65 bytes, `0x04 || X || Y`) is returned.
 ///
 /// # Errors
 ///
@@ -80,7 +80,7 @@ fn init_signing_key(fd: i32) -> Result<Vec<u8>> {
 
     let public_key_bytes = signing_key
         .verifying_key()
-        .to_encoded_point(true) // compressed SEC1
+        .to_encoded_point(false) // uncompressed SEC1
         .as_bytes()
         .to_vec();
 
@@ -373,7 +373,7 @@ fn handle_public_key(nonce: [u8; 32]) -> Result<EnclaveResponse> {
     let attestation_doc = request_attestation_doc(None, &nonce)?;
     let public_key = signing_key()
         .verifying_key()
-        .to_encoded_point(true)
+        .to_encoded_point(false)
         .as_bytes()
         .to_vec();
     Ok(EnclaveResponse::Attestation {
@@ -485,7 +485,7 @@ fn request_attestation_doc(user_data: Option<&[u8; 32]>, nonce: &[u8; 32]) -> Re
 
     let public_key_bytes = signing_key()
         .verifying_key()
-        .to_encoded_point(true)
+        .to_encoded_point(false)
         .as_bytes()
         .to_vec();
 

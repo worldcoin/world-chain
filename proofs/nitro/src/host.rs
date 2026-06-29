@@ -235,8 +235,8 @@ impl NitroProver {
 
 /// Verifies the enclave's 65-byte recoverable secp256k1 signature over
 /// `signing_commitment(boot_info)` and checks that the recovered key matches
-/// `expected_pub_key` (the compressed SEC1-encoded public key from the key-attestation
-/// document).
+/// `expected_pub_key` (the uncompressed SEC1-encoded public key, `0x04 || X || Y`,
+/// from the key-attestation document).
 ///
 /// # Errors
 ///
@@ -265,7 +265,7 @@ fn verify_proof_signature(
     })?;
     let recovered_vk = VerifyingKey::recover_from_prehash(&commitment, &sig, rec_id)
         .map_err(|e| NitroProverError::InvalidSignature(e.to_string()))?;
-    let recovered_key_bytes = recovered_vk.to_encoded_point(true).as_bytes().to_vec();
+    let recovered_key_bytes = recovered_vk.to_encoded_point(false).as_bytes().to_vec();
     if recovered_key_bytes.as_slice() != expected_pub_key {
         return Err(NitroProverError::SignatureMismatch {
             recovered: hex::encode(&recovered_key_bytes),

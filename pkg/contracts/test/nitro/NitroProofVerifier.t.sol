@@ -4,7 +4,6 @@ pragma solidity ^0.8.28;
 import {Test, Vm} from "forge-std/Test.sol";
 import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyRegistry.sol";
 import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol";
-import {Secp256k1} from "../../src/proofs/nitro/libraries/Secp256k1.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
 import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier.sol";
 
@@ -36,7 +35,6 @@ contract NitroProofVerifierTest is Test {
 
     Vm.Wallet enclaveWallet;
     bytes enclavePubKey;
-    bytes enclavePubKeyCompressed;
 
     function setUp() public {
         attestationVerifier = new MockNitroAttestationVerifier();
@@ -45,7 +43,6 @@ contract NitroProofVerifierTest is Test {
 
         enclaveWallet = vm.createWallet("enclave");
         enclavePubKey = _uncompressedKey(enclaveWallet.publicKeyX, enclaveWallet.publicKeyY);
-        enclavePubKeyCompressed = _compressedKey(enclaveWallet.publicKeyX, enclaveWallet.publicKeyY);
 
         attestationVerifier.setExpectation(TBS, SIG, PCR0, PCR1, PCR2, enclavePubKey);
         registry.registerKey(TBS, SIG, PCR0, PCR1, PCR2);
@@ -57,14 +54,6 @@ contract NitroProofVerifierTest is Test {
         assembly {
             mstore(add(out, 33), x)
             mstore(add(out, 65), y)
-        }
-    }
-
-    function _compressedKey(uint256 x, uint256 y) internal pure returns (bytes memory out) {
-        out = new bytes(33);
-        out[0] = (y & 1 == 1) ? bytes1(0x03) : bytes1(0x02);
-        assembly {
-            mstore(add(out, 33), x)
         }
     }
 
@@ -99,10 +88,14 @@ contract NitroProofVerifierTest is Test {
         assertTrue(proofVerifier.verifyProof(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG, sig, enclavePubKey));
     }
 
-    function test_VerifyProof_AcceptsCompressedKey() public {
-        bytes32 commitment = _commitment();
-        bytes memory sig = _sign(commitment);
-        assertTrue(proofVerifier.verifyProof(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG, sig, enclavePubKeyCompressed));
+    function test_VerifyProof_RevertsForCompressedKey() public {
+        // The enclave emits uncompressed keys; passing a 33-byte compressed key
+        // must be rejected outright.
+        bytes memory compressed = new bytes(33);
+        compressed[0] = 0x02;
+        bytes memory sig = _sign(_commitment());
+        vm.expectRevert(NitroProofVerifier.InvalidPublicKey.selector);
+        proofVerifier.verifyProof(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG, sig, compressed);
     }
 
     function test_VerifyProof_FalseForUnregisteredKey() public {
@@ -193,10 +186,13 @@ contract NitroProofVerifierTest is Test {
         assertTrue(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
     }
 
-    function test_Verify_GenericInterface_AcceptsCompressedKey() public {
-        bytes32 commitment = _commitment();
-        bytes memory sig = _sign(commitment);
-        assertTrue(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKeyCompressed)));
+    function test_Verify_GenericInterface_FalseForCompressedKey() public {
+        // The generic hook must surface compressed-key inputs as `false` (revert
+        // inside try/catch), not propagate the revert.
+        bytes memory compressed = new bytes(33);
+        compressed[0] = 0x02;
+        bytes memory sig = _sign(_commitment());
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, compressed)));
     }
 
     function test_Verify_GenericInterface_FalseForWrongRootId() public {
@@ -223,9 +219,9 @@ contract NitroProofVerifierTest is Test {
     }
 
     function test_Verify_GenericInterface_FalseForBadKey() public view {
-        // 7-byte key cannot be SEC1-decoded → Secp256k1.normalizeToUncompressed
-        // reverts → verify() returns false. We must still supply a valid rootId
-        // so the binding check doesn't short-circuit before reaching the key.
+        // 7-byte key cannot be SEC1-decoded → verifyProof reverts with
+        // InvalidPublicKey → verify() catches and returns false. A valid rootId
+        // must still be supplied so the binding check doesn't short-circuit.
         bytes memory badKey = hex"01020304050607";
         assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(hex"00", badKey)));
     }
