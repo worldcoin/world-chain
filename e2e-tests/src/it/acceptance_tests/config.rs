@@ -25,9 +25,8 @@ const DEFAULT_DEPOSIT_TIMEOUT_SECS: u64 = 300;
 const DEFAULT_DEPOSIT_POLL_INTERVAL_MS: u64 = 2_000;
 const DEFAULT_DEPOSIT_VALUE_WEI: &str = "0";
 const DEFAULT_DEPOSIT_MAX_L1_GAS: u64 = 20_000_000;
-const WORLD_CHAIN_DEVNET_CHAIN_ID: u64 = 69420;
-const DEV_US_EAST_1_NETWORK: &str = "dev-us-east-1";
-const ANVIL_L2_FAUCET_PRIVATE_KEY: &str =
+const WORLD_CHAIN_ACCEPTANCE_DEVNET_CHAIN_ID: u64 = 69420;
+const FALLBACK_L2_PRIVATE_KEY: &str =
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const WORLD_CHAIN_DEVNET_SAFE_4337_MODULE: Address =
     address!("70673A08a5B1086585d39979Fb2d84FDC0bB6Aaf");
@@ -58,7 +57,7 @@ pub(super) struct Config {
     pub(super) min_block_increments: u64,
     pub(super) tx_timeout: Duration,
     pub(super) tx_poll_interval: Duration,
-    pub(super) l2_key: Option<PrivateKeySigner>,
+    pub(super) l2_key: PrivateKeySigner,
     pub(super) cloudflare_access: Option<CloudflareAccess>,
     pub(super) bundler: Option<BundlerConfig>,
     pub(super) karst_enabled: bool,
@@ -117,10 +116,7 @@ impl Config {
         let network = optional_env("ACCEPTANCE_NETWORK").unwrap_or_else(|| "local".to_string());
         let karst_enabled = parse_optional_value("ACCEPTANCE_KARST_ENABLED", false)?;
         let karst_deposit = karst_deposit_config_from_env(karst_enabled)?;
-        let l2_key = l2_key_from_env(&network, karst_enabled)?;
-        if karst_enabled && l2_key.is_none() {
-            bail!("ACCEPTANCE_L2_KEY is required when ACCEPTANCE_KARST_ENABLED=true");
-        }
+        let l2_key = l2_key_from_env()?;
 
         Ok(Some(Self {
             network,
@@ -322,17 +318,12 @@ fn bundler_config_from_env(
     }))
 }
 
-fn l2_key_from_env(network: &str, karst_enabled: bool) -> eyre::Result<Option<PrivateKeySigner>> {
+fn l2_key_from_env() -> eyre::Result<PrivateKeySigner> {
     if let Some(l2_key) = optional_env("ACCEPTANCE_L2_KEY") {
-        return parse_value("ACCEPTANCE_L2_KEY", &l2_key).map(Some);
+        return parse_value("ACCEPTANCE_L2_KEY", &l2_key);
     }
 
-    if karst_enabled && network == DEV_US_EAST_1_NETWORK {
-        // Public Anvil test key used by the us-east-1 devnet L2 faucet.
-        return parse_value("ANVIL_L2_FAUCET_PRIVATE_KEY", ANVIL_L2_FAUCET_PRIVATE_KEY).map(Some);
-    }
-
-    Ok(None)
+    parse_value("FALLBACK_L2_PRIVATE_KEY", FALLBACK_L2_PRIVATE_KEY)
 }
 
 fn bundler_cloudflare_access_from_env(
@@ -393,7 +384,7 @@ fn parse_optional_address(
         return parse_value(name, &value);
     }
 
-    if expected_chain_id == WORLD_CHAIN_DEVNET_CHAIN_ID {
+    if expected_chain_id == WORLD_CHAIN_ACCEPTANCE_DEVNET_CHAIN_ID {
         return Ok(world_chain_devnet_default);
     }
 

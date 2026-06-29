@@ -60,11 +60,7 @@ pub(super) async fn l2_execution_checks(env: &RpcEnv) -> eyre::Result<()> {
         info!("ACCEPTANCE_KARST_ENABLED not set, skipping Karst L2 acceptance tests");
         return Ok(());
     }
-    let l2_key = env
-        .config()
-        .l2_key
-        .clone()
-        .ok_or_eyre("ACCEPTANCE_L2_KEY is required when ACCEPTANCE_KARST_ENABLED=true")?;
+    let l2_key = env.config().l2_key.clone();
 
     info!(
         network = %env.config().network,
