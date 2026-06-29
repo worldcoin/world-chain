@@ -1,11 +1,10 @@
 use crate::{
-    SessionStatus,
-    config::ProverServiceConfig,
+    DEFAULT_MAX_ATTEMPTS, SessionStatus,
+    config::{DEFAULT_MAX_RETRIES, ProverServiceConfig},
     error::{InvalidConfigError, ProofJobQueueError, ProofRequestError, ProverServiceInitError},
     types::{
-        BackendProofId, BackendProofState, BackendProofWork, BackendSession, BackendSessionState,
-        LockId, LockedBackendProofWork, LockedProofRequest, ProofBackend, ProofData, ProofRequest,
-        ProofRequestId, ProofResponse, ProofStatus, SessionType,
+        BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend, ProofData,
+        ProofJobStatus, ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType,
     },
 };
 use alloy_primitives::{Address, B256};
@@ -15,7 +14,7 @@ use sqlx::{
     migrate::{MigrateError, Migrator},
     postgres::{PgPoolOptions, PgRow},
 };
-use std::{str::FromStr, time::Duration};
+use std::time::Duration;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -37,7 +36,7 @@ enum PostgresIsolationLevel {
 impl PostgresIsolationLevel {
     const fn set_transaction_sql(self) -> &'static str {
         match self {
-            Self::ReadCommitted => "set transaction isolation level read committed",
+            Self::ReadCommitted => "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
         }
     }
 }
@@ -80,66 +79,19 @@ impl ProverServiceStore {
         let id = proof_request.id();
         let backend = proof_request.backend;
         let proof_id = proof_id_bytes(id);
-        let now = db_now();
+        let now = Utc::now();
         let mut tx = self.begin_request_tx().await?;
 
-        if let Some(row) =
-            sqlx::query("select status from proof_requests where proof_id = $1 for update")
-                .bind(&proof_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(request_db)?
-        {
-            let status = parse_status(row.try_get("status").map_err(request_db)?)?;
-            if status == ProofStatus::Failed {
-                sqlx::query("delete from proof_sessions where proof_id = $1")
-                    .bind(&proof_id)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(request_db)?;
-                sqlx::query(
-                    "update proof_requests
-                     set status = $2,
-                         proof_data = null,
-                         failure_reason = null,
-                         start_attempts = 0,
-                         lock_expires_at = null,
-                         lock_id = null,
-                         worker_id = null,
-                         updated_at = $3,
-                         finished_at = null
-                     where proof_id = $1",
-                )
-                .bind(&proof_id)
-                .bind(ProofStatus::Queued.as_str())
-                .bind(now)
-                .execute(&mut *tx)
-                .await
-                .map_err(request_db)?;
-                info!(%id, %backend, "failed proof request re-queued");
-            }
-            tx.commit().await.map_err(request_db)?;
-            return Ok(id);
-        }
-
-        let queued: i64 = sqlx::query_scalar(
-            "select count(*) from proof_requests where backend = $1 and status = $2",
-        )
-        .bind(backend.as_str())
-        .bind(ProofStatus::Queued.as_str())
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(request_db)?;
-        if queued as usize >= self.config.max_queue_len {
-            return Err(ProofRequestError::QueueFull(backend));
-        }
-
-        sqlx::query(
-            "insert into proof_requests (
+        // --
+        let insert_result = sqlx::query(
+            r#"
+            INSERT INTO proof_requests (
                 proof_id, backend, game, root_claim, l2_block_number, l1_head,
-                status, created_at, updated_at
-             )
-             values ($1, $2, $3, $4, $5, $6, $7, $8, $8)",
+                proof_status, job_status, created_at, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ON CONFLICT (proof_id) DO NOTHING
+            "#,
         )
         .bind(&proof_id)
         .bind(backend.as_str())
@@ -147,28 +99,97 @@ impl ProverServiceStore {
         .bind(proof_request.root_claim.as_slice())
         .bind(l2_to_i64(proof_request.l2_block_number)?)
         .bind(proof_request.l1_head.as_slice())
-        .bind(ProofStatus::Queued.as_str())
+        .bind(ProofStatus::Created.as_str())
+        .bind(ProofJobStatus::Pending.as_str())
+        .bind(now)
         .bind(now)
         .execute(&mut *tx)
         .await
         .map_err(request_db)?;
 
-        tx.commit().await.map_err(request_db)?;
-        info!(%id, %backend, "proof request queued");
-        Ok(id)
+        if insert_result.rows_affected() > 0 {
+            // no conflict
+            tx.commit().await.map_err(request_db)?;
+            return Ok(id);
+        }
+
+        // conflict path
+        let row = sqlx::query(
+            r#"
+            SELECT proof_status, retry_count
+            FROM proof_requests
+            WHERE proof_id = $1
+            FOR UPDATE
+            "#,
+        )
+        .bind(&proof_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(request_db)?;
+
+        let Some(row) = row else {
+            tx.rollback().await.map_err(request_db)?;
+            return Err(ProofRequestError::RowMissingAfterConflict { id });
+        };
+
+        let proof_status_str: &str = row.get("proof_status");
+        let proof_status = ProofStatus::try_from(proof_status_str).map_err(|e| {
+            ProofRequestError::Internal(format!("Invalid proof status in db: {}", e))
+        })?;
+
+        if proof_status == ProofStatus::Failed {
+            // retry the entire proof job if retry_count is less than the max_retry
+            let retry_count: i32 = row.get("retry_count");
+            // TODO: eventually this max can be a cli parameter
+            if retry_count > DEFAULT_MAX_RETRIES {
+                tx.rollback().await.map_err(request_db)?;
+                return Err(ProofRequestError::TooManyRetries(id));
+            }
+
+            sqlx::query(
+                r#"
+                UPDATE proof_requests
+                SET proof_status = $1,
+                    job_status = $2,
+                    retry_count = retry_count + 1,
+                    failure_reason = NULL,
+                    proof_data = NULL,
+                    completed_at = NULL,
+                    worker_id = NULL,
+                    lock_id = NULL,
+                    lock_expires_at = NULL,
+                    attempt = 0
+                WHERE id = $3
+                "#,
+            )
+            .bind(ProofStatus::Created.as_str())
+            .bind(ProofJobStatus::Pending.as_str())
+            .bind(&proof_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(request_db)?;
+
+            tx.commit().await.map_err(request_db)?;
+            Ok(id)
+        } else {
+            // this proof request already exists in the db with a non-failing status.
+            // Rollback the db transaction and return the proof id.
+            tx.rollback().await.map_err(request_db)?;
+            Ok(id)
+        }
     }
 
     pub(crate) async fn proof_status(
         &self,
         proof_id: ProofRequestId,
     ) -> Result<ProofStatus, ProofRequestError> {
-        let row = sqlx::query("select status from proof_requests where proof_id = $1")
+        let row = sqlx::query("select proof_status from proof_requests where proof_id = $1")
             .bind(proof_id_bytes(proof_id))
             .fetch_optional(&self.pool)
             .await
             .map_err(request_db)?
             .ok_or(ProofRequestError::NotFound(proof_id))?;
-        parse_status(row.try_get("status").map_err(request_db)?)
+        parse_status(row.try_get("proof_status").map_err(request_db)?)
     }
 
     pub(crate) async fn get_proof(
@@ -176,7 +197,7 @@ impl ProverServiceStore {
         proof_id: ProofRequestId,
     ) -> Result<ProofResponse, ProofRequestError> {
         let row = sqlx::query(
-            "select status, proof_data, failure_reason from proof_requests where proof_id = $1",
+            "select proof_status, proof_data, failure_reason from proof_requests where proof_id = $1",
         )
         .bind(proof_id_bytes(proof_id))
         .fetch_optional(&self.pool)
@@ -184,9 +205,9 @@ impl ProverServiceStore {
         .map_err(request_db)?
         .ok_or(ProofRequestError::NotFound(proof_id))?;
 
-        let status = parse_status(row.try_get("status").map_err(request_db)?)?;
+        let status = parse_status(row.try_get("proof_status").map_err(request_db)?)?;
         match status {
-            ProofStatus::Completed => {
+            ProofStatus::Succeeded => {
                 let data: Vec<u8> = row
                     .try_get("proof_data")
                     .map_err(|err| ProofRequestError::Internal(err.to_string()))?;
@@ -225,15 +246,15 @@ impl ProverServiceStore {
                  from proof_requests
                  where backend = $1
                    and (
-                     status = $2
-                     or (status = $3 and lock_expires_at < $4)
+                     proof_status = $2
+                     or (proof_status = $3 and lock_expires_at < $4)
                    )
                  order by created_at
                  for update skip locked
                  limit 1",
             )
             .bind(backend.as_str())
-            .bind(ProofStatus::Queued.as_str())
+            .bind(ProofStatus::Created.as_str())
             .bind(ProofStatus::Starting.as_str())
             .bind(now)
             .fetch_optional(&mut *tx)
@@ -309,13 +330,13 @@ impl ProverServiceStore {
         let session = if let Some(row) = row {
             let backend_session_id: String = row.try_get("backend_session_id").map_err(queue_db)?;
             let status_str: String = row.try_get("status").map_err(queue_db)?;
-            let state = BackendSessionState::try_from(status_str.as_str()).map_err(|e| {
+            let state = BackendSessionStatus::try_from(status_str.as_str()).map_err(|e| {
                 ProofJobQueueError::Internal(format!("unknown proof_sessions.status value {e:?}"))
             })?;
 
             Some(BackendSession {
                 backend_session_id,
-                state,
+                status: state,
             })
         } else {
             None
@@ -331,7 +352,7 @@ impl ProverServiceStore {
         worker_id: String,
         lock_id: LockId,
         backend_session_id: String,
-        state: BackendSessionState,
+        state: BackendSessionStatus,
     ) -> Result<(), ProofJobQueueError> {
         let now = Utc::now();
         let mut tx = self.begin_queue_tx().await?;
@@ -493,7 +514,7 @@ impl ProverServiceStore {
         Ok(())
     }
 
-    pub(crate) async fn submit_proof_from_proof_job(
+    pub(crate) async fn submit_proof(
         &self,
         proof: ProofResponse,
         lock_id: LockId,
@@ -616,10 +637,6 @@ fn l2_to_i64(value: u64) -> Result<i64, ProofRequestError> {
         .map_err(|_| ProofRequestError::Internal(format!("l2 block number {value} exceeds i64")))
 }
 
-fn db_now() -> DbTimestamp {
-    Utc::now()
-}
-
 fn timestamp_after(timestamp: DbTimestamp, duration: Duration) -> DbTimestamp {
     let duration = TimeDelta::from_std(duration).unwrap_or(TimeDelta::MAX);
     timestamp
@@ -638,24 +655,6 @@ fn queue_db(err: sqlx::Error) -> ProofJobQueueError {
 enum BackendSubmissionFailureAction {
     Terminal(String),
     Retry(String),
-}
-
-fn backend_submission_failure_action(
-    error: &ProofJobQueueError,
-) -> Option<BackendSubmissionFailureAction> {
-    match error {
-        ProofJobQueueError::StaleLocked
-        | ProofJobQueueError::UnknownBackendJob(_)
-        | ProofJobQueueError::UnknownJob(_) => None,
-        ProofJobQueueError::InvalidProof { .. } => {
-            Some(BackendSubmissionFailureAction::Terminal(error.to_string()))
-        }
-        ProofJobQueueError::Internal(_) | ProofJobQueueError::Rpc(_) => {
-            Some(BackendSubmissionFailureAction::Retry(format!(
-                "failed to submit completed backend proof: {error}"
-            )))
-        }
-    }
 }
 
 async fn classify_proof_update(

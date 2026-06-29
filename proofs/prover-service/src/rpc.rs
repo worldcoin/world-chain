@@ -3,9 +3,8 @@ use crate::{
     service::ProverService,
     traits::{ProofJobQueue, ProofRequester},
     types::{
-        BackendProofState, BackendSession, BackendSessionState, BackendUpdate, LockId,
-        LockedBackendProofWork, LockedProofRequest, ProofBackend, ProofRequest, ProofRequestId,
-        ProofResponse, ProofStatus, ProofSubmissionLock, SessionType,
+        BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
+        ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType,
     },
 };
 use jsonrpsee::{
@@ -71,7 +70,7 @@ pub trait ProverServiceApi {
 
     /// Submit a generated proof.
     #[method(name = "submitProof")]
-    async fn submit_proof(&self, proof: ProofResponse, lock: ProofSubmissionLock) -> RpcResult<()>;
+    async fn submit_proof(&self, proof: ProofResponse, lock: LockId) -> RpcResult<()>;
 
     /// Get a proof session if any.
     #[method(name = "getProofSession")]
@@ -90,7 +89,7 @@ pub trait ProverServiceApi {
         worker_id: String,
         lock_id: LockId,
         backend_session_id: String,
-        state: BackendSessionState,
+        state: BackendSessionStatus,
     ) -> RpcResult<()>;
 }
 
@@ -144,6 +143,9 @@ impl From<ProofJobQueueError> for ErrorObjectOwned {
             ProofJobQueueError::Rpc(_) => {
                 ErrorObject::owned(INTERNAL_ERROR_CODE, message, None::<()>)
             }
+            ProofJobQueueError::NotFound(_) => {
+                ErrorObject::owned(error_code::NOT_FOUND, message, None::<()>)
+            }
         }
     }
 }
@@ -183,7 +185,7 @@ impl ProverServiceApiServer for ProverServiceRpc {
         Ok(self.service.get_next_proof(backend, worker_id).await?)
     }
 
-    async fn submit_proof(&self, proof: ProofResponse, lock: ProofSubmissionLock) -> RpcResult<()> {
+    async fn submit_proof(&self, proof: ProofResponse, lock: LockId) -> RpcResult<()> {
         Ok(self.service.submit_proof(proof, lock).await?)
     }
 
@@ -205,7 +207,7 @@ impl ProverServiceApiServer for ProverServiceRpc {
         worker_id: String,
         lock_id: LockId,
         backend_session_id: String,
-        state: BackendSessionState,
+        state: BackendSessionStatus,
     ) -> RpcResult<()> {
         Ok(self
             .service
@@ -372,7 +374,7 @@ impl ProofJobQueue for RpcProverServiceClient {
     async fn submit_proof(
         &self,
         proof: ProofResponse,
-        lock: ProofSubmissionLock,
+        lock: LockId,
     ) -> Result<(), ProofJobQueueError> {
         let id = proof.id;
         ProverServiceApiClient::submit_proof(&self.client, proof, lock)
@@ -397,7 +399,7 @@ impl ProofJobQueue for RpcProverServiceClient {
         worker_id: String,
         lock_id: LockId,
         backend_session_id: String,
-        state: BackendSessionState,
+        state: BackendSessionStatus,
     ) -> Result<(), ProofJobQueueError> {
         ProverServiceApiClient::record_proof_session(
             &self.client,

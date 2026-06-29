@@ -24,3 +24,19 @@ pub trait ProofJobBackend: Send + Sync + 'static {
         state: BackendProofState,
     ) -> anyhow::Result<BackendUpdate>;
 }
+
+pub trait ClaimedProofJobHandler: Send + Sync + 'static {
+    /// Error returned while handling a claimed proof job.
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    /// Returns whether this worker should attempt to claim a job now.
+    async fn ready_to_claim(&self, _worker_id: &str) -> bool {
+        true
+    }
+
+    /// Handles a claimed proof job.
+    async fn handle_claimed_job(&self, job: ProofJob) -> Result<(), Self::Error>;
+
+    /// Signals backend-specific spawned work to stop during shutdown.
+    fn shutdown(&self) {}
+}

@@ -30,6 +30,14 @@ pub enum ProofRequestError {
     /// No proof request with the given id is known.
     #[error("proof request {0} not found")]
     NotFound(ProofRequestId),
+    /// Conflicting row disappeared after insert conflict. Safe to retry.
+    #[error("proof_id {id}: proof request row missing after insert conflict; retry request_proof")]
+    RowMissingAfterConflict {
+        /// Proof request id that was expected to exist.
+        id: ProofRequestId,
+    },
+    #[error("The proof request {0} has been retried too many times")]
+    TooManyRetries(ProofRequestId),
     /// The proof is not ready yet.
     #[error("proof request {id} is not ready yet (status: {status})")]
     Pending {

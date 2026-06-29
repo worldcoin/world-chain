@@ -4,9 +4,8 @@ use crate::{
     store::ProverServiceStore,
     traits::{ProofJobQueue, ProofRequester},
     types::{
-        BackendProofState, BackendSession, BackendSessionState, BackendUpdate, LockId,
-        LockedBackendProofWork, LockedProofRequest, ProofBackend, ProofRequest, ProofRequestId,
-        ProofResponse, ProofStatus, ProofSubmissionLock, SessionType,
+        BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
+        ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType,
     },
 };
 use async_trait::async_trait;
@@ -89,19 +88,9 @@ impl ProofJobQueue for ProverService {
     async fn submit_proof(
         &self,
         proof: ProofResponse,
-        lock: ProofSubmissionLock,
+        lock: LockId,
     ) -> Result<(), ProofJobQueueError> {
-        match lock {
-            ProofSubmissionLock::ProofJob { lock_id } => {
-                self.store.submit_proof_from_proof_job(proof, lock_id).await
-            }
-            ProofSubmissionLock::BackendJob {
-                backend_job_id,
-                lock_id,
-            } => {
-                todo!()
-            }
-        }
+        self.store.submit_proof(proof, lock).await
     }
 
     async fn get_proof_session(
@@ -119,7 +108,7 @@ impl ProofJobQueue for ProverService {
         worker_id: String,
         lock_id: LockId,
         backend_session_id: String,
-        state: BackendSessionState,
+        state: BackendSessionStatus,
     ) -> Result<(), ProofJobQueueError> {
         self.record_proof_session(
             proof_id,

@@ -7,6 +7,9 @@ pub const DEFAULT_LOCK_TIMEOUT: Duration = Duration::from_mins(30);
 /// Default maximum number of proving attempts per request.
 pub const DEFAULT_MAX_ATTEMPTS: u32 = 3;
 
+/// Default maximum number of retries per request.
+pub const DEFAULT_MAX_RETRIES: i32 = 3;
+
 /// Default maximum number of requests queued per backend.
 pub const DEFAULT_MAX_QUEUE_LEN: usize = 1024;
 
