@@ -189,6 +189,69 @@ contract NitroProofVerifierTest is Test {
         assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
     }
 
+    function test_Verify_FalseForSignatureLength64() public {
+        // EIP-2098 "compact" 64-byte signatures are NOT accepted; the
+        // contract is strict about 65-byte (r || s || v) tuples.
+        bytes memory sig = new bytes(64);
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+    }
+
+    function test_Verify_FalseForEmptySignature() public {
+        bytes memory sig = "";
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+    }
+
+    function test_Verify_FalseForHighSSignature() public {
+        // EIP-2 low-s enforcement: even if (r, s) is a valid signature, an
+        // s > secp256k1n/2 must be rejected (signature malleability).
+        bytes memory sig = _sign(_commitment());
+        // Flip s to its high-s equivalent: s' = n - s, v' = v ^ 1.
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            let p := add(sig, 32)
+            r := mload(p)
+            s := mload(add(p, 32))
+            v := byte(0, mload(add(p, 64)))
+        }
+        uint256 n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141;
+        bytes32 sHigh = bytes32(n - uint256(s));
+        uint8 vFlipped = v == 27 ? 28 : 27;
+        bytes memory malleable = abi.encodePacked(r, sHigh, vFlipped);
+        // Original signature still validates...
+        assertTrue(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        // ...but the malleable high-s twin must NOT.
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(malleable, enclavePubKey)));
+    }
+
+    function test_Verify_FalseForInvalidV() public {
+        // Build a 65-byte signature with v outside {27, 28}.
+        bytes memory sig = _sign(_commitment());
+        // Overwrite v byte with 29.
+        assembly {
+            mstore8(add(add(sig, 32), 64), 29)
+        }
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        // Also v = 0 (legacy unsigned).
+        assembly {
+            mstore8(add(add(sig, 32), 64), 0)
+        }
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        // Also v = 26.
+        assembly {
+            mstore8(add(add(sig, 32), 64), 26)
+        }
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+    }
+
+    function test_Verify_FalseForAllZeroSignature() public {
+        // r = s = 0, v = 27. ecrecover returns address(0) → false.
+        bytes memory sig = new bytes(65);
+        sig[64] = bytes1(uint8(27));
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+    }
+
     /*//////////////////////////////////////////////////////////////
                               KEY GATES
     //////////////////////////////////////////////////////////////*/
@@ -207,6 +270,21 @@ contract NitroProofVerifierTest is Test {
         assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(hex"00", badKey)));
     }
 
+    function test_Verify_FalseForEmptyPublicKey() public view {
+        bytes memory emptyKey = "";
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(hex"00", emptyKey)));
+    }
+
+    function test_Verify_FalseForKeyWithLength65AndWrongPrefix() public {
+        // 65-byte length passes the length gate but the prefix check
+        // (`publicKey[0] != 0x04`) must still reject it.
+        bytes memory key = new bytes(65);
+        key[0] = 0x03;
+        // Use a real signature so we fail on the prefix check, not earlier.
+        bytes memory sig = _sign(_commitment());
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, key)));
+    }
+
     /*//////////////////////////////////////////////////////////////
                             ABI DECODE GATES
     //////////////////////////////////////////////////////////////*/
@@ -219,6 +297,75 @@ contract NitroProofVerifierTest is Test {
 
     function test_Verify_FalseForEmptyProof() public view {
         assertFalse(proofVerifier.verify(bytes32(0), ""));
+    }
+
+    function test_Verify_FalseForTruncatedProof() public view {
+        // 31 bytes is too short to even decode the first uint256.
+        assertFalse(
+            proofVerifier.verify(_expectedRootId(), hex"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+        );
+    }
+
+    function test_Verify_AcceptsZeroL2BlockNumber() public {
+        // Boundary: l2BlockNumber = 0 must work, since the rootId is
+        // recomputed deterministically and the commitment is signed over
+        // exactly that value.
+        bytes32 rootId = WorldChainProofLib.rootId(
+            DOMAIN_HASH, PARENT_REF, L2_POST_ROOT, 0, INTERMEDIATE_ROOTS, L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
+        );
+        bytes32 commitment = keccak256(abi.encodePacked(L2_POST_ROOT, uint64(0), ROLLUP_CFG));
+        bytes memory sig = _sign(commitment);
+        bytes memory proof = abi.encode(
+            DOMAIN_HASH,
+            PARENT_REF,
+            INTERMEDIATE_ROOTS,
+            L1_ORIGIN_HASH,
+            L1_ORIGIN_NUMBER,
+            ROLLUP_CFG,
+            L2_POST_ROOT,
+            uint64(0),
+            sig,
+            enclavePubKey
+        );
+        assertTrue(proofVerifier.verify(rootId, proof));
+    }
+
+    function test_Verify_FalseForWrongRollupConfigHash() public {
+        // The proof's `rollupConfigHash` participates in the signing
+        // commitment but NOT in the rootId reconstruction (see
+        // {NitroProofVerifier._decodeAndVerify}). A mismatched
+        // rollupConfigHash in the proof must therefore cause the signature
+        // recovery to mismatch the expected key and surface as `false`,
+        // even though `rootId` still reconstructs correctly.
+        bytes32 wrongCfg = keccak256("wrong-cfg");
+        bytes32 commitment = keccak256(abi.encodePacked(L2_POST_ROOT, L2_BLOCK, wrongCfg));
+        bytes memory sig = _sign(commitment);
+        // Build the proof claiming the ORIGINAL rollupConfigHash (so rootId
+        // reconstructs to the expected one), but with a signature over the
+        // wrong-cfg commitment.
+        bytes memory proof = abi.encode(
+            DOMAIN_HASH,
+            PARENT_REF,
+            INTERMEDIATE_ROOTS,
+            L1_ORIGIN_HASH,
+            L1_ORIGIN_NUMBER,
+            ROLLUP_CFG,
+            L2_POST_ROOT,
+            L2_BLOCK,
+            sig,
+            enclavePubKey
+        );
+        assertFalse(proofVerifier.verify(_expectedRootId(), proof));
+    }
+
+    function test_Verify_PerCallIdempotent() public {
+        // verify() is view: calling it twice must return the same result
+        // and not record any state change.
+        bytes memory sig = _sign(_commitment());
+        bytes memory proof = _proofBytes(sig, enclavePubKey);
+        bytes32 root = _expectedRootId();
+        assertTrue(proofVerifier.verify(root, proof));
+        assertTrue(proofVerifier.verify(root, proof));
     }
 
     /*//////////////////////////////////////////////////////////////

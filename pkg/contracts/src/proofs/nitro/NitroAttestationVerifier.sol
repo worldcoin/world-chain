@@ -239,10 +239,25 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
         // 1. Full on-chain COSE_Sign1 + cert chain + P-384 verification.
         Ptrs memory ptrs = validateAttestation(attestationTbs, signature);
 
-        // 1a. Cabundle sanity bound. The vendored {NitroValidator} only
-        //     enforces `cabundle.length > 0`; cap it here to keep adversarial
-        //     bundles from polluting {CertManager}'s cache. AWS Nitro PKI
-        //     bundles are always 3 entries in practice.
+        // 2. Post-validation: cabundle bound, freshness, PCR allowlist, key shape.
+        return _verifyValidated(attestationTbs, ptrs);
+    }
+
+    /// @dev Post-{validateAttestation} verification: enforces the cabundle
+    ///      bound, freshness, PCR allowlist, and extracts the certified key.
+    ///      Extracted from {verifyAttestation} so that test harnesses can
+    ///      exercise the individual branches with a synthesised `Ptrs` (every
+    ///      branch otherwise requires a fresh AWS-signed attestation, which
+    ///      can't be checked in as a deterministic fixture). The production
+    ///      code path is unchanged.
+    function _verifyValidated(bytes calldata attestationTbs, Ptrs memory ptrs)
+        internal
+        returns (bytes memory publicKey, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2)
+    {
+        // 1. Cabundle sanity bound. The vendored {NitroValidator} only
+        //    enforces `cabundle.length > 0`; cap it here to keep adversarial
+        //    bundles from polluting {CertManager}'s cache. AWS Nitro PKI
+        //    bundles are always 3 entries in practice.
         if (ptrs.cabundle.length > MAX_CABUNDLE_LEN) revert CabundleTooLong(ptrs.cabundle.length);
 
         // 2. Freshness check.
