@@ -141,7 +141,7 @@ impl ProverServiceStore {
             // retry the entire proof job if retry_count is less than the max_retry
             let retry_count: i32 = row.get("retry_count");
             // TODO: eventually this max can be a cli parameter
-            if retry_count > DEFAULT_MAX_RETRIES {
+            if retry_count > self.config.max_retries as i32 {
                 tx.rollback().await.map_err(request_db)?;
                 return Err(ProofRequestError::TooManyRetries(id));
             }
@@ -239,23 +239,22 @@ impl ProverServiceStore {
     ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
         loop {
             let mut tx = self.begin_queue_tx().await?;
-            let now = db_now();
+            let now = Utc::now();
             let Some(row) = sqlx::query(
-                "select proof_id, backend, game, root_claim, l2_block_number, l1_head,
-                        start_attempts
-                 from proof_requests
-                 where backend = $1
-                   and (
-                     proof_status = $2
-                     or (proof_status = $3 and lock_expires_at < $4)
-                   )
-                 order by created_at
-                 for update skip locked
-                 limit 1",
+                "SELECT proof_id, backend, game, root_claim, l2_block_number, l1_head, start_attempts
+                FROM proof_requests
+                WHERE backend = $1
+                AND (
+                    proof_status = $2
+                    OR (proof_status = $3 AND lock_expires_at < $4)
+                )
+                ORDER BY created_at
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1",
             )
             .bind(backend.as_str())
             .bind(ProofStatus::Created.as_str())
-            .bind(ProofStatus::Starting.as_str())
+            .bind(ProofStatus::Running.as_str())
             .bind(now)
             .fetch_optional(&mut *tx)
             .await
@@ -266,10 +265,10 @@ impl ProverServiceStore {
             };
 
             let proof_id = proof_id_from_row(&row).map_err(ProofJobQueueError::Internal)?;
-            let attempts: i32 = row.try_get("start_attempts").map_err(queue_db)?;
+            let attempts: i32 = row.try_get("attempt").map_err(queue_db)?;
             if attempts as u32 >= self.config.max_attempts {
                 let reason = format!("start lock expired after {attempts} attempts");
-                mark_proof_failed(&mut tx, proof_id, &reason, db_now())
+                mark_proof_failed(&mut tx, proof_id, &reason, now)
                     .await
                     .map_err(queue_db)?;
                 warn!(%proof_id, attempts, "proof job failed: start attempts exhausted");
