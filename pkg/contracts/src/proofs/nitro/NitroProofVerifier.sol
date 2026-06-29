@@ -132,6 +132,11 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
         if (v != 27 && v != 28) return false;
 
         address recovered = ecrecover(commitment, v, r, s);
+        // ecrecover returns address(0) for malformed (r, s, v) tuples that
+        // it cannot decode. Reject explicitly: matching against an
+        // expectedPublicKey that derives to address(0) is cryptographically
+        // impossible, but a defensive check here keeps the failure mode
+        // explicit and audit-friendly.
         if (recovered == address(0)) return false;
 
         // Ethereum address = last 20 bytes of keccak256(X || Y), i.e. of the

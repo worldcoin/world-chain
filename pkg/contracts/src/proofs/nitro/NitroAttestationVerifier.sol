@@ -75,6 +75,13 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
     ///         guard a forged future timestamp would be perpetually fresh.
     error AttestationFromFuture(uint256 driftSeconds);
 
+    /// @notice The attestation document's `cabundle` has more entries than
+    ///         {MAX_CABUNDLE_LEN} allows. AWS Nitro PKI bundles are always 3
+    ///         certificates (root → intermediate → leaf's issuer); anything
+    ///         significantly larger is treated as either a malformed or an
+    ///         adversarially-padded document.
+    error CabundleTooLong(uint256 found);
+
     /// @notice The number of PCRs in the doc is less than 3 (PCR0/1/2
     ///         required).
     error InsufficientPcrs(uint256 found);
@@ -125,6 +132,18 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
     ///         {MAX_AGE} by dating the document into the future.
     uint256 public constant CLOCK_SKEW_TOLERANCE = 5 minutes;
 
+    /// @notice Upper bound on the number of certificates in the
+    ///         attestation document's `cabundle`. AWS Nitro PKI bundles are
+    ///         always 3 certs in practice (root + 1 intermediate + leaf's
+    ///         issuer). A generous cap of 8 covers any plausible future
+    ///         expansion while preventing griefing via an artificially-long
+    ///         bundle. Defense in depth: a malicious bundle that exceeds
+    ///         this size would have already run out of gas in
+    ///         {validateAttestation}, but the explicit cap turns the failure
+    ///         into a clean revert and prevents polluting {CertManager}
+    ///         storage with junk intermediate-cert cache entries.
+    uint256 public constant MAX_CABUNDLE_LEN = 8;
+
     /*//////////////////////////////////////////////////////////////
                                 STORAGE
     //////////////////////////////////////////////////////////////*/
@@ -152,7 +171,21 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
 
     /// @notice Adds a PCR triple to the allowlist. Re-approving an
     ///         already-approved triple is a no-op (no event emitted).
+    ///
     /// @dev Only callable by the owner.
+    ///
+    ///      ## Hashing convention
+    ///      Each `pcr*` argument **must** equal `keccak256(rawPcr)` where
+    ///      `rawPcr` is the unmodified 48-byte SHA-384 PCR value as returned
+    ///      by the NSM (the binary contents of the `pcrs[i]` CBOR byte
+    ///      string in the attestation document) — not a hex string, not a
+    ///      truncated representation, not the keccak256 of a hex encoding.
+    ///
+    ///      `verifyAttestation` hashes the raw 48-byte PCRs the exact same
+    ///      way (see {_hashPcr} below, which `calldatacopy`s the bytes
+    ///      directly out of `attestationTbs` and runs `keccak256` on them).
+    ///      A mismatch in encoding will cause the on-chain check to silently
+    ///      reject every otherwise-valid attestation for that image.
     function approvePCRSet(bytes32 pcr0, bytes32 pcr1, bytes32 pcr2) external onlyOwner {
         _approvePCRSet(pcr0, pcr1, pcr2);
     }
@@ -209,6 +242,12 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
     {
         // 1. Full on-chain COSE_Sign1 + cert chain + P-384 verification.
         Ptrs memory ptrs = validateAttestation(attestationTbs, signature);
+
+        // 1a. Cabundle sanity bound. The vendored {NitroValidator} only
+        //     enforces `cabundle.length > 0`; cap it here to keep adversarial
+        //     bundles from polluting {CertManager}'s cache. AWS Nitro PKI
+        //     bundles are always 3 entries in practice.
+        if (ptrs.cabundle.length > MAX_CABUNDLE_LEN) revert CabundleTooLong(ptrs.cabundle.length);
 
         // 2. Freshness check.
         _checkFreshness(ptrs.timestamp);
@@ -269,7 +308,16 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
     }
 
     /// @dev Hashes the raw PCR bytes referenced by `pcrPtr` into a 32-byte
-    ///      digest. Reads directly from calldata; no memory allocation.
+    ///      digest. `pcrPtr.start()` / `pcrPtr.length()` come from the
+    ///      vendored CBOR decoder and point at the raw
+    ///      `pcrs[i]` byte string in the COSE_Sign1 payload. The upstream
+    ///      {NitroValidator} already enforces that this byte string is
+    ///      32 / 48 / 64 bytes long (see `require(... "invalid pcr")` in
+    ///      `NitroValidator._parsePcrs`), so for AWS Nitro / SHA-384 this is
+    ///      always the raw 48-byte PCR value. We `calldatacopy` it into
+    ///      scratch memory and run `keccak256` on it directly — no encoding,
+    ///      no hex conversion. Callers approving PCRs via {approvePCRSet}
+    ///      must hash the same raw bytes the same way.
     function _hashPcr(bytes calldata tbs, CborElement pcrPtr) internal pure returns (bytes32 hash) {
         uint256 start = pcrPtr.start();
         uint256 len = pcrPtr.length();
