@@ -601,47 +601,6 @@ impl ProofJobQueue for SharedProverService {
         self.service.get_next_proof(backend, worker_id).await
     }
 
-    async fn submit_backend_proof_state(
-        &self,
-        proof_id: ProofRequestId,
-        backend_proof_state: BackendProofState,
-        lock_id: LockId,
-        worker_id: String,
-    ) -> Result<(), ProofJobQueueError> {
-        self.service
-            .submit_backend_proof_state(proof_id, backend_proof_state, lock_id, worker_id)
-            .await
-    }
-
-    async fn get_next_backend_proof(
-        &self,
-        backend: ProofBackend,
-    ) -> Result<Option<LockedBackendProofWork>, ProofJobQueueError> {
-        self.service.get_next_backend_proof(backend).await
-    }
-
-    async fn complete_backend_proof_job(
-        &self,
-        backend_job_id: i64,
-        lock_id: LockId,
-        next_update: BackendUpdate,
-    ) -> Result<(), ProofJobQueueError> {
-        self.service
-            .complete_backend_proof_job(backend_job_id, lock_id, next_update)
-            .await
-    }
-
-    async fn fail_backend_proof_job(
-        &self,
-        backend_job_id: i64,
-        reason: String,
-        lock_id: LockId,
-    ) -> Result<(), ProofJobQueueError> {
-        self.service
-            .fail_backend_proof_job(backend_job_id, reason, lock_id)
-            .await
-    }
-
     async fn submit_proof(
         &self,
         proof: ProofResponse,
@@ -650,15 +609,32 @@ impl ProofJobQueue for SharedProverService {
         self.service.submit_proof(proof, lease).await
     }
 
-    async fn fail_proof(
+    async fn get_proof_session(
         &self,
         proof_id: ProofRequestId,
-        reason: String,
-        lock_id: LockId,
+        session_type: SessionType,
+    ) -> Result<Option<BackendSession>, ProofJobQueueError> {
+        self.service.get_proof_session(proof_id, session_type).await
+    }
+
+    async fn record_proof_session(
+        &self,
+        proof_id: ProofRequestId,
+        session_type: SessionType,
         worker_id: String,
+        lock_id: LockId,
+        backend_session_id: String,
+        state: BackendSessionState,
     ) -> Result<(), ProofJobQueueError> {
         self.service
-            .fail_proof(proof_id, reason, lock_id, worker_id)
+            .record_proof_session(
+                proof_id,
+                session_type,
+                worker_id,
+                lock_id,
+                backend_session_id,
+                state,
+            )
             .await
     }
 }

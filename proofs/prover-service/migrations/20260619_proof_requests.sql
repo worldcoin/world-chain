@@ -36,36 +36,20 @@ create table proof_sessions (
     id                  bigserial primary key,
     proof_id            bytea not null references proof_requests(proof_id),
 
-    backend             text not null,
-    phase               text not null,
-    backend_proof_id    text not null,
+    session_type        text not null,
+    backend_session_id  text not null,
 
     status              text not null,
-    advance_attempts    integer not null default 0,
-    next_poll_at        timestamptz not null,
-    lock_expires_at     timestamptz null,
-    lock_id             uuid null,
 
-    artifact            bytea null,
     failure_reason      text null,
 
     created_at          timestamptz not null,
-    updated_at          timestamptz not null,
     completed_at        timestamptz null,
 
-    unique (backend, backend_proof_id),
-    unique (proof_id, phase),
-
-    constraint proof_sessions_status_check
-        check (status in ('requested', 'completed', 'failed')),
-    constraint proof_sessions_phase_check
-        check (phase in ('single', 'range', 'aggregation'))
+    constraint proof_sessions_session_type_check
+        check (session_type in ('snark', 'stark'))
 );
 
-create index proof_sessions_due_idx
-    on proof_sessions (backend, next_poll_at)
-    where status = 'requested';
-
-create index proof_sessions_lock_idx
-    on proof_sessions (lock_expires_at)
-    where status = 'requested';
+create unique index proof_sessions_active_unique_idx
+    on proof_sessions (proof_id, session_type)
+    where status in ('submitting', 'running');

@@ -80,4 +80,7 @@ pub enum ProofJobQueueError {
     /// RPC transport error.
     #[error("RPC error: {0}")]
     Rpc(String),
+    /// No proof request with the given id is known.
+    #[error("proof request {0} not found")]
+    NotFound(ProofRequestId),
 }

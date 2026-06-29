@@ -191,7 +191,7 @@ pub struct ProofResponse {
 
 /// Durable status of an external backend proof job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BackendProofJobStatus {
+pub enum SessionStatus {
     /// External backend work was requested and is awaiting polling.
     Requested,
     /// External backend work completed successfully.
@@ -200,7 +200,7 @@ pub enum BackendProofJobStatus {
     Failed,
 }
 
-impl BackendProofJobStatus {
+impl SessionStatus {
     /// Stable database representation.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -208,6 +208,24 @@ impl BackendProofJobStatus {
             Self::Requested => "requested",
             Self::Completed => "completed",
             Self::Failed => "failed",
+        }
+    }
+
+    /// Whether this status represents a terminal backend session.
+    pub const fn is_terminal(&self) -> bool {
+        matches!(self, Self::Completed | Self::Failed)
+    }
+}
+
+impl TryFrom<&str> for SessionStatus {
+    type Error = String;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "REQUESTED" => Ok(Self::Requested),
+            "COMPLETED" => Ok(Self::Completed),
+            "FAILED" => Ok(Self::Failed),
+            other => Err(format!("Unknown session status: {other}")),
         }
     }
 }
@@ -398,4 +416,88 @@ pub enum BackendUpdate {
     Failed(String),
     /// No state change; poll again later.
     Noop,
+}
+
+/// The session type used to differentiate the proof type
+/// returned by SP1 backend.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SessionType {
+    /// The range proof.
+    Stark,
+    /// The final snark groth16 proof.
+    Snark,
+}
+
+impl SessionType {
+    /// Convert enum to static string representation
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Stark => "STARK",
+            Self::Snark => "SNARK",
+        }
+    }
+}
+
+impl TryFrom<&str> for SessionType {
+    type Error = String;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "STARK" => Ok(Self::Stark),
+            "SNARK" => Ok(Self::Snark),
+            other => Err(format!("Unknown session type: {other}")),
+        }
+    }
+}
+
+/// A backend session tracked in the prover service for a proof job.
+///
+/// Workers record the backend-issued identifier (for example an SP1 cluster or
+/// network proof id) so a restart or reclaim resumes the in-flight backend job
+/// rather than re-running it. The worker itself holds no local state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackendSession {
+    /// Backend-specific session identifier used to resume polling.
+    pub backend_session_id: String,
+    /// Current backend session lifecycle state.
+    pub state: BackendSessionState,
+}
+
+/// Lifecycle state of a tracked backend session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BackendSessionState {
+    /// Reservation placeholder before the backend job has been submitted.
+    Submitting,
+    /// Backend session is actively running.
+    Running,
+    /// Backend session completed successfully.
+    Completed,
+    /// Backend session failed.
+    Failed,
+}
+
+impl BackendSessionState {
+    /// Convert enum to static string representation
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Submitting => "SUBMITTING",
+            Self::Running => "RUNNING",
+            Self::Completed => "COMPLETED",
+            Self::Failed => "FAILED",
+        }
+    }
+}
+
+impl TryFrom<&str> for BackendSessionState {
+    type Error = String;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "SUBMITTING" => Ok(Self::Submitting),
+            "RUNNING" => Ok(Self::Running),
+            "COMPLETED" => Ok(Self::Completed),
+            "FAILED" => Ok(Self::Failed),
+            other => Err(format!("Unknown session status: {other}")),
+        }
+    }
 }
