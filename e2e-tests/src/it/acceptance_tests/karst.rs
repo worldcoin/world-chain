@@ -1,8 +1,9 @@
 //! Karst L2 checks adapted from upstream OP Stack acceptance coverage:
 //! https://github.com/ethereum-optimism/optimism/tree/develop/op-acceptance-tests/tests
 
-use std::{borrow::Cow, time::Instant};
+use std::time::Instant;
 
+use alloy_consensus::TxReceipt;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, B256, Bytes, TxKind, U256, address};
 use alloy_provider::{DynProvider, Provider, ProviderBuilder, RootProvider};
@@ -10,9 +11,10 @@ use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use alloy_sol_types::{SolCall, sol};
 use eyre::eyre::{Context, OptionExt, bail, ensure};
-use op_alloy_consensus::{TxDeposit, UserDepositSource};
+use op_alloy_consensus::{OpTxType, TxDeposit, UserDepositSource};
+use op_alloy_network::Optimism;
+use op_alloy_rpc_types::OpTransactionReceipt;
 use revm::bytecode::opcode;
-use serde_json::Value;
 use tokio::time::sleep;
 use tracing::{info, warn};
 
@@ -32,6 +34,7 @@ const BN256_PAIR_ELEMENT_LEN: usize = 192;
 const KARST_BN256_PAIR_MAX_INPUT_SIZE: usize = 300 * BN256_PAIR_ELEMENT_LEN;
 const KARST_BN256_PAIR_PROBE_GAS_LIMIT: u64 = 12_000_000;
 const MAX_TX_GAS: u64 = 16_777_216;
+const L1_BASE_FEE_HEADROOM_MULTIPLIER: u128 = 2;
 
 sol! {
     contract OptimismPortal {
@@ -329,7 +332,7 @@ async fn check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env: &RpcEnv) -> eyre:
     );
     let l2_hash = deposit_tx.tx_hash();
     let l2_receipt = wait_for_deposit_receipt(
-        env.chain_provider(),
+        env.optimism_provider(),
         "EIP-7825 deposit bypass L2 deposit",
         l2_hash,
         config.deposit_timeout,
@@ -358,7 +361,7 @@ struct DepositReceipt {
 }
 
 async fn wait_for_deposit_receipt(
-    provider: &RootProvider,
+    provider: &RootProvider<Optimism>,
     label: &str,
     hash: B256,
     timeout: std::time::Duration,
@@ -366,12 +369,12 @@ async fn wait_for_deposit_receipt(
 ) -> eyre::Result<DepositReceipt> {
     let deadline = Instant::now() + timeout;
     loop {
-        let receipt: Option<Value> = provider
-            .raw_request(Cow::Borrowed("eth_getTransactionReceipt"), (hash,))
+        let receipt = provider
+            .get_transaction_receipt(hash)
             .await
             .with_context(|| format!("{label}: failed to fetch receipt for {hash:?}"))?;
         if let Some(receipt) = receipt {
-            return parse_deposit_receipt(label, hash, &receipt);
+            return parse_deposit_receipt(label, hash, receipt);
         }
 
         ensure!(
@@ -382,32 +385,25 @@ async fn wait_for_deposit_receipt(
     }
 }
 
-fn parse_deposit_receipt(label: &str, hash: B256, receipt: &Value) -> eyre::Result<DepositReceipt> {
-    let tx_type = receipt
-        .get("type")
-        .and_then(Value::as_str)
-        .ok_or_eyre(format!("{label}: receipt for {hash:?} missing type"))?;
+fn parse_deposit_receipt(
+    label: &str,
+    hash: B256,
+    receipt: OpTransactionReceipt,
+) -> eyre::Result<DepositReceipt> {
+    let tx_type = receipt.inner.inner.receipt.tx_type();
     ensure!(
-        tx_type == "0x7e",
+        tx_type == OpTxType::Deposit,
         "{label}: expected deposit receipt type 0x7e for {hash:?}, got {tx_type}"
     );
-    let status = parse_hex_u64_field(label, hash, receipt, "status")?;
-    let block_number = parse_hex_u64_field(label, hash, receipt, "blockNumber")?;
+    let block_number = receipt
+        .inner
+        .block_number
+        .ok_or_eyre(format!("{label}: receipt for {hash:?} missing blockNumber"))?;
 
     Ok(DepositReceipt {
-        status: status == 1,
+        status: receipt.inner.inner.status(),
         block_number,
     })
-}
-
-fn parse_hex_u64_field(label: &str, hash: B256, receipt: &Value, field: &str) -> eyre::Result<u64> {
-    let value = receipt
-        .get(field)
-        .and_then(Value::as_str)
-        .ok_or_eyre(format!("{label}: receipt for {hash:?} missing {field}"))?;
-    let value = value.strip_prefix("0x").unwrap_or(value);
-    u64::from_str_radix(value, 16)
-        .with_context(|| format!("{label}: receipt for {hash:?} has invalid {field}"))
 }
 
 #[derive(Clone, Copy)]
@@ -437,7 +433,8 @@ async fn l1_fee_caps(provider: &DynProvider) -> eyre::Result<FeeCaps> {
         .ok_or_eyre("latest L1 block missing base fee while computing Karst deposit fee cap")?
         as u128;
     let max_fee_per_gas = base_fee
-        .saturating_mul(2)
+        // Keep the tx marketable if Sepolia base fee rises between estimate, submit, and inclusion.
+        .saturating_mul(L1_BASE_FEE_HEADROOM_MULTIPLIER)
         .saturating_add(max_priority_fee_per_gas)
         .max(gas_price)
         .max(max_priority_fee_per_gas);

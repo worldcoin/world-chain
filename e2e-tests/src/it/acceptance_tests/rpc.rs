@@ -1,4 +1,5 @@
 use alloy_eips::BlockNumberOrTag;
+use alloy_network::{Ethereum, Network};
 use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_client::RpcClient;
 use alloy_transport::layers::RetryBackoffLayer;
@@ -7,12 +8,14 @@ use alloy_transport_http::reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue},
 };
 use eyre::eyre::{WrapErr, eyre};
+use op_alloy_network::Optimism;
 
 use super::config::{CloudflareAccess, Config};
 
 #[derive(Clone)]
 pub(super) struct RpcEnv {
     provider: RootProvider,
+    optimism_provider: RootProvider<Optimism>,
     l1_provider: Option<RootProvider>,
     bundler_provider: Option<RootProvider>,
     config: Config,
@@ -25,7 +28,10 @@ impl RpcEnv {
         let Some(config) = Config::from_env()? else {
             return Ok(None);
         };
-        let provider = provider_for_url(&config.rpc_url, config.cloudflare_access.as_ref())?;
+        let provider =
+            provider_for_url::<Ethereum>(&config.rpc_url, config.cloudflare_access.as_ref())?;
+        let optimism_provider =
+            provider_for_url::<Optimism>(&config.rpc_url, config.cloudflare_access.as_ref())?;
         let l1_provider = config
             .karst_deposit
             .as_ref()
@@ -39,6 +45,7 @@ impl RpcEnv {
 
         Ok(Some(Self {
             provider,
+            optimism_provider,
             l1_provider,
             bundler_provider,
             config,
@@ -51,6 +58,10 @@ impl RpcEnv {
 
     pub(super) fn chain_provider(&self) -> &RootProvider {
         &self.provider
+    }
+
+    pub(super) fn optimism_provider(&self) -> &RootProvider<Optimism> {
+        &self.optimism_provider
     }
 
     pub(super) fn l1_provider(&self) -> Option<&RootProvider> {
@@ -77,17 +88,17 @@ impl RpcEnv {
     }
 }
 
-fn provider_for_url(
+fn provider_for_url<N: Network>(
     url: &url::Url,
     cloudflare_access: Option<&CloudflareAccess>,
-) -> eyre::Result<RootProvider> {
+) -> eyre::Result<RootProvider<N>> {
     let retry = RetryBackoffLayer::new(4, 100, 330);
     let http_client = http_client(cloudflare_access)?;
     let client = RpcClient::builder()
         .layer(retry)
         .http_with_client(http_client, url.clone());
 
-    Ok(RootProvider::new(client))
+    Ok(RootProvider::<N>::new(client))
 }
 
 fn http_client(access: Option<&CloudflareAccess>) -> eyre::Result<Client> {
