@@ -22,10 +22,10 @@ use world_chain_proposer::{
     ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
 };
 use world_chain_prover_service::{
-    BackendProofState, BackendUpdate, LeaseToken, LeasedBackendProofWork, LeasedProofRequest,
+    BackendProofState, BackendUpdate, LockId, LockedBackendProofWork, LockedProofRequest,
     ProofBackend, ProofData, ProofJobQueue, ProofJobQueueError, ProofRequest, ProofRequestError,
-    ProofRequestId, ProofRequester, ProofResponse, ProofStatus, ProofSubmissionLease,
-    ProverService, ProverServiceConfig,
+    ProofRequestId, ProofRequester, ProofResponse, ProofStatus, ProofSubmissionLock, ProverService,
+    ProverServiceConfig,
 };
 
 pub const BLOCK_INTERVAL: u64 = 10;
@@ -596,36 +596,38 @@ impl ProofJobQueue for SharedProverService {
     async fn get_next_proof(
         &self,
         backend: ProofBackend,
-    ) -> Result<Option<LeasedProofRequest>, ProofJobQueueError> {
-        self.service.get_next_proof(backend).await
+        worker_id: String,
+    ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
+        self.service.get_next_proof(backend, worker_id).await
     }
 
     async fn submit_backend_proof_state(
         &self,
         proof_id: ProofRequestId,
         backend_proof_state: BackendProofState,
-        lease_token: LeaseToken,
+        lock_id: LockId,
+        worker_id: String,
     ) -> Result<(), ProofJobQueueError> {
         self.service
-            .submit_backend_proof_state(proof_id, backend_proof_state, lease_token)
+            .submit_backend_proof_state(proof_id, backend_proof_state, lock_id, worker_id)
             .await
     }
 
     async fn get_next_backend_proof(
         &self,
         backend: ProofBackend,
-    ) -> Result<Option<LeasedBackendProofWork>, ProofJobQueueError> {
+    ) -> Result<Option<LockedBackendProofWork>, ProofJobQueueError> {
         self.service.get_next_backend_proof(backend).await
     }
 
     async fn complete_backend_proof_job(
         &self,
         backend_job_id: i64,
-        lease_token: LeaseToken,
+        lock_id: LockId,
         next_update: BackendUpdate,
     ) -> Result<(), ProofJobQueueError> {
         self.service
-            .complete_backend_proof_job(backend_job_id, lease_token, next_update)
+            .complete_backend_proof_job(backend_job_id, lock_id, next_update)
             .await
     }
 
@@ -633,17 +635,17 @@ impl ProofJobQueue for SharedProverService {
         &self,
         backend_job_id: i64,
         reason: String,
-        lease_token: LeaseToken,
+        lock_id: LockId,
     ) -> Result<(), ProofJobQueueError> {
         self.service
-            .fail_backend_proof_job(backend_job_id, reason, lease_token)
+            .fail_backend_proof_job(backend_job_id, reason, lock_id)
             .await
     }
 
     async fn submit_proof(
         &self,
         proof: ProofResponse,
-        lease: ProofSubmissionLease,
+        lease: ProofSubmissionLock,
     ) -> Result<(), ProofJobQueueError> {
         self.service.submit_proof(proof, lease).await
     }
@@ -652,8 +654,11 @@ impl ProofJobQueue for SharedProverService {
         &self,
         proof_id: ProofRequestId,
         reason: String,
-        lease_token: LeaseToken,
+        lock_id: LockId,
+        worker_id: String,
     ) -> Result<(), ProofJobQueueError> {
-        self.service.fail_proof(proof_id, reason, lease_token).await
+        self.service
+            .fail_proof(proof_id, reason, lock_id, worker_id)
+            .await
     }
 }

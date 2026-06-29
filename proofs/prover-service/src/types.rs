@@ -264,37 +264,37 @@ impl TryFrom<&str> for BackendProofPhase {
     }
 }
 
-/// Opaque token proving ownership of a leased row.
+/// Opaque token proving ownership of a locked row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct LeaseToken(pub Uuid);
+pub struct LockId(pub Uuid);
 
-impl LeaseToken {
-    /// Generate a fresh lease token.
+impl LockId {
+    /// Generate a fresh lock id.
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
 }
 
-impl Default for LeaseToken {
+impl Default for LockId {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl std::fmt::Display for LeaseToken {
+impl std::fmt::Display for LockId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-/// Initial proof request leased from `proof_requests`.
+/// Initial proof request locked from `proof_requests`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LeasedProofRequest {
+pub struct LockedProofRequest {
     /// The user-facing proof request.
     pub request: ProofRequest,
-    /// Token required for updates to the leased proof job.
-    pub lease_token: LeaseToken,
+    /// Token required for updates to the locked proof job.
+    pub lock_id: LockId,
 }
 
 /// Durable external backend state.
@@ -356,31 +356,31 @@ pub struct BackendProofWork {
     pub state: BackendProofState,
 }
 
-/// Durable backend job leased from `proof_sessions`.
+/// Durable backend job locked from `proof_sessions`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LeasedBackendProofWork {
+pub struct LockedBackendProofWork {
     /// Database identifier of the backend job row.
     pub backend_job_id: i64,
     /// Backend work to advance.
     pub work: BackendProofWork,
-    /// Token required for updates to the leased backend job.
-    pub lease_token: LeaseToken,
+    /// Token required for updates to the locked backend job.
+    pub lock_id: LockId,
 }
 
-/// Lease location for final proof submission.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ProofSubmissionLease {
+/// Locked location for final proof submission.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProofSubmissionLock {
     /// Final proof was produced while starting a user-facing proof job.
     ProofJob {
-        /// Token for the leased `proof_requests` row.
-        lease_token: LeaseToken,
+        /// Token for the locked `proof_requests` row.
+        lock_id: LockId,
     },
     /// Final proof was produced while advancing a durable backend job.
     BackendJob {
         /// Database identifier of the backend job row.
         backend_job_id: i64,
-        /// Token for the leased `proof_sessions` row.
-        lease_token: LeaseToken,
+        /// Token for the locked `proof_sessions` row.
+        lock_id: LockId,
     },
 }
 

@@ -1,7 +1,7 @@
 use crate::{
-    BackendProofId, BackendProofState, BackendUpdate, LeasedProofRequest, ProofBackend, ProofData,
+    BackendProofId, BackendProofState, BackendUpdate, LockedProofRequest, ProofBackend, ProofData,
     ProofJobQueue, ProofJobQueueError, ProofRequest, ProofRequestError, ProofRequester,
-    ProofResponse, ProofStatus, ProofSubmissionLease, ProverService, ProverServiceConfig,
+    ProofResponse, ProofStatus, ProofSubmissionLock, ProverService, ProverServiceConfig,
     RpcProverServiceClient, start_rpc_server,
 };
 use alloy_primitives::{Address, B256, Bytes};
@@ -12,7 +12,7 @@ use testcontainers_modules::postgres;
 
 fn test_config() -> ProverServiceConfig {
     ProverServiceConfig {
-        lease_timeout: Duration::from_secs(60),
+        lock_timeout: Duration::from_secs(60),
         max_attempts: 2,
         max_queue_len: 4,
         backend_poll_interval: Duration::from_millis(25),
@@ -80,6 +80,10 @@ fn backend_id(seed: u8) -> BackendProofId {
     BackendProofId(B256::with_last_byte(seed))
 }
 
+fn worker_id() -> String {
+    "test-worker".to_string()
+}
+
 #[test]
 fn request_id_is_deterministic() {
     let sp1 = request(ProofBackend::Sp1, 1);
@@ -99,12 +103,12 @@ async fn nitro_style_full_lifecycle() {
     let id = service.request_proof(req.clone()).await.unwrap();
     assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Queued);
 
-    let leased = service
-        .get_next_proof(ProofBackend::Nitro)
+    let locked = service
+        .get_next_proof(ProofBackend::Nitro, worker_id())
         .await
         .unwrap()
         .expect("job available");
-    assert_eq!(leased.request, req);
+    assert_eq!(locked.request, req);
     assert_eq!(
         service.proof_status(id).await.unwrap(),
         ProofStatus::Starting
@@ -121,8 +125,8 @@ async fn nitro_style_full_lifecycle() {
     service
         .submit_proof(
             response.clone(),
-            ProofSubmissionLease::ProofJob {
-                lease_token: leased.lease_token,
+            ProofSubmissionLock::ProofJob {
+                lock_id: locked.lock_id,
             },
         )
         .await
@@ -142,21 +146,22 @@ async fn backend_job_workflow_reaches_final_proof() {
     let service = ctx.service;
     let req = request(ProofBackend::Sp1, 2);
     let id = service.request_proof(req.clone()).await.unwrap();
-    let LeasedProofRequest {
-        request: leased_req,
-        lease_token,
+    let LockedProofRequest {
+        request: locked_req,
+        lock_id,
     } = service
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
         .expect("job available");
-    assert_eq!(leased_req, req);
+    assert_eq!(locked_req, req);
 
     service
         .submit_backend_proof_state(
             id,
             BackendProofState::Range { id: backend_id(1) },
-            lease_token,
+            lock_id,
+            worker_id(),
         )
         .await
         .unwrap();
@@ -177,7 +182,7 @@ async fn backend_job_workflow_reaches_final_proof() {
     );
 
     service
-        .complete_backend_proof_job(range.backend_job_id, range.lease_token, BackendUpdate::Noop)
+        .complete_backend_proof_job(range.backend_job_id, range.lock_id, BackendUpdate::Noop)
         .await
         .unwrap();
     assert!(
@@ -197,7 +202,7 @@ async fn backend_job_workflow_reaches_final_proof() {
     service
         .complete_backend_proof_job(
             range.backend_job_id,
-            range.lease_token,
+            range.lock_id,
             BackendUpdate::Pending {
                 state: BackendProofState::Aggregation { id: backend_id(2) },
             },
@@ -217,9 +222,9 @@ async fn backend_job_workflow_reaches_final_proof() {
     service
         .submit_proof(
             proof_for(&req),
-            ProofSubmissionLease::BackendJob {
+            ProofSubmissionLock::BackendJob {
                 backend_job_id: aggregation.backend_job_id,
-                lease_token: aggregation.lease_token,
+                lock_id: aggregation.lock_id,
             },
         )
         .await
@@ -231,9 +236,9 @@ async fn backend_job_workflow_reaches_final_proof() {
 }
 
 #[tokio::test]
-async fn stale_start_lease_is_rejected() {
+async fn stale_start_lock_is_rejected() {
     let Some(ctx) = service(ProverServiceConfig {
-        lease_timeout: Duration::from_millis(10),
+        lock_timeout: Duration::from_millis(10),
         ..test_config()
     })
     .await
@@ -244,34 +249,34 @@ async fn stale_start_lease_is_rejected() {
     let req = request(ProofBackend::Sp1, 3);
     let id = service.request_proof(req.clone()).await.unwrap();
     let first = service
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
-        .expect("first lease");
+        .expect("first lock");
     tokio::time::sleep(Duration::from_millis(20)).await;
     let second = service
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
-        .expect("second lease");
+        .expect("second lock");
 
     assert!(matches!(
         service
             .submit_proof(
                 proof_for(&req),
-                ProofSubmissionLease::ProofJob {
-                    lease_token: first.lease_token,
+                ProofSubmissionLock::ProofJob {
+                    lock_id: first.lock_id,
                 },
             )
             .await,
-        Err(ProofJobQueueError::StaleLease)
+        Err(ProofJobQueueError::StaleLocked)
     ));
 
     service
         .submit_proof(
             proof_for(&req),
-            ProofSubmissionLease::ProofJob {
-                lease_token: second.lease_token,
+            ProofSubmissionLock::ProofJob {
+                lock_id: second.lock_id,
             },
         )
         .await
@@ -292,27 +297,33 @@ async fn failed_attempts_retry_until_exhausted() {
     let id = service.request_proof(req.clone()).await.unwrap();
 
     let first = service
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
-        .expect("first lease");
+        .expect("first lock");
     service
         .fail_proof(
             id,
             "witness generation failed".to_string(),
-            first.lease_token,
+            first.lock_id,
+            worker_id(),
         )
         .await
         .unwrap();
     assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Queued);
 
     let second = service
-        .get_next_proof(ProofBackend::Sp1)
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
-        .expect("second lease");
+        .expect("second lock");
     service
-        .fail_proof(id, "backend rejected".to_string(), second.lease_token)
+        .fail_proof(
+            id,
+            "backend rejected".to_string(),
+            second.lock_id,
+            worker_id(),
+        )
         .await
         .unwrap();
     assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Failed);
@@ -326,16 +337,17 @@ async fn backend_attempt_errors_retry_until_exhausted() {
     let service = ctx.service;
     let req = request(ProofBackend::Sp1, 5);
     let id = service.request_proof(req.clone()).await.unwrap();
-    let leased = service
-        .get_next_proof(ProofBackend::Sp1)
+    let locked = service
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
-        .expect("start lease");
+        .expect("start lock");
     service
         .submit_backend_proof_state(
             id,
             BackendProofState::Range { id: backend_id(1) },
-            leased.lease_token,
+            locked.lock_id,
+            worker_id(),
         )
         .await
         .unwrap();
@@ -344,12 +356,12 @@ async fn backend_attempt_errors_retry_until_exhausted() {
         .get_next_backend_proof(ProofBackend::Sp1)
         .await
         .unwrap()
-        .expect("first backend lease");
+        .expect("first backend lock");
     service
         .fail_backend_proof_job(
             first.backend_job_id,
             "temporary SP1 poll failure".to_string(),
-            first.lease_token,
+            first.lock_id,
         )
         .await
         .unwrap();
@@ -370,13 +382,13 @@ async fn backend_attempt_errors_retry_until_exhausted() {
         .get_next_backend_proof(ProofBackend::Sp1)
         .await
         .unwrap()
-        .expect("second backend lease");
+        .expect("second backend lock");
     assert_eq!(second.backend_job_id, first.backend_job_id);
     service
         .fail_backend_proof_job(
             second.backend_job_id,
             "temporary SP1 poll failure".to_string(),
-            second.lease_token,
+            second.lock_id,
         )
         .await
         .unwrap();
@@ -391,16 +403,17 @@ async fn invalid_completed_backend_proof_fails_immediately() {
     let service = ctx.service;
     let req = request(ProofBackend::Sp1, 6);
     let id = service.request_proof(req.clone()).await.unwrap();
-    let leased = service
-        .get_next_proof(ProofBackend::Sp1)
+    let locked = service
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
-        .expect("start lease");
+        .expect("start lock");
     service
         .submit_backend_proof_state(
             id,
             BackendProofState::Range { id: backend_id(1) },
-            leased.lease_token,
+            locked.lock_id,
+            worker_id(),
         )
         .await
         .unwrap();
@@ -409,7 +422,7 @@ async fn invalid_completed_backend_proof_fails_immediately() {
         .get_next_backend_proof(ProofBackend::Sp1)
         .await
         .unwrap()
-        .expect("backend lease");
+        .expect("backend lock");
     let invalid_proof = ProofData::Nitro {
         attestation: Bytes::from(vec![0xcc]),
         signature: Bytes::from(vec![0xdd]),
@@ -418,7 +431,7 @@ async fn invalid_completed_backend_proof_fails_immediately() {
         service
             .complete_backend_proof_job(
                 backend.backend_job_id,
-                backend.lease_token,
+                backend.lock_id,
                 BackendUpdate::Complete(invalid_proof),
             )
             .await,
@@ -436,23 +449,24 @@ async fn invalid_completed_backend_proof_fails_immediately() {
 }
 
 #[tokio::test]
-async fn failed_completed_backend_submission_releases_lease() {
+async fn failed_completed_backend_submission_relocks_lock() {
     let Some(ctx) = service(test_config()).await else {
         return;
     };
     let service = ctx.service;
     let req = request(ProofBackend::Sp1, 7);
     let id = service.request_proof(req.clone()).await.unwrap();
-    let leased = service
-        .get_next_proof(ProofBackend::Sp1)
+    let locked = service
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
-        .expect("start lease");
+        .expect("start lock");
     service
         .submit_backend_proof_state(
             id,
             BackendProofState::Range { id: backend_id(1) },
-            leased.lease_token,
+            locked.lock_id,
+            worker_id(),
         )
         .await
         .unwrap();
@@ -460,7 +474,7 @@ async fn failed_completed_backend_submission_releases_lease() {
         .get_next_backend_proof(ProofBackend::Sp1)
         .await
         .unwrap()
-        .expect("backend lease");
+        .expect("backend lock");
 
     sqlx::query("update proof_requests set backend = 'corrupt' where proof_id = $1")
         .bind(id.0.as_slice())
@@ -472,7 +486,7 @@ async fn failed_completed_backend_submission_releases_lease() {
         service
             .complete_backend_proof_job(
                 backend.backend_job_id,
-                backend.lease_token,
+                backend.lock_id,
                 BackendUpdate::Complete(proof_for(&req).proof),
             )
             .await,
@@ -480,8 +494,8 @@ async fn failed_completed_backend_submission_releases_lease() {
     ));
 
     let row = sqlx::query(
-        "select status, advance_attempts, locked_until is null as unlocked,
-                lease_token is null as lease_cleared
+        "select status, advance_attempts, lock_expires_at is null as unlocked,
+                lock_id is null as lock_cleared
          from proof_sessions
          where id = $1",
     )
@@ -492,7 +506,7 @@ async fn failed_completed_backend_submission_releases_lease() {
     assert_eq!(row.get::<String, _>("status"), "requested");
     assert_eq!(row.get::<i32, _>("advance_attempts"), 1);
     assert!(row.get::<bool, _>("unlocked"));
-    assert!(row.get::<bool, _>("lease_cleared"));
+    assert!(row.get::<bool, _>("lock_cleared"));
 }
 
 #[tokio::test]
@@ -503,16 +517,17 @@ async fn backend_noop_polling_does_not_exhaust_attempts() {
     let service = ctx.service;
     let req = request(ProofBackend::Sp1, 8);
     let id = service.request_proof(req.clone()).await.unwrap();
-    let leased = service
-        .get_next_proof(ProofBackend::Sp1)
+    let locked = service
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
-        .expect("start lease");
+        .expect("start lock");
     service
         .submit_backend_proof_state(
             id,
             BackendProofState::Range { id: backend_id(1) },
-            leased.lease_token,
+            locked.lock_id,
+            worker_id(),
         )
         .await
         .unwrap();
@@ -523,7 +538,7 @@ async fn backend_noop_polling_does_not_exhaust_attempts() {
             .get_next_backend_proof(ProofBackend::Sp1)
             .await
             .unwrap()
-            .expect("backend lease");
+            .expect("backend lock");
         if let Some(previous) = backend_job_id {
             assert_eq!(backend.backend_job_id, previous);
         } else {
@@ -532,7 +547,7 @@ async fn backend_noop_polling_does_not_exhaust_attempts() {
         service
             .complete_backend_proof_job(
                 backend.backend_job_id,
-                backend.lease_token,
+                backend.lock_id,
                 BackendUpdate::Noop,
             )
             .await
@@ -548,11 +563,11 @@ async fn backend_noop_polling_does_not_exhaust_attempts() {
         .get_next_backend_proof(ProofBackend::Sp1)
         .await
         .unwrap()
-        .expect("backend lease after repeated noops");
+        .expect("backend lock after repeated noops");
     service
         .complete_backend_proof_job(
             backend.backend_job_id,
-            backend.lease_token,
+            backend.lock_id,
             BackendUpdate::Pending {
                 state: BackendProofState::Aggregation { id: backend_id(2) },
             },
@@ -566,9 +581,9 @@ async fn backend_noop_polling_does_not_exhaust_attempts() {
 }
 
 #[tokio::test]
-async fn expired_backend_leases_count_toward_attempts() {
+async fn expired_backend_locks_count_toward_attempts() {
     let Some(ctx) = service(ProverServiceConfig {
-        lease_timeout: Duration::from_millis(10),
+        lock_timeout: Duration::from_millis(10),
         ..test_config()
     })
     .await
@@ -578,16 +593,17 @@ async fn expired_backend_leases_count_toward_attempts() {
     let service = ctx.service;
     let req = request(ProofBackend::Sp1, 9);
     let id = service.request_proof(req.clone()).await.unwrap();
-    let leased = service
-        .get_next_proof(ProofBackend::Sp1)
+    let locked = service
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
-        .expect("start lease");
+        .expect("start lock");
     service
         .submit_backend_proof_state(
             id,
             BackendProofState::Range { id: backend_id(1) },
-            leased.lease_token,
+            locked.lock_id,
+            worker_id(),
         )
         .await
         .unwrap();
@@ -596,13 +612,13 @@ async fn expired_backend_leases_count_toward_attempts() {
         .get_next_backend_proof(ProofBackend::Sp1)
         .await
         .unwrap()
-        .expect("first backend lease");
+        .expect("first backend lock");
     tokio::time::sleep(Duration::from_millis(20)).await;
     let second = service
         .get_next_backend_proof(ProofBackend::Sp1)
         .await
         .unwrap()
-        .expect("second backend lease");
+        .expect("second backend lock");
     assert_eq!(second.backend_job_id, first.backend_job_id);
     assert_eq!(
         service.proof_status(id).await.unwrap(),
@@ -635,17 +651,17 @@ async fn rpc_end_to_end() {
     let id = client.request_proof(req.clone()).await.unwrap();
     assert_eq!(client.proof_status(id).await.unwrap(), ProofStatus::Queued);
 
-    let leased = client
-        .get_next_proof(ProofBackend::Sp1)
+    let locked = client
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
         .expect("job available");
-    assert_eq!(leased.request, req);
+    assert_eq!(locked.request, req);
     client
         .submit_proof(
             proof_for(&req),
-            ProofSubmissionLease::ProofJob {
-                lease_token: leased.lease_token,
+            ProofSubmissionLock::ProofJob {
+                lock_id: locked.lock_id,
             },
         )
         .await
@@ -669,16 +685,17 @@ async fn rpc_backend_invalid_proof_maps_to_typed_error() {
 
     let req = request(ProofBackend::Sp1, 10);
     let id = client.request_proof(req.clone()).await.unwrap();
-    let leased = client
-        .get_next_proof(ProofBackend::Sp1)
+    let locked = client
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
-        .expect("start lease");
+        .expect("start lock");
     client
         .submit_backend_proof_state(
             id,
             BackendProofState::Range { id: backend_id(1) },
-            leased.lease_token,
+            locked.lock_id,
+            worker_id(),
         )
         .await
         .unwrap();
@@ -686,7 +703,7 @@ async fn rpc_backend_invalid_proof_maps_to_typed_error() {
         .get_next_backend_proof(ProofBackend::Sp1)
         .await
         .unwrap()
-        .expect("backend lease");
+        .expect("backend lock");
 
     let invalid_proof = ProofData::Nitro {
         attestation: Bytes::from(vec![0xcc]),
@@ -696,7 +713,7 @@ async fn rpc_backend_invalid_proof_maps_to_typed_error() {
         client
             .complete_backend_proof_job(
                 backend.backend_job_id,
-                backend.lease_token,
+                backend.lock_id,
                 BackendUpdate::Complete(invalid_proof),
             )
             .await,
