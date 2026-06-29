@@ -4,9 +4,7 @@ use std::{
 };
 
 use ::eyre::eyre::eyre;
-use alloy_consensus::Block;
 use alloy_primitives::B256;
-use op_alloy_consensus::OpTxEnvelope;
 use reth_basic_payload_builder::{
     HeaderForPayload, PayloadBuilder, PayloadConfig, PayloadState, PayloadTaskGuard, PrecachedState,
 };
@@ -15,7 +13,7 @@ use reth_optimism_payload_builder::OpPayloadAttrs;
 use reth_optimism_primitives::OpPrimitives;
 use reth_payload_builder::{BuildNewPayload, PayloadId, PayloadJobGenerator};
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderError};
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory,
 };
@@ -28,7 +26,6 @@ use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_primitives::{
     access_list::FlashblockAccessList,
     ed25519_dalek::SigningKey,
-    flashblocks::recovered_block_from_flashblocks,
     p2p::Authorization,
     payload_id::{force_op_payload_id_v3, payload_id_with_version},
 };
@@ -182,7 +179,7 @@ where
 
         let payload_task_guard = PayloadTaskGuard::new(self.config.max_payload_tasks);
 
-        let maybe_pre_state = self.check_for_pre_state(self.client.chain_spec(), id)?;
+        let maybe_pre_state = self.check_for_pre_state(id)?;
 
         let payload_id = config.payload_id();
         let mut authorization = self.authorizations.clone();
@@ -340,7 +337,6 @@ where
     /// next flashblock index to build on top of.
     fn check_for_pre_state(
         &self,
-        chain_spec: Arc<WorldChainSpec>,
         id: PayloadId,
     ) -> Result<
         Option<(Builder::BuiltPayload, u64, Option<FlashblockAccessList>)>,
@@ -353,27 +349,16 @@ where
             PayloadBuilderError::Other(eyre!("Failed to reduce flashblocks: {}", e).into())
         })?;
 
-        if *flashblock.payload_id() == id {
+        let latest_payload = self.flashblocks_state.latest_payload();
+
+        if let Some(latest) = latest_payload
+            && latest.id() == id
+        {
             // If we have a pre-confirmed state, we can use it to build the payload
             debug!(target: "flashblocks::payload_builder", payload_id = %id, "Using pre-confirmed state for payload");
 
-            let block: RecoveredBlock<Block<OpTxEnvelope>> =
-                recovered_block_from_flashblocks(chain_spec, flashblock.clone()).map_err(|e| {
-                    PayloadBuilderError::Other(
-                        eyre!("Failed to recover block from flashblocks: {}", e).into(),
-                    )
-                })?;
-            let sealed = block.into_sealed_block();
-
-            let payload = OpBuiltPayload::new(
-                id,
-                Arc::new(sealed),
-                flashblock.flashblock().metadata.fees,
-                None,
-            );
-
             return Ok(Some((
-                payload,
+                latest,
                 flashblock.flashblock().index + 1,
                 flashblock
                     .diff()

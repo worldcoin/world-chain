@@ -246,6 +246,11 @@ impl FlashblocksExecutionCoordinator {
         self.inner.write().payload_events = Some(tx);
     }
 
+    /// Returns the cloned `latest_payload` if present
+    pub fn latest_payload(&self) -> Option<OpBuiltPayload> {
+        self.inner.read().latest_payload.clone().map(|p| p.0)
+    }
+
     /// Broadcasts a new payload to cache in the in memory tree.
     pub fn broadcast_payload(
         &self,
