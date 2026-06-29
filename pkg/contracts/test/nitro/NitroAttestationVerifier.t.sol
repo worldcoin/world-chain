@@ -12,9 +12,7 @@ import {ICertManager} from "@nitro-validator/ICertManager.sol";
 ///      both the stale and the future-dated branches without constructing a
 ///      full Nitro attestation document.
 contract NitroAttestationVerifierHarness is NitroAttestationVerifier {
-    constructor(ICertManager cm, address owner_, bytes32[] memory p0, bytes32[] memory p1, bytes32[] memory p2)
-        NitroAttestationVerifier(cm, owner_, p0, p1, p2)
-    {}
+    constructor(ICertManager cm, address owner_) NitroAttestationVerifier(cm, owner_) {}
 
     function checkFreshness(uint64 timestampMs) external view {
         _checkFreshness(timestampMs);
@@ -47,15 +45,13 @@ contract NitroAttestationVerifierTest is Test {
     function setUp() public {
         certManager = new CertManager();
 
-        bytes32[] memory p0 = new bytes32[](1);
-        bytes32[] memory p1 = new bytes32[](1);
-        bytes32[] memory p2 = new bytes32[](1);
-        p0[0] = PCR0_A;
-        p1[0] = PCR1_A;
-        p2[0] = PCR2_A;
+        verifier = new NitroAttestationVerifier(ICertManager(address(certManager)), owner);
+        harness = new NitroAttestationVerifierHarness(ICertManager(address(certManager)), owner);
 
-        verifier = new NitroAttestationVerifier(ICertManager(address(certManager)), owner, p0, p1, p2);
-        harness = new NitroAttestationVerifierHarness(ICertManager(address(certManager)), owner, p0, p1, p2);
+        // The allowlist is empty at deploy; pre-approve PCR set A for the
+        // suite, leaving PCR set B unapproved for negative-path tests.
+        vm.prank(owner);
+        verifier.approvePCRSet(PCR0_A, PCR1_A, PCR2_A);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -70,33 +66,16 @@ contract NitroAttestationVerifierTest is Test {
         assertEq(verifier.owner(), owner);
     }
 
-    function test_Constructor_ApprovesInitialPCRSets() public view {
+    function test_Constructor_DeploysWithEmptyAllowlist() public {
+        NitroAttestationVerifier v = new NitroAttestationVerifier(ICertManager(address(certManager)), owner);
+        assertFalse(v.isPCRSetApproved(PCR0_A, PCR1_A, PCR2_A));
+        assertFalse(v.isPCRSetApproved(PCR0_B, PCR1_B, PCR2_B));
+    }
+
+    function test_SetupApprovedPcrSetA() public view {
+        // setUp pre-approves PCR set A; sanity-check it.
         assertTrue(verifier.isPCRSetApproved(PCR0_A, PCR1_A, PCR2_A));
         assertFalse(verifier.isPCRSetApproved(PCR0_B, PCR1_B, PCR2_B));
-    }
-
-    function test_Constructor_RevertsOnPcrLengthMismatch() public {
-        bytes32[] memory p0 = new bytes32[](2);
-        bytes32[] memory p1 = new bytes32[](1);
-        bytes32[] memory p2 = new bytes32[](1);
-        vm.expectRevert(bytes("initial PCR length mismatch"));
-        new NitroAttestationVerifier(ICertManager(address(certManager)), owner, p0, p1, p2);
-    }
-
-    function test_Constructor_AcceptsMultipleInitialPCRSets() public {
-        bytes32[] memory p0 = new bytes32[](2);
-        bytes32[] memory p1 = new bytes32[](2);
-        bytes32[] memory p2 = new bytes32[](2);
-        p0[0] = PCR0_A;
-        p1[0] = PCR1_A;
-        p2[0] = PCR2_A;
-        p0[1] = PCR0_B;
-        p1[1] = PCR1_B;
-        p2[1] = PCR2_B;
-
-        NitroAttestationVerifier v = new NitroAttestationVerifier(ICertManager(address(certManager)), owner, p0, p1, p2);
-        assertTrue(v.isPCRSetApproved(PCR0_A, PCR1_A, PCR2_A));
-        assertTrue(v.isPCRSetApproved(PCR0_B, PCR1_B, PCR2_B));
     }
 
     /*//////////////////////////////////////////////////////////////
