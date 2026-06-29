@@ -21,6 +21,10 @@ const DEFAULT_USER_OPERATION_SPONSORSHIP_VALIDITY_SECS: u64 = 60;
 const DEFAULT_USER_OPERATION_SPONSORSHIP_MAX_COST_WEI: &str = "1000000000000000000";
 const DEFAULT_TX_TIMEOUT_SECS: u64 = 60;
 const DEFAULT_TX_POLL_INTERVAL_MS: u64 = 500;
+const DEFAULT_DEPOSIT_TIMEOUT_SECS: u64 = 300;
+const DEFAULT_DEPOSIT_POLL_INTERVAL_MS: u64 = 2_000;
+const DEFAULT_DEPOSIT_VALUE_WEI: &str = "0";
+const DEFAULT_DEPOSIT_MAX_L1_GAS: u64 = 20_000_000;
 const WORLD_CHAIN_DEVNET_CHAIN_ID: u64 = 69420;
 const DEV_US_EAST_1_NETWORK: &str = "dev-us-east-1";
 const ANVIL_L2_FAUCET_PRIVATE_KEY: &str =
@@ -58,6 +62,7 @@ pub(super) struct Config {
     pub(super) cloudflare_access: Option<CloudflareAccess>,
     pub(super) bundler: Option<BundlerConfig>,
     pub(super) karst_enabled: bool,
+    pub(super) karst_deposit: Option<KarstDepositConfig>,
 }
 
 #[derive(Clone)]
@@ -86,6 +91,17 @@ pub(super) struct BundlerConfig {
     pub(super) sponsorship_validity: Duration,
 }
 
+#[derive(Clone)]
+pub(super) struct KarstDepositConfig {
+    pub(super) l1_rpc_url: Url,
+    pub(super) l1_key: PrivateKeySigner,
+    pub(super) optimism_portal: Address,
+    pub(super) deposit_value: U256,
+    pub(super) deposit_max_l1_gas: u64,
+    pub(super) deposit_timeout: Duration,
+    pub(super) deposit_poll_interval: Duration,
+}
+
 impl Config {
     pub(super) fn from_env() -> eyre::Result<Option<Self>> {
         let Some(rpc_url) = optional_env("ACCEPTANCE_RPC_URL") else {
@@ -100,6 +116,7 @@ impl Config {
         let bundler = bundler_config_from_env(expected_chain_id, cloudflare_access.as_ref())?;
         let network = optional_env("ACCEPTANCE_NETWORK").unwrap_or_else(|| "local".to_string());
         let karst_enabled = parse_optional_value("ACCEPTANCE_KARST_ENABLED", false)?;
+        let karst_deposit = karst_deposit_config_from_env(karst_enabled)?;
         let l2_key = l2_key_from_env(&network, karst_enabled)?;
         if karst_enabled && l2_key.is_none() {
             bail!("ACCEPTANCE_L2_KEY is required when ACCEPTANCE_KARST_ENABLED=true");
@@ -135,6 +152,7 @@ impl Config {
             cloudflare_access,
             bundler,
             karst_enabled,
+            karst_deposit,
         }))
     }
 
@@ -146,6 +164,12 @@ impl Config {
 impl BundlerConfig {
     pub(super) fn rpc_target(&self) -> String {
         rpc_target(&self.rpc_url)
+    }
+}
+
+impl KarstDepositConfig {
+    pub(super) fn l1_rpc_target(&self) -> String {
+        rpc_target(&self.l1_rpc_url)
     }
 }
 
@@ -161,6 +185,53 @@ fn cloudflare_access_from_env() -> eyre::Result<Option<CloudflareAccess>> {
         (None, None) => Ok(None),
         _ => bail!("CF_ACCESS_CLIENT_ID and CF_ACCESS_CLIENT_SECRET must be set together"),
     }
+}
+
+fn karst_deposit_config_from_env(karst_enabled: bool) -> eyre::Result<Option<KarstDepositConfig>> {
+    let deposit_enabled = parse_optional_value("ACCEPTANCE_KARST_DEPOSIT_ENABLED", false)?;
+    if !deposit_enabled {
+        return Ok(None);
+    }
+
+    if !karst_enabled {
+        bail!(
+            "ACCEPTANCE_KARST_ENABLED=true is required when ACCEPTANCE_KARST_DEPOSIT_ENABLED=true"
+        );
+    }
+
+    let Some(l1_rpc_url) = optional_env("ACCEPTANCE_L1_RPC_URL") else {
+        bail!("ACCEPTANCE_L1_RPC_URL is required when ACCEPTANCE_KARST_DEPOSIT_ENABLED=true");
+    };
+    let Some(l1_key) = optional_env("ACCEPTANCE_L1_KEY") else {
+        bail!("ACCEPTANCE_L1_KEY is required when ACCEPTANCE_KARST_DEPOSIT_ENABLED=true");
+    };
+    let Some(optimism_portal) = optional_env("ACCEPTANCE_OPTIMISM_PORTAL") else {
+        bail!("ACCEPTANCE_OPTIMISM_PORTAL is required when ACCEPTANCE_KARST_DEPOSIT_ENABLED=true");
+    };
+
+    Ok(Some(KarstDepositConfig {
+        l1_rpc_url: l1_rpc_url
+            .parse()
+            .wrap_err("failed to parse Karst deposit L1 RPC URL")?,
+        l1_key: parse_value("ACCEPTANCE_L1_KEY", &l1_key)?,
+        optimism_portal: parse_value("ACCEPTANCE_OPTIMISM_PORTAL", &optimism_portal)?,
+        deposit_value: parse_optional_value_from_str(
+            "ACCEPTANCE_DEPOSIT_VALUE_WEI",
+            DEFAULT_DEPOSIT_VALUE_WEI,
+        )?,
+        deposit_max_l1_gas: parse_optional_value(
+            "ACCEPTANCE_DEPOSIT_MAX_L1_GAS",
+            DEFAULT_DEPOSIT_MAX_L1_GAS,
+        )?,
+        deposit_timeout: Duration::from_secs(parse_optional_value(
+            "ACCEPTANCE_DEPOSIT_TIMEOUT_SECS",
+            DEFAULT_DEPOSIT_TIMEOUT_SECS,
+        )?),
+        deposit_poll_interval: Duration::from_millis(parse_optional_value(
+            "ACCEPTANCE_DEPOSIT_POLL_INTERVAL_MS",
+            DEFAULT_DEPOSIT_POLL_INTERVAL_MS,
+        )?),
+    }))
 }
 
 fn bundler_config_from_env(

@@ -138,12 +138,16 @@ jobs:
         env:
           ACCEPTANCE_NETWORK: ${{ matrix.network }}
           ACCEPTANCE_RPC_URL: ${{ matrix.rpc_url }}
+          ACCEPTANCE_L1_RPC_URL: ${{ vars.ACCEPTANCE_L1_RPC_URL }}
           ACCEPTANCE_BUNDLER_RPC_URL: ${{ matrix.network == 'dev-eu-central-2' && inputs.bundler_rpc_url != '' && inputs.bundler_rpc_url || matrix.bundler_rpc_url }}
           ACCEPTANCE_CHAIN_ID: ${{ matrix.expected_chain_id }}
           ACCEPTANCE_4337_ENTRY_POINT: ${{ matrix.entry_point }}
           ACCEPTANCE_4337_MODULE: ${{ matrix.safe_4337_module }}
           ACCEPTANCE_4337_WALLET_DEPLOYER: ${{ matrix.safe_4337_wallet_deployer }}
           ACCEPTANCE_KARST_ENABLED: ${{ matrix.karst_enabled }}
+          ACCEPTANCE_KARST_DEPOSIT_ENABLED: ${{ matrix.karst_enabled == 'true' && (vars.ACCEPTANCE_KARST_DEPOSIT_ENABLED || 'false') || 'false' }}
+          ACCEPTANCE_L1_KEY: ${{ secrets.ACCEPTANCE_L1_KEY }}
+          ACCEPTANCE_OPTIMISM_PORTAL: ${{ vars.ACCEPTANCE_OPTIMISM_PORTAL }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
           ACCEPTANCE_BUNDLER_CF_ACCESS_CLIENT_ID: ${{ secrets.ACCEPTANCE_BUNDLER_CF_ACCESS_CLIENT_ID }}

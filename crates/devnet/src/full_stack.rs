@@ -158,6 +158,7 @@ pub struct FullStackWorldDevnet {
     sequencers: Vec<SequencerService>,
     observability: Option<ObservabilityStack>,
     l1: L1DevChain,
+    optimism_portal: String,
     components: Vec<DevnetComponent>,
     removed_services: Vec<DevnetComponent>,
     _tempdir: TempDir,
@@ -498,6 +499,7 @@ impl FullStackWorldDevnet {
         let conductor_rpc_internal = host_internal_url(&conductors[0].rpc_url)?;
         let l2_rpc_internal = host_internal_url(&sequencers[0].rpc_url)?;
         let game_factory = l1_address(&artifacts.l1_addresses, "DisputeGameFactoryProxy")?;
+        let optimism_portal = l1_address(&artifacts.l1_addresses, "OptimismPortalProxy")?;
 
         let (batcher, proposer, challenger) = if config.op_challenger {
             let (batcher, proposer, challenger) = tokio::try_join!(
@@ -662,6 +664,7 @@ impl FullStackWorldDevnet {
             sequencers,
             observability,
             l1,
+            optimism_portal,
             components,
             removed_services: topology.removed_services,
             _tempdir: artifacts.workdir,
@@ -670,6 +673,10 @@ impl FullStackWorldDevnet {
 
     pub fn l1_rpc_url(&self) -> &str {
         self.l1.rpc_url()
+    }
+
+    pub fn optimism_portal(&self) -> &str {
+        &self.optimism_portal
     }
 
     pub fn l2_rpc_url(&self) -> &str {
@@ -858,17 +865,22 @@ l2ContractsLocator = "{}"
   SuperchainProxyAdminOwner = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
   SuperchainGuardian = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
   ProtocolVersionsOwner = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
+  Challenger = "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720"
 
 [[chains]]
   id = "0x{:064x}"
   baseFeeVaultRecipient = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
   l1FeeVaultRecipient = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
   sequencerFeeVaultRecipient = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+  operatorFeeVaultRecipient = "0x1CBd3b2770909D4e10f157cABC84C7264073C9Ec"
   eip1559DenominatorCanyon = 250
   eip1559Denominator = 50
   eip1559Elasticity = 10
+  gasLimit = 60000000
   operatorFeeScalar = 0
   operatorFeeConstant = 0
+  minBaseFee = 0
+  daFootprintGasScalar = 0
   [chains.roles]
     l1ProxyAdminOwner = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
     l2ProxyAdminOwner = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
@@ -3526,11 +3538,16 @@ mod tests {
     }
 
     #[test]
-    fn renders_op_deployer_intent_with_tagged_contract_locators() {
+    fn renders_op_deployer_intent_with_embedded_contract_artifacts() {
         let intent = render_intent(&HaSequencerConfig::default());
 
-        assert!(intent.contains("l1ContractsLocator = \"tag://op-contracts/v7.0.0-rc.4\""));
-        assert!(intent.contains("l2ContractsLocator = \"tag://op-contracts/v7.0.0-rc.4\""));
+        assert!(intent.contains("l1ContractsLocator = \"embedded\""));
+        assert!(intent.contains("l2ContractsLocator = \"embedded\""));
+        assert!(intent.contains("Challenger = \"0xa0Ee7A142d267C1f36714E4a8F75612F20a79720\""));
+        assert!(intent.contains(
+            "operatorFeeVaultRecipient = \"0x1CBd3b2770909D4e10f157cABC84C7264073C9Ec\""
+        ));
+        assert!(intent.contains("gasLimit = 60000000"));
         assert!(!intent.contains("https://storage.googleapis.com/oplabs-contract-artifacts"));
     }
 }

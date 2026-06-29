@@ -13,6 +13,7 @@ use super::config::{CloudflareAccess, Config};
 #[derive(Clone)]
 pub(super) struct RpcEnv {
     provider: RootProvider,
+    l1_provider: Option<RootProvider>,
     bundler_provider: Option<RootProvider>,
     config: Config,
 }
@@ -25,6 +26,11 @@ impl RpcEnv {
             return Ok(None);
         };
         let provider = provider_for_url(&config.rpc_url, config.cloudflare_access.as_ref())?;
+        let l1_provider = config
+            .karst_deposit
+            .as_ref()
+            .map(|deposit| provider_for_url(&deposit.l1_rpc_url, None))
+            .transpose()?;
         let bundler_provider = config
             .bundler
             .as_ref()
@@ -33,6 +39,7 @@ impl RpcEnv {
 
         Ok(Some(Self {
             provider,
+            l1_provider,
             bundler_provider,
             config,
         }))
@@ -44,6 +51,10 @@ impl RpcEnv {
 
     pub(super) fn chain_provider(&self) -> &RootProvider {
         &self.provider
+    }
+
+    pub(super) fn l1_provider(&self) -> Option<&RootProvider> {
+        self.l1_provider.as_ref()
     }
 
     pub(super) fn bundler_provider(&self) -> Option<&RootProvider> {
