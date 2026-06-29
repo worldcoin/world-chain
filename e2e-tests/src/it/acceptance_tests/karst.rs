@@ -254,7 +254,7 @@ async fn check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env: &RpcEnv) -> eyre:
         .erased();
     let request =
         deposit_transaction_request(l1_sender, config.optimism_portal, config.deposit_value);
-    // Portal metering reads tx.gasprice during eth_estimateGas, before send-time fillers run.
+    // Send-time fee fillers do not run during our explicit eth_estimateGas preflight.
     let request = with_estimated_l1_fees(&l1_provider, request).await?;
 
     let estimated_gas = match l1_provider.estimate_gas(request.clone()).await {
