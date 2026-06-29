@@ -5,7 +5,6 @@ import {NitroValidator} from "@nitro-validator/NitroValidator.sol";
 import {ICertManager} from "@nitro-validator/ICertManager.sol";
 import {CborElement, LibCborElement, CborDecode} from "@nitro-validator/CborDecode.sol";
 import {LibBytes} from "@nitro-validator/LibBytes.sol";
-import {Secp256k1} from "./libraries/Secp256k1.sol";
 import {INitroAttestationVerifier} from "./INitroAttestationVerifier.sol";
 
 /// @title NitroAttestationVerifier
@@ -58,8 +57,9 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier {
     error PcrMismatch(uint8 index);
 
     /// @notice The document does not embed a `public_key` field, or the embedded
-    ///         key is not a recognized SEC1 secp256k1 encoding (33-byte
-    ///         compressed or 65-byte uncompressed).
+    ///         key is not a 65-byte SEC1-uncompressed (`0x04 || X || Y`)
+    ///         secp256k1 key. The World Nitro enclave is expected to emit its
+    ///         ephemeral key in uncompressed form.
     error InvalidEmbeddedPublicKey();
 
     /*//////////////////////////////////////////////////////////////
@@ -128,18 +128,16 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier {
         _requirePcr(attestationTbs, ptrs.pcrs[1], pcr1, 1);
         _requirePcr(attestationTbs, ptrs.pcrs[2], pcr2, 2);
 
-        // 4. Extract the certified enclave public key. The NSM may embed it in
-        //    either SEC1-uncompressed (65 bytes) or SEC1-compressed (33 bytes)
-        //    form; we normalize to uncompressed so downstream consumers always
-        //    see the same shape and can derive the Ethereum address with a
-        //    single keccak256.
-        if (ptrs.publicKey.isNull()) revert InvalidEmbeddedPublicKey();
-        uint256 keyLen = ptrs.publicKey.length();
-        if (keyLen != 33 && keyLen != 65) revert InvalidEmbeddedPublicKey();
+        // 4. Extract the certified enclave public key. The World Nitro enclave
+        //    always emits a 65-byte SEC1-uncompressed (`0x04 || X || Y`) key, so
+        //    we accept that shape exclusively.
+        if (ptrs.publicKey.isNull() || ptrs.publicKey.length() != 65) {
+            revert InvalidEmbeddedPublicKey();
+        }
 
         bytes memory tbsMem = attestationTbs;
-        bytes memory rawKey = tbsMem.slice(ptrs.publicKey.start(), keyLen);
-        publicKey = Secp256k1.normalizeToUncompressed(rawKey);
+        publicKey = tbsMem.slice(ptrs.publicKey.start(), 65);
+        if (publicKey[0] != 0x04) revert InvalidEmbeddedPublicKey();
 
         emit AttestationVerified(keccak256(attestationTbs), publicKey, pcr0, pcr1, pcr2, ptrs.timestamp);
     }

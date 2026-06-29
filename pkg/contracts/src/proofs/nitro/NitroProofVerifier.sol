@@ -4,7 +4,6 @@ pragma solidity 0.8.28;
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
 import {WorldChainProofLib} from "../WorldChainProofLib.sol";
 import {NitroEnclaveKeyRegistry} from "./NitroEnclaveKeyRegistry.sol";
-import {Secp256k1} from "./libraries/Secp256k1.sol";
 
 /// @title NitroProofVerifier
 /// @author Worldcoin
@@ -45,8 +44,9 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     /// @notice Thrown when {verifyProof} is called with a malformed signature.
     error InvalidSignatureLength();
 
-    /// @notice Thrown when the supplied public key is not a valid SEC1
-    ///         encoding (65-byte uncompressed or 33-byte compressed).
+    /// @notice Thrown when the supplied public key is not a 65-byte
+    ///         SEC1-uncompressed secp256k1 key (`0x04 || X || Y`). The World
+    ///         Nitro enclave always emits this form.
     error InvalidPublicKey();
 
     /*//////////////////////////////////////////////////////////////
@@ -110,9 +110,9 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
         view
         returns (bool)
     {
-        bytes memory uncompressed = Secp256k1.normalizeToUncompressed(expectedPublicKey);
+        if (expectedPublicKey.length != 65 || expectedPublicKey[0] != 0x04) revert InvalidPublicKey();
 
-        if (!registry.isKeyRegistered(uncompressed)) return false;
+        if (!registry.isKeyRegistered(expectedPublicKey)) return false;
 
         if (signature.length != 65) revert InvalidSignatureLength();
 
@@ -134,7 +134,10 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
         address recovered = ecrecover(commitment, v, r, s);
         if (recovered == address(0)) return false;
 
-        return recovered == Secp256k1.ethAddressFromUncompressed(uncompressed);
+        // Ethereum address = last 20 bytes of keccak256(X || Y), i.e. of the
+        // 64-byte tail after the `0x04` prefix.
+        bytes32 keyHash = keccak256(expectedPublicKey[1:65]);
+        return recovered == address(uint160(uint256(keyHash)));
     }
 
     /*//////////////////////////////////////////////////////////////
