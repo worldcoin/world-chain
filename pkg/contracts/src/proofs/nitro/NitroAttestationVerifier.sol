@@ -140,26 +140,11 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
     ///                     caches verified certificates from the AWS Nitro
     ///                     PKI.
     /// @param owner_       Initial owner allowed to manage {approvedPCRSets}.
-    /// @param initialPcr0  Array of PCR0 measurements to approve at deploy
-    ///                     time. Must be the same length as `initialPcr1`
-    ///                     and `initialPcr2`. May be empty.
-    /// @param initialPcr1  Array of PCR1 measurements.
-    /// @param initialPcr2  Array of PCR2 measurements.
-    constructor(
-        ICertManager certManager_,
-        address owner_,
-        bytes32[] memory initialPcr0,
-        bytes32[] memory initialPcr1,
-        bytes32[] memory initialPcr2
-    ) NitroValidator(certManager_) Ownable(owner_) {
-        require(
-            initialPcr0.length == initialPcr1.length && initialPcr1.length == initialPcr2.length,
-            "initial PCR length mismatch"
-        );
-        for (uint256 i = 0; i < initialPcr0.length; i++) {
-            _approvePCRSet(initialPcr0[i], initialPcr1[i], initialPcr2[i]);
-        }
-    }
+    /// @dev The PCR allowlist starts empty: no attestation can be verified
+    ///      until the owner approves at least one PCR triple via
+    ///      {approvePCRSet}. Deployers should script that as an immediate
+    ///      follow-up to the constructor call — see `DeployNitro.s.sol`.
+    constructor(ICertManager certManager_, address owner_) NitroValidator(certManager_) Ownable(owner_) {}
 
     /*//////////////////////////////////////////////////////////////
                            ALLOWLIST MANAGEMENT

@@ -18,9 +18,18 @@ import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol"
 ///        - `OWNER` — address that becomes the owner of both
 ///          {NitroAttestationVerifier} (manages the PCR allowlist) and
 ///          {NitroEnclaveKeyRegistry} (revokes keys).
-///        - `INITIAL_PCR0`, `INITIAL_PCR1`, `INITIAL_PCR2` — the keccak256
-///          digests of the raw PCR0/1/2 measurements of the first approved
-///          enclave image (each PCR is 48 bytes; hash before encoding).
+///
+///      ## REQUIRED follow-up: approve the initial PCR set(s)
+///      {NitroAttestationVerifier} is deployed with an empty allowlist, so
+///      `verifyAttestation` will revert with `PCRSetNotApproved` until the
+///      owner approves at least one enclave image. Immediately after this
+///      script runs, the owner MUST submit:
+///
+///        verifier.approvePCRSet(keccak256(rawPcr0), keccak256(rawPcr1),
+///                               keccak256(rawPcr2))
+///
+///      for every approved EIF. The raw PCRs are the 48-byte SHA-384 hashes
+///      reported by `nitro-cli describe-eif`.
 ///
 ///      ## Operator pre-warm step (required before first registerKey)
 ///      {CertManager} caches verified certificates so the ~63M-gas X.509 +
@@ -46,21 +55,13 @@ contract DeployNitro is Script {
     function run() external {
         address owner = vm.envAddress("OWNER");
 
-        bytes32[] memory initialPcr0 = new bytes32[](1);
-        bytes32[] memory initialPcr1 = new bytes32[](1);
-        bytes32[] memory initialPcr2 = new bytes32[](1);
-        initialPcr0[0] = vm.envBytes32("INITIAL_PCR0");
-        initialPcr1[0] = vm.envBytes32("INITIAL_PCR1");
-        initialPcr2[0] = vm.envBytes32("INITIAL_PCR2");
-
         vm.startBroadcast();
 
         CertManager certManager = new CertManager();
         console.log("CertManager:", address(certManager));
 
-        NitroAttestationVerifier verifier = new NitroAttestationVerifier(
-            ICertManager(address(certManager)), owner, initialPcr0, initialPcr1, initialPcr2
-        );
+        NitroAttestationVerifier verifier =
+            new NitroAttestationVerifier(ICertManager(address(certManager)), owner);
         console.log("NitroAttestationVerifier:", address(verifier));
 
         NitroEnclaveKeyRegistry registry = new NitroEnclaveKeyRegistry(verifier, owner);
@@ -70,5 +71,10 @@ contract DeployNitro is Script {
         console.log("NitroProofVerifier:", address(proofVerifier));
 
         vm.stopBroadcast();
+
+        console.log("");
+        console.log("NEXT STEPS (owner):");
+        console.log("  1. Pre-warm CertManager with the AWS Nitro PKI intermediates.");
+        console.log("  2. verifier.approvePCRSet(pcr0, pcr1, pcr2) for each approved EIF.");
     }
 }
