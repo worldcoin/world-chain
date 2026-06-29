@@ -8,6 +8,9 @@ The MVP checks:
 - when `ACCEPTANCE_KARST_ENABLED=true`, Karst L2 execution checks send funded
   EOA transactions covering MODEXP bounds/gas floors, P256VERIFY gas floor,
   bn256 pairing input limit, CLZ, and transaction gas cap rejection
+- when `ACCEPTANCE_KARST_DEPOSIT_ENABLED=true`, the Karst checks also submit an
+  L1 portal deposit whose derived L2 deposit gas limit is above the Karst
+  transaction gas cap, then require the L2 deposit receipt to land
 - when `ACCEPTANCE_BUNDLER_RPC_URL` is set, Rundler accepts sponsored ERC-4337 v0.7 user operations for ephemeral Safe smart account wallets
 - the sponsored ERC-4337 checks cover concurrent wallet deployment, parallel post-deploy user operations across every wallet, multi-lane 2D nonce bursts, replay/gap rejection, and sponsorship constraint rejection
 
@@ -27,8 +30,12 @@ The MVP checks:
 | `ACCEPTANCE_MIN_BLOCK_INCREMENTS` | no | `1` | Minimum required block-number increase. |
 | `ACCEPTANCE_TX_TIMEOUT_SECS` | no | `60` | Max time to wait for an acceptance test L2 transaction receipt. |
 | `ACCEPTANCE_TX_POLL_INTERVAL_MS` | no | `500` | Poll interval while waiting for acceptance test L2 transaction receipts. |
-| `ACCEPTANCE_L2_KEY` | yes when Karst checks are enabled | unset | Funded L2 EOA key used by acceptance checks that submit L2 transactions. |
-| `ACCEPTANCE_KARST_ENABLED` | no | `false` | Enables Karst L2 execution checks. Requires `ACCEPTANCE_L2_KEY`. |
+| `ACCEPTANCE_L2_KEY` | no | fallback development key | Funded L2 EOA key used by acceptance checks that submit L2 transactions. |
+| `ACCEPTANCE_KARST_ENABLED` | no | `false` | Enables Karst L2 execution checks. |
+| `ACCEPTANCE_KARST_DEPOSIT_ENABLED` | no | `false` | Enables the Karst L1 deposit bypass check. Requires `ACCEPTANCE_KARST_ENABLED=true`. |
+| `ACCEPTANCE_L1_RPC_URL` | yes when Karst deposit checks are enabled | unset | L1 RPC endpoint used to submit the OptimismPortal deposit transaction. |
+| `ACCEPTANCE_L1_KEY` | yes when Karst deposit checks are enabled | unset | Funded L1 EOA key used to pay L1 gas for the OptimismPortal deposit transaction. |
+| `ACCEPTANCE_OPTIMISM_PORTAL` | yes when Karst deposit checks are enabled | unset | L1 OptimismPortal proxy address. |
 | `ACCEPTANCE_BUNDLER_RPC_URL` | no | unset | Rundler RPC endpoint. If unset, ERC-4337 checks are skipped. |
 | `ACCEPTANCE_4337_ENTRY_POINT` | no on chain `69420`; yes otherwise | `0x0000000071727De22E5E9d8BAf0edAc6f37da032` on chain `69420` | ERC-4337 v0.7 EntryPoint address. |
 | `ACCEPTANCE_4337_MODULE` | no on chain `69420`; yes otherwise | `0x70673A08a5B1086585d39979Fb2d84FDC0bB6Aaf` on chain `69420` | Safe4337 module used to sign Safe user operations. |
@@ -82,6 +89,21 @@ ACCEPTANCE_RPC_URL="$(jq -r .primary.l2_rpc_url target/devnet/endpoints.json)" \
 ACCEPTANCE_CHAIN_ID="$(jq -r .chain_id target/devnet/endpoints.json)" \
 ACCEPTANCE_KARST_ENABLED=true \
 ACCEPTANCE_L2_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
+cargo nextest run --profile ci -p world-chain-tests \
+  -E 'test(/acceptance_tests::test_network/)'
+```
+
+Example with Karst L1 deposit bypass checks enabled against a local devnet:
+
+```sh
+ACCEPTANCE_RPC_URL="$(jq -r .primary.sequencer_rpc_url target/devnet/endpoints.json)" \
+ACCEPTANCE_CHAIN_ID="$(jq -r .chain_id target/devnet/endpoints.json)" \
+ACCEPTANCE_KARST_ENABLED=true \
+ACCEPTANCE_L2_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
+ACCEPTANCE_KARST_DEPOSIT_ENABLED=true \
+ACCEPTANCE_L1_RPC_URL="$(jq -r .primary.l1_rpc_url target/devnet/endpoints.json)" \
+ACCEPTANCE_L1_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
+ACCEPTANCE_OPTIMISM_PORTAL="$(jq -r .primary.optimism_portal target/devnet/endpoints.json)" \
 cargo nextest run --profile ci -p world-chain-tests \
   -E 'test(/acceptance_tests::test_network/)'
 ```

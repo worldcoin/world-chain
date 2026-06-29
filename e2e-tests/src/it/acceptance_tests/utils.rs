@@ -168,7 +168,7 @@ impl L2TxSender {
     }
 }
 
-async fn wait_for_transaction_receipt(
+pub(super) async fn wait_for_transaction_receipt(
     provider: &DynProvider,
     label: &str,
     hash: B256,
