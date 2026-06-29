@@ -183,7 +183,7 @@ impl ProverServiceStore {
         &self,
         proof_id: ProofRequestId,
     ) -> Result<ProofStatus, ProofRequestError> {
-        let row = sqlx::query("select proof_status from proof_requests where proof_id = $1")
+        let row = sqlx::query("SELECT proof_status FROM proof_requests WHERE proof_id = $1")
             .bind(proof_id_bytes(proof_id))
             .fetch_optional(&self.pool)
             .await
@@ -197,7 +197,7 @@ impl ProverServiceStore {
         proof_id: ProofRequestId,
     ) -> Result<ProofResponse, ProofRequestError> {
         let row = sqlx::query(
-            "select proof_status, proof_data, failure_reason from proof_requests where proof_id = $1",
+            "SELECT proof_status, proof_data, failure_reason FROM proof_requests WHERE proof_id = $1",
         )
         .bind(proof_id_bytes(proof_id))
         .fetch_optional(&self.pool)
