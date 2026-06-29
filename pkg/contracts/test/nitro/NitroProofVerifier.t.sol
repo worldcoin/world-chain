@@ -44,8 +44,8 @@ contract NitroProofVerifierTest is Test {
         enclaveWallet = vm.createWallet("enclave");
         enclavePubKey = _uncompressedKey(enclaveWallet.publicKeyX, enclaveWallet.publicKeyY);
 
-        attestationVerifier.setExpectation(TBS, SIG, PCR0, PCR1, PCR2, enclavePubKey);
-        registry.registerKey(TBS, SIG, PCR0, PCR1, PCR2);
+        attestationVerifier.setExpectation(TBS, SIG, enclavePubKey, PCR0, PCR1, PCR2);
+        registry.registerKey(TBS, SIG);
     }
 
     function _uncompressedKey(uint256 x, uint256 y) internal pure returns (bytes memory out) {
