@@ -216,11 +216,7 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
     ///      {NitroEnclaveKeyRegistry} for the full rationale on why an
     ///      on-chain cascade is deliberately not implemented.
     function revokePCRSet(bytes32 pcr0, bytes32 pcr1, bytes32 pcr2) external onlyOwner {
-        bytes32 h = _pcrSetHash(pcr0, pcr1, pcr2);
-        if (approvedPCRSets[h]) {
-            approvedPCRSets[h] = false;
-            emit PCRSetRevoked(pcr0, pcr1, pcr2);
-        }
+        _revokePCRSet(pcr0, pcr1, pcr2);
     }
 
     /// @notice Returns whether the given PCR triple is currently approved.
@@ -285,6 +281,14 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
         if (!approvedPCRSets[h]) {
             approvedPCRSets[h] = true;
             emit PCRSetApproved(pcr0, pcr1, pcr2);
+        }
+    }
+
+    function _revokePCRSet(bytes32 pcr0, bytes32 pcr1, bytes32 pcr2) internal {
+        bytes32 h = _pcrSetHash(pcr0, pcr1, pcr2);
+        if (approvedPCRSets[h]) {
+            approvedPCRSets[h] = false;
+            emit PCRSetRevoked(pcr0, pcr1, pcr2);
         }
     }
 
