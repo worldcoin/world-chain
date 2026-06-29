@@ -146,7 +146,7 @@ jobs:
         env:
           ACCEPTANCE_NETWORK: ${{ matrix.network }}
           ACCEPTANCE_RPC_URL: ${{ matrix.rpc_url }}
-          ACCEPTANCE_L1_RPC_URL: ${{ secrets.ACCEPTANCE_L1_RPC_URL }}
+          ACCEPTANCE_L1_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
           ACCEPTANCE_BUNDLER_RPC_URL: ${{ matrix.network == 'dev-eu-central-2' && inputs.bundler_rpc_url != '' && inputs.bundler_rpc_url || matrix.bundler_rpc_url }}
           ACCEPTANCE_CHAIN_ID: ${{ matrix.expected_chain_id }}
           ACCEPTANCE_4337_ENTRY_POINT: ${{ matrix.entry_point }}
