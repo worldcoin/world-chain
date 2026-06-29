@@ -136,6 +136,40 @@ contract NitroEnclaveKeyRegistry is Ownable {
     /// @dev Only callable by the owner. Revocation is permanent — see
     ///      {isKeyRevoked} — so a compromised key cannot be silently restored
     ///      by replaying its attestation document.
+    ///
+    ///      ## Relationship to {NitroAttestationVerifier.revokePCRSet}
+    ///      Revoking a PCR set on the verifier (i.e. retiring an enclave
+    ///      image) does **not** automatically transition the keys that were
+    ///      registered under that image to {KeyStatus.Revoked} here. Each key
+    ///      remains {KeyStatus.Active} until {revokeKey} is called for it
+    ///      individually.
+    ///
+    ///      This is intentional. Nitro enclave signing keys are ephemeral:
+    ///      they are generated in-memory at startup, never persisted to
+    ///      disk, and destroyed the moment the enclave process exits. The
+    ///      designed incident-response flow for a compromised image is:
+    ///        1. Stop the running enclave instances (the AWS Nitro hardware
+    ///           isolation guarantees the key is destroyed with the process).
+    ///        2. Call {NitroAttestationVerifier.revokePCRSet} so no fresh
+    ///           enclave from the same image can re-register.
+    ///      The two steps together eliminate the threat without per-key
+    ///      cascading on-chain.
+    ///
+    ///      Belt-and-suspenders operators can still observe
+    ///      {NitroAttestationVerifier.PCRSetRevoked} events off-chain and
+    ///      call {revokeKey} for every affected key. The {KeyRegistered}
+    ///      event carries the bound PCR triple specifically to make this
+    ///      easy.
+    ///
+    ///      ## Why no on-chain cascade?
+    ///      An automatic on-chain cascade was considered and rejected:
+    ///        - Storing `pcrSetHash → keyHash[]` to enumerate affected keys
+    ///          requires an unbounded array per image, with O(N) gas on
+    ///          {registerKey} and on the cascade itself.
+    ///        - Doing the lookup lazily in {isKeyRegistered} would add an
+    ///          extra SLOAD on every proof-verification call (the hot path),
+    ///          for no security gain given Nitro's hardware key-destruction
+    ///          guarantee.
     function revokeKey(bytes calldata publicKey) external onlyOwner {
         bytes32 keyHash = keccak256(publicKey);
         if (_keyStatus[keyHash] != KeyStatus.Active) revert KeyNotRegistered();

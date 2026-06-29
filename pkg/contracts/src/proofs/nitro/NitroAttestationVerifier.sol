@@ -159,9 +159,29 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
 
     /// @notice Removes a PCR triple from the allowlist. Future attestations
     ///         for this image will be rejected with {PCRSetNotApproved}.
-    ///         Already-registered keys remain in
-    ///         {NitroEnclaveKeyRegistry} until separately revoked there.
-    /// @dev Only callable by the owner. Revoking an unknown triple is a no-op.
+    ///
+    /// @dev Only callable by the owner. Revoking an unknown triple is a
+    ///      no-op.
+    ///
+    ///      ## Important: revocation is NOT retroactive
+    ///      Revoking a PCR triple only blocks **new** key registrations for
+    ///      that image. Keys that were already registered from this image
+    ///      remain {NitroEnclaveKeyRegistry.KeyStatus.Active} until they are
+    ///      individually revoked via {NitroEnclaveKeyRegistry.revokeKey}.
+    ///
+    ///      This is intentional. Nitro enclave signing keys are ephemeral:
+    ///      they are generated in-memory at enclave startup, never persisted,
+    ///      and destroyed when the enclave process stops. The intended
+    ///      incident-response flow for a compromised image is therefore:
+    ///        1. Stop the running enclave instances (kills their keys).
+    ///        2. Call {revokePCRSet} so no fresh enclave from the same image
+    ///           can re-register.
+    ///      Operators who want belt-and-suspenders may listen for
+    ///      {PCRSetRevoked} events off-chain and call
+    ///      {NitroEnclaveKeyRegistry.revokeKey} for each affected key (the
+    ///      `KeyRegistered` event carries the bound PCR triple). See
+    ///      {NitroEnclaveKeyRegistry} for the full rationale on why an
+    ///      on-chain cascade is deliberately not implemented.
     function revokePCRSet(bytes32 pcr0, bytes32 pcr1, bytes32 pcr2) external onlyOwner {
         bytes32 h = _pcrSetHash(pcr0, pcr1, pcr2);
         if (approvedPCRSets[h]) {
