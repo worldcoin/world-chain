@@ -72,9 +72,39 @@ contract DeployNitro is Script {
 
         vm.stopBroadcast();
 
+        // ════════════════════════════════════════════════════════════════════
+        // IMPORTANT: NEXT STEP — pre-warm CertManager *before* any user call
+        // ════════════════════════════════════════════════════════════════════
+        // CertManager caches verified X.509 certs so the ~63M-gas chain check
+        // is paid once per intermediate, not once per attestation. Skipping
+        // the pre-warm means the FIRST `NitroEnclaveKeyRegistry.registerKey`
+        // call will run the full chain validation inside a single tx and
+        // OOG (block gas limit < 63M on most networks).
+        //
+        // Owner script to run before opening up registerKey:
+        //
+        //   bytes32 rootHash = certManager.verifyCACert(rootCertDer, 0);
+        //   bytes32 imHash   = certManager.verifyCACert(intermediateDer, rootHash);
+        //   bytes32 issHash  = certManager.verifyCACert(issuerDer, imHash);
+        //   // …repeat for every additional intermediate, parent-hash chained.
+        //
+        // Fetch the cabundle from a live enclave's attestation document
+        // (`NitroValidator.decodeAttestationTbs` + CBOR parse) or from the
+        // AWS Nitro public PKI distribution endpoints.
+        //
+        // Then approve at least one PCR set so verifyAttestation can succeed:
+        //
+        //   verifier.approvePCRSet(
+        //       keccak256(rawPcr0), keccak256(rawPcr1), keccak256(rawPcr2)
+        //   );
+        //
+        // (rawPcr* are the 48-byte SHA-384 values from `nitro-cli describe-eif`.)
+        // ════════════════════════════════════════════════════════════════════
         console.log("");
-        console.log("NEXT STEPS (owner):");
-        console.log("  1. Pre-warm CertManager with the AWS Nitro PKI intermediates.");
+        console.log("NEXT STEPS (owner) — mandatory before any registerKey call:");
+        console.log("  1. certManager.verifyCACert(cert, parentHash) for each cert");
+        console.log("     in the AWS Nitro PKI chain (root → intermediates → issuer).");
+        console.log("     Without this, the first registerKey will OOG (~63M gas).");
         console.log("  2. verifier.approvePCRSet(pcr0, pcr1, pcr2) for each approved EIF.");
     }
 }

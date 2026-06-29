@@ -157,6 +157,22 @@ fn sign_boot_info(boot_info: &BootInfoStruct) -> Result<Vec<u8>> {
         .sign_prehash_recoverable(&commitment)
         .context("secp256k1 signing failed")?;
 
+    // EIP-2 low-s normalization. The on-chain NitroProofVerifier rejects
+    // high-s signatures to prevent malleability; `sign_prehash_recoverable`
+    // does NOT normalize by default, so ~50% of raw signatures would be
+    // rejected. `Signature::normalize_s()` returns `Some(new_sig)` only when
+    // normalization was needed; when it does flip s = n - s, the y-parity of
+    // the recovered point flips too, so we must also flip the LSB of the
+    // recovery id.
+    let (sig, rec_id) = match sig.normalize_s() {
+        Some(normalized) => {
+            let flipped = k256::ecdsa::RecoveryId::from_byte(rec_id.to_byte() ^ 1)
+                .expect("recovery id parity flip is always 0 or 1");
+            (normalized, flipped)
+        }
+        None => (sig, rec_id),
+    };
+
     // 65 bytes: 64-byte compact sig (r ‖ s) + 1-byte EVM recovery id (27 or 28).
     // EVM ecrecover expects v = recovery_id + 27.
     let mut sig_bytes = Vec::with_capacity(65);
