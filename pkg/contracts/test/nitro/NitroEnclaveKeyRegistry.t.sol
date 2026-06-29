@@ -46,7 +46,6 @@ contract NitroEnclaveKeyRegistryTest is Test {
         registry.registerKey(TBS, SIG);
 
         assertTrue(registry.isKeyRegistered(pubKey));
-        assertEq(registry.getKeyByPCRs(PCR0, PCR1, PCR2), pubKey);
     }
 
     function test_RegisterKey_RevertsWhenVerifierRejects() public {
@@ -64,10 +63,6 @@ contract NitroEnclaveKeyRegistryTest is Test {
 
     function test_IsKeyRegistered_FalseForUnknown() public view {
         assertFalse(registry.isKeyRegistered(otherKey));
-    }
-
-    function test_GetKeyByPCRs_EmptyForUnknown() public view {
-        assertEq(registry.getKeyByPCRs(bytes32(0), bytes32(0), bytes32(0)), bytes(""));
     }
 
     function test_RevokeKey_OnlyOwner() public {
@@ -91,16 +86,18 @@ contract NitroEnclaveKeyRegistryTest is Test {
         registry.revokeKey(pubKey);
     }
 
-    function test_Rotation_SupersedesPriorKeyForSamePCRs() public {
+    function test_MultipleInstancesSameImage() public {
+        // Two validator instances run the same enclave image → same PCR triple,
+        // but each has its own ephemeral key. Both must register successfully
+        // and both must be queryable via isKeyRegistered. (No on-chain
+        // PCRs → key index exists; the KeyRegistered events are the off-chain
+        // source of truth.)
         registry.registerKey(TBS, SIG);
 
-        // Set up a rotated key with a new attestation for the same PCR triple.
         bytes memory tbs2 = hex"cafe";
         attestationVerifier.setExpectation(tbs2, SIG, otherKey, PCR0, PCR1, PCR2);
-
         registry.registerKey(tbs2, SIG);
-        assertEq(registry.getKeyByPCRs(PCR0, PCR1, PCR2), otherKey);
-        // Old key stays registered until explicitly revoked.
+
         assertTrue(registry.isKeyRegistered(pubKey));
         assertTrue(registry.isKeyRegistered(otherKey));
     }
@@ -156,9 +153,7 @@ contract NitroEnclaveKeyRegistryTest is Test {
         attestationVerifier.setExpectation(tbsB, SIG, otherKey, pcr0B, pcr1B, pcr2B);
         registry.registerKey(tbsB, SIG);
 
-        // Both keys are registered under their respective PCR triples.
-        assertEq(registry.getKeyByPCRs(PCR0, PCR1, PCR2), pubKey);
-        assertEq(registry.getKeyByPCRs(pcr0B, pcr1B, pcr2B), otherKey);
+        // Both keys are registered.
         assertTrue(registry.isKeyRegistered(pubKey));
         assertTrue(registry.isKeyRegistered(otherKey));
     }
