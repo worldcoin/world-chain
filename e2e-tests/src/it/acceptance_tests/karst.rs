@@ -4,9 +4,8 @@
 use std::time::Instant;
 
 use alloy_consensus::TxReceipt;
-use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, B256, Bytes, TxKind, U256, address};
-use alloy_provider::{DynProvider, Provider, ProviderBuilder, RootProvider};
+use alloy_provider::{Provider, ProviderBuilder, RootProvider};
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use alloy_sol_types::{SolCall, sol};
@@ -34,7 +33,6 @@ const BN256_PAIR_ELEMENT_LEN: usize = 192;
 const KARST_BN256_PAIR_MAX_INPUT_SIZE: usize = 300 * BN256_PAIR_ELEMENT_LEN;
 const KARST_BN256_PAIR_PROBE_GAS_LIMIT: u64 = 12_000_000;
 const MAX_TX_GAS: u64 = 16_777_216;
-const L1_BASE_FEE_HEADROOM_MULTIPLIER: u128 = 2;
 
 sol! {
     contract OptimismPortal {
@@ -254,13 +252,8 @@ async fn check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env: &RpcEnv) -> eyre:
         .wallet(l1_key)
         .connect_provider(l1_provider)
         .erased();
-    let fee_caps = l1_fee_caps(&l1_provider).await?;
-    let request = deposit_transaction_request(
-        l1_sender,
-        config.optimism_portal,
-        config.deposit_value,
-        fee_caps,
-    );
+    let request =
+        deposit_transaction_request(l1_sender, config.optimism_portal, config.deposit_value);
 
     let estimated_gas = match l1_provider.estimate_gas(request.clone()).await {
         Ok(estimated_gas) if estimated_gas <= config.deposit_max_l1_gas => estimated_gas,
@@ -274,27 +267,12 @@ async fn check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env: &RpcEnv) -> eyre:
         }
         Err(err) => return Err(err).context("EIP-7825 deposit bypass preflight failed"),
     };
-    let max_l1_fee = U256::from(estimated_gas) * U256::from(fee_caps.max_fee_per_gas);
-    if max_l1_fee > config.deposit_max_l1_fee {
-        warn!(
-            estimated_gas,
-            max_fee_per_gas = fee_caps.max_fee_per_gas,
-            max_l1_fee = %max_l1_fee,
-            max_l1_fee_limit = %config.deposit_max_l1_fee,
-            "EIP-7825 deposit bypass preflight exceeded the configured L1 fee limit; skipping environment-dependent check"
-        );
-        return Ok(());
-    }
     info!(
         l1_rpc = %config.l1_rpc_target(),
         l1_sender = %l1_sender,
         optimism_portal = %config.optimism_portal,
         estimated_gas,
-        max_fee_per_gas = fee_caps.max_fee_per_gas,
-        max_priority_fee_per_gas = fee_caps.max_priority_fee_per_gas,
-        max_l1_fee = %max_l1_fee,
         max_l1_gas = config.deposit_max_l1_gas,
-        max_l1_fee_limit = %config.deposit_max_l1_fee,
         deposit_gas_limit = MAX_TX_GAS + 1,
         "EIP-7825 deposit bypass preflight succeeded"
     );
@@ -406,50 +384,10 @@ fn parse_deposit_receipt(
     })
 }
 
-#[derive(Clone, Copy)]
-struct FeeCaps {
-    max_fee_per_gas: u128,
-    max_priority_fee_per_gas: u128,
-}
-
-async fn l1_fee_caps(provider: &DynProvider) -> eyre::Result<FeeCaps> {
-    let max_priority_fee_per_gas = provider
-        .get_max_priority_fee_per_gas()
-        .await
-        .context("failed to fetch L1 priority fee for Karst deposit")?;
-    let gas_price = provider
-        .get_gas_price()
-        .await
-        .context("failed to fetch L1 gas price for Karst deposit")?;
-    let latest_block = provider
-        .get_block_by_number(BlockNumberOrTag::Latest)
-        .await
-        .context("failed to fetch latest L1 block for Karst deposit fee cap")?
-        .ok_or_eyre("latest L1 block missing while computing Karst deposit fee cap")?;
-    let base_fee = latest_block
-        .header
-        .inner
-        .base_fee_per_gas
-        .ok_or_eyre("latest L1 block missing base fee while computing Karst deposit fee cap")?
-        as u128;
-    let max_fee_per_gas = base_fee
-        // Keep the tx marketable if Sepolia base fee rises between estimate, submit, and inclusion.
-        .saturating_mul(L1_BASE_FEE_HEADROOM_MULTIPLIER)
-        .saturating_add(max_priority_fee_per_gas)
-        .max(gas_price)
-        .max(max_priority_fee_per_gas);
-
-    Ok(FeeCaps {
-        max_fee_per_gas,
-        max_priority_fee_per_gas,
-    })
-}
-
 fn deposit_transaction_request(
     from: Address,
     portal: Address,
     deposit_value: U256,
-    fee_caps: FeeCaps,
 ) -> TransactionRequest {
     let call = OptimismPortal::depositTransactionCall {
         _to: from,
@@ -463,8 +401,6 @@ fn deposit_transaction_request(
         .from(from)
         .to(portal)
         .value(deposit_value)
-        .max_fee_per_gas(fee_caps.max_fee_per_gas)
-        .max_priority_fee_per_gas(fee_caps.max_priority_fee_per_gas)
         .input(TransactionInput::new(call.abi_encode().into()))
 }
 
