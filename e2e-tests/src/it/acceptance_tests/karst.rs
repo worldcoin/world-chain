@@ -260,20 +260,7 @@ async fn check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env: &RpcEnv) -> eyre:
     );
 
     let estimated_gas = match l1_provider.estimate_gas(request.clone()).await {
-        Ok(estimated_gas) if estimated_gas <= config.deposit_max_l1_gas => {
-            info!(
-                l1_rpc = %config.l1_rpc_target(),
-                l1_sender = %l1_sender,
-                optimism_portal = %config.optimism_portal,
-                estimated_gas,
-                max_fee_per_gas = fee_caps.max_fee_per_gas,
-                max_priority_fee_per_gas = fee_caps.max_priority_fee_per_gas,
-                max_l1_gas = config.deposit_max_l1_gas,
-                deposit_gas_limit = MAX_TX_GAS + 1,
-                "EIP-7825 deposit bypass preflight succeeded"
-            );
-            estimated_gas
-        }
+        Ok(estimated_gas) if estimated_gas <= config.deposit_max_l1_gas => estimated_gas,
         Ok(estimated_gas) => {
             warn!(
                 estimated_gas,
@@ -284,6 +271,30 @@ async fn check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env: &RpcEnv) -> eyre:
         }
         Err(err) => return Err(err).context("EIP-7825 deposit bypass preflight failed"),
     };
+    let max_l1_fee = U256::from(estimated_gas) * U256::from(fee_caps.max_fee_per_gas);
+    if max_l1_fee > config.deposit_max_l1_fee {
+        warn!(
+            estimated_gas,
+            max_fee_per_gas = fee_caps.max_fee_per_gas,
+            max_l1_fee = %max_l1_fee,
+            max_l1_fee_limit = %config.deposit_max_l1_fee,
+            "EIP-7825 deposit bypass preflight exceeded the configured L1 fee limit; skipping environment-dependent check"
+        );
+        return Ok(());
+    }
+    info!(
+        l1_rpc = %config.l1_rpc_target(),
+        l1_sender = %l1_sender,
+        optimism_portal = %config.optimism_portal,
+        estimated_gas,
+        max_fee_per_gas = fee_caps.max_fee_per_gas,
+        max_priority_fee_per_gas = fee_caps.max_priority_fee_per_gas,
+        max_l1_fee = %max_l1_fee,
+        max_l1_gas = config.deposit_max_l1_gas,
+        max_l1_fee_limit = %config.deposit_max_l1_fee,
+        deposit_gas_limit = MAX_TX_GAS + 1,
+        "EIP-7825 deposit bypass preflight succeeded"
+    );
     let request = request.gas_limit(
         estimated_gas
             .saturating_add(100_000)

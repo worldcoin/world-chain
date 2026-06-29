@@ -25,6 +25,7 @@ const DEFAULT_DEPOSIT_TIMEOUT_SECS: u64 = 300;
 const DEFAULT_DEPOSIT_POLL_INTERVAL_MS: u64 = 2_000;
 const DEFAULT_DEPOSIT_VALUE_WEI: &str = "0";
 const DEFAULT_DEPOSIT_MAX_L1_GAS: u64 = 20_000_000;
+const DEFAULT_DEPOSIT_MAX_L1_FEE_WEI: &str = "50000000000000000";
 const WORLD_CHAIN_ACCEPTANCE_DEVNET_CHAIN_ID: u64 = 69420;
 // Public Anvil test key used as the default acceptance-test sender.
 const FALLBACK_L2_PRIVATE_KEY: &str =
@@ -98,6 +99,7 @@ pub(super) struct KarstDepositConfig {
     pub(super) optimism_portal: Address,
     pub(super) deposit_value: U256,
     pub(super) deposit_max_l1_gas: u64,
+    pub(super) deposit_max_l1_fee: U256,
     pub(super) deposit_timeout: Duration,
     pub(super) deposit_poll_interval: Duration,
 }
@@ -219,6 +221,10 @@ fn karst_deposit_config_from_env(karst_enabled: bool) -> eyre::Result<Option<Kar
         deposit_max_l1_gas: parse_optional_value(
             "ACCEPTANCE_DEPOSIT_MAX_L1_GAS",
             DEFAULT_DEPOSIT_MAX_L1_GAS,
+        )?,
+        deposit_max_l1_fee: parse_optional_value_from_str(
+            "ACCEPTANCE_DEPOSIT_MAX_L1_FEE_WEI",
+            DEFAULT_DEPOSIT_MAX_L1_FEE_WEI,
         )?,
         deposit_timeout: Duration::from_secs(parse_optional_value(
             "ACCEPTANCE_DEPOSIT_TIMEOUT_SECS",
