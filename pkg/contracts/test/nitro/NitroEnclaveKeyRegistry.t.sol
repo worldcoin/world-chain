@@ -107,6 +107,97 @@ contract NitroEnclaveKeyRegistryTest is Test {
         assertEq(address(registry.verifier()), address(attestationVerifier));
     }
 
+    function test_Constructor_RevertsOnZeroOwner() public {
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
+        new NitroEnclaveKeyRegistry(attestationVerifier, address(0));
+    }
+
+    function test_RegisterKey_ReturnsKeyAndPCRs() public {
+        // The function's return values must be forwarded verbatim from the
+        // verifier so off-chain consumers can rely on them.
+        (bytes memory key, bytes32 p0, bytes32 p1, bytes32 p2) = registry.registerKey(TBS, SIG);
+        assertEq(key, pubKey);
+        assertEq(p0, PCR0);
+        assertEq(p1, PCR1);
+        assertEq(p2, PCR2);
+    }
+
+    function test_RegisterKey_RejectsValidLengthKeyWithWrongPrefix() public {
+        // 65-byte key but the SEC1 prefix is 0x03 (compressed-y-odd) instead
+        // of 0x04 (uncompressed). The registry's defensive check must catch
+        // this even though the real verifier already enforces 0x04.
+        bytes memory badKey = new bytes(65);
+        badKey[0] = 0x03;
+        for (uint256 i = 1; i < 65; i++) {
+            badKey[i] = bytes1(uint8(i));
+        }
+        attestationVerifier.setExpectation(hex"feedface", SIG, badKey, PCR0, PCR1, PCR2);
+        vm.expectRevert(NitroEnclaveKeyRegistry.InvalidPublicKey.selector);
+        registry.registerKey(hex"feedface", SIG);
+    }
+
+    function test_RegisterKey_RejectsKeyWithLength64() public {
+        // SEC1-uncompressed minus the 0x04 prefix — wrong length, must revert.
+        bytes memory key64 = new bytes(64);
+        for (uint256 i = 0; i < 64; i++) {
+            key64[i] = bytes1(uint8(0xAA));
+        }
+        attestationVerifier.setExpectation(hex"6464", SIG, key64, PCR0, PCR1, PCR2);
+        vm.expectRevert(NitroEnclaveKeyRegistry.InvalidPublicKey.selector);
+        registry.registerKey(hex"6464", SIG);
+    }
+
+    function test_RegisterKey_RejectsKeyWithLength66() public {
+        bytes memory key66 = new bytes(66);
+        key66[0] = 0x04;
+        attestationVerifier.setExpectation(hex"6666", SIG, key66, PCR0, PCR1, PCR2);
+        vm.expectRevert(NitroEnclaveKeyRegistry.InvalidPublicKey.selector);
+        registry.registerKey(hex"6666", SIG);
+    }
+
+    function test_RevokeKey_AlreadyRevokedRevertsKeyNotRegistered() public {
+        registry.registerKey(TBS, SIG);
+        vm.prank(owner);
+        registry.revokeKey(pubKey);
+        // A second revoke for the same (now Revoked) key must surface
+        // `KeyNotRegistered`, NOT silently succeed and re-emit the event.
+        vm.prank(owner);
+        vm.expectRevert(NitroEnclaveKeyRegistry.KeyNotRegistered.selector);
+        registry.revokeKey(pubKey);
+    }
+
+    function test_RevokeKey_RevertsForUnknownKey() public {
+        // Revoking a never-seen key must surface `KeyNotRegistered`.
+        vm.prank(owner);
+        vm.expectRevert(NitroEnclaveKeyRegistry.KeyNotRegistered.selector);
+        registry.revokeKey(otherKey);
+    }
+
+    function test_RegisterKey_EmitsKeyRegisteredWithExactPCRs() public {
+        // Stronger assertion: emits the exact event including all PCRs.
+        vm.expectEmit(false, false, false, true);
+        emit NitroEnclaveKeyRegistry.KeyRegistered(pubKey, PCR0, PCR1, PCR2);
+        registry.registerKey(TBS, SIG);
+    }
+
+    function test_KeyStatus_ForUnknownKeyIsZero() public view {
+        // The default `KeyStatus.Unknown == 0` invariant: any never-seen key
+        // must report Unknown, isKeyRegistered=false, isKeyRevoked=false.
+        assertEq(uint8(registry.keyStatus(otherKey)), uint8(NitroEnclaveKeyRegistry.KeyStatus.Unknown));
+        assertFalse(registry.isKeyRegistered(otherKey));
+        assertFalse(registry.isKeyRevoked(otherKey));
+    }
+
+    function test_RegisterKey_PropagatesVerifierRevertVerbatim() public {
+        // The verifier rejects; the registry must not swallow the revert.
+        // (Already covered by `test_RegisterKey_RevertsWhenVerifierRejects`,
+        // but here we lock in the exact selector so a future refactor that
+        // wraps the call in a try/catch can't accidentally turn it into
+        // a different error type.)
+        vm.expectRevert(MockNitroAttestationVerifier.UnexpectedCall.selector);
+        registry.registerKey(hex"deadbeef", hex"00");
+    }
+
     function test_RevokeKey_PreventsReregistration() public {
         registry.registerKey(TBS, SIG);
 
