@@ -21,12 +21,12 @@ contract NitroProofVerifierTest is Test {
     bytes constant TBS = hex"deadbeef";
     bytes constant SIG = hex"cafebabe";
 
-    // Example boot-info fields used to build a signing commitment.
+    // Boot-info fields used to build a signing commitment.
     bytes32 constant L2_POST_ROOT = keccak256("l2-post-root");
     uint64 constant L2_BLOCK = 123_456;
     bytes32 constant ROLLUP_CFG = keccak256("rollup-cfg");
 
-    // Context fields needed to rebuild rootId in the generic verify() hook.
+    // Context fields needed to rebuild rootId.
     bytes32 constant DOMAIN_HASH = keccak256("domain");
     address constant PARENT_REF = address(0xBEEF);
     bytes32 constant INTERMEDIATE_ROOTS = keccak256("intermediate-roots");
@@ -48,6 +48,10 @@ contract NitroProofVerifierTest is Test {
         registry.registerKey(TBS, SIG);
     }
 
+    /*//////////////////////////////////////////////////////////////
+                                HELPERS
+    //////////////////////////////////////////////////////////////*/
+
     function _uncompressedKey(uint256 x, uint256 y) internal pure returns (bytes memory out) {
         out = new bytes(65);
         out[0] = 0x04;
@@ -57,101 +61,30 @@ contract NitroProofVerifierTest is Test {
         }
     }
 
-    function _sign(bytes32 digest) internal returns (bytes memory) {
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(enclaveWallet, digest);
+    function _sign(Vm.Wallet memory w, bytes32 digest) internal returns (bytes memory) {
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(w, digest);
         return abi.encodePacked(r, s, v);
     }
 
-    function _commitment() internal view returns (bytes32) {
-        return proofVerifier.signingCommitment(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG);
+    function _sign(bytes32 digest) internal returns (bytes memory) {
+        return _sign(enclaveWallet, digest);
     }
 
-    /*//////////////////////////////////////////////////////////////
-                           SIGNING COMMITMENT
-    //////////////////////////////////////////////////////////////*/
-
-    function test_SigningCommitment_MatchesRustEncoding() public view {
-        // signing_commitment(boot_info) = keccak256( l2PostRoot ||
-        //   uint64BE(l2BlockNumber) || rollupConfigHash )
-        bytes memory packed = abi.encodePacked(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG);
-        assertEq(packed.length, 32 + 8 + 32);
-        assertEq(keccak256(packed), proofVerifier.signingCommitment(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG));
+    function _commitment() internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG));
     }
 
-    /*//////////////////////////////////////////////////////////////
-                          verifyProof (typed)
-    //////////////////////////////////////////////////////////////*/
-
-    function test_VerifyProof_HappyPath() public {
-        bytes32 commitment = _commitment();
-        bytes memory sig = _sign(commitment);
-        assertTrue(proofVerifier.verifyProof(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG, sig, enclavePubKey));
+    function _expectedRootId() internal pure returns (bytes32) {
+        return WorldChainProofLib.rootId(
+            DOMAIN_HASH,
+            PARENT_REF,
+            L2_POST_ROOT,
+            uint256(L2_BLOCK),
+            INTERMEDIATE_ROOTS,
+            L1_ORIGIN_HASH,
+            L1_ORIGIN_NUMBER
+        );
     }
-
-    function test_VerifyProof_RevertsForCompressedKey() public {
-        // The enclave emits uncompressed keys; passing a 33-byte compressed key
-        // must be rejected outright.
-        bytes memory compressed = new bytes(33);
-        compressed[0] = 0x02;
-        bytes memory sig = _sign(_commitment());
-        vm.expectRevert(NitroProofVerifier.InvalidPublicKey.selector);
-        proofVerifier.verifyProof(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG, sig, compressed);
-    }
-
-    function test_VerifyProof_FalseForUnregisteredKey() public {
-        Vm.Wallet memory rogue = vm.createWallet("rogue");
-        bytes memory roguePub = _uncompressedKey(rogue.publicKeyX, rogue.publicKeyY);
-        bytes32 commitment = _commitment();
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(rogue, commitment);
-        bytes memory sig = abi.encodePacked(r, s, v);
-        assertFalse(proofVerifier.verifyProof(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG, sig, roguePub));
-    }
-
-    function test_VerifyProof_FalseForRevokedKey() public {
-        bytes32 commitment = _commitment();
-        bytes memory sig = _sign(commitment);
-
-        vm.prank(owner);
-        registry.revokeKey(enclavePubKey);
-
-        assertFalse(proofVerifier.verifyProof(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG, sig, enclavePubKey));
-    }
-
-    function test_VerifyProof_FalseForDifferentSigner() public {
-        Vm.Wallet memory rogue = vm.createWallet("rogue");
-        bytes32 commitment = _commitment();
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(rogue, commitment);
-        bytes memory sig = abi.encodePacked(r, s, v);
-        assertFalse(proofVerifier.verifyProof(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG, sig, enclavePubKey));
-    }
-
-    function test_VerifyProof_FalseForWrongBootInfo() public {
-        // Signature over the correct commitment is replayed against a different
-        // block number — the recomputed digest will not match.
-        bytes32 commitment = _commitment();
-        bytes memory sig = _sign(commitment);
-        assertFalse(proofVerifier.verifyProof(L2_POST_ROOT, L2_BLOCK + 1, ROLLUP_CFG, sig, enclavePubKey));
-    }
-
-    function test_VerifyProof_RevertsForBadSignatureLength() public {
-        bytes memory sig = hex"1234";
-        vm.expectRevert(NitroProofVerifier.InvalidSignatureLength.selector);
-        proofVerifier.verifyProof(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG, sig, enclavePubKey);
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                       verifyProofPrecomputed
-    //////////////////////////////////////////////////////////////*/
-
-    function test_VerifyProofPrecomputed_HappyPath() public {
-        bytes32 commitment = _commitment();
-        bytes memory sig = _sign(commitment);
-        assertTrue(proofVerifier.verifyProofPrecomputed(commitment, sig, enclavePubKey));
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                       verify (generic interface)
-    //////////////////////////////////////////////////////////////*/
 
     function _proofBytes(bytes memory sig, bytes memory pub) internal pure returns (bytes memory) {
         return abi.encode(
@@ -168,63 +101,129 @@ contract NitroProofVerifierTest is Test {
         );
     }
 
-    function _expectedRootId() internal pure returns (bytes32) {
-        return WorldChainProofLib.rootId(
+    /*//////////////////////////////////////////////////////////////
+                              HAPPY PATH
+    //////////////////////////////////////////////////////////////*/
+
+    function test_Verify_HappyPath() public {
+        bytes memory sig = _sign(_commitment());
+        assertTrue(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                            BINDING FAILURES
+    //////////////////////////////////////////////////////////////*/
+
+    function test_Verify_FalseForWrongRootId() public {
+        // Honest signature + boot_info, but the game asks about a different
+        // rootId — the verifier must NOT validate.
+        bytes memory sig = _sign(_commitment());
+        assertFalse(proofVerifier.verify(bytes32(uint256(0xdead)), _proofBytes(sig, enclavePubKey)));
+    }
+
+    function test_Verify_FalseForWrongBootInfo() public {
+        // The proof claims (L2_POST_ROOT, L2_BLOCK + 1, ROLLUP_CFG) but the
+        // signature is over the L2_BLOCK commitment — rootId check still
+        // passes for the modified block number? It must not: the signing
+        // commitment is recomputed from the proof's boot_info, so a wrong
+        // commitment surfaces as a signature mismatch.
+        bytes memory sig = _sign(_commitment());
+        // Build a proof with a mismatched block number and a matching rootId.
+        bytes32 wrongRootId = WorldChainProofLib.rootId(
             DOMAIN_HASH,
             PARENT_REF,
             L2_POST_ROOT,
-            uint256(L2_BLOCK),
+            uint256(L2_BLOCK + 1),
             INTERMEDIATE_ROOTS,
             L1_ORIGIN_HASH,
             L1_ORIGIN_NUMBER
         );
+        bytes memory proof = abi.encode(
+            DOMAIN_HASH,
+            PARENT_REF,
+            INTERMEDIATE_ROOTS,
+            L1_ORIGIN_HASH,
+            L1_ORIGIN_NUMBER,
+            ROLLUP_CFG,
+            L2_POST_ROOT,
+            L2_BLOCK + 1,
+            sig,
+            enclavePubKey
+        );
+        assertFalse(proofVerifier.verify(wrongRootId, proof));
     }
 
-    function test_Verify_GenericInterface() public {
-        bytes32 commitment = _commitment();
-        bytes memory sig = _sign(commitment);
-        assertTrue(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+    /*//////////////////////////////////////////////////////////////
+                            REGISTRY GATES
+    //////////////////////////////////////////////////////////////*/
+
+    function test_Verify_FalseForUnregisteredKey() public {
+        Vm.Wallet memory rogue = vm.createWallet("rogue");
+        bytes memory roguePub = _uncompressedKey(rogue.publicKeyX, rogue.publicKeyY);
+        bytes memory sig = _sign(rogue, _commitment());
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, roguePub)));
     }
 
-    function test_Verify_GenericInterface_FalseForCompressedKey() public {
-        // The generic hook must surface compressed-key inputs as `false` (revert
-        // inside try/catch), not propagate the revert.
+    function test_Verify_FalseForRevokedKey() public {
+        bytes memory sig = _sign(_commitment());
+
+        vm.prank(owner);
+        registry.revokeKey(enclavePubKey);
+
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                           SIGNATURE GATES
+    //////////////////////////////////////////////////////////////*/
+
+    function test_Verify_FalseForDifferentSigner() public {
+        // Sign with a different key while passing the registered enclave key.
+        Vm.Wallet memory rogue = vm.createWallet("rogue");
+        bytes memory sig = _sign(rogue, _commitment());
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+    }
+
+    function test_Verify_FalseForBadSignatureLength() public {
+        bytes memory sig = hex"1234";
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                              KEY GATES
+    //////////////////////////////////////////////////////////////*/
+
+    function test_Verify_FalseForCompressedKey() public {
         bytes memory compressed = new bytes(33);
         compressed[0] = 0x02;
         bytes memory sig = _sign(_commitment());
         assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, compressed)));
     }
 
-    function test_Verify_GenericInterface_FalseForWrongRootId() public {
-        // Honest signature + boot_info, but the game asks about a different rootId
-        // — the verifier must NOT validate.
-        bytes32 commitment = _commitment();
-        bytes memory sig = _sign(commitment);
-        assertFalse(proofVerifier.verify(bytes32(uint256(0xdead)), _proofBytes(sig, enclavePubKey)));
+    function test_Verify_FalseForBadKey() public view {
+        // 7-byte key cannot be SEC1-decoded → _verifyEnclaveSignature
+        // reverts with InvalidPublicKey → verify() catches and returns false.
+        bytes memory badKey = hex"01020304050607";
+        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(hex"00", badKey)));
     }
 
-    function test_Verify_GenericInterface_FalseOnRevert() public {
-        // Malformed signature → verifyProof reverts → verify returns false.
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(hex"1234", enclavePubKey)));
-    }
+    /*//////////////////////////////////////////////////////////////
+                            ABI DECODE GATES
+    //////////////////////////////////////////////////////////////*/
 
-    function test_Verify_GenericInterface_FalseForGarbage() public view {
+    function test_Verify_FalseForGarbage() public view {
         // Garbage proof bytes that don't decode into the expected tuple must
         // be surfaced as `false` — the ABI decode lives inside the try/catch.
         assertFalse(proofVerifier.verify(bytes32(0), hex"00"));
     }
 
-    function test_Verify_GenericInterface_FalseForEmptyProof() public view {
+    function test_Verify_FalseForEmptyProof() public view {
         assertFalse(proofVerifier.verify(bytes32(0), ""));
     }
 
-    function test_Verify_GenericInterface_FalseForBadKey() public view {
-        // 7-byte key cannot be SEC1-decoded → verifyProof reverts with
-        // InvalidPublicKey → verify() catches and returns false. A valid rootId
-        // must still be supplied so the binding check doesn't short-circuit.
-        bytes memory badKey = hex"01020304050607";
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(hex"00", badKey)));
-    }
+    /*//////////////////////////////////////////////////////////////
+                          INTERNAL ENTRY POINT
+    //////////////////////////////////////////////////////////////*/
 
     function test_DecodeAndVerify_NotCallableExternally() public {
         vm.expectRevert(bytes("internal"));
