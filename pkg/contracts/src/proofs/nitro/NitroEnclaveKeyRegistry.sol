@@ -33,12 +33,18 @@ contract NitroEnclaveKeyRegistry is Ownable {
                                  ERRORS
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Thrown when {revokeKey} is called for a key that is not registered.
+    /// @notice Thrown when {revokeKey} is called for a key that is not
+    ///         currently registered as {KeyStatus.Active}.
     error KeyNotRegistered();
 
-    /// @notice Thrown when {registerKey} is called for a key that was previously
-    ///         revoked. Revocation is permanent — a compromised enclave key must
-    ///         not be silently restored by re-submitting its attestation document.
+    /// @notice Thrown when {registerKey} is called for a key that is already
+    ///         {KeyStatus.Active}.
+    error KeyAlreadyRegistered();
+
+    /// @notice Thrown when {registerKey} is called for a key that was
+    ///         previously revoked. Revocation is permanent — a compromised
+    ///         enclave key must not be silently restored by re-submitting
+    ///         its attestation document.
     error KeyRevokedPermanently();
 
     /// @notice Thrown when the verifier returns a malformed public key.
@@ -55,19 +61,28 @@ contract NitroEnclaveKeyRegistry is Ownable {
     event KeyRevoked(bytes publicKey);
 
     /*//////////////////////////////////////////////////////////////
+                                  TYPES
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Lifecycle state of a registered key.
+    /// @dev The default zero value (`Unknown`) denotes a key that has never
+    ///      been registered. Transitions are strictly
+    ///      `Unknown → Active → Revoked`; there is no path back.
+    enum KeyStatus {
+        Unknown,
+        Active,
+        Revoked
+    }
+
+    /*//////////////////////////////////////////////////////////////
                                 STORAGE
     //////////////////////////////////////////////////////////////*/
 
     /// @notice On-chain Nitro attestation verifier.
     INitroAttestationVerifier public immutable verifier;
 
-    /// @notice keccak256(publicKey) => registered flag. Cleared on revoke.
-    mapping(bytes32 keyHash => bool registered) private _registered;
-
-    /// @notice keccak256(publicKey) => permanently revoked flag. Set on revoke and
-    ///         never cleared, so a revoked key cannot be re-registered even if a
-    ///         valid attestation document for it is replayed.
-    mapping(bytes32 keyHash => bool revoked) private _revoked;
+    /// @notice `keccak256(publicKey) → lifecycle status`.
+    mapping(bytes32 keyHash => KeyStatus status) private _keyStatus;
 
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
@@ -105,8 +120,10 @@ contract NitroEnclaveKeyRegistry is Ownable {
         if (publicKey.length != 65 || publicKey[0] != 0x04) revert InvalidPublicKey();
 
         bytes32 keyHash = keccak256(publicKey);
-        if (_revoked[keyHash]) revert KeyRevokedPermanently();
-        _registered[keyHash] = true;
+        KeyStatus status = _keyStatus[keyHash];
+        if (status == KeyStatus.Revoked) revert KeyRevokedPermanently();
+        if (status == KeyStatus.Active) revert KeyAlreadyRegistered();
+        _keyStatus[keyHash] = KeyStatus.Active;
 
         emit KeyRegistered(publicKey, pcr0, pcr1, pcr2);
     }
@@ -121,9 +138,8 @@ contract NitroEnclaveKeyRegistry is Ownable {
     ///      by replaying its attestation document.
     function revokeKey(bytes calldata publicKey) external onlyOwner {
         bytes32 keyHash = keccak256(publicKey);
-        if (!_registered[keyHash]) revert KeyNotRegistered();
-        _registered[keyHash] = false;
-        _revoked[keyHash] = true;
+        if (_keyStatus[keyHash] != KeyStatus.Active) revert KeyNotRegistered();
+        _keyStatus[keyHash] = KeyStatus.Revoked;
         emit KeyRevoked(publicKey);
     }
 
@@ -131,13 +147,18 @@ contract NitroEnclaveKeyRegistry is Ownable {
                                  VIEWS
     //////////////////////////////////////////////////////////////*/
 
+    /// @notice Returns the lifecycle status of `publicKey`.
+    function keyStatus(bytes calldata publicKey) external view returns (KeyStatus) {
+        return _keyStatus[keccak256(publicKey)];
+    }
+
     /// @notice Returns whether `publicKey` is currently registered (and not revoked).
     function isKeyRegistered(bytes calldata publicKey) external view returns (bool) {
-        return _registered[keccak256(publicKey)];
+        return _keyStatus[keccak256(publicKey)] == KeyStatus.Active;
     }
 
     /// @notice Returns whether `publicKey` has been permanently revoked.
     function isKeyRevoked(bytes calldata publicKey) external view returns (bool) {
-        return _revoked[keccak256(publicKey)];
+        return _keyStatus[keccak256(publicKey)] == KeyStatus.Revoked;
     }
 }

@@ -141,6 +141,26 @@ contract NitroEnclaveKeyRegistryTest is Test {
         assertFalse(registry.isKeyRevoked(pubKey));
     }
 
+    function test_RegisterKey_RevertsIfAlreadyActive() public {
+        registry.registerKey(TBS, SIG);
+        vm.expectRevert(NitroEnclaveKeyRegistry.KeyAlreadyRegistered.selector);
+        registry.registerKey(TBS, SIG);
+    }
+
+    function test_KeyStatus_LifecycleTransitions() public {
+        // Unknown
+        assertEq(uint8(registry.keyStatus(pubKey)), uint8(NitroEnclaveKeyRegistry.KeyStatus.Unknown));
+
+        // Active
+        registry.registerKey(TBS, SIG);
+        assertEq(uint8(registry.keyStatus(pubKey)), uint8(NitroEnclaveKeyRegistry.KeyStatus.Active));
+
+        // Revoked
+        vm.prank(owner);
+        registry.revokeKey(pubKey);
+        assertEq(uint8(registry.keyStatus(pubKey)), uint8(NitroEnclaveKeyRegistry.KeyStatus.Revoked));
+    }
+
     function test_MultiImageCoexistence() public {
         // Image A.
         registry.registerKey(TBS, SIG);
