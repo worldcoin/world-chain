@@ -3,6 +3,7 @@
 
 use std::{borrow::Cow, time::Instant};
 
+use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, B256, Bytes, TxKind, U256, address};
 use alloy_provider::{DynProvider, Provider, ProviderBuilder, RootProvider};
 use alloy_rpc_types::{TransactionInput, TransactionRequest};
@@ -265,6 +266,8 @@ async fn check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env: &RpcEnv) -> eyre:
                 l1_sender = %l1_sender,
                 optimism_portal = %config.optimism_portal,
                 estimated_gas,
+                max_fee_per_gas = fee_caps.max_fee_per_gas,
+                max_priority_fee_per_gas = fee_caps.max_priority_fee_per_gas,
                 max_l1_gas = config.deposit_max_l1_gas,
                 deposit_gas_limit = MAX_TX_GAS + 1,
                 "EIP-7825 deposit bypass preflight succeeded"
@@ -407,10 +410,25 @@ async fn l1_fee_caps(provider: &DynProvider) -> eyre::Result<FeeCaps> {
         .get_max_priority_fee_per_gas()
         .await
         .context("failed to fetch L1 priority fee for Karst deposit")?;
-    let max_fee_per_gas = provider
+    let gas_price = provider
         .get_gas_price()
         .await
-        .context("failed to fetch L1 gas price for Karst deposit")?
+        .context("failed to fetch L1 gas price for Karst deposit")?;
+    let latest_block = provider
+        .get_block_by_number(BlockNumberOrTag::Latest)
+        .await
+        .context("failed to fetch latest L1 block for Karst deposit fee cap")?
+        .ok_or_eyre("latest L1 block missing while computing Karst deposit fee cap")?;
+    let base_fee = latest_block
+        .header
+        .inner
+        .base_fee_per_gas
+        .ok_or_eyre("latest L1 block missing base fee while computing Karst deposit fee cap")?
+        as u128;
+    let max_fee_per_gas = base_fee
+        .saturating_mul(2)
+        .saturating_add(max_priority_fee_per_gas)
+        .max(gas_price)
         .max(max_priority_fee_per_gas);
 
     Ok(FeeCaps {
