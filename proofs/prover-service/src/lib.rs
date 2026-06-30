@@ -93,7 +93,7 @@ pub use traits::{ProofJobQueue, ProofRequester};
 pub use types::{
     BackendProofId, BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
     ProofData, ProofJobStatus, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
-    SessionStatus, SessionType,
+    SessionType,
 };
 
 #[cfg(test)]

@@ -1,5 +1,4 @@
 use crate::{
-    SessionStatus,
     config::ProverServiceConfig,
     error::{InvalidConfigError, ProofJobQueueError, ProofRequestError, ProverServiceInitError},
     types::{
@@ -406,7 +405,7 @@ impl ProverServiceStore {
 
         for row in existing_backend_sessions {
             let status_str: &str = row.get("status");
-            let status = SessionStatus::try_from(status_str).map_err(|err| {
+            let status = BackendSessionStatus::try_from(status_str).map_err(|err| {
                 ProofJobQueueError::Internal(format!(
                     "invalid session status '{status_str}': {err}"
                 ))

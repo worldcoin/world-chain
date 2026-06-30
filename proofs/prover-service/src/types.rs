@@ -223,47 +223,6 @@ pub struct ProofResponse {
     pub proof: ProofData,
 }
 
-/// Durable status of an external backend proof job.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SessionStatus {
-    /// External backend work was requested and is awaiting polling.
-    Requested,
-    /// External backend work completed successfully.
-    Completed,
-    /// External backend work reached a terminal failure.
-    Failed,
-}
-
-impl SessionStatus {
-    /// Stable database representation.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Requested => "requested",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-        }
-    }
-
-    /// Whether this status represents a terminal backend session.
-    pub const fn is_terminal(&self) -> bool {
-        matches!(self, Self::Completed | Self::Failed)
-    }
-}
-
-impl TryFrom<&str> for SessionStatus {
-    type Error = String;
-
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        match s {
-            "REQUESTED" => Ok(Self::Requested),
-            "COMPLETED" => Ok(Self::Completed),
-            "FAILED" => Ok(Self::Failed),
-            other => Err(format!("Unknown session status: {other}")),
-        }
-    }
-}
-
 /// External backend request identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BackendProofId(pub B256);
@@ -374,6 +333,11 @@ impl BackendSessionStatus {
             Self::Completed => "COMPLETED",
             Self::Failed => "FAILED",
         }
+    }
+
+    /// Whether this status represents a terminal backend session.
+    pub const fn is_terminal(&self) -> bool {
+        matches!(self, Self::Completed | Self::Failed)
     }
 }
 
