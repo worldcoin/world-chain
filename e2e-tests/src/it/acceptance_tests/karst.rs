@@ -1,7 +1,7 @@
 //! Karst L2 checks adapted from upstream OP Stack acceptance coverage:
 //! https://github.com/ethereum-optimism/optimism/tree/develop/op-acceptance-tests/tests
 
-use std::time::Instant;
+use std::{borrow::Cow, time::Instant};
 
 use alloy_consensus::TxReceipt;
 use alloy_primitives::{Address, B256, Bytes, TxKind, U256, address};
@@ -14,6 +14,7 @@ use op_alloy_consensus::{OpTxType, TxDeposit, UserDepositSource};
 use op_alloy_network::Optimism;
 use op_alloy_rpc_types::OpTransactionReceipt;
 use revm::bytecode::opcode;
+use serde_json::Value;
 use tokio::time::sleep;
 use tracing::{info, warn};
 
@@ -70,6 +71,8 @@ pub(super) async fn l2_execution_checks(env: &RpcEnv) -> eyre::Result<()> {
         "running Karst L2 execution acceptance tests"
     );
 
+    check_eip_7910_eth_config(env).await?;
+
     let mut sender = L2TxSender::new(
         env.chain_provider().clone(),
         l2_key,
@@ -87,6 +90,77 @@ pub(super) async fn l2_execution_checks(env: &RpcEnv) -> eyre::Result<()> {
     check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env).await?;
 
     info!("Karst L2 execution acceptance tests completed");
+    Ok(())
+}
+
+async fn check_eip_7910_eth_config(env: &RpcEnv) -> eyre::Result<()> {
+    let response: Value = env
+        .chain_provider()
+        .raw_request(Cow::Borrowed("eth_config"), ())
+        .await
+        .context("EIP-7910 eth_config RPC failed")?;
+
+    ensure!(
+        response.get("next").is_some(),
+        "EIP-7910 eth_config response missing next fork field"
+    );
+    ensure!(
+        response.get("last").is_some(),
+        "EIP-7910 eth_config response missing last fork field"
+    );
+
+    let current = response
+        .get("current")
+        .and_then(Value::as_object)
+        .ok_or_eyre("EIP-7910 eth_config response missing current fork config")?;
+
+    let chain_id = current
+        .get("chainId")
+        .and_then(Value::as_str)
+        .ok_or_eyre("EIP-7910 eth_config current config missing chainId")?;
+    let expected_chain_id = format!("{:#x}", env.config().expected_chain_id);
+    ensure!(
+        chain_id.eq_ignore_ascii_case(&expected_chain_id),
+        "EIP-7910 eth_config chainId mismatch: expected {expected_chain_id}, got {chain_id}"
+    );
+    ensure!(
+        current.get("activationTime").is_some(),
+        "EIP-7910 eth_config current config missing activationTime"
+    );
+
+    let fork_id = current
+        .get("forkId")
+        .and_then(Value::as_str)
+        .ok_or_eyre("EIP-7910 eth_config current config missing forkId")?;
+    let blob_schedule = current
+        .get("blobSchedule")
+        .and_then(Value::as_object)
+        .ok_or_eyre("EIP-7910 eth_config current config missing blobSchedule")?;
+    for field in ["target", "max", "baseFeeUpdateFraction"] {
+        ensure!(
+            blob_schedule.contains_key(field),
+            "EIP-7910 eth_config blobSchedule missing {field}"
+        );
+    }
+
+    let precompiles = current
+        .get("precompiles")
+        .and_then(Value::as_object)
+        .ok_or_eyre("EIP-7910 eth_config current config missing precompiles")?;
+    let p256verify = precompiles
+        .get("P256VERIFY")
+        .and_then(Value::as_str)
+        .ok_or_eyre("EIP-7910 eth_config precompiles missing P256VERIFY")?;
+    let expected_p256verify = P256VERIFY_PRECOMPILE.to_string();
+    ensure!(
+        p256verify.eq_ignore_ascii_case(&expected_p256verify),
+        "EIP-7910 eth_config P256VERIFY mismatch: expected {expected_p256verify}, got {p256verify}"
+    );
+
+    info!(
+        chain_id,
+        fork_id, p256verify, "EIP-7910 eth_config returned expected Karst fork metadata"
+    );
     Ok(())
 }
 
