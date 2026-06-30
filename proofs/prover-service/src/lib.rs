@@ -91,8 +91,8 @@ pub use rpc::{
 pub use service::ProverService;
 pub use traits::{ProofJobQueue, ProofRequester};
 pub use types::{
-    BackendProofId, BackendProofPhase, LockId, LockedProofRequest, ProofBackend, ProofData,
-    ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionStatus,
+    BackendProofId, LockId, LockedProofRequest, ProofBackend, ProofData, ProofRequest,
+    ProofRequestId, ProofResponse, ProofStatus, SessionStatus,
 };
 
 #[cfg(test)]

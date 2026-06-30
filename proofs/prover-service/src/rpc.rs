@@ -12,7 +12,10 @@ use jsonrpsee::{
     http_client::{HttpClient, HttpClientBuilder},
     proc_macros::rpc,
     server::{Server, ServerHandle},
-    types::{ErrorObject, ErrorObjectOwned, error::INTERNAL_ERROR_CODE},
+    types::{
+        ErrorObject, ErrorObjectOwned,
+        error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE},
+    },
 };
 use std::{net::SocketAddr, sync::Arc};
 use tracing::info;
@@ -27,6 +30,10 @@ pub mod error_code {
     pub const PENDING: i32 = -32003;
     /// The proof request permanently failed; the error data holds the reason.
     pub const FAILED: i32 = -32004;
+    /// The proof request has been retried more than the configured maximum.
+    pub const TOO_MANY_RETRIES: i32 = -32005;
+    /// A conflicting row vanished after an insert conflict; the request is safe to retry.
+    pub const RETRYABLE_CONFLICT: i32 = -32006;
     /// No proof job with the given id is known.
     pub const UNKNOWN_JOB: i32 = -32011;
     /// No backend proof job with the given id is known.
@@ -108,6 +115,12 @@ impl From<ProofRequestError> for ErrorObjectOwned {
             ProofRequestError::NotFound(_) => {
                 ErrorObject::owned(error_code::NOT_FOUND, message, None::<()>)
             }
+            ProofRequestError::RowMissingAfterConflict { .. } => {
+                ErrorObject::owned(error_code::RETRYABLE_CONFLICT, message, None::<()>)
+            }
+            ProofRequestError::TooManyRetries(_) => {
+                ErrorObject::owned(error_code::TOO_MANY_RETRIES, message, None::<()>)
+            }
             ProofRequestError::Pending { status, .. } => {
                 ErrorObject::owned(error_code::PENDING, message, Some(status))
             }
@@ -150,6 +163,9 @@ impl From<ProofJobQueueError> for ErrorObjectOwned {
             }
             ProofJobQueueError::NotFound(_) => {
                 ErrorObject::owned(error_code::NOT_FOUND, message, None::<()>)
+            }
+            ProofJobQueueError::Validation(_) => {
+                ErrorObject::owned(INVALID_PARAMS_CODE, message, None::<()>)
             }
         }
     }
@@ -289,9 +305,13 @@ fn map_request_error(
     match (err.code(), backend) {
         (error_code::QUEUE_FULL, Some(backend)) => ProofRequestError::QueueFull(backend),
         (error_code::NOT_FOUND, _) => ProofRequestError::NotFound(id),
+        (error_code::TOO_MANY_RETRIES, _) => ProofRequestError::TooManyRetries(id),
+        (error_code::RETRYABLE_CONFLICT, _) => {
+            ProofRequestError::RowMissingAfterConflict { id }
+        }
         (error_code::PENDING, _) => ProofRequestError::Pending {
             id,
-            status: error_data(&err).unwrap_or(ProofStatus::Queued),
+            status: error_data(&err).unwrap_or(ProofStatus::Created),
         },
         (error_code::FAILED, _) => ProofRequestError::Failed {
             id,
