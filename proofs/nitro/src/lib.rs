@@ -50,6 +50,10 @@ use tracing_subscriber as _;
 
 pub mod attestation;
 
+/// P-384 modular-inverse hint generator for on-chain hinted ECDSA384 verification.
+/// See [`p384_hints::collect_hints`] for the primary entry point.
+pub mod p384_hints;
+
 #[cfg(all(feature = "enclave", target_os = "linux"))]
 pub mod host;
 pub mod protocol;
