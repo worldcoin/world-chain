@@ -160,7 +160,14 @@ async fn run_worker<Q, B>(
 
         match claimed {
             Ok(Some(locked)) => {
-                spawn_job(&mut jobs, &queue, &backend, &config.worker_id, locked, permit);
+                spawn_job(
+                    &mut jobs,
+                    &queue,
+                    &backend,
+                    &config.worker_id,
+                    locked,
+                    permit,
+                );
             }
             Ok(None) => {
                 drop(permit);
@@ -223,8 +230,7 @@ fn spawn_job<Q, B>(
     jobs.spawn(
         async move {
             let _permit = permit;
-            let sessions =
-                JobSessions::new(session_queue, proof_id, worker_id.clone(), lock_id);
+            let sessions = JobSessions::new(session_queue, proof_id, worker_id.clone(), lock_id);
             let job = ProofJob {
                 request,
                 lock_id,
