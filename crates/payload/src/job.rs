@@ -41,31 +41,27 @@ use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
 pub struct FlashblocksPendingPayload<P> {
     /// The marker to cancel the job on drop
     _cancel: CancelOnDrop,
-    /// The channel to send the result to.
-    payload: oneshot::Receiver<
-        Result<(BuildOutcome<P>, Option<FlashblockAccessList>), PayloadBuilderError>,
-    >,
+    /// The build outcome channel.
+    ///
+    /// This is intentionally identical in shape to [`PendingPayload`]'s channel so the
+    /// conversion into reth's type is a plain field move (see the [`From`] impl below).
+    payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
+    /// Side channel for the access list produced alongside a successful build.
+    ///
+    /// The build task sends the access list *before* the outcome, so once [`Self::payload`]
+    /// resolves `Ok` this receiver is guaranteed to already hold the access list — or to be
+    /// closed if the build produced none.
+    access_list: oneshot::Receiver<FlashblockAccessList>,
 }
 
-// FIXME: this conversion is sad
-impl<P: Send + Sync + 'static> From<FlashblocksPendingPayload<P>> for PendingPayload<P> {
+impl<P> From<FlashblocksPendingPayload<P>> for PendingPayload<P> {
+    /// Converts into reth's [`PendingPayload`] by handing over the outcome channel directly.
+    ///
+    /// The flashblocks access list is only needed while the job drives its own build loop, so
+    /// it is dropped here. Because [`FlashblocksPendingPayload::payload`] already has the exact
+    /// shape [`PendingPayload`] expects, no task spawn or re-channeling is required.
     fn from(value: FlashblocksPendingPayload<P>) -> Self {
-        let FlashblocksPendingPayload { _cancel, payload } = value;
-
-        let payload = async move {
-            match payload.await {
-                Ok(Ok((outcome, _access_list))) => Ok(outcome),
-                Ok(Err(e)) => Err(e),
-                Err(recv_err) => Err(PayloadBuilderError::from(recv_err)), // adjust if needed
-            }
-        };
-
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        tokio::spawn(async move {
-            let _ = tx.send(payload.await);
-        });
-
-        PendingPayload::new(_cancel, rx)
+        PendingPayload::new(value._cancel, value.payload)
     }
 }
 
@@ -73,13 +69,13 @@ impl<P> FlashblocksPendingPayload<P> {
     /// Constructs a [`FlashblocksPendingPayload`] future.
     pub const fn new(
         cancel: CancelOnDrop,
-        payload: oneshot::Receiver<
-            Result<(BuildOutcome<P>, Option<FlashblockAccessList>), PayloadBuilderError>,
-        >,
+        payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
+        access_list: oneshot::Receiver<FlashblockAccessList>,
     ) -> Self {
         Self {
             _cancel: cancel,
             payload,
+            access_list,
         }
     }
 }
@@ -88,8 +84,13 @@ impl<P> Future for FlashblocksPendingPayload<P> {
     type Output = Result<(BuildOutcome<P>, Option<FlashblockAccessList>), PayloadBuilderError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let res = ready!(self.payload.poll_unpin(cx));
-        Poll::Ready(res.map_err(Into::into).and_then(|res| res))
+        let outcome = ready!(self.payload.poll_unpin(cx))
+            .map_err(PayloadBuilderError::from)
+            .and_then(|outcome| outcome);
+
+        // The access list (if any) is guaranteed to be available once the outcome resolves, as
+        // the build task sends it first. A closed channel simply means there was none.
+        Poll::Ready(outcome.map(|outcome| (outcome, self.access_list.try_recv().ok())))
     }
 }
 
@@ -279,6 +280,7 @@ where
     pub(crate) fn spawn_build_job(&mut self) {
         trace!(target: "flashblocks::payload_builder", id = %self.config.payload_id(), "spawn new payload build task");
         let (tx, rx) = oneshot::channel();
+        let (access_list_tx, access_list_rx) = oneshot::channel();
         let cancel = CancelOnDrop::default();
         let _cancel = cancel.clone();
         let guard = self.payload_task_guard.clone();
@@ -308,11 +310,22 @@ where
                 committed = ?committed_payload.payload().is_none(),
                 "starting payload build task"
             );
-            let result = builder.try_build_with_precommit(args, committed_payload.payload());
-            let _ = tx.send(result);
+            // Send the access list before the outcome so it is observable as soon as the
+            // outcome resolves. See [`FlashblocksPendingPayload`].
+            let outcome = match builder.try_build_with_precommit(args, committed_payload.payload())
+            {
+                Ok((outcome, access_list)) => {
+                    if let Some(access_list) = access_list {
+                        let _ = access_list_tx.send(access_list);
+                    }
+                    Ok(outcome)
+                }
+                Err(err) => Err(err),
+            };
+            let _ = tx.send(outcome);
         }));
 
-        self.pending_block = Some(FlashblocksPendingPayload::new(_cancel, rx));
+        self.pending_block = Some(FlashblocksPendingPayload::new(_cancel, rx, access_list_rx));
     }
 
     /// Publishes a new payload to the [`FlashblocksHandle`] after every build job has resolved.
