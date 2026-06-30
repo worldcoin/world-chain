@@ -101,7 +101,10 @@ async fn full_lifecycle_succeeds() {
     let req = request(ProofBackend::Nitro, 1);
 
     let id = service.request_proof(req.clone()).await.unwrap();
-    assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Created);
+    assert_eq!(
+        service.proof_status(id).await.unwrap(),
+        ProofStatus::Created
+    );
     assert!(matches!(
         service.get_proof(id).await,
         Err(ProofRequestError::Pending {
@@ -116,7 +119,10 @@ async fn full_lifecycle_succeeds() {
         .unwrap()
         .expect("job available");
     assert_eq!(locked.request, req);
-    assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Running);
+    assert_eq!(
+        service.proof_status(id).await.unwrap(),
+        ProofStatus::Running
+    );
     assert!(matches!(
         service.get_proof(id).await,
         Err(ProofRequestError::Pending {
@@ -245,7 +251,10 @@ async fn submit_proof_with_wrong_backend_is_rejected() {
             .await,
         Err(ProofJobQueueError::Validation(_))
     ));
-    assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Running);
+    assert_eq!(
+        service.proof_status(id).await.unwrap(),
+        ProofStatus::Running
+    );
 }
 
 #[tokio::test]
