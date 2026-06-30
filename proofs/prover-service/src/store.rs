@@ -1,21 +1,19 @@
 use crate::{
-    DEFAULT_MAX_ATTEMPTS, SessionStatus,
-    config::{DEFAULT_MAX_RETRIES, ProverServiceConfig},
+    SessionStatus,
+    config::ProverServiceConfig,
     error::{InvalidConfigError, ProofJobQueueError, ProofRequestError, ProverServiceInitError},
     types::{
-        BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend, ProofData,
+        BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
         ProofJobStatus, ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType,
     },
 };
 use alloy_primitives::{Address, B256};
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, Utc};
 use sqlx::{
     PgPool, Postgres, Row, Transaction,
     migrate::{MigrateError, Migrator},
     postgres::{PgPoolOptions, PgRow},
 };
-use std::time::Duration;
-use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
