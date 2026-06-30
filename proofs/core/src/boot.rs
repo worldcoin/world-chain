@@ -145,6 +145,17 @@ struct WorldRollupConfigHashInput<'a, T: Serialize + ?Sized> {
 /// that are not represented in upstream Kona's `RollupConfig`. Delegates to
 /// [`hash_world_rollup_config_generic`] and propagates serialization errors instead of
 /// panicking on malformed input.
+///
+/// # Cross-chain replay resistance
+///
+/// Kona's `RollupConfig` contains both `l1_chain_id` and `l2_chain_id` (see
+/// `kona-genesis::RollupConfig`), and both are part of the serde-serialized JSON
+/// blob hashed here. The resulting `rollupConfigHash` is therefore an implicit
+/// domain separator: a Nitro signature whose payload commits to this hash
+/// cannot be replayed on a different chain id. The on-chain
+/// `NitroProofVerifier.signingCommitment(l2PostRoot, l2BlockNumber,
+/// rollupConfigHash)` inherits the same property without needing an explicit
+/// `chainId` field in the commitment.
 pub fn hash_world_rollup_config(
     rollup_config: &RollupConfig,
     world_schedule: &WorldRangeHardforkConfig,

@@ -146,7 +146,8 @@ pub struct ParsedAttestationDoc {
     pub cabundle: Vec<Vec<u8>>,
     /// Optional `public_key` field. Present when the enclave called `NsmRequest::Attestation`
     /// with `public_key: Some(bytes)` — i.e., for [`EnclaveRequest::PublicKey`] responses.
-    /// The bytes are the compressed SEC1 encoding of the enclave's ephemeral secp256k1 key.
+    /// The bytes are the uncompressed SEC1 encoding (`0x04 || X || Y`, 65 bytes) of the
+    /// enclave's ephemeral secp256k1 key.
     ///
     /// Use [`extract_nsm_public_key`] to obtain this value with a mandatory-presence check.
     pub public_key: Option<Vec<u8>>,
