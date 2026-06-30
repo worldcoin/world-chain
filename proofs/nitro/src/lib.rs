@@ -26,6 +26,10 @@
 //!
 //! The enclave-side guest is the `world-chain-nitro-enclave` binary (`src/enclave.rs`).
 
+// clap is used by the p384-hints binary; reference it here so the
+// `unused_crate_dependencies` lint does not fire on the lib target.
+use clap as _;
+
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
     boot::BootInfoStruct,
@@ -49,6 +53,10 @@ use tracing as _;
 use tracing_subscriber as _;
 
 pub mod attestation;
+
+/// P-384 modular-inverse hint generator for on-chain hinted ECDSA384 verification.
+/// See [`p384_hints::collect_hints`] for the primary entry point.
+pub mod p384_hints;
 
 #[cfg(all(feature = "enclave", target_os = "linux"))]
 pub mod host;
