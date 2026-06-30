@@ -18641,6 +18641,7 @@ dependencies = [
  "reth-tracing",
  "tracing",
  "world-chain-chainspec",
+ "world-chain-primitives",
 ]
 
 [[package]]
@@ -19378,6 +19379,7 @@ dependencies = [
  "reth-rpc-eth-types",
  "reth-storage-api",
  "reth-tasks",
+ "reth-tracing",
  "reth-transaction-pool",
  "revm",
  "revm-database",

@@ -16,7 +16,7 @@ use reth_node_core::{
     version::version_metadata,
 };
 use reth_node_metrics::recorder::install_prometheus_recorder;
-use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
+use reth_rpc_server_types::{DefaultRpcModuleValidator, RethRpcModule, RpcModuleValidator};
 use reth_tracing::{Layers, TracingGuards};
 use tracing::{info, warn};
 use world_chain_chainspec::WorldChainSpec;
@@ -231,8 +231,36 @@ where
             let otlp_status = runner.block_on(self.cli.traces.init_otlp_tracing(&mut layers))?;
             let otlp_logs_status = runner.block_on(self.cli.traces.init_otlp_logs(&mut layers))?;
 
-            self.guard = Some(self.cli.logs.init_tracing_with_layers(layers, false)?);
+            // Install the runtime log-filter reload handle only when the `admin`
+            // RPC namespace is enabled — that is what gates the
+            // `admin_tracingDirectives` endpoint, and enabling reload also forces
+            // module targets onto every stdout line, which we don't want to
+            // impose on nodes that won't use the feature.
+            let enable_reload = matches!(
+                &self.cli.command,
+                Commands::Node(cmd) if cmd.rpc.is_namespace_enabled(RethRpcModule::Admin)
+            );
+
+            self.guard = Some(
+                self.cli
+                    .logs
+                    .init_tracing_with_layers(layers, enable_reload)?,
+            );
             info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
+
+            // Capture the startup filter so `admin_tracingDirectives` can revert
+            // an ephemeral override once its TTL expires. This mirrors how reth's
+            // reload builds filters (the hidden default directives are dropped on
+            // any reload), so it is as faithful as the reload mechanism allows.
+            if enable_reload {
+                let directive = self.cli.logs.verbosity.directive().to_string();
+                let baseline = if self.cli.logs.log_stdout_filter.is_empty() {
+                    directive
+                } else {
+                    format!("{directive},{}", self.cli.logs.log_stdout_filter)
+                };
+                world_chain_primitives::log_reload::set_startup_log_directives(baseline);
+            }
 
             match otlp_status {
                 OtlpInitStatus::Started(endpoint) => {
