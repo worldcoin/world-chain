@@ -43,7 +43,7 @@ reth-optimism-evm.workspace = true
 reth-tracing.workspace = true
 
 # rpc
-jsonrpsee.workspace = true
+jsonrpsee = { workspace = true, features = ["http-client"] }
 
 # alloy
 alloy-consensus.workspace = true
