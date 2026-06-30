@@ -97,3 +97,7 @@ tracing-subscriber = { workspace = true, optional = true }
 [dev-dependencies]
 rand = "0.8"
 serde_json = { workspace = true }
+
+[[bin]]
+name = "gen-test-vector"
+path = "src/bin/gen_test_vector.rs"
