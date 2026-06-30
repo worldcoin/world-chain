@@ -19102,7 +19102,6 @@ dependencies = [
  "k256",
  "kona-proof",
  "num-bigint 0.4.6",
- "num-integer",
  "num-traits",
  "p384",
  "rand 0.8.6",
