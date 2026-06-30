@@ -51,9 +51,9 @@ CREATE TABLE proof_sessions (
     completed_at        TIMESTAMPTZ NULL,
 
     CONSTRAINT proof_sessions_session_type_check
-        CHECK (session_type IN ('snark', 'stark'))
+        CHECK (session_type IN ('SNARK', 'STARK'))
 );
 
 CREATE UNIQUE INDEX proof_sessions_active_unique_idx
     ON proof_sessions (proof_id, session_type)
-    WHERE status IN ('submitting', 'running');
+    WHERE status IN ('SUBMITTING', 'RUNNING');

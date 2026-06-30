@@ -335,13 +335,13 @@ impl ProverServiceStore {
         worker_id: String,
         lock_id: LockId,
         backend_session_id: String,
-        state: BackendSessionStatus,
+        status: BackendSessionStatus,
     ) -> Result<(), ProofJobQueueError> {
         let now = Utc::now();
         let mut tx = self.begin_queue_tx().await?;
         let claim = sqlx::query(
             r#"
-           SELECT proof_id, status, worker_id, lock_id, lock_expires_at
+           SELECT proof_id, job_status, worker_id, lock_id, lock_expires_at
            FROM proof_requests
            WHERE proof_id = $1
            FOR UPDATE
@@ -357,10 +357,10 @@ impl ProverServiceStore {
         };
 
         let stored_proof_request_id: Uuid = claim.get("proof_id");
-        let stored_proof_status_str: &str = claim.get("status");
-        let stored_proof_status = ProofStatus::try_from(stored_proof_status_str).map_err(|e| {
+        let stored_job_status_str: &str = claim.get("job_status");
+        let stored_job_status = ProofJobStatus::try_from(stored_job_status_str).map_err(|e| {
             ProofJobQueueError::Internal(format!(
-                "Unknown job_status '{stored_proof_status_str}': {e}"
+                "Unknown job_status '{stored_job_status_str}': {e}"
             ))
         })?;
 
@@ -372,9 +372,9 @@ impl ProverServiceStore {
         // - proof status must be `Claimed`
         // - lock_id and worker_id must match
         // - lock_expires_at shoult not be expired
-        if stored_proof_status != ProofStatus::Queued {
+        if stored_job_status != ProofJobStatus::Claimed {
             return Err(ProofJobQueueError::Internal(format!(
-                "Invalid status for proof {proof_id}: expected Queued, got {stored_proof_status:?}"
+                "Invalid status for proof {proof_id}: expected Queued, got {stored_job_status:?}"
             )));
         }
         if stored_lock_id != Some(lock_id.0) || stored_worker_id != Some(worker_id.clone()) {
@@ -418,7 +418,7 @@ impl ProverServiceStore {
             })?;
             if status.is_terminal() {
                 // return this proof session
-                // TODO: eventually return the proof session here
+                // TODO: do it
             }
         }
 
@@ -429,14 +429,16 @@ impl ProverServiceStore {
             r#"
             SELECT id
             FROM proof_sessions
-            WHERE proof_request_id = $1
+            WHERE proof_id = $1
               AND session_type = $2
-              AND status IN ('SUBMITTING', 'RUNNING')
+              AND (status = $3 OR status = $4)
             FOR UPDATE
             "#,
         )
         .bind(proof_id_bytes(proof_id))
         .bind(session_type.as_str())
+        .bind(BackendSessionStatus::Submitting.as_str())
+        .bind(BackendSessionStatus::Running.as_str())
         .fetch_optional(&mut *tx)
         .await
         .map_err(queue_db)?
@@ -450,15 +452,15 @@ impl ProverServiceStore {
                     status = $2,
                     failure_reason = $3
                 WHERE id = $4
-                  AND status IN ('SUBMITTING', 'RUNNING')
-                RETURNING id, proof_id, session_type, backend_session_id,
-                          status, failure_reason, metadata, created_at, completed_at
+                AND (status = $5 OR status = $6)
                 "#,
             )
             .bind(backend_session_id)
-            .bind(state.as_str())
+            .bind(status.as_str())
             .bind("failure reason".to_string()) // TODO: replace this with an input value
             .bind(active_id)
+            .bind(BackendSessionStatus::Submitting.as_str())
+            .bind(BackendSessionStatus::Running.as_str())
             .fetch_optional(&mut *tx)
             .await
             .map_err(queue_db)?
@@ -473,20 +475,19 @@ impl ProverServiceStore {
                 r#"
                 INSERT INTO proof_sessions (
                     proof_id, session_type, backend_session_id, status, failure_reason,
-                    metadata, completed_at
+                    created_at, completed_at
                 )
                 VALUES (
-                    $1, $2, $3, $4, $5, NULL, NULL
+                    $1, $2, $3, $4, $5, $6, NULL
                 )
-                RETURNING id, proof_id, session_type, backend_session_id,
-                          status, failure_reason, metadata, created_at, completed_at
                 "#,
             )
             .bind(proof_id_bytes(proof_id))
             .bind(session_type.as_str())
             .bind(backend_session_id)
-            .bind(state.as_str())
+            .bind(status.as_str())
             .bind("failure reason".to_string()) // TODO: replace this with an input value
+            .bind(now)
             .fetch_one(&mut *tx)
             .await
             .map_err(queue_db)?
