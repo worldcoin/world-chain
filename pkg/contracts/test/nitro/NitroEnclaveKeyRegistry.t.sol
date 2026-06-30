@@ -43,7 +43,7 @@ contract NitroEnclaveKeyRegistryTest is Test {
     function test_RegisterKey_StoresKeyAndEmits() public {
         vm.expectEmit(false, false, false, true);
         emit NitroEnclaveKeyRegistry.KeyRegistered(pubKey, PCR0, PCR1, PCR2);
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
 
         assertTrue(registry.isKeyRegistered(pubKey));
     }
@@ -51,14 +51,14 @@ contract NitroEnclaveKeyRegistryTest is Test {
     function test_RegisterKey_RevertsWhenVerifierRejects() public {
         // No expectation set for these (TBS, SIG).
         vm.expectRevert(MockNitroAttestationVerifier.UnexpectedCall.selector);
-        registry.registerKey(hex"deadbeef", SIG);
+        registry.registerKey(hex"deadbeef", SIG, "");
     }
 
     function test_RegisterKey_RevertsOnMalformedKey() public {
         bytes memory badKey = hex"0301";
         attestationVerifier.setExpectation(hex"badf00", SIG, badKey, PCR0, PCR1, PCR2);
         vm.expectRevert(NitroEnclaveKeyRegistry.InvalidPublicKey.selector);
-        registry.registerKey(hex"badf00", SIG);
+        registry.registerKey(hex"badf00", SIG, "");
     }
 
     function test_IsKeyRegistered_FalseForUnknown() public view {
@@ -66,7 +66,7 @@ contract NitroEnclaveKeyRegistryTest is Test {
     }
 
     function test_RevokeKey_OnlyOwner() public {
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
 
         vm.prank(attacker);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
@@ -92,11 +92,11 @@ contract NitroEnclaveKeyRegistryTest is Test {
         // and both must be queryable via isKeyRegistered. (No on-chain
         // PCRs → key index exists; the KeyRegistered events are the off-chain
         // source of truth.)
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
 
         bytes memory tbs2 = hex"cafe";
         attestationVerifier.setExpectation(tbs2, SIG, otherKey, PCR0, PCR1, PCR2);
-        registry.registerKey(tbs2, SIG);
+        registry.registerKey(tbs2, SIG, "");
 
         assertTrue(registry.isKeyRegistered(pubKey));
         assertTrue(registry.isKeyRegistered(otherKey));
@@ -115,7 +115,7 @@ contract NitroEnclaveKeyRegistryTest is Test {
     function test_RegisterKey_ReturnsKeyAndPCRs() public {
         // The function's return values must be forwarded verbatim from the
         // verifier so off-chain consumers can rely on them.
-        (bytes memory key, bytes32 p0, bytes32 p1, bytes32 p2) = registry.registerKey(TBS, SIG);
+        (bytes memory key, bytes32 p0, bytes32 p1, bytes32 p2) = registry.registerKey(TBS, SIG, "");
         assertEq(key, pubKey);
         assertEq(p0, PCR0);
         assertEq(p1, PCR1);
@@ -133,7 +133,7 @@ contract NitroEnclaveKeyRegistryTest is Test {
         }
         attestationVerifier.setExpectation(hex"feedface", SIG, badKey, PCR0, PCR1, PCR2);
         vm.expectRevert(NitroEnclaveKeyRegistry.InvalidPublicKey.selector);
-        registry.registerKey(hex"feedface", SIG);
+        registry.registerKey(hex"feedface", SIG, "");
     }
 
     function test_RegisterKey_RejectsKeyWithLength64() public {
@@ -144,7 +144,7 @@ contract NitroEnclaveKeyRegistryTest is Test {
         }
         attestationVerifier.setExpectation(hex"6464", SIG, key64, PCR0, PCR1, PCR2);
         vm.expectRevert(NitroEnclaveKeyRegistry.InvalidPublicKey.selector);
-        registry.registerKey(hex"6464", SIG);
+        registry.registerKey(hex"6464", SIG, "");
     }
 
     function test_RegisterKey_RejectsKeyWithLength66() public {
@@ -152,11 +152,11 @@ contract NitroEnclaveKeyRegistryTest is Test {
         key66[0] = 0x04;
         attestationVerifier.setExpectation(hex"6666", SIG, key66, PCR0, PCR1, PCR2);
         vm.expectRevert(NitroEnclaveKeyRegistry.InvalidPublicKey.selector);
-        registry.registerKey(hex"6666", SIG);
+        registry.registerKey(hex"6666", SIG, "");
     }
 
     function test_RevokeKey_AlreadyRevokedRevertsKeyNotRegistered() public {
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
         vm.prank(owner);
         registry.revokeKey(pubKey);
         // A second revoke for the same (now Revoked) key must surface
@@ -177,7 +177,7 @@ contract NitroEnclaveKeyRegistryTest is Test {
         // Stronger assertion: emits the exact event including all PCRs.
         vm.expectEmit(false, false, false, true);
         emit NitroEnclaveKeyRegistry.KeyRegistered(pubKey, PCR0, PCR1, PCR2);
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
     }
 
     function test_KeyStatus_ForUnknownKeyIsZero() public view {
@@ -195,11 +195,11 @@ contract NitroEnclaveKeyRegistryTest is Test {
         // wraps the call in a try/catch can't accidentally turn it into
         // a different error type.)
         vm.expectRevert(MockNitroAttestationVerifier.UnexpectedCall.selector);
-        registry.registerKey(hex"deadbeef", hex"00");
+        registry.registerKey(hex"deadbeef", hex"00", "");
     }
 
     function test_RevokeKey_PreventsReregistration() public {
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
 
         vm.prank(owner);
         registry.revokeKey(pubKey);
@@ -208,13 +208,13 @@ contract NitroEnclaveKeyRegistryTest is Test {
 
         // Anyone re-submitting the same attestation must fail.
         vm.expectRevert(NitroEnclaveKeyRegistry.KeyRevokedPermanently.selector);
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
 
         assertFalse(registry.isKeyRegistered(pubKey));
     }
 
     function test_RevokeKey_AlsoBlocksRegistrationUnderDifferentPCRs() public {
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
 
         vm.prank(owner);
         registry.revokeKey(pubKey);
@@ -224,18 +224,18 @@ contract NitroEnclaveKeyRegistryTest is Test {
         bytes32 otherPcr0 = bytes32(uint256(0xff));
         attestationVerifier.setExpectation(hex"1234", SIG, pubKey, otherPcr0, PCR1, PCR2);
         vm.expectRevert(NitroEnclaveKeyRegistry.KeyRevokedPermanently.selector);
-        registry.registerKey(hex"1234", SIG);
+        registry.registerKey(hex"1234", SIG, "");
     }
 
     function test_IsKeyRevoked_FalseBeforeRevoke() public {
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
         assertFalse(registry.isKeyRevoked(pubKey));
     }
 
     function test_RegisterKey_RevertsIfAlreadyActive() public {
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
         vm.expectRevert(NitroEnclaveKeyRegistry.KeyAlreadyRegistered.selector);
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
     }
 
     function test_KeyStatus_LifecycleTransitions() public {
@@ -243,7 +243,7 @@ contract NitroEnclaveKeyRegistryTest is Test {
         assertEq(uint8(registry.keyStatus(pubKey)), uint8(NitroEnclaveKeyRegistry.KeyStatus.Unknown));
 
         // Active
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
         assertEq(uint8(registry.keyStatus(pubKey)), uint8(NitroEnclaveKeyRegistry.KeyStatus.Active));
 
         // Revoked
@@ -254,7 +254,7 @@ contract NitroEnclaveKeyRegistryTest is Test {
 
     function test_MultiImageCoexistence() public {
         // Image A.
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
 
         // Image B: different PCR triple, different key, different attestation.
         bytes32 pcr0B = bytes32(uint256(0x10));
@@ -262,7 +262,7 @@ contract NitroEnclaveKeyRegistryTest is Test {
         bytes32 pcr2B = bytes32(uint256(0x12));
         bytes memory tbsB = hex"03030303";
         attestationVerifier.setExpectation(tbsB, SIG, otherKey, pcr0B, pcr1B, pcr2B);
-        registry.registerKey(tbsB, SIG);
+        registry.registerKey(tbsB, SIG, "");
 
         // Both keys are registered.
         assertTrue(registry.isKeyRegistered(pubKey));

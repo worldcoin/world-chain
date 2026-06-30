@@ -8,34 +8,34 @@ import {NitroEnclaveKeyRegistry} from "./NitroEnclaveKeyRegistry.sol";
 /// @title NitroProofVerifier
 /// @author Worldcoin
 /// @notice TEE-attestation proof lane verifier compatible with WIP-1006's
-///         multi-proof system ({IWorldChainProofVerifier}).
+///         multi-proof system (`IWorldChainProofVerifier`).
 /// @dev The enclave produces an ECDSA (secp256k1) signature over the
 ///      `signing_commitment` computed in `proofs/nitro/src/protocol.rs`:
 ///
 ///         signingCommitment =
 ///             keccak256( l2PostRoot || uint64BE(l2BlockNumber) || rollupConfigHash )
 ///
-///      The {verify} hook \u2014 the only public entry point on this contract \u2014:
+///      The `verify` hook — the only public entry point on this contract —:
 ///        1. Reconstructs the proposal's `rootId` from the boot-info plus the
 ///           remaining context fields supplied in the proof and asserts it
 ///           equals the `rootId` the game is asking about. This binds the
 ///           Nitro signature to the *specific* proposal under dispute.
 ///        2. Checks that `expectedPublicKey` is currently registered in
-///           {NitroEnclaveKeyRegistry}.
+///           `NitroEnclaveKeyRegistry`.
 ///        3. Recomputes the signing commitment from the boot-info fields.
 ///        4. Recovers the signer via `ecrecover` and matches it against the
 ///           Ethereum address derived from `expectedPublicKey`.
 ///
 ///      Any decode or verification failure is surfaced as `false` (never
 ///      a revert) to honour the boolean-predicate contract of
-///      {IWorldChainProofVerifier}.
+///      `IWorldChainProofVerifier`.
 contract NitroProofVerifier is IWorldChainProofVerifier {
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
     //////////////////////////////////////////////////////////////*/
 
     /// @dev Thrown when the proof's signature bytes are not exactly 65 bytes.
-    ///      Surfaced as `false` via {verify}'s try/catch.
+    ///      Surfaced as `false` via `verify`'s try/catch.
     error InvalidSignatureLength();
 
     /// @dev Thrown when the proof's expected public key is not a 65-byte
@@ -79,9 +79,9 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     ///            bytes   expectedPublicKey
     ///        )
     ///
-    ///      Decoding plus {_verifyDecoded} live behind an external `this.`
-    ///      call so the try/catch in {verify} traps every revert path \u2014
-    ///      including a malformed ABI payload \u2014 and surfaces it as `false`.
+    ///      Decoding plus `_verifyDecoded` live behind an external `this.`
+    ///      call so the try/catch in `verify` traps every revert path —
+    ///      including a malformed ABI payload — and surfaces it as `false`.
     function verify(bytes32 rootId, bytes calldata proof) external view returns (bool) {
         try this._decodeAndVerify(rootId, proof) returns (bool ok) {
             return ok;
@@ -90,9 +90,9 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
         }
     }
 
-    /// @notice External helper used only by {verify}; MUST NOT be called
+    /// @notice External helper used only by `verify`; MUST NOT be called
     ///         directly.
-    /// @dev External so that {verify} can invoke it via `this.` and trap
+    /// @dev External so that `verify` can invoke it via `this.` and trap
     ///      reverts (including the ABI decode revert) in a try/catch.
     function _decodeAndVerify(bytes32 rootId, bytes calldata proof) external view returns (bool) {
         require(msg.sender == address(this), "internal");
@@ -150,7 +150,7 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     ///      derived from `expectedPublicKey`, and that the key is registered.
     ///      Returns `false` on logical mismatch (unregistered key, wrong
     ///      signer, malleable s, etc.); reverts on structural errors
-    ///      (`InvalidSignatureLength`, `InvalidPublicKey`) which {verify}
+    ///      (`InvalidSignatureLength`, `InvalidPublicKey`) which `verify`
     ///      catches and turns into `false`.
     function _verifyEnclaveSignature(bytes32 commitment, bytes memory signature, bytes memory expectedPublicKey)
         internal

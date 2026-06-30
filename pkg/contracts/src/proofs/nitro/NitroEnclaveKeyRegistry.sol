@@ -7,18 +7,18 @@ import {INitroAttestationVerifier} from "./INitroAttestationVerifier.sol";
 /// @title NitroEnclaveKeyRegistry
 /// @author Worldcoin
 /// @notice Registry of attested AWS Nitro enclave secp256k1 public keys.
-/// @dev Registration goes through a fully on-chain {INitroAttestationVerifier}
+/// @dev Registration goes through a fully on-chain `INitroAttestationVerifier`
 ///      which:
 ///        - validates the COSE_Sign1 P-384 signature;
 ///        - validates the X.509 cert chain to the AWS Nitro root CA (via the
-///          cached {ICertManager});
+///          cached `ICertManager`);
 ///        - extracts PCR0/1/2 from the document and checks they correspond to
 ///          an enclave image that the verifier's owner has explicitly approved;
 ///        - returns the embedded SEC1-uncompressed secp256k1 public key together
 ///          with the PCR triple it was bound to.
 ///
 ///      The registry records the returned key in a per-key `keccak256(publicKey)`
-///      flag and emits {KeyRegistered} with the bound PCR triple, which is the
+///      flag and emits `KeyRegistered` with the bound PCR triple, which is the
 ///      authoritative off-chain index from PCRs to keys. The registry
 ///      deliberately does NOT maintain an on-chain `PCRs → key` lookup:
 ///      multiple validator instances run the same enclave image simultaneously,
@@ -33,15 +33,15 @@ contract NitroEnclaveKeyRegistry is Ownable {
                                  ERRORS
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Thrown when {revokeKey} is called for a key that is not
-    ///         currently registered as {KeyStatus.Active}.
+    /// @notice Thrown when `revokeKey` is called for a key that is not
+    ///         currently registered as `KeyStatus.Active`.
     error KeyNotRegistered();
 
-    /// @notice Thrown when {registerKey} is called for a key that is already
-    ///         {KeyStatus.Active}.
+    /// @notice Thrown when `registerKey` is called for a key that is already
+    ///         `KeyStatus.Active`.
     error KeyAlreadyRegistered();
 
-    /// @notice Thrown when {registerKey} is called for a key that was
+    /// @notice Thrown when `registerKey` is called for a key that was
     ///         previously revoked. Revocation is permanent — a compromised
     ///         enclave key must not be silently restored by re-submitting
     ///         its attestation document.
@@ -106,17 +106,20 @@ contract NitroEnclaveKeyRegistry is Ownable {
     ///
     /// @dev The full COSE_Sign1 / X.509 / P-384 verification, the PCR
     ///      allowlist check, and the freshness check are all delegated to
-    ///      {INitroAttestationVerifier.verifyAttestation}; this function only
+    ///      `INitroAttestationVerifier.verifyAttestation`; this function only
     ///      stores the resulting key. Reverts on any verification failure.
     ///
     /// @param attestationTbs The COSE_Sign1 TBS bytes (from
     ///                       `NitroValidator.decodeAttestationTbs`).
     /// @param signature      The 96-byte (r||s) P-384 attestation signature.
-    function registerKey(bytes calldata attestationTbs, bytes calldata signature)
+    /// @param attestationSigHints Off-chain modular-inverse hints for the
+    ///                       P-384 attestation signature. Pre-compute with
+    ///                       `tools/p384_hints.js attestation ...`.
+    function registerKey(bytes calldata attestationTbs, bytes calldata signature, bytes calldata attestationSigHints)
         external
         returns (bytes memory publicKey, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2)
     {
-        (publicKey, pcr0, pcr1, pcr2) = verifier.verifyAttestation(attestationTbs, signature);
+        (publicKey, pcr0, pcr1, pcr2) = verifier.verifyAttestation(attestationTbs, signature, attestationSigHints);
         if (publicKey.length != 65 || publicKey[0] != 0x04) revert InvalidPublicKey();
 
         bytes32 keyHash = keccak256(publicKey);
@@ -134,14 +137,14 @@ contract NitroEnclaveKeyRegistry is Ownable {
 
     /// @notice Revoke a previously registered enclave key.
     /// @dev Only callable by the owner. Revocation is permanent — see
-    ///      {isKeyRevoked} — so a compromised key cannot be silently restored
+    ///      `isKeyRevoked` — so a compromised key cannot be silently restored
     ///      by replaying its attestation document.
     ///
-    ///      ## Relationship to {NitroAttestationVerifier.revokePCRSet}
+    ///      ## Relationship to `NitroAttestationVerifier.revokePCRSet`
     ///      Revoking a PCR set on the verifier (i.e. retiring an enclave
     ///      image) does **not** automatically transition the keys that were
-    ///      registered under that image to {KeyStatus.Revoked} here. Each key
-    ///      remains {KeyStatus.Active} until {revokeKey} is called for it
+    ///      registered under that image to `KeyStatus.Revoked` here. Each key
+    ///      remains `KeyStatus.Active` until `revokeKey` is called for it
     ///      individually.
     ///
     ///      This is intentional. Nitro enclave signing keys are ephemeral:
@@ -150,14 +153,14 @@ contract NitroEnclaveKeyRegistry is Ownable {
     ///      designed incident-response flow for a compromised image is:
     ///        1. Stop the running enclave instances (the AWS Nitro hardware
     ///           isolation guarantees the key is destroyed with the process).
-    ///        2. Call {NitroAttestationVerifier.revokePCRSet} so no fresh
+    ///        2. Call `NitroAttestationVerifier.revokePCRSet` so no fresh
     ///           enclave from the same image can re-register.
     ///      The two steps together eliminate the threat without per-key
     ///      cascading on-chain.
     ///
     ///      Belt-and-suspenders operators can still observe
-    ///      {NitroAttestationVerifier.PCRSetRevoked} events off-chain and
-    ///      call {revokeKey} for every affected key. The {KeyRegistered}
+    ///      `NitroAttestationVerifier.PCRSetRevoked` events off-chain and
+    ///      call `revokeKey` for every affected key. The `KeyRegistered`
     ///      event carries the bound PCR triple specifically to make this
     ///      easy.
     ///
@@ -165,8 +168,8 @@ contract NitroEnclaveKeyRegistry is Ownable {
     ///      An automatic on-chain cascade was considered and rejected:
     ///        - Storing `pcrSetHash → keyHash[]` to enumerate affected keys
     ///          requires an unbounded array per image, with O(N) gas on
-    ///          {registerKey} and on the cascade itself.
-    ///        - Doing the lookup lazily in {isKeyRegistered} would add an
+    ///          `registerKey` and on the cascade itself.
+    ///        - Doing the lookup lazily in `isKeyRegistered` would add an
     ///          extra SLOAD on every proof-verification call (the hot path),
     ///          for no security gain given Nitro's hardware key-destruction
     ///          guarantee.
