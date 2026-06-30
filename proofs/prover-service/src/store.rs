@@ -150,12 +150,12 @@ impl ProverServiceStore {
                     retry_count = retry_count + 1,
                     failure_reason = NULL,
                     proof_data = NULL,
-                    completed_at = NULL,
+                    finished_at = NULL,
                     worker_id = NULL,
                     lock_id = NULL,
                     lock_expires_at = NULL,
                     attempt = 0
-                WHERE id = $3
+                WHERE proof_id = $3
                 "#,
             )
             .bind(ProofStatus::Created.as_str())
