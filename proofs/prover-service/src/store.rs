@@ -469,11 +469,11 @@ impl ProverServiceStore {
             sqlx::query(
                 r#"
                 INSERT INTO proof_sessions (
-                    proof_id, session_type, backend_session_id, status, failure_reason,
-                    created_at, completed_at
-                )
+                    proof_id, session_type, backend_session_id, status,
+                    created_at, failure_reason, completed_at
+                    )
                 VALUES (
-                    $1, $2, $3, $4, $5, $6, NULL
+                    $1, $2, $3, $4, $5, NULL, NULL
                 )
                 RETURNING id
                 "#,
@@ -482,7 +482,6 @@ impl ProverServiceStore {
             .bind(session_type.as_str())
             .bind(backend_session_id)
             .bind(status.as_str())
-            .bind("failure reason".to_string()) // TODO: replace this with an input value
             .bind(now)
             .fetch_one(&mut *tx)
             .await
