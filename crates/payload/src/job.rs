@@ -50,7 +50,7 @@ pub struct FlashblocksPendingPayload<P> {
     ///
     /// The build task sends the access list *before* the outcome, so once [`Self::payload`]
     /// resolves `Ok` this receiver is guaranteed to already hold the access list — or to be
-    /// closed if the build produced none.
+    /// closed if the build produced `None`.
     access_list: oneshot::Receiver<FlashblockAccessList>,
 }
 
@@ -58,8 +58,7 @@ impl<P> From<FlashblocksPendingPayload<P>> for PendingPayload<P> {
     /// Converts into reth's [`PendingPayload`] by handing over the outcome channel directly.
     ///
     /// The flashblocks access list is only needed while the job drives its own build loop, so
-    /// it is dropped here. Because [`FlashblocksPendingPayload::payload`] already has the exact
-    /// shape [`PendingPayload`] expects, no task spawn or re-channeling is required.
+    /// it is dropped here.
     fn from(value: FlashblocksPendingPayload<P>) -> Self {
         PendingPayload::new(value._cancel, value.payload)
     }
