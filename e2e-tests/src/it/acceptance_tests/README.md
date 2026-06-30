@@ -5,9 +5,10 @@ The MVP checks:
 - `eth_chainId` matches the configured chain ID
 - `eth_getBlockByNumber("latest")` returns a block
 - `eth_blockNumber` advances by at least `ACCEPTANCE_MIN_BLOCK_INCREMENTS`
-- when `ACCEPTANCE_KARST_ENABLED=true`, Karst L2 execution checks send funded
-  EOA transactions covering MODEXP bounds/gas floors, P256VERIFY gas floor,
-  bn256 pairing input limit, CLZ, and transaction gas cap rejection
+- when `ACCEPTANCE_KARST_ENABLED=true`, Karst L2 execution checks call
+  `eth_config` and send funded EOA transactions covering MODEXP bounds/gas
+  floors, P256VERIFY gas floor, bn256 pairing input limit, CLZ, and transaction
+  gas cap rejection
 - when `ACCEPTANCE_KARST_DEPOSIT_ENABLED=true`, the Karst checks also submit an
   L1 portal deposit whose derived L2 deposit gas limit is above the Karst
   transaction gas cap, then require the L2 deposit receipt to land
