@@ -237,71 +237,53 @@ impl ProverServiceStore {
         backend: ProofBackend,
         worker_id: String,
     ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
-        loop {
-            let mut tx = self.begin_queue_tx().await?;
-            let now = Utc::now();
-            let Some(row) = sqlx::query(
-                "SELECT proof_id, backend, game, root_claim, l2_block_number, l1_head, start_attempts
-                FROM proof_requests
-                WHERE backend = $1
-                AND (
-                    proof_status = $2
-                    OR (proof_status = $3 AND lock_expires_at < $4)
-                )
-                ORDER BY created_at
+        let lock_id = LockId::new();
+        let now = Utc::now();
+        let lock_expires_at = now + self.config.lock_timeout;
+        let query = sqlx::query(
+            r#"
+            UPDATE proof_requests
+            SET proof_status = $1,
+                worker_id = $2,
+                lock_id = $3,
+                job_status = $4,
+                attempt = attempt + 1,
+                lock_expires_at = $5,
+                updated_at = $6
+            WHERE proof_id = (
+                SELECT proof_id FROM proof_requests
+                WHERE backend = $7
+                    AND (
+                        job_status = $8
+                        OR (job_status = $9 AND lock_expires_at < $10 AND attempt < $11)
+                    ) 
+                ORDER BY l2_block_number ASC, created_at ASC, proof_id ASC
                 FOR UPDATE SKIP LOCKED
-                LIMIT 1",
+                LIMIT 1 
             )
-            .bind(backend.as_str())
-            .bind(ProofStatus::Created.as_str())
-            .bind(ProofStatus::Running.as_str())
-            .bind(now)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(queue_db)?
-            else {
-                tx.commit().await.map_err(queue_db)?;
-                return Ok(None);
-            };
+            RETURNING backend, game, root_claim, l2_block_number, l1_head;
+            "#,
+        )
+        .bind(ProofStatus::Running.as_str())
+        .bind(worker_id)
+        .bind(lock_id.0)
+        .bind(ProofJobStatus::Claimed.as_str())
+        .bind(lock_expires_at)
+        .bind(now)
+        .bind(backend.as_str())
+        .bind(ProofJobStatus::Pending.as_str())
+        .bind(ProofJobStatus::Claimed.as_str())
+        .bind(now)
+        .bind(self.config.max_attempts as i32)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(queue_db)?;
 
-            let proof_id = proof_id_from_row(&row).map_err(ProofJobQueueError::Internal)?;
-            let attempts: i32 = row.try_get("attempt").map_err(queue_db)?;
-            if attempts as u32 >= self.config.max_attempts {
-                let reason = format!("start lock expired after {attempts} attempts");
-                mark_proof_failed(&mut tx, proof_id, &reason, now)
-                    .await
-                    .map_err(queue_db)?;
-                warn!(%proof_id, attempts, "proof job failed: start attempts exhausted");
-                tx.commit().await.map_err(queue_db)?;
-                continue;
-            }
-
+        if let Some(row) = query {
             let request = request_from_row(&row).map_err(ProofJobQueueError::Internal)?;
-            let lock_id = LockId::new();
-            let lock_expires_at = timestamp_after(now, self.config.lock_timeout);
-            sqlx::query(
-                "update proof_requests
-                 set status = $2,
-                     lock_expires_at = $3,
-                     lock_id = $4,
-                     start_attempts = start_attempts + 1,
-                     updated_at = $5,
-                     worker_id = $6
-                 where proof_id = $1",
-            )
-            .bind(proof_id_bytes(proof_id))
-            .bind(ProofStatus::Starting.as_str())
-            .bind(lock_expires_at)
-            .bind(lock_id.0)
-            .bind(now)
-            .bind(worker_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(queue_db)?;
-
-            tx.commit().await.map_err(queue_db)?;
-            debug!(%proof_id, %backend, attempts = attempts + 1, "proof job locked");
-            return Ok(Some(LockedProofRequest { request, lock_id }));
+            Ok(Some(LockedProofRequest { request, lock_id }))
+        } else {
+            Ok(None)
         }
     }
 
