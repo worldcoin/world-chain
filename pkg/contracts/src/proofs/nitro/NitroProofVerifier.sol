@@ -15,7 +15,7 @@ import {NitroEnclaveKeyRegistry} from "./NitroEnclaveKeyRegistry.sol";
 ///         signingCommitment =
 ///             keccak256( l2PostRoot || uint64BE(l2BlockNumber) || rollupConfigHash )
 ///
-///      The {verify} hook \u2014 the only public entry point on this contract \u2014:
+///      The {verify} hook — the only public entry point on this contract —:
 ///        1. Reconstructs the proposal's `rootId` from the boot-info plus the
 ///           remaining context fields supplied in the proof and asserts it
 ///           equals the `rootId` the game is asking about. This binds the
@@ -80,8 +80,8 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     ///        )
     ///
     ///      Decoding plus {_verifyDecoded} live behind an external `this.`
-    ///      call so the try/catch in {verify} traps every revert path \u2014
-    ///      including a malformed ABI payload \u2014 and surfaces it as `false`.
+    ///      call so the try/catch in {verify} traps every revert path —
+    ///      including a malformed ABI payload — and surfaces it as `false`.
     function verify(bytes32 rootId, bytes calldata proof) external view returns (bool) {
         try this._decodeAndVerify(rootId, proof) returns (bool ok) {
             return ok;
