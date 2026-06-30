@@ -135,7 +135,6 @@ impl ProverServiceStore {
         if proof_status == ProofStatus::Failed {
             // retry the entire proof job if retry_count is less than the max_retry
             let retry_count: i32 = row.get("retry_count");
-            // TODO: eventually this max can be a cli parameter
             if retry_count > self.config.max_retries as i32 {
                 tx.rollback().await.map_err(request_db)?;
                 return Err(ProofRequestError::TooManyRetries(id));
