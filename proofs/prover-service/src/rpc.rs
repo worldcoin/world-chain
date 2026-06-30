@@ -334,27 +334,6 @@ fn map_job_error(err: ClientError, id: ProofRequestId) -> ProofJobQueueError {
     }
 }
 
-fn map_backend_job_error(err: ClientError, backend_job_id: i64) -> ProofJobQueueError {
-    let ClientError::Call(err) = err else {
-        return ProofJobQueueError::Rpc(err.to_string());
-    };
-    match err.code() {
-        error_code::UNKNOWN_BACKEND_JOB => ProofJobQueueError::UnknownBackendJob(backend_job_id),
-        error_code::STALE_LOCK => ProofJobQueueError::StaleLocked,
-        error_code::INVALID_PROOF => {
-            if let Some(data) = error_data::<InvalidProofErrorData>(&err) {
-                ProofJobQueueError::InvalidProof {
-                    id: data.id,
-                    reason: data.reason,
-                }
-            } else {
-                ProofJobQueueError::Rpc(format!("{} (code {})", err.message(), err.code()))
-            }
-        }
-        _ => ProofJobQueueError::Rpc(format!("{} (code {})", err.message(), err.code())),
-    }
-}
-
 #[async_trait]
 impl ProofRequester for RpcProverServiceClient {
     async fn request_proof(

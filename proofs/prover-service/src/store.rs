@@ -8,7 +8,7 @@ use crate::{
     },
 };
 use alloy_primitives::{Address, B256};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use sqlx::{
     PgPool, Postgres, Row, Transaction,
     migrate::{MigrateError, Migrator},
@@ -23,8 +23,6 @@ pub(crate) struct ProverServiceStore {
     config: ProverServiceConfig,
     pool: PgPool,
 }
-
-type DbTimestamp = DateTime<Utc>;
 
 #[derive(Debug, Clone, Copy)]
 enum PostgresIsolationLevel {
@@ -382,7 +380,7 @@ impl ProverServiceStore {
         if stored_lock_expires_at.is_none()
             || stored_lock_expires_at
                 .as_ref()
-                .map_or(true, |expires_at| *expires_at <= now)
+                .is_none_or(|expires_at| *expires_at <= now)
         {
             return Err(ProofJobQueueError::Internal(format!(
                 "Lock expired for proof {proof_id}"
@@ -541,7 +539,7 @@ impl ProverServiceStore {
         if stored_lock_expires_at.is_none()
             || stored_lock_expires_at
                 .as_ref()
-                .map_or(true, |expires_at| *expires_at <= now)
+                .is_none_or(|expires_at| *expires_at <= now)
         {
             return Err(ProofJobQueueError::Validation(format!(
                 "Lock expired for proof {}",
@@ -552,9 +550,9 @@ impl ProverServiceStore {
             stored_job_status,
             ProofJobStatus::Succeeded | ProofJobStatus::Failed
         ) {
-            return Err(ProofJobQueueError::Validation(format!(
-                "The proof has alredy reached a terminal job status.",
-            )));
+            return Err(ProofJobQueueError::Validation(
+                "The proof has alredy reached a terminal job status.".to_string(),
+            ));
         }
         // now update the table with the proof
         let proof_data = serde_json::to_vec(&proof.proof)
@@ -596,9 +594,9 @@ impl ProverServiceStore {
             // read the row again (equal to start of this fn) and perform
             // validation again. This makes the error more clear and callers
             // of this fn may handle the specific error better.
-            Err(ProofJobQueueError::Validation(format!(
-                "submit_proof is failing because there is no row to update!"
-            )))
+            Err(ProofJobQueueError::Validation(
+                "submit_proof is failing because there is no row to update!".to_string(),
+            ))
         }
     }
 
@@ -673,10 +671,6 @@ fn request_from_row(row: &PgRow) -> Result<ProofRequest, String> {
 
 fn parse_status(status: String) -> Result<ProofStatus, ProofRequestError> {
     ProofStatus::try_from(status.as_str()).map_err(ProofRequestError::Internal)
-}
-
-fn parse_backend(backend: String) -> Result<ProofBackend, ProofJobQueueError> {
-    ProofBackend::try_from(backend.as_str()).map_err(ProofJobQueueError::Internal)
 }
 
 fn l2_to_i64(value: u64) -> Result<i64, ProofRequestError> {
