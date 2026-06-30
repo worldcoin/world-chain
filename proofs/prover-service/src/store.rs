@@ -580,6 +580,7 @@ impl ProverServiceStore {
         .bind(proof_data)
         .bind(now)
         .bind(proof_id_bytes(proof.id))
+        .bind(ProofJobStatus::Claimed.as_str())
         .bind(worker_id)
         .bind(lock_id.0)
         .bind(now)

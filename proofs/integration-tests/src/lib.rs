@@ -13,7 +13,7 @@ use std::{
 };
 use world_chain_challenger::{ChallengeSubmission, ChallengerClient, ChallengerError};
 use world_chain_defender::{DefenderClient, DefenderError, DefenderSubmission};
-use world_chain_proof_worker::ProofJobBackend;
+use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_proofs::{
     ConsensusError, ConsensusProvider, GameCreated, PROOF_SYSTEM_VERSION, ProofDomain, ProofLane,
     RootCommitment, RootState, has_threshold,
@@ -22,10 +22,9 @@ use world_chain_proposer::{
     ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
 };
 use world_chain_prover_service::{
-    BackendProofState, BackendUpdate, LockId, LockedBackendProofWork, LockedProofRequest,
-    ProofBackend, ProofData, ProofJobQueue, ProofJobQueueError, ProofRequest, ProofRequestError,
-    ProofRequestId, ProofRequester, ProofResponse, ProofStatus, ProofSubmissionLock, ProverService,
-    ProverServiceConfig,
+    BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend, ProofData,
+    ProofJobQueue, ProofJobQueueError, ProofRequest, ProofRequestError, ProofRequestId,
+    ProofRequester, ProofResponse, ProofStatus, ProverService, ProverServiceConfig, SessionType,
 };
 
 pub const BLOCK_INTERVAL: u64 = 10;
@@ -515,22 +514,26 @@ impl FakeProofBackend {
     }
 }
 
-impl ProofJobBackend for FakeProofBackend {
+#[async_trait]
+impl ClaimedProofJobHandler for FakeProofBackend {
     fn lane(&self) -> ProofBackend {
         self.lane
     }
 
-    fn start(&self, request: &ProofRequest) -> anyhow::Result<BackendUpdate> {
+    async fn handle_claimed_job(&self, job: ProofJob) -> anyhow::Result<ProofData> {
+        let request = &job.request;
         let id = request.id();
-        let mut attempts = self.attempts.lock().expect("fake backend mutex poisoned");
-        let count = attempts.entry(id).or_default();
-        if *count < self.failures_before_success {
+        {
+            let mut attempts = self.attempts.lock().expect("fake backend mutex poisoned");
+            let count = attempts.entry(id).or_default();
+            if *count < self.failures_before_success {
+                *count += 1;
+                anyhow::bail!("configured fake proof failure for {id}");
+            }
             *count += 1;
-            anyhow::bail!("configured fake proof failure for {id}");
         }
-        *count += 1;
 
-        Ok(BackendUpdate::Complete(match self.lane {
+        Ok(match self.lane {
             ProofBackend::Sp1 => ProofData::Sp1 {
                 public_values: request.root_claim.as_slice().to_vec().into(),
                 proof: vec![0x51, request.l2_block_number as u8].into(), // mock proof
@@ -539,15 +542,7 @@ impl ProofJobBackend for FakeProofBackend {
                 attestation: request.l1_head.as_slice().to_vec().into(),
                 signature: vec![0x7e, request.l2_block_number as u8].into(), // mock signature
             },
-        }))
-    }
-
-    fn advance(
-        &self,
-        _request: &ProofRequest,
-        _state: BackendProofState,
-    ) -> anyhow::Result<BackendUpdate> {
-        anyhow::bail!("fake backend does not support durable backend jobs")
+        })
     }
 }
 
@@ -604,9 +599,10 @@ impl ProofJobQueue for SharedProverService {
     async fn submit_proof(
         &self,
         proof: ProofResponse,
-        lease: ProofSubmissionLock,
+        worker_id: String,
+        lock: LockId,
     ) -> Result<(), ProofJobQueueError> {
-        self.service.submit_proof(proof, lease).await
+        self.service.submit_proof(proof, worker_id, lock).await
     }
 
     async fn get_proof_session(
@@ -624,7 +620,7 @@ impl ProofJobQueue for SharedProverService {
         worker_id: String,
         lock_id: LockId,
         backend_session_id: String,
-        state: BackendSessionState,
+        state: BackendSessionStatus,
     ) -> Result<(), ProofJobQueueError> {
         self.service
             .record_proof_session(

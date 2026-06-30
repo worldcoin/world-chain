@@ -30,11 +30,11 @@ CREATE TABLE proof_requests (
 
 CREATE INDEX proof_requests_queued_idx
     ON proof_requests (backend, created_at)
-    WHERE status = 'queued';
+    WHERE job_status = 'PENDING';
 
 CREATE INDEX proof_requests_starting_lock_idx
     ON proof_requests (lock_expires_at)
-    WHERE status = 'starting';
+    WHERE job_status = 'CLAIMED';
 
 CREATE TABLE proof_sessions (
     id                  BIGSERIAL PRIMARY KEY,
