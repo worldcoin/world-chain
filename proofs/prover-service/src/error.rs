@@ -91,4 +91,6 @@ pub enum ProofJobQueueError {
     /// No proof request with the given id is known.
     #[error("proof request {0} not found")]
     NotFound(ProofRequestId),
+    #[error("validation error: {0}")]
+    Validation(String),
 }

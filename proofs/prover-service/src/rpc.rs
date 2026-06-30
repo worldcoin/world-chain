@@ -70,7 +70,12 @@ pub trait ProverServiceApi {
 
     /// Submit a generated proof.
     #[method(name = "submitProof")]
-    async fn submit_proof(&self, proof: ProofResponse, lock: LockId) -> RpcResult<()>;
+    async fn submit_proof(
+        &self,
+        proof: ProofResponse,
+        worker_id: String,
+        lock: LockId,
+    ) -> RpcResult<()>;
 
     /// Get a proof session if any.
     #[method(name = "getProofSession")]
@@ -185,8 +190,13 @@ impl ProverServiceApiServer for ProverServiceRpc {
         Ok(self.service.get_next_proof(backend, worker_id).await?)
     }
 
-    async fn submit_proof(&self, proof: ProofResponse, lock: LockId) -> RpcResult<()> {
-        Ok(self.service.submit_proof(proof, lock).await?)
+    async fn submit_proof(
+        &self,
+        proof: ProofResponse,
+        worker_id: String,
+        lock: LockId,
+    ) -> RpcResult<()> {
+        Ok(self.service.submit_proof(proof, worker_id, lock).await?)
     }
 
     async fn get_proof_session(
@@ -374,10 +384,11 @@ impl ProofJobQueue for RpcProverServiceClient {
     async fn submit_proof(
         &self,
         proof: ProofResponse,
+        worker_id: String,
         lock: LockId,
     ) -> Result<(), ProofJobQueueError> {
         let id = proof.id;
-        ProverServiceApiClient::submit_proof(&self.client, proof, lock)
+        ProverServiceApiClient::submit_proof(&self.client, proof, worker_id, lock)
             .await
             .map_err(|err| map_job_error(err, id))
     }

@@ -51,6 +51,7 @@ pub trait ProofJobQueue {
     async fn submit_proof(
         &self,
         proof: ProofResponse,
+        worker_id: String,
         lock: LockId,
     ) -> Result<(), ProofJobQueueError>;
 

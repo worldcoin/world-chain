@@ -500,34 +500,104 @@ impl ProverServiceStore {
     pub(crate) async fn submit_proof(
         &self,
         proof: ProofResponse,
+        worker_id: String,
         lock_id: LockId,
     ) -> Result<(), ProofJobQueueError> {
-        let mut tx = self.begin_queue_tx().await?;
+        let now = Utc::now();
         let row = sqlx::query(
-            "select backend
-             from proof_requests
-             where proof_id = $1
-               and lock_id = $2
-               and status = $3
-             for update",
+            r#"
+            SELECT backend, game, root_claim, l2_block_number, l1_head, proof_status,
+                lock_id, worker_id, lock_expires_at, job_status
+            FROM proof_requests
+            WHERE proof_id = $1
+            "#,
         )
         .bind(proof_id_bytes(proof.id))
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(queue_db)?;
+        let Some(existing) = row else {
+            return Err(ProofJobQueueError::NotFound(proof.id));
+        };
+        let stored_proof_request =
+            request_from_row(&existing).map_err(ProofJobQueueError::Internal)?;
+        let stored_lock_id: Option<Uuid> = existing.get("lock_id");
+        let stored_worker_id: Option<String> = existing.get("worker_id");
+        let stored_lock_expires_at: Option<chrono::DateTime<Utc>> = existing.get("lock_expires_at");
+        let stored_job_status_str: String = existing.get("job_status");
+        let stored_job_status = ProofJobStatus::try_from(stored_job_status_str.as_str())
+            .map_err(ProofJobQueueError::Internal)?;
+        // validation
+        if stored_proof_request.backend != proof.proof.backend() {
+            return Err(ProofJobQueueError::Validation(format!(
+                "stored backend is {} but provided proof is for {}",
+                stored_proof_request.backend,
+                proof.proof.backend()
+            )));
+        }
+        if stored_lock_id != Some(lock_id.0) || stored_worker_id != Some(worker_id.clone()) {
+            return Err(ProofJobQueueError::StaleLocked);
+        }
+        if stored_lock_expires_at.is_none()
+            || stored_lock_expires_at
+                .as_ref()
+                .map_or(true, |expires_at| *expires_at <= now)
+        {
+            return Err(ProofJobQueueError::Validation(format!(
+                "Lock expired for proof {}",
+                stored_proof_request.id()
+            )));
+        }
+        if matches!(
+            stored_job_status,
+            ProofJobStatus::Succeeded | ProofJobStatus::Failed
+        ) {
+            return Err(ProofJobQueueError::Validation(format!(
+                "The proof has alredy reached a terminal job status.",
+            )));
+        }
+        // now update the table with the proof
+        let proof_data = serde_json::to_vec(&proof.proof)
+            .map_err(|err| ProofJobQueueError::Internal(err.to_string()))?;
+        let row = sqlx::query(
+            r#"
+            UPDATE proof_requests
+            SET proof_status = $1,
+                job_status = $2,
+                proof_data = $3,
+                failure_reason = NULL,
+                finished_at = $4
+            WHERE proof_id = $5
+                AND job_status = $6
+                AND worker_id = $7   
+                AND lock_id = $8
+                AND lock_expires_at > $9
+            "#,
+        )
+        .bind(ProofStatus::Succeeded.as_str())
+        .bind(ProofJobStatus::Succeeded.as_str())
+        .bind(proof_data)
+        .bind(now)
+        .bind(proof_id_bytes(proof.id))
+        .bind(worker_id)
         .bind(lock_id.0)
-        .bind(ProofStatus::Starting.as_str())
-        .fetch_optional(&mut *tx)
+        .bind(now)
+        .fetch_optional(&self.pool)
         .await
         .map_err(queue_db)?;
 
-        let Some(row) = row else {
-            return Err(classify_proof_update(&mut tx, proof.id).await);
-        };
-        let expected = parse_backend(row.try_get("backend").map_err(queue_db)?)?;
-        validate_proof_backend(proof.id, &proof.proof, expected)?;
-        complete_proof(&mut tx, proof, db_now())
-            .await
-            .map_err(queue_db)?;
-        tx.commit().await.map_err(queue_db)?;
-        Ok(())
+        if let Some(_row) = row {
+            // db is updated, return successfully
+            Ok(())
+        } else {
+            // TODO: to do a better analysis of the error, we should try to
+            // read the row again (equal to start of this fn) and perform
+            // validation again. This makes the error more clear and callers
+            // of this fn may handle the specific error better.
+            Err(ProofJobQueueError::Validation(format!(
+                "submit_proof is failing because there is no row to update!"
+            )))
+        }
     }
 
     async fn begin_tx(
@@ -618,135 +688,4 @@ fn request_db(err: sqlx::Error) -> ProofRequestError {
 
 fn queue_db(err: sqlx::Error) -> ProofJobQueueError {
     ProofJobQueueError::Internal(err.to_string())
-}
-
-async fn classify_proof_update(
-    tx: &mut Transaction<'_, Postgres>,
-    proof_id: ProofRequestId,
-) -> ProofJobQueueError {
-    let exists = sqlx::query_scalar::<_, bool>(
-        "select exists(select 1 from proof_requests where proof_id = $1)",
-    )
-    .bind(proof_id_bytes(proof_id))
-    .fetch_one(&mut **tx)
-    .await
-    .unwrap_or(false);
-    if exists {
-        ProofJobQueueError::StaleLocked
-    } else {
-        ProofJobQueueError::UnknownJob(proof_id)
-    }
-}
-
-async fn classify_backend_update(
-    tx: &mut Transaction<'_, Postgres>,
-    backend_job_id: i64,
-) -> ProofJobQueueError {
-    let exists =
-        sqlx::query_scalar::<_, bool>("select exists(select 1 from proof_sessions where id = $1)")
-            .bind(backend_job_id)
-            .fetch_one(&mut **tx)
-            .await
-            .unwrap_or(false);
-    if exists {
-        ProofJobQueueError::StaleLocked
-    } else {
-        ProofJobQueueError::UnknownBackendJob(backend_job_id)
-    }
-}
-
-async fn mark_proof_failed(
-    tx: &mut Transaction<'_, Postgres>,
-    proof_id: ProofRequestId,
-    reason: &str,
-    now: DbTimestamp,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "update proof_requests
-         set status = $2,
-             proof_data = null,
-             failure_reason = $3,
-             lock_expires_at = null,
-             lock_id = null,
-             worker_id = null,
-             updated_at = $4,
-             finished_at = $4
-         where proof_id = $1",
-    )
-    .bind(proof_id_bytes(proof_id))
-    .bind(ProofStatus::Failed.as_str())
-    .bind(reason)
-    .bind(now)
-    .execute(&mut **tx)
-    .await?;
-    Ok(())
-}
-
-async fn mark_backend_failed(
-    tx: &mut Transaction<'_, Postgres>,
-    backend_job_id: i64,
-    proof_id: ProofRequestId,
-    reason: &str,
-    now: DbTimestamp,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "update proof_sessions
-         set failure_reason = $2,
-             completed_at = $3
-         where id = $1",
-    )
-    .bind(backend_job_id)
-    .bind(reason)
-    .bind(now)
-    .execute(&mut **tx)
-    .await?;
-    mark_proof_failed(tx, proof_id, reason, now).await
-}
-
-async fn complete_proof(
-    tx: &mut Transaction<'_, Postgres>,
-    proof: ProofResponse,
-    now: DbTimestamp,
-) -> Result<(), sqlx::Error> {
-    let proof_data =
-        serde_json::to_vec(&proof.proof).map_err(|err| sqlx::Error::Decode(Box::new(err)))?;
-    sqlx::query(
-        "update proof_requests
-         set status = $2,
-             proof_data = $3,
-             failure_reason = null,
-             lock_expires_at = null,
-             lock_id = null,
-             worker_id = null,
-             updated_at = $4,
-             finished_at = $4
-         where proof_id = $1",
-    )
-    .bind(proof_id_bytes(proof.id))
-    .bind(ProofStatus::Completed.as_str())
-    .bind(proof_data)
-    .bind(now)
-    .execute(&mut **tx)
-    .await?;
-    info!(id = %proof.id, "proof job completed");
-    Ok(())
-}
-
-fn validate_proof_backend(
-    id: ProofRequestId,
-    proof: &ProofData,
-    expected: ProofBackend,
-) -> Result<(), ProofJobQueueError> {
-    if proof.backend() == expected {
-        Ok(())
-    } else {
-        Err(ProofJobQueueError::InvalidProof {
-            id,
-            reason: format!(
-                "backend mismatch: expected {}, got {}",
-                expected,
-                proof.backend()
-            ),
-        })
-    }
 }

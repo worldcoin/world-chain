@@ -88,9 +88,10 @@ impl ProofJobQueue for ProverService {
     async fn submit_proof(
         &self,
         proof: ProofResponse,
+        worker_id: String,
         lock: LockId,
     ) -> Result<(), ProofJobQueueError> {
-        self.store.submit_proof(proof, lock).await
+        self.store.submit_proof(proof, worker_id, lock).await
     }
 
     async fn get_proof_session(
