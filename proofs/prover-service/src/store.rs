@@ -356,7 +356,6 @@ impl ProverServiceStore {
             return Err(ProofJobQueueError::NotFound(proof_id));
         };
 
-        let stored_proof_request_id: Uuid = claim.get("proof_id");
         let stored_job_status_str: &str = claim.get("job_status");
         let stored_job_status = ProofJobStatus::try_from(stored_job_status_str).map_err(|e| {
             ProofJobQueueError::Internal(format!(
