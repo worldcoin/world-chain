@@ -112,11 +112,15 @@ contract NitroEnclaveKeyRegistry is Ownable {
     /// @param attestationTbs The COSE_Sign1 TBS bytes (from
     ///                       `NitroValidator.decodeAttestationTbs`).
     /// @param signature      The 96-byte (r||s) P-384 attestation signature.
-    function registerKey(bytes calldata attestationTbs, bytes calldata signature)
-        external
-        returns (bytes memory publicKey, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2)
-    {
-        (publicKey, pcr0, pcr1, pcr2) = verifier.verifyAttestation(attestationTbs, signature);
+    /// @param attestationSigHints Off-chain modular-inverse hints for the
+    ///                       P-384 attestation signature. Pre-compute with
+    ///                       `tools/p384_hints.js attestation ...`.
+    function registerKey(
+        bytes calldata attestationTbs,
+        bytes calldata signature,
+        bytes calldata attestationSigHints
+    ) external returns (bytes memory publicKey, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2) {
+        (publicKey, pcr0, pcr1, pcr2) = verifier.verifyAttestation(attestationTbs, signature, attestationSigHints);
         if (publicKey.length != 65 || publicKey[0] != 0x04) revert InvalidPublicKey();
 
         bytes32 keyHash = keccak256(publicKey);

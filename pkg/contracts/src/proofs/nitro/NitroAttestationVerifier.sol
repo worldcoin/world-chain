@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {NitroValidator} from "@nitro-validator/NitroValidator.sol";
 import {ICertManager} from "@nitro-validator/ICertManager.sol";
+import {IP384Verifier} from "@nitro-validator/IP384Verifier.sol";
 import {CborElement, LibCborElement, CborDecode} from "@nitro-validator/CborDecode.sol";
 import {LibBytes} from "@nitro-validator/LibBytes.sol";
 import {INitroAttestationVerifier} from "./INitroAttestationVerifier.sol";
@@ -163,7 +164,10 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
     ///      until the owner approves at least one PCR triple via
     ///      {approvePCRSet}. Deployers should script that as an immediate
     ///      follow-up to the constructor call — see `DeployNitro.s.sol`.
-    constructor(ICertManager certManager_, address owner_) NitroValidator(certManager_) Ownable(owner_) {}
+    constructor(ICertManager certManager_, IP384Verifier p384Verifier_, address owner_)
+        NitroValidator(certManager_, p384Verifier_)
+        Ownable(owner_)
+    {}
 
     /*//////////////////////////////////////////////////////////////
                            ALLOWLIST MANAGEMENT
@@ -230,14 +234,16 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
 
     /// @inheritdoc INitroAttestationVerifier
     /// @dev Side effects: this is not `view` because the underlying
-    ///      {NitroValidator.validateAttestation} writes verified cert entries
-    ///      to {ICertManager}'s cache when uncached certs are encountered.
-    function verifyAttestation(bytes calldata attestationTbs, bytes calldata signature)
-        external
-        returns (bytes memory publicKey, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2)
-    {
-        // 1. Full on-chain COSE_Sign1 + cert chain + P-384 verification.
-        Ptrs memory ptrs = validateAttestation(attestationTbs, signature);
+    ///      {NitroValidator.validateAttestationWithHints} reads verified cert
+    ///      entries from {ICertManager}'s cache (certs must already be pre-warmed
+    ///      via {ICertManager.verifyCACertWithHints} before this is called).
+    function verifyAttestation(
+        bytes calldata attestationTbs,
+        bytes calldata signature,
+        bytes calldata attestationSigHints
+    ) external returns (bytes memory publicKey, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2) {
+        // 1. Full on-chain COSE_Sign1 + cert chain (cache hit) + hinted P-384 verification.
+        Ptrs memory ptrs = validateAttestationWithHints(attestationTbs, signature, attestationSigHints);
 
         // 2. Post-validation: cabundle bound, freshness, PCR allowlist, key shape.
         return _verifyValidated(attestationTbs, ptrs);

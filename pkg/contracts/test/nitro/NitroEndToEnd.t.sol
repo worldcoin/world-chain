@@ -104,7 +104,7 @@ contract NitroEndToEndTest is Test {
         //    surfaces the enclave key + PCRs; the registry stores them.
         vm.expectEmit(false, false, false, true);
         emit NitroEnclaveKeyRegistry.KeyRegistered(enclavePubKey, PCR0, PCR1, PCR2);
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
         assertTrue(registry.isKeyRegistered(enclavePubKey));
         assertEq(uint8(registry.keyStatus(enclavePubKey)), uint8(NitroEnclaveKeyRegistry.KeyStatus.Active));
 
@@ -116,7 +116,7 @@ contract NitroEndToEndTest is Test {
     }
 
     function test_E2E_RevokeKeyInvalidatesFutureProofs() public {
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
         bytes memory sig = _signCommitment(enclaveWallet, POST, BLK, CFG);
 
         // Pre-revoke: proof is valid.
@@ -134,7 +134,7 @@ contract NitroEndToEndTest is Test {
         // And the registry must permanently refuse to re-register the key,
         // even via a fresh attestation.
         vm.expectRevert(NitroEnclaveKeyRegistry.KeyRevokedPermanently.selector);
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
     }
 
     function test_E2E_TwoEnclavesSameImageBothValid() public {
@@ -146,8 +146,8 @@ contract NitroEndToEndTest is Test {
         bytes memory tbs2 = hex"caca";
         attestationVerifier.setExpectation(tbs2, SIG, secondPubKey, PCR0, PCR1, PCR2);
 
-        registry.registerKey(TBS, SIG);
-        registry.registerKey(tbs2, SIG);
+        registry.registerKey(TBS, SIG, "");
+        registry.registerKey(tbs2, SIG, "");
 
         bytes memory sigA = _signCommitment(enclaveWallet, POST, BLK, CFG);
         bytes memory sigB = _signCommitment(secondWallet, POST, BLK, CFG);
@@ -164,8 +164,8 @@ contract NitroEndToEndTest is Test {
         bytes memory tbs2 = hex"baba";
         attestationVerifier.setExpectation(tbs2, SIG, secondPubKey, PCR0, PCR1, PCR2);
 
-        registry.registerKey(TBS, SIG);
-        registry.registerKey(tbs2, SIG);
+        registry.registerKey(TBS, SIG, "");
+        registry.registerKey(tbs2, SIG, "");
 
         vm.prank(owner);
         registry.revokeKey(enclavePubKey);
@@ -184,7 +184,7 @@ contract NitroEndToEndTest is Test {
     }
 
     function test_E2E_ProofMustBindToRequestedRootId() public {
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
         bytes memory sig = _signCommitment(enclaveWallet, POST, BLK, CFG);
 
         // Honest proof but the dispute game asks about a different rootId.

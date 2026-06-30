@@ -45,7 +45,7 @@ contract NitroProofVerifierTest is Test {
         enclavePubKey = _uncompressedKey(enclaveWallet.publicKeyX, enclaveWallet.publicKeyY);
 
         attestationVerifier.setExpectation(TBS, SIG, enclavePubKey, PCR0, PCR1, PCR2);
-        registry.registerKey(TBS, SIG);
+        registry.registerKey(TBS, SIG, "");
     }
 
     /*//////////////////////////////////////////////////////////////

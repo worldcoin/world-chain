@@ -7,6 +7,8 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {NitroAttestationVerifier} from "../../src/proofs/nitro/NitroAttestationVerifier.sol";
 import {CertManager} from "@nitro-validator/CertManager.sol";
 import {ICertManager} from "@nitro-validator/ICertManager.sol";
+import {IP384Verifier} from "@nitro-validator/IP384Verifier.sol";
+import {P384Verifier} from "@nitro-validator/P384Verifier.sol";
 import {NitroValidator} from "@nitro-validator/NitroValidator.sol";
 import {CborElement, LibCborElement} from "@nitro-validator/CborDecode.sol";
 
@@ -14,7 +16,7 @@ import {CborElement, LibCborElement} from "@nitro-validator/CborDecode.sol";
 ///      branches (cabundle bound, PCR allowlist, embedded-key shape, freshness)
 ///      without synthesising a fresh AWS-signed Nitro attestation.
 contract NitroAttestationVerifierHarness is NitroAttestationVerifier {
-    constructor(ICertManager cm, address owner_) NitroAttestationVerifier(cm, owner_) {}
+    constructor(ICertManager cm, IP384Verifier p384, address owner_) NitroAttestationVerifier(cm, p384, owner_) {}
 
     function checkFreshness(uint64 timestampMs) external view {
         _checkFreshness(timestampMs);
@@ -40,6 +42,7 @@ contract NitroAttestationVerifierHarness is NitroAttestationVerifier {
 contract NitroAttestationVerifierTest is Test {
     using LibCborElement for CborElement;
 
+    P384Verifier p384Verifier;
     CertManager certManager;
     NitroAttestationVerifier verifier;
     NitroAttestationVerifierHarness harness;
@@ -56,10 +59,11 @@ contract NitroAttestationVerifierTest is Test {
     bytes32 constant PCR2_B = bytes32(uint256(0xb2));
 
     function setUp() public {
-        certManager = new CertManager();
+        p384Verifier = new P384Verifier();
+        certManager = new CertManager(IP384Verifier(address(p384Verifier)));
 
-        verifier = new NitroAttestationVerifier(ICertManager(address(certManager)), owner);
-        harness = new NitroAttestationVerifierHarness(ICertManager(address(certManager)), owner);
+        verifier = new NitroAttestationVerifier(ICertManager(address(certManager)), IP384Verifier(address(p384Verifier)), owner);
+        harness = new NitroAttestationVerifierHarness(ICertManager(address(certManager)), IP384Verifier(address(p384Verifier)), owner);
 
         // The allowlist is empty at deploy; pre-approve PCR set A for the
         // suite, leaving PCR set B unapproved for negative-path tests.
@@ -83,11 +87,11 @@ contract NitroAttestationVerifierTest is Test {
 
     function test_Constructor_RevertsOnZeroOwner() public {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableInvalidOwner.selector, address(0)));
-        new NitroAttestationVerifier(ICertManager(address(certManager)), address(0));
+        new NitroAttestationVerifier(ICertManager(address(certManager)), IP384Verifier(address(p384Verifier)), address(0));
     }
 
     function test_Constructor_DeploysWithEmptyAllowlist() public {
-        NitroAttestationVerifier v = new NitroAttestationVerifier(ICertManager(address(certManager)), owner);
+        NitroAttestationVerifier v = new NitroAttestationVerifier(ICertManager(address(certManager)), IP384Verifier(address(p384Verifier)), owner);
         assertFalse(v.isPCRSetApproved(PCR0_A, PCR1_A, PCR2_A));
         assertFalse(v.isPCRSetApproved(PCR0_B, PCR1_B, PCR2_B));
     }
@@ -173,7 +177,7 @@ contract NitroAttestationVerifierTest is Test {
         // bytes do not silently verify. Specific failure modes are tested
         // upstream in base/nitro-validator.
         vm.expectRevert();
-        verifier.verifyAttestation(hex"00", hex"00");
+        verifier.verifyAttestation(hex"00", hex"00", "");
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -619,7 +623,7 @@ contract NitroAttestationVerifierTest is Test {
         emit NitroAttestationVerifier.AttestationVerified(
             keccak256(tbs), _realPubKey(), _realPcr0Hash(), _realPcr1Hash(), _realPcr2Hash(), REAL_DOC_TS_MS
         );
-        (bytes memory pk, bytes32 p0, bytes32 p1, bytes32 p2) = verifier.verifyAttestation(tbs, sig);
+        (bytes memory pk, bytes32 p0, bytes32 p1, bytes32 p2) = verifier.verifyAttestation(tbs, sig, "");
         assertEq(pk, _realPubKey());
         assertEq(p0, _realPcr0Hash());
         assertEq(p1, _realPcr1Hash());
@@ -636,7 +640,7 @@ contract NitroAttestationVerifierTest is Test {
                 NitroAttestationVerifier.PCRSetNotApproved.selector, _realPcr0Hash(), _realPcr1Hash(), _realPcr2Hash()
             )
         );
-        verifier.verifyAttestation(tbs, sig);
+        verifier.verifyAttestation(tbs, sig, "");
     }
 
     function test_VerifyAttestation_RealFixture_RevertsWhenStale() public {
@@ -651,7 +655,7 @@ contract NitroAttestationVerifierTest is Test {
         bytes memory tbs = _realAttestationTbs();
         bytes memory sig = _realAttestationSig();
         vm.expectRevert(abi.encodeWithSelector(NitroAttestationVerifier.AttestationStale.selector, ts - REAL_DOC_TS));
-        verifier.verifyAttestation(tbs, sig);
+        verifier.verifyAttestation(tbs, sig, "");
     }
 
     function test_VerifyAttestation_RealFixture_RevertsWhenFromFuture_NotTestable() public pure {
