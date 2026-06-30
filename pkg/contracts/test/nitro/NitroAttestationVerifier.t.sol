@@ -35,9 +35,9 @@ contract NitroAttestationVerifierHarness is NitroAttestationVerifier {
 ///
 ///      Full happy-path verification is also exercised against the real
 ///      AWS-signed attestation document checked in upstream as a fixture
-///      (see {test_VerifyAttestation_RealFixture_*}). The remaining
+///      (see `test_VerifyAttestation_RealFixture_*`). The remaining
 ///      post-validation branches are exercised via the harness which lets us
-///      inject a synthetic {NitroValidator.Ptrs} struct without having to
+///      inject a synthetic `NitroValidator.Ptrs` struct without having to
 ///      forge a full Nitro document + cert chain.
 contract NitroAttestationVerifierTest is Test {
     using LibCborElement for CborElement;

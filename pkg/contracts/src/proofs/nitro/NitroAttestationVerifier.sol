@@ -44,7 +44,7 @@ import {INitroAttestationVerifier} from "./INitroAttestationVerifier.sol";
 ///        1. Build a new EIF and capture its PCR0/1/2 measurements.
 ///        2. `approvePCRSet(newPcr0, newPcr1, newPcr2)`.
 ///        3. Roll out new enclaves; each registers its ephemeral key via
-///           {NitroEnclaveKeyRegistry.registerKey}, which delegates here.
+///           `NitroEnclaveKeyRegistry.registerKey`, which delegates here.
 ///        4. Once the migration completes, `revokePCRSet(oldPcr0, oldPcr1,
 ///           oldPcr2)` to disallow future registrations for the old image.
 ///           Already-registered keys remain valid until separately revoked in
@@ -59,7 +59,7 @@ import {INitroAttestationVerifier} from "./INitroAttestationVerifier.sol";
 ///           in separate transactions (this amortizes the ~63M-gas chain
 ///           validation cost across many attestations).
 ///        3. Caller invokes `verifyAttestation` (typically via
-///           {NitroEnclaveKeyRegistry.registerKey}).
+///           `NitroEnclaveKeyRegistry.registerKey`).
 contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, Ownable {
     using LibCborElement for CborElement;
     using LibBytes for bytes;
@@ -203,8 +203,8 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
     ///      ## Important: revocation is NOT retroactive
     ///      Revoking a PCR triple only blocks **new** key registrations for
     ///      that image. Keys that were already registered from this image
-    ///      remain {NitroEnclaveKeyRegistry.KeyStatus.Active} until they are
-    ///      individually revoked via {NitroEnclaveKeyRegistry.revokeKey}.
+    ///      remain `NitroEnclaveKeyRegistry.KeyStatus.Active` until they are
+    ///      individually revoked via `NitroEnclaveKeyRegistry.revokeKey`.
     ///
     ///      This is intentional. Nitro enclave signing keys are ephemeral:
     ///      they are generated in-memory at enclave startup, never persisted,
@@ -215,7 +215,7 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
     ///           can re-register.
     ///      Operators who want belt-and-suspenders may listen for
     ///      `PCRSetRevoked` events off-chain and call
-    ///      {NitroEnclaveKeyRegistry.revokeKey} for each affected key (the
+    ///      `NitroEnclaveKeyRegistry.revokeKey` for each affected key (the
     ///      `KeyRegistered` event carries the bound PCR triple). See
     ///      `NitroEnclaveKeyRegistry` for the full rationale on why an
     ///      on-chain cascade is deliberately not implemented.
@@ -234,9 +234,9 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
 
     /// @inheritdoc INitroAttestationVerifier
     /// @dev Side effects: this is not `view` because the underlying
-    ///      {NitroValidator.validateAttestationWithHints} reads verified cert
+    ///      `NitroValidator.validateAttestationWithHints` reads verified cert
     ///      entries from `ICertManager`'s cache (certs must already be pre-warmed
-    ///      via {ICertManager.verifyCACertWithHints} before this is called).
+    ///      via `ICertManager.verifyCACertWithHints` before this is called).
     function verifyAttestation(
         bytes calldata attestationTbs,
         bytes calldata signature,

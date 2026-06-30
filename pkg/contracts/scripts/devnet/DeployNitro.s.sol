@@ -47,7 +47,7 @@ import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol"
 ///      pre-warm by calling `verifyCACertWithHints(cert, parentCertHash, hints)`
 ///      for every intermediate in the AWS Nitro PKI (root → top-level
 ///      intermediate → … → leaf's immediate issuer) in separate transactions
-///      before any user calls {NitroEnclaveKeyRegistry.registerKey}.
+///      before any user calls `NitroEnclaveKeyRegistry.registerKey`.
 ///      Use `lib/nitro-validator/tools/hinted_attestation_calls.js` to
 ///      generate the full call sequence with pre-computed hints.
 ///
@@ -56,8 +56,8 @@ import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol"
 ///        1. Capture its PCR0/1/2 measurements; compute their keccak256.
 ///        2. `verifier.approvePCRSet(newPcr0, newPcr1, newPcr2)` (owner-only).
 ///        3. Roll out new enclaves; each registers via
-///           {NitroEnclaveKeyRegistry.registerKey}, which calls
-///           {NitroAttestationVerifier.verifyAttestation}. The verifier
+///           `NitroEnclaveKeyRegistry.registerKey`, which calls
+///           `NitroAttestationVerifier.verifyAttestation`. The verifier
 ///           accepts both old- and new-image attestations during overlap.
 ///        4. After migration, `verifier.revokePCRSet(oldPcr0, oldPcr1,
 ///           oldPcr2)` to stop accepting new registrations for the retired

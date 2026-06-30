@@ -333,7 +333,7 @@ contract NitroProofVerifierTest is Test {
     function test_Verify_FalseForWrongRollupConfigHash() public {
         // The proof's `rollupConfigHash` participates in the signing
         // commitment but NOT in the rootId reconstruction (see
-        // {NitroProofVerifier._decodeAndVerify}). A mismatched
+        // `NitroProofVerifier._decodeAndVerify`). A mismatched
         // rollupConfigHash in the proof must therefore cause the signature
         // recovery to mismatch the expected key and surface as `false`,
         // even though `rootId` still reconstructs correctly.

@@ -34,11 +34,11 @@ contract NitroEnclaveKeyRegistry is Ownable {
     //////////////////////////////////////////////////////////////*/
 
     /// @notice Thrown when `revokeKey` is called for a key that is not
-    ///         currently registered as {KeyStatus.Active}.
+    ///         currently registered as `KeyStatus.Active`.
     error KeyNotRegistered();
 
     /// @notice Thrown when `registerKey` is called for a key that is already
-    ///         {KeyStatus.Active}.
+    ///         `KeyStatus.Active`.
     error KeyAlreadyRegistered();
 
     /// @notice Thrown when `registerKey` is called for a key that was
@@ -106,7 +106,7 @@ contract NitroEnclaveKeyRegistry is Ownable {
     ///
     /// @dev The full COSE_Sign1 / X.509 / P-384 verification, the PCR
     ///      allowlist check, and the freshness check are all delegated to
-    ///      {INitroAttestationVerifier.verifyAttestation}; this function only
+    ///      `INitroAttestationVerifier.verifyAttestation`; this function only
     ///      stores the resulting key. Reverts on any verification failure.
     ///
     /// @param attestationTbs The COSE_Sign1 TBS bytes (from
@@ -140,11 +140,11 @@ contract NitroEnclaveKeyRegistry is Ownable {
     ///      `isKeyRevoked` — so a compromised key cannot be silently restored
     ///      by replaying its attestation document.
     ///
-    ///      ## Relationship to {NitroAttestationVerifier.revokePCRSet}
+    ///      ## Relationship to `NitroAttestationVerifier.revokePCRSet`
     ///      Revoking a PCR set on the verifier (i.e. retiring an enclave
     ///      image) does **not** automatically transition the keys that were
-    ///      registered under that image to {KeyStatus.Revoked} here. Each key
-    ///      remains {KeyStatus.Active} until `revokeKey` is called for it
+    ///      registered under that image to `KeyStatus.Revoked` here. Each key
+    ///      remains `KeyStatus.Active` until `revokeKey` is called for it
     ///      individually.
     ///
     ///      This is intentional. Nitro enclave signing keys are ephemeral:
@@ -153,13 +153,13 @@ contract NitroEnclaveKeyRegistry is Ownable {
     ///      designed incident-response flow for a compromised image is:
     ///        1. Stop the running enclave instances (the AWS Nitro hardware
     ///           isolation guarantees the key is destroyed with the process).
-    ///        2. Call {NitroAttestationVerifier.revokePCRSet} so no fresh
+    ///        2. Call `NitroAttestationVerifier.revokePCRSet` so no fresh
     ///           enclave from the same image can re-register.
     ///      The two steps together eliminate the threat without per-key
     ///      cascading on-chain.
     ///
     ///      Belt-and-suspenders operators can still observe
-    ///      {NitroAttestationVerifier.PCRSetRevoked} events off-chain and
+    ///      `NitroAttestationVerifier.PCRSetRevoked` events off-chain and
     ///      call `revokeKey` for every affected key. The `KeyRegistered`
     ///      event carries the bound PCR triple specifically to make this
     ///      easy.
