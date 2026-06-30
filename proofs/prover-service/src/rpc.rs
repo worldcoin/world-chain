@@ -306,9 +306,7 @@ fn map_request_error(
         (error_code::QUEUE_FULL, Some(backend)) => ProofRequestError::QueueFull(backend),
         (error_code::NOT_FOUND, _) => ProofRequestError::NotFound(id),
         (error_code::TOO_MANY_RETRIES, _) => ProofRequestError::TooManyRetries(id),
-        (error_code::RETRYABLE_CONFLICT, _) => {
-            ProofRequestError::RowMissingAfterConflict { id }
-        }
+        (error_code::RETRYABLE_CONFLICT, _) => ProofRequestError::RowMissingAfterConflict { id },
         (error_code::PENDING, _) => ProofRequestError::Pending {
             id,
             status: error_data(&err).unwrap_or(ProofStatus::Created),

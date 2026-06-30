@@ -35,6 +35,10 @@ struct Cli {
     #[arg(long, env = "MAX_ATTEMPTS", default_value_t = 3)]
     max_attempts: u32,
 
+    /// Maximum proving retries per request before it is failed.
+    #[arg(long, env = "MAX_RETRIES", default_value_t = 3)]
+    max_retries: u32,
+
     /// Maximum number of requests queued per backend.
     #[arg(long, env = "MAX_QUEUE_LEN", default_value_t = 1024)]
     max_queue_len: usize,
@@ -58,6 +62,7 @@ async fn main() -> Result<()> {
         max_attempts: cli.max_attempts,
         max_queue_len: cli.max_queue_len,
         backend_poll_interval: Duration::from_secs(cli.backend_poll_interval_seconds),
+        max_retries: cli.max_retries,
     };
     let service = Arc::new(
         ProverService::connect(&cli.database_url, config)
