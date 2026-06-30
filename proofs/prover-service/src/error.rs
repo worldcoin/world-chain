@@ -1,4 +1,4 @@
-use crate::types::{ProofBackend, ProofRequestId, ProofStatus};
+use crate::types::{ProofRequestId, ProofStatus};
 use sqlx::migrate::MigrateError;
 use thiserror::Error;
 
@@ -24,9 +24,6 @@ pub enum ProverServiceInitError {
 /// Error returned to a defender by the `prover-service`.
 #[derive(Error, Debug)]
 pub enum ProofRequestError {
-    /// The queue for the requested backend is at capacity.
-    #[error("proof queue for backend {0} is full")]
-    QueueFull(ProofBackend),
     /// No proof request with the given id is known.
     #[error("proof request {0} not found")]
     NotFound(ProofRequestId),

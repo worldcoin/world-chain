@@ -78,8 +78,7 @@ mod types;
 
 // re-exports
 pub use config::{
-    DEFAULT_BACKEND_POLL_INTERVAL, DEFAULT_LOCK_TIMEOUT, DEFAULT_MAX_ATTEMPTS,
-    DEFAULT_MAX_QUEUE_LEN, ProverServiceConfig,
+    DEFAULT_BACKEND_POLL_INTERVAL, DEFAULT_LOCK_TIMEOUT, DEFAULT_MAX_ATTEMPTS, ProverServiceConfig,
 };
 pub use error::{
     InvalidConfigError, ProofJobQueueError, ProofRequestError, ProverServiceInitError,

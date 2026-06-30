@@ -39,10 +39,6 @@ struct Cli {
     #[arg(long, env = "MAX_RETRIES", default_value_t = 3)]
     max_retries: u32,
 
-    /// Maximum number of requests queued per backend.
-    #[arg(long, env = "MAX_QUEUE_LEN", default_value_t = 1024)]
-    max_queue_len: usize,
-
     /// Seconds to wait before polling an unchanged backend job again.
     #[arg(long, env = "BACKEND_POLL_INTERVAL_SECONDS", default_value_t = 30)]
     backend_poll_interval_seconds: u64,
@@ -60,7 +56,6 @@ async fn main() -> Result<()> {
     let config = ProverServiceConfig {
         lock_timeout: Duration::from_secs(cli.lease_timeout_seconds),
         max_attempts: cli.max_attempts,
-        max_queue_len: cli.max_queue_len,
         backend_poll_interval: Duration::from_secs(cli.backend_poll_interval_seconds),
         max_retries: cli.max_retries,
     };

@@ -10,9 +10,6 @@ pub const DEFAULT_MAX_ATTEMPTS: u32 = 3;
 /// Default maximum number of retries per request.
 pub const DEFAULT_MAX_RETRIES: u32 = 3;
 
-/// Default maximum number of requests queued per backend.
-pub const DEFAULT_MAX_QUEUE_LEN: usize = 1024;
-
 /// Default delay before polling an unchanged backend job again.
 pub const DEFAULT_BACKEND_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -28,8 +25,6 @@ pub struct ProverServiceConfig {
     /// Maximum number of times that a proof workflow can be
     /// entirely retried.
     pub max_retries: u32,
-    /// Maximum number of requests queued per backend.
-    pub max_queue_len: usize,
     /// Delay before a backend job that returned `Noop` becomes pollable again.
     pub backend_poll_interval: Duration,
 }
@@ -44,11 +39,6 @@ impl ProverServiceConfig {
         }
         if self.max_retries == 0 {
             return Err(InvalidConfigError("max_retries must be greater than zero"));
-        }
-        if self.max_queue_len == 0 {
-            return Err(InvalidConfigError(
-                "max_queue_len must be greater than zero",
-            ));
         }
         if self.backend_poll_interval.is_zero() {
             return Err(InvalidConfigError(
@@ -65,7 +55,6 @@ impl Default for ProverServiceConfig {
             lock_timeout: DEFAULT_LOCK_TIMEOUT,
             max_attempts: DEFAULT_MAX_ATTEMPTS,
             max_retries: DEFAULT_MAX_RETRIES,
-            max_queue_len: DEFAULT_MAX_QUEUE_LEN,
             backend_poll_interval: DEFAULT_BACKEND_POLL_INTERVAL,
         }
     }

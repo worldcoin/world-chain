@@ -14,7 +14,6 @@ fn test_config() -> ProverServiceConfig {
         lock_timeout: Duration::from_secs(60),
         max_attempts: 2,
         max_retries: 2,
-        max_queue_len: 4,
         backend_poll_interval: Duration::from_millis(25),
     }
 }

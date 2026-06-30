@@ -22,8 +22,6 @@ use tracing::info;
 
 /// JSON-RPC error codes returned by the `prover-service`.
 pub mod error_code {
-    /// The queue for the requested backend is at capacity.
-    pub const QUEUE_FULL: i32 = -32001;
     /// No proof request with the given id is known.
     pub const NOT_FOUND: i32 = -32002;
     /// The proof is not ready yet; the error data holds the [`crate::ProofStatus`].
@@ -109,9 +107,6 @@ impl From<ProofRequestError> for ErrorObjectOwned {
     fn from(err: ProofRequestError) -> Self {
         let message = err.to_string();
         match err {
-            ProofRequestError::QueueFull(_) => {
-                ErrorObject::owned(error_code::QUEUE_FULL, message, None::<()>)
-            }
             ProofRequestError::NotFound(_) => {
                 ErrorObject::owned(error_code::NOT_FOUND, message, None::<()>)
             }
@@ -303,7 +298,6 @@ fn map_request_error(
         return ProofRequestError::Rpc(err.to_string());
     };
     match (err.code(), backend) {
-        (error_code::QUEUE_FULL, Some(backend)) => ProofRequestError::QueueFull(backend),
         (error_code::NOT_FOUND, _) => ProofRequestError::NotFound(id),
         (error_code::TOO_MANY_RETRIES, _) => ProofRequestError::TooManyRetries(id),
         (error_code::RETRYABLE_CONFLICT, _) => ProofRequestError::RowMissingAfterConflict { id },

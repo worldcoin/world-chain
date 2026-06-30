@@ -88,7 +88,6 @@ async fn start_proof_stack_with(
             lock_timeout: Duration::from_millis(500),
             max_attempts: 2,
             max_retries: 2,
-            max_queue_len: 16,
             backend_poll_interval: Duration::from_millis(5),
         },
     )
