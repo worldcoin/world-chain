@@ -95,4 +95,5 @@ world-chain-proof-kona-client-utils = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
+rand = "0.8"
 serde_json = { workspace = true }

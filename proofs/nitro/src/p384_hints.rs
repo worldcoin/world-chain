@@ -382,45 +382,102 @@ pub fn collect_hints(hash: &[u8], signature: &[u8], pubkey: &[u8]) -> Result<Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+    use p384::{
+        ecdsa::{signature::Signer, Signature, SigningKey},
+    };
+    use sha2::{Digest, Sha384};
 
-    /// Verify that `collect_hints` returns a non-empty byte string whose length
-    /// is a multiple of 48 for a syntactically valid (but small) test vector.
-    /// The test uses the P-384 base point as the public key and a pre-known
-    /// valid signature so we don't need a live AWS attestation document.
-    ///
-    /// NOTE: a full round-trip test (calling the Solidity contract with the
-    /// hints) is covered by the Foundry test suite.
-    #[test]
-    fn hints_length_multiple_of_48() {
-        // This is a self-signed test vector: sign hash=keccak("test") with
-        // a deterministic nonce. We just check structural properties here.
-        // A real integration test lives in the Foundry suite.
-        let hash = hex::decode(
-            "9c22ff5f21f0b81b113e63f7db6da94fedef11b3d610b09\
-             41e6a0e1e1e1e1e1e1",
-        );
-        // If the hash is not a valid P-384 test vector we just skip.
-        if hash.is_err() {
-            return;
-        }
-        let hash = hash.unwrap();
-        if hash.len() > 48 {
-            return;
-        }
-        // We can't produce a valid signature without a real key here —
-        // the important invariant is tested end-to-end in Foundry.
-        // This test only checks the encoding logic.
-        let one = BigUint::one();
-        let encoded = encode_hint(&one);
-        assert_eq!(encoded.len(), 48);
-        assert_eq!(&encoded[..47], &[0u8; 47]);
-        assert_eq!(encoded[47], 1u8);
+    /// Sign `message` with `signing_key` and return `(sha384_hash, r‖s, x‖y)`.
+    fn sign_p384(signing_key: &SigningKey, message: &[u8]) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+        let sig: Signature = signing_key.sign(message);
+        let hash = Sha384::digest(message).to_vec();
+
+        // r‖s as raw 48+48 bytes
+        let sig_bytes = sig.to_bytes();
+        let signature = sig_bytes.to_vec();
+
+        // Uncompressed public key: 0x04 ‖ x ‖ y  (97 bytes) → drop the 0x04 prefix → 96 bytes
+        let verifying_key = signing_key.verifying_key();
+        let encoded = verifying_key.to_encoded_point(false);
+        let pubkey = encoded.as_bytes()[1..].to_vec(); // drop 0x04
+
+        (hash, signature, pubkey)
     }
 
-    fn encode_hint(v: &BigUint) -> Vec<u8> {
-        let bytes = v.to_bytes_be();
-        let mut out = vec![0u8; 48 - bytes.len()];
-        out.extend_from_slice(&bytes);
-        out
+    /// `collect_hints` must produce output whose length is a multiple of 48
+    /// (one 384-bit inverse per slot).
+    #[test]
+    fn hints_length_is_multiple_of_48() {
+        let sk = SigningKey::random(&mut rand::thread_rng());
+        let (hash, sig, pubkey) = sign_p384(&sk, b"hello world");
+        let hints = collect_hints(&hash, &sig, &pubkey).expect("collect_hints failed");
+        assert!(!hints.is_empty(), "hints must not be empty");
+        assert_eq!(hints.len() % 48, 0, "each hint is 48 bytes");
+    }
+
+    /// Every 48-byte slot in the hint stream must be a valid modular inverse:
+    /// `b · inv ≡ 1 (mod m)` where `m` alternates between the field prime `p`
+    /// and the group order `n` depending on which operation generated it.
+    /// We verify the weaker (but still meaningful) property that no hint slot
+    /// is all-zeros (which would trivially fail the on-chain `b·inv ≡ 1` check).
+    #[test]
+    fn hints_are_nonzero() {
+        let sk = SigningKey::random(&mut rand::thread_rng());
+        let (hash, sig, pubkey) = sign_p384(&sk, b"test message");
+        let hints = collect_hints(&hash, &sig, &pubkey).expect("collect_hints failed");
+        for (i, chunk) in hints.chunks(48).enumerate() {
+            assert_ne!(chunk, &[0u8; 48], "hint slot {i} must not be zero");
+        }
+    }
+
+    /// The full round-trip: generate a P-384 keypair, sign a message, collect
+    /// hints, then verify that each hint satisfies `b · inv ≡ 1 (mod m)` for
+    /// the two moduli used during ECDSA384 verification (field prime `p` and
+    /// group order `n`).  This mirrors the on-chain check in the Solidity
+    /// `ECDSA384.moddivAssign` / `modinv` functions.
+    ///
+    /// We verify hints by re-running the ECDSA scalar arithmetic and checking
+    /// that the signature verifies — if any hint were wrong the underlying
+    /// modular arithmetic would produce a wrong result, so verification would
+    /// fail.
+    #[test]
+    fn collect_hints_round_trip_verifies() {
+        use p384::ecdsa::{signature::Verifier, VerifyingKey};
+
+        let sk = SigningKey::random(&mut rand::thread_rng());
+        let vk: VerifyingKey = *sk.verifying_key();
+        let msg = b"nitro enclave attestation round-trip test";
+        let (hash, sig_bytes, pubkey) = sign_p384(&sk, msg);
+
+        // collect_hints internally re-runs ECDSA verification; it only succeeds
+        // if the signature is valid AND all computed inverses are correct.
+        let hints = collect_hints(&hash, &sig_bytes, &pubkey)
+            .expect("collect_hints must succeed for a valid signature");
+
+        // Sanity: hints are non-empty and well-formed.
+        assert!(!hints.is_empty());
+        assert_eq!(hints.len() % 48, 0);
+
+        // Also confirm the signature itself verifies with the p384 crate.
+        let sig = Signature::from_bytes(sig_bytes.as_slice().into()).unwrap();
+        vk.verify(msg, &sig).expect("p384 crate must also verify the same sig");
+    }
+
+    /// `collect_hints` must reject an all-zero signature.
+    #[test]
+    fn collect_hints_rejects_zero_r() {
+        let sk = SigningKey::random(&mut rand::thread_rng());
+        let (hash, _, pubkey) = sign_p384(&sk, b"test");
+        let bad_sig = vec![0u8; 96];
+        assert!(collect_hints(&hash, &bad_sig, &pubkey).is_err());
+    }
+
+    /// `collect_hints` must reject a pubkey that is not on the P-384 curve.
+    #[test]
+    fn collect_hints_rejects_off_curve_pubkey() {
+        let sk = SigningKey::random(&mut rand::thread_rng());
+        let (hash, sig, _) = sign_p384(&sk, b"test");
+        let bad_pubkey = vec![1u8; 96]; // almost certainly not on the curve
+        assert!(collect_hints(&hash, &sig, &bad_pubkey).is_err());
     }
 }

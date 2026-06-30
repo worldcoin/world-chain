@@ -19105,6 +19105,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "p384",
+ "rand 0.8.6",
  "rkyv",
  "serde",
  "serde_bytes",
