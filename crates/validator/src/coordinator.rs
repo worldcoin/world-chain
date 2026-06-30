@@ -73,6 +73,12 @@ pub struct FlashblocksExecutionCoordinatorInner {
     payload_events: Option<Sender<Events<OpEngineTypes>>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct CoordinatorSnapshot {
+    pub flashblocks: Flashblocks,
+    pub latest_payload: Option<(OpBuiltPayload, u64)>,
+}
+
 impl FlashblocksExecutionCoordinator {
     /// Creates a new instance of [`FlashblocksStateExecutor`].
     ///
@@ -249,6 +255,19 @@ impl FlashblocksExecutionCoordinator {
     /// Returns the cloned `latest_payload` if present
     pub fn latest_payload(&self) -> Option<OpBuiltPayload> {
         self.inner.read().latest_payload.clone().map(|p| p.0)
+    }
+
+    /// Fetches an atomic snapshot of the [`FlashblocksExecutionCoordinator`]
+    pub fn snapshot(&self) -> CoordinatorSnapshot {
+        let inner = self.inner.read();
+
+        let latest_payload = inner.latest_payload.clone();
+        let flashblocks = inner.flashblocks.clone();
+
+        CoordinatorSnapshot {
+            flashblocks,
+            latest_payload,
+        }
     }
 
     /// Broadcasts a new payload to cache in the in memory tree.

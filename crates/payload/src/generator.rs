@@ -33,7 +33,7 @@ use world_chain_primitives::{
 use crate::job::{CommittedPayloadState, FlashblocksPayloadJob};
 use world_chain_builder::traits::payload_builder::FlashblockPayloadBuilder;
 use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};
-use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
+use world_chain_validator::coordinator::{CoordinatorSnapshot, FlashblocksExecutionCoordinator};
 
 /// A type that initiates payload building jobs on the [`crate::builder::FlashblocksPayloadBuilder`].
 pub struct FlashblocksPayloadJobGenerator<Client, Builder> {
@@ -342,14 +342,14 @@ where
         Option<(Builder::BuiltPayload, u64, Option<FlashblockAccessList>)>,
         PayloadBuilderError,
     > {
-        let payload = self.flashblocks_state.latest_payload();
+        let CoordinatorSnapshot {
+            latest_payload: payload,
+            flashblocks,
+        } = self.flashblocks_state.snapshot();
 
-        let Some(latest) = payload.filter(|latest| latest.id() == id) else {
+        let Some((latest, _)) = payload.filter(|latest| latest.0.id() == id) else {
             return Ok(None);
         };
-
-        // check for any pending pre state received over p2p
-        let flashblocks = self.flashblocks_state.flashblocks();
 
         let payload_hash = latest.block().hash();
 
