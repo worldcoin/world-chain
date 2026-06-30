@@ -259,7 +259,7 @@ where
                 } else {
                     format!("{directive},{}", self.cli.logs.log_stdout_filter)
                 };
-                world_chain_primitives::log_reload::set_startup_log_directives(baseline);
+                world_chain_primitives::tracing::set_startup_tracing_directives(baseline);
             }
 
             match otlp_status {

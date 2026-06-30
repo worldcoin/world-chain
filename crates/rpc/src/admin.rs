@@ -19,7 +19,7 @@ use jsonrpsee_types::error::INTERNAL_ERROR_CODE;
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
-use world_chain_primitives::log_reload::startup_log_directives;
+use world_chain_primitives::tracing::startup_tracing_directives;
 
 /// Maximum permitted TTL for an ephemeral tracing override (1 hour). Bounds how
 /// long an elevated filter can degrade the node before auto-reverting.
@@ -125,7 +125,7 @@ impl AdminApiExtServer for WorldChainAdminApiExt {
 
         reth_tracing::set_log_vmodule(directives).map_err(invalid_params)?;
 
-        let baseline = startup_log_directives().unwrap_or_default().to_string();
+        let baseline = startup_tracing_directives().unwrap_or_default().to_string();
         let ttl = req.ttl_secs;
 
         let revert_baseline = baseline.clone();
