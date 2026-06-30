@@ -85,7 +85,7 @@ fn decode_ecdsa_der_sig(der: &[u8]) -> Result<Vec<u8>> {
     if der.is_empty() || der[0] != 0x30 {
         bail!(
             "expected SEQUENCE tag 0x30, got 0x{:02x}",
-            der.get(0).copied().unwrap_or(0)
+            der.first().copied().unwrap_or(0)
         );
     }
     let mut pos = 1;
@@ -131,7 +131,7 @@ fn decode_der_integer(data: &[u8]) -> Result<(Vec<u8>, usize)> {
     if data.is_empty() || data[0] != 0x02 {
         bail!(
             "expected INTEGER tag 0x02, got 0x{:02x}",
-            data.get(0).copied().unwrap_or(0)
+            data.first().copied().unwrap_or(0)
         );
     }
     let (len, header) = decode_der_length(&data[1..])?;
@@ -228,14 +228,14 @@ fn decode_input(s: &str) -> Result<Vec<u8>> {
         .or_else(|| s.strip_prefix("0X"))
         .unwrap_or(s);
     // Try hex first, fall back to base64
-    if !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit()) && s.len() % 2 == 0 {
-        return Ok(hex::decode(s).context("hex decode")?);
+    if !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit()) && s.len().is_multiple_of(2) {
+        return hex::decode(s).context("hex decode");
     }
     use base64::Engine;
-    Ok(base64::engine::general_purpose::STANDARD
+    base64::engine::general_purpose::STANDARD
         .decode(s)
         .or_else(|_| base64::engine::general_purpose::STANDARD_NO_PAD.decode(s))
-        .map_err(|e| anyhow::anyhow!("base64 decode: {e}"))?)
+        .map_err(|e| anyhow::anyhow!("base64 decode: {e}"))
 }
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────

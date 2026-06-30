@@ -21,8 +21,8 @@ fn main() {
 
     println!("// Private key (hex): {}", hex::encode(sk_bytes));
     println!("// Message: {:?}", std::str::from_utf8(message).unwrap());
-    println!("// SHA-384(message): {}", hex::encode(&hash));
-    println!("// Signature (r||s): {}", hex::encode(&sig_bytes));
+    println!("// SHA-384(message): {}", hex::encode(hash));
+    println!("// Signature (r||s): {}", hex::encode(sig_bytes));
     println!("// Public key (x||y): {}", hex::encode(pubkey));
 
     let hints = collect_hints(&hash, &sig_bytes, pubkey).expect("collect_hints");
