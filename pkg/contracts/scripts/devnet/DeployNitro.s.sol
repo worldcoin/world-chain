@@ -13,13 +13,13 @@ import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol"
 
 /// @title DeployNitro
 /// @notice Deploys the on-chain AWS Nitro attestation stack for WIP-1006:
-///         {P384Verifier} → {CertManager} → {NitroAttestationVerifier}
-///         → {NitroEnclaveKeyRegistry} → {NitroProofVerifier}.
+///         `P384Verifier` → `CertManager` → `NitroAttestationVerifier`
+///         → `NitroEnclaveKeyRegistry` → `NitroProofVerifier`.
 ///
 /// @dev Required environment variables:
 ///        - `OWNER` — address that becomes the owner of both
-///          {NitroAttestationVerifier} (manages the PCR allowlist) and
-///          {NitroEnclaveKeyRegistry} (revokes keys).
+///          `NitroAttestationVerifier` (manages the PCR allowlist) and
+///          `NitroEnclaveKeyRegistry` (revokes keys).
 ///
 ///      ## Hinted P-384 verification (gas optimisation)
 ///      Signature verification uses off-chain-computed modular-inverse hints
@@ -30,7 +30,7 @@ import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol"
 ///      Pre-compute hints with `lib/nitro-validator/tools/p384_hints.js`.
 ///
 ///      ## REQUIRED follow-up: approve the initial PCR set(s)
-///      {NitroAttestationVerifier} is deployed with an empty allowlist, so
+///      `NitroAttestationVerifier` is deployed with an empty allowlist, so
 ///      `verifyAttestation` will revert with `PCRSetNotApproved` until the
 ///      owner approves at least one enclave image. Immediately after this
 ///      script runs, the owner MUST submit:
@@ -42,7 +42,7 @@ import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol"
 ///      reported by `nitro-cli describe-eif`.
 ///
 ///      ## Operator pre-warm step (required before first registerKey)
-///      {CertManager} caches verified certificates so the expensive X.509 +
+///      `CertManager` caches verified certificates so the expensive X.509 +
 ///      P-384 chain check is paid only once per intermediate. Operators MUST
 ///      pre-warm by calling `verifyCACertWithHints(cert, parentCertHash, hints)`
 ///      for every intermediate in the AWS Nitro PKI (root → top-level

@@ -11,19 +11,19 @@ import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier
 
 /// @title NitroEndToEndTest
 /// @notice Full pipeline integration test wiring:
-///         {NitroAttestationVerifier}-like attestation flow (via mock so we
-///         can control the certified enclave key) → {NitroEnclaveKeyRegistry}
-///         → {NitroProofVerifier}.
+///         `NitroAttestationVerifier`-like attestation flow (via mock so we
+///         can control the certified enclave key) → `NitroEnclaveKeyRegistry`
+///         → `NitroProofVerifier`.
 ///
 /// @dev A truly end-to-end test that goes through a real AWS-signed Nitro
-///      attestation AND a real {NitroProofVerifier} verification would
+///      attestation AND a real `NitroProofVerifier` verification would
 ///      require knowing the enclave's private key (so we could sign a fresh
 ///      `signing_commitment`). Since we obviously don't have AWS NSM's
 ///      private key, the integration test mocks the attestation step but
 ///      otherwise exercises the registry + proof-verifier code paths exactly
 ///      as they run in production. The PCR-allowlist piece of the
-///      {NitroAttestationVerifier} contract is covered separately in
-///      {NitroAttestationVerifierTest} (including a real-fixture happy
+///      `NitroAttestationVerifier` contract is covered separately in
+///      `NitroAttestationVerifierTest` (including a real-fixture happy
 ///      path).
 contract NitroEndToEndTest is Test {
     MockNitroAttestationVerifier attestationVerifier;

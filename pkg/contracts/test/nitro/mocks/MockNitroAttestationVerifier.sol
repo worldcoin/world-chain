@@ -4,7 +4,7 @@ pragma solidity 0.8.28;
 import {INitroAttestationVerifier} from "../../../src/proofs/nitro/INitroAttestationVerifier.sol";
 
 /// @title MockNitroAttestationVerifier
-/// @notice Test double for {INitroAttestationVerifier}. Lets tests preset the
+/// @notice Test double for `INitroAttestationVerifier`. Lets tests preset the
 ///         `(attestationTbs, signature, hints) -> (publicKey, pcr0, pcr1, pcr2)`
 ///         mapping so the registry can be exercised without a real Nitro
 ///         document + cert chain. Mirrors the hinted verifier API.
