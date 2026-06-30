@@ -37,7 +37,11 @@ contract MockNitroAttestationVerifier is INitroAttestationVerifier {
         bytes calldata attestationTbs,
         bytes calldata signature,
         bytes calldata /* attestationSigHints */
-    ) external view returns (bytes memory publicKey, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2) {
+    )
+        external
+        view
+        returns (bytes memory publicKey, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2)
+    {
         Output memory out = _preset[keccak256(abi.encode(attestationTbs, signature))];
         if (out.publicKey.length == 0) revert UnexpectedCall();
         return (out.publicKey, out.pcr0, out.pcr1, out.pcr2);

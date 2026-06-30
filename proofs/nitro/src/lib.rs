@@ -26,6 +26,10 @@
 //!
 //! The enclave-side guest is the `world-chain-nitro-enclave` binary (`src/enclave.rs`).
 
+// clap is used by the p384-hints binary; reference it here so the
+// `unused_crate_dependencies` lint does not fire on the lib target.
+use clap as _;
+
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
     boot::BootInfoStruct,

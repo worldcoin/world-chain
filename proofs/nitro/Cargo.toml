@@ -53,7 +53,6 @@ ciborium = "0.2"
 clap = { workspace = true }
 hex.workspace = true
 num-bigint = "0.4"
-num-integer = "0.1"
 num-traits = "0.2"
 rkyv.workspace = true
 serde = { workspace = true, features = ["derive"] }

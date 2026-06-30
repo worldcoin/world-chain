@@ -62,8 +62,8 @@ fn parse_cert_signature(der: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     use sha2::{Digest, Sha384};
     use x509_parser::prelude::*;
 
-    let (_, cert) = X509Certificate::from_der(der)
-        .map_err(|e| anyhow::anyhow!("X.509 parse error: {e:?}"))?;
+    let (_, cert) =
+        X509Certificate::from_der(der).map_err(|e| anyhow::anyhow!("X.509 parse error: {e:?}"))?;
 
     // TBS covers the raw DER bytes of the TBSCertificate element.
     // x509-parser exposes the raw slice via `cert.tbs_certificate.as_ref()`.
@@ -83,7 +83,10 @@ fn parse_cert_signature(der: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
 fn decode_ecdsa_der_sig(der: &[u8]) -> Result<Vec<u8>> {
     // Manual minimal DER decoder: SEQUENCE { INTEGER, INTEGER }
     if der.is_empty() || der[0] != 0x30 {
-        bail!("expected SEQUENCE tag 0x30, got 0x{:02x}", der.get(0).copied().unwrap_or(0));
+        bail!(
+            "expected SEQUENCE tag 0x30, got 0x{:02x}",
+            der.get(0).copied().unwrap_or(0)
+        );
     }
     let mut pos = 1;
     let (seq_len, consumed) = decode_der_length(&der[pos..])?;
@@ -126,13 +129,20 @@ fn decode_der_length(data: &[u8]) -> Result<(usize, usize)> {
 
 fn decode_der_integer(data: &[u8]) -> Result<(Vec<u8>, usize)> {
     if data.is_empty() || data[0] != 0x02 {
-        bail!("expected INTEGER tag 0x02, got 0x{:02x}", data.get(0).copied().unwrap_or(0));
+        bail!(
+            "expected INTEGER tag 0x02, got 0x{:02x}",
+            data.get(0).copied().unwrap_or(0)
+        );
     }
     let (len, header) = decode_der_length(&data[1..])?;
     let start = 1 + header;
     let bytes = &data[start..start + len];
     // Strip leading zero byte (DER uses it to keep the sign bit clear for positive integers)
-    let stripped = if !bytes.is_empty() && bytes[0] == 0x00 { &bytes[1..] } else { bytes };
+    let stripped = if !bytes.is_empty() && bytes[0] == 0x00 {
+        &bytes[1..]
+    } else {
+        bytes
+    };
     Ok((stripped.to_vec(), start + len))
 }
 
@@ -154,8 +164,8 @@ fn parse_attestation_signature(raw: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     use sha2::{Digest, Sha384};
 
     // The raw document is a COSE_Sign1 CBOR tag (18) containing an array.
-    let value: Value = ciborium::de::from_reader(raw)
-        .map_err(|e| anyhow::anyhow!("CBOR decode error: {e:?}"))?;
+    let value: Value =
+        ciborium::de::from_reader(raw).map_err(|e| anyhow::anyhow!("CBOR decode error: {e:?}"))?;
 
     // Unwrap optional tag
     let array = match value {
@@ -185,7 +195,10 @@ fn parse_attestation_signature(raw: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
     };
 
     if sig_bytes.len() != 96 {
-        bail!("attestation signature must be 96 bytes, got {}", sig_bytes.len());
+        bail!(
+            "attestation signature must be 96 bytes, got {}",
+            sig_bytes.len()
+        );
     }
 
     // Reconstruct the TBS structure: ["Signature1", protected, b"", payload]
@@ -207,11 +220,13 @@ fn parse_attestation_signature(raw: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
 
 fn decode_input(s: &str) -> Result<Vec<u8>> {
     if let Some(path) = s.strip_prefix('@') {
-        let raw = fs::read_to_string(Path::new(path))
-            .with_context(|| format!("reading {path}"))?;
+        let raw = fs::read_to_string(Path::new(path)).with_context(|| format!("reading {path}"))?;
         return decode_input(raw.trim());
     }
-    let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
+    let s = s
+        .strip_prefix("0x")
+        .or_else(|| s.strip_prefix("0X"))
+        .unwrap_or(s);
     // Try hex first, fall back to base64
     if !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit()) && s.len() % 2 == 0 {
         return Ok(hex::decode(s).context("hex decode")?);
@@ -274,22 +289,33 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let hints = match cli.command {
-        Command::Verify { hash, signature, pubkey } => {
+        Command::Verify {
+            hash,
+            signature,
+            pubkey,
+        } => {
             let hash = decode_input(&hash).context("--hash")?;
             let sig = decode_input(&signature).context("--signature")?;
             let pk = decode_input(&pubkey).context("--pubkey")?;
             collect_hints(&hash, &sig, &pk)?
         }
-        Command::Cert { cert, parent_pubkey } => {
+        Command::Cert {
+            cert,
+            parent_pubkey,
+        } => {
             let cert_bytes = decode_input(&cert).context("--cert")?;
             let pk = decode_input(&parent_pubkey).context("--parent-pubkey")?;
             let (hash, sig) = parse_cert_signature(&cert_bytes).context("parsing cert")?;
             collect_hints(&hash, &sig, &pk)?
         }
-        Command::Attestation { attestation, leaf_pubkey } => {
+        Command::Attestation {
+            attestation,
+            leaf_pubkey,
+        } => {
             let attest = decode_input(&attestation).context("--attestation")?;
             let pk = decode_input(&leaf_pubkey).context("--leaf-pubkey")?;
-            let (hash, sig) = parse_attestation_signature(&attest).context("parsing attestation")?;
+            let (hash, sig) =
+                parse_attestation_signature(&attest).context("parsing attestation")?;
             collect_hints(&hash, &sig, &pk)?
         }
     };

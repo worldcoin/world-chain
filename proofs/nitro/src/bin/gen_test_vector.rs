@@ -1,9 +1,9 @@
 //! One-shot binary to generate a deterministic P-384 test vector for p384_hints tests.
 //! Run with: cargo run -p world-chain-proof-nitro --bin gen-test-vector
 //! The output is the expected `collect_hints` byte string for the fixed vector.
-use p384::ecdsa::{signature::Signer, Signature, SigningKey};
-use world_chain_proof_nitro::p384_hints::collect_hints;
+use p384::ecdsa::{Signature, SigningKey, signature::Signer};
 use sha2::{Digest, Sha384};
+use world_chain_proof_nitro::p384_hints::collect_hints;
 
 fn main() {
     // Fixed 48-byte private scalar (all 0x01 bytes — a known weak key, fine for test vectors)
@@ -26,6 +26,10 @@ fn main() {
     println!("// Public key (x||y): {}", hex::encode(pubkey));
 
     let hints = collect_hints(&hash, &sig_bytes, pubkey).expect("collect_hints");
-    println!("// Hints ({} bytes = {} inverses):", hints.len(), hints.len() / 48);
+    println!(
+        "// Hints ({} bytes = {} inverses):",
+        hints.len(),
+        hints.len() / 48
+    );
     println!("// {}", hex::encode(&hints));
 }
