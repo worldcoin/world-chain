@@ -450,6 +450,7 @@ impl ProverServiceStore {
                     failure_reason = $3
                 WHERE id = $4
                 AND (status = $5 OR status = $6)
+                RETURNING id
                 "#,
             )
             .bind(backend_session_id)
@@ -477,6 +478,7 @@ impl ProverServiceStore {
                 VALUES (
                     $1, $2, $3, $4, $5, $6, NULL
                 )
+                RETURNING id
                 "#,
             )
             .bind(proof_id_bytes(proof_id))
@@ -570,6 +572,7 @@ impl ProverServiceStore {
                 AND worker_id = $7   
                 AND lock_id = $8
                 AND lock_expires_at > $9
+            RETURNING proof_id
             "#,
         )
         .bind(ProofStatus::Succeeded.as_str())

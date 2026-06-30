@@ -111,14 +111,15 @@ impl ProofJobQueue for ProverService {
         backend_session_id: String,
         state: BackendSessionStatus,
     ) -> Result<(), ProofJobQueueError> {
-        self.record_proof_session(
-            proof_id,
-            session_type,
-            worker_id,
-            lock_id,
-            backend_session_id,
-            state,
-        )
-        .await
+        self.store
+            .record_proof_session(
+                proof_id,
+                session_type,
+                worker_id,
+                lock_id,
+                backend_session_id,
+                state,
+            )
+            .await
     }
 }
