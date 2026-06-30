@@ -559,14 +559,6 @@ fn proof_id_bytes(id: ProofRequestId) -> Vec<u8> {
     id.0.as_slice().to_vec()
 }
 
-fn proof_id_from_row(row: &PgRow) -> Result<ProofRequestId, String> {
-    proof_id_from_bytes(row.try_get("proof_id").map_err(|err| err.to_string())?)
-}
-
-fn proof_id_from_bytes(bytes: Vec<u8>) -> Result<ProofRequestId, String> {
-    Ok(ProofRequestId(b256_from_bytes("proof_id", bytes)?))
-}
-
 fn b256_from_bytes(field: &str, bytes: Vec<u8>) -> Result<B256, String> {
     if bytes.len() != 32 {
         return Err(format!("{field} has {} bytes, expected 32", bytes.len()));
@@ -621,24 +613,12 @@ fn l2_to_i64(value: u64) -> Result<i64, ProofRequestError> {
         .map_err(|_| ProofRequestError::Internal(format!("l2 block number {value} exceeds i64")))
 }
 
-fn timestamp_after(timestamp: DbTimestamp, duration: Duration) -> DbTimestamp {
-    let duration = TimeDelta::from_std(duration).unwrap_or(TimeDelta::MAX);
-    timestamp
-        .checked_add_signed(duration)
-        .unwrap_or(DateTime::<Utc>::MAX_UTC)
-}
-
 fn request_db(err: sqlx::Error) -> ProofRequestError {
     ProofRequestError::Internal(err.to_string())
 }
 
 fn queue_db(err: sqlx::Error) -> ProofJobQueueError {
     ProofJobQueueError::Internal(err.to_string())
-}
-
-enum BackendSubmissionFailureAction {
-    Terminal(String),
-    Retry(String),
 }
 
 async fn classify_proof_update(
