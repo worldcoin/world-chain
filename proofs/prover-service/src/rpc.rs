@@ -365,7 +365,7 @@ fn map_job_call_error(err: ErrorObjectOwned, fallback_id: ProofRequestId) -> Pro
             ProofJobQueueError::AlreadyTerminal(error_data(&err).unwrap_or(fallback_id))
         }
         error_code::PROOF_MISMATCH => {
-            if let Some(data) = error_data::<ProofMismatchErrorData>(&err) {
+            if let Some(data) = error_data::<Box<ProofMismatchErrorData>>(&err) {
                 ProofJobQueueError::ProofMismatch(data)
             } else {
                 ProofJobQueueError::RemoteInternal

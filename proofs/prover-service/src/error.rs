@@ -159,7 +159,7 @@ pub enum ProofJobQueueError {
     #[error(transparent)]
     ProofEncoding(#[from] serde_json::Error),
     #[error("{0}")]
-    ProofMismatch(ProofMismatchErrorData),
+    ProofMismatch(Box<ProofMismatchErrorData>),
     #[error(
         "proof {0}: the diagnostic read did not identify a stable reason for the proof submission failure."
     )]

@@ -310,7 +310,7 @@ impl ProverServiceStore {
             let backend_session_id: String = row.try_get("backend_session_id")?;
             let status_str: String = row.try_get("status")?;
             let state = BackendSessionStatus::try_from(status_str.as_str())
-                .map_err(|e| ProofJobQueueError::UnknownBackendSessionStatus(e))?;
+                .map_err(ProofJobQueueError::UnknownBackendSessionStatus)?;
 
             Some(BackendSession {
                 backend_session_id,
@@ -352,7 +352,7 @@ impl ProverServiceStore {
 
         let stored_job_status_str: &str = claim.get("job_status");
         let stored_job_status = ProofJobStatus::try_from(stored_job_status_str)
-            .map_err(|e| ProofJobQueueError::UnknownProofJobStatus(e))?;
+            .map_err(ProofJobQueueError::UnknownProofJobStatus)?;
 
         let stored_lock_id: Option<Uuid> = claim.get("lock_id");
         let stored_worker_id: Option<String> = claim.get("worker_id");
@@ -401,7 +401,7 @@ impl ProverServiceStore {
         for row in existing_backend_sessions {
             let status_str: &str = row.get("status");
             let status = BackendSessionStatus::try_from(status_str)
-                .map_err(|err| ProofJobQueueError::UnknownBackendSessionStatus(err))?;
+                .map_err(ProofJobQueueError::UnknownBackendSessionStatus)?;
             if status.is_terminal() {
                 // return this proof session
                 // TODO: do it
@@ -509,7 +509,7 @@ impl ProverServiceStore {
         let stored_lock_expires_at: Option<chrono::DateTime<Utc>> = existing.get("lock_expires_at");
         let stored_job_status_str: String = existing.get("job_status");
         let stored_job_status = ProofJobStatus::try_from(stored_job_status_str.as_str())
-            .map_err(|err| ProofJobQueueError::UnknownProofJobStatus(err))?;
+            .map_err(ProofJobQueueError::UnknownProofJobStatus)?;
         // validation
         if stored_proof_request.backend != proof.proof.backend() {
             return Err(ProofJobQueueError::BackendMismatch(
@@ -592,7 +592,7 @@ impl ProverServiceStore {
                 existing.get("lock_expires_at");
             let stored_job_status_str: String = existing.get("job_status");
             let stored_job_status = ProofJobStatus::try_from(stored_job_status_str.as_str())
-                .map_err(|err| ProofJobQueueError::UnknownProofJobStatus(err))?;
+                .map_err(ProofJobQueueError::UnknownProofJobStatus)?;
             // validation
             if stored_job_status == ProofJobStatus::Succeeded
                 && stored_worker_id == Some(worker_id.clone())
@@ -604,11 +604,13 @@ impl ProverServiceStore {
                     // proof has already been submitted - no op
                     return Ok(());
                 } else {
-                    return Err(ProofJobQueueError::ProofMismatch(ProofMismatchErrorData {
-                        proof_id: proof.id,
-                        expected: stored_proof_data,
-                        actual: proof.proof,
-                    }));
+                    return Err(ProofJobQueueError::ProofMismatch(Box::new(
+                        ProofMismatchErrorData {
+                            proof_id: proof.id,
+                            expected: stored_proof_data,
+                            actual: proof.proof,
+                        },
+                    )));
                 }
             }
             if matches!(
@@ -632,7 +634,7 @@ impl ProverServiceStore {
             if stored_lock_expires_at.is_none() || stored_lock_expires_at.unwrap() <= Utc::now() {
                 return Err(ProofJobQueueError::LockExpired(proof.id));
             }
-            return Err(ProofJobQueueError::Unknown(proof.id));
+            Err(ProofJobQueueError::Unknown(proof.id))
         }
     }
 
@@ -686,7 +688,7 @@ fn request_from_row(row: &PgRow) -> Result<ProofRequest, ProofJobQueueError> {
 
     Ok(ProofRequest {
         backend: ProofBackend::try_from(row.try_get::<String, _>("backend")?.as_str())
-            .map_err(|err| ProofJobQueueError::UnknownProofBackend(err))?,
+            .map_err(ProofJobQueueError::UnknownProofBackend)?,
         game: address_from_bytes(row.try_get("game")?)?,
         root_claim: b256_from_bytes(row.try_get("root_claim")?)?,
         l2_block_number: l2_block_number as u64,
