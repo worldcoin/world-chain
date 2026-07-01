@@ -162,6 +162,11 @@ pub struct FlashblocksP2PState {
     pub observed_payloads: VecDeque<ObservedPayload>,
     /// All currently connected peers and their connection state.
     pub peers: HashMap<PeerId, FlashblocksPeerState>,
+    /// Monotonic counter assigning each connection a unique id, so that a superseded
+    /// connection's teardown cannot remove state belonging to its replacement
+    /// (simultaneous dials between mutually-trusted peers routinely produce two
+    /// short-lived overlapping connections to the same peer).
+    pub next_connection_id: u64,
 }
 
 impl Default for FlashblocksP2PState {
@@ -177,6 +182,7 @@ impl Default for FlashblocksP2PState {
             flashblocks: Vec::new(),
             observed_payloads: VecDeque::new(),
             peers: HashMap::new(),
+            next_connection_id: 0,
         }
     }
 }
@@ -727,26 +733,36 @@ impl FlashblocksHandle {
         handle
     }
 
+    /// Returns the id assigned to this connection, which must be passed back to
+    /// [`Self::on_peer_disconnected`] when the connection is torn down.
     pub(crate) fn on_peer_connected<N: FlashblocksP2PNetworkHandle>(
         &self,
         network: N,
         peer_id: PeerId,
         outbound_tx: mpsc::Sender<BytesMut>,
-    ) {
+    ) -> u64 {
+        let connection_id = {
+            let mut state = self.state.lock();
+            let connection_id = state.next_connection_id;
+            state.next_connection_id += 1;
+            connection_id
+        };
+
         // Ignore self-connections (can occur when discovery hairpins through the NLB).
         if peer_id == network.local_node_record().id {
-            return;
+            return connection_id;
         }
 
         {
             let mut state = self.state.lock();
-            let mut conn_state = FlashblocksPeerState::new(peer_id);
+            let mut conn_state = FlashblocksPeerState::new(peer_id, connection_id);
             conn_state.outbound_tx = Some(outbound_tx);
             let replaced = state.peers.insert(peer_id, conn_state);
 
             tracing::trace!(
                 target: "flashblocks::p2p",
                 %peer_id,
+                connection_id,
                 total_peers = state.peers.len(),
                 "flashblocks peer connected",
             );
@@ -822,16 +838,39 @@ impl FlashblocksHandle {
                 );
             }
         });
+
+        connection_id
     }
 
-    pub(crate) fn on_peer_disconnected(&self, peer_id: PeerId) {
+    pub(crate) fn on_peer_disconnected(&self, peer_id: PeerId, connection_id: u64) {
         let mut state = self.state.lock();
+
+        // Only remove the state that belongs to the connection being torn down. During a
+        // simultaneous-dial collision two connections to the same peer briefly overlap and
+        // the superseded one is dropped after its replacement registered; removing here
+        // would destroy the live connection's state, causing subsequent control messages
+        // to be misinterpreted as protocol violations.
+        match state.peers.get(&peer_id) {
+            Some(conn_state) if conn_state.connection_id == connection_id => {}
+            Some(_) => {
+                tracing::trace!(
+                    target: "flashblocks::p2p",
+                    %peer_id,
+                    connection_id,
+                    "ignoring disconnect for superseded connection",
+                );
+                return;
+            }
+            None => return,
+        }
+
         let removed = state.peers.remove(&peer_id);
 
         if let Some(conn_state) = &removed {
             tracing::trace!(
                 target: "flashblocks::p2p",
                 %peer_id,
+                connection_id,
                 was_sending = conn_state.send_enabled,
                 receive_status = ?conn_state.receive_status,
                 remaining_peers = state.peers.len(),
@@ -1634,7 +1673,7 @@ mod tests {
 
     fn test_peer_state(trusted: bool) -> FlashblocksPeerState {
         let peer_id = PeerId::random();
-        let mut state = FlashblocksPeerState::new(peer_id);
+        let mut state = FlashblocksPeerState::new(peer_id, 0);
         state.set_trusted(peer_id, trusted);
         state
     }
@@ -1645,7 +1684,7 @@ mod tests {
     ) -> (FlashblocksPeerState, mpsc::Receiver<BytesMut>) {
         let (tx, rx) = mpsc::channel(100);
         let peer_id = PeerId::random();
-        let mut state = FlashblocksPeerState::new(peer_id);
+        let mut state = FlashblocksPeerState::new(peer_id, 0);
         state.set_trusted(peer_id, trusted);
         state.outbound_tx = Some(tx);
         (state, rx)
@@ -1774,6 +1813,44 @@ mod tests {
                 .expect("peer exists")
                 .trusted
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn superseded_connection_drop_keeps_replacement_state() {
+        let authorizer = SigningKey::from_bytes(&[7; 32]);
+        let handle = FlashblocksHandle::with_fanout_args(
+            authorizer.verifying_key(),
+            Some(SigningKey::from_bytes(&[8; 32])),
+            test_fanout_args(),
+        );
+        let peer_id = PeerId::random();
+        let network = MockNetwork::default();
+
+        // First connection registers.
+        let (outbound_tx1, _outbound_rx1) = mpsc::channel(100);
+        let conn1 = handle.on_peer_connected(network.clone(), peer_id, outbound_tx1);
+
+        // A simultaneous-dial collision replaces it with a second connection before
+        // the first one is torn down.
+        let (outbound_tx2, _outbound_rx2) = mpsc::channel(100);
+        let conn2 = handle.on_peer_connected(network.clone(), peer_id, outbound_tx2);
+        assert_ne!(conn1, conn2);
+
+        // The superseded connection's teardown must not remove the replacement's state.
+        handle.on_peer_disconnected(peer_id, conn1);
+        assert_eq!(
+            handle
+                .state
+                .lock()
+                .connection_state(&peer_id)
+                .expect("peer state must survive the stale disconnect")
+                .connection_id,
+            conn2
+        );
+
+        // The live connection's teardown removes it.
+        handle.on_peer_disconnected(peer_id, conn2);
+        assert!(handle.state.lock().connection_state(&peer_id).is_none());
     }
 
     #[test]
