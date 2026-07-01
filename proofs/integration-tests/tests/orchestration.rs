@@ -82,9 +82,12 @@ async fn start_proof_stack_with(
     let service = SharedProverService::connect(
         &database_url,
         ProverServiceConfig {
-            lock_timeout: Duration::from_secs(5),
+            // Failed attempts re-queue only after their lock expires (there is no explicit
+            // fail API), so keep the timeout short enough that the transient-failure test
+            // observes the retry within its polling budget.
+            lock_timeout: Duration::from_millis(500),
             max_attempts: 2,
-            max_queue_len: 16,
+            max_retries: 2,
             backend_poll_interval: Duration::from_millis(5),
         },
     )

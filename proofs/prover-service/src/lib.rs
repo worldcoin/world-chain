@@ -78,8 +78,7 @@ mod types;
 
 // re-exports
 pub use config::{
-    DEFAULT_BACKEND_POLL_INTERVAL, DEFAULT_LOCK_TIMEOUT, DEFAULT_MAX_ATTEMPTS,
-    DEFAULT_MAX_QUEUE_LEN, ProverServiceConfig,
+    DEFAULT_BACKEND_POLL_INTERVAL, DEFAULT_LOCK_TIMEOUT, DEFAULT_MAX_ATTEMPTS, ProverServiceConfig,
 };
 pub use error::{
     InvalidConfigError, ProofJobQueueError, ProofRequestError, ProverServiceInitError,
@@ -91,9 +90,9 @@ pub use rpc::{
 pub use service::ProverService;
 pub use traits::{ProofJobQueue, ProofRequester};
 pub use types::{
-    BackendProofId, BackendProofJobStatus, BackendProofPhase, BackendProofState, BackendProofWork,
-    BackendUpdate, LockId, LockedBackendProofWork, LockedProofRequest, ProofBackend, ProofData,
-    ProofRequest, ProofRequestId, ProofResponse, ProofStatus, ProofSubmissionLock,
+    BackendProofId, BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
+    ProofData, ProofJobStatus, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
+    SessionType,
 };
 
 #[cfg(test)]

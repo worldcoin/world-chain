@@ -213,7 +213,7 @@ async fn worker_proves_real_range_end_to_end() {
     let deadline = tokio::time::Instant::now() + timeout;
     let status = loop {
         match client.proof_status(id).await.expect("poll status") {
-            ProofStatus::Completed => break ProofStatus::Completed,
+            ProofStatus::Succeeded => break ProofStatus::Succeeded,
             ProofStatus::Failed => panic!("proof request failed: {:?}", client.get_proof(id).await),
             pending => {
                 assert!(
@@ -224,7 +224,7 @@ async fn worker_proves_real_range_end_to_end() {
             }
         }
     };
-    assert_eq!(status, ProofStatus::Completed);
+    assert_eq!(status, ProofStatus::Succeeded);
 
     let response = client.get_proof(id).await.expect("fetch proof");
     assert_eq!(response.id, id);

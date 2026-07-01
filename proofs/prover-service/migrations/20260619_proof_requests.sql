@@ -1,71 +1,62 @@
-create table proof_requests (
-    proof_id            bytea primary key,
-    backend             text not null,
-    game                bytea not null,
-    root_claim          bytea not null,
-    l2_block_number     bigint not null,
-    l1_head             bytea not null,
+CREATE TABLE proof_requests (
+    proof_id            BYTEA PRIMARY KEY,
+    backend             TEXT NOT NULL,
+    game                BYTEA NOT NULL,
+    root_claim          BYTEA NOT NULL,
+    l2_block_number     BIGINT NOT NULL,
+    l1_head             BYTEA NOT NULL,
 
-    status              text not null,
-    proof_data          bytea null,
-    failure_reason      text null,
+    proof_status        TEXT NOT NULL,
+    proof_data          BYTEA NULL,
+    failure_reason      TEXT NULL,
+    retry_count         INTEGER NOT NULL DEFAULT 0,
 
-    worker_id           text null,
-    lock_id             uuid null,
+    worker_id           TEXT NULL,
+    lock_id             UUID NULL,
+    job_status          TEXT NOT NULL,
+    attempt             INTEGER NOT NULL DEFAULT 0,
+    lock_expires_at     TIMESTAMP WITH TIME ZONE NULL,
 
-    start_attempts      integer not null default 0,
-    lock_expires_at     timestamp with time zone null,
+    created_at          TIMESTAMPTZ NOT NULL,
+    updated_at          TIMESTAMPTZ NOT NULL,
+    finished_at         TIMESTAMPTZ NULL,
 
-    created_at          timestamptz not null,
-    updated_at          timestamptz not null,
-    finished_at         timestamptz null,
-
-    constraint proof_requests_status_check
-        check (status in ('queued', 'starting', 'backend_pending', 'completed', 'failed'))
+    CONSTRAINT proof_requests_status_check
+        CHECK (proof_status IN ('CREATED', 'RUNNING', 'SUCCEEDED', 'FAILED')),
+    CONSTRAINT proof_requests_job_status_check
+        CHECK (job_status IN ('PENDING', 'CLAIMED', 'SUCCEEDED', 'FAILED'))
+   
 );
 
-create index proof_requests_queued_idx
-    on proof_requests (backend, created_at)
-    where status = 'queued';
+CREATE INDEX proof_requests_queued_idx
+    ON proof_requests (backend, created_at)
+    WHERE job_status = 'PENDING';
 
-create index proof_requests_starting_lock_idx
-    on proof_requests (lock_expires_at)
-    where status = 'starting';
+CREATE INDEX proof_requests_starting_lock_idx
+    ON proof_requests (lock_expires_at)
+    WHERE job_status = 'CLAIMED';
 
-create table proof_sessions (
-    id                  bigserial primary key,
-    proof_id            bytea not null references proof_requests(proof_id),
+CREATE TABLE proof_sessions (
+    id                  BIGSERIAL PRIMARY KEY,
+    proof_id            BYTEA NOT NULL REFERENCES proof_requests(proof_id),
 
-    backend             text not null,
-    phase               text not null,
-    backend_proof_id    text not null,
+    session_type        TEXT NOT NULL,
+    backend_session_id  TEXT NOT NULL,
 
-    status              text not null,
-    advance_attempts    integer not null default 0,
-    next_poll_at        timestamptz not null,
-    lock_expires_at     timestamptz null,
-    lock_id             uuid null,
+    status              TEXT NOT NULL,
 
-    artifact            bytea null,
-    failure_reason      text null,
+    failure_reason      TEXT NULL,
 
-    created_at          timestamptz not null,
-    updated_at          timestamptz not null,
-    completed_at        timestamptz null,
+    created_at          TIMESTAMPTZ NOT NULL,
+    completed_at        TIMESTAMPTZ NULL,
 
-    unique (backend, backend_proof_id),
-    unique (proof_id, phase),
+    CONSTRAINT proof_sessions_session_type_check
+        CHECK (session_type IN ('SNARK', 'STARK')),
 
-    constraint proof_sessions_status_check
-        check (status in ('requested', 'completed', 'failed')),
-    constraint proof_sessions_phase_check
-        check (phase in ('single', 'range', 'aggregation'))
+    CONSTRAINT proof_sessions_status_check
+        CHECK (status IN ('SUBMITTING', 'RUNNING', 'COMPLETED', 'FAILED'))
 );
 
-create index proof_sessions_due_idx
-    on proof_sessions (backend, next_poll_at)
-    where status = 'requested';
-
-create index proof_sessions_lock_idx
-    on proof_sessions (lock_expires_at)
-    where status = 'requested';
+CREATE UNIQUE INDEX proof_sessions_active_unique_idx
+    ON proof_sessions (proof_id, session_type)
+    WHERE status IN ('SUBMITTING', 'RUNNING');

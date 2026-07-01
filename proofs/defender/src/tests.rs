@@ -207,7 +207,7 @@ impl ProofRequester for MockProver {
         Ok(if self.fail {
             ProofStatus::Failed
         } else {
-            ProofStatus::Completed
+            ProofStatus::Succeeded
         })
     }
 

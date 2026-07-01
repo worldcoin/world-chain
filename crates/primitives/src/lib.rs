@@ -8,5 +8,8 @@ pub mod payload_id;
 pub mod primitives;
 pub mod tracing;
 
+#[cfg(test)]
+pub(crate) mod test_fixtures;
+
 // re-exports
 pub use ed25519_dalek;
