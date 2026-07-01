@@ -570,19 +570,12 @@ impl ProverServiceStore {
             // db is updated, return successfully
             Ok(())
         } else {
-            // TODO: to do a better analysis of the error, we should try to
-            // read the row again (equal to start of this fn) and perform
-            // validation again. This makes the error more clear and callers
-            // of this fn may handle the specific error better.
-            // Err(ProofJobQueueError::Validation(
-            //     "submit_proof is failing because there is no row to update!".to_string(),
-            // ))
-            // re-read the row to anaylize the error or return `AlreadySubmitted` if the proof
+            // re-read the row to anaylize the error or return Ok(()) if the proof
             // has already been submitted (idempotency).
             let row = sqlx::query(
                 r#"
                 SELECT backend, game, root_claim, l2_block_number, l1_head, proof_status,
-                    lock_id, worker_id, lock_expires_at, job_status
+                    lock_id, worker_id, lock_expires_at, job_status, proof_data
                 FROM proof_requests
                 WHERE proof_id = $1
                 "#,
