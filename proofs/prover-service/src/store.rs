@@ -1,7 +1,10 @@
 use crate::{
     ProofData,
     config::ProverServiceConfig,
-    error::{InvalidConfigError, ProofJobQueueError, ProofRequestError, ProverServiceInitError},
+    error::{
+        BackendMismatchErrorData, InvalidConfigError, ProofJobQueueError, ProofJobStatusErrorData,
+        ProofMismatchErrorData, ProofRequestError, ProverServiceInitError,
+    },
     types::{
         BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
         ProofJobStatus, ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType,
@@ -360,11 +363,13 @@ impl ProverServiceStore {
         // - lock_id and worker_id must match
         // - lock_expires_at shoult not be expired
         if stored_job_status != ProofJobStatus::Claimed {
-            return Err(ProofJobQueueError::ProofJobStatusNotClaimed {
-                proof_id,
-                expected: ProofJobStatus::Claimed,
-                actual: stored_job_status,
-            });
+            return Err(ProofJobQueueError::ProofJobStatusNotClaimed(
+                ProofJobStatusErrorData {
+                    proof_id,
+                    expected: ProofJobStatus::Claimed,
+                    actual: stored_job_status,
+                },
+            ));
         }
         if stored_lock_id != Some(lock_id.0) || stored_worker_id != Some(worker_id.clone()) {
             return Err(ProofJobQueueError::StaleLock(proof_id));
@@ -507,11 +512,13 @@ impl ProverServiceStore {
             .map_err(|err| ProofJobQueueError::UnknownProofJobStatus(err))?;
         // validation
         if stored_proof_request.backend != proof.proof.backend() {
-            return Err(ProofJobQueueError::BackendMismatch {
-                proof_id: proof.id,
-                expected: stored_proof_request.backend,
-                actual: proof.proof.backend(),
-            });
+            return Err(ProofJobQueueError::BackendMismatch(
+                BackendMismatchErrorData {
+                    proof_id: proof.id,
+                    expected: stored_proof_request.backend,
+                    actual: proof.proof.backend(),
+                },
+            ));
         }
         if stored_lock_id != Some(lock_id.0) || stored_worker_id != Some(worker_id.clone()) {
             return Err(ProofJobQueueError::StaleLock(proof.id));
@@ -604,11 +611,11 @@ impl ProverServiceStore {
                     // proof has already been submitted - no op
                     return Ok(());
                 } else {
-                    return Err(ProofJobQueueError::ProofMismatch {
+                    return Err(ProofJobQueueError::ProofMismatch(ProofMismatchErrorData {
                         proof_id: proof.id,
                         expected: stored_proof_data,
                         actual: proof.proof,
-                    });
+                    }));
                 }
             }
             if matches!(
@@ -618,11 +625,13 @@ impl ProverServiceStore {
                 return Err(ProofJobQueueError::AlreadyTerminal(proof.id));
             }
             if stored_job_status != ProofJobStatus::Claimed {
-                return Err(ProofJobQueueError::ProofJobStatusNotClaimed {
-                    proof_id: proof.id,
-                    expected: ProofJobStatus::Claimed,
-                    actual: stored_job_status,
-                });
+                return Err(ProofJobQueueError::ProofJobStatusNotClaimed(
+                    ProofJobStatusErrorData {
+                        proof_id: proof.id,
+                        expected: ProofJobStatus::Claimed,
+                        actual: stored_job_status,
+                    },
+                ));
             }
             if stored_lock_id != Some(lock_id.0) || stored_worker_id != Some(worker_id) {
                 return Err(ProofJobQueueError::StaleLock(proof.id));

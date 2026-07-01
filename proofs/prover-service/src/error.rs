@@ -62,6 +62,69 @@ pub enum ProofRequestError {
     Rpc(String),
 }
 
+/// Data describing a proof job status mismatch.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct ProofJobStatusErrorData {
+    /// The proof request id.
+    pub proof_id: ProofRequestId,
+    /// The expected job status.
+    pub expected: ProofJobStatus,
+    /// The actual stored job status.
+    pub actual: ProofJobStatus,
+}
+
+impl std::fmt::Display for ProofJobStatusErrorData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Invalid proof job status for proof id {}: expected {}, got {}.",
+            self.proof_id, self.expected, self.actual
+        )
+    }
+}
+
+/// Data describing a submitted proof backend mismatch.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct BackendMismatchErrorData {
+    /// The proof request id.
+    pub proof_id: ProofRequestId,
+    /// The backend expected by the stored proof request.
+    pub expected: ProofBackend,
+    /// The backend that produced the submitted proof.
+    pub actual: ProofBackend,
+}
+
+impl std::fmt::Display for BackendMismatchErrorData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "proof job {} backend mismatch: expected {}, got {}.",
+            self.proof_id, self.expected, self.actual
+        )
+    }
+}
+
+/// Data describing a repeated proof submission with different proof data.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct ProofMismatchErrorData {
+    /// The proof request id.
+    pub proof_id: ProofRequestId,
+    /// The proof data already stored by the prover-service.
+    pub expected: ProofData,
+    /// The proof data submitted by the worker.
+    pub actual: ProofData,
+}
+
+impl std::fmt::Display for ProofMismatchErrorData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "proof {} proof data mismatch: expected {:?}, got {:?}.",
+            self.proof_id, self.expected, self.actual
+        )
+    }
+}
+
 /// Error returned to a prover worker by the `prover-service`.
 #[derive(Error, Debug)]
 pub enum ProofJobQueueError {
@@ -81,34 +144,30 @@ pub enum ProofJobQueueError {
     MalformedB256(usize),
     #[error("Proof request {0} not found.")]
     ProofIdNotFound(ProofRequestId),
-    #[error("Invalid proof job status for proof id {proof_id}: expected {expected}, got {actual}.")]
-    ProofJobStatusNotClaimed {
-        proof_id: ProofRequestId,
-        expected: ProofJobStatus,
-        actual: ProofJobStatus,
-    },
+    #[error("{0}")]
+    ProofJobStatusNotClaimed(ProofJobStatusErrorData),
     #[error("Stale lock for given proof id: {0}.")]
     StaleLock(ProofRequestId),
     #[error("Expired lock for given proof id: {0}.")]
     LockExpired(ProofRequestId),
-    #[error("proof job {proof_id} backend mismatch: expected {expected}, got {actual}.")]
-    BackendMismatch {
-        proof_id: ProofRequestId,
-        expected: ProofBackend,
-        actual: ProofBackend,
-    },
+    #[error("{0}")]
+    BackendMismatch(BackendMismatchErrorData),
     #[error("The proof {0} has already reached a terminal job status.")]
     AlreadyTerminal(ProofRequestId),
     #[error(transparent)]
     ProofEncoding(#[from] serde_json::Error),
-    #[error("proof {proof_id} proof data mismatch: expected {expected:?}, got {actual:?}.")]
-    ProofMismatch {
-        proof_id: ProofRequestId,
-        expected: ProofData,
-        actual: ProofData,
-    },
+    #[error("{0}")]
+    ProofMismatch(ProofMismatchErrorData),
     #[error(
         "proof {0}: the diagnostic read did not identify a stable reason for the proof submission failure."
     )]
     Unknown(ProofRequestId),
+    #[error("remote prover-service internal error.")]
+    RemoteInternal,
+    #[error("RPC request timed out.")]
+    RpcRequestTimeout,
+    #[error("RPC transport error: {0}.")]
+    RpcTransport(#[from] jsonrpsee::core::BoxError),
+    #[error("RPC client error: {0}.")]
+    RpcClient(#[source] jsonrpsee::core::client::Error),
 }

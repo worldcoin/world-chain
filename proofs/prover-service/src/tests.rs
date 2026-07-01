@@ -248,7 +248,7 @@ async fn submit_proof_with_wrong_backend_is_rejected() {
         service
             .submit_proof(mismatched, worker_id(), locked.lock_id)
             .await,
-        Err(ProofJobQueueError::BackendMismatch { .. })
+        Err(ProofJobQueueError::BackendMismatch(_))
     ));
     assert_eq!(
         service.proof_status(id).await.unwrap(),
