@@ -509,8 +509,8 @@ impl ProverServiceStore {
         if stored_proof_request.backend != proof.proof.backend() {
             return Err(ProofJobQueueError::BackendMismatch {
                 proof_id: proof.id,
-                expected: proof.proof.backend(),
-                actual: stored_proof_request.backend,
+                expected: stored_proof_request.backend,
+                actual: proof.proof.backend(),
             });
         }
         if stored_lock_id != Some(lock_id.0) || stored_worker_id != Some(worker_id.clone()) {
