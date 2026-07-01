@@ -258,12 +258,6 @@ where
             info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
 
             if enable_reload {
-                // Capture the stdout startup filter as the revert target for
-                // `admin_tracingDirectives`. reth reloads every reloadable layer
-                // (stdout, file, journald) with a single directive string, so a
-                // per-layer baseline cannot be restored; we use the stdout +
-                // verbosity configuration, which the file/journald layers are
-                // also reverted to. See `admin_tracingDirectives` docs.
                 let directive = self.cli.logs.verbosity.directive().to_string();
                 let baseline = if self.cli.logs.log_stdout_filter.is_empty() {
                     directive
