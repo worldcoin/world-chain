@@ -7,5 +7,8 @@ pub mod p2p;
 pub mod payload_id;
 pub mod primitives;
 
+#[cfg(test)]
+pub(crate) mod test_fixtures;
+
 // re-exports
 pub use ed25519_dalek;
