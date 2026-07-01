@@ -62,6 +62,15 @@ pub trait AdminApiExt {
     /// Requires the node to have been started with the `admin` RPC namespace
     /// enabled (which installs the log-filter reload handle); otherwise returns
     /// an error.
+    ///
+    /// Scope: reth reloads every reloadable layer together, so the override —
+    /// and the subsequent revert — apply *uniformly* to all log outputs (stdout
+    /// and the debug log file). The revert target is derived from the stdout
+    /// verbosity + `--log.stdout.filter` startup configuration; a layer that was
+    /// configured with a *different* startup filter (e.g. a custom
+    /// `--log.file.filter`) is restored to this same directive string, not its
+    /// own original filter. This is a limitation of reth's uniform reload, not a
+    /// separate bug.
     #[method(name = "tracingDirectives")]
     async fn tracing_directives(
         &self,
@@ -69,12 +78,24 @@ pub trait AdminApiExt {
     ) -> RpcResult<TracingDirectivesResponse>;
 }
 
+/// Bookkeeping for the in-flight ephemeral override, guarded by a single mutex
+/// so concurrent `tracingDirectives` calls are serialized.
+#[derive(Debug, Default)]
+struct RevertState {
+    /// Monotonic override counter. Each applied override bumps this, and a
+    /// scheduled revert captures the value at schedule time. A revert only fires
+    /// if its captured generation still matches — so a timer that has already
+    /// woken past its sleep (which `abort` cannot stop) still cannot clobber a
+    /// newer override.
+    generation: u64,
+    /// Handle to the scheduled revert task, aborted when superseded.
+    task: Option<JoinHandle<()>>,
+}
+
 /// World Chain `admin` namespace extension.
 #[derive(Debug, Clone, Default)]
 pub struct WorldChainAdminApiExt {
-    /// Handle to the currently-scheduled revert task. A new override aborts the
-    /// previous pending revert so a stale timer can't revert a fresh override.
-    pending_revert: Arc<Mutex<Option<JoinHandle<()>>>>,
+    revert: Arc<Mutex<RevertState>>,
 }
 
 impl WorldChainAdminApiExt {
@@ -123,14 +144,38 @@ impl AdminApiExtServer for WorldChainAdminApiExt {
             ));
         }
 
-        reth_tracing::set_log_vmodule(directives).map_err(invalid_params)?;
-
         let baseline = startup_tracing_directives().unwrap_or_default().to_string();
         let ttl = req.ttl_secs;
 
+        // Serialize the whole apply-and-schedule under one lock so concurrent
+        // calls cannot interleave. The lock is only ever held across synchronous
+        // work (never across `.await`), so this cannot deadlock the runtime.
+        let mut state = self.revert.lock().expect("revert mutex poisoned");
+
+        // Apply the override. `set_log_vmodule` validates the pattern before
+        // mutating any handle, so on failure we return without touching the
+        // currently-scheduled revert.
+        reth_tracing::set_log_vmodule(directives).map_err(invalid_params)?;
+
+        // Supersede the previous override: abort its revert task (best effort)
+        // and bump the generation so a task that already woke is neutered.
+        if let Some(previous) = state.task.take() {
+            previous.abort();
+        }
+        state.generation = state.generation.wrapping_add(1);
+        let generation = state.generation;
+
+        let revert = self.revert.clone();
         let revert_baseline = baseline.clone();
-        let handle = tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(ttl)).await;
+            let mut state = revert.lock().expect("revert mutex poisoned");
+            // Only revert if this is still the active override; a newer override
+            // (or its immediate supersession) leaves the filter as the caller set
+            // it.
+            if state.generation != generation {
+                return;
+            }
             match reth_tracing::set_log_vmodule(&revert_baseline) {
                 Ok(()) => info!(
                     target: "world_chain::admin",
@@ -143,18 +188,10 @@ impl AdminApiExtServer for WorldChainAdminApiExt {
                     "Failed to revert tracing directives after TTL"
                 ),
             }
+            state.task = None;
         });
-
-        // Abort any previously-scheduled revert so it can't fire against this
-        // newer override.
-        if let Some(previous) = self
-            .pending_revert
-            .lock()
-            .expect("pending_revert mutex poisoned")
-            .replace(handle)
-        {
-            previous.abort();
-        }
+        state.task = Some(task);
+        drop(state);
 
         info!(
             target: "world_chain::admin",

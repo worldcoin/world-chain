@@ -63,8 +63,28 @@ async fn test_admin_tracing_directives_apply_and_revert() -> eyre::Result<()> {
     // The override takes effect immediately.
     assert_eq!(LevelFilter::current(), LevelFilter::TRACE);
 
-    // After the TTL elapses the filter reverts to the startup configuration.
+    // Supersede it with a second override before the first TTL elapses. The
+    // first revert (scheduled for ~2s) must NOT clobber this newer override.
+    let resp: serde_json::Value = client
+        .request(
+            "admin_tracingDirectives",
+            rpc_params![serde_json::json!({ "directives": "debug", "ttlSecs": 4 })],
+        )
+        .await?;
+    assert_eq!(resp["applied"], "debug");
+    assert_eq!(LevelFilter::current(), LevelFilter::DEBUG);
+
+    // Wait past the *first* override's TTL. If the stale revert fired it would
+    // have dropped the level back to INFO; the generation guard must keep DEBUG.
     tokio::time::sleep(Duration::from_secs(3)).await;
+    assert_eq!(
+        LevelFilter::current(),
+        LevelFilter::DEBUG,
+        "superseded revert clobbered the newer override"
+    );
+
+    // Wait past the second override's TTL; it reverts to the startup config.
+    tokio::time::sleep(Duration::from_secs(2)).await;
     assert_eq!(LevelFilter::current(), LevelFilter::INFO);
 
     // Invalid input is rejected over the wire before any state change.
