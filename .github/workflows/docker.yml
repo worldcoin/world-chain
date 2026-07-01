@@ -4,13 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Branch, tag, or SHA to build.
+        description: Branch, tag, or SHA to build. Leave blank to build the ref this run was launched from.
         required: false
-        default: main
+        type: string
       image_tag:
-        description: Custom image tag to publish (e.g. "nightly").
-        required: false
+        description: Mutable tag to publish alongside the immutable sha tag. "tag" applies the git tag (launch this run from a v* tag).
+        required: true
+        type: choice
         default: nightly
+        options:
+          - nightly
+          - alphanet
+          - tag
   push:
     branches: [main]
 
@@ -67,5 +72,7 @@ jobs:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ inputs.image_tag || 'nightly' }}
             type=sha
+            type=raw,value=nightly,enable=${{ inputs.image_tag == 'nightly' }}
+            type=raw,value=alphanet,enable=${{ inputs.image_tag == 'alphanet' }}
+            type=ref,event=tag,enable=${{ inputs.image_tag == 'tag' }}
