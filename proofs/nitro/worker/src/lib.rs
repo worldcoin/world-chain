@@ -37,13 +37,11 @@ use world_chain_proof_nitro::{
     host::{EnclaveEndpoint, NitroProver},
 };
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
-use world_chain_proof_worker::{ProofJobBackend, ProofWorker, ProofWorkerConfig};
-use world_chain_prover_service::{
-    BackendProofState, BackendUpdate, ProofBackend, ProofData, ProofRequest, RpcProverServiceClient,
-};
+use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob, ProofWorker, ProofWorkerConfig};
+use world_chain_prover_service::{ProofBackend, ProofData, RpcProverServiceClient};
 
 // ──────────────────────────────────────────────────────────────────────────────────────
-// NitroBackend — ProofJobBackend implementation for the Nitro TEE lane
+// NitroBackend — ClaimedProofJobHandler implementation for the Nitro TEE lane
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
@@ -67,12 +65,15 @@ impl NitroBackend {
     }
 }
 
-impl ProofJobBackend for NitroBackend {
+#[async_trait::async_trait]
+impl ClaimedProofJobHandler for NitroBackend {
     fn lane(&self) -> ProofBackend {
         ProofBackend::Nitro
     }
 
-    fn start(&self, request: &ProofRequest) -> anyhow::Result<BackendUpdate> {
+    async fn handle_claimed_job(&self, job: ProofJob) -> anyhow::Result<ProofData> {
+        let request = &job.request;
+
         let start_block = request
             .l2_block_number
             .checked_sub(self.config.block_interval)
@@ -89,23 +90,26 @@ impl ProofJobBackend for NitroBackend {
         let prover =
             NitroProver::with_runtime(endpoint, self.config.expected_pcrs, self.rt_handle.clone());
 
-        let input = build_range_input(
-            &self.config.online,
-            RangeWitnessRequest {
-                start_block,
-                end_block: request.l2_block_number,
-                l1_head: Some(request.l1_head),
-                allow_unfinalized: false,
-            },
-        )
+        // Witness generation is synchronous and heavy; keep it off the async scheduler.
+        let input = tokio::task::block_in_place(|| {
+            build_range_input(
+                &self.config.online,
+                RangeWitnessRequest {
+                    start_block,
+                    end_block: request.l2_block_number,
+                    l1_head: Some(request.l1_head),
+                    allow_unfinalized: false,
+                },
+            )
+        })
         .context("witness generation failed")?;
 
         let nitro_request = NitroRangeProofRequest::from_witness_data(&input.witness, None)
             .context("witness serialize")?;
 
-        let artifact = self
-            .rt_handle
-            .block_on(prover.prove_range_async(nitro_request))
+        let artifact = prover
+            .prove_range_async(nitro_request)
+            .await
             .context("nitro enclave proving failed")?;
 
         if artifact.boot_info.l2PostRoot != request.root_claim {
@@ -145,18 +149,10 @@ impl ProofJobBackend for NitroBackend {
             "enclave attested range proof"
         );
 
-        Ok(BackendUpdate::Complete(ProofData::Nitro {
+        Ok(ProofData::Nitro {
             attestation: Bytes::from(artifact.attestation_doc),
             signature: Bytes::from(artifact.signature),
-        }))
-    }
-
-    fn advance(
-        &self,
-        _request: &ProofRequest,
-        _state: BackendProofState,
-    ) -> anyhow::Result<BackendUpdate> {
-        bail!("Nitro backend does not support durable backend jobs")
+        })
     }
 }
 

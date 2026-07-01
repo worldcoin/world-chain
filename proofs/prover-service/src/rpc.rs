@@ -3,9 +3,8 @@ use crate::{
     service::ProverService,
     traits::{ProofJobQueue, ProofRequester},
     types::{
-        BackendProofState, BackendUpdate, LockId, LockedBackendProofWork, LockedProofRequest,
-        ProofBackend, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
-        ProofSubmissionLock,
+        BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
+        ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType,
     },
 };
 use jsonrpsee::{
@@ -13,21 +12,26 @@ use jsonrpsee::{
     http_client::{HttpClient, HttpClientBuilder},
     proc_macros::rpc,
     server::{Server, ServerHandle},
-    types::{ErrorObject, ErrorObjectOwned, error::INTERNAL_ERROR_CODE},
+    types::{
+        ErrorObject, ErrorObjectOwned,
+        error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE},
+    },
 };
 use std::{net::SocketAddr, sync::Arc};
 use tracing::info;
 
 /// JSON-RPC error codes returned by the `prover-service`.
 pub mod error_code {
-    /// The queue for the requested backend is at capacity.
-    pub const QUEUE_FULL: i32 = -32001;
     /// No proof request with the given id is known.
     pub const NOT_FOUND: i32 = -32002;
     /// The proof is not ready yet; the error data holds the [`crate::ProofStatus`].
     pub const PENDING: i32 = -32003;
     /// The proof request permanently failed; the error data holds the reason.
     pub const FAILED: i32 = -32004;
+    /// The proof request has been retried more than the configured maximum.
+    pub const TOO_MANY_RETRIES: i32 = -32005;
+    /// A conflicting row vanished after an insert conflict; the request is safe to retry.
+    pub const RETRYABLE_CONFLICT: i32 = -32006;
     /// No proof job with the given id is known.
     pub const UNKNOWN_JOB: i32 = -32011;
     /// No backend proof job with the given id is known.
@@ -69,53 +73,33 @@ pub trait ProverServiceApi {
         worker_id: String,
     ) -> RpcResult<Option<LockedProofRequest>>;
 
-    /// Persist durable backend work created while starting a proof job.
-    #[method(name = "submitBackendProofState")]
-    async fn submit_backend_proof_state(
-        &self,
-        proof_id: ProofRequestId,
-        backend_proof_state: BackendProofState,
-        lock_id: LockId,
-        worker_id: String,
-    ) -> RpcResult<()>;
-
-    /// Lock the next durable backend proof job for the given backend.
-    #[method(name = "getNextBackendProof")]
-    async fn get_next_backend_proof(
-        &self,
-        backend: ProofBackend,
-    ) -> RpcResult<Option<LockedBackendProofWork>>;
-
-    /// Apply a durable backend proof update.
-    #[method(name = "completeBackendProofJob")]
-    async fn complete_backend_proof_job(
-        &self,
-        backend_job_id: i64,
-        lock_id: LockId,
-        next_update: BackendUpdate,
-    ) -> RpcResult<()>;
-
-    /// Report that advancing a durable backend proof job failed for this attempt.
-    #[method(name = "failBackendProofJob")]
-    async fn fail_backend_proof_job(
-        &self,
-        backend_job_id: i64,
-        reason: String,
-        lock_id: LockId,
-    ) -> RpcResult<()>;
-
     /// Submit a generated proof.
     #[method(name = "submitProof")]
-    async fn submit_proof(&self, proof: ProofResponse, lock: ProofSubmissionLock) -> RpcResult<()>;
+    async fn submit_proof(
+        &self,
+        proof: ProofResponse,
+        worker_id: String,
+        lock: LockId,
+    ) -> RpcResult<()>;
 
-    /// Report that proving failed for the given job.
-    #[method(name = "failProof")]
-    async fn fail_proof(
+    /// Get a proof session if any.
+    #[method(name = "getProofSession")]
+    async fn get_proof_session(
         &self,
         proof_id: ProofRequestId,
-        reason: String,
-        lock_id: LockId,
+        session_type: SessionType,
+    ) -> RpcResult<Option<BackendSession>>;
+
+    /// Record a new proof session.
+    #[method(name = "recordProofSession")]
+    async fn record_proof_session(
+        &self,
+        proof_id: ProofRequestId,
+        session_type: SessionType,
         worker_id: String,
+        lock_id: LockId,
+        backend_session_id: String,
+        state: BackendSessionStatus,
     ) -> RpcResult<()>;
 }
 
@@ -123,11 +107,14 @@ impl From<ProofRequestError> for ErrorObjectOwned {
     fn from(err: ProofRequestError) -> Self {
         let message = err.to_string();
         match err {
-            ProofRequestError::QueueFull(_) => {
-                ErrorObject::owned(error_code::QUEUE_FULL, message, None::<()>)
-            }
             ProofRequestError::NotFound(_) => {
                 ErrorObject::owned(error_code::NOT_FOUND, message, None::<()>)
+            }
+            ProofRequestError::RowMissingAfterConflict { .. } => {
+                ErrorObject::owned(error_code::RETRYABLE_CONFLICT, message, None::<()>)
+            }
+            ProofRequestError::TooManyRetries(_) => {
+                ErrorObject::owned(error_code::TOO_MANY_RETRIES, message, None::<()>)
             }
             ProofRequestError::Pending { status, .. } => {
                 ErrorObject::owned(error_code::PENDING, message, Some(status))
@@ -169,6 +156,12 @@ impl From<ProofJobQueueError> for ErrorObjectOwned {
             ProofJobQueueError::Rpc(_) => {
                 ErrorObject::owned(INTERNAL_ERROR_CODE, message, None::<()>)
             }
+            ProofJobQueueError::NotFound(_) => {
+                ErrorObject::owned(error_code::NOT_FOUND, message, None::<()>)
+            }
+            ProofJobQueueError::Validation(_) => {
+                ErrorObject::owned(INVALID_PARAMS_CODE, message, None::<()>)
+            }
         }
     }
 }
@@ -208,64 +201,45 @@ impl ProverServiceApiServer for ProverServiceRpc {
         Ok(self.service.get_next_proof(backend, worker_id).await?)
     }
 
-    async fn submit_backend_proof_state(
+    async fn submit_proof(
+        &self,
+        proof: ProofResponse,
+        worker_id: String,
+        lock: LockId,
+    ) -> RpcResult<()> {
+        Ok(self.service.submit_proof(proof, worker_id, lock).await?)
+    }
+
+    async fn get_proof_session(
         &self,
         proof_id: ProofRequestId,
-        backend_proof_state: BackendProofState,
-        lock_id: LockId,
-        worker_id: String,
-    ) -> RpcResult<()> {
+        session_type: SessionType,
+    ) -> RpcResult<Option<BackendSession>> {
         Ok(self
             .service
-            .submit_backend_proof_state(proof_id, backend_proof_state, lock_id, worker_id)
+            .get_proof_session(proof_id, session_type)
             .await?)
     }
 
-    async fn get_next_backend_proof(
-        &self,
-        backend: ProofBackend,
-    ) -> RpcResult<Option<LockedBackendProofWork>> {
-        Ok(self.service.get_next_backend_proof(backend).await?)
-    }
-
-    async fn complete_backend_proof_job(
-        &self,
-        backend_job_id: i64,
-        lock_id: LockId,
-        next_update: BackendUpdate,
-    ) -> RpcResult<()> {
-        Ok(self
-            .service
-            .complete_backend_proof_job(backend_job_id, lock_id, next_update)
-            .await?)
-    }
-
-    async fn fail_backend_proof_job(
-        &self,
-        backend_job_id: i64,
-        reason: String,
-        lock_id: LockId,
-    ) -> RpcResult<()> {
-        Ok(self
-            .service
-            .fail_backend_proof_job(backend_job_id, reason, lock_id)
-            .await?)
-    }
-
-    async fn submit_proof(&self, proof: ProofResponse, lock: ProofSubmissionLock) -> RpcResult<()> {
-        Ok(self.service.submit_proof(proof, lock).await?)
-    }
-
-    async fn fail_proof(
+    async fn record_proof_session(
         &self,
         proof_id: ProofRequestId,
-        reason: String,
-        lock_id: LockId,
+        session_type: SessionType,
         worker_id: String,
+        lock_id: LockId,
+        backend_session_id: String,
+        state: BackendSessionStatus,
     ) -> RpcResult<()> {
         Ok(self
             .service
-            .fail_proof(proof_id, reason, lock_id, worker_id)
+            .record_proof_session(
+                proof_id,
+                session_type,
+                worker_id,
+                lock_id,
+                backend_session_id,
+                state,
+            )
             .await?)
     }
 }
@@ -324,11 +298,12 @@ fn map_request_error(
         return ProofRequestError::Rpc(err.to_string());
     };
     match (err.code(), backend) {
-        (error_code::QUEUE_FULL, Some(backend)) => ProofRequestError::QueueFull(backend),
         (error_code::NOT_FOUND, _) => ProofRequestError::NotFound(id),
+        (error_code::TOO_MANY_RETRIES, _) => ProofRequestError::TooManyRetries(id),
+        (error_code::RETRYABLE_CONFLICT, _) => ProofRequestError::RowMissingAfterConflict { id },
         (error_code::PENDING, _) => ProofRequestError::Pending {
             id,
-            status: error_data(&err).unwrap_or(ProofStatus::Queued),
+            status: error_data(&err).unwrap_or(ProofStatus::Created),
         },
         (error_code::FAILED, _) => ProofRequestError::Failed {
             id,
@@ -349,27 +324,6 @@ fn map_job_error(err: ClientError, id: ProofRequestId) -> ProofJobQueueError {
             id,
             reason: invalid_proof_reason(&err).unwrap_or_else(|| err.message().to_string()),
         },
-        _ => ProofJobQueueError::Rpc(format!("{} (code {})", err.message(), err.code())),
-    }
-}
-
-fn map_backend_job_error(err: ClientError, backend_job_id: i64) -> ProofJobQueueError {
-    let ClientError::Call(err) = err else {
-        return ProofJobQueueError::Rpc(err.to_string());
-    };
-    match err.code() {
-        error_code::UNKNOWN_BACKEND_JOB => ProofJobQueueError::UnknownBackendJob(backend_job_id),
-        error_code::STALE_LOCK => ProofJobQueueError::StaleLocked,
-        error_code::INVALID_PROOF => {
-            if let Some(data) = error_data::<InvalidProofErrorData>(&err) {
-                ProofJobQueueError::InvalidProof {
-                    id: data.id,
-                    reason: data.reason,
-                }
-            } else {
-                ProofJobQueueError::Rpc(format!("{} (code {})", err.message(), err.code()))
-            }
-        }
         _ => ProofJobQueueError::Rpc(format!("{} (code {})", err.message(), err.code())),
     }
 }
@@ -418,85 +372,47 @@ impl ProofJobQueue for RpcProverServiceClient {
             .map_err(|err| ProofJobQueueError::Rpc(err.to_string()))
     }
 
-    async fn submit_backend_proof_state(
-        &self,
-        proof_id: ProofRequestId,
-        backend_proof_state: BackendProofState,
-        lock_id: LockId,
-        worker_id: String,
-    ) -> Result<(), ProofJobQueueError> {
-        ProverServiceApiClient::submit_backend_proof_state(
-            &self.client,
-            proof_id,
-            backend_proof_state,
-            lock_id,
-            worker_id,
-        )
-        .await
-        .map_err(|err| map_job_error(err, proof_id))
-    }
-
-    async fn get_next_backend_proof(
-        &self,
-        backend: ProofBackend,
-    ) -> Result<Option<LockedBackendProofWork>, ProofJobQueueError> {
-        ProverServiceApiClient::get_next_backend_proof(&self.client, backend)
-            .await
-            .map_err(|err| ProofJobQueueError::Rpc(err.to_string()))
-    }
-
-    async fn complete_backend_proof_job(
-        &self,
-        backend_job_id: i64,
-        lock_id: LockId,
-        next_update: BackendUpdate,
-    ) -> Result<(), ProofJobQueueError> {
-        ProverServiceApiClient::complete_backend_proof_job(
-            &self.client,
-            backend_job_id,
-            lock_id,
-            next_update,
-        )
-        .await
-        .map_err(|err| map_backend_job_error(err, backend_job_id))
-    }
-
-    async fn fail_backend_proof_job(
-        &self,
-        backend_job_id: i64,
-        reason: String,
-        lock_id: LockId,
-    ) -> Result<(), ProofJobQueueError> {
-        ProverServiceApiClient::fail_backend_proof_job(
-            &self.client,
-            backend_job_id,
-            reason,
-            lock_id,
-        )
-        .await
-        .map_err(|err| map_backend_job_error(err, backend_job_id))
-    }
-
     async fn submit_proof(
         &self,
         proof: ProofResponse,
-        lock: ProofSubmissionLock,
+        worker_id: String,
+        lock: LockId,
     ) -> Result<(), ProofJobQueueError> {
         let id = proof.id;
-        ProverServiceApiClient::submit_proof(&self.client, proof, lock)
+        ProverServiceApiClient::submit_proof(&self.client, proof, worker_id, lock)
             .await
             .map_err(|err| map_job_error(err, id))
     }
 
-    async fn fail_proof(
+    async fn get_proof_session(
         &self,
         proof_id: ProofRequestId,
-        reason: String,
-        lock_id: LockId,
-        worker_id: String,
-    ) -> Result<(), ProofJobQueueError> {
-        ProverServiceApiClient::fail_proof(&self.client, proof_id, reason, lock_id, worker_id)
+        session_type: SessionType,
+    ) -> Result<Option<BackendSession>, ProofJobQueueError> {
+        ProverServiceApiClient::get_proof_session(&self.client, proof_id, session_type)
             .await
             .map_err(|err| map_job_error(err, proof_id))
+    }
+
+    async fn record_proof_session(
+        &self,
+        proof_id: ProofRequestId,
+        session_type: SessionType,
+        worker_id: String,
+        lock_id: LockId,
+        backend_session_id: String,
+        state: BackendSessionStatus,
+    ) -> Result<(), ProofJobQueueError> {
+        ProverServiceApiClient::record_proof_session(
+            &self.client,
+            proof_id,
+            session_type,
+            worker_id,
+            lock_id,
+            backend_session_id,
+            state,
+        )
+        .await
+        .map_err(|err| map_job_error(err, proof_id))
     }
 }

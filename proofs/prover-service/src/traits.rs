@@ -1,9 +1,8 @@
 use crate::{
     error::{ProofJobQueueError, ProofRequestError},
     types::{
-        BackendProofState, BackendUpdate, LockId, LockedBackendProofWork, LockedProofRequest,
-        ProofBackend, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
-        ProofSubmissionLock,
+        BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
+        ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType,
     },
 };
 use async_trait::async_trait;
@@ -48,56 +47,27 @@ pub trait ProofJobQueue {
         worker_id: String,
     ) -> Result<Option<LockedProofRequest>, ProofJobQueueError>;
 
-    /// Persist durable backend work created while starting a proof job.
-    async fn submit_backend_proof_state(
-        &self,
-        proof_id: ProofRequestId,
-        backend_proof_state: BackendProofState,
-        lock_id: LockId,
-        worker_id: String,
-    ) -> Result<(), ProofJobQueueError>;
-
-    /// Lock durable backend work that is due for polling or advancement.
-    async fn get_next_backend_proof(
-        &self,
-        backend: ProofBackend,
-    ) -> Result<Option<LockedBackendProofWork>, ProofJobQueueError>;
-
-    /// Apply an update produced while advancing a durable backend job.
-    async fn complete_backend_proof_job(
-        &self,
-        backend_job_id: i64,
-        lock_id: LockId,
-        next_update: BackendUpdate,
-    ) -> Result<(), ProofJobQueueError>;
-
-    /// Report that advancing a durable backend job failed for this attempt.
-    ///
-    /// The backend job is re-scheduled until its attempts are exhausted, after
-    /// which it and its parent proof job are marked as permanently failed.
-    async fn fail_backend_proof_job(
-        &self,
-        backend_job_id: i64,
-        reason: String,
-        lock_id: LockId,
-    ) -> Result<(), ProofJobQueueError>;
-
     /// Submit a final proof response to the `prover-service`.
     async fn submit_proof(
         &self,
         proof: ProofResponse,
-        lock: ProofSubmissionLock,
+        worker_id: String,
+        lock: LockId,
     ) -> Result<(), ProofJobQueueError>;
 
-    /// Report that proving failed for the given job.
-    ///
-    /// The job is re-queued until its attempts are exhausted, after which
-    /// it is marked as permanently failed.
-    async fn fail_proof(
+    async fn get_proof_session(
         &self,
         proof_id: ProofRequestId,
-        reason: String,
-        lock_id: LockId,
+        session_type: SessionType,
+    ) -> Result<Option<BackendSession>, ProofJobQueueError>;
+
+    async fn record_proof_session(
+        &self,
+        proof_id: ProofRequestId,
+        session_type: SessionType,
         worker_id: String,
+        lock_id: LockId,
+        backend_session_id: String,
+        state: BackendSessionStatus,
     ) -> Result<(), ProofJobQueueError>;
 }

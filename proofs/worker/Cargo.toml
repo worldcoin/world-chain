@@ -16,14 +16,11 @@ world-chain-prover-service.workspace = true
 
 # misc
 anyhow.workspace = true
-backon.workspace = true
-futures-util.workspace = true
-pin-project.workspace = true
-tokio = { workspace = true, features = ["rt", "sync", "time"] }
+async-trait.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 tokio-util.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["serde"] }
-async-trait.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
