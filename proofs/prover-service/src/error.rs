@@ -1,4 +1,7 @@
-use crate::types::{ProofRequestId, ProofStatus};
+use crate::{
+    ProofBackend, ProofJobStatus,
+    types::{ProofRequestId, ProofStatus},
+};
 use sqlx::migrate::MigrateError;
 use thiserror::Error;
 
@@ -62,32 +65,40 @@ pub enum ProofRequestError {
 /// Error returned to a prover worker by the `prover-service`.
 #[derive(Error, Debug)]
 pub enum ProofJobQueueError {
-    /// No proof request with the given id is known.
-    #[error("unknown proof job {0}")]
-    UnknownJob(ProofRequestId),
-    /// No backend proof job with the given id is known.
-    #[error("unknown backend proof job {0}")]
-    UnknownBackendJob(i64),
-    /// The lock token no longer owns the row being updated.
-    #[error("stale lock for proof job update")]
-    StaleLocked,
-    /// The submitted proof does not match the requested job.
-    #[error("invalid proof for job {id}: {reason}")]
-    InvalidProof {
-        /// The proof request id.
-        id: ProofRequestId,
-        /// Why the proof was rejected.
-        reason: String,
+    #[error(transparent)]
+    Sqlx(#[from] sqlx::Error),
+    #[error("block number is negative: {0}.")]
+    NegativeBlockNumber(i64),
+    #[error("{0}")]
+    UnknownProofBackend(String),
+    #[error("{0}")]
+    UnknownBackendSessionStatus(String),
+    #[error("{0}")]
+    UnknownProofJobStatus(String),
+    #[error("The provided value has {0} bytes, expected 20.")]
+    MalformedAddress(usize),
+    #[error("The provided value has {0} bytes, expected 32.")]
+    MalformedB256(usize),
+    #[error("Proof request {0} not found.")]
+    ProofIdNotFound(ProofRequestId),
+    #[error("Invalid proof job status for proof id {proof_id}: expected {expected}, got {actual}.")]
+    ProofJobStatusNotClaimed {
+        proof_id: ProofRequestId,
+        expected: ProofJobStatus,
+        actual: ProofJobStatus,
     },
-    /// Internal service or storage error.
-    #[error("prover-service error: {0}")]
-    Internal(String),
-    /// RPC transport error.
-    #[error("RPC error: {0}")]
-    Rpc(String),
-    /// No proof request with the given id is known.
-    #[error("proof request {0} not found")]
-    NotFound(ProofRequestId),
-    #[error("validation error: {0}")]
-    Validation(String),
+    #[error("Stale lock for given proof id: {0}.")]
+    StaleLock(ProofRequestId),
+    #[error("Expired lock for given proof id: {0}.")]
+    LockExpired(ProofRequestId),
+    #[error("proof job {proof_id} backend mismatch: expected {expected}, got {actual}.")]
+    BackendMismatch {
+        proof_id: ProofRequestId,
+        expected: ProofBackend,
+        actual: ProofBackend,
+    },
+    #[error("The proof {0} has already reached a terminal job status.")]
+    AlreadyTerminal(ProofRequestId),
+    #[error(transparent)]
+    ProofEncoding(#[from] serde_json::Error),
 }
