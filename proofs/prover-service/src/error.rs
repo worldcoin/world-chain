@@ -2,7 +2,9 @@ use crate::{
     ProofBackend, ProofData, ProofJobStatus,
     types::{ProofRequestId, ProofStatus},
 };
+use jsonrpsee::core::client::Error as JsonRpseeError;
 use sqlx::migrate::MigrateError;
+use std::sync::Arc;
 use thiserror::Error;
 
 /// Invalid `prover-service` configuration.
@@ -164,10 +166,31 @@ pub enum ProofJobQueueError {
     Unknown(ProofRequestId),
     #[error("remote prover-service internal error.")]
     RemoteInternal,
+    #[error("remote prover-service storage error.")]
+    RemoteSqlx,
     #[error("RPC request timed out.")]
     RpcRequestTimeout,
     #[error("RPC transport error: {0}.")]
     RpcTransport(#[from] jsonrpsee::core::BoxError),
+    #[error("RPC client restart needed: {0}.")]
+    RpcRestartNeeded(#[source] Arc<JsonRpseeError>),
+    #[error("RPC service disconnected.")]
+    RpcServiceDisconnected,
     #[error("RPC client error: {0}.")]
-    RpcClient(#[source] jsonrpsee::core::client::Error),
+    RpcClient(#[source] JsonRpseeError),
+}
+
+impl ProofJobQueueError {
+    /// Whether retrying the same operation can plausibly succeed.
+    pub const fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::Sqlx(_)
+                | Self::RemoteSqlx
+                | Self::RpcRequestTimeout
+                | Self::RpcTransport(_)
+                | Self::RpcRestartNeeded(_)
+                | Self::RpcServiceDisconnected
+        )
+    }
 }

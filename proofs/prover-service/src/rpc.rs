@@ -46,6 +46,8 @@ pub mod error_code {
     pub const ALREADY_TERMINAL: i32 = -32017;
     /// A replayed submit carried proof data that differs from the stored proof.
     pub const PROOF_MISMATCH: i32 = -32018;
+    /// Temporary prover-service storage failure.
+    pub const SQLX: i32 = -32019;
 }
 
 /// The `prover-service` JSON-RPC API, covering both the defender-facing
@@ -158,8 +160,10 @@ impl From<ProofJobQueueError> for ErrorObjectOwned {
             ProofJobQueueError::ProofMismatch(data) => {
                 ErrorObject::owned(error_code::PROOF_MISMATCH, message, Some(data))
             }
-            ProofJobQueueError::Sqlx(_)
-            | ProofJobQueueError::NegativeBlockNumber(_)
+            ProofJobQueueError::Sqlx(_) => {
+                ErrorObject::owned(error_code::SQLX, message, None::<()>)
+            }
+            ProofJobQueueError::NegativeBlockNumber(_)
             | ProofJobQueueError::UnknownProofBackend(_)
             | ProofJobQueueError::UnknownBackendSessionStatus(_)
             | ProofJobQueueError::UnknownProofJobStatus(_)
@@ -168,8 +172,11 @@ impl From<ProofJobQueueError> for ErrorObjectOwned {
             | ProofJobQueueError::ProofEncoding(_)
             | ProofJobQueueError::Unknown(_)
             | ProofJobQueueError::RemoteInternal
+            | ProofJobQueueError::RemoteSqlx
             | ProofJobQueueError::RpcRequestTimeout
             | ProofJobQueueError::RpcTransport(_)
+            | ProofJobQueueError::RpcRestartNeeded(_)
+            | ProofJobQueueError::RpcServiceDisconnected
             | ProofJobQueueError::RpcClient(_) => {
                 ErrorObject::owned(INTERNAL_ERROR_CODE, message, None::<()>)
             }
@@ -322,6 +329,8 @@ fn map_job_error(err: ClientError, id: ProofRequestId) -> ProofJobQueueError {
     match err {
         ClientError::RequestTimeout => ProofJobQueueError::RpcRequestTimeout,
         ClientError::Transport(err) => ProofJobQueueError::RpcTransport(err),
+        ClientError::RestartNeeded(err) => ProofJobQueueError::RpcRestartNeeded(err),
+        ClientError::ServiceDisconnect => ProofJobQueueError::RpcServiceDisconnected,
         ClientError::Call(err) => map_job_call_error(err, id),
         err => ProofJobQueueError::RpcClient(err),
     }
@@ -362,6 +371,7 @@ fn map_job_call_error(err: ErrorObjectOwned, fallback_id: ProofRequestId) -> Pro
                 ProofJobQueueError::RemoteInternal
             }
         }
+        error_code::SQLX => ProofJobQueueError::RemoteSqlx,
         INTERNAL_ERROR_CODE => ProofJobQueueError::RemoteInternal,
         _ => ProofJobQueueError::RpcClient(ClientError::Call(err)),
     }
