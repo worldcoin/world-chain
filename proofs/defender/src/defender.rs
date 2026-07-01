@@ -205,10 +205,8 @@ where
                     }
                 };
                 match status {
-                    ProofStatus::Queued | ProofStatus::Starting | ProofStatus::BackendPending => {
-                        state
-                    }
-                    ProofStatus::Completed => {
+                    ProofStatus::Created | ProofStatus::Running => state,
+                    ProofStatus::Succeeded => {
                         let response = match self.proof_requester.get_proof(id).await {
                             Ok(response) => response,
                             Err(error) => {
