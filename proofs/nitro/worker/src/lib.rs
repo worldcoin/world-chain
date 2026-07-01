@@ -37,8 +37,14 @@ use world_chain_proof_nitro::{
     host::{EnclaveEndpoint, NitroProver},
 };
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
-use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob, ProofWorker, ProofWorkerConfig};
+use world_chain_proof_worker::{
+    ClaimedProofJobHandler, ProofJob, ProofWorker, ProofWorkerConfig, RetryConfig,
+};
 use world_chain_prover_service::{ProofBackend, ProofData, RpcProverServiceClient};
+
+const DEFAULT_SUBMIT_PROOF_RETRY_MAX_RETRIES: u32 = 5;
+const DEFAULT_SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS: u64 = 100;
+const DEFAULT_SUBMIT_PROOF_RETRY_MAX_DELAY_MS: u64 = 10_000;
 
 // ──────────────────────────────────────────────────────────────────────────────────────
 // NitroBackend — ClaimedProofJobHandler implementation for the Nitro TEE lane
@@ -257,6 +263,34 @@ struct Cli {
     #[arg(long, default_value_t = 1)]
     max_concurrent_jobs: usize,
 
+    /// Maximum retries after a retryable submitProof failure.
+    #[arg(
+        long,
+        env = "SUBMIT_PROOF_RETRY_MAX_RETRIES",
+        default_value_t = DEFAULT_SUBMIT_PROOF_RETRY_MAX_RETRIES
+    )]
+    submit_proof_retry_max_retries: u32,
+
+    /// Retry submitProof without an attempt limit while errors remain retryable.
+    #[arg(long, env = "SUBMIT_PROOF_RETRY_UNBOUNDED", default_value_t = false)]
+    submit_proof_retry_unbounded: bool,
+
+    /// Initial delay in milliseconds before retrying submitProof.
+    #[arg(
+        long,
+        env = "SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS",
+        default_value_t = DEFAULT_SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS
+    )]
+    submit_proof_retry_initial_delay_ms: u64,
+
+    /// Maximum delay in milliseconds between submitProof retries.
+    #[arg(
+        long,
+        env = "SUBMIT_PROOF_RETRY_MAX_DELAY_MS",
+        default_value_t = DEFAULT_SUBMIT_PROOF_RETRY_MAX_DELAY_MS
+    )]
+    submit_proof_retry_max_delay_ms: u64,
+
     /// The unique worker id.
     #[arg(long)]
     worker_id: String,
@@ -296,6 +330,10 @@ pub fn run() -> Result<()> {
         prover_service = %cli.prover_service_url,
         enclave_cid = cli.enclave_cid,
         block_interval = cli.block_interval,
+        submit_proof_retry_max_retries = cli.submit_proof_retry_max_retries,
+        submit_proof_retry_unbounded = cli.submit_proof_retry_unbounded,
+        submit_proof_retry_initial_delay_ms = cli.submit_proof_retry_initial_delay_ms,
+        submit_proof_retry_max_delay_ms = cli.submit_proof_retry_max_delay_ms,
         "nitro-worker starting"
     );
 
@@ -321,6 +359,17 @@ pub fn run() -> Result<()> {
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
 
     let worker_id = format!("{}-nitro-worker", cli.worker_id);
+    let retry_initial_delay = Duration::from_millis(cli.submit_proof_retry_initial_delay_ms);
+    let retry_max_delay = Duration::from_millis(cli.submit_proof_retry_max_delay_ms);
+    let retry_config = if cli.submit_proof_retry_unbounded {
+        RetryConfig::unbounded(retry_initial_delay, retry_max_delay)
+    } else {
+        RetryConfig::new(
+            cli.submit_proof_retry_max_retries,
+            retry_initial_delay,
+            retry_max_delay,
+        )
+    };
     let worker = ProofWorker::new(
         queue,
         backend,
@@ -328,6 +377,7 @@ pub fn run() -> Result<()> {
             worker_id,
             poll_interval: Duration::from_secs(cli.poll_interval_seconds),
             max_concurrent_jobs: cli.max_concurrent_jobs,
+            retry_config,
         },
     );
 
