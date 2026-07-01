@@ -51,7 +51,10 @@ CREATE TABLE proof_sessions (
     completed_at        TIMESTAMPTZ NULL,
 
     CONSTRAINT proof_sessions_session_type_check
-        CHECK (session_type IN ('SNARK', 'STARK'))
+        CHECK (session_type IN ('SNARK', 'STARK')),
+
+    CONSTRAINT proof_sessions_status_check
+        CHECK (status IN ('SUBMITTING', 'RUNNING', 'COMPLETED', 'FAILED'))
 );
 
 CREATE UNIQUE INDEX proof_sessions_active_unique_idx
