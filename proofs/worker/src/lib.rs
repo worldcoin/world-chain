@@ -16,6 +16,7 @@
 //! rather than re-run completed phases.
 
 mod backend;
+mod retry;
 mod worker;
 
 pub use backend::{ClaimedProofJobHandler, JobSessions, ProofJob};
