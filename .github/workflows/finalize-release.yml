@@ -1,0 +1,157 @@
+name: finalize-release
+
+# Tags the exact, already-built sha-* commit at the head of release/vX.Y as
+# vX.Y.Z. Contains NO checkout-of-source-for-build step and NO docker build
+# step by construction — finalizing a release must never rebuild the artifact
+# that was already validated on Alphanet/Betanet/Alchemy Sepolia. Pushing the
+# tag triggers the existing release.yml (tag-push trigger), which drafts the
+# GitHub release from the image built here.
+#
+# See the Release Runbook: https://app.notion.com/p/3568614bdf8c80afa4a3de10fb9f1fc7
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to finalize, X.Y.Z (no leading 'v')."
+        required: true
+        type: string
+      skip_soak_check:
+        description: >-
+          Skip the Notion Alchemy-Sepolia soak check. Only use this if the
+          reconciler that keeps that row accurate isn't deployed yet, or for a
+          documented incident override — this removes a real safety check, not
+          a formality.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  approve-release:
+    name: approve release
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - run: true
+
+  finalize:
+    name: tag release
+    needs: approve-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate version and resolve release branch
+        id: resolve
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version must be X.Y.Z (no 'v' prefix), got '${VERSION}'."
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+            echo "::error::Tag v${VERSION} already exists."
+            exit 1
+          fi
+
+          major_minor="$(cut -d. -f1,2 <<<"${VERSION}")"
+          release_branch="release/v${major_minor}"
+          if ! git ls-remote --exit-code --heads origin "${release_branch}" >/dev/null 2>&1; then
+            echo "::error::${release_branch} does not exist. Run prepare-release.yml first."
+            exit 1
+          fi
+
+          git fetch --no-tags origin "${release_branch}"
+          head_sha="$(git rev-parse "origin/${release_branch}")"
+          echo "release_branch=${release_branch}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${head_sha}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${head_sha:0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the candidate image was actually published
+        env:
+          SHA_TAG: sha-${{ steps.resolve.outputs.short_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          if ! docker buildx imagetools inspect "ghcr.io/${{ github.repository }}:${SHA_TAG}" >/dev/null 2>&1; then
+            echo "::error::No published image found for ${SHA_TAG}. prepare-release.yml must complete successfully before finalize-release.yml runs."
+            exit 1
+          fi
+
+      - name: Check Alchemy Sepolia soak status in Notion
+        if: ${{ !inputs.skip_soak_check }}
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_RELEASE_TRACKER_DATABASE_ID }}
+          SHORT_SHA: ${{ steps.resolve.outputs.short_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl -sS -X POST "https://api.notion.com/v1/databases/${NOTION_DATABASE_ID}/query" \
+            -H "Authorization: Bearer ${NOTION_TOKEN}" \
+            -H "Notion-Version: 2022-06-28" \
+            -H "Content-Type: application/json" \
+            -d '{"filter": {"property": "Environment", "title": {"equals": "Alchemy Sepolia"}}}')"
+
+          if jq -e '.object == "error"' <<<"${response}" >/dev/null; then
+            echo "::error::Notion query failed: $(jq -r '.message' <<<"${response}")"
+            exit 1
+          fi
+
+          count="$(jq '.results | length' <<<"${response}")"
+          if [[ "${count}" -ne 1 ]]; then
+            echo "::error::Expected exactly one Alchemy Sepolia row, found ${count}. Re-run with skip_soak_check=true only if you've manually verified the soak."
+            exit 1
+          fi
+
+          status="$(jq -r '.results[0].properties.Status.select.name // "Unknown"' <<<"${response}")"
+          tag="$(jq -r '.results[0].properties["Release / RC Tag"].rich_text[0].plain_text // ""' <<<"${response}")"
+
+          echo "Alchemy Sepolia: status=${status}, tag=${tag}"
+
+          if [[ "${status}" != "Deployed" ]]; then
+            echo "::error::Alchemy Sepolia status is '${status}', not 'Deployed'. This candidate hasn't soaked yet. Pass skip_soak_check=true only for a documented override."
+            exit 1
+          fi
+          if [[ "${tag}" != *"${SHORT_SHA}"* ]]; then
+            echo "::error::Alchemy Sepolia is running tag '${tag}', which does not reference sha-${SHORT_SHA}. Refusing to finalize a version whose candidate never actually soaked."
+            exit 1
+          fi
+
+      - name: Tag and push
+        env:
+          VERSION: ${{ inputs.version }}
+          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${VERSION}" "${HEAD_SHA}" -m "Release v${VERSION}"
+          git push origin "v${VERSION}"
+
+      - name: Summary
+        env:
+          VERSION: ${{ inputs.version }}
+          RELEASE_BRANCH: ${{ steps.resolve.outputs.release_branch }}
+        shell: bash
+        run: |
+          {
+            echo "## Finalized v${VERSION}"
+            echo ""
+            echo "- Tagged from \`${RELEASE_BRANCH}\` at \`${{ steps.resolve.outputs.head_sha }}\`"
+            echo "- No rebuild occurred — this is the exact artifact already validated through Betanet and Alchemy Sepolia."
+            echo ""
+            echo "release.yml will now draft the GitHub release. Once ready, run **promote-release.yml** with \`environment=staging\` and \`version=v${VERSION}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
