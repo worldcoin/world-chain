@@ -9,7 +9,7 @@ use jsonrpsee::{
 use lru::LruCache;
 use op_revm::OpTransaction;
 use reth_evm::{ConfigureEvm, Evm as RethEvm, EvmFactory, block::BlockExecutorFactory};
-use reth_optimism_primitives::{OpPrimitives, OpReceipt};
+use reth_optimism_primitives::OpReceipt;
 use reth_primitives_traits::{FullSignedTx, NodePrimitives};
 use reth_provider::{BlockReaderIdExt, HeaderProvider, StateProviderFactory};
 use reth_revm::{State, database::StateProviderDatabase};
@@ -497,7 +497,7 @@ pub fn relax_cfg_for_simulation<Spec>(cfg_env: &mut CfgEnv<Spec>) {
 
 /// Implementation of the `simulate_unsignedUserOp` RPC endpoint.
 #[derive(Debug, Clone)]
-pub struct Simulate<Client, EvmConfig = WorldChainEvmConfig<OpPrimitives>> {
+pub struct Simulate<Client, EvmConfig = WorldChainEvmConfig> {
     client: Client,
     evm_config: EvmConfig,
     metadata_cache: MetadataCache,

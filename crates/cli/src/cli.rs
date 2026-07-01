@@ -133,6 +133,33 @@ mod validator_tests {
     }
 }
 
+/// Arguments controlling the live pre-image witness oracle.
+#[derive(Debug, Clone, clap::Args)]
+pub struct WitnessArgs {
+    /// Enable live pre-image witness collection for the proof system.
+    #[arg(long = "witness.collect", default_value_t = false)]
+    pub collect: bool,
+    /// Ring-buffer depth: the maximum number of recent block witnesses retained in the in-memory
+    /// cache served over `debug_collectRangeWitness`.
+    #[arg(long = "witness.depth", default_value_t = Self::DEFAULT_DEPTH)]
+    pub depth: usize,
+}
+
+impl WitnessArgs {
+    /// Default ring-buffer depth, matching the witness cache's
+    /// compile-time default capacity.
+    const DEFAULT_DEPTH: usize = 1024;
+}
+
+impl Default for WitnessArgs {
+    fn default() -> Self {
+        Self {
+            collect: false,
+            depth: Self::DEFAULT_DEPTH,
+        }
+    }
+}
+
 #[derive(Debug, Clone, clap::Args)]
 pub struct WorldChainArgs {
     /// op rollup args
@@ -150,6 +177,10 @@ pub struct WorldChainArgs {
     /// Flashblock args
     #[command(flatten)]
     pub flashblocks: Option<FlashblocksArgs>,
+
+    /// Witness oracle args
+    #[command(flatten)]
+    pub witness: WitnessArgs,
 
     /// Comma-separated list of peer IDs to which transactions should be propagated
     #[arg(long = "tx-peers", value_delimiter = ',', value_name = "PEER_ID")]
@@ -466,6 +497,21 @@ mod tests {
     }
 
     #[test]
+    fn witness_args_default_off() {
+        let args = CommandParser::parse_from(["bin"]).world;
+        assert!(!args.witness.collect);
+        assert_eq!(args.witness.depth, 1024);
+    }
+
+    #[test]
+    fn witness_args_parsed() {
+        let args =
+            CommandParser::parse_from(["bin", "--witness.collect", "--witness.depth", "32"]).world;
+        assert!(args.witness.collect);
+        assert_eq!(args.witness.depth, 32);
+    }
+
+    #[test]
     fn flashblocks_enabled_should_materialize_flashblocks_args() {
         let args = CommandParser::parse_from(["bin", "--flashblocks.enabled"]).world;
         assert!(
@@ -545,6 +591,7 @@ mod tests {
                 block_uncompressed_size_limit: None,
             },
             flashblocks: None,
+            witness: WitnessArgs::default(),
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
             disable_bootnodes: true,
             simulate_enabled: false,
