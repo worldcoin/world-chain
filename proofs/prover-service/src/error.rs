@@ -1,5 +1,5 @@
 use crate::{
-    ProofBackend, ProofJobStatus,
+    ProofBackend, ProofData, ProofJobStatus,
     types::{ProofRequestId, ProofStatus},
 };
 use sqlx::migrate::MigrateError;
@@ -101,4 +101,14 @@ pub enum ProofJobQueueError {
     AlreadyTerminal(ProofRequestId),
     #[error(transparent)]
     ProofEncoding(#[from] serde_json::Error),
+    #[error("proof {proof_id} proof data mismatch: expected {expected:?}, got {actual:?}.")]
+    ProofMismatch {
+        proof_id: ProofRequestId,
+        expected: ProofData,
+        actual: ProofData,
+    },
+    #[error(
+        "proof {0}: the diagnostic read did not identify a stable reason for the proof submission failure."
+    )]
+    Unknown(ProofRequestId),
 }

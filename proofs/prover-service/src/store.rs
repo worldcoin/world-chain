@@ -1,4 +1,5 @@
 use crate::{
+    ProofData,
     config::ProverServiceConfig,
     error::{InvalidConfigError, ProofJobQueueError, ProofRequestError, ProverServiceInitError},
     types::{
@@ -552,7 +553,7 @@ impl ProverServiceStore {
         .bind(now)
         .bind(proof_id_bytes(proof.id))
         .bind(ProofJobStatus::Claimed.as_str())
-        .bind(worker_id)
+        .bind(worker_id.clone())
         .bind(lock_id.0)
         .bind(now)
         .fetch_optional(&self.pool)
@@ -569,7 +570,67 @@ impl ProverServiceStore {
             // Err(ProofJobQueueError::Validation(
             //     "submit_proof is failing because there is no row to update!".to_string(),
             // ))
-            todo!()
+            // re-read the row to anaylize the error or return `AlreadySubmitted` if the proof
+            // has already been submitted (idempotency).
+            let row = sqlx::query(
+                r#"
+                SELECT backend, game, root_claim, l2_block_number, l1_head, proof_status,
+                    lock_id, worker_id, lock_expires_at, job_status
+                FROM proof_requests
+                WHERE proof_id = $1
+                "#,
+            )
+            .bind(proof_id_bytes(proof.id))
+            .fetch_optional(&self.pool)
+            .await?;
+            let Some(existing) = row else {
+                return Err(ProofJobQueueError::ProofIdNotFound(proof.id));
+            };
+            let stored_lock_id: Option<Uuid> = existing.get("lock_id");
+            let stored_worker_id: Option<String> = existing.get("worker_id");
+            let stored_lock_expires_at: Option<chrono::DateTime<Utc>> =
+                existing.get("lock_expires_at");
+            let stored_job_status_str: String = existing.get("job_status");
+            let stored_job_status = ProofJobStatus::try_from(stored_job_status_str.as_str())
+                .map_err(|err| ProofJobQueueError::UnknownProofJobStatus(err))?;
+            // validation
+            if stored_job_status == ProofJobStatus::Succeeded
+                && stored_worker_id == Some(worker_id.clone())
+                && stored_lock_id == Some(lock_id.0)
+            {
+                let stored_proof_data_vec: Vec<u8> = existing.get("proof_data");
+                let stored_proof_data: ProofData = serde_json::from_slice(&stored_proof_data_vec)?;
+                if stored_proof_data == proof.proof {
+                    // proof has already been submitted - no op
+                    return Ok(());
+                } else {
+                    return Err(ProofJobQueueError::ProofMismatch {
+                        proof_id: proof.id,
+                        expected: stored_proof_data,
+                        actual: proof.proof,
+                    });
+                }
+            }
+            if matches!(
+                stored_job_status,
+                ProofJobStatus::Succeeded | ProofJobStatus::Failed
+            ) {
+                return Err(ProofJobQueueError::AlreadyTerminal(proof.id));
+            }
+            if stored_job_status != ProofJobStatus::Claimed {
+                return Err(ProofJobQueueError::ProofJobStatusNotClaimed {
+                    proof_id: proof.id,
+                    expected: ProofJobStatus::Claimed,
+                    actual: stored_job_status,
+                });
+            }
+            if stored_lock_id != Some(lock_id.0) || stored_worker_id != Some(worker_id) {
+                return Err(ProofJobQueueError::StaleLock(proof.id));
+            }
+            if stored_lock_expires_at.is_none() || stored_lock_expires_at.unwrap() <= Utc::now() {
+                return Err(ProofJobQueueError::LockExpired(proof.id));
+            }
+            return Err(ProofJobQueueError::Unknown(proof.id));
         }
     }
 
