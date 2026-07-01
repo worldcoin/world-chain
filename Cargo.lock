@@ -18641,6 +18641,7 @@ dependencies = [
  "reth-tracing",
  "tracing",
  "world-chain-chainspec",
+ "world-chain-primitives",
 ]
 
 [[package]]
@@ -19376,6 +19377,7 @@ dependencies = [
  "reth-rpc-eth-types",
  "reth-storage-api",
  "reth-tasks",
+ "reth-tracing",
  "reth-transaction-pool",
  "revm",
  "revm-database",
@@ -19478,6 +19480,7 @@ dependencies = [
  "reth-prune-types",
  "reth-revm",
  "reth-rpc-api",
+ "reth-rpc-server-types",
  "reth-stages-types",
  "reth-tasks",
  "reth-tracing",
@@ -19525,6 +19528,7 @@ dependencies = [
  "color-eyre",
  "ed25519-dalek",
  "futures",
+ "jsonrpsee",
  "op-alloy-consensus",
  "op-alloy-network",
  "op-alloy-rpc-types",
