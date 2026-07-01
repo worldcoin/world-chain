@@ -42,7 +42,7 @@ use world_chain_proof_worker::{
 };
 use world_chain_prover_service::{ProofBackend, ProofData, RpcProverServiceClient};
 
-const DEFAULT_SUBMIT_PROOF_RETRY_MAX_RETRIES: u32 = 5;
+const DEFAULT_SUBMIT_PROOF_RETRY_MAX_RETRIES: u32 = 10;
 const DEFAULT_SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS: u64 = 100;
 const DEFAULT_SUBMIT_PROOF_RETRY_MAX_DELAY_MS: u64 = 10_000;
 

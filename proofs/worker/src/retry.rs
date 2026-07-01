@@ -5,7 +5,7 @@ use backon::ExponentialBuilder;
 /// Minimum retry delay used to avoid tight retry loops.
 pub const MIN_RETRY_DELAY: Duration = Duration::from_millis(1);
 /// Default maximum bounded retry attempts.
-pub const DEFAULT_BOUNDED_MAX_ATTEMPTS: u32 = 5;
+pub const DEFAULT_BOUNDED_MAX_ATTEMPTS: u32 = 10;
 /// Default initial bounded retry delay.
 pub const DEFAULT_BOUNDED_INITIAL_DELAY: Duration = Duration::from_millis(100);
 /// Default maximum bounded retry delay.
