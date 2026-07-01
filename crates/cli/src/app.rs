@@ -231,10 +231,31 @@ where
             let otlp_status = runner.block_on(self.cli.traces.init_otlp_tracing(&mut layers))?;
             let otlp_logs_status = runner.block_on(self.cli.traces.init_otlp_logs(&mut layers))?;
 
-            let enable_reload = matches!(
-                &self.cli.command,
-                Commands::Node(cmd) if cmd.rpc.is_namespace_enabled(RethRpcModule::Admin)
-            );
+            // Only install the runtime reload handle (and incur reth's forced
+            // stdout `show_target`) when the `admin` namespace is explicitly
+            // enabled on an HTTP/WS transport — the same condition under which
+            // `admin_tracingDirectives` is registered. We deliberately do not use
+            // `RpcServerArgs::is_namespace_enabled`, whose IPC branch reports
+            // every namespace as enabled whenever IPC is on (the default) and
+            // would turn reload on for nodes that never expose `admin`.
+            let enable_reload = match &self.cli.command {
+                Commands::Node(cmd) => {
+                    let admin = &RethRpcModule::Admin;
+                    (cmd.rpc.http
+                        && cmd
+                            .rpc
+                            .http_api
+                            .as_ref()
+                            .is_some_and(|api| api.contains(admin)))
+                        || (cmd.rpc.ws
+                            && cmd
+                                .rpc
+                                .ws_api
+                                .as_ref()
+                                .is_some_and(|api| api.contains(admin)))
+                }
+                _ => false,
+            };
 
             self.guard = Some(
                 self.cli

@@ -438,10 +438,26 @@ where
                 modules.replace_configured(world_chain_eth_ext.into_rpc())?;
                 modules.replace_configured(flashblocks_op_api.into_rpc())?;
 
-                modules.merge_if_module_configured(
-                    RethRpcModule::Admin,
-                    WorldChainAdminApiExt::new().into_rpc(),
-                )?;
+                // Register the admin tracing endpoint only where the `admin`
+                // namespace is explicitly enabled on http/ws. We intentionally do
+                // not use `merge_if_module_configured`, which would also expose it
+                // on IPC: reth's default IPC module set is *all* modules, so the
+                // endpoint would be served on IPC even when no operator enabled
+                // `admin`. Reload is likewise only installed for explicit http/ws
+                // admin (see `world_chain_cli::app`), so gating both the same way
+                // keeps the endpoint from ever being reachable without reload.
+                let admin = RethRpcModule::Admin;
+                let admin_on_http = modules.module_config().contains_http(&admin);
+                let admin_on_ws = modules.module_config().contains_ws(&admin);
+                if admin_on_http || admin_on_ws {
+                    let admin_ext = WorldChainAdminApiExt::new().into_rpc();
+                    if admin_on_http {
+                        modules.merge_http(admin_ext.clone())?;
+                    }
+                    if admin_on_ws {
+                        modules.merge_ws(admin_ext)?;
+                    }
+                }
 
                 if simulate_enabled {
                     let simulate_api =
