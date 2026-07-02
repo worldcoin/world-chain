@@ -648,6 +648,92 @@ impl ProverServiceStore {
         }
     }
 
+    pub(crate) async fn heartbeat(
+        &self,
+        proof_id: ProofRequestId,
+        worker_id: String,
+        lock_id: LockId,
+    ) -> Result<(), ProofJobQueueError> {
+        let now = Utc::now();
+        let next_lock_expiration = now + self.config.lock_timeout;
+        let maybe_row = sqlx::query(
+            r#"
+            UPDATE proof_requests
+            SET lock_expires_at = $1,
+                updated_at = $2
+            WHERE proof_id = $3
+                AND job_status = $3
+                AND worker_id = $4
+                AND lock_id = $5
+                AND lock_expires_at > $6
+                RETURNING proof_id
+            "#,
+        )
+        .bind(next_lock_expiration)
+        .bind(now)
+        .bind(proof_id_bytes(proof_id))
+        .bind(ProofJobStatus::Claimed.as_str())
+        .bind(worker_id.clone())
+        .bind(lock_id.0)
+        .bind(now)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if maybe_row.is_some() {
+            // row updated, return successfully
+            Ok(())
+        } else {
+            // read the row to return a better error
+            let row = sqlx::query(
+                r#"
+                SELECT backend, game, root_claim, l2_block_number, l1_head, proof_status,
+                    lock_id, worker_id, lock_expires_at, job_status
+                FROM proof_requests
+                WHERE proof_id = $1
+                "#,
+            )
+            .bind(proof_id_bytes(proof_id))
+            .fetch_optional(&self.pool)
+            .await?;
+            let Some(existing) = row else {
+                return Err(ProofJobQueueError::ProofIdNotFound(proof_id));
+            };
+            // validation to return a proper error
+            let stored_job_status_str: &str = existing.get("job_status");
+            let stored_lock_id: Option<Uuid> = existing.try_get("lock_id").ok();
+            let stored_worker_id: Option<String> = existing.get("worker_id");
+            let stored_lock_expires_at: Option<chrono::DateTime<Utc>> =
+                existing.get("lock_expires_at");
+            let stored_parsed_status = ProofJobStatus::try_from(stored_job_status_str)
+                .map_err(ProofJobQueueError::UnknownProofJobStatus)?;
+            if matches!(
+                stored_parsed_status,
+                ProofJobStatus::Succeeded | ProofJobStatus::Failed
+            ) {
+                return Err(ProofJobQueueError::AlreadyTerminal(proof_id));
+            }
+            if stored_parsed_status != ProofJobStatus::Claimed {
+                return Err(ProofJobQueueError::ProofJobStatusNotClaimed(
+                    ProofJobStatusErrorData {
+                        proof_id,
+                        expected: ProofJobStatus::Claimed,
+                        actual: stored_parsed_status,
+                    },
+                ));
+            }
+            if stored_lock_id != Some(lock_id.0) || stored_worker_id != Some(worker_id) {
+                return Err(ProofJobQueueError::StaleLock(proof_id));
+            }
+            if stored_lock_expires_at.is_none()
+                || stored_lock_expires_at.map_or(true, |expires_at| expires_at <= now)
+            {
+                return Err(ProofJobQueueError::StaleLock(proof_id));
+            }
+
+            Err(ProofJobQueueError::Unknown(proof_id))
+        }
+    }
+
     async fn begin_tx(
         &self,
         isolation_level: PostgresIsolationLevel,
