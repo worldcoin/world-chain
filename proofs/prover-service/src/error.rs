@@ -1,4 +1,7 @@
-use crate::{ProofBackend, ProofData, ProofJobStatus, types::ProofRequestId};
+use crate::{
+    ProofBackend, ProofData, ProofJobStatus,
+    types::{BackendSessionStatus, ProofRequestId, SessionType},
+};
 use alloy_primitives::BlockNumber;
 use jsonrpsee::core::client::Error as JsonRpseeError;
 use sqlx::migrate::MigrateError;
@@ -118,6 +121,36 @@ impl std::fmt::Display for BackendMismatchErrorData {
     }
 }
 
+/// Data describing an attempt to record a backend session that has already
+/// reached a terminal status with a conflicting status.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct BackendSessionAlreadyTerminalErrorData {
+    /// The proof request id.
+    pub proof_id: ProofRequestId,
+    /// The session type of the conflicting backend session.
+    pub session_type: SessionType,
+    /// The backend-issued session identifier.
+    pub backend_session_id: String,
+    /// The terminal status already stored for this backend session.
+    pub stored: BackendSessionStatus,
+    /// The status the worker attempted to record.
+    pub attempted: BackendSessionStatus,
+}
+
+impl std::fmt::Display for BackendSessionAlreadyTerminalErrorData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "backend session {} for proof {} ({}) already reached terminal status {}; cannot record status {}.",
+            self.backend_session_id,
+            self.proof_id,
+            self.session_type.as_str(),
+            self.stored.as_str(),
+            self.attempted.as_str(),
+        )
+    }
+}
+
 /// Data describing a repeated proof submission with different proof data.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ProofMismatchErrorData {
@@ -168,6 +201,8 @@ pub enum ProofJobQueueError {
     BackendMismatch(BackendMismatchErrorData),
     #[error("The proof {0} has already reached a terminal job status.")]
     AlreadyTerminal(ProofRequestId),
+    #[error("{0}")]
+    BackendSessionAlreadyTerminal(BackendSessionAlreadyTerminalErrorData),
     #[error(transparent)]
     ProofEncoding(#[from] serde_json::Error),
     #[error("{0}")]

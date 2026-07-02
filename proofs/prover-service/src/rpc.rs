@@ -1,7 +1,8 @@
 use crate::{
     error::{
-        BackendMismatchErrorData, ProofJobQueueError, ProofJobStatusErrorData,
-        ProofMismatchErrorData, ProofRequestError, TooManyRetriesErrorData,
+        BackendMismatchErrorData, BackendSessionAlreadyTerminalErrorData, ProofJobQueueError,
+        ProofJobStatusErrorData, ProofMismatchErrorData, ProofRequestError,
+        TooManyRetriesErrorData,
     },
     service::ProverService,
     traits::{ProofJobQueue, ProofRequester},
@@ -45,6 +46,9 @@ pub mod error_code {
     pub const PROOF_MISMATCH: i32 = -32018;
     /// Temporary prover-service storage failure.
     pub const SQLX: i32 = -32019;
+    /// A worker tried to record a backend session that already reached a
+    /// conflicting terminal status.
+    pub const BACKEND_SESSION_ALREADY_TERMINAL: i32 = -32020;
 }
 
 /// The `prover-service` JSON-RPC API, covering both the defender-facing
@@ -155,6 +159,11 @@ impl From<ProofJobQueueError> for ErrorObjectOwned {
             ProofJobQueueError::AlreadyTerminal(proof_id) => {
                 ErrorObject::owned(error_code::ALREADY_TERMINAL, message, Some(proof_id))
             }
+            ProofJobQueueError::BackendSessionAlreadyTerminal(data) => ErrorObject::owned(
+                error_code::BACKEND_SESSION_ALREADY_TERMINAL,
+                message,
+                Some(data),
+            ),
             ProofJobQueueError::ProofMismatch(data) => {
                 ErrorObject::owned(error_code::PROOF_MISMATCH, message, Some(data))
             }
@@ -369,6 +378,13 @@ fn map_job_call_error(err: ErrorObjectOwned, fallback_id: ProofRequestId) -> Pro
         }
         error_code::ALREADY_TERMINAL => {
             ProofJobQueueError::AlreadyTerminal(error_data(&err).unwrap_or(fallback_id))
+        }
+        error_code::BACKEND_SESSION_ALREADY_TERMINAL => {
+            if let Some(data) = error_data::<BackendSessionAlreadyTerminalErrorData>(&err) {
+                ProofJobQueueError::BackendSessionAlreadyTerminal(data)
+            } else {
+                ProofJobQueueError::RemoteInternal
+            }
         }
         error_code::PROOF_MISMATCH => {
             if let Some(data) = error_data::<Box<ProofMismatchErrorData>>(&err) {
