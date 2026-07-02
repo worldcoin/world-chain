@@ -6,8 +6,9 @@ use crate::{
         ProofMismatchErrorData, ProofRequestError, ProverServiceInitError,
     },
     types::{
-        BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
-        ProofJobStatus, ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType,
+        BackendSession, BackendSessionStatus, FailedProofResponse, LockId, LockedProofRequest,
+        PendingProofResponse, ProofBackend, ProofJobStatus, ProofRequest, ProofRequestId,
+        ProofResponse, ProofStatus, SessionType, SucceededProofResponse,
     },
 };
 use alloy_primitives::{Address, B256};
@@ -206,21 +207,21 @@ impl ProverServiceStore {
                 let data: Vec<u8> = row.get("proof_data");
                 let proof =
                     serde_json::from_slice(&data).map_err(ProofRequestError::ProofEncoding)?;
-                Ok(ProofResponse::Succeeded {
+                Ok(ProofResponse::Succeeded(SucceededProofResponse {
                     id: proof_id,
                     proof,
-                })
+                }))
             }
-            ProofStatus::Failed => Ok(ProofResponse::Failed {
+            ProofStatus::Failed => Ok(ProofResponse::Failed(FailedProofResponse {
                 id: proof_id,
                 reason: row
                     .get::<Option<String>, _>("failure_reason")
                     .unwrap_or_else(|| "proof job failed".to_string()),
-            }),
-            status => Err(ProofRequestError::Pending {
+            })),
+            status => Ok(ProofResponse::Pending(PendingProofResponse {
                 id: proof_id,
                 status,
-            }),
+            })),
         }
     }
 
@@ -478,7 +479,7 @@ impl ProverServiceStore {
 
     pub(crate) async fn submit_proof(
         &self,
-        proof: ProofResponse,
+        proof: SucceededProofResponse,
         worker_id: String,
         lock_id: LockId,
     ) -> Result<(), ProofJobQueueError> {

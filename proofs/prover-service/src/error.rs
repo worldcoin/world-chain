@@ -1,4 +1,4 @@
-use crate::{ProofBackend, ProofData, ProofJobStatus, ProofStatus, types::ProofRequestId};
+use crate::{ProofBackend, ProofData, ProofJobStatus, types::ProofRequestId};
 use alloy_primitives::BlockNumber;
 use jsonrpsee::core::client::Error as JsonRpseeError;
 use sqlx::migrate::MigrateError;

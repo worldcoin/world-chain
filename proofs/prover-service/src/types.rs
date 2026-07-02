@@ -217,24 +217,36 @@ impl ProofData {
 /// a defender that requests the proof back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProofResponse {
-    Succeeded {
-        /// The identifier of the proof request this proof answers.
-        id: ProofRequestId,
-        /// The actual proof.
-        proof: ProofData,
-    },
-    Failed {
-        /// The identifier of the proof request.
-        id: ProofRequestId,
-        /// Failure reason.
-        reason: String,
-    },
-    Pending {
-        /// The identifier of the proof request.
-        id: ProofRequestId,
-        /// Current proof status.
-        status: ProofStatus,
-    },
+    Succeeded(SucceededProofResponse),
+    Failed(FailedProofResponse),
+    Pending(PendingProofResponse),
+}
+
+/// The succeeded proof response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SucceededProofResponse {
+    /// The identifier of the proof request this proof answers.
+    pub id: ProofRequestId,
+    /// The actual proof.
+    pub proof: ProofData,
+}
+
+/// The failed proof response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FailedProofResponse {
+    /// The identifier of the proof request.
+    id: ProofRequestId,
+    /// Failure reason.
+    reason: String,
+}
+
+/// The pending proof response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingProofResponse {
+    /// The identifier of the proof request.
+    id: ProofRequestId,
+    /// Current proof status.
+    status: ProofStatus,
 }
 
 /// External backend request identifier.

@@ -8,6 +8,7 @@ use crate::{
     types::{
         BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
         ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType,
+        SucceededProofResponse,
     },
 };
 use jsonrpsee::{
@@ -78,7 +79,7 @@ pub trait ProverServiceApi {
     #[method(name = "submitProof")]
     async fn submit_proof(
         &self,
-        proof: ProofResponse,
+        proof: SucceededProofResponse,
         worker_id: String,
         lock: LockId,
     ) -> RpcResult<()>;
@@ -221,7 +222,7 @@ impl ProverServiceApiServer for ProverServiceRpc {
 
     async fn submit_proof(
         &self,
-        proof: ProofResponse,
+        proof: SucceededProofResponse,
         worker_id: String,
         lock: LockId,
     ) -> RpcResult<()> {
@@ -423,7 +424,7 @@ impl ProofJobQueue for RpcProverServiceClient {
 
     async fn submit_proof(
         &self,
-        proof: ProofResponse,
+        proof: SucceededProofResponse,
         worker_id: String,
         lock: LockId,
     ) -> Result<(), ProofJobQueueError> {
