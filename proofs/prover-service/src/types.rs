@@ -216,11 +216,25 @@ impl ProofData {
 /// The response sent by the `prover-service` to
 /// a defender that requests the proof back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProofResponse {
-    /// The identifier of the proof request this proof answers.
-    pub id: ProofRequestId,
-    /// The generated proof.
-    pub proof: ProofData,
+pub enum ProofResponse {
+    Succeeded {
+        /// The identifier of the proof request this proof answers.
+        id: ProofRequestId,
+        /// The actual proof.
+        proof: ProofData,
+    },
+    Failed {
+        /// The identifier of the proof request.
+        id: ProofRequestId,
+        /// Failure reason.
+        reason: String,
+    },
+    Pending {
+        /// The identifier of the proof request.
+        id: ProofRequestId,
+        /// Current proof status.
+        status: ProofStatus,
+    },
 }
 
 /// External backend request identifier.
