@@ -10,7 +10,7 @@ use world_chain_defender::{DefenderConfig, WorldChainDefender};
 use world_chain_proof_integration_tests::{
     BLOCK_INTERVAL, FakeConsensus, FakeExecution, FakeProofBackend, SharedProverService,
 };
-use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig};
+use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig, RetryConfig};
 use world_chain_proofs::{ProofLane, RootState};
 use world_chain_proposer::{ProposerConfig, WorldChainProposer};
 use world_chain_prover_service::{ProofBackend, ProverServiceConfig};
@@ -101,6 +101,7 @@ async fn start_proof_stack_with(
             worker_id: "orchestration-sp1-worker".to_string(),
             poll_interval: Duration::from_millis(5),
             max_concurrent_jobs: 1,
+            retry_config: RetryConfig::default(),
         },
     );
     let sp1_cancel = sp1_worker.cancellation_token();
@@ -113,6 +114,7 @@ async fn start_proof_stack_with(
             worker_id: "orchestration-nitro-worker".to_string(),
             poll_interval: Duration::from_millis(5),
             max_concurrent_jobs: 1,
+            retry_config: RetryConfig::default(),
         },
     );
     let nitro_cancel = nitro_worker.cancellation_token();

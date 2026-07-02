@@ -16,9 +16,14 @@
 //! rather than re-run completed phases.
 
 mod backend;
+mod retry;
 mod worker;
 
 pub use backend::{ClaimedProofJobHandler, JobSessions, ProofJob};
+pub use retry::{
+    DEFAULT_BOUNDED_INITIAL_DELAY, DEFAULT_BOUNDED_MAX_ATTEMPTS, DEFAULT_BOUNDED_MAX_DELAY,
+    MIN_RETRY_DELAY, RetryConfig,
+};
 pub use worker::{
     DEFAULT_MAX_CONCURRENT_JOBS, DEFAULT_POLL_INTERVAL, ProofWorker, ProofWorkerConfig,
 };

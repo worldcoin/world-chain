@@ -1,5 +1,8 @@
 use crate::{
-    error::{ProofJobQueueError, ProofRequestError},
+    error::{
+        BackendMismatchErrorData, ProofJobQueueError, ProofJobStatusErrorData,
+        ProofMismatchErrorData, ProofRequestError,
+    },
     service::ProverService,
     traits::{ProofJobQueue, ProofRequester},
     types::{
@@ -12,10 +15,7 @@ use jsonrpsee::{
     http_client::{HttpClient, HttpClientBuilder},
     proc_macros::rpc,
     server::{Server, ServerHandle},
-    types::{
-        ErrorObject, ErrorObjectOwned,
-        error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE},
-    },
+    types::{ErrorObject, ErrorObjectOwned, error::INTERNAL_ERROR_CODE},
 };
 use std::{net::SocketAddr, sync::Arc};
 use tracing::info;
@@ -32,21 +32,22 @@ pub mod error_code {
     pub const TOO_MANY_RETRIES: i32 = -32005;
     /// A conflicting row vanished after an insert conflict; the request is safe to retry.
     pub const RETRYABLE_CONFLICT: i32 = -32006;
-    /// No proof job with the given id is known.
-    pub const UNKNOWN_JOB: i32 = -32011;
-    /// No backend proof job with the given id is known.
-    pub const UNKNOWN_BACKEND_JOB: i32 = -32013;
+    /// No proof job with the given proof request id is known.
+    pub const PROOF_ID_NOT_FOUND: i32 = -32011;
+    /// The proof job was not in the expected claimed status.
+    pub const PROOF_JOB_STATUS_NOT_CLAIMED: i32 = -32012;
     /// A worker tried to update a row using an expired or superseded lock.
     pub const STALE_LOCK: i32 = -32014;
-    /// The submitted proof does not match the requested job;
-    /// the error data holds the proof id and reason.
-    pub const INVALID_PROOF: i32 = -32012;
-}
-
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-struct InvalidProofErrorData {
-    id: ProofRequestId,
-    reason: String,
+    /// A worker tried to update a row using an expired lock.
+    pub const LOCK_EXPIRED: i32 = -32015;
+    /// The submitted proof was produced by a different backend than the job expects.
+    pub const BACKEND_MISMATCH: i32 = -32016;
+    /// The proof job has already reached a terminal status.
+    pub const ALREADY_TERMINAL: i32 = -32017;
+    /// A replayed submit carried proof data that differs from the stored proof.
+    pub const PROOF_MISMATCH: i32 = -32018;
+    /// Temporary prover-service storage failure.
+    pub const SQLX: i32 = -32019;
 }
 
 /// The `prover-service` JSON-RPC API, covering both the defender-facing
@@ -136,31 +137,48 @@ impl From<ProofJobQueueError> for ErrorObjectOwned {
     fn from(err: ProofJobQueueError) -> Self {
         let message = err.to_string();
         match err {
-            ProofJobQueueError::UnknownJob(_) => {
-                ErrorObject::owned(error_code::UNKNOWN_JOB, message, None::<()>)
+            ProofJobQueueError::ProofIdNotFound(proof_id) => {
+                ErrorObject::owned(error_code::PROOF_ID_NOT_FOUND, message, Some(proof_id))
             }
-            ProofJobQueueError::UnknownBackendJob(_) => {
-                ErrorObject::owned(error_code::UNKNOWN_BACKEND_JOB, message, None::<()>)
-            }
-            ProofJobQueueError::StaleLocked => {
-                ErrorObject::owned(error_code::STALE_LOCK, message, None::<()>)
-            }
-            ProofJobQueueError::InvalidProof { id, reason } => ErrorObject::owned(
-                error_code::INVALID_PROOF,
+            ProofJobQueueError::ProofJobStatusNotClaimed(data) => ErrorObject::owned(
+                error_code::PROOF_JOB_STATUS_NOT_CLAIMED,
                 message,
-                Some(InvalidProofErrorData { id, reason }),
+                Some(data),
             ),
-            ProofJobQueueError::Internal(_) => {
+            ProofJobQueueError::StaleLock(proof_id) => {
+                ErrorObject::owned(error_code::STALE_LOCK, message, Some(proof_id))
+            }
+            ProofJobQueueError::LockExpired(proof_id) => {
+                ErrorObject::owned(error_code::LOCK_EXPIRED, message, Some(proof_id))
+            }
+            ProofJobQueueError::BackendMismatch(data) => {
+                ErrorObject::owned(error_code::BACKEND_MISMATCH, message, Some(data))
+            }
+            ProofJobQueueError::AlreadyTerminal(proof_id) => {
+                ErrorObject::owned(error_code::ALREADY_TERMINAL, message, Some(proof_id))
+            }
+            ProofJobQueueError::ProofMismatch(data) => {
+                ErrorObject::owned(error_code::PROOF_MISMATCH, message, Some(data))
+            }
+            ProofJobQueueError::Sqlx(_) => {
+                ErrorObject::owned(error_code::SQLX, message, None::<()>)
+            }
+            ProofJobQueueError::NegativeBlockNumber(_)
+            | ProofJobQueueError::UnknownProofBackend(_)
+            | ProofJobQueueError::UnknownBackendSessionStatus(_)
+            | ProofJobQueueError::UnknownProofJobStatus(_)
+            | ProofJobQueueError::MalformedAddress(_)
+            | ProofJobQueueError::MalformedB256(_)
+            | ProofJobQueueError::ProofEncoding(_)
+            | ProofJobQueueError::Unknown(_)
+            | ProofJobQueueError::RemoteInternal
+            | ProofJobQueueError::RemoteSqlx
+            | ProofJobQueueError::RpcRequestTimeout
+            | ProofJobQueueError::RpcTransport(_)
+            | ProofJobQueueError::RpcRestartNeeded(_)
+            | ProofJobQueueError::RpcServiceDisconnected
+            | ProofJobQueueError::RpcClient(_) => {
                 ErrorObject::owned(INTERNAL_ERROR_CODE, message, None::<()>)
-            }
-            ProofJobQueueError::Rpc(_) => {
-                ErrorObject::owned(INTERNAL_ERROR_CODE, message, None::<()>)
-            }
-            ProofJobQueueError::NotFound(_) => {
-                ErrorObject::owned(error_code::NOT_FOUND, message, None::<()>)
-            }
-            ProofJobQueueError::Validation(_) => {
-                ErrorObject::owned(INVALID_PARAMS_CODE, message, None::<()>)
             }
         }
     }
@@ -283,12 +301,6 @@ fn error_data<T: serde::de::DeserializeOwned>(err: &ErrorObjectOwned) -> Option<
         .and_then(|raw| serde_json::from_str(raw.get()).ok())
 }
 
-fn invalid_proof_reason(err: &ErrorObjectOwned) -> Option<String> {
-    error_data::<InvalidProofErrorData>(err)
-        .map(|data| data.reason)
-        .or_else(|| error_data(err))
-}
-
 fn map_request_error(
     err: ClientError,
     id: ProofRequestId,
@@ -314,17 +326,54 @@ fn map_request_error(
 }
 
 fn map_job_error(err: ClientError, id: ProofRequestId) -> ProofJobQueueError {
-    let ClientError::Call(err) = err else {
-        return ProofJobQueueError::Rpc(err.to_string());
-    };
+    match err {
+        ClientError::RequestTimeout => ProofJobQueueError::RpcRequestTimeout,
+        ClientError::Transport(err) => ProofJobQueueError::RpcTransport(err),
+        ClientError::RestartNeeded(err) => ProofJobQueueError::RpcRestartNeeded(err),
+        ClientError::ServiceDisconnect => ProofJobQueueError::RpcServiceDisconnected,
+        ClientError::Call(err) => map_job_call_error(err, id),
+        err => ProofJobQueueError::RpcClient(err),
+    }
+}
+
+fn map_job_call_error(err: ErrorObjectOwned, fallback_id: ProofRequestId) -> ProofJobQueueError {
     match err.code() {
-        error_code::UNKNOWN_JOB => ProofJobQueueError::UnknownJob(id),
-        error_code::STALE_LOCK => ProofJobQueueError::StaleLocked,
-        error_code::INVALID_PROOF => ProofJobQueueError::InvalidProof {
-            id,
-            reason: invalid_proof_reason(&err).unwrap_or_else(|| err.message().to_string()),
-        },
-        _ => ProofJobQueueError::Rpc(format!("{} (code {})", err.message(), err.code())),
+        error_code::PROOF_ID_NOT_FOUND => {
+            ProofJobQueueError::ProofIdNotFound(error_data(&err).unwrap_or(fallback_id))
+        }
+        error_code::PROOF_JOB_STATUS_NOT_CLAIMED => {
+            if let Some(data) = error_data::<ProofJobStatusErrorData>(&err) {
+                ProofJobQueueError::ProofJobStatusNotClaimed(data)
+            } else {
+                ProofJobQueueError::RemoteInternal
+            }
+        }
+        error_code::STALE_LOCK => {
+            ProofJobQueueError::StaleLock(error_data(&err).unwrap_or(fallback_id))
+        }
+        error_code::LOCK_EXPIRED => {
+            ProofJobQueueError::LockExpired(error_data(&err).unwrap_or(fallback_id))
+        }
+        error_code::BACKEND_MISMATCH => {
+            if let Some(data) = error_data::<BackendMismatchErrorData>(&err) {
+                ProofJobQueueError::BackendMismatch(data)
+            } else {
+                ProofJobQueueError::RemoteInternal
+            }
+        }
+        error_code::ALREADY_TERMINAL => {
+            ProofJobQueueError::AlreadyTerminal(error_data(&err).unwrap_or(fallback_id))
+        }
+        error_code::PROOF_MISMATCH => {
+            if let Some(data) = error_data::<Box<ProofMismatchErrorData>>(&err) {
+                ProofJobQueueError::ProofMismatch(data)
+            } else {
+                ProofJobQueueError::RemoteInternal
+            }
+        }
+        error_code::SQLX => ProofJobQueueError::RemoteSqlx,
+        INTERNAL_ERROR_CODE => ProofJobQueueError::RemoteInternal,
+        _ => ProofJobQueueError::RpcClient(ClientError::Call(err)),
     }
 }
 
@@ -369,7 +418,7 @@ impl ProofJobQueue for RpcProverServiceClient {
     ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
         ProverServiceApiClient::get_next_proof(&self.client, backend, worker_id)
             .await
-            .map_err(|err| ProofJobQueueError::Rpc(err.to_string()))
+            .map_err(|err| map_job_error(err, ProofRequestId(Default::default())))
     }
 
     async fn submit_proof(

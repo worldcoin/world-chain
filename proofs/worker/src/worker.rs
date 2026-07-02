@@ -1,5 +1,6 @@
 //! Service polling the `prover-service` for claimed proof jobs and submitting results.
 
+use backon::Retryable;
 use std::{
     future::Future,
     pin::Pin,
@@ -7,7 +8,6 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-
 use tokio::{
     sync::{OwnedSemaphorePermit, Semaphore},
     task::JoinSet,
@@ -16,7 +16,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, info, info_span, warn};
 use world_chain_prover_service::{LockedProofRequest, ProofJobQueue, ProofResponse};
 
-use crate::backend::{ClaimedProofJobHandler, JobSessions, ProofJob};
+use crate::{
+    backend::{ClaimedProofJobHandler, JobSessions, ProofJob},
+    retry::RetryConfig,
+};
 
 /// Default number of jobs proving concurrently. One is right for a local CPU prover, which a
 /// single job already saturates; raise it for backends that parallelize externally (the
@@ -36,17 +39,25 @@ pub struct ProofWorkerConfig {
     /// Maximum number of jobs this worker proves concurrently. Per-worker, not global, so an
     /// SP1 worker and a TEE worker in the same process throttle independently.
     pub max_concurrent_jobs: usize,
+    /// Configurations for retry.
+    pub retry_config: RetryConfig,
 }
 
 impl ProofWorkerConfig {
     /// Create a new `ProofWorkerConfig` with the provided `worker_id`,
-    /// `poll_interval` and `max_concurrent_jobs`.
+    /// `poll_interval`, `max_concurrent_jobs` and `retry_config`.
     #[must_use]
-    pub fn new(worker_id: String, poll_interval: Duration, max_concurrent_jobs: usize) -> Self {
+    pub fn new(
+        worker_id: String,
+        poll_interval: Duration,
+        max_concurrent_jobs: usize,
+        retry_config: RetryConfig,
+    ) -> Self {
         Self {
             worker_id,
             poll_interval,
             max_concurrent_jobs,
+            retry_config,
         }
     }
 }
@@ -167,6 +178,7 @@ async fn run_worker<Q, B>(
                     &config.worker_id,
                     locked,
                     permit,
+                    config.retry_config,
                 );
             }
             Ok(None) => {
@@ -206,6 +218,7 @@ fn spawn_job<Q, B>(
     worker_id: &str,
     locked: LockedProofRequest,
     permit: OwnedSemaphorePermit,
+    retry_config: RetryConfig,
 ) where
     Q: ProofJobQueue + Send + Sync + 'static,
     B: ClaimedProofJobHandler,
@@ -244,15 +257,29 @@ fn spawn_job<Q, B>(
                         id: proof_id,
                         proof,
                     };
-                    match queue.submit_proof(response, worker_id, lock_id).await {
+                    let submit_result = (|| async {
+                        queue
+                            .submit_proof(response.clone(), worker_id.clone(), lock_id)
+                            .await
+                    })
+                    .retry(retry_config.to_backoff_builder())
+                    .when(|err| err.is_retryable())
+                    .notify(|error, delay| {
+                        warn!(%error, ?delay, "failed to submit proof, retrying");
+                    })
+                    .await;
+                    match submit_result {
                         Ok(()) => info!("proof submitted"),
-                        Err(error) => warn!(%error, "failed to submit proof"),
+                        Err(error) => warn!(
+                            %error,
+                            "failed to submit proof after retries, lease will expire and re-queue"
+                        ),
                     }
                 }
                 // `{:#}` renders the full anyhow context chain into the failure reason.
                 Err(error) => warn!(
                     reason = %format!("{error:#}"),
-                    "proving failed; lease will expire and re-queue"
+                    "proving failed, lease will expire and re-queue"
                 ),
             }
         }

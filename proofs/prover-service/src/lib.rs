@@ -81,7 +81,8 @@ pub use config::{
     DEFAULT_BACKEND_POLL_INTERVAL, DEFAULT_LOCK_TIMEOUT, DEFAULT_MAX_ATTEMPTS, ProverServiceConfig,
 };
 pub use error::{
-    InvalidConfigError, ProofJobQueueError, ProofRequestError, ProverServiceInitError,
+    BackendMismatchErrorData, InvalidConfigError, ProofJobQueueError, ProofJobStatusErrorData,
+    ProofMismatchErrorData, ProofRequestError, ProverServiceInitError,
 };
 pub use rpc::{
     ProverServiceApiClient, ProverServiceApiServer, ProverServiceRpc, RpcProverServiceClient,

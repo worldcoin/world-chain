@@ -39,7 +39,9 @@ use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequester, ProofStatus, ProverService,
     ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
 };
-use world_chain_sp1_worker::{ProofWorker, ProofWorkerConfig, Sp1Backend, Sp1BackendConfig};
+use world_chain_sp1_worker::{
+    ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
+};
 
 /// Reads a required env var, or returns `None` (with a skip message) when absent.
 fn required(name: &str) -> Option<String> {
@@ -190,6 +192,7 @@ async fn worker_proves_real_range_end_to_end() {
             worker_id: "test-worker".to_string(),
             poll_interval: Duration::from_millis(500),
             max_concurrent_jobs: 1,
+            retry_config: RetryConfig::default(),
         },
     );
     let token = worker.cancellation_token();

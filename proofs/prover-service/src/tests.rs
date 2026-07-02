@@ -209,7 +209,7 @@ async fn stale_lock_is_rejected_and_reclaim_succeeds() {
         service
             .submit_proof(proof_for(&req), worker_id(), first.lock_id)
             .await,
-        Err(ProofJobQueueError::StaleLocked)
+        Err(ProofJobQueueError::StaleLock(_))
     ));
 
     // The current lock owner can submit successfully.
@@ -248,7 +248,7 @@ async fn submit_proof_with_wrong_backend_is_rejected() {
         service
             .submit_proof(mismatched, worker_id(), locked.lock_id)
             .await,
-        Err(ProofJobQueueError::Validation(_))
+        Err(ProofJobQueueError::BackendMismatch(_))
     ));
     assert_eq!(
         service.proof_status(id).await.unwrap(),

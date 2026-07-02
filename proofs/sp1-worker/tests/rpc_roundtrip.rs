@@ -10,7 +10,7 @@ use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequester, ProofStatus, ProverService,
     ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
 };
-use world_chain_sp1_worker::{ClaimedProofJobHandler, ProofWorker, ProofWorkerConfig};
+use world_chain_sp1_worker::{ClaimedProofJobHandler, ProofWorker, ProofWorkerConfig, RetryConfig};
 
 /// Backend returning a canned SP1 proof for any request, without RPC or a prover.
 struct MockBackend;
@@ -86,6 +86,7 @@ async fn worker_completes_requested_proof_over_rpc() {
             worker_id: "test-worker".to_string(),
             poll_interval: Duration::from_millis(10),
             max_concurrent_jobs: 1,
+            retry_config: RetryConfig::default(),
         },
     );
     let worker_handle = tokio::spawn(worker);
