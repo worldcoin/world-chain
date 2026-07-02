@@ -2713,8 +2713,7 @@ async fn start_sp1_worker(
         prover_service = %prover_service_url,
         block_interval = deployment.block_interval,
         prover = ?kind,
-        submit_proof_retry_max_retries = retry_config.max_attempts.unwrap_or_default(),
-        submit_proof_retry_unbounded = retry_config.max_attempts.is_none(),
+        submit_proof_retry_max_retries = retry_config.max_attempts,
         submit_proof_retry_initial_delay_ms = retry_config.initial_delay.as_millis(),
         submit_proof_retry_max_delay_ms = retry_config.max_delay.as_millis(),
         "starting native defender SP1 worker"

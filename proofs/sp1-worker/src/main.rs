@@ -14,7 +14,7 @@ use world_chain_sp1_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
 };
 
-const DEFAULT_SUBMIT_PROOF_RETRY_MAX_RETRIES: u32 = 10;
+const DEFAULT_SUBMIT_PROOF_RETRY_MAX_RETRIES: usize = 10;
 const DEFAULT_SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS: u64 = 100;
 const DEFAULT_SUBMIT_PROOF_RETRY_MAX_DELAY_MS: u64 = 10_000;
 
@@ -120,11 +120,7 @@ struct Cli {
         env = "SUBMIT_PROOF_RETRY_MAX_RETRIES",
         default_value_t = DEFAULT_SUBMIT_PROOF_RETRY_MAX_RETRIES
     )]
-    submit_proof_retry_max_retries: u32,
-
-    /// Retry submitProof without an attempt limit while errors remain retryable.
-    #[arg(long, env = "SUBMIT_PROOF_RETRY_UNBOUNDED", default_value_t = false)]
-    submit_proof_retry_unbounded: bool,
+    submit_proof_retry_max_retries: usize,
 
     /// Initial delay in milliseconds before retrying submitProof.
     #[arg(
@@ -189,15 +185,11 @@ fn main() -> Result<()> {
     let worker_id = format!("{}-sp1-worker", cli.worker_id);
     let retry_initial_delay = Duration::from_millis(cli.submit_proof_retry_initial_delay_ms);
     let retry_max_delay = Duration::from_millis(cli.submit_proof_retry_max_delay_ms);
-    let retry_config = if cli.submit_proof_retry_unbounded {
-        RetryConfig::unbounded(retry_initial_delay, retry_max_delay)
-    } else {
-        RetryConfig::new(
-            cli.submit_proof_retry_max_retries,
-            retry_initial_delay,
-            retry_max_delay,
-        )
-    };
+    let retry_config = RetryConfig::new(
+        cli.submit_proof_retry_max_retries,
+        retry_initial_delay,
+        retry_max_delay,
+    );
     let worker = ProofWorker::new(
         queue,
         backend,
@@ -215,7 +207,6 @@ fn main() -> Result<()> {
         ranges = cli.ranges.max(1),
         prover = ?cli.prover,
         submit_proof_retry_max_retries = cli.submit_proof_retry_max_retries,
-        submit_proof_retry_unbounded = cli.submit_proof_retry_unbounded,
         submit_proof_retry_initial_delay_ms = cli.submit_proof_retry_initial_delay_ms,
         submit_proof_retry_max_delay_ms = cli.submit_proof_retry_max_delay_ms,
         "sp1-worker starting"

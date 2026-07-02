@@ -5,7 +5,7 @@ use backon::ExponentialBuilder;
 /// Minimum retry delay used to avoid tight retry loops.
 pub const MIN_RETRY_DELAY: Duration = Duration::from_millis(1);
 /// Default maximum bounded retry attempts.
-pub const DEFAULT_BOUNDED_MAX_ATTEMPTS: u32 = 10;
+pub const DEFAULT_BOUNDED_MAX_ATTEMPTS: usize = 10;
 /// Default initial bounded retry delay.
 pub const DEFAULT_BOUNDED_INITIAL_DELAY: Duration = Duration::from_millis(100);
 /// Default maximum bounded retry delay.
@@ -14,9 +14,7 @@ pub const DEFAULT_BOUNDED_MAX_DELAY: Duration = Duration::from_secs(10);
 #[derive(Debug, Clone, Copy)]
 pub struct RetryConfig {
     /// Maximum number of retries performed after the initial call.
-    ///
-    /// `None` retries without an attempt limit.
-    pub max_attempts: Option<u32>,
+    pub max_attempts: usize,
     /// First delay after a retryable failure.
     pub initial_delay: Duration,
     /// Maximum delay between retry attempts.
@@ -25,18 +23,9 @@ pub struct RetryConfig {
 
 impl RetryConfig {
     /// Creates a bounded retry config.
-    pub const fn new(max_attempts: u32, initial_delay: Duration, max_delay: Duration) -> Self {
+    pub const fn new(max_attempts: usize, initial_delay: Duration, max_delay: Duration) -> Self {
         Self {
-            max_attempts: Some(max_attempts),
-            initial_delay,
-            max_delay,
-        }
-    }
-
-    /// Creates an unbounded retry config.
-    pub const fn unbounded(initial_delay: Duration, max_delay: Duration) -> Self {
-        Self {
-            max_attempts: None,
+            max_attempts,
             initial_delay,
             max_delay,
         }
@@ -56,16 +45,11 @@ impl RetryConfig {
 
     /// Creates a `backon` [`ExponentialBuilder`] from this configuration.
     pub fn to_backoff_builder(&self) -> ExponentialBuilder {
-        let builder = ExponentialBuilder::default()
+        ExponentialBuilder::default()
             .with_min_delay(self.normalized_initial_delay())
             .with_max_delay(self.normalized_max_delay())
-            .with_jitter();
-
-        let Some(max_attempts) = self.max_attempts else {
-            return builder.without_max_times();
-        };
-
-        builder.with_max_times(max_attempts as usize)
+            .with_max_times(self.max_attempts)
+            .with_jitter()
     }
 }
 
