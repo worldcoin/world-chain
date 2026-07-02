@@ -56,12 +56,16 @@ pub trait ProofJobQueue {
         lock: LockId,
     ) -> Result<(), ProofJobQueueError>;
 
+    /// Get a backend session that matches the provided proof_id and
+    /// session_type if it exists.
     async fn get_proof_session(
         &self,
         proof_id: ProofRequestId,
         session_type: SessionType,
     ) -> Result<Option<BackendSession>, ProofJobQueueError>;
 
+    /// Record a backend session tied to the provided proof_id
+    /// and session_type.
     async fn record_proof_session(
         &self,
         proof_id: ProofRequestId,
