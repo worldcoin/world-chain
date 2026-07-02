@@ -2,8 +2,9 @@ use crate::{
     ProofData,
     config::ProverServiceConfig,
     error::{
-        BackendMismatchErrorData, InvalidConfigError, ProofJobQueueError, ProofJobStatusErrorData,
-        ProofMismatchErrorData, ProofRequestError, ProverServiceInitError, TooManyRetriesErrorData,
+        BackendMismatchErrorData, BackendSessionAlreadyTerminalErrorData, InvalidConfigError,
+        ProofJobQueueError, ProofJobStatusErrorData, ProofMismatchErrorData, ProofRequestError,
+        ProverServiceInitError, TooManyRetriesErrorData,
     },
     types::{
         BackendSession, BackendSessionStatus, FailedProofResponse, LockId, LockedProofRequest,
@@ -384,6 +385,7 @@ impl ProverServiceStore {
                 WHERE proof_id = $1
                   AND session_type = $2
                   AND backend_session_id = $3
+                ORDER BY id
                 FOR UPDATE
             "#,
         )
@@ -393,13 +395,26 @@ impl ProverServiceStore {
         .fetch_all(&mut *tx)
         .await?;
 
-        for row in existing_backend_sessions {
+        // A terminal backend session is immutable, so short-circuit before the
+        // active-session update below. Re-recording the same status is an idempotent
+        // retry, any other status is a conflict.
+        for row in &existing_backend_sessions {
             let status_str: &str = row.get("status");
-            let status = BackendSessionStatus::try_from(status_str)
+            let stored = BackendSessionStatus::try_from(status_str)
                 .map_err(ProofJobQueueError::UnknownBackendSessionStatus)?;
-            if status.is_terminal() {
-                // return this proof session
-                // TODO: do it
+            if stored.is_terminal() {
+                if stored == status {
+                    return Ok(());
+                }
+                return Err(ProofJobQueueError::BackendSessionAlreadyTerminal(
+                    BackendSessionAlreadyTerminalErrorData {
+                        proof_id,
+                        session_type,
+                        backend_session_id,
+                        stored,
+                        attempted: status,
+                    },
+                ));
             }
         }
 
