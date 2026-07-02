@@ -75,4 +75,14 @@ pub trait ProofJobQueue {
         backend_session_id: String,
         state: BackendSessionStatus,
     ) -> Result<(), ProofJobQueueError>;
+
+    /// Ping the `prover-service` to signal that a proof worker tied
+    /// to the provided `worker_id` and `lock` is still working on
+    /// the provided `proof_id` job.
+    async fn heartbeat(
+        &self,
+        proof_id: ProofRequestId,
+        worker_id: String,
+        lock: LockId,
+    ) -> Result<(), ProofJobQueueError>;
 }
