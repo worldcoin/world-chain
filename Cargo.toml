@@ -190,29 +190,29 @@ alloy-op-hardforks = { git = "https://github.com/ethereum-optimism/optimism", re
 op-alloy-provider = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da", default-features = false }
 
 # alloy
-alloy = { version = "2.0.5" }
-alloy-json-rpc = { version = "2.0.5", default-features = false }
+alloy = { version = "~2.0.5" }
+alloy-json-rpc = { version = "~2.0.5", default-features = false }
 alloy-chains = { version = "0.2.33", default-features = false }
-alloy-provider = { version = "2.0.5", default-features = false }
-alloy-rpc-client = { version = "2.0.5", default-features = false }
-alloy-transport-http = { version = "2.0.5", default-features = false }
-alloy-transport = { version = "2.0.5", default-features = false }
-alloy-consensus = { version = "2.0.5", default-features = false }
-alloy-network = { version = "2.0.5", default-features = false }
+alloy-provider = { version = "~2.0.5", default-features = false }
+alloy-rpc-client = { version = "~2.0.5", default-features = false }
+alloy-transport-http = { version = "~2.0.5", default-features = false }
+alloy-transport = { version = "~2.0.5", default-features = false }
+alloy-consensus = { version = "~2.0.5", default-features = false }
+alloy-network = { version = "~2.0.5", default-features = false }
 alloy-primitives = { version = "1.6.0", default-features = false, features = [
     "std",
     "map-foldhash",
 ] }
-alloy-contract = { version = "2.0.5", default-features = false }
-alloy-rpc-types-eth = { version = "2.0.5", default-features = false }
-alloy-rpc-types = { version = "2.0.5", features = [
+alloy-contract = { version = "~2.0.5", default-features = false }
+alloy-rpc-types-eth = { version = "~2.0.5", default-features = false }
+alloy-rpc-types = { version = "~2.0.5", features = [
     "eth",
 ], default-features = false }
-alloy-rpc-types-engine = { version = "2.0.5", default-features = false }
+alloy-rpc-types-engine = { version = "~2.0.5", default-features = false }
 alloy-rlp = { version = "0.3.13", default-features = false, features = [
     "derive",
 ] }
-alloy-eips = { version = "2.0.5", default-features = false, features = [
+alloy-eips = { version = "~2.0.5", default-features = false, features = [
     "serde",
 ] }
 
@@ -221,14 +221,14 @@ alloy-eip7928 = { version = "0.4.3", default-features = false, features = [
     "rlp",
 ] }
 
-alloy-genesis = { version = "2.0.5", default-features = false }
-alloy-rpc-types-debug = "2.0.5"
-alloy-signer = { version = "2.0.5", default-features = false }
-alloy-signer-local = { version = "2.0.5", default-features = false, features = [
+alloy-genesis = { version = "~2.0.5", default-features = false }
+alloy-rpc-types-debug = "~2.0.5"
+alloy-signer = { version = "~2.0.5", default-features = false }
+alloy-signer-local = { version = "~2.0.5", default-features = false, features = [
     "mnemonic",
 ] }
 alloy-sol-types = "1.6.0"
-alloy-serde = { version = "2.0.5", default-features = false }
+alloy-serde = { version = "~2.0.5", default-features = false }
 alloy-hardforks = { version = "0.4.7", default-features = false }
 alloy-trie = { version = "0.9.4", default-features = false, features = [
     "ethereum",
