@@ -3,7 +3,7 @@ use crate::{
     config::ProverServiceConfig,
     error::{
         BackendMismatchErrorData, InvalidConfigError, ProofJobQueueError, ProofJobStatusErrorData,
-        ProofMismatchErrorData, ProofRequestError, ProverServiceInitError,
+        ProofMismatchErrorData, ProofRequestError, ProverServiceInitError, TooManyRetriesErrorData,
     },
     types::{
         BackendSession, BackendSessionStatus, FailedProofResponse, LockId, LockedProofRequest,
@@ -139,10 +139,10 @@ impl ProverServiceStore {
             let retry_count: i32 = row.get("retry_count");
             if retry_count > self.config.max_retries as i32 {
                 tx.rollback().await?;
-                return Err(ProofRequestError::TooManyRetries {
+                return Err(ProofRequestError::TooManyRetries(TooManyRetriesErrorData {
                     proof_id: id,
                     max_retries: self.config.max_retries,
-                });
+                }));
             }
 
             sqlx::query(

@@ -235,18 +235,18 @@ pub struct SucceededProofResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FailedProofResponse {
     /// The identifier of the proof request.
-    id: ProofRequestId,
+    pub id: ProofRequestId,
     /// Failure reason.
-    reason: String,
+    pub reason: String,
 }
 
 /// The pending proof response.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingProofResponse {
     /// The identifier of the proof request.
-    id: ProofRequestId,
+    pub id: ProofRequestId,
     /// Current proof status.
-    status: ProofStatus,
+    pub status: ProofStatus,
 }
 
 /// External backend request identifier.

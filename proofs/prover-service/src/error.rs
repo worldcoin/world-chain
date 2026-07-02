@@ -33,19 +33,47 @@ pub enum ProofRequestError {
     RowMissingAfterConflict(ProofRequestId),
     #[error("{0}")]
     UnknownProofStatus(String),
-    #[error(
-        "This proof request {proof_id} has been retried more than max_retries = {max_retries}."
-    )]
-    TooManyRetries {
-        proof_id: ProofRequestId,
-        max_retries: u32,
-    },
+    #[error("{0}")]
+    TooManyRetries(TooManyRetriesErrorData),
     #[error("Proof request {0} not found.")]
     ProofIdNotFound(ProofRequestId),
     #[error(transparent)]
     ProofEncoding(#[from] serde_json::Error),
     #[error("The block number {0} exceeds i64 max value.")]
     BlockNumberExceedsI64(BlockNumber),
+    #[error("remote prover-service internal error.")]
+    RemoteInternal,
+    #[error("remote prover-service storage error.")]
+    RemoteSqlx,
+    #[error("RPC request timed out.")]
+    RpcRequestTimeout,
+    #[error("RPC transport error: {0}.")]
+    RpcTransport(#[from] jsonrpsee::core::BoxError),
+    #[error("RPC client restart needed: {0}.")]
+    RpcRestartNeeded(#[source] Arc<JsonRpseeError>),
+    #[error("RPC service disconnected.")]
+    RpcServiceDisconnected,
+    #[error("RPC client error: {0}.")]
+    RpcClient(#[source] JsonRpseeError),
+}
+
+/// Data describing a proof request that exceeded retry limits.
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
+pub struct TooManyRetriesErrorData {
+    /// The proof request id.
+    pub proof_id: ProofRequestId,
+    /// The maximum number of retries configured by the prover-service.
+    pub max_retries: u32,
+}
+
+impl std::fmt::Display for TooManyRetriesErrorData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "This proof request {} has been retried more than max_retries = {}.",
+            self.proof_id, self.max_retries
+        )
+    }
 }
 
 /// Data describing a proof job status mismatch.

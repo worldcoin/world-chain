@@ -25,6 +25,7 @@ use world_chain_prover_service::{
     BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend, ProofData,
     ProofJobQueue, ProofJobQueueError, ProofRequest, ProofRequestError, ProofRequestId,
     ProofRequester, ProofResponse, ProofStatus, ProverService, ProverServiceConfig, SessionType,
+    SucceededProofResponse,
 };
 
 pub const BLOCK_INTERVAL: u64 = 10;
@@ -598,7 +599,7 @@ impl ProofJobQueue for SharedProverService {
 
     async fn submit_proof(
         &self,
-        proof: ProofResponse,
+        proof: SucceededProofResponse,
         worker_id: String,
         lock: LockId,
     ) -> Result<(), ProofJobQueueError> {
