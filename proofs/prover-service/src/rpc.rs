@@ -1,13 +1,14 @@
 use crate::{
     error::{
         BackendMismatchErrorData, ProofJobQueueError, ProofJobStatusErrorData,
-        ProofMismatchErrorData, ProofRequestError,
+        ProofMismatchErrorData, ProofRequestError, TooManyRetriesErrorData,
     },
     service::ProverService,
     traits::{ProofJobQueue, ProofRequester},
     types::{
         BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
         ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType,
+        SucceededProofResponse,
     },
 };
 use jsonrpsee::{
@@ -24,10 +25,6 @@ use tracing::info;
 pub mod error_code {
     /// No proof request with the given id is known.
     pub const NOT_FOUND: i32 = -32002;
-    /// The proof is not ready yet; the error data holds the [`crate::ProofStatus`].
-    pub const PENDING: i32 = -32003;
-    /// The proof request permanently failed; the error data holds the reason.
-    pub const FAILED: i32 = -32004;
     /// The proof request has been retried more than the configured maximum.
     pub const TOO_MANY_RETRIES: i32 = -32005;
     /// A conflicting row vanished after an insert conflict; the request is safe to retry.
@@ -78,7 +75,7 @@ pub trait ProverServiceApi {
     #[method(name = "submitProof")]
     async fn submit_proof(
         &self,
-        proof: ProofResponse,
+        proof: SucceededProofResponse,
         worker_id: String,
         lock: LockId,
     ) -> RpcResult<()>;
@@ -108,25 +105,26 @@ impl From<ProofRequestError> for ErrorObjectOwned {
     fn from(err: ProofRequestError) -> Self {
         let message = err.to_string();
         match err {
-            ProofRequestError::NotFound(_) => {
-                ErrorObject::owned(error_code::NOT_FOUND, message, None::<()>)
+            ProofRequestError::ProofIdNotFound(proof_id) => {
+                ErrorObject::owned(error_code::NOT_FOUND, message, Some(proof_id))
             }
-            ProofRequestError::RowMissingAfterConflict { .. } => {
-                ErrorObject::owned(error_code::RETRYABLE_CONFLICT, message, None::<()>)
+            ProofRequestError::RowMissingAfterConflict(proof_id) => {
+                ErrorObject::owned(error_code::RETRYABLE_CONFLICT, message, Some(proof_id))
             }
-            ProofRequestError::TooManyRetries(_) => {
-                ErrorObject::owned(error_code::TOO_MANY_RETRIES, message, None::<()>)
+            ProofRequestError::TooManyRetries(data) => {
+                ErrorObject::owned(error_code::TOO_MANY_RETRIES, message, Some(data))
             }
-            ProofRequestError::Pending { status, .. } => {
-                ErrorObject::owned(error_code::PENDING, message, Some(status))
-            }
-            ProofRequestError::Failed { reason, .. } => {
-                ErrorObject::owned(error_code::FAILED, message, Some(reason))
-            }
-            ProofRequestError::Internal(_) => {
-                ErrorObject::owned(INTERNAL_ERROR_CODE, message, None::<()>)
-            }
-            ProofRequestError::Rpc(_) => {
+            ProofRequestError::Sqlx(_) => ErrorObject::owned(error_code::SQLX, message, None::<()>),
+            ProofRequestError::UnknownProofStatus(_)
+            | ProofRequestError::ProofEncoding(_)
+            | ProofRequestError::BlockNumberExceedsI64(_)
+            | ProofRequestError::RemoteInternal
+            | ProofRequestError::RemoteSqlx
+            | ProofRequestError::RpcRequestTimeout
+            | ProofRequestError::RpcTransport(_)
+            | ProofRequestError::RpcRestartNeeded(_)
+            | ProofRequestError::RpcServiceDisconnected
+            | ProofRequestError::RpcClient(_) => {
                 ErrorObject::owned(INTERNAL_ERROR_CODE, message, None::<()>)
             }
         }
@@ -221,7 +219,7 @@ impl ProverServiceApiServer for ProverServiceRpc {
 
     async fn submit_proof(
         &self,
-        proof: ProofResponse,
+        proof: SucceededProofResponse,
         worker_id: String,
         lock: LockId,
     ) -> RpcResult<()> {
@@ -301,27 +299,35 @@ fn error_data<T: serde::de::DeserializeOwned>(err: &ErrorObjectOwned) -> Option<
         .and_then(|raw| serde_json::from_str(raw.get()).ok())
 }
 
-fn map_request_error(
-    err: ClientError,
-    id: ProofRequestId,
-    backend: Option<ProofBackend>,
-) -> ProofRequestError {
-    let ClientError::Call(err) = err else {
-        return ProofRequestError::Rpc(err.to_string());
-    };
-    match (err.code(), backend) {
-        (error_code::NOT_FOUND, _) => ProofRequestError::NotFound(id),
-        (error_code::TOO_MANY_RETRIES, _) => ProofRequestError::TooManyRetries(id),
-        (error_code::RETRYABLE_CONFLICT, _) => ProofRequestError::RowMissingAfterConflict { id },
-        (error_code::PENDING, _) => ProofRequestError::Pending {
-            id,
-            status: error_data(&err).unwrap_or(ProofStatus::Created),
-        },
-        (error_code::FAILED, _) => ProofRequestError::Failed {
-            id,
-            reason: error_data(&err).unwrap_or_else(|| err.message().to_string()),
-        },
-        _ => ProofRequestError::Rpc(format!("{} (code {})", err.message(), err.code())),
+fn map_request_error(err: ClientError, id: ProofRequestId) -> ProofRequestError {
+    match err {
+        ClientError::RequestTimeout => ProofRequestError::RpcRequestTimeout,
+        ClientError::Transport(err) => ProofRequestError::RpcTransport(err),
+        ClientError::RestartNeeded(err) => ProofRequestError::RpcRestartNeeded(err),
+        ClientError::ServiceDisconnect => ProofRequestError::RpcServiceDisconnected,
+        ClientError::Call(err) => map_request_call_error(err, id),
+        err => ProofRequestError::RpcClient(err),
+    }
+}
+
+fn map_request_call_error(err: ErrorObjectOwned, fallback_id: ProofRequestId) -> ProofRequestError {
+    match err.code() {
+        error_code::NOT_FOUND => {
+            ProofRequestError::ProofIdNotFound(error_data(&err).unwrap_or(fallback_id))
+        }
+        error_code::TOO_MANY_RETRIES => {
+            if let Some(data) = error_data::<TooManyRetriesErrorData>(&err) {
+                ProofRequestError::TooManyRetries(data)
+            } else {
+                ProofRequestError::RemoteInternal
+            }
+        }
+        error_code::RETRYABLE_CONFLICT => {
+            ProofRequestError::RowMissingAfterConflict(error_data(&err).unwrap_or(fallback_id))
+        }
+        error_code::SQLX => ProofRequestError::RemoteSqlx,
+        INTERNAL_ERROR_CODE => ProofRequestError::RemoteInternal,
+        _ => ProofRequestError::RpcClient(ClientError::Call(err)),
     }
 }
 
@@ -384,10 +390,9 @@ impl ProofRequester for RpcProverServiceClient {
         proof_request: ProofRequest,
     ) -> Result<ProofRequestId, ProofRequestError> {
         let id = proof_request.id();
-        let backend = proof_request.backend;
         ProverServiceApiClient::request_proof(&self.client, proof_request)
             .await
-            .map_err(|err| map_request_error(err, id, Some(backend)))
+            .map_err(|err| map_request_error(err, id))
     }
 
     async fn proof_status(
@@ -396,7 +401,7 @@ impl ProofRequester for RpcProverServiceClient {
     ) -> Result<ProofStatus, ProofRequestError> {
         ProverServiceApiClient::proof_status(&self.client, proof_id)
             .await
-            .map_err(|err| map_request_error(err, proof_id, None))
+            .map_err(|err| map_request_error(err, proof_id))
     }
 
     async fn get_proof(
@@ -405,7 +410,7 @@ impl ProofRequester for RpcProverServiceClient {
     ) -> Result<ProofResponse, ProofRequestError> {
         ProverServiceApiClient::get_proof(&self.client, proof_id)
             .await
-            .map_err(|err| map_request_error(err, proof_id, None))
+            .map_err(|err| map_request_error(err, proof_id))
     }
 }
 
@@ -423,7 +428,7 @@ impl ProofJobQueue for RpcProverServiceClient {
 
     async fn submit_proof(
         &self,
-        proof: ProofResponse,
+        proof: SucceededProofResponse,
         worker_id: String,
         lock: LockId,
     ) -> Result<(), ProofJobQueueError> {

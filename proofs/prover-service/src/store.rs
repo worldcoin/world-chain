@@ -3,11 +3,12 @@ use crate::{
     config::ProverServiceConfig,
     error::{
         BackendMismatchErrorData, InvalidConfigError, ProofJobQueueError, ProofJobStatusErrorData,
-        ProofMismatchErrorData, ProofRequestError, ProverServiceInitError,
+        ProofMismatchErrorData, ProofRequestError, ProverServiceInitError, TooManyRetriesErrorData,
     },
     types::{
-        BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
-        ProofJobStatus, ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType,
+        BackendSession, BackendSessionStatus, FailedProofResponse, LockId, LockedProofRequest,
+        PendingProofResponse, ProofBackend, ProofJobStatus, ProofRequest, ProofRequestId,
+        ProofResponse, ProofStatus, SessionType, SucceededProofResponse,
     },
 };
 use alloy_primitives::{Address, B256};
@@ -103,12 +104,11 @@ impl ProverServiceStore {
         .bind(now)
         .bind(now)
         .execute(&mut *tx)
-        .await
-        .map_err(request_db)?;
+        .await?;
 
         if insert_result.rows_affected() > 0 {
             // no conflict
-            tx.commit().await.map_err(request_db)?;
+            tx.commit().await?;
             return Ok(id);
         }
 
@@ -123,25 +123,26 @@ impl ProverServiceStore {
         )
         .bind(&proof_id)
         .fetch_optional(&mut *tx)
-        .await
-        .map_err(request_db)?;
+        .await?;
 
         let Some(row) = row else {
-            tx.rollback().await.map_err(request_db)?;
-            return Err(ProofRequestError::RowMissingAfterConflict { id });
+            tx.rollback().await?;
+            return Err(ProofRequestError::RowMissingAfterConflict(id));
         };
 
         let proof_status_str: &str = row.get("proof_status");
-        let proof_status = ProofStatus::try_from(proof_status_str).map_err(|e| {
-            ProofRequestError::Internal(format!("Invalid proof status in db: {}", e))
-        })?;
+        let proof_status = ProofStatus::try_from(proof_status_str)
+            .map_err(ProofRequestError::UnknownProofStatus)?;
 
         if proof_status == ProofStatus::Failed {
             // retry the entire proof job if retry_count is less than the max_retry
             let retry_count: i32 = row.get("retry_count");
             if retry_count > self.config.max_retries as i32 {
-                tx.rollback().await.map_err(request_db)?;
-                return Err(ProofRequestError::TooManyRetries(id));
+                tx.rollback().await?;
+                return Err(ProofRequestError::TooManyRetries(TooManyRetriesErrorData {
+                    proof_id: id,
+                    max_retries: self.config.max_retries,
+                }));
             }
 
             sqlx::query(
@@ -164,15 +165,14 @@ impl ProverServiceStore {
             .bind(ProofJobStatus::Pending.as_str())
             .bind(&proof_id)
             .execute(&mut *tx)
-            .await
-            .map_err(request_db)?;
+            .await?;
 
-            tx.commit().await.map_err(request_db)?;
+            tx.commit().await?;
             Ok(id)
         } else {
             // this proof request already exists in the db with a non-failing status.
             // Rollback the db transaction and return the proof id.
-            tx.rollback().await.map_err(request_db)?;
+            tx.rollback().await?;
             Ok(id)
         }
     }
@@ -184,10 +184,9 @@ impl ProverServiceStore {
         let row = sqlx::query("SELECT proof_status FROM proof_requests WHERE proof_id = $1")
             .bind(proof_id_bytes(proof_id))
             .fetch_optional(&self.pool)
-            .await
-            .map_err(request_db)?
-            .ok_or(ProofRequestError::NotFound(proof_id))?;
-        parse_status(row.try_get("proof_status").map_err(request_db)?)
+            .await?
+            .ok_or(ProofRequestError::ProofIdNotFound(proof_id))?;
+        parse_status(row.get("proof_status"))
     }
 
     pub(crate) async fn get_proof(
@@ -199,34 +198,30 @@ impl ProverServiceStore {
         )
         .bind(proof_id_bytes(proof_id))
         .fetch_optional(&self.pool)
-        .await
-        .map_err(request_db)?
-        .ok_or(ProofRequestError::NotFound(proof_id))?;
+        .await?
+        .ok_or(ProofRequestError::ProofIdNotFound(proof_id))?;
 
-        let status = parse_status(row.try_get("proof_status").map_err(request_db)?)?;
+        let status = parse_status(row.get("proof_status"))?;
         match status {
             ProofStatus::Succeeded => {
-                let data: Vec<u8> = row
-                    .try_get("proof_data")
-                    .map_err(|err| ProofRequestError::Internal(err.to_string()))?;
-                let proof = serde_json::from_slice(&data)
-                    .map_err(|err| ProofRequestError::Internal(err.to_string()))?;
-                Ok(ProofResponse {
+                let data: Vec<u8> = row.get("proof_data");
+                let proof =
+                    serde_json::from_slice(&data).map_err(ProofRequestError::ProofEncoding)?;
+                Ok(ProofResponse::Succeeded(SucceededProofResponse {
                     id: proof_id,
                     proof,
-                })
+                }))
             }
-            ProofStatus::Failed => Err(ProofRequestError::Failed {
+            ProofStatus::Failed => Ok(ProofResponse::Failed(FailedProofResponse {
                 id: proof_id,
                 reason: row
-                    .try_get::<Option<String>, _>("failure_reason")
-                    .map_err(request_db)?
+                    .get::<Option<String>, _>("failure_reason")
                     .unwrap_or_else(|| "proof job failed".to_string()),
-            }),
-            status => Err(ProofRequestError::Pending {
+            })),
+            status => Ok(ProofResponse::Pending(PendingProofResponse {
                 id: proof_id,
                 status,
-            }),
+            })),
         }
     }
 
@@ -484,7 +479,7 @@ impl ProverServiceStore {
 
     pub(crate) async fn submit_proof(
         &self,
-        proof: ProofResponse,
+        proof: SucceededProofResponse,
         worker_id: String,
         lock_id: LockId,
     ) -> Result<(), ProofJobQueueError> {
@@ -652,7 +647,7 @@ impl ProverServiceStore {
     async fn begin_request_tx(&self) -> Result<Transaction<'_, Postgres>, ProofRequestError> {
         self.begin_tx(PostgresIsolationLevel::ReadCommitted)
             .await
-            .map_err(request_db)
+            .map_err(ProofRequestError::Sqlx)
     }
 
     async fn begin_queue_tx(&self) -> Result<Transaction<'_, Postgres>, ProofJobQueueError> {
@@ -697,14 +692,9 @@ fn request_from_row(row: &PgRow) -> Result<ProofRequest, ProofJobQueueError> {
 }
 
 fn parse_status(status: String) -> Result<ProofStatus, ProofRequestError> {
-    ProofStatus::try_from(status.as_str()).map_err(ProofRequestError::Internal)
+    ProofStatus::try_from(status.as_str()).map_err(ProofRequestError::UnknownProofStatus)
 }
 
 fn l2_to_i64(value: u64) -> Result<i64, ProofRequestError> {
-    i64::try_from(value)
-        .map_err(|_| ProofRequestError::Internal(format!("l2 block number {value} exceeds i64")))
-}
-
-fn request_db(err: sqlx::Error) -> ProofRequestError {
-    ProofRequestError::Internal(err.to_string())
+    i64::try_from(value).map_err(|_| ProofRequestError::BlockNumberExceedsI64(value))
 }

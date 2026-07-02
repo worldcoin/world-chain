@@ -82,7 +82,7 @@ pub use config::{
 };
 pub use error::{
     BackendMismatchErrorData, InvalidConfigError, ProofJobQueueError, ProofJobStatusErrorData,
-    ProofMismatchErrorData, ProofRequestError, ProverServiceInitError,
+    ProofMismatchErrorData, ProofRequestError, ProverServiceInitError, TooManyRetriesErrorData,
 };
 pub use rpc::{
     ProverServiceApiClient, ProverServiceApiServer, ProverServiceRpc, RpcProverServiceClient,
@@ -91,9 +91,9 @@ pub use rpc::{
 pub use service::ProverService;
 pub use traits::{ProofJobQueue, ProofRequester};
 pub use types::{
-    BackendProofId, BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
-    ProofData, ProofJobStatus, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
-    SessionType,
+    BackendProofId, BackendSession, BackendSessionStatus, FailedProofResponse, LockId,
+    LockedProofRequest, PendingProofResponse, ProofBackend, ProofData, ProofJobStatus,
+    ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType, SucceededProofResponse,
 };
 
 #[cfg(test)]

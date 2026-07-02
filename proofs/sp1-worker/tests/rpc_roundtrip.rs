@@ -7,8 +7,8 @@ use testcontainers::{ContainerAsync, runners::AsyncRunner};
 use testcontainers_modules::postgres;
 use world_chain_proof_worker::ProofJob;
 use world_chain_prover_service::{
-    ProofBackend, ProofData, ProofRequest, ProofRequester, ProofStatus, ProverService,
-    ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
+    ProofBackend, ProofData, ProofRequest, ProofRequester, ProofResponse, ProofStatus,
+    ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
 };
 use world_chain_sp1_worker::{ClaimedProofJobHandler, ProofWorker, ProofWorkerConfig, RetryConfig};
 
@@ -102,6 +102,9 @@ async fn worker_completes_requested_proof_over_rpc() {
     assert_eq!(status, ProofStatus::Succeeded);
 
     let response = requester.get_proof(id).await.expect("proof available");
+    let ProofResponse::Succeeded(response) = response else {
+        panic!("expected succeeded proof response");
+    };
     assert_eq!(response.id, id);
     let ProofData::Sp1 {
         proof,

@@ -15,7 +15,7 @@ use std::{
 use world_chain_proofs::{ConsensusError, ConsensusProvider, GameCreated, ProofLane, RootState};
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
-    ProofResponse, ProofStatus,
+    ProofResponse, ProofStatus, SucceededProofResponse,
 };
 
 const GAME_1: Address = address!("0000000000000000000000000000000000000001");
@@ -221,7 +221,7 @@ impl ProofRequester for MockProver {
             .expect("not poisoned")
             .get(&proof_id)
             .cloned()
-            .ok_or(ProofRequestError::NotFound(proof_id))?;
+            .ok_or(ProofRequestError::ProofIdNotFound(proof_id))?;
         let proof = match request.backend {
             ProofBackend::Sp1 => ProofData::Sp1 {
                 proof: Bytes::from_static(b"proof"),
@@ -232,10 +232,10 @@ impl ProofRequester for MockProver {
                 signature: Bytes::from_static(b"signature"),
             },
         };
-        Ok(ProofResponse {
+        Ok(ProofResponse::Succeeded(SucceededProofResponse {
             id: proof_id,
             proof,
-        })
+        }))
     }
 }
 

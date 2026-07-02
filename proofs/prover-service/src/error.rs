@@ -1,7 +1,5 @@
-use crate::{
-    ProofBackend, ProofData, ProofJobStatus,
-    types::{ProofRequestId, ProofStatus},
-};
+use crate::{ProofBackend, ProofData, ProofJobStatus, types::ProofRequestId};
+use alloy_primitives::BlockNumber;
 use jsonrpsee::core::client::Error as JsonRpseeError;
 use sqlx::migrate::MigrateError;
 use std::sync::Arc;
@@ -29,39 +27,53 @@ pub enum ProverServiceInitError {
 /// Error returned to a defender by the `prover-service`.
 #[derive(Error, Debug)]
 pub enum ProofRequestError {
-    /// No proof request with the given id is known.
-    #[error("proof request {0} not found")]
-    NotFound(ProofRequestId),
-    /// Conflicting row disappeared after insert conflict. Safe to retry.
-    #[error("proof_id {id}: proof request row missing after insert conflict; retry request_proof")]
-    RowMissingAfterConflict {
-        /// Proof request id that was expected to exist.
-        id: ProofRequestId,
-    },
-    #[error("The proof request {0} has been retried too many times")]
-    TooManyRetries(ProofRequestId),
-    /// The proof is not ready yet.
-    #[error("proof request {id} is not ready yet (status: {status})")]
-    Pending {
-        /// The proof request id.
-        id: ProofRequestId,
-        /// The current status of the request.
-        status: ProofStatus,
-    },
-    /// The proof request permanently failed.
-    #[error("proof request {id} failed: {reason}")]
-    Failed {
-        /// The proof request id.
-        id: ProofRequestId,
-        /// The reason reported on the last attempt.
-        reason: String,
-    },
-    /// Internal service or storage error.
-    #[error("prover-service error: {0}")]
-    Internal(String),
-    /// RPC transport error.
-    #[error("RPC error: {0}")]
-    Rpc(String),
+    #[error(transparent)]
+    Sqlx(#[from] sqlx::Error),
+    #[error("proof id {0}: proof request row missing after insert conflict. Retry request_proof.")]
+    RowMissingAfterConflict(ProofRequestId),
+    #[error("{0}")]
+    UnknownProofStatus(String),
+    #[error("{0}")]
+    TooManyRetries(TooManyRetriesErrorData),
+    #[error("Proof request {0} not found.")]
+    ProofIdNotFound(ProofRequestId),
+    #[error(transparent)]
+    ProofEncoding(#[from] serde_json::Error),
+    #[error("The block number {0} exceeds i64 max value.")]
+    BlockNumberExceedsI64(BlockNumber),
+    #[error("remote prover-service internal error.")]
+    RemoteInternal,
+    #[error("remote prover-service storage error.")]
+    RemoteSqlx,
+    #[error("RPC request timed out.")]
+    RpcRequestTimeout,
+    #[error("RPC transport error: {0}.")]
+    RpcTransport(#[from] jsonrpsee::core::BoxError),
+    #[error("RPC client restart needed: {0}.")]
+    RpcRestartNeeded(#[source] Arc<JsonRpseeError>),
+    #[error("RPC service disconnected.")]
+    RpcServiceDisconnected,
+    #[error("RPC client error: {0}.")]
+    RpcClient(#[source] JsonRpseeError),
+}
+
+/// Data describing a proof request that exceeded retry limits.
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
+pub struct TooManyRetriesErrorData {
+    /// The proof request id.
+    pub proof_id: ProofRequestId,
+    /// The maximum number of retries configured by the prover-service.
+    pub max_retries: u32,
+}
+
+impl std::fmt::Display for TooManyRetriesErrorData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "This proof request {} has been retried more than max_retries = {}.",
+            self.proof_id, self.max_retries
+        )
+    }
 }
 
 /// Data describing a proof job status mismatch.

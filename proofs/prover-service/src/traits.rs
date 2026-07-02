@@ -3,6 +3,7 @@ use crate::{
     types::{
         BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
         ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType,
+        SucceededProofResponse,
     },
 };
 use async_trait::async_trait;
@@ -50,7 +51,7 @@ pub trait ProofJobQueue {
     /// Submit a final proof response to the `prover-service`.
     async fn submit_proof(
         &self,
-        proof: ProofResponse,
+        proof: SucceededProofResponse,
         worker_id: String,
         lock: LockId,
     ) -> Result<(), ProofJobQueueError>;

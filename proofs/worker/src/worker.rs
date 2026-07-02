@@ -14,7 +14,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, info, info_span, warn};
-use world_chain_prover_service::{LockedProofRequest, ProofJobQueue, ProofResponse};
+use world_chain_prover_service::{LockedProofRequest, ProofJobQueue, SucceededProofResponse};
 
 use crate::{
     backend::{ClaimedProofJobHandler, JobSessions, ProofJob},
@@ -253,7 +253,7 @@ fn spawn_job<Q, B>(
 
             match backend.handle_claimed_job(job).await {
                 Ok(proof) => {
-                    let response = ProofResponse {
+                    let response = SucceededProofResponse {
                         id: proof_id,
                         proof,
                     };

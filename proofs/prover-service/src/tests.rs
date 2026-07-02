@@ -1,7 +1,7 @@
 use crate::{
-    ProofBackend, ProofData, ProofJobQueue, ProofJobQueueError, ProofRequest, ProofRequestError,
-    ProofRequester, ProofResponse, ProofStatus, ProverService, ProverServiceConfig,
-    RpcProverServiceClient, start_rpc_server,
+    ProofBackend, ProofData, ProofJobQueue, ProofJobQueueError, ProofRequest, ProofRequester,
+    ProofResponse, ProofStatus, ProverService, ProverServiceConfig, RpcProverServiceClient,
+    SucceededProofResponse, start_rpc_server,
     types::{BackendSessionStatus, SessionType},
 };
 use alloy_primitives::{Address, B256, Bytes};
@@ -58,7 +58,7 @@ fn request(backend: ProofBackend, seed: u8) -> ProofRequest {
     }
 }
 
-fn proof_for(req: &ProofRequest) -> ProofResponse {
+fn proof_for(req: &ProofRequest) -> SucceededProofResponse {
     let proof = match req.backend {
         ProofBackend::Sp1 => ProofData::Sp1 {
             proof: Bytes::from(vec![0xaa]),
@@ -69,7 +69,7 @@ fn proof_for(req: &ProofRequest) -> ProofResponse {
             signature: Bytes::from(vec![0xdd]),
         },
     };
-    ProofResponse {
+    SucceededProofResponse {
         id: req.id(),
         proof,
     }
@@ -105,11 +105,9 @@ async fn full_lifecycle_succeeds() {
         ProofStatus::Created
     );
     assert!(matches!(
-        service.get_proof(id).await,
-        Err(ProofRequestError::Pending {
-            status: ProofStatus::Created,
-            ..
-        })
+        service.get_proof(id).await.unwrap(),
+        ProofResponse::Pending(response)
+            if response.id == id && response.status == ProofStatus::Created
     ));
 
     let locked = service
@@ -123,11 +121,9 @@ async fn full_lifecycle_succeeds() {
         ProofStatus::Running
     );
     assert!(matches!(
-        service.get_proof(id).await,
-        Err(ProofRequestError::Pending {
-            status: ProofStatus::Running,
-            ..
-        })
+        service.get_proof(id).await.unwrap(),
+        ProofResponse::Pending(response)
+            if response.id == id && response.status == ProofStatus::Running
     ));
 
     let response = proof_for(&req);
@@ -139,7 +135,10 @@ async fn full_lifecycle_succeeds() {
         service.proof_status(id).await.unwrap(),
         ProofStatus::Succeeded
     );
-    assert_eq!(service.get_proof(id).await.unwrap(), response);
+    assert_eq!(
+        service.get_proof(id).await.unwrap(),
+        ProofResponse::Succeeded(response)
+    );
 }
 
 #[tokio::test]
@@ -237,7 +236,7 @@ async fn submit_proof_with_wrong_backend_is_rejected() {
         .unwrap()
         .expect("lock");
 
-    let mismatched = ProofResponse {
+    let mismatched = SucceededProofResponse {
         id,
         proof: ProofData::Nitro {
             attestation: Bytes::from(vec![0xcc]),
@@ -326,7 +325,10 @@ async fn rpc_end_to_end() {
         .submit_proof(response.clone(), worker_id(), locked.lock_id)
         .await
         .unwrap();
-    assert_eq!(client.get_proof(id).await.unwrap(), response);
+    assert_eq!(
+        client.get_proof(id).await.unwrap(),
+        ProofResponse::Succeeded(response)
+    );
 
     handle.stop().unwrap();
     handle.stopped().await;
