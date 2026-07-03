@@ -103,6 +103,15 @@ pub trait ProverServiceApi {
         backend_session_id: String,
         state: BackendSessionStatus,
     ) -> RpcResult<()>;
+
+    /// Heartbeat call.
+    #[method(name = "heartbeat")]
+    async fn heartbeat(
+        &self,
+        proof_id: ProofRequestId,
+        worker_id: String,
+        lock: LockId,
+    ) -> RpcResult<()>;
 }
 
 impl From<ProofRequestError> for ErrorObjectOwned {
@@ -266,6 +275,15 @@ impl ProverServiceApiServer for ProverServiceRpc {
                 state,
             )
             .await?)
+    }
+
+    async fn heartbeat(
+        &self,
+        proof_id: ProofRequestId,
+        worker_id: String,
+        lock: LockId,
+    ) -> RpcResult<()> {
+        Ok(self.service.heartbeat(proof_id, worker_id, lock).await?)
     }
 }
 
@@ -484,5 +502,16 @@ impl ProofJobQueue for RpcProverServiceClient {
         )
         .await
         .map_err(|err| map_job_error(err, proof_id))
+    }
+
+    async fn heartbeat(
+        &self,
+        proof_id: ProofRequestId,
+        worker_id: String,
+        lock: LockId,
+    ) -> Result<(), ProofJobQueueError> {
+        ProverServiceApiClient::heartbeat(&self.client, proof_id, worker_id, lock)
+            .await
+            .map_err(|err| map_job_error(err, proof_id))
     }
 }

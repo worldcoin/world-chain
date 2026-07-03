@@ -725,7 +725,7 @@ impl ProverServiceStore {
                 return Err(ProofJobQueueError::StaleLock(proof_id));
             }
             if stored_lock_expires_at.is_none()
-                || stored_lock_expires_at.map_or(true, |expires_at| expires_at <= now)
+                || stored_lock_expires_at.is_none_or(|expires_at| expires_at <= now)
             {
                 return Err(ProofJobQueueError::StaleLock(proof_id));
             }

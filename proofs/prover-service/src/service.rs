@@ -130,6 +130,6 @@ impl ProofJobQueue for ProverService {
         worker_id: String,
         lock: LockId,
     ) -> Result<(), ProofJobQueueError> {
-        self.store.hearbeat(proof_id, worker_id, lock).await
+        self.store.heartbeat(proof_id, worker_id, lock).await
     }
 }
