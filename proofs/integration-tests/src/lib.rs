@@ -634,4 +634,13 @@ impl ProofJobQueue for SharedProverService {
             )
             .await
     }
+
+    async fn heartbeat(
+        &self,
+        proof_id: ProofRequestId,
+        worker_id: String,
+        lock: LockId,
+    ) -> Result<(), ProofJobQueueError> {
+        self.service.heartbeat(proof_id, worker_id, lock).await
+    }
 }

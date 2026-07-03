@@ -123,4 +123,13 @@ impl ProofJobQueue for ProverService {
             )
             .await
     }
+
+    async fn heartbeat(
+        &self,
+        proof_id: ProofRequestId,
+        worker_id: String,
+        lock: LockId,
+    ) -> Result<(), ProofJobQueueError> {
+        self.store.heartbeat(proof_id, worker_id, lock).await
+    }
 }

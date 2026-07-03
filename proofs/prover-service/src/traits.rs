@@ -56,12 +56,16 @@ pub trait ProofJobQueue {
         lock: LockId,
     ) -> Result<(), ProofJobQueueError>;
 
+    /// Get a backend session that matches the provided proof_id and
+    /// session_type if it exists.
     async fn get_proof_session(
         &self,
         proof_id: ProofRequestId,
         session_type: SessionType,
     ) -> Result<Option<BackendSession>, ProofJobQueueError>;
 
+    /// Record a backend session tied to the provided proof_id
+    /// and session_type.
     async fn record_proof_session(
         &self,
         proof_id: ProofRequestId,
@@ -70,5 +74,15 @@ pub trait ProofJobQueue {
         lock_id: LockId,
         backend_session_id: String,
         state: BackendSessionStatus,
+    ) -> Result<(), ProofJobQueueError>;
+
+    /// Ping the `prover-service` to signal that a proof worker tied
+    /// to the provided `worker_id` and `lock` is still working on
+    /// the provided `proof_id` job.
+    async fn heartbeat(
+        &self,
+        proof_id: ProofRequestId,
+        worker_id: String,
+        lock: LockId,
     ) -> Result<(), ProofJobQueueError>;
 }
