@@ -61,13 +61,11 @@ struct NitroBackendConfig {
 
 struct NitroBackend {
     config: NitroBackendConfig,
-    /// Handle to the async runtime so we can call async enclave methods from `prove`.
-    rt_handle: tokio::runtime::Handle,
 }
 
 impl NitroBackend {
-    fn new(config: NitroBackendConfig, rt_handle: tokio::runtime::Handle) -> Self {
-        Self { config, rt_handle }
+    fn new(config: NitroBackendConfig) -> Self {
+        Self { config }
     }
 }
 
@@ -93,8 +91,7 @@ impl ClaimedProofJobHandler for NitroBackend {
 
         let endpoint =
             EnclaveEndpoint::with_port(self.config.enclave_cid, self.config.enclave_port);
-        let prover =
-            NitroProver::with_runtime(endpoint, self.config.expected_pcrs, self.rt_handle.clone());
+        let prover = NitroProver::new(endpoint, self.config.expected_pcrs);
 
         let input = build_range_input(
             &self.config.online,
@@ -294,7 +291,7 @@ struct Cli {
 // Entry point
 // ──────────────────────────────────────────────────────────────────────────────────────
 
-pub fn run() -> Result<()> {
+pub async fn run() -> Result<()> {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -330,14 +327,6 @@ pub fn run() -> Result<()> {
         "nitro-worker starting"
     );
 
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_name("nitro-worker")
-        .worker_threads(2)
-        .max_blocking_threads(4)
-        .build()
-        .context("failed to build tokio runtime")?;
-
     let backend_config = NitroBackendConfig {
         block_interval: cli.block_interval,
         online,
@@ -346,7 +335,7 @@ pub fn run() -> Result<()> {
         expected_pcrs,
     };
 
-    let backend = NitroBackend::new(backend_config, runtime.handle().clone());
+    let backend = NitroBackend::new(backend_config);
 
     let queue = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
@@ -370,15 +359,7 @@ pub fn run() -> Result<()> {
         },
     );
 
-    let token = worker.cancellation_token();
-    runtime.spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            info!("received ctrl-c, shutting down");
-            token.cancel();
-        }
-    });
-
-    runtime.block_on(worker);
+    worker.await;
     Ok(())
 }
 
