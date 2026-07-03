@@ -19094,6 +19094,7 @@ dependencies = [
  "alloy-consensus 2.0.5",
  "alloy-primitives",
  "anyhow",
+ "async-trait",
  "aws-nitro-enclaves-nsm-api",
  "base64 0.22.1",
  "ciborium",

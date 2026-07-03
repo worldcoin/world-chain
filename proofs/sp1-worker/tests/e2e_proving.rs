@@ -111,21 +111,9 @@ async fn worker_proves_real_range_end_to_end() {
         .await
         .expect("query claimed output root");
 
-    // `resolve_l1_head` uses a blocking HTTP client, so run it off the async runtime.
-    let l1_head = {
-        let (l1_rpc, l2_rpc) = (l1_rpc.clone(), l2_rpc.clone());
-        tokio::task::spawn_blocking(move || {
-            resolve_l1_head(
-                &reqwest::blocking::Client::new(),
-                &l2_rpc,
-                &l1_rpc,
-                claimed_block,
-            )
-        })
+    let l1_head = resolve_l1_head(&reqwest::Client::new(), &l2_rpc, &l1_rpc, claimed_block)
         .await
-        .expect("resolve_l1_head task")
-        .expect("resolve l1 head")
-    };
+        .expect("resolve l1 head");
 
     let rollup_config_value =
         serde_json::from_slice(&std::fs::read(&rollup_config).expect("read rollup config"))
