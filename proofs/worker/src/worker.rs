@@ -14,10 +14,13 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, info, info_span, warn};
-use world_chain_prover_service::{LockedProofRequest, ProofJobQueue, SucceededProofResponse};
+use world_chain_prover_service::{
+    LockedProofRequest, ProofJobQueue, ProofJobQueueError, SucceededProofResponse,
+};
 
 use crate::{
     backend::{ClaimedProofJobHandler, JobSessions, ProofJob},
+    heartbeat::{WorkerHeartbeat, WorkerHeartbeatConfig},
     retry::RetryConfig,
 };
 
@@ -251,35 +254,90 @@ fn spawn_job<Q, B>(
                 sessions,
             };
 
-            match backend.handle_claimed_job(job).await {
-                Ok(proof) => {
-                    let response = SucceededProofResponse {
-                        id: proof_id,
-                        proof,
-                    };
-                    let submit_result = (|| async {
-                        queue
-                            .submit_proof(response.clone(), worker_id.clone(), lock_id)
-                            .await
-                    })
-                    .retry(retry_config.to_backoff_builder())
-                    .when(|err| err.is_retryable())
-                    .notify(|error, delay| {
-                        warn!(%error, ?delay, "failed to submit proof, retrying");
-                    })
-                    .await;
-                    match submit_result {
-                        Ok(()) => info!("proof submitted"),
-                        Err(error) => warn!(
-                            %error,
-                            "failed to submit proof after retries, lease will expire and re-queue"
-                        ),
+            let worker_heartbeat_config = WorkerHeartbeatConfig::default();
+            let worker_heartbeat = WorkerHeartbeat::new(
+                proof_id,
+                worker_id.clone(),
+                lock_id,
+                worker_heartbeat_config,
+                queue.clone(),
+            );
+            let heartbeat = worker_heartbeat.run_until_failure();
+            tokio::pin!(heartbeat);
+
+            let proof_result = tokio::select! {
+                biased;
+                result = backend.handle_claimed_job(job) => result,
+                lease_lost = &mut heartbeat => {
+                    warn!(%lease_lost, "heartbeat failed, cancelling proof job");
+                    return;
+                }
+            };
+
+            let proof = match proof_result {
+                Ok(proof) => proof,
+                // `{:#}` renders the full anyhow context chain into the failure reason.
+                Err(error) => {
+                    warn!(
+                        reason = %format!("{error:#}"),
+                        "proving failed, lease will expire and re-queue"
+                    );
+                    return;
+                }
+            };
+
+            let response = SucceededProofResponse {
+                id: proof_id,
+                proof,
+            };
+
+            let submit_proof = async {
+                (|| async {
+                    queue
+                        .submit_proof(response.clone(), worker_id.clone(), lock_id)
+                        .await
+                })
+                .retry(retry_config.to_backoff_builder())
+                .when(|err| err.is_retryable())
+                .notify(|error, delay| {
+                    warn!(%error, ?delay, "failed to submit proof, retrying");
+                })
+                .await
+            };
+
+            let submit_result = tokio::select! {
+                biased;
+                submit_result = submit_proof => submit_result,
+                lease_lost = &mut heartbeat => {
+                    if matches!(lease_lost, ProofJobQueueError::AlreadyTerminal(_)) {
+                        // When the submit_proof work submits the proof, it changes the job status to succeeded.
+                        // If shortly after that, the heartbeat tries to extend the lock, the heartbeat will fail
+                        // becasue the job status is not claimed anymore, therefore returns `AlreadyTerminal`.
+                        // In this case, try the `submit_proof` idempotent operation again. This should return
+                        // Ok(()) if everything is fine.
+                        (|| async {
+                            queue
+                                .submit_proof(response.clone(), worker_id.clone(), lock_id)
+                                .await
+                        })
+                        .retry(retry_config.to_backoff_builder())
+                        .when(|err| err.is_retryable())
+                        .notify(|error, delay| {
+                            warn!(%error, ?delay, "failed to submit proof, retrying");
+                        })
+                        .await
+                    } else {
+                        warn!(%lease_lost, "heartbeat failed, cancelling proof job");
+                        return;
                     }
                 }
-                // `{:#}` renders the full anyhow context chain into the failure reason.
+            };
+
+            match submit_result {
+                Ok(()) => info!("proof submitted"),
                 Err(error) => warn!(
-                    reason = %format!("{error:#}"),
-                    "proving failed, lease will expire and re-queue"
+                    %error,
+                    "failed to submit proof after retries, lease will expire and re-queue"
                 ),
             }
         }

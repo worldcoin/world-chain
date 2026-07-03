@@ -19301,6 +19301,7 @@ dependencies = [
  "alloy-primitives",
  "anyhow",
  "async-trait",
+ "auto_impl",
  "chrono",
  "clap",
  "dotenvy",

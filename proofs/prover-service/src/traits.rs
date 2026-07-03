@@ -7,10 +7,12 @@ use crate::{
     },
 };
 use async_trait::async_trait;
+use auto_impl::auto_impl;
 
 /// It contains all methods needed for a defender to request a proof
 /// to the `prover-service`.
 #[async_trait]
+#[auto_impl(Arc)]
 pub trait ProofRequester {
     /// Send a proof request to the `prover-service`.
     ///
@@ -36,6 +38,7 @@ pub trait ProofRequester {
 /// It contains all methods needed for a prover worker to get
 /// new proof requests and submits proof responses.
 #[async_trait]
+#[auto_impl(Arc)]
 pub trait ProofJobQueue {
     /// Look for a new proof request to start on the given backend.
     ///
