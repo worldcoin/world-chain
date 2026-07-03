@@ -58,10 +58,6 @@ where
         let request = &job.request;
         let start_block = self.start_block(request)?;
 
-        // Witness generation and proving are CPU/IO heavy and fully synchronous; run them on
-        // the blocking pool so the worker's async scheduler is not starved. Range proofs
-        // parallelize on their own scoped threads inside `prove_validity`.
-        //
         // TODO: drive the SP1 proving network asynchronously, checkpointing range (STARK) and
         // aggregation (SNARK) sessions through `job.sessions` so a worker restart resumes
         // in-flight network proofs instead of re-running them.
