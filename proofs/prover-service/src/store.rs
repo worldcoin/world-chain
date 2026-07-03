@@ -727,7 +727,7 @@ impl ProverServiceStore {
             if stored_lock_expires_at.is_none()
                 || stored_lock_expires_at.is_none_or(|expires_at| expires_at <= now)
             {
-                return Err(ProofJobQueueError::StaleLock(proof_id));
+                return Err(ProofJobQueueError::LockExpired(proof_id));
             }
 
             Err(ProofJobQueueError::Unknown(proof_id))
