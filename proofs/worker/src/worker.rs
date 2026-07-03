@@ -294,6 +294,7 @@ fn spawn_job<Q, B>(
             };
 
             tokio::select! {
+                biased;
                 _ = proof_and_submit_task => {},
                 lease_lost = &mut heartbeat => {
                     warn!(%lease_lost, "heartbeat failed, cancelling proof job");
