@@ -91,21 +91,22 @@ struct Sp1VkeysArgs {
     output: Option<PathBuf>,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
     match Cli::parse().command {
-        Command::HashRollupConfig(args) => print_rollup_config_hash(args)?,
-        Command::Witness(args) => write_witness(args)?,
-        Command::Execute(args) => sp1_execute(args)?,
-        Command::Prove(args) => sp1_prove(*args)?,
-        Command::Vkeys(args) => sp1_vkeys(args)?,
+        Command::HashRollupConfig(args) => print_rollup_config_hash(args).await?,
+        Command::Witness(args) => write_witness(args).await?,
+        Command::Execute(args) => sp1_execute(args).await?,
+        Command::Prove(args) => sp1_prove(*args).await?,
+        Command::Vkeys(args) => sp1_vkeys(args).await?,
     }
 
     Ok(())
 }
 
-fn sp1_execute(args: Sp1ExecuteArgs) -> Result<()> {
+async fn sp1_execute(args: Sp1ExecuteArgs) -> Result<()> {
     use sp1_sdk::{Prover, ProverClient, SP1Stdin};
 
     let witness_bytes = fs::read(&args.witness)
@@ -116,21 +117,19 @@ fn sp1_execute(args: Sp1ExecuteArgs) -> Result<()> {
     let mut stdin = SP1Stdin::new();
     stdin.write_vec(witness_bytes);
 
-    tokio::runtime::Runtime::new()?.block_on(async {
-        let client = ProverClient::builder().cpu().build().await;
-        let (public_values, report) = client
-            .execute(elf.into(), stdin)
-            .await
-            .context("SP1 execution failed")?;
+    let client = ProverClient::builder().cpu().build().await;
+    let (public_values, report) = client
+        .execute(elf.into(), stdin)
+        .await
+        .context("SP1 execution failed")?;
 
-        println!("execution succeeded");
-        println!("total cycles:  {}", report.total_instruction_count());
-        println!("public values: 0x{}", hex::encode(public_values.as_slice()));
-        Ok(())
-    })
+    println!("execution succeeded");
+    println!("total cycles:  {}", report.total_instruction_count());
+    println!("public values: 0x{}", hex::encode(public_values.as_slice()));
+    Ok(())
 }
 
-fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
+async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
     use sp1_sdk::SP1ProofMode;
     use world_chain_proof_succinct_host_utils::{
         prover::SuccinctProver,
@@ -167,7 +166,8 @@ fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
             split_count: args.ranges.max(1),
             prover_address: args.prover_address,
         },
-    )?;
+    )
+    .await?;
 
     println!(
         "aggregation proof complete: block {block} pre={pre:?} post={post:?}",
@@ -184,7 +184,7 @@ fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
     Ok(())
 }
 
-fn sp1_vkeys(args: Sp1VkeysArgs) -> Result<()> {
+async fn sp1_vkeys(args: Sp1VkeysArgs) -> Result<()> {
     use anyhow::anyhow;
     use sp1_sdk::{CpuProver, HashableKey, Prover, ProvingKey, env::EnvProver};
     use world_chain_proof_core::types::u32_to_u8;
@@ -194,21 +194,20 @@ fn sp1_vkeys(args: Sp1VkeysArgs) -> Result<()> {
     let range_elf_sha256 = hex::encode(Sha256::digest(&*range_elf_bytes));
     let agg_elf_sha256 = hex::encode(Sha256::digest(&*agg_elf_bytes));
 
-    let (range_vkey_commitment, aggregation_vkey) =
-        tokio::runtime::Runtime::new()?.block_on(async {
-            let client = EnvProver::Cpu(CpuProver::new().await);
-            let range_pk = client
-                .setup(range_elf_bytes)
-                .await
-                .map_err(|e| anyhow!("range setup failed: {e}"))?;
-            let agg_pk = client
-                .setup(agg_elf_bytes)
-                .await
-                .map_err(|e| anyhow!("aggregation setup failed: {e}"))?;
-            let range_vkey_commitment = B256::from(u32_to_u8(range_pk.verifying_key().hash_u32()));
-            let aggregation_vkey = agg_pk.verifying_key().bytes32();
-            anyhow::Ok((range_vkey_commitment, aggregation_vkey))
-        })?;
+    let (range_vkey_commitment, aggregation_vkey) = {
+        let client = EnvProver::Cpu(CpuProver::new().await);
+        let range_pk = client
+            .setup(range_elf_bytes)
+            .await
+            .map_err(|e| anyhow!("range setup failed: {e}"))?;
+        let agg_pk = client
+            .setup(agg_elf_bytes)
+            .await
+            .map_err(|e| anyhow!("aggregation setup failed: {e}"))?;
+        let range_vkey_commitment = B256::from(u32_to_u8(range_pk.verifying_key().hash_u32()));
+        let aggregation_vkey = agg_pk.verifying_key().bytes32();
+        anyhow::Ok((range_vkey_commitment, aggregation_vkey))
+    }?;
 
     let out = serde_json::to_string_pretty(&json!({
         "range_vkey_commitment": range_vkey_commitment,
