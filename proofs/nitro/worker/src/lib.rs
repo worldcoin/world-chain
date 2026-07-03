@@ -96,7 +96,6 @@ impl ClaimedProofJobHandler for NitroBackend {
         let prover =
             NitroProver::with_runtime(endpoint, self.config.expected_pcrs, self.rt_handle.clone());
 
-        // Witness generation is synchronous and heavy; keep it off the async scheduler.
         let input = build_range_input(
             &self.config.online,
             RangeWitnessRequest {
