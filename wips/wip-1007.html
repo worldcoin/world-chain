@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>PBH Transactions - World Chain Specs</title>
+        <title>WIP-1007: Flashblock Access Lists - World Chain Specs</title>
 
 
         <!-- Custom HTML head -->
@@ -176,49 +176,135 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="pbh-transactions"><a class="header" href="#pbh-transactions">PBH Transactions</a></h1>
-<p>The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that target the <a href="https://github.com/worldcoin/world-chain/blob/main/pkg/contracts/src/PBHEntryPointImplV1.sol">PBHEntryPoint</a> and includes a <a href="./payload.html">PBHPayload</a> encoded in the tx calldata.</p>
-<!--TODO: uncomment this once the pbh sidecar is merged to main The World Chain Builder introduces the concept of PBH transactions, which are standard OP transactions that include a valid `PBHPayload` either encoded in the `WorldChainTxEnvelope` or in tx calldata and target the `PBHEntryPoint`. -->
-<!--TODO: uncomment once the pbh sidecar is merged tom main ## World Chain Tx Envelope
-The `WorldChainTxEnvelope` is an EIP-2718 transaction envelope that extends the standard `OpTxEnvelope`, optionally including a `PBHSidecar`. -->
-<h2 id="pbh-4337-userops"><a class="header" href="#pbh-4337-userops">PBH 4337 UserOps</a></h2>
-<p>The <code>PBHEntryPoint</code> contract also provides priority inclusion for 4337 <a href="https://eips.ethereum.org/EIPS/eip-4337#useroperation">UserOps</a> through PBH bundles. A PBH bundle is a standard 4337 bundle where the aggregated signature field is consists of an array of <code>PBHPayload</code>. A valid PBH bundle should include a <code>n</code> <code>PBHPayload</code>s, with each item corresponding to a <code>UserOp</code> in the bundle.</p>
-<p>When creating a PBH <code>UserOp</code>, users will append the <code>PBHPayload</code> to the <a href="https://github.com/eth-infinitism/account-abstraction/blob/ed8a5c79b50361b2f1742ee9efecd45f494df597/contracts/interfaces/PackedUserOperation.sol#L27">signature</a> field and specify the <a href="">PBHSignatureAggregator</a> as the <a href="https://github.com/eth-infinitism/account-abstraction/blob/ed8a5c79b50361b2f1742ee9efecd45f494df597/contracts/legacy/v06/IAccount06.sol#L25-L26">sigAuthorizer</a>. The <code>UserOp</code> can then be sent to a 4337 bundler that supports PBH and maintains an alt-mempool for PBH <code>UserOps</code>.</p>
-<p>The bundler will <a href="./validation.html">validate the PBHPayload</a>, strip the payload from the <code>userOp.signature</code> field and add it to the aggregated signature.</p>
-<pre><code class="language-solidity">    /**
-     * Aggregate multiple signatures into a single value.
-     * This method is called off-chain to calculate the signature to pass with handleOps()
-     * @param userOps              - Array of UserOperations to collect the signatures from.
-     * @return aggregatedSignature - The aggregated signature.
-     */
-    function aggregateSignatures(PackedUserOperation[] calldata userOps)
-        external
-        view
-        returns (bytes memory aggregatedSignature)
-    {
-        IPBHEntryPoint.PBHPayload[] memory pbhPayloads = new IPBHEntryPoint.PBHPayload[](userOps.length);
-        for (uint256 i = 0; i &lt; userOps.length; ++i) {
-            (, bytes memory proofData) = SafeModuleSignatures.extractProof(
-                userOps[i].signature, ISafe(payable(userOps[i].sender)).getThreshold()
-            );
-            pbhPayloads[i] = abi.decode(proofData, (IPBHEntryPoint.PBHPayload));
-        }
-        aggregatedSignature = abi.encode(pbhPayloads);
-    }
-
+                        <h2 id="abstract"><a class="header" href="#abstract">Abstract</a></h2>
+<p>A Flashblock Access List (FBAL) is an [EIP-7928][eip-7928]-style block access list scoped to a single flashblock. The builder records every account, balance, nonce, code, and storage change produced while executing a flashblock’s transactions - each tagged with a block-local <em>block access index</em> — and publishes the resulting list, together with the Keccak256 hash of its RLP encoding, as an optional field on the flashblock pre-confirmation payload propagated over the Flashblocks P2P network.</p>
+<p>The access list is a self-contained description of the flashblock’s state transition. A consumer that receives it can (1) reconstruct the exact pre-state seen by every transaction in the flashblock from the access list itself, (2) re-execute those transactions independently and in parallel rather than sequentially, (3) compute the post-flashblock state root by applying the diff to the parent bundle without any re-execution, and (4) confirm that the builder’s claimed state transition is correct by re-deriving the access list and checking its hash against the published value, then checking the receipts root, state root, and block hash.</p>
+<h2 id="motivation"><a class="header" href="#motivation">Motivation</a></h2>
+<p>Flashblocks deliver sub-block pre-confirmations: a builder publishes an ordered stream of incremental payloads (<code>index = 0, 1, 2, …</code>) for a single block, and consumers apply each delta to maintain a <code>pending</code> block well before the full block is sealed. To surface that <code>pending</code> state through the standard RPC surface, every consuming node must execute each flashblock’s transactions as it arrives.</p>
+<p>Naively, each consumer re-executes the flashblock’s transactions sequentially against live state, exactly as the builder did. This has two costs on the hot path between receiving a flashblock and exposing it as <code>pending</code>:</p>
+<ul>
+<li><strong>Sequential dependency.</strong> Transactions must run one after another because each may read state written by an earlier one, so execution cannot be parallelized without knowing the data dependencies in advance.</li>
+<li><strong>A full state-root computation that depends on execution.</strong> The post-state and therefore the state root are only known once execution finishes.</li>
+</ul>
+<p>EIP-7928 observes that if a block ships a complete list of the state it touches and the values it writes — keyed by an intra-block ordering index — then a verifier no longer needs to discover dependencies by executing: the access list <em>is</em> the dependency graph and the post-state diff. This WIP applies that idea to flashblocks specifically:</p>
+<ul>
+<li>The per-index pre-state for any transaction can be materialized directly from the access list, so transactions can be executed <strong>in parallel</strong>, each against an isolated snapshot.</li>
+<li>The <strong>post-flashblock state root</strong> can be derived by applying the diff to the parent bundle state, with no execution at all.</li>
+<li>Re-execution is still performed, but only to <strong>verify</strong> the builder’s claim: the independently re-derived access list must hash to the published value, and the resulting receipts root, state root, and block hash must match the flashblock.</li>
+</ul>
+<p>The access list is therefore an optimization and an integrity check layered on the existing pre-confirmation flow, not a change to the canonical block. It is opt-in: a builder may or may not attach it, and a consumer selects the parallel path when it is present and a legacy sequential path when it is absent.</p>
+<h2 id="specification"><a class="header" href="#specification">Specification</a></h2>
+<p>The key words “MUST”, “MUST NOT”, “REQUIRED”, “SHALL”, “SHALL NOT”, “SHOULD”, “SHOULD NOT”, “RECOMMENDED”, “NOT RECOMMENDED”, “MAY”, and “OPTIONAL” in this document are to be interpreted as described in <a href="https://www.rfc-editor.org/rfc/rfc2119">RFC 2119</a> and <a href="https://www.rfc-editor.org/rfc/rfc8174">RFC 8174</a>.</p>
+<h3 id="data-structures"><a class="header" href="#data-structures">Data Structures</a></h3>
+<p>A Flashblock Access List reuses the EIP-7928 change-record types verbatim and wraps them in two World Chain types.</p>
+<h4 id="flashblockaccesslist"><a class="header" href="#flashblockaccesslist"><code>FlashblockAccessList</code></a></h4>
+<pre><code class="language-text">FlashblockAccessList {
+    changes:      List[AccountChanges],   // EIP-7928 account change records
+    min_tx_index: u16,                    // lowest block access index covered by this flashblock
+    max_tx_index: u16,                    // highest block access index covered by this flashblock
+}
 </code></pre>
-<p>Upon submitting a PBH bundle to the network, the World Chain builder will ensure that all PBH bundles have valid proofs and mark the bundle for priority inclusion.</p>
-<p>Visit the <a href="./validation.html#signal-hash">validation</a> section of the docs to see how to encode the <code>signalHash</code> for a PBH <code>UserOps</code> work, check out the <a href="https://github.com/worldcoin/world-chain/blob/main/pkg/contracts/src/PBHEntryPointImplV1.sol#L216-L250">handleAggregatedOps()</a> function and <a href="https://github.com/worldcoin/world-chain/blob/main/pkg/contracts/src/PBH4337Module.sol">PBH4337Module</a>.</p>
+<ul>
+<li><code>changes</code> is the set of [EIP-7928 <code>AccountChanges</code>][eip-7928] records produced by the transactions in this flashblock.</li>
+<li><code>min_tx_index</code> and <code>max_tx_index</code> are the inclusive bounds of the block-access-index range that this flashblock’s transactions occupy within the block. For the first flashblock <code>min_tx_index</code> is <code>0</code>. For a later flashblock <code>min_tx_index</code> is the count of transactions already committed in prior flashblocks plus one. <code>max_tx_index</code> corresponds to the trailing system transaction (balance increments).</li>
+</ul>
+<p>Each <code>AccountChanges</code> record (defined by EIP-7928) groups all changes for one account and MUST be encoded with the following field order:</p>
+<pre><code class="language-text">AccountChanges {
+    address:         Address,
+    storage_changes: List[SlotChanges],
+    storage_reads:   List[U256],
+    balance_changes: List[BalanceChange],
+    nonce_changes:   List[NonceChange],
+    code_changes:    List[CodeChange],
+}
+
+SlotChanges   { slot: U256, changes: List[StorageChange] }
+StorageChange { block_access_index: u64, new_value:    U256  }
+BalanceChange { block_access_index: u64, post_balance: U256  }
+NonceChange   { block_access_index: u64, new_nonce:    u64   }
+CodeChange    { block_access_index: u64, new_code:     Bytes }
+</code></pre>
+<p>Each change record carries the <code>block_access_index</code> at which it occurred and the resulting post-value (the value <em>after</em> the change), not a delta.</p>
+<h4 id="flashblockaccesslistdata"><a class="header" href="#flashblockaccesslistdata"><code>FlashblockAccessListData</code></a></h4>
+<pre><code class="language-text">FlashblockAccessListData {
+    access_list:      FlashblockAccessList,
+    access_list_hash: B256,
+}
+</code></pre>
+<p><code>access_list_hash</code> is defined as:</p>
+<pre><code class="language-text">access_list_hash = keccak256(rlp(access_list))
+</code></pre>
+<p>where <code>rlp(access_list)</code> is the RLP encoding of the <code>FlashblockAccessList</code> (the inner list, <strong>not</strong> the <code>FlashblockAccessListData</code> wrapper). The hash MUST be computed over the canonical form defined in <a href="#canonical-form">Canonical Form</a>.</p>
+<h4 id="placement-on-the-flashblock-payload"><a class="header" href="#placement-on-the-flashblock-payload">Placement on the flashblock payload</a></h4>
+<p><code>FlashblockAccessListData</code> is carried as the trailing OPTIONAL field of the flashblock diff:</p>
+<pre><code class="language-text">ExecutionPayloadFlashblockDeltaV1 {
+    state_root, receipts_root, logs_bloom, gas_used,
+    block_hash, transactions, withdrawals, withdrawals_root,
+    access_list_data: Option[FlashblockAccessListData],   // trailing optional
+}
+</code></pre>
+<p>Because <code>access_list_data</code> is encoded as a trailing optional field, a payload that omits it is wire-compatible with a payload that predates this WIP. The diff is in turn embedded in <code>FlashblocksPayloadV1</code> and propagated over the Flashblocks P2P network inside an authorized, builder-signed message (<code>AuthorizedMsg::FlashblocksPayloadV1</code>). This WIP adds no new P2P message type; it only populates a previously-empty optional field.</p>
+<h3 id="canonical-form"><a class="header" href="#canonical-form">Canonical Form</a></h3>
+<p>The <code>access_list_hash</code> is only useful if the builder and every consumer arrive at byte-identical RLP. A <code>FlashblockAccessList</code> MUST therefore be in canonical form before it is hashed. Canonical form is defined by the following rules, which both the builder (when producing) and the consumer (when re-deriving) MUST apply:</p>
+<ol>
+<li><strong>Account ordering.</strong> <code>changes</code> MUST be sorted ascending by <code>address</code>.</li>
+<li><strong>Slot ordering.</strong> Within each account, <code>storage_changes</code> MUST be sorted ascending by <code>slot</code>, and <code>storage_reads</code> MUST be sorted ascending and deduplicated.</li>
+<li><strong>Change ordering.</strong> Within each slot, and within each account’s <code>balance_changes</code>, <code>nonce_changes</code>, and <code>code_changes</code>, entries MUST be sorted ascending by <code>block_access_index</code>.</li>
+<li><strong>Consecutive de-duplication.</strong> Consecutive change entries that write the same value MUST be collapsed to the single occurrence with the highest <code>block_access_index</code>. (Executing a value, changing it, and changing it back, or writing the same value twice, MUST NOT inflate the list.)</li>
+<li><strong>Empty-account pruning.</strong> An account whose net recorded changes are all zero/default — every balance change to <code>0</code>, every nonce change to <code>0</code>, every code change to empty code, and every storage write to <code>0</code> — MUST be removed from <code>changes</code> entirely.</li>
+</ol>
+<p>Two access lists that describe the same state transition MUST produce the same canonical form and therefore the same <code>access_list_hash</code>.</p>
+<h3 id="block-access-index-semantics"><a class="header" href="#block-access-index-semantics">Block Access Index Semantics</a></h3>
+<p>The <code>block_access_index</code> is the mechanism that lets a consumer reconstruct the pre-state of any transaction without executing the ones before it.</p>
+<p>A change tagged with <code>block_access_index = j</code> is the state <em>produced at</em> index <code>j</code>. A reader executing the transaction at index <code>i</code> MUST observe every change with <code>block_access_index &lt; i</code> and MUST NOT observe any change with <code>block_access_index &gt;= i</code>. In other words, the transaction at index <code>i</code> reads the state left behind by all strictly-earlier indices, giving each transaction a snapshot-isolated view of the pre-state.</p>
+<p>Implementations construct this view by indexing the access list so that a change recorded at <code>block_access_index = j</code> becomes visible to readers at index <code>j + 1</code> and later, and a read at index <code>i</code> returns the most recent change whose visibility index is <code>&lt;= i</code>. A read that finds no matching entry MUST fall through to the parent (pre-block) state.</p>
+<h3 id="builder-construction-producer"><a class="header" href="#builder-construction-producer">Builder Construction (Producer)</a></h3>
+<p>While building a flashblock, the builder MUST record, for each committed transaction at its <code>block_access_index</code>, the post-values of all account fields and storage slots that the transaction changed, plus the storage slots it read. The recording rules are:</p>
+<ul>
+<li>For an account that exists in the pre-state, a <code>balance_changes</code> / <code>nonce_changes</code> / <code>code_changes</code> entry MUST be recorded only if the corresponding field differs from its pre-transaction value.</li>
+<li>For an account that does not exist in the pre-state, the balance, nonce, and code MUST all be recorded at the current index.</li>
+<li>For storage, a <code>StorageChange</code> MUST be recorded only when the slot’s post-value differs from the value read before any modification in that transaction (the original value, not a cached intermediate value).</li>
+<li>Every storage slot read during execution MUST be recorded in <code>storage_reads</code>, whether or not it was written.</li>
+</ul>
+<p>After all of a flashblock’s transactions are recorded, the builder MUST reduce the accumulated changes to <a href="#canonical-form">Canonical Form</a>, set <code>min_tx_index</code> / <code>max_tx_index</code> to the block-access-index range the flashblock covers, compute <code>access_list_hash</code>, and attach the resulting <code>FlashblockAccessListData</code> to the diff.</p>
+<p>Attaching a Flashblock Access List is OPTIONAL and controlled by builder configuration. A builder that does not produce access lists MUST leave <code>access_list_data</code> absent.</p>
+<h3 id="consumer-validation"><a class="header" href="#consumer-validation">Consumer Validation</a></h3>
+<p>A consumer that receives a flashblock whose diff contains <code>access_list_data</code> MAY use the access list to validate the flashblock via the parallel path. A consumer that uses the access list MUST perform all of the following, and MUST reject the flashblock if any step fails:</p>
+<ol>
+<li><strong>Reconstruct pre-state.</strong> Build a temporal pre-state from <code>access_list</code> over the parent block’s state, applying the <a href="#block-access-index-semantics">Block Access Index Semantics</a>. For any account, slot, or code not present in the access list, reads MUST fall through to the parent state.</li>
+<li><strong>Derive the post-state.</strong> Extend the bundle state committed by prior flashblocks with the changes in <code>access_list</code> to obtain the post-flashblock bundle, and compute its state root.</li>
+<li><strong>Re-execute in parallel.</strong> Execute the flashblock’s transactions, each at its own <code>block_access_index</code> over an isolated snapshot of the reconstructed pre-state, and aggregate the per-transaction receipts, gas, fees, and re-derived account changes.</li>
+<li><strong>Verify the access list.</strong> Reduce the re-derived changes to canonical form, compute their hash, and require it to equal the published <code>access_list_hash</code>. A mismatch MUST be rejected.</li>
+<li><strong>Verify the roots and hash.</strong> The re-computed <code>receipts_root</code> MUST equal <code>diff.receipts_root</code>, the derived <code>state_root</code> MUST equal <code>diff.state_root</code>, and the assembled block hash MUST equal <code>diff.block_hash</code>.</li>
+</ol>
+<p>A consumer MUST NOT surface a flashblock’s state as <code>pending</code> unless validation succeeds. If <code>access_list_data</code> is absent, the consumer MUST fall back to sequential re-execution of the diff transactions against the committed state (the legacy path), which produces the same <code>pending</code> block without the access-list optimizations.</p>
+<h4 id="block-reconstruction"><a class="header" href="#block-reconstruction">Block reconstruction</a></h4>
+<p>When a consumer reconstructs a full block header from a reduced set of flashblocks, the access list does not appear in the header. When the Amsterdam hardfork is active at the block timestamp, the reconstructed header MUST set <code>block_access_list_hash = EMPTY_BLOCK_ACCESS_LIST_HASH</code> and <code>slot_number = 0</code>; the Flashblock Access List is a pre-confirmation sidecar and is not committed to in the canonical block.</p>
+<h2 id="rationale"><a class="header" href="#rationale">Rationale</a></h2>
+<p><strong>Why reuse EIP-7928 change records.</strong> The per-account, per-field, index-tagged change records of EIP-7928 already encode exactly the dependency and post-state information a verifier needs, and reusing the alloy <code>eip7928</code> types keeps the World Chain wire format aligned with the upstream standard. The only World Chain additions are the <code>min_tx_index</code> / <code>max_tx_index</code> bounds (because a flashblock covers a contiguous <em>sub-range</em> of the block’s indices rather than the whole block) and the <code>access_list_hash</code> (because the list is gossiped and must be integrity-checked against the builder’s signature-covered payload).</p>
+<p><strong>Why <code>block_access_index</code> visibility is offset by one.</strong> Snapshot isolation requires transaction <code>i</code> to see writes from <code>&lt; i</code> but not its own writes at <code>i</code>. Storing a change produced at index <code>j</code> so that it becomes visible at <code>j + 1</code> makes a point-in-time read at index <code>i</code> return precisely the state of all strictly-earlier transactions, which is what enables independent parallel execution.</p>
+<h2 id="backwards-compatibility"><a class="header" href="#backwards-compatibility">Backwards Compatibility</a></h2>
+<p>The Flashblock Access List is carried in a trailing optional field of the flashblock diff and is gated behind builder configuration, so it introduces no backwards-incompatible wire change:</p>
+<ul>
+<li>A builder that does not enable access lists produces byte-identical payloads to the pre-WIP format.</li>
+<li>A consumer that does not understand the field ignores it and uses sequential re-execution.</li>
+<li>A consumer that does understand the field selects the parallel path only when the field is present, and the legacy path otherwise.</li>
+</ul>
+<h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
+<p><strong>The access list is advisory until verified.</strong> A consumer MUST NOT trust a builder-supplied access list.</p>
+<p><strong>Index integrity.</strong> The snapshot-isolation guarantee depends on correct <code>block_access_index</code> assignment and on the <code>&lt; i</code> visibility rule. An off-by-one in visibility, or a misattributed index, can let a transaction observe state from a later transaction, producing a pre-state that diverges from sequential execution; this would be caught by the re-execution checks but would manifest as a (potentially griefing) validation failure rather than silent corruption.</p>
+<p><strong>Authenticity is inherited, not added.</strong> This WIP relies on the existing Flashblocks P2P authorization: access lists are only meaningful inside builder-signed, authorizer-authorized payloads. The WIP adds no new trust assumption about who may publish, only new data inside an already-authenticated message.</p>
+<p><strong>Resource bounds.</strong> A flashblock access list can be large (one entry per touched account/slot per index). Consumers SHOULD bound the work spent reconstructing pre-state and executing in parallel, consistent with the EIP-7928 per-block maxima, so that an oversized access list cannot be used to exhaust a consumer on the pre-confirmation hot path.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../pbh/architecture.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../wips/wip-1006.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../pbh/payload.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../wips/wip-template.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -228,11 +314,11 @@ The `WorldChainTxEnvelope` is an EIP-2718 transaction envelope that extends the 
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../pbh/architecture.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../wips/wip-1006.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../pbh/payload.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../wips/wip-template.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

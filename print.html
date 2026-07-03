@@ -38,10 +38,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-25cdab43.js";
+            window.path_to_searchindex_js = "searchindex-570c630a.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-a26f203c.js"></script>
+        <script src="toc-ab5c5c9b.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -3912,6 +3912,127 @@ rootId = keccak256(abi.encode(
 <h2 id="copyright"><a class="header" href="#copyright">Copyright</a></h2>
 <p>Copyright and related rights waived via <a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="wip-1007-flashblock-access-lists"><a href="#wip-1007-flashblock-access-lists" class="header">WIP-1007: Flashblock Access Lists</a></h1>
+<h2 id="abstract-7"><a class="header" href="#abstract-7">Abstract</a></h2>
+<p>A Flashblock Access List (FBAL) is an [EIP-7928][eip-7928]-style block access list scoped to a single flashblock. The builder records every account, balance, nonce, code, and storage change produced while executing a flashblock’s transactions - each tagged with a block-local <em>block access index</em> — and publishes the resulting list, together with the Keccak256 hash of its RLP encoding, as an optional field on the flashblock pre-confirmation payload propagated over the Flashblocks P2P network.</p>
+<p>The access list is a self-contained description of the flashblock’s state transition. A consumer that receives it can (1) reconstruct the exact pre-state seen by every transaction in the flashblock from the access list itself, (2) re-execute those transactions independently and in parallel rather than sequentially, (3) compute the post-flashblock state root by applying the diff to the parent bundle without any re-execution, and (4) confirm that the builder’s claimed state transition is correct by re-deriving the access list and checking its hash against the published value, then checking the receipts root, state root, and block hash.</p>
+<h2 id="motivation-7"><a class="header" href="#motivation-7">Motivation</a></h2>
+<p>Flashblocks deliver sub-block pre-confirmations: a builder publishes an ordered stream of incremental payloads (<code>index = 0, 1, 2, …</code>) for a single block, and consumers apply each delta to maintain a <code>pending</code> block well before the full block is sealed. To surface that <code>pending</code> state through the standard RPC surface, every consuming node must execute each flashblock’s transactions as it arrives.</p>
+<p>Naively, each consumer re-executes the flashblock’s transactions sequentially against live state, exactly as the builder did. This has two costs on the hot path between receiving a flashblock and exposing it as <code>pending</code>:</p>
+<ul>
+<li><strong>Sequential dependency.</strong> Transactions must run one after another because each may read state written by an earlier one, so execution cannot be parallelized without knowing the data dependencies in advance.</li>
+<li><strong>A full state-root computation that depends on execution.</strong> The post-state and therefore the state root are only known once execution finishes.</li>
+</ul>
+<p>EIP-7928 observes that if a block ships a complete list of the state it touches and the values it writes — keyed by an intra-block ordering index — then a verifier no longer needs to discover dependencies by executing: the access list <em>is</em> the dependency graph and the post-state diff. This WIP applies that idea to flashblocks specifically:</p>
+<ul>
+<li>The per-index pre-state for any transaction can be materialized directly from the access list, so transactions can be executed <strong>in parallel</strong>, each against an isolated snapshot.</li>
+<li>The <strong>post-flashblock state root</strong> can be derived by applying the diff to the parent bundle state, with no execution at all.</li>
+<li>Re-execution is still performed, but only to <strong>verify</strong> the builder’s claim: the independently re-derived access list must hash to the published value, and the resulting receipts root, state root, and block hash must match the flashblock.</li>
+</ul>
+<p>The access list is therefore an optimization and an integrity check layered on the existing pre-confirmation flow, not a change to the canonical block. It is opt-in: a builder may or may not attach it, and a consumer selects the parallel path when it is present and a legacy sequential path when it is absent.</p>
+<h2 id="specification-6"><a class="header" href="#specification-6">Specification</a></h2>
+<p>The key words “MUST”, “MUST NOT”, “REQUIRED”, “SHALL”, “SHALL NOT”, “SHOULD”, “SHOULD NOT”, “RECOMMENDED”, “NOT RECOMMENDED”, “MAY”, and “OPTIONAL” in this document are to be interpreted as described in <a href="https://www.rfc-editor.org/rfc/rfc2119">RFC 2119</a> and <a href="https://www.rfc-editor.org/rfc/rfc8174">RFC 8174</a>.</p>
+<h3 id="data-structures-1"><a class="header" href="#data-structures-1">Data Structures</a></h3>
+<p>A Flashblock Access List reuses the EIP-7928 change-record types verbatim and wraps them in two World Chain types.</p>
+<h4 id="flashblockaccesslist"><a class="header" href="#flashblockaccesslist"><code>FlashblockAccessList</code></a></h4>
+<pre><code class="language-text">FlashblockAccessList {
+    changes:      List[AccountChanges],   // EIP-7928 account change records
+    min_tx_index: u16,                    // lowest block access index covered by this flashblock
+    max_tx_index: u16,                    // highest block access index covered by this flashblock
+}
+</code></pre>
+<ul>
+<li><code>changes</code> is the set of [EIP-7928 <code>AccountChanges</code>][eip-7928] records produced by the transactions in this flashblock.</li>
+<li><code>min_tx_index</code> and <code>max_tx_index</code> are the inclusive bounds of the block-access-index range that this flashblock’s transactions occupy within the block. For the first flashblock <code>min_tx_index</code> is <code>0</code>. For a later flashblock <code>min_tx_index</code> is the count of transactions already committed in prior flashblocks plus one. <code>max_tx_index</code> corresponds to the trailing system transaction (balance increments).</li>
+</ul>
+<p>Each <code>AccountChanges</code> record (defined by EIP-7928) groups all changes for one account and MUST be encoded with the following field order:</p>
+<pre><code class="language-text">AccountChanges {
+    address:         Address,
+    storage_changes: List[SlotChanges],
+    storage_reads:   List[U256],
+    balance_changes: List[BalanceChange],
+    nonce_changes:   List[NonceChange],
+    code_changes:    List[CodeChange],
+}
+
+SlotChanges   { slot: U256, changes: List[StorageChange] }
+StorageChange { block_access_index: u64, new_value:    U256  }
+BalanceChange { block_access_index: u64, post_balance: U256  }
+NonceChange   { block_access_index: u64, new_nonce:    u64   }
+CodeChange    { block_access_index: u64, new_code:     Bytes }
+</code></pre>
+<p>Each change record carries the <code>block_access_index</code> at which it occurred and the resulting post-value (the value <em>after</em> the change), not a delta.</p>
+<h4 id="flashblockaccesslistdata"><a class="header" href="#flashblockaccesslistdata"><code>FlashblockAccessListData</code></a></h4>
+<pre><code class="language-text">FlashblockAccessListData {
+    access_list:      FlashblockAccessList,
+    access_list_hash: B256,
+}
+</code></pre>
+<p><code>access_list_hash</code> is defined as:</p>
+<pre><code class="language-text">access_list_hash = keccak256(rlp(access_list))
+</code></pre>
+<p>where <code>rlp(access_list)</code> is the RLP encoding of the <code>FlashblockAccessList</code> (the inner list, <strong>not</strong> the <code>FlashblockAccessListData</code> wrapper). The hash MUST be computed over the canonical form defined in <a href="#canonical-form">Canonical Form</a>.</p>
+<h4 id="placement-on-the-flashblock-payload"><a class="header" href="#placement-on-the-flashblock-payload">Placement on the flashblock payload</a></h4>
+<p><code>FlashblockAccessListData</code> is carried as the trailing OPTIONAL field of the flashblock diff:</p>
+<pre><code class="language-text">ExecutionPayloadFlashblockDeltaV1 {
+    state_root, receipts_root, logs_bloom, gas_used,
+    block_hash, transactions, withdrawals, withdrawals_root,
+    access_list_data: Option[FlashblockAccessListData],   // trailing optional
+}
+</code></pre>
+<p>Because <code>access_list_data</code> is encoded as a trailing optional field, a payload that omits it is wire-compatible with a payload that predates this WIP. The diff is in turn embedded in <code>FlashblocksPayloadV1</code> and propagated over the Flashblocks P2P network inside an authorized, builder-signed message (<code>AuthorizedMsg::FlashblocksPayloadV1</code>). This WIP adds no new P2P message type; it only populates a previously-empty optional field.</p>
+<h3 id="canonical-form"><a class="header" href="#canonical-form">Canonical Form</a></h3>
+<p>The <code>access_list_hash</code> is only useful if the builder and every consumer arrive at byte-identical RLP. A <code>FlashblockAccessList</code> MUST therefore be in canonical form before it is hashed. Canonical form is defined by the following rules, which both the builder (when producing) and the consumer (when re-deriving) MUST apply:</p>
+<ol>
+<li><strong>Account ordering.</strong> <code>changes</code> MUST be sorted ascending by <code>address</code>.</li>
+<li><strong>Slot ordering.</strong> Within each account, <code>storage_changes</code> MUST be sorted ascending by <code>slot</code>, and <code>storage_reads</code> MUST be sorted ascending and deduplicated.</li>
+<li><strong>Change ordering.</strong> Within each slot, and within each account’s <code>balance_changes</code>, <code>nonce_changes</code>, and <code>code_changes</code>, entries MUST be sorted ascending by <code>block_access_index</code>.</li>
+<li><strong>Consecutive de-duplication.</strong> Consecutive change entries that write the same value MUST be collapsed to the single occurrence with the highest <code>block_access_index</code>. (Executing a value, changing it, and changing it back, or writing the same value twice, MUST NOT inflate the list.)</li>
+<li><strong>Empty-account pruning.</strong> An account whose net recorded changes are all zero/default — every balance change to <code>0</code>, every nonce change to <code>0</code>, every code change to empty code, and every storage write to <code>0</code> — MUST be removed from <code>changes</code> entirely.</li>
+</ol>
+<p>Two access lists that describe the same state transition MUST produce the same canonical form and therefore the same <code>access_list_hash</code>.</p>
+<h3 id="block-access-index-semantics"><a class="header" href="#block-access-index-semantics">Block Access Index Semantics</a></h3>
+<p>The <code>block_access_index</code> is the mechanism that lets a consumer reconstruct the pre-state of any transaction without executing the ones before it.</p>
+<p>A change tagged with <code>block_access_index = j</code> is the state <em>produced at</em> index <code>j</code>. A reader executing the transaction at index <code>i</code> MUST observe every change with <code>block_access_index &lt; i</code> and MUST NOT observe any change with <code>block_access_index &gt;= i</code>. In other words, the transaction at index <code>i</code> reads the state left behind by all strictly-earlier indices, giving each transaction a snapshot-isolated view of the pre-state.</p>
+<p>Implementations construct this view by indexing the access list so that a change recorded at <code>block_access_index = j</code> becomes visible to readers at index <code>j + 1</code> and later, and a read at index <code>i</code> returns the most recent change whose visibility index is <code>&lt;= i</code>. A read that finds no matching entry MUST fall through to the parent (pre-block) state.</p>
+<h3 id="builder-construction-producer"><a class="header" href="#builder-construction-producer">Builder Construction (Producer)</a></h3>
+<p>While building a flashblock, the builder MUST record, for each committed transaction at its <code>block_access_index</code>, the post-values of all account fields and storage slots that the transaction changed, plus the storage slots it read. The recording rules are:</p>
+<ul>
+<li>For an account that exists in the pre-state, a <code>balance_changes</code> / <code>nonce_changes</code> / <code>code_changes</code> entry MUST be recorded only if the corresponding field differs from its pre-transaction value.</li>
+<li>For an account that does not exist in the pre-state, the balance, nonce, and code MUST all be recorded at the current index.</li>
+<li>For storage, a <code>StorageChange</code> MUST be recorded only when the slot’s post-value differs from the value read before any modification in that transaction (the original value, not a cached intermediate value).</li>
+<li>Every storage slot read during execution MUST be recorded in <code>storage_reads</code>, whether or not it was written.</li>
+</ul>
+<p>After all of a flashblock’s transactions are recorded, the builder MUST reduce the accumulated changes to <a href="#canonical-form">Canonical Form</a>, set <code>min_tx_index</code> / <code>max_tx_index</code> to the block-access-index range the flashblock covers, compute <code>access_list_hash</code>, and attach the resulting <code>FlashblockAccessListData</code> to the diff.</p>
+<p>Attaching a Flashblock Access List is OPTIONAL and controlled by builder configuration. A builder that does not produce access lists MUST leave <code>access_list_data</code> absent.</p>
+<h3 id="consumer-validation"><a class="header" href="#consumer-validation">Consumer Validation</a></h3>
+<p>A consumer that receives a flashblock whose diff contains <code>access_list_data</code> MAY use the access list to validate the flashblock via the parallel path. A consumer that uses the access list MUST perform all of the following, and MUST reject the flashblock if any step fails:</p>
+<ol>
+<li><strong>Reconstruct pre-state.</strong> Build a temporal pre-state from <code>access_list</code> over the parent block’s state, applying the <a href="#block-access-index-semantics">Block Access Index Semantics</a>. For any account, slot, or code not present in the access list, reads MUST fall through to the parent state.</li>
+<li><strong>Derive the post-state.</strong> Extend the bundle state committed by prior flashblocks with the changes in <code>access_list</code> to obtain the post-flashblock bundle, and compute its state root.</li>
+<li><strong>Re-execute in parallel.</strong> Execute the flashblock’s transactions, each at its own <code>block_access_index</code> over an isolated snapshot of the reconstructed pre-state, and aggregate the per-transaction receipts, gas, fees, and re-derived account changes.</li>
+<li><strong>Verify the access list.</strong> Reduce the re-derived changes to canonical form, compute their hash, and require it to equal the published <code>access_list_hash</code>. A mismatch MUST be rejected.</li>
+<li><strong>Verify the roots and hash.</strong> The re-computed <code>receipts_root</code> MUST equal <code>diff.receipts_root</code>, the derived <code>state_root</code> MUST equal <code>diff.state_root</code>, and the assembled block hash MUST equal <code>diff.block_hash</code>.</li>
+</ol>
+<p>A consumer MUST NOT surface a flashblock’s state as <code>pending</code> unless validation succeeds. If <code>access_list_data</code> is absent, the consumer MUST fall back to sequential re-execution of the diff transactions against the committed state (the legacy path), which produces the same <code>pending</code> block without the access-list optimizations.</p>
+<h4 id="block-reconstruction"><a class="header" href="#block-reconstruction">Block reconstruction</a></h4>
+<p>When a consumer reconstructs a full block header from a reduced set of flashblocks, the access list does not appear in the header. When the Amsterdam hardfork is active at the block timestamp, the reconstructed header MUST set <code>block_access_list_hash = EMPTY_BLOCK_ACCESS_LIST_HASH</code> and <code>slot_number = 0</code>; the Flashblock Access List is a pre-confirmation sidecar and is not committed to in the canonical block.</p>
+<h2 id="rationale-4"><a class="header" href="#rationale-4">Rationale</a></h2>
+<p><strong>Why reuse EIP-7928 change records.</strong> The per-account, per-field, index-tagged change records of EIP-7928 already encode exactly the dependency and post-state information a verifier needs, and reusing the alloy <code>eip7928</code> types keeps the World Chain wire format aligned with the upstream standard. The only World Chain additions are the <code>min_tx_index</code> / <code>max_tx_index</code> bounds (because a flashblock covers a contiguous <em>sub-range</em> of the block’s indices rather than the whole block) and the <code>access_list_hash</code> (because the list is gossiped and must be integrity-checked against the builder’s signature-covered payload).</p>
+<p><strong>Why <code>block_access_index</code> visibility is offset by one.</strong> Snapshot isolation requires transaction <code>i</code> to see writes from <code>&lt; i</code> but not its own writes at <code>i</code>. Storing a change produced at index <code>j</code> so that it becomes visible at <code>j + 1</code> makes a point-in-time read at index <code>i</code> return precisely the state of all strictly-earlier transactions, which is what enables independent parallel execution.</p>
+<h2 id="backwards-compatibility-6"><a class="header" href="#backwards-compatibility-6">Backwards Compatibility</a></h2>
+<p>The Flashblock Access List is carried in a trailing optional field of the flashblock diff and is gated behind builder configuration, so it introduces no backwards-incompatible wire change:</p>
+<ul>
+<li>A builder that does not enable access lists produces byte-identical payloads to the pre-WIP format.</li>
+<li>A consumer that does not understand the field ignores it and uses sequential re-execution.</li>
+<li>A consumer that does understand the field selects the parallel path only when the field is present, and the legacy path otherwise.</li>
+</ul>
+<h2 id="security-considerations-6"><a class="header" href="#security-considerations-6">Security Considerations</a></h2>
+<p><strong>The access list is advisory until verified.</strong> A consumer MUST NOT trust a builder-supplied access list.</p>
+<p><strong>Index integrity.</strong> The snapshot-isolation guarantee depends on correct <code>block_access_index</code> assignment and on the <code>&lt; i</code> visibility rule. An off-by-one in visibility, or a misattributed index, can let a transaction observe state from a later transaction, producing a pre-state that diverges from sequential execution; this would be caught by the re-execution checks but would manifest as a (potentially griefing) validation failure rather than silent corruption.</p>
+<p><strong>Authenticity is inherited, not added.</strong> This WIP relies on the existing Flashblocks P2P authorization: access lists are only meaningful inside builder-signed, authorizer-authorized payloads. The WIP adds no new trust assumption about who may publish, only new data inside an already-authenticated message.</p>
+<p><strong>Resource bounds.</strong> A flashblock access list can be large (one entry per touched account/slot per index). Consumers SHOULD bound the work spent reconstructing pre-state and executing in parallel, consistent with the EIP-7928 per-block maxima, so that an oversized access list cannot be used to exhaust a consumer on the pre-confirmation hot path.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="wip-template"><a href="#wip-template" class="header">WIP Template</a></h1>
 <!--
   READ wips/README.md BEFORE USING THIS TEMPLATE!
@@ -3926,7 +4047,7 @@ rootId = keccak256(abi.encode(
 
   TODO: Remove this comment before submitting.
 -->
-<h2 id="abstract-7"><a class="header" href="#abstract-7">Abstract</a></h2>
+<h2 id="abstract-8"><a class="header" href="#abstract-8">Abstract</a></h2>
 <!--
   The Abstract is a multi-sentence (short paragraph) technical summary. This should be a
   very terse and human-readable version of the specification section. Someone should be
@@ -3934,7 +4055,7 @@ rootId = keccak256(abi.encode(
 
   TODO: Remove this comment before submitting.
 -->
-<h2 id="motivation-7"><a class="header" href="#motivation-7">Motivation</a></h2>
+<h2 id="motivation-8"><a class="header" href="#motivation-8">Motivation</a></h2>
 <!--
   This section is optional.
 
@@ -3945,7 +4066,7 @@ rootId = keccak256(abi.encode(
 
   TODO: Remove this comment before submitting.
 -->
-<h2 id="specification-6"><a class="header" href="#specification-6">Specification</a></h2>
+<h2 id="specification-7"><a class="header" href="#specification-7">Specification</a></h2>
 <!--
   The Specification section should describe the syntax and semantics of any new feature.
   The specification should be detailed enough to allow competing, interoperable implementations.
@@ -3965,7 +4086,7 @@ rootId = keccak256(abi.encode(
 
   TODO: Remove this comment before submitting.
 -->
-<h2 id="rationale-4"><a class="header" href="#rationale-4">Rationale</a></h2>
+<h2 id="rationale-5"><a class="header" href="#rationale-5">Rationale</a></h2>
 <!--
   The Rationale section fleshes out the specification by describing what motivated the design
   and why particular design decisions were made. It should describe alternate designs that
@@ -3974,7 +4095,7 @@ rootId = keccak256(abi.encode(
   TODO: Remove this comment before submitting.
 -->
 <p>TBD</p>
-<h2 id="backwards-compatibility-6"><a class="header" href="#backwards-compatibility-6">Backwards Compatibility</a></h2>
+<h2 id="backwards-compatibility-7"><a class="header" href="#backwards-compatibility-7">Backwards Compatibility</a></h2>
 <!--
   This section is optional.
 
@@ -4005,7 +4126,7 @@ rootId = keccak256(abi.encode(
 
   TODO: Remove this comment before submitting.
 -->
-<h2 id="security-considerations-6"><a class="header" href="#security-considerations-6">Security Considerations</a></h2>
+<h2 id="security-considerations-7"><a class="header" href="#security-considerations-7">Security Considerations</a></h2>
 <!--
   All WIPs MUST contain a section discussing the security implications and considerations
   relevant to the proposed change. Include information important for security discussions,
