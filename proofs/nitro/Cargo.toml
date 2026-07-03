@@ -61,6 +61,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 world-chain-proof-core.workspace = true
+async-trait.workspace = true
 
 # Host-side attestation verification deps (non-optional: used by parse_check_and_verify) --
 # These are compiled on all platforms; the p384 / x509-parser crates are pure Rust and

@@ -97,12 +97,7 @@ async fn nitro_prove(args: NitroArgs) -> Result<()> {
     let request = NitroRangeProofRequest::from_witness_data(&input.witness, None)
         .map_err(|e| anyhow!("failed to serialize witness: {e}"))?;
 
-    let rt = tokio::runtime::Runtime::new()?;
-    let prover = NitroProver::with_runtime(
-        EnclaveEndpoint::new(args.cid),
-        expected_pcrs,
-        rt.handle().clone(),
-    );
+    let prover = NitroProver::new(EnclaveEndpoint::new(args.cid), expected_pcrs);
 
     println!(
         "sending range {start}..={end} to enclave (cid {cid})",
@@ -111,8 +106,9 @@ async fn nitro_prove(args: NitroArgs) -> Result<()> {
         cid = args.cid,
     );
 
-    let artifact = rt
-        .block_on(prover.prove_range_async(request))
+    let artifact = prover
+        .prove_range_async(request)
+        .await
         .map_err(|e| anyhow!("enclave proving failed: {e}"))?;
 
     println!(

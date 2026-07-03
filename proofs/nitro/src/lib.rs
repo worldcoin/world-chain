@@ -26,6 +26,7 @@
 //!
 //! The enclave-side guest is the `world-chain-nitro-enclave` binary (`src/enclave.rs`).
 
+use async_trait::async_trait;
 // clap is used by the p384-hints binary; reference it here so the
 // `unused_crate_dependencies` lint does not fire on the lib target.
 use clap as _;
@@ -208,18 +209,19 @@ pub struct NitroAggregationProofArtifact {
 ///
 /// Modeled after [`world_chain_proof_succinct_proof_utils::WorldSuccinctProver`], but the
 /// request and artifact types carry attestation material instead of ZK proofs.
+#[async_trait]
 pub trait WorldNitroProver {
     /// Backend-specific error type.
     type Error;
 
     /// Proves one range witness inside an attested execution environment.
-    fn prove_range(
+    async fn prove_range(
         &self,
         request: NitroRangeProofRequest,
     ) -> Result<NitroRangeProofArtifact, Self::Error>;
 
     /// Aggregates already-attested range proofs.
-    fn prove_aggregation(
+    async fn prove_aggregation(
         &self,
         request: NitroAggregationProofRequest,
     ) -> Result<NitroAggregationProofArtifact, Self::Error>;

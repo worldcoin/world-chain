@@ -45,31 +45,15 @@ impl EnclaveEndpoint {
 pub struct NitroProver {
     endpoint: EnclaveEndpoint,
     expected_pcrs: ExpectedPcrs,
-    runtime: tokio::runtime::Handle,
 }
 
 impl NitroProver {
-    /// Creates a new prover bound to the current tokio runtime.
-    ///
-    /// # Panics
-    /// Panics if no tokio runtime is currently active. Use [`NitroProver::with_runtime`]
-    /// when calling from a non-async context.
+    /// Creates a new prover.
     #[must_use]
     pub fn new(endpoint: EnclaveEndpoint, expected_pcrs: ExpectedPcrs) -> Self {
-        Self::with_runtime(endpoint, expected_pcrs, tokio::runtime::Handle::current())
-    }
-
-    /// Creates a new prover with an explicit tokio runtime handle.
-    #[must_use]
-    pub fn with_runtime(
-        endpoint: EnclaveEndpoint,
-        expected_pcrs: ExpectedPcrs,
-        runtime: tokio::runtime::Handle,
-    ) -> Self {
         Self {
             endpoint,
             expected_pcrs,
-            runtime,
         }
     }
 
@@ -295,22 +279,18 @@ fn aggregation_outputs(
 impl WorldNitroProver for NitroProver {
     type Error = NitroProverError;
 
-    fn prove_range(
+    async fn prove_range(
         &self,
         request: NitroRangeProofRequest,
     ) -> Result<NitroRangeProofArtifact, Self::Error> {
-        let runtime = self.runtime.clone();
-        let prover = self.clone();
-        runtime.block_on(prover.prove_range_async(request))
+        self.prove_range_async(request)
     }
 
-    fn prove_aggregation(
+    async fn prove_aggregation(
         &self,
         request: NitroAggregationProofRequest,
     ) -> Result<NitroAggregationProofArtifact, Self::Error> {
-        let runtime = self.runtime.clone();
-        let prover = self.clone();
-        runtime.block_on(prover.prove_aggregation_async(request))
+        self.prove_aggregation_async(request)
     }
 }
 
