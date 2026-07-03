@@ -1,5 +1,6 @@
 //! Host-side `NitroProver` that talks to a running Nitro enclave over vsock.
 
+use async_trait::async_trait;
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
 use tokio_vsock::{VsockAddr, VsockStream};
 use tracing::{debug, instrument, warn};
@@ -276,6 +277,7 @@ fn aggregation_outputs(
     }
 }
 
+#[async_trait]
 impl WorldNitroProver for NitroProver {
     type Error = NitroProverError;
 
@@ -283,14 +285,14 @@ impl WorldNitroProver for NitroProver {
         &self,
         request: NitroRangeProofRequest,
     ) -> Result<NitroRangeProofArtifact, Self::Error> {
-        self.prove_range_async(request)
+        self.prove_range_async(request).await
     }
 
     async fn prove_aggregation(
         &self,
         request: NitroAggregationProofRequest,
     ) -> Result<NitroAggregationProofArtifact, Self::Error> {
-        self.prove_aggregation_async(request)
+        self.prove_aggregation_async(request).await
     }
 }
 
