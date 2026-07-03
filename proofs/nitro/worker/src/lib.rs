@@ -97,17 +97,16 @@ impl ClaimedProofJobHandler for NitroBackend {
             NitroProver::with_runtime(endpoint, self.config.expected_pcrs, self.rt_handle.clone());
 
         // Witness generation is synchronous and heavy; keep it off the async scheduler.
-        let input = tokio::task::block_in_place(|| {
-            build_range_input(
-                &self.config.online,
-                RangeWitnessRequest {
-                    start_block,
-                    end_block: request.l2_block_number,
-                    l1_head: Some(request.l1_head),
-                    allow_unfinalized: false,
-                },
-            )
-        })
+        let input = build_range_input(
+            &self.config.online,
+            RangeWitnessRequest {
+                start_block,
+                end_block: request.l2_block_number,
+                l1_head: Some(request.l1_head),
+                allow_unfinalized: false,
+            },
+        )
+        .await
         .context("witness generation failed")?;
 
         let nitro_request = NitroRangeProofRequest::from_witness_data(&input.witness, None)

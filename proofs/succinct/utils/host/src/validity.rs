@@ -6,7 +6,7 @@
 
 use alloy_primitives::{Address, B256};
 use anyhow::{Context, bail};
-use reqwest::blocking::Client;
+use reqwest::Client;
 use world_chain_proof_core::{artifacts::AggregationProofArtifact, types::AggregationInputs};
 use world_chain_proof_succinct_utils::{
     AggregationProofRequest, RangeProofRequest, WorldSuccinctProver,
@@ -68,7 +68,7 @@ impl ValidityProofRequest {
 /// level up by the worker's concurrency permits. Sequential proving also keeps only one
 /// witness alive at a time, bounding memory, and avoids sharing the prover's runtime across
 /// threads.
-pub fn prove_validity<P>(
+pub async fn prove_validity<P>(
     host: &OnlineHostConfig,
     prover: &P,
     request: ValidityProofRequest,
@@ -85,7 +85,7 @@ where
     let client = Client::new();
     let l1_head = match request.l1_head {
         Some(hash) => hash,
-        None => resolve_l1_head(&client, &host.l2_rpc, &host.l1_rpc, request.end_block)?,
+        None => resolve_l1_head(&client, &host.l2_rpc, &host.l1_rpc, request.end_block).await?,
     };
 
     let mut boot_infos = Vec::with_capacity(ranges.len());
@@ -104,7 +104,8 @@ where
                 l1_head: Some(l1_head),
                 allow_unfinalized: request.allow_unfinalized,
             },
-        )?;
+        )
+        .await?;
 
         tracing::info!(
             start = sub_range.start + 1,
@@ -128,7 +129,7 @@ where
         range_proofs.push(artifact.proof);
     }
 
-    let l1_header = fetch_l1_header_by_hash(&client, &host.l1_rpc, l1_head)?;
+    let l1_header = fetch_l1_header_by_hash(&client, &host.l1_rpc, l1_head).await?;
     let l1_headers_cbor =
         serde_cbor::to_vec(&vec![l1_header]).context("CBOR-encoding L1 header failed")?;
 

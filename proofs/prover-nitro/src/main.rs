@@ -54,20 +54,21 @@ struct NitroArgs {
     output: Option<PathBuf>,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
     match Cli::parse().command {
-        Command::HashRollupConfig(args) => print_rollup_config_hash(args)?,
-        Command::Witness(args) => write_witness(args)?,
-        Command::Prove(args) => nitro_prove(args)?,
+        Command::HashRollupConfig(args) => print_rollup_config_hash(args).await?,
+        Command::Witness(args) => write_witness(args).await?,
+        Command::Prove(args) => nitro_prove(args).await?,
     }
 
     Ok(())
 }
 
 #[cfg(target_os = "linux")]
-fn nitro_prove(args: NitroArgs) -> Result<()> {
+async fn nitro_prove(args: NitroArgs) -> Result<()> {
     use anyhow::anyhow;
     use world_chain_proof_nitro::{
         ExpectedPcrs, NitroRangeProofRequest,
@@ -77,7 +78,7 @@ fn nitro_prove(args: NitroArgs) -> Result<()> {
     };
     use world_chain_prover::{build_range_input_from_args, write_json};
 
-    let input = build_range_input_from_args(&args.rpc)?;
+    let input = build_range_input_from_args(&args.rpc).await?;
 
     let expected_pcrs = match (args.pcr0, args.pcr1, args.pcr2) {
         (Some(p0), Some(p1), Some(p2)) => ExpectedPcrs {
@@ -147,7 +148,7 @@ fn nitro_prove(args: NitroArgs) -> Result<()> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn nitro_prove(_args: NitroArgs) -> Result<()> {
+async fn nitro_prove(_args: NitroArgs) -> Result<()> {
     bail!("world-chain-prover-nitro requires Linux with AF_VSOCK support")
 }
 

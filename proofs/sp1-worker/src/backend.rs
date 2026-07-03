@@ -66,20 +66,19 @@ where
         // aggregation (SNARK) sessions through `job.sessions` so a worker restart resumes
         // in-flight network proofs instead of re-running them.
         let _ = &job.sessions;
-        let artifact = tokio::task::block_in_place(|| {
-            prove_validity(
-                &self.host,
-                &self.prover,
-                ValidityProofRequest::new(
-                    start_block,
-                    request.l2_block_number,
-                    Some(request.l1_head),
-                    self.config.allow_unfinalized,
-                    self.config.split_count,
-                    self.config.prover_address,
-                ),
-            )
-        })
+        let artifact = prove_validity(
+            &self.host,
+            &self.prover,
+            ValidityProofRequest::new(
+                start_block,
+                request.l2_block_number,
+                Some(request.l1_head),
+                self.config.allow_unfinalized,
+                self.config.split_count,
+                self.config.prover_address,
+            ),
+        )
+        .await
         .context("SP1 validity proving failed")?;
 
         check_artifact(request, &artifact)?;
