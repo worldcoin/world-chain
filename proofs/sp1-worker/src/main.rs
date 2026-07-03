@@ -145,6 +145,17 @@ struct Cli {
 
 fn main() -> Result<()> {
     dotenvy::dotenv().ok();
+
+    // The Succinct sp1-sdk reads `NETWORK_PRIVATE_KEY` from the environment when building
+    // a network prover.  Infra/ops provisions the key as `SP1_PRIVATE_KEY`, so bridge the
+    // two names: if `NETWORK_PRIVATE_KEY` is unset but `SP1_PRIVATE_KEY` is, copy it over
+    // before the SDK builder runs.
+    if std::env::var("NETWORK_PRIVATE_KEY").is_err() {
+        if let Ok(val) = std::env::var("SP1_PRIVATE_KEY") {
+            std::env::set_var("NETWORK_PRIVATE_KEY", &val);
+        }
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
