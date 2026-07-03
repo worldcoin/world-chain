@@ -662,10 +662,10 @@ impl ProverServiceStore {
             SET lock_expires_at = $1,
                 updated_at = $2
             WHERE proof_id = $3
-                AND job_status = $3
-                AND worker_id = $4
-                AND lock_id = $5
-                AND lock_expires_at > $6
+                AND job_status = $4
+                AND worker_id = $5
+                AND lock_id = $6
+                AND lock_expires_at > $7
                 RETURNING proof_id
             "#,
         )
