@@ -16,6 +16,7 @@
 //! rather than re-run completed phases.
 
 mod backend;
+mod heartbeat;
 mod retry;
 mod worker;
 
