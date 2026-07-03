@@ -359,6 +359,16 @@ pub async fn run() -> Result<()> {
         },
     );
 
+    // Ctrl-C triggers a graceful shutdown: the worker stops leasing, signals the backend to
+    // shut down, and resolves.
+    let token = worker.cancellation_token();
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() {
+            info!("received ctrl-c, shutting down");
+            token.cancel();
+        }
+    });
+
     worker.await;
     Ok(())
 }
