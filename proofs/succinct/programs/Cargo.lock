@@ -4698,7 +4698,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-core"
-version = "2.3.0"
+version = "2.4.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -4721,7 +4721,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-kona-client-utils"
-version = "2.3.0"
+version = "2.4.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -4767,7 +4767,7 @@ dependencies = [
 
 [[package]]
 name = "world-chain-proof-succinct-client-utils"
-version = "2.3.0"
+version = "2.4.0"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
