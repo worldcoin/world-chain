@@ -59,9 +59,10 @@ impl FlashblockAccessList {
     ///
     /// This derives the post-state directly from the *claimed* access list, so the block state root
     /// can be computed without re-executing transactions. The access list is a sparse diff — it
-    /// only records the fields that changed — so any field it omits is read from `state_provider`
-    /// (the parent state) to complete the account leaf. The latest recorded change per field wins
-    /// (changes are not guaranteed pre-sorted, so selection is by block access index, not position).
+    /// only records the fields that changed — so any field it omits is read from the already
+    /// committed post-state first, then from `state_provider` (the parent state) to complete the
+    /// account leaf. The latest recorded change per field wins (changes are not guaranteed
+    /// pre-sorted, so selection is by block access index, not position).
     ///
     /// Accounts that only appear as storage reads are skipped, and accounts that end empty
     /// (EIP-158) are inserted as destroyed so their trie leaf and storage are removed.
@@ -71,13 +72,20 @@ impl FlashblockAccessList {
         mut hashed_post_state: HashedPostState,
     ) -> ProviderResult<HashedPostState> {
         for changes in &self.changes {
+            let hashed_address = keccak256(changes.address);
+
             // Read the parent account only when the access list omits a field we need to complete
-            // the leaf. Pure storage reads carry no field changes and need no parent lookup.
+            // the leaf. For later flashblocks, an earlier flashblock in the same block may already
+            // have changed that account, so prefer the committed post-state over the parent state.
+            // Pure storage reads carry no field changes and need no parent lookup.
             let pre = if changes.balance_changes.is_empty()
                 || changes.nonce_changes.is_empty()
                 || changes.code_changes.is_empty()
             {
-                state_provider.basic_account(&changes.address)?
+                match hashed_post_state.accounts.get(&hashed_address).cloned() {
+                    Some(account) => account,
+                    None => state_provider.basic_account(&changes.address)?,
+                }
             } else {
                 None
             };
@@ -86,7 +94,6 @@ impl FlashblockAccessList {
                 continue;
             };
 
-            let hashed_address = keccak256(changes.address);
             // An account that ends empty is pruned from the trie (EIP-158): record it as destroyed
             // so the leaf is removed (`None`) and its storage is wiped.
             let destroyed = account.is_empty();

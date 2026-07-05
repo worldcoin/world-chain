@@ -1,16 +1,18 @@
 use crate::{
     error::{ProofJobQueueError, ProofRequestError},
     types::{
-        BackendProofState, BackendUpdate, LeaseToken, LeasedBackendProofWork, LeasedProofRequest,
-        ProofBackend, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
-        ProofSubmissionLease,
+        BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
+        ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType,
+        SucceededProofResponse,
     },
 };
 use async_trait::async_trait;
+use auto_impl::auto_impl;
 
 /// It contains all methods needed for a defender to request a proof
 /// to the `prover-service`.
 #[async_trait]
+#[auto_impl(Arc)]
 pub trait ProofRequester {
     /// Send a proof request to the `prover-service`.
     ///
@@ -36,65 +38,54 @@ pub trait ProofRequester {
 /// It contains all methods needed for a prover worker to get
 /// new proof requests and submits proof responses.
 #[async_trait]
+#[auto_impl(Arc)]
 pub trait ProofJobQueue {
     /// Look for a new proof request to start on the given backend.
     ///
-    /// Returns `None` when no work is available. Returned jobs are leased:
-    /// a job that is neither submitted nor failed before the lease expires
+    /// Returns `None` when no work is available. Returned jobs are locked:
+    /// a job that is neither submitted nor failed before the lock expires
     /// is re-queued.
     async fn get_next_proof(
         &self,
         backend: ProofBackend,
-    ) -> Result<Option<LeasedProofRequest>, ProofJobQueueError>;
-
-    /// Persist durable backend work created while starting a proof job.
-    async fn submit_backend_proof_state(
-        &self,
-        proof_id: ProofRequestId,
-        backend_proof_state: BackendProofState,
-        lease_token: LeaseToken,
-    ) -> Result<(), ProofJobQueueError>;
-
-    /// Lease durable backend work that is due for polling or advancement.
-    async fn get_next_backend_proof(
-        &self,
-        backend: ProofBackend,
-    ) -> Result<Option<LeasedBackendProofWork>, ProofJobQueueError>;
-
-    /// Apply an update produced while advancing a durable backend job.
-    async fn complete_backend_proof_job(
-        &self,
-        backend_job_id: i64,
-        lease_token: LeaseToken,
-        next_update: BackendUpdate,
-    ) -> Result<(), ProofJobQueueError>;
-
-    /// Report that advancing a durable backend job failed for this attempt.
-    ///
-    /// The backend job is re-scheduled until its attempts are exhausted, after
-    /// which it and its parent proof job are marked as permanently failed.
-    async fn fail_backend_proof_job(
-        &self,
-        backend_job_id: i64,
-        reason: String,
-        lease_token: LeaseToken,
-    ) -> Result<(), ProofJobQueueError>;
+        worker_id: String,
+    ) -> Result<Option<LockedProofRequest>, ProofJobQueueError>;
 
     /// Submit a final proof response to the `prover-service`.
     async fn submit_proof(
         &self,
-        proof: ProofResponse,
-        lease: ProofSubmissionLease,
+        proof: SucceededProofResponse,
+        worker_id: String,
+        lock: LockId,
     ) -> Result<(), ProofJobQueueError>;
 
-    /// Report that proving failed for the given job.
-    ///
-    /// The job is re-queued until its attempts are exhausted, after which
-    /// it is marked as permanently failed.
-    async fn fail_proof(
+    /// Get a backend session that matches the provided proof_id and
+    /// session_type if it exists.
+    async fn get_proof_session(
         &self,
         proof_id: ProofRequestId,
-        reason: String,
-        lease_token: LeaseToken,
+        session_type: SessionType,
+    ) -> Result<Option<BackendSession>, ProofJobQueueError>;
+
+    /// Record a backend session tied to the provided proof_id
+    /// and session_type.
+    async fn record_proof_session(
+        &self,
+        proof_id: ProofRequestId,
+        session_type: SessionType,
+        worker_id: String,
+        lock_id: LockId,
+        backend_session_id: String,
+        state: BackendSessionStatus,
+    ) -> Result<(), ProofJobQueueError>;
+
+    /// Ping the `prover-service` to signal that a proof worker tied
+    /// to the provided `worker_id` and `lock` is still working on
+    /// the provided `proof_id` job.
+    async fn heartbeat(
+        &self,
+        proof_id: ProofRequestId,
+        worker_id: String,
+        lock: LockId,
     ) -> Result<(), ProofJobQueueError>;
 }

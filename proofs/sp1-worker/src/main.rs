@@ -10,7 +10,13 @@ use world_chain_proof_kona_host_utils::online::build_online_config;
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
 use world_chain_proof_succinct_host_utils::prover::{SP1ProofMode, Sp1ProverKind, SuccinctProver};
 use world_chain_prover_service::RpcProverServiceClient;
-use world_chain_sp1_worker::{ProofWorker, ProofWorkerConfig, Sp1Backend, Sp1BackendConfig};
+use world_chain_sp1_worker::{
+    ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
+};
+
+const DEFAULT_SUBMIT_PROOF_RETRY_MAX_RETRIES: usize = 10;
+const DEFAULT_SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS: u64 = 100;
+const DEFAULT_SUBMIT_PROOF_RETRY_MAX_DELAY_MS: u64 = 10_000;
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum Network {
@@ -107,6 +113,34 @@ struct Cli {
     /// the Succinct proving network.
     #[arg(long, default_value_t = 1)]
     max_concurrent_jobs: usize,
+
+    /// Maximum retries after a retryable submitProof failure.
+    #[arg(
+        long,
+        env = "SUBMIT_PROOF_RETRY_MAX_RETRIES",
+        default_value_t = DEFAULT_SUBMIT_PROOF_RETRY_MAX_RETRIES
+    )]
+    submit_proof_retry_max_retries: usize,
+
+    /// Initial delay in milliseconds before retrying submitProof.
+    #[arg(
+        long,
+        env = "SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS",
+        default_value_t = DEFAULT_SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS
+    )]
+    submit_proof_retry_initial_delay_ms: u64,
+
+    /// Maximum delay in milliseconds between submitProof retries.
+    #[arg(
+        long,
+        env = "SUBMIT_PROOF_RETRY_MAX_DELAY_MS",
+        default_value_t = DEFAULT_SUBMIT_PROOF_RETRY_MAX_DELAY_MS
+    )]
+    submit_proof_retry_max_delay_ms: u64,
+
+    /// The unique worker id.
+    #[arg(long)]
+    worker_id: String,
 }
 
 fn main() -> Result<()> {
@@ -148,12 +182,22 @@ fn main() -> Result<()> {
 
     let queue = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
+    let worker_id = format!("{}-sp1-worker", cli.worker_id);
+    let retry_initial_delay = Duration::from_millis(cli.submit_proof_retry_initial_delay_ms);
+    let retry_max_delay = Duration::from_millis(cli.submit_proof_retry_max_delay_ms);
+    let retry_config = RetryConfig::new(
+        cli.submit_proof_retry_max_retries,
+        retry_initial_delay,
+        retry_max_delay,
+    );
     let worker = ProofWorker::new(
         queue,
         backend,
         ProofWorkerConfig {
+            worker_id,
             poll_interval: Duration::from_secs(cli.poll_interval_seconds),
             max_concurrent_jobs: cli.max_concurrent_jobs,
+            retry_config,
         },
     );
 
@@ -162,6 +206,9 @@ fn main() -> Result<()> {
         block_interval = cli.block_interval,
         ranges = cli.ranges.max(1),
         prover = ?cli.prover,
+        submit_proof_retry_max_retries = cli.submit_proof_retry_max_retries,
+        submit_proof_retry_initial_delay_ms = cli.submit_proof_retry_initial_delay_ms,
+        submit_proof_retry_max_delay_ms = cli.submit_proof_retry_max_delay_ms,
         "sp1-worker starting"
     );
 

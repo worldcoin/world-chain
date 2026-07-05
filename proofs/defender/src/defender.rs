@@ -13,7 +13,7 @@ use std::{
 use tracing::{error, info, warn};
 use world_chain_proofs::{ConsensusProvider, GameCreated, ProofLane, RootState};
 use world_chain_prover_service::{
-    ProofBackend, ProofData, ProofRequest, ProofRequester, ProofStatus,
+    ProofBackend, ProofData, ProofRequest, ProofRequester, ProofResponse, ProofStatus,
 };
 
 /// The number of L1 blocks published in 24h.
@@ -205,12 +205,30 @@ where
                     }
                 };
                 match status {
-                    ProofStatus::Queued | ProofStatus::Starting | ProofStatus::BackendPending => {
-                        state
-                    }
-                    ProofStatus::Completed => {
+                    ProofStatus::Created | ProofStatus::Running => state,
+                    ProofStatus::Succeeded => {
                         let response = match self.proof_requester.get_proof(id).await {
-                            Ok(response) => response,
+                            Ok(ProofResponse::Succeeded(response)) => response,
+                            Ok(ProofResponse::Pending(response)) => {
+                                warn!(
+                                    %game,
+                                    ?lane,
+                                    %id,
+                                    status = %response.status,
+                                    "proof status was succeeded but proof response is pending; retrying next tick"
+                                );
+                                return state;
+                            }
+                            Ok(ProofResponse::Failed(response)) => {
+                                warn!(
+                                    %game,
+                                    ?lane,
+                                    %id,
+                                    reason = %response.reason,
+                                    "proof status was succeeded but proof response is failed; retrying next tick"
+                                );
+                                return state;
+                            }
                             Err(error) => {
                                 warn!(%game, ?lane, %id, %error, "proof retrieval failed; retrying next tick");
                                 return state;

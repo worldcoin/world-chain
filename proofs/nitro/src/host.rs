@@ -1,5 +1,6 @@
 //! Host-side `NitroProver` that talks to a running Nitro enclave over vsock.
 
+use async_trait::async_trait;
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
 use tokio_vsock::{VsockAddr, VsockStream};
 use tracing::{debug, instrument, warn};
@@ -45,31 +46,15 @@ impl EnclaveEndpoint {
 pub struct NitroProver {
     endpoint: EnclaveEndpoint,
     expected_pcrs: ExpectedPcrs,
-    runtime: tokio::runtime::Handle,
 }
 
 impl NitroProver {
-    /// Creates a new prover bound to the current tokio runtime.
-    ///
-    /// # Panics
-    /// Panics if no tokio runtime is currently active. Use [`NitroProver::with_runtime`]
-    /// when calling from a non-async context.
+    /// Creates a new prover.
     #[must_use]
     pub fn new(endpoint: EnclaveEndpoint, expected_pcrs: ExpectedPcrs) -> Self {
-        Self::with_runtime(endpoint, expected_pcrs, tokio::runtime::Handle::current())
-    }
-
-    /// Creates a new prover with an explicit tokio runtime handle.
-    #[must_use]
-    pub fn with_runtime(
-        endpoint: EnclaveEndpoint,
-        expected_pcrs: ExpectedPcrs,
-        runtime: tokio::runtime::Handle,
-    ) -> Self {
         Self {
             endpoint,
             expected_pcrs,
-            runtime,
         }
     }
 
@@ -235,8 +220,8 @@ impl NitroProver {
 
 /// Verifies the enclave's 65-byte recoverable secp256k1 signature over
 /// `signing_commitment(boot_info)` and checks that the recovered key matches
-/// `expected_pub_key` (the compressed SEC1-encoded public key from the key-attestation
-/// document).
+/// `expected_pub_key` (the uncompressed SEC1-encoded public key, `0x04 || X || Y`,
+/// from the key-attestation document).
 ///
 /// # Errors
 ///
@@ -265,7 +250,7 @@ fn verify_proof_signature(
     })?;
     let recovered_vk = VerifyingKey::recover_from_prehash(&commitment, &sig, rec_id)
         .map_err(|e| NitroProverError::InvalidSignature(e.to_string()))?;
-    let recovered_key_bytes = recovered_vk.to_encoded_point(true).as_bytes().to_vec();
+    let recovered_key_bytes = recovered_vk.to_encoded_point(false).as_bytes().to_vec();
     if recovered_key_bytes.as_slice() != expected_pub_key {
         return Err(NitroProverError::SignatureMismatch {
             recovered: hex::encode(&recovered_key_bytes),
@@ -292,25 +277,22 @@ fn aggregation_outputs(
     }
 }
 
+#[async_trait]
 impl WorldNitroProver for NitroProver {
     type Error = NitroProverError;
 
-    fn prove_range(
+    async fn prove_range(
         &self,
         request: NitroRangeProofRequest,
     ) -> Result<NitroRangeProofArtifact, Self::Error> {
-        let runtime = self.runtime.clone();
-        let prover = self.clone();
-        runtime.block_on(prover.prove_range_async(request))
+        self.prove_range_async(request).await
     }
 
-    fn prove_aggregation(
+    async fn prove_aggregation(
         &self,
         request: NitroAggregationProofRequest,
     ) -> Result<NitroAggregationProofArtifact, Self::Error> {
-        let runtime = self.runtime.clone();
-        let prover = self.clone();
-        runtime.block_on(prover.prove_aggregation_async(request))
+        self.prove_aggregation_async(request).await
     }
 }
 

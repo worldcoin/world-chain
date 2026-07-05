@@ -50,7 +50,7 @@ use world_chain_builder::payload_builder_metrics::PayloadBuildAttemptMetrics;
 use world_chain_chainspec::{WorldChainSpec, WorldChainSpecBuilder};
 use world_chain_evm::{
     BlockBuilderExt, OpRethReceiptBuilder, WorldChainEvmConfig,
-    execution::bal::{BalBlockBuilder, CommittedState},
+    execution::bal::{BalBlockBuilder, CommittedState, pre_refund_gas_used},
     utils::cache_prestate_from_bundle,
 };
 use world_chain_primitives::{
@@ -464,13 +464,25 @@ impl TxOp {
 
     /// Creates a signed transaction from this operation
     pub fn to_signed_tx(&self, nonce: u64) -> Recovered<OpTransactionSigned> {
+        self.to_signed_tx_with_gas_limit(nonce, self.gas_limit())
+    }
+
+    /// Creates a signed transaction from this operation with an explicit gas limit.
+    ///
+    /// Used by gas-limit fuzzing to set the transaction's `gas_limit` field independently of the
+    /// operation's estimated cost.
+    pub fn to_signed_tx_with_gas_limit(
+        &self,
+        nonce: u64,
+        gas_limit: u64,
+    ) -> Recovered<OpTransactionSigned> {
         let mut tx = TxEip1559 {
             chain_id: CHAIN_SPEC.chain().id(),
             nonce,
             max_fee_per_gas: CHAIN_SPEC.genesis_header().base_fee_per_gas.unwrap_or(1) as u128 * 2,
             max_priority_fee_per_gas: 1,
             to: self.target(),
-            gas_limit: self.gas_limit(),
+            gas_limit,
             value: self.value(),
             input: self.encode_calldata(),
             access_list: Default::default(),
@@ -486,7 +498,12 @@ impl TxOp {
 
     /// Encodes transaction to bytes
     pub fn to_encoded_bytes(&self, nonce: u64) -> Bytes {
-        let tx = self.to_signed_tx(nonce);
+        self.to_encoded_bytes_with_gas_limit(nonce, self.gas_limit())
+    }
+
+    /// Encodes transaction to bytes with an explicit gas limit.
+    pub fn to_encoded_bytes_with_gas_limit(&self, nonce: u64, gas_limit: u64) -> Bytes {
+        let tx = self.to_signed_tx_with_gas_limit(nonce, gas_limit);
         let mut buf = Vec::new();
         tx.inner().encode_2718(&mut buf);
         Bytes::from(buf)
@@ -551,6 +568,60 @@ pub fn build_chained_payloads_with_provider<P>(
 where
     P: StateProvider + ?Sized,
 {
+    // Default each transaction's gas limit to the operation's estimate.
+    let sequence = sequence
+        .into_iter()
+        .map(|(op, nonce)| {
+            let gas_limit = op.gas_limit();
+            (op, nonce, gas_limit)
+        })
+        .collect();
+    build_chained_payloads_with_provider_and_gas(state_provider, sequence, max_flashblocks, bal)
+}
+
+/// Builds chained payloads using an explicit per-transaction gas limit.
+///
+/// Mirrors [`build_chained_payloads`] but lets callers fuzz each transaction's `gas_limit` field
+/// independently of the operation's estimated cost. Uses a mock [`TestStateProvider`] as the
+/// backing database.
+pub fn build_chained_payloads_with_gas_limits(
+    sequence: Vec<(TxOp, u64, u64)>,
+    max_flashblocks: usize,
+    bal: bool,
+) -> Result<
+    Vec<(
+        ExecutionPayloadFlashblockDeltaV1,
+        Option<CommittedState<OpRethReceiptBuilder>>,
+    )>,
+    Box<dyn std::error::Error + Send + Sync>,
+> {
+    let state_provider = create_test_state_provider();
+    build_chained_payloads_with_provider_and_gas(
+        state_provider.as_ref(),
+        sequence,
+        max_flashblocks,
+        bal,
+    )
+}
+
+/// Backing implementation for the `build_chained_payloads*` family.
+///
+/// Each sequence entry is `(operation, nonce, gas_limit)`.
+fn build_chained_payloads_with_provider_and_gas<P>(
+    state_provider: &P,
+    sequence: Vec<(TxOp, u64, u64)>,
+    max_flashblocks: usize,
+    bal: bool,
+) -> Result<
+    Vec<(
+        ExecutionPayloadFlashblockDeltaV1,
+        Option<CommittedState<OpRethReceiptBuilder>>,
+    )>,
+    Box<dyn std::error::Error + Send + Sync>,
+>
+where
+    P: StateProvider + ?Sized,
+{
     let mut payloads = Vec::with_capacity(max_flashblocks);
     let mut prev_outcome: Option<(BlockBuilderOutcome<OpPrimitives>, BundleState)> = None;
 
@@ -559,8 +630,11 @@ where
     let sequences = sequence.chunks(chunk_size).collect::<Vec<_>>();
 
     for sequence in sequences.into_iter() {
-        // Convert transaction ops to signed transactions
-        let transactions = transaction_op_sequence_to_transactions(sequence);
+        // Convert transaction ops to signed transactions, honoring the explicit gas limit.
+        let transactions: Vec<_> = sequence
+            .iter()
+            .map(|(op, nonce, gas_limit)| op.to_signed_tx_with_gas_limit(*nonce, *gas_limit))
+            .collect();
 
         // Execute over the previous outcome, if any
         let (outcome, bal_data, bundle_state) =
@@ -580,8 +654,11 @@ where
                 .into());
             }
         }
-        // Encode transactions for the payload
-        let encoded_txs = transaction_sequence_to_encoded(sequence);
+        // Encode transactions for the payload, honoring the explicit gas limit.
+        let encoded_txs: Vec<_> = sequence
+            .iter()
+            .map(|(op, nonce, gas_limit)| op.to_encoded_bytes_with_gas_limit(*nonce, *gas_limit))
+            .collect();
 
         // Construct the payload
         let payload = ExecutionPayloadFlashblockDeltaV1 {
@@ -598,26 +675,34 @@ where
 
         payloads.push((
             payload,
-            prev_outcome.as_ref().map(|(o, state)| CommittedState {
-                is_first: false,
-                gas_used: o.block.gas_used(),
-                blob_gas_used: o.block.blob_gas_used().unwrap_or_default(),
-                fees: U256::ZERO,
-                bundle: state.clone(),
-                receipts: o
-                    .execution_result
-                    .receipts
-                    .clone()
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, r)| (idx as u64, r.clone()))
-                    .collect(),
-                transactions: o
+            prev_outcome.as_ref().map(|(o, state)| {
+                let gas_used = o.block.gas_used();
+                let transactions: Vec<_> = o
                     .block
                     .clone_transactions_recovered()
                     .enumerate()
                     .map(|(idx, tx)| (idx as u64, tx.clone()))
-                    .collect(),
+                    .collect();
+                let evm_gas_used =
+                    pre_refund_gas_used(gas_used, transactions.iter().map(|(_, tx)| tx));
+
+                CommittedState {
+                    is_first: false,
+                    gas_used,
+                    evm_gas_used,
+                    blob_gas_used: o.block.blob_gas_used().unwrap_or_default(),
+                    fees: U256::ZERO,
+                    bundle: state.clone(),
+                    receipts: o
+                        .execution_result
+                        .receipts
+                        .clone()
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, r)| (idx as u64, r.clone()))
+                        .collect(),
+                    transactions,
+                }
             }),
         ));
 

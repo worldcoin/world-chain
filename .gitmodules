@@ -22,3 +22,6 @@
 [submodule "pkg/contracts/lib/safe-modules"]
 	path = pkg/contracts/lib/safe-modules
 	url = https://github.com/worldcoin/safe-modules
+[submodule "pkg/contracts/lib/nitro-validator"]
+	path = pkg/contracts/lib/nitro-validator
+	url = https://github.com/base/nitro-validator

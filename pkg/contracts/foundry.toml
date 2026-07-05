@@ -25,6 +25,8 @@ remappings = [
   "@forge-std/=lib/forge-std/src/",
   "forge-std/=lib/forge-std/src/",
   "@solady=lib/solady/src/utils/",
+  "@nitro-validator/=lib/nitro-validator/src/",
+  "@solarity/=lib/nitro-validator/lib/solidity-lib/contracts/",
 ]
 
 [profile.ci]

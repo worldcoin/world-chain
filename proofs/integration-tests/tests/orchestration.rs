@@ -10,7 +10,7 @@ use world_chain_defender::{DefenderConfig, WorldChainDefender};
 use world_chain_proof_integration_tests::{
     BLOCK_INTERVAL, FakeConsensus, FakeExecution, FakeProofBackend, SharedProverService,
 };
-use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig};
+use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig, RetryConfig};
 use world_chain_proofs::{ProofLane, RootState};
 use world_chain_proposer::{ProposerConfig, WorldChainProposer};
 use world_chain_prover_service::{ProofBackend, ProverServiceConfig};
@@ -82,9 +82,12 @@ async fn start_proof_stack_with(
     let service = SharedProverService::connect(
         &database_url,
         ProverServiceConfig {
-            lease_timeout: Duration::from_secs(5),
+            // Failed attempts re-queue only after their lock expires (there is no explicit
+            // fail API), so keep the timeout short enough that the transient-failure test
+            // observes the retry within its polling budget.
+            lock_timeout: Duration::from_millis(500),
             max_attempts: 2,
-            max_queue_len: 16,
+            max_retries: 2,
             backend_poll_interval: Duration::from_millis(5),
         },
     )
@@ -95,8 +98,10 @@ async fn start_proof_stack_with(
         service.clone(),
         sp1_backend,
         ProofWorkerConfig {
+            worker_id: "orchestration-sp1-worker".to_string(),
             poll_interval: Duration::from_millis(5),
             max_concurrent_jobs: 1,
+            retry_config: RetryConfig::default(),
         },
     );
     let sp1_cancel = sp1_worker.cancellation_token();
@@ -106,8 +111,10 @@ async fn start_proof_stack_with(
         service.clone(),
         nitro_backend,
         ProofWorkerConfig {
+            worker_id: "orchestration-nitro-worker".to_string(),
             poll_interval: Duration::from_millis(5),
             max_concurrent_jobs: 1,
+            retry_config: RetryConfig::default(),
         },
     );
     let nitro_cancel = nitro_worker.cancellation_token();

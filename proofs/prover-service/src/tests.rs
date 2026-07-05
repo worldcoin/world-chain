@@ -1,20 +1,19 @@
 use crate::{
-    BackendProofId, BackendProofState, BackendUpdate, LeasedProofRequest, ProofBackend, ProofData,
-    ProofJobQueue, ProofJobQueueError, ProofRequest, ProofRequestError, ProofRequester,
-    ProofResponse, ProofStatus, ProofSubmissionLease, ProverService, ProverServiceConfig,
-    RpcProverServiceClient, start_rpc_server,
+    ProofBackend, ProofData, ProofJobQueue, ProofJobQueueError, ProofRequest, ProofRequester,
+    ProofResponse, ProofStatus, ProverService, ProverServiceConfig, RpcProverServiceClient,
+    SucceededProofResponse, start_rpc_server,
+    types::{BackendSessionStatus, SessionType},
 };
 use alloy_primitives::{Address, B256, Bytes};
-use sqlx::Row;
 use std::{sync::Arc, time::Duration};
 use testcontainers::{ContainerAsync, runners::AsyncRunner};
 use testcontainers_modules::postgres;
 
 fn test_config() -> ProverServiceConfig {
     ProverServiceConfig {
-        lease_timeout: Duration::from_secs(60),
+        lock_timeout: Duration::from_secs(60),
         max_attempts: 2,
-        max_queue_len: 4,
+        max_retries: 2,
         backend_poll_interval: Duration::from_millis(25),
     }
 }
@@ -59,7 +58,7 @@ fn request(backend: ProofBackend, seed: u8) -> ProofRequest {
     }
 }
 
-fn proof_for(req: &ProofRequest) -> ProofResponse {
+fn proof_for(req: &ProofRequest) -> SucceededProofResponse {
     let proof = match req.backend {
         ProofBackend::Sp1 => ProofData::Sp1 {
             proof: Bytes::from(vec![0xaa]),
@@ -70,14 +69,18 @@ fn proof_for(req: &ProofRequest) -> ProofResponse {
             signature: Bytes::from(vec![0xdd]),
         },
     };
-    ProofResponse {
+    SucceededProofResponse {
         id: req.id(),
         proof,
     }
 }
 
-fn backend_id(seed: u8) -> BackendProofId {
-    BackendProofId(B256::with_last_byte(seed))
+fn backend_session_id(seed: u8) -> String {
+    format!("backend-session-{seed}")
+}
+
+fn worker_id() -> String {
+    "test-worker".to_string()
 }
 
 #[test]
@@ -89,7 +92,7 @@ fn request_id_is_deterministic() {
 }
 
 #[tokio::test]
-async fn nitro_style_full_lifecycle() {
+async fn full_lifecycle_succeeds() {
     let Some(ctx) = service(test_config()).await else {
         return;
     };
@@ -97,143 +100,84 @@ async fn nitro_style_full_lifecycle() {
     let req = request(ProofBackend::Nitro, 1);
 
     let id = service.request_proof(req.clone()).await.unwrap();
-    assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Queued);
+    assert_eq!(
+        service.proof_status(id).await.unwrap(),
+        ProofStatus::Created
+    );
+    assert!(matches!(
+        service.get_proof(id).await.unwrap(),
+        ProofResponse::Pending(response)
+            if response.id == id && response.status == ProofStatus::Created
+    ));
 
-    let leased = service
-        .get_next_proof(ProofBackend::Nitro)
+    let locked = service
+        .get_next_proof(ProofBackend::Nitro, worker_id())
         .await
         .unwrap()
         .expect("job available");
-    assert_eq!(leased.request, req);
+    assert_eq!(locked.request, req);
     assert_eq!(
         service.proof_status(id).await.unwrap(),
-        ProofStatus::Starting
+        ProofStatus::Running
     );
     assert!(matches!(
-        service.get_proof(id).await,
-        Err(ProofRequestError::Pending {
-            status: ProofStatus::Starting,
-            ..
-        })
+        service.get_proof(id).await.unwrap(),
+        ProofResponse::Pending(response)
+            if response.id == id && response.status == ProofStatus::Running
     ));
 
     let response = proof_for(&req);
     service
-        .submit_proof(
-            response.clone(),
-            ProofSubmissionLease::ProofJob {
-                lease_token: leased.lease_token,
-            },
-        )
+        .submit_proof(response.clone(), worker_id(), locked.lock_id)
         .await
         .unwrap();
     assert_eq!(
         service.proof_status(id).await.unwrap(),
-        ProofStatus::Completed
+        ProofStatus::Succeeded
     );
-    assert_eq!(service.get_proof(id).await.unwrap(), response);
+    assert_eq!(
+        service.get_proof(id).await.unwrap(),
+        ProofResponse::Succeeded(response)
+    );
 }
 
 #[tokio::test]
-async fn backend_job_workflow_reaches_final_proof() {
+async fn duplicate_request_is_deduplicated() {
     let Some(ctx) = service(test_config()).await else {
         return;
     };
     let service = ctx.service;
     let req = request(ProofBackend::Sp1, 2);
-    let id = service.request_proof(req.clone()).await.unwrap();
-    let LeasedProofRequest {
-        request: leased_req,
-        lease_token,
-    } = service
-        .get_next_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("job available");
-    assert_eq!(leased_req, req);
 
-    service
-        .submit_backend_proof_state(
-            id,
-            BackendProofState::Range { id: backend_id(1) },
-            lease_token,
-        )
-        .await
-        .unwrap();
+    let first = service.request_proof(req.clone()).await.unwrap();
+    let second = service.request_proof(req.clone()).await.unwrap();
+    assert_eq!(first, second);
+    assert_eq!(first, req.id());
     assert_eq!(
-        service.proof_status(id).await.unwrap(),
-        ProofStatus::BackendPending
-    );
-
-    let range = service
-        .get_next_backend_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("range job");
-    assert_eq!(range.work.proof_request, req);
-    assert_eq!(
-        range.work.state,
-        BackendProofState::Range { id: backend_id(1) }
-    );
-
-    service
-        .complete_backend_proof_job(range.backend_job_id, range.lease_token, BackendUpdate::Noop)
-        .await
-        .unwrap();
-    assert!(
-        service
-            .get_next_backend_proof(ProofBackend::Sp1)
-            .await
-            .unwrap()
-            .is_none()
-    );
-    tokio::time::sleep(Duration::from_millis(30)).await;
-
-    let range = service
-        .get_next_backend_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("range job after poll delay");
-    service
-        .complete_backend_proof_job(
-            range.backend_job_id,
-            range.lease_token,
-            BackendUpdate::Pending {
-                state: BackendProofState::Aggregation { id: backend_id(2) },
-            },
-        )
-        .await
-        .unwrap();
-
-    let aggregation = service
-        .get_next_backend_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("aggregation job");
-    assert_eq!(
-        aggregation.work.state,
-        BackendProofState::Aggregation { id: backend_id(2) }
-    );
-    service
-        .submit_proof(
-            proof_for(&req),
-            ProofSubmissionLease::BackendJob {
-                backend_job_id: aggregation.backend_job_id,
-                lease_token: aggregation.lease_token,
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        service.proof_status(id).await.unwrap(),
-        ProofStatus::Completed
+        service.proof_status(first).await.unwrap(),
+        ProofStatus::Created
     );
 }
 
 #[tokio::test]
-async fn stale_start_lease_is_rejected() {
+async fn get_next_proof_on_empty_queue_returns_none() {
+    let Some(ctx) = service(test_config()).await else {
+        return;
+    };
+    let service = ctx.service;
+    assert!(
+        service
+            .get_next_proof(ProofBackend::Sp1, worker_id())
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn stale_lock_is_rejected_and_reclaim_succeeds() {
     let Some(ctx) = service(ProverServiceConfig {
-        lease_timeout: Duration::from_millis(10),
+        lock_timeout: Duration::from_millis(50),
         ..test_config()
     })
     .await
@@ -243,381 +187,115 @@ async fn stale_start_lease_is_rejected() {
     let service = ctx.service;
     let req = request(ProofBackend::Sp1, 3);
     let id = service.request_proof(req.clone()).await.unwrap();
-    let first = service
-        .get_next_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("first lease");
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    let second = service
-        .get_next_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("second lease");
 
+    let first = service
+        .get_next_proof(ProofBackend::Sp1, worker_id())
+        .await
+        .unwrap()
+        .expect("first lock");
+
+    // Let the first lock expire so the job can be reclaimed.
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    let second = service
+        .get_next_proof(ProofBackend::Sp1, worker_id())
+        .await
+        .unwrap()
+        .expect("second lock");
+    assert_ne!(first.lock_id, second.lock_id);
+
+    // The first (now superseded) lock can no longer submit.
     assert!(matches!(
         service
-            .submit_proof(
-                proof_for(&req),
-                ProofSubmissionLease::ProofJob {
-                    lease_token: first.lease_token,
-                },
-            )
+            .submit_proof(proof_for(&req), worker_id(), first.lock_id)
             .await,
-        Err(ProofJobQueueError::StaleLease)
+        Err(ProofJobQueueError::StaleLock(_))
     ));
 
+    // The current lock owner can submit successfully.
     service
-        .submit_proof(
-            proof_for(&req),
-            ProofSubmissionLease::ProofJob {
-                lease_token: second.lease_token,
-            },
-        )
+        .submit_proof(proof_for(&req), worker_id(), second.lock_id)
         .await
         .unwrap();
     assert_eq!(
         service.proof_status(id).await.unwrap(),
-        ProofStatus::Completed
+        ProofStatus::Succeeded
     );
 }
 
 #[tokio::test]
-async fn failed_attempts_retry_until_exhausted() {
+async fn submit_proof_with_wrong_backend_is_rejected() {
     let Some(ctx) = service(test_config()).await else {
         return;
     };
     let service = ctx.service;
     let req = request(ProofBackend::Sp1, 4);
     let id = service.request_proof(req.clone()).await.unwrap();
-
-    let first = service
-        .get_next_proof(ProofBackend::Sp1)
+    let locked = service
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
-        .expect("first lease");
-    service
-        .fail_proof(
-            id,
-            "witness generation failed".to_string(),
-            first.lease_token,
-        )
-        .await
-        .unwrap();
-    assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Queued);
+        .expect("lock");
 
-    let second = service
-        .get_next_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("second lease");
-    service
-        .fail_proof(id, "backend rejected".to_string(), second.lease_token)
-        .await
-        .unwrap();
-    assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Failed);
+    let mismatched = SucceededProofResponse {
+        id,
+        proof: ProofData::Nitro {
+            attestation: Bytes::from(vec![0xcc]),
+            signature: Bytes::from(vec![0xdd]),
+        },
+    };
+    assert!(matches!(
+        service
+            .submit_proof(mismatched, worker_id(), locked.lock_id)
+            .await,
+        Err(ProofJobQueueError::BackendMismatch(_))
+    ));
+    assert_eq!(
+        service.proof_status(id).await.unwrap(),
+        ProofStatus::Running
+    );
 }
 
 #[tokio::test]
-async fn backend_attempt_errors_retry_until_exhausted() {
+async fn record_and_get_proof_session_round_trips() {
     let Some(ctx) = service(test_config()).await else {
         return;
     };
     let service = ctx.service;
     let req = request(ProofBackend::Sp1, 5);
     let id = service.request_proof(req.clone()).await.unwrap();
-    let leased = service
-        .get_next_proof(ProofBackend::Sp1)
+    let locked = service
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
-        .expect("start lease");
-    service
-        .submit_backend_proof_state(
-            id,
-            BackendProofState::Range { id: backend_id(1) },
-            leased.lease_token,
-        )
-        .await
-        .unwrap();
+        .expect("lock");
 
-    let first = service
-        .get_next_backend_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("first backend lease");
-    service
-        .fail_backend_proof_job(
-            first.backend_job_id,
-            "temporary SP1 poll failure".to_string(),
-            first.lease_token,
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        service.proof_status(id).await.unwrap(),
-        ProofStatus::BackendPending
-    );
     assert!(
         service
-            .get_next_backend_proof(ProofBackend::Sp1)
+            .get_proof_session(id, SessionType::Stark)
             .await
             .unwrap()
             .is_none()
     );
-    tokio::time::sleep(Duration::from_millis(30)).await;
 
-    let second = service
-        .get_next_backend_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("second backend lease");
-    assert_eq!(second.backend_job_id, first.backend_job_id);
     service
-        .fail_backend_proof_job(
-            second.backend_job_id,
-            "temporary SP1 poll failure".to_string(),
-            second.lease_token,
-        )
-        .await
-        .unwrap();
-    assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Failed);
-}
-
-#[tokio::test]
-async fn invalid_completed_backend_proof_fails_immediately() {
-    let Some(ctx) = service(test_config()).await else {
-        return;
-    };
-    let service = ctx.service;
-    let req = request(ProofBackend::Sp1, 6);
-    let id = service.request_proof(req.clone()).await.unwrap();
-    let leased = service
-        .get_next_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("start lease");
-    service
-        .submit_backend_proof_state(
+        .record_proof_session(
             id,
-            BackendProofState::Range { id: backend_id(1) },
-            leased.lease_token,
+            SessionType::Stark,
+            worker_id(),
+            locked.lock_id,
+            backend_session_id(1),
+            BackendSessionStatus::Running,
         )
         .await
         .unwrap();
 
-    let backend = service
-        .get_next_backend_proof(ProofBackend::Sp1)
+    let session = service
+        .get_proof_session(id, SessionType::Stark)
         .await
         .unwrap()
-        .expect("backend lease");
-    let invalid_proof = ProofData::Nitro {
-        attestation: Bytes::from(vec![0xcc]),
-        signature: Bytes::from(vec![0xdd]),
-    };
-    assert!(matches!(
-        service
-            .complete_backend_proof_job(
-                backend.backend_job_id,
-                backend.lease_token,
-                BackendUpdate::Complete(invalid_proof),
-            )
-            .await,
-        Err(ProofJobQueueError::InvalidProof { .. })
-    ));
-
-    assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Failed);
-    assert!(
-        service
-            .get_next_backend_proof(ProofBackend::Sp1)
-            .await
-            .unwrap()
-            .is_none()
-    );
-}
-
-#[tokio::test]
-async fn failed_completed_backend_submission_releases_lease() {
-    let Some(ctx) = service(test_config()).await else {
-        return;
-    };
-    let service = ctx.service;
-    let req = request(ProofBackend::Sp1, 7);
-    let id = service.request_proof(req.clone()).await.unwrap();
-    let leased = service
-        .get_next_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("start lease");
-    service
-        .submit_backend_proof_state(
-            id,
-            BackendProofState::Range { id: backend_id(1) },
-            leased.lease_token,
-        )
-        .await
-        .unwrap();
-    let backend = service
-        .get_next_backend_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("backend lease");
-
-    sqlx::query("update proof_jobs set backend = 'corrupt' where proof_id = $1")
-        .bind(id.0.as_slice())
-        .execute(service.pool())
-        .await
-        .unwrap();
-
-    assert!(matches!(
-        service
-            .complete_backend_proof_job(
-                backend.backend_job_id,
-                backend.lease_token,
-                BackendUpdate::Complete(proof_for(&req).proof),
-            )
-            .await,
-        Err(ProofJobQueueError::Internal(_))
-    ));
-
-    let row = sqlx::query(
-        "select status, advance_attempts, locked_until is null as unlocked,
-                lease_token is null as lease_cleared
-         from proof_backend_jobs
-         where id = $1",
-    )
-    .bind(backend.backend_job_id)
-    .fetch_one(service.pool())
-    .await
-    .unwrap();
-    assert_eq!(row.get::<String, _>("status"), "requested");
-    assert_eq!(row.get::<i32, _>("advance_attempts"), 1);
-    assert!(row.get::<bool, _>("unlocked"));
-    assert!(row.get::<bool, _>("lease_cleared"));
-}
-
-#[tokio::test]
-async fn backend_noop_polling_does_not_exhaust_attempts() {
-    let Some(ctx) = service(test_config()).await else {
-        return;
-    };
-    let service = ctx.service;
-    let req = request(ProofBackend::Sp1, 8);
-    let id = service.request_proof(req.clone()).await.unwrap();
-    let leased = service
-        .get_next_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("start lease");
-    service
-        .submit_backend_proof_state(
-            id,
-            BackendProofState::Range { id: backend_id(1) },
-            leased.lease_token,
-        )
-        .await
-        .unwrap();
-
-    let mut backend_job_id = None;
-    for _ in 0..4 {
-        let backend = service
-            .get_next_backend_proof(ProofBackend::Sp1)
-            .await
-            .unwrap()
-            .expect("backend lease");
-        if let Some(previous) = backend_job_id {
-            assert_eq!(backend.backend_job_id, previous);
-        } else {
-            backend_job_id = Some(backend.backend_job_id);
-        }
-        service
-            .complete_backend_proof_job(
-                backend.backend_job_id,
-                backend.lease_token,
-                BackendUpdate::Noop,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            service.proof_status(id).await.unwrap(),
-            ProofStatus::BackendPending
-        );
-        tokio::time::sleep(Duration::from_millis(30)).await;
-    }
-
-    let backend = service
-        .get_next_backend_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("backend lease after repeated noops");
-    service
-        .complete_backend_proof_job(
-            backend.backend_job_id,
-            backend.lease_token,
-            BackendUpdate::Pending {
-                state: BackendProofState::Aggregation { id: backend_id(2) },
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        service.proof_status(id).await.unwrap(),
-        ProofStatus::BackendPending
-    );
-}
-
-#[tokio::test]
-async fn expired_backend_leases_count_toward_attempts() {
-    let Some(ctx) = service(ProverServiceConfig {
-        lease_timeout: Duration::from_millis(10),
-        ..test_config()
-    })
-    .await
-    else {
-        return;
-    };
-    let service = ctx.service;
-    let req = request(ProofBackend::Sp1, 9);
-    let id = service.request_proof(req.clone()).await.unwrap();
-    let leased = service
-        .get_next_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("start lease");
-    service
-        .submit_backend_proof_state(
-            id,
-            BackendProofState::Range { id: backend_id(1) },
-            leased.lease_token,
-        )
-        .await
-        .unwrap();
-
-    let first = service
-        .get_next_backend_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("first backend lease");
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    let second = service
-        .get_next_backend_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("second backend lease");
-    assert_eq!(second.backend_job_id, first.backend_job_id);
-    assert_eq!(
-        service.proof_status(id).await.unwrap(),
-        ProofStatus::BackendPending
-    );
-
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    assert!(
-        service
-            .get_next_backend_proof(ProofBackend::Sp1)
-            .await
-            .unwrap()
-            .is_none()
-    );
-    assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Failed);
+        .expect("session recorded");
+    assert_eq!(session.backend_session_id, backend_session_id(1));
+    assert_eq!(session.status, BackendSessionStatus::Running);
 }
 
 #[tokio::test]
@@ -631,77 +309,26 @@ async fn rpc_end_to_end() {
         .unwrap();
     let client = RpcProverServiceClient::new(format!("http://{addr}")).unwrap();
 
-    let req = request(ProofBackend::Sp1, 5);
+    let req = request(ProofBackend::Sp1, 6);
     let id = client.request_proof(req.clone()).await.unwrap();
-    assert_eq!(client.proof_status(id).await.unwrap(), ProofStatus::Queued);
+    assert_eq!(client.proof_status(id).await.unwrap(), ProofStatus::Created);
 
-    let leased = client
-        .get_next_proof(ProofBackend::Sp1)
+    let locked = client
+        .get_next_proof(ProofBackend::Sp1, worker_id())
         .await
         .unwrap()
         .expect("job available");
-    assert_eq!(leased.request, req);
+    assert_eq!(locked.request, req);
+
+    let response = proof_for(&req);
     client
-        .submit_proof(
-            proof_for(&req),
-            ProofSubmissionLease::ProofJob {
-                lease_token: leased.lease_token,
-            },
-        )
+        .submit_proof(response.clone(), worker_id(), locked.lock_id)
         .await
         .unwrap();
-    assert_eq!(client.get_proof(id).await.unwrap(), proof_for(&req));
-
-    handle.stop().unwrap();
-    handle.stopped().await;
-}
-
-#[tokio::test]
-async fn rpc_backend_invalid_proof_maps_to_typed_error() {
-    let Some(ctx) = service(test_config()).await else {
-        return;
-    };
-    let service = Arc::new(ctx.service);
-    let (addr, handle) = start_rpc_server("127.0.0.1:0".parse().unwrap(), Arc::clone(&service))
-        .await
-        .unwrap();
-    let client = RpcProverServiceClient::new(format!("http://{addr}")).unwrap();
-
-    let req = request(ProofBackend::Sp1, 10);
-    let id = client.request_proof(req.clone()).await.unwrap();
-    let leased = client
-        .get_next_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("start lease");
-    client
-        .submit_backend_proof_state(
-            id,
-            BackendProofState::Range { id: backend_id(1) },
-            leased.lease_token,
-        )
-        .await
-        .unwrap();
-    let backend = client
-        .get_next_backend_proof(ProofBackend::Sp1)
-        .await
-        .unwrap()
-        .expect("backend lease");
-
-    let invalid_proof = ProofData::Nitro {
-        attestation: Bytes::from(vec![0xcc]),
-        signature: Bytes::from(vec![0xdd]),
-    };
-    assert!(matches!(
-        client
-            .complete_backend_proof_job(
-                backend.backend_job_id,
-                backend.lease_token,
-                BackendUpdate::Complete(invalid_proof),
-            )
-            .await,
-        Err(ProofJobQueueError::InvalidProof { id: error_id, .. }) if error_id == id
-    ));
+    assert_eq!(
+        client.get_proof(id).await.unwrap(),
+        ProofResponse::Succeeded(response)
+    );
 
     handle.stop().unwrap();
     handle.stopped().await;

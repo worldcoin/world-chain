@@ -547,6 +547,7 @@ fn write_endpoints_file(devnet: &WorldDevnet, path: &Path) -> Result<()> {
         "chain_id": DEV_CHAIN_ID,
         "primary": {
             "l1_rpc_url": devnet.l1_rpc_url(),
+            "optimism_portal": devnet.optimism_portal(),
             "l2_rpc_url": devnet.l2_rpc_url(),
             "sequencer_rpc_url": devnet.sequencer_rpc_url(),
             "flashblocks_url": devnet.flashblocks_url(),
