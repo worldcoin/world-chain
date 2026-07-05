@@ -1254,14 +1254,16 @@ pub fn decode_revert_reason(output: &Bytes) -> String {
 
     if selector == ERROR_STRING_SELECTOR && output.len() >= MIN_ERROR_STRING_LEN {
         let offset: usize = U256::from_be_slice(&output[4..36]).try_into().unwrap_or(0);
-        let abs_offset = 4 + offset;
-        if abs_offset + 32 <= output.len() {
-            let len: usize = U256::from_be_slice(&output[abs_offset..abs_offset + 32])
+        if let Some(abs_offset) = offset.checked_add(4)
+            && let Some(str_start) = abs_offset.checked_add(32)
+            && str_start <= output.len()
+        {
+            let len: usize = U256::from_be_slice(&output[abs_offset..str_start])
                 .try_into()
                 .unwrap_or(0);
-            let str_start = abs_offset + 32;
-            if str_start + len <= output.len()
-                && let Ok(s) = std::str::from_utf8(&output[str_start..str_start + len])
+            if let Some(str_end) = str_start.checked_add(len)
+                && str_end <= output.len()
+                && let Ok(s) = std::str::from_utf8(&output[str_start..str_end])
             {
                 return s.to_string();
             }
@@ -1424,17 +1426,18 @@ fn decode_abi_string(data: &[u8]) -> Option<String> {
         return None;
     }
     let offset: usize = U256::from_be_slice(&data[..32]).try_into().ok()?;
-    if offset + 32 > data.len() {
+    let str_start = offset.checked_add(32)?;
+    if str_start > data.len() {
         return None;
     }
-    let len: usize = U256::from_be_slice(&data[offset..offset + 32])
+    let len: usize = U256::from_be_slice(&data[offset..str_start])
         .try_into()
         .ok()?;
-    let str_start = offset + 32;
-    if str_start + len > data.len() {
+    let str_end = str_start.checked_add(len)?;
+    if str_end > data.len() {
         return None;
     }
-    String::from_utf8(data[str_start..str_start + len].to_vec()).ok()
+    String::from_utf8(data[str_start..str_end].to_vec()).ok()
 }
 
 fn asset_metadata_is_resolved(asset: &AssetInfo) -> bool {
@@ -1669,5 +1672,31 @@ mod tests {
         assert_eq!(asset.symbol, "GAME");
         assert_eq!(asset.name, "Game Items");
         assert_eq!(asset.asset_type, AssetType::Erc1155);
+    }
+
+    /// A malicious `Error(string)` revert whose ABI offset field is crafted so
+    /// that `offset + 4 + 32` wraps `usize` under release (overflow-checks
+    /// off), bypassing the bounds guard and indexing far out of range.
+    #[test]
+    fn decode_revert_reason_rejects_crafted_offset_overflow() {
+        let mut payload = vec![0_u8; 100];
+        payload[0..4].copy_from_slice(&ERROR_STRING_SELECTOR);
+        let offset: u64 = u64::MAX - 10;
+        payload[28..36].copy_from_slice(&offset.to_be_bytes());
+        let output = Bytes::from(payload.clone());
+
+        assert_eq!(
+            decode_revert_reason(&output),
+            format!("0x{}", hex::encode(&payload))
+        );
+    }
+
+    #[test]
+    fn decode_abi_string_rejects_crafted_offset_overflow() {
+        let mut data = vec![0_u8; 100];
+        let offset: u64 = u64::MAX - 10;
+        data[24..32].copy_from_slice(&offset.to_be_bytes());
+
+        assert_eq!(decode_abi_string(&data), None);
     }
 }
