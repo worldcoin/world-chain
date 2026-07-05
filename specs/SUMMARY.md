@@ -17,4 +17,5 @@
     - [WIP-1004: EdDSA Verification Precompile](./wips/wip-1004.md)
     - [WIP-1005: Proof System Upgrade](./wips/wip-1005.md)
     - [WIP-1006: Proof System Architecture](./wips/wip-1006.md)
+    - [WIP-1007: Flashblock Access Lists](./wips/wip-1007.md)
     - [WIP Template](./wips/wip-template.md)
