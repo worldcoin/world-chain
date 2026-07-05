@@ -5,33 +5,27 @@ use std::{sync::Arc, time::Duration};
 use alloy_primitives::{Address, B256, Bytes};
 use testcontainers::{ContainerAsync, runners::AsyncRunner};
 use testcontainers_modules::postgres;
+use world_chain_proof_worker::ProofJob;
 use world_chain_prover_service::{
-    BackendProofState, BackendUpdate, ProofBackend, ProofData, ProofRequest, ProofRequester,
-    ProofStatus, ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
+    ProofBackend, ProofData, ProofRequest, ProofRequester, ProofResponse, ProofStatus,
+    ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
 };
-use world_chain_sp1_worker::{ProofJobBackend, ProofWorker, ProofWorkerConfig};
+use world_chain_sp1_worker::{ClaimedProofJobHandler, ProofWorker, ProofWorkerConfig, RetryConfig};
 
 /// Backend returning a canned SP1 proof for any request, without RPC or a prover.
 struct MockBackend;
 
-impl ProofJobBackend for MockBackend {
+#[async_trait::async_trait]
+impl ClaimedProofJobHandler for MockBackend {
     fn lane(&self) -> ProofBackend {
         ProofBackend::Sp1
     }
 
-    fn start(&self, _request: &ProofRequest) -> anyhow::Result<BackendUpdate> {
-        Ok(BackendUpdate::Complete(ProofData::Sp1 {
+    async fn handle_claimed_job(&self, _job: ProofJob) -> anyhow::Result<ProofData> {
+        Ok(ProofData::Sp1 {
             proof: Bytes::from_static(&[0xaa, 0xbb]),
             public_values: Bytes::from_static(&[0x01]),
-        }))
-    }
-
-    fn advance(
-        &self,
-        _request: &ProofRequest,
-        _state: BackendProofState,
-    ) -> anyhow::Result<BackendUpdate> {
-        anyhow::bail!("mock backend has no durable backend jobs")
+        })
     }
 }
 
@@ -89,23 +83,28 @@ async fn worker_completes_requested_proof_over_rpc() {
         queue,
         MockBackend,
         ProofWorkerConfig {
+            worker_id: "test-worker".to_string(),
             poll_interval: Duration::from_millis(10),
             max_concurrent_jobs: 1,
+            retry_config: RetryConfig::default(),
         },
     );
     let worker_handle = tokio::spawn(worker);
 
-    let mut status = ProofStatus::Queued;
+    let mut status = ProofStatus::Created;
     for _ in 0..200 {
         status = requester.proof_status(id).await.expect("status known");
-        if status == ProofStatus::Completed {
+        if status == ProofStatus::Succeeded {
             break;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-    assert_eq!(status, ProofStatus::Completed);
+    assert_eq!(status, ProofStatus::Succeeded);
 
     let response = requester.get_proof(id).await.expect("proof available");
+    let ProofResponse::Succeeded(response) = response else {
+        panic!("expected succeeded proof response");
+    };
     assert_eq!(response.id, id);
     let ProofData::Sp1 {
         proof,

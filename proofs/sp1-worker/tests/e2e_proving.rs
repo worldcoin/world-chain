@@ -36,10 +36,12 @@ use world_chain_proof_kona_host_utils::online::{OnlineHostConfig, resolve_l1_hea
 use world_chain_proof_succinct_host_utils::prover::{SP1ProofMode, Sp1ProverKind, SuccinctProver};
 use world_chain_proofs::{ConsensusProvider, OptimismConsensusClient};
 use world_chain_prover_service::{
-    ProofBackend, ProofData, ProofRequest, ProofRequester, ProofStatus, ProverService,
-    ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
+    ProofBackend, ProofData, ProofRequest, ProofRequester, ProofResponse, ProofStatus,
+    ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
 };
-use world_chain_sp1_worker::{ProofWorker, ProofWorkerConfig, Sp1Backend, Sp1BackendConfig};
+use world_chain_sp1_worker::{
+    ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
+};
 
 /// Reads a required env var, or returns `None` (with a skip message) when absent.
 fn required(name: &str) -> Option<String> {
@@ -109,21 +111,9 @@ async fn worker_proves_real_range_end_to_end() {
         .await
         .expect("query claimed output root");
 
-    // `resolve_l1_head` uses a blocking HTTP client, so run it off the async runtime.
-    let l1_head = {
-        let (l1_rpc, l2_rpc) = (l1_rpc.clone(), l2_rpc.clone());
-        tokio::task::spawn_blocking(move || {
-            resolve_l1_head(
-                &reqwest::blocking::Client::new(),
-                &l2_rpc,
-                &l1_rpc,
-                claimed_block,
-            )
-        })
+    let l1_head = resolve_l1_head(&reqwest::Client::new(), &l2_rpc, &l1_rpc, claimed_block)
         .await
-        .expect("resolve_l1_head task")
-        .expect("resolve l1 head")
-    };
+        .expect("resolve l1 head");
 
     let rollup_config_value =
         serde_json::from_slice(&std::fs::read(&rollup_config).expect("read rollup config"))
@@ -187,8 +177,10 @@ async fn worker_proves_real_range_end_to_end() {
         RpcProverServiceClient::new(&url).expect("client"),
         backend,
         ProofWorkerConfig {
+            worker_id: "test-worker".to_string(),
             poll_interval: Duration::from_millis(500),
             max_concurrent_jobs: 1,
+            retry_config: RetryConfig::default(),
         },
     );
     let token = worker.cancellation_token();
@@ -212,7 +204,7 @@ async fn worker_proves_real_range_end_to_end() {
     let deadline = tokio::time::Instant::now() + timeout;
     let status = loop {
         match client.proof_status(id).await.expect("poll status") {
-            ProofStatus::Completed => break ProofStatus::Completed,
+            ProofStatus::Succeeded => break ProofStatus::Succeeded,
             ProofStatus::Failed => panic!("proof request failed: {:?}", client.get_proof(id).await),
             pending => {
                 assert!(
@@ -223,9 +215,12 @@ async fn worker_proves_real_range_end_to_end() {
             }
         }
     };
-    assert_eq!(status, ProofStatus::Completed);
+    assert_eq!(status, ProofStatus::Succeeded);
 
     let response = client.get_proof(id).await.expect("fetch proof");
+    let ProofResponse::Succeeded(response) = response else {
+        panic!("expected succeeded proof response");
+    };
     assert_eq!(response.id, id);
     let ProofData::Sp1 {
         proof,

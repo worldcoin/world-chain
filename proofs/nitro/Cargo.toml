@@ -24,6 +24,10 @@ name = "test-attestation"
 path = "src/bin/test_attestation.rs"
 required-features = ["enclave"]
 
+[[bin]]
+name = "p384-hints"
+path = "src/bin/p384_hints.rs"
+
 [features]
 default = []
 # Enables both the host-side prover (talks to a running Nitro enclave over vsock)
@@ -46,7 +50,10 @@ alloy-primitives = { workspace = true, features = ["serde"] }
 anyhow.workspace = true
 base64 = { workspace = true }
 ciborium = "0.2"
+clap = { workspace = true }
 hex.workspace = true
+num-bigint = "0.4"
+num-traits = "0.2"
 rkyv.workspace = true
 serde = { workspace = true, features = ["derive"] }
 sha2.workspace = true
@@ -54,6 +61,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 world-chain-proof-core.workspace = true
+async-trait.workspace = true
 
 # Host-side attestation verification deps (non-optional: used by parse_check_and_verify) --
 # These are compiled on all platforms; the p384 / x509-parser crates are pure Rust and
@@ -87,4 +95,9 @@ world-chain-proof-kona-client-utils = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
+rand = "0.8"
 serde_json = { workspace = true }
+
+[[bin]]
+name = "gen-test-vector"
+path = "src/bin/gen_test_vector.rs"

@@ -94,7 +94,16 @@ impl SuccinctProver {
                     Sp1ProverKind::Cpu => EnvProver::Cpu(CpuProver::new().await),
                     Sp1ProverKind::Mock => EnvProver::Mock(MockProver::new().await),
                     Sp1ProverKind::Network => {
-                        EnvProver::Network(ProverClient::builder().network().build().await)
+                        let private_key = std::env::var("SP1_PRIVATE_KEY").context(
+                            "SP1_PRIVATE_KEY environment variable must be set to use the network prover",
+                        )?;
+                        EnvProver::Network(
+                            ProverClient::builder()
+                                .network()
+                                .private_key(&private_key)
+                                .build()
+                                .await,
+                        )
                     }
                 };
                 let range_pk = client

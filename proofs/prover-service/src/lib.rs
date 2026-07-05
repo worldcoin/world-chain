@@ -78,11 +78,11 @@ mod types;
 
 // re-exports
 pub use config::{
-    DEFAULT_BACKEND_POLL_INTERVAL, DEFAULT_LEASE_TIMEOUT, DEFAULT_MAX_ATTEMPTS,
-    DEFAULT_MAX_QUEUE_LEN, ProverServiceConfig,
+    DEFAULT_BACKEND_POLL_INTERVAL, DEFAULT_LOCK_TIMEOUT, DEFAULT_MAX_ATTEMPTS, ProverServiceConfig,
 };
 pub use error::{
-    InvalidConfigError, ProofJobQueueError, ProofRequestError, ProverServiceInitError,
+    BackendMismatchErrorData, InvalidConfigError, ProofJobQueueError, ProofJobStatusErrorData,
+    ProofMismatchErrorData, ProofRequestError, ProverServiceInitError, TooManyRetriesErrorData,
 };
 pub use rpc::{
     ProverServiceApiClient, ProverServiceApiServer, ProverServiceRpc, RpcProverServiceClient,
@@ -91,9 +91,9 @@ pub use rpc::{
 pub use service::ProverService;
 pub use traits::{ProofJobQueue, ProofRequester};
 pub use types::{
-    BackendProofId, BackendProofJobStatus, BackendProofPhase, BackendProofState, BackendProofWork,
-    BackendUpdate, LeaseToken, LeasedBackendProofWork, LeasedProofRequest, ProofBackend, ProofData,
-    ProofRequest, ProofRequestId, ProofResponse, ProofStatus, ProofSubmissionLease,
+    BackendProofId, BackendSession, BackendSessionStatus, FailedProofResponse, LockId,
+    LockedProofRequest, PendingProofResponse, ProofBackend, ProofData, ProofJobStatus,
+    ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType, SucceededProofResponse,
 };
 
 #[cfg(test)]

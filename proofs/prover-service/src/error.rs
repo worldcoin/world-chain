@@ -1,5 +1,11 @@
-use crate::types::{ProofBackend, ProofRequestId, ProofStatus};
+use crate::{
+    ProofBackend, ProofData, ProofJobStatus,
+    types::{BackendSessionStatus, ProofRequestId, SessionType},
+};
+use alloy_primitives::BlockNumber;
+use jsonrpsee::core::client::Error as JsonRpseeError;
 use sqlx::migrate::MigrateError;
+use std::sync::Arc;
 use thiserror::Error;
 
 /// Invalid `prover-service` configuration.
@@ -24,60 +30,214 @@ pub enum ProverServiceInitError {
 /// Error returned to a defender by the `prover-service`.
 #[derive(Error, Debug)]
 pub enum ProofRequestError {
-    /// The queue for the requested backend is at capacity.
-    #[error("proof queue for backend {0} is full")]
-    QueueFull(ProofBackend),
-    /// No proof request with the given id is known.
-    #[error("proof request {0} not found")]
-    NotFound(ProofRequestId),
-    /// The proof is not ready yet.
-    #[error("proof request {id} is not ready yet (status: {status})")]
-    Pending {
-        /// The proof request id.
-        id: ProofRequestId,
-        /// The current status of the request.
-        status: ProofStatus,
-    },
-    /// The proof request permanently failed.
-    #[error("proof request {id} failed: {reason}")]
-    Failed {
-        /// The proof request id.
-        id: ProofRequestId,
-        /// The reason reported on the last attempt.
-        reason: String,
-    },
-    /// Internal service or storage error.
-    #[error("prover-service error: {0}")]
-    Internal(String),
-    /// RPC transport error.
-    #[error("RPC error: {0}")]
-    Rpc(String),
+    #[error(transparent)]
+    Sqlx(#[from] sqlx::Error),
+    #[error("proof id {0}: proof request row missing after insert conflict. Retry request_proof.")]
+    RowMissingAfterConflict(ProofRequestId),
+    #[error("{0}")]
+    UnknownProofStatus(String),
+    #[error("{0}")]
+    TooManyRetries(TooManyRetriesErrorData),
+    #[error("Proof request {0} not found.")]
+    ProofIdNotFound(ProofRequestId),
+    #[error(transparent)]
+    ProofEncoding(#[from] serde_json::Error),
+    #[error("The block number {0} exceeds i64 max value.")]
+    BlockNumberExceedsI64(BlockNumber),
+    #[error("remote prover-service internal error.")]
+    RemoteInternal,
+    #[error("remote prover-service storage error.")]
+    RemoteSqlx,
+    #[error("RPC request timed out.")]
+    RpcRequestTimeout,
+    #[error("RPC transport error: {0}.")]
+    RpcTransport(#[from] jsonrpsee::core::BoxError),
+    #[error("RPC client restart needed: {0}.")]
+    RpcRestartNeeded(#[source] Arc<JsonRpseeError>),
+    #[error("RPC service disconnected.")]
+    RpcServiceDisconnected,
+    #[error("RPC client error: {0}.")]
+    RpcClient(#[source] JsonRpseeError),
+}
+
+/// Data describing a proof request that exceeded retry limits.
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
+pub struct TooManyRetriesErrorData {
+    /// The proof request id.
+    pub proof_id: ProofRequestId,
+    /// The maximum number of retries configured by the prover-service.
+    pub max_retries: u32,
+}
+
+impl std::fmt::Display for TooManyRetriesErrorData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "This proof request {} has been retried more than max_retries = {}.",
+            self.proof_id, self.max_retries
+        )
+    }
+}
+
+/// Data describing a proof job status mismatch.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct ProofJobStatusErrorData {
+    /// The proof request id.
+    pub proof_id: ProofRequestId,
+    /// The expected job status.
+    pub expected: ProofJobStatus,
+    /// The actual stored job status.
+    pub actual: ProofJobStatus,
+}
+
+impl std::fmt::Display for ProofJobStatusErrorData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Invalid proof job status for proof id {}: expected {}, got {}.",
+            self.proof_id, self.expected, self.actual
+        )
+    }
+}
+
+/// Data describing a submitted proof backend mismatch.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct BackendMismatchErrorData {
+    /// The proof request id.
+    pub proof_id: ProofRequestId,
+    /// The backend expected by the stored proof request.
+    pub expected: ProofBackend,
+    /// The backend that produced the submitted proof.
+    pub actual: ProofBackend,
+}
+
+impl std::fmt::Display for BackendMismatchErrorData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "proof job {} backend mismatch: expected {}, got {}.",
+            self.proof_id, self.expected, self.actual
+        )
+    }
+}
+
+/// Data describing an attempt to record a backend session that has already
+/// reached a terminal status with a conflicting status.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct BackendSessionAlreadyTerminalErrorData {
+    /// The proof request id.
+    pub proof_id: ProofRequestId,
+    /// The session type of the conflicting backend session.
+    pub session_type: SessionType,
+    /// The backend-issued session identifier.
+    pub backend_session_id: String,
+    /// The terminal status already stored for this backend session.
+    pub stored: BackendSessionStatus,
+    /// The status the worker attempted to record.
+    pub attempted: BackendSessionStatus,
+}
+
+impl std::fmt::Display for BackendSessionAlreadyTerminalErrorData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "backend session {} for proof {} ({}) already reached terminal status {}; cannot record status {}.",
+            self.backend_session_id,
+            self.proof_id,
+            self.session_type.as_str(),
+            self.stored.as_str(),
+            self.attempted.as_str(),
+        )
+    }
+}
+
+/// Data describing a repeated proof submission with different proof data.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct ProofMismatchErrorData {
+    /// The proof request id.
+    pub proof_id: ProofRequestId,
+    /// The proof data already stored by the prover-service.
+    pub expected: ProofData,
+    /// The proof data submitted by the worker.
+    pub actual: ProofData,
+}
+
+impl std::fmt::Display for ProofMismatchErrorData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "proof {} proof data mismatch: expected {:?}, got {:?}.",
+            self.proof_id, self.expected, self.actual
+        )
+    }
 }
 
 /// Error returned to a prover worker by the `prover-service`.
 #[derive(Error, Debug)]
 pub enum ProofJobQueueError {
-    /// No proof request with the given id is known.
-    #[error("unknown proof job {0}")]
-    UnknownJob(ProofRequestId),
-    /// No backend proof job with the given id is known.
-    #[error("unknown backend proof job {0}")]
-    UnknownBackendJob(i64),
-    /// The lease token no longer owns the row being updated.
-    #[error("stale lease for proof job update")]
-    StaleLease,
-    /// The submitted proof does not match the requested job.
-    #[error("invalid proof for job {id}: {reason}")]
-    InvalidProof {
-        /// The proof request id.
-        id: ProofRequestId,
-        /// Why the proof was rejected.
-        reason: String,
-    },
-    /// Internal service or storage error.
-    #[error("prover-service error: {0}")]
-    Internal(String),
-    /// RPC transport error.
-    #[error("RPC error: {0}")]
-    Rpc(String),
+    #[error(transparent)]
+    Sqlx(#[from] sqlx::Error),
+    #[error("block number is negative: {0}.")]
+    NegativeBlockNumber(i64),
+    #[error("{0}")]
+    UnknownProofBackend(String),
+    #[error("{0}")]
+    UnknownBackendSessionStatus(String),
+    #[error("{0}")]
+    UnknownProofJobStatus(String),
+    #[error("The provided value has {0} bytes, expected 20.")]
+    MalformedAddress(usize),
+    #[error("The provided value has {0} bytes, expected 32.")]
+    MalformedB256(usize),
+    #[error("Proof request {0} not found.")]
+    ProofIdNotFound(ProofRequestId),
+    #[error("{0}")]
+    ProofJobStatusNotClaimed(ProofJobStatusErrorData),
+    #[error("Stale lock for given proof id: {0}.")]
+    StaleLock(ProofRequestId),
+    #[error("Expired lock for given proof id: {0}.")]
+    LockExpired(ProofRequestId),
+    #[error("{0}")]
+    BackendMismatch(BackendMismatchErrorData),
+    #[error("The proof {0} has already reached a terminal job status.")]
+    AlreadyTerminal(ProofRequestId),
+    #[error("{0}")]
+    BackendSessionAlreadyTerminal(BackendSessionAlreadyTerminalErrorData),
+    #[error(transparent)]
+    ProofEncoding(#[from] serde_json::Error),
+    #[error("{0}")]
+    ProofMismatch(Box<ProofMismatchErrorData>),
+    #[error(
+        "proof {0}: the diagnostic read did not identify a stable reason for the proof submission failure."
+    )]
+    Unknown(ProofRequestId),
+    #[error("remote prover-service internal error.")]
+    RemoteInternal,
+    #[error("remote prover-service storage error.")]
+    RemoteSqlx,
+    #[error("RPC request timed out.")]
+    RpcRequestTimeout,
+    #[error("RPC transport error: {0}.")]
+    RpcTransport(#[from] jsonrpsee::core::BoxError),
+    #[error("RPC client restart needed: {0}.")]
+    RpcRestartNeeded(#[source] Arc<JsonRpseeError>),
+    #[error("RPC service disconnected.")]
+    RpcServiceDisconnected,
+    #[error("RPC client error: {0}.")]
+    RpcClient(#[source] JsonRpseeError),
+}
+
+impl ProofJobQueueError {
+    /// Whether retrying the same operation can plausibly succeed.
+    pub const fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::Sqlx(_)
+                | Self::RemoteSqlx
+                | Self::RpcRequestTimeout
+                | Self::RpcTransport(_)
+                | Self::RpcRestartNeeded(_)
+                | Self::RpcServiceDisconnected
+        )
+    }
 }

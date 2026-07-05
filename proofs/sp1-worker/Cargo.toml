@@ -31,6 +31,7 @@ alloy-sol-types.workspace = true
 
 # misc
 anyhow.workspace = true
+async-trait.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
 reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }

@@ -65,7 +65,7 @@ static SIGNING_KEY: OnceLock<SigningKey> = OnceLock::new();
 ///
 /// Uses [`NsmRequest::GetRandom`] to obtain 32 bytes of hardware-backed entropy and
 /// constructs a secp256k1 [`SigningKey`] from them. The key is stored in
-/// [`SIGNING_KEY`] and the public key (compressed SEC1, 33 bytes) is returned.
+/// [`SIGNING_KEY`] and the public key (uncompressed SEC1, 65 bytes, `0x04 || X || Y`) is returned.
 ///
 /// # Errors
 ///
@@ -80,7 +80,7 @@ fn init_signing_key(fd: i32) -> Result<Vec<u8>> {
 
     let public_key_bytes = signing_key
         .verifying_key()
-        .to_encoded_point(true) // compressed SEC1
+        .to_encoded_point(false) // uncompressed SEC1
         .as_bytes()
         .to_vec();
 
@@ -156,6 +156,22 @@ fn sign_boot_info(boot_info: &BootInfoStruct) -> Result<Vec<u8>> {
     let (sig, rec_id) = signing_key()
         .sign_prehash_recoverable(&commitment)
         .context("secp256k1 signing failed")?;
+
+    // EIP-2 low-s normalization. The on-chain NitroProofVerifier rejects
+    // high-s signatures to prevent malleability; `sign_prehash_recoverable`
+    // does NOT normalize by default, so ~50% of raw signatures would be
+    // rejected. `Signature::normalize_s()` returns `Some(new_sig)` only when
+    // normalization was needed; when it does flip s = n - s, the y-parity of
+    // the recovered point flips too, so we must also flip the LSB of the
+    // recovery id.
+    let (sig, rec_id) = match sig.normalize_s() {
+        Some(normalized) => {
+            let flipped = k256::ecdsa::RecoveryId::from_byte(rec_id.to_byte() ^ 1)
+                .expect("recovery id parity flip is always 0 or 1");
+            (normalized, flipped)
+        }
+        None => (sig, rec_id),
+    };
 
     // 65 bytes: 64-byte compact sig (r ‖ s) + 1-byte EVM recovery id (27 or 28).
     // EVM ecrecover expects v = recovery_id + 27.
@@ -373,7 +389,7 @@ fn handle_public_key(nonce: [u8; 32]) -> Result<EnclaveResponse> {
     let attestation_doc = request_attestation_doc(None, &nonce)?;
     let public_key = signing_key()
         .verifying_key()
-        .to_encoded_point(true)
+        .to_encoded_point(false)
         .as_bytes()
         .to_vec();
     Ok(EnclaveResponse::Attestation {
@@ -485,7 +501,7 @@ fn request_attestation_doc(user_data: Option<&[u8; 32]>, nonce: &[u8; 32]) -> Re
 
     let public_key_bytes = signing_key()
         .verifying_key()
-        .to_encoded_point(true)
+        .to_encoded_point(false)
         .as_bytes()
         .to_vec();
 

@@ -11,7 +11,7 @@ set -euo pipefail
 # Usage: scripts/build-eif.sh [output-dir]   (default: target/eif)
 #
 # Outputs in <output-dir>:
-#   world-chain-nitro-enclave.eif   the enclave image
+#   world-chain-nitro-worker-enclave.eif   the enclave image
 #   pcrs.json                       PCR0/PCR1/PCR2 measurements
 #
 # Env overrides:
@@ -24,7 +24,7 @@ if [ "$(uname -s)" != "Linux" ] || [ "$(uname -m)" != "x86_64" ]; then
 fi
 
 NITRO_CLI_VERSION="${NITRO_CLI_VERSION:-v1.4.2}"
-ENCLAVE_IMAGE_TAG="${ENCLAVE_IMAGE_TAG:-world-chain-nitro-enclave:local}"
+ENCLAVE_IMAGE_TAG="${ENCLAVE_IMAGE_TAG:-world-chain-nitro-worker-enclave:local}"
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
@@ -47,7 +47,7 @@ if [ ! -x "$nitro_cli" ]; then
 fi
 
 echo "[3/3] Converting to EIF..."
-eif_path="$out_dir/world-chain-nitro-enclave.eif"
+eif_path="$out_dir/world-chain-nitro-worker-enclave.eif"
 build_json="$out_dir/build-enclave.json"
 NITRO_CLI_BLOBS="$nitro_cli_dir/blobs/x86_64" \
 NITRO_CLI_ARTIFACTS="$out_dir/artifacts" \

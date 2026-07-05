@@ -8,7 +8,7 @@ use std::{
 use alloy_primitives::B256;
 use anyhow::{Context, Result, bail};
 use clap::Args;
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::Serialize;
 use serde_json::{Value, json};
 use world_chain_chainspec::WorldChainSpec;
@@ -110,18 +110,19 @@ pub struct WitnessArgs {
     pub output: PathBuf,
 }
 
-pub fn print_rollup_config_hash(args: HashRollupConfigArgs) -> Result<()> {
-    let hash = rollup_config_hash_from_args(args)?;
+pub async fn print_rollup_config_hash(args: HashRollupConfigArgs) -> Result<()> {
+    let hash = rollup_config_hash_from_args(args).await?;
     println!("{hash:?}");
     Ok(())
 }
 
-pub fn rollup_config_hash_from_args(args: HashRollupConfigArgs) -> Result<B256> {
+pub async fn rollup_config_hash_from_args(args: HashRollupConfigArgs) -> Result<B256> {
     match (args.rollup_config, args.l2_rpc) {
         (Some(path), _) => Ok(proof_config_from_file(&path)?.1),
         (None, Some(url)) => {
             let client = Client::new();
-            let value: Value = rpc(&client, &url, "optimism_rollupConfig", json!([]))?
+            let value: Value = rpc(&client, &url, "optimism_rollupConfig", json!([]))
+                .await?
                 .context("optimism_rollupConfig returned null")?;
             Ok(world_chain_proof_protocol::hash_rollup_config(&value)?)
         }
@@ -129,8 +130,8 @@ pub fn rollup_config_hash_from_args(args: HashRollupConfigArgs) -> Result<B256> 
     }
 }
 
-pub fn write_witness(args: WitnessArgs) -> Result<()> {
-    let input = build_range_input_from_args(&args.rpc)?;
+pub async fn write_witness(args: WitnessArgs) -> Result<()> {
+    let input = build_range_input_from_args(&args.rpc).await?;
     let bytes = witness_bytes(&input.witness)?;
     write_bytes(&args.output, &bytes)?;
     let metadata_path = sibling_path(&args.output, "metadata.json");
@@ -163,7 +164,7 @@ pub fn online_host_config(args: &RpcArgs) -> Result<OnlineHostConfig> {
     })
 }
 
-pub fn build_range_input_from_args(args: &RpcArgs) -> Result<RangeProofInput> {
+pub async fn build_range_input_from_args(args: &RpcArgs) -> Result<RangeProofInput> {
     let config = online_host_config(args)?;
     build_range_input(
         &config,
@@ -174,6 +175,7 @@ pub fn build_range_input_from_args(args: &RpcArgs) -> Result<RangeProofInput> {
             allow_unfinalized: args.allow_unfinalized,
         },
     )
+    .await
 }
 
 pub fn proof_config(

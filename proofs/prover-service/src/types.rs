@@ -90,58 +90,92 @@ impl std::fmt::Display for ProofRequestId {
     }
 }
 
-/// The lifecycle state of a proof request inside the `prover-service`.
+/// Status of a proof request
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProofStatus {
-    /// Waiting in the backend queue for a worker.
-    Queued,
-    /// Leased to a worker that is starting backend work.
-    Starting,
-    /// External backend work has been requested and is being polled.
-    BackendPending,
-    /// Proof generated and available via `get_proof`.
-    Completed,
-    /// Permanently failed after exhausting all attempts.
+    /// Proof request has been created but not yet queued.
+    Created,
+    /// Proof is actively being generated.
+    Running,
+    /// Proof generation completed successfully.
+    Succeeded,
+    /// Proof generation failed.
     Failed,
 }
 
-impl std::fmt::Display for ProofStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl ProofStatus {
+    /// Convert enum to static string representation
+    pub const fn as_str(&self) -> &'static str {
         match self {
-            Self::Queued => write!(f, "queued"),
-            Self::Starting => write!(f, "starting"),
-            Self::BackendPending => write!(f, "backend pending"),
-            Self::Completed => write!(f, "completed"),
-            Self::Failed => write!(f, "failed"),
+            Self::Created => "CREATED",
+            Self::Running => "RUNNING",
+            Self::Succeeded => "SUCCEEDED",
+            Self::Failed => "FAILED",
         }
     }
 }
 
-impl ProofStatus {
-    /// Stable database representation.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Queued => "queued",
-            Self::Starting => "starting",
-            Self::BackendPending => "backend_pending",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-        }
+impl std::fmt::Display for ProofStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
 impl TryFrom<&str> for ProofStatus {
     type Error = String;
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
-            "queued" => Ok(Self::Queued),
-            "starting" => Ok(Self::Starting),
-            "backend_pending" => Ok(Self::BackendPending),
-            "completed" => Ok(Self::Completed),
-            "failed" => Ok(Self::Failed),
-            other => Err(format!("unknown proof status {other:?}")),
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "CREATED" => Ok(Self::Created),
+            "RUNNING" => Ok(Self::Running),
+            "SUCCEEDED" => Ok(Self::Succeeded),
+            "FAILED" => Ok(Self::Failed),
+            other => Err(format!("Unknown proof status: {other}")),
+        }
+    }
+}
+
+/// Worker-owned job lifecycle status, distinct from requester [`ProofStatus`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProofJobStatus {
+    /// Job is claimable and not currently owned by any worker.
+    Pending,
+    /// Job is currently claimed by a worker under an unexpired lock.
+    Claimed,
+    /// Job completed successfully through the worker API.
+    Succeeded,
+    /// Job failed terminally.
+    Failed,
+}
+
+impl ProofJobStatus {
+    /// Convert enum to static string representation.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "PENDING",
+            Self::Claimed => "CLAIMED",
+            Self::Succeeded => "SUCCEEDED",
+            Self::Failed => "FAILED",
+        }
+    }
+}
+
+impl std::fmt::Display for ProofJobStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl TryFrom<&str> for ProofJobStatus {
+    type Error = String;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "PENDING" => Ok(Self::Pending),
+            "CLAIMED" => Ok(Self::Claimed),
+            "SUCCEEDED" => Ok(Self::Succeeded),
+            "FAILED" => Ok(Self::Failed),
+            other => Err(format!("Unknown proof job status: {other}")),
         }
     }
 }
@@ -182,34 +216,37 @@ impl ProofData {
 /// The response sent by the `prover-service` to
 /// a defender that requests the proof back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProofResponse {
+pub enum ProofResponse {
+    Succeeded(SucceededProofResponse),
+    Failed(FailedProofResponse),
+    Pending(PendingProofResponse),
+}
+
+/// The succeeded proof response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SucceededProofResponse {
     /// The identifier of the proof request this proof answers.
     pub id: ProofRequestId,
-    /// The generated proof.
+    /// The actual proof.
     pub proof: ProofData,
 }
 
-/// Durable status of an external backend proof job.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BackendProofJobStatus {
-    /// External backend work was requested and is awaiting polling.
-    Requested,
-    /// External backend work completed successfully.
-    Completed,
-    /// External backend work reached a terminal failure.
-    Failed,
+/// The failed proof response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FailedProofResponse {
+    /// The identifier of the proof request.
+    pub id: ProofRequestId,
+    /// Failure reason.
+    pub reason: String,
 }
 
-impl BackendProofJobStatus {
-    /// Stable database representation.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Requested => "requested",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-        }
-    }
+/// The pending proof response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingProofResponse {
+    /// The identifier of the proof request.
+    pub id: ProofRequestId,
+    /// Current proof status.
+    pub status: ProofStatus,
 }
 
 /// External backend request identifier.
@@ -222,180 +259,124 @@ impl std::fmt::Display for BackendProofId {
     }
 }
 
-/// Durable backend proof phase.
+/// Opaque token proving ownership of a locked row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum BackendProofPhase {
-    /// SP1 compressed range proof phase.
-    Range,
-    /// SP1 aggregation proof phase.
-    Aggregation,
-    /// Single external backend request phase.
-    Single,
-}
+pub struct LockId(pub Uuid);
 
-impl BackendProofPhase {
-    /// Stable database representation.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Range => "range",
-            Self::Aggregation => "aggregation",
-            Self::Single => "single",
-        }
-    }
-}
-
-impl std::fmt::Display for BackendProofPhase {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl TryFrom<&str> for BackendProofPhase {
-    type Error = String;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
-            "range" => Ok(Self::Range),
-            "aggregation" => Ok(Self::Aggregation),
-            "single" => Ok(Self::Single),
-            other => Err(format!("unknown backend proof phase {other:?}")),
-        }
-    }
-}
-
-/// Opaque token proving ownership of a leased row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct LeaseToken(pub Uuid);
-
-impl LeaseToken {
-    /// Generate a fresh lease token.
+impl LockId {
+    /// Generate a fresh lock id.
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
 }
 
-impl Default for LeaseToken {
+impl Default for LockId {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl std::fmt::Display for LeaseToken {
+impl std::fmt::Display for LockId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-/// Initial proof request leased from `proof_jobs`.
+/// Initial proof request locked from `proof_requests`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LeasedProofRequest {
+pub struct LockedProofRequest {
     /// The user-facing proof request.
     pub request: ProofRequest,
-    /// Token required for updates to the leased proof job.
-    pub lease_token: LeaseToken,
+    /// Token required for updates to the locked proof job.
+    pub lock_id: LockId,
 }
 
-/// Durable external backend state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BackendProofState {
-    /// SP1 compressed range proof.
-    Range {
-        /// External backend request id.
-        id: BackendProofId,
-    },
-    /// SP1 aggregation proof.
-    Aggregation {
-        /// External backend request id.
-        id: BackendProofId,
-    },
-    /// One backend request directly produces the final proof.
-    Single {
-        /// External backend request id.
-        id: BackendProofId,
-    },
+/// The session type used to differentiate the proof type
+/// returned by SP1 backend.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SessionType {
+    /// The range proof.
+    Stark,
+    /// The final snark groth16 proof.
+    Snark,
 }
 
-impl BackendProofState {
-    /// Durable phase for this backend proof state.
-    #[must_use]
-    pub const fn phase(self) -> BackendProofPhase {
+impl SessionType {
+    /// Convert enum to static string representation
+    pub const fn as_str(&self) -> &'static str {
         match self {
-            Self::Range { .. } => BackendProofPhase::Range,
-            Self::Aggregation { .. } => BackendProofPhase::Aggregation,
-            Self::Single { .. } => BackendProofPhase::Single,
-        }
-    }
-
-    /// The contained external backend request id.
-    #[must_use]
-    pub const fn id(self) -> BackendProofId {
-        match self {
-            Self::Range { id } | Self::Aggregation { id } | Self::Single { id } => id,
-        }
-    }
-
-    /// Rebuild from phase and backend request id.
-    #[must_use]
-    pub const fn from_phase(phase: BackendProofPhase, id: BackendProofId) -> Self {
-        match phase {
-            BackendProofPhase::Range => Self::Range { id },
-            BackendProofPhase::Aggregation => Self::Aggregation { id },
-            BackendProofPhase::Single => Self::Single { id },
+            Self::Stark => "STARK",
+            Self::Snark => "SNARK",
         }
     }
 }
 
-/// Backend work returned from a durable backend job.
+impl TryFrom<&str> for SessionType {
+    type Error = String;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "STARK" => Ok(Self::Stark),
+            "SNARK" => Ok(Self::Snark),
+            other => Err(format!("Unknown session type: {other}")),
+        }
+    }
+}
+
+/// A backend session tracked in the prover service for a proof job.
+///
+/// Workers record the backend-issued identifier (for example an SP1 cluster or
+/// network proof id) so a restart or reclaim resumes the in-flight backend job
+/// rather than re-running it. The worker itself holds no local state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BackendProofWork {
-    /// The original user-facing proof request.
-    pub proof_request: ProofRequest,
-    /// Opaque backend state to advance.
-    pub state: BackendProofState,
+pub struct BackendSession {
+    /// Backend-specific session identifier used to resume polling.
+    pub backend_session_id: String,
+    /// Current backend session lifecycle status.
+    pub status: BackendSessionStatus,
 }
 
-/// Durable backend job leased from `proof_backend_jobs`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LeasedBackendProofWork {
-    /// Database identifier of the backend job row.
-    pub backend_job_id: i64,
-    /// Backend work to advance.
-    pub work: BackendProofWork,
-    /// Token required for updates to the leased backend job.
-    pub lease_token: LeaseToken,
-}
-
-/// Lease location for final proof submission.
+/// Lifecycle status of a tracked backend session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ProofSubmissionLease {
-    /// Final proof was produced while starting a user-facing proof job.
-    ProofJob {
-        /// Token for the leased `proof_jobs` row.
-        lease_token: LeaseToken,
-    },
-    /// Final proof was produced while advancing a durable backend job.
-    BackendJob {
-        /// Database identifier of the backend job row.
-        backend_job_id: i64,
-        /// Token for the leased `proof_backend_jobs` row.
-        lease_token: LeaseToken,
-    },
+pub enum BackendSessionStatus {
+    /// Reservation placeholder before the backend job has been submitted.
+    Submitting,
+    /// Backend session is actively running.
+    Running,
+    /// Backend session completed successfully.
+    Completed,
+    /// Backend session failed.
+    Failed,
 }
 
-/// Result of starting or advancing backend work.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BackendUpdate {
-    /// Backend work was requested externally and must be polled later.
-    Pending {
-        /// Durable backend state.
-        state: BackendProofState,
-    },
-    /// Final proof is complete.
-    Complete(ProofData),
-    /// Terminal backend failure.
-    Failed(String),
-    /// No state change; poll again later.
-    Noop,
+impl BackendSessionStatus {
+    /// Convert enum to static string representation
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Submitting => "SUBMITTING",
+            Self::Running => "RUNNING",
+            Self::Completed => "COMPLETED",
+            Self::Failed => "FAILED",
+        }
+    }
+
+    /// Whether this status represents a terminal backend session.
+    pub const fn is_terminal(&self) -> bool {
+        matches!(self, Self::Completed | Self::Failed)
+    }
+}
+
+impl TryFrom<&str> for BackendSessionStatus {
+    type Error = String;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "SUBMITTING" => Ok(Self::Submitting),
+            "RUNNING" => Ok(Self::Running),
+            "COMPLETED" => Ok(Self::Completed),
+            "FAILED" => Ok(Self::Failed),
+            other => Err(format!("Unknown session status: {other}")),
+        }
+    }
 }

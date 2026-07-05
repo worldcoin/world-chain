@@ -19,7 +19,7 @@ use anyhow::{Context, anyhow, bail};
 use kona_host::{DataFormat, single::SingleChainHost};
 use kona_preimage::{BidirectionalChannel, HintWriter, NativeChannel, OracleReader};
 use kona_proof::{CachingOracle, l1::OracleBlobProvider};
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use world_chain_proof_core::{
@@ -242,7 +242,7 @@ struct RpcError {
 ///
 /// Synchronous: creates its own Tokio runtime for the Kona host, so it must run on a
 /// blocking-capable thread (not inside an async task).
-pub fn build_range_input(
+pub async fn build_range_input(
     config: &OnlineHostConfig,
     request: RangeWitnessRequest,
 ) -> anyhow::Result<RangeProofInput> {
@@ -255,7 +255,7 @@ pub fn build_range_input(
     }
 
     let client = Client::new();
-    let finalized_l2_head = finalized_l2_head(&client, &config.l2_rpc)?;
+    let finalized_l2_head = finalized_l2_head(&client, &config.l2_rpc).await?;
     if !request.allow_unfinalized && finalized_l2_head.is_some_and(|head| request.end_block > head)
     {
         bail!(
@@ -269,16 +269,20 @@ pub fn build_range_input(
         &client,
         &config.l2_rpc,
         BlockTag::Number(request.start_block),
-    )?;
-    let post_block = get_block(&client, &config.l2_rpc, BlockTag::Number(request.end_block))?;
-    let pre_state = output_root_witness(&client, &config.l2_rpc, request.start_block, &pre_block)?;
-    let post_state = output_root_witness(&client, &config.l2_rpc, request.end_block, &post_block)?;
+    )
+    .await?;
+    let post_block =
+        get_block(&client, &config.l2_rpc, BlockTag::Number(request.end_block)).await?;
+    let pre_state =
+        output_root_witness(&client, &config.l2_rpc, request.start_block, &pre_block).await?;
+    let post_state =
+        output_root_witness(&client, &config.l2_rpc, request.end_block, &post_block).await?;
     let pre_root = pre_state.output_root();
     let post_root = post_state.output_root();
 
     let l1_head = match request.l1_head {
         Some(hash) => hash,
-        None => resolve_l1_head(&client, &config.l2_rpc, &config.l1_rpc, request.end_block)?,
+        None => resolve_l1_head(&client, &config.l2_rpc, &config.l1_rpc, request.end_block).await?,
     };
 
     let active_fork = config
@@ -308,11 +312,8 @@ pub fn build_range_input(
         l1_config_path: None,
     };
 
-    let witness = tokio::runtime::Runtime::new()?.block_on(collect_world_range_witness(
-        host,
-        config.schedule.clone(),
-        config.witness_timeout,
-    ))?;
+    let witness =
+        collect_world_range_witness(host, config.schedule.clone(), config.witness_timeout).await?;
 
     Ok(RangeProofInput {
         metadata: RangeMetadata {
@@ -437,27 +438,29 @@ async fn collect_witness_from_channels(
 }
 
 /// Fetches the finalized L2 head block number, when the RPC exposes one.
-pub fn finalized_l2_head(client: &Client, rpc_url: &str) -> anyhow::Result<Option<u64>> {
+pub async fn finalized_l2_head(client: &Client, rpc_url: &str) -> anyhow::Result<Option<u64>> {
     Ok(rpc::<RpcBlock>(
         client,
         rpc_url,
         "eth_getBlockByNumber",
         json!(["finalized", false]),
-    )?
+    )
+    .await?
     .map(|b| b.number.0))
 }
 
-fn get_block(client: &Client, rpc_url: &str, tag: BlockTag) -> anyhow::Result<RpcBlock> {
+async fn get_block(client: &Client, rpc_url: &str, tag: BlockTag) -> anyhow::Result<RpcBlock> {
     rpc(
         client,
         rpc_url,
         "eth_getBlockByNumber",
         json!([tag.to_rpc_value(), false]),
-    )?
+    )
+    .await?
     .with_context(|| format!("eth_getBlockByNumber returned null for {}", tag.display()))
 }
 
-fn output_root_witness(
+async fn output_root_witness(
     client: &Client,
     rpc_url: &str,
     block_number: u64,
@@ -472,11 +475,14 @@ fn output_root_witness(
             Vec::<String>::new(),
             BlockTag::Number(block_number).to_rpc_value(),
         ]),
-    ) {
+    )
+    .await
+    {
         Ok(Some(proof)) => proof,
         Ok(None) => bail!("eth_getProof returned null"),
         Err(proof_err) => {
             return output_root_witness_from_op_node(client, rpc_url, block_number, block)
+                .await
                 .with_context(|| format!("eth_getProof failed first: {proof_err}"));
         }
     };
@@ -488,7 +494,7 @@ fn output_root_witness(
     })
 }
 
-fn output_root_witness_from_op_node(
+async fn output_root_witness_from_op_node(
     client: &Client,
     rpc_url: &str,
     block_number: u64,
@@ -499,7 +505,8 @@ fn output_root_witness_from_op_node(
         rpc_url,
         "optimism_outputAtBlock",
         json!([BlockTag::Number(block_number).to_rpc_value()]),
-    )?
+    )
+    .await?
     .context("optimism_outputAtBlock returned null")?;
 
     let witness = OutputRootWitness {
@@ -518,21 +525,27 @@ fn output_root_witness_from_op_node(
 }
 
 /// Resolves a finalized L1 head past the range's L1 origin, mirroring the proposer's choice.
-pub fn resolve_l1_head(
+pub async fn resolve_l1_head(
     client: &Client,
     l2_rpc: &str,
     l1_rpc: &str,
     end_block: u64,
 ) -> anyhow::Result<B256> {
-    let l1_origin_number = l1_origin_number(client, l2_rpc, end_block)?;
-    let finalized_l1 = get_block(client, l1_rpc, BlockTag::Finalized)?;
+    let l1_origin_number = l1_origin_number(client, l2_rpc, end_block).await?;
+    let finalized_l1 = get_block(client, l1_rpc, BlockTag::Finalized).await?;
     let target = l1_origin_number
         .saturating_add(20)
         .min(finalized_l1.number.0);
-    Ok(get_block(client, l1_rpc, BlockTag::Number(target))?.hash)
+    Ok(get_block(client, l1_rpc, BlockTag::Number(target))
+        .await?
+        .hash)
 }
 
-fn l1_origin_number(client: &Client, rpc_url: &str, block_number: u64) -> anyhow::Result<u64> {
+async fn l1_origin_number(
+    client: &Client,
+    rpc_url: &str,
+    block_number: u64,
+) -> anyhow::Result<u64> {
     let selector = &keccak256("number()")[..4];
     let result: String = rpc(
         client,
@@ -545,7 +558,8 @@ fn l1_origin_number(client: &Client, rpc_url: &str, block_number: u64) -> anyhow
             },
             BlockTag::Number(block_number).to_rpc_value(),
         ]),
-    )?
+    )
+    .await?
     .context("eth_call to L1Block.number() returned null")?;
 
     parse_hex_u64_word(&result)
@@ -564,18 +578,19 @@ fn parse_hex_u64_word(value: &str) -> anyhow::Result<u64> {
 }
 
 /// Fetches an L1 header by hash, e.g. the checkpoint head consumed by the aggregation guest.
-pub fn fetch_l1_header_by_hash(
+pub async fn fetch_l1_header_by_hash(
     client: &Client,
     rpc_url: &str,
     hash: B256,
 ) -> anyhow::Result<alloy_consensus::Header> {
-    let block_json: Value = rpc(client, rpc_url, "eth_getBlockByHash", json!([hash, false]))?
+    let block_json: Value = rpc(client, rpc_url, "eth_getBlockByHash", json!([hash, false]))
+        .await?
         .with_context(|| format!("eth_getBlockByHash returned null for {hash:?}"))?;
     serde_json::from_value(block_json).context("failed to deserialize L1 block header")
 }
 
 /// Minimal blocking JSON-RPC call helper.
-pub fn rpc<T: DeserializeOwned>(
+pub async fn rpc<T: DeserializeOwned>(
     client: &Client,
     rpc_url: &str,
     method: &str,
@@ -590,10 +605,12 @@ pub fn rpc<T: DeserializeOwned>(
             "params": params,
         }))
         .send()
+        .await
         .with_context(|| format!("failed to call {method}"))?
         .error_for_status()
         .with_context(|| format!("{method} returned HTTP error"))?
         .json()
+        .await
         .with_context(|| format!("failed to decode {method} response"))?;
 
     if let Some(error) = response.error {
