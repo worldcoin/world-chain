@@ -6,6 +6,7 @@
 
 use alloy_primitives::B256;
 use anyhow::Context;
+use async_trait::async_trait;
 use sp1_sdk::{
     CpuProver, HashableKey, MockProver, ProveRequest, Prover, ProverClient, ProvingKey, SP1Proof,
     SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin,
@@ -64,10 +65,6 @@ pub enum SuccinctProverError {
 }
 
 /// [`WorldSuccinctProver`] implementation over the sp1-sdk environment provers.
-///
-/// Synchronous like the trait it implements: holds its own Tokio runtime and blocks on the
-/// async sp1-sdk calls, mirroring `NitroProver`. Construct and call it from blocking-capable
-/// threads only.
 pub struct SuccinctProver {
     kind: Sp1ProverKind,
     client: EnvProver,
@@ -78,69 +75,66 @@ pub struct SuccinctProver {
     agg_network_pk: Option<SP1ProvingKey>,
     multi_block_vkey: [u32; 8],
     agg_mode: SP1ProofMode,
-    runtime: tokio::runtime::Runtime,
 }
 
 impl SuccinctProver {
     /// Creates the prover using caller-supplied ELFs. Use this in production binaries with
     /// ELFs embedded at compile time via `world_chain_proof_succinct_elfs`.
-    pub fn new(kind: Sp1ProverKind, agg_mode: SP1ProofMode) -> anyhow::Result<Self> {
+    pub async fn new(kind: Sp1ProverKind, agg_mode: SP1ProofMode) -> anyhow::Result<Self> {
         let range_elf = world_chain_proof_succinct_elfs::range_elf();
         let agg_elf = world_chain_proof_succinct_elfs::aggregation_elf();
-        let runtime = tokio::runtime::Runtime::new().context("failed to create tokio runtime")?;
-        let (client, range_pk, agg_pk, network_client, range_network_pk, agg_network_pk) = runtime
-            .block_on(async {
-                let client = match kind {
-                    Sp1ProverKind::Cpu => EnvProver::Cpu(CpuProver::new().await),
-                    Sp1ProverKind::Mock => EnvProver::Mock(MockProver::new().await),
-                    Sp1ProverKind::Network => {
-                        let private_key = std::env::var("SP1_PRIVATE_KEY").context(
+        let (client, range_pk, agg_pk, network_client, range_network_pk, agg_network_pk) = {
+            let client = match kind {
+                Sp1ProverKind::Cpu => EnvProver::Cpu(CpuProver::new().await),
+                Sp1ProverKind::Mock => EnvProver::Mock(MockProver::new().await),
+                Sp1ProverKind::Network => {
+                    let private_key = std::env::var("SP1_PRIVATE_KEY").context(
                             "SP1_PRIVATE_KEY environment variable must be set to use the network prover",
                         )?;
-                        EnvProver::Network(
-                            ProverClient::builder()
-                                .network()
-                                .private_key(&private_key)
-                                .build()
-                                .await,
-                        )
-                    }
-                };
-                let range_pk = client
-                    .setup(range_elf.clone())
-                    .await
-                    .context("range program setup failed")?;
-                let agg_pk = client
-                    .setup(agg_elf.clone())
-                    .await
-                    .context("aggregation program setup failed")?;
-                let (network_client, range_network_pk, agg_network_pk) = match &client {
-                    EnvProver::Network(network) => {
-                        let range_network_pk = network
-                            .setup(range_elf)
-                            .await
-                            .context("network range program setup failed")?;
-                        let agg_network_pk = network
-                            .setup(agg_elf)
-                            .await
-                            .context("network aggregation program setup failed")?;
-                        (
-                            Some(network.clone()),
-                            Some(range_network_pk),
-                            Some(agg_network_pk),
-                        )
-                    }
-                    _ => (None, None, None),
-                };
-                anyhow::Ok((
-                    client,
-                    range_pk,
-                    agg_pk,
-                    network_client,
-                    range_network_pk,
-                    agg_network_pk,
-                ))
-            })?;
+                    EnvProver::Network(
+                        ProverClient::builder()
+                            .network()
+                            .private_key(&private_key)
+                            .build()
+                            .await,
+                    )
+                }
+            };
+            let range_pk = client
+                .setup(range_elf.clone())
+                .await
+                .context("range program setup failed")?;
+            let agg_pk = client
+                .setup(agg_elf.clone())
+                .await
+                .context("aggregation program setup failed")?;
+            let (network_client, range_network_pk, agg_network_pk) = match &client {
+                EnvProver::Network(network) => {
+                    let range_network_pk = network
+                        .setup(range_elf)
+                        .await
+                        .context("network range program setup failed")?;
+                    let agg_network_pk = network
+                        .setup(agg_elf)
+                        .await
+                        .context("network aggregation program setup failed")?;
+                    (
+                        Some(network.clone()),
+                        Some(range_network_pk),
+                        Some(agg_network_pk),
+                    )
+                }
+                _ => (None, None, None),
+            };
+            anyhow::Ok((
+                client,
+                range_pk,
+                agg_pk,
+                network_client,
+                range_network_pk,
+                agg_network_pk,
+            ))
+        }?;
         let multi_block_vkey = range_pk.verifying_key().hash_u32();
 
         Ok(Self {
@@ -153,7 +147,6 @@ impl SuccinctProver {
             agg_network_pk,
             multi_block_vkey,
             agg_mode,
-            runtime,
         })
     }
 
@@ -176,6 +169,7 @@ impl SuccinctProver {
     }
 }
 
+#[async_trait]
 impl WorldSuccinctProver for SuccinctProver {
     type Error = anyhow::Error;
 
@@ -183,13 +177,18 @@ impl WorldSuccinctProver for SuccinctProver {
         self.multi_block_vkey
     }
 
-    fn prove_range(&self, request: RangeProofRequest) -> Result<RangeProofArtifact, Self::Error> {
+    async fn prove_range(
+        &self,
+        request: RangeProofRequest,
+    ) -> Result<RangeProofArtifact, Self::Error> {
         let mut stdin = SP1Stdin::new();
         stdin.write_vec(request.witness_rkyv);
 
         let proof = self
-            .runtime
-            .block_on(async { self.client.prove(&self.range_pk, stdin).compressed().await })
+            .client
+            .prove(&self.range_pk, stdin)
+            .compressed()
+            .await
             .context("range proving failed")?;
 
         let boot_info: BootInfoStruct = bincode::deserialize(proof.public_values.as_slice())
@@ -214,7 +213,7 @@ impl WorldSuccinctProver for SuccinctProver {
         })
     }
 
-    fn prove_aggregation(
+    async fn prove_aggregation(
         &self,
         request: AggregationProofRequest,
     ) -> Result<AggregationProofArtifact, Self::Error> {
@@ -231,17 +230,15 @@ impl WorldSuccinctProver for SuccinctProver {
         stdin.write(&request.inputs);
         stdin.write_vec(request.l1_headers_cbor);
 
-        let proof = self
-            .runtime
-            .block_on(async {
-                let mut prove = self.client.prove(&self.agg_pk, stdin).mode(self.agg_mode);
-                if self.kind == Sp1ProverKind::Mock {
-                    // Mock range proofs are dummies; skip recursive verification in the guest.
-                    prove = prove.deferred_proof_verification(false);
-                }
-                prove.await
-            })
-            .context("aggregation proving failed")?;
+        let proof = {
+            let mut prove = self.client.prove(&self.agg_pk, stdin).mode(self.agg_mode);
+            if self.kind == Sp1ProverKind::Mock {
+                // Mock range proofs are dummies; skip recursive verification in the guest.
+                prove = prove.deferred_proof_verification(false);
+            }
+            prove.await
+        }
+        .context("aggregation proving failed")?;
 
         if self.kind != Sp1ProverKind::Mock {
             self.client
@@ -271,20 +268,23 @@ impl WorldSuccinctProver for SuccinctProver {
         self.kind == Sp1ProverKind::Network
     }
 
-    fn request_range(&self, request: RangeProofRequest) -> Result<B256, Self::Error> {
+    async fn request_range(&self, request: RangeProofRequest) -> Result<B256, Self::Error> {
         let (network, range_pk, _) = self.network_parts()?;
         let mut stdin = SP1Stdin::new();
         stdin.write_vec(request.witness_rkyv);
-        self.runtime
-            .block_on(async { network.prove(range_pk, stdin).compressed().request().await })
+        network
+            .prove(range_pk, stdin)
+            .compressed()
+            .request()
+            .await
             .context("range proof network request failed")
     }
 
-    fn poll_range(&self, id: B256) -> Result<Option<RangeProofArtifact>, Self::Error> {
+    async fn poll_range(&self, id: B256) -> Result<Option<RangeProofArtifact>, Self::Error> {
         let (network, _, _) = self.network_parts()?;
-        let maybe_proof = self
-            .runtime
-            .block_on(async { network.get_proof_status(id).await })
+        let maybe_proof = network
+            .get_proof_status(id)
+            .await
             .context("range proof network status failed")?
             .1;
 
@@ -294,7 +294,10 @@ impl WorldSuccinctProver for SuccinctProver {
             .context("range proof conversion failed")
     }
 
-    fn request_aggregation(&self, request: AggregationProofRequest) -> Result<B256, Self::Error> {
+    async fn request_aggregation(
+        &self,
+        request: AggregationProofRequest,
+    ) -> Result<B256, Self::Error> {
         let (network, range_pk, agg_pk) = self.network_parts()?;
         let mut stdin = SP1Stdin::new();
         let range_vk = range_pk.verifying_key().vk.clone();
@@ -309,22 +312,22 @@ impl WorldSuccinctProver for SuccinctProver {
         stdin.write(&request.inputs);
         stdin.write_vec(request.l1_headers_cbor);
 
-        self.runtime
-            .block_on(async {
-                network
-                    .prove(agg_pk, stdin)
-                    .mode(self.agg_mode)
-                    .request()
-                    .await
-            })
+        network
+            .prove(agg_pk, stdin)
+            .mode(self.agg_mode)
+            .request()
+            .await
             .context("aggregation proof network request failed")
     }
 
-    fn poll_aggregation(&self, id: B256) -> Result<Option<AggregationProofArtifact>, Self::Error> {
+    async fn poll_aggregation(
+        &self,
+        id: B256,
+    ) -> Result<Option<AggregationProofArtifact>, Self::Error> {
         let (network, _, agg_pk) = self.network_parts()?;
-        let maybe_proof = self
-            .runtime
-            .block_on(async { network.get_proof_status(id).await })
+        let maybe_proof = network
+            .get_proof_status(id)
+            .await
             .context("aggregation proof network status failed")?
             .1;
 

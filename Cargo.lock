@@ -19186,6 +19186,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
  "anyhow",
+ "async-trait",
  "bincode 1.3.3",
  "reqwest 0.12.28",
  "rkyv",
@@ -19207,6 +19208,7 @@ name = "world-chain-proof-succinct-utils"
 version = "2.4.0"
 dependencies = [
  "alloy-primitives",
+ "async-trait",
  "rkyv",
  "serde",
  "world-chain-proof-core",
