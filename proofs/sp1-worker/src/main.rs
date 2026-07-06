@@ -214,7 +214,7 @@ async fn main() -> Result<()> {
             poll_interval: Duration::from_secs(cli.poll_interval_seconds),
             max_concurrent_jobs: cli.max_concurrent_jobs,
             retry_config,
-            heartbeat_config
+            heartbeat_config,
         },
     );
 

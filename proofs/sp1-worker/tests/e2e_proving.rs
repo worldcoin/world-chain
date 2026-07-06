@@ -34,6 +34,7 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres;
 use world_chain_proof_kona_host_utils::online::{OnlineHostConfig, resolve_l1_head};
 use world_chain_proof_succinct_host_utils::prover::{SP1ProofMode, Sp1ProverKind, SuccinctProver};
+use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_proofs::{ConsensusProvider, OptimismConsensusClient};
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequester, ProofResponse, ProofStatus,
@@ -179,6 +180,7 @@ async fn worker_proves_real_range_end_to_end() {
             poll_interval: Duration::from_millis(500),
             max_concurrent_jobs: 1,
             retry_config: RetryConfig::default(),
+            heartbeat_config: WorkerHeartbeatConfig::default(),
         },
     );
     let token = worker.cancellation_token();

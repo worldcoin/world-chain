@@ -5,7 +5,7 @@ use std::{sync::Arc, time::Duration};
 use alloy_primitives::{Address, B256, Bytes};
 use testcontainers::{ContainerAsync, runners::AsyncRunner};
 use testcontainers_modules::postgres;
-use world_chain_proof_worker::ProofJob;
+use world_chain_proof_worker::{ProofJob, WorkerHeartbeatConfig};
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequester, ProofResponse, ProofStatus,
     ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
@@ -87,6 +87,7 @@ async fn worker_completes_requested_proof_over_rpc() {
             poll_interval: Duration::from_millis(10),
             max_concurrent_jobs: 1,
             retry_config: RetryConfig::default(),
+            heartbeat_config: WorkerHeartbeatConfig::default(),
         },
     );
     let worker_handle = tokio::spawn(worker);
