@@ -44,7 +44,9 @@ use world_chain_challenger::{AlloyChallengerClient, ChallengerConfig, WorldChain
 use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
 use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
 use world_chain_proof_succinct_host_utils::prover::{SP1ProofMode, Sp1ProverKind, SuccinctProver};
-use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig, RetryConfig};
+use world_chain_proof_worker::{
+    ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
+};
 use world_chain_proofs::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
 use world_chain_proposer::{AlloyProofSystemClient, ProposerConfig, WorldChainProposer};
 use world_chain_prover_service::{
@@ -2696,6 +2698,7 @@ async fn start_sp1_worker(
     let queue = RpcProverServiceClient::new(prover_service_url)
         .map_err(|error| eyre!("failed to connect SP1 worker to prover-service: {error}"))?;
     let retry_config = RetryConfig::default();
+    let heartbeat_config = WorkerHeartbeatConfig::default();
     let worker = ProofWorker::new(
         queue,
         backend,
@@ -2704,6 +2707,7 @@ async fn start_sp1_worker(
             poll_interval: SP1_WORKER_POLL_INTERVAL,
             max_concurrent_jobs: 1,
             retry_config,
+            heartbeat_config,
         },
     );
 
