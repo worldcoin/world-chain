@@ -44,23 +44,27 @@ pub struct ProofWorkerConfig {
     pub max_concurrent_jobs: usize,
     /// Configurations for retry.
     pub retry_config: RetryConfig,
+    /// Configurations for worker heartbeat.
+    pub heartbeat_config: WorkerHeartbeatConfig,
 }
 
 impl ProofWorkerConfig {
     /// Create a new `ProofWorkerConfig` with the provided `worker_id`,
-    /// `poll_interval`, `max_concurrent_jobs` and `retry_config`.
+    /// `poll_interval`, `max_concurrent_jobs`, `retry_config` and `heartbeat_config`.
     #[must_use]
     pub fn new(
         worker_id: String,
         poll_interval: Duration,
         max_concurrent_jobs: usize,
         retry_config: RetryConfig,
+        heartbeat_config: WorkerHeartbeatConfig,
     ) -> Self {
         Self {
             worker_id,
             poll_interval,
             max_concurrent_jobs,
             retry_config,
+            heartbeat_config,
         }
     }
 }
@@ -182,6 +186,7 @@ async fn run_worker<Q, B>(
                     locked,
                     permit,
                     config.retry_config,
+                    config.heartbeat_config,
                 );
             }
             Ok(None) => {
@@ -222,6 +227,7 @@ fn spawn_job<Q, B>(
     locked: LockedProofRequest,
     permit: OwnedSemaphorePermit,
     retry_config: RetryConfig,
+    worker_heartbeat_config: WorkerHeartbeatConfig,
 ) where
     Q: ProofJobQueue + Send + Sync + 'static,
     B: ClaimedProofJobHandler,
@@ -254,7 +260,6 @@ fn spawn_job<Q, B>(
                 sessions,
             };
 
-            let worker_heartbeat_config = WorkerHeartbeatConfig::default();
             let worker_heartbeat = WorkerHeartbeat::new(
                 proof_id,
                 worker_id.clone(),
