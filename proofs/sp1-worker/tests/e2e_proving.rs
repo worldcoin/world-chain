@@ -130,11 +130,9 @@ async fn worker_proves_real_range_end_to_end() {
 
     let kind = prover_kind();
     // Build the prover off the async runtime: it owns its own runtime internally.
-    let prover =
-        tokio::task::spawn_blocking(move || SuccinctProver::new(kind, SP1ProofMode::Groth16))
-            .await
-            .expect("prover setup task")
-            .expect("build prover");
+    let prover = SuccinctProver::new(kind, SP1ProofMode::Groth16)
+        .await
+        .expect("build prover");
 
     let backend = Sp1Backend::new(
         host,

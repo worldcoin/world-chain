@@ -2678,11 +2678,9 @@ async fn start_sp1_worker(
     .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?;
 
     // `SuccinctProver` owns its own runtime, so build it off the async runtime.
-    let prover =
-        tokio::task::spawn_blocking(move || SuccinctProver::new(kind, SP1ProofMode::Groth16))
-            .await
-            .wrap_err("SP1 prover setup task panicked")?
-            .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+    let prover = SuccinctProver::new(kind, SP1ProofMode::Groth16)
+        .await
+        .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
 
     let backend = Sp1Backend::new(
         host,
