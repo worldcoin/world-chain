@@ -9,6 +9,7 @@ use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_kona_host_utils::online::build_online_config;
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
 use world_chain_proof_succinct_host_utils::prover::{SP1ProofMode, Sp1ProverKind, SuccinctProver};
+use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_prover_service::RpcProverServiceClient;
 use world_chain_sp1_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, Sp1Backend, Sp1BackendConfig,
@@ -17,6 +18,8 @@ use world_chain_sp1_worker::{
 const DEFAULT_SUBMIT_PROOF_RETRY_MAX_RETRIES: usize = 10;
 const DEFAULT_SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS: u64 = 100;
 const DEFAULT_SUBMIT_PROOF_RETRY_MAX_DELAY_MS: u64 = 10_000;
+const DEFAULT_WORKER_HEARTBEAT_INTERVAL_SEC: u64 = 30;
+const DEFAULT_WORKER_MAX_CONSECUTIVE_HEARTBEAT_FAILURES: u32 = 5;
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum Network {
@@ -141,6 +144,14 @@ struct Cli {
     /// The unique worker id.
     #[arg(long)]
     worker_id: String,
+
+    #[arg(long, default_value_t = DEFAULT_WORKER_HEARTBEAT_INTERVAL_SEC)]
+    /// The worker heartbeat interval in seconds.
+    heartbeat_interval_sec: u64,
+
+    #[arg(long, default_value_t = DEFAULT_WORKER_MAX_CONSECUTIVE_HEARTBEAT_FAILURES)]
+    /// Maximum consecutive retryable heartbeat failures before aborting proof generation.
+    heartbeat_max_consecutive_failures: u32,
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
@@ -191,6 +202,10 @@ async fn main() -> Result<()> {
         retry_initial_delay,
         retry_max_delay,
     );
+    let heartbeat_config = WorkerHeartbeatConfig::with_max_consecutive_failures(
+        Duration::from_secs(cli.heartbeat_interval_sec),
+        cli.heartbeat_max_consecutive_failures,
+    );
     let worker = ProofWorker::new(
         queue,
         backend,
@@ -199,6 +214,7 @@ async fn main() -> Result<()> {
             poll_interval: Duration::from_secs(cli.poll_interval_seconds),
             max_concurrent_jobs: cli.max_concurrent_jobs,
             retry_config,
+            heartbeat_config
         },
     );
 
