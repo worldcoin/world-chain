@@ -39,12 +39,15 @@ use world_chain_proof_nitro::{
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
 use world_chain_proof_worker::{
     ClaimedProofJobHandler, ProofJob, ProofWorker, ProofWorkerConfig, RetryConfig,
+    WorkerHeartbeatConfig,
 };
 use world_chain_prover_service::{ProofBackend, ProofData, RpcProverServiceClient};
 
 const DEFAULT_SUBMIT_PROOF_RETRY_MAX_RETRIES: usize = 10;
 const DEFAULT_SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS: u64 = 100;
 const DEFAULT_SUBMIT_PROOF_RETRY_MAX_DELAY_MS: u64 = 10_000;
+const DEFAULT_WORKER_HEARTBEAT_INTERVAL_SEC: u64 = 30;
+const DEFAULT_WORKER_MAX_CONSECUTIVE_HEARTBEAT_FAILURES: u32 = 5;
 
 // ──────────────────────────────────────────────────────────────────────────────────────
 // NitroBackend — ClaimedProofJobHandler implementation for the Nitro TEE lane
@@ -285,6 +288,14 @@ struct Cli {
     /// The unique worker id.
     #[arg(long)]
     worker_id: String,
+
+    #[arg(long, default_value_t = DEFAULT_WORKER_HEARTBEAT_INTERVAL_SEC)]
+    /// The worker heartbeat interval in seconds.
+    heartbeat_interval_sec: u64,
+
+    #[arg(long, default_value_t = DEFAULT_WORKER_MAX_CONSECUTIVE_HEARTBEAT_FAILURES)]
+    /// Maximum consecutive retryable heartbeat failures before aborting proof generation.
+    heartbeat_max_consecutive_failures: u32,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────────────
@@ -348,6 +359,10 @@ pub async fn run() -> Result<()> {
         retry_initial_delay,
         retry_max_delay,
     );
+    let heartbeat_config = WorkerHeartbeatConfig::with_max_consecutive_failures(
+        Duration::from_secs(cli.heartbeat_interval_sec),
+        cli.heartbeat_max_consecutive_failures,
+    );
     let worker = ProofWorker::new(
         queue,
         backend,
@@ -356,6 +371,7 @@ pub async fn run() -> Result<()> {
             poll_interval: Duration::from_secs(cli.poll_interval_seconds),
             max_concurrent_jobs: cli.max_concurrent_jobs,
             retry_config,
+            heartbeat_config,
         },
     );
 
