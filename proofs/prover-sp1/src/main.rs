@@ -154,7 +154,7 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
         prover = args.prover,
     );
 
-    let prover = SuccinctProver::new(args.prover, mode)?;
+    let prover = SuccinctProver::new(args.prover, mode).await?;
     let artifact = prove_validity(
         &host,
         &prover,
