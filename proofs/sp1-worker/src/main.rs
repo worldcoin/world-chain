@@ -143,7 +143,8 @@ struct Cli {
     worker_id: String,
 }
 
-fn main() -> Result<()> {
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
+async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -167,7 +168,7 @@ fn main() -> Result<()> {
     // ELFs are embedded at compile time via `sp1_sdk::include_elf!()`
     // (see `proofs/succinct/elfs/build.rs`). Challenged roots are
     // defended on-chain; Groth16 keeps verification ~100k gas.
-    let prover = SuccinctProver::new(cli.prover, SP1ProofMode::Groth16)?;
+    let prover = SuccinctProver::new(cli.prover, SP1ProofMode::Groth16).await?;
 
     let backend = Sp1Backend::new(
         host,
@@ -212,26 +213,16 @@ fn main() -> Result<()> {
         "sp1-worker starting"
     );
 
-    // The async side is light (job-queue RPC and timers); proving runs on the blocking
-    // pool, and range proofs parallelize on their own scoped threads.
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_name("sp1-worker")
-        .worker_threads(2)
-        .max_blocking_threads(4)
-        .build()
-        .context("failed to build tokio runtime")?;
-
     // Ctrl-C triggers a graceful shutdown: the worker stops leasing, flushes pending
     // reports, and resolves.
     let token = worker.cancellation_token();
-    runtime.spawn(async move {
+    tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
             tracing::info!("received ctrl-c, shutting down");
             token.cancel();
         }
     });
 
-    runtime.block_on(worker);
+    worker.await;
     Ok(())
 }

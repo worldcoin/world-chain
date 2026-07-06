@@ -1,4 +1,5 @@
 use alloy_primitives::B256;
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
     range::WorldRangeProofPublicValues, types::AggregationInputs, witness::WorldRangeWitnessData,
@@ -51,6 +52,7 @@ pub struct AggregationProofRequest {
 }
 
 /// Interface expected from a concrete SP1 prover backend.
+#[async_trait]
 pub trait WorldSuccinctProver {
     /// Backend-specific error type.
     type Error;
@@ -59,10 +61,13 @@ pub trait WorldSuccinctProver {
     fn multi_block_vkey(&self) -> [u32; 8];
 
     /// Proves one range witness.
-    fn prove_range(&self, request: RangeProofRequest) -> Result<RangeProofArtifact, Self::Error>;
+    async fn prove_range(
+        &self,
+        request: RangeProofRequest,
+    ) -> Result<RangeProofArtifact, Self::Error>;
 
     /// Aggregates already-generated range proofs.
-    fn prove_aggregation(
+    async fn prove_aggregation(
         &self,
         request: AggregationProofRequest,
     ) -> Result<AggregationProofArtifact, Self::Error>;
@@ -73,14 +78,20 @@ pub trait WorldSuccinctProver {
     }
 
     /// Request a range proof from an external backend without waiting for completion.
-    fn request_range(&self, request: RangeProofRequest) -> Result<B256, Self::Error>;
+    async fn request_range(&self, request: RangeProofRequest) -> Result<B256, Self::Error>;
 
     /// Poll a previously requested range proof.
-    fn poll_range(&self, id: B256) -> Result<Option<RangeProofArtifact>, Self::Error>;
+    async fn poll_range(&self, id: B256) -> Result<Option<RangeProofArtifact>, Self::Error>;
 
     /// Request an aggregation proof from an external backend without waiting for completion.
-    fn request_aggregation(&self, request: AggregationProofRequest) -> Result<B256, Self::Error>;
+    async fn request_aggregation(
+        &self,
+        request: AggregationProofRequest,
+    ) -> Result<B256, Self::Error>;
 
     /// Poll a previously requested aggregation proof.
-    fn poll_aggregation(&self, id: B256) -> Result<Option<AggregationProofArtifact>, Self::Error>;
+    async fn poll_aggregation(
+        &self,
+        id: B256,
+    ) -> Result<Option<AggregationProofArtifact>, Self::Error>;
 }

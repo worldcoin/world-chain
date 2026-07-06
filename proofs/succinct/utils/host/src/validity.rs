@@ -114,7 +114,10 @@ where
         );
         let range_request = RangeProofRequest::from_witness_data(&input.witness, None)
             .context("failed to serialize range witness")?;
-        let artifact = prover.prove_range(range_request).map_err(Into::into)?;
+        let artifact = prover
+            .prove_range(range_request)
+            .await
+            .map_err(Into::into)?;
 
         if artifact.boot_info.l2PostRoot != input.metadata.l2_post_root {
             bail!(
@@ -145,5 +148,6 @@ where
             l1_headers_cbor,
             range_proofs,
         })
+        .await
         .map_err(Into::into)
 }
