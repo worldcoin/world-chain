@@ -38,6 +38,7 @@ The MVP checks:
 | `ACCEPTANCE_L1_KEY` | yes when Karst deposit checks are enabled | unset | Funded L1 EOA key used to pay L1 gas for the OptimismPortal deposit transaction. |
 | `ACCEPTANCE_OPTIMISM_PORTAL` | yes when Karst deposit checks are enabled | unset | L1 OptimismPortal proxy address. |
 | `ACCEPTANCE_BUNDLER_RPC_URL` | no | unset | Rundler RPC endpoint. If unset, ERC-4337 checks are skipped. |
+| `ACCEPTANCE_4337_RPC_URL` | no | `ACCEPTANCE_RPC_URL` | Execution RPC used for ERC-4337 contract reads when the configured Rundler targets a different chain than the rest of the acceptance suite. |
 | `ACCEPTANCE_4337_ENTRY_POINT` | no on chain `69420`; yes otherwise | `0x0000000071727De22E5E9d8BAf0edAc6f37da032` on chain `69420` | ERC-4337 v0.7 EntryPoint address. |
 | `ACCEPTANCE_4337_MODULE` | no on chain `69420`; yes otherwise | `0x70673A08a5B1086585d39979Fb2d84FDC0bB6Aaf` on chain `69420` | Safe4337 module used to sign Safe user operations. |
 | `ACCEPTANCE_4337_WALLET_DEPLOYER` | no on chain `69420`; yes otherwise | `0xd1f0B51940DbD6e73891D2a41Ef14483fDC5Cb6e` on chain `69420` | Safe4337 wallet deployer used as the v0.7 factory. |
@@ -56,9 +57,9 @@ The ERC-4337 wallet owners are deterministic test mnemonic accounts and are only
 used to sign Safe user operations. They do not need ETH. The tests send standard
 two-parameter `eth_sendUserOperation` requests; sponsorship is expected to be
 injected by the configured Rundler endpoint. The ERC-4337 signing chain ID is
-read from Rundler. Contract reads use the regular acceptance RPC when it matches
-that chain ID, and otherwise use the public World Chain mainnet RPC for the known
-stage-Rundler-on-mainnet case.
+read from Rundler. Contract reads use `ACCEPTANCE_RPC_URL` unless
+`ACCEPTANCE_4337_RPC_URL` is set; when set, the override RPC chain ID must match
+Rundler's chain ID.
 
 The GitHub Actions acceptance workflow sets `ACCEPTANCE_4337_PROFILE=smoke` for
 bundler-enabled runs. That profile means 20 ephemeral Safe wallets, 2 post-deploy

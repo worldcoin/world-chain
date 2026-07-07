@@ -48,6 +48,7 @@ jobs:
             rpc_url: https://worldchain-mainnet.g.alchemy.com/public
             acceptance_profile: smoke
             bundler_rpc_url: https://rundler-mainnet.worldcoin.dev
+            erc4337_rpc_url: ""
             entry_point: "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
             safe_4337_module: "0x70673A08a5B1086585d39979Fb2d84FDC0bB6Aaf"
             safe_4337_wallet_deployer: "0xd1f0B51940DbD6e73891D2a41Ef14483fDC5Cb6e"
@@ -62,6 +63,7 @@ jobs:
             rpc_url: https://wc-node-sepolia.worldcoin.dev
             acceptance_profile: smoke
             bundler_rpc_url: https://rundler-stage.worldcoin.dev
+            erc4337_rpc_url: https://worldchain-mainnet.g.alchemy.com/public
             entry_point: "0x0000000071727De22E5E9d8BAf0edAc6f37da032"
             safe_4337_module: "0x70673A08a5B1086585d39979Fb2d84FDC0bB6Aaf"
             safe_4337_wallet_deployer: "0xd1f0B51940DbD6e73891D2a41Ef14483fDC5Cb6e"
@@ -76,6 +78,7 @@ jobs:
             rpc_url: https://wc-node-devnet.worldcoin.dev
             acceptance_profile: ""
             bundler_rpc_url: ""
+            erc4337_rpc_url: ""
             entry_point: ""
             safe_4337_module: ""
             safe_4337_wallet_deployer: ""
@@ -90,6 +93,7 @@ jobs:
             rpc_url: https://tx-proxy-devnet-eu-central-2.worldcoin.dev
             acceptance_profile: smoke
             bundler_rpc_url: https://rundler-devnet-eu-central-2.worldcoin.dev
+            erc4337_rpc_url: ""
             expected_chain_id: "69420"
             entry_point: ""
             safe_4337_module: ""
@@ -149,6 +153,7 @@ jobs:
           ACCEPTANCE_L1_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
           ACCEPTANCE_BUNDLER_RPC_URL: ${{ matrix.network == 'dev-eu-central-2' && inputs.bundler_rpc_url != '' && inputs.bundler_rpc_url || matrix.bundler_rpc_url }}
           ACCEPTANCE_CHAIN_ID: ${{ matrix.expected_chain_id }}
+          ACCEPTANCE_4337_RPC_URL: ${{ matrix.erc4337_rpc_url }}
           ACCEPTANCE_4337_ENTRY_POINT: ${{ matrix.entry_point }}
           ACCEPTANCE_4337_MODULE: ${{ matrix.safe_4337_module }}
           ACCEPTANCE_4337_WALLET_DEPLOYER: ${{ matrix.safe_4337_wallet_deployer }}

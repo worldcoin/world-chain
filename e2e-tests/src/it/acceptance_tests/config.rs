@@ -72,6 +72,7 @@ pub(super) struct CloudflareAccess {
 #[derive(Clone)]
 pub(super) struct BundlerConfig {
     pub(super) rpc_url: Url,
+    pub(super) chain_rpc_url: Option<Url>,
     pub(super) cloudflare_access: Option<CloudflareAccess>,
     pub(super) entry_point: Address,
     pub(super) module: Address,
@@ -158,6 +159,10 @@ impl BundlerConfig {
     pub(super) fn rpc_target(&self) -> String {
         rpc_target(&self.rpc_url)
     }
+
+    pub(super) fn chain_rpc_target(&self) -> Option<String> {
+        self.chain_rpc_url.as_ref().map(rpc_target)
+    }
 }
 
 impl KarstDepositConfig {
@@ -240,6 +245,9 @@ fn bundler_config_from_env(
         rpc_url: rpc_url
             .parse()
             .wrap_err("failed to parse ERC-4337 bundler RPC URL")?,
+        chain_rpc_url: optional_env("ACCEPTANCE_4337_RPC_URL")
+            .map(|value| value.parse().wrap_err("failed to parse ERC-4337 RPC URL"))
+            .transpose()?,
         cloudflare_access: bundler_cloudflare_access_from_env(chain_cloudflare_access)?,
         entry_point: parse_optional_address(
             "ACCEPTANCE_4337_ENTRY_POINT",

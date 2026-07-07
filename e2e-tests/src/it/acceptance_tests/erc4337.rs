@@ -27,8 +27,6 @@ use super::{
     rpc::{self, RpcEnv},
 };
 
-const WORLD_CHAIN_MAINNET_CHAIN_ID: u64 = 480;
-const WORLD_CHAIN_MAINNET_RPC_URL: &str = "https://worldchain-mainnet.g.alchemy.com/public";
 const SAFE_OP_TYPE_HASH: FixedBytes<32> =
     fixed_bytes!("c03dfc11d8b10bf9cf703d558958c8c42777f785d998c62060d85a4f0ef6ea7f");
 const SAFE_DOMAIN_TYPE_HASH: FixedBytes<32> =
@@ -82,7 +80,7 @@ pub(super) async fn sponsored_user_operations(env: &RpcEnv) -> eyre::Result<()> 
         .get_chain_id()
         .await
         .context("failed to read ERC-4337 bundler chain ID")?;
-    let (chain, chain_rpc) = erc4337_chain_provider(env, bundler_chain_id)?;
+    let (chain, chain_rpc) = erc4337_chain_provider(env, config, bundler_chain_id).await?;
 
     let harness = UserOperationHarness::new(chain, bundler.clone(), config, bundler_chain_id)?;
 
@@ -103,26 +101,37 @@ pub(super) async fn sponsored_user_operations(env: &RpcEnv) -> eyre::Result<()> 
     harness.run().await
 }
 
-fn erc4337_chain_provider(
+async fn erc4337_chain_provider(
     env: &RpcEnv,
+    config: &BundlerConfig,
     bundler_chain_id: u64,
 ) -> eyre::Result<(RootProvider, String)> {
-    if bundler_chain_id == env.config().expected_chain_id {
-        return Ok((env.chain_provider().clone(), env.config().rpc_target()));
+    if let Some(rpc_url) = &config.chain_rpc_url {
+        let provider = rpc::provider_for_url::<Ethereum>(rpc_url, None)?;
+        let chain_id = provider
+            .get_chain_id()
+            .await
+            .context("failed to read ERC-4337 RPC chain ID")?;
+        ensure!(
+            chain_id == bundler_chain_id,
+            "ACCEPTANCE_4337_RPC_URL chain ID {chain_id} does not match ERC-4337 bundler chain ID {bundler_chain_id}"
+        );
+
+        return Ok((
+            provider,
+            config
+                .chain_rpc_target()
+                .unwrap_or_else(|| "<configured ERC-4337 RPC>".to_string()),
+        ));
     }
 
-    if bundler_chain_id == WORLD_CHAIN_MAINNET_CHAIN_ID {
-        let rpc_url = WORLD_CHAIN_MAINNET_RPC_URL
-            .parse()
-            .wrap_err("failed to parse World Chain mainnet RPC URL")?;
-        let provider = rpc::provider_for_url::<Ethereum>(&rpc_url, None)?;
-        return Ok((provider, WORLD_CHAIN_MAINNET_RPC_URL.to_string()));
-    }
-
-    bail!(
-        "ERC-4337 bundler chain ID {bundler_chain_id} does not match ACCEPTANCE_CHAIN_ID {} and no fallback RPC is configured for it",
+    ensure!(
+        bundler_chain_id == env.config().expected_chain_id,
+        "ERC-4337 bundler chain ID {bundler_chain_id} does not match ACCEPTANCE_CHAIN_ID {}; set ACCEPTANCE_4337_RPC_URL for the chain backing the bundler",
         env.config().expected_chain_id
-    )
+    );
+
+    Ok((env.chain_provider().clone(), env.config().rpc_target()))
 }
 
 struct UserOperationHarness<'a> {
