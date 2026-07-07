@@ -21,6 +21,7 @@ mod retry;
 mod worker;
 
 pub use backend::{ClaimedProofJobHandler, JobSessions, ProofJob};
+pub use heartbeat::WorkerHeartbeatConfig;
 pub use retry::{
     DEFAULT_BOUNDED_INITIAL_DELAY, DEFAULT_BOUNDED_MAX_ATTEMPTS, DEFAULT_BOUNDED_MAX_DELAY,
     MIN_RETRY_DELAY, RetryConfig,
