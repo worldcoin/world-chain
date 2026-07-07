@@ -12,7 +12,7 @@ The MVP checks:
 - when `ACCEPTANCE_KARST_DEPOSIT_ENABLED=true`, the Karst checks also submit an
   L1 portal deposit whose derived L2 deposit gas limit is above the Karst
   transaction gas cap, then require the L2 deposit receipt to land
-- when `ACCEPTANCE_BUNDLER_RPC_URL` is set, Rundler accepts sponsored ERC-4337 v0.7 user operations for ephemeral Safe smart account wallets
+- when `ACCEPTANCE_BUNDLER_RPC_URL` is set, the configured sponsored Rundler endpoint accepts ERC-4337 v0.7 user operations for ephemeral Safe smart account wallets
 - the sponsored ERC-4337 checks cover concurrent wallet deployment, parallel post-deploy user operations across every wallet, multi-lane 2D nonce bursts, replay/gap rejection, and sponsorship constraint rejection
 
 ## Environment
@@ -51,12 +51,11 @@ The MVP checks:
 | `ACCEPTANCE_USEROP_TIMEOUT_SECS` | no | `30` | Max time to wait for a sent user operation receipt. |
 | `ACCEPTANCE_USEROP_REJECT_TIMEOUT_SECS` | no | `3` | Max time to wait for a sad-path user operation to be rejected. |
 | `ACCEPTANCE_USEROP_POLL_INTERVAL_MS` | no | `250` | Poll interval while waiting for a user operation receipt. |
-| `ACCEPTANCE_4337_SPONSORSHIP_MAX_COST_WEI` | no | `1000000000000000000` | `bundlerSponsorship.maxCost` sent as Rundler's permissioned third parameter. |
-| `ACCEPTANCE_4337_SPONSORSHIP_VALIDITY_SECS` | no | `60` | Seconds from now used to compute `bundlerSponsorship.validUntil`. |
 
 The ERC-4337 wallet owners are deterministic test mnemonic accounts and are only
-used to sign Safe user operations. They do not need ETH. Sponsored operations are
-paid by the configured Rundler instance.
+used to sign Safe user operations. They do not need ETH. The tests send standard
+two-parameter `eth_sendUserOperation` requests; sponsorship is expected to be
+injected by the configured Rundler endpoint.
 
 The GitHub Actions acceptance workflow sets `ACCEPTANCE_4337_PROFILE=smoke` for
 bundler-enabled runs. That profile means 20 ephemeral Safe wallets, 2 post-deploy

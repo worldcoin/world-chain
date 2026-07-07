@@ -17,7 +17,6 @@ use alloy_signer::SignerSync;
 use alloy_sol_types::{SolCall, SolValue, sol};
 use eyre::eyre::{Context, OptionExt, bail, ensure};
 use futures::{StreamExt, TryStreamExt, stream};
-use serde::Serialize;
 use tokio::time::{Instant, sleep, timeout};
 use tracing::{info, warn};
 use world_chain_test_utils::utils::signer;
@@ -31,7 +30,7 @@ const SAFE_DOMAIN_TYPE_HASH: FixedBytes<32> =
 const PARALLEL_NOOP_NONCE_KEY: u64 = 10;
 const MULTI_LANE_NONCE_KEYS: [u64; 3] = [20, 21, 22];
 const SINGLE_WALLET_NONCE_OPS: u64 = 4;
-const SAD_PATH_REJECTION_CHECKS: u64 = 7;
+const SAD_PATH_REJECTION_CHECKS: u64 = 6;
 
 sol! {
     struct EncodedSafeOpStruct {
@@ -119,19 +118,6 @@ struct UserOperationOverrides {
     max_priority_fee_per_gas: U256,
     paymaster: Option<Address>,
     invalidate_signature: bool,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct UserOperationPermissions {
-    bundler_sponsorship: BundlerSponsorship,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct BundlerSponsorship {
-    max_cost: String,
-    valid_until: u64,
 }
 
 impl<'a> UserOperationHarness<'a> {
@@ -332,7 +318,7 @@ impl<'a> UserOperationHarness<'a> {
                 UserOperationOverrides::default(),
             )
             .await?;
-        self.expect_send_rejected("replayed 2D nonce", replay, true)
+        self.expect_send_rejected("replayed 2D nonce", replay)
             .await?;
 
         let gap = self
@@ -344,27 +330,10 @@ impl<'a> UserOperationHarness<'a> {
                 UserOperationOverrides::default(),
             )
             .await?;
-        self.expect_send_rejected("2D nonce sequence gap", gap, true)
+        self.expect_send_rejected("2D nonce sequence gap", gap)
             .await?;
 
-        let without_permissions = self.fresh_wallet(self.config.wallet_count).await?;
-        let zero_fee_op = self
-            .signed_noop_user_operation(
-                &without_permissions,
-                0,
-                0,
-                true,
-                UserOperationOverrides::default(),
-            )
-            .await?;
-        self.expect_send_rejected(
-            "zero fee operation without sponsorship permissions",
-            zero_fee_op,
-            false,
-        )
-        .await?;
-
-        let nonzero_fee_wallet = self.fresh_wallet(self.config.wallet_count + 1).await?;
+        let nonzero_fee_wallet = self.fresh_wallet(self.config.wallet_count).await?;
         let nonzero_fee_op = self
             .signed_noop_user_operation(
                 &nonzero_fee_wallet,
@@ -381,11 +350,10 @@ impl<'a> UserOperationHarness<'a> {
         self.expect_send_rejected(
             "sponsored operation with non-zero fee fields",
             nonzero_fee_op,
-            true,
         )
         .await?;
 
-        let nonzero_pvg_wallet = self.fresh_wallet(self.config.wallet_count + 2).await?;
+        let nonzero_pvg_wallet = self.fresh_wallet(self.config.wallet_count + 1).await?;
         let nonzero_pvg_op = self
             .signed_noop_user_operation(
                 &nonzero_pvg_wallet,
@@ -401,11 +369,10 @@ impl<'a> UserOperationHarness<'a> {
         self.expect_send_rejected(
             "sponsored operation with non-zero preVerificationGas",
             nonzero_pvg_op,
-            true,
         )
         .await?;
 
-        let paymaster_wallet = self.fresh_wallet(self.config.wallet_count + 3).await?;
+        let paymaster_wallet = self.fresh_wallet(self.config.wallet_count + 2).await?;
         let paymaster_op = self
             .signed_noop_user_operation(
                 &paymaster_wallet,
@@ -418,10 +385,10 @@ impl<'a> UserOperationHarness<'a> {
                 },
             )
             .await?;
-        self.expect_send_rejected("sponsored operation with paymaster", paymaster_op, true)
+        self.expect_send_rejected("sponsored operation with paymaster", paymaster_op)
             .await?;
 
-        let bad_sig_wallet = self.fresh_wallet(self.config.wallet_count + 4).await?;
+        let bad_sig_wallet = self.fresh_wallet(self.config.wallet_count + 3).await?;
         let bad_sig_op = self
             .signed_noop_user_operation(
                 &bad_sig_wallet,
@@ -434,7 +401,7 @@ impl<'a> UserOperationHarness<'a> {
                 },
             )
             .await?;
-        self.expect_send_rejected("invalid Safe signature", bad_sig_op, true)
+        self.expect_send_rejected("invalid Safe signature", bad_sig_op)
             .await
     }
 
@@ -580,26 +547,10 @@ impl<'a> UserOperationHarness<'a> {
             .bundler
             .raw_request(
                 Cow::Borrowed("eth_sendUserOperation"),
-                (user_op, self.config.entry_point, self.permissions()?),
-            )
-            .await
-            .context("failed to send sponsored user operation")?;
-
-        Ok(hash)
-    }
-
-    async fn send_user_operation_without_permissions(
-        &self,
-        user_op: PackedUserOperation,
-    ) -> eyre::Result<B256> {
-        let hash = self
-            .bundler
-            .raw_request(
-                Cow::Borrowed("eth_sendUserOperation"),
                 (user_op, self.config.entry_point),
             )
             .await
-            .context("failed to send user operation without permissions")?;
+            .context("failed to send proxy-sponsored user operation")?;
 
         Ok(hash)
     }
@@ -608,15 +559,8 @@ impl<'a> UserOperationHarness<'a> {
         &self,
         label: &'static str,
         user_op: PackedUserOperation,
-        with_permissions: bool,
     ) -> eyre::Result<()> {
-        let send = async {
-            if with_permissions {
-                self.send_sponsored_user_operation(user_op).await
-            } else {
-                self.send_user_operation_without_permissions(user_op).await
-            }
-        };
+        let send = self.send_sponsored_user_operation(user_op);
 
         match timeout(self.config.user_operation_reject_timeout, send).await {
             Ok(Ok(hash)) => bail!("{label} was accepted by bundler as {hash:?}"),
@@ -760,22 +704,6 @@ impl<'a> UserOperationHarness<'a> {
             .raw_request(Cow::Borrowed("eth_call"), (request, "latest"))
             .await
             .context("eth_call failed")
-    }
-
-    fn permissions(&self) -> eyre::Result<UserOperationPermissions> {
-        let valid_until = SystemTime::now()
-            .checked_add(self.config.sponsorship_validity)
-            .ok_or_eyre("sponsorship validUntil overflowed SystemTime")?
-            .duration_since(UNIX_EPOCH)
-            .wrap_err("system clock is before UNIX_EPOCH")?
-            .as_secs();
-
-        Ok(UserOperationPermissions {
-            bundler_sponsorship: BundlerSponsorship {
-                max_cost: format!("{:#x}", self.config.sponsorship_max_cost),
-                valid_until,
-            },
-        })
     }
 
     fn log_completion_summary(&self, wallet_count: usize) {

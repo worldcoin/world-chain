@@ -17,8 +17,6 @@ const DEFAULT_USER_OPERATION_OPS_PER_WALLET: u64 = 3;
 const DEFAULT_USER_OPERATION_OP_CONCURRENCY: usize = 60;
 const DEFAULT_USER_OPERATION_NONCE_CONCURRENCY: usize = 2;
 const DEFAULT_USER_OPERATION_OWNER_START_INDEX: u32 = 1000;
-const DEFAULT_USER_OPERATION_SPONSORSHIP_VALIDITY_SECS: u64 = 60;
-const DEFAULT_USER_OPERATION_SPONSORSHIP_MAX_COST_WEI: &str = "1000000000000000000";
 const DEFAULT_TX_TIMEOUT_SECS: u64 = 60;
 const DEFAULT_TX_POLL_INTERVAL_MS: u64 = 500;
 const DEFAULT_DEPOSIT_TIMEOUT_SECS: u64 = 300;
@@ -87,8 +85,6 @@ pub(super) struct BundlerConfig {
     pub(super) user_operation_timeout: Duration,
     pub(super) user_operation_reject_timeout: Duration,
     pub(super) user_operation_poll_interval: Duration,
-    pub(super) sponsorship_max_cost: U256,
-    pub(super) sponsorship_validity: Duration,
 }
 
 #[derive(Clone)]
@@ -307,14 +303,6 @@ fn bundler_config_from_env(
         user_operation_poll_interval: Duration::from_millis(parse_optional_value(
             "ACCEPTANCE_USEROP_POLL_INTERVAL_MS",
             DEFAULT_USER_OPERATION_POLL_INTERVAL_MS,
-        )?),
-        sponsorship_max_cost: parse_optional_value_from_str(
-            "ACCEPTANCE_4337_SPONSORSHIP_MAX_COST_WEI",
-            DEFAULT_USER_OPERATION_SPONSORSHIP_MAX_COST_WEI,
-        )?,
-        sponsorship_validity: Duration::from_secs(parse_optional_value(
-            "ACCEPTANCE_4337_SPONSORSHIP_VALIDITY_SECS",
-            DEFAULT_USER_OPERATION_SPONSORSHIP_VALIDITY_SECS,
         )?),
     }))
 }
