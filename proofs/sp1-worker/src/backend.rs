@@ -15,7 +15,8 @@ use world_chain_proof_succinct_utils::{
 };
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_prover_service::{
-    BackendSession, BackendSessionStatus, ProofBackend, ProofData, ProofRequest, SessionType,
+    BackendSession, BackendSessionStatus, ProofBackend, ProofData, ProofRequest, ProofRequestId,
+    SessionType,
 };
 
 /// Configuration for [`Sp1Backend`].
@@ -74,10 +75,7 @@ where
 
             check_artifact(request, &agg)?;
 
-            return Ok(ProofData::Sp1 {
-                proof: agg.proof.into(),
-                public_values: agg.outputs.abi_encode().into(),
-            });
+            return Ok(proof_data_from_aggregation(agg));
         }
 
         let range = if let Some(stark_session) = self.get_session(&job, SessionType::Stark).await? {
@@ -91,22 +89,14 @@ where
                 .context("failed to build range proof request")?;
 
             let session_id = self
-                .prover
-                .submit(
+                .submit_session(
+                    &job,
                     proof_id,
                     SessionType::Stark,
                     SuccinctProofRequest::Range(range_request),
                 )
                 .await
                 .context("failed to submit range proof")?;
-
-            self.record_session(
-                &job,
-                SessionType::Stark,
-                &session_id,
-                BackendSessionStatus::Running,
-            )
-            .await?;
 
             self.wait_and_download_range(&job, session_id)
                 .await
@@ -121,21 +111,14 @@ where
             .context("failed to build aggregation proof request")?;
 
         let snark_session_id = self
-            .prover
-            .submit(
+            .submit_session(
+                &job,
                 proof_id,
                 SessionType::Snark,
                 SuccinctProofRequest::Aggregation(aggregation_request),
             )
             .await
             .context("failed to submit aggregation proof")?;
-        self.record_session(
-            &job,
-            SessionType::Snark,
-            &snark_session_id,
-            BackendSessionStatus::Running,
-        )
-        .await?;
 
         let agg = self
             .wait_and_download_aggregation(&job, snark_session_id)
@@ -144,10 +127,7 @@ where
 
         check_artifact(request, &agg)?;
 
-        Ok(ProofData::Sp1 {
-            proof: agg.proof.into(),
-            public_values: agg.outputs.abi_encode().into(),
-        })
+        Ok(proof_data_from_aggregation(agg))
     }
 }
 
@@ -194,60 +174,50 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         Ok(())
     }
 
+    async fn submit_session(
+        &self,
+        job: &ProofJob,
+        proof_id: ProofRequestId,
+        session_type: SessionType,
+        request: SuccinctProofRequest,
+    ) -> anyhow::Result<String> {
+        let session_id = self
+            .prover
+            .submit(proof_id, session_type.clone(), request)
+            .await?;
+
+        self.record_session(
+            job,
+            session_type,
+            &session_id,
+            BackendSessionStatus::Running,
+        )
+        .await?;
+
+        Ok(session_id)
+    }
+
     async fn wait_and_download_range(
         &self,
         job: &ProofJob,
         session_id: String,
     ) -> anyhow::Result<RangeProofArtifact> {
-        loop {
-            match self
-                .prover
-                .poll(session_id.clone(), SessionType::Stark)
-                .await?
-            {
-                Sp1SessionStatus::Running => {
-                    // TODO: replace this hardcoded duration with a cli flag
-                    let duration = Duration::from_secs(10);
-                    tokio::time::sleep(duration).await;
-                }
-                Sp1SessionStatus::Completed => {
-                    let artifact = self
-                        .prover
-                        .download(session_id.clone(), SessionType::Stark)
-                        .await?;
-
-                    self.record_session(
-                        job,
-                        SessionType::Stark,
-                        &session_id,
-                        BackendSessionStatus::Completed,
-                    )
-                    .await?;
-
-                    let ProofArtifact::Range(range) = artifact else {
-                        anyhow::bail!(
-                            "expected range proof artifact for STARK session {session_id}"
-                        );
-                    };
-
-                    return Ok(range);
-                }
-                Sp1SessionStatus::Failed(reason) => {
-                    self.record_session(
-                        job,
-                        SessionType::Stark,
-                        &session_id,
-                        BackendSessionStatus::Failed,
-                    )
-                    .await?;
-
-                    anyhow::bail!("range proof session {session_id} failed: {reason}");
-                }
-                Sp1SessionStatus::NotFound => {
-                    anyhow::bail!("range proof session {session_id} not found by prover");
-                }
-            }
-        }
+        let expected_session_id = session_id.clone();
+        self.wait_and_download_session(
+            job,
+            SessionType::Stark,
+            session_id,
+            "range",
+            move |artifact| {
+                let ProofArtifact::Range(range) = artifact else {
+                    anyhow::bail!(
+                        "expected range proof artifact for STARK session {expected_session_id}"
+                    );
+                };
+                Ok(range)
+            },
+        )
+        .await
     }
 
     async fn wait_and_download_aggregation(
@@ -255,10 +225,36 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         job: &ProofJob,
         session_id: String,
     ) -> anyhow::Result<AggregationProofArtifact> {
+        let expected_session_id = session_id.clone();
+        self.wait_and_download_session(
+            job,
+            SessionType::Snark,
+            session_id,
+            "aggregation",
+            move |artifact| {
+                let ProofArtifact::Aggregation(agg) = artifact else {
+                    anyhow::bail!(
+                        "expected aggregation proof artifact for SNARK session {expected_session_id}"
+                    );
+                };
+                Ok(agg)
+            },
+        )
+        .await
+    }
+
+    async fn wait_and_download_session<T>(
+        &self,
+        job: &ProofJob,
+        session_type: SessionType,
+        session_id: String,
+        label: &'static str,
+        decode: impl Fn(ProofArtifact) -> anyhow::Result<T>,
+    ) -> anyhow::Result<T> {
         loop {
             match self
                 .prover
-                .poll(session_id.clone(), SessionType::Snark)
+                .poll(session_id.clone(), session_type.clone())
                 .await?
             {
                 Sp1SessionStatus::Running => {
@@ -269,38 +265,32 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
                 Sp1SessionStatus::Completed => {
                     let artifact = self
                         .prover
-                        .download(session_id.clone(), SessionType::Snark)
+                        .download(session_id.clone(), session_type.clone())
                         .await?;
 
                     self.record_session(
                         job,
-                        SessionType::Snark,
+                        session_type.clone(),
                         &session_id,
                         BackendSessionStatus::Completed,
                     )
                     .await?;
 
-                    let ProofArtifact::Aggregation(agg) = artifact else {
-                        anyhow::bail!(
-                            "expected aggregation proof artifact for SNARK session {session_id}"
-                        );
-                    };
-
-                    return Ok(agg);
+                    return decode(artifact);
                 }
                 Sp1SessionStatus::Failed(reason) => {
                     self.record_session(
                         job,
-                        SessionType::Snark,
+                        session_type.clone(),
                         &session_id,
                         BackendSessionStatus::Failed,
                     )
                     .await?;
 
-                    anyhow::bail!("aggregation proof session {session_id} failed: {reason}");
+                    anyhow::bail!("{label} proof session {session_id} failed: {reason}");
                 }
                 Sp1SessionStatus::NotFound => {
-                    anyhow::bail!("aggregation proof session {session_id} not found by prover");
+                    anyhow::bail!("{label} proof session {session_id} not found by prover");
                 }
             }
         }
@@ -426,4 +416,11 @@ fn check_artifact(
         });
     }
     Ok(())
+}
+
+fn proof_data_from_aggregation(artifact: AggregationProofArtifact) -> ProofData {
+    ProofData::Sp1 {
+        proof: artifact.proof.into(),
+        public_values: artifact.outputs.abi_encode().into(),
+    }
 }

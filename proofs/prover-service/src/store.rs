@@ -310,7 +310,6 @@ impl ProverServiceStore {
         .bind(BackendSessionStatus::Completed.as_str())
         .fetch_optional(&self.pool)
         .await?;
-   
 
         let session = if let Some(row) = row {
             let backend_session_id: String = row.try_get("backend_session_id")?;
