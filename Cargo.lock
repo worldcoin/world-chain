@@ -19137,6 +19137,7 @@ dependencies = [
  "world-chain-proof-kona-host-utils",
  "world-chain-proof-succinct-elfs",
  "world-chain-proof-succinct-utils",
+ "world-chain-prover-service",
 ]
 
 [[package]]
@@ -19144,10 +19145,12 @@ name = "world-chain-proof-succinct-utils"
 version = "2.4.0"
 dependencies = [
  "alloy-primitives",
+ "anyhow",
  "async-trait",
  "rkyv",
  "serde",
  "world-chain-proof-core",
+ "world-chain-prover-service",
 ]
 
 [[package]]

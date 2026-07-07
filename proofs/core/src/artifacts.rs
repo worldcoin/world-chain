@@ -4,6 +4,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::{boot::BootInfoStruct, types::AggregationOutputs};
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProofArtifact {
+    Range(RangeProofArtifact),
+    Aggregation(AggregationProofArtifact),
+}
+
 /// Public output and proof bytes returned by a range prover.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RangeProofArtifact {

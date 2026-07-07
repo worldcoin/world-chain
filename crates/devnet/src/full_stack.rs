@@ -43,7 +43,9 @@ use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 use world_chain_challenger::{AlloyChallengerClient, ChallengerConfig, WorldChainChallenger};
 use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
 use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
-use world_chain_proof_succinct_host_utils::prover::{SP1ProofMode, Sp1ProverKind, SuccinctProver};
+use world_chain_proof_succinct_host_utils::cpu_prover::{
+    CpuSuccinctProver, SP1ProofMode, Sp1ProverKind,
+};
 use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
 };
@@ -2680,7 +2682,7 @@ async fn start_sp1_worker(
     .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?;
 
     // `SuccinctProver` owns its own runtime, so build it off the async runtime.
-    let prover = SuccinctProver::new(kind, SP1ProofMode::Groth16)
+    let prover = CpuSuccinctProver::new(kind, SP1ProofMode::Groth16)
         .await
         .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
 

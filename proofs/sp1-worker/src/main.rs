@@ -8,7 +8,9 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_kona_host_utils::online::build_online_config;
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
-use world_chain_proof_succinct_host_utils::prover::{SP1ProofMode, Sp1ProverKind, SuccinctProver};
+use world_chain_proof_succinct_host_utils::cpu_prover::{
+    CpuSuccinctProver, SP1ProofMode, Sp1ProverKind,
+};
 use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_prover_service::RpcProverServiceClient;
 use world_chain_sp1_worker::{
@@ -179,7 +181,7 @@ async fn main() -> Result<()> {
     // ELFs are embedded at compile time via `sp1_sdk::include_elf!()`
     // (see `proofs/succinct/elfs/build.rs`). Challenged roots are
     // defended on-chain; Groth16 keeps verification ~100k gas.
-    let prover = SuccinctProver::new(cli.prover, SP1ProofMode::Groth16).await?;
+    let prover = CpuSuccinctProver::new(cli.prover, SP1ProofMode::Groth16).await?;
 
     let backend = Sp1Backend::new(
         host,

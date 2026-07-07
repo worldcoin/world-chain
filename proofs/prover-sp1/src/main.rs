@@ -69,7 +69,7 @@ struct Sp1ProveArgs {
 
     /// Prover backend: cpu, mock, or network. Overrides SP1_PROVER env var.
     #[arg(long, env = "SP1_PROVER", default_value = "cpu")]
-    prover: world_chain_proof_succinct_host_utils::prover::Sp1ProverKind,
+    prover: world_chain_proof_succinct_host_utils::cpu_prover::Sp1ProverKind,
 
     /// Aggregation proof mode.
     #[arg(long, default_value = "groth16")]
@@ -132,8 +132,7 @@ async fn sp1_execute(args: Sp1ExecuteArgs) -> Result<()> {
 async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
     use sp1_sdk::SP1ProofMode;
     use world_chain_proof_succinct_host_utils::{
-        prover::SuccinctProver,
-        validity::{ValidityProofRequest, prove_validity},
+        cpu_prover::CpuSuccinctProver, validity::ValidityProofRequest,
     };
 
     let host = online_host_config(&args.rpc)?;
@@ -154,7 +153,7 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
         prover = args.prover,
     );
 
-    let prover = SuccinctProver::new(args.prover, mode).await?;
+    let prover = CpuSuccinctProver::new(args.prover).await?;
     let artifact = prove_validity(
         &host,
         &prover,

@@ -58,96 +58,95 @@ impl ValidityProofRequest {
     }
 }
 
-/// Proves the transition over `(start_block, end_block]` and aggregates it into one artifact.
-///
-/// Synchronous and long-running (witness generation plus proving); it must run on a
-/// blocking-capable thread (use `tokio::task::spawn_blocking` from async code).
-///
-/// Sub-ranges are built and proved sequentially. A single CPU proof already saturates the
-/// host, so intra-job parallelism would only thrash it; cross-job parallelism is handled one
-/// level up by the worker's concurrency permits. Sequential proving also keeps only one
-/// witness alive at a time, bounding memory, and avoids sharing the prover's runtime across
-/// threads.
-pub async fn prove_validity<P>(
-    host: &OnlineHostConfig,
-    prover: &P,
-    request: ValidityProofRequest,
-) -> anyhow::Result<AggregationProofArtifact>
-where
-    P: WorldSuccinctProver,
-    P::Error: Into<anyhow::Error>,
-{
-    let range = L2BlockRange::new(request.start_block, request.end_block)?;
-    // Sub-ranges are half-open [start, end) bounds; each is proved as (start, end] with
-    // `start` as the agreed parent block, matching the factory's block-interval convention.
-    let ranges = split_range(range, request.split_count)?;
+// /// Proves the transition over `(start_block, end_block]` and aggregates it into one artifact.
+// ///
+// /// Synchronous and long-running (witness generation plus proving); it must run on a
+// /// blocking-capable thread (use `tokio::task::spawn_blocking` from async code).
+// ///
+// /// Sub-ranges are built and proved sequentially. A single CPU proof already saturates the
+// /// host, so intra-job parallelism would only thrash it; cross-job parallelism is handled one
+// /// level up by the worker's concurrency permits. Sequential proving also keeps only one
+// /// witness alive at a time, bounding memory, and avoids sharing the prover's runtime across
+// /// threads.
+// pub async fn prove_validity<P>(
+//     host: &OnlineHostConfig,
+//     prover: &P,
+//     request: ValidityProofRequest,
+// ) -> anyhow::Result<AggregationProofArtifact>
+// where
+//     P: WorldSuccinctProver,
+// {
+//     let range = L2BlockRange::new(request.start_block, request.end_block)?;
+//     // Sub-ranges are half-open [start, end) bounds; each is proved as (start, end] with
+//     // `start` as the agreed parent block, matching the factory's block-interval convention.
+//     let ranges = split_range(range, request.split_count)?;
 
-    let client = Client::new();
-    let l1_head = match request.l1_head {
-        Some(hash) => hash,
-        None => resolve_l1_head(&client, &host.l2_rpc, &host.l1_rpc, request.end_block).await?,
-    };
+//     let client = Client::new();
+//     let l1_head = match request.l1_head {
+//         Some(hash) => hash,
+//         None => resolve_l1_head(&client, &host.l2_rpc, &host.l1_rpc, request.end_block).await?,
+//     };
 
-    let mut boot_infos = Vec::with_capacity(ranges.len());
-    let mut range_proofs = Vec::with_capacity(ranges.len());
-    for sub_range in &ranges {
-        tracing::info!(
-            start = sub_range.start + 1,
-            end = sub_range.end,
-            "building range witness"
-        );
-        let input = build_range_input(
-            host,
-            RangeWitnessRequest {
-                start_block: sub_range.start,
-                end_block: sub_range.end,
-                l1_head: Some(l1_head),
-                allow_unfinalized: request.allow_unfinalized,
-            },
-        )
-        .await?;
+//     let mut boot_infos = Vec::with_capacity(ranges.len());
+//     let mut range_proofs = Vec::with_capacity(ranges.len());
+//     for sub_range in &ranges {
+//         tracing::info!(
+//             start = sub_range.start + 1,
+//             end = sub_range.end,
+//             "building range witness"
+//         );
+//         let input = build_range_input(
+//             host,
+//             RangeWitnessRequest {
+//                 start_block: sub_range.start,
+//                 end_block: sub_range.end,
+//                 l1_head: Some(l1_head),
+//                 allow_unfinalized: request.allow_unfinalized,
+//             },
+//         )
+//         .await?;
 
-        tracing::info!(
-            start = sub_range.start + 1,
-            end = sub_range.end,
-            "proving range"
-        );
-        let range_request = RangeProofRequest::from_witness_data(&input.witness, None)
-            .context("failed to serialize range witness")?;
-        let artifact = prover
-            .prove_range(range_request)
-            .await
-            .map_err(Into::into)?;
+//         tracing::info!(
+//             start = sub_range.start + 1,
+//             end = sub_range.end,
+//             "proving range"
+//         );
+//         let range_request = RangeProofRequest::from_witness_data(&input.witness, None)
+//             .context("failed to serialize range witness")?;
+//         let artifact = prover
+//             .prove_range(range_request)
+//             .await
+//             .map_err(Into::into)?;
 
-        if artifact.boot_info.l2PostRoot != input.metadata.l2_post_root {
-            bail!(
-                "range proof post root mismatch at block {}: witness {:?}, proof {:?}",
-                input.metadata.end_block,
-                input.metadata.l2_post_root,
-                artifact.boot_info.l2PostRoot,
-            );
-        }
+//         if artifact.boot_info.l2PostRoot != input.metadata.l2_post_root {
+//             bail!(
+//                 "range proof post root mismatch at block {}: witness {:?}, proof {:?}",
+//                 input.metadata.end_block,
+//                 input.metadata.l2_post_root,
+//                 artifact.boot_info.l2PostRoot,
+//             );
+//         }
 
-        boot_infos.push(artifact.boot_info);
-        range_proofs.push(artifact.proof);
-    }
+//         boot_infos.push(artifact.boot_info);
+//         range_proofs.push(artifact.proof);
+//     }
 
-    let l1_header = fetch_l1_header_by_hash(&client, &host.l1_rpc, l1_head).await?;
-    let l1_headers_cbor =
-        serde_cbor::to_vec(&vec![l1_header]).context("CBOR-encoding L1 header failed")?;
+//     let l1_header = fetch_l1_header_by_hash(&client, &host.l1_rpc, l1_head).await?;
+//     let l1_headers_cbor =
+//         serde_cbor::to_vec(&vec![l1_header]).context("CBOR-encoding L1 header failed")?;
 
-    tracing::info!(ranges = ranges.len(), "aggregating range proofs");
-    prover
-        .prove_aggregation(AggregationProofRequest {
-            inputs: AggregationInputs {
-                boot_infos,
-                latest_l1_checkpoint_head: l1_head,
-                multi_block_vkey: prover.multi_block_vkey(),
-                prover_address: request.prover_address,
-            },
-            l1_headers_cbor,
-            range_proofs,
-        })
-        .await
-        .map_err(Into::into)
-}
+//     tracing::info!(ranges = ranges.len(), "aggregating range proofs");
+//     prover
+//         .prove_aggregation(AggregationProofRequest {
+//             inputs: AggregationInputs {
+//                 boot_infos,
+//                 latest_l1_checkpoint_head: l1_head,
+//                 multi_block_vkey: prover.multi_block_vkey(),
+//                 prover_address: request.prover_address,
+//             },
+//             l1_headers_cbor,
+//             range_proofs,
+//         })
+//         .await
+//         .map_err(Into::into)
+// }

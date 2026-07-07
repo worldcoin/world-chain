@@ -33,7 +33,9 @@ use alloy_primitives::Address;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres;
 use world_chain_proof_kona_host_utils::online::{OnlineHostConfig, resolve_l1_head};
-use world_chain_proof_succinct_host_utils::prover::{SP1ProofMode, Sp1ProverKind, SuccinctProver};
+use world_chain_proof_succinct_host_utils::cpu_prover::{
+    CpuSuccinctProver, SP1ProofMode, Sp1ProverKind,
+};
 use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_proofs::{ConsensusProvider, OptimismConsensusClient};
 use world_chain_prover_service::{
@@ -131,7 +133,7 @@ async fn worker_proves_real_range_end_to_end() {
 
     let kind = prover_kind();
     // Build the prover off the async runtime: it owns its own runtime internally.
-    let prover = SuccinctProver::new(kind, SP1ProofMode::Groth16)
+    let prover = CpuSuccinctProver::new(kind, SP1ProofMode::Groth16)
         .await
         .expect("build prover");
 

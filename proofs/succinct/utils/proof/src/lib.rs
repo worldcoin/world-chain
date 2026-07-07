@@ -2,15 +2,22 @@ use alloy_primitives::B256;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
-    range::WorldRangeProofPublicValues, types::AggregationInputs, witness::WorldRangeWitnessData,
+    artifacts::ProofArtifact, range::WorldRangeProofPublicValues, types::AggregationInputs,
+    witness::WorldRangeWitnessData,
 };
 
 pub use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArtifact};
+use world_chain_prover_service::{ProofRequestId, SessionType};
 
 // ---------------------------------------------------------------------------
 // Proof request types and prover trait
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProofRequest {
+    Range(RangeProofRequest),
+    Aggregation(AggregationProofRequest),
+}
 /// Host request for a single SP1 range proof.
 ///
 /// Carries the full rkyv-serialized [`WorldRangeWitnessData`] that the range guest reads from
@@ -67,44 +74,26 @@ pub enum Sp1SessionStatus {
 /// Interface expected from a concrete SP1 prover backend.
 #[async_trait]
 pub trait WorldSuccinctProver {
-    /// Backend-specific error type.
-    type Error;
+    // TODO: change the error type in all methods, temporarily defaulting to anyhow String
 
-    /// 8-word hash of the range program verifying key, as committed by the aggregation guest.
-    fn multi_block_vkey(&self) -> [u32; 8];
+    fn supports_persistent_sessions(&self) -> bool;
 
-    /// Proves one range witness.
-    async fn prove_range(
+    async fn submit(
         &self,
-        request: RangeProofRequest,
-    ) -> Result<RangeProofArtifact, Self::Error>;
+        proof_id: ProofRequestId,
+        session_type: SessionType,
+        request: ProofRequest,
+    ) -> anyhow::Result<String>;
 
-    /// Aggregates already-generated range proofs.
-    async fn prove_aggregation(
+    async fn poll(
         &self,
-        request: AggregationProofRequest,
-    ) -> Result<AggregationProofArtifact, Self::Error>;
+        session_id: String,
+        session_type: SessionType,
+    ) -> anyhow::Result<Sp1SessionStatus>;
 
-    /// Whether this prover can create durable external proof requests.
-    fn supports_async_requests(&self) -> bool {
-        false
-    }
-
-    /// Request a range proof from an external backend without waiting for completion.
-    async fn request_range(&self, request: RangeProofRequest) -> Result<B256, Self::Error>;
-
-    /// Poll a previously requested range proof.
-    async fn poll_range(&self, id: B256) -> Result<Option<RangeProofArtifact>, Self::Error>;
-
-    /// Request an aggregation proof from an external backend without waiting for completion.
-    async fn request_aggregation(
+    async fn download(
         &self,
-        request: AggregationProofRequest,
-    ) -> Result<B256, Self::Error>;
-
-    /// Poll a previously requested aggregation proof.
-    async fn poll_aggregation(
-        &self,
-        id: B256,
-    ) -> Result<Option<AggregationProofArtifact>, Self::Error>;
+        session_id: String,
+        session_type: SessionType,
+    ) -> anyhow::Result<ProofArtifact>;
 }
