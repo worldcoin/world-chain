@@ -12,8 +12,8 @@ on:
           - all
           - prod
           - stage
-          - dev-us-east-1
-          - dev-eu-central-2
+          - betanet
+          - alphanet
       bundler_rpc_url:
         description: Optional Rundler RPC URL for ERC-4337 sponsored user operation checks
         required: false
@@ -72,7 +72,7 @@ jobs:
             karst_deposit_enabled: "false"
             optimism_portal: ""
             allow_failure: false
-          - network: dev-us-east-1
+          - network: betanet
             environment: dev
             include_in_all: true
             rpc_url: https://wc-node-devnet.worldcoin.dev
@@ -87,7 +87,7 @@ jobs:
             karst_deposit_enabled: "true"
             optimism_portal: "0x081a60097c9e1fbe7f55a950eaf77c81dbe3c7af"
             allow_failure: true
-          - network: dev-eu-central-2
+          - network: alphanet
             environment: dev-eu-central-2
             include_in_all: true
             rpc_url: https://tx-proxy-devnet-eu-central-2.worldcoin.dev
@@ -151,7 +151,7 @@ jobs:
           ACCEPTANCE_NETWORK: ${{ matrix.network }}
           ACCEPTANCE_RPC_URL: ${{ matrix.rpc_url }}
           ACCEPTANCE_L1_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
-          ACCEPTANCE_BUNDLER_RPC_URL: ${{ matrix.network == 'dev-eu-central-2' && inputs.bundler_rpc_url != '' && inputs.bundler_rpc_url || matrix.bundler_rpc_url }}
+          ACCEPTANCE_BUNDLER_RPC_URL: ${{ matrix.network == 'alphanet' && inputs.bundler_rpc_url != '' && inputs.bundler_rpc_url || matrix.bundler_rpc_url }}
           ACCEPTANCE_CHAIN_ID: ${{ matrix.expected_chain_id }}
           ACCEPTANCE_4337_RPC_URL: ${{ matrix.erc4337_rpc_url }}
           ACCEPTANCE_4337_ENTRY_POINT: ${{ matrix.entry_point }}
