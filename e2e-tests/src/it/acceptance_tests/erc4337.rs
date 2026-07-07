@@ -3,6 +3,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use alloy_network::Ethereum;
 use alloy_primitives::{
     Address, B256, Bytes, FixedBytes, U256, address,
     aliases::{U48, U192},
@@ -21,8 +22,13 @@ use tokio::time::{Instant, sleep, timeout};
 use tracing::{info, warn};
 use world_chain_test_utils::utils::signer;
 
-use super::{config::BundlerConfig, rpc::RpcEnv};
+use super::{
+    config::BundlerConfig,
+    rpc::{self, RpcEnv},
+};
 
+const WORLD_CHAIN_MAINNET_CHAIN_ID: u64 = 480;
+const WORLD_CHAIN_MAINNET_RPC_URL: &str = "https://worldchain-mainnet.g.alchemy.com/public";
 const SAFE_OP_TYPE_HASH: FixedBytes<32> =
     fixed_bytes!("c03dfc11d8b10bf9cf703d558958c8c42777f785d998c62060d85a4f0ef6ea7f");
 const SAFE_DOMAIN_TYPE_HASH: FixedBytes<32> =
@@ -72,18 +78,20 @@ pub(super) async fn sponsored_user_operations(env: &RpcEnv) -> eyre::Result<()> 
     let bundler = env
         .bundler_provider()
         .ok_or_eyre("ERC-4337 bundler provider missing")?;
+    let bundler_chain_id = bundler
+        .get_chain_id()
+        .await
+        .context("failed to read ERC-4337 bundler chain ID")?;
+    let (chain, chain_rpc) = erc4337_chain_provider(env, bundler_chain_id)?;
 
-    let harness = UserOperationHarness::new(
-        env.chain_provider(),
-        bundler,
-        config,
-        env.config().expected_chain_id,
-    )?;
+    let harness = UserOperationHarness::new(chain, bundler.clone(), config, bundler_chain_id)?;
 
     info!(
         network = env.config().network,
-        chain_rpc = env.config().rpc_target(),
+        acceptance_rpc = env.config().rpc_target(),
+        chain_rpc,
         bundler_rpc = config.rpc_target(),
+        bundler_chain_id,
         entry_point = ?config.entry_point,
         wallets = config.wallet_count,
         deploy_concurrency = config.deploy_concurrency,
@@ -95,9 +103,31 @@ pub(super) async fn sponsored_user_operations(env: &RpcEnv) -> eyre::Result<()> 
     harness.run().await
 }
 
+fn erc4337_chain_provider(
+    env: &RpcEnv,
+    bundler_chain_id: u64,
+) -> eyre::Result<(RootProvider, String)> {
+    if bundler_chain_id == env.config().expected_chain_id {
+        return Ok((env.chain_provider().clone(), env.config().rpc_target()));
+    }
+
+    if bundler_chain_id == WORLD_CHAIN_MAINNET_CHAIN_ID {
+        let rpc_url = WORLD_CHAIN_MAINNET_RPC_URL
+            .parse()
+            .wrap_err("failed to parse World Chain mainnet RPC URL")?;
+        let provider = rpc::provider_for_url::<Ethereum>(&rpc_url, None)?;
+        return Ok((provider, WORLD_CHAIN_MAINNET_RPC_URL.to_string()));
+    }
+
+    bail!(
+        "ERC-4337 bundler chain ID {bundler_chain_id} does not match ACCEPTANCE_CHAIN_ID {} and no fallback RPC is configured for it",
+        env.config().expected_chain_id
+    )
+}
+
 struct UserOperationHarness<'a> {
-    chain: &'a RootProvider,
-    bundler: &'a RootProvider,
+    chain: RootProvider,
+    bundler: RootProvider,
     config: &'a BundlerConfig,
     chain_id: u64,
     salt_base: U256,
@@ -122,8 +152,8 @@ struct UserOperationOverrides {
 
 impl<'a> UserOperationHarness<'a> {
     fn new(
-        chain: &'a RootProvider,
-        bundler: &'a RootProvider,
+        chain: RootProvider,
+        bundler: RootProvider,
         config: &'a BundlerConfig,
         chain_id: u64,
     ) -> eyre::Result<Self> {

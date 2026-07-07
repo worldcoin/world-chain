@@ -55,7 +55,10 @@ The MVP checks:
 The ERC-4337 wallet owners are deterministic test mnemonic accounts and are only
 used to sign Safe user operations. They do not need ETH. The tests send standard
 two-parameter `eth_sendUserOperation` requests; sponsorship is expected to be
-injected by the configured Rundler endpoint.
+injected by the configured Rundler endpoint. The ERC-4337 signing chain ID is
+read from Rundler. Contract reads use the regular acceptance RPC when it matches
+that chain ID, and otherwise use the public World Chain mainnet RPC for the known
+stage-Rundler-on-mainnet case.
 
 The GitHub Actions acceptance workflow sets `ACCEPTANCE_4337_PROFILE=smoke` for
 bundler-enabled runs. That profile means 20 ephemeral Safe wallets, 2 post-deploy
