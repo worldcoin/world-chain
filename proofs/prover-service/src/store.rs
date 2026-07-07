@@ -292,15 +292,25 @@ impl ProverServiceStore {
             JOIN proof_requests pr ON pr.proof_id = ps.proof_id
             WHERE pr.proof_id = $1
               AND ps.session_type = $2
-              AND (ps.status = $3 OR ps.status = $4)
+              AND ps.status IN ($3, $4, $5)
+            ORDER BY
+              CASE
+                WHEN ps.status IN ($3, $4) THEN 0
+                ELSE 1
+              END,
+              ps.completed_at DESC NULLS LAST,
+              ps.id DESC
+            LIMIT 1
             "#,
         )
         .bind(proof_id_bytes(proof_id))
         .bind(session_type.as_str())
         .bind(BackendSessionStatus::Submitting.as_str())
         .bind(BackendSessionStatus::Running.as_str())
+        .bind(BackendSessionStatus::Completed.as_str())
         .fetch_optional(&self.pool)
         .await?;
+   
 
         let session = if let Some(row) = row {
             let backend_session_id: String = row.try_get("backend_session_id")?;

@@ -12,7 +12,7 @@ use std::{collections::HashMap, sync::Mutex};
 use world_chain_proof_core::{
     artifacts::{AggregationProofArtifact, ProofArtifact, RangeProofArtifact},
     boot::BootInfoStruct,
-    types::AggregationOutputs,
+    types::{AggregationInputs, AggregationOutputs},
 };
 use world_chain_proof_succinct_utils::{
     AggregationProofRequest, ProofRequest, RangeProofRequest, Sp1SessionStatus, WorldSuccinctProver,
@@ -180,8 +180,18 @@ impl WorldSuccinctProver for CpuSuccinctProver {
                 Ok(proof_id.to_string())
             }
             SessionType::Snark => {
-                let ProofRequest::Aggregation(agg_request) = request else {
+                let ProofRequest::Aggregation(session_request) = request else {
                     bail!("proof request and session type mistmach")
+                };
+                let agg_request = AggregationProofRequest {
+                    inputs: AggregationInputs {
+                        boot_infos: session_request.boot_infos,
+                        latest_l1_checkpoint_head: session_request.latest_l1_checkpoint_head,
+                        multi_block_vkey: self.multi_block_vkey,
+                        prover_address: session_request.prover_address,
+                    },
+                    l1_headers_cbor: session_request.l1_headers_cbor,
+                    range_proofs: session_request.range_proofs,
                 };
                 let agg_proof = self.prove_aggregation(agg_request).await?;
                 let mut agg_proofs = self

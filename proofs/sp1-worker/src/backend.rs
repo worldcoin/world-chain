@@ -5,15 +5,12 @@ use std::time::Duration;
 use alloy_primitives::{Address, B256};
 use alloy_sol_types::SolValue;
 use anyhow::Context;
-use world_chain_proof_core::{
-    artifacts::{AggregationProofArtifact, ProofArtifact},
-    types::AggregationInputs,
-};
+use world_chain_proof_core::artifacts::{AggregationProofArtifact, ProofArtifact};
 use world_chain_proof_kona_host_utils::online::{
     OnlineHostConfig, RangeWitnessRequest, build_range_input, fetch_l1_header_by_hash,
 };
 use world_chain_proof_succinct_utils::{
-    AggregationProofRequest, ProofRequest as SuccinctProofRequest, RangeProofArtifact,
+    AggregationSessionRequest, ProofRequest as SuccinctProofRequest, RangeProofArtifact,
     RangeProofRequest, Sp1SessionStatus, WorldSuccinctProver,
 };
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
@@ -66,6 +63,7 @@ where
 
     async fn handle_claimed_job(&self, job: ProofJob) -> anyhow::Result<ProofData> {
         let request = &job.request;
+        let proof_id = request.id();
         let start_block = self.start_block(request)?;
 
         if let Some(snark_session) = self.get_session(&job, SessionType::Snark).await? {
@@ -95,7 +93,7 @@ where
             let session_id = self
                 .prover
                 .submit(
-                    request.id(),
+                    proof_id,
                     SessionType::Stark,
                     SuccinctProofRequest::Range(range_request),
                 )
@@ -117,21 +115,25 @@ where
 
         self.validate_range_artifact(request, &range)?;
 
-        let aggregation_request = self.build_aggregation_request(request, &range).await?;
+        let aggregation_request = self
+            .build_aggregation_request(request, &range)
+            .await
+            .context("failed to build aggregation proof request")?;
+
         let snark_session_id = self
             .prover
             .submit(
-                request.id(),
-                SessionType::Stark,
+                proof_id,
+                SessionType::Snark,
                 SuccinctProofRequest::Aggregation(aggregation_request),
             )
-            .await?;
-
+            .await
+            .context("failed to submit aggregation proof")?;
         self.record_session(
             &job,
-            SessionType::Stark,
-            snark_session_id.as_str(),
-            BackendSessionStatus::Completed,
+            SessionType::Snark,
+            &snark_session_id,
+            BackendSessionStatus::Running,
         )
         .await?;
 
@@ -308,20 +310,17 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         &self,
         request: &ProofRequest,
         range: &RangeProofArtifact,
-    ) -> anyhow::Result<AggregationProofRequest> {
+    ) -> anyhow::Result<AggregationSessionRequest> {
         let l1_header =
             fetch_l1_header_by_hash(&reqwest::Client::new(), &self.host.l1_rpc, request.l1_head)
                 .await?;
 
         let l1_headers_cbor = serde_cbor::to_vec(&vec![l1_header])?;
 
-        Ok(AggregationProofRequest {
-            inputs: AggregationInputs {
-                boot_infos: vec![range.boot_info.clone()],
-                latest_l1_checkpoint_head: request.l1_head,
-                multi_block_vkey: self.prover.multi_block_vkey(),
-                prover_address: self.config.prover_address,
-            },
+        Ok(AggregationSessionRequest {
+            boot_infos: vec![range.boot_info.clone()],
+            latest_l1_checkpoint_head: request.l1_head,
+            prover_address: self.config.prover_address,
             l1_headers_cbor,
             range_proofs: vec![range.proof.clone()],
         })

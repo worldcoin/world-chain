@@ -1,9 +1,9 @@
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
-    artifacts::ProofArtifact, range::WorldRangeProofPublicValues, types::AggregationInputs,
-    witness::WorldRangeWitnessData,
+    artifacts::ProofArtifact, boot::BootInfoStruct, range::WorldRangeProofPublicValues,
+    types::AggregationInputs, witness::WorldRangeWitnessData,
 };
 
 pub use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArtifact};
@@ -16,7 +16,7 @@ use world_chain_prover_service::{ProofRequestId, SessionType};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProofRequest {
     Range(RangeProofRequest),
-    Aggregation(AggregationProofRequest),
+    Aggregation(AggregationSessionRequest),
 }
 /// Host request for a single SP1 range proof.
 ///
@@ -55,6 +55,24 @@ pub struct AggregationProofRequest {
     ///
     /// Each entry is the backend-serialized range proof returned in
     /// [`RangeProofArtifact::proof`]; the aggregation guest recursively verifies them.
+    pub range_proofs: Vec<Vec<u8>>,
+}
+
+/// Backend-agnostic request for an aggregation proof session.
+///
+/// Concrete provers inject their own verifying key metadata when converting this into a
+/// low-level [`AggregationProofRequest`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AggregationSessionRequest {
+    /// Boot infos committed by the range proofs being aggregated.
+    pub boot_infos: Vec<BootInfoStruct>,
+    /// Latest L1 checkpoint head committed by the aggregation guest.
+    pub latest_l1_checkpoint_head: B256,
+    /// Prover address committed by the aggregation guest for on-chain attribution.
+    pub prover_address: Address,
+    /// CBOR-encoded L1 headers, ordered from oldest to newest.
+    pub l1_headers_cbor: Vec<u8>,
+    /// Serialized compressed SP1 range proofs, ordered to match `boot_infos`.
     pub range_proofs: Vec<Vec<u8>>,
 }
 
