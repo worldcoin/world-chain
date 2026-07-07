@@ -202,22 +202,15 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         job: &ProofJob,
         session_id: String,
     ) -> anyhow::Result<RangeProofArtifact> {
-        let expected_session_id = session_id.clone();
-        self.wait_and_download_session(
-            job,
-            SessionType::Stark,
-            session_id,
-            "range",
-            move |artifact| {
-                let ProofArtifact::Range(range) = artifact else {
-                    anyhow::bail!(
-                        "expected range proof artifact for STARK session {expected_session_id}"
-                    );
-                };
-                Ok(range)
-            },
-        )
-        .await
+        let artifact = self
+            .wait_and_download_artifact(job, SessionType::Stark, session_id.clone())
+            .await?;
+
+        let ProofArtifact::Range(range) = artifact else {
+            anyhow::bail!("expected range proof artifact for STARK session {session_id}");
+        };
+
+        Ok(range)
     }
 
     async fn wait_and_download_aggregation(
@@ -225,32 +218,24 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         job: &ProofJob,
         session_id: String,
     ) -> anyhow::Result<AggregationProofArtifact> {
-        let expected_session_id = session_id.clone();
-        self.wait_and_download_session(
-            job,
-            SessionType::Snark,
-            session_id,
-            "aggregation",
-            move |artifact| {
-                let ProofArtifact::Aggregation(agg) = artifact else {
-                    anyhow::bail!(
-                        "expected aggregation proof artifact for SNARK session {expected_session_id}"
-                    );
-                };
-                Ok(agg)
-            },
-        )
-        .await
+        let artifact = self
+            .wait_and_download_artifact(job, SessionType::Snark, session_id.clone())
+            .await?;
+
+        let ProofArtifact::Aggregation(agg) = artifact else {
+            anyhow::bail!("expected aggregation proof artifact for SNARK session {session_id}");
+        };
+
+        Ok(agg)
     }
 
-    async fn wait_and_download_session<T>(
+    async fn wait_and_download_artifact(
         &self,
         job: &ProofJob,
         session_type: SessionType,
         session_id: String,
-        label: &'static str,
-        decode: impl Fn(ProofArtifact) -> anyhow::Result<T>,
-    ) -> anyhow::Result<T> {
+    ) -> anyhow::Result<ProofArtifact> {
+        let session_label = session_type.as_str();
         loop {
             match self
                 .prover
@@ -276,7 +261,7 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
                     )
                     .await?;
 
-                    return decode(artifact);
+                    return Ok(artifact);
                 }
                 Sp1SessionStatus::Failed(reason) => {
                     self.record_session(
@@ -287,10 +272,10 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
                     )
                     .await?;
 
-                    anyhow::bail!("{label} proof session {session_id} failed: {reason}");
+                    anyhow::bail!("{session_label} proof session {session_id} failed: {reason}");
                 }
                 Sp1SessionStatus::NotFound => {
-                    anyhow::bail!("{label} proof session {session_id} not found by prover");
+                    anyhow::bail!("{session_label} proof session {session_id} not found by prover");
                 }
             }
         }
