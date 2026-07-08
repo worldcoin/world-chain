@@ -220,14 +220,14 @@ fn validate_range_artifact(
         );
     }
 
-    if let Some(expected_l1_head) = request.l1_head {
-        if artifact.boot_info.l1Head != expected_l1_head {
-            bail!(
-                "range proof l1 head mismatch: expected {:?}, got {:?}",
-                expected_l1_head,
-                artifact.boot_info.l1Head
-            );
-        }
+    if let Some(expected_l1_head) = request.l1_head
+        && artifact.boot_info.l1Head != expected_l1_head
+    {
+        bail!(
+            "range proof l1 head mismatch: expected {:?}, got {:?}",
+            expected_l1_head,
+            artifact.boot_info.l1Head
+        );
     }
 
     if artifact.boot_info.rollupConfigHash != host.rollup_config_hash {
