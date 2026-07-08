@@ -68,13 +68,17 @@ struct Sp1ProveArgs {
     #[arg(long, default_value_t = 1)]
     ranges: u64,
 
-    /// Prover backend. Network is reserved for a follow-up implementation.
+    /// Prover backend.
     #[arg(
         long,
         env = "SP1_PROVER",
         default_value_t = Sp1ProverKind::Cpu
     )]
     prover: Sp1ProverKind,
+
+    /// SP1 network private key. Required when --prover network.
+    #[arg(long, env = "SP1_PRIVATE_KEY")]
+    sp1_private_key: Option<String>,
 
     /// Aggregation proof mode.
     #[arg(long, default_value = "groth16")]
@@ -139,6 +143,7 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
     use world_chain_proof_succinct_host_utils::{
         cpu_prover::CpuSuccinctProver,
         mock_prover::MockSuccinctProver,
+        network_prover::NetworkSuccinctProver,
         validity::{ValidityProofRequest, prove_validity},
     };
 
@@ -179,10 +184,12 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
             prove_validity(&host, &prover, proof_request).await?
         }
         Sp1ProverKind::Network => {
-            anyhow::bail!(
-                "unsupported SP1 prover '{}'; only 'cpu' and 'mock' are currently available",
-                args.prover
-            );
+            let private_key = args
+                .sp1_private_key
+                .clone()
+                .context("SP1_PRIVATE_KEY is required when --prover network")?;
+            let prover = NetworkSuccinctProver::new(mode, &private_key).await?;
+            prove_validity(&host, &prover, proof_request).await?
         }
     };
 

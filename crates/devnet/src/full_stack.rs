@@ -47,6 +47,7 @@ use world_chain_proof_succinct_host_utils::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
     mock_prover::MockSuccinctProver,
+    network_prover::NetworkSuccinctProver,
 };
 use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
@@ -91,6 +92,8 @@ const SP1_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// Env var enabling the in-process defender, prover-service, and SP1 worker. Off by default:
 /// real proving needs the SP1 ELFs. Set a prover backend to turn it on.
 const SP1_WORKER_PROVER_ENV: &str = "DEVNET_SP1_WORKER_PROVER";
+/// SP1 network private key. Required when `DEVNET_SP1_WORKER_PROVER=network`.
+const SP1_PRIVATE_KEY_ENV: &str = "SP1_PRIVATE_KEY";
 /// Bond, in wei, sent with every `WorldChainProofSystemFactory.propose`.
 /// Matches `PROPOSER_BOND` (1 ether) in `scripts/devnet/DeployProofSystem.s.sol`.
 const WORLD_PROPOSER_BOND_WEI: u128 = 1_000_000_000_000_000_000;
@@ -2697,10 +2700,15 @@ async fn start_sp1_worker(
                 .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
             start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
         }
-        Sp1ProverKind::Network => bail!(
-            "unsupported SP1 prover '{}'; only 'cpu' and 'mock' are currently available",
-            kind
-        ),
+        Sp1ProverKind::Network => {
+            let private_key = std::env::var(SP1_PRIVATE_KEY_ENV).wrap_err_with(|| {
+                format!("{SP1_PRIVATE_KEY_ENV} is required when {SP1_WORKER_PROVER_ENV}=network")
+            })?;
+            let prover = NetworkSuccinctProver::new(SP1ProofMode::Groth16, &private_key)
+                .await
+                .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+            start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
+        }
     }
 }
 
