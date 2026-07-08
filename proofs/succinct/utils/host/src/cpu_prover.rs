@@ -1,6 +1,7 @@
 //! Range proofs are produced in `Compressed` mode so the aggregation guest can recursively
 //! verify them; the aggregation proof mode is configurable (Groth16 for on-chain verification).
 
+use crate::SuccinctProverError;
 use anyhow::{Context, bail};
 use async_trait::async_trait;
 pub use sp1_sdk::SP1ProofMode;
@@ -17,21 +18,6 @@ use world_chain_proof_succinct_utils::{
     AggregationProofRequest, ProofRequest, RangeProofRequest, Sp1SessionStatus, WorldSuccinctProver,
 };
 use world_chain_prover_service::{ProofRequestId, SessionType};
-
-/// Structured failures specific to [`SuccinctProver`]; surfaced wrapped in
-/// [`anyhow::Error`] so callers can downcast when they need to match on them.
-#[derive(Debug, thiserror::Error)]
-pub enum SuccinctProverError {
-    /// The guest committed boot info that differs from the host-computed expectation.
-    #[error("range proof boot info mismatch: expected {expected:?}, got {actual:?}")]
-    BootInfoMismatch {
-        expected: Box<BootInfoStruct>,
-        actual: Box<BootInfoStruct>,
-    },
-    /// Aggregation requires compressed range proofs for recursive verification.
-    #[error("range proof was not in compressed mode")]
-    NotCompressed,
-}
 
 /// [`WorldSuccinctProver`] CPU-local implementation over the sp1-sdk local prover.
 pub struct CpuSuccinctProver {
