@@ -68,7 +68,7 @@ struct Sp1ProveArgs {
     #[arg(long, default_value_t = 1)]
     ranges: u64,
 
-    /// Prover backend. Mock and network are reserved for follow-up implementations.
+    /// Prover backend. Network is reserved for a follow-up implementation.
     #[arg(
         long,
         env = "SP1_PROVER",
@@ -138,6 +138,7 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
     use sp1_sdk::SP1ProofMode;
     use world_chain_proof_succinct_host_utils::{
         cpu_prover::CpuSuccinctProver,
+        mock_prover::MockSuccinctProver,
         validity::{ValidityProofRequest, prove_validity},
     };
 
@@ -159,28 +160,31 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
         prover = args.prover,
     );
 
-    let prover = match args.prover {
-        Sp1ProverKind::Cpu => CpuSuccinctProver::new(mode).await?,
-        Sp1ProverKind::Mock | Sp1ProverKind::Network => {
+    let proof_request = ValidityProofRequest {
+        start_block: args.rpc.start_block,
+        end_block: args.rpc.end_block,
+        l1_head: args.rpc.l1_head,
+        allow_unfinalized: args.rpc.allow_unfinalized,
+        split_count: args.ranges.max(1),
+        prover_address: args.prover_address,
+    };
+
+    let artifact = match args.prover {
+        Sp1ProverKind::Cpu => {
+            let prover = CpuSuccinctProver::new(mode).await?;
+            prove_validity(&host, &prover, proof_request.clone()).await?
+        }
+        Sp1ProverKind::Mock => {
+            let prover = MockSuccinctProver::new(mode).await?;
+            prove_validity(&host, &prover, proof_request).await?
+        }
+        Sp1ProverKind::Network => {
             anyhow::bail!(
-                "unsupported SP1 prover '{}'; only 'cpu' is currently available",
+                "unsupported SP1 prover '{}'; only 'cpu' and 'mock' are currently available",
                 args.prover
             );
         }
     };
-    let artifact = prove_validity(
-        &host,
-        &prover,
-        ValidityProofRequest {
-            start_block: args.rpc.start_block,
-            end_block: args.rpc.end_block,
-            l1_head: args.rpc.l1_head,
-            allow_unfinalized: args.rpc.allow_unfinalized,
-            split_count: args.ranges.max(1),
-            prover_address: args.prover_address,
-        },
-    )
-    .await?;
 
     println!(
         "aggregation proof complete: block {block} pre={pre:?} post={post:?}",

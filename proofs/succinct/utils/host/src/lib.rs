@@ -13,6 +13,7 @@ use world_chain_proof_core::{
     types::AggregationInputs,
     witness::WorldRangeWitnessData,
 };
+pub use world_chain_proof_succinct_utils::WorldSuccinctProver;
 use world_chain_proof_succinct_utils::{AggregationProofRequest, RangeProofRequest};
 
 #[cfg(feature = "sp1")]
