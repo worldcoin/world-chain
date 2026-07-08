@@ -26,6 +26,7 @@ pub struct MockSuccinctProver {
     agg_pk: SP1ProvingKey,
     multi_block_vkey: [u32; 8],
     agg_mode: SP1ProofMode,
+
     range_proofs: Mutex<HashMap<String, RangeProofArtifact>>,
     agg_proofs: Mutex<HashMap<String, AggregationProofArtifact>>,
 }
