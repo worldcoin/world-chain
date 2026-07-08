@@ -8,7 +8,8 @@ use world_chain_proof_core::artifacts::{
     AggregationProofArtifact, ProofArtifact, RangeProofArtifact,
 };
 use world_chain_proof_kona_host_utils::online::{
-    OnlineHostConfig, RangeWitnessRequest, build_range_input, fetch_l1_header_by_hash,
+    OnlineHostConfig, RangeMetadata, RangeWitnessRequest, build_range_input,
+    fetch_l1_header_by_hash,
 };
 use world_chain_proof_succinct_utils::{
     AggregationSessionRequest, ProofRequest as SuccinctProofRequest, RangeProofRequest,
@@ -31,6 +32,11 @@ pub struct ValidityProofRequest {
     pub split_count: u64,
     /// Prover address committed by the aggregation guest.
     pub prover_address: Address,
+}
+
+struct BuiltRangeRequest {
+    request: RangeProofRequest,
+    metadata: RangeMetadata,
 }
 
 /// Builds, proves, and aggregates a single-range SP1 validity proof.
@@ -58,14 +64,14 @@ where
     }
 
     let proof_id = validity_proof_id(&request);
-    let range_request = build_range_request(host, &request)
+    let range_input = build_range_request(host, &request)
         .await
         .context("failed to build range proof request")?;
     let range_session_id = prover
         .submit(
             proof_id,
             SessionType::Stark,
-            SuccinctProofRequest::Range(range_request),
+            SuccinctProofRequest::Range(range_input.request),
         )
         .await
         .context("failed to submit range proof")?;
@@ -73,7 +79,7 @@ where
         .await
         .context("failed to complete range proof")?;
 
-    validate_range_artifact(host, &request, &range)?;
+    validate_range_artifact(&range_input.metadata, &range)?;
 
     let aggregation_request = build_aggregation_request(host, &request, &range)
         .await
@@ -90,7 +96,7 @@ where
         .await
         .context("failed to complete aggregation proof")?;
 
-    validate_aggregation_artifact(host, &request, &range, &aggregation)?;
+    validate_aggregation_artifact(&range_input.metadata, &aggregation)?;
 
     Ok(aggregation)
 }
@@ -108,7 +114,7 @@ fn validity_proof_id(request: &ValidityProofRequest) -> ProofRequestId {
 async fn build_range_request(
     host: &OnlineHostConfig,
     request: &ValidityProofRequest,
-) -> anyhow::Result<RangeProofRequest> {
+) -> anyhow::Result<BuiltRangeRequest> {
     let input = build_range_input(
         host,
         RangeWitnessRequest {
@@ -121,8 +127,13 @@ async fn build_range_request(
     .await
     .context("failed to build SP1 range witness")?;
 
-    RangeProofRequest::from_witness_data(&input.witness, None)
-        .context("failed to serialize SP1 range witness")
+    let request = RangeProofRequest::from_witness_data(&input.witness, None)
+        .context("failed to serialize SP1 range witness")?;
+
+    Ok(BuiltRangeRequest {
+        request,
+        metadata: input.metadata,
+    })
 }
 
 async fn build_aggregation_request(
@@ -208,32 +219,45 @@ where
 }
 
 fn validate_range_artifact(
-    host: &OnlineHostConfig,
-    request: &ValidityProofRequest,
+    metadata: &RangeMetadata,
     artifact: &RangeProofArtifact,
 ) -> anyhow::Result<()> {
-    if artifact.boot_info.l2BlockNumber != request.end_block {
-        bail!(
-            "range proof block mismatch: expected {}, got {}",
-            request.end_block,
-            artifact.boot_info.l2BlockNumber
-        );
-    }
-
-    if let Some(expected_l1_head) = request.l1_head
-        && artifact.boot_info.l1Head != expected_l1_head
-    {
+    if artifact.boot_info.l1Head != metadata.l1_head {
         bail!(
             "range proof l1 head mismatch: expected {:?}, got {:?}",
-            expected_l1_head,
+            metadata.l1_head,
             artifact.boot_info.l1Head
         );
     }
 
-    if artifact.boot_info.rollupConfigHash != host.rollup_config_hash {
+    if artifact.boot_info.l2PreRoot != metadata.l2_pre_root {
+        bail!(
+            "range proof pre root mismatch: expected {:?}, got {:?}",
+            metadata.l2_pre_root,
+            artifact.boot_info.l2PreRoot
+        );
+    }
+
+    if artifact.boot_info.l2PostRoot != metadata.l2_post_root {
+        bail!(
+            "range proof post root mismatch: expected {:?}, got {:?}",
+            metadata.l2_post_root,
+            artifact.boot_info.l2PostRoot
+        );
+    }
+
+    if artifact.boot_info.l2BlockNumber != metadata.end_block {
+        bail!(
+            "range proof block mismatch: expected {}, got {}",
+            metadata.end_block,
+            artifact.boot_info.l2BlockNumber
+        );
+    }
+
+    if artifact.boot_info.rollupConfigHash != metadata.rollup_config_hash {
         bail!(
             "range proof rollup config hash mismatch: expected {:?}, got {:?}",
-            host.rollup_config_hash,
+            metadata.rollup_config_hash,
             artifact.boot_info.rollupConfigHash
         );
     }
@@ -242,42 +266,120 @@ fn validate_range_artifact(
 }
 
 fn validate_aggregation_artifact(
-    host: &OnlineHostConfig,
-    request: &ValidityProofRequest,
-    range: &RangeProofArtifact,
+    metadata: &RangeMetadata,
     artifact: &AggregationProofArtifact,
 ) -> anyhow::Result<()> {
-    if artifact.outputs.l2PostRoot != range.boot_info.l2PostRoot {
+    if artifact.outputs.l2PreRoot != metadata.l2_pre_root {
+        bail!(
+            "aggregation pre root mismatch: expected {:?}, got {:?}",
+            metadata.l2_pre_root,
+            artifact.outputs.l2PreRoot
+        );
+    }
+
+    if artifact.outputs.l2PostRoot != metadata.l2_post_root {
         bail!(
             "aggregation post root mismatch: expected {:?}, got {:?}",
-            range.boot_info.l2PostRoot,
+            metadata.l2_post_root,
             artifact.outputs.l2PostRoot
         );
     }
 
-    if artifact.outputs.l2BlockNumber != request.end_block {
+    if artifact.outputs.l2BlockNumber != metadata.end_block {
         bail!(
             "aggregation block mismatch: expected {}, got {}",
-            request.end_block,
+            metadata.end_block,
             artifact.outputs.l2BlockNumber
         );
     }
 
-    if artifact.outputs.l1Head != range.boot_info.l1Head {
+    if artifact.outputs.l1Head != metadata.l1_head {
         bail!(
             "aggregation l1 head mismatch: expected {:?}, got {:?}",
-            range.boot_info.l1Head,
+            metadata.l1_head,
             artifact.outputs.l1Head
         );
     }
 
-    if artifact.outputs.rollupConfigHash != host.rollup_config_hash {
+    if artifact.outputs.rollupConfigHash != metadata.rollup_config_hash {
         bail!(
             "aggregation rollup config hash mismatch: expected {:?}, got {:?}",
-            host.rollup_config_hash,
+            metadata.rollup_config_hash,
             artifact.outputs.rollupConfigHash
         );
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::Address;
+    use world_chain_proof_core::{boot::BootInfoStruct, types::AggregationOutputs};
+
+    use super::*;
+
+    fn metadata() -> RangeMetadata {
+        RangeMetadata {
+            start_block: 10,
+            end_block: 20,
+            finalized_l2_head: Some(30),
+            l1_head: B256::repeat_byte(0x11),
+            l2_pre_root: B256::repeat_byte(0x22),
+            l2_post_root: B256::repeat_byte(0x33),
+            rollup_config_hash: B256::repeat_byte(0x44),
+            active_fork: "Jovian".to_string(),
+            world_spec_id: "JOVIAN".to_string(),
+        }
+    }
+
+    fn range_artifact(metadata: &RangeMetadata) -> RangeProofArtifact {
+        RangeProofArtifact {
+            boot_info: BootInfoStruct {
+                l1Head: metadata.l1_head,
+                l2PreRoot: metadata.l2_pre_root,
+                l2PostRoot: metadata.l2_post_root,
+                l2BlockNumber: metadata.end_block,
+                rollupConfigHash: metadata.rollup_config_hash,
+            },
+            proof: vec![1, 2, 3],
+        }
+    }
+
+    fn aggregation_artifact(metadata: &RangeMetadata) -> AggregationProofArtifact {
+        AggregationProofArtifact {
+            outputs: AggregationOutputs {
+                l1Head: metadata.l1_head,
+                l2PreRoot: metadata.l2_pre_root,
+                l2PostRoot: metadata.l2_post_root,
+                l2BlockNumber: metadata.end_block,
+                rollupConfigHash: metadata.rollup_config_hash,
+                multiBlockVKey: B256::repeat_byte(0x55),
+                proverAddress: Address::ZERO,
+            },
+            proof: vec![4, 5, 6],
+        }
+    }
+
+    #[test]
+    fn range_validation_rejects_post_root_mismatch() {
+        let metadata = metadata();
+        let mut artifact = range_artifact(&metadata);
+        artifact.boot_info.l2PostRoot = B256::repeat_byte(0x99);
+
+        let error = validate_range_artifact(&metadata, &artifact).unwrap_err();
+
+        assert!(error.to_string().contains("range proof post root mismatch"));
+    }
+
+    #[test]
+    fn aggregation_validation_rejects_post_root_mismatch() {
+        let metadata = metadata();
+        let mut artifact = aggregation_artifact(&metadata);
+        artifact.outputs.l2PostRoot = B256::repeat_byte(0x99);
+
+        let error = validate_aggregation_artifact(&metadata, &artifact).unwrap_err();
+
+        assert!(error.to_string().contains("aggregation post root mismatch"));
+    }
 }
