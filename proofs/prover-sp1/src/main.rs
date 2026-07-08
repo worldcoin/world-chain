@@ -67,9 +67,9 @@ struct Sp1ProveArgs {
     #[arg(long, default_value_t = 1)]
     ranges: u64,
 
-    /// Prover backend: cpu, mock, or network. Overrides SP1_PROVER env var.
+    /// Prover backend. Only cpu is currently wired in this binary.
     #[arg(long, env = "SP1_PROVER", default_value = "cpu")]
-    prover: world_chain_proof_succinct_host_utils::cpu_prover::Sp1ProverKind,
+    prover: String,
 
     /// Aggregation proof mode.
     #[arg(long, default_value = "groth16")]
@@ -132,7 +132,8 @@ async fn sp1_execute(args: Sp1ExecuteArgs) -> Result<()> {
 async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
     use sp1_sdk::SP1ProofMode;
     use world_chain_proof_succinct_host_utils::{
-        cpu_prover::CpuSuccinctProver, validity::ValidityProofRequest,
+        cpu_prover::CpuSuccinctProver,
+        validity::{ValidityProofRequest, prove_validity},
     };
 
     let host = online_host_config(&args.rpc)?;
@@ -153,7 +154,14 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
         prover = args.prover,
     );
 
-    let prover = CpuSuccinctProver::new(args.prover).await?;
+    if args.prover != "cpu" {
+        anyhow::bail!(
+            "unsupported SP1 prover '{}'; only 'cpu' is currently available",
+            args.prover
+        );
+    }
+
+    let prover = CpuSuccinctProver::new(mode).await?;
     let artifact = prove_validity(
         &host,
         &prover,

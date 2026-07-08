@@ -1,7 +1,7 @@
 //! Full end-to-end proving test for the SP1 worker.
 //!
-//! Runs the real worker against a real `prover-service` and a real [`SuccinctProver`],
-//! generating a witness from live RPC endpoints and proving it (mock, CPU, or network). This
+//! Runs the real worker against a real `prover-service` and a real [`CpuSuccinctProver`],
+//! generating a witness from live RPC endpoints and proving it with the local CPU prover. This
 //! is the highest-fidelity test of the worker — it exercises lease → witness → prove →
 //! submit end to end — but it needs external infrastructure, so it is `#[ignore]`d and only
 //! runs when the required environment is present.
@@ -17,13 +17,10 @@
 //! export L1_BEACON_RPC_URL=$L1_RPC_URL          # devnet uses calldata DA; L1 RPC doubles as beacon
 //! export ROLLUP_RPC_URL=http://127.0.0.1:7545   # op-node, for output roots
 //! export ROLLUP_CONFIG=/path/to/rollup.json
-//! export SP1_PROVER=cpu                          # cpu | mock | network (default: mock)
 //! cargo test -p world-chain-sp1-worker --test e2e_proving -- --ignored --nocapture
 //! ```
 //!
-//! `SP1_PROVER=mock` validates the full witness + guest-execution + root-binding path cheaply
-//! (the SP1 mock prover still executes the guest); `cpu`/`network` additionally produce a real
-//! SNARK. The SP1 guest ELFs are baked into the worker at compile time via
+//! The SP1 guest ELFs are baked into the worker at compile time via
 //! `sp1_sdk::include_elf!()` (see `proofs/succinct/elfs/build.rs`); no path-based
 //! overrides are required.
 
@@ -33,9 +30,7 @@ use alloy_primitives::Address;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres;
 use world_chain_proof_kona_host_utils::online::{OnlineHostConfig, resolve_l1_head};
-use world_chain_proof_succinct_host_utils::cpu_prover::{
-    CpuSuccinctProver, SP1ProofMode, Sp1ProverKind,
-};
+use world_chain_proof_succinct_host_utils::cpu_prover::{CpuSuccinctProver, SP1ProofMode};
 use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_proofs::{ConsensusProvider, OptimismConsensusClient};
 use world_chain_prover_service::{
@@ -55,13 +50,6 @@ fn required(name: &str) -> Option<String> {
             None
         }
     }
-}
-
-fn prover_kind() -> Sp1ProverKind {
-    std::env::var("SP1_PROVER")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(Sp1ProverKind::Mock)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -131,9 +119,8 @@ async fn worker_proves_real_range_end_to_end() {
     )
     .expect("build host config");
 
-    let kind = prover_kind();
     // Build the prover off the async runtime: it owns its own runtime internally.
-    let prover = CpuSuccinctProver::new(kind, SP1ProofMode::Groth16)
+    let prover = CpuSuccinctProver::new(SP1ProofMode::Groth16)
         .await
         .expect("build prover");
 
@@ -200,7 +187,7 @@ async fn worker_proves_real_range_end_to_end() {
         .await
         .expect("enqueue proof request");
     eprintln!(
-        "enqueued {id} for block {claimed_block} (interval {block_interval}, {kind:?} prover); proving may take a while"
+        "enqueued {id} for block {claimed_block} (interval {block_interval}, cpu prover); proving may take a while"
     );
 
     let deadline = tokio::time::Instant::now() + timeout;
@@ -232,10 +219,7 @@ async fn worker_proves_real_range_end_to_end() {
         panic!("expected SP1 proof data");
     };
     assert!(!public_values.is_empty(), "public values must be populated");
-    // A real SNARK is non-empty; the mock prover may emit an empty proof blob, which is fine.
-    if !matches!(prover_kind(), Sp1ProverKind::Mock) {
-        assert!(!proof.is_empty(), "non-mock proof must be non-empty");
-    }
+    assert!(!proof.is_empty(), "cpu proof must be non-empty");
 
     token.cancel();
     let _ = tokio::time::timeout(Duration::from_secs(5), worker_handle).await;

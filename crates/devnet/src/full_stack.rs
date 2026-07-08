@@ -43,9 +43,7 @@ use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 use world_chain_challenger::{AlloyChallengerClient, ChallengerConfig, WorldChainChallenger};
 use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
 use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
-use world_chain_proof_succinct_host_utils::cpu_prover::{
-    CpuSuccinctProver, SP1ProofMode, Sp1ProverKind,
-};
+use world_chain_proof_succinct_host_utils::cpu_prover::{CpuSuccinctProver, SP1ProofMode};
 use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
 };
@@ -87,7 +85,7 @@ const PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL: u64 = 5;
 /// Poll interval for the in-process SP1 worker leasing jobs from the prover-service.
 const SP1_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// Env var enabling the in-process defender, prover-service, and SP1 worker. Off by default:
-/// real proving needs the SP1 ELFs. Set a prover backend (`cpu`/`mock`/`network`) to turn it on.
+/// real proving needs the SP1 ELFs. Set to `cpu` to turn it on.
 const SP1_WORKER_PROVER_ENV: &str = "DEVNET_SP1_WORKER_PROVER";
 /// Bond, in wei, sent with every `WorldChainProofSystemFactory.propose`.
 /// Matches `PROPOSER_BOND` (1 ether) in `scripts/devnet/DeployProofSystem.s.sol`.
@@ -574,8 +572,8 @@ impl FullStackWorldDevnet {
         // requests for challenged valid games; the worker leases SP1 jobs, builds witnesses
         // from the devnet L1/L2 RPCs, and proves them with the selected backend.
         let (prover_service, sp1_worker, world_defender, prover_service_url) =
-            match (proof_system.as_ref(), sp1_worker_prover_kind()) {
-                (Some(deployment), Some(kind)) => {
+            match (proof_system.as_ref(), sp1_worker_enabled()?) {
+                (Some(deployment), true) => {
                     let output_root_rpc = op_nodes
                         .first()
                         .map(|node| node.rpc_url.clone())
@@ -602,7 +600,6 @@ impl FullStackWorldDevnet {
                         &url,
                         &artifacts.rollup_path,
                         deployment,
-                        kind,
                     )
                     .await?;
                     (Some(service), Some(worker), Some(defender), Some(url))
@@ -2569,12 +2566,15 @@ async fn start_world_chain_defender(
     Ok(DefenderTask { handle })
 }
 
-/// Reads the SP1 worker prover backend from [`SP1_WORKER_PROVER_ENV`], or `None` when the
-/// defender proving loop is disabled.
-fn sp1_worker_prover_kind() -> Option<Sp1ProverKind> {
-    std::env::var(SP1_WORKER_PROVER_ENV)
-        .ok()
-        .and_then(|value| value.parse().ok())
+/// Reads [`SP1_WORKER_PROVER_ENV`], returning whether the defender proving loop is enabled.
+fn sp1_worker_enabled() -> Result<bool> {
+    match std::env::var(SP1_WORKER_PROVER_ENV) {
+        Ok(value) if value == "cpu" => Ok(true),
+        Ok(value) => bail!(
+            "unsupported {SP1_WORKER_PROVER_ENV} value '{value}'; only 'cpu' is currently available"
+        ),
+        Err(_) => Ok(false),
+    }
 }
 
 /// Starts the in-process defender prover-service and returns its task handle and JSON-RPC URL.
@@ -2668,7 +2668,6 @@ async fn start_sp1_worker(
     prover_service_url: &str,
     rollup_path: &Path,
     deployment: &WorldProofSystemDeployment,
-    kind: Sp1ProverKind,
 ) -> Result<Sp1WorkerTask> {
     let rollup_config: Value = read_json(rollup_path)?;
     let host = OnlineHostConfig::from_rollup_config_value(
@@ -2681,8 +2680,8 @@ async fn start_sp1_worker(
     )
     .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?;
 
-    // `SuccinctProver` owns its own runtime, so build it off the async runtime.
-    let prover = CpuSuccinctProver::new(kind, SP1ProofMode::Groth16)
+    // `CpuSuccinctProver` owns its own runtime, so build it off the async runtime.
+    let prover = CpuSuccinctProver::new(SP1ProofMode::Groth16)
         .await
         .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
 
@@ -2716,7 +2715,7 @@ async fn start_sp1_worker(
     info!(
         prover_service = %prover_service_url,
         block_interval = deployment.block_interval,
-        prover = ?kind,
+        prover = "cpu",
         submit_proof_retry_max_retries = retry_config.max_attempts,
         submit_proof_retry_initial_delay_ms = retry_config.initial_delay.as_millis(),
         submit_proof_retry_max_delay_ms = retry_config.max_delay.as_millis(),

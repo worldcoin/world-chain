@@ -8,9 +8,7 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_kona_host_utils::online::build_online_config;
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
-use world_chain_proof_succinct_host_utils::cpu_prover::{
-    CpuSuccinctProver, SP1ProofMode, Sp1ProverKind,
-};
+use world_chain_proof_succinct_host_utils::cpu_prover::{CpuSuccinctProver, SP1ProofMode};
 use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_prover_service::RpcProverServiceClient;
 use world_chain_sp1_worker::{
@@ -98,9 +96,9 @@ struct Cli {
     #[arg(long, default_value_t = 900)]
     witness_timeout_seconds: u64,
 
-    /// Prover backend: cpu, mock, or network. Overrides SP1_PROVER env var.
+    /// Prover backend. Only cpu is currently wired in this binary.
     #[arg(long, env = "SP1_PROVER", default_value = "cpu")]
-    prover: Sp1ProverKind,
+    prover: String,
 
     /// Prover address for on-chain attribution (defaults to zero address).
     #[arg(
@@ -181,7 +179,13 @@ async fn main() -> Result<()> {
     // ELFs are embedded at compile time via `sp1_sdk::include_elf!()`
     // (see `proofs/succinct/elfs/build.rs`). Challenged roots are
     // defended on-chain; Groth16 keeps verification ~100k gas.
-    let prover = CpuSuccinctProver::new(cli.prover, SP1ProofMode::Groth16).await?;
+    if cli.prover != "cpu" {
+        anyhow::bail!(
+            "unsupported SP1 prover '{}'; only 'cpu' is currently available",
+            cli.prover
+        );
+    }
+    let prover = CpuSuccinctProver::new(SP1ProofMode::Groth16).await?;
 
     let backend = Sp1Backend::new(
         host,
@@ -224,7 +228,7 @@ async fn main() -> Result<()> {
         prover_service = %cli.prover_service_url,
         block_interval = cli.block_interval,
         ranges = cli.ranges.max(1),
-        prover = ?cli.prover,
+        prover = %cli.prover,
         submit_proof_retry_max_retries = cli.submit_proof_retry_max_retries,
         submit_proof_retry_initial_delay_ms = cli.submit_proof_retry_initial_delay_ms,
         submit_proof_retry_max_delay_ms = cli.submit_proof_retry_max_delay_ms,
