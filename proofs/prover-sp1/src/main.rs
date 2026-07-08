@@ -5,6 +5,7 @@ use alloy_primitives::{Address, B256};
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
+use world_chain_proof_succinct_host_utils::Sp1ProverKind;
 use world_chain_prover::{
     HashRollupConfigArgs, RpcArgs, WitnessArgs, ensure_parent_dir, online_host_config,
     print_rollup_config_hash, write_json, write_witness,
@@ -67,9 +68,13 @@ struct Sp1ProveArgs {
     #[arg(long, default_value_t = 1)]
     ranges: u64,
 
-    /// Prover backend. Only cpu is currently wired in this binary.
-    #[arg(long, env = "SP1_PROVER", default_value = "cpu")]
-    prover: String,
+    /// Prover backend. Mock and network are reserved for follow-up implementations.
+    #[arg(
+        long,
+        env = "SP1_PROVER",
+        default_value_t = Sp1ProverKind::Cpu
+    )]
+    prover: Sp1ProverKind,
 
     /// Aggregation proof mode.
     #[arg(long, default_value = "groth16")]
@@ -146,7 +151,7 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
     };
 
     println!(
-        "proving blocks {start}..={end} over {ranges} range(s) ({mode:?} aggregation, {prover:?} prover)",
+        "proving blocks {start}..={end} over {ranges} range(s) ({mode:?} aggregation, {prover} prover)",
         start = args.rpc.start_block + 1,
         end = args.rpc.end_block,
         ranges = args.ranges.max(1),
@@ -154,14 +159,15 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
         prover = args.prover,
     );
 
-    if args.prover != "cpu" {
-        anyhow::bail!(
-            "unsupported SP1 prover '{}'; only 'cpu' is currently available",
-            args.prover
-        );
-    }
-
-    let prover = CpuSuccinctProver::new(mode).await?;
+    let prover = match args.prover {
+        Sp1ProverKind::Cpu => CpuSuccinctProver::new(mode).await?,
+        Sp1ProverKind::Mock | Sp1ProverKind::Network => {
+            anyhow::bail!(
+                "unsupported SP1 prover '{}'; only 'cpu' is currently available",
+                args.prover
+            );
+        }
+    };
     let artifact = prove_validity(
         &host,
         &prover,

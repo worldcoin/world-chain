@@ -17,6 +17,7 @@
 //! export L1_BEACON_RPC_URL=$L1_RPC_URL          # devnet uses calldata DA; L1 RPC doubles as beacon
 //! export ROLLUP_RPC_URL=http://127.0.0.1:7545   # op-node, for output roots
 //! export ROLLUP_CONFIG=/path/to/rollup.json
+//! export SP1_PROVER=cpu                          # cpu | mock | network (mock/network not wired yet)
 //! cargo test -p world-chain-sp1-worker --test e2e_proving -- --ignored --nocapture
 //! ```
 //!
@@ -30,7 +31,10 @@ use alloy_primitives::Address;
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres;
 use world_chain_proof_kona_host_utils::online::{OnlineHostConfig, resolve_l1_head};
-use world_chain_proof_succinct_host_utils::cpu_prover::{CpuSuccinctProver, SP1ProofMode};
+use world_chain_proof_succinct_host_utils::{
+    Sp1ProverKind,
+    cpu_prover::{CpuSuccinctProver, SP1ProofMode},
+};
 use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_proofs::{ConsensusProvider, OptimismConsensusClient};
 use world_chain_prover_service::{
@@ -50,6 +54,13 @@ fn required(name: &str) -> Option<String> {
             None
         }
     }
+}
+
+fn prover_kind() -> Sp1ProverKind {
+    std::env::var("SP1_PROVER")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(Sp1ProverKind::Cpu)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -119,10 +130,15 @@ async fn worker_proves_real_range_end_to_end() {
     )
     .expect("build host config");
 
-    // Build the prover off the async runtime: it owns its own runtime internally.
-    let prover = CpuSuccinctProver::new(SP1ProofMode::Groth16)
-        .await
-        .expect("build prover");
+    let kind = prover_kind();
+    let prover = match kind {
+        Sp1ProverKind::Cpu => CpuSuccinctProver::new(SP1ProofMode::Groth16)
+            .await
+            .expect("build prover"),
+        Sp1ProverKind::Mock | Sp1ProverKind::Network => {
+            panic!("unsupported SP1 prover '{kind}'; only 'cpu' is currently available");
+        }
+    };
 
     let backend = Sp1Backend::new(
         host,
@@ -187,7 +203,7 @@ async fn worker_proves_real_range_end_to_end() {
         .await
         .expect("enqueue proof request");
     eprintln!(
-        "enqueued {id} for block {claimed_block} (interval {block_interval}, cpu prover); proving may take a while"
+        "enqueued {id} for block {claimed_block} (interval {block_interval}, {kind} prover); proving may take a while"
     );
 
     let deadline = tokio::time::Instant::now() + timeout;

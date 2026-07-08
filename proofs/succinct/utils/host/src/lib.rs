@@ -1,7 +1,10 @@
 //! Host-side helpers for preparing World Chain OP Succinct Lite proof requests.
 
+use std::fmt;
+
 use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
+use strum::EnumString;
 use world_chain_proof_core::{
     RollupConfigHashError,
     boot::{BootInfoStruct, hash_world_rollup_config_generic},
@@ -19,6 +22,36 @@ pub mod mock_prover;
 #[cfg(feature = "sp1")]
 pub mod network_prover;
 pub mod validity;
+
+/// SP1 proving backend selected by binaries and dev tooling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, EnumString)]
+#[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case", ascii_case_insensitive)]
+pub enum Sp1ProverKind {
+    /// Local CPU prover.
+    Cpu,
+    /// Local mock prover.
+    Mock,
+    /// Succinct proving network.
+    Network,
+}
+
+impl Sp1ProverKind {
+    /// Stable CLI/env representation.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Cpu => "cpu",
+            Self::Mock => "mock",
+            Self::Network => "network",
+        }
+    }
+}
+
+impl fmt::Display for Sp1ProverKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 /// Error returned while constructing host-side proof config.
 #[derive(Debug, thiserror::Error)]

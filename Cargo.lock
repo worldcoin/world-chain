@@ -19130,6 +19130,7 @@ dependencies = [
  "serde_cbor",
  "serde_json",
  "sp1-sdk",
+ "strum 0.28.0",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
