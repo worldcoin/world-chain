@@ -92,8 +92,6 @@ pub enum Sp1SessionStatus {
 /// Interface expected from a concrete SP1 prover backend.
 #[async_trait]
 pub trait WorldSuccinctProver {
-    // TODO: change the error type in all methods, temporarily defaulting to anyhow String
-
     fn supports_persistent_sessions(&self) -> bool;
 
     async fn submit(
