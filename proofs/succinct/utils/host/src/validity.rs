@@ -1,153 +1,385 @@
-//! End-to-end validity proving for one L2 block range.
-//!
-//! Splits the range into sub-ranges, builds each witness over RPC, proves every sub-range with
-//! a [`WorldSuccinctProver`] backend, and aggregates the results into a single
-//! [`AggregationProofArtifact`] whose outputs commit to the claimed output root.
+//! End-to-end validity proof helper built on the generic succinct prover session API.
 
-use alloy_primitives::{Address, B256};
+use std::time::Duration;
+
+use alloy_primitives::{Address, B256, keccak256};
 use anyhow::{Context, bail};
-use reqwest::Client;
-use world_chain_proof_core::{artifacts::AggregationProofArtifact, types::AggregationInputs};
-use world_chain_proof_succinct_utils::{
-    AggregationProofRequest, RangeProofRequest, WorldSuccinctProver,
+use world_chain_proof_core::artifacts::{
+    AggregationProofArtifact, ProofArtifact, RangeProofArtifact,
 };
-
 use world_chain_proof_kona_host_utils::online::{
-    OnlineHostConfig, RangeWitnessRequest, build_range_input, fetch_l1_header_by_hash,
-    resolve_l1_head,
+    OnlineHostConfig, RangeMetadata, RangeWitnessRequest, build_range_input,
+    fetch_l1_header_by_hash,
 };
+use world_chain_proof_succinct_utils::{
+    AggregationSessionRequest, ProofRequest as SuccinctProofRequest, RangeProofRequest,
+    Sp1SessionStatus, WorldSuccinctProver,
+};
+use world_chain_prover_service::{ProofRequestId, SessionType};
 
-use crate::{L2BlockRange, split_range};
-
-/// One validity-proof job covering L2 blocks `(start_block, end_block]`.
-#[derive(Clone, Copy, Debug)]
+/// Request for proving one contiguous L2 validity range and aggregating it into a final proof.
+#[derive(Clone, Debug)]
 pub struct ValidityProofRequest {
-    /// Exclusive lower bound: the agreed parent block.
+    /// L2 block number immediately before the proved range.
     pub start_block: u64,
-    /// Inclusive upper bound: the claimed block.
+    /// L2 block number at the end of the proved range.
     pub end_block: u64,
-    /// L1 head pinning every range witness and the aggregation checkpoint. Resolved from
-    /// finalized L1 when `None`.
+    /// Optional L1 head hash pinning the witness data.
     pub l1_head: Option<B256>,
     /// Allow proving blocks newer than the finalized L2 head.
     pub allow_unfinalized: bool,
-    /// Number of sub-ranges proved independently before aggregation, clamped to the range
-    /// length.
+    /// Number of range proofs to split the request into. Only one is currently supported.
     pub split_count: u64,
-    /// Prover address committed by the aggregation guest for on-chain attribution.
+    /// Prover address committed by the aggregation guest.
     pub prover_address: Address,
 }
 
-impl ValidityProofRequest {
-    pub fn new(
-        start: u64,
-        end: u64,
-        l1_head: Option<B256>,
-        allow_unfinalized: bool,
-        split_count: u64,
-        prover_address: Address,
-    ) -> Self {
-        Self {
-            start_block: start,
-            end_block: end,
-            l1_head,
-            allow_unfinalized,
-            split_count,
-            prover_address,
-        }
-    }
+struct BuiltRangeRequest {
+    request: RangeProofRequest,
+    metadata: RangeMetadata,
 }
 
-/// Proves the transition over `(start_block, end_block]` and aggregates it into one artifact.
-///
-/// Synchronous and long-running (witness generation plus proving); it must run on a
-/// blocking-capable thread (use `tokio::task::spawn_blocking` from async code).
-///
-/// Sub-ranges are built and proved sequentially. A single CPU proof already saturates the
-/// host, so intra-job parallelism would only thrash it; cross-job parallelism is handled one
-/// level up by the worker's concurrency permits. Sequential proving also keeps only one
-/// witness alive at a time, bounding memory, and avoids sharing the prover's runtime across
-/// threads.
+/// Builds, proves, and aggregates a single-range SP1 validity proof.
 pub async fn prove_validity<P>(
     host: &OnlineHostConfig,
     prover: &P,
     request: ValidityProofRequest,
 ) -> anyhow::Result<AggregationProofArtifact>
 where
-    P: WorldSuccinctProver,
-    P::Error: Into<anyhow::Error>,
+    P: WorldSuccinctProver + Sync,
 {
-    let range = L2BlockRange::new(request.start_block, request.end_block)?;
-    // Sub-ranges are half-open [start, end) bounds; each is proved as (start, end] with
-    // `start` as the agreed parent block, matching the factory's block-interval convention.
-    let ranges = split_range(range, request.split_count)?;
-
-    let client = Client::new();
-    let l1_head = match request.l1_head {
-        Some(hash) => hash,
-        None => resolve_l1_head(&client, &host.l2_rpc, &host.l1_rpc, request.end_block).await?,
-    };
-
-    let mut boot_infos = Vec::with_capacity(ranges.len());
-    let mut range_proofs = Vec::with_capacity(ranges.len());
-    for sub_range in &ranges {
-        tracing::info!(
-            start = sub_range.start + 1,
-            end = sub_range.end,
-            "building range witness"
+    if request.end_block <= request.start_block {
+        bail!(
+            "end block {} must be greater than start block {}",
+            request.end_block,
+            request.start_block
         );
-        let input = build_range_input(
-            host,
-            RangeWitnessRequest {
-                start_block: sub_range.start,
-                end_block: sub_range.end,
-                l1_head: Some(l1_head),
-                allow_unfinalized: request.allow_unfinalized,
-            },
-        )
-        .await?;
-
-        tracing::info!(
-            start = sub_range.start + 1,
-            end = sub_range.end,
-            "proving range"
-        );
-        let range_request = RangeProofRequest::from_witness_data(&input.witness, None)
-            .context("failed to serialize range witness")?;
-        let artifact = prover
-            .prove_range(range_request)
-            .await
-            .map_err(Into::into)?;
-
-        if artifact.boot_info.l2PostRoot != input.metadata.l2_post_root {
-            bail!(
-                "range proof post root mismatch at block {}: witness {:?}, proof {:?}",
-                input.metadata.end_block,
-                input.metadata.l2_post_root,
-                artifact.boot_info.l2PostRoot,
-            );
-        }
-
-        boot_infos.push(artifact.boot_info);
-        range_proofs.push(artifact.proof);
     }
 
-    let l1_header = fetch_l1_header_by_hash(&client, &host.l1_rpc, l1_head).await?;
-    let l1_headers_cbor =
-        serde_cbor::to_vec(&vec![l1_header]).context("CBOR-encoding L1 header failed")?;
+    if request.split_count.max(1) != 1 {
+        bail!(
+            "SP1 validity proving currently supports exactly one range proof, got {}",
+            request.split_count
+        );
+    }
 
-    tracing::info!(ranges = ranges.len(), "aggregating range proofs");
-    prover
-        .prove_aggregation(AggregationProofRequest {
-            inputs: AggregationInputs {
-                boot_infos,
-                latest_l1_checkpoint_head: l1_head,
-                multi_block_vkey: prover.multi_block_vkey(),
-                prover_address: request.prover_address,
-            },
-            l1_headers_cbor,
-            range_proofs,
-        })
+    let proof_id = validity_proof_id(&request);
+    let range_input = build_range_request(host, &request)
         .await
-        .map_err(Into::into)
+        .context("failed to build range proof request")?;
+    let range_session_id = prover
+        .submit(
+            proof_id,
+            SessionType::Stark,
+            SuccinctProofRequest::Range(range_input.request),
+        )
+        .await
+        .context("failed to submit range proof")?;
+    let range = wait_and_download_range(prover, range_session_id)
+        .await
+        .context("failed to complete range proof")?;
+
+    validate_range_artifact(&range_input.metadata, &range)?;
+
+    let aggregation_request = build_aggregation_request(host, &request, &range)
+        .await
+        .context("failed to build aggregation proof request")?;
+    let aggregation_session_id = prover
+        .submit(
+            proof_id,
+            SessionType::Snark,
+            SuccinctProofRequest::Aggregation(aggregation_request),
+        )
+        .await
+        .context("failed to submit aggregation proof")?;
+    let aggregation = wait_and_download_aggregation(prover, aggregation_session_id)
+        .await
+        .context("failed to complete aggregation proof")?;
+
+    validate_aggregation_artifact(&range_input.metadata, &aggregation)?;
+
+    Ok(aggregation)
+}
+
+fn validity_proof_id(request: &ValidityProofRequest) -> ProofRequestId {
+    let mut bytes = Vec::with_capacity(16 + 8 + 8 + 32 + 20);
+    bytes.extend_from_slice(b"sp1-validity-v1");
+    bytes.extend_from_slice(&request.start_block.to_be_bytes());
+    bytes.extend_from_slice(&request.end_block.to_be_bytes());
+    bytes.extend_from_slice(request.l1_head.unwrap_or_default().as_slice());
+    bytes.extend_from_slice(request.prover_address.as_slice());
+    ProofRequestId(keccak256(bytes))
+}
+
+async fn build_range_request(
+    host: &OnlineHostConfig,
+    request: &ValidityProofRequest,
+) -> anyhow::Result<BuiltRangeRequest> {
+    let input = build_range_input(
+        host,
+        RangeWitnessRequest {
+            start_block: request.start_block,
+            end_block: request.end_block,
+            l1_head: request.l1_head,
+            allow_unfinalized: request.allow_unfinalized,
+        },
+    )
+    .await
+    .context("failed to build SP1 range witness")?;
+
+    let request = RangeProofRequest::from_witness_data(&input.witness, None)
+        .context("failed to serialize SP1 range witness")?;
+
+    Ok(BuiltRangeRequest {
+        request,
+        metadata: input.metadata,
+    })
+}
+
+async fn build_aggregation_request(
+    host: &OnlineHostConfig,
+    request: &ValidityProofRequest,
+    range: &RangeProofArtifact,
+) -> anyhow::Result<AggregationSessionRequest> {
+    let l1_head = range.boot_info.l1Head;
+    let l1_header = fetch_l1_header_by_hash(&reqwest::Client::new(), &host.l1_rpc, l1_head)
+        .await
+        .context("failed to fetch L1 header for aggregation proof")?;
+    let l1_headers_cbor =
+        serde_cbor::to_vec(&vec![l1_header]).context("failed to encode aggregation L1 headers")?;
+
+    Ok(AggregationSessionRequest {
+        boot_infos: vec![range.boot_info.clone()],
+        latest_l1_checkpoint_head: l1_head,
+        prover_address: request.prover_address,
+        l1_headers_cbor,
+        range_proofs: vec![range.proof.clone()],
+    })
+}
+
+async fn wait_and_download_range<P>(
+    prover: &P,
+    session_id: String,
+) -> anyhow::Result<RangeProofArtifact>
+where
+    P: WorldSuccinctProver + Sync,
+{
+    let artifact =
+        wait_and_download_artifact(prover, SessionType::Stark, session_id.clone()).await?;
+    let ProofArtifact::Range(range) = artifact else {
+        bail!("expected range proof artifact for STARK session {session_id}");
+    };
+    Ok(range)
+}
+
+async fn wait_and_download_aggregation<P>(
+    prover: &P,
+    session_id: String,
+) -> anyhow::Result<AggregationProofArtifact>
+where
+    P: WorldSuccinctProver + Sync,
+{
+    let artifact =
+        wait_and_download_artifact(prover, SessionType::Snark, session_id.clone()).await?;
+    let ProofArtifact::Aggregation(aggregation) = artifact else {
+        bail!("expected aggregation proof artifact for SNARK session {session_id}");
+    };
+    Ok(aggregation)
+}
+
+async fn wait_and_download_artifact<P>(
+    prover: &P,
+    session_type: SessionType,
+    session_id: String,
+) -> anyhow::Result<ProofArtifact>
+where
+    P: WorldSuccinctProver + Sync,
+{
+    let session_label = session_type.as_str();
+    loop {
+        match prover
+            .poll(session_id.clone(), session_type.clone())
+            .await?
+        {
+            Sp1SessionStatus::Running => tokio::time::sleep(Duration::from_secs(10)).await,
+            Sp1SessionStatus::Completed => {
+                return prover
+                    .download(session_id, session_type)
+                    .await
+                    .with_context(|| format!("failed to download {session_label} proof"));
+            }
+            Sp1SessionStatus::Failed(reason) => {
+                bail!("{session_label} proof session {session_id} failed: {reason}");
+            }
+            Sp1SessionStatus::NotFound => {
+                bail!("{session_label} proof session {session_id} not found by prover");
+            }
+        }
+    }
+}
+
+fn validate_range_artifact(
+    metadata: &RangeMetadata,
+    artifact: &RangeProofArtifact,
+) -> anyhow::Result<()> {
+    if artifact.boot_info.l1Head != metadata.l1_head {
+        bail!(
+            "range proof l1 head mismatch: expected {:?}, got {:?}",
+            metadata.l1_head,
+            artifact.boot_info.l1Head
+        );
+    }
+
+    if artifact.boot_info.l2PreRoot != metadata.l2_pre_root {
+        bail!(
+            "range proof pre root mismatch: expected {:?}, got {:?}",
+            metadata.l2_pre_root,
+            artifact.boot_info.l2PreRoot
+        );
+    }
+
+    if artifact.boot_info.l2PostRoot != metadata.l2_post_root {
+        bail!(
+            "range proof post root mismatch: expected {:?}, got {:?}",
+            metadata.l2_post_root,
+            artifact.boot_info.l2PostRoot
+        );
+    }
+
+    if artifact.boot_info.l2BlockNumber != metadata.end_block {
+        bail!(
+            "range proof block mismatch: expected {}, got {}",
+            metadata.end_block,
+            artifact.boot_info.l2BlockNumber
+        );
+    }
+
+    if artifact.boot_info.rollupConfigHash != metadata.rollup_config_hash {
+        bail!(
+            "range proof rollup config hash mismatch: expected {:?}, got {:?}",
+            metadata.rollup_config_hash,
+            artifact.boot_info.rollupConfigHash
+        );
+    }
+
+    Ok(())
+}
+
+fn validate_aggregation_artifact(
+    metadata: &RangeMetadata,
+    artifact: &AggregationProofArtifact,
+) -> anyhow::Result<()> {
+    if artifact.outputs.l2PreRoot != metadata.l2_pre_root {
+        bail!(
+            "aggregation pre root mismatch: expected {:?}, got {:?}",
+            metadata.l2_pre_root,
+            artifact.outputs.l2PreRoot
+        );
+    }
+
+    if artifact.outputs.l2PostRoot != metadata.l2_post_root {
+        bail!(
+            "aggregation post root mismatch: expected {:?}, got {:?}",
+            metadata.l2_post_root,
+            artifact.outputs.l2PostRoot
+        );
+    }
+
+    if artifact.outputs.l2BlockNumber != metadata.end_block {
+        bail!(
+            "aggregation block mismatch: expected {}, got {}",
+            metadata.end_block,
+            artifact.outputs.l2BlockNumber
+        );
+    }
+
+    if artifact.outputs.l1Head != metadata.l1_head {
+        bail!(
+            "aggregation l1 head mismatch: expected {:?}, got {:?}",
+            metadata.l1_head,
+            artifact.outputs.l1Head
+        );
+    }
+
+    if artifact.outputs.rollupConfigHash != metadata.rollup_config_hash {
+        bail!(
+            "aggregation rollup config hash mismatch: expected {:?}, got {:?}",
+            metadata.rollup_config_hash,
+            artifact.outputs.rollupConfigHash
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::Address;
+    use world_chain_proof_core::{boot::BootInfoStruct, types::AggregationOutputs};
+
+    use super::*;
+
+    fn metadata() -> RangeMetadata {
+        RangeMetadata {
+            start_block: 10,
+            end_block: 20,
+            finalized_l2_head: Some(30),
+            l1_head: B256::repeat_byte(0x11),
+            l2_pre_root: B256::repeat_byte(0x22),
+            l2_post_root: B256::repeat_byte(0x33),
+            rollup_config_hash: B256::repeat_byte(0x44),
+            active_fork: "Jovian".to_string(),
+            world_spec_id: "JOVIAN".to_string(),
+        }
+    }
+
+    fn range_artifact(metadata: &RangeMetadata) -> RangeProofArtifact {
+        RangeProofArtifact {
+            boot_info: BootInfoStruct {
+                l1Head: metadata.l1_head,
+                l2PreRoot: metadata.l2_pre_root,
+                l2PostRoot: metadata.l2_post_root,
+                l2BlockNumber: metadata.end_block,
+                rollupConfigHash: metadata.rollup_config_hash,
+            },
+            proof: vec![1, 2, 3],
+        }
+    }
+
+    fn aggregation_artifact(metadata: &RangeMetadata) -> AggregationProofArtifact {
+        AggregationProofArtifact {
+            outputs: AggregationOutputs {
+                l1Head: metadata.l1_head,
+                l2PreRoot: metadata.l2_pre_root,
+                l2PostRoot: metadata.l2_post_root,
+                l2BlockNumber: metadata.end_block,
+                rollupConfigHash: metadata.rollup_config_hash,
+                multiBlockVKey: B256::repeat_byte(0x55),
+                proverAddress: Address::ZERO,
+            },
+            proof: vec![4, 5, 6],
+        }
+    }
+
+    #[test]
+    fn range_validation_rejects_post_root_mismatch() {
+        let metadata = metadata();
+        let mut artifact = range_artifact(&metadata);
+        artifact.boot_info.l2PostRoot = B256::repeat_byte(0x99);
+
+        let error = validate_range_artifact(&metadata, &artifact).unwrap_err();
+
+        assert!(error.to_string().contains("range proof post root mismatch"));
+    }
+
+    #[test]
+    fn aggregation_validation_rejects_post_root_mismatch() {
+        let metadata = metadata();
+        let mut artifact = aggregation_artifact(&metadata);
+        artifact.outputs.l2PostRoot = B256::repeat_byte(0x99);
+
+        let error = validate_aggregation_artifact(&metadata, &artifact).unwrap_err();
+
+        assert!(error.to_string().contains("aggregation post root mismatch"));
+    }
 }

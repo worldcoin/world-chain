@@ -5,6 +5,7 @@ use alloy_primitives::{Address, B256};
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
+use world_chain_proof_succinct_host_utils::Sp1ProverKind;
 use world_chain_prover::{
     HashRollupConfigArgs, RpcArgs, WitnessArgs, ensure_parent_dir, online_host_config,
     print_rollup_config_hash, write_json, write_witness,
@@ -67,9 +68,13 @@ struct Sp1ProveArgs {
     #[arg(long, default_value_t = 1)]
     ranges: u64,
 
-    /// Prover backend: cpu, mock, or network. Overrides SP1_PROVER env var.
-    #[arg(long, env = "SP1_PROVER", default_value = "cpu")]
-    prover: world_chain_proof_succinct_host_utils::prover::Sp1ProverKind,
+    /// Prover backend. Mock and network are reserved for follow-up implementations.
+    #[arg(
+        long,
+        env = "SP1_PROVER",
+        default_value_t = Sp1ProverKind::Cpu
+    )]
+    prover: Sp1ProverKind,
 
     /// Aggregation proof mode.
     #[arg(long, default_value = "groth16")]
@@ -132,7 +137,7 @@ async fn sp1_execute(args: Sp1ExecuteArgs) -> Result<()> {
 async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
     use sp1_sdk::SP1ProofMode;
     use world_chain_proof_succinct_host_utils::{
-        prover::SuccinctProver,
+        cpu_prover::CpuSuccinctProver,
         validity::{ValidityProofRequest, prove_validity},
     };
 
@@ -146,7 +151,7 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
     };
 
     println!(
-        "proving blocks {start}..={end} over {ranges} range(s) ({mode:?} aggregation, {prover:?} prover)",
+        "proving blocks {start}..={end} over {ranges} range(s) ({mode:?} aggregation, {prover} prover)",
         start = args.rpc.start_block + 1,
         end = args.rpc.end_block,
         ranges = args.ranges.max(1),
@@ -154,7 +159,15 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
         prover = args.prover,
     );
 
-    let prover = SuccinctProver::new(args.prover, mode).await?;
+    let prover = match args.prover {
+        Sp1ProverKind::Cpu => CpuSuccinctProver::new(mode).await?,
+        Sp1ProverKind::Mock | Sp1ProverKind::Network => {
+            anyhow::bail!(
+                "unsupported SP1 prover '{}'; only 'cpu' is currently available",
+                args.prover
+            );
+        }
+    };
     let artifact = prove_validity(
         &host,
         &prover,
