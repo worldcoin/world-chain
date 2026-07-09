@@ -50,6 +50,11 @@ impl ProverService {
     pub const fn pool(&self) -> &PgPool {
         self.store.pool()
     }
+
+    /// Mark proof requests that exhausted all worker attempts as failed.
+    pub(crate) async fn mark_exhausted_proof_requests_failed(&self) -> Result<u64, sqlx::Error> {
+        self.store.mark_exhausted_proof_requests_failed().await
+    }
 }
 
 #[async_trait]

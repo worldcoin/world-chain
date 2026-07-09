@@ -19,6 +19,7 @@ use sqlx::{
     migrate::{MigrateError, Migrator},
     postgres::{PgPoolOptions, PgRow},
 };
+use tracing::info;
 use uuid::Uuid;
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
@@ -168,6 +169,13 @@ impl ProverServiceStore {
             .execute(&mut *tx)
             .await?;
 
+            info!(
+                proof_id = %id,
+                retry_count = retry_count + 1,
+                max_retries = self.config.max_retries,
+                "re-queued failed proof request"
+            );
+
             tx.commit().await?;
             Ok(id)
         } else {
@@ -226,6 +234,64 @@ impl ProverServiceStore {
         }
     }
 
+    pub(crate) async fn mark_exhausted_proof_requests_failed(&self) -> Result<u64, sqlx::Error> {
+        let now = Utc::now();
+        let reason = format!(
+            "proof request exhausted max attempts ({})",
+            self.config.max_attempts
+        );
+        let row = sqlx::query(
+            r#"
+            WITH failed_requests AS (
+                UPDATE proof_requests
+                SET proof_status = $1,
+                    job_status = $2,
+                    failure_reason = $3,
+                    worker_id = NULL,
+                    lock_id = NULL,
+                    lock_expires_at = NULL,
+                    updated_at = $4,
+                    finished_at = $4
+                WHERE attempt >= $5
+                    AND (proof_status = $6 OR proof_status = $7)
+                    AND (
+                        job_status = $8
+                        OR (job_status = $9 AND lock_expires_at < $4)
+                    )
+                RETURNING proof_id
+            ),
+            failed_sessions AS (
+                UPDATE proof_sessions
+                SET status = $10,
+                    failure_reason = $3,
+                    completed_at = $4
+                WHERE proof_id IN (SELECT proof_id FROM failed_requests)
+                    AND (status = $11 OR status = $12)
+                RETURNING id
+            )
+            SELECT COUNT(*) AS failed_request_count
+            FROM failed_requests
+            "#,
+        )
+        .bind(ProofStatus::Failed.as_str())
+        .bind(ProofJobStatus::Failed.as_str())
+        .bind(reason)
+        .bind(now)
+        .bind(self.config.max_attempts as i32)
+        .bind(ProofStatus::Created.as_str())
+        .bind(ProofStatus::Running.as_str())
+        .bind(ProofJobStatus::Pending.as_str())
+        .bind(ProofJobStatus::Claimed.as_str())
+        .bind(BackendSessionStatus::Failed.as_str())
+        .bind(BackendSessionStatus::Submitting.as_str())
+        .bind(BackendSessionStatus::Running.as_str())
+        .fetch_one(&self.pool)
+        .await?;
+
+        let failed_request_count: i64 = row.get("failed_request_count");
+        Ok(failed_request_count as u64)
+    }
+
     pub(crate) async fn get_next_proof(
         &self,
         backend: ProofBackend,
@@ -247,9 +313,10 @@ impl ProverServiceStore {
             WHERE proof_id = (
                 SELECT proof_id FROM proof_requests
                 WHERE backend = $7
+                    AND attempt < $11
                     AND (
                         job_status = $8
-                        OR (job_status = $9 AND lock_expires_at < $10 AND attempt < $11)
+                        OR (job_status = $9 AND lock_expires_at < $10)
                     ) 
                 ORDER BY l2_block_number ASC, created_at ASC, proof_id ASC
                 FOR UPDATE SKIP LOCKED

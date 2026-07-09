@@ -72,13 +72,15 @@ mod config;
 mod error;
 mod rpc;
 mod service;
+mod status_poller;
 mod store;
 mod traits;
 mod types;
 
 // re-exports
 pub use config::{
-    DEFAULT_BACKEND_POLL_INTERVAL, DEFAULT_LOCK_TIMEOUT, DEFAULT_MAX_ATTEMPTS, ProverServiceConfig,
+    DEFAULT_BACKEND_POLL_INTERVAL, DEFAULT_LOCK_TIMEOUT, DEFAULT_MAX_ATTEMPTS,
+    DEFAULT_STATUS_POLLER_INTERVAL, ProverServiceConfig,
 };
 pub use error::{
     BackendMismatchErrorData, InvalidConfigError, ProofJobQueueError, ProofJobStatusErrorData,
@@ -89,6 +91,7 @@ pub use rpc::{
     start_rpc_server,
 };
 pub use service::ProverService;
+pub use status_poller::run_status_poller;
 pub use traits::{ProofJobQueue, ProofRequester};
 pub use types::{
     BackendProofId, BackendSession, BackendSessionStatus, FailedProofResponse, LockId,
