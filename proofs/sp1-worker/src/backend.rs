@@ -196,23 +196,6 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         job: &ProofJob,
         session_id: String,
     ) -> anyhow::Result<RangeProofArtifact> {
-        self.wait_and_download_range_artifact(job, session_id).await
-    }
-
-    async fn wait_and_download_aggregation(
-        &self,
-        job: &ProofJob,
-        session_id: String,
-    ) -> anyhow::Result<AggregationProofArtifact> {
-        self.wait_and_download_aggregation_artifact(job, session_id)
-            .await
-    }
-
-    async fn wait_and_download_range_artifact(
-        &self,
-        job: &ProofJob,
-        session_id: String,
-    ) -> anyhow::Result<RangeProofArtifact> {
         let session_type = SessionType::Stark;
         let session_label = session_type.as_str();
         loop {
@@ -254,7 +237,7 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         }
     }
 
-    async fn wait_and_download_aggregation_artifact(
+    async fn wait_and_download_aggregation(
         &self,
         job: &ProofJob,
         session_id: String,
