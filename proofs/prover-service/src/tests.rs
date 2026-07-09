@@ -293,6 +293,7 @@ async fn status_poller_marks_expired_exhausted_jobs_failed() {
             second.lock_id,
             backend_session_id(5),
             BackendSessionStatus::Running,
+            None,
         )
         .await
         .unwrap();
