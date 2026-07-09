@@ -33,6 +33,8 @@ pub struct Sp1BackendConfig {
     pub prover_address: Address,
     /// Allow proving blocks newer than the finalized L2 head.
     pub allow_unfinalized: bool,
+    /// Sleep between SP1 prover session status polls while a proof is still running.
+    pub session_poll_interval: Duration,
 }
 
 /// [`ClaimedProofJobHandler`] for the [`ProofBackend::Sp1`] lane: builds witnesses over RPC
@@ -201,9 +203,7 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         loop {
             match self.prover.poll(&session_id).await? {
                 Sp1SessionStatus::Running => {
-                    // TODO: replace this hardcoded duration with a cli flag
-                    let duration = Duration::from_secs(10);
-                    tokio::time::sleep(duration).await;
+                    tokio::time::sleep(self.config.session_poll_interval).await;
                 }
                 Sp1SessionStatus::Completed => {
                     let proof = self.prover.download(&session_id).await?;
@@ -247,9 +247,7 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         loop {
             match self.prover.poll(&session_id).await? {
                 Sp1SessionStatus::Running => {
-                    // TODO: replace this hardcoded duration with a cli flag
-                    let duration = Duration::from_secs(10);
-                    tokio::time::sleep(duration).await;
+                    tokio::time::sleep(self.config.session_poll_interval).await;
                 }
                 Sp1SessionStatus::Completed => {
                     let proof = self.prover.download(&session_id).await?;
