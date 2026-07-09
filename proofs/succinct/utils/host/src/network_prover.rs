@@ -1,7 +1,7 @@
 //! Range proofs are produced in `Compressed` mode so the aggregation guest can recursively
 //! verify them; the aggregation proof mode is configurable (Groth16 for on-chain verification).
 
-use crate::SuccinctProverError;
+use crate::{SuccinctProverError, WorldSuccinctProver};
 use alloy_primitives::B256;
 use anyhow::{Context, bail};
 use async_trait::async_trait;
@@ -11,15 +11,10 @@ use sp1_sdk::{
     SP1ProofWithPublicValues, SP1ProvingKey, SP1Stdin,
     network::proto::{GetProofRequestStatusResponse, types::FulfillmentStatus},
 };
-use world_chain_proof_core::{
-    artifacts::{AggregationProofArtifact, ProofArtifact, RangeProofArtifact},
-    boot::BootInfoStruct,
-    types::{AggregationInputs, AggregationOutputs},
-};
+use world_chain_proof_core::types::AggregationInputs;
 use world_chain_proof_succinct_utils::{
-    AggregationProofRequest, ProofRequest, RangeProofRequest, Sp1SessionStatus, WorldSuccinctProver,
+    AggregationProofRequest, RangeProofRequest, Sp1ProofRequest, Sp1SessionStatus,
 };
-use world_chain_prover_service::{ProofRequestId, SessionType};
 
 /// [`WorldSuccinctProver`] network implementation over the sp1-sdk network prover.
 pub struct NetworkSuccinctProver {
@@ -125,24 +120,10 @@ impl WorldSuccinctProver for NetworkSuccinctProver {
         true
     }
 
-    async fn submit(
-        &self,
-        _proof_id: ProofRequestId,
-        session_type: SessionType,
-        request: ProofRequest,
-    ) -> anyhow::Result<String> {
-        match session_type {
-            SessionType::Stark => {
-                let ProofRequest::Range(range_request) = request else {
-                    bail!("proof request and session type mistmach")
-                };
-                let backend_session_id = self.request_range_proof(range_request).await?;
-                Ok(backend_session_id)
-            }
-            SessionType::Snark => {
-                let ProofRequest::Aggregation(session_request) = request else {
-                    bail!("proof request and session type mistmach")
-                };
+    async fn submit(&self, request: Sp1ProofRequest) -> anyhow::Result<String> {
+        match request {
+            Sp1ProofRequest::Range(range_request) => self.request_range_proof(range_request).await,
+            Sp1ProofRequest::Aggregation(session_request) => {
                 let agg_request = AggregationProofRequest {
                     inputs: AggregationInputs {
                         boot_infos: session_request.boot_infos,
@@ -153,69 +134,22 @@ impl WorldSuccinctProver for NetworkSuccinctProver {
                     l1_headers_cbor: session_request.l1_headers_cbor,
                     range_proofs: session_request.range_proofs,
                 };
-                let backend_session_id = self.request_aggregation_proof(agg_request).await?;
-                Ok(backend_session_id.to_string())
+                self.request_aggregation_proof(agg_request).await
             }
         }
     }
 
-    async fn poll(
-        &self,
-        session_id: String,
-        _session_type: SessionType,
-    ) -> anyhow::Result<Sp1SessionStatus> {
-        let (sp1_status, _maybe_proof) = self.get_network_proof_status(&session_id).await?;
+    async fn poll(&self, session_id: &str) -> anyhow::Result<Sp1SessionStatus> {
+        let (sp1_status, _maybe_proof) = self.get_network_proof_status(session_id).await?;
         Ok(sp1_status)
     }
 
-    async fn download(
-        &self,
-        session_id: String,
-        session_type: SessionType,
-    ) -> anyhow::Result<ProofArtifact> {
-        let (sp1_status, maybe_proof) = self.get_network_proof_status(&session_id).await?;
+    async fn download(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues> {
+        let (sp1_status, maybe_proof) = self.get_network_proof_status(session_id).await?;
         match sp1_status {
-            Sp1SessionStatus::Completed => {
-                let proof = maybe_proof.ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "network proof {session_id} is fulfilled but no proof was returned"
-                    )
-                })?;
-                match session_type {
-                    SessionType::Stark => {
-                        let boot_info: BootInfoStruct =
-                            bincode::deserialize(proof.public_values.as_slice())
-                                .context("range proof public values deserialization failed")?;
-
-                        let proof_bytes = bincode::serialize(&proof)
-                            .context("range proof serialization failed")?;
-
-                        Ok(ProofArtifact::Range(RangeProofArtifact {
-                            boot_info,
-                            proof: proof_bytes,
-                        }))
-                    }
-                    SessionType::Snark => {
-                        let outputs =
-                            <AggregationOutputs as alloy_sol_types::SolValue>::abi_decode(
-                                proof.public_values.as_slice(),
-                            )
-                            .context("aggregation outputs abi decoding failed")?;
-
-                        // Groth16/Plonk proofs serialize to their on-chain calldata representation; other
-                        // modes (mock runs, compressed) keep the full sdk proof for offline use.
-                        let proof_bytes = match &proof.proof {
-                            SP1Proof::Groth16(_) | SP1Proof::Plonk(_) => proof.bytes(),
-                            _ => bincode::serialize(&proof)
-                                .context("aggregation proof serialization failed")?,
-                        };
-                        Ok(ProofArtifact::Aggregation(AggregationProofArtifact {
-                            outputs,
-                            proof: proof_bytes,
-                        }))
-                    }
-                }
-            }
+            Sp1SessionStatus::Completed => maybe_proof.ok_or_else(|| {
+                anyhow::anyhow!("network proof {session_id} is fulfilled but no proof was returned")
+            }),
             Sp1SessionStatus::Running => {
                 bail!("network proof {session_id} is not fulfilled yet");
             }

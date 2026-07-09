@@ -3,17 +3,26 @@
 use std::fmt;
 
 use alloy_primitives::{Address, B256, U256};
+#[cfg(feature = "sp1")]
+use anyhow::Context;
+#[cfg(feature = "sp1")]
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "sp1")]
+use sp1_sdk::{SP1Proof, SP1ProofWithPublicValues};
 use strum::EnumString;
+#[cfg(feature = "sp1")]
+use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArtifact};
+#[cfg(feature = "sp1")]
+use world_chain_proof_core::types::AggregationOutputs;
 use world_chain_proof_core::{
     RollupConfigHashError,
     boot::{BootInfoStruct, hash_world_rollup_config_generic},
     hash_rollup_config,
-    range::{WorldRangeHardforkConfig, WorldRangeProofPublicValues},
+    range::WorldRangeHardforkConfig,
     types::AggregationInputs,
     witness::WorldRangeWitnessData,
 };
-pub use world_chain_proof_succinct_utils::WorldSuccinctProver;
 use world_chain_proof_succinct_utils::{AggregationProofRequest, RangeProofRequest};
 
 #[cfg(feature = "sp1")]
@@ -22,21 +31,78 @@ pub mod cpu_prover;
 pub mod mock_prover;
 #[cfg(feature = "sp1")]
 pub mod network_prover;
+#[cfg(feature = "sp1")]
 pub mod validity;
 
 /// Structured failures specific to all succinct provers; surfaced wrapped in
 /// [`anyhow::Error`] so callers can downcast when they need to match on them.
 #[derive(Debug, thiserror::Error)]
 pub enum SuccinctProverError {
-    /// The guest committed boot info that differs from the host-computed expectation.
-    #[error("range proof boot info mismatch: expected {expected:?}, got {actual:?}")]
-    BootInfoMismatch {
-        expected: Box<BootInfoStruct>,
-        actual: Box<BootInfoStruct>,
-    },
     /// Aggregation requires compressed range proofs for recursive verification.
     #[error("range proof was not in compressed mode")]
     NotCompressed,
+}
+
+/// Interface expected from a concrete SP1 prover backend.
+#[cfg(feature = "sp1")]
+#[async_trait]
+pub trait WorldSuccinctProver {
+    fn supports_persistent_sessions(&self) -> bool;
+
+    async fn submit(
+        &self,
+        request: world_chain_proof_succinct_utils::Sp1ProofRequest,
+    ) -> anyhow::Result<String>;
+
+    async fn poll(
+        &self,
+        session_id: &str,
+    ) -> anyhow::Result<world_chain_proof_succinct_utils::Sp1SessionStatus>;
+
+    async fn download(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues>;
+}
+
+/// Converts a raw compressed SP1 range proof into the artifact consumed by aggregation.
+#[cfg(feature = "sp1")]
+pub fn range_artifact_from_sp1_proof(
+    proof: &SP1ProofWithPublicValues,
+) -> anyhow::Result<RangeProofArtifact> {
+    let boot_info: BootInfoStruct = bincode::deserialize(proof.public_values.as_slice())
+        .context("range proof public values deserialization failed")?;
+
+    let SP1Proof::Compressed(_) = &proof.proof else {
+        return Err(SuccinctProverError::NotCompressed.into());
+    };
+
+    let proof_bytes = bincode::serialize(proof).context("range proof serialization failed")?;
+
+    Ok(RangeProofArtifact {
+        boot_info,
+        proof: proof_bytes,
+    })
+}
+
+/// Converts a raw SP1 aggregation proof into the artifact submitted on-chain.
+#[cfg(feature = "sp1")]
+pub fn aggregation_artifact_from_sp1_proof(
+    proof: &SP1ProofWithPublicValues,
+) -> anyhow::Result<AggregationProofArtifact> {
+    let outputs = <AggregationOutputs as alloy_sol_types::SolValue>::abi_decode(
+        proof.public_values.as_slice(),
+    )
+    .context("aggregation outputs abi decoding failed")?;
+
+    // Groth16/Plonk proofs serialize to their on-chain calldata representation; other
+    // modes (mock runs, compressed) keep the full sdk proof for offline use.
+    let proof_bytes = match &proof.proof {
+        SP1Proof::Groth16(_) | SP1Proof::Plonk(_) => proof.bytes(),
+        _ => bincode::serialize(proof).context("aggregation proof serialization failed")?,
+    };
+
+    Ok(AggregationProofArtifact {
+        outputs,
+        proof: proof_bytes,
+    })
 }
 
 /// SP1 proving backend selected by binaries and dev tooling.
@@ -303,22 +369,8 @@ impl WorldSuccinctHost {
     pub fn range_request(
         &self,
         witness: &WorldRangeWitnessData,
-        expected_public_values: Option<WorldRangeProofPublicValues>,
     ) -> Result<RangeProofRequest, WorldSuccinctHostError> {
-        if let Some(expected) = &expected_public_values {
-            let expected_hash = self.config.identity().rollup_config_hash;
-            if expected.boot_info.rollup_config_hash != expected_hash {
-                return Err(WorldSuccinctHostError::RollupConfigHashMismatch {
-                    expected: expected_hash,
-                    actual: expected.boot_info.rollup_config_hash,
-                });
-            }
-        }
-
-        Ok(RangeProofRequest::from_witness_data(
-            witness,
-            expected_public_values,
-        )?)
+        Ok(RangeProofRequest::from_witness_data(witness)?)
     }
 
     pub fn aggregation_request(

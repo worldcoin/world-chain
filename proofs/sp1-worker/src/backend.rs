@@ -5,18 +5,19 @@ use std::time::Duration;
 use alloy_primitives::{Address, B256};
 use alloy_sol_types::SolValue;
 use anyhow::Context;
-use world_chain_proof_core::artifacts::{AggregationProofArtifact, ProofArtifact};
+use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArtifact};
 use world_chain_proof_kona_host_utils::online::{
     OnlineHostConfig, RangeWitnessRequest, build_range_input, fetch_l1_header_by_hash,
 };
+use world_chain_proof_succinct_host_utils::{
+    WorldSuccinctProver, aggregation_artifact_from_sp1_proof, range_artifact_from_sp1_proof,
+};
 use world_chain_proof_succinct_utils::{
-    AggregationSessionRequest, ProofRequest as SuccinctProofRequest, RangeProofArtifact,
-    RangeProofRequest, Sp1SessionStatus, WorldSuccinctProver,
+    AggregationSessionRequest, RangeProofRequest, Sp1ProofRequest, Sp1SessionStatus,
 };
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_prover_service::{
-    BackendSession, BackendSessionStatus, ProofBackend, ProofData, ProofRequest, ProofRequestId,
-    SessionType,
+    BackendSession, BackendSessionStatus, ProofBackend, ProofData, ProofRequest, SessionType,
 };
 
 /// Configuration for [`Sp1Backend`].
@@ -64,7 +65,6 @@ where
 
     async fn handle_claimed_job(&self, job: ProofJob) -> anyhow::Result<ProofData> {
         let request = &job.request;
-        let proof_id = request.id();
         let start_block = self.start_block(request)?;
 
         if let Some(snark_session) = self.get_session(&job, SessionType::Snark).await? {
@@ -91,9 +91,8 @@ where
             let session_id = self
                 .submit_session(
                     &job,
-                    proof_id,
                     SessionType::Stark,
-                    SuccinctProofRequest::Range(range_request),
+                    Sp1ProofRequest::Range(range_request),
                 )
                 .await
                 .context("failed to submit range proof")?;
@@ -113,9 +112,8 @@ where
         let snark_session_id = self
             .submit_session(
                 &job,
-                proof_id,
                 SessionType::Snark,
-                SuccinctProofRequest::Aggregation(aggregation_request),
+                Sp1ProofRequest::Aggregation(aggregation_request),
             )
             .await
             .context("failed to submit aggregation proof")?;
@@ -177,14 +175,10 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
     async fn submit_session(
         &self,
         job: &ProofJob,
-        proof_id: ProofRequestId,
         session_type: SessionType,
-        request: SuccinctProofRequest,
+        request: Sp1ProofRequest,
     ) -> anyhow::Result<String> {
-        let session_id = self
-            .prover
-            .submit(proof_id, session_type.clone(), request)
-            .await?;
+        let session_id = self.prover.submit(request).await?;
 
         self.record_session(
             job,
@@ -202,15 +196,45 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         job: &ProofJob,
         session_id: String,
     ) -> anyhow::Result<RangeProofArtifact> {
-        let artifact = self
-            .wait_and_download_artifact(job, SessionType::Stark, session_id.clone())
-            .await?;
+        let session_type = SessionType::Stark;
+        let session_label = session_type.as_str();
+        loop {
+            match self.prover.poll(&session_id).await? {
+                Sp1SessionStatus::Running => {
+                    // TODO: replace this hardcoded duration with a cli flag
+                    let duration = Duration::from_secs(10);
+                    tokio::time::sleep(duration).await;
+                }
+                Sp1SessionStatus::Completed => {
+                    let proof = self.prover.download(&session_id).await?;
+                    let artifact = range_artifact_from_sp1_proof(&proof)?;
 
-        let ProofArtifact::Range(range) = artifact else {
-            anyhow::bail!("expected range proof artifact for STARK session {session_id}");
-        };
+                    self.record_session(
+                        job,
+                        session_type.clone(),
+                        &session_id,
+                        BackendSessionStatus::Completed,
+                    )
+                    .await?;
 
-        Ok(range)
+                    return Ok(artifact);
+                }
+                Sp1SessionStatus::Failed(reason) => {
+                    self.record_session(
+                        job,
+                        session_type.clone(),
+                        &session_id,
+                        BackendSessionStatus::Failed,
+                    )
+                    .await?;
+
+                    anyhow::bail!("{session_label} proof session {session_id} failed: {reason}");
+                }
+                Sp1SessionStatus::NotFound => {
+                    anyhow::bail!("{session_label} proof session {session_id} not found by prover");
+                }
+            }
+        }
     }
 
     async fn wait_and_download_aggregation(
@@ -218,40 +242,18 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         job: &ProofJob,
         session_id: String,
     ) -> anyhow::Result<AggregationProofArtifact> {
-        let artifact = self
-            .wait_and_download_artifact(job, SessionType::Snark, session_id.clone())
-            .await?;
-
-        let ProofArtifact::Aggregation(agg) = artifact else {
-            anyhow::bail!("expected aggregation proof artifact for SNARK session {session_id}");
-        };
-
-        Ok(agg)
-    }
-
-    async fn wait_and_download_artifact(
-        &self,
-        job: &ProofJob,
-        session_type: SessionType,
-        session_id: String,
-    ) -> anyhow::Result<ProofArtifact> {
+        let session_type = SessionType::Snark;
         let session_label = session_type.as_str();
         loop {
-            match self
-                .prover
-                .poll(session_id.clone(), session_type.clone())
-                .await?
-            {
+            match self.prover.poll(&session_id).await? {
                 Sp1SessionStatus::Running => {
                     // TODO: replace this hardcoded duration with a cli flag
                     let duration = Duration::from_secs(10);
                     tokio::time::sleep(duration).await;
                 }
                 Sp1SessionStatus::Completed => {
-                    let artifact = self
-                        .prover
-                        .download(session_id.clone(), session_type.clone())
-                        .await?;
+                    let proof = self.prover.download(&session_id).await?;
+                    let artifact = aggregation_artifact_from_sp1_proof(&proof)?;
 
                     self.record_session(
                         job,
@@ -318,7 +320,7 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         .await
         .context("failed to build SP1 range witness")?;
 
-        let range_request = RangeProofRequest::from_witness_data(&input.witness, None)
+        let range_request = RangeProofRequest::from_witness_data(&input.witness)
             .context("failed to serialize SP1 range witness")?;
 
         Ok(range_request)

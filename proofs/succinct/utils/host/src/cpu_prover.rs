@@ -1,23 +1,25 @@
 //! Range proofs are produced in `Compressed` mode so the aggregation guest can recursively
 //! verify them; the aggregation proof mode is configurable (Groth16 for on-chain verification).
 
-use crate::SuccinctProverError;
-use anyhow::{Context, bail};
+use crate::{SuccinctProverError, WorldSuccinctProver};
+use anyhow::Context;
 use async_trait::async_trait;
 pub use sp1_sdk::SP1ProofMode;
 use sp1_sdk::{
-    CpuProver, HashableKey, ProveRequest, Prover, ProvingKey, SP1Proof, SP1ProvingKey, SP1Stdin,
+    CpuProver, HashableKey, ProveRequest, Prover, ProvingKey, SP1Proof, SP1ProofWithPublicValues,
+    SP1ProvingKey, SP1Stdin,
 };
-use std::{collections::HashMap, sync::Mutex};
-use world_chain_proof_core::{
-    artifacts::{AggregationProofArtifact, ProofArtifact, RangeProofArtifact},
-    boot::BootInfoStruct,
-    types::{AggregationInputs, AggregationOutputs},
+use std::{
+    collections::HashMap,
+    sync::{
+        Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
+use world_chain_proof_core::types::AggregationInputs;
 use world_chain_proof_succinct_utils::{
-    AggregationProofRequest, ProofRequest, RangeProofRequest, Sp1SessionStatus, WorldSuccinctProver,
+    AggregationProofRequest, RangeProofRequest, Sp1ProofRequest, Sp1SessionStatus,
 };
-use world_chain_prover_service::{ProofRequestId, SessionType};
 
 /// [`WorldSuccinctProver`] CPU-local implementation over the sp1-sdk local prover.
 pub struct CpuSuccinctProver {
@@ -27,8 +29,8 @@ pub struct CpuSuccinctProver {
     multi_block_vkey: [u32; 8],
     agg_mode: SP1ProofMode,
 
-    range_proofs: Mutex<HashMap<String, RangeProofArtifact>>,
-    agg_proofs: Mutex<HashMap<String, AggregationProofArtifact>>,
+    next_session_id: AtomicU64,
+    proofs: Mutex<HashMap<String, SP1ProofWithPublicValues>>,
 }
 
 impl CpuSuccinctProver {
@@ -54,12 +56,20 @@ impl CpuSuccinctProver {
             agg_pk,
             multi_block_vkey,
             agg_mode,
-            range_proofs: Mutex::new(HashMap::default()),
-            agg_proofs: Mutex::new(HashMap::default()),
+            next_session_id: AtomicU64::new(0),
+            proofs: Mutex::new(HashMap::default()),
         })
     }
 
-    async fn prove_range(&self, request: RangeProofRequest) -> anyhow::Result<RangeProofArtifact> {
+    fn next_session_id(&self, prefix: &str) -> String {
+        let id = self.next_session_id.fetch_add(1, Ordering::Relaxed);
+        format!("{prefix}-{id}")
+    }
+
+    async fn prove_range(
+        &self,
+        request: RangeProofRequest,
+    ) -> anyhow::Result<SP1ProofWithPublicValues> {
         let mut stdin = SP1Stdin::new();
         stdin.write_vec(request.witness_rkyv);
 
@@ -70,32 +80,13 @@ impl CpuSuccinctProver {
             .await
             .context("range proving failed")?;
 
-        let boot_info: BootInfoStruct = bincode::deserialize(proof.public_values.as_slice())
-            .context("range proof public values deserialization failed")?;
-
-        if let Some(expected) = request.expected_public_values {
-            let expected_boot = BootInfoStruct::from(expected.boot_info);
-            if expected_boot != boot_info {
-                return Err(SuccinctProverError::BootInfoMismatch {
-                    expected: Box::new(expected_boot),
-                    actual: Box::new(boot_info),
-                }
-                .into());
-            }
-        }
-
-        let proof_bytes = bincode::serialize(&proof).context("range proof serialization failed")?;
-
-        Ok(RangeProofArtifact {
-            boot_info,
-            proof: proof_bytes,
-        })
+        Ok(proof)
     }
 
     async fn prove_aggregation(
         &self,
         request: AggregationProofRequest,
-    ) -> anyhow::Result<AggregationProofArtifact> {
+    ) -> anyhow::Result<SP1ProofWithPublicValues> {
         let mut stdin = SP1Stdin::new();
         let range_vk = self.range_pk.verifying_key().vk.clone();
         for proof_bytes in &request.range_proofs {
@@ -120,22 +111,7 @@ impl CpuSuccinctProver {
             .verify(&proof, self.agg_pk.verifying_key(), None)
             .context("aggregation proof verification failed")?;
 
-        let outputs = <AggregationOutputs as alloy_sol_types::SolValue>::abi_decode(
-            proof.public_values.as_slice(),
-        )
-        .context("aggregation outputs abi decoding failed")?;
-
-        // Groth16/Plonk proofs serialize to their on-chain calldata representation; other
-        // modes (mock runs, compressed) keep the full sdk proof for offline use.
-        let proof_bytes = match &proof.proof {
-            SP1Proof::Groth16(_) | SP1Proof::Plonk(_) => proof.bytes(),
-            _ => bincode::serialize(&proof).context("aggregation proof serialization failed")?,
-        };
-
-        Ok(AggregationProofArtifact {
-            outputs,
-            proof: proof_bytes,
-        })
+        Ok(proof)
     }
 }
 
@@ -145,29 +121,12 @@ impl WorldSuccinctProver for CpuSuccinctProver {
         false
     }
 
-    async fn submit(
-        &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-        request: ProofRequest,
-    ) -> anyhow::Result<String> {
-        match session_type {
-            SessionType::Stark => {
-                let ProofRequest::Range(range_request) = request else {
-                    bail!("proof request and session type mistmach")
-                };
-                let range_proof = self.prove_range(range_request).await?;
-                let mut range_proofs = self
-                    .range_proofs
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("mutex lock poisoned"))?;
-                range_proofs.insert(proof_id.to_string(), range_proof);
-                Ok(proof_id.to_string())
+    async fn submit(&self, request: Sp1ProofRequest) -> anyhow::Result<String> {
+        let (prefix, proof) = match request {
+            Sp1ProofRequest::Range(range_request) => {
+                ("range", self.prove_range(range_request).await?)
             }
-            SessionType::Snark => {
-                let ProofRequest::Aggregation(session_request) = request else {
-                    bail!("proof request and session type mistmach")
-                };
+            Sp1ProofRequest::Aggregation(session_request) => {
                 let agg_request = AggregationProofRequest {
                     inputs: AggregationInputs {
                         boot_infos: session_request.boot_infos,
@@ -178,76 +137,40 @@ impl WorldSuccinctProver for CpuSuccinctProver {
                     l1_headers_cbor: session_request.l1_headers_cbor,
                     range_proofs: session_request.range_proofs,
                 };
-                let agg_proof = self.prove_aggregation(agg_request).await?;
-                let mut agg_proofs = self
-                    .agg_proofs
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("mutex lock poisoned"))?;
-                agg_proofs.insert(proof_id.to_string(), agg_proof);
-                Ok(proof_id.to_string())
+                ("aggregation", self.prove_aggregation(agg_request).await?)
             }
+        };
+
+        let session_id = self.next_session_id(prefix);
+        let mut proofs = self
+            .proofs
+            .lock()
+            .map_err(|_| anyhow::anyhow!("mutex lock poisoned"))?;
+        proofs.insert(session_id.clone(), proof);
+        Ok(session_id)
+    }
+
+    async fn poll(&self, session_id: &str) -> anyhow::Result<Sp1SessionStatus> {
+        let proofs = self
+            .proofs
+            .lock()
+            .map_err(|_| anyhow::anyhow!("mutex lock poisoned"))?;
+        if proofs.contains_key(session_id) {
+            // CPU prover immediately returns completed status if the entry exists in the hashmap.
+            Ok(Sp1SessionStatus::Completed)
+        } else {
+            Ok(Sp1SessionStatus::NotFound)
         }
     }
 
-    async fn poll(
-        &self,
-        session_id: String,
-        session_type: SessionType,
-    ) -> anyhow::Result<Sp1SessionStatus> {
-        match session_type {
-            SessionType::Stark => {
-                let range_proofs = self
-                    .range_proofs
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("mutex lock poisoned"))?;
-                if range_proofs.contains_key(&session_id) {
-                    // CPU prover immediately returns completed status if the entry exists in the hashmap
-                    Ok(Sp1SessionStatus::Completed)
-                } else {
-                    Ok(Sp1SessionStatus::NotFound)
-                }
-            }
-            SessionType::Snark => {
-                let agg_proofs = self
-                    .agg_proofs
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("mutex lock poisoned"))?;
-                if agg_proofs.contains_key(&session_id) {
-                    // CPU prover immediately returns completed status if the entry exists in the hashmap
-                    Ok(Sp1SessionStatus::Completed)
-                } else {
-                    Ok(Sp1SessionStatus::NotFound)
-                }
-            }
-        }
-    }
-
-    async fn download(
-        &self,
-        session_id: String,
-        session_type: SessionType,
-    ) -> anyhow::Result<ProofArtifact> {
-        match session_type {
-            SessionType::Stark => {
-                let range_proofs = self
-                    .range_proofs
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("mutex lock poisoned"))?;
-                let range_proof = range_proofs.get(&session_id).ok_or_else(|| {
-                    anyhow::anyhow!("no range proof found for session_id: {}", session_id)
-                })?;
-                Ok(ProofArtifact::Range(range_proof.clone()))
-            }
-            SessionType::Snark => {
-                let agg_proofs = self
-                    .agg_proofs
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("mutex lock poisoned"))?;
-                let agg_proof = agg_proofs.get(&session_id).ok_or_else(|| {
-                    anyhow::anyhow!("no agg proof found for session_id: {}", session_id)
-                })?;
-                Ok(ProofArtifact::Aggregation(agg_proof.clone()))
-            }
-        }
+    async fn download(&self, session_id: &str) -> anyhow::Result<SP1ProofWithPublicValues> {
+        let proofs = self
+            .proofs
+            .lock()
+            .map_err(|_| anyhow::anyhow!("mutex lock poisoned"))?;
+        let proof = proofs
+            .get(session_id)
+            .ok_or_else(|| anyhow::anyhow!("no proof found for session_id: {session_id}"))?;
+        Ok(proof.clone())
     }
 }
