@@ -313,10 +313,10 @@ impl ProverServiceStore {
             WHERE proof_id = (
                 SELECT proof_id FROM proof_requests
                 WHERE backend = $7
-                    AND attempt < $11
+                    AND attempt < $8
                     AND (
-                        job_status = $8
-                        OR (job_status = $9 AND lock_expires_at < $10)
+                        job_status = $9
+                        OR (job_status = $10 AND lock_expires_at < $11)
                     ) 
                 ORDER BY l2_block_number ASC, created_at ASC, proof_id ASC
                 FOR UPDATE SKIP LOCKED
@@ -332,10 +332,10 @@ impl ProverServiceStore {
         .bind(lock_expires_at)
         .bind(now)
         .bind(backend.as_str())
+        .bind(self.config.max_attempts as i32)
         .bind(ProofJobStatus::Pending.as_str())
         .bind(ProofJobStatus::Claimed.as_str())
         .bind(now)
-        .bind(self.config.max_attempts as i32)
         .fetch_optional(&self.pool)
         .await?;
 
