@@ -17,7 +17,7 @@
 //! export L1_BEACON_RPC_URL=$L1_RPC_URL          # devnet uses calldata DA; L1 RPC doubles as beacon
 //! export ROLLUP_RPC_URL=http://127.0.0.1:7545   # op-node, for output roots
 //! export ROLLUP_CONFIG=/path/to/rollup.json
-//! export SP1_PROVER=cpu                          # cpu | mock | network (mock/network not wired yet)
+//! export SP1_PROVER=cpu                          # cpu | mock | network (network not wired yet)
 //! cargo test -p world-chain-sp1-worker --test e2e_proving -- --ignored --nocapture
 //! ```
 //!
@@ -27,13 +27,14 @@
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres;
 use world_chain_proof_kona_host_utils::online::{OnlineHostConfig, resolve_l1_head};
 use world_chain_proof_succinct_host_utils::{
-    Sp1ProverKind,
+    Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
+    mock_prover::MockSuccinctProver,
 };
 use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_proofs::{ConsensusProvider, OptimismConsensusClient};
@@ -131,15 +132,62 @@ async fn worker_proves_real_range_end_to_end() {
     .expect("build host config");
 
     let kind = prover_kind();
-    let prover = match kind {
-        Sp1ProverKind::Cpu => CpuSuccinctProver::new(SP1ProofMode::Groth16)
-            .await
-            .expect("build prover"),
-        Sp1ProverKind::Mock | Sp1ProverKind::Network => {
-            panic!("unsupported SP1 prover '{kind}'; only 'cpu' is currently available");
+    match kind {
+        Sp1ProverKind::Cpu => {
+            let prover = CpuSuccinctProver::new(SP1ProofMode::Groth16)
+                .await
+                .expect("build prover");
+            run_worker_proves_real_range_end_to_end_with_prover(
+                host,
+                prover,
+                kind,
+                block_interval,
+                split_count,
+                root_claim,
+                l1_head,
+                claimed_block,
+                timeout,
+            )
+            .await;
         }
-    };
+        Sp1ProverKind::Mock => {
+            let prover = MockSuccinctProver::new(SP1ProofMode::Groth16)
+                .await
+                .expect("build prover");
+            run_worker_proves_real_range_end_to_end_with_prover(
+                host,
+                prover,
+                kind,
+                block_interval,
+                split_count,
+                root_claim,
+                l1_head,
+                claimed_block,
+                timeout,
+            )
+            .await;
+        }
+        Sp1ProverKind::Network => {
+            panic!(
+                "unsupported SP1 prover '{kind}'; only 'cpu' and 'mock' are currently available"
+            );
+        }
+    }
+}
 
+async fn run_worker_proves_real_range_end_to_end_with_prover<P>(
+    host: OnlineHostConfig,
+    prover: P,
+    kind: Sp1ProverKind,
+    block_interval: u64,
+    split_count: u64,
+    root_claim: B256,
+    l1_head: B256,
+    claimed_block: u64,
+    timeout: Duration,
+) where
+    P: WorldSuccinctProver + Send + Sync + 'static,
+{
     let backend = Sp1Backend::new(
         host,
         prover,
@@ -235,7 +283,9 @@ async fn worker_proves_real_range_end_to_end() {
         panic!("expected SP1 proof data");
     };
     assert!(!public_values.is_empty(), "public values must be populated");
-    assert!(!proof.is_empty(), "cpu proof must be non-empty");
+    if !matches!(kind, Sp1ProverKind::Mock) {
+        assert!(!proof.is_empty(), "non-mock proof must be non-empty");
+    }
 
     token.cancel();
     let _ = tokio::time::timeout(Duration::from_secs(5), worker_handle).await;

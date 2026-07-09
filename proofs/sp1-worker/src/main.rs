@@ -6,11 +6,12 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use world_chain_chainspec::WorldChainSpec;
-use world_chain_proof_kona_host_utils::online::build_online_config;
+use world_chain_proof_kona_host_utils::online::{OnlineHostConfig, build_online_config};
 use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
 use world_chain_proof_succinct_host_utils::{
-    Sp1ProverKind,
+    Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
+    mock_prover::MockSuccinctProver,
 };
 use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_prover_service::RpcProverServiceClient;
@@ -99,7 +100,7 @@ struct Cli {
     #[arg(long, default_value_t = 900)]
     witness_timeout_seconds: u64,
 
-    /// Prover backend. Mock and network are reserved for follow-up implementations.
+    /// Prover backend. Network is reserved for a follow-up implementation.
     #[arg(
         long,
         env = "SP1_PROVER",
@@ -186,16 +187,37 @@ async fn main() -> Result<()> {
     // ELFs are embedded at compile time via `sp1_sdk::include_elf!()`
     // (see `proofs/succinct/elfs/build.rs`). Challenged roots are
     // defended on-chain; Groth16 keeps verification ~100k gas.
-    let prover = match cli.prover {
-        Sp1ProverKind::Cpu => CpuSuccinctProver::new(SP1ProofMode::Groth16).await?,
-        Sp1ProverKind::Mock | Sp1ProverKind::Network => {
+    let prover_kind = cli.prover;
+    match prover_kind {
+        Sp1ProverKind::Cpu => {
+            run_worker(
+                cli,
+                host,
+                CpuSuccinctProver::new(SP1ProofMode::Groth16).await?,
+            )
+            .await
+        }
+        Sp1ProverKind::Mock => {
+            run_worker(
+                cli,
+                host,
+                MockSuccinctProver::new(SP1ProofMode::Groth16).await?,
+            )
+            .await
+        }
+        Sp1ProverKind::Network => {
             anyhow::bail!(
-                "unsupported SP1 prover '{}'; only 'cpu' is currently available",
-                cli.prover
+                "unsupported SP1 prover '{}'; only 'cpu' and 'mock' are currently available",
+                prover_kind
             );
         }
-    };
+    }
+}
 
+async fn run_worker<P>(cli: Cli, host: OnlineHostConfig, prover: P) -> Result<()>
+where
+    P: WorldSuccinctProver + Send + Sync + 'static,
+{
     let backend = Sp1Backend::new(
         host,
         prover,

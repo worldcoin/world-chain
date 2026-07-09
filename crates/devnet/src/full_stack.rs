@@ -44,8 +44,9 @@ use world_chain_challenger::{AlloyChallengerClient, ChallengerConfig, WorldChain
 use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
 use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
 use world_chain_proof_succinct_host_utils::{
-    Sp1ProverKind,
+    Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
+    mock_prover::MockSuccinctProver,
 };
 use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
@@ -2683,16 +2684,36 @@ async fn start_sp1_worker(
     )
     .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?;
 
-    let prover = match kind {
-        Sp1ProverKind::Cpu => CpuSuccinctProver::new(SP1ProofMode::Groth16)
-            .await
-            .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?,
-        Sp1ProverKind::Mock | Sp1ProverKind::Network => bail!(
-            "unsupported SP1 prover '{}'; only 'cpu' is currently available",
+    match kind {
+        Sp1ProverKind::Cpu => {
+            let prover = CpuSuccinctProver::new(SP1ProofMode::Groth16)
+                .await
+                .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+            start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
+        }
+        Sp1ProverKind::Mock => {
+            let prover = MockSuccinctProver::new(SP1ProofMode::Groth16)
+                .await
+                .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+            start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
+        }
+        Sp1ProverKind::Network => bail!(
+            "unsupported SP1 prover '{}'; only 'cpu' and 'mock' are currently available",
             kind
         ),
-    };
+    }
+}
 
+fn start_sp1_worker_with_prover<P>(
+    prover_service_url: &str,
+    deployment: &WorldProofSystemDeployment,
+    kind: Sp1ProverKind,
+    host: OnlineHostConfig,
+    prover: P,
+) -> Result<Sp1WorkerTask>
+where
+    P: WorldSuccinctProver + Send + Sync + 'static,
+{
     let backend = Sp1Backend::new(
         host,
         prover,
