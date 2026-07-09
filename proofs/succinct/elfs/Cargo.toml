@@ -9,7 +9,7 @@ repository.workspace = true
 build = "build.rs"
 
 [build-dependencies]
-sp1-build = "=6.2.3"
+sp1-build = "=6.3.1"
 
 [dependencies]
-sp1-sdk = { version = "=6.1.0", features = ["network"] }
+sp1-sdk = { version = "=6.2.3", features = ["network"] }
