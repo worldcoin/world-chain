@@ -102,6 +102,7 @@ pub trait ProverServiceApi {
         lock_id: LockId,
         backend_session_id: String,
         state: BackendSessionStatus,
+        failure_reason: String,
     ) -> RpcResult<()>;
 
     /// Heartbeat call.
@@ -263,6 +264,7 @@ impl ProverServiceApiServer for ProverServiceRpc {
         lock_id: LockId,
         backend_session_id: String,
         state: BackendSessionStatus,
+        failure_reason: String,
     ) -> RpcResult<()> {
         Ok(self
             .service
@@ -273,6 +275,7 @@ impl ProverServiceApiServer for ProverServiceRpc {
                 lock_id,
                 backend_session_id,
                 state,
+                failure_reason,
             )
             .await?)
     }
@@ -490,6 +493,7 @@ impl ProofJobQueue for RpcProverServiceClient {
         lock_id: LockId,
         backend_session_id: String,
         state: BackendSessionStatus,
+        failure_reason: String,
     ) -> Result<(), ProofJobQueueError> {
         ProverServiceApiClient::record_proof_session(
             &self.client,
@@ -499,6 +503,7 @@ impl ProofJobQueue for RpcProverServiceClient {
             lock_id,
             backend_session_id,
             state,
+            failure_reason,
         )
         .await
         .map_err(|err| map_job_error(err, proof_id))

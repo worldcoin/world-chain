@@ -77,6 +77,7 @@ pub trait ProofJobQueue {
         lock_id: LockId,
         backend_session_id: String,
         state: BackendSessionStatus,
+        failure_reason: String,
     ) -> Result<(), ProofJobQueueError>;
 
     /// Ping the `prover-service` to signal that a proof worker tied

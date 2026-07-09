@@ -622,6 +622,7 @@ impl ProofJobQueue for SharedProverService {
         lock_id: LockId,
         backend_session_id: String,
         state: BackendSessionStatus,
+        failure_reason: String,
     ) -> Result<(), ProofJobQueueError> {
         self.service
             .record_proof_session(
@@ -631,6 +632,7 @@ impl ProofJobQueue for SharedProverService {
                 lock_id,
                 backend_session_id,
                 state,
+                failure_reason,
             )
             .await
     }
