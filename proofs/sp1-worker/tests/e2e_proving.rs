@@ -213,6 +213,7 @@ async fn run_worker_proves_real_range_end_to_end_with_prover<P>(
             split_count,
             prover_address: Address::ZERO,
             allow_unfinalized: false,
+            session_poll_interval: Duration::from_secs(10),
         },
     );
 

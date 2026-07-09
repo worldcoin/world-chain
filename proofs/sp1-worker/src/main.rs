@@ -25,6 +25,7 @@ const DEFAULT_SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS: u64 = 100;
 const DEFAULT_SUBMIT_PROOF_RETRY_MAX_DELAY_MS: u64 = 10_000;
 const DEFAULT_WORKER_HEARTBEAT_INTERVAL_SEC: u64 = 30;
 const DEFAULT_WORKER_MAX_CONSECUTIVE_HEARTBEAT_FAILURES: u32 = 5;
+const DEFAULT_SP1_SESSION_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum Network {
@@ -124,6 +125,15 @@ struct Cli {
     /// Seconds to sleep between job-queue polls when no work is available.
     #[arg(long, default_value_t = 10)]
     poll_interval_seconds: u64,
+
+    /// Seconds to sleep between SP1 prover session status polls while a proof is running.
+    #[arg(
+        long,
+        env = "SP1_SESSION_POLL_INTERVAL_SECONDS",
+        default_value_t = DEFAULT_SP1_SESSION_POLL_INTERVAL.as_secs(),
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    sp1_session_poll_interval_seconds: u64,
 
     /// Maximum number of jobs proved concurrently. One suits a local CPU prover; raise it for
     /// the Succinct proving network.
@@ -237,6 +247,7 @@ where
             split_count: cli.ranges.max(1),
             prover_address: cli.prover_address,
             allow_unfinalized: cli.allow_unfinalized,
+            session_poll_interval: Duration::from_secs(cli.sp1_session_poll_interval_seconds),
         },
     );
 
@@ -271,6 +282,7 @@ where
         block_interval = cli.block_interval,
         ranges = cli.ranges.max(1),
         prover = %cli.prover,
+        sp1_session_poll_interval_seconds = cli.sp1_session_poll_interval_seconds,
         submit_proof_retry_max_retries = cli.submit_proof_retry_max_retries,
         submit_proof_retry_initial_delay_ms = cli.submit_proof_retry_initial_delay_ms,
         submit_proof_retry_max_delay_ms = cli.submit_proof_retry_max_delay_ms,
@@ -289,4 +301,47 @@ where
 
     worker.await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_args() -> Vec<&'static str> {
+        vec![
+            "sp1-worker",
+            "--prover-service-url",
+            "http://127.0.0.1:8545",
+            "--l2-rpc",
+            "http://127.0.0.1:9545",
+            "--l1-rpc",
+            "http://127.0.0.1:8545",
+            "--l1-beacon-rpc",
+            "http://127.0.0.1:5052",
+            "--block-interval",
+            "10",
+            "--worker-id",
+            "test",
+        ]
+    }
+
+    #[test]
+    fn parses_sp1_session_poll_interval_seconds() {
+        let mut args = base_args();
+        args.extend(["--sp1-session-poll-interval-seconds", "3"]);
+
+        let cli = Cli::parse_from(args);
+
+        assert_eq!(cli.sp1_session_poll_interval_seconds, 3);
+    }
+
+    #[test]
+    fn rejects_zero_sp1_session_poll_interval_seconds() {
+        let mut args = base_args();
+        args.extend(["--sp1-session-poll-interval-seconds", "0"]);
+
+        let error = Cli::try_parse_from(args).expect_err("zero poll interval should be rejected");
+
+        assert_eq!(error.kind(), clap::error::ErrorKind::ValueValidation);
+    }
 }

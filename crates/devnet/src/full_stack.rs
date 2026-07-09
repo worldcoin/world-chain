@@ -2730,6 +2730,7 @@ where
             split_count: 1,
             prover_address: Address::ZERO,
             allow_unfinalized: false,
+            session_poll_interval: Duration::from_secs(10),
         },
     );
 
