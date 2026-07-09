@@ -622,7 +622,7 @@ impl ProofJobQueue for SharedProverService {
         lock_id: LockId,
         backend_session_id: String,
         state: BackendSessionStatus,
-        failure_reason: String,
+        failure_reason: Option<String>,
     ) -> Result<(), ProofJobQueueError> {
         self.service
             .record_proof_session(

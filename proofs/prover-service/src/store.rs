@@ -336,7 +336,7 @@ impl ProverServiceStore {
         lock_id: LockId,
         backend_session_id: String,
         status: BackendSessionStatus,
-        failure_reason: String,
+        failure_reason: Option<String>,
     ) -> Result<(), ProofJobQueueError> {
         let now = Utc::now();
         let mut tx = self.begin_queue_tx().await?;
