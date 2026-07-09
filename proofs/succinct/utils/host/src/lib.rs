@@ -24,6 +24,21 @@ pub mod mock_prover;
 pub mod network_prover;
 pub mod validity;
 
+/// Structured failures specific to all succinct provers; surfaced wrapped in
+/// [`anyhow::Error`] so callers can downcast when they need to match on them.
+#[derive(Debug, thiserror::Error)]
+pub enum SuccinctProverError {
+    /// The guest committed boot info that differs from the host-computed expectation.
+    #[error("range proof boot info mismatch: expected {expected:?}, got {actual:?}")]
+    BootInfoMismatch {
+        expected: Box<BootInfoStruct>,
+        actual: Box<BootInfoStruct>,
+    },
+    /// Aggregation requires compressed range proofs for recursive verification.
+    #[error("range proof was not in compressed mode")]
+    NotCompressed,
+}
+
 /// SP1 proving backend selected by binaries and dev tooling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, EnumString)]
 #[serde(rename_all = "kebab-case")]

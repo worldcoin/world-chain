@@ -12,6 +12,7 @@ use world_chain_proof_succinct_host_utils::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
     mock_prover::MockSuccinctProver,
+    network_prover::NetworkSuccinctProver,
 };
 use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_prover_service::RpcProverServiceClient;
@@ -100,13 +101,17 @@ struct Cli {
     #[arg(long, default_value_t = 900)]
     witness_timeout_seconds: u64,
 
-    /// Prover backend. Network is reserved for a follow-up implementation.
+    /// Prover backend.
     #[arg(
         long,
         env = "SP1_PROVER",
         default_value_t = Sp1ProverKind::Cpu
     )]
     prover: Sp1ProverKind,
+
+    /// SP1 network private key. Required when --prover network.
+    #[arg(long, env = "SP1_PRIVATE_KEY")]
+    sp1_private_key: Option<String>,
 
     /// Prover address for on-chain attribution (defaults to zero address).
     #[arg(
@@ -206,10 +211,16 @@ async fn main() -> Result<()> {
             .await
         }
         Sp1ProverKind::Network => {
-            anyhow::bail!(
-                "unsupported SP1 prover '{}'; only 'cpu' and 'mock' are currently available",
-                prover_kind
-            );
+            let private_key = cli
+                .sp1_private_key
+                .clone()
+                .context("SP1_PRIVATE_KEY is required when --prover network")?;
+            run_worker(
+                cli,
+                host,
+                NetworkSuccinctProver::new(SP1ProofMode::Groth16, &private_key).await?,
+            )
+            .await
         }
     }
 }

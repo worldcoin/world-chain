@@ -1,7 +1,7 @@
 //! Range proofs are produced in `Compressed` mode so the aggregation guest can recursively
 //! verify them; the aggregation proof mode is configurable (Groth16 for on-chain verification).
 
-use crate::cpu_prover::SuccinctProverError;
+use crate::SuccinctProverError;
 use anyhow::{Context, bail};
 use async_trait::async_trait;
 use sp1_sdk::{
@@ -20,6 +20,7 @@ use world_chain_proof_succinct_utils::{
 };
 use world_chain_prover_service::{ProofRequestId, SessionType};
 
+/// [`WorldSuccinctProver`] mock implementation over the sp1-sdk mock prover.
 pub struct MockSuccinctProver {
     client: MockProver,
     range_pk: SP1ProvingKey,

@@ -17,7 +17,8 @@
 //! export L1_BEACON_RPC_URL=$L1_RPC_URL          # devnet uses calldata DA; L1 RPC doubles as beacon
 //! export ROLLUP_RPC_URL=http://127.0.0.1:7545   # op-node, for output roots
 //! export ROLLUP_CONFIG=/path/to/rollup.json
-//! export SP1_PROVER=cpu                          # cpu | mock | network (network not wired yet)
+//! export SP1_PROVER=cpu                          # cpu | mock | network
+//! export SP1_PRIVATE_KEY=<your key>              # required for SP1_PROVER=network
 //! cargo test -p world-chain-sp1-worker --test e2e_proving -- --ignored --nocapture
 //! ```
 //!
@@ -35,6 +36,7 @@ use world_chain_proof_succinct_host_utils::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
     mock_prover::MockSuccinctProver,
+    network_prover::NetworkSuccinctProver,
 };
 use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_proofs::{ConsensusProvider, OptimismConsensusClient};
@@ -168,9 +170,24 @@ async fn worker_proves_real_range_end_to_end() {
             .await;
         }
         Sp1ProverKind::Network => {
-            panic!(
-                "unsupported SP1 prover '{kind}'; only 'cpu' and 'mock' are currently available"
-            );
+            let Some(private_key) = required("SP1_PRIVATE_KEY") else {
+                return;
+            };
+            let prover = NetworkSuccinctProver::new(SP1ProofMode::Groth16, &private_key)
+                .await
+                .expect("build prover");
+            run_worker_proves_real_range_end_to_end_with_prover(
+                host,
+                prover,
+                kind,
+                block_interval,
+                split_count,
+                root_claim,
+                l1_head,
+                claimed_block,
+                timeout,
+            )
+            .await;
         }
     }
 }
