@@ -91,6 +91,7 @@ async fn start_proof_stack_with(
             max_attempts: 2,
             max_retries: 2,
             backend_poll_interval: Duration::from_millis(5),
+            status_poller_interval: Duration::from_millis(5),
         },
     )
     .await

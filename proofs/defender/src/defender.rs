@@ -263,10 +263,21 @@ where
                             .request_proof(proof_request(game_created, backend))
                             .await
                         {
-                            Ok(id) => LaneState::Requested {
-                                id,
-                                attempts: attempts + 1,
-                            },
+                            Ok(id) => {
+                                let next_attempt = attempts + 1;
+                                warn!(
+                                    %game,
+                                    ?lane,
+                                    %id,
+                                    attempts = next_attempt,
+                                    max_attempts = self.config.max_proof_attempts,
+                                    "proof failed; re-requested proof"
+                                );
+                                LaneState::Requested {
+                                    id,
+                                    attempts: next_attempt,
+                                }
+                            }
                             Err(error) => {
                                 warn!(%game, ?lane, %error, "proof re-request failed; retrying next tick");
                                 state

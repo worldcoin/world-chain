@@ -13,6 +13,9 @@ pub const DEFAULT_MAX_RETRIES: u32 = 3;
 /// Default delay before polling an unchanged backend job again.
 pub const DEFAULT_BACKEND_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Default delay between status-poller scans.
+pub const DEFAULT_STATUS_POLLER_INTERVAL: Duration = Duration::from_secs(30);
+
 /// Configuration for the `prover-service`.
 #[derive(Debug, Clone)]
 pub struct ProverServiceConfig {
@@ -27,6 +30,8 @@ pub struct ProverServiceConfig {
     pub max_retries: u32,
     /// Delay before a backend job that returned `Noop` becomes pollable again.
     pub backend_poll_interval: Duration,
+    /// Delay between scans that terminalize unhealthy proof requests.
+    pub status_poller_interval: Duration,
 }
 
 impl ProverServiceConfig {
@@ -45,6 +50,11 @@ impl ProverServiceConfig {
                 "backend_poll_interval must be greater than zero",
             ));
         }
+        if self.status_poller_interval.is_zero() {
+            return Err(InvalidConfigError(
+                "status_poller_interval must be greater than zero",
+            ));
+        }
         Ok(())
     }
 }
@@ -56,6 +66,7 @@ impl Default for ProverServiceConfig {
             max_attempts: DEFAULT_MAX_ATTEMPTS,
             max_retries: DEFAULT_MAX_RETRIES,
             backend_poll_interval: DEFAULT_BACKEND_POLL_INTERVAL,
+            status_poller_interval: DEFAULT_STATUS_POLLER_INTERVAL,
         }
     }
 }

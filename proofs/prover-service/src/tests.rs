@@ -15,6 +15,7 @@ fn test_config() -> ProverServiceConfig {
         max_attempts: 2,
         max_retries: 2,
         backend_poll_interval: Duration::from_millis(25),
+        status_poller_interval: Duration::from_millis(25),
     }
 }
 
@@ -252,6 +253,105 @@ async fn submit_proof_with_wrong_backend_is_rejected() {
     assert_eq!(
         service.proof_status(id).await.unwrap(),
         ProofStatus::Running
+    );
+}
+
+#[tokio::test]
+async fn status_poller_marks_expired_exhausted_jobs_failed() {
+    let config = ProverServiceConfig {
+        lock_timeout: Duration::from_millis(50),
+        ..test_config()
+    };
+    let max_attempts = config.max_attempts;
+    let expected_failure_reason = format!("proof request exhausted max attempts ({max_attempts})");
+    let Some(ctx) = service(config).await else {
+        return;
+    };
+    let service = ctx.service;
+    let req = request(ProofBackend::Sp1, 5);
+    let id = service.request_proof(req).await.unwrap();
+
+    let first = service
+        .get_next_proof(ProofBackend::Sp1, worker_id())
+        .await
+        .unwrap()
+        .expect("first lock");
+    tokio::time::sleep(Duration::from_millis(80)).await;
+
+    let second = service
+        .get_next_proof(ProofBackend::Sp1, worker_id())
+        .await
+        .unwrap()
+        .expect("second lock");
+    assert_ne!(first.lock_id, second.lock_id);
+
+    service
+        .record_proof_session(
+            id,
+            SessionType::Stark,
+            worker_id(),
+            second.lock_id,
+            backend_session_id(5),
+            BackendSessionStatus::Running,
+            None,
+        )
+        .await
+        .unwrap();
+
+    // we dont fail active work
+    assert_eq!(
+        service
+            .mark_exhausted_proof_requests_failed()
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        service.proof_status(id).await.unwrap(),
+        ProofStatus::Running
+    );
+
+    tokio::time::sleep(Duration::from_millis(80)).await;
+
+    // without status poller, this job is not claimable
+    assert!(
+        service
+            .get_next_proof(ProofBackend::Sp1, worker_id())
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    // clean up status poller status and expect to clean up 1 row
+    assert_eq!(
+        service
+            .mark_exhausted_proof_requests_failed()
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(service.proof_status(id).await.unwrap(), ProofStatus::Failed);
+
+    assert!(matches!(
+        service.get_proof(id).await.unwrap(),
+        ProofResponse::Failed(response)
+            if response.id == id && response.reason == expected_failure_reason
+    ));
+
+    // sp1 proof session is cleaned up too
+    assert!(
+        service
+            .get_proof_session(id, SessionType::Stark)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        service
+            .mark_exhausted_proof_requests_failed()
+            .await
+            .unwrap(),
+        0
     );
 }
 
