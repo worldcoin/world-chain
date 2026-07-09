@@ -22,10 +22,11 @@ use world_chain_proposer::{
     ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
 };
 use world_chain_prover_service::{
-    BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend, ProofData,
-    ProofJobQueue, ProofJobQueueError, ProofRequest, ProofRequestError, ProofRequestId,
-    ProofRequester, ProofResponse, ProofStatus, ProverService, ProverServiceConfig, SessionType,
-    SucceededProofResponse,
+    GetNextProofRequest, GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse,
+    HeartbeatRequest, HeartbeatResponse, ProofBackend, ProofData, ProofJobQueue,
+    ProofJobQueueError, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
+    ProofResponse, ProofStatus, ProverService, ProverServiceConfig, RecordProofSessionRequest,
+    RecordProofSessionResponse, SubmitProofRequest, SubmitProofResponse,
 };
 
 pub const BLOCK_INTERVAL: u64 = 10;
@@ -591,58 +592,36 @@ impl ProofRequester for SharedProverService {
 impl ProofJobQueue for SharedProverService {
     async fn get_next_proof(
         &self,
-        backend: ProofBackend,
-        worker_id: String,
-    ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
-        self.service.get_next_proof(backend, worker_id).await
+        request: GetNextProofRequest,
+    ) -> Result<GetNextProofResponse, ProofJobQueueError> {
+        self.service.get_next_proof(request).await
     }
 
     async fn submit_proof(
         &self,
-        proof: SucceededProofResponse,
-        worker_id: String,
-        lock: LockId,
-    ) -> Result<(), ProofJobQueueError> {
-        self.service.submit_proof(proof, worker_id, lock).await
+        request: SubmitProofRequest,
+    ) -> Result<SubmitProofResponse, ProofJobQueueError> {
+        self.service.submit_proof(request).await
     }
 
     async fn get_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-    ) -> Result<Option<BackendSession>, ProofJobQueueError> {
-        self.service.get_proof_session(proof_id, session_type).await
+        request: GetProofSessionRequest,
+    ) -> Result<GetProofSessionResponse, ProofJobQueueError> {
+        self.service.get_proof_session(request).await
     }
 
     async fn record_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-        worker_id: String,
-        lock_id: LockId,
-        backend_session_id: String,
-        state: BackendSessionStatus,
-        failure_reason: Option<String>,
-    ) -> Result<(), ProofJobQueueError> {
-        self.service
-            .record_proof_session(
-                proof_id,
-                session_type,
-                worker_id,
-                lock_id,
-                backend_session_id,
-                state,
-                failure_reason,
-            )
-            .await
+        request: RecordProofSessionRequest,
+    ) -> Result<RecordProofSessionResponse, ProofJobQueueError> {
+        self.service.record_proof_session(request).await
     }
 
     async fn heartbeat(
         &self,
-        proof_id: ProofRequestId,
-        worker_id: String,
-        lock: LockId,
-    ) -> Result<(), ProofJobQueueError> {
-        self.service.heartbeat(proof_id, worker_id, lock).await
+        request: HeartbeatRequest,
+    ) -> Result<HeartbeatResponse, ProofJobQueueError> {
+        self.service.heartbeat(request).await
     }
 }
