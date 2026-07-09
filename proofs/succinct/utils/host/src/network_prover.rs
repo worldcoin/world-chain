@@ -242,7 +242,9 @@ fn sp1_status(status: &GetProofRequestStatusResponse) -> Sp1SessionStatus {
             "proof unfulfillable, execution_status={}",
             status.execution_status()
         )),
-        Ok(_) => Sp1SessionStatus::Running,
+        Ok(FulfillmentStatus::Assigned)
+        | Ok(FulfillmentStatus::Requested)
+        | Ok(FulfillmentStatus::UnspecifiedFulfillmentStatus) => Sp1SessionStatus::Running,
         Err(_) => Sp1SessionStatus::Failed(format!(
             "unknown network proof fulfillment status: {}",
             status.fulfillment_status()
