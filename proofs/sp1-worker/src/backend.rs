@@ -162,13 +162,14 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         session_type: SessionType,
         session_id: &str,
         status: BackendSessionStatus,
+        failure_reason: Option<String>,
     ) -> anyhow::Result<()> {
         if !self.prover.supports_persistent_sessions() {
             return Ok(());
         }
 
         job.sessions
-            .record(session_type, session_id.to_string(), status)
+            .record(session_type, session_id.to_string(), status, failure_reason)
             .await?;
 
         Ok(())
@@ -181,12 +182,14 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         request: Sp1ProofRequest,
     ) -> anyhow::Result<String> {
         let session_id = self.prover.submit(request).await?;
+        let empty_failure_reason = None;
 
         self.record_session(
             job,
             session_type,
             &session_id,
             BackendSessionStatus::Running,
+            empty_failure_reason,
         )
         .await?;
 
@@ -208,12 +211,14 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
                 Sp1SessionStatus::Completed => {
                     let proof = self.prover.download(&session_id).await?;
                     let artifact = range_artifact_from_sp1_proof(&proof)?;
+                    let empty_failure_reason = None;
 
                     self.record_session(
                         job,
                         session_type.clone(),
                         &session_id,
                         BackendSessionStatus::Completed,
+                        empty_failure_reason,
                     )
                     .await?;
 
@@ -225,6 +230,7 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
                         session_type.clone(),
                         &session_id,
                         BackendSessionStatus::Failed,
+                        Some(reason.clone()),
                     )
                     .await?;
 
@@ -252,12 +258,14 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
                 Sp1SessionStatus::Completed => {
                     let proof = self.prover.download(&session_id).await?;
                     let artifact = aggregation_artifact_from_sp1_proof(&proof)?;
+                    let empty_failure_reason = None;
 
                     self.record_session(
                         job,
                         session_type.clone(),
                         &session_id,
                         BackendSessionStatus::Completed,
+                        empty_failure_reason,
                     )
                     .await?;
 
@@ -269,6 +277,7 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
                         session_type.clone(),
                         &session_id,
                         BackendSessionStatus::Failed,
+                        Some(reason.clone()),
                     )
                     .await?;
 

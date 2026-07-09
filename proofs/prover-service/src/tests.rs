@@ -384,6 +384,7 @@ async fn record_and_get_proof_session_round_trips() {
             locked.lock_id,
             backend_session_id(1),
             BackendSessionStatus::Running,
+            None,
         )
         .await
         .unwrap();

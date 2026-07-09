@@ -55,6 +55,7 @@ impl JobSessions {
         session_type: SessionType,
         backend_session_id: String,
         status: BackendSessionStatus,
+        failure_reason: Option<String>,
     ) -> Result<(), ProofJobQueueError> {
         self.queue
             .record_proof_session(
@@ -64,6 +65,7 @@ impl JobSessions {
                 self.lock_id,
                 backend_session_id,
                 status,
+                failure_reason,
             )
             .await
     }

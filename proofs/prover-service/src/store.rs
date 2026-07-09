@@ -403,6 +403,7 @@ impl ProverServiceStore {
         lock_id: LockId,
         backend_session_id: String,
         status: BackendSessionStatus,
+        failure_reason: Option<String>,
     ) -> Result<(), ProofJobQueueError> {
         let now = Utc::now();
         let mut tx = self.begin_queue_tx().await?;
@@ -529,7 +530,7 @@ impl ProverServiceStore {
             )
             .bind(backend_session_id)
             .bind(status.as_str())
-            .bind("failure reason".to_string()) // TODO: replace this with an input value
+            .bind(failure_reason)
             .bind(active_id)
             .bind(BackendSessionStatus::Submitting.as_str())
             .bind(BackendSessionStatus::Running.as_str())
