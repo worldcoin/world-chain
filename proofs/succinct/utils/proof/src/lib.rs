@@ -1,23 +1,21 @@
 use alloy_primitives::{Address, B256};
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
-    artifacts::ProofArtifact, boot::BootInfoStruct, range::WorldRangeProofPublicValues,
-    types::AggregationInputs, witness::WorldRangeWitnessData,
+    boot::BootInfoStruct, types::AggregationInputs, witness::WorldRangeWitnessData,
 };
 
 pub use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArtifact};
-use world_chain_prover_service::{ProofRequestId, SessionType};
 
 // ---------------------------------------------------------------------------
-// Proof request types and prover trait
+// Proof request types
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ProofRequest {
+pub enum Sp1ProofRequest {
     Range(RangeProofRequest),
     Aggregation(AggregationSessionRequest),
 }
+
 /// Host request for a single SP1 range proof.
 ///
 /// Carries the full rkyv-serialized [`WorldRangeWitnessData`] that the range guest reads from
@@ -26,20 +24,14 @@ pub enum ProofRequest {
 pub struct RangeProofRequest {
     /// rkyv-serialized [`WorldRangeWitnessData`] consumed by the range guest.
     pub witness_rkyv: Vec<u8>,
-    /// Optional host-computed public values checked against the guest commitment.
-    pub expected_public_values: Option<WorldRangeProofPublicValues>,
 }
 
 impl RangeProofRequest {
     /// Builds a request by rkyv-serializing the supplied witness data.
-    pub fn from_witness_data(
-        witness: &WorldRangeWitnessData,
-        expected_public_values: Option<WorldRangeProofPublicValues>,
-    ) -> Result<Self, rkyv::rancor::Error> {
+    pub fn from_witness_data(witness: &WorldRangeWitnessData) -> Result<Self, rkyv::rancor::Error> {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(witness)?;
         Ok(Self {
             witness_rkyv: bytes.to_vec(),
-            expected_public_values,
         })
     }
 }
@@ -87,29 +79,4 @@ pub enum Sp1SessionStatus {
     Failed(String),
     /// The backend has no record of the session id.
     NotFound,
-}
-
-/// Interface expected from a concrete SP1 prover backend.
-#[async_trait]
-pub trait WorldSuccinctProver {
-    fn supports_persistent_sessions(&self) -> bool;
-
-    async fn submit(
-        &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-        request: ProofRequest,
-    ) -> anyhow::Result<String>;
-
-    async fn poll(
-        &self,
-        session_id: String,
-        session_type: SessionType,
-    ) -> anyhow::Result<Sp1SessionStatus>;
-
-    async fn download(
-        &self,
-        session_id: String,
-        session_type: SessionType,
-    ) -> anyhow::Result<ProofArtifact>;
 }

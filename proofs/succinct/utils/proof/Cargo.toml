@@ -12,6 +12,3 @@ alloy-primitives.workspace = true
 rkyv.workspace = true
 serde.workspace = true
 world-chain-proof-core.workspace = true
-async-trait.workspace = true
-world-chain-prover-service.workspace = true
-anyhow.workspace = true

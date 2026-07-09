@@ -7,7 +7,7 @@
 //! `BootInfoStruct` is attested by the enclave's NSM device. Verifiers check the attestation
 //! document instead of a ZK proof.
 //!
-//! The boundary mirrors [`world_chain_proof_succinct_proof_utils::WorldSuccinctProver`]:
+//! The boundary mirrors [`world_chain_proof_succinct_host_utils::WorldSuccinctProver`]:
 //!
 //! - [`NitroRangeProofRequest`] carries the full rkyv-serialized [`WorldRangeWitnessData`]
 //!   that the enclave needs to drive the derivation pipeline.
@@ -207,7 +207,7 @@ pub struct NitroAggregationProofArtifact {
 
 /// Backend trait for TEE-attested World prover implementations.
 ///
-/// Modeled after [`world_chain_proof_succinct_proof_utils::WorldSuccinctProver`], but the
+/// Modeled after [`world_chain_proof_succinct_host_utils::WorldSuccinctProver`], but the
 /// request and artifact types carry attestation material instead of ZK proofs.
 #[async_trait]
 pub trait WorldNitroProver {

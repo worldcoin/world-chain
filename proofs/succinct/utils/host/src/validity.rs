@@ -2,20 +2,20 @@
 
 use std::time::Duration;
 
-use alloy_primitives::{Address, B256, keccak256};
-use anyhow::{Context, bail};
-use world_chain_proof_core::artifacts::{
-    AggregationProofArtifact, ProofArtifact, RangeProofArtifact,
+use crate::{
+    WorldSuccinctProver, aggregation_artifact_from_sp1_proof, range_artifact_from_sp1_proof,
 };
+use alloy_primitives::{Address, B256};
+use anyhow::{Context, bail};
+use sp1_sdk::SP1ProofWithPublicValues;
+use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArtifact};
 use world_chain_proof_kona_host_utils::online::{
     OnlineHostConfig, RangeMetadata, RangeWitnessRequest, build_range_input,
     fetch_l1_header_by_hash,
 };
 use world_chain_proof_succinct_utils::{
-    AggregationSessionRequest, ProofRequest as SuccinctProofRequest, RangeProofRequest,
-    Sp1SessionStatus, WorldSuccinctProver,
+    AggregationSessionRequest, RangeProofRequest, Sp1ProofRequest, Sp1SessionStatus,
 };
-use world_chain_prover_service::{ProofRequestId, SessionType};
 
 /// Request for proving one contiguous L2 validity range and aggregating it into a final proof.
 #[derive(Clone, Debug)]
@@ -63,16 +63,11 @@ where
         );
     }
 
-    let proof_id = validity_proof_id(&request);
     let range_input = build_range_request(host, &request)
         .await
         .context("failed to build range proof request")?;
     let range_session_id = prover
-        .submit(
-            proof_id,
-            SessionType::Stark,
-            SuccinctProofRequest::Range(range_input.request),
-        )
+        .submit(Sp1ProofRequest::Range(range_input.request))
         .await
         .context("failed to submit range proof")?;
     let range = wait_and_download_range(prover, range_session_id)
@@ -85,11 +80,7 @@ where
         .await
         .context("failed to build aggregation proof request")?;
     let aggregation_session_id = prover
-        .submit(
-            proof_id,
-            SessionType::Snark,
-            SuccinctProofRequest::Aggregation(aggregation_request),
-        )
+        .submit(Sp1ProofRequest::Aggregation(aggregation_request))
         .await
         .context("failed to submit aggregation proof")?;
     let aggregation = wait_and_download_aggregation(prover, aggregation_session_id)
@@ -99,16 +90,6 @@ where
     validate_aggregation_artifact(&range_input.metadata, &aggregation)?;
 
     Ok(aggregation)
-}
-
-fn validity_proof_id(request: &ValidityProofRequest) -> ProofRequestId {
-    let mut bytes = Vec::with_capacity(16 + 8 + 8 + 32 + 20);
-    bytes.extend_from_slice(b"sp1-validity-v1");
-    bytes.extend_from_slice(&request.start_block.to_be_bytes());
-    bytes.extend_from_slice(&request.end_block.to_be_bytes());
-    bytes.extend_from_slice(request.l1_head.unwrap_or_default().as_slice());
-    bytes.extend_from_slice(request.prover_address.as_slice());
-    ProofRequestId(keccak256(bytes))
 }
 
 async fn build_range_request(
@@ -127,7 +108,7 @@ async fn build_range_request(
     .await
     .context("failed to build SP1 range witness")?;
 
-    let request = RangeProofRequest::from_witness_data(&input.witness, None)
+    let request = RangeProofRequest::from_witness_data(&input.witness)
         .context("failed to serialize SP1 range witness")?;
 
     Ok(BuiltRangeRequest {
@@ -164,12 +145,8 @@ async fn wait_and_download_range<P>(
 where
     P: WorldSuccinctProver + Sync,
 {
-    let artifact =
-        wait_and_download_artifact(prover, SessionType::Stark, session_id.clone()).await?;
-    let ProofArtifact::Range(range) = artifact else {
-        bail!("expected range proof artifact for STARK session {session_id}");
-    };
-    Ok(range)
+    let proof = wait_and_download_proof(prover, session_id, "STARK").await?;
+    range_artifact_from_sp1_proof(&proof)
 }
 
 async fn wait_and_download_aggregation<P>(
@@ -179,32 +156,24 @@ async fn wait_and_download_aggregation<P>(
 where
     P: WorldSuccinctProver + Sync,
 {
-    let artifact =
-        wait_and_download_artifact(prover, SessionType::Snark, session_id.clone()).await?;
-    let ProofArtifact::Aggregation(aggregation) = artifact else {
-        bail!("expected aggregation proof artifact for SNARK session {session_id}");
-    };
-    Ok(aggregation)
+    let proof = wait_and_download_proof(prover, session_id, "SNARK").await?;
+    aggregation_artifact_from_sp1_proof(&proof)
 }
 
-async fn wait_and_download_artifact<P>(
+async fn wait_and_download_proof<P>(
     prover: &P,
-    session_type: SessionType,
     session_id: String,
-) -> anyhow::Result<ProofArtifact>
+    session_label: &'static str,
+) -> anyhow::Result<SP1ProofWithPublicValues>
 where
     P: WorldSuccinctProver + Sync,
 {
-    let session_label = session_type.as_str();
     loop {
-        match prover
-            .poll(session_id.clone(), session_type.clone())
-            .await?
-        {
+        match prover.poll(&session_id).await? {
             Sp1SessionStatus::Running => tokio::time::sleep(Duration::from_secs(10)).await,
             Sp1SessionStatus::Completed => {
                 return prover
-                    .download(session_id, session_type)
+                    .download(&session_id)
                     .await
                     .with_context(|| format!("failed to download {session_label} proof"));
             }

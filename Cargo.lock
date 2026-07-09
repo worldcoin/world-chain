@@ -19146,12 +19146,9 @@ name = "world-chain-proof-succinct-utils"
 version = "2.4.0"
 dependencies = [
  "alloy-primitives",
- "anyhow",
- "async-trait",
  "rkyv",
  "serde",
  "world-chain-proof-core",
- "world-chain-prover-service",
 ]
 
 [[package]]
