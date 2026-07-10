@@ -30,11 +30,6 @@ remappings = [
   "@sp1-contracts/=lib/sp1-contracts/contracts/",
 ]
 
-# Only import the SP1 verifier interface from this dependency in this project.
-# Versioned verifier implementations under lib/sp1-contracts/contracts/src/v*/ are
-# deployed/pinned separately to the target chain and can carry their own compiler
-# assumptions.
-
 [profile.ci]
 
 [fuzz]
