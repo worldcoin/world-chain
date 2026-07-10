@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {IWorldChainAnchorStateRegistry} from "./interfaces/IWorldChainAnchorStateRegistry.sol";
-import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.sol";
-import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
+import {IWorldChainAnchorStateRegistry} from "../interfaces/IWorldChainAnchorStateRegistry.sol";
+import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
+import {IWorldChainProofSystemGame} from "../interfaces/IWorldChainProofSystemGame.sol";
 import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
-import {WorldChainProofLib} from "./WorldChainProofLib.sol";
+import {WorldChainProofLib} from "../WorldChainProofLib.sol";
 
 /// ABI-encoded public values committed by the World Chain SP1 aggregation proof.
 /// Must match `world_chain_proof_core::types::AggregationOutputs`.

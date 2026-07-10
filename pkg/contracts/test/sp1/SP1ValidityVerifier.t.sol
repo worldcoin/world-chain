@@ -4,8 +4,8 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 
 import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
-import {AggregationOutputs, SP1ValidityVerifier} from "../src/proofs/SP1ValidityVerifier.sol";
-import {WorldChainProofLib} from "../src/proofs/WorldChainProofLib.sol";
+import {AggregationOutputs, SP1ValidityVerifier} from "../../src/proofs/sp1/SP1ValidityVerifier.sol";
+import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
 
 contract StubSP1Verifier is ISP1Verifier {
     bool public reject;
