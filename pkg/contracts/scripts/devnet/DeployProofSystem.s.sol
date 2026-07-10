@@ -40,8 +40,6 @@ contract DeployProofSystem is Script {
         vm.startBroadcast(config.privateKey);
         deployment.anchor = new WorldChainAnchorStateRegistry(bytes32(0), 0);
         deployment.staking = new MockStakingRegistry();
-        // TODO: wire SP1ValidityVerifier for this lane once deployments provide the
-        // Succinct verifier gateway, aggregation vkey, and range vkey commitment.
         deployment.validityVerifier = new MockRootIdVerifier(false);
         deployment.teeVerifier = new MockRootIdVerifier(false);
         deployment.councilVerifier = new MockRootIdVerifier(false);
