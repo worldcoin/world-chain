@@ -163,6 +163,30 @@ pub struct WorldChainArgs {
     )]
     pub disable_bootnodes: bool,
 
+    /// Disable P2P-triggered backfill (pipeline) sync.
+    ///
+    /// When set, the node uses a no-op backfill sync implementation instead of
+    /// the default `PipelineSync`. P2P peer announcements more than 32 blocks
+    /// ahead of the canonical tip no longer put the engine into pipeline mode,
+    /// so `engine_forkchoiceUpdated` is never short-circuited to `SYNCING` from
+    /// a peer-triggered backfill.
+    ///
+    /// Use this on CL-driven nodes (archive / verifier) where a consensus
+    /// client such as `kona-node` drives the chain via the Engine API. In that
+    /// setup a spontaneous pipeline sync deadlocks the CL/EL handshake: the EL
+    /// returns `SYNCING`, kona-node enters `AwaitingELSyncCompletion`, and no
+    /// side ever progresses.
+    ///
+    /// Do NOT set this on a standalone (non-CL-driven) node — without
+    /// pipeline sync the node cannot catch up from far behind the tip over P2P.
+    #[arg(
+        long = "engine.no-backfill",
+        alias = "engine.no_backfill",
+        env = "ENGINE_NO_BACKFILL",
+        default_value_t = false
+    )]
+    pub no_backfill: bool,
+
     /// Whether the `simulate_unsignedUserOp` RPC endpoint should be served on
     /// HTTP. Derived from `--http.api`: enabled when the selection contains
     /// the `simulate` namespace.
@@ -547,6 +571,7 @@ mod tests {
             flashblocks: None,
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
             disable_bootnodes: true,
+            no_backfill: false,
             simulate_enabled: false,
         };
 

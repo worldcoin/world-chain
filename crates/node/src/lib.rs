@@ -1,8 +1,10 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 pub mod add_ons;
+pub mod backfill;
 pub mod context;
 pub mod engine;
+pub mod launch;
 pub mod node;
 pub mod payload;
 pub mod payload_service;
