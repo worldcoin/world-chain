@@ -94,9 +94,12 @@ pub use service::ProverService;
 pub use status_poller::run_status_poller;
 pub use traits::{ProofJobQueue, ProofRequester};
 pub use types::{
-    BackendProofId, BackendSession, BackendSessionStatus, FailedProofResponse, LockId,
-    LockedProofRequest, PendingProofResponse, ProofBackend, ProofData, ProofJobStatus,
-    ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType, SucceededProofResponse,
+    BackendProofId, BackendSession, BackendSessionStatus, FailedProofResponse, GetNextProofRequest,
+    GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse, HeartbeatRequest,
+    HeartbeatResponse, LockId, LockedProofRequest, PendingProofResponse, ProofBackend, ProofData,
+    ProofJobStatus, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
+    RecordProofSessionRequest, RecordProofSessionResponse, SessionType, SubmitProofRequest,
+    SubmitProofResponse, SucceededProofResponse,
 };
 
 #[cfg(test)]

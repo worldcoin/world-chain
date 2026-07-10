@@ -4,9 +4,10 @@ use crate::{
     store::ProverServiceStore,
     traits::{ProofJobQueue, ProofRequester},
     types::{
-        BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
-        ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType,
-        SucceededProofResponse,
+        GetNextProofRequest, GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse,
+        HeartbeatRequest, HeartbeatResponse, ProofRequest, ProofRequestId, ProofResponse,
+        ProofStatus, RecordProofSessionRequest, RecordProofSessionResponse, SubmitProofRequest,
+        SubmitProofResponse,
     },
 };
 use async_trait::async_trait;
@@ -85,58 +86,36 @@ impl ProofRequester for ProverService {
 impl ProofJobQueue for ProverService {
     async fn get_next_proof(
         &self,
-        backend: ProofBackend,
-        worker_id: String,
-    ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
-        self.store.get_next_proof(backend, worker_id).await
+        request: GetNextProofRequest,
+    ) -> Result<GetNextProofResponse, ProofJobQueueError> {
+        self.store.get_next_proof(request).await
     }
 
     async fn submit_proof(
         &self,
-        proof: SucceededProofResponse,
-        worker_id: String,
-        lock: LockId,
-    ) -> Result<(), ProofJobQueueError> {
-        self.store.submit_proof(proof, worker_id, lock).await
+        request: SubmitProofRequest,
+    ) -> Result<SubmitProofResponse, ProofJobQueueError> {
+        self.store.submit_proof(request).await
     }
 
     async fn get_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-    ) -> Result<Option<BackendSession>, ProofJobQueueError> {
-        self.store.get_proof_session(proof_id, session_type).await
+        request: GetProofSessionRequest,
+    ) -> Result<GetProofSessionResponse, ProofJobQueueError> {
+        self.store.get_proof_session(request).await
     }
 
     async fn record_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-        worker_id: String,
-        lock_id: LockId,
-        backend_session_id: String,
-        state: BackendSessionStatus,
-        failure_reason: Option<String>,
-    ) -> Result<(), ProofJobQueueError> {
-        self.store
-            .record_proof_session(
-                proof_id,
-                session_type,
-                worker_id,
-                lock_id,
-                backend_session_id,
-                state,
-                failure_reason,
-            )
-            .await
+        request: RecordProofSessionRequest,
+    ) -> Result<RecordProofSessionResponse, ProofJobQueueError> {
+        self.store.record_proof_session(request).await
     }
 
     async fn heartbeat(
         &self,
-        proof_id: ProofRequestId,
-        worker_id: String,
-        lock: LockId,
-    ) -> Result<(), ProofJobQueueError> {
-        self.store.heartbeat(proof_id, worker_id, lock).await
+        request: HeartbeatRequest,
+    ) -> Result<HeartbeatResponse, ProofJobQueueError> {
+        self.store.heartbeat(request).await
     }
 }

@@ -7,9 +7,10 @@ use crate::{
     service::ProverService,
     traits::{ProofJobQueue, ProofRequester},
     types::{
-        BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
-        ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType,
-        SucceededProofResponse,
+        GetNextProofRequest, GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse,
+        HeartbeatRequest, HeartbeatResponse, ProofRequest, ProofRequestId, ProofResponse,
+        ProofStatus, RecordProofSessionRequest, RecordProofSessionResponse, SubmitProofRequest,
+        SubmitProofResponse,
     },
 };
 use jsonrpsee::{
@@ -69,50 +70,30 @@ pub trait ProverServiceApi {
 
     /// Lock the next queued proof request for the given backend.
     #[method(name = "getNextProof")]
-    async fn get_next_proof(
-        &self,
-        backend: ProofBackend,
-        worker_id: String,
-    ) -> RpcResult<Option<LockedProofRequest>>;
+    async fn get_next_proof(&self, request: GetNextProofRequest)
+    -> RpcResult<GetNextProofResponse>;
 
     /// Submit a generated proof.
     #[method(name = "submitProof")]
-    async fn submit_proof(
-        &self,
-        proof: SucceededProofResponse,
-        worker_id: String,
-        lock: LockId,
-    ) -> RpcResult<()>;
+    async fn submit_proof(&self, request: SubmitProofRequest) -> RpcResult<SubmitProofResponse>;
 
     /// Get a proof session if any.
     #[method(name = "getProofSession")]
     async fn get_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-    ) -> RpcResult<Option<BackendSession>>;
+        request: GetProofSessionRequest,
+    ) -> RpcResult<GetProofSessionResponse>;
 
     /// Record a new proof session.
     #[method(name = "recordProofSession")]
     async fn record_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-        worker_id: String,
-        lock_id: LockId,
-        backend_session_id: String,
-        state: BackendSessionStatus,
-        failure_reason: Option<String>,
-    ) -> RpcResult<()>;
+        request: RecordProofSessionRequest,
+    ) -> RpcResult<RecordProofSessionResponse>;
 
     /// Heartbeat call.
     #[method(name = "heartbeat")]
-    async fn heartbeat(
-        &self,
-        proof_id: ProofRequestId,
-        worker_id: String,
-        lock: LockId,
-    ) -> RpcResult<()>;
+    async fn heartbeat(&self, request: HeartbeatRequest) -> RpcResult<HeartbeatResponse>;
 }
 
 impl From<ProofRequestError> for ErrorObjectOwned {
@@ -230,63 +211,31 @@ impl ProverServiceApiServer for ProverServiceRpc {
 
     async fn get_next_proof(
         &self,
-        backend: ProofBackend,
-        worker_id: String,
-    ) -> RpcResult<Option<LockedProofRequest>> {
-        Ok(self.service.get_next_proof(backend, worker_id).await?)
+        request: GetNextProofRequest,
+    ) -> RpcResult<GetNextProofResponse> {
+        Ok(self.service.get_next_proof(request).await?)
     }
 
-    async fn submit_proof(
-        &self,
-        proof: SucceededProofResponse,
-        worker_id: String,
-        lock: LockId,
-    ) -> RpcResult<()> {
-        Ok(self.service.submit_proof(proof, worker_id, lock).await?)
+    async fn submit_proof(&self, request: SubmitProofRequest) -> RpcResult<SubmitProofResponse> {
+        Ok(self.service.submit_proof(request).await?)
     }
 
     async fn get_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-    ) -> RpcResult<Option<BackendSession>> {
-        Ok(self
-            .service
-            .get_proof_session(proof_id, session_type)
-            .await?)
+        request: GetProofSessionRequest,
+    ) -> RpcResult<GetProofSessionResponse> {
+        Ok(self.service.get_proof_session(request).await?)
     }
 
     async fn record_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-        worker_id: String,
-        lock_id: LockId,
-        backend_session_id: String,
-        state: BackendSessionStatus,
-        failure_reason: Option<String>,
-    ) -> RpcResult<()> {
-        Ok(self
-            .service
-            .record_proof_session(
-                proof_id,
-                session_type,
-                worker_id,
-                lock_id,
-                backend_session_id,
-                state,
-                failure_reason,
-            )
-            .await?)
+        request: RecordProofSessionRequest,
+    ) -> RpcResult<RecordProofSessionResponse> {
+        Ok(self.service.record_proof_session(request).await?)
     }
 
-    async fn heartbeat(
-        &self,
-        proof_id: ProofRequestId,
-        worker_id: String,
-        lock: LockId,
-    ) -> RpcResult<()> {
-        Ok(self.service.heartbeat(proof_id, worker_id, lock).await?)
+    async fn heartbeat(&self, request: HeartbeatRequest) -> RpcResult<HeartbeatResponse> {
+        Ok(self.service.heartbeat(request).await?)
     }
 }
 
@@ -455,67 +404,49 @@ impl ProofRequester for RpcProverServiceClient {
 impl ProofJobQueue for RpcProverServiceClient {
     async fn get_next_proof(
         &self,
-        backend: ProofBackend,
-        worker_id: String,
-    ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
-        ProverServiceApiClient::get_next_proof(&self.client, backend, worker_id)
+        request: GetNextProofRequest,
+    ) -> Result<GetNextProofResponse, ProofJobQueueError> {
+        ProverServiceApiClient::get_next_proof(&self.client, request)
             .await
             .map_err(|err| map_job_error(err, ProofRequestId(Default::default())))
     }
 
     async fn submit_proof(
         &self,
-        proof: SucceededProofResponse,
-        worker_id: String,
-        lock: LockId,
-    ) -> Result<(), ProofJobQueueError> {
-        let id = proof.id;
-        ProverServiceApiClient::submit_proof(&self.client, proof, worker_id, lock)
+        request: SubmitProofRequest,
+    ) -> Result<SubmitProofResponse, ProofJobQueueError> {
+        let id = request.proof.id;
+        ProverServiceApiClient::submit_proof(&self.client, request)
             .await
             .map_err(|err| map_job_error(err, id))
     }
 
     async fn get_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-    ) -> Result<Option<BackendSession>, ProofJobQueueError> {
-        ProverServiceApiClient::get_proof_session(&self.client, proof_id, session_type)
+        request: GetProofSessionRequest,
+    ) -> Result<GetProofSessionResponse, ProofJobQueueError> {
+        let proof_id = request.proof_id;
+        ProverServiceApiClient::get_proof_session(&self.client, request)
             .await
             .map_err(|err| map_job_error(err, proof_id))
     }
 
     async fn record_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-        worker_id: String,
-        lock_id: LockId,
-        backend_session_id: String,
-        state: BackendSessionStatus,
-        failure_reason: Option<String>,
-    ) -> Result<(), ProofJobQueueError> {
-        ProverServiceApiClient::record_proof_session(
-            &self.client,
-            proof_id,
-            session_type,
-            worker_id,
-            lock_id,
-            backend_session_id,
-            state,
-            failure_reason,
-        )
-        .await
-        .map_err(|err| map_job_error(err, proof_id))
+        request: RecordProofSessionRequest,
+    ) -> Result<RecordProofSessionResponse, ProofJobQueueError> {
+        let proof_id = request.proof_id;
+        ProverServiceApiClient::record_proof_session(&self.client, request)
+            .await
+            .map_err(|err| map_job_error(err, proof_id))
     }
 
     async fn heartbeat(
         &self,
-        proof_id: ProofRequestId,
-        worker_id: String,
-        lock: LockId,
-    ) -> Result<(), ProofJobQueueError> {
-        ProverServiceApiClient::heartbeat(&self.client, proof_id, worker_id, lock)
+        request: HeartbeatRequest,
+    ) -> Result<HeartbeatResponse, ProofJobQueueError> {
+        let proof_id = request.proof_id;
+        ProverServiceApiClient::heartbeat(&self.client, request)
             .await
             .map_err(|err| map_job_error(err, proof_id))
     }

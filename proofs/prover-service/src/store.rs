@@ -7,9 +7,12 @@ use crate::{
         ProverServiceInitError, TooManyRetriesErrorData,
     },
     types::{
-        BackendSession, BackendSessionStatus, FailedProofResponse, LockId, LockedProofRequest,
-        PendingProofResponse, ProofBackend, ProofJobStatus, ProofRequest, ProofRequestId,
-        ProofResponse, ProofStatus, SessionType, SucceededProofResponse,
+        BackendSession, BackendSessionStatus, FailedProofResponse, GetNextProofRequest,
+        GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse, HeartbeatRequest,
+        HeartbeatResponse, LockId, LockedProofRequest, PendingProofResponse, ProofBackend,
+        ProofJobStatus, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
+        RecordProofSessionRequest, RecordProofSessionResponse, SubmitProofRequest,
+        SubmitProofResponse, SucceededProofResponse,
     },
 };
 use alloy_primitives::{Address, B256};
@@ -294,9 +297,9 @@ impl ProverServiceStore {
 
     pub(crate) async fn get_next_proof(
         &self,
-        backend: ProofBackend,
-        worker_id: String,
-    ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
+        request: GetNextProofRequest,
+    ) -> Result<GetNextProofResponse, ProofJobQueueError> {
+        let GetNextProofRequest { backend, worker_id } = request;
         let lock_id = LockId::new();
         let now = Utc::now();
         let lock_expires_at = now + self.config.lock_timeout;
@@ -341,17 +344,24 @@ impl ProverServiceStore {
 
         if let Some(row) = query {
             let request = request_from_row(&row)?;
-            Ok(Some(LockedProofRequest { request, lock_id }))
+            Ok(GetNextProofResponse {
+                locked_request: Some(LockedProofRequest { request, lock_id }),
+            })
         } else {
-            Ok(None)
+            Ok(GetNextProofResponse {
+                locked_request: None,
+            })
         }
     }
 
     pub(crate) async fn get_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-    ) -> Result<Option<BackendSession>, ProofJobQueueError> {
+        request: GetProofSessionRequest,
+    ) -> Result<GetProofSessionResponse, ProofJobQueueError> {
+        let GetProofSessionRequest {
+            proof_id,
+            session_type,
+        } = request;
         let row = sqlx::query(
             r#"
             SELECT ps.backend_session_id, ps.status
@@ -392,19 +402,22 @@ impl ProverServiceStore {
             None
         };
 
-        Ok(session)
+        Ok(GetProofSessionResponse { session })
     }
 
     pub(crate) async fn record_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-        worker_id: String,
-        lock_id: LockId,
-        backend_session_id: String,
-        status: BackendSessionStatus,
-        failure_reason: Option<String>,
-    ) -> Result<(), ProofJobQueueError> {
+        request: RecordProofSessionRequest,
+    ) -> Result<RecordProofSessionResponse, ProofJobQueueError> {
+        let RecordProofSessionRequest {
+            proof_id,
+            session_type,
+            worker_id,
+            lock_id,
+            backend_session_id,
+            status,
+            failure_reason,
+        } = request;
         let now = Utc::now();
         let mut tx = self.begin_queue_tx().await?;
         let claim = sqlx::query(
@@ -481,7 +494,7 @@ impl ProverServiceStore {
                 .map_err(ProofJobQueueError::UnknownBackendSessionStatus)?;
             if stored.is_terminal() {
                 if stored == status {
-                    return Ok(());
+                    return Ok(RecordProofSessionResponse {});
                 }
                 return Err(ProofJobQueueError::BackendSessionAlreadyTerminal(
                     BackendSessionAlreadyTerminalErrorData {
@@ -566,15 +579,18 @@ impl ProverServiceStore {
 
         tx.commit().await?;
 
-        Ok(())
+        Ok(RecordProofSessionResponse {})
     }
 
     pub(crate) async fn submit_proof(
         &self,
-        proof: SucceededProofResponse,
-        worker_id: String,
-        lock_id: LockId,
-    ) -> Result<(), ProofJobQueueError> {
+        request: SubmitProofRequest,
+    ) -> Result<SubmitProofResponse, ProofJobQueueError> {
+        let SubmitProofRequest {
+            proof,
+            worker_id,
+            lock_id,
+        } = request;
         let now = Utc::now();
         let row = sqlx::query(
             r#"
@@ -655,9 +671,9 @@ impl ProverServiceStore {
 
         if let Some(_row) = row {
             // db is updated, return successfully
-            Ok(())
+            Ok(SubmitProofResponse {})
         } else {
-            // re-read the row to anaylize the error or return Ok(()) if the proof
+            // re-read the row to anaylize the error or return success if the proof
             // has already been submitted (idempotency).
             let row = sqlx::query(
                 r#"
@@ -689,7 +705,7 @@ impl ProverServiceStore {
                 let stored_proof_data: ProofData = serde_json::from_slice(&stored_proof_data_vec)?;
                 if stored_proof_data == proof.proof {
                     // proof has already been submitted - no op
-                    return Ok(());
+                    return Ok(SubmitProofResponse {});
                 } else {
                     return Err(ProofJobQueueError::ProofMismatch(Box::new(
                         ProofMismatchErrorData {
@@ -727,10 +743,13 @@ impl ProverServiceStore {
 
     pub(crate) async fn heartbeat(
         &self,
-        proof_id: ProofRequestId,
-        worker_id: String,
-        lock_id: LockId,
-    ) -> Result<(), ProofJobQueueError> {
+        request: HeartbeatRequest,
+    ) -> Result<HeartbeatResponse, ProofJobQueueError> {
+        let HeartbeatRequest {
+            proof_id,
+            worker_id,
+            lock_id,
+        } = request;
         let now = Utc::now();
         let next_lock_expiration = now + self.config.lock_timeout;
         let maybe_row = sqlx::query(
@@ -758,7 +777,7 @@ impl ProverServiceStore {
 
         if maybe_row.is_some() {
             // row updated, return successfully
-            Ok(())
+            Ok(HeartbeatResponse {})
         } else {
             // read the row to return a better error
             let row = sqlx::query(

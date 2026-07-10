@@ -1,7 +1,9 @@
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::warn;
-use world_chain_prover_service::{LockId, ProofJobQueue, ProofJobQueueError, ProofRequestId};
+use world_chain_prover_service::{
+    HeartbeatRequest, LockId, ProofJobQueue, ProofJobQueueError, ProofRequestId,
+};
 
 /// Minimum proof-generation heartbeat interval.
 pub const MIN_WORKER_HEARTBEAT_INTERVAL: Duration = Duration::from_millis(1);
@@ -101,7 +103,11 @@ impl<Q: ProofJobQueue> WorkerHeartbeat<Q> {
 
             match self
                 .queue
-                .heartbeat(self.proof_id, self.worker_id.clone(), self.lock_id)
+                .heartbeat(HeartbeatRequest {
+                    proof_id: self.proof_id,
+                    worker_id: self.worker_id.clone(),
+                    lock_id: self.lock_id,
+                })
                 .await
             {
                 Ok(_) => {

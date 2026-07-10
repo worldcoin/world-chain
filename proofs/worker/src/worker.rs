@@ -15,7 +15,8 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{Instrument, info, info_span, warn};
 use world_chain_prover_service::{
-    LockedProofRequest, ProofJobQueue, ProofJobQueueError, SucceededProofResponse,
+    GetNextProofRequest, LockedProofRequest, ProofJobQueue, ProofJobQueueError, SubmitProofRequest,
+    SucceededProofResponse,
 };
 
 use crate::{
@@ -173,26 +174,30 @@ async fn run_worker<Q, B>(
         let claimed = tokio::select! {
             biased;
             () = cancel.cancelled() => break,
-            claimed = queue.get_next_proof(lane, config.worker_id.clone()) => claimed,
+            claimed = queue.get_next_proof(GetNextProofRequest {
+                backend: lane,
+                worker_id: config.worker_id.clone(),
+            }) => claimed,
         };
 
         match claimed {
-            Ok(Some(locked)) => {
-                spawn_job(
-                    &mut jobs,
-                    &queue,
-                    &backend,
-                    &config.worker_id,
-                    locked,
-                    permit,
-                    config.retry_config,
-                    config.heartbeat_config,
-                );
-            }
-            Ok(None) => {
-                drop(permit);
-                if sleep_or_cancel(&cancel, config.poll_interval).await {
-                    break;
+            Ok(response) => {
+                if let Some(locked) = response.locked_request {
+                    spawn_job(
+                        &mut jobs,
+                        &queue,
+                        &backend,
+                        &config.worker_id,
+                        locked,
+                        permit,
+                        config.retry_config,
+                        config.heartbeat_config,
+                    );
+                } else {
+                    drop(permit);
+                    if sleep_or_cancel(&cancel, config.poll_interval).await {
+                        break;
+                    }
                 }
             }
             Err(error) => {
@@ -299,7 +304,11 @@ fn spawn_job<Q, B>(
             let submit_proof = async {
                 (|| async {
                     queue
-                        .submit_proof(response.clone(), worker_id.clone(), lock_id)
+                        .submit_proof(SubmitProofRequest {
+                            proof: response.clone(),
+                            worker_id: worker_id.clone(),
+                            lock_id,
+                        })
                         .await
                 })
                 .retry(retry_config.to_backoff_builder())
@@ -322,7 +331,11 @@ fn spawn_job<Q, B>(
                         // Ok(()) if everything is fine.
                         (|| async {
                             queue
-                                .submit_proof(response.clone(), worker_id.clone(), lock_id)
+                                .submit_proof(SubmitProofRequest {
+                                    proof: response.clone(),
+                                    worker_id: worker_id.clone(),
+                                    lock_id,
+                                })
                                 .await
                         })
                         .retry(retry_config.to_backoff_builder())
@@ -339,7 +352,7 @@ fn spawn_job<Q, B>(
             };
 
             match submit_result {
-                Ok(()) => info!("proof submitted"),
+                Ok(_) => info!("proof submitted"),
                 Err(error) => warn!(
                     %error,
                     "failed to submit proof after retries, lease will expire and re-queue"
