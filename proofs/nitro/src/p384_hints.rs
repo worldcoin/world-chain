@@ -457,7 +457,7 @@ mod tests {
     /// (one 384-bit inverse per slot).
     #[test]
     fn hints_length_is_multiple_of_48() {
-        let sk = SigningKey::random(&mut rand::thread_rng());
+        let sk = SigningKey::random(&mut rand::rng());
         let (hash, sig, pubkey) = sign_p384(&sk, b"hello world");
         let hints = collect_hints(&hash, &sig, &pubkey).expect("collect_hints failed");
         assert!(!hints.is_empty(), "hints must not be empty");
@@ -471,7 +471,7 @@ mod tests {
     /// is all-zeros (which would trivially fail the on-chain `b·inv ≡ 1` check).
     #[test]
     fn hints_are_nonzero() {
-        let sk = SigningKey::random(&mut rand::thread_rng());
+        let sk = SigningKey::random(&mut rand::rng());
         let (hash, sig, pubkey) = sign_p384(&sk, b"test message");
         let hints = collect_hints(&hash, &sig, &pubkey).expect("collect_hints failed");
         for (i, chunk) in hints.chunks(48).enumerate() {
@@ -493,7 +493,7 @@ mod tests {
     fn collect_hints_round_trip_verifies() {
         use p384::ecdsa::{VerifyingKey, signature::Verifier};
 
-        let sk = SigningKey::random(&mut rand::thread_rng());
+        let sk = SigningKey::random(&mut rand::rng());
         let vk: VerifyingKey = *sk.verifying_key();
         let msg = b"nitro enclave attestation round-trip test";
         let (hash, sig_bytes, pubkey) = sign_p384(&sk, msg);
@@ -516,7 +516,7 @@ mod tests {
     /// `collect_hints` must reject an all-zero signature.
     #[test]
     fn collect_hints_rejects_zero_r() {
-        let sk = SigningKey::random(&mut rand::thread_rng());
+        let sk = SigningKey::random(&mut rand::rng());
         let (hash, _, pubkey) = sign_p384(&sk, b"test");
         let bad_sig = vec![0u8; 96];
         assert!(collect_hints(&hash, &bad_sig, &pubkey).is_err());
@@ -525,7 +525,7 @@ mod tests {
     /// `collect_hints` must reject a pubkey that is not on the P-384 curve.
     #[test]
     fn collect_hints_rejects_off_curve_pubkey() {
-        let sk = SigningKey::random(&mut rand::thread_rng());
+        let sk = SigningKey::random(&mut rand::rng());
         let (hash, sig, _) = sign_p384(&sk, b"test");
         let bad_pubkey = vec![1u8; 96]; // almost certainly not on the curve
         assert!(collect_hints(&hash, &sig, &bad_pubkey).is_err());
