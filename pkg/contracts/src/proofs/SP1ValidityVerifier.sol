@@ -18,7 +18,7 @@ struct AggregationOutputs {
 }
 
 /// @title SP1ValidityVerifier
-/// @author Worldcoin
+/// @author World Contributors
 /// @notice SP1 validity-proof lane verifier compatible with WIP-1006's
 ///         multi-proof system (`IWorldChainProofVerifier`).
 /// @dev The verifier checks the SP1 aggregation proof with Succinct's verifier
