@@ -48,7 +48,7 @@ pub struct HashRollupConfigArgs {
     #[arg(long, env = "ROLLUP_CONFIG", conflicts_with = "l2_rpc")]
     pub rollup_config: Option<PathBuf>,
 
-    /// L2 RPC URL to fetch the rollup config from. Mutually exclusive with --rollup-config.
+    /// L2 consensus RPC URL to fetch the rollup config from. Mutually exclusive with --rollup-config.
     #[arg(long, env = "L2_RPC_URL", conflicts_with = "rollup_config")]
     pub l2_rpc: Option<String>,
 }
@@ -75,7 +75,8 @@ pub struct RpcArgs {
     #[arg(long, env = "L1_BEACON_RPC_URL")]
     pub l1_beacon_rpc: String,
 
-    /// Rollup config JSON file. If omitted, uses the built-in World Chain mainnet config.
+    /// Rollup config JSON file. If omitted, uses the selected network's built-in fork schedule
+    /// and requires --rollup-config-hash.
     #[arg(long, env = "ROLLUP_CONFIG")]
     pub rollup_config: Option<PathBuf>,
 
