@@ -2,7 +2,7 @@
 //! submits the proofs back.
 
 use alloy_primitives::{Address, B256};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use world_chain_chainspec::WorldChainSpec;
@@ -198,6 +198,13 @@ async fn main() -> Result<()> {
         &protocol_cfg,
         Duration::from_secs(cli.witness_timeout_seconds),
     )?;
+
+    // currently we don't support split_range != 1, therefore we ensure it's exactly 1
+    if cli.ranges != 1 {
+        bail!(
+            "Currently we don't support splitting the range proof into multiple ranges. Set `ranges` to 1."
+        )
+    }
 
     // ELFs are embedded at compile time via `sp1_sdk::include_elf!()`
     // (see `proofs/succinct/elfs/build.rs`). Challenged roots are
