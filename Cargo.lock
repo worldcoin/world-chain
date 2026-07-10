@@ -19274,6 +19274,7 @@ dependencies = [
  "world-chain-proof-core",
  "world-chain-proof-succinct-elfs",
  "world-chain-proof-succinct-host-utils",
+ "world-chain-proof-succinct-utils",
  "world-chain-prover",
 ]
 
