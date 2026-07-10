@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import {IWorldChainAnchorStateRegistry} from "./interfaces/IWorldChainAnchorStateRegistry.sol";
 import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.sol";
+import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
 import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
 import {WorldChainProofLib} from "./WorldChainProofLib.sol";
 
@@ -43,6 +45,9 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     /// @notice Thrown when the expected range program verification key is zero.
     error ZeroRangeVKeyCommitment();
 
+    /// @notice Thrown when the anchor-state registry address is zero.
+    error ZeroAnchorStateRegistry();
+
     /*//////////////////////////////////////////////////////////////
                                STORAGE
     //////////////////////////////////////////////////////////////*/
@@ -59,6 +64,9 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     /// @notice Range-program verification key committed by the aggregation proof.
     bytes32 public immutable rangeVKeyCommitment;
 
+    /// @notice Anchor-state registry used when the proposal parent is the current anchor.
+    address public immutable anchorStateRegistry;
+
     /*//////////////////////////////////////////////////////////////
                              CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
@@ -67,17 +75,20 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
         ISP1Verifier sp1Verifier_,
         bytes32 aggregationVKey_,
         bytes32 rollupConfigHash_,
-        bytes32 rangeVKeyCommitment_
+        bytes32 rangeVKeyCommitment_,
+        address anchorStateRegistry_
     ) {
         if (address(sp1Verifier_) == address(0)) revert ZeroSP1Verifier();
         if (aggregationVKey_ == bytes32(0)) revert ZeroAggregationVKey();
         if (rollupConfigHash_ == bytes32(0)) revert ZeroRollupConfigHash();
         if (rangeVKeyCommitment_ == bytes32(0)) revert ZeroRangeVKeyCommitment();
+        if (anchorStateRegistry_ == address(0)) revert ZeroAnchorStateRegistry();
 
         sp1Verifier = sp1Verifier_;
         aggregationVKey = aggregationVKey_;
         rollupConfigHash = rollupConfigHash_;
         rangeVKeyCommitment = rangeVKeyCommitment_;
+        anchorStateRegistry = anchorStateRegistry_;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -143,7 +154,18 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
         );
         if (expectedRootId != rootId) return false;
 
+        // `rootId` commits to the parent reference address, so the SP1 public
+        // values must separately bind the proved pre-root to that parent's root.
+        if (outputs.l2PreRoot != _parentRootClaim(parentRef)) return false;
+
         sp1Verifier.verifyProof(aggregationVKey, publicValues, proofBytes);
         return true;
+    }
+
+    function _parentRootClaim(address parentRef) internal view returns (bytes32) {
+        if (parentRef == anchorStateRegistry) {
+            return IWorldChainAnchorStateRegistry(parentRef).currentRootClaim();
+        }
+        return IWorldChainProofSystemGame(parentRef).rootClaim();
     }
 }
