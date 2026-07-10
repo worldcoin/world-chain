@@ -87,6 +87,12 @@ async fn worker_proves_real_range_end_to_end() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1);
+    // currently we don't support split_range != 1, therefore we ensure it's exactly 1
+    if split_count != 1 {
+        panic!(
+            "Currently we don't support splitting the range proof into multiple ranges. Set `ranges` to 1."
+        )
+    }
     let timeout = Duration::from_secs(
         std::env::var("E2E_TIMEOUT_SECS")
             .ok()
