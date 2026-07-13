@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 #[cfg(target_os = "linux")]
 use anyhow::Context;
 use anyhow::{Result, bail};
@@ -29,24 +27,10 @@ enum Command {
     /// Fetch a bare attestation document from a running Nitro enclave.
     ///
     /// This does not run any proof — it simply asks the enclave's NSM device for an
-    /// attestation document and returns the raw COSE_Sign1 bytes. Useful for
-    /// CertManager pre-warm workflows.
-    GetAttestation(GetAttestationArgs),
-}
-
-#[derive(Debug, Args)]
-struct GetAttestationArgs {
-    /// vsock CID of the running Nitro enclave.
-    #[arg(long, env = "ENCLAVE_CID", default_value_t = 16)]
-    cid: u32,
-
-    /// vsock port the enclave is listening on.
-    #[arg(long, env = "ENCLAVE_PORT", default_value_t = 5005)]
-    port: u32,
-
-    /// Write hex-encoded attestation to this file instead of stdout.
-    #[arg(long)]
-    output: Option<PathBuf>,
+    /// attestation document and prints the raw COSE_Sign1 bytes as hex to stdout.
+    /// Useful for CertManager pre-warm workflows. Connects to CID 16 on the default
+    /// vsock port. Pipe the output directly into hinted_attestation_calls.js.
+    GetAttestation,
 }
 
 #[derive(Debug, Args)]
@@ -87,27 +71,23 @@ async fn main() -> Result<()> {
         Command::HashRollupConfig(args) => print_rollup_config_hash(args).await?,
         Command::Witness(args) => write_witness(args).await?,
         Command::Prove(args) => nitro_prove(args).await?,
-        Command::GetAttestation(args) => get_attestation(args).await?,
+        Command::GetAttestation => get_attestation().await?,
     }
 
     Ok(())
 }
 
 #[cfg(target_os = "linux")]
-async fn get_attestation(args: GetAttestationArgs) -> Result<()> {
+async fn get_attestation() -> Result<()> {
     use world_chain_proof_nitro::{
         ExpectedPcrs,
         host::{EnclaveEndpoint, NitroProver},
+        protocol::DEFAULT_VSOCK_PORT,
     };
 
     let prover = NitroProver::new(
-        EnclaveEndpoint::with_port(args.cid, args.port),
+        EnclaveEndpoint::with_port(16, DEFAULT_VSOCK_PORT),
         ExpectedPcrs::PLACEHOLDER,
-    );
-
-    eprintln!(
-        "requesting bare attestation from enclave (cid={}, port={})",
-        args.cid, args.port
     );
 
     let attestation_doc = prover
@@ -115,21 +95,13 @@ async fn get_attestation(args: GetAttestationArgs) -> Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("get_attestation failed: {e}"))?;
 
-    let hex_encoded = hex::encode(&attestation_doc);
-
-    if let Some(output) = args.output {
-        std::fs::write(&output, &hex_encoded)
-            .with_context(|| format!("failed to write to {}", output.display()))?;
-        eprintln!("attestation written to {} ({} bytes)", output.display(), attestation_doc.len());
-    } else {
-        println!("{hex_encoded}");
-    }
+    println!("{}", hex::encode(&attestation_doc));
 
     Ok(())
 }
 
 #[cfg(not(target_os = "linux"))]
-async fn get_attestation(_args: GetAttestationArgs) -> Result<()> {
+async fn get_attestation() -> Result<()> {
     bail!("get-attestation requires Linux with AF_VSOCK support")
 }
 
