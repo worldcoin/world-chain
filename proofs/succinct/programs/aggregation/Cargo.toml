@@ -16,4 +16,3 @@ sha2.workspace = true
 sp1-lib.workspace = true
 sp1-zkvm.workspace = true
 world-chain-proof-core.workspace = true
-world-chain-proof-succinct-client-utils.workspace = true
