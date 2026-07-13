@@ -10,7 +10,9 @@ use world_chain_defender::{DefenderConfig, WorldChainDefender};
 use world_chain_proof_integration_tests::{
     BLOCK_INTERVAL, FakeConsensus, FakeExecution, FakeProofBackend, SharedProverService,
 };
-use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig, RetryConfig};
+use world_chain_proof_worker::{
+    ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
+};
 use world_chain_proofs::{ProofLane, RootState};
 use world_chain_proposer::{ProposerConfig, WorldChainProposer};
 use world_chain_prover_service::{ProofBackend, ProverServiceConfig};
@@ -89,6 +91,7 @@ async fn start_proof_stack_with(
             max_attempts: 2,
             max_retries: 2,
             backend_poll_interval: Duration::from_millis(5),
+            status_poller_interval: Duration::from_millis(5),
         },
     )
     .await
@@ -102,6 +105,7 @@ async fn start_proof_stack_with(
             poll_interval: Duration::from_millis(5),
             max_concurrent_jobs: 1,
             retry_config: RetryConfig::default(),
+            heartbeat_config: WorkerHeartbeatConfig::default(),
         },
     );
     let sp1_cancel = sp1_worker.cancellation_token();
@@ -115,6 +119,7 @@ async fn start_proof_stack_with(
             poll_interval: Duration::from_millis(5),
             max_concurrent_jobs: 1,
             retry_config: RetryConfig::default(),
+            heartbeat_config: WorkerHeartbeatConfig::default(),
         },
     );
     let nitro_cancel = nitro_worker.cancellation_token();

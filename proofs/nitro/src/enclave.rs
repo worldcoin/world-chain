@@ -1,8 +1,8 @@
 //! Enclave-side library code.
 //!
 //! This is the worker loop the `world-chain-nitro-enclave` binary runs inside the Nitro
-//! Enclave. It listens on vsock, runs the same OP Succinct Lite range/aggregation logic the
-//! SP1 guest does, and attests the result via the local NSM device.
+//! Enclave. It listens on vsock, runs the same OP Succinct Lite range logic the SP1 guest
+//! does, and attests the result via the local NSM device.
 //!
 //! Gated behind the `enclave` feature so the heavy kona / NSM dependencies are not pulled
 //! into the host build.
@@ -16,13 +16,11 @@
 //! - **Certified**: the public key is embedded in NSM attestation documents via
 //!   [`EnclaveRequest::PublicKey`], binding it to the enclave's PCR measurements.
 //!
-//! Every [`EnclaveResponse::Range`] and [`EnclaveResponse::Aggregation`] includes a 65-byte
-//! recoverable secp256k1 signature over
+//! Every [`EnclaveResponse::Range`] includes a 65-byte recoverable secp256k1 signature over
 //! `keccak256(l2_post_root ‖ l2_block_number_be ‖ rollup_config_hash)`.
 
 use std::sync::{Arc, OnceLock};
 
-use alloy_consensus::Header;
 use anyhow::{Context, Result, anyhow};
 use aws_nitro_enclaves_nsm_api::{
     api::{Request as NsmRequest, Response as NsmResponse},
@@ -38,7 +36,6 @@ use world_chain_proof_core::{
     BlobStore,
     boot::BootInfoStruct,
     range::{WorldRangeHardforkConfig, WorldRangeProofPublicValues},
-    types::AggregationInputs,
     witness::{WitnessData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
 use world_chain_proof_kona_client_utils::{
@@ -240,15 +237,6 @@ async fn dispatch(request: EnclaveRequest) -> Result<EnclaveResponse> {
             check_version(version)?;
             handle_range(witness_rkyv, expected_public_values, nonce).await
         }
-        EnclaveRequest::Aggregation {
-            version,
-            inputs,
-            l1_headers_cbor,
-            nonce,
-        } => {
-            check_version(version)?;
-            handle_aggregation(inputs, l1_headers_cbor, nonce).await
-        }
         EnclaveRequest::PublicKey { nonce } => handle_public_key(nonce),
     }
 }
@@ -304,77 +292,6 @@ async fn handle_range(
     let attestation_doc = request_attestation_doc(Some(&user_data), &nonce)?;
 
     Ok(EnclaveResponse::Range {
-        boot_info,
-        attestation_doc,
-        signature,
-    })
-}
-
-async fn handle_aggregation(
-    inputs: AggregationInputs,
-    l1_headers_cbor: Vec<u8>,
-    nonce: [u8; 32],
-) -> Result<EnclaveResponse> {
-    let first = inputs
-        .boot_infos
-        .first()
-        .ok_or_else(|| anyhow!("aggregation requires at least one range boot info"))?;
-    let last = inputs.boot_infos.last().expect("checked non-empty above");
-
-    // Verify consecutive range chain (same checks as the SP1 aggregation program).
-    for pair in inputs.boot_infos.windows(2) {
-        let (prev, next) = (&pair[0], &pair[1]);
-        if prev.l2PostRoot != next.l2PreRoot {
-            return Err(anyhow!("range chain broken: l2PostRoot/l2PreRoot mismatch"));
-        }
-        if prev.rollupConfigHash != next.rollupConfigHash {
-            return Err(anyhow!("range chain broken: rollupConfigHash mismatch"));
-        }
-    }
-
-    // Decode and verify the L1 header chain.
-    let headers: Vec<Header> = serde_cbor::from_slice(&l1_headers_cbor)
-        .map_err(|e| anyhow!("failed to decode L1 headers: {e}"))?;
-
-    let mut l1_heads_map: std::collections::HashMap<alloy_primitives::B256, bool> = inputs
-        .boot_infos
-        .iter()
-        .map(|bi| (bi.l1Head, false))
-        .collect();
-
-    let mut current_hash = inputs.latest_l1_checkpoint_head;
-    for header in headers.iter().rev() {
-        if header.hash_slow() != current_hash {
-            return Err(anyhow!("L1 header chain hash mismatch at {current_hash}"));
-        }
-        if let Some(found) = l1_heads_map.get_mut(&current_hash) {
-            *found = true;
-        }
-        current_hash = header.parent_hash;
-    }
-
-    for (l1_head, found) in &l1_heads_map {
-        if !found {
-            return Err(anyhow!(
-                "l1Head {l1_head:?} not found in the provided header chain"
-            ));
-        }
-    }
-
-    let boot_info = BootInfoStruct {
-        l1Head: inputs.latest_l1_checkpoint_head,
-        l2PreRoot: first.l2PreRoot,
-        l2PostRoot: last.l2PostRoot,
-        l2BlockNumber: last.l2BlockNumber,
-        rollupConfigHash: last.rollupConfigHash,
-    };
-
-    let signature = sign_boot_info(&boot_info)?;
-
-    let user_data = protocol::aggregation_user_data(&boot_info, &inputs);
-    let attestation_doc = request_attestation_doc(Some(&user_data), &nonce)?;
-
-    Ok(EnclaveResponse::Aggregation {
         boot_info,
         attestation_doc,
         signature,

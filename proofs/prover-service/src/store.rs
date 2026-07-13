@@ -7,9 +7,12 @@ use crate::{
         ProverServiceInitError, TooManyRetriesErrorData,
     },
     types::{
-        BackendSession, BackendSessionStatus, FailedProofResponse, LockId, LockedProofRequest,
-        PendingProofResponse, ProofBackend, ProofJobStatus, ProofRequest, ProofRequestId,
-        ProofResponse, ProofStatus, SessionType, SucceededProofResponse,
+        BackendSession, BackendSessionStatus, FailedProofResponse, GetNextProofRequest,
+        GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse, HeartbeatRequest,
+        HeartbeatResponse, LockId, LockedProofRequest, PendingProofResponse, ProofBackend,
+        ProofJobStatus, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
+        RecordProofSessionRequest, RecordProofSessionResponse, SubmitProofRequest,
+        SubmitProofResponse, SucceededProofResponse,
     },
 };
 use alloy_primitives::{Address, B256};
@@ -19,6 +22,7 @@ use sqlx::{
     migrate::{MigrateError, Migrator},
     postgres::{PgPoolOptions, PgRow},
 };
+use tracing::info;
 use uuid::Uuid;
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
@@ -168,6 +172,13 @@ impl ProverServiceStore {
             .execute(&mut *tx)
             .await?;
 
+            info!(
+                proof_id = %id,
+                retry_count = retry_count + 1,
+                max_retries = self.config.max_retries,
+                "re-queued failed proof request"
+            );
+
             tx.commit().await?;
             Ok(id)
         } else {
@@ -226,11 +237,69 @@ impl ProverServiceStore {
         }
     }
 
+    pub(crate) async fn mark_exhausted_proof_requests_failed(&self) -> Result<u64, sqlx::Error> {
+        let now = Utc::now();
+        let reason = format!(
+            "proof request exhausted max attempts ({})",
+            self.config.max_attempts
+        );
+        let row = sqlx::query(
+            r#"
+            WITH failed_requests AS (
+                UPDATE proof_requests
+                SET proof_status = $1,
+                    job_status = $2,
+                    failure_reason = $3,
+                    worker_id = NULL,
+                    lock_id = NULL,
+                    lock_expires_at = NULL,
+                    updated_at = $4,
+                    finished_at = $4
+                WHERE attempt >= $5
+                    AND (proof_status = $6 OR proof_status = $7)
+                    AND (
+                        job_status = $8
+                        OR (job_status = $9 AND lock_expires_at < $4)
+                    )
+                RETURNING proof_id
+            ),
+            failed_sessions AS (
+                UPDATE proof_sessions
+                SET status = $10,
+                    failure_reason = $3,
+                    completed_at = $4
+                WHERE proof_id IN (SELECT proof_id FROM failed_requests)
+                    AND (status = $11 OR status = $12)
+                RETURNING id
+            )
+            SELECT COUNT(*) AS failed_request_count
+            FROM failed_requests
+            "#,
+        )
+        .bind(ProofStatus::Failed.as_str())
+        .bind(ProofJobStatus::Failed.as_str())
+        .bind(reason)
+        .bind(now)
+        .bind(self.config.max_attempts as i32)
+        .bind(ProofStatus::Created.as_str())
+        .bind(ProofStatus::Running.as_str())
+        .bind(ProofJobStatus::Pending.as_str())
+        .bind(ProofJobStatus::Claimed.as_str())
+        .bind(BackendSessionStatus::Failed.as_str())
+        .bind(BackendSessionStatus::Submitting.as_str())
+        .bind(BackendSessionStatus::Running.as_str())
+        .fetch_one(&self.pool)
+        .await?;
+
+        let failed_request_count: i64 = row.get("failed_request_count");
+        Ok(failed_request_count as u64)
+    }
+
     pub(crate) async fn get_next_proof(
         &self,
-        backend: ProofBackend,
-        worker_id: String,
-    ) -> Result<Option<LockedProofRequest>, ProofJobQueueError> {
+        request: GetNextProofRequest,
+    ) -> Result<GetNextProofResponse, ProofJobQueueError> {
+        let GetNextProofRequest { backend, worker_id } = request;
         let lock_id = LockId::new();
         let now = Utc::now();
         let lock_expires_at = now + self.config.lock_timeout;
@@ -247,9 +316,10 @@ impl ProverServiceStore {
             WHERE proof_id = (
                 SELECT proof_id FROM proof_requests
                 WHERE backend = $7
+                    AND attempt < $8
                     AND (
-                        job_status = $8
-                        OR (job_status = $9 AND lock_expires_at < $10 AND attempt < $11)
+                        job_status = $9
+                        OR (job_status = $10 AND lock_expires_at < $11)
                     ) 
                 ORDER BY l2_block_number ASC, created_at ASC, proof_id ASC
                 FOR UPDATE SKIP LOCKED
@@ -265,26 +335,33 @@ impl ProverServiceStore {
         .bind(lock_expires_at)
         .bind(now)
         .bind(backend.as_str())
+        .bind(self.config.max_attempts as i32)
         .bind(ProofJobStatus::Pending.as_str())
         .bind(ProofJobStatus::Claimed.as_str())
         .bind(now)
-        .bind(self.config.max_attempts as i32)
         .fetch_optional(&self.pool)
         .await?;
 
         if let Some(row) = query {
             let request = request_from_row(&row)?;
-            Ok(Some(LockedProofRequest { request, lock_id }))
+            Ok(GetNextProofResponse {
+                locked_request: Some(LockedProofRequest { request, lock_id }),
+            })
         } else {
-            Ok(None)
+            Ok(GetNextProofResponse {
+                locked_request: None,
+            })
         }
     }
 
     pub(crate) async fn get_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-    ) -> Result<Option<BackendSession>, ProofJobQueueError> {
+        request: GetProofSessionRequest,
+    ) -> Result<GetProofSessionResponse, ProofJobQueueError> {
+        let GetProofSessionRequest {
+            proof_id,
+            session_type,
+        } = request;
         let row = sqlx::query(
             r#"
             SELECT ps.backend_session_id, ps.status
@@ -292,13 +369,22 @@ impl ProverServiceStore {
             JOIN proof_requests pr ON pr.proof_id = ps.proof_id
             WHERE pr.proof_id = $1
               AND ps.session_type = $2
-              AND (ps.status = $3 OR ps.status = $4)
+              AND ps.status IN ($3, $4, $5)
+            ORDER BY
+              CASE
+                WHEN ps.status IN ($3, $4) THEN 0
+                ELSE 1
+              END,
+              ps.completed_at DESC NULLS LAST,
+              ps.id DESC
+            LIMIT 1
             "#,
         )
         .bind(proof_id_bytes(proof_id))
         .bind(session_type.as_str())
         .bind(BackendSessionStatus::Submitting.as_str())
         .bind(BackendSessionStatus::Running.as_str())
+        .bind(BackendSessionStatus::Completed.as_str())
         .fetch_optional(&self.pool)
         .await?;
 
@@ -316,18 +402,22 @@ impl ProverServiceStore {
             None
         };
 
-        Ok(session)
+        Ok(GetProofSessionResponse { session })
     }
 
     pub(crate) async fn record_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-        worker_id: String,
-        lock_id: LockId,
-        backend_session_id: String,
-        status: BackendSessionStatus,
-    ) -> Result<(), ProofJobQueueError> {
+        request: RecordProofSessionRequest,
+    ) -> Result<RecordProofSessionResponse, ProofJobQueueError> {
+        let RecordProofSessionRequest {
+            proof_id,
+            session_type,
+            worker_id,
+            lock_id,
+            backend_session_id,
+            status,
+            failure_reason,
+        } = request;
         let now = Utc::now();
         let mut tx = self.begin_queue_tx().await?;
         let claim = sqlx::query(
@@ -404,7 +494,7 @@ impl ProverServiceStore {
                 .map_err(ProofJobQueueError::UnknownBackendSessionStatus)?;
             if stored.is_terminal() {
                 if stored == status {
-                    return Ok(());
+                    return Ok(RecordProofSessionResponse {});
                 }
                 return Err(ProofJobQueueError::BackendSessionAlreadyTerminal(
                     BackendSessionAlreadyTerminalErrorData {
@@ -453,7 +543,7 @@ impl ProverServiceStore {
             )
             .bind(backend_session_id)
             .bind(status.as_str())
-            .bind("failure reason".to_string()) // TODO: replace this with an input value
+            .bind(failure_reason)
             .bind(active_id)
             .bind(BackendSessionStatus::Submitting.as_str())
             .bind(BackendSessionStatus::Running.as_str())
@@ -489,15 +579,18 @@ impl ProverServiceStore {
 
         tx.commit().await?;
 
-        Ok(())
+        Ok(RecordProofSessionResponse {})
     }
 
     pub(crate) async fn submit_proof(
         &self,
-        proof: SucceededProofResponse,
-        worker_id: String,
-        lock_id: LockId,
-    ) -> Result<(), ProofJobQueueError> {
+        request: SubmitProofRequest,
+    ) -> Result<SubmitProofResponse, ProofJobQueueError> {
+        let SubmitProofRequest {
+            proof,
+            worker_id,
+            lock_id,
+        } = request;
         let now = Utc::now();
         let row = sqlx::query(
             r#"
@@ -578,9 +671,9 @@ impl ProverServiceStore {
 
         if let Some(_row) = row {
             // db is updated, return successfully
-            Ok(())
+            Ok(SubmitProofResponse {})
         } else {
-            // re-read the row to anaylize the error or return Ok(()) if the proof
+            // re-read the row to anaylize the error or return success if the proof
             // has already been submitted (idempotency).
             let row = sqlx::query(
                 r#"
@@ -612,7 +705,7 @@ impl ProverServiceStore {
                 let stored_proof_data: ProofData = serde_json::from_slice(&stored_proof_data_vec)?;
                 if stored_proof_data == proof.proof {
                     // proof has already been submitted - no op
-                    return Ok(());
+                    return Ok(SubmitProofResponse {});
                 } else {
                     return Err(ProofJobQueueError::ProofMismatch(Box::new(
                         ProofMismatchErrorData {
@@ -650,10 +743,13 @@ impl ProverServiceStore {
 
     pub(crate) async fn heartbeat(
         &self,
-        proof_id: ProofRequestId,
-        worker_id: String,
-        lock_id: LockId,
-    ) -> Result<(), ProofJobQueueError> {
+        request: HeartbeatRequest,
+    ) -> Result<HeartbeatResponse, ProofJobQueueError> {
+        let HeartbeatRequest {
+            proof_id,
+            worker_id,
+            lock_id,
+        } = request;
         let now = Utc::now();
         let next_lock_expiration = now + self.config.lock_timeout;
         let maybe_row = sqlx::query(
@@ -681,7 +777,7 @@ impl ProverServiceStore {
 
         if maybe_row.is_some() {
             // row updated, return successfully
-            Ok(())
+            Ok(HeartbeatResponse {})
         } else {
             // read the row to return a better error
             let row = sqlx::query(

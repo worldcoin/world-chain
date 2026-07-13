@@ -11,6 +11,9 @@ import {IPBHEntryPoint} from "../../src/interfaces/IPBHEntryPoint.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {Create2Factory} from "./Create2Deploy.sol";
 
+// TODO: add production WIP-1006 proof-system deployment wiring in a dedicated
+// script, including SP1ValidityVerifier as the validity lane with the Succinct
+// verifier gateway, aggregation vkey, range vkey commitment, and anchor registry.
 contract Deploy is Create2Factory, Script {
     address public pbhEntryPoint;
     address public pbhEntryPointImpl;

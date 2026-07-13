@@ -24,15 +24,12 @@ members = [
     "crates/evm",
     "crates/pbh",
     "proofs/core",
-    "proofs/protocol",
     "proofs/nitro",
     "proofs/nitro/worker",
     "proofs/prover-sp1",
     "proofs/prover-nitro",
     "proofs/kona-client",
     "proofs/kona-host",
-    "proofs/succinct/utils/client",
-    "proofs/succinct/utils/ethereum-client",
     "proofs/succinct/utils/host",
     "proofs/succinct/utils/proof",
     "proofs/succinct/elfs",
@@ -92,13 +89,10 @@ world-chain-prover = { path = "proofs/prover", default-features = false }
 world-chain-prover-sp1 = { path = "proofs/prover-sp1", default-features = false }
 world-chain-prover-nitro = { path = "proofs/prover-nitro", default-features = false }
 world-chain-proof-core = { path = "proofs/core", default-features = false }
-world-chain-proof-protocol = { path = "proofs/protocol", default-features = false }
 world-chain-proof-nitro = { path = "proofs/nitro", default-features = false }
 world-chain-proof-kona-client-utils = { path = "proofs/kona-client", default-features = false }
 world-chain-proof-kona-host-utils = { path = "proofs/kona-host", default-features = false }
 world-chain-nitro-worker = { path = "proofs/nitro/worker", default-features = false }
-world-chain-proof-succinct-client-utils = { path = "proofs/succinct/utils/client", default-features = false }
-world-chain-proof-succinct-ethereum-client-utils = { path = "proofs/succinct/utils/ethereum-client", default-features = false }
 world-chain-proof-succinct-elfs = { path = "proofs/succinct/elfs" }
 world-chain-proof-succinct-host-utils = { path = "proofs/succinct/utils/host", default-features = false }
 world-chain-proof-succinct-utils = { path = "proofs/succinct/utils/proof", default-features = false }

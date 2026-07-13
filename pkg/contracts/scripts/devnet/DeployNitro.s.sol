@@ -118,7 +118,7 @@ contract DeployNitro is Script {
         // (rawPcr* are the 48-byte SHA-384 values from `nitro-cli describe-eif`.)
         // ════════════════════════════════════════════════════════════════════
         console.log("");
-        console.log("NEXT STEPS (owner) — mandatory before any registerKey call:");
+        console.log("NEXT STEPS (owner) -- mandatory before any registerKey call:");
         console.log("  1. certManager.verifyCACertWithHints(cert, parentHash, hints) for each cert");
         console.log("     in the AWS Nitro PKI chain (root -> intermediates -> issuer).");
         console.log("     Use tools/hinted_attestation_calls.js to generate calls + hints.");

@@ -28,7 +28,6 @@ world-chain-proof-kona-host-utils.workspace = true
 
 # Chain config
 world-chain-chainspec.workspace = true
-world-chain-proof-protocol.workspace = true
 
 # Alloy types
 alloy-primitives = { workspace = true, features = ["serde"] }

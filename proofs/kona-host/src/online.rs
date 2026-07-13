@@ -22,14 +22,15 @@ use kona_proof::{CachingOracle, l1::OracleBlobProvider};
 use reqwest::Client;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
+use world_chain_chainspec::{WorldChainHardfork, WorldChainHardforks};
 use world_chain_proof_core::{
+    hash_rollup_config,
     range::{WorldRangeHardforkConfig, WorldRangeSpecId},
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
 use world_chain_proof_kona_client_utils::{
     ETHDAWitnessExecutor, OutputRootWitness, WitnessExecutor, get_inputs_for_pipeline,
 };
-use world_chain_proof_protocol::WorldHardforkConfig;
 
 const L1_BLOCK_PREDEPLOY: Address = address!("0x4200000000000000000000000000000000000015");
 const L2_TO_L1_MESSAGE_PASSER: Address = address!("0x4200000000000000000000000000000000000016");
@@ -73,15 +74,15 @@ impl OnlineHostConfig {
         rollup_config_path: Option<PathBuf>,
         witness_timeout: Duration,
     ) -> anyhow::Result<Self> {
-        let protocol = WorldHardforkConfig::from_rollup_config_value(rollup_config)
+        let schedule = serde_json::from_value(rollup_config.clone())
             .context("failed to parse rollup config hardforks")?;
-        let rollup_config_hash = world_chain_proof_protocol::hash_rollup_config(rollup_config)
-            .context("failed to hash rollup config")?;
+        let rollup_config_hash =
+            hash_rollup_config(rollup_config).context("failed to hash rollup config")?;
         Ok(Self {
             l1_rpc,
             l1_beacon_rpc,
             l2_rpc,
-            schedule: range_hardfork_config(&protocol),
+            schedule,
             rollup_config_hash,
             l2_chain_id: None,
             rollup_config_path,
@@ -90,28 +91,34 @@ impl OnlineHostConfig {
     }
 }
 
-/// Maps a protocol hardfork config to the range guest's fork schedule.
-pub fn range_hardfork_config(config: &WorldHardforkConfig) -> WorldRangeHardforkConfig {
+/// Builds the range guest's hardfork schedule from a World chain spec.
+pub fn hardfork_config_from_chain_spec<S>(chain_spec: &S) -> WorldRangeHardforkConfig
+where
+    S: WorldChainHardforks + ?Sized,
+{
+    let block_number = |fork| chain_spec.world_chain_fork_activation(fork).block_number();
+    let timestamp = |fork| chain_spec.world_chain_fork_activation(fork).as_timestamp();
+
     WorldRangeHardforkConfig {
-        bedrock_block: config.bedrock_block,
-        regolith_time: config.regolith_time,
-        canyon_time: config.canyon_time,
-        ecotone_time: config.ecotone_time,
-        fjord_time: config.fjord_time,
-        granite_time: config.granite_time,
-        holocene_time: config.holocene_time,
-        isthmus_time: config.isthmus_time,
-        jovian_time: config.jovian_time,
-        karst_time: config.karst_time,
-        tropo_time: config.tropo_time,
-        strato_time: config.strato_time,
+        bedrock_block: block_number(WorldChainHardfork::Bedrock),
+        regolith_time: timestamp(WorldChainHardfork::Regolith),
+        canyon_time: timestamp(WorldChainHardfork::Canyon),
+        ecotone_time: timestamp(WorldChainHardfork::Ecotone),
+        fjord_time: timestamp(WorldChainHardfork::Fjord),
+        granite_time: timestamp(WorldChainHardfork::Granite),
+        holocene_time: timestamp(WorldChainHardfork::Holocene),
+        isthmus_time: timestamp(WorldChainHardfork::Isthmus),
+        jovian_time: timestamp(WorldChainHardfork::Jovian),
+        karst_time: timestamp(WorldChainHardfork::Karst),
+        tropo_time: timestamp(WorldChainHardfork::Tropo),
+        strato_time: timestamp(WorldChainHardfork::Strato),
     }
 }
 
 /// Builds an [`OnlineHostConfig`] from either a rollup-config file or a pre-computed hash.
 ///
 /// When `rollup_config_path` is `Some`, the schedule and hash are derived from the file content.
-/// When `None`, `rollup_config_hash` must be provided and `protocol_config` supplies the schedule.
+/// When `None`, `rollup_config_hash` must be provided together with the built-in schedule.
 pub fn build_online_config(
     rollup_config_path: Option<PathBuf>,
     rollup_config_hash: Option<B256>,
@@ -119,7 +126,7 @@ pub fn build_online_config(
     l1_beacon_rpc: String,
     l2_rpc: String,
     l2_chain_id: u64,
-    protocol_config: &WorldHardforkConfig,
+    schedule: &WorldRangeHardforkConfig,
     witness_timeout: Duration,
 ) -> anyhow::Result<OnlineHostConfig> {
     if let Some(path) = rollup_config_path {
@@ -143,7 +150,7 @@ pub fn build_online_config(
         l1_rpc,
         l1_beacon_rpc,
         l2_rpc,
-        schedule: range_hardfork_config(protocol_config),
+        schedule: schedule.clone(),
         rollup_config_hash,
         l2_chain_id: Some(l2_chain_id),
         rollup_config_path: None,

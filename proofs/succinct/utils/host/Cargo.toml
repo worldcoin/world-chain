@@ -15,11 +15,10 @@ sp1 = ["dep:sp1-sdk", "dep:bincode", "dep:alloy-sol-types", "dep:world-chain-pro
 alloy-primitives = { workspace = true, features = ["serde"] }
 anyhow.workspace = true
 reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
-rkyv.workspace = true
 serde.workspace = true
 serde_cbor = "0.11"
 thiserror.workspace = true
-serde_json.workspace = true
+strum.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 world-chain-proof-core.workspace = true
@@ -30,3 +29,4 @@ alloy-sol-types = { workspace = true, optional = true }
 bincode = { version = "1", optional = true }
 sp1-sdk = { version = "=6.1.0", features = ["network"], optional = true }
 async-trait.workspace = true
+world-chain-prover-service.workspace = true

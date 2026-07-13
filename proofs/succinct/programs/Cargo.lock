@@ -4762,24 +4762,6 @@ dependencies = [
  "sp1-lib",
  "sp1-zkvm",
  "world-chain-proof-core",
- "world-chain-proof-succinct-client-utils",
-]
-
-[[package]]
-name = "world-chain-proof-succinct-client-utils"
-version = "2.4.0"
-dependencies = [
- "alloy-eips",
- "alloy-primitives",
- "alloy-sol-types",
- "cfg-if",
- "revm-precompile",
- "rkyv",
- "serde_json",
- "sha2",
- "thiserror",
- "world-chain-proof-core",
- "world-chain-proof-kona-client-utils",
 ]
 
 [[package]]
@@ -4791,7 +4773,6 @@ dependencies = [
  "sp1-zkvm",
  "world-chain-proof-core",
  "world-chain-proof-kona-client-utils",
- "world-chain-proof-succinct-client-utils",
  "world-chain-proof-succinct-range-utils",
 ]
 

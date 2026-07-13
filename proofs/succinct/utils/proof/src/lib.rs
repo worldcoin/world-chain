@@ -1,15 +1,20 @@
-use alloy_primitives::B256;
-use async_trait::async_trait;
+use alloy_primitives::{Address, B256};
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
-    range::WorldRangeProofPublicValues, types::AggregationInputs, witness::WorldRangeWitnessData,
+    boot::BootInfoStruct, types::AggregationInputs, witness::WorldRangeWitnessData,
 };
 
 pub use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArtifact};
 
 // ---------------------------------------------------------------------------
-// Proof request types and prover trait
+// Proof request types
 // ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Sp1ProofRequest {
+    Range(RangeProofRequest),
+    Aggregation(AggregationSessionRequest),
+}
 
 /// Host request for a single SP1 range proof.
 ///
@@ -19,20 +24,14 @@ pub use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProof
 pub struct RangeProofRequest {
     /// rkyv-serialized [`WorldRangeWitnessData`] consumed by the range guest.
     pub witness_rkyv: Vec<u8>,
-    /// Optional host-computed public values checked against the guest commitment.
-    pub expected_public_values: Option<WorldRangeProofPublicValues>,
 }
 
 impl RangeProofRequest {
     /// Builds a request by rkyv-serializing the supplied witness data.
-    pub fn from_witness_data(
-        witness: &WorldRangeWitnessData,
-        expected_public_values: Option<WorldRangeProofPublicValues>,
-    ) -> Result<Self, rkyv::rancor::Error> {
+    pub fn from_witness_data(witness: &WorldRangeWitnessData) -> Result<Self, rkyv::rancor::Error> {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(witness)?;
         Ok(Self {
             witness_rkyv: bytes.to_vec(),
-            expected_public_values,
         })
     }
 }
@@ -51,47 +50,33 @@ pub struct AggregationProofRequest {
     pub range_proofs: Vec<Vec<u8>>,
 }
 
-/// Interface expected from a concrete SP1 prover backend.
-#[async_trait]
-pub trait WorldSuccinctProver {
-    /// Backend-specific error type.
-    type Error;
+/// Backend-agnostic request for an aggregation proof session.
+///
+/// Concrete provers inject their own verifying key metadata when converting this into a
+/// low-level [`AggregationProofRequest`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AggregationSessionRequest {
+    /// Boot infos committed by the range proofs being aggregated.
+    pub boot_infos: Vec<BootInfoStruct>,
+    /// Latest L1 checkpoint head committed by the aggregation guest.
+    pub latest_l1_checkpoint_head: B256,
+    /// Prover address committed by the aggregation guest for on-chain attribution.
+    pub prover_address: Address,
+    /// CBOR-encoded L1 headers, ordered from oldest to newest.
+    pub l1_headers_cbor: Vec<u8>,
+    /// Serialized compressed SP1 range proofs, ordered to match `boot_infos`.
+    pub range_proofs: Vec<Vec<u8>>,
+}
 
-    /// 8-word hash of the range program verifying key, as committed by the aggregation guest.
-    fn multi_block_vkey(&self) -> [u32; 8];
-
-    /// Proves one range witness.
-    async fn prove_range(
-        &self,
-        request: RangeProofRequest,
-    ) -> Result<RangeProofArtifact, Self::Error>;
-
-    /// Aggregates already-generated range proofs.
-    async fn prove_aggregation(
-        &self,
-        request: AggregationProofRequest,
-    ) -> Result<AggregationProofArtifact, Self::Error>;
-
-    /// Whether this prover can create durable external proof requests.
-    fn supports_async_requests(&self) -> bool {
-        false
-    }
-
-    /// Request a range proof from an external backend without waiting for completion.
-    async fn request_range(&self, request: RangeProofRequest) -> Result<B256, Self::Error>;
-
-    /// Poll a previously requested range proof.
-    async fn poll_range(&self, id: B256) -> Result<Option<RangeProofArtifact>, Self::Error>;
-
-    /// Request an aggregation proof from an external backend without waiting for completion.
-    async fn request_aggregation(
-        &self,
-        request: AggregationProofRequest,
-    ) -> Result<B256, Self::Error>;
-
-    /// Poll a previously requested aggregation proof.
-    async fn poll_aggregation(
-        &self,
-        id: B256,
-    ) -> Result<Option<AggregationProofArtifact>, Self::Error>;
+/// Current status of a backend proving session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Sp1SessionStatus {
+    /// The backend session is still running.
+    Running,
+    /// The backend session completed successfully and the proof can be downloaded.
+    Completed,
+    /// The backend session failed with the given reason.
+    Failed(String),
+    /// The backend has no record of the session id.
+    NotFound,
 }

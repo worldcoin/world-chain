@@ -13,7 +13,7 @@
 //!  │  build Kona witness over RPC (same path as bin/proof)                               │
 //!  │       │                                                                              │
 //!  │       ▼                                                                              │
-//!  │  NitroProver::prove_range_async  ──────► Nitro Enclave                              │
+//!  │  NitroProver::prove_range  ────────────► Nitro Enclave                              │
 //!  │       │                                  (vsock / PCR-pinned)                       │
 //!  │       ▼                                                                              │
 //!  │  prover_submitProof(Nitro { attestation, signature })                               │
@@ -31,20 +31,23 @@ use tracing::{info, warn};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_kona_host_utils::online::{
     OnlineHostConfig, RangeWitnessRequest, build_online_config, build_range_input,
+    hardfork_config_from_chain_spec,
 };
 use world_chain_proof_nitro::{
     ExpectedPcrs, NitroRangeProofRequest,
     host::{EnclaveEndpoint, NitroProver},
 };
-use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
 use world_chain_proof_worker::{
     ClaimedProofJobHandler, ProofJob, ProofWorker, ProofWorkerConfig, RetryConfig,
+    WorkerHeartbeatConfig,
 };
 use world_chain_prover_service::{ProofBackend, ProofData, RpcProverServiceClient};
 
 const DEFAULT_SUBMIT_PROOF_RETRY_MAX_RETRIES: usize = 10;
 const DEFAULT_SUBMIT_PROOF_RETRY_INITIAL_DELAY_MS: u64 = 100;
 const DEFAULT_SUBMIT_PROOF_RETRY_MAX_DELAY_MS: u64 = 10_000;
+const DEFAULT_WORKER_HEARTBEAT_INTERVAL_SEC: u64 = 30;
+const DEFAULT_WORKER_MAX_CONSECUTIVE_HEARTBEAT_FAILURES: u32 = 5;
 
 // ──────────────────────────────────────────────────────────────────────────────────────
 // NitroBackend — ClaimedProofJobHandler implementation for the Nitro TEE lane
@@ -109,7 +112,7 @@ impl ClaimedProofJobHandler for NitroBackend {
             .context("witness serialize")?;
 
         let artifact = prover
-            .prove_range_async(nitro_request)
+            .prove_range(nitro_request)
             .await
             .context("nitro enclave proving failed")?;
 
@@ -285,6 +288,14 @@ struct Cli {
     /// The unique worker id.
     #[arg(long)]
     worker_id: String,
+
+    #[arg(long, default_value_t = DEFAULT_WORKER_HEARTBEAT_INTERVAL_SEC)]
+    /// The worker heartbeat interval in seconds.
+    heartbeat_interval_sec: u64,
+
+    #[arg(long, default_value_t = DEFAULT_WORKER_MAX_CONSECUTIVE_HEARTBEAT_FAILURES)]
+    /// Maximum consecutive retryable heartbeat failures before aborting proof generation.
+    heartbeat_max_consecutive_failures: u32,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────────────
@@ -300,7 +311,7 @@ pub async fn run() -> Result<()> {
     let cli = Cli::parse();
 
     let spec = cli.network.chain_spec();
-    let protocol_cfg = ProtocolHardforkConfig::from_chain_spec(spec.as_ref());
+    let schedule = hardfork_config_from_chain_spec(spec.as_ref());
     let online = build_online_config(
         cli.rollup_config.clone(),
         cli.rollup_config_hash,
@@ -308,7 +319,7 @@ pub async fn run() -> Result<()> {
         cli.l1_beacon_rpc.clone(),
         cli.l2_rpc.clone(),
         cli.network.chain_id(),
-        &protocol_cfg,
+        &schedule,
         Duration::from_secs(cli.witness_timeout_seconds),
     )?;
     let expected_pcrs = build_expected_pcrs(
@@ -348,6 +359,10 @@ pub async fn run() -> Result<()> {
         retry_initial_delay,
         retry_max_delay,
     );
+    let heartbeat_config = WorkerHeartbeatConfig::with_max_consecutive_failures(
+        Duration::from_secs(cli.heartbeat_interval_sec),
+        cli.heartbeat_max_consecutive_failures,
+    );
     let worker = ProofWorker::new(
         queue,
         backend,
@@ -356,6 +371,7 @@ pub async fn run() -> Result<()> {
             poll_interval: Duration::from_secs(cli.poll_interval_seconds),
             max_concurrent_jobs: cli.max_concurrent_jobs,
             retry_config,
+            heartbeat_config,
         },
     );
 

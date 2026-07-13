@@ -43,8 +43,15 @@ use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 use world_chain_challenger::{AlloyChallengerClient, ChallengerConfig, WorldChainChallenger};
 use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
 use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
-use world_chain_proof_succinct_host_utils::prover::{SP1ProofMode, Sp1ProverKind, SuccinctProver};
-use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig, RetryConfig};
+use world_chain_proof_succinct_host_utils::{
+    Sp1ProverKind, WorldSuccinctProver,
+    cpu_prover::{CpuSuccinctProver, SP1ProofMode},
+    mock_prover::MockSuccinctProver,
+    network_prover::NetworkSuccinctProver,
+};
+use world_chain_proof_worker::{
+    ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
+};
 use world_chain_proofs::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
 use world_chain_proposer::{AlloyProofSystemClient, ProposerConfig, WorldChainProposer};
 use world_chain_prover_service::{
@@ -83,8 +90,10 @@ const PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL: u64 = 5;
 /// Poll interval for the in-process SP1 worker leasing jobs from the prover-service.
 const SP1_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// Env var enabling the in-process defender, prover-service, and SP1 worker. Off by default:
-/// real proving needs the SP1 ELFs. Set a prover backend (`cpu`/`mock`/`network`) to turn it on.
+/// real proving needs the SP1 ELFs. Set a prover backend to turn it on.
 const SP1_WORKER_PROVER_ENV: &str = "DEVNET_SP1_WORKER_PROVER";
+/// SP1 network private key. Required when `DEVNET_SP1_WORKER_PROVER=network`.
+const SP1_PRIVATE_KEY_ENV: &str = "SP1_PRIVATE_KEY";
 /// Bond, in wei, sent with every `WorldChainProofSystemFactory.propose`.
 /// Matches `PROPOSER_BOND` (1 ether) in `scripts/devnet/DeployProofSystem.s.sol`.
 const WORLD_PROPOSER_BOND_WEI: u128 = 1_000_000_000_000_000_000;
@@ -570,7 +579,7 @@ impl FullStackWorldDevnet {
         // requests for challenged valid games; the worker leases SP1 jobs, builds witnesses
         // from the devnet L1/L2 RPCs, and proves them with the selected backend.
         let (prover_service, sp1_worker, world_defender, prover_service_url) =
-            match (proof_system.as_ref(), sp1_worker_prover_kind()) {
+            match (proof_system.as_ref(), sp1_worker_prover_kind()?) {
                 (Some(deployment), Some(kind)) => {
                     let output_root_rpc = op_nodes
                         .first()
@@ -2567,10 +2576,11 @@ async fn start_world_chain_defender(
 
 /// Reads the SP1 worker prover backend from [`SP1_WORKER_PROVER_ENV`], or `None` when the
 /// defender proving loop is disabled.
-fn sp1_worker_prover_kind() -> Option<Sp1ProverKind> {
-    std::env::var(SP1_WORKER_PROVER_ENV)
-        .ok()
-        .and_then(|value| value.parse().ok())
+fn sp1_worker_prover_kind() -> Result<Option<Sp1ProverKind>> {
+    match std::env::var(SP1_WORKER_PROVER_ENV) {
+        Ok(value) => value.parse().map(Some).map_err(|error| eyre!("{error}")),
+        Err(_) => Ok(None),
+    }
 }
 
 /// Starts the in-process defender prover-service and returns its task handle and JSON-RPC URL.
@@ -2677,11 +2687,41 @@ async fn start_sp1_worker(
     )
     .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?;
 
-    // `SuccinctProver` owns its own runtime, so build it off the async runtime.
-    let prover = SuccinctProver::new(kind, SP1ProofMode::Groth16)
-        .await
-        .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+    match kind {
+        Sp1ProverKind::Cpu => {
+            let prover = CpuSuccinctProver::new(SP1ProofMode::Groth16)
+                .await
+                .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+            start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
+        }
+        Sp1ProverKind::Mock => {
+            let prover = MockSuccinctProver::new(SP1ProofMode::Groth16)
+                .await
+                .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+            start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
+        }
+        Sp1ProverKind::Network => {
+            let private_key = std::env::var(SP1_PRIVATE_KEY_ENV).wrap_err_with(|| {
+                format!("{SP1_PRIVATE_KEY_ENV} is required when {SP1_WORKER_PROVER_ENV}=network")
+            })?;
+            let prover = NetworkSuccinctProver::new(SP1ProofMode::Groth16, &private_key)
+                .await
+                .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+            start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
+        }
+    }
+}
 
+fn start_sp1_worker_with_prover<P>(
+    prover_service_url: &str,
+    deployment: &WorldProofSystemDeployment,
+    kind: Sp1ProverKind,
+    host: OnlineHostConfig,
+    prover: P,
+) -> Result<Sp1WorkerTask>
+where
+    P: WorldSuccinctProver + Send + Sync + 'static,
+{
     let backend = Sp1Backend::new(
         host,
         prover,
@@ -2690,12 +2730,14 @@ async fn start_sp1_worker(
             split_count: 1,
             prover_address: Address::ZERO,
             allow_unfinalized: false,
+            session_poll_interval: Duration::from_secs(10),
         },
     );
 
     let queue = RpcProverServiceClient::new(prover_service_url)
         .map_err(|error| eyre!("failed to connect SP1 worker to prover-service: {error}"))?;
     let retry_config = RetryConfig::default();
+    let heartbeat_config = WorkerHeartbeatConfig::default();
     let worker = ProofWorker::new(
         queue,
         backend,
@@ -2704,13 +2746,14 @@ async fn start_sp1_worker(
             poll_interval: SP1_WORKER_POLL_INTERVAL,
             max_concurrent_jobs: 1,
             retry_config,
+            heartbeat_config,
         },
     );
 
     info!(
         prover_service = %prover_service_url,
         block_interval = deployment.block_interval,
-        prover = ?kind,
+        prover = %kind,
         submit_proof_retry_max_retries = retry_config.max_attempts,
         submit_proof_retry_initial_delay_ms = retry_config.initial_delay.as_millis(),
         submit_proof_retry_max_delay_ms = retry_config.max_delay.as_millis(),

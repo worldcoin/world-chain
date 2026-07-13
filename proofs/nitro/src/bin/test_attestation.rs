@@ -53,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
     let prover = NitroProver::new(EnclaveEndpoint::new(cid), expected_pcrs);
 
     tracing::info!(cid, "sending range proof request to enclave");
-    let artifact = prover.prove_range_async(request).await?;
+    let artifact = prover.prove_range(request).await?;
 
     tracing::info!(
         l2_pre_root  = ?artifact.boot_info.l2PreRoot,

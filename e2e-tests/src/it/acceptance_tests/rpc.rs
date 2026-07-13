@@ -88,7 +88,7 @@ impl RpcEnv {
     }
 }
 
-fn provider_for_url<N: Network>(
+pub(super) fn provider_for_url<N: Network>(
     url: &url::Url,
     cloudflare_access: Option<&CloudflareAccess>,
 ) -> eyre::Result<RootProvider<N>> {

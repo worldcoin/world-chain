@@ -363,3 +363,56 @@ pub enum WorldRangeProofValidationError {
         actual: WorldRangeSpecId,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parses_snake_and_camel_case_fork_times() {
+        let snake: WorldRangeHardforkConfig = serde_json::from_value(json!({
+            "jovian_time": 10,
+            "karst_time": 20,
+            "tropo_time": 30,
+            "strato_time": 40
+        }))
+        .unwrap();
+        let camel: WorldRangeHardforkConfig = serde_json::from_value(json!({
+            "jovianTime": 10,
+            "karstTime": 20,
+            "tropoTime": 30,
+            "stratoTime": 40
+        }))
+        .unwrap();
+
+        assert_eq!(snake, camel);
+        assert_eq!(snake.karst_time, Some(20));
+        assert_eq!(snake.tropo_time, Some(30));
+        assert_eq!(snake.strato_time, Some(40));
+    }
+
+    #[test]
+    fn activates_karst_tropo_and_strato_in_order() {
+        let config = WorldRangeHardforkConfig {
+            jovian_time: Some(10),
+            karst_time: Some(20),
+            tropo_time: Some(30),
+            strato_time: Some(40),
+            ..Default::default()
+        };
+
+        assert_eq!(config.active_fork_at(1, 19), WorldRangeHardfork::Jovian);
+        assert_eq!(config.active_fork_at(1, 20), WorldRangeHardfork::Karst);
+        assert_eq!(config.active_fork_at(1, 30), WorldRangeHardfork::Tropo);
+        assert_eq!(config.active_fork_at(1, 40), WorldRangeHardfork::Strato);
+        assert_eq!(
+            WorldRangeSpecId::from_hardfork(config.active_fork_at(1, 20)),
+            WorldRangeSpecId::KARST
+        );
+        assert_eq!(
+            WorldRangeSpecId::from_hardfork(config.active_fork_at(1, 40)),
+            WorldRangeSpecId::STRATO
+        );
+    }
+}

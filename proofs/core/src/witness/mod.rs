@@ -41,26 +41,6 @@ pub trait WitnessData: Sized {
 }
 
 #[derive(Clone, Debug, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct DefaultWitnessData {
-    pub preimage_store: PreimageStore,
-    pub blob_data: BlobData,
-}
-
-#[async_trait]
-impl WitnessData for DefaultWitnessData {
-    fn from_parts(preimage_store: PreimageStore, blob_data: BlobData) -> Self {
-        Self {
-            preimage_store,
-            blob_data,
-        }
-    }
-
-    fn into_parts(self) -> (PreimageStore, BlobData) {
-        (self.preimage_store, self.blob_data)
-    }
-}
-
-#[derive(Clone, Debug, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct WorldRangeWitnessData {
     pub preimage_store: PreimageStore,
     pub blob_data: BlobData,
@@ -93,28 +73,6 @@ impl WorldRangeWitnessData {
             blob_data,
             schedule,
         }
-    }
-}
-
-#[derive(Clone, Debug, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct EigenDAWitnessData {
-    pub preimage_store: PreimageStore,
-    pub blob_data: BlobData,
-    pub eigenda_data: Option<Vec<u8>>,
-}
-
-#[async_trait]
-impl WitnessData for EigenDAWitnessData {
-    fn from_parts(preimage_store: PreimageStore, blob_data: BlobData) -> Self {
-        Self {
-            preimage_store,
-            blob_data,
-            eigenda_data: None,
-        }
-    }
-
-    fn into_parts(self) -> (PreimageStore, BlobData) {
-        (self.preimage_store, self.blob_data)
     }
 }
 

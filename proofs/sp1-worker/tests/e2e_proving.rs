@@ -1,7 +1,7 @@
 //! Full end-to-end proving test for the SP1 worker.
 //!
-//! Runs the real worker against a real `prover-service` and a real [`SuccinctProver`],
-//! generating a witness from live RPC endpoints and proving it (mock, CPU, or network). This
+//! Runs the real worker against a real `prover-service` and a real [`CpuSuccinctProver`],
+//! generating a witness from live RPC endpoints and proving it with the local CPU prover. This
 //! is the highest-fidelity test of the worker — it exercises lease → witness → prove →
 //! submit end to end — but it needs external infrastructure, so it is `#[ignore]`d and only
 //! runs when the required environment is present.
@@ -17,23 +17,28 @@
 //! export L1_BEACON_RPC_URL=$L1_RPC_URL          # devnet uses calldata DA; L1 RPC doubles as beacon
 //! export ROLLUP_RPC_URL=http://127.0.0.1:7545   # op-node, for output roots
 //! export ROLLUP_CONFIG=/path/to/rollup.json
-//! export SP1_PROVER=cpu                          # cpu | mock | network (default: mock)
+//! export SP1_PROVER=cpu                          # cpu | mock | network
+//! export SP1_PRIVATE_KEY=<your key>              # required for SP1_PROVER=network
 //! cargo test -p world-chain-sp1-worker --test e2e_proving -- --ignored --nocapture
 //! ```
 //!
-//! `SP1_PROVER=mock` validates the full witness + guest-execution + root-binding path cheaply
-//! (the SP1 mock prover still executes the guest); `cpu`/`network` additionally produce a real
-//! SNARK. The SP1 guest ELFs are baked into the worker at compile time via
+//! The SP1 guest ELFs are baked into the worker at compile time via
 //! `sp1_sdk::include_elf!()` (see `proofs/succinct/elfs/build.rs`); no path-based
 //! overrides are required.
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256};
 use testcontainers::runners::AsyncRunner;
 use testcontainers_modules::postgres;
 use world_chain_proof_kona_host_utils::online::{OnlineHostConfig, resolve_l1_head};
-use world_chain_proof_succinct_host_utils::prover::{SP1ProofMode, Sp1ProverKind, SuccinctProver};
+use world_chain_proof_succinct_host_utils::{
+    Sp1ProverKind, WorldSuccinctProver,
+    cpu_prover::{CpuSuccinctProver, SP1ProofMode},
+    mock_prover::MockSuccinctProver,
+    network_prover::NetworkSuccinctProver,
+};
+use world_chain_proof_worker::WorkerHeartbeatConfig;
 use world_chain_proofs::{ConsensusProvider, OptimismConsensusClient};
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequester, ProofResponse, ProofStatus,
@@ -57,8 +62,8 @@ fn required(name: &str) -> Option<String> {
 fn prover_kind() -> Sp1ProverKind {
     std::env::var("SP1_PROVER")
         .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(Sp1ProverKind::Mock)
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(Sp1ProverKind::Cpu)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -82,6 +87,12 @@ async fn worker_proves_real_range_end_to_end() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1);
+    // currently we don't support split_range != 1, therefore we ensure it's exactly 1
+    if split_count != 1 {
+        panic!(
+            "Currently we don't support splitting the range proof into multiple ranges. Set `ranges` to 1."
+        )
+    }
     let timeout = Duration::from_secs(
         std::env::var("E2E_TIMEOUT_SECS")
             .ok()
@@ -129,11 +140,77 @@ async fn worker_proves_real_range_end_to_end() {
     .expect("build host config");
 
     let kind = prover_kind();
-    // Build the prover off the async runtime: it owns its own runtime internally.
-    let prover = SuccinctProver::new(kind, SP1ProofMode::Groth16)
-        .await
-        .expect("build prover");
+    match kind {
+        Sp1ProverKind::Cpu => {
+            let prover = CpuSuccinctProver::new(SP1ProofMode::Groth16)
+                .await
+                .expect("build prover");
+            run_worker_proves_real_range_end_to_end_with_prover(
+                host,
+                prover,
+                kind,
+                block_interval,
+                split_count,
+                root_claim,
+                l1_head,
+                claimed_block,
+                timeout,
+            )
+            .await;
+        }
+        Sp1ProverKind::Mock => {
+            let prover = MockSuccinctProver::new(SP1ProofMode::Groth16)
+                .await
+                .expect("build prover");
+            run_worker_proves_real_range_end_to_end_with_prover(
+                host,
+                prover,
+                kind,
+                block_interval,
+                split_count,
+                root_claim,
+                l1_head,
+                claimed_block,
+                timeout,
+            )
+            .await;
+        }
+        Sp1ProverKind::Network => {
+            let Some(private_key) = required("SP1_PRIVATE_KEY") else {
+                return;
+            };
+            let prover = NetworkSuccinctProver::new(SP1ProofMode::Groth16, &private_key)
+                .await
+                .expect("build prover");
+            run_worker_proves_real_range_end_to_end_with_prover(
+                host,
+                prover,
+                kind,
+                block_interval,
+                split_count,
+                root_claim,
+                l1_head,
+                claimed_block,
+                timeout,
+            )
+            .await;
+        }
+    }
+}
 
+async fn run_worker_proves_real_range_end_to_end_with_prover<P>(
+    host: OnlineHostConfig,
+    prover: P,
+    kind: Sp1ProverKind,
+    block_interval: u64,
+    split_count: u64,
+    root_claim: B256,
+    l1_head: B256,
+    claimed_block: u64,
+    timeout: Duration,
+) where
+    P: WorldSuccinctProver + Send + Sync + 'static,
+{
     let backend = Sp1Backend::new(
         host,
         prover,
@@ -142,6 +219,7 @@ async fn worker_proves_real_range_end_to_end() {
             split_count,
             prover_address: Address::ZERO,
             allow_unfinalized: false,
+            session_poll_interval: Duration::from_secs(10),
         },
     );
 
@@ -179,6 +257,7 @@ async fn worker_proves_real_range_end_to_end() {
             poll_interval: Duration::from_millis(500),
             max_concurrent_jobs: 1,
             retry_config: RetryConfig::default(),
+            heartbeat_config: WorkerHeartbeatConfig::default(),
         },
     );
     let token = worker.cancellation_token();
@@ -196,7 +275,7 @@ async fn worker_proves_real_range_end_to_end() {
         .await
         .expect("enqueue proof request");
     eprintln!(
-        "enqueued {id} for block {claimed_block} (interval {block_interval}, {kind:?} prover); proving may take a while"
+        "enqueued {id} for block {claimed_block} (interval {block_interval}, {kind} prover); proving may take a while"
     );
 
     let deadline = tokio::time::Instant::now() + timeout;
@@ -228,8 +307,7 @@ async fn worker_proves_real_range_end_to_end() {
         panic!("expected SP1 proof data");
     };
     assert!(!public_values.is_empty(), "public values must be populated");
-    // A real SNARK is non-empty; the mock prover may emit an empty proof blob, which is fine.
-    if !matches!(prover_kind(), Sp1ProverKind::Mock) {
+    if !matches!(kind, Sp1ProverKind::Mock) {
         assert!(!proof.is_empty(), "non-mock proof must be non-empty");
     }
 
