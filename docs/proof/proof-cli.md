@@ -21,6 +21,7 @@ Commands:
   hash-rollup-config   Print the rollup config hash used in proofs
   witness              Build and serialize a witness to a file
   prove                Generate witness and send it to a Nitro enclave
+  get-attestation      Fetch a bare attestation from a running enclave
 ```
 
 ## Building
@@ -52,6 +53,7 @@ All RPC flags accept an environment variable fallback. The full set used across 
 | `SP1_PROVER` | `--prover` | SP1 backend: `cpu`, `network`, or `mock` |
 | `SP1_PRIVATE_KEY` | `--sp1-private-key` | Required for `--prover network` (sp1-sdk) |
 | `ENCLAVE_CID` | `--cid` | vsock CID of the running Nitro enclave |
+| `ENCLAVE_PORT` | `--port` | vsock port of the running Nitro enclave |
 | `PCR0` / `PCR1` / `PCR2` | `--pcr0/1/2` | Expected Nitro PCR measurements |
 
 A `.env` file in the working directory is loaded automatically.
@@ -382,6 +384,7 @@ Commands:
   hash-rollup-config   Print the rollup config hash used in proofs
   witness              Build and serialize a witness to a file
   prove                Generate witness and send to a Nitro enclave for attested proving
+  get-attestation      Fetch a bare attestation from a running enclave
 ```
 
 ### `prove`
@@ -440,3 +443,86 @@ The output JSON has the shape:
   "attestationDoc": "0x<hex-encoded COSE_Sign1 bytes>"
 }
 ```
+
+### `get-attestation`
+
+Fetches a bare NSM attestation document from a running Nitro enclave. No proof is generated
+and no RPC endpoints are required — the enclave simply calls its NSM device and returns the
+raw `COSE_Sign1` bytes.
+
+This is primarily used for the **CertManager pre-warm** workflow (see below).
+
+**Requires:** Linux host with AF_VSOCK support and a running Nitro enclave.
+
+```
+world-chain-prover-nitro get-attestation [--cid <N>] [--port <N>] [--output <FILE>] [--user-data <HEX>]
+```
+
+| Flag | Env | Default | Description |
+|---|---|---|---|
+| `--cid <N>` | `ENCLAVE_CID` | `16` | vsock CID of the Nitro enclave |
+| `--port <N>` | `ENCLAVE_PORT` | `5005` | vsock port the enclave listens on |
+| `--output <FILE>` | — | stdout | Write hex-encoded attestation to file |
+| `--user-data <HEX>` | — | — | Arbitrary user data to embed in the attestation (hex-encoded) |
+
+**Example**
+
+```bash
+cargo run -p world-chain-prover-nitro -- get-attestation \
+  --cid 16 \
+  --output /tmp/attestation.hex
+```
+
+---
+
+## CertManager pre-warm workflow
+
+When deploying the Nitro proof system from scratch, the `CertManager` contract on L1 must
+be pre-warmed with the AWS Nitro CA certificate chain **before** any `registerKey` call can
+succeed. This creates a chicken-and-egg problem: to register an enclave's key you need the
+CA chain on-chain, and to get the CA chain you need a real attestation document from a
+running enclave.
+
+The `get-attestation` subcommand solves this by providing a lightweight way to obtain an
+attestation document without running a full proof.
+
+### Step 1 — Start the enclave
+
+Build and run the Nitro enclave as described in the [Running the Nitro enclave](#running-the-nitro-enclave)
+section above.
+
+### Step 2 — Fetch the attestation document
+
+```bash
+cargo run -p world-chain-prover-nitro -- get-attestation \
+  --cid 16 \
+  --output /tmp/attestation.hex
+```
+
+The output file contains the hex-encoded `COSE_Sign1` attestation bytes.
+
+### Step 3 — Pre-warm CertManager
+
+Pipe the attestation into the `hinted_attestation_calls.js` tool to extract the CA chain
+and submit it to `CertManager`:
+
+```bash
+cat /tmp/attestation.hex | xargs -I{} node tools/hinted_attestation_calls.js prepare \
+  --attestation {} \
+  --cert-manager 0x<CertManager address>
+```
+
+### Step 4 — Approve PCR set (Phase 3)
+
+Once the CA chain is registered, complete the setup by approving the enclave's PCR
+measurements:
+
+```bash
+node tools/hinted_attestation_calls.js approvePCRSet \
+  --pcr0 $PCR0 \
+  --pcr1 $PCR1 \
+  --pcr2 $PCR2 \
+  --cert-manager 0x<CertManager address>
+```
+
+After this, `registerKey` calls from the enclave will succeed.

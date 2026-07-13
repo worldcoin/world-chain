@@ -98,6 +98,29 @@ impl NitroProver {
         }
     }
 
+    /// Requests a bare attestation document from the enclave.
+    ///
+    /// This is a lightweight call that does not run any proof — the enclave simply
+    /// asks the NSM device for an attestation document and returns the raw `COSE_Sign1`
+    /// bytes. Useful for CertManager pre-warm workflows where operators need a real
+    /// attestation document before any `registerKey` call can succeed.
+    #[instrument(skip_all, fields(endpoint = ?self.endpoint))]
+    pub async fn get_attestation(
+        &self,
+        user_data: Option<Vec<u8>>,
+    ) -> Result<Vec<u8>, NitroProverError> {
+        let response = self
+            .round_trip(EnclaveRequest::GetAttestation { user_data })
+            .await?;
+        match response {
+            EnclaveResponse::BareAttestation { attestation_doc } => Ok(attestation_doc),
+            EnclaveResponse::Error { message } => Err(NitroProverError::Enclave(message)),
+            _ => Err(NitroProverError::UnexpectedResponse(
+                "expected BareAttestation",
+            )),
+        }
+    }
+
     /// Proves one range witness inside the Nitro enclave.
     #[instrument(skip_all, fields(endpoint = ?self.endpoint))]
     pub async fn prove_range(
@@ -122,6 +145,9 @@ impl NitroProver {
             EnclaveResponse::Error { message } => return Err(NitroProverError::Enclave(message)),
             EnclaveResponse::Attestation { .. } => {
                 return Err(NitroProverError::UnexpectedResponse("attestation"));
+            }
+            EnclaveResponse::BareAttestation { .. } => {
+                return Err(NitroProverError::UnexpectedResponse("bare_attestation"));
             }
         };
 
