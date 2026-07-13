@@ -34,11 +34,9 @@ default = []
 # and the enclave-side code path.
 # Requires Linux (AF_VSOCK is not available on macOS or Windows).
 enclave = [
-    "dep:alloy-consensus",
     "dep:aws-nitro-enclaves-nsm-api",
     "dep:kona-proof",
     "dep:serde_bytes",
-    "dep:serde_cbor",
     "dep:tokio-vsock",
     "dep:tracing-subscriber",
     "dep:world-chain-proof-kona-client-utils",
@@ -61,7 +59,6 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 world-chain-proof-core.workspace = true
-async-trait.workspace = true
 
 # Host-side attestation verification deps (non-optional: used by parse_check_and_verify) --
 # These are compiled on all platforms; the p384 / x509-parser crates are pure Rust and
@@ -81,11 +78,9 @@ k256 = { version = "0.13", features = ["ecdsa"] }
 # non-Linux hosts.
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-vsock = { version = "0.5", optional = true }
-alloy-consensus = { workspace = true, optional = true }
 aws-nitro-enclaves-nsm-api = { version = "0.5", optional = true }
 kona-proof = { workspace = true, optional = true }
 serde_bytes = { version = "0.11", optional = true }
-serde_cbor = { version = "0.11", optional = true }
 world-chain-proof-kona-client-utils = { workspace = true, optional = true }
 # (k256 is in the top-level [dependencies] as a non-optional dep so it is
 # available to both the enclave-side signing code and the host-side

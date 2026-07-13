@@ -19026,10 +19026,8 @@ dependencies = [
 name = "world-chain-proof-nitro"
 version = "2.4.0"
 dependencies = [
- "alloy-consensus 2.0.5",
  "alloy-primitives",
  "anyhow",
- "async-trait",
  "aws-nitro-enclaves-nsm-api",
  "base64 0.22.1",
  "ciborium",
@@ -19044,7 +19042,6 @@ dependencies = [
  "rkyv",
  "serde",
  "serde_bytes",
- "serde_cbor",
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.18",
