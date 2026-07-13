@@ -123,6 +123,10 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
         );
         if (expectedRootId != rootId) return false;
 
+        // TODO: if Nitro becomes a production validity lane, extend this proof
+        // payload and the enclave-signed commitment with `l2PreRoot`, then
+        // compare it against the root claim behind `parentRef` as in the SP1 lane.
+
         // 2. Verify the enclave signature over the signing commitment
         //    derived from the same boot_info fields.
         bytes32 commitment = _signingCommitment(l2PostRoot, l2BlockNumber, rollupConfigHash);

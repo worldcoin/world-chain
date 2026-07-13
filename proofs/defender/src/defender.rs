@@ -430,8 +430,12 @@ fn proof_request(game_created: &GameCreated, backend: ProofBackend) -> ProofRequ
 
 /// Encode a proof payload into the `bytes` argument of `submitProofLane`.
 ///
-/// TODO: the on-chain proof calldata format is not defined yet. Replace this
-/// placeholder encoding once the game contract specifies it.
+/// TODO: encode proofs for their concrete on-chain verifiers. SP1 proofs must
+/// match `SP1ValidityVerifier`'s ABI tuple:
+/// `(domainHash, parentRef, intermediateRootsHash, l1OriginNumber, publicValues, proofBytes)`.
+/// That requires proposal context in addition to `ProofData`, so this helper
+/// should move closer to the game/lane submission path before real SP1 lanes
+/// are enabled.
 fn encode_proof(proof: &ProofData) -> Bytes {
     match proof {
         ProofData::Sp1 {

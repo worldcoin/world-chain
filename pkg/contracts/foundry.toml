@@ -27,6 +27,7 @@ remappings = [
   "@solady=lib/solady/src/utils/",
   "@nitro-validator/=lib/nitro-validator/src/",
   "@solarity/=lib/nitro-validator/lib/solidity-lib/contracts/",
+  "@sp1-contracts/=lib/sp1-contracts/contracts/",
 ]
 
 [profile.ci]
