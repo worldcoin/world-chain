@@ -40,6 +40,10 @@ struct GetAttestationArgs {
     #[arg(long, env = "ENCLAVE_CID", default_value_t = 16)]
     cid: u32,
 
+    /// vsock port the enclave is listening on.
+    #[arg(long, env = "ENCLAVE_PORT", default_value_t = 5005)]
+    port: u32,
+
     /// Write hex-encoded attestation to this file instead of stdout.
     #[arg(long)]
     output: Option<PathBuf>,
@@ -53,6 +57,10 @@ struct NitroArgs {
     /// vsock CID of the running Nitro enclave.
     #[arg(long, env = "ENCLAVE_CID", default_value_t = 16)]
     cid: u32,
+
+    /// vsock port the enclave is listening on.
+    #[arg(long, env = "ENCLAVE_PORT", default_value_t = 5005)]
+    port: u32,
 
     /// PCR0 hex (48 bytes).
     #[arg(long, env = "PCR0")]
@@ -93,13 +101,13 @@ async fn get_attestation(args: GetAttestationArgs) -> Result<()> {
     };
 
     let prover = NitroProver::new(
-        EnclaveEndpoint::new(args.cid),
+        EnclaveEndpoint::with_port(args.cid, args.port),
         ExpectedPcrs::PLACEHOLDER,
     );
 
     eprintln!(
-        "requesting bare attestation from enclave (cid={})",
-        args.cid
+        "requesting bare attestation from enclave (cid={}, port={})",
+        args.cid, args.port
     );
 
     let attestation_doc = prover
@@ -155,7 +163,7 @@ async fn nitro_prove(args: NitroArgs) -> Result<()> {
     let request = NitroRangeProofRequest::from_witness_data(&input.witness, None)
         .map_err(|e| anyhow!("failed to serialize witness: {e}"))?;
 
-    let prover = NitroProver::new(EnclaveEndpoint::new(args.cid), expected_pcrs);
+    let prover = NitroProver::new(EnclaveEndpoint::with_port(args.cid, args.port), expected_pcrs);
 
     println!(
         "sending range {start}..={end} to enclave (cid {cid})",
