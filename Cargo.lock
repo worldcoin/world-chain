@@ -18705,7 +18705,6 @@ dependencies = [
  "world-chain-chainspec",
  "world-chain-proof-kona-host-utils",
  "world-chain-proof-nitro",
- "world-chain-proof-protocol",
  "world-chain-proof-worker",
  "world-chain-prover-service",
 ]
@@ -19018,9 +19017,9 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "world-chain-chainspec",
  "world-chain-proof-core",
  "world-chain-proof-kona-client-utils",
- "world-chain-proof-protocol",
 ]
 
 [[package]]
@@ -19056,22 +19055,6 @@ dependencies = [
  "world-chain-proof-core",
  "world-chain-proof-kona-client-utils",
  "x509-parser",
-]
-
-[[package]]
-name = "world-chain-proof-protocol"
-version = "2.4.0"
-dependencies = [
- "alloy-primitives",
- "op-revm",
- "reth-chainspec",
- "reth-optimism-forks",
- "revm-primitives",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.18",
- "world-chain-chainspec",
 ]
 
 [[package]]
@@ -19217,7 +19200,6 @@ dependencies = [
  "world-chain-chainspec",
  "world-chain-proof-core",
  "world-chain-proof-kona-host-utils",
- "world-chain-proof-protocol",
 ]
 
 [[package]]
@@ -19358,7 +19340,6 @@ dependencies = [
  "world-chain-chainspec",
  "world-chain-proof-core",
  "world-chain-proof-kona-host-utils",
- "world-chain-proof-protocol",
  "world-chain-proof-succinct-host-utils",
  "world-chain-proof-succinct-utils",
  "world-chain-proof-worker",

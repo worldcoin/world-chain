@@ -31,12 +31,12 @@ use tracing::{info, warn};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_kona_host_utils::online::{
     OnlineHostConfig, RangeWitnessRequest, build_online_config, build_range_input,
+    hardfork_config_from_chain_spec,
 };
 use world_chain_proof_nitro::{
     ExpectedPcrs, NitroRangeProofRequest,
     host::{EnclaveEndpoint, NitroProver},
 };
-use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
 use world_chain_proof_worker::{
     ClaimedProofJobHandler, ProofJob, ProofWorker, ProofWorkerConfig, RetryConfig,
     WorkerHeartbeatConfig,
@@ -311,7 +311,7 @@ pub async fn run() -> Result<()> {
     let cli = Cli::parse();
 
     let spec = cli.network.chain_spec();
-    let protocol_cfg = ProtocolHardforkConfig::from_chain_spec(spec.as_ref());
+    let schedule = hardfork_config_from_chain_spec(spec.as_ref());
     let online = build_online_config(
         cli.rollup_config.clone(),
         cli.rollup_config_hash,
@@ -319,7 +319,7 @@ pub async fn run() -> Result<()> {
         cli.l1_beacon_rpc.clone(),
         cli.l2_rpc.clone(),
         cli.network.chain_id(),
-        &protocol_cfg,
+        &schedule,
         Duration::from_secs(cli.witness_timeout_seconds),
     )?;
     let expected_pcrs = build_expected_pcrs(

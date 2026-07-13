@@ -24,7 +24,6 @@ members = [
     "crates/evm",
     "crates/pbh",
     "proofs/core",
-    "proofs/protocol",
     "proofs/nitro",
     "proofs/nitro/worker",
     "proofs/prover-sp1",
@@ -92,7 +91,6 @@ world-chain-prover = { path = "proofs/prover", default-features = false }
 world-chain-prover-sp1 = { path = "proofs/prover-sp1", default-features = false }
 world-chain-prover-nitro = { path = "proofs/prover-nitro", default-features = false }
 world-chain-proof-core = { path = "proofs/core", default-features = false }
-world-chain-proof-protocol = { path = "proofs/protocol", default-features = false }
 world-chain-proof-nitro = { path = "proofs/nitro", default-features = false }
 world-chain-proof-kona-client-utils = { path = "proofs/kona-client", default-features = false }
 world-chain-proof-kona-host-utils = { path = "proofs/kona-host", default-features = false }

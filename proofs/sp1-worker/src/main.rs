@@ -6,8 +6,9 @@ use anyhow::{Context, Result, bail};
 use clap::Parser;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use world_chain_chainspec::WorldChainSpec;
-use world_chain_proof_kona_host_utils::online::{OnlineHostConfig, build_online_config};
-use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
+use world_chain_proof_kona_host_utils::online::{
+    OnlineHostConfig, build_online_config, hardfork_config_from_chain_spec,
+};
 use world_chain_proof_succinct_host_utils::{
     Sp1ProverKind, WorldSuccinctProver,
     cpu_prover::{CpuSuccinctProver, SP1ProofMode},
@@ -187,7 +188,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let spec = cli.network.chain_spec();
-    let protocol_cfg = ProtocolHardforkConfig::from_chain_spec(spec.as_ref());
+    let schedule = hardfork_config_from_chain_spec(spec.as_ref());
     let host = build_online_config(
         cli.rollup_config.clone(),
         cli.rollup_config_hash,
@@ -195,7 +196,7 @@ async fn main() -> Result<()> {
         cli.l1_beacon_rpc.clone(),
         cli.l2_rpc.clone(),
         cli.network.chain_id(),
-        &protocol_cfg,
+        &schedule,
         Duration::from_secs(cli.witness_timeout_seconds),
     )?;
 

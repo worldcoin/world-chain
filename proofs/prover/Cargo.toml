@@ -20,5 +20,4 @@ serde.workspace = true
 serde_json.workspace = true
 world-chain-chainspec.workspace = true
 world-chain-proof-core.workspace = true
-world-chain-proof-protocol.workspace = true
 world-chain-proof-kona-host-utils.workspace = true
