@@ -40,18 +40,9 @@ struct GetAttestationArgs {
     #[arg(long, env = "ENCLAVE_CID", default_value_t = 16)]
     cid: u32,
 
-    /// vsock port the enclave is listening on (default: 5005, matching
-    /// `world_chain_proof_nitro::protocol::DEFAULT_VSOCK_PORT`).
-    #[arg(long, env = "ENCLAVE_PORT", default_value_t = 5005)]
-    port: u32,
-
     /// Write hex-encoded attestation to this file instead of stdout.
     #[arg(long)]
     output: Option<PathBuf>,
-
-    /// Arbitrary user data to embed in the attestation (hex-encoded).
-    #[arg(long)]
-    user_data: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -101,27 +92,18 @@ async fn get_attestation(args: GetAttestationArgs) -> Result<()> {
         host::{EnclaveEndpoint, NitroProver},
     };
 
-    let user_data = match &args.user_data {
-        Some(hex_str) => {
-            let bytes = hex::decode(hex_str.strip_prefix("0x").unwrap_or(hex_str))
-                .context("invalid hex in --user-data")?;
-            Some(bytes)
-        }
-        None => None,
-    };
-
     let prover = NitroProver::new(
-        EnclaveEndpoint::with_port(args.cid, args.port),
+        EnclaveEndpoint::new(args.cid),
         ExpectedPcrs::PLACEHOLDER,
     );
 
     eprintln!(
-        "requesting bare attestation from enclave (cid={}, port={})",
-        args.cid, args.port
+        "requesting bare attestation from enclave (cid={})",
+        args.cid
     );
 
     let attestation_doc = prover
-        .get_attestation(user_data)
+        .get_attestation(None)
         .await
         .map_err(|e| anyhow::anyhow!("get_attestation failed: {e}"))?;
 

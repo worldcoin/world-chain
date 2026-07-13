@@ -53,7 +53,6 @@ All RPC flags accept an environment variable fallback. The full set used across 
 | `SP1_PROVER` | `--prover` | SP1 backend: `cpu`, `network`, or `mock` |
 | `SP1_PRIVATE_KEY` | `--sp1-private-key` | Required for `--prover network` (sp1-sdk) |
 | `ENCLAVE_CID` | `--cid` | vsock CID of the running Nitro enclave |
-| `ENCLAVE_PORT` | `--port` | vsock port of the running Nitro enclave |
 | `PCR0` / `PCR1` / `PCR2` | `--pcr0/1/2` | Expected Nitro PCR measurements |
 
 A `.env` file in the working directory is loaded automatically.
@@ -455,15 +454,13 @@ This is primarily used for the **CertManager pre-warm** workflow (see below).
 **Requires:** Linux host with AF_VSOCK support and a running Nitro enclave.
 
 ```
-world-chain-prover-nitro get-attestation [--cid <N>] [--port <N>] [--output <FILE>] [--user-data <HEX>]
+world-chain-prover-nitro get-attestation [--cid <N>] [--output <FILE>]
 ```
 
 | Flag | Env | Default | Description |
 |---|---|---|---|
 | `--cid <N>` | `ENCLAVE_CID` | `16` | vsock CID of the Nitro enclave |
-| `--port <N>` | `ENCLAVE_PORT` | `5005` | vsock port the enclave listens on |
 | `--output <FILE>` | — | stdout | Write hex-encoded attestation to file |
-| `--user-data <HEX>` | — | — | Arbitrary user data to embed in the attestation (hex-encoded) |
 
 **Example**
 
