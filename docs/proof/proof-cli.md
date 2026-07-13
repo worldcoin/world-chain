@@ -449,28 +449,23 @@ The output JSON has the shape:
 
 Fetches a bare NSM attestation document from a running Nitro enclave. No proof is generated
 and no RPC endpoints are required — the enclave simply calls its NSM device and returns the
-raw `COSE_Sign1` bytes.
+raw `COSE_Sign1` bytes. Connects to CID 16 on the default vsock port (5005) and prints the
+hex-encoded attestation to stdout.
 
 This is primarily used for the **CertManager pre-warm** workflow (see below).
 
 **Requires:** Linux host with AF_VSOCK support and a running Nitro enclave.
 
 ```
-world-chain-prover-nitro get-attestation [--cid <N>] [--port <N>] [--output <FILE>]
+world-chain-prover-nitro get-attestation
 ```
 
-| Flag | Env | Default | Description |
-|---|---|---|---|
-| `--cid <N>` | `ENCLAVE_CID` | `16` | vsock CID of the Nitro enclave |
-| `--port <N>` | `ENCLAVE_PORT` | `5005` | vsock port the enclave listens on |
-| `--output <FILE>` | — | stdout | Write hex-encoded attestation to file |
+This subcommand takes no flags.
 
 **Example**
 
 ```bash
-cargo run -p world-chain-prover-nitro -- get-attestation \
-  --cid 16 \
-  --output /tmp/attestation.hex
+cargo run -p world-chain-prover-nitro -- get-attestation > /tmp/attestation.hex
 ```
 
 ---
@@ -494,12 +489,10 @@ section above.
 ### Step 2 — Fetch the attestation document
 
 ```bash
-cargo run -p world-chain-prover-nitro -- get-attestation \
-  --cid 16 \
-  --output /tmp/attestation.hex
+cargo run -p world-chain-prover-nitro -- get-attestation > /tmp/attestation.hex
 ```
 
-The output file contains the hex-encoded `COSE_Sign1` attestation bytes.
+The file contains the hex-encoded `COSE_Sign1` attestation bytes.
 
 ### Step 3 — Pre-warm CertManager
 
