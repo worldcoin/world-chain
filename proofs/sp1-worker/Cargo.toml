@@ -19,7 +19,6 @@ workspace = true
 world-chain-chainspec.workspace = true
 world-chain-proof-core.workspace = true
 world-chain-proof-kona-host-utils.workspace = true
-world-chain-proof-protocol.workspace = true
 world-chain-proof-succinct-host-utils = { workspace = true, features = ["sp1"] }
 world-chain-proof-succinct-utils.workspace = true
 world-chain-proof-worker.workspace = true
