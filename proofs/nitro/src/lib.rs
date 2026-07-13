@@ -7,14 +7,10 @@
 //! `BootInfoStruct` is attested by the enclave's NSM device. Verifiers check the attestation
 //! document instead of a ZK proof.
 //!
-//! The boundary mirrors [`world_chain_proof_succinct_host_utils::WorldSuccinctProver`]:
-//!
 //! - [`NitroRangeProofRequest`] carries the full rkyv-serialized [`WorldRangeWitnessData`]
 //!   that the enclave needs to drive the derivation pipeline.
 //! - [`NitroRangeProofArtifact`] returns the committed [`BootInfoStruct`] plus the raw
 //!   NSM attestation document (`COSE_Sign1` bytes) the host can hand to any verifier.
-//! - [`WorldNitroProver`] is the analogue of `WorldSuccinctProver` for attestation-backed
-//!   backends.
 //!
 //! Module layout:
 //!
@@ -26,17 +22,13 @@
 //!
 //! The enclave-side guest is the `world-chain-nitro-enclave` binary (`src/enclave.rs`).
 
-use async_trait::async_trait;
 // clap is used by the p384-hints binary; reference it here so the
 // `unused_crate_dependencies` lint does not fire on the lib target.
 use clap as _;
 
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
-    boot::BootInfoStruct,
-    range::WorldRangeProofPublicValues,
-    types::{AggregationInputs, AggregationOutputs},
-    witness::WorldRangeWitnessData,
+    boot::BootInfoStruct, range::WorldRangeProofPublicValues, witness::WorldRangeWitnessData,
 };
 
 // Used only by the feature-gated `enclave` module; bind with `as _`
@@ -172,61 +164,6 @@ pub struct NitroRangeProofArtifact {
     pub signature: Vec<u8>,
 }
 
-/// Host request for a Nitro-attested aggregation proof.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NitroAggregationProofRequest {
-    /// Same aggregation inputs as the Succinct backend.
-    pub inputs: AggregationInputs,
-    /// CBOR-encoded L1 headers, ordered from oldest to newest.
-    pub l1_headers_cbor: Vec<u8>,
-}
-
-/// Artifact returned by a Nitro aggregation prover.
-///
-/// Unlike the generic [`world_chain_proof_core::artifacts::AggregationProofArtifact`], this
-/// struct also preserves the 65-byte recoverable secp256k1 `signature` that the enclave
-/// produced and that was cryptographically verified against the enclave's certified key
-/// before being included here. Dropping it would prevent callers from performing
-/// EVM-native on-chain signature recovery over the aggregated output.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NitroAggregationProofArtifact {
-    /// ABI-compatible aggregation outputs committed by the enclave.
-    pub outputs: AggregationOutputs,
-    /// `COSE_Sign1` attestation document bytes returned by the Nitro NSM device.
-    ///
-    /// The document's `user_data` field commits to
-    /// [`protocol::aggregation_user_data`] of the boot info and inputs,
-    /// binding the attestation to this specific aggregation.
-    pub proof: Vec<u8>,
-    /// 65-byte recoverable secp256k1 signature over the signing commitment.
-    ///
-    /// Produced by the enclave's ephemeral signing key, which is certified by the
-    /// NSM attestation document. Enables EVM-native on-chain signature recovery.
-    pub signature: Vec<u8>,
-}
-
-/// Backend trait for TEE-attested World prover implementations.
-///
-/// Modeled after [`world_chain_proof_succinct_host_utils::WorldSuccinctProver`], but the
-/// request and artifact types carry attestation material instead of ZK proofs.
-#[async_trait]
-pub trait WorldNitroProver {
-    /// Backend-specific error type.
-    type Error;
-
-    /// Proves one range witness inside an attested execution environment.
-    async fn prove_range(
-        &self,
-        request: NitroRangeProofRequest,
-    ) -> Result<NitroRangeProofArtifact, Self::Error>;
-
-    /// Aggregates already-attested range proofs.
-    async fn prove_aggregation(
-        &self,
-        request: NitroAggregationProofRequest,
-    ) -> Result<NitroAggregationProofArtifact, Self::Error>;
-}
-
 /// Convenience hash used to bind boot info into the attestation `user_data` field.
 ///
 /// `SHA256(l2_pre_root || l2_post_root || l2_block_number_be || rollup_config_hash)`
@@ -246,8 +183,7 @@ pub fn signing_commitment(boot_info: &BootInfoStruct) -> [u8; 32] {
 /// Re-exports of common host-facing types so callers can do `use world_chain_proof_nitro::*`.
 pub mod prelude {
     pub use crate::{
-        ExpectedPcrs, NitroAggregationProofArtifact, NitroAggregationProofRequest,
-        NitroRangeProofArtifact, NitroRangeProofRequest, WorldNitroProver, range_user_data,
+        ExpectedPcrs, NitroRangeProofArtifact, NitroRangeProofRequest, range_user_data,
         signing_commitment,
     };
     #[cfg(all(feature = "enclave", target_os = "linux"))]

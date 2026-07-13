@@ -107,7 +107,7 @@ async fn nitro_prove(args: NitroArgs) -> Result<()> {
     );
 
     let artifact = prover
-        .prove_range_async(request)
+        .prove_range(request)
         .await
         .map_err(|e| anyhow!("enclave proving failed: {e}"))?;
 

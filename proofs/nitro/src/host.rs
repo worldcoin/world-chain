@@ -1,14 +1,12 @@
 //! Host-side `NitroProver` that talks to a running Nitro enclave over vsock.
 
-use async_trait::async_trait;
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
 use tokio_vsock::{VsockAddr, VsockStream};
 use tracing::{debug, instrument, warn};
 use world_chain_proof_core::boot::BootInfoStruct;
 
 use crate::{
-    ExpectedPcrs, NitroAggregationProofArtifact, NitroAggregationProofRequest,
-    NitroRangeProofArtifact, NitroRangeProofRequest, WorldNitroProver,
+    ExpectedPcrs, NitroRangeProofArtifact, NitroRangeProofRequest,
     attestation::{self, AttestationError},
     protocol::{
         self, DEFAULT_VSOCK_PORT, EnclaveRequest, EnclaveResponse, FrameError, PROTOCOL_VERSION,
@@ -41,7 +39,7 @@ impl EnclaveEndpoint {
     }
 }
 
-/// Host-side prover that proxies range and aggregation requests to a Nitro enclave.
+/// Host-side prover that proxies range requests to a Nitro enclave.
 #[derive(Clone, Debug)]
 pub struct NitroProver {
     endpoint: EnclaveEndpoint,
@@ -100,9 +98,9 @@ impl NitroProver {
         }
     }
 
-    /// Async version of [`WorldNitroProver::prove_range`].
+    /// Proves one range witness inside the Nitro enclave.
     #[instrument(skip_all, fields(endpoint = ?self.endpoint))]
-    pub async fn prove_range_async(
+    pub async fn prove_range(
         &self,
         request: NitroRangeProofRequest,
     ) -> Result<NitroRangeProofArtifact, NitroProverError> {
@@ -122,9 +120,6 @@ impl NitroProver {
                 signature,
             } => (boot_info, attestation_doc, signature),
             EnclaveResponse::Error { message } => return Err(NitroProverError::Enclave(message)),
-            EnclaveResponse::Aggregation { .. } => {
-                return Err(NitroProverError::UnexpectedResponse("aggregation"));
-            }
             EnclaveResponse::Attestation { .. } => {
                 return Err(NitroProverError::UnexpectedResponse("attestation"));
             }
@@ -155,64 +150,6 @@ impl NitroProver {
         Ok(NitroRangeProofArtifact {
             boot_info,
             attestation_doc,
-            signature,
-        })
-    }
-
-    /// Async version of [`WorldNitroProver::prove_aggregation`].
-    #[instrument(skip_all, fields(endpoint = ?self.endpoint))]
-    pub async fn prove_aggregation_async(
-        &self,
-        request: NitroAggregationProofRequest,
-    ) -> Result<NitroAggregationProofArtifact, NitroProverError> {
-        // ── Step 1: Prove ──
-        let nonce = generate_nonce()?;
-        let enclave_request = EnclaveRequest::Aggregation {
-            version: PROTOCOL_VERSION,
-            inputs: request.inputs.clone(),
-            l1_headers_cbor: request.l1_headers_cbor,
-            nonce,
-        };
-        let response = self.round_trip(enclave_request).await?;
-        let (boot_info, attestation_doc, signature) = match response {
-            EnclaveResponse::Aggregation {
-                boot_info,
-                attestation_doc,
-                signature,
-            } => (boot_info, attestation_doc, signature),
-            EnclaveResponse::Error { message } => return Err(NitroProverError::Enclave(message)),
-            EnclaveResponse::Range { .. } => {
-                return Err(NitroProverError::UnexpectedResponse("range"));
-            }
-            EnclaveResponse::Attestation { .. } => {
-                return Err(NitroProverError::UnexpectedResponse("attestation"));
-            }
-        };
-
-        // ── Step 2: Verify attestation doc + proof signature ──
-        if !self.expected_pcrs.is_placeholder() {
-            let expected_user_data = protocol::aggregation_user_data(&boot_info, &request.inputs);
-            attestation::parse_check_and_verify(
-                &attestation_doc,
-                &self.expected_pcrs,
-                &expected_user_data,
-            )?;
-            attestation::verify_nonce(&attestation_doc, &nonce)?;
-            let certified_pub_key = attestation::extract_nsm_public_key(&attestation_doc)?;
-            verify_proof_signature(&signature, &boot_info, &certified_pub_key)?;
-        } else {
-            warn!(
-                target: "world_chain::nitro",
-                "placeholder PCRs in use — skipping attestation and signature verification (dev/test mode only)"
-            );
-        }
-
-        // The aggregation artifact carries the attestation document as `proof` and
-        // the enclave's verified secp256k1 signature so callers can perform
-        // EVM-native on-chain recovery without re-requesting the signature.
-        Ok(NitroAggregationProofArtifact {
-            outputs: aggregation_outputs(&boot_info, &request.inputs),
-            proof: attestation_doc,
             signature,
         })
     }
@@ -258,42 +195,6 @@ fn verify_proof_signature(
         });
     }
     Ok(())
-}
-
-fn aggregation_outputs(
-    boot_info: &world_chain_proof_core::boot::BootInfoStruct,
-    inputs: &world_chain_proof_core::types::AggregationInputs,
-) -> world_chain_proof_core::types::AggregationOutputs {
-    use alloy_primitives::B256;
-    use world_chain_proof_core::types::{AggregationOutputs, u32_to_u8};
-    AggregationOutputs {
-        l1Head: boot_info.l1Head,
-        l2PreRoot: boot_info.l2PreRoot,
-        l2PostRoot: boot_info.l2PostRoot,
-        l2BlockNumber: boot_info.l2BlockNumber,
-        rollupConfigHash: boot_info.rollupConfigHash,
-        multiBlockVKey: B256::from(u32_to_u8(inputs.multi_block_vkey)),
-        proverAddress: inputs.prover_address,
-    }
-}
-
-#[async_trait]
-impl WorldNitroProver for NitroProver {
-    type Error = NitroProverError;
-
-    async fn prove_range(
-        &self,
-        request: NitroRangeProofRequest,
-    ) -> Result<NitroRangeProofArtifact, Self::Error> {
-        self.prove_range_async(request).await
-    }
-
-    async fn prove_aggregation(
-        &self,
-        request: NitroAggregationProofRequest,
-    ) -> Result<NitroAggregationProofArtifact, Self::Error> {
-        self.prove_aggregation_async(request).await
-    }
 }
 
 /// Reads 32 bytes from the OS CSPRNG (`/dev/urandom`) for use as a per-request nonce.

@@ -13,7 +13,7 @@
 //!  │  build Kona witness over RPC (same path as bin/proof)                               │
 //!  │       │                                                                              │
 //!  │       ▼                                                                              │
-//!  │  NitroProver::prove_range_async  ──────► Nitro Enclave                              │
+//!  │  NitroProver::prove_range  ────────────► Nitro Enclave                              │
 //!  │       │                                  (vsock / PCR-pinned)                       │
 //!  │       ▼                                                                              │
 //!  │  prover_submitProof(Nitro { attestation, signature })                               │
@@ -112,7 +112,7 @@ impl ClaimedProofJobHandler for NitroBackend {
             .context("witness serialize")?;
 
         let artifact = prover
-            .prove_range_async(nitro_request)
+            .prove_range(nitro_request)
             .await
             .context("nitro enclave proving failed")?;
 
