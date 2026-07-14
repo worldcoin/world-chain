@@ -329,9 +329,8 @@ proof-approve-pcrs:
     echo "PCR set approved."
 
 # Combined – Run all proof system deployment phases in sequence.
-# NOTE: proof-deploy-nitro outputs contract addresses (CERT_MANAGER_ADDRESS,
-# NITRO_ATTESTATION_VERIFIER) that must be set before phases 3a/3b.
-# Export them in your shell between steps, or run phases individually.
+# Automatically wires contract addresses between steps. PCR0/1/2 must be
+# provided upfront (they identify the enclave image to approve).
 proof-setup env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -339,10 +338,30 @@ proof-setup env="alphanet":
         echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
         exit 1
     fi
-    # Validate that downstream env vars are set before starting
-    : "${CERT_MANAGER_ADDRESS:?CERT_MANAGER_ADDRESS is required (from proof-deploy-nitro output)}"
-    : "${NITRO_ATTESTATION_VERIFIER:?NITRO_ATTESTATION_VERIFIER is required (from proof-deploy-nitro output)}"
-    just proof-deploy-nitro
+    : "${PCR0:?PCR0 is required (48-byte hex)}"
+    : "${PCR1:?PCR1 is required (48-byte hex)}"
+    : "${PCR2:?PCR2 is required (48-byte hex)}"
+
+    echo "=== Step 0: Computing rollup config hash ===" >&2
+    ROLLUP_CONFIG_HASH=$(just proof-rollup-config-hash {{env}})
+    export ROLLUP_CONFIG_HASH
+    echo "ROLLUP_CONFIG_HASH=$ROLLUP_CONFIG_HASH" >&2
+
+    echo "=== Step 1: Deploying Nitro attestation stack ===" >&2
+    NITRO_LOG=$(mktemp)
+    just proof-deploy-nitro | tee "$NITRO_LOG"
+    CERT_MANAGER_ADDRESS=$(grep -oP 'CertManager:\s+\K0x[0-9a-fA-F]{40}' "$NITRO_LOG")
+    NITRO_ATTESTATION_VERIFIER=$(grep -oP 'NitroAttestationVerifier:\s+\K0x[0-9a-fA-F]{40}' "$NITRO_LOG")
+    export CERT_MANAGER_ADDRESS NITRO_ATTESTATION_VERIFIER
+    echo "CERT_MANAGER_ADDRESS=$CERT_MANAGER_ADDRESS" >&2
+    echo "NITRO_ATTESTATION_VERIFIER=$NITRO_ATTESTATION_VERIFIER" >&2
+    rm -f "$NITRO_LOG"
+
+    echo "=== Step 2: Deploying proof system contracts ===" >&2
     just proof-deploy-system
+
+    echo "=== Step 3a: Pre-warming CertManager ===" >&2
     just proof-certmanager-prewarm {{env}}
+
+    echo "=== Step 3b: Approving PCR set ===" >&2
     just proof-approve-pcrs
