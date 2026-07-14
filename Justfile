@@ -120,9 +120,10 @@ install *args='':
 # Proof System Deployment
 # ==============================================================================
 #
-# env can be: alphanet (default), betanet, or any custom namespace prefix.
-# The env parameter controls the k8s namespace used for enclave operations.
-# Set PROOF_NAMESPACE to override the derived namespace entirely.
+# env parameter selects a config file from scripts/proof-envs/<env>.env
+# which sets KUBECONTEXT, PROOF_NAMESPACE, PROOF_NITRO_IMAGE, etc.
+# Shell env vars override values from the config file.
+# See scripts/proof-envs/README.md for details.
 #
 # Workflow phases:
 #   Phase 0a  proof-rollup-config-hash   – Compute rollup config hash
@@ -160,13 +161,23 @@ proof-rollup-config-hash rollup_config='':
 proof-get-attestation env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
-    NS="${PROOF_NAMESPACE:-{{env}}-world-chain-proof-nitro-worker}"
-    IMAGE="${PROOF_NITRO_IMAGE:-ghcr.io/worldcoin/world-chain-proof-nitro:nightly}"
+    if [ ! -f "scripts/proof-envs/{{env}}.env" ]; then
+        echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
+        exit 1
+    fi
+    # Load env config; shell env vars take precedence
+    _kubecontext="${KUBECONTEXT:-}"
+    _namespace="${PROOF_NAMESPACE:-}"
+    _image="${PROOF_NITRO_IMAGE:-}"
+    source scripts/proof-envs/{{env}}.env
+    KUBECONTEXT="${_kubecontext:-$KUBECONTEXT}"
+    PROOF_NAMESPACE="${_namespace:-$PROOF_NAMESPACE}"
+    PROOF_NITRO_IMAGE="${_image:-$PROOF_NITRO_IMAGE}"
     POD_NAME="proof-attestation-$(date +%s)"
-    echo "Spawning attestation pod $POD_NAME in namespace $NS…" >&2
-    kubectl run "$POD_NAME" \
-        --namespace "$NS" \
-        --image "$IMAGE" \
+    echo "Spawning attestation pod $POD_NAME in namespace $PROOF_NAMESPACE (context: $KUBECONTEXT)…" >&2
+    kubectl --context="$KUBECONTEXT" run "$POD_NAME" \
+        --namespace "$PROOF_NAMESPACE" \
+        --image "$PROOF_NITRO_IMAGE" \
         --restart=Never \
         --overrides='{
           "spec": {
@@ -176,10 +187,10 @@ proof-get-attestation env="alphanet":
         }' \
         -- get-attestation
     echo "Waiting for pod to complete…" >&2
-    kubectl wait --for=condition=Ready pod/"$POD_NAME" -n "$NS" --timeout=120s 2>/dev/null || true
-    kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/"$POD_NAME" -n "$NS" --timeout=300s
-    kubectl logs "$POD_NAME" -n "$NS"
-    kubectl delete pod "$POD_NAME" -n "$NS" --ignore-not-found >&2
+    kubectl --context="$KUBECONTEXT" wait --for=condition=Ready pod/"$POD_NAME" -n "$PROOF_NAMESPACE" --timeout=120s 2>/dev/null || true
+    kubectl --context="$KUBECONTEXT" wait --for=jsonpath='{.status.phase}'=Succeeded pod/"$POD_NAME" -n "$PROOF_NAMESPACE" --timeout=300s
+    kubectl --context="$KUBECONTEXT" logs "$POD_NAME" -n "$PROOF_NAMESPACE"
+    kubectl --context="$KUBECONTEXT" delete pod "$POD_NAME" -n "$PROOF_NAMESPACE" --ignore-not-found >&2
 
 # Phase 1 – Deploy the Nitro attestation stack.
 proof-deploy-nitro:
@@ -216,6 +227,10 @@ proof-deploy-system:
 proof-certmanager-prewarm env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
+    if [ ! -f "scripts/proof-envs/{{env}}.env" ]; then
+        echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
+        exit 1
+    fi
     : "${CERT_MANAGER_ADDRESS:?CERT_MANAGER_ADDRESS is required}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
     : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
@@ -253,11 +268,13 @@ proof-approve-pcrs:
 
 # Combined – Run all proof system deployment phases in sequence.
 proof-setup env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f "scripts/proof-envs/{{env}}.env" ]; then
+        echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
+        exit 1
+    fi
     just proof-deploy-nitro
     just proof-deploy-system
     just proof-certmanager-prewarm {{env}}
     just proof-approve-pcrs
-
-# Alias for backwards compatibility.
-proof-setup-alphanet:
-    just proof-setup alphanet
