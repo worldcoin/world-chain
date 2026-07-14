@@ -117,8 +117,12 @@ install *args='':
     cargo install --path bin/world-chain --locked $@
 
 # ==============================================================================
-# Proof System Deployment (alphanet)
+# Proof System Deployment
 # ==============================================================================
+#
+# env can be: alphanet (default), betanet, or any custom namespace prefix.
+# The env parameter controls the k8s namespace used for enclave operations.
+# Set PROOF_NAMESPACE to override the derived namespace entirely.
 #
 # Workflow phases:
 #   Phase 0a  proof-rollup-config-hash   – Compute rollup config hash
@@ -127,7 +131,7 @@ install *args='':
 #   Phase 2   proof-deploy-system         – Deploy proof system contracts
 #   Phase 3a  proof-certmanager-prewarm   – Pre-warm CertManager with CA certs
 #   Phase 3b  proof-approve-pcrs          – Approve PCR set on verifier
-#   Combined  proof-setup-alphanet        – Run all phases in sequence
+#   Combined  proof-setup                 – Run all phases in sequence
 #
 # Required env vars (varies by target):
 #   PRIVATE_KEY, OWNER, OWNER_KEY, L1_RPC_URL,
@@ -153,10 +157,10 @@ proof-rollup-config-hash rollup_config='':
     cargo run -p world-chain-prover-sp1 -- hash-rollup-config --rollup-config "$RC"
 
 # Phase 0b – Run a one-shot k8s Job to get a bare attestation doc from the enclave.
-proof-get-attestation:
+proof-get-attestation env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
-    NS="${PROOF_NAMESPACE:-alphanet-world-chain-proof-nitro-worker}"
+    NS="${PROOF_NAMESPACE:-{{env}}-world-chain-proof-nitro-worker}"
     IMAGE="${PROOF_NITRO_IMAGE:-ghcr.io/worldcoin/world-chain-proof-nitro:nightly}"
     POD_NAME="proof-attestation-$(date +%s)"
     echo "Spawning attestation pod $POD_NAME in namespace $NS…" >&2
@@ -209,14 +213,14 @@ proof-deploy-system:
         | tee "$OUT"
 
 # Phase 3a – Pre-warm CertManager with the AWS Nitro CA cert chain.
-proof-certmanager-prewarm:
+proof-certmanager-prewarm env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
     : "${CERT_MANAGER_ADDRESS:?CERT_MANAGER_ADDRESS is required}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
     : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
     echo "Fetching attestation from enclave…"
-    ATTESTATION_HEX=$(just proof-get-attestation)
+    ATTESTATION_HEX=$(just proof-get-attestation {{env}})
     echo "Generating calldata…"
     CALLDATA_JSON=$(node pkg/contracts/lib/nitro-validator/tools/hinted_attestation_calls.js prepare \
         --attestation "$ATTESTATION_HEX" --cert-manager "$CERT_MANAGER_ADDRESS")
@@ -248,8 +252,12 @@ proof-approve-pcrs:
     echo "PCR set approved."
 
 # Combined – Run all proof system deployment phases in sequence.
-proof-setup-alphanet:
+proof-setup env="alphanet":
     just proof-deploy-nitro
     just proof-deploy-system
-    just proof-certmanager-prewarm
+    just proof-certmanager-prewarm {{env}}
     just proof-approve-pcrs
+
+# Alias for backwards compatibility.
+proof-setup-alphanet:
+    just proof-setup alphanet
