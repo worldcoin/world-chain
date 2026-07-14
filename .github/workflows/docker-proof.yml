@@ -332,7 +332,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ github.repository }}-nitro-worker-enclave-eif:${{ inputs.image_tag || 'nightly' }}
             ${{ env.REGISTRY }}/${{ github.repository }}-nitro-worker-enclave-eif:sha-${{ steps.short-sha.outputs.value }}
 
-summary:
+  summary:
     name: Image tags summary
     if: always()
     needs:
