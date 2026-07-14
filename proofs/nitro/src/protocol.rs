@@ -46,6 +46,12 @@ pub enum EnclaveRequest {
         /// 32-byte random nonce for replay protection (see `Range::nonce`).
         nonce: [u8; 32],
     },
+    /// Request a bare NSM attestation document without running any proof.
+    ///
+    /// Used for CertManager pre-warm: operators need a real attestation document from
+    /// a running enclave so the AWS Nitro CA cert chain can be extracted and registered
+    /// on L1 before any `registerKey` call can succeed.
+    GetAttestation,
 }
 
 /// Responses the enclave can return to the host.
@@ -77,6 +83,13 @@ pub enum EnclaveResponse {
         /// (33 bytes). Included at the top level for convenient extraction without
         /// full document parsing.
         public_key: Vec<u8>,
+    },
+    /// Bare attestation document returned in response to [`EnclaveRequest::GetAttestation`].
+    ///
+    /// Contains only the raw `COSE_Sign1` bytes — no proof payload, no public key extraction.
+    BareAttestation {
+        /// `COSE_Sign1` attestation document bytes from the NSM device.
+        attestation_doc: Vec<u8>,
     },
     /// Enclave-side error. The host treats this as a permanent failure for the request.
     Error {
