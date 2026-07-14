@@ -165,17 +165,25 @@ proof-get-attestation env="alphanet":
         echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
         exit 1
     fi
-    # Load env config; shell env vars take precedence
-    _kubecontext="${KUBECONTEXT:-}"
-    _namespace="${PROOF_NAMESPACE:-}"
-    _image="${PROOF_NITRO_IMAGE:-}"
-    source scripts/proof-envs/{{env}}.env
+    _load_env_file() {
+        local file="$1"
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# ]] && continue
+            line="${line%%#*}"
+            line="${line#"${line%%[! ]*}"}"
+            line="${line%"${line##*[! ]}"}"
+            [[ -z "$line" ]] && continue
+            key="${line%%=*}"
+            val="${line#*=}"
+            val="${val#\"}" ; val="${val%\"}"
+            val="${val#\'}" ; val="${val%\'}"
+            [[ -z "${!key+x}" ]] && export "$key=$val"
+        done < "$file"
+    }
+    _load_env_file "scripts/proof-envs/{{env}}.env"
     if [ -f "scripts/proof-envs/{{env}}.local.env" ]; then
-        source scripts/proof-envs/{{env}}.local.env
+        _load_env_file "scripts/proof-envs/{{env}}.local.env"
     fi
-    KUBECONTEXT="${_kubecontext:-$KUBECONTEXT}"
-    PROOF_NAMESPACE="${_namespace:-$PROOF_NAMESPACE}"
-    PROOF_NITRO_IMAGE="${_image:-$PROOF_NITRO_IMAGE}"
     POD_NAME="proof-attestation-$(date +%s)"
     echo "Spawning attestation pod $POD_NAME in namespace $PROOF_NAMESPACE (context: $KUBECONTEXT)…" >&2
     kubectl --context="$KUBECONTEXT" run "$POD_NAME" \
@@ -234,9 +242,24 @@ proof-certmanager-prewarm env="alphanet":
         echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
         exit 1
     fi
-    source scripts/proof-envs/{{env}}.env
+    _load_env_file() {
+        local file="$1"
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# ]] && continue
+            line="${line%%#*}"
+            line="${line#"${line%%[! ]*}"}"
+            line="${line%"${line##*[! ]}"}"
+            [[ -z "$line" ]] && continue
+            key="${line%%=*}"
+            val="${line#*=}"
+            val="${val#\"}" ; val="${val%\"}"
+            val="${val#\'}" ; val="${val%\'}"
+            [[ -z "${!key+x}" ]] && export "$key=$val"
+        done < "$file"
+    }
+    _load_env_file "scripts/proof-envs/{{env}}.env"
     if [ -f "scripts/proof-envs/{{env}}.local.env" ]; then
-        source scripts/proof-envs/{{env}}.local.env
+        _load_env_file "scripts/proof-envs/{{env}}.local.env"
     fi
     : "${CERT_MANAGER_ADDRESS:?CERT_MANAGER_ADDRESS is required}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
@@ -281,9 +304,24 @@ proof-setup env="alphanet":
         echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
         exit 1
     fi
-    source scripts/proof-envs/{{env}}.env
+    _load_env_file() {
+        local file="$1"
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# ]] && continue
+            line="${line%%#*}"
+            line="${line#"${line%%[! ]*}"}"
+            line="${line%"${line##*[! ]}"}"
+            [[ -z "$line" ]] && continue
+            key="${line%%=*}"
+            val="${line#*=}"
+            val="${val#\"}" ; val="${val%\"}"
+            val="${val#\'}" ; val="${val%\'}"
+            [[ -z "${!key+x}" ]] && export "$key=$val"
+        done < "$file"
+    }
+    _load_env_file "scripts/proof-envs/{{env}}.env"
     if [ -f "scripts/proof-envs/{{env}}.local.env" ]; then
-        source scripts/proof-envs/{{env}}.local.env
+        _load_env_file "scripts/proof-envs/{{env}}.local.env"
     fi
     just proof-deploy-nitro
     just proof-deploy-system

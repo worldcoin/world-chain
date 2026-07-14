@@ -27,7 +27,14 @@ Shell env vars still override both.
 
 ## What goes in the config file
 
-Non-secret, environment-specific values:
+Files use **dotenv format** (not bash). Supported syntax:
+
+- `KEY=value` — simple key-value pairs
+- `KEY="value with spaces"` or `KEY='value'` — quoted values (quotes are stripped)
+- `KEY=value # note` — inline comments (everything after `#` is ignored)
+- Empty lines and `# comment` lines are skipped
+
+Only non-secret, environment-specific values belong here:
 
 | Variable | Description |
 |----------|-------------|
