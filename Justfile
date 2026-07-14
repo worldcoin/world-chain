@@ -220,18 +220,33 @@ proof-get-attestation env="alphanet":
         kubectl --context="$KUBECONTEXT" delete pod "$POD_NAME" -n "$PROOF_NAMESPACE" --ignore-not-found >&2
     }
     trap cleanup EXIT
+    # Find the node running the enclave (vsock requires same physical host)
+    ENCLAVE_NODE=$(kubectl --context="$KUBECONTEXT" get pod \
+        -n "$PROOF_NAMESPACE" \
+        -l app="$PROOF_NAMESPACE" \
+        -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null || true)
+    if [ -z "$ENCLAVE_NODE" ]; then
+        ENCLAVE_NODE=$(kubectl --context="$KUBECONTEXT" get pod \
+            -n "$PROOF_NAMESPACE" \
+            -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null || true)
+    fi
+    if [ -z "$ENCLAVE_NODE" ]; then
+        echo "Error: could not find a running pod in $PROOF_NAMESPACE to determine enclave node" >&2
+        exit 1
+    fi
+    echo "Enclave node: $ENCLAVE_NODE" >&2
     echo "Spawning attestation pod $POD_NAME in namespace $PROOF_NAMESPACE (context: $KUBECONTEXT)…" >&2
     echo "  (you can also run: kubectl --context=$KUBECONTEXT logs -f $POD_NAME -n $PROOF_NAMESPACE)" >&2
     kubectl --context="$KUBECONTEXT" run "$POD_NAME" \
         --namespace "$PROOF_NAMESPACE" \
         --image "$PROOF_NITRO_IMAGE" \
         --restart=Never \
-        --overrides='{
-          "spec": {
-            "nodeSelector": {"intent": "enclave"},
-            "tolerations": [{"key": "enclave", "operator": "Exists", "effect": "NoExecute"}]
+        --overrides="{
+          \"spec\": {
+            \"nodeName\": \"$ENCLAVE_NODE\",
+            \"tolerations\": [{\"key\": \"enclave\", \"operator\": \"Exists\", \"effect\": \"NoExecute\"}]
           }
-        }' \
+        }" \
         -- get-attestation
     echo "Waiting for pod $POD_NAME to complete…" >&2
     kubectl --context="$KUBECONTEXT" wait --for=condition=Ready pod/"$POD_NAME" -n "$PROOF_NAMESPACE" --timeout=120s 2>/dev/null || true
