@@ -163,28 +163,28 @@ proof-rollup-config-hash env="alphanet":
         source scripts/proof-envs/{{env}}.local.env
     fi
     if [ -n "${L2_RPC_URL:-}" ]; then
-        echo "Fetching rollup config from op-node at $L2_RPC_URL…"
+        echo "Fetching rollup config from op-node at $L2_RPC_URL…" >&2
         cargo run -p world-chain-prover-sp1 -- hash-rollup-config --l2-rpc "$L2_RPC_URL"
     elif [ -n "${ROLLUP_CONFIG_URL:-}" ]; then
-        echo "Downloading rollup config from $ROLLUP_CONFIG_URL…"
-        curl -sL "$ROLLUP_CONFIG_URL" -o /tmp/rollup.json
+        echo "Downloading rollup config from $ROLLUP_CONFIG_URL…" >&2
+        curl -sfSL "$ROLLUP_CONFIG_URL" -o /tmp/rollup.json
         cargo run -p world-chain-prover-sp1 -- hash-rollup-config --rollup-config /tmp/rollup.json
     elif [ -n "${ROLLUP_CONFIG:-}" ]; then
-        echo "Using local rollup config: $ROLLUP_CONFIG"
+        echo "Using local rollup config: $ROLLUP_CONFIG" >&2
         cargo run -p world-chain-prover-sp1 -- hash-rollup-config --rollup-config "$ROLLUP_CONFIG"
     else
         LOCAL_PORT=19545
-        echo "Port-forwarding to $OP_NODE_POD in $OP_NODE_NAMESPACE (context: $KUBECONTEXT)…"
+        echo "Port-forwarding to $OP_NODE_POD in $OP_NODE_NAMESPACE (context: $KUBECONTEXT)…" >&2
         kubectl --context="$KUBECONTEXT" port-forward \
             -n "$OP_NODE_NAMESPACE" \
             "pod/$OP_NODE_POD" "${LOCAL_PORT}:${OP_NODE_PORT}" &
         PF_PID=$!
+        trap 'kill $PF_PID 2>/dev/null || true' EXIT
         for i in $(seq 1 10); do
             nc -z localhost $LOCAL_PORT 2>/dev/null && break || sleep 1
         done
         cargo run -p world-chain-prover-sp1 -- hash-rollup-config \
             --l2-rpc "http://localhost:$LOCAL_PORT"
-        kill $PF_PID 2>/dev/null || true
     fi
 
 # Phase 0b – Run a one-shot k8s Job to get a bare attestation doc from the enclave.
@@ -200,6 +200,8 @@ proof-get-attestation env="alphanet":
         source scripts/proof-envs/{{env}}.local.env
     fi
     POD_NAME="proof-attestation-$(date +%s)"
+    cleanup() { kubectl --context="$KUBECONTEXT" delete pod "$POD_NAME" -n "$PROOF_NAMESPACE" --ignore-not-found >&2; }
+    trap cleanup EXIT
     echo "Spawning attestation pod $POD_NAME in namespace $PROOF_NAMESPACE (context: $KUBECONTEXT)…" >&2
     kubectl --context="$KUBECONTEXT" run "$POD_NAME" \
         --namespace "$PROOF_NAMESPACE" \
@@ -216,7 +218,6 @@ proof-get-attestation env="alphanet":
     kubectl --context="$KUBECONTEXT" wait --for=condition=Ready pod/"$POD_NAME" -n "$PROOF_NAMESPACE" --timeout=120s 2>/dev/null || true
     kubectl --context="$KUBECONTEXT" wait --for=jsonpath='{.status.phase}'=Succeeded pod/"$POD_NAME" -n "$PROOF_NAMESPACE" --timeout=300s
     kubectl --context="$KUBECONTEXT" logs "$POD_NAME" -n "$PROOF_NAMESPACE"
-    kubectl --context="$KUBECONTEXT" delete pod "$POD_NAME" -n "$PROOF_NAMESPACE" --ignore-not-found >&2
 
 # Phase 1 – Deploy the Nitro attestation stack.
 proof-deploy-nitro:
@@ -225,11 +226,10 @@ proof-deploy-nitro:
     : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
     : "${OWNER:?OWNER is required}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
-    OUT="${PROOF_DEPLOY_OUT:-/tmp/nitro-deploy-$(date +%s).json}"
-    echo "Deploying Nitro contracts (output → $OUT)…"
+    export PROOF_DEPLOY_OUT="${PROOF_DEPLOY_OUT:-/tmp/nitro-deploy-$(date +%s).json}"
+    echo "Deploying Nitro contracts (output → $PROOF_DEPLOY_OUT)…"
     cd pkg/contracts && forge script scripts/devnet/DeployNitro.s.sol:DeployNitro \
-        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast --slow \
-        | tee "$OUT"
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast --slow
 
 # Phase 2 – Deploy the proof system contracts.
 proof-deploy-system:
@@ -243,11 +243,10 @@ proof-deploy-system:
     export PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL="${PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL:-5}"
     export PROOF_THRESHOLD="${PROOF_THRESHOLD:-2}"
     export WORLD_CHALLENGER_ADDRESS="${WORLD_CHALLENGER_ADDRESS:-}"
-    OUT="${PROOF_SYSTEM_DEPLOYMENT_OUT:-/tmp/proof-system-deploy-$(date +%s).json}"
-    echo "Deploying proof system contracts (output → $OUT)…"
+    export PROOF_SYSTEM_DEPLOYMENT_OUT="${PROOF_SYSTEM_DEPLOYMENT_OUT:-/tmp/proof-system-deploy-$(date +%s).json}"
+    echo "Deploying proof system contracts (output → $PROOF_SYSTEM_DEPLOYMENT_OUT)…"
     cd pkg/contracts && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
-        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast --slow \
-        | tee "$OUT"
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast --slow
 
 # Phase 3a – Pre-warm CertManager with the AWS Nitro CA cert chain.
 proof-certmanager-prewarm env="alphanet":
@@ -269,15 +268,29 @@ proof-certmanager-prewarm env="alphanet":
     echo "Generating calldata…"
     CALLDATA_JSON=$(node pkg/contracts/lib/nitro-validator/tools/hinted_attestation_calls.js prepare \
         --attestation "$ATTESTATION_HEX" --cert-manager "$CERT_MANAGER_ADDRESS")
-    echo "Submitting cold cert entries…"
-    echo "$CALLDATA_JSON" | jq -r '.cold[]' | while read -r calldata; do
+    COLD_ENTRIES=$(echo "$CALLDATA_JSON" | jq -r '.cold[]')
+    if [ -z "$COLD_ENTRIES" ]; then
+        echo "Error: no cold cert entries found — attestation may be invalid" >&2
+        exit 1
+    fi
+    COUNT=$(echo "$COLD_ENTRIES" | wc -l)
+    echo "Submitting $COUNT cold cert entries…"
+    FAILED=0
+    while IFS= read -r calldata; do
         echo "  Sending tx with calldata ${calldata:0:20}…"
-        cast send "$CERT_MANAGER_ADDRESS" \
+        if ! cast send "$CERT_MANAGER_ADDRESS" \
             --data "$calldata" \
             --rpc-url "$L1_RPC_URL" \
-            --private-key "$PRIVATE_KEY"
-    done
-    echo "CertManager pre-warm complete."
+            --private-key "$PRIVATE_KEY"; then
+            echo "  Error: cast send failed for calldata ${calldata:0:20}" >&2
+            FAILED=$((FAILED + 1))
+        fi
+    done <<< "$COLD_ENTRIES"
+    if [ "$FAILED" -gt 0 ]; then
+        echo "Error: $FAILED of $COUNT cold cert submissions failed" >&2
+        exit 1
+    fi
+    echo "CertManager pre-warm complete ($COUNT entries submitted)."
 
 # Phase 3b – Approve the PCR set on NitroAttestationVerifier.
 proof-approve-pcrs:
@@ -290,6 +303,10 @@ proof-approve-pcrs:
     : "${PCR1:?PCR1 is required (48-byte hex)}"
     : "${PCR2:?PCR2 is required (48-byte hex)}"
     echo "Approving PCR set on $NITRO_ATTESTATION_VERIFIER…"
+    # PCR values must be 0x-prefixed hex so cast keccak hashes the raw bytes
+    [[ "$PCR0" == 0x* ]] || PCR0="0x$PCR0"
+    [[ "$PCR1" == 0x* ]] || PCR1="0x$PCR1"
+    [[ "$PCR2" == 0x* ]] || PCR2="0x$PCR2"
     cast send "$NITRO_ATTESTATION_VERIFIER" \
         "approvePCRSet(bytes32,bytes32,bytes32)" \
         "$(cast keccak "$PCR0")" "$(cast keccak "$PCR1")" "$(cast keccak "$PCR2")" \
@@ -297,6 +314,9 @@ proof-approve-pcrs:
     echo "PCR set approved."
 
 # Combined – Run all proof system deployment phases in sequence.
+# NOTE: proof-deploy-nitro outputs contract addresses (CERT_MANAGER_ADDRESS,
+# NITRO_ATTESTATION_VERIFIER) that must be set before phases 3a/3b.
+# Export them in your shell between steps, or run phases individually.
 proof-setup env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -304,10 +324,9 @@ proof-setup env="alphanet":
         echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
         exit 1
     fi
-    source scripts/proof-envs/{{env}}.env
-    if [ -f "scripts/proof-envs/{{env}}.local.env" ]; then
-        source scripts/proof-envs/{{env}}.local.env
-    fi
+    # Validate that downstream env vars are set before starting
+    : "${CERT_MANAGER_ADDRESS:?CERT_MANAGER_ADDRESS is required (from proof-deploy-nitro output)}"
+    : "${NITRO_ATTESTATION_VERIFIER:?NITRO_ATTESTATION_VERIFIER is required (from proof-deploy-nitro output)}"
     just proof-deploy-nitro
     just proof-deploy-system
     just proof-certmanager-prewarm {{env}}
