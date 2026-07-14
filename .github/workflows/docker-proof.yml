@@ -339,7 +339,7 @@ jobs:
       - merge-nitro-prover-image
       - merge-nitro-worker-image
       - merge-nitro-worker-enclave-image
-      - merge-nitro-worker-enclave-eif-image
+      - build-nitro-worker-enclave-eif-image
       - merge-service-images
     runs-on: ubuntu-latest
     steps:
