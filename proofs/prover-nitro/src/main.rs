@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 #[cfg(target_os = "linux")]
 use anyhow::Context;
 use anyhow::{Result, bail};
@@ -90,10 +92,12 @@ async fn get_attestation() -> Result<()> {
         ExpectedPcrs::PLACEHOLDER,
     );
 
-    let attestation_doc = prover.get_attestation().await
+    let attestation_doc = prover
+        .get_attestation()
+        .await
         .map_err(|e| anyhow::anyhow!("get_attestation failed: {e}"))?;
 
-    println!("{}", hex::encode(&attestation_doc));
+    println!("{}", hex::encode(attestation_doc));
 
     Ok(())
 }
@@ -133,7 +137,10 @@ async fn nitro_prove(args: NitroArgs) -> Result<()> {
     let request = NitroRangeProofRequest::from_witness_data(&input.witness, None)
         .map_err(|e| anyhow!("failed to serialize witness: {e}"))?;
 
-    let prover = NitroProver::new(EnclaveEndpoint::with_port(args.cid, args.port), expected_pcrs);
+    let prover = NitroProver::new(
+        EnclaveEndpoint::with_port(args.cid, args.port),
+        expected_pcrs,
+    );
 
     println!(
         "sending range {start}..={end} to enclave (cid {cid})",

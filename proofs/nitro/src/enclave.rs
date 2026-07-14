@@ -427,11 +427,9 @@ fn handle_get_attestation() -> Result<EnclaveResponse> {
     let response = nsm_process_request(fd, request);
 
     match response {
-        NsmResponse::Attestation { document } => {
-            Ok(EnclaveResponse::BareAttestation {
-                attestation_doc: document,
-            })
-        }
+        NsmResponse::Attestation { document } => Ok(EnclaveResponse::BareAttestation {
+            attestation_doc: document,
+        }),
         NsmResponse::Error(err) => Err(anyhow!("nsm returned error: {err:?}")),
         other => Err(anyhow!("unexpected nsm response: {other:?}")),
     }
