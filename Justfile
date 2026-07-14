@@ -244,10 +244,22 @@ proof-get-attestation env="alphanet":
         --overrides="{
           \"spec\": {
             \"nodeName\": \"$ENCLAVE_NODE\",
-            \"tolerations\": [{\"key\": \"enclave\", \"operator\": \"Exists\", \"effect\": \"NoExecute\"}]
+            \"tolerations\": [{\"key\": \"enclave\", \"operator\": \"Exists\", \"effect\": \"NoExecute\"}],
+            \"containers\": [{
+              \"name\": \"$POD_NAME\",
+              \"image\": \"$PROOF_NITRO_IMAGE\",
+              \"args\": [\"get-attestation\"],
+              \"securityContext\": {
+                \"runAsNonRoot\": true,
+                \"runAsUser\": 10001,
+                \"runAsGroup\": 10001,
+                \"seccompProfile\": {\"type\": \"RuntimeDefault\"},
+                \"capabilities\": {\"drop\": [\"ALL\"]},
+                \"allowPrivilegeEscalation\": false
+              }
+            }]
           }
-        }" \
-        -- get-attestation
+        }"
     echo "Waiting for pod $POD_NAME to complete…" >&2
     kubectl --context="$KUBECONTEXT" wait --for=condition=Ready pod/"$POD_NAME" -n "$PROOF_NAMESPACE" --timeout=120s 2>/dev/null || true
     # Stream logs in background so the user sees container output while waiting
@@ -256,6 +268,14 @@ proof-get-attestation env="alphanet":
     if ! kubectl --context="$KUBECONTEXT" wait --for=jsonpath='{.status.phase}'=Succeeded pod/"$POD_NAME" -n "$PROOF_NAMESPACE" --timeout=300s; then
         echo "=== Pod failed or timed out — dumping pod description ===" >&2
         kubectl --context="$KUBECONTEXT" describe pod "$POD_NAME" -n "$PROOF_NAMESPACE" >&2 || true
+        # Check for known enclave compatibility issue
+        POD_LOGS=$(kubectl --context="$KUBECONTEXT" logs "$POD_NAME" -n "$PROOF_NAMESPACE" 2>/dev/null || true)
+        if echo "$POD_LOGS" | grep -qiE 'early eof|unknown request'; then
+            echo "" >&2
+            echo "Hint: 'vsock io error: early eof' means the running enclave EIF was built before" >&2
+            echo "the get-attestation protocol was added. Redeploy the nitro-worker with a fresh" >&2
+            echo "nightly image (trigger docker-proof.yml workflow or wait for the next nightly build)." >&2
+        fi
         exit 1
     fi
     # Kill the background log stream before capturing final output to stdout
