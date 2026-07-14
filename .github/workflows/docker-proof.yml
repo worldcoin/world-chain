@@ -331,3 +331,36 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository }}-nitro-worker-enclave-eif:${{ inputs.image_tag || 'nightly' }}
             ${{ env.REGISTRY }}/${{ github.repository }}-nitro-worker-enclave-eif:sha-${{ steps.short-sha.outputs.value }}
+  summary:
+    name: Image tags summary
+    if: always()
+    needs:
+      - merge-sp1-prover-image
+      - merge-nitro-prover-image
+      - merge-nitro-worker-image
+      - merge-nitro-worker-enclave-image
+      - merge-nitro-worker-enclave-eif-image
+      - merge-service-images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write summary
+        run: |
+          TAG="${{ inputs.image_tag || 'nightly' }}"
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          REPO="ghcr.io/${{ github.repository }}"
+          {
+            echo "## 🐳 Images built"
+            echo ""
+            echo "| Image | Tags |"
+            echo "|-------|------|"
+            echo "| \`$REPO-proof-sp1\` | \`${TAG}\`, \`sha-${SHA}\` |"
+            echo "| \`$REPO-proof-nitro\` | \`${TAG}\`, \`sha-${SHA}\` |"
+            echo "| \`$REPO-nitro-worker\` | \`${TAG}\`, \`sha-${SHA}\` |"
+            echo "| \`$REPO-nitro-worker-enclave\` | \`${TAG}\`, \`sha-${SHA}\` |"
+            echo "| \`$REPO-nitro-worker-enclave-eif\` | \`${TAG}\`, \`sha-${SHA}\` |"
+            echo "| \`$REPO-sp1-worker\` | \`${TAG}\`, \`sha-${SHA}\` |"
+            echo "| \`$REPO-proposer\` | \`${TAG}\`, \`sha-${SHA}\` |"
+            echo "| \`$REPO-challenger\` | \`${TAG}\`, \`sha-${SHA}\` |"
+            echo "| \`$REPO-defender\` | \`${TAG}\`, \`sha-${SHA}\` |"
+            echo "| \`$REPO-prover-service\` | \`${TAG}\`, \`sha-${SHA}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
