@@ -51,10 +51,7 @@ pub enum EnclaveRequest {
     /// Used for CertManager pre-warm: operators need a real attestation document from
     /// a running enclave so the AWS Nitro CA cert chain can be extracted and registered
     /// on L1 before any `registerKey` call can succeed.
-    GetAttestation {
-        /// Optional arbitrary user data to embed in the attestation document.
-        user_data: Option<Vec<u8>>,
-    },
+    GetAttestation,
 }
 
 /// Responses the enclave can return to the host.

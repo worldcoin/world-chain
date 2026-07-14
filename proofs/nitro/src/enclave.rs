@@ -238,7 +238,7 @@ async fn dispatch(request: EnclaveRequest) -> Result<EnclaveResponse> {
             handle_range(witness_rkyv, expected_public_values, nonce).await
         }
         EnclaveRequest::PublicKey { nonce } => handle_public_key(nonce),
-        EnclaveRequest::GetAttestation { user_data } => handle_get_attestation(user_data),
+        EnclaveRequest::GetAttestation => handle_get_attestation(),
     }
 }
 
@@ -413,16 +413,14 @@ fn ensure_boot_info_matches(
 /// Handles a [`EnclaveRequest::GetAttestation`] request.
 ///
 /// Produces a bare attestation document via the NSM device. No proof is run.
-fn handle_get_attestation(user_data: Option<Vec<u8>>) -> Result<EnclaveResponse> {
+fn handle_get_attestation() -> Result<EnclaveResponse> {
     let fd = nsm_init();
     if fd < 0 {
         return Err(anyhow!("nsm_init returned negative fd: {fd}"));
     }
 
-    let user_data_buf = user_data.map(ByteBuf::from);
-
     let request = NsmRequest::Attestation {
-        user_data: user_data_buf,
+        user_data: None,
         nonce: None,
         public_key: None,
     };

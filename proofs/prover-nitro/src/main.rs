@@ -90,9 +90,7 @@ async fn get_attestation() -> Result<()> {
         ExpectedPcrs::PLACEHOLDER,
     );
 
-    let attestation_doc = prover
-        .get_attestation(None)
-        .await
+    let attestation_doc = prover.get_attestation().await
         .map_err(|e| anyhow::anyhow!("get_attestation failed: {e}"))?;
 
     println!("{}", hex::encode(&attestation_doc));

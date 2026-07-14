@@ -94,7 +94,10 @@ impl NitroProver {
                 Ok((attestation_doc, public_key))
             }
             EnclaveResponse::Error { message } => Err(NitroProverError::Enclave(message)),
-            _ => Err(NitroProverError::UnexpectedResponse("non-attestation")),
+            EnclaveResponse::Range { .. } => Err(NitroProverError::UnexpectedResponse("range")),
+            EnclaveResponse::BareAttestation { .. } => {
+                Err(NitroProverError::UnexpectedResponse("bare_attestation"))
+            }
         }
     }
 
@@ -105,19 +108,15 @@ impl NitroProver {
     /// bytes. Useful for CertManager pre-warm workflows where operators need a real
     /// attestation document before any `registerKey` call can succeed.
     #[instrument(skip_all, fields(endpoint = ?self.endpoint))]
-    pub async fn get_attestation(
-        &self,
-        user_data: Option<Vec<u8>>,
-    ) -> Result<Vec<u8>, NitroProverError> {
-        let response = self
-            .round_trip(EnclaveRequest::GetAttestation { user_data })
-            .await?;
+    pub async fn get_attestation(&self) -> Result<Vec<u8>, NitroProverError> {
+        let response = self.round_trip(EnclaveRequest::GetAttestation).await?;
         match response {
             EnclaveResponse::BareAttestation { attestation_doc } => Ok(attestation_doc),
             EnclaveResponse::Error { message } => Err(NitroProverError::Enclave(message)),
-            _ => Err(NitroProverError::UnexpectedResponse(
-                "expected BareAttestation",
-            )),
+            EnclaveResponse::Attestation { .. } => {
+                Err(NitroProverError::UnexpectedResponse("attestation"))
+            }
+            EnclaveResponse::Range { .. } => Err(NitroProverError::UnexpectedResponse("range")),
         }
     }
 
