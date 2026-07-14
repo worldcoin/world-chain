@@ -180,9 +180,23 @@ proof-rollup-config-hash env="alphanet":
             "pod/$OP_NODE_POD" "${LOCAL_PORT}:${OP_NODE_PORT}" &
         PF_PID=$!
         trap 'kill $PF_PID 2>/dev/null || true' EXIT
+        READY=false
         for i in $(seq 1 10); do
-            nc -z localhost $LOCAL_PORT 2>/dev/null && break || sleep 1
+            if nc -z localhost "$LOCAL_PORT" 2>/dev/null; then
+                READY=true
+                break
+            fi
+            # check that the port-forward process is still alive
+            if ! kill -0 "$PF_PID" 2>/dev/null; then
+                echo "Error: kubectl port-forward exited unexpectedly" >&2
+                exit 1
+            fi
+            sleep 1
         done
+        if [ "$READY" != true ]; then
+            echo "Error: port-forward to localhost:$LOCAL_PORT not ready after 10s" >&2
+            exit 1
+        fi
         cargo run -p world-chain-prover-sp1 -- hash-rollup-config \
             --l2-rpc "http://localhost:$LOCAL_PORT"
     fi
