@@ -214,9 +214,14 @@ proof-get-attestation env="alphanet":
         source scripts/proof-envs/{{env}}.local.env
     fi
     POD_NAME="proof-attestation-$(date +%s)"
-    cleanup() { kubectl --context="$KUBECONTEXT" delete pod "$POD_NAME" -n "$PROOF_NAMESPACE" --ignore-not-found >&2; }
+    LOGS_PID=""
+    cleanup() {
+        [ -n "$LOGS_PID" ] && kill "$LOGS_PID" 2>/dev/null || true
+        kubectl --context="$KUBECONTEXT" delete pod "$POD_NAME" -n "$PROOF_NAMESPACE" --ignore-not-found >&2
+    }
     trap cleanup EXIT
     echo "Spawning attestation pod $POD_NAME in namespace $PROOF_NAMESPACE (context: $KUBECONTEXT)…" >&2
+    echo "  (you can also run: kubectl --context=$KUBECONTEXT logs -f $POD_NAME -n $PROOF_NAMESPACE)" >&2
     kubectl --context="$KUBECONTEXT" run "$POD_NAME" \
         --namespace "$PROOF_NAMESPACE" \
         --image "$PROOF_NITRO_IMAGE" \
@@ -228,9 +233,19 @@ proof-get-attestation env="alphanet":
           }
         }' \
         -- get-attestation
-    echo "Waiting for pod to complete…" >&2
+    echo "Waiting for pod $POD_NAME to complete…" >&2
     kubectl --context="$KUBECONTEXT" wait --for=condition=Ready pod/"$POD_NAME" -n "$PROOF_NAMESPACE" --timeout=120s 2>/dev/null || true
-    kubectl --context="$KUBECONTEXT" wait --for=jsonpath='{.status.phase}'=Succeeded pod/"$POD_NAME" -n "$PROOF_NAMESPACE" --timeout=300s
+    # Stream logs in background so the user sees container output while waiting
+    kubectl --context="$KUBECONTEXT" logs -f "$POD_NAME" -n "$PROOF_NAMESPACE" >&2 2>/dev/null &
+    LOGS_PID=$!
+    if ! kubectl --context="$KUBECONTEXT" wait --for=jsonpath='{.status.phase}'=Succeeded pod/"$POD_NAME" -n "$PROOF_NAMESPACE" --timeout=300s; then
+        echo "=== Pod failed or timed out — dumping pod description ===" >&2
+        kubectl --context="$KUBECONTEXT" describe pod "$POD_NAME" -n "$PROOF_NAMESPACE" >&2 || true
+        exit 1
+    fi
+    # Kill the background log stream before capturing final output to stdout
+    kill "$LOGS_PID" 2>/dev/null || true
+    LOGS_PID=""
     kubectl --context="$KUBECONTEXT" logs "$POD_NAME" -n "$PROOF_NAMESPACE"
 
 # Phase 1 – Deploy the Nitro attestation stack.
