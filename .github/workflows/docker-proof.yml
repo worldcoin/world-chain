@@ -331,6 +331,7 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository }}-nitro-worker-enclave-eif:${{ inputs.image_tag || 'nightly' }}
             ${{ env.REGISTRY }}/${{ github.repository }}-nitro-worker-enclave-eif:sha-${{ steps.short-sha.outputs.value }}
+
   summary:
     name: Image tags summary
     if: always()
@@ -344,23 +345,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Write summary
+        env:
+          TAG: ${{ inputs.image_tag || 'nightly' }}
+          SHA: ${{ github.sha }}
+          SP1_PROVER_RESULT:    ${{ needs.merge-sp1-prover-image.result }}
+          NITRO_PROVER_RESULT:  ${{ needs.merge-nitro-prover-image.result }}
+          NITRO_WORKER_RESULT:  ${{ needs.merge-nitro-worker-image.result }}
+          ENCLAVE_RESULT:       ${{ needs.merge-nitro-worker-enclave-image.result }}
+          EIF_RESULT:           ${{ needs.build-nitro-worker-enclave-eif-image.result }}
+          SERVICES_RESULT:      ${{ needs.merge-service-images.result }}
+          SP1_PROVER_DIGEST:    ${{ needs.merge-sp1-prover-image.outputs.digest }}
+          NITRO_PROVER_DIGEST:  ${{ needs.merge-nitro-prover-image.outputs.digest }}
+          NITRO_WORKER_DIGEST:  ${{ needs.merge-nitro-worker-image.outputs.digest }}
+          ENCLAVE_DIGEST:       ${{ needs.merge-nitro-worker-enclave-image.outputs.digest }}
+          EIF_DIGEST:           ${{ needs.build-nitro-worker-enclave-eif-image.outputs.digest }}
         run: |
-          TAG="${{ inputs.image_tag || 'nightly' }}"
-          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          SHORT="${SHA:0:7}"
           REPO="ghcr.io/${{ github.repository }}"
+          status() { [ "$1" = "success" ] && echo "✅" || echo "❌ $1"; }
           {
-            echo "## 🐳 Images built"
+            echo "## 🐳 Image build results"
             echo ""
-            echo "| Image | Tags |"
-            echo "|-------|------|"
-            echo "| \`$REPO-proof-sp1\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-proof-nitro\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-nitro-worker\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-nitro-worker-enclave\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-nitro-worker-enclave-eif\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-sp1-worker\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-proposer\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-challenger\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-defender\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-prover-service\` | \`${TAG}\`, \`sha-${SHA}\` |"
+            echo "| Image | Tag | Status |"
+            echo "|-------|-----|--------|"
+            echo "| \`$REPO-proof-sp1\` | \`sha-$SHORT\` | $(status $SP1_PROVER_RESULT) |"
+            echo "| \`$REPO-proof-nitro\` | \`sha-$SHORT\` | $(status $NITRO_PROVER_RESULT) |"
+            echo "| \`$REPO-nitro-worker\` | \`sha-$SHORT\` | $(status $NITRO_WORKER_RESULT) |"
+            echo "| \`$REPO-nitro-worker-enclave\` | \`sha-$SHORT\` | $(status $ENCLAVE_RESULT) |"
+            echo "| \`$REPO-nitro-worker-enclave-eif\` | \`sha-$SHORT\` | $(status $EIF_RESULT) |"
+            echo "| service images (sp1-worker, proposer, ...) | \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
           } >> "$GITHUB_STEP_SUMMARY"
