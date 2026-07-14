@@ -787,3 +787,146 @@ The codebase provides three verification depths for different call sites:
 - `parse_check_and_verify` — full verification (all 5 checks)
 - `verify_cose_sign1_signature` — signature + cert chain only
 - `verify_pcrs_only` — just PCR matching (lightweight check)
+
+---
+
+## Frequently Asked Questions
+
+These questions came up during development and represent the non-obvious parts of the
+system. They are documented here to save future contributors the same discovery process.
+
+---
+
+**Q: Why are PCRs passed into `verifyAttestation` if they are already inside the
+attestation document?**
+
+The attestation document contains the *actual* PCR values from the running enclave. But
+the verifier needs *expected* PCR values to compare against — without them there is
+nothing to verify: any enclave image would be accepted. The caller supplies expected PCRs
+(from `approvedPCRSets`) so the contract can assert the enclave ran exactly the image the
+operator approved. Think of it as: the document says "I am X", the caller's expected PCRs
+say "I will only accept X".
+
+---
+
+**Q: How does an upgrade to a new enclave version (with new PCRs) work?**
+
+1. Build the new EIF — `nitro-cli build-enclave` outputs new PCR0/1/2 measurements.
+2. `approvePCRSet(newPcr0, newPcr1, newPcr2)` — both old and new PCR sets are now
+   approved simultaneously.
+3. Deploy new enclave pods; each one calls `registerKey` on startup (via the operator /
+   prover-service flow).
+4. Once all enclaves have migrated to the new image, call
+   `revokePCRSet(oldPcr0, oldPcr1, oldPcr2)` — prevents future registrations under the
+   old image. Already-registered keys from the old image remain valid until separately
+   revoked if needed.
+
+This overlap window means zero downtime: both generations of enclaves can serve proofs
+simultaneously during the rollout.
+
+---
+
+**Q: Why was `getKeyByPCRs` removed from `NitroEnclaveKeyRegistry`?**
+
+A 1-to-1 mapping from PCR triple to key is incorrect — multiple enclave instances can
+run the same EIF simultaneously. Each instance generates its own independent ephemeral
+keypair at startup. The registry deliberately has no `PCRs → key` lookup; each key is
+indexed only by its own `keccak256(publicKey)` hash. The authoritative off-chain index
+from PCRs to keys is the `KeyRegistered` event log.
+
+---
+
+**Q: Does `NitroAttestationVerifier` need PCRs passed into its constructor?**
+
+No. PCR management is fully dynamic — PCR sets are added and removed at runtime via
+`approvePCRSet` / `revokePCRSet`. No PCRs are baked into the constructor. This allows the
+owner to approve new enclave images and retire old ones without redeploying the verifier
+contract.
+
+---
+
+**Q: Why store revoked keys in `NitroEnclaveKeyRegistry` instead of just deleting them?**
+
+To prevent replay attacks. If a key were simply deleted on revocation, an attacker who
+captured that key's original attestation document could re-submit it to `registerKey` and
+silently restore the key. The `Revoked` state is permanent — once revoked, a key can
+never be re-registered regardless of whether a valid attestation document for it is
+available. The lifecycle is strictly `Unknown → Active → Revoked` with no path back.
+
+---
+
+**Q: Why is there an `Unknown` state in the key lifecycle enum? Isn't Active/Revoked
+enough?**
+
+Solidity enums default to their zero value. Having `Unknown` as zero makes it explicit
+when a key has never been registered at all, clearly distinguishing it from `Active`. It
+avoids the footgun where the default zero value silently means "active" before any
+registration has occurred. Gas-wise, a 3-value enum is identical to a 2-value one — both
+fit in a single storage slot byte.
+
+---
+
+**Q: When a PCR set is revoked, should all keys registered under those PCRs be
+automatically revoked too?**
+
+This was explicitly considered and decided against. Revoking a PCR set is a
+forward-looking operation — it prevents *new* keys from registering under that image.
+Existing registered keys were each individually verified at registration time and are
+tracked separately. Cascading revocation would require an on-chain `PCR → [keys]` mapping
+(which conflicts with the multi-instance design above) or an unbounded on-chain loop.
+
+The recommended operational approach: if you need to revoke all keys from a compromised
+image, call `revokeKey` for each key individually. The `KeyRegistered` events provide the
+off-chain index needed to enumerate them.
+
+> **Security note:** The gap between PCR revocation and individual key revocation means a
+> window exists where proofs signed by the old (possibly compromised) image are still
+> accepted. Operators should revoke individual keys promptly after revoking a PCR set.
+
+---
+
+**Q: Can you build an EIF (`.eif` file) on a regular machine, or do you need a
+Nitro-capable EC2 host?**
+
+`nitro-cli build-enclave` only runs on Amazon Linux on Nitro-capable EC2 instances — it
+is not available in standard GitHub Actions runners. The CI pipeline works around this:
+
+1. A normal runner builds the enclave binary and produces a Docker image.
+2. A dedicated Nitro-capable EC2 runner runs `nitro-cli build-enclave` to produce the
+   `.eif` file and record its PCR measurements.
+3. The EIF is baked into a second launcher Docker image (`Dockerfile.eif`) and published
+   to GHCR.
+4. In Kubernetes, the `enclave-launcher` sidecar pulls this image and runs
+   `nitro-cli run-enclave` using the EIF baked inside it.
+
+---
+
+**Q: How does the enclave-launcher share the enclave CID with the main nitro-worker
+container?**
+
+The CID is dynamic — `nitro-cli run-enclave` allocates it at runtime and it cannot be
+hardcoded (multiple enclave instances could run on the same node, each getting a different
+CID). The launcher:
+
+1. Runs `nitro-cli run-enclave ...` (without `--enclave-cid` to let AWS assign it).
+2. Reads the allocated CID via `nitro-cli describe-enclaves`.
+3. Writes the CID to `/run/nitro-shared/enclave-cid` on a shared `emptyDir` volume.
+
+The main nitro-worker container waits for that file to appear before connecting over
+vsock. This is why the startup script contains the `while [ ! -f /run/nitro-shared/enclave-cid ]` polling loop.
+
+---
+
+**Q: Why does the `vsock-proxy` sidecar exist if the enclave has no network access?**
+
+AWS Nitro Enclaves are fully network-isolated — no inbound or outbound TCP/IP connections
+are possible. The only channel out is vsock. The `vsock-proxy` sidecar runs on the parent
+EC2 instance and acts as a vsock-to-TCP bridge:
+
+- The enclave connects to it via vsock (CID 3, the reserved parent CID).
+- The proxy forwards those connections to specific AWS API endpoints configured at startup
+  (in production, `kms.us-east-1.amazonaws.com:443`).
+
+This is how the enclave can reach AWS KMS for any key operations while remaining isolated
+from direct internet access. The proxy is intentionally limited to a single destination
+endpoint, minimising the network attack surface exposed to the enclave.
