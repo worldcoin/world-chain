@@ -115,3 +115,141 @@ docs:
 
 install *args='':
     cargo install --path bin/world-chain --locked $@
+
+# ==============================================================================
+# Proof System Deployment (alphanet)
+# ==============================================================================
+#
+# Workflow phases:
+#   Phase 0a  proof-rollup-config-hash   – Compute rollup config hash
+#   Phase 0b  proof-get-attestation       – Fetch bare attestation doc from enclave
+#   Phase 1   proof-deploy-nitro          – Deploy Nitro attestation contracts
+#   Phase 2   proof-deploy-system         – Deploy proof system contracts
+#   Phase 3a  proof-certmanager-prewarm   – Pre-warm CertManager with CA certs
+#   Phase 3b  proof-approve-pcrs          – Approve PCR set on verifier
+#   Combined  proof-setup-alphanet        – Run all phases in sequence
+#
+# Required env vars (varies by target):
+#   PRIVATE_KEY, OWNER, OWNER_KEY, L1_RPC_URL,
+#   WORLD_CHAIN_L2_CHAIN_ID, ROLLUP_CONFIG_HASH,
+#   CERT_MANAGER_ADDRESS, NITRO_ATTESTATION_VERIFIER,
+#   PCR0, PCR1, PCR2
+# ==============================================================================
+
+# Phase 0a – Compute and print the rollup config hash.
+proof-rollup-config-hash rollup_config='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "{{rollup_config}}" ]; then
+        RC="{{rollup_config}}"
+    elif [ -n "${ROLLUP_CONFIG:-}" ]; then
+        RC="$ROLLUP_CONFIG"
+    else
+        echo "ROLLUP_CONFIG not set; downloading from S3…"
+        RC="/tmp/rollup-config-$(date +%s).json"
+        aws s3 cp s3://worldchain-alphanet/rollup-config.json "$RC"
+    fi
+    echo "Using rollup config: $RC"
+    cargo run -p world-chain-prover-sp1 -- hash-rollup-config --rollup-config "$RC"
+
+# Phase 0b – Run a one-shot k8s Job to get a bare attestation doc from the enclave.
+proof-get-attestation:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    NS="${PROOF_NAMESPACE:-alphanet-world-chain-proof-nitro-worker}"
+    IMAGE="${PROOF_NITRO_IMAGE:-ghcr.io/worldcoin/world-chain-proof-nitro:nightly}"
+    POD_NAME="proof-attestation-$(date +%s)"
+    echo "Spawning attestation pod $POD_NAME in namespace $NS…" >&2
+    kubectl run "$POD_NAME" \
+        --namespace "$NS" \
+        --image "$IMAGE" \
+        --restart=Never \
+        --overrides='{
+          "spec": {
+            "nodeSelector": {"intent": "enclave"},
+            "tolerations": [{"key": "enclave", "operator": "Exists", "effect": "NoExecute"}]
+          }
+        }' \
+        -- get-attestation
+    echo "Waiting for pod to complete…" >&2
+    kubectl wait --for=condition=Ready pod/"$POD_NAME" -n "$NS" --timeout=120s 2>/dev/null || true
+    kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/"$POD_NAME" -n "$NS" --timeout=300s
+    kubectl logs "$POD_NAME" -n "$NS"
+    kubectl delete pod "$POD_NAME" -n "$NS" --ignore-not-found >&2
+
+# Phase 1 – Deploy the Nitro attestation stack.
+proof-deploy-nitro:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
+    : "${OWNER:?OWNER is required}"
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    OUT="${PROOF_DEPLOY_OUT:-/tmp/nitro-deploy-$(date +%s).json}"
+    echo "Deploying Nitro contracts (output → $OUT)…"
+    cd pkg/contracts && forge script scripts/devnet/DeployNitro.s.sol:DeployNitro \
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast --slow \
+        | tee "$OUT"
+
+# Phase 2 – Deploy the proof system contracts.
+proof-deploy-system:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    : "${WORLD_CHAIN_L2_CHAIN_ID:?WORLD_CHAIN_L2_CHAIN_ID is required}"
+    : "${ROLLUP_CONFIG_HASH:?ROLLUP_CONFIG_HASH is required}"
+    export PROOF_SYSTEM_BLOCK_INTERVAL="${PROOF_SYSTEM_BLOCK_INTERVAL:-10}"
+    export PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL="${PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL:-5}"
+    export PROOF_THRESHOLD="${PROOF_THRESHOLD:-2}"
+    export WORLD_CHALLENGER_ADDRESS="${WORLD_CHALLENGER_ADDRESS:-}"
+    OUT="${PROOF_SYSTEM_DEPLOYMENT_OUT:-/tmp/proof-system-deploy-$(date +%s).json}"
+    echo "Deploying proof system contracts (output → $OUT)…"
+    cd pkg/contracts && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast --slow \
+        | tee "$OUT"
+
+# Phase 3a – Pre-warm CertManager with the AWS Nitro CA cert chain.
+proof-certmanager-prewarm:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${CERT_MANAGER_ADDRESS:?CERT_MANAGER_ADDRESS is required}"
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
+    echo "Fetching attestation from enclave…"
+    ATTESTATION_HEX=$(just proof-get-attestation)
+    echo "Generating calldata…"
+    CALLDATA_JSON=$(node pkg/contracts/lib/nitro-validator/tools/hinted_attestation_calls.js prepare \
+        --attestation "$ATTESTATION_HEX" --cert-manager "$CERT_MANAGER_ADDRESS")
+    echo "Submitting cold cert entries…"
+    echo "$CALLDATA_JSON" | jq -r '.cold[]' | while read -r calldata; do
+        echo "  Sending tx with calldata ${calldata:0:20}…"
+        cast send "$CERT_MANAGER_ADDRESS" \
+            --data "$calldata" \
+            --rpc-url "$L1_RPC_URL" \
+            --private-key "$PRIVATE_KEY"
+    done
+    echo "CertManager pre-warm complete."
+
+# Phase 3b – Approve the PCR set on NitroAttestationVerifier.
+proof-approve-pcrs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${NITRO_ATTESTATION_VERIFIER:?NITRO_ATTESTATION_VERIFIER is required}"
+    : "${OWNER_KEY:?OWNER_KEY is required}"
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    : "${PCR0:?PCR0 is required (48-byte hex)}"
+    : "${PCR1:?PCR1 is required (48-byte hex)}"
+    : "${PCR2:?PCR2 is required (48-byte hex)}"
+    echo "Approving PCR set on $NITRO_ATTESTATION_VERIFIER…"
+    cast send "$NITRO_ATTESTATION_VERIFIER" \
+        "approvePCRSet(bytes32,bytes32,bytes32)" \
+        "$(cast keccak "$PCR0")" "$(cast keccak "$PCR1")" "$(cast keccak "$PCR2")" \
+        --rpc-url "$L1_RPC_URL" --private-key "$OWNER_KEY"
+    echo "PCR set approved."
+
+# Combined – Run all proof system deployment phases in sequence.
+proof-setup-alphanet:
+    just proof-deploy-nitro
+    just proof-deploy-system
+    just proof-certmanager-prewarm
+    just proof-approve-pcrs
