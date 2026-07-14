@@ -170,6 +170,9 @@ proof-get-attestation env="alphanet":
     _namespace="${PROOF_NAMESPACE:-}"
     _image="${PROOF_NITRO_IMAGE:-}"
     source scripts/proof-envs/{{env}}.env
+    if [ -f "scripts/proof-envs/{{env}}.local.env" ]; then
+        source scripts/proof-envs/{{env}}.local.env
+    fi
     KUBECONTEXT="${_kubecontext:-$KUBECONTEXT}"
     PROOF_NAMESPACE="${_namespace:-$PROOF_NAMESPACE}"
     PROOF_NITRO_IMAGE="${_image:-$PROOF_NITRO_IMAGE}"
@@ -231,6 +234,10 @@ proof-certmanager-prewarm env="alphanet":
         echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
         exit 1
     fi
+    source scripts/proof-envs/{{env}}.env
+    if [ -f "scripts/proof-envs/{{env}}.local.env" ]; then
+        source scripts/proof-envs/{{env}}.local.env
+    fi
     : "${CERT_MANAGER_ADDRESS:?CERT_MANAGER_ADDRESS is required}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
     : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
@@ -273,6 +280,10 @@ proof-setup env="alphanet":
     if [ ! -f "scripts/proof-envs/{{env}}.env" ]; then
         echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
         exit 1
+    fi
+    source scripts/proof-envs/{{env}}.env
+    if [ -f "scripts/proof-envs/{{env}}.local.env" ]; then
+        source scripts/proof-envs/{{env}}.local.env
     fi
     just proof-deploy-nitro
     just proof-deploy-system

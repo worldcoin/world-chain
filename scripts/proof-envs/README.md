@@ -10,6 +10,21 @@ environment. The `just proof-*` targets load the matching file based on the
 2. Fill in the values for your environment.
 3. Run targets with `just proof-setup <your-env>`.
 
+## Local overrides
+
+To override values locally without modifying committed files, create a
+`<env>.local.env` file next to the base config. These files are gitignored.
+
+For example, to use a different kubectl context for alphanet locally:
+
+```bash
+# scripts/proof-envs/alphanet.local.env
+KUBECONTEXT=my-local-context
+```
+
+Local overrides are sourced after the base config, so they take precedence.
+Shell env vars still override both.
+
 ## What goes in the config file
 
 Non-secret, environment-specific values:
