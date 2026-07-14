@@ -139,23 +139,33 @@ install *args='':
 #   WORLD_CHAIN_L2_CHAIN_ID, ROLLUP_CONFIG_HASH,
 #   CERT_MANAGER_ADDRESS, NITRO_ATTESTATION_VERIFIER,
 #   PCR0, PCR1, PCR2
+#
+# Optional (proof-rollup-config-hash — one of these, in priority order):
+#   L2_RPC_URL, ROLLUP_CONFIG_URL, ROLLUP_CONFIG
 # ==============================================================================
 
 # Phase 0a – Compute and print the rollup config hash.
-proof-rollup-config-hash rollup_config='':
+# Sources (checked in priority order):
+#   L2_RPC_URL        – op-node RPC endpoint (port 9545, NOT the execution client on 8545)
+#   ROLLUP_CONFIG_URL – URL to download the rollup config JSON from
+#   ROLLUP_CONFIG     – local file path to an existing rollup config JSON
+proof-rollup-config-hash:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ -n "{{rollup_config}}" ]; then
-        RC="{{rollup_config}}"
+    if [ -n "${L2_RPC_URL:-}" ]; then
+        echo "Fetching rollup config from op-node at $L2_RPC_URL…"
+        cargo run -p world-chain-prover-sp1 -- hash-rollup-config --l2-rpc "$L2_RPC_URL"
+    elif [ -n "${ROLLUP_CONFIG_URL:-}" ]; then
+        echo "Downloading rollup config from $ROLLUP_CONFIG_URL…"
+        curl -sL "$ROLLUP_CONFIG_URL" -o /tmp/rollup.json
+        cargo run -p world-chain-prover-sp1 -- hash-rollup-config --rollup-config /tmp/rollup.json
     elif [ -n "${ROLLUP_CONFIG:-}" ]; then
-        RC="$ROLLUP_CONFIG"
+        echo "Using local rollup config: $ROLLUP_CONFIG"
+        cargo run -p world-chain-prover-sp1 -- hash-rollup-config --rollup-config "$ROLLUP_CONFIG"
     else
-        echo "ROLLUP_CONFIG not set; downloading from S3…"
-        RC="/tmp/rollup-config-$(date +%s).json"
-        aws s3 cp s3://worldchain-alphanet/rollup-config.json "$RC"
+        echo "Error: set L2_RPC_URL (op-node), ROLLUP_CONFIG_URL, or ROLLUP_CONFIG (local file path)" >&2
+        exit 1
     fi
-    echo "Using rollup config: $RC"
-    cargo run -p world-chain-prover-sp1 -- hash-rollup-config --rollup-config "$RC"
 
 # Phase 0b – Run a one-shot k8s Job to get a bare attestation doc from the enclave.
 proof-get-attestation env="alphanet":
