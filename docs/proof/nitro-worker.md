@@ -662,6 +662,110 @@ a debug enclave is indistinguishable from a forged one.
 
 ---
 
+## Frequently Asked Questions
+
+### Q: Why are PCRs passed into `verifyAttestation` if they are already included in the attestation document?
+
+**A:** The attestation document contains the *actual* PCR values from the running
+enclave. But the verifier needs *expected* PCR values to compare against — without
+supplying expected PCRs, there is nothing to verify: any enclave image would be
+accepted. The caller provides expected PCRs so the contract can assert the enclave ran
+exactly the image the operator approved. The on-chain `NitroAttestationVerifier`
+maintains an `approvedPCRSets` allowlist; it hashes the PCRs extracted from the
+attestation and checks them against this set.
+
+### Q: How does an upgrade to a new enclave version (with new PCRs) work?
+
+**A:** The upgrade is a rolling process:
+
+1. Build a new EIF → get new PCR0/1/2 measurements.
+2. Call `approvePCRSet(newPcr0, newPcr1, newPcr2)` — both old and new PCR sets are
+   now approved simultaneously.
+3. Deploy new enclaves; each one registers its ephemeral key via `registerKey` (which
+   succeeds because the new PCRs are approved).
+4. Once all enclaves have migrated, call `revokePCRSet(oldPcr0, oldPcr1, oldPcr2)` —
+   this disallows future key registrations for the old image. Already-registered keys
+   from the old image remain valid until individually revoked if needed.
+
+This allows zero-downtime upgrades with a window where both old and new enclave
+images are active.
+
+### Q: Why was `getKeyByPCRs` removed from `NitroEnclaveKeyRegistry`?
+
+**A:** A 1:1 mapping from PCR triple to key is incorrect because **multiple enclave
+instances can run the same EIF simultaneously**. Each instance generates its own
+independent ephemeral keypair at startup. The registry deliberately has no
+`PCRs → key` lookup — each key is indexed only by its own `keccak256(publicKey)` hash.
+The authoritative off-chain index from PCRs to keys is the `KeyRegistered` event log.
+
+### Q: Does `NitroAttestationVerifier` need PCRs in its constructor?
+
+**A:** No. PCR management is fully dynamic — PCR sets are added and removed at runtime
+via `approvePCRSet` / `revokePCRSet`. No PCRs are baked into the contract constructor.
+This allows the owner to approve new enclave images and retire old ones without
+redeploying the verifier contract.
+
+### Q: Why store revoked keys in `NitroEnclaveKeyRegistry` instead of just deleting them?
+
+**A:** To prevent replay attacks. If a key were simply deleted on revocation, an
+attacker who captured that key's original attestation document could re-submit it to
+`registerKey` and restore the key. The `Revoked` state is permanent — once revoked, a
+key can never be re-registered regardless of whether a valid attestation document for
+it is available. The lifecycle is strictly `Unknown → Active → Revoked` with no path
+back.
+
+### Q: Why is there an `Unknown` state in the key lifecycle enum? Isn't just Active/Revoked enough?
+
+**A:** Solidity enums default to their zero value. Having `Unknown` as the zero value
+makes it explicit when a key has never been registered at all, distinguishing it from
+`Active`. It also avoids the footgun where the zero value silently means "active"
+before any registration occurs. Gas-wise, checking against a 3-value enum is identical
+to a 2-value one — both fit in a single storage slot byte.
+
+### Q: When a PCR set is revoked, should all keys registered under those PCRs be automatically revoked too?
+
+**A:** This was explicitly considered and decided against. Revoking a PCR set is a
+**forward-looking** operation — it prevents *new* keys from registering under that
+image. Existing registered keys were individually verified at registration time and are
+tracked separately. Mass-revoking all keys on PCR revocation would require either an
+on-chain `PCR → [keys]` mapping (which conflicts with multi-instance support) or an
+O(n) loop over all keys. The security posture is: if you need to revoke all keys from
+a compromised image, call `revokeKey` for each individually. This is noted as a
+security consideration in the contract's NatSpec.
+
+### Q: Can you build an EIF on a regular machine, or do you need a Nitro-capable EC2 host?
+
+**A:** `nitro-cli build-enclave` requires the Nitro CLI, which only runs on Amazon
+Linux on Nitro-capable EC2 instances — not in standard GitHub Actions runners or local
+machines. The build pipeline works around this:
+
+1. CI builds the enclave binary Docker image normally (any runner).
+2. A dedicated Nitro-capable EC2 runner runs `nitro-cli build-enclave` to produce the
+   EIF file.
+3. The EIF is baked into a second Docker image (`Dockerfile.eif`) published to GHCR.
+4. The `enclave-launcher` sidecar in Kubernetes pulls this image and runs
+   `nitro-cli run-enclave` using the EIF baked inside it.
+
+### Q: How does the enclave-launcher share the enclave CID with the main nitro-worker container?
+
+**A:** The CID is dynamic — `nitro-cli run-enclave` allocates it at runtime and it
+cannot be hardcoded because multiple enclave instances could run on the same node. The
+launcher extracts the CID after enclave start using `nitro-cli describe-enclaves`, then
+writes it to `/run/nitro-shared/enclave-cid` (a shared `emptyDir` volume). The main
+`nitro-worker` container polls this file at startup before connecting over vsock.
+
+### Q: Why does the `vsock-proxy` sidecar exist if the enclave has no network?
+
+**A:** That's exactly why it exists. AWS Nitro Enclaves are fully network-isolated —
+no inbound or outbound TCP/IP connections. The only channel out is vsock. The
+`vsock-proxy` sidecar runs on the parent EC2 instance and acts as a **vsock-to-TCP
+bridge**: the enclave connects to it via vsock (CID 3, the well-known parent CID), and
+the proxy forwards those connections to specific AWS API endpoints (in this case,
+`kms.us-east-1.amazonaws.com:443`). This is how the enclave can reach AWS KMS for any
+key operations while remaining isolated from direct internet access.
+
+---
+
 ## Host-Side Verification (5 Checks)
 
 When production PCRs are configured, the host performs five verification checks on
