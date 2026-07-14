@@ -226,10 +226,11 @@ proof-deploy-nitro:
     : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
     : "${OWNER:?OWNER is required}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
-    export PROOF_DEPLOY_OUT="${PROOF_DEPLOY_OUT:-/tmp/nitro-deploy-$(date +%s).json}"
+    PROOF_DEPLOY_OUT="${PROOF_DEPLOY_OUT:-/tmp/nitro-deploy-$(date +%s).log}"
     echo "Deploying Nitro contracts (output → $PROOF_DEPLOY_OUT)…"
     cd pkg/contracts && forge script scripts/devnet/DeployNitro.s.sol:DeployNitro \
-        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast --slow
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast --slow \
+        | tee "$PROOF_DEPLOY_OUT"
 
 # Phase 2 – Deploy the proof system contracts.
 proof-deploy-system:
