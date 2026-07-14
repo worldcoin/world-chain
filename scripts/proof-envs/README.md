@@ -35,6 +35,9 @@ values belong here:
 | `KUBECONTEXT` | Kubernetes context for `kubectl` commands |
 | `PROOF_NAMESPACE` | Namespace for the proof nitro worker pods |
 | `PROOF_NITRO_IMAGE` | Container image for the nitro attestation worker |
+| `OP_NODE_NAMESPACE` | Kubernetes namespace where the op-node pod runs |
+| `OP_NODE_POD` | Name of the op-node pod (for auto port-forward) |
+| `OP_NODE_PORT` | op-node RPC port inside the pod (typically `9545`) |
 
 ## Required shell environment variables
 

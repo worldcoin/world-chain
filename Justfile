@@ -149,9 +149,19 @@ install *args='':
 #   L2_RPC_URL        – op-node RPC endpoint (port 9545, NOT the execution client on 8545)
 #   ROLLUP_CONFIG_URL – URL to download the rollup config JSON from
 #   ROLLUP_CONFIG     – local file path to an existing rollup config JSON
-proof-rollup-config-hash:
+#   (default)         – auto port-forward to the op-node pod via kubectl
+# L2_RPC_URL overrides auto port-forward; useful for CI or when already port-forwarded
+proof-rollup-config-hash env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
+    if [ ! -f "scripts/proof-envs/{{env}}.env" ]; then
+        echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
+        exit 1
+    fi
+    source scripts/proof-envs/{{env}}.env
+    if [ -f "scripts/proof-envs/{{env}}.local.env" ]; then
+        source scripts/proof-envs/{{env}}.local.env
+    fi
     if [ -n "${L2_RPC_URL:-}" ]; then
         echo "Fetching rollup config from op-node at $L2_RPC_URL…"
         cargo run -p world-chain-prover-sp1 -- hash-rollup-config --l2-rpc "$L2_RPC_URL"
@@ -163,8 +173,18 @@ proof-rollup-config-hash:
         echo "Using local rollup config: $ROLLUP_CONFIG"
         cargo run -p world-chain-prover-sp1 -- hash-rollup-config --rollup-config "$ROLLUP_CONFIG"
     else
-        echo "Error: set L2_RPC_URL (op-node), ROLLUP_CONFIG_URL, or ROLLUP_CONFIG (local file path)" >&2
-        exit 1
+        LOCAL_PORT=19545
+        echo "Port-forwarding to $OP_NODE_POD in $OP_NODE_NAMESPACE (context: $KUBECONTEXT)…"
+        kubectl --context="$KUBECONTEXT" port-forward \
+            -n "$OP_NODE_NAMESPACE" \
+            "pod/$OP_NODE_POD" "${LOCAL_PORT}:${OP_NODE_PORT}" &
+        PF_PID=$!
+        for i in $(seq 1 10); do
+            nc -z localhost $LOCAL_PORT 2>/dev/null && break || sleep 1
+        done
+        cargo run -p world-chain-prover-sp1 -- hash-rollup-config \
+            --l2-rpc "http://localhost:$LOCAL_PORT"
+        kill $PF_PID 2>/dev/null || true
     fi
 
 # Phase 0b – Run a one-shot k8s Job to get a bare attestation doc from the enclave.
