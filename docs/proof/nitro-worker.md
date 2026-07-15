@@ -14,6 +14,16 @@ without a ZK proof.
 The system spans two binaries, three Kubernetes containers, and four smart contracts.
 This document explains every layer.
 
+> **Comparison with Base:** World Chain's Nitro implementation is directly inspired by
+> Base's [`op-enclave`](https://github.com/base/op-enclave) project and reuses Base's
+> [`nitro-validator`](https://github.com/base/nitro-validator) Solidity library. The
+> core on-chain attestation verification (COSE_Sign1 parsing, hinted P-384, cert chain,
+> `ecrecover`) is shared. The key differences are: (1) World Chain integrates as an OP
+> Stack dispute game lane, while Base's op-enclave replaces the proposer outright; (2)
+> World Chain checks PCR0+PCR1+PCR2 triples, Base checks only PCR0; (3) World Chain
+> has a 3-state key lifecycle with permanent revocation, Base uses a simple
+> add/delete map. Details are compared throughout this document.
+
 ---
 
 ## Architecture
@@ -67,22 +77,32 @@ shared by all enclave pods on that node:
 ### On-Chain Contract Stack
 
 ```
-NitroProofVerifier
+NitroProofVerifier           ← World Chain addition: dispute game lane hook
   │  ecrecover signature → check key is registered
   ▼
-NitroEnclaveKeyRegistry
+NitroEnclaveKeyRegistry      ← World Chain addition: 3-state key lifecycle
   │  registerKey() / revokeKey() / isKeyRegistered()
   │  key lifecycle: Unknown → Active → Revoked
   ▼
-NitroAttestationVerifier
-  │  parse COSE_Sign1, verify P-384 sig, check PCRs
+NitroAttestationVerifier     ← World Chain addition: PCR triple allowlist + timestamps
+  │  parse COSE_Sign1, verify P-384 sig, check PCR0+PCR1+PCR2
   ▼
-CertManager (ICertManager)
-  │  X.509 certificate chain validation
+NitroValidator               ← Base's library (base/nitro-validator)
+  │  CBOR parse, hinted P-384 ECDSA, cert chain walk
+  ▼
+CertManager (ICertManager)   ← Base's library
+  │  X.509 certificate chain validation + caching
   │  pinned to AWS Nitro Root CA
   ▼
 AWS Nitro Root CA (hardcoded)
 ```
+
+> **Base comparison:** Base's `SystemConfigGlobal` sits at approximately the
+> `NitroAttestationVerifier` + `NitroEnclaveKeyRegistry` layer — it validates the
+> attestation and stores valid signer addresses. World Chain adds `NitroProofVerifier`
+> on top to integrate with the OP Stack dispute game interface
+> (`IWorldChainProofVerifier`). Base doesn't have an equivalent because their system
+> replaces the proposer rather than plugging into the dispute game.
 
 ---
 
@@ -306,6 +326,12 @@ This design separates the **expensive operation** (P-384 attestation verificatio
 cert chain validation, done once at key registration) from the **cheap operation**
 (secp256k1 ecrecover, done for every proof).
 
+> **Base comparison:** Base's op-enclave uses the same two-layer design — one P-384
+> attestation at key registration, then secp256k1 `ecrecover` for every state root
+> proposal. Base's enclave is written in Go; World Chain's is Rust using the Kona
+> derivation pipeline. The NSM API calls and signing/attestation pattern are
+> functionally identical.
+
 ---
 
 ## Commitments: `user_data` vs `signing_commitment`
@@ -365,6 +391,12 @@ when building the Enclave Image File (EIF):
 | PCR2 | Application code | Application binary changes |
 
 PCR0 is the **primary identity** — it uniquely identifies the complete enclave image.
+
+> **Base comparison:** Base's `SystemConfigGlobal` registers only **PCR0** (stored as
+> `keccak256(pcr0)` in a boolean mapping). World Chain uses the full **PCR0+PCR1+PCR2
+> triple**, which is more precise — PCR1 and PCR2 let you distinguish kernel-only
+> changes from application-only changes. The trade-off: approving a new World Chain
+> PCR triple requires three values to be captured and submitted vs Base's single PCR0.
 
 ### Production vs Placeholder Mode
 
@@ -449,6 +481,19 @@ NitroProofVerifier
         └─ 7. Return true (or false on any failure — never reverts)
 ```
 
+> **Base comparison:** Base's `SystemConfigGlobal.registerSigner()` performs the same
+> steps 1–5 (attestation validation via `NitroValidator`), then derives an Ethereum
+> address from the attestation's `public_key` field:
+> ```
+> publicKeyHash = keccak256(publicKey[1:])  // skip 0x04 prefix
+> enclaveAddress = address(uint160(publicKeyHash))
+> validSigners[enclaveAddress] = true
+> ```
+> World Chain takes the same approach but stores `keccak256(fullPublicKey)` →
+> `KeyStatus` in `NitroEnclaveKeyRegistry` instead of `address → bool` in a flat map,
+> enabling the 3-state lifecycle and making the full uncompressed key available for
+> verification. The on-chain `ecrecover` check is identical in both systems.
+
 ---
 
 ## Key Lifecycle
@@ -508,6 +553,13 @@ The owner can call `NitroEnclaveKeyRegistry.revokeKey(publicKey)`:
 
 Revocation is necessary when an enclave is decommissioned or compromised.
 
+> **Base comparison:** Base's `SystemConfigGlobal` uses a simple `mapping(address =>
+> bool) validSigners`. Deregistration is `delete validSigners[addr]` — the address
+> can be re-added later with a new attestation. World Chain's `KeyStatus.Revoked` is
+> permanent; a revoked key hash can never be reactivated. This closes the replay
+> attack window (a captured attestation could re-register a deleted Base key, but not
+> a World Chain `Revoked` one).
+
 ---
 
 ## CertManager Pre-Warm
@@ -561,6 +613,16 @@ The contract owner approves the PCR triple in `NitroAttestationVerifier`.
 
 Now `registerKey` calls will succeed because `CertManager` can validate the cert chain
 and the PCR set is approved.
+
+> **Base comparison:** Base uses the same `CertManager` pre-warm workflow (it's their
+> contract). Their tooling (`tools/hinted_attestation_calls.js`) is the reference
+> implementation; World Chain uses the same script. The hinted P-384 verification
+> (where modular inverses are computed off-chain and verified on-chain) was introduced
+> by Base in [`nitro-validator` PR #28](https://github.com/base/nitro-validator/pull/28)
+> after the Fusaka upgrade raised `MODEXP` pricing enough that the old fully on-chain
+> P-384 path no longer fit in a block. Both systems now require ~27 KB of hint calldata
+> per P-384 signature, split across 5 transactions for cold cert-chain warming (total
+> ~41M gas) and 1 transaction for warm attestation validation (~13.8M gas).
 
 ---
 
