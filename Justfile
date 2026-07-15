@@ -263,12 +263,9 @@ proof-get-attestation env="alphanet":
               \"args\": [\"get-attestation\"],
               \"env\": [{\"name\": \"ENCLAVE_CID\", \"value\": \"$ENCLAVE_CID\"}],
               \"securityContext\": {
-                \"runAsNonRoot\": true,
-                \"runAsUser\": 10001,
-                \"runAsGroup\": 10001,
-                \"seccompProfile\": {\"type\": \"RuntimeDefault\"},
-                \"capabilities\": {\"drop\": [\"ALL\"]},
-                \"allowPrivilegeEscalation\": false
+                \"runAsUser\": 0,
+                \"runAsNonRoot\": false,
+                \"allowPrivilegeEscalation\": true
               }
             }]
           }
