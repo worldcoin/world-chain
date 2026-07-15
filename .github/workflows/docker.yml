@@ -18,6 +18,17 @@ on:
           - tag
   push:
     branches: [main]
+    paths:
+      - "bin/world-chain/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/config.toml"
+      - "Dockerfile"
+      - "scripts/**"
+      - ".github/workflows/docker.yml"
+      - ".github/actions/docker-build-push-digest/**"
+      - ".github/actions/docker-merge-manifest/**"
 
 env:
   REPO_NAME: ${{ github.event.repository.name }}
