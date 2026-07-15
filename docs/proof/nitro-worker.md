@@ -18,45 +18,51 @@ This document explains every layer.
 
 ## Architecture
 
-### The 3-Container Pod
+### The 2-Container Pod + DaemonSet
 
-The `nitro-worker` Kubernetes pod contains three containers that cooperate via shared
-volumes and vsock:
+The `nitro-worker` Kubernetes pod contains two containers. A **shared DaemonSet**
+(`world-chain-proof-nitro-vsock-proxy`) runs one `vsock-proxy` per Nitro-capable node,
+shared by all enclave pods on that node:
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Kubernetes Pod                                         │
-│                                                         │
-│  ┌─────────────────┐  ┌──────────────┐  ┌────────────┐ │
-│  │  nitro-worker    │  │  enclave-    │  │  vsock-    │ │
-│  │  (main)          │  │  launcher    │  │  proxy     │ │
-│  │                  │  │  (sidecar)   │  │  (sidecar) │ │
-│  │  Polls prover-   │  │  Runs        │  │  Tunnels   │ │
-│  │  service for     │  │  nitro-cli   │  │  vsock →   │ │
-│  │  jobs, builds    │  │  run-enclave │  │  AWS KMS   │ │
-│  │  witnesses,      │  │  writes CID  │  │  endpoint  │ │
-│  │  sends to        │  │  to shared   │  │            │ │
-│  │  enclave via     │  │  volume      │  │  CID 3     │ │
-│  │  vsock           │  │              │  │  port 443  │ │
-│  └───────┬──────────┘  └──────┬───────┘  └─────┬──────┘ │
-│          │                    │                 │        │
-│          │  /run/nitro-shared/enclave-cid       │        │
-│          │◄───────────────────┘                 │        │
-│          │                                      │        │
-│          │         vsock (CID from file)         │        │
-│          ▼                                      │        │
-│  ┌──────────────────────────────────────────────┘──────┐ │
-│  │  AWS Nitro Enclave                                  │ │
-│  │                                                     │ │
-│  │  world-chain-nitro-enclave binary                   │ │
-│  │  - Listens on vsock port 5005                       │ │
-│  │  - Runs Kona derivation pipeline                    │ │
-│  │  - Signs with ephemeral secp256k1 key               │ │
-│  │  - Calls NSM for attestation                        │ │
-│  │  - NO network access (only vsock)                   │ │
-│  └─────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  EC2 Node (Nitro-capable)                                        │
+│                                                                  │
+│  ┌──────────────────────────────────┐  ┌──────────────────────┐ │
+│  │  nitro-worker Pod                │  │  vsock-proxy         │ │
+│  │                                  │  │  DaemonSet Pod       │ │
+│  │  ┌──────────────┐ ┌───────────┐  │  │                      │ │
+│  │  │ nitro-worker  │ │ enclave-  │  │  │  vsock (CID 3)  →   │ │
+│  │  │ (main)        │ │ launcher  │  │  │  kms.amazonaws.com  │ │
+│  │  │               │ │ (sidecar) │  │  │  :443               │ │
+│  │  │ Polls prover- │ │ Runs      │  │  │                      │ │
+│  │  │ service,      │ │ nitro-cli │  │  │  Shared by all       │ │
+│  │  │ builds        │ │ writes    │  │  │  enclave pods on     │ │
+│  │  │ witnesses,    │ │ CID to    │  │  │  this node           │ │
+│  │  │ sends to      │ │ volume    │  │  └──────────────────────┘ │
+│  │  │ enclave       │ └─────┬─────┘  │                          │
+│  │  └──────┬────────┘       │        │                          │
+│  │         │   /run/nitro-shared/    │                          │
+│  │         │◄──enclave-cid──┘        │                          │
+│  │         │                         │                          │
+│  └─────────┼─────────────────────────┘                          │
+│            │ vsock (CID from file)                               │
+│            ▼                                                     │
+│  ┌─────────────────────────────────────┐                        │
+│  │  AWS Nitro Enclave                  │                        │
+│  │  world-chain-nitro-enclave binary   │                        │
+│  │  - Listens on vsock port 5005       │                        │
+│  │  - Runs Kona derivation pipeline    │                        │
+│  │  - Signs with ephemeral secp256k1   │                        │
+│  │  - Calls NSM for attestation        │                        │
+│  │  - NO network access (only vsock)   │                        │
+│  └─────────────────────────────────────┘                        │
+└──────────────────────────────────────────────────────────────────┘
 ```
+
+> **Note:** vsock ports are host-global (not namespaced like TCP). Using a shared
+> DaemonSet prevents port conflicts when multiple enclave pods run on the same node.
+> See the [Kubernetes Deployment](#kubernetes-deployment) section for details.
 
 ### On-Chain Contract Stack
 
@@ -94,8 +100,8 @@ DNS. vsock is the **only** communication channel. The enclave listens on
 assigned CID, which `nitro-cli run-enclave` prints and the `enclave-launcher` sidecar
 writes to a shared file.
 
-The `vsock-proxy` sidecar bridges vsock (CID 3) to real TCP endpoints so the enclave
-can reach AWS KMS/STS if needed.
+The `vsock-proxy` DaemonSet bridges vsock (CID 3) to real TCP endpoints so the enclave
+can reach AWS APIs (currently pre-configured for KMS) — see [Where KMS Fits](#where-kms-fits) below.
 
 ### NSM (Nitro Security Module)
 
@@ -162,8 +168,27 @@ chain validation to `CertManager`. Because certificate validation is expensive
 (~63M gas for the full chain), the certs must be **pre-warmed** — validated and cached
 once — before any `registerKey` call can succeed.
 
+
 ---
 
+## Where KMS Fits
+
+The `vsock-proxy` DaemonSet is configured to forward vsock traffic to
+`kms.us-east-1.amazonaws.com:443`. However, the **current enclave binary does not
+call AWS KMS**. The proxy is pre-provisioned for future use cases such as:
+
+- **KMS-sealed secrets:** The enclave could use KMS to decrypt secrets that are only
+  accessible to an attested enclave (via KMS key policy conditions on PCR values).
+- **Key persistence across restarts:** Instead of generating a new ephemeral key on
+  every boot, the enclave could encrypt its signing key with a KMS key and store the
+  ciphertext externally, then decrypt it on next boot — giving the key a stable
+  identity while remaining protected by attestation.
+
+Currently the enclave's ephemeral secp256k1 key is generated entirely from NSM
+entropy (`NsmRequest::GetRandom`) with no KMS involvement. The proxy is present in
+the infrastructure but the enclave makes no outbound connections to KMS.
+
+---
 ## End-to-End Proving Flow
 
 Here is the full journey from "job available" to "proof accepted":
@@ -541,29 +566,30 @@ and the PCR set is approved.
 
 ### Pod Structure
 
-The `nitro-worker` pod requires three containers:
+The `nitro-worker` pod has two containers. The vsock-proxy is deployed as a **separate
+DaemonSet** (`world-chain-proof-nitro-vsock-proxy`) shared across all enclave pods on
+the same node — vsock ports are host-global, so a per-pod sidecar would conflict if
+multiple enclave pods ran on the same node.
 
 #### 1. `nitro-worker` (Main Container)
 
-- Runs the `world-chain-prover-nitro` binary in worker mode
+- Runs the `nitro-worker` binary (polls prover-service, builds witnesses, submits proofs)
 - Reads the enclave CID from `/run/nitro-shared/enclave-cid` (written by the launcher)
 - Connects to the enclave over vsock using that CID
-- Polls the prover-service for jobs, builds witnesses, submits proofs
 
 #### 2. `enclave-launcher` (Sidecar)
 
-- Runs `nitro-cli run-enclave` with the EIF file
-- Captures the enclave's assigned CID from the command output
-- Writes the CID to `/run/nitro-shared/enclave-cid`
-- Then blocks on `nitro-cli console` to keep the container alive and stream enclave
-  logs
+- Runs `nitro-cli run-enclave` with the pre-built EIF baked into the container image
+- Extracts the enclave's assigned CID via `nitro-cli describe-enclaves`
+- Writes the CID to `/run/nitro-shared/enclave-cid` on the shared `emptyDir` volume
+- Blocks on `nitro-cli console` to keep the container alive and stream enclave logs
 
-#### 3. `vsock-proxy` (Sidecar)
+#### DaemonSet: `vsock-proxy`
 
-- Runs the `vsock-proxy` binary
-- Listens on vsock CID 3 and proxies connections to `kms.us-east-1.amazonaws.com:443`
-- Gives the enclave outbound HTTPS access to AWS KMS/STS (which the enclave would
-  otherwise be unable to reach since it has no network interfaces)
+- One pod per Nitro-capable node (not per enclave pod)
+- Listens on vsock CID 3, port 8001; proxies to `kms.us-east-1.amazonaws.com:443`
+- Runs with `hostNetwork: true` to bind vsock at the host level
+- Must be running before enclave pods start
 
 ### Required Resources
 
@@ -630,14 +656,22 @@ a debug enclave is indistinguishable from a forged one.
 
 | Flag / Env Var | Description | Default |
 |----------------|-------------|---------|
-| `--prover-service-url` | URL of the prover-service API | Required |
-| `--enclave-cid` / `ENCLAVE_CID` | vsock CID of the enclave (or read from file) | Read from `/run/nitro-shared/enclave-cid` |
+| `--prover-service-url` / `PROVER_SERVICE_URL` | URL of the prover-service API | Required |
+| `--l2-rpc` / `L2_RPC_URL` | World Chain L2 RPC endpoint | Required |
+| `--l1-rpc` / `L1_RPC_URL` | Ethereum L1 RPC endpoint | Required |
+| `--l1-beacon-rpc` / `L1_BEACON_RPC_URL` | Ethereum L1 Beacon API endpoint | Required |
+| `--network` / `NETWORK` | `worldchain` or `worldchain-sepolia` | `worldchain` |
+| `--rollup-config` / `ROLLUP_CONFIG` | Path to rollup config JSON file | — |
+| `--rollup-config-hash` / `ROLLUP_CONFIG_HASH` | Rollup config hash override | — |
+| `--block-interval` / `BLOCK_INTERVAL` | L2 blocks per proof (must match contract) | Required |
+| `--enclave-cid` / `ENCLAVE_CID` | vsock CID of the enclave | `16` |
+| `--enclave-port` / `ENCLAVE_PORT` | vsock port the enclave listens on | `5005` |
 | `--pcr0` / `PCR0` | Expected PCR0 (hex, 48 bytes) | All zeros (placeholder) |
 | `--pcr1` / `PCR1` | Expected PCR1 (hex, 48 bytes) | All zeros (placeholder) |
 | `--pcr2` / `PCR2` | Expected PCR2 (hex, 48 bytes) | All zeros (placeholder) |
-| `--l1-rpc-url` | L1 Ethereum RPC endpoint | Required |
-| `--l2-rpc-url` | L2 World Chain RPC endpoint | Required |
-| `--l1-beacon-url` | L1 Beacon Chain API endpoint | Required |
+| `--worker-id` | Unique identifier for this worker instance | Required |
+| `--poll-interval-seconds` / `POLL_INTERVAL_SECONDS` | Seconds between prover-service polls | `10` |
+| `--max-concurrent-jobs` | Max jobs proved in parallel | `1` |
 
 ### `world-chain-nitro-enclave` (Enclave Binary)
 
@@ -656,9 +690,13 @@ a debug enclave is indistinguishable from a forged one.
 
 | Command | Description |
 |---------|-------------|
-| `worker` | Run the nitro worker (poll for jobs, prove, submit) |
-| `get-attestation` | Get a bare NSM attestation (for CertManager pre-warm) |
-| `get-public-key` | Get the enclave's ephemeral public key + attestation (for key registration) |
+| `hash-rollup-config` | Print the rollup config hash |
+| `witness` | Build and serialize a witness to a file without proving |
+| `prove` | Generate witness and send to a running enclave for attested proving |
+| `get-attestation` | Fetch a bare NSM attestation (for CertManager pre-warm) |
+
+> **Note:** `nitro-worker` (the long-running production worker that polls the prover-service)
+> is a separate binary from `world-chain-prover-nitro` (the one-shot CLI tool above).
 
 ---
 
@@ -789,144 +827,3 @@ The codebase provides three verification depths for different call sites:
 - `verify_pcrs_only` — just PCR matching (lightweight check)
 
 ---
-
-## Frequently Asked Questions
-
-These questions came up during development and represent the non-obvious parts of the
-system. They are documented here to save future contributors the same discovery process.
-
----
-
-**Q: Why are PCRs passed into `verifyAttestation` if they are already inside the
-attestation document?**
-
-The attestation document contains the *actual* PCR values from the running enclave. But
-the verifier needs *expected* PCR values to compare against — without them there is
-nothing to verify: any enclave image would be accepted. The caller supplies expected PCRs
-(from `approvedPCRSets`) so the contract can assert the enclave ran exactly the image the
-operator approved. Think of it as: the document says "I am X", the caller's expected PCRs
-say "I will only accept X".
-
----
-
-**Q: How does an upgrade to a new enclave version (with new PCRs) work?**
-
-1. Build the new EIF — `nitro-cli build-enclave` outputs new PCR0/1/2 measurements.
-2. `approvePCRSet(newPcr0, newPcr1, newPcr2)` — both old and new PCR sets are now
-   approved simultaneously.
-3. Deploy new enclave pods; each one calls `registerKey` on startup (via the operator /
-   prover-service flow).
-4. Once all enclaves have migrated to the new image, call
-   `revokePCRSet(oldPcr0, oldPcr1, oldPcr2)` — prevents future registrations under the
-   old image. Already-registered keys from the old image remain valid until separately
-   revoked if needed.
-
-This overlap window means zero downtime: both generations of enclaves can serve proofs
-simultaneously during the rollout.
-
----
-
-**Q: Why was `getKeyByPCRs` removed from `NitroEnclaveKeyRegistry`?**
-
-A 1-to-1 mapping from PCR triple to key is incorrect — multiple enclave instances can
-run the same EIF simultaneously. Each instance generates its own independent ephemeral
-keypair at startup. The registry deliberately has no `PCRs → key` lookup; each key is
-indexed only by its own `keccak256(publicKey)` hash. The authoritative off-chain index
-from PCRs to keys is the `KeyRegistered` event log.
-
----
-
-**Q: Does `NitroAttestationVerifier` need PCRs passed into its constructor?**
-
-No. PCR management is fully dynamic — PCR sets are added and removed at runtime via
-`approvePCRSet` / `revokePCRSet`. No PCRs are baked into the constructor. This allows the
-owner to approve new enclave images and retire old ones without redeploying the verifier
-contract.
-
----
-
-**Q: Why store revoked keys in `NitroEnclaveKeyRegistry` instead of just deleting them?**
-
-To prevent replay attacks. If a key were simply deleted on revocation, an attacker who
-captured that key's original attestation document could re-submit it to `registerKey` and
-silently restore the key. The `Revoked` state is permanent — once revoked, a key can
-never be re-registered regardless of whether a valid attestation document for it is
-available. The lifecycle is strictly `Unknown → Active → Revoked` with no path back.
-
----
-
-**Q: Why is there an `Unknown` state in the key lifecycle enum? Isn't Active/Revoked
-enough?**
-
-Solidity enums default to their zero value. Having `Unknown` as zero makes it explicit
-when a key has never been registered at all, clearly distinguishing it from `Active`. It
-avoids the footgun where the default zero value silently means "active" before any
-registration has occurred. Gas-wise, a 3-value enum is identical to a 2-value one — both
-fit in a single storage slot byte.
-
----
-
-**Q: When a PCR set is revoked, should all keys registered under those PCRs be
-automatically revoked too?**
-
-This was explicitly considered and decided against. Revoking a PCR set is a
-forward-looking operation — it prevents *new* keys from registering under that image.
-Existing registered keys were each individually verified at registration time and are
-tracked separately. Cascading revocation would require an on-chain `PCR → [keys]` mapping
-(which conflicts with the multi-instance design above) or an unbounded on-chain loop.
-
-The recommended operational approach: if you need to revoke all keys from a compromised
-image, call `revokeKey` for each key individually. The `KeyRegistered` events provide the
-off-chain index needed to enumerate them.
-
-> **Security note:** The gap between PCR revocation and individual key revocation means a
-> window exists where proofs signed by the old (possibly compromised) image are still
-> accepted. Operators should revoke individual keys promptly after revoking a PCR set.
-
----
-
-**Q: Can you build an EIF (`.eif` file) on a regular machine, or do you need a
-Nitro-capable EC2 host?**
-
-`nitro-cli build-enclave` only runs on Amazon Linux on Nitro-capable EC2 instances — it
-is not available in standard GitHub Actions runners. The CI pipeline works around this:
-
-1. A normal runner builds the enclave binary and produces a Docker image.
-2. A dedicated Nitro-capable EC2 runner runs `nitro-cli build-enclave` to produce the
-   `.eif` file and record its PCR measurements.
-3. The EIF is baked into a second launcher Docker image (`Dockerfile.eif`) and published
-   to GHCR.
-4. In Kubernetes, the `enclave-launcher` sidecar pulls this image and runs
-   `nitro-cli run-enclave` using the EIF baked inside it.
-
----
-
-**Q: How does the enclave-launcher share the enclave CID with the main nitro-worker
-container?**
-
-The CID is dynamic — `nitro-cli run-enclave` allocates it at runtime and it cannot be
-hardcoded (multiple enclave instances could run on the same node, each getting a different
-CID). The launcher:
-
-1. Runs `nitro-cli run-enclave ...` (without `--enclave-cid` to let AWS assign it).
-2. Reads the allocated CID via `nitro-cli describe-enclaves`.
-3. Writes the CID to `/run/nitro-shared/enclave-cid` on a shared `emptyDir` volume.
-
-The main nitro-worker container waits for that file to appear before connecting over
-vsock. This is why the startup script contains the `while [ ! -f /run/nitro-shared/enclave-cid ]` polling loop.
-
----
-
-**Q: Why does the `vsock-proxy` sidecar exist if the enclave has no network access?**
-
-AWS Nitro Enclaves are fully network-isolated — no inbound or outbound TCP/IP connections
-are possible. The only channel out is vsock. The `vsock-proxy` sidecar runs on the parent
-EC2 instance and acts as a vsock-to-TCP bridge:
-
-- The enclave connects to it via vsock (CID 3, the reserved parent CID).
-- The proxy forwards those connections to specific AWS API endpoints configured at startup
-  (in production, `kms.us-east-1.amazonaws.com:443`).
-
-This is how the enclave can reach AWS KMS for any key operations while remaining isolated
-from direct internet access. The proxy is intentionally limited to a single destination
-endpoint, minimising the network attack surface exposed to the enclave.
