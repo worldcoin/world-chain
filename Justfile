@@ -235,6 +235,18 @@ proof-get-attestation env="alphanet":
         exit 1
     fi
     echo "Enclave node: $ENCLAVE_NODE" >&2
+    # Discover the actual vsock CID from the running nitro-worker pod
+    NITRO_POD=$(kubectl --context="$KUBECONTEXT" get pod \
+        -n "$PROOF_NAMESPACE" \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    ENCLAVE_CID=16
+    if [ -n "$NITRO_POD" ]; then
+        CID_FROM_POD=$(kubectl --context="$KUBECONTEXT" exec \
+            -n "$PROOF_NAMESPACE" "$NITRO_POD" \
+            -- cat /run/nitro-shared/enclave-cid 2>/dev/null || true)
+        [ -n "$CID_FROM_POD" ] && ENCLAVE_CID="$CID_FROM_POD"
+    fi
+    echo "Enclave CID: $ENCLAVE_CID" >&2
     echo "Spawning attestation pod $POD_NAME in namespace $PROOF_NAMESPACE (context: $KUBECONTEXT)…" >&2
     echo "  (you can also run: kubectl --context=$KUBECONTEXT logs -f $POD_NAME -n $PROOF_NAMESPACE)" >&2
     kubectl --context="$KUBECONTEXT" run "$POD_NAME" \
@@ -249,6 +261,7 @@ proof-get-attestation env="alphanet":
               \"name\": \"$POD_NAME\",
               \"image\": \"$PROOF_NITRO_IMAGE\",
               \"args\": [\"get-attestation\"],
+              \"env\": [{\"name\": \"ENCLAVE_CID\", \"value\": \"$ENCLAVE_CID\"}],
               \"securityContext\": {
                 \"runAsNonRoot\": true,
                 \"runAsUser\": 10001,
