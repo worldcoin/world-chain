@@ -28,35 +28,28 @@ This document explains every layer.
 
 ## Architecture
 
-### The 2-Container Pod + DaemonSet
+### The 2-Container Pod
 
-The `nitro-worker` Kubernetes pod contains two containers. A **shared DaemonSet**
-(`world-chain-proof-nitro-vsock-proxy`) runs one `vsock-proxy` per Nitro-capable node,
-shared by all enclave pods on that node:
+The `nitro-worker` Kubernetes pod contains two containers:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  EC2 Node (Nitro-capable)                                               │
 │                                                                         │
-│  ┌──────────────────────────────────────┐  ┌─────────────────────────┐  │
-│  │  nitro-worker Pod                    │  │  vsock-proxy DaemonSet  │  │
-│  │                                      │  │                         │  │
-│  │  ┌─────────────────┐ ┌────────────┐  │  │  Listens: CID 3 :8001   │  │
-│  │  │  nitro-worker   │ │  enclave-  │  │  │  Forwards to:           │  │
-│  │  │  (main)         │ │  launcher  │  │  │  kms.amazonaws.com:443  │  │
-│  │  │                 │ │  (sidecar) │  │  │                         │  │
-│  │  │  polls prover-  │ │  runs      │  │  │  (shared by all enclave │  │
-│  │  │  service, build │ │  nitro-cli │  │  │   pods on this node)    │  │
-│  │  │  witnesses,     │ │  run-encl. │  │  └─────────────────────────┘  │
-│  │  │  send to encl.  │ │            │  │                               │
-│  │  │                 │ │  writes    │  │                               │
-│  │  │                 │ │  CID  ─────┼──┼──► /run/nitro-shared/         │
-│  │  │                 │ └────────────┘  │       enclave-cid             │
-│  │  │  reads CID ◄────┼─────────────────┼────────────────────────────── │
-│  │  └────────┬────────┘                 │                               │
-│  └───────────┼──────────────────────────┘                               │
-│              │ vsock (CID from shared file, port 5005)                  │
-│              ▼                                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │  nitro-worker Pod                                                │  │
+│  │                                                                  │  │
+│  │  ┌──────────────────────────┐  ┌──────────────────────────────┐ │  │
+│  │  │  nitro-worker (main)     │  │  enclave-launcher (sidecar)  │ │  │
+│  │  │                          │  │                              │ │  │
+│  │  │  polls prover-service    │  │  runs nitro-cli run-enclave  │ │  │
+│  │  │  builds witnesses        │  │  writes CID ─────────────────┼─┼► │
+│  │  │  sends to enclave        │  │  to /run/nitro-shared/       │ │  │
+│  │  │  reads CID ◄─────────────┼──┼──────────────────────────── │ │  │
+│  │  └────────────┬─────────────┘  └──────────────────────────────┘ │  │
+│  └───────────────┼────────────────────────────────────────────────── ┘  │
+│                  │ vsock (CID from /run/nitro-shared/enclave-cid)       │
+│                  ▼                                                      │
 │  ┌───────────────────────────────────────────────────────────────────┐  │
 │  │  AWS Nitro Enclave  (world-chain-nitro-enclave)                   │  │
 │  │                                                                   │  │
@@ -68,10 +61,6 @@ shared by all enclave pods on that node:
 │  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
-
-> **Note:** vsock ports are host-global (not namespaced like TCP). Using a shared
-> DaemonSet prevents port conflicts when multiple enclave pods run on the same node.
-> See the [Kubernetes Deployment](#kubernetes-deployment) section for details.
 
 ### On-Chain Contract Stack
 
@@ -119,8 +108,10 @@ DNS. vsock is the **only** communication channel. The enclave listens on
 assigned CID, which `nitro-cli run-enclave` prints and the `enclave-launcher` sidecar
 writes to a shared file.
 
-The `vsock-proxy` DaemonSet bridges vsock (CID 3) to real TCP endpoints so the enclave
-can reach AWS APIs — see [Key Persistence](#key-persistence) for context on why KMS is pre-configured but not yet used.
+There is currently no vsock-proxy in the deployment — the enclave makes no outbound
+AWS API calls. If KMS key persistence is implemented in the future, a vsock-proxy
+will be needed to bridge the enclave's vsock traffic to external AWS endpoints.
+See [Key Persistence](#key-persistence) and the [KMS improvement proposal](#future-improvement-kms-based-key-persistence).
 
 ### NSM (Nitro Security Module)
 
@@ -668,10 +659,9 @@ and the PCR set is approved.
 
 ### Pod Structure
 
-The `nitro-worker` pod has two containers. The vsock-proxy is deployed as a **separate
-DaemonSet** (`world-chain-proof-nitro-vsock-proxy`) shared across all enclave pods on
-the same node — vsock ports are host-global, so a per-pod sidecar would conflict if
-multiple enclave pods ran on the same node.
+The `nitro-worker` pod has two containers. There is no vsock-proxy — the enclave
+makes no outbound AWS API calls. If KMS key persistence is added later, a vsock-proxy
+will be needed (see the [KMS improvement proposal](#future-improvement-kms-based-key-persistence)).
 
 #### 1. `nitro-worker` (Main Container)
 
@@ -686,12 +676,7 @@ multiple enclave pods ran on the same node.
 - Writes the CID to `/run/nitro-shared/enclave-cid` on the shared `emptyDir` volume
 - Blocks on `nitro-cli console` to keep the container alive and stream enclave logs
 
-#### DaemonSet: `vsock-proxy`
 
-- One pod per Nitro-capable node (not per enclave pod)
-- Listens on vsock CID 3, port 8001; proxies to `kms.us-east-1.amazonaws.com:443`
-- Runs with `hostNetwork: true` to bind vsock at the host level
-- Must be running before enclave pods start
 
 ### Required Resources
 
@@ -886,18 +871,13 @@ launcher extracts the CID after enclave start using `nitro-cli describe-enclaves
 writes it to `/run/nitro-shared/enclave-cid` (a shared `emptyDir` volume). The main
 `nitro-worker` container polls this file at startup before connecting over vsock.
 
-### Q: Why does the `vsock-proxy` DaemonSet exist if the enclave has no network?
+### Q: Does the enclave have any network access?
 
-**A:** That's exactly why it exists. AWS Nitro Enclaves are fully network-isolated —
-no inbound or outbound TCP/IP connections. The only channel out is vsock. The
-`vsock-proxy` runs on the parent EC2 instance and acts as a **vsock-to-TCP bridge**:
-the enclave connects to it via vsock (CID 3, the well-known parent CID), and the proxy
-forwards those connections to specific AWS API endpoints.
-
-Currently the proxy is configured to forward to `kms.us-east-1.amazonaws.com:443` but
-the enclave binary never calls KMS — the endpoint was added speculatively during
-initial setup. The proxy is the right place to add such forwarding if the enclave ever
-needs outbound AWS access (e.g. for a future key-persistence implementation).
+**A:** No. AWS Nitro Enclaves are fully network-isolated — no inbound or outbound
+TCP/IP. The only channel is vsock, which connects the enclave to its parent EC2
+instance. Currently there is no vsock-proxy in the deployment, so the enclave has
+no outbound connectivity at all. If KMS-based key persistence is implemented in the
+future, a vsock-proxy sidecar will be re-added to bridge vsock to AWS endpoints (e.g. `kms.us-east-1.amazonaws.com:443` for KMS).
 
 ---
 
@@ -1014,11 +994,10 @@ Enclave
 | Proposer involvement on restart | None | Must orchestrate handoff | — |
 | On-chain re-registration on restart | ❌ not needed | ❌ not needed | ✅ required |
 
-#### What's already in place
+#### What needs to be built
 
-The vsock-proxy DaemonSet already has a forwarding rule for
-`kms.us-east-1.amazonaws.com:443` — the network path exists. What is needed to
-implement this:
+The vsock-proxy sidecar was removed because the enclave currently makes no outbound
+calls. To implement KMS key persistence, the following are needed:
 
 1. `aws-sdk-kms` (Rust) + `aws-nitro-enclaves-sdk-rust` in the enclave binary for
    attestation-attached API calls.
