@@ -202,8 +202,8 @@ proof-rollup-config-hash env="alphanet":
     fi
 
 # Phase 0b  – Fetch a bare attestation doc from the running Nitro enclave.
-#              Runs as an ephemeral container inside the nitro-worker pod so it
-#              shares the pod's vsock device access. Prints hex attestation to stdout.
+#              Execs into the nitro-worker pod (which already has vsock device access)
+#              and calls `nitro-worker get-attestation`. Prints hex attestation to stdout.
 proof-get-attestation env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -215,7 +215,6 @@ proof-get-attestation env="alphanet":
     if [ -f "scripts/proof-envs/{{env}}.local.env" ]; then
         source scripts/proof-envs/{{env}}.local.env
     fi
-    # Find the nitro-worker pod
     NITRO_POD=$(kubectl --context="$KUBECONTEXT" get pod \
         -n "$PROOF_NAMESPACE" \
         -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
@@ -223,21 +222,13 @@ proof-get-attestation env="alphanet":
         echo "Error: no running pod found in namespace $PROOF_NAMESPACE" >&2
         exit 1
     fi
-    # Read the actual vsock CID from the shared file in the pod
     ENCLAVE_CID=$(kubectl --context="$KUBECONTEXT" exec \
         -n "$PROOF_NAMESPACE" "$NITRO_POD" \
         -- cat /run/nitro-shared/enclave-cid 2>/dev/null || echo "16")
-    echo "Nitro-worker pod: $NITRO_POD" >&2
-    echo "Enclave CID: $ENCLAVE_CID" >&2
-    echo "Running get-attestation as ephemeral container in pod $NITRO_POD..." >&2
-    # Run get-attestation as an ephemeral debug container inside the nitro-worker pod.
-    # This shares the pod's vsock device access, which is required to connect to the enclave.
-    ENCLAVE_CID="$ENCLAVE_CID" kubectl --context="$KUBECONTEXT" debug \
-        -n "$PROOF_NAMESPACE" \
-        "$NITRO_POD" \
-        --image="$PROOF_NITRO_IMAGE" \
-        --image-pull-policy=Always \
-        -- sh -c "ENCLAVE_CID=$ENCLAVE_CID world-chain-prover-nitro get-attestation"
+    echo "Pod: $NITRO_POD  CID: $ENCLAVE_CID" >&2
+    kubectl --context="$KUBECONTEXT" exec \
+        -n "$PROOF_NAMESPACE" "$NITRO_POD" \
+        -- sh -c "ENCLAVE_CID=$ENCLAVE_CID nitro-worker get-attestation"
 
 # Phase 1 – Deploy the Nitro attestation stack.
 proof-deploy-nitro:
