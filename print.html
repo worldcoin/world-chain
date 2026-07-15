@@ -38,10 +38,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-570c630a.js";
+            window.path_to_searchindex_js = "searchindex-d1f7deee.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-ab5c5c9b.js"></script>
+        <script src="toc-87388434.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -1206,6 +1206,8 @@ Flashblocks:
 <tr><td><a href="#wip-1004-eddsa-verification-precompile">1004</a></td><td>EdDSA Verification Precompile</td><td>Draft</td><td>Core</td><td>2026-05-14</td></tr>
 <tr><td><a href="#wip-1005-proof-system-upgrade">1005</a></td><td>Proof System Upgrade</td><td>Draft</td><td>Core</td><td>2026-05-20</td></tr>
 <tr><td><a href="#wip-1006-proof-system-architecture">1006</a></td><td>Proof System Architecture</td><td>Draft</td><td>Core</td><td>2026-05-27</td></tr>
+<tr><td><a href="#wip-1007-flashblock-access-lists">1007</a></td><td>Flashblock Access Lists</td><td>Draft</td><td>Networking</td><td>2026-05-29</td></tr>
+<tr><td><a href="#wip-1008-staked-subblocks-and-unsafe-head-bft">1008</a></td><td>Staked Subblocks and Unsafe-Head BFT</td><td>Draft</td><td>Core</td><td>2026-07-13</td></tr>
 </tbody>
 </table>
 </div>
@@ -4033,6 +4035,239 @@ CodeChange    { block_access_index: u64, new_code:     Bytes }
 <p><strong>Authenticity is inherited, not added.</strong> This WIP relies on the existing Flashblocks P2P authorization: access lists are only meaningful inside builder-signed, authorizer-authorized payloads. The WIP adds no new trust assumption about who may publish, only new data inside an already-authenticated message.</p>
 <p><strong>Resource bounds.</strong> A flashblock access list can be large (one entry per touched account/slot per index). Consumers SHOULD bound the work spent reconstructing pre-state and executing in parallel, consistent with the EIP-7928 per-block maxima, so that an oversized access list cannot be used to exhaust a consumer on the pre-confirmation hot path.</p>
 <div style="break-before: page; page-break-before: always;"></div>
+<h1 id="wip-1008-staked-subblocks-and-unsafe-head-bft"><a href="#wip-1008-staked-subblocks-and-unsafe-head-bft" class="header">WIP-1008: Staked Subblocks and Unsafe-Head BFT</a></h1>
+<h2 id="abstract-8"><a class="header" href="#abstract-8">Abstract</a></h2>
+<p>World Chain today derives all of its security from Ethereum: the safe and finalized heads are derived from L1, and the unsafe head — the segment of the chain built by the sequencer but not yet posted to L1 — carries no economic security and is extendable by exactly one party. This WIP introduces a secondary consensus layer over the unsafe chain, composed of validators staking WLD in an L2 predeploy.</p>
+<p>Validators perform two duties. First, a per-block committee of validators each contributes a <strong>subblock</strong>: a signed, bounded, ordered transaction list that the sequencer’s block builder MUST place at the start of the block, ahead of its own mempool-derived contents. Every subblock carries a mandatory <a href="#wip-1007-flashblock-access-lists">WIP-1007</a> Flashblock Access List, so the builder verifies and stitches pre-executed subblocks in parallel and the subblock region is streamed as the first flashblock of the block, preserving the 200 ms flashblock cadence. Second, every active validator verifies each new unsafe block and signs a BLS attestation over it. When attestations representing ≥ 2/3 of active stake are aggregated, the block obtains an <strong>attestation certificate</strong> and becomes <code>attested</code> — a new head label between <code>unsafe</code> and <code>safe</code>. Reorging an attested block requires equivocation by ≥ 1/3 of stake, all of it attributable and slashable.</p>
+<p>The sequencer remains the sole block producer and aggregator; L1 derivation is unchanged. The overlay adds accountable safety and multi-party inclusion to the unsafe chain without touching the OP Stack derivation pipeline, and it degrades gracefully: if every validator is offline, World Chain produces blocks exactly as it does today.</p>
+<h2 id="motivation-8"><a class="header" href="#motivation-8">Motivation</a></h2>
+<p>Three gaps motivate this proposal:</p>
+<ol>
+<li>
+<p><strong>No economic security on the unsafe head.</strong> Between block production and L1 finalization, the chain tip is backed only by the sequencer’s reputation. Flashblocks give users 200 ms pre-confirmations, but a pre-confirmation is a promise from a single operator. Applications settling real value against the unsafe head (payments, exchange deposits) have no slashable counterparty if that promise is broken. An attestation certificate converts “the sequencer said so” into “reorging this block costs at least 1/3 of total staked WLD.”</p>
+</li>
+<li>
+<p><strong>Single-party inclusion.</strong> Every transaction on World Chain today is included at the discretion of one sequencer. Priority Blockspace for Humans (PBH) shapes <em>ordering</em> within the block, but not <em>who controls entry</em>. Subblocks give a rotating committee of independent, staked proposers a protocol-guaranteed region at the front of every block. A user who believes they are being censored can submit to any committee member, and omission of a valid subblock is attributable, attestation-blocking, and eventually slashable.</p>
+</li>
+<li>
+<p><strong>WLD utility.</strong> World Chain has no native staking function for WLD. Validators stake WLD to earn subblock priority fees and attestation rewards, giving the asset a productive, protocol-native role and sharding a portion of block revenue across the validator set.</p>
+</li>
+</ol>
+<p>The design deliberately keeps the sequencer as a <em>meta-aggregator</em>: subblocks compose the start of the block, and the sequencer extends them with transactions from its own mempool. This preserves the existing builder pipeline, flashblock streaming, PBH semantics, and — critically — chain liveness that does not depend on validator liveness.</p>
+<h2 id="specification-7"><a class="header" href="#specification-7">Specification</a></h2>
+<p>The key words “MUST”, “MUST NOT”, “REQUIRED”, “SHALL”, “SHALL NOT”, “SHOULD”, “SHOULD NOT”, “RECOMMENDED”, “NOT RECOMMENDED”, “MAY”, and “OPTIONAL” in this document are to be interpreted as described in <a href="https://www.rfc-editor.org/rfc/rfc2119">RFC 2119</a> and <a href="https://www.rfc-editor.org/rfc/rfc8174">RFC 8174</a>.</p>
+<h3 id="terminology-1"><a class="header" href="#terminology-1">Terminology</a></h3>
+<ul>
+<li><strong>Validator</strong> — an entity that has staked WLD in the <code>StakeManager</code> predeploy and is in the active set. Runs a full World Chain node plus a validator sidecar. (Distinct from the transaction-validation component of the builder.)</li>
+<li><strong>Subblock</strong> — a signed, ordered transaction list produced by a validator selected for block <code>N</code>’s subblock committee.</li>
+<li><strong>Subblock committee</strong> — the <code>SUBBLOCK_COMMITTEE_SIZE</code> validators eligible to submit a subblock for a given block.</li>
+<li><strong>Attestation</strong> — a validator’s BLS signature over an unsafe block it has verified.</li>
+<li><strong>Attestation certificate</strong> — an aggregate of attestations representing ≥ <code>QUORUM_NUMERATOR/QUORUM_DENOMINATOR</code> of active stake for one block.</li>
+<li><strong>Attested head</strong> — the highest block with a known certificate; exposed as the <code>attested</code> block tag, ordered <code>unsafe ≥ attested ≥ safe ≥ finalized</code>.</li>
+</ul>
+<h3 id="parameters"><a class="header" href="#parameters">Parameters</a></h3>
+<p>Provisional values; final numbers to be fixed before Review status.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Value</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td><code>EPOCH_LENGTH</code></td><td>1800 blocks</td><td>1 hour at 2 s blocks; validator set snapshots per epoch</td></tr>
+<tr><td><code>MAX_ACTIVE_VALIDATORS</code></td><td>128</td><td>top-N by stake</td></tr>
+<tr><td><code>MIN_STAKE</code></td><td>TBD (WLD)</td><td>governance-set</td></tr>
+<tr><td><code>SUBBLOCK_COMMITTEE_SIZE</code></td><td>4</td><td>proposers per block</td></tr>
+<tr><td><code>SUBBLOCK_GAS_QUOTA</code></td><td><code>gas_limit * 20 / 100</code></td><td>per subblock (committee total: 20% of block gas)</td></tr>
+<tr><td><code>MAX_SUBBLOCK_BYTES</code></td><td>32 KiB</td><td>per subblock, uncompressed; bounds L1 DA exposure</td></tr>
+<tr><td><code>MAX_SUBBLOCK_FBAL_BYTES</code></td><td>128 KiB</td><td>encoded access-list sidecar; P2P-only, never posted to L1</td></tr>
+<tr><td><code>SUBBLOCK_DEADLINE</code></td><td>slot start of block <code>N</code></td><td>subblocks for <code>N</code> are broadcast during slot <code>N−1</code></td></tr>
+<tr><td><code>QUORUM_NUMERATOR/DENOMINATOR</code></td><td>2/3</td><td>of active stake, by weight</td></tr>
+<tr><td><code>CERT_INCLUSION_WINDOW</code></td><td>8 blocks</td><td>certificate for <code>N</code> must land on-chain by <code>N + 8</code> for rewards</td></tr>
+<tr><td><code>WITHDRAWAL_DELAY</code></td><td>2 epochs + L1 finality of the exit block</td><td>stake remains slashable while evidence can surface</td></tr>
+<tr><td><code>ATTESTATION_DOMAIN</code> / <code>SUBBLOCK_DOMAIN</code></td><td><code>0x57430101</code> / <code>0x57430102</code></td><td>signing-domain separators</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="validator-registry-the-stakemanager-predeploy"><a class="header" href="#validator-registry-the-stakemanager-predeploy">Validator registry: the <code>StakeManager</code> predeploy</a></h3>
+<p>A new predeploy (address TBD in the World Chain predeploy namespace) is the single on-chain root of trust for the overlay:</p>
+<pre><code class="language-solidity">interface IStakeManager {
+    function register(bytes calldata blsPubkey, bytes calldata p2pPubkey, bytes calldata possessionProof) external; // locks msg.value-equivalent WLD via permit/transferFrom
+    function deposit(uint256 amount) external;
+    function initiateExit() external;
+    function withdraw() external;                       // after WITHDRAWAL_DELAY
+    function submitCertificate(AttestationData calldata data, bytes calldata aggSig, bytes calldata participation) external;
+    function slash(bytes calldata evidence) external;   // permissionless; whistleblower reward
+    function activeSet(uint64 epoch) external view returns (ValidatorInfo[] memory);
+}
+</code></pre>
+<ul>
+<li>Registration requires <code>MIN_STAKE</code> WLD, a BLS12-381 public key with a proof of possession, and an ed25519 P2P key for the flashblocks network.</li>
+<li>The <strong>active set for epoch <code>e</code></strong> is the top <code>MAX_ACTIVE_VALIDATORS</code> by stake, snapshotted at the last block of epoch <code>e − 2</code> (one full epoch of activation delay). All duties and quorum weights for epoch <code>e</code> are computed against this snapshot, so every node derives an identical validator set from chain state alone.</li>
+<li>BLS aggregate verification in <code>submitCertificate</code> and <code>slash</code> uses the <a href="https://eips.ethereum.org/EIPS/eip-2537">EIP-2537</a> precompiles.</li>
+</ul>
+<h3 id="duty-assignment"><a class="header" href="#duty-assignment">Duty assignment</a></h3>
+<p>For block <code>N</code> in epoch <code>e</code>, the subblock committee is a deterministic, stake-weighted sample without replacement of <code>SUBBLOCK_COMMITTEE_SIZE</code> validators from the epoch-<code>e</code> active set, seeded by:</p>
+<pre><code>seed(N) = keccak256(epoch_seed(e) ‖ uint64(N))
+epoch_seed(e) = keccak256(l1_origin_hash(first block of epoch e − 1))
+</code></pre>
+<p>The seed is fixed one epoch in advance and derived from an L1 block hash already embedded in the L2 chain, so assignment is computable by every node and not grindable by the sequencer. Attestation duty is not sampled: <strong>every</strong> active validator attests every block.</p>
+<h3 id="subblocks"><a class="header" href="#subblocks">Subblocks</a></h3>
+<h4 id="structure"><a class="header" href="#structure">Structure</a></h4>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct SubBlock {
+    pub chain_id: u64,
+    pub block_number: u64,
+    /// Unsafe head the proposer built against. Advisory: the builder
+    /// re-validates against the actual parent (see Inclusion semantics).
+    pub parent_hash: B256,
+    pub validator_index: u16,
+    /// EIP-2718 transaction envelopes, in proposer order.
+    pub transactions: Vec&lt;Bytes&gt;,
+    /// WIP-1007 Flashblock Access List for `transactions` executed
+    /// against `parent_hash` state, plus its keccak256 commitment.
+    /// REQUIRED: a subblock without a verifiable access list is invalid
+    /// (validity condition 5).
+    pub access_list: FlashblockAccessList,
+    pub access_list_hash: B256,
+}
+
+pub struct SignedSubBlock {
+    pub message: SubBlock,
+    /// BLS signature over keccak256(SUBBLOCK_DOMAIN ‖ ssz/rlp(message)).
+    pub signature: BlsSignature,
+}
+<span class="boring">}</span></code></pre>
+<h4 id="validity"><a class="header" href="#validity">Validity</a></h4>
+<p>A <code>SignedSubBlock</code> for block <code>N</code> is <strong>valid</strong> iff:</p>
+<ol>
+<li><code>validator_index</code> is in <code>N</code>’s subblock committee and the signature verifies against that validator’s registered BLS key;</li>
+<li><code>sum(gas_limit of transactions) ≤ SUBBLOCK_GAS_QUOTA</code> and encoded size ≤ <code>MAX_SUBBLOCK_BYTES</code>;</li>
+<li>it was received before <code>SUBBLOCK_DEADLINE</code>;</li>
+<li>no transaction is a deposit transaction, and no transaction claims PBH blockspace (subblock quota is carved out of the non-PBH region; PBH guarantees are unaffected);</li>
+<li><code>parent_hash</code> references block <code>N − 1</code> or <code>N − 2</code> of the chain being extended, the encoded access list is ≤ <code>MAX_SUBBLOCK_FBAL_BYTES</code>, and the access list <strong>re-derives under <a href="#wip-1007-flashblock-access-lists">WIP-1007</a> verification</strong>: executing <code>transactions</code> against per-transaction pre-states materialized from the list MUST reproduce an access list hashing to <code>access_list_hash</code>, and the list’s claimed pre-states MUST match the state at <code>parent_hash</code>;</li>
+<li>it is the only subblock signed by this validator for height <code>N</code> (two distinct signed subblocks for the same height are slashable equivocation).</li>
+</ol>
+<h4 id="inclusion-semantics"><a class="header" href="#inclusion-semantics">Inclusion semantics</a></h4>
+<p>Proposers build their subblock for block <code>N</code> against the unsafe head during slot <code>N − 1</code> and broadcast it on the P2P network (below). The builder:</p>
+<ol>
+<li>Collects valid subblocks until <code>SUBBLOCK_DEADLINE</code>.</li>
+<li>Orders subblocks by the committee’s sampling order for <code>N</code> (deterministic given the seed).</li>
+<li>Executes the subblock region first, at the top of the block. Within a subblock, transactions execute in proposer order; a transaction that is invalid against its pre-state (bad nonce, insufficient balance for fees) is <strong>skipped</strong>, not reverted-and-included, and does not invalidate the rest of the subblock. This rule is deterministic given the parent state and the ordered subblock set, so attestors can re-derive the exact expected region.</li>
+<li>Extends the block with PBH and mempool transactions exactly as today.</li>
+</ol>
+<p>The mandatory access lists are what make step 3 parallel rather than sequential. On receipt of each subblock — before the deadline, off the block-building critical path — the builder MUST verify it under WIP-1007: materialize each transaction’s pre-state from the FBAL, execute all of the subblock’s transactions in parallel against isolated snapshots, and check that the re-derived access list hashes to <code>access_list_hash</code> (validity condition 5). A subblock that fails verification is invalid, MUST be excluded, and does not bind attestors. At sealing time the builder stitches the pre-verified regions: where a subblock’s FBAL pre-state claims match the actual parent state of block <code>N</code> and no earlier-ordered subblock wrote to overlapping state, the cached execution results and state diffs are applied directly with no re-execution; only transactions whose pre-state diverges (stale <code>parent_hash</code>, cross-subblock overlap) are re-executed sequentially under the skip rule of step 3. The executed subblock region is emitted as <strong>flashblock index 0</strong> with its own composite FBAL, so downstream flashblock consumers are unaffected and the 200 ms streaming cadence is preserved.</p>
+<p>The builder MUST include every valid subblock it received by the deadline. This obligation is enforced by the attestation layer, not by L1 derivation (see Attestation validity policy).</p>
+<h3 id="p2p-flblk-protocol-v3"><a class="header" href="#p2p-flblk-protocol-v3">P2P: <code>flblk</code> protocol v3</a></h3>
+<p>Subblock and attestation gossip reuses the existing flashblocks P2P network. The <code>flblk</code> protocol version bumps to <code>3</code> with three new top-level messages:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Discriminator</th><th>Message</th><th>Signer</th><th>Relay</th></tr>
+</thead>
+<tbody>
+<tr><td><code>0x05</code></td><td><code>SignedSubBlock</code></td><td>committee validator</td><td>gossip (dedup by <code>(height, validator_index)</code>)</td></tr>
+<tr><td><code>0x06</code></td><td><code>SignedAttestation</code></td><td>any active validator</td><td>gossip (dedup by <code>(height, validator_index)</code>)</td></tr>
+<tr><td><code>0x07</code></td><td><code>AttestationCertificate</code></td><td>aggregate</td><td>gossip (dedup by <code>(height, block_hash)</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<p>These messages are validator-signed rather than wrapped in the builder <code>Authorized</code> envelope; peers verify them against the <code>StakeManager</code> active-set snapshot and penalize peers relaying messages with invalid signatures, non-committee proposers, or heights outside <code>[unsafe_head − 4, unsafe_head + 2]</code>. Fanout, send/receive sets, and rotation follow <a href="specs/flashblocks/p2p_v2.html">p2p v2</a> unchanged.</p>
+<h3 id="attestations"><a class="header" href="#attestations">Attestations</a></h3>
+<h4 id="data-structures-2"><a class="header" href="#data-structures-2">Data structures</a></h4>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct AttestationData {
+    pub chain_id: u64,
+    pub epoch: u64,
+    pub block_number: u64,
+    pub block_hash: B256,
+}
+
+pub struct SignedAttestation {
+    pub data: AttestationData,
+    pub validator_index: u16,
+    /// BLS signature over keccak256(ATTESTATION_DOMAIN ‖ ssz/rlp(data)).
+    pub signature: BlsSignature,
+}
+
+pub struct AttestationCertificate {
+    pub data: AttestationData,
+    pub aggregate_signature: BlsSignature,
+    /// Bit i set ⇔ active validator i contributed.
+    pub participation: BitVec,
+}
+<span class="boring">}</span></code></pre>
+<h4 id="attestation-validity-policy"><a class="header" href="#attestation-validity-policy">Attestation validity policy</a></h4>
+<p>Upon importing unsafe block <code>N</code> (via flashblocks or op-node gossip), an active validator MUST sign and broadcast an attestation iff <strong>all</strong> hold:</p>
+<ol>
+<li>The block is valid under World Chain execution rules (the validator’s node has executed it).</li>
+<li>The block’s subblock region matches the deterministic expected region: every valid subblock the validator observed on the P2P network at least <code>SUBBLOCK_OBSERVATION_MARGIN</code> (provisionally 200 ms) before <code>SUBBLOCK_DEADLINE</code> is present, correctly ordered, and correctly executed.</li>
+<li>The block descends from every block the validator has previously seen a certificate for, and the validator has not attested a conflicting block at height <code>N</code>.</li>
+</ol>
+<p>Rule 2 is intentionally subjective at the margin (a validator cannot prove what the builder did or did not receive); its role is to make sustained censorship <em>quorum-blocking and publicly attributable</em> rather than to adjudicate single-block races. Rule 3, combined with the slashing conditions, is objective and provides accountable safety.</p>
+<h4 id="certificates-and-the-attested-head"><a class="header" href="#certificates-and-the-attested-head">Certificates and the attested head</a></h4>
+<p>Any node MAY aggregate attestations; in practice the builder aggregates as attestations arrive. When aggregated weight reaches quorum, the certificate is gossiped (msg <code>0x07</code>) and the block becomes <code>attested</code>.</p>
+<p>The builder MUST embed the newest certificate it holds on-chain via a <code>StakeManager.submitCertificate</code> call (a builder-injected transaction, gas-subsidized in the same manner as PBH transactions) no later than <code>CERT_INCLUSION_WINDOW</code> blocks after the certified height. On-chain inclusion is what drives reward accounting and makes certificates available to future L1-side consumers; the gossiped certificate alone already moves the <code>attested</code> tag on replicas.</p>
+<p>Nodes expose <code>attested</code> as an additional block tag in the RPC layer. <code>safe</code> and <code>finalized</code> retain their L1-derived semantics unchanged.</p>
+<h4 id="chain-extension-rule"><a class="header" href="#chain-extension-rule">Chain-extension rule</a></h4>
+<p>The sequencer and builder MUST NOT extend a fork that excludes an attested block. Honest validators will not attest such a fork (rule 3), so it can never reach quorum without ≥ 1/3 of stake double-signing — which is slashable. The batcher SHOULD prefer submitting attested blocks to L1; if quorum has been unattainable for more than <code>BATCHER_ATTESTATION_TIMEOUT</code> (provisionally 2 minutes), it MUST fall back to submitting unsafe blocks as today, emitting degraded-mode telemetry. Chain liveness never depends on validator liveness.</p>
+<h3 id="slashing"><a class="header" href="#slashing">Slashing</a></h3>
+<p><code>StakeManager.slash(evidence)</code> is permissionless. Evidence is verified on-chain against the epoch snapshot; a valid submission burns <code>SLASH_FRACTION</code> (provisionally 100% for equivocation offenses) of the offender’s stake, pays <code>WHISTLEBLOWER_FRACTION</code> (provisionally 5%) to the submitter, and ejects the offender.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>#</th><th>Offense</th><th>Evidence</th></tr>
+</thead>
+<tbody>
+<tr><td>S1</td><td>Attestation equivocation: two attestations, same height, different <code>block_hash</code></td><td>both <code>SignedAttestation</code>s</td></tr>
+<tr><td>S2</td><td>Certificate conflict: an attestation for a block that does not descend from a certified block at a lower height</td><td>the attestation + the certificate + a header-chain proof of non-descent</td></tr>
+<tr><td>S3</td><td>Subblock equivocation: two distinct <code>SignedSubBlock</code>s for the same height</td><td>both signed subblocks</td></tr>
+</tbody>
+</table>
+</div>
+<p>The sequencer/builder is additionally bonded (amount TBD) via the same contract. Builder equivocation — two <code>Authorized</code> flashblock payloads with the same <code>payload_id</code>/index and different content, or sealing a block that abandons a certified ancestor — is attributable via the existing flashblocks dual-signature scheme and slashes the builder bond (S4). Header-chain verification for S2/S4 uses on-chain ancestry within the last 8192 block hashes; deeper evidence falls back to a governance-adjudicated path until a fault-proof-style verifier is specified.</p>
+<h3 id="rewards"><a class="header" href="#rewards">Rewards</a></h3>
+<ul>
+<li><strong>Subblock proposers</strong> earn the priority fees of their included subblock transactions, minus a pro-rata share of the region’s L1 DA cost. The builder computes per-proposer totals during block construction and credits them in the <code>submitCertificate</code> call; attestors re-derive the amounts during block verification, so incorrect crediting is attestation-blocking (rule 2 extends to the settlement calldata).</li>
+<li><strong>Attestors</strong> accrue a per-epoch WLD reward proportional to their certified participation (sum of <code>participation</code> bits landed within <code>CERT_INCLUSION_WINDOW</code>), paid from a governance-funded rewards budget held by <code>StakeManager</code>. No new WLD is issued by the protocol.</li>
+<li>There is no inclusion reward for the certificate transaction itself; embedding it is a builder obligation.</li>
+</ul>
+<h2 id="rationale-5"><a class="header" href="#rationale-5">Rationale</a></h2>
+<p><strong>Attestation overlay instead of full BFT leader rotation.</strong> Rotating block proposal among validators (CometBFT/HotStuff-style) would replace the sequencer, requiring deep changes to op-node, rollup-boost HA, and the derivation-adjacent operational stack, and would put validator liveness on the critical path of chain liveness. The overlay achieves the two properties users actually need on the unsafe head — accountable safety and multi-party inclusion — while keeping the sequencer as sole aggregator. Because there is exactly one proposer per height, no fork-choice or view-change machinery is needed; the protocol reduces to a single-shot finality gadget per block, and the classic BFT results still apply to its safety: conflicting certificates require ≥ 1/3 equivocating stake. Leader rotation remains a natural future extension once the validator set and slashing machinery are proven.</p>
+<p><strong>Subblocks à la Tempo.</strong> Tempo’s subblock architecture demonstrated that inclusion can be sharded across validators without sharding block <em>production</em>. It fits World Chain unusually well: the builder already assembles blocks from heterogeneous regions (PBH blockspace, mempool), already streams incremental payloads every 200 ms, and — via WIP-1007 — already has a format for shipping a region’s state transition as a verifiable bundle. A subblock is, mechanically, an externally-authored flashblock-0 fragment with an FBAL attached.</p>
+<p><strong>Enforcing inclusion via attestations instead of derivation validity.</strong> Making subblock omission a <em>derivation-invalidity</em> condition would fork the OP Stack derivation pipeline and make the canonical chain depend on P2P-observable facts, which is unsound. Attestation-gating gets the product property (sustained censorship becomes publicly attributable and blocks economic finality) without touching L1 validity rules.</p>
+<p><strong>Staking on L2 rather than L1.</strong> An L2 predeploy makes the active set, certificates, rewards, and slashing readable by the nodes that need them at zero latency, and WLD is natively liquid on World Chain. The cost is that slashing guarantees are themselves only as final as the L2 chain; <code>WITHDRAWAL_DELAY</code> is therefore anchored to L1 finality of the exit block, so stake cannot escape ahead of the evidence window.</p>
+<p><strong>BLS12-381 for both duties.</strong> Attestations require aggregation (128 signatures per 2 s block otherwise); EIP-2537 precompiles make on-chain verification affordable; using one key type for subblocks and attestations keeps the registry and possession-proof story simple.</p>
+<h2 id="backwards-compatibility-7"><a class="header" href="#backwards-compatibility-7">Backwards Compatibility</a></h2>
+<ul>
+<li><strong>L1 derivation is unchanged.</strong> Blocks produced under this WIP are valid OP Stack blocks; a node ignoring the overlay follows the identical canonical chain. <code>safe</code>/<code>finalized</code> semantics are untouched.</li>
+<li><strong><code>flblk</code> bumps 2 → 3.</strong> v2 peers cannot parse the new message types and are incompatible, consistent with the v1 → v2 precedent.</li>
+<li><strong>RPC</strong> adds the <code>attested</code> tag; existing tags are unchanged.</li>
+<li><strong>PBH</strong> is unaffected: subblock quota is carved from non-PBH blockspace, and subblocks cannot claim PBH space.</li>
+<li>The <code>StakeManager</code> predeploy and certificate-settlement transaction require a hardfork activation.</li>
+</ul>
+<h2 id="security-considerations-7"><a class="header" href="#security-considerations-7">Security Considerations</a></h2>
+<ul>
+<li><strong>Scope of the guarantee.</strong> Certificates protect against <em>pre-L1</em> reorgs only. Once a block is derived from finalized L1 data, Ethereum’s guarantees dominate. The overlay’s accountable safety also assumes ≥ 2/3 of stake is honest <em>and</em> independent; stake concentration (few entities controlling quorum) reproduces single-operator trust with extra steps. <code>MAX_ACTIVE_VALIDATORS</code>, delegation policy, and stake caps are the levers; concentration metrics must be public.</li>
+<li><strong>Subjectivity of inclusion enforcement.</strong> Rule 2 of the attestation policy depends on what each validator observed. A builder can plausibly deny receipt of any single subblock, and a malicious validator can broadcast a subblock late and cry censorship. The margin parameter, per-validator omission telemetry, and quorum (no single validator’s view decides) bound both attacks; the design goal is detecting and pricing <em>sustained</em> censorship, not adjudicating individual races. This subjectivity is why omission is quorum-blocking but not directly slashable.</li>
+<li><strong>Liveness attacks on the overlay.</strong> ≥ 1/3 of stake refusing to attest halts certificates, not the chain (batcher falls back after <code>BATCHER_ATTESTATION_TIMEOUT</code>). The cost of this attack is forgone rewards; if <code>attested</code> becomes load-bearing for major applications, withholding-based griefing pricing (inactivity leaks) should be revisited.</li>
+<li><strong>DA and resource griefing via subblocks.</strong> Subblock transactions consume L1 DA paid by the protocol’s fee flow. <code>MAX_SUBBLOCK_BYTES</code>, <code>SUBBLOCK_GAS_QUOTA</code>, and the skip-invalid rule bound the damage of junk subblocks; a proposer who persistently fills subblocks with skipped or zero-fee transactions earns nothing and is visible in telemetry. Per-proposer DA-cost deduction (Rewards) makes spam self-defeating economically. A well-formed subblock with a bogus access list costs the builder one bounded, parallel verification pass off the critical path before exclusion; <code>MAX_SUBBLOCK_FBAL_BYTES</code> and per-subblock gas quotas cap that work, and repeated verification failures are attributable to the signing proposer.</li>
+<li><strong>Equivocation windows.</strong> Between a block reaching quorum and its certificate propagating, a validator could attest a competing block without yet “knowing” of the certificate. S1 (same-height equivocation) is unconditional and covers this window; S2 covers post-certificate forks. Validators MUST persist their signing history across restarts (slashing-protection database, as in Ethereum consensus clients).</li>
+<li><strong>Key management.</strong> BLS possession proofs prevent rogue-key aggregation attacks. Validator keys are hot by necessity; the registry SHOULD support a separate cold withdrawal address so key compromise caps losses at slashing, not theft of stake.</li>
+<li><strong>Builder bond and HA.</strong> In HA sequencer setups, failover between builders is already coordinated via <code>StartPublish</code>/<code>StopPublish</code>; S4 evidence must distinguish malicious equivocation from a benign failover race. The dual-signature <code>Authorized</code> envelope scopes accountability to the authorized builder for a given <code>payload_id</code>, which is the correct boundary, but the exact S4 predicate under failover needs adversarial review before it arms.</li>
+</ul>
+<h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
+<ol>
+<li>Final economic parameters: <code>MIN_STAKE</code>, reward budget sizing, slash fractions, and whether delegation is in scope for v1.</li>
+<li>The exact settlement mechanism for routing subblock priority fees out of the sequencer fee vault, and its interaction with existing fee-vault withdrawal flows.</li>
+<li>Whether <code>attested</code> should eventually gate flashblock-level pre-confirmations (validators attesting flashblocks, not just sealed blocks) — the natural next step for 200 ms economic finality.</li>
+<li>S2/S4 evidence verification beyond the 8192-block ancestry window: governance adjudication vs. a fault-proof-style on-chain verifier.</li>
+<li>Committee sizing: whether <code>SUBBLOCK_COMMITTEE_SIZE</code> should scale with the active set, and whether committee membership should be private until the slot (to resist targeted DoS on proposers).</li>
+</ol>
+<h2 id="security-considerations-status"><a class="header" href="#security-considerations-status">Security Considerations Status</a></h2>
+<p>Needs adversarial review before leaving Draft, in particular the S4 failover predicate and the inclusion-enforcement subjectivity bounds.</p>
+<div style="break-before: page; page-break-before: always;"></div>
 <h1 id="wip-template"><a href="#wip-template" class="header">WIP Template</a></h1>
 <!--
   READ wips/README.md BEFORE USING THIS TEMPLATE!
@@ -4047,7 +4282,7 @@ CodeChange    { block_access_index: u64, new_code:     Bytes }
 
   TODO: Remove this comment before submitting.
 -->
-<h2 id="abstract-8"><a class="header" href="#abstract-8">Abstract</a></h2>
+<h2 id="abstract-9"><a class="header" href="#abstract-9">Abstract</a></h2>
 <!--
   The Abstract is a multi-sentence (short paragraph) technical summary. This should be a
   very terse and human-readable version of the specification section. Someone should be
@@ -4055,7 +4290,7 @@ CodeChange    { block_access_index: u64, new_code:     Bytes }
 
   TODO: Remove this comment before submitting.
 -->
-<h2 id="motivation-8"><a class="header" href="#motivation-8">Motivation</a></h2>
+<h2 id="motivation-9"><a class="header" href="#motivation-9">Motivation</a></h2>
 <!--
   This section is optional.
 
@@ -4066,7 +4301,7 @@ CodeChange    { block_access_index: u64, new_code:     Bytes }
 
   TODO: Remove this comment before submitting.
 -->
-<h2 id="specification-7"><a class="header" href="#specification-7">Specification</a></h2>
+<h2 id="specification-8"><a class="header" href="#specification-8">Specification</a></h2>
 <!--
   The Specification section should describe the syntax and semantics of any new feature.
   The specification should be detailed enough to allow competing, interoperable implementations.
@@ -4086,7 +4321,7 @@ CodeChange    { block_access_index: u64, new_code:     Bytes }
 
   TODO: Remove this comment before submitting.
 -->
-<h2 id="rationale-5"><a class="header" href="#rationale-5">Rationale</a></h2>
+<h2 id="rationale-6"><a class="header" href="#rationale-6">Rationale</a></h2>
 <!--
   The Rationale section fleshes out the specification by describing what motivated the design
   and why particular design decisions were made. It should describe alternate designs that
@@ -4095,7 +4330,7 @@ CodeChange    { block_access_index: u64, new_code:     Bytes }
   TODO: Remove this comment before submitting.
 -->
 <p>TBD</p>
-<h2 id="backwards-compatibility-7"><a class="header" href="#backwards-compatibility-7">Backwards Compatibility</a></h2>
+<h2 id="backwards-compatibility-8"><a class="header" href="#backwards-compatibility-8">Backwards Compatibility</a></h2>
 <!--
   This section is optional.
 
@@ -4126,7 +4361,7 @@ CodeChange    { block_access_index: u64, new_code:     Bytes }
 
   TODO: Remove this comment before submitting.
 -->
-<h2 id="security-considerations-7"><a class="header" href="#security-considerations-7">Security Considerations</a></h2>
+<h2 id="security-considerations-8"><a class="header" href="#security-considerations-8">Security Considerations</a></h2>
 <!--
   All WIPs MUST contain a section discussing the security implications and considerations
   relevant to the proposed change. Include information important for security discussions,

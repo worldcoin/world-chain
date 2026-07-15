@@ -1,0 +1,470 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>WIP-1008: Staked Subblocks and Unsafe-Head BFT - World Chain Specs</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-e96d0476.css">
+        <link rel="stylesheet" href="../css/chrome-d279d366.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+        <!-- MathJax -->
+        <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex-d1f7deee.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-87388434.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">World Chain Specs</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h2 id="abstract"><a class="header" href="#abstract">Abstract</a></h2>
+<p>World Chain today derives all of its security from Ethereum: the safe and finalized heads are derived from L1, and the unsafe head — the segment of the chain built by the sequencer but not yet posted to L1 — carries no economic security and is extendable by exactly one party. This WIP introduces a secondary consensus layer over the unsafe chain, composed of validators staking WLD in an L2 predeploy.</p>
+<p>Validators perform two duties. First, a per-block committee of validators each contributes a <strong>subblock</strong>: a signed, bounded, ordered transaction list that the sequencer’s block builder MUST place at the start of the block, ahead of its own mempool-derived contents. Every subblock carries a mandatory <a href="./wip-1007.html">WIP-1007</a> Flashblock Access List, so the builder verifies and stitches pre-executed subblocks in parallel and the subblock region is streamed as the first flashblock of the block, preserving the 200 ms flashblock cadence. Second, every active validator verifies each new unsafe block and signs a BLS attestation over it. When attestations representing ≥ 2/3 of active stake are aggregated, the block obtains an <strong>attestation certificate</strong> and becomes <code>attested</code> — a new head label between <code>unsafe</code> and <code>safe</code>. Reorging an attested block requires equivocation by ≥ 1/3 of stake, all of it attributable and slashable.</p>
+<p>The sequencer remains the sole block producer and aggregator; L1 derivation is unchanged. The overlay adds accountable safety and multi-party inclusion to the unsafe chain without touching the OP Stack derivation pipeline, and it degrades gracefully: if every validator is offline, World Chain produces blocks exactly as it does today.</p>
+<h2 id="motivation"><a class="header" href="#motivation">Motivation</a></h2>
+<p>Three gaps motivate this proposal:</p>
+<ol>
+<li>
+<p><strong>No economic security on the unsafe head.</strong> Between block production and L1 finalization, the chain tip is backed only by the sequencer’s reputation. Flashblocks give users 200 ms pre-confirmations, but a pre-confirmation is a promise from a single operator. Applications settling real value against the unsafe head (payments, exchange deposits) have no slashable counterparty if that promise is broken. An attestation certificate converts “the sequencer said so” into “reorging this block costs at least 1/3 of total staked WLD.”</p>
+</li>
+<li>
+<p><strong>Single-party inclusion.</strong> Every transaction on World Chain today is included at the discretion of one sequencer. Priority Blockspace for Humans (PBH) shapes <em>ordering</em> within the block, but not <em>who controls entry</em>. Subblocks give a rotating committee of independent, staked proposers a protocol-guaranteed region at the front of every block. A user who believes they are being censored can submit to any committee member, and omission of a valid subblock is attributable, attestation-blocking, and eventually slashable.</p>
+</li>
+<li>
+<p><strong>WLD utility.</strong> World Chain has no native staking function for WLD. Validators stake WLD to earn subblock priority fees and attestation rewards, giving the asset a productive, protocol-native role and sharding a portion of block revenue across the validator set.</p>
+</li>
+</ol>
+<p>The design deliberately keeps the sequencer as a <em>meta-aggregator</em>: subblocks compose the start of the block, and the sequencer extends them with transactions from its own mempool. This preserves the existing builder pipeline, flashblock streaming, PBH semantics, and — critically — chain liveness that does not depend on validator liveness.</p>
+<h2 id="specification"><a class="header" href="#specification">Specification</a></h2>
+<p>The key words “MUST”, “MUST NOT”, “REQUIRED”, “SHALL”, “SHALL NOT”, “SHOULD”, “SHOULD NOT”, “RECOMMENDED”, “NOT RECOMMENDED”, “MAY”, and “OPTIONAL” in this document are to be interpreted as described in <a href="https://www.rfc-editor.org/rfc/rfc2119">RFC 2119</a> and <a href="https://www.rfc-editor.org/rfc/rfc8174">RFC 8174</a>.</p>
+<h3 id="terminology"><a class="header" href="#terminology">Terminology</a></h3>
+<ul>
+<li><strong>Validator</strong> — an entity that has staked WLD in the <code>StakeManager</code> predeploy and is in the active set. Runs a full World Chain node plus a validator sidecar. (Distinct from the transaction-validation component of the builder.)</li>
+<li><strong>Subblock</strong> — a signed, ordered transaction list produced by a validator selected for block <code>N</code>’s subblock committee.</li>
+<li><strong>Subblock committee</strong> — the <code>SUBBLOCK_COMMITTEE_SIZE</code> validators eligible to submit a subblock for a given block.</li>
+<li><strong>Attestation</strong> — a validator’s BLS signature over an unsafe block it has verified.</li>
+<li><strong>Attestation certificate</strong> — an aggregate of attestations representing ≥ <code>QUORUM_NUMERATOR/QUORUM_DENOMINATOR</code> of active stake for one block.</li>
+<li><strong>Attested head</strong> — the highest block with a known certificate; exposed as the <code>attested</code> block tag, ordered <code>unsafe ≥ attested ≥ safe ≥ finalized</code>.</li>
+</ul>
+<h3 id="parameters"><a class="header" href="#parameters">Parameters</a></h3>
+<p>Provisional values; final numbers to be fixed before Review status.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Value</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td><code>EPOCH_LENGTH</code></td><td>1800 blocks</td><td>1 hour at 2 s blocks; validator set snapshots per epoch</td></tr>
+<tr><td><code>MAX_ACTIVE_VALIDATORS</code></td><td>128</td><td>top-N by stake</td></tr>
+<tr><td><code>MIN_STAKE</code></td><td>TBD (WLD)</td><td>governance-set</td></tr>
+<tr><td><code>SUBBLOCK_COMMITTEE_SIZE</code></td><td>4</td><td>proposers per block</td></tr>
+<tr><td><code>SUBBLOCK_GAS_QUOTA</code></td><td><code>gas_limit * 20 / 100</code></td><td>per subblock (committee total: 20% of block gas)</td></tr>
+<tr><td><code>MAX_SUBBLOCK_BYTES</code></td><td>32 KiB</td><td>per subblock, uncompressed; bounds L1 DA exposure</td></tr>
+<tr><td><code>MAX_SUBBLOCK_FBAL_BYTES</code></td><td>128 KiB</td><td>encoded access-list sidecar; P2P-only, never posted to L1</td></tr>
+<tr><td><code>SUBBLOCK_DEADLINE</code></td><td>slot start of block <code>N</code></td><td>subblocks for <code>N</code> are broadcast during slot <code>N−1</code></td></tr>
+<tr><td><code>QUORUM_NUMERATOR/DENOMINATOR</code></td><td>2/3</td><td>of active stake, by weight</td></tr>
+<tr><td><code>CERT_INCLUSION_WINDOW</code></td><td>8 blocks</td><td>certificate for <code>N</code> must land on-chain by <code>N + 8</code> for rewards</td></tr>
+<tr><td><code>WITHDRAWAL_DELAY</code></td><td>2 epochs + L1 finality of the exit block</td><td>stake remains slashable while evidence can surface</td></tr>
+<tr><td><code>ATTESTATION_DOMAIN</code> / <code>SUBBLOCK_DOMAIN</code></td><td><code>0x57430101</code> / <code>0x57430102</code></td><td>signing-domain separators</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="validator-registry-the-stakemanager-predeploy"><a class="header" href="#validator-registry-the-stakemanager-predeploy">Validator registry: the <code>StakeManager</code> predeploy</a></h3>
+<p>A new predeploy (address TBD in the World Chain predeploy namespace) is the single on-chain root of trust for the overlay:</p>
+<pre><code class="language-solidity">interface IStakeManager {
+    function register(bytes calldata blsPubkey, bytes calldata p2pPubkey, bytes calldata possessionProof) external; // locks msg.value-equivalent WLD via permit/transferFrom
+    function deposit(uint256 amount) external;
+    function initiateExit() external;
+    function withdraw() external;                       // after WITHDRAWAL_DELAY
+    function submitCertificate(AttestationData calldata data, bytes calldata aggSig, bytes calldata participation) external;
+    function slash(bytes calldata evidence) external;   // permissionless; whistleblower reward
+    function activeSet(uint64 epoch) external view returns (ValidatorInfo[] memory);
+}
+</code></pre>
+<ul>
+<li>Registration requires <code>MIN_STAKE</code> WLD, a BLS12-381 public key with a proof of possession, and an ed25519 P2P key for the flashblocks network.</li>
+<li>The <strong>active set for epoch <code>e</code></strong> is the top <code>MAX_ACTIVE_VALIDATORS</code> by stake, snapshotted at the last block of epoch <code>e − 2</code> (one full epoch of activation delay). All duties and quorum weights for epoch <code>e</code> are computed against this snapshot, so every node derives an identical validator set from chain state alone.</li>
+<li>BLS aggregate verification in <code>submitCertificate</code> and <code>slash</code> uses the <a href="https://eips.ethereum.org/EIPS/eip-2537">EIP-2537</a> precompiles.</li>
+</ul>
+<h3 id="duty-assignment"><a class="header" href="#duty-assignment">Duty assignment</a></h3>
+<p>For block <code>N</code> in epoch <code>e</code>, the subblock committee is a deterministic, stake-weighted sample without replacement of <code>SUBBLOCK_COMMITTEE_SIZE</code> validators from the epoch-<code>e</code> active set, seeded by:</p>
+<pre><code>seed(N) = keccak256(epoch_seed(e) ‖ uint64(N))
+epoch_seed(e) = keccak256(l1_origin_hash(first block of epoch e − 1))
+</code></pre>
+<p>The seed is fixed one epoch in advance and derived from an L1 block hash already embedded in the L2 chain, so assignment is computable by every node and not grindable by the sequencer. Attestation duty is not sampled: <strong>every</strong> active validator attests every block.</p>
+<h3 id="subblocks"><a class="header" href="#subblocks">Subblocks</a></h3>
+<h4 id="structure"><a class="header" href="#structure">Structure</a></h4>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct SubBlock {
+    pub chain_id: u64,
+    pub block_number: u64,
+    /// Unsafe head the proposer built against. Advisory: the builder
+    /// re-validates against the actual parent (see Inclusion semantics).
+    pub parent_hash: B256,
+    pub validator_index: u16,
+    /// EIP-2718 transaction envelopes, in proposer order.
+    pub transactions: Vec&lt;Bytes&gt;,
+    /// WIP-1007 Flashblock Access List for `transactions` executed
+    /// against `parent_hash` state, plus its keccak256 commitment.
+    /// REQUIRED: a subblock without a verifiable access list is invalid
+    /// (validity condition 5).
+    pub access_list: FlashblockAccessList,
+    pub access_list_hash: B256,
+}
+
+pub struct SignedSubBlock {
+    pub message: SubBlock,
+    /// BLS signature over keccak256(SUBBLOCK_DOMAIN ‖ ssz/rlp(message)).
+    pub signature: BlsSignature,
+}
+<span class="boring">}</span></code></pre>
+<h4 id="validity"><a class="header" href="#validity">Validity</a></h4>
+<p>A <code>SignedSubBlock</code> for block <code>N</code> is <strong>valid</strong> iff:</p>
+<ol>
+<li><code>validator_index</code> is in <code>N</code>’s subblock committee and the signature verifies against that validator’s registered BLS key;</li>
+<li><code>sum(gas_limit of transactions) ≤ SUBBLOCK_GAS_QUOTA</code> and encoded size ≤ <code>MAX_SUBBLOCK_BYTES</code>;</li>
+<li>it was received before <code>SUBBLOCK_DEADLINE</code>;</li>
+<li>no transaction is a deposit transaction, and no transaction claims PBH blockspace (subblock quota is carved out of the non-PBH region; PBH guarantees are unaffected);</li>
+<li><code>parent_hash</code> references block <code>N − 1</code> or <code>N − 2</code> of the chain being extended, the encoded access list is ≤ <code>MAX_SUBBLOCK_FBAL_BYTES</code>, and the access list <strong>re-derives under <a href="./wip-1007.html">WIP-1007</a> verification</strong>: executing <code>transactions</code> against per-transaction pre-states materialized from the list MUST reproduce an access list hashing to <code>access_list_hash</code>, and the list’s claimed pre-states MUST match the state at <code>parent_hash</code>;</li>
+<li>it is the only subblock signed by this validator for height <code>N</code> (two distinct signed subblocks for the same height are slashable equivocation).</li>
+</ol>
+<h4 id="inclusion-semantics"><a class="header" href="#inclusion-semantics">Inclusion semantics</a></h4>
+<p>Proposers build their subblock for block <code>N</code> against the unsafe head during slot <code>N − 1</code> and broadcast it on the P2P network (below). The builder:</p>
+<ol>
+<li>Collects valid subblocks until <code>SUBBLOCK_DEADLINE</code>.</li>
+<li>Orders subblocks by the committee’s sampling order for <code>N</code> (deterministic given the seed).</li>
+<li>Executes the subblock region first, at the top of the block. Within a subblock, transactions execute in proposer order; a transaction that is invalid against its pre-state (bad nonce, insufficient balance for fees) is <strong>skipped</strong>, not reverted-and-included, and does not invalidate the rest of the subblock. This rule is deterministic given the parent state and the ordered subblock set, so attestors can re-derive the exact expected region.</li>
+<li>Extends the block with PBH and mempool transactions exactly as today.</li>
+</ol>
+<p>The mandatory access lists are what make step 3 parallel rather than sequential. On receipt of each subblock — before the deadline, off the block-building critical path — the builder MUST verify it under WIP-1007: materialize each transaction’s pre-state from the FBAL, execute all of the subblock’s transactions in parallel against isolated snapshots, and check that the re-derived access list hashes to <code>access_list_hash</code> (validity condition 5). A subblock that fails verification is invalid, MUST be excluded, and does not bind attestors. At sealing time the builder stitches the pre-verified regions: where a subblock’s FBAL pre-state claims match the actual parent state of block <code>N</code> and no earlier-ordered subblock wrote to overlapping state, the cached execution results and state diffs are applied directly with no re-execution; only transactions whose pre-state diverges (stale <code>parent_hash</code>, cross-subblock overlap) are re-executed sequentially under the skip rule of step 3. The executed subblock region is emitted as <strong>flashblock index 0</strong> with its own composite FBAL, so downstream flashblock consumers are unaffected and the 200 ms streaming cadence is preserved.</p>
+<p>The builder MUST include every valid subblock it received by the deadline. This obligation is enforced by the attestation layer, not by L1 derivation (see Attestation validity policy).</p>
+<h3 id="p2p-flblk-protocol-v3"><a class="header" href="#p2p-flblk-protocol-v3">P2P: <code>flblk</code> protocol v3</a></h3>
+<p>Subblock and attestation gossip reuses the existing flashblocks P2P network. The <code>flblk</code> protocol version bumps to <code>3</code> with three new top-level messages:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Discriminator</th><th>Message</th><th>Signer</th><th>Relay</th></tr>
+</thead>
+<tbody>
+<tr><td><code>0x05</code></td><td><code>SignedSubBlock</code></td><td>committee validator</td><td>gossip (dedup by <code>(height, validator_index)</code>)</td></tr>
+<tr><td><code>0x06</code></td><td><code>SignedAttestation</code></td><td>any active validator</td><td>gossip (dedup by <code>(height, validator_index)</code>)</td></tr>
+<tr><td><code>0x07</code></td><td><code>AttestationCertificate</code></td><td>aggregate</td><td>gossip (dedup by <code>(height, block_hash)</code>)</td></tr>
+</tbody>
+</table>
+</div>
+<p>These messages are validator-signed rather than wrapped in the builder <code>Authorized</code> envelope; peers verify them against the <code>StakeManager</code> active-set snapshot and penalize peers relaying messages with invalid signatures, non-committee proposers, or heights outside <code>[unsafe_head − 4, unsafe_head + 2]</code>. Fanout, send/receive sets, and rotation follow <a href="../specs/flashblocks/p2p_v2.html">p2p v2</a> unchanged.</p>
+<h3 id="attestations"><a class="header" href="#attestations">Attestations</a></h3>
+<h4 id="data-structures"><a class="header" href="#data-structures">Data structures</a></h4>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct AttestationData {
+    pub chain_id: u64,
+    pub epoch: u64,
+    pub block_number: u64,
+    pub block_hash: B256,
+}
+
+pub struct SignedAttestation {
+    pub data: AttestationData,
+    pub validator_index: u16,
+    /// BLS signature over keccak256(ATTESTATION_DOMAIN ‖ ssz/rlp(data)).
+    pub signature: BlsSignature,
+}
+
+pub struct AttestationCertificate {
+    pub data: AttestationData,
+    pub aggregate_signature: BlsSignature,
+    /// Bit i set ⇔ active validator i contributed.
+    pub participation: BitVec,
+}
+<span class="boring">}</span></code></pre>
+<h4 id="attestation-validity-policy"><a class="header" href="#attestation-validity-policy">Attestation validity policy</a></h4>
+<p>Upon importing unsafe block <code>N</code> (via flashblocks or op-node gossip), an active validator MUST sign and broadcast an attestation iff <strong>all</strong> hold:</p>
+<ol>
+<li>The block is valid under World Chain execution rules (the validator’s node has executed it).</li>
+<li>The block’s subblock region matches the deterministic expected region: every valid subblock the validator observed on the P2P network at least <code>SUBBLOCK_OBSERVATION_MARGIN</code> (provisionally 200 ms) before <code>SUBBLOCK_DEADLINE</code> is present, correctly ordered, and correctly executed.</li>
+<li>The block descends from every block the validator has previously seen a certificate for, and the validator has not attested a conflicting block at height <code>N</code>.</li>
+</ol>
+<p>Rule 2 is intentionally subjective at the margin (a validator cannot prove what the builder did or did not receive); its role is to make sustained censorship <em>quorum-blocking and publicly attributable</em> rather than to adjudicate single-block races. Rule 3, combined with the slashing conditions, is objective and provides accountable safety.</p>
+<h4 id="certificates-and-the-attested-head"><a class="header" href="#certificates-and-the-attested-head">Certificates and the attested head</a></h4>
+<p>Any node MAY aggregate attestations; in practice the builder aggregates as attestations arrive. When aggregated weight reaches quorum, the certificate is gossiped (msg <code>0x07</code>) and the block becomes <code>attested</code>.</p>
+<p>The builder MUST embed the newest certificate it holds on-chain via a <code>StakeManager.submitCertificate</code> call (a builder-injected transaction, gas-subsidized in the same manner as PBH transactions) no later than <code>CERT_INCLUSION_WINDOW</code> blocks after the certified height. On-chain inclusion is what drives reward accounting and makes certificates available to future L1-side consumers; the gossiped certificate alone already moves the <code>attested</code> tag on replicas.</p>
+<p>Nodes expose <code>attested</code> as an additional block tag in the RPC layer. <code>safe</code> and <code>finalized</code> retain their L1-derived semantics unchanged.</p>
+<h4 id="chain-extension-rule"><a class="header" href="#chain-extension-rule">Chain-extension rule</a></h4>
+<p>The sequencer and builder MUST NOT extend a fork that excludes an attested block. Honest validators will not attest such a fork (rule 3), so it can never reach quorum without ≥ 1/3 of stake double-signing — which is slashable. The batcher SHOULD prefer submitting attested blocks to L1; if quorum has been unattainable for more than <code>BATCHER_ATTESTATION_TIMEOUT</code> (provisionally 2 minutes), it MUST fall back to submitting unsafe blocks as today, emitting degraded-mode telemetry. Chain liveness never depends on validator liveness.</p>
+<h3 id="slashing"><a class="header" href="#slashing">Slashing</a></h3>
+<p><code>StakeManager.slash(evidence)</code> is permissionless. Evidence is verified on-chain against the epoch snapshot; a valid submission burns <code>SLASH_FRACTION</code> (provisionally 100% for equivocation offenses) of the offender’s stake, pays <code>WHISTLEBLOWER_FRACTION</code> (provisionally 5%) to the submitter, and ejects the offender.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>#</th><th>Offense</th><th>Evidence</th></tr>
+</thead>
+<tbody>
+<tr><td>S1</td><td>Attestation equivocation: two attestations, same height, different <code>block_hash</code></td><td>both <code>SignedAttestation</code>s</td></tr>
+<tr><td>S2</td><td>Certificate conflict: an attestation for a block that does not descend from a certified block at a lower height</td><td>the attestation + the certificate + a header-chain proof of non-descent</td></tr>
+<tr><td>S3</td><td>Subblock equivocation: two distinct <code>SignedSubBlock</code>s for the same height</td><td>both signed subblocks</td></tr>
+</tbody>
+</table>
+</div>
+<p>The sequencer/builder is additionally bonded (amount TBD) via the same contract. Builder equivocation — two <code>Authorized</code> flashblock payloads with the same <code>payload_id</code>/index and different content, or sealing a block that abandons a certified ancestor — is attributable via the existing flashblocks dual-signature scheme and slashes the builder bond (S4). Header-chain verification for S2/S4 uses on-chain ancestry within the last 8192 block hashes; deeper evidence falls back to a governance-adjudicated path until a fault-proof-style verifier is specified.</p>
+<h3 id="rewards"><a class="header" href="#rewards">Rewards</a></h3>
+<ul>
+<li><strong>Subblock proposers</strong> earn the priority fees of their included subblock transactions, minus a pro-rata share of the region’s L1 DA cost. The builder computes per-proposer totals during block construction and credits them in the <code>submitCertificate</code> call; attestors re-derive the amounts during block verification, so incorrect crediting is attestation-blocking (rule 2 extends to the settlement calldata).</li>
+<li><strong>Attestors</strong> accrue a per-epoch WLD reward proportional to their certified participation (sum of <code>participation</code> bits landed within <code>CERT_INCLUSION_WINDOW</code>), paid from a governance-funded rewards budget held by <code>StakeManager</code>. No new WLD is issued by the protocol.</li>
+<li>There is no inclusion reward for the certificate transaction itself; embedding it is a builder obligation.</li>
+</ul>
+<h2 id="rationale"><a class="header" href="#rationale">Rationale</a></h2>
+<p><strong>Attestation overlay instead of full BFT leader rotation.</strong> Rotating block proposal among validators (CometBFT/HotStuff-style) would replace the sequencer, requiring deep changes to op-node, rollup-boost HA, and the derivation-adjacent operational stack, and would put validator liveness on the critical path of chain liveness. The overlay achieves the two properties users actually need on the unsafe head — accountable safety and multi-party inclusion — while keeping the sequencer as sole aggregator. Because there is exactly one proposer per height, no fork-choice or view-change machinery is needed; the protocol reduces to a single-shot finality gadget per block, and the classic BFT results still apply to its safety: conflicting certificates require ≥ 1/3 equivocating stake. Leader rotation remains a natural future extension once the validator set and slashing machinery are proven.</p>
+<p><strong>Subblocks à la Tempo.</strong> Tempo’s subblock architecture demonstrated that inclusion can be sharded across validators without sharding block <em>production</em>. It fits World Chain unusually well: the builder already assembles blocks from heterogeneous regions (PBH blockspace, mempool), already streams incremental payloads every 200 ms, and — via WIP-1007 — already has a format for shipping a region’s state transition as a verifiable bundle. A subblock is, mechanically, an externally-authored flashblock-0 fragment with an FBAL attached.</p>
+<p><strong>Enforcing inclusion via attestations instead of derivation validity.</strong> Making subblock omission a <em>derivation-invalidity</em> condition would fork the OP Stack derivation pipeline and make the canonical chain depend on P2P-observable facts, which is unsound. Attestation-gating gets the product property (sustained censorship becomes publicly attributable and blocks economic finality) without touching L1 validity rules.</p>
+<p><strong>Staking on L2 rather than L1.</strong> An L2 predeploy makes the active set, certificates, rewards, and slashing readable by the nodes that need them at zero latency, and WLD is natively liquid on World Chain. The cost is that slashing guarantees are themselves only as final as the L2 chain; <code>WITHDRAWAL_DELAY</code> is therefore anchored to L1 finality of the exit block, so stake cannot escape ahead of the evidence window.</p>
+<p><strong>BLS12-381 for both duties.</strong> Attestations require aggregation (128 signatures per 2 s block otherwise); EIP-2537 precompiles make on-chain verification affordable; using one key type for subblocks and attestations keeps the registry and possession-proof story simple.</p>
+<h2 id="backwards-compatibility"><a class="header" href="#backwards-compatibility">Backwards Compatibility</a></h2>
+<ul>
+<li><strong>L1 derivation is unchanged.</strong> Blocks produced under this WIP are valid OP Stack blocks; a node ignoring the overlay follows the identical canonical chain. <code>safe</code>/<code>finalized</code> semantics are untouched.</li>
+<li><strong><code>flblk</code> bumps 2 → 3.</strong> v2 peers cannot parse the new message types and are incompatible, consistent with the v1 → v2 precedent.</li>
+<li><strong>RPC</strong> adds the <code>attested</code> tag; existing tags are unchanged.</li>
+<li><strong>PBH</strong> is unaffected: subblock quota is carved from non-PBH blockspace, and subblocks cannot claim PBH space.</li>
+<li>The <code>StakeManager</code> predeploy and certificate-settlement transaction require a hardfork activation.</li>
+</ul>
+<h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
+<ul>
+<li><strong>Scope of the guarantee.</strong> Certificates protect against <em>pre-L1</em> reorgs only. Once a block is derived from finalized L1 data, Ethereum’s guarantees dominate. The overlay’s accountable safety also assumes ≥ 2/3 of stake is honest <em>and</em> independent; stake concentration (few entities controlling quorum) reproduces single-operator trust with extra steps. <code>MAX_ACTIVE_VALIDATORS</code>, delegation policy, and stake caps are the levers; concentration metrics must be public.</li>
+<li><strong>Subjectivity of inclusion enforcement.</strong> Rule 2 of the attestation policy depends on what each validator observed. A builder can plausibly deny receipt of any single subblock, and a malicious validator can broadcast a subblock late and cry censorship. The margin parameter, per-validator omission telemetry, and quorum (no single validator’s view decides) bound both attacks; the design goal is detecting and pricing <em>sustained</em> censorship, not adjudicating individual races. This subjectivity is why omission is quorum-blocking but not directly slashable.</li>
+<li><strong>Liveness attacks on the overlay.</strong> ≥ 1/3 of stake refusing to attest halts certificates, not the chain (batcher falls back after <code>BATCHER_ATTESTATION_TIMEOUT</code>). The cost of this attack is forgone rewards; if <code>attested</code> becomes load-bearing for major applications, withholding-based griefing pricing (inactivity leaks) should be revisited.</li>
+<li><strong>DA and resource griefing via subblocks.</strong> Subblock transactions consume L1 DA paid by the protocol’s fee flow. <code>MAX_SUBBLOCK_BYTES</code>, <code>SUBBLOCK_GAS_QUOTA</code>, and the skip-invalid rule bound the damage of junk subblocks; a proposer who persistently fills subblocks with skipped or zero-fee transactions earns nothing and is visible in telemetry. Per-proposer DA-cost deduction (Rewards) makes spam self-defeating economically. A well-formed subblock with a bogus access list costs the builder one bounded, parallel verification pass off the critical path before exclusion; <code>MAX_SUBBLOCK_FBAL_BYTES</code> and per-subblock gas quotas cap that work, and repeated verification failures are attributable to the signing proposer.</li>
+<li><strong>Equivocation windows.</strong> Between a block reaching quorum and its certificate propagating, a validator could attest a competing block without yet “knowing” of the certificate. S1 (same-height equivocation) is unconditional and covers this window; S2 covers post-certificate forks. Validators MUST persist their signing history across restarts (slashing-protection database, as in Ethereum consensus clients).</li>
+<li><strong>Key management.</strong> BLS possession proofs prevent rogue-key aggregation attacks. Validator keys are hot by necessity; the registry SHOULD support a separate cold withdrawal address so key compromise caps losses at slashing, not theft of stake.</li>
+<li><strong>Builder bond and HA.</strong> In HA sequencer setups, failover between builders is already coordinated via <code>StartPublish</code>/<code>StopPublish</code>; S4 evidence must distinguish malicious equivocation from a benign failover race. The dual-signature <code>Authorized</code> envelope scopes accountability to the authorized builder for a given <code>payload_id</code>, which is the correct boundary, but the exact S4 predicate under failover needs adversarial review before it arms.</li>
+</ul>
+<h2 id="open-questions"><a class="header" href="#open-questions">Open Questions</a></h2>
+<ol>
+<li>Final economic parameters: <code>MIN_STAKE</code>, reward budget sizing, slash fractions, and whether delegation is in scope for v1.</li>
+<li>The exact settlement mechanism for routing subblock priority fees out of the sequencer fee vault, and its interaction with existing fee-vault withdrawal flows.</li>
+<li>Whether <code>attested</code> should eventually gate flashblock-level pre-confirmations (validators attesting flashblocks, not just sealed blocks) — the natural next step for 200 ms economic finality.</li>
+<li>S2/S4 evidence verification beyond the 8192-block ancestry window: governance adjudication vs. a fault-proof-style on-chain verifier.</li>
+<li>Committee sizing: whether <code>SUBBLOCK_COMMITTEE_SIZE</code> should scale with the active set, and whether committee membership should be private until the slot (to resist targeted DoS on proposers).</li>
+</ol>
+<h2 id="security-considerations-status"><a class="header" href="#security-considerations-status">Security Considerations Status</a></h2>
+<p>Needs adversarial review before leaving Draft, in particular the S4 failover predicate and the inclusion-enforcement subjectivity bounds.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../wips/wip-1007.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../wips/wip-template.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../wips/wip-1007.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../wips/wip-template.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-09f2665d.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-609e4cb8.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../specs/static/mermaid-3a6b472a.min.js"></script>
+        <script src="../specs/static/mermaid-init-025d9952.js"></script>
+        <script src="../specs/static/solidity-min-a44de257.js"></script>
+
+
+
+    </div>
+    </body>
+</html>
