@@ -929,3 +929,106 @@ The codebase provides three verification depths for different call sites:
 - `verify_pcrs_only` — just PCR matching (lightweight check)
 
 ---
+
+---
+
+## Future Improvement: KMS-Based Key Persistence
+
+> **Status: not implemented.** This section describes a planned improvement.
+
+### Problem
+
+The current ephemeral-key design requires on-chain re-registration every time the
+enclave restarts, creating a brief liveness gap. Base's RSA-sealing approach avoids
+this but couples the enclave restart to the proposer process being online to
+orchestrate the handoff.
+
+### Proposed solution: attestation-based KMS key policy
+
+AWS KMS supports **PCR-conditioned key policies**: KMS verifies the NSM attestation
+document submitted alongside an API call and only grants access if the PCR values in
+the attestation match the conditions in the key policy. This lets KMS act as a
+hardware-enforced escrow for the secp256k1 signing key.
+
+#### One-time setup
+
+Create a KMS key with PCR conditions:
+
+```json
+{
+  "Condition": {
+    "StringEqualsIgnoreCase": {
+      "kms:RecipientAttestation:PCR0": "<hex PCR0>",
+      "kms:RecipientAttestation:PCR1": "<hex PCR1>",
+      "kms:RecipientAttestation:PCR2": "<hex PCR2>"
+    }
+  }
+}
+```
+
+Only an enclave whose NSM attestation contains those exact PCR values can use this
+key — enforced by KMS, not by application code.
+
+#### First boot — sealing the signing key
+
+```
+Enclave
+  │
+  ├─ Generate secp256k1 signing key from NSM entropy (as today)
+  ├─ Register new key on-chain (once, as today)
+  │
+  ├─ Call kms:GenerateDataKey  ← NSM attestation attached automatically by AWS SDK
+  │   KMS verifies attestation + PCR conditions → returns plaintext + encrypted data key
+  │
+  ├─ Encrypt secp256k1 key bytes with plaintext data key (AES-256-GCM)
+  ├─ Wipe plaintext data key from memory
+  │
+  └─ Store { encrypted_data_key || encrypted_signing_key } to S3 / K8s Secret
+```
+
+#### Subsequent boots — unsealing the signing key
+
+```
+Enclave
+  │
+  ├─ Read { encrypted_data_key, encrypted_signing_key } from storage
+  │
+  ├─ Call kms:Decrypt(encrypted_data_key)  ← NSM attestation attached
+  │   KMS verifies attestation + PCR conditions → returns plaintext data key
+  │
+  ├─ Decrypt secp256k1 key bytes
+  └─ Same key as before → no on-chain re-registration needed
+```
+
+#### PCR upgrade flow
+
+1. Add new PCRs to the KMS key policy (both old and new approved simultaneously).
+2. Deploy new enclave — on first boot it reads the existing ciphertext; KMS now
+   accepts the new PCRs, so it can unseal → same secp256k1 key is restored.
+3. Remove old PCRs from the key policy.
+
+#### Comparison
+
+| | KMS (proposed) | Base RSA-sealing | Current (ephemeral) |
+|---|---|---|---|
+| Key survives enclave restart | ✅ | ✅ | ❌ |
+| Key survives proposer restart | ✅ | ❌ | — |
+| Trust root | AWS KMS + NSM | Proposer process | — |
+| PCR binding | KMS key policy (AWS-enforced) | PCR0 check in Go code | — |
+| Ciphertext storage | S3 / K8s Secret | Proposer RAM | — |
+| Proposer involvement on restart | None | Must orchestrate handoff | — |
+| On-chain re-registration on restart | ❌ not needed | ❌ not needed | ✅ required |
+
+#### What's already in place
+
+The vsock-proxy DaemonSet already has a forwarding rule for
+`kms.us-east-1.amazonaws.com:443` — the network path exists. What is needed to
+implement this:
+
+1. `aws-sdk-kms` (Rust) + `aws-nitro-enclaves-sdk-rust` in the enclave binary for
+   attestation-attached API calls.
+2. A KMS key with the PCR-conditioned key policy above.
+3. An IAM role for the enclave pod with `kms:GenerateDataKey` + `kms:Decrypt`
+   permissions, bound via IRSA / Pod Identity.
+4. A storage location for the ciphertext blob (S3 bucket or K8s Secret), readable
+   by the enclave at startup.
