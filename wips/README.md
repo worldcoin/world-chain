@@ -31,6 +31,8 @@ WIPs are modeled after [Ethereum Improvement Proposals (EIPs)](https://github.co
 | [1004](./wip-1004.md) | EdDSA Verification Precompile      | Draft  | Core     | 2026-05-14 |
 | [1005](./wip-1005.md) | Proof System Upgrade               | Draft  | Core     | 2026-05-20 |
 | [1006](./wip-1006.md) | Proof System Architecture          | Draft  | Core     | 2026-05-27 |
+| [1007](./wip-1007.md) | Flashblock Access Lists            | Draft  | Networking | 2026-05-29 |
+| [1008](./wip-1008.md) | Staked Subblocks and Unsafe-Head BFT | Draft | Core    | 2026-07-13 |
 
 ---
 
