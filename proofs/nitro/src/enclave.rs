@@ -238,6 +238,7 @@ async fn dispatch(request: EnclaveRequest) -> Result<EnclaveResponse> {
             handle_range(witness_rkyv, expected_public_values, nonce).await
         }
         EnclaveRequest::PublicKey { nonce } => handle_public_key(nonce),
+        EnclaveRequest::GetAttestation => handle_get_attestation(),
     }
 }
 
@@ -407,6 +408,31 @@ fn ensure_boot_info_matches(
         ));
     }
     Ok(())
+}
+
+/// Handles a [`EnclaveRequest::GetAttestation`] request.
+///
+/// Produces a bare attestation document via the NSM device. No proof is run.
+fn handle_get_attestation() -> Result<EnclaveResponse> {
+    let fd = nsm_init();
+    if fd < 0 {
+        return Err(anyhow!("nsm_init returned negative fd: {fd}"));
+    }
+
+    let request = NsmRequest::Attestation {
+        user_data: None,
+        nonce: None,
+        public_key: None,
+    };
+    let response = nsm_process_request(fd, request);
+
+    match response {
+        NsmResponse::Attestation { document } => Ok(EnclaveResponse::BareAttestation {
+            attestation_doc: document,
+        }),
+        NsmResponse::Error(err) => Err(anyhow!("nsm returned error: {err:?}")),
+        other => Err(anyhow!("unexpected nsm response: {other:?}")),
+    }
 }
 
 /// Calls the NSM device to produce an attestation document committing to `user_data`.

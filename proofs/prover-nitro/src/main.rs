@@ -26,6 +26,13 @@ enum Command {
     Witness(WitnessArgs),
     /// Generate witness and send to a running Nitro enclave for attested proving.
     Prove(NitroArgs),
+    /// Fetch a bare attestation document from a running Nitro enclave.
+    ///
+    /// This does not run any proof — it simply asks the enclave's NSM device for an
+    /// attestation document and prints the raw COSE_Sign1 bytes as hex to stdout.
+    /// Useful for CertManager pre-warm workflows. Connects to CID 16 on the default
+    /// vsock port. Pipe the output directly into hinted_attestation_calls.js.
+    GetAttestation,
 }
 
 #[derive(Debug, Args)]
@@ -36,6 +43,10 @@ struct NitroArgs {
     /// vsock CID of the running Nitro enclave.
     #[arg(long, env = "ENCLAVE_CID", default_value_t = 16)]
     cid: u32,
+
+    /// vsock port the enclave is listening on.
+    #[arg(long, env = "ENCLAVE_PORT", default_value_t = 5005)]
+    port: u32,
 
     /// PCR0 hex (48 bytes).
     #[arg(long, env = "PCR0")]
@@ -62,9 +73,38 @@ async fn main() -> Result<()> {
         Command::HashRollupConfig(args) => print_rollup_config_hash(args).await?,
         Command::Witness(args) => write_witness(args).await?,
         Command::Prove(args) => nitro_prove(args).await?,
+        Command::GetAttestation => get_attestation().await?,
     }
 
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+async fn get_attestation() -> Result<()> {
+    use world_chain_proof_nitro::{
+        ExpectedPcrs,
+        host::{EnclaveEndpoint, NitroProver},
+        protocol::DEFAULT_VSOCK_PORT,
+    };
+
+    let prover = NitroProver::new(
+        EnclaveEndpoint::with_port(16, DEFAULT_VSOCK_PORT),
+        ExpectedPcrs::PLACEHOLDER,
+    );
+
+    let attestation_doc = prover
+        .get_attestation()
+        .await
+        .map_err(|e| anyhow::anyhow!("get_attestation failed: {e}"))?;
+
+    println!("{}", hex::encode(attestation_doc));
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn get_attestation() -> Result<()> {
+    bail!("get-attestation requires Linux with AF_VSOCK support")
 }
 
 #[cfg(target_os = "linux")]
@@ -97,7 +137,10 @@ async fn nitro_prove(args: NitroArgs) -> Result<()> {
     let request = NitroRangeProofRequest::from_witness_data(&input.witness, None)
         .map_err(|e| anyhow!("failed to serialize witness: {e}"))?;
 
-    let prover = NitroProver::new(EnclaveEndpoint::new(args.cid), expected_pcrs);
+    let prover = NitroProver::new(
+        EnclaveEndpoint::with_port(args.cid, args.port),
+        expected_pcrs,
+    );
 
     println!(
         "sending range {start}..={end} to enclave (cid {cid})",
