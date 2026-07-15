@@ -173,20 +173,22 @@ once — before any `registerKey` call can succeed.
 
 ## Where KMS Fits
 
-The `vsock-proxy` DaemonSet is configured to forward vsock traffic to
-`kms.us-east-1.amazonaws.com:443`. However, the **current enclave binary does not
-call AWS KMS**. The proxy is pre-provisioned for future use cases such as:
+**Short answer: KMS is not used.** The `vsock-proxy` DaemonSet is configured to
+forward vsock traffic to `kms.us-east-1.amazonaws.com:443`, but the enclave binary
+makes no calls to KMS and never has.
 
-- **KMS-sealed secrets:** The enclave could use KMS to decrypt secrets that are only
-  accessible to an attested enclave (via KMS key policy conditions on PCR values).
-- **Key persistence across restarts:** Instead of generating a new ephemeral key on
-  every boot, the enclave could encrypt its signing key with a KMS key and store the
-  ciphertext externally, then decrypt it on next boot — giving the key a stable
-  identity while remaining protected by attestation.
+The proxy endpoint was added speculatively during the initial Kubernetes deployment
+setup, following the standard AWS Nitro Enclave pattern where KMS is commonly used
+for key sealing. The enclave code was never written to use it.
 
-Currently the enclave's ephemeral secp256k1 key is generated entirely from NSM
-entropy (`NsmRequest::GetRandom`) with no KMS involvement. The proxy is present in
-the infrastructure but the enclave makes no outbound connections to KMS.
+The enclave's ephemeral secp256k1 key is generated entirely from NSM entropy
+(`NsmRequest::GetRandom`) at startup and lives only in enclave memory. There is no
+key persistence across enclave restarts — a new key is generated every time the
+enclave boots, and that new key must be re-registered on-chain before it can be used
+to verify proofs.
+
+The `kms.us-east-1.amazonaws.com` target in the vsock-proxy config can be removed or
+repurposed if KMS access is genuinely needed in the future.
 
 ---
 ## End-to-End Proving Flow
