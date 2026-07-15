@@ -120,7 +120,7 @@ assigned CID, which `nitro-cli run-enclave` prints and the `enclave-launcher` si
 writes to a shared file.
 
 The `vsock-proxy` DaemonSet bridges vsock (CID 3) to real TCP endpoints so the enclave
-can reach AWS APIs (currently pre-configured for KMS, but unused) — see [Key Persistence and Ephemeral Keys](#key-persistence-and-ephemeral-keys) below.
+can reach AWS APIs — see [Key Persistence](#key-persistence) for context on why KMS is pre-configured but not yet used.
 
 ### NSM (Nitro Security Module)
 
@@ -190,32 +190,32 @@ once — before any `registerKey` call can succeed.
 
 ---
 
-## Key Persistence and Ephemeral Keys
+## Key Persistence
 
-### Current behaviour: ephemeral keys
+The secp256k1 signing key is the enclave's long-term identity — it is registered
+on-chain and used to sign every range proof. How this key survives (or doesn't
+survive) enclave restarts has significant operational implications.
 
-The enclave's secp256k1 signing key is generated fresh from NSM entropy
-(`NsmRequest::GetRandom`) on every enclave boot and lives only in enclave memory.
-There is **no key persistence across restarts** — when the enclave stops the key
-is gone, and the new key generated on next boot must be re-registered on-chain
-before it can be used to verify proofs.
+### Current behaviour: ephemeral, re-register on restart
 
-### Where KMS Fits
+The signing key is generated fresh from NSM entropy (`NsmRequest::GetRandom`) on
+every enclave boot and lives only in enclave memory. When the enclave stops the key
+is gone. The new key generated on next boot must be re-registered on-chain before
+it can be used to verify proofs, causing a brief liveness gap.
 
-**KMS is not used.** The `vsock-proxy` DaemonSet is configured to forward vsock
-traffic to `kms.us-east-1.amazonaws.com:443`, but the enclave binary makes no calls
-to KMS. The endpoint was added speculatively during initial deployment setup and
-the enclave code was never written to use it. It can be removed or repurposed.
+**On-chain impact:** the old key stays `Active` in `NitroEnclaveKeyRegistry` (it
+was never revoked), but it cannot sign anything — the enclave that held its private
+key no longer exists. The new key needs a fresh `registerKey` call.
 
-### How Base solves key persistence (for reference)
+### How Base solves it: RSA-sealing (for reference)
 
-Base's [`op-enclave`](https://github.com/base/op-enclave) achieves key persistence
-without KMS using a custom RSA-sealing protocol between the enclave and the proposer
-process. The enclave holds two keys at startup:
+Base's [`op-enclave`](https://github.com/base/op-enclave) avoids re-registration by
+sealing the secp256k1 signing key with RSA encryption so the proposer can hand it
+back to a restarted enclave. The enclave holds two keys at startup:
 
 - A **secp256k1 signing key** — for signing state root proposals (registered on-chain)
 - An **RSA-4096 decryption key** — generated from NSM entropy, used only as a
-  key-transport wrapper
+  one-time key-transport wrapper
 
 The persistence flow on enclave restart:
 
@@ -236,22 +236,17 @@ The persistence flow on enclave restart:
      │                                       Now has the same secp256k1 key
 ```
 
-**Where the ciphertext is stored:** in memory on the proposer process (the Go binary
-running outside the enclave). It is never written to a database or KMS — it lives in
-RAM for the lifetime of the proposer process. On proposer restart, the full handoff
-runs again.
+The ciphertext lives in RAM on the proposer process — not in a database, not in KMS.
+The proposer only hands the key to an enclave whose NSM attestation shows PCR0 matches
+the approved image. The RSA-sealing approach avoids re-registration but couples the
+restart to the proposer being online to orchestrate the handoff.
 
-**Security guarantee:** the ciphertext can only be decrypted by an enclave that
-holds the RSA private key. The proposer only encrypts to an RSA key whose NSM
-attestation shows PCR0 matches the approved image — so even if the ciphertext leaks,
-an attacker cannot recover the secp256k1 key without a genuine enclave running the
-correct EIF.
+### Proposed improvement: KMS-based persistence
 
-**Why World Chain doesn't do this yet:** the RSA-sealing protocol requires the
-proposer to orchestrate a key handoff on every enclave restart, adding operational
-complexity. The on-chain re-registration path (current behaviour) is simpler to
-reason about, at the cost of a brief liveness gap after each restart while the new
-key is registered.
+A cleaner alternative using AWS KMS attestation-based key policies is described in
+[Future Improvement: KMS-Based Key Persistence](#future-improvement-kms-based-key-persistence)
+below. That approach lets the enclave unseal its own key autonomously on restart,
+without the proposer being involved.
 
 ---
 ## End-to-End Proving Flow
