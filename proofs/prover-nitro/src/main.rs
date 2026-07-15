@@ -88,7 +88,9 @@ async fn get_attestation() -> Result<()> {
     };
 
     let cid: u32 = match std::env::var("ENCLAVE_CID") {
-        Ok(v) => v.parse().map_err(|_| anyhow::anyhow!("ENCLAVE_CID is set but not a valid u32: {v:?}"))?,
+        Ok(v) => v
+            .parse()
+            .map_err(|_| anyhow::anyhow!("ENCLAVE_CID is set but not a valid u32: {v:?}"))?,
         Err(_) => 16,
     };
 
