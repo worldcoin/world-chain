@@ -201,7 +201,9 @@ proof-rollup-config-hash env="alphanet":
             --l2-rpc "http://localhost:$LOCAL_PORT"
     fi
 
-# Phase 0b – Run a one-shot k8s Job to get a bare attestation doc from the enclave.
+# Phase 0b  – Fetch a bare attestation doc from the running Nitro enclave.
+#              Runs as an ephemeral container inside the nitro-worker pod so it
+#              shares the pod's vsock device access. Prints hex attestation to stdout.
 proof-get-attestation env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -213,87 +215,29 @@ proof-get-attestation env="alphanet":
     if [ -f "scripts/proof-envs/{{env}}.local.env" ]; then
         source scripts/proof-envs/{{env}}.local.env
     fi
-    POD_NAME="proof-attestation-$(date +%s)"
-    LOGS_PID=""
-    cleanup() {
-        [ -n "$LOGS_PID" ] && kill "$LOGS_PID" 2>/dev/null || true
-        kubectl --context="$KUBECONTEXT" delete pod "$POD_NAME" -n "$PROOF_NAMESPACE" --ignore-not-found >&2
-    }
-    trap cleanup EXIT
-    # Find the node running the enclave (vsock requires same physical host)
-    ENCLAVE_NODE=$(kubectl --context="$KUBECONTEXT" get pod \
-        -n "$PROOF_NAMESPACE" \
-        -l app="$PROOF_NAMESPACE" \
-        -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null || true)
-    if [ -z "$ENCLAVE_NODE" ]; then
-        ENCLAVE_NODE=$(kubectl --context="$KUBECONTEXT" get pod \
-            -n "$PROOF_NAMESPACE" \
-            -o jsonpath='{.items[0].spec.nodeName}' 2>/dev/null || true)
-    fi
-    if [ -z "$ENCLAVE_NODE" ]; then
-        echo "Error: could not find a running pod in $PROOF_NAMESPACE to determine enclave node" >&2
-        exit 1
-    fi
-    echo "Enclave node: $ENCLAVE_NODE" >&2
-    # Discover the actual vsock CID from the running nitro-worker pod
+    # Find the nitro-worker pod
     NITRO_POD=$(kubectl --context="$KUBECONTEXT" get pod \
         -n "$PROOF_NAMESPACE" \
         -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-    ENCLAVE_CID=16
-    if [ -n "$NITRO_POD" ]; then
-        CID_FROM_POD=$(kubectl --context="$KUBECONTEXT" exec \
-            -n "$PROOF_NAMESPACE" "$NITRO_POD" \
-            -- cat /run/nitro-shared/enclave-cid 2>/dev/null || true)
-        [ -n "$CID_FROM_POD" ] && ENCLAVE_CID="$CID_FROM_POD"
-    fi
-    echo "Enclave CID: $ENCLAVE_CID" >&2
-    echo "Spawning attestation pod $POD_NAME in namespace $PROOF_NAMESPACE (context: $KUBECONTEXT)…" >&2
-    echo "  (you can also run: kubectl --context=$KUBECONTEXT logs -f $POD_NAME -n $PROOF_NAMESPACE)" >&2
-    kubectl --context="$KUBECONTEXT" run "$POD_NAME" \
-        --namespace "$PROOF_NAMESPACE" \
-        --image "$PROOF_NITRO_IMAGE" \
-        --restart=Never \
-        --overrides="{
-          \"spec\": {
-            \"nodeName\": \"$ENCLAVE_NODE\",
-            \"tolerations\": [{\"key\": \"enclave\", \"operator\": \"Exists\", \"effect\": \"NoExecute\"}],
-            \"containers\": [{
-              \"name\": \"$POD_NAME\",
-              \"image\": \"$PROOF_NITRO_IMAGE\",
-              \"args\": [\"get-attestation\"],
-              \"env\": [{\"name\": \"ENCLAVE_CID\", \"value\": \"$ENCLAVE_CID\"}],
-              \"securityContext\": {
-                \"privileged\": true
-              },
-              \"resources\": {
-                \"requests\": {\"aws.ec2.nitro/nitro_enclaves\": \"1\"},
-                \"limits\": {\"aws.ec2.nitro/nitro_enclaves\": \"1\"}
-              }
-            }]
-          }
-        }"
-    echo "Waiting for pod $POD_NAME to complete…" >&2
-    kubectl --context="$KUBECONTEXT" wait --for=condition=Ready pod/"$POD_NAME" -n "$PROOF_NAMESPACE" --timeout=120s 2>/dev/null || true
-    # Stream logs in background so the user sees container output while waiting
-    kubectl --context="$KUBECONTEXT" logs -f "$POD_NAME" -n "$PROOF_NAMESPACE" >&2 2>/dev/null &
-    LOGS_PID=$!
-    if ! kubectl --context="$KUBECONTEXT" wait --for=jsonpath='{.status.phase}'=Succeeded pod/"$POD_NAME" -n "$PROOF_NAMESPACE" --timeout=300s; then
-        echo "=== Pod failed or timed out — dumping pod description ===" >&2
-        kubectl --context="$KUBECONTEXT" describe pod "$POD_NAME" -n "$PROOF_NAMESPACE" >&2 || true
-        # Check for known enclave compatibility issue
-        POD_LOGS=$(kubectl --context="$KUBECONTEXT" logs "$POD_NAME" -n "$PROOF_NAMESPACE" 2>/dev/null || true)
-        if echo "$POD_LOGS" | grep -qiE 'early eof|unknown request'; then
-            echo "" >&2
-            echo "Hint: 'vsock io error: early eof' means the running enclave EIF was built before" >&2
-            echo "the get-attestation protocol was added. Redeploy the nitro-worker with a fresh" >&2
-            echo "nightly image (trigger docker-proof.yml workflow or wait for the next nightly build)." >&2
-        fi
+    if [ -z "$NITRO_POD" ]; then
+        echo "Error: no running pod found in namespace $PROOF_NAMESPACE" >&2
         exit 1
     fi
-    # Kill the background log stream before capturing final output to stdout
-    kill "$LOGS_PID" 2>/dev/null || true
-    LOGS_PID=""
-    kubectl --context="$KUBECONTEXT" logs "$POD_NAME" -n "$PROOF_NAMESPACE"
+    # Read the actual vsock CID from the shared file in the pod
+    ENCLAVE_CID=$(kubectl --context="$KUBECONTEXT" exec \
+        -n "$PROOF_NAMESPACE" "$NITRO_POD" \
+        -- cat /run/nitro-shared/enclave-cid 2>/dev/null || echo "16")
+    echo "Nitro-worker pod: $NITRO_POD" >&2
+    echo "Enclave CID: $ENCLAVE_CID" >&2
+    echo "Running get-attestation as ephemeral container in pod $NITRO_POD..." >&2
+    # Run get-attestation as an ephemeral debug container inside the nitro-worker pod.
+    # This shares the pod's vsock device access, which is required to connect to the enclave.
+    ENCLAVE_CID="$ENCLAVE_CID" kubectl --context="$KUBECONTEXT" debug \
+        -n "$PROOF_NAMESPACE" \
+        "$NITRO_POD" \
+        --image="$PROOF_NITRO_IMAGE" \
+        --image-pull-policy=Always \
+        -- sh -c "ENCLAVE_CID=$ENCLAVE_CID world-chain-prover-nitro get-attestation"
 
 # Phase 1 – Deploy the Nitro attestation stack.
 proof-deploy-nitro:
