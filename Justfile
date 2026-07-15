@@ -263,9 +263,7 @@ proof-get-attestation env="alphanet":
               \"args\": [\"get-attestation\"],
               \"env\": [{\"name\": \"ENCLAVE_CID\", \"value\": \"$ENCLAVE_CID\"}],
               \"securityContext\": {
-                \"runAsUser\": 0,
-                \"runAsNonRoot\": false,
-                \"allowPrivilegeEscalation\": true
+                \"privileged\": true
               }
             }]
           }
