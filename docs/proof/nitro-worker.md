@@ -120,7 +120,7 @@ assigned CID, which `nitro-cli run-enclave` prints and the `enclave-launcher` si
 writes to a shared file.
 
 The `vsock-proxy` DaemonSet bridges vsock (CID 3) to real TCP endpoints so the enclave
-can reach AWS APIs (currently pre-configured for KMS) — see [Where KMS Fits](#where-kms-fits) below.
+can reach AWS APIs (currently pre-configured for KMS, but unused) — see [Key Persistence and Ephemeral Keys](#key-persistence-and-ephemeral-keys) below.
 
 ### NSM (Nitro Security Module)
 
@@ -190,24 +190,68 @@ once — before any `registerKey` call can succeed.
 
 ---
 
-## Where KMS Fits
+## Key Persistence and Ephemeral Keys
 
-**Short answer: KMS is not used.** The `vsock-proxy` DaemonSet is configured to
-forward vsock traffic to `kms.us-east-1.amazonaws.com:443`, but the enclave binary
-makes no calls to KMS and never has.
+### Current behaviour: ephemeral keys
 
-The proxy endpoint was added speculatively during the initial Kubernetes deployment
-setup, following the standard AWS Nitro Enclave pattern where KMS is commonly used
-for key sealing. The enclave code was never written to use it.
+The enclave's secp256k1 signing key is generated fresh from NSM entropy
+(`NsmRequest::GetRandom`) on every enclave boot and lives only in enclave memory.
+There is **no key persistence across restarts** — when the enclave stops the key
+is gone, and the new key generated on next boot must be re-registered on-chain
+before it can be used to verify proofs.
 
-The enclave's ephemeral secp256k1 key is generated entirely from NSM entropy
-(`NsmRequest::GetRandom`) at startup and lives only in enclave memory. There is no
-key persistence across enclave restarts — a new key is generated every time the
-enclave boots, and that new key must be re-registered on-chain before it can be used
-to verify proofs.
+### Where KMS Fits
 
-The `kms.us-east-1.amazonaws.com` target in the vsock-proxy config can be removed or
-repurposed if KMS access is genuinely needed in the future.
+**KMS is not used.** The `vsock-proxy` DaemonSet is configured to forward vsock
+traffic to `kms.us-east-1.amazonaws.com:443`, but the enclave binary makes no calls
+to KMS. The endpoint was added speculatively during initial deployment setup and
+the enclave code was never written to use it. It can be removed or repurposed.
+
+### How Base solves key persistence (for reference)
+
+Base's [`op-enclave`](https://github.com/base/op-enclave) achieves key persistence
+without KMS using a custom RSA-sealing protocol between the enclave and the proposer
+process. The enclave holds two keys at startup:
+
+- A **secp256k1 signing key** — for signing state root proposals (registered on-chain)
+- An **RSA-4096 decryption key** — generated from NSM entropy, used only as a
+  key-transport wrapper
+
+The persistence flow on enclave restart:
+
+```
+  Proposer                      New enclave (just started)
+     │                                  │
+     │─ DecryptionAttestation() ───────►│  NSM signs attestation with
+     │◄─ COSE_Sign1 doc ───────────────-│  new RSA public key in public_key field
+     │
+     │─ EncryptedSignerKey(attestation) ─► Old enclave (still running)
+     │                                       1. Verifies attestation (PCR0 check)
+     │                                       2. Extracts RSA pubkey from doc
+     │                                       3. Encrypts secp256k1 key bytes with it
+     │◄─ RSA-encrypted ciphertext ──────────
+     │
+     │─ SetSignerKey(ciphertext) ────────► New enclave
+     │                                       Decrypts with its RSA private key
+     │                                       Now has the same secp256k1 key
+```
+
+**Where the ciphertext is stored:** in memory on the proposer process (the Go binary
+running outside the enclave). It is never written to a database or KMS — it lives in
+RAM for the lifetime of the proposer process. On proposer restart, the full handoff
+runs again.
+
+**Security guarantee:** the ciphertext can only be decrypted by an enclave that
+holds the RSA private key. The proposer only encrypts to an RSA key whose NSM
+attestation shows PCR0 matches the approved image — so even if the ciphertext leaks,
+an attacker cannot recover the secp256k1 key without a genuine enclave running the
+correct EIF.
+
+**Why World Chain doesn't do this yet:** the RSA-sealing protocol requires the
+proposer to orchestrate a key handoff on every enclave restart, adding operational
+complexity. The on-chain re-registration path (current behaviour) is simpler to
+reason about, at the cost of a brief liveness gap after each restart while the new
+key is registered.
 
 ---
 ## End-to-End Proving Flow
@@ -847,15 +891,18 @@ launcher extracts the CID after enclave start using `nitro-cli describe-enclaves
 writes it to `/run/nitro-shared/enclave-cid` (a shared `emptyDir` volume). The main
 `nitro-worker` container polls this file at startup before connecting over vsock.
 
-### Q: Why does the `vsock-proxy` sidecar exist if the enclave has no network?
+### Q: Why does the `vsock-proxy` DaemonSet exist if the enclave has no network?
 
 **A:** That's exactly why it exists. AWS Nitro Enclaves are fully network-isolated —
 no inbound or outbound TCP/IP connections. The only channel out is vsock. The
-`vsock-proxy` sidecar runs on the parent EC2 instance and acts as a **vsock-to-TCP
-bridge**: the enclave connects to it via vsock (CID 3, the well-known parent CID), and
-the proxy forwards those connections to specific AWS API endpoints (in this case,
-`kms.us-east-1.amazonaws.com:443`). This is how the enclave can reach AWS KMS for any
-key operations while remaining isolated from direct internet access.
+`vsock-proxy` runs on the parent EC2 instance and acts as a **vsock-to-TCP bridge**:
+the enclave connects to it via vsock (CID 3, the well-known parent CID), and the proxy
+forwards those connections to specific AWS API endpoints.
+
+Currently the proxy is configured to forward to `kms.us-east-1.amazonaws.com:443` but
+the enclave binary never calls KMS — the endpoint was added speculatively during
+initial setup. The proxy is the right place to add such forwarding if the enclave ever
+needs outbound AWS access (e.g. for a future key-persistence implementation).
 
 ---
 
