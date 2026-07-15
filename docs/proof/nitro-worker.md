@@ -791,14 +791,6 @@ attestation and checks them against this set.
 This allows zero-downtime upgrades with a window where both old and new enclave
 images are active.
 
-### Q: Why was `getKeyByPCRs` removed from `NitroEnclaveKeyRegistry`?
-
-**A:** A 1:1 mapping from PCR triple to key is incorrect because **multiple enclave
-instances can run the same EIF simultaneously**. Each instance generates its own
-independent ephemeral keypair at startup. The registry deliberately has no
-`PCRs → key` lookup — each key is indexed only by its own `keccak256(publicKey)` hash.
-The authoritative off-chain index from PCRs to keys is the `KeyRegistered` event log.
-
 ### Q: Does `NitroAttestationVerifier` need PCRs in its constructor?
 
 **A:** No. PCR management is fully dynamic — PCR sets are added and removed at runtime
