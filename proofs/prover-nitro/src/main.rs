@@ -87,8 +87,13 @@ async fn get_attestation() -> Result<()> {
         protocol::DEFAULT_VSOCK_PORT,
     };
 
+    let cid: u32 = std::env::var("ENCLAVE_CID")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(16);
+
     let prover = NitroProver::new(
-        EnclaveEndpoint::with_port(16, DEFAULT_VSOCK_PORT),
+        EnclaveEndpoint::with_port(cid, DEFAULT_VSOCK_PORT),
         ExpectedPcrs::PLACEHOLDER,
     );
 
