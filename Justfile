@@ -264,6 +264,10 @@ proof-get-attestation env="alphanet":
               \"env\": [{\"name\": \"ENCLAVE_CID\", \"value\": \"$ENCLAVE_CID\"}],
               \"securityContext\": {
                 \"privileged\": true
+              },
+              \"resources\": {
+                \"requests\": {\"aws.ec2.nitro/nitro_enclaves\": \"1\"},
+                \"limits\": {\"aws.ec2.nitro/nitro_enclaves\": \"1\"}
               }
             }]
           }
