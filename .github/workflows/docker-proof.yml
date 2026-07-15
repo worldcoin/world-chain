@@ -45,8 +45,23 @@ permissions:
   id-token: write
 
 jobs:
+  resolve-sha:
+    name: resolve build SHA
+    runs-on: ubuntu-latest
+    outputs:
+      short: ${{ steps.sha.outputs.short }}
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Get short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
   build-sp1-prover-image:
     name: build world-chain-prover-sp1 image
+    needs: [resolve-sha]
     environment: dev
     strategy:
       fail-fast: false
@@ -79,6 +94,7 @@ jobs:
 
   build-nitro-prover-image:
     name: build world-chain-prover-nitro image
+    needs: [resolve-sha]
     environment: dev
     strategy:
       fail-fast: false
@@ -117,7 +133,7 @@ jobs:
   # running right after its own builds.
   merge-sp1-prover-image:
     name: merge world-chain-prover-sp1 image manifest
-    needs: [build-sp1-prover-image]
+    needs: [resolve-sha, build-sp1-prover-image]
     runs-on: ubuntu-latest
     steps:
       - name: Check Out Repo
@@ -132,11 +148,11 @@ jobs:
           digest_artifact_prefix: digests-prover-sp1
           tags: |
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
-            type=sha
+            type=raw,value=sha-${{ needs.resolve-sha.outputs.short }}
 
   merge-nitro-prover-image:
     name: merge world-chain-prover-nitro image manifest
-    needs: [build-nitro-prover-image]
+    needs: [resolve-sha, build-nitro-prover-image]
     runs-on: ubuntu-latest
     steps:
       - name: Check Out Repo
@@ -151,13 +167,14 @@ jobs:
           digest_artifact_prefix: digests-prover-nitro
           tags: |
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
-            type=sha
+            type=raw,value=sha-${{ needs.resolve-sha.outputs.short }}
 
   # Service deployable images, built from the same Dockerfile.proof via
   # PROVER_PACKAGE/PROVER_BIN/FEATURES build-args. Each pushes to its own
   # `<repo>-<service>` image so tags do not collide with the `proof` image.
   build-service-images:
     name: build ${{ matrix.service.bin }} image
+    needs: [resolve-sha]
     environment: dev
     strategy:
       fail-fast: false
@@ -193,7 +210,7 @@ jobs:
 
   merge-service-images:
     name: merge ${{ matrix.service.bin }} image manifest
-    needs: [build-service-images]
+    needs: [resolve-sha, build-service-images]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -217,12 +234,13 @@ jobs:
           digest_artifact_prefix: ${{ matrix.service.prefix }}
           tags: |
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
-            type=sha
+            type=raw,value=sha-${{ needs.resolve-sha.outputs.short }}
 
   # nitro-worker is Linux x86_64 only (requires AF_VSOCK), so it cannot be
   # built in the multi-arch service matrix above.
   build-nitro-worker-image:
     name: build nitro-worker image
+    needs: [resolve-sha]
     environment: dev
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
@@ -246,7 +264,7 @@ jobs:
 
   merge-nitro-worker-image:
     name: merge nitro-worker image manifest
-    needs: [build-nitro-worker-image]
+    needs: [resolve-sha, build-nitro-worker-image]
     runs-on: ubuntu-latest
     steps:
       - name: Check Out Repo
@@ -262,12 +280,13 @@ jobs:
           digest_artifact_pattern: digests-nitro-worker-linux-*
           tags: |
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
-            type=sha
+            type=raw,value=sha-${{ needs.resolve-sha.outputs.short }}
 
   # nitro-worker-enclave uses its own Dockerfile (proofs/nitro/Dockerfile) and
   # is x86_64 only (Nitro Enclaves are x86_64).
   build-nitro-worker-enclave-image:
     name: build nitro-worker-enclave image
+    needs: [resolve-sha]
     environment: dev
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
@@ -288,7 +307,7 @@ jobs:
 
   merge-nitro-worker-enclave-image:
     name: merge nitro-worker-enclave image manifest
-    needs: [build-nitro-worker-enclave-image]
+    needs: [resolve-sha, build-nitro-worker-enclave-image]
     runs-on: ubuntu-latest
     steps:
       - name: Check Out Repo
@@ -303,14 +322,14 @@ jobs:
           digest_artifact_prefix: digests-nitro-worker-enclave
           tags: |
             type=raw,value=${{ inputs.image_tag || 'nightly' }}
-            type=sha
+            type=raw,value=sha-${{ needs.resolve-sha.outputs.short }}
 
   # Build the Nitro Enclave Image Format (EIF) file from the enclave Docker image,
   # then package it into a minimal OCI carrier image pushed to GHCR so Kubernetes
   # pods can pull it via an init container (AWS Nitro Enclaves K8s device plugin pattern).
   build-nitro-worker-enclave-eif-image:
     name: build nitro-worker-enclave EIF carrier image
-    needs: [build-nitro-worker-enclave-image]
+    needs: [resolve-sha, build-nitro-worker-enclave-image]
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
       - name: Check Out Repo
@@ -329,9 +348,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Get short SHA
-        id: short-sha
-        run: echo "value=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
       - name: Build and push EIF carrier image
         uses: docker/build-push-action@v6
         with:
@@ -341,11 +357,13 @@ jobs:
           platforms: linux/amd64
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository }}-nitro-worker-enclave-eif:${{ inputs.image_tag || 'nightly' }}
-            ${{ env.REGISTRY }}/${{ github.repository }}-nitro-worker-enclave-eif:sha-${{ steps.short-sha.outputs.value }}
+            ${{ env.REGISTRY }}/${{ github.repository }}-nitro-worker-enclave-eif:sha-${{ needs.resolve-sha.outputs.short }}
+
   summary:
     name: Image tags summary
     if: always()
     needs:
+      - resolve-sha
       - merge-sp1-prover-image
       - merge-nitro-prover-image
       - merge-nitro-worker-image
@@ -355,23 +373,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Write summary
+        env:
+          TAG:                 ${{ inputs.image_tag || 'nightly' }}
+          SHORT:               ${{ needs.resolve-sha.outputs.short }}
+          SP1_PROVER_RESULT:   ${{ needs.merge-sp1-prover-image.result }}
+          NITRO_PROVER_RESULT: ${{ needs.merge-nitro-prover-image.result }}
+          NITRO_WORKER_RESULT: ${{ needs.merge-nitro-worker-image.result }}
+          ENCLAVE_RESULT:      ${{ needs.merge-nitro-worker-enclave-image.result }}
+          EIF_RESULT:          ${{ needs.build-nitro-worker-enclave-eif-image.result }}
+          SERVICES_RESULT:     ${{ needs.merge-service-images.result }}
         run: |
-          TAG="${{ inputs.image_tag || 'nightly' }}"
-          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           REPO="ghcr.io/${{ github.repository }}"
+          status() { [ "$1" = "success" ] && echo "✅" || echo "❌ ($1)"; }
           {
-            echo "## 🐳 Images built"
+            echo "## 🐳 Image build results"
             echo ""
-            echo "| Image | Tags |"
-            echo "|-------|------|"
-            echo "| \`$REPO-proof-sp1\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-proof-nitro\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-nitro-worker\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-nitro-worker-enclave\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-nitro-worker-enclave-eif\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-sp1-worker\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-proposer\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-challenger\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-defender\` | \`${TAG}\`, \`sha-${SHA}\` |"
-            echo "| \`$REPO-prover-service\` | \`${TAG}\`, \`sha-${SHA}\` |"
+            echo "| Image | Tags | Status |"
+            echo "|-------|------|--------|"
+            echo "| \`$REPO-proof-sp1\` | \`$TAG\` \`sha-$SHORT\` | $(status $SP1_PROVER_RESULT) |"
+            echo "| \`$REPO-proof-nitro\` | \`$TAG\` \`sha-$SHORT\` | $(status $NITRO_PROVER_RESULT) |"
+            echo "| \`$REPO-nitro-worker\` | \`$TAG\` \`sha-$SHORT\` | $(status $NITRO_WORKER_RESULT) |"
+            echo "| \`$REPO-nitro-worker-enclave\` | \`$TAG\` \`sha-$SHORT\` | $(status $ENCLAVE_RESULT) |"
+            echo "| \`$REPO-nitro-worker-enclave-eif\` | \`$TAG\` \`sha-$SHORT\` | $(status $EIF_RESULT) |"
+            echo "| \`$REPO-sp1-worker\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
+            echo "| \`$REPO-proposer\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
+            echo "| \`$REPO-challenger\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
+            echo "| \`$REPO-defender\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
+            echo "| \`$REPO-prover-service\` | \`$TAG\` \`sha-$SHORT\` | $(status $SERVICES_RESULT) |"
           } >> "$GITHUB_STEP_SUMMARY"
