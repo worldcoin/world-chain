@@ -87,10 +87,10 @@ async fn get_attestation() -> Result<()> {
         protocol::DEFAULT_VSOCK_PORT,
     };
 
-    let cid: u32 = std::env::var("ENCLAVE_CID")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(16);
+    let cid: u32 = match std::env::var("ENCLAVE_CID") {
+        Ok(v) => v.parse().map_err(|_| anyhow::anyhow!("ENCLAVE_CID is set but not a valid u32: {v:?}"))?,
+        Err(_) => 16,
+    };
 
     let prover = NitroProver::new(
         EnclaveEndpoint::with_port(cid, DEFAULT_VSOCK_PORT),
