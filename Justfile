@@ -375,16 +375,62 @@ proof-certmanager-prewarm env="alphanet":
     echo "Generating calldata…"
     CALLDATA_JSON=$(node pkg/contracts/lib/nitro-validator/tools/hinted_attestation_calls.js prepare \
         --attestation "$ATTESTATION_HEX" --cert-manager "$CERT_MANAGER_ADDRESS")
-    COLD_ENTRIES=$(echo "$CALLDATA_JSON" | jq -r '.cold[].calldata')
-    if [ -z "$COLD_ENTRIES" ]; then
+    # Read full JSON objects so we can access certHash alongside calldata.
+    # The cold array contains cert-caching entries (cache_ca / cache_leaf) plus a
+    # final validate_attestation entry; we only prewarm the cert entries here.
+    mapfile -t COLD_OBJECTS < <(echo "$CALLDATA_JSON" | jq -c '.cold[] | select(.certHash != null)')
+    if [ "${#COLD_OBJECTS[@]}" -eq 0 ]; then
         echo "Error: no cold cert entries found — attestation may be invalid" >&2
         exit 1
     fi
-    COUNT=$(echo "$COLD_ENTRIES" | wc -l)
-    echo "Submitting $COUNT cold cert entries…"
+    TOTAL="${#COLD_OBJECTS[@]}"
+    echo "Checking $TOTAL cold cert entries against on-chain cache…"
+    # First pass: skip already-cached certs, collect pending calldata for gas estimation.
+    PENDING_CALLDATA=()
+    PENDING_LABELS=()
+    SKIPPED=0
+    for entry in "${COLD_OBJECTS[@]}"; do
+        CERT_HASH=$(echo "$entry" | jq -r '.certHash')
+        CALLDATA=$(echo "$entry" | jq -r '.calldata')
+        LABEL=$(echo "$entry" | jq -r '.label // .kind')
+        # CertManager stores verified certs in the public `verified(bytes32)` mapping.
+        # An empty-bytes return ("0x") means the cert is not yet cached on-chain.
+        CACHED=$(cast call "$CERT_MANAGER_ADDRESS" "verified(bytes32)(bytes)" "$CERT_HASH" \
+            --rpc-url "$L1_RPC_URL" 2>/dev/null || echo "0x")
+        if [ "$CACHED" != "0x" ]; then
+            echo "  Skipping [$LABEL] — already cached (hash ${CERT_HASH:0:14}…)"
+            SKIPPED=$((SKIPPED + 1))
+            continue
+        fi
+        PENDING_CALLDATA+=("$CALLDATA")
+        PENDING_LABELS+=("$LABEL")
+    done
+    PENDING_COUNT="${#PENDING_CALLDATA[@]}"
+    if [ "$PENDING_COUNT" -eq 0 ]; then
+        echo "All $TOTAL certs already cached — nothing to submit."
+        exit 0
+    fi
+    echo "$SKIPPED of $TOTAL certs already cached; $PENDING_COUNT to submit."
+    echo ""
+    # Pre-flight gas estimate: sum individual estimates, then price in ETH.
+    echo "Estimating gas…"
+    TOTAL_GAS=0
+    for calldata in "${PENDING_CALLDATA[@]}"; do
+        GAS=$(cast estimate "$CERT_MANAGER_ADDRESS" "$calldata" --rpc-url "$L1_RPC_URL" 2>/dev/null || echo 0)
+        TOTAL_GAS=$((TOTAL_GAS + GAS))
+    done
+    GAS_PRICE=$(cast gas-price --rpc-url "$L1_RPC_URL")
+    TOTAL_WEI=$(echo "$TOTAL_GAS * $GAS_PRICE" | bc)
+    TOTAL_ETH=$(cast to-unit "$TOTAL_WEI" ether)
+    echo "Estimated cost: ${TOTAL_ETH} ETH (${TOTAL_GAS} gas @ ${GAS_PRICE} wei/gas) for ${PENDING_COUNT} txs"
+    echo ""
+    # Submit pending (non-cached) cert entries.
+    echo "Submitting $PENDING_COUNT cold cert entries…"
     FAILED=0
-    while IFS= read -r calldata; do
-        echo "  Sending tx with calldata ${calldata:0:20}…"
+    for i in "${!PENDING_CALLDATA[@]}"; do
+        calldata="${PENDING_CALLDATA[$i]}"
+        label="${PENDING_LABELS[$i]}"
+        echo "  Sending tx $((i + 1))/$PENDING_COUNT [$label] (calldata ${calldata:0:20}…)"
         if ! cast send "$CERT_MANAGER_ADDRESS" \
             "$calldata" \
             --rpc-url "$L1_RPC_URL" \
@@ -392,12 +438,12 @@ proof-certmanager-prewarm env="alphanet":
             echo "  Error: cast send failed for calldata ${calldata:0:20}" >&2
             FAILED=$((FAILED + 1))
         fi
-    done <<< "$COLD_ENTRIES"
+    done
     if [ "$FAILED" -gt 0 ]; then
-        echo "Error: $FAILED of $COUNT cold cert submissions failed" >&2
+        echo "Error: $FAILED of $PENDING_COUNT cold cert submissions failed" >&2
         exit 1
     fi
-    echo "CertManager pre-warm complete ($COUNT entries submitted)."
+    echo "CertManager pre-warm complete ($PENDING_COUNT submitted, $SKIPPED already cached)."
 
 # Phase 3b – Approve the PCR set on NitroAttestationVerifier.
 proof-approve-pcrs:
