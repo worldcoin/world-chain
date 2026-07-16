@@ -401,7 +401,7 @@ proof-approve-pcrs:
     : "${PCR0:?PCR0 is required (48-byte hex)}"
     : "${PCR1:?PCR1 is required (48-byte hex)}"
     : "${PCR2:?PCR2 is required (48-byte hex)}"
-    echo "Approving PCR set on $NITRO_ATTESTATION_VERIFIER…"
+    echo "Approving PCR set on ${NITRO_ATTESTATION_VERIFIER}…"
     # PCR values must be 0x-prefixed hex so cast keccak hashes the raw bytes
     [[ "$PCR0" == 0x* ]] || PCR0="0x$PCR0"
     [[ "$PCR1" == 0x* ]] || PCR1="0x$PCR1"
