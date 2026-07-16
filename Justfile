@@ -138,7 +138,9 @@ install *args='':
 # Required env vars (varies by target):
 #   PRIVATE_KEY, OWNER, OWNER_KEY, L1_RPC_URL,
 #   WORLD_CHAIN_L2_CHAIN_ID, ROLLUP_CONFIG_HASH,
-#   CERT_MANAGER_ADDRESS, NITRO_ATTESTATION_VERIFIER,
+#   CERT_MANAGER_ADDRESS, NITRO_ATTESTATION_VERIFIER
+#
+# Optional env vars (auto-fetched from enclave if not set):
 #   PCR0, PCR1, PCR2
 #
 # Optional (proof-rollup-config-hash — one of these, in priority order):
@@ -368,8 +370,8 @@ proof-approve-pcrs:
     echo "PCR set approved."
 
 # Combined – Run all proof system deployment phases in sequence.
-# Automatically wires contract addresses between steps. PCR0/1/2 must be
-# provided upfront (they identify the enclave image to approve).
+# Automatically wires contract addresses between steps. PCR0/1/2 are
+# auto-fetched from the running enclave if not pre-set.
 proof-setup env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -377,10 +379,6 @@ proof-setup env="alphanet":
         echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
         exit 1
     fi
-    : "${PCR0:?PCR0 is required (48-byte hex)}"
-    : "${PCR1:?PCR1 is required (48-byte hex)}"
-    : "${PCR2:?PCR2 is required (48-byte hex)}"
-
     echo "=== Step 0: Computing rollup config hash ===" >&2
     ROLLUP_CONFIG_HASH=$(just proof-rollup-config-hash {{env}})
     export ROLLUP_CONFIG_HASH
@@ -401,6 +399,11 @@ proof-setup env="alphanet":
 
     echo "=== Step 3a: Pre-warming CertManager ===" >&2
     just proof-certmanager-prewarm {{env}}
+
+    if [ -z "${PCR0:-}" ] || [ -z "${PCR1:-}" ] || [ -z "${PCR2:-}" ]; then
+        echo "=== Step 3b-pre: Fetching PCRs from running enclave ===" >&2
+        eval $(just proof-get-pcrs {{env}})
+    fi
 
     echo "=== Step 3b: Approving PCR set ===" >&2
     just proof-approve-pcrs
