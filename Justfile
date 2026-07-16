@@ -373,7 +373,8 @@ proof-certmanager-prewarm env="alphanet":
     echo "Fetching attestation from enclave…"
     ATTESTATION_HEX=$(just proof-get-attestation {{env}})
     echo "Generating pre-warm plan…"
-    PREWARM_PLAN=$(mktemp --suffix=.json)
+    PREWARM_PLAN="/tmp/prewarm-plan-$$.json"
+    trap 'rm -f "$PREWARM_PLAN"' EXIT
     node pkg/contracts/lib/nitro-validator/tools/hinted_attestation_calls.js prepare \
         --attestation "$ATTESTATION_HEX" --cert-manager "$CERT_MANAGER_ADDRESS" \
         > "$PREWARM_PLAN"
@@ -382,7 +383,6 @@ proof-certmanager-prewarm env="alphanet":
     cd pkg/contracts && CERT_MANAGER_ADDRESS="$CERT_MANAGER_ADDRESS" PREWARM_PLAN="$PREWARM_PLAN" \
         forge script scripts/devnet/PrewarmCertManager.s.sol:PrewarmCertManager \
             --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast --slow
-    rm -f "$PREWARM_PLAN"
 
 # Phase 3b – Approve the PCR set on NitroAttestationVerifier.
 proof-approve-pcrs:
