@@ -21,6 +21,8 @@ jobs:
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
       - uses: actions/checkout@v6
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
       - uses: taiki-e/install-action@just
       - uses: arduino/setup-protoc@v3
         with:
@@ -96,6 +98,8 @@ jobs:
     name: docs
     steps:
       - uses: actions/checkout@v6
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
       - uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
