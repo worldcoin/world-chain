@@ -1,8 +1,7 @@
 mod cmd;
 
 use clap::{Parser, Subcommand};
-use cmd::get_attestation::GetAttestationArgs;
-use cmd::run::WorkerArgs;
+use cmd::{get_attestation::GetAttestationArgs, run::WorkerArgs};
 
 #[derive(Parser)]
 #[command(name = "nitro-worker", about = "World Chain Nitro TEE proving worker")]
@@ -14,7 +13,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Start the proving worker.
-    Run(WorkerArgs),
+    Run(Box<WorkerArgs>),
     /// Fetch a bare attestation document from the running enclave and print hex to stdout.
     GetAttestation(GetAttestationArgs),
 }
@@ -34,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     match Cli::parse().command {
-        Command::Run(args) => cmd::run::run(args).await?,
+        Command::Run(args) => cmd::run::run(*args).await?,
         Command::GetAttestation(args) => cmd::get_attestation::get_attestation(args).await?,
     }
     Ok(())

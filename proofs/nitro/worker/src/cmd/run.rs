@@ -46,8 +46,6 @@ impl Network {
     }
 }
 
-use crate::cmd::common::CommonArgs;
-
 #[derive(Debug, Parser)]
 #[command(
     about = "World Chain Nitro TEE proving worker: leases jobs from the prover-service, \
