@@ -222,12 +222,25 @@ proof-get-attestation env="alphanet":
         echo "Error: no running pod found in namespace $PROOF_NAMESPACE" >&2
         exit 1
     fi
+    # Get the name of the main (non-init) container — first container in the pod spec
+    CONTAINER=$(kubectl --context="$KUBECONTEXT" get pod "$NITRO_POD" \
+        -n "$PROOF_NAMESPACE" \
+        -o jsonpath='{.spec.containers[0].name}')
+    # Check it is actually Running
+    CONTAINER_STATE=$(kubectl --context="$KUBECONTEXT" get pod "$NITRO_POD" \
+        -n "$PROOF_NAMESPACE" \
+        -o jsonpath="{.status.containerStatuses[?(@.name==\"$CONTAINER\")].state.running}")
+    if [ -z "$CONTAINER_STATE" ]; then
+        echo "Error: container '$CONTAINER' in pod '$NITRO_POD' is not in Running state" >&2
+        kubectl --context="$KUBECONTEXT" get pod "$NITRO_POD" -n "$PROOF_NAMESPACE" >&2
+        exit 1
+    fi
     ENCLAVE_CID=$(kubectl --context="$KUBECONTEXT" exec \
-        -n "$PROOF_NAMESPACE" "$NITRO_POD" \
+        -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" \
         -- cat /run/nitro-shared/enclave-cid 2>/dev/null || echo "16")
-    echo "Pod: $NITRO_POD  CID: $ENCLAVE_CID" >&2
+    echo "Pod: $NITRO_POD  Container: $CONTAINER  CID: $ENCLAVE_CID" >&2
     kubectl --context="$KUBECONTEXT" exec \
-        -n "$PROOF_NAMESPACE" "$NITRO_POD" \
+        -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" \
         -- sh -c "ENCLAVE_CID=$ENCLAVE_CID nitro-worker get-attestation"
 
 # Phase 1 – Deploy the Nitro attestation stack.
