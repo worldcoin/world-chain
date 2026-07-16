@@ -1,8 +1,12 @@
+#[cfg(target_os = "linux")]
 mod cmd;
 
+#[cfg(target_os = "linux")]
 use clap::{Parser, Subcommand};
+#[cfg(target_os = "linux")]
 use cmd::{get_attestation::GetAttestationArgs, run::WorkerArgs};
 
+#[cfg(target_os = "linux")]
 #[derive(Parser)]
 #[command(name = "nitro-worker", about = "World Chain Nitro TEE proving worker")]
 struct Cli {
@@ -10,6 +14,7 @@ struct Cli {
     command: Command,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Subcommand)]
 enum Command {
     /// Start the proving worker.
