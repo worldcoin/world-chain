@@ -31,7 +31,7 @@ test-verbose *args='':
     RUST_LOG="info,flashblocks=trace,world_chain=trace,bal_executor=trace,payload_builder=trace,engine::tree=trace" cargo nextest run --workspace $@
 
 clippy:
-    cargo clippy --workspace --all-targets --all-features
+    cargo +nightly-2026-07-01 clippy --workspace --all-targets --all-features
 
 fmt: fmt-fix fmt-check contracts-fmt
 
@@ -39,10 +39,10 @@ contracts-fmt:
     @just ./pkg/contracts/fmt
 
 fmt-fix:
-    cargo fmt --all
+    cargo +nightly-2026-07-01 fmt --all
 
 fmt-check:
-    cargo fmt --all -- --check
+    cargo +nightly-2026-07-01 fmt --all -- --check
 
 # Launch a local playground (in-process node swarm)
 playground *args='':
