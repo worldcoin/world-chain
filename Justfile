@@ -386,7 +386,7 @@ proof-certmanager-prewarm env="alphanet":
     while IFS= read -r calldata; do
         echo "  Sending tx with calldata ${calldata:0:20}…"
         if ! cast send "$CERT_MANAGER_ADDRESS" \
-            --data "$calldata" \
+            "$calldata" \
             --rpc-url "$L1_RPC_URL" \
             --private-key "$PRIVATE_KEY"; then
             echo "  Error: cast send failed for calldata ${calldata:0:20}" >&2
