@@ -64,7 +64,11 @@ inherits = "dev"
 inherits = "dev"
 
 
-[workspace.lints]
+[workspace.lints.rust]
+# eyre 0.6's `bail!` macro ends with a trailing semicolon, which nightly Rust
+# now warns about when the macro is used in expression position (match arms, etc.).
+# This is a known upstream issue; suppress until eyre is updated or we migrate.
+semicolon_in_expressions_from_macros = "allow"
 
 
 [workspace.dependencies]
