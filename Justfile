@@ -127,6 +127,7 @@ install *args='':
 #
 # Workflow phases:
 #   Phase 0a  proof-rollup-config-hash   – Compute rollup config hash
+#   Phase 0a  proof-get-chain-id          – Print the L2 chain ID from the op-node
 #   Phase 0b  proof-get-attestation       – Fetch bare attestation doc from enclave
 #   Phase 0b  proof-get-pcrs              – Print PCR0/PCR1/PCR2 from the EIF on the enclave-launcher container
 #   Phase 1   proof-deploy-nitro          – Deploy Nitro attestation contracts
@@ -203,6 +204,56 @@ proof-rollup-config-hash env="alphanet":
         cargo run -p world-chain-prover-sp1 -- hash-rollup-config \
             --l2-rpc "http://localhost:$LOCAL_PORT"
     fi
+
+# Phase 0a (alt) – Print the L2 chain ID from the op-node rollup config.
+#                   Uses the same port-forward pattern as proof-rollup-config-hash.
+#                   If L2_CHAIN_ID is already set, prints it directly.
+#                   Output: bare integer, e.g. 480
+proof-get-chain-id env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f "scripts/proof-envs/{{env}}.env" ]; then
+        echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
+        exit 1
+    fi
+    source scripts/proof-envs/{{env}}.env
+    if [ -f "scripts/proof-envs/{{env}}.local.env" ]; then
+        source scripts/proof-envs/{{env}}.local.env
+    fi
+    if [ -n "${L2_CHAIN_ID:-}" ]; then
+        echo "$L2_CHAIN_ID"
+        exit 0
+    fi
+    if [ -n "${L2_RPC_URL:-}" ]; then
+        RPC_URL="$L2_RPC_URL"
+    else
+        LOCAL_PORT=19546
+        echo "Port-forwarding to $OP_NODE_POD in $OP_NODE_NAMESPACE (context: $KUBECONTEXT)…" >&2
+        kubectl --context="$KUBECONTEXT" port-forward \
+            -n "$OP_NODE_NAMESPACE" \
+            "pod/$OP_NODE_POD" "${LOCAL_PORT}:${OP_NODE_PORT}" &
+        PF_PID=$!
+        trap 'kill $PF_PID 2>/dev/null || true' EXIT
+        READY=false
+        for i in $(seq 1 10); do
+            if nc -z localhost "$LOCAL_PORT" 2>/dev/null; then
+                READY=true
+                break
+            fi
+            if ! kill -0 "$PF_PID" 2>/dev/null; then
+                echo "Error: kubectl port-forward exited unexpectedly" >&2
+                exit 1
+            fi
+            sleep 1
+        done
+        if [ "$READY" != true ]; then
+            echo "Error: port-forward to localhost:$LOCAL_PORT not ready after 10s" >&2
+            exit 1
+        fi
+        RPC_URL="http://localhost:$LOCAL_PORT"
+    fi
+    cast rpc --rpc-url "$RPC_URL" optimism_rollupConfig 2>/dev/null \
+        | jq -r '.l2ChainId // .l2_chain_id'
 
 # Phase 0b  – Fetch a bare attestation doc from the running Nitro enclave.
 #              Execs into the nitro-worker pod (which already has vsock device access)
@@ -379,6 +430,13 @@ proof-setup env="alphanet":
         echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
         exit 1
     fi
+    if [ -z "${WORLD_CHAIN_L2_CHAIN_ID:-}" ]; then
+        echo "=== Step 0-pre: Fetching L2 chain ID from op-node ===" >&2
+        WORLD_CHAIN_L2_CHAIN_ID=$(just proof-get-chain-id {{env}})
+        export WORLD_CHAIN_L2_CHAIN_ID
+        echo "WORLD_CHAIN_L2_CHAIN_ID=$WORLD_CHAIN_L2_CHAIN_ID" >&2
+    fi
+
     echo "=== Step 0: Computing rollup config hash ===" >&2
     ROLLUP_CONFIG_HASH=$(just proof-rollup-config-hash {{env}})
     export ROLLUP_CONFIG_HASH
