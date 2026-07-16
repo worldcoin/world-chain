@@ -142,8 +142,10 @@ pub fn run(_args: Args) -> Result<()> {
     std::thread::scope(|s| {
         // Rust fmt check
         s.spawn(|| {
-            let (ok, stderr) =
-                run_cmd_capture("cargo", &["+nightly-2026-07-01", "fmt", "--all", "--", "--check"]);
+            let (ok, stderr) = run_cmd_capture(
+                "cargo",
+                &["+nightly-2026-07-01", "fmt", "--all", "--", "--check"],
+            );
             if ok {
                 report("Rust formatting", Status::Pass, &errors);
             } else {
@@ -178,7 +180,8 @@ pub fn run(_args: Args) -> Result<()> {
                 report(
                     "Clippy",
                     Status::FailWith(
-                        "cargo +nightly-2026-07-01 clippy --workspace --all-targets --all-features".into(),
+                        "cargo +nightly-2026-07-01 clippy --workspace --all-targets --all-features"
+                            .into(),
                         diag,
                     ),
                     &errors,
