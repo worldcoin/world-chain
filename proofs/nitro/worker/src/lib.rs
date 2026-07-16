@@ -188,22 +188,6 @@ impl Network {
     }
 }
 
-/// Enclave connection arguments shared between the worker and get-attestation subcommands.
-#[derive(Debug, Clone, clap::Args)]
-pub struct CommonArgs {
-    /// vsock CID of the running Nitro Enclave.
-    #[arg(long, env = "ENCLAVE_CID", default_value_t = 16)]
-    pub enclave_cid: u32,
-
-    /// vsock port the enclave listens on.
-    #[arg(
-        long,
-        env = "ENCLAVE_PORT",
-        default_value_t = world_chain_proof_nitro::protocol::DEFAULT_VSOCK_PORT
-    )]
-    pub enclave_port: u32,
-}
-
 #[derive(Debug, Parser)]
 #[command(
     name = "nitro-worker",
@@ -244,9 +228,17 @@ pub struct WorkerArgs {
     #[arg(long, env = "BLOCK_INTERVAL")]
     block_interval: u64,
 
-    /// Enclave connection (CID + port).
-    #[command(flatten)]
-    pub common: CommonArgs,
+    /// vsock CID of the running Nitro Enclave.
+    #[arg(long, env = "ENCLAVE_CID", default_value_t = 16)]
+    pub enclave_cid: u32,
+
+    /// vsock port the enclave listens on.
+    #[arg(
+        long,
+        env = "ENCLAVE_PORT",
+        default_value_t = world_chain_proof_nitro::protocol::DEFAULT_VSOCK_PORT
+    )]
+    pub enclave_port: u32,
 
     /// PCR0 hex (48 bytes). All three PCRs must be provided for production use.
     #[arg(long, env = "PCR0")]
@@ -344,7 +336,7 @@ pub async fn run_with_cli(cli: WorkerArgs) -> Result<()> {
 
     info!(
         prover_service = %cli.prover_service_url,
-        enclave_cid = cli.common.enclave_cid,
+        enclave_cid = cli.enclave_cid,
         block_interval = cli.block_interval,
         submit_proof_retry_max_retries = cli.submit_proof_retry_max_retries,
         submit_proof_retry_initial_delay_ms = cli.submit_proof_retry_initial_delay_ms,
@@ -355,8 +347,8 @@ pub async fn run_with_cli(cli: WorkerArgs) -> Result<()> {
     let backend_config = NitroBackendConfig {
         block_interval: cli.block_interval,
         online,
-        enclave_cid: cli.common.enclave_cid,
-        enclave_port: cli.common.enclave_port,
+        enclave_cid: cli.enclave_cid,
+        enclave_port: cli.enclave_port,
         expected_pcrs,
     };
 

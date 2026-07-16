@@ -5,7 +5,7 @@ fn main() {
 }
 
 #[cfg(target_os = "linux")]
-use world_chain_nitro_worker::{CommonArgs, WorkerArgs};
+use world_chain_nitro_worker::WorkerArgs;
 
 #[cfg(target_os = "linux")]
 #[derive(clap::Parser)]
@@ -22,6 +22,23 @@ enum Command {
     Run(WorkerArgs),
     /// Fetch a bare attestation document from the running enclave and print hex to stdout.
     GetAttestation(GetAttestationArgs),
+}
+
+/// Enclave connection arguments for the get-attestation subcommand.
+#[cfg(target_os = "linux")]
+#[derive(clap::Args)]
+struct CommonArgs {
+    /// vsock CID of the running Nitro Enclave.
+    #[arg(long, env = "ENCLAVE_CID", default_value_t = 16)]
+    enclave_cid: u32,
+
+    /// vsock port the enclave listens on.
+    #[arg(
+        long,
+        env = "ENCLAVE_PORT",
+        default_value_t = world_chain_proof_nitro::protocol::DEFAULT_VSOCK_PORT
+    )]
+    enclave_port: u32,
 }
 
 #[cfg(target_os = "linux")]
