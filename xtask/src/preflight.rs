@@ -121,7 +121,7 @@ pub fn run(_args: Args) -> Result<()> {
 
     std::thread::scope(|s| {
         s.spawn(|| {
-            run_cmd("cargo", &["+nightly", "fmt", "--all"]);
+            run_cmd("cargo", &["+nightly-2026-07-01", "fmt", "--all"]);
         });
 
         if contracts_changed {
@@ -142,15 +142,17 @@ pub fn run(_args: Args) -> Result<()> {
     std::thread::scope(|s| {
         // Rust fmt check
         s.spawn(|| {
-            let (ok, stderr) =
-                run_cmd_capture("cargo", &["+nightly", "fmt", "--all", "--", "--check"]);
+            let (ok, stderr) = run_cmd_capture(
+                "cargo",
+                &["+nightly-2026-07-01", "fmt", "--all", "--", "--check"],
+            );
             if ok {
                 report("Rust formatting", Status::Pass, &errors);
             } else {
                 let diag = condensed_diagnostics(&stderr);
                 report(
                     "Rust formatting",
-                    Status::FailWith("cargo +nightly fmt --all".into(), diag),
+                    Status::FailWith("cargo +nightly-2026-07-01 fmt --all".into(), diag),
                     &errors,
                 );
             }
@@ -161,7 +163,7 @@ pub fn run(_args: Args) -> Result<()> {
             let (ok, stderr) = run_cmd_capture_env(
                 "cargo",
                 &[
-                    "+nightly",
+                    "+nightly-2026-07-01",
                     "clippy",
                     "--workspace",
                     "--all-targets",
@@ -178,7 +180,8 @@ pub fn run(_args: Args) -> Result<()> {
                 report(
                     "Clippy",
                     Status::FailWith(
-                        "cargo +nightly clippy --workspace --all-targets --all-features".into(),
+                        "cargo +nightly-2026-07-01 clippy --workspace --all-targets --all-features"
+                            .into(),
                         diag,
                     ),
                     &errors,
