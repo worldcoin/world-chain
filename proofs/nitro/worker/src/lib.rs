@@ -194,7 +194,7 @@ impl Network {
     about = "World Chain Nitro TEE proving worker: leases jobs from the prover-service, \
              proves them in a Nitro Enclave, and submits the signed attestations back."
 )]
-struct Cli {
+pub struct Cli {
     /// prover-service JSON-RPC URL.
     #[arg(long, env = "PROVER_SERVICE_URL")]
     prover_service_url: String,
@@ -308,8 +308,10 @@ pub async fn run() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let cli = Cli::parse();
+    run_with_cli(Cli::parse()).await
+}
 
+pub async fn run_with_cli(cli: Cli) -> Result<()> {
     let spec = cli.network.chain_spec();
     let schedule = hardfork_config_from_chain_spec(spec.as_ref());
     let online = build_online_config(
