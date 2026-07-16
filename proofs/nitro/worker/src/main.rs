@@ -5,7 +5,7 @@ fn main() {
 }
 
 #[cfg(target_os = "linux")]
-use world_chain_nitro_worker::Cli as RunArgs;
+use world_chain_nitro_worker::{CommonArgs, WorkerArgs};
 
 #[cfg(target_os = "linux")]
 #[derive(clap::Parser)]
@@ -18,10 +18,17 @@ struct Cli {
 #[cfg(target_os = "linux")]
 #[derive(clap::Subcommand)]
 enum Command {
-    /// Start the proving worker (default).
-    Run(RunArgs),
-    /// Fetch a bare attestation doc from the running enclave and print hex to stdout.
-    GetAttestation,
+    /// Start the proving worker.
+    Run(WorkerArgs),
+    /// Fetch a bare attestation document from the running enclave and print hex to stdout.
+    GetAttestation(GetAttestationArgs),
+}
+
+#[cfg(target_os = "linux")]
+#[derive(clap::Args)]
+struct GetAttestationArgs {
+    #[command(flatten)]
+    common: CommonArgs,
 }
 
 #[cfg(target_os = "linux")]
@@ -38,8 +45,8 @@ async fn main() {
                 std::process::exit(1);
             }
         }
-        Command::GetAttestation => {
-            if let Err(e) = get_attestation().await {
+        Command::GetAttestation(args) => {
+            if let Err(e) = get_attestation(args).await {
                 eprintln!("error: {e:#}");
                 std::process::exit(1);
             }
@@ -48,22 +55,14 @@ async fn main() {
 }
 
 #[cfg(target_os = "linux")]
-async fn get_attestation() -> anyhow::Result<()> {
+async fn get_attestation(args: GetAttestationArgs) -> anyhow::Result<()> {
     use world_chain_proof_nitro::{
         ExpectedPcrs,
         host::{EnclaveEndpoint, NitroProver},
-        protocol::DEFAULT_VSOCK_PORT,
-    };
-
-    let cid: u32 = match std::env::var("ENCLAVE_CID") {
-        Ok(v) => v
-            .parse()
-            .map_err(|_| anyhow::anyhow!("ENCLAVE_CID is set but not a valid u32: {v:?}"))?,
-        Err(_) => 16,
     };
 
     let prover = NitroProver::new(
-        EnclaveEndpoint::with_port(cid, DEFAULT_VSOCK_PORT),
+        EnclaveEndpoint::with_port(args.common.enclave_cid, args.common.enclave_port),
         ExpectedPcrs::PLACEHOLDER,
     );
 

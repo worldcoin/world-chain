@@ -188,13 +188,29 @@ impl Network {
     }
 }
 
+/// Enclave connection arguments shared between the worker and get-attestation subcommands.
+#[derive(Debug, Clone, clap::Args)]
+pub struct CommonArgs {
+    /// vsock CID of the running Nitro Enclave.
+    #[arg(long, env = "ENCLAVE_CID", default_value_t = 16)]
+    pub enclave_cid: u32,
+
+    /// vsock port the enclave listens on.
+    #[arg(
+        long,
+        env = "ENCLAVE_PORT",
+        default_value_t = world_chain_proof_nitro::protocol::DEFAULT_VSOCK_PORT
+    )]
+    pub enclave_port: u32,
+}
+
 #[derive(Debug, Parser)]
 #[command(
     name = "nitro-worker",
     about = "World Chain Nitro TEE proving worker: leases jobs from the prover-service, \
              proves them in a Nitro Enclave, and submits the signed attestations back."
 )]
-pub struct Cli {
+pub struct WorkerArgs {
     /// prover-service JSON-RPC URL.
     #[arg(long, env = "PROVER_SERVICE_URL")]
     prover_service_url: String,
@@ -228,13 +244,9 @@ pub struct Cli {
     #[arg(long, env = "BLOCK_INTERVAL")]
     block_interval: u64,
 
-    /// vsock CID of the running Nitro Enclave.
-    #[arg(long, env = "ENCLAVE_CID", default_value_t = 16)]
-    enclave_cid: u32,
-
-    /// vsock port the enclave listens on.
-    #[arg(long, env = "ENCLAVE_PORT", default_value_t = world_chain_proof_nitro::protocol::DEFAULT_VSOCK_PORT)]
-    enclave_port: u32,
+    /// Enclave connection (CID + port).
+    #[command(flatten)]
+    pub common: CommonArgs,
 
     /// PCR0 hex (48 bytes). All three PCRs must be provided for production use.
     #[arg(long, env = "PCR0")]
@@ -308,10 +320,10 @@ pub async fn run() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    run_with_cli(Cli::parse()).await
+    run_with_cli(WorkerArgs::parse()).await
 }
 
-pub async fn run_with_cli(cli: Cli) -> Result<()> {
+pub async fn run_with_cli(cli: WorkerArgs) -> Result<()> {
     let spec = cli.network.chain_spec();
     let schedule = hardfork_config_from_chain_spec(spec.as_ref());
     let online = build_online_config(
@@ -332,7 +344,7 @@ pub async fn run_with_cli(cli: Cli) -> Result<()> {
 
     info!(
         prover_service = %cli.prover_service_url,
-        enclave_cid = cli.enclave_cid,
+        enclave_cid = cli.common.enclave_cid,
         block_interval = cli.block_interval,
         submit_proof_retry_max_retries = cli.submit_proof_retry_max_retries,
         submit_proof_retry_initial_delay_ms = cli.submit_proof_retry_initial_delay_ms,
@@ -343,8 +355,8 @@ pub async fn run_with_cli(cli: Cli) -> Result<()> {
     let backend_config = NitroBackendConfig {
         block_interval: cli.block_interval,
         online,
-        enclave_cid: cli.enclave_cid,
-        enclave_port: cli.enclave_port,
+        enclave_cid: cli.common.enclave_cid,
+        enclave_port: cli.common.enclave_port,
         expected_pcrs,
     };
 
