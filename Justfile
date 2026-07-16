@@ -375,7 +375,7 @@ proof-certmanager-prewarm env="alphanet":
     echo "Generating calldata…"
     CALLDATA_JSON=$(node pkg/contracts/lib/nitro-validator/tools/hinted_attestation_calls.js prepare \
         --attestation "$ATTESTATION_HEX" --cert-manager "$CERT_MANAGER_ADDRESS")
-    COLD_ENTRIES=$(echo "$CALLDATA_JSON" | jq -r '.cold[]')
+    COLD_ENTRIES=$(echo "$CALLDATA_JSON" | jq -r '.cold[].calldata')
     if [ -z "$COLD_ENTRIES" ]; then
         echo "Error: no cold cert entries found — attestation may be invalid" >&2
         exit 1
