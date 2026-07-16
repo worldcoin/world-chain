@@ -1596,7 +1596,7 @@ async fn connect_execution_peers(sequencers: &[SequencerService]) -> Result<()> 
             bail!(
                 "EL peer graph is not connected yet: {} (need every node >= {min_peers_per_node}, total >= {min_total_peer_connections})",
                 peer_counts_summary(&counts)
-            )
+            );
         }
     })
     .await
@@ -1674,12 +1674,12 @@ async fn add_execution_peer_once(source: &SequencerService, enode: &str) -> Resu
     )
     .await?;
     if trusted.as_bool() == Some(false) {
-        bail!("admin_addTrustedPeer returned false")
+        bail!("admin_addTrustedPeer returned false");
     }
 
     let added = json_rpc(&source.rpc_url, "admin_addPeer", json!([enode])).await?;
     if added.as_bool() == Some(false) {
-        bail!("admin_addPeer returned false")
+        bail!("admin_addPeer returned false");
     }
     Ok(())
 }
@@ -2067,7 +2067,7 @@ async fn wait_for_op_node_peer_mesh(op_nodes: &[OpNodeService]) -> Result<()> {
                     bail!(
                         "{} has {connected} connected op-node peers, expected {expected}",
                         node.id
-                    )
+                    );
                 }
             },
         )
@@ -2153,7 +2153,7 @@ async fn wait_for_conductor_health(conductors: &[ConductorService]) -> Result<()
                 if healthy {
                     Ok(())
                 } else {
-                    bail!("{} sequencer is not healthy yet", conductor.id)
+                    bail!("{} sequencer is not healthy yet", conductor.id);
                 }
             },
         )
@@ -2174,7 +2174,7 @@ async fn wait_for_conductor_leader(bootstrap: &ConductorService, timeout: Durati
         if leader {
             Ok(())
         } else {
-            bail!("bootstrap conductor is not raft leader yet")
+            bail!("bootstrap conductor is not raft leader yet");
         }
     })
     .await
@@ -2871,7 +2871,7 @@ async fn require_http_success(url: &str) -> Result<()> {
     if response.status().is_success() {
         Ok(())
     } else {
-        bail!("metrics endpoint {url} returned {}", response.status())
+        bail!("metrics endpoint {url} returned {}", response.status());
     }
 }
 
@@ -3274,7 +3274,7 @@ async fn wait_for_l2_blocks(rpc_url: &str, min_block: u64, timeout: Duration) ->
         if block >= min_block {
             Ok(())
         } else {
-            bail!("latest L2 block {block} is below expected {min_block}")
+            bail!("latest L2 block {block} is below expected {min_block}");
         }
     })
     .await
@@ -3350,7 +3350,7 @@ async fn wait_for_rpc_chain_id(rpc_url: &str, timeout: Duration) -> Result<()> {
         if chain_id == DEV_CHAIN_ID {
             Ok(())
         } else {
-            bail!("expected chain id {DEV_CHAIN_ID}, got {chain_id}")
+            bail!("expected chain id {DEV_CHAIN_ID}, got {chain_id}");
         }
     })
     .await
@@ -3519,7 +3519,7 @@ fn world_chain_binary() -> Result<PathBuf> {
 
     bail!(
         "failed to find native world-chain binary; run `cargo build -p world-chain` or set WORLD_CHAIN_BIN"
-    )
+    );
 }
 
 fn repo_root() -> Result<PathBuf> {
