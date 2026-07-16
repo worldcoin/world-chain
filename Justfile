@@ -373,11 +373,18 @@ proof-certmanager-prewarm env="alphanet":
     echo "Fetching attestation from enclave…"
     ATTESTATION_HEX=$(just proof-get-attestation {{env}})
     echo "Generating pre-warm plan…"
-    PREWARM_PLAN="/tmp/prewarm-plan-$$.json"
-    trap 'rm -f "$PREWARM_PLAN"' EXIT
+    PREWARM_PLAN_RAW="/tmp/prewarm-plan-$$.json"
+    PREWARM_PLAN="/tmp/prewarm-plan-$$-simple.json"
+    trap 'rm -f "$PREWARM_PLAN_RAW" "$PREWARM_PLAN"' EXIT
     node pkg/contracts/lib/nitro-validator/tools/hinted_attestation_calls.js prepare \
         --attestation "$ATTESTATION_HEX" --cert-manager "$CERT_MANAGER_ADDRESS" \
-        > "$PREWARM_PLAN"
+        > "$PREWARM_PLAN_RAW"
+    # Simplify to parallel arrays so vm.parseJsonStringArray works in the Forge script.
+    # Filter out the validate_attestation entry (no certHash field).
+    jq '{
+      calldatas:  [.cold[] | select(.certHash != null) | .calldata],
+      certHashes: [.cold[] | select(.certHash != null) | .certHash]
+    }' "$PREWARM_PLAN_RAW" > "$PREWARM_PLAN"
     echo "Pre-warm plan saved to $PREWARM_PLAN"
     echo "Submitting cold cert entries via Forge script…"
     cd pkg/contracts && CERT_MANAGER_ADDRESS="$CERT_MANAGER_ADDRESS" PREWARM_PLAN="$PREWARM_PLAN" \
