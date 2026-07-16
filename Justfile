@@ -128,6 +128,7 @@ install *args='':
 # Workflow phases:
 #   Phase 0a  proof-rollup-config-hash   – Compute rollup config hash
 #   Phase 0b  proof-get-attestation       – Fetch bare attestation doc from enclave
+#   Phase 0b  proof-get-pcrs              – Print PCR0/PCR1/PCR2 from the EIF on the enclave-launcher container
 #   Phase 1   proof-deploy-nitro          – Deploy Nitro attestation contracts
 #   Phase 2   proof-deploy-system         – Deploy proof system contracts
 #   Phase 3a  proof-certmanager-prewarm   – Pre-warm CertManager with CA certs
@@ -242,6 +243,34 @@ proof-get-attestation env="alphanet":
     kubectl --context="$KUBECONTEXT" exec \
         -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" \
         -- sh -c "ENCLAVE_CID=$ENCLAVE_CID nitro-worker get-attestation"
+
+# Phase 0b (alt) – Print PCR0, PCR1, PCR2 from the EIF image on the enclave-launcher container.
+proof-get-pcrs env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f "scripts/proof-envs/{{env}}.env" ]; then
+        echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
+        exit 1
+    fi
+    source scripts/proof-envs/{{env}}.env
+    if [ -f "scripts/proof-envs/{{env}}.local.env" ]; then
+        source scripts/proof-envs/{{env}}.local.env
+    fi
+    NITRO_POD=$(kubectl --context="$KUBECONTEXT" get pod \
+        -n "$PROOF_NAMESPACE" \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    if [ -z "$NITRO_POD" ]; then
+        echo "Error: no running pod found in namespace $PROOF_NAMESPACE" >&2
+        exit 1
+    fi
+    echo "Pod: $NITRO_POD  Container: enclave-launcher" >&2
+    MEASUREMENTS=$(kubectl --context="$KUBECONTEXT" exec \
+        -n "$PROOF_NAMESPACE" "$NITRO_POD" -c enclave-launcher \
+        -- nitro-cli describe-eif --eif-path /home/world-chain-nitro-worker-enclave.eif \
+        | jq -r '.Measurements')
+    echo "PCR0=$(echo "$MEASUREMENTS" | jq -r '.PCR0')"
+    echo "PCR1=$(echo "$MEASUREMENTS" | jq -r '.PCR1')"
+    echo "PCR2=$(echo "$MEASUREMENTS" | jq -r '.PCR2')"
 
 # Phase 1 – Deploy the Nitro attestation stack.
 proof-deploy-nitro:
