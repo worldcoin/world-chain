@@ -22,7 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: taiki-e/install-action@just
-      - uses: dtolnay/rust-toolchain@stable
       - uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -49,6 +48,7 @@ jobs:
       - uses: taiki-e/install-action@just
       - uses: dtolnay/rust-toolchain@nightly
         with:
+          toolchain: nightly-2026-07-01
           components: rustfmt, clippy
       - name: Cache
         uses: actions/cache@v5
@@ -61,7 +61,7 @@ jobs:
           key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-test-
       - name: fmt + lint
-        run: cargo +nightly fmt --all -- --check
+        run: cargo +nightly-2026-07-01 fmt --all -- --check
 
   cargo-clippy:
     runs-on: arc-public-8xlarge-amd64-runner
@@ -72,6 +72,7 @@ jobs:
       - uses: taiki-e/install-action@just
       - uses: dtolnay/rust-toolchain@nightly
         with:
+          toolchain: nightly-2026-07-01
           components: rustfmt, clippy
       - uses: arduino/setup-protoc@v3
         with:
@@ -87,7 +88,7 @@ jobs:
           key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-test-
       - name: clippy
-        run: cargo +nightly clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo +nightly-2026-07-01 clippy --workspace --all-targets --all-features -- -D warnings
 
   cargo-docs:
     runs-on: arc-public-8xlarge-amd64-runner
@@ -95,7 +96,6 @@ jobs:
     name: docs
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
       - uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
