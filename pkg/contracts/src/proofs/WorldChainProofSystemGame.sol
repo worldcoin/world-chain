@@ -9,8 +9,13 @@ contract WorldChainProofSystemGame {
     using WorldChainProofLib for uint8;
 
     struct ProposalInit {
+        address factory;
+        address anchorStateRegistry;
+        uint256 attempt;
         address proposer;
         address parentRef;
+        bytes32 startingRootClaim;
+        uint256 startingL2BlockNumber;
         bytes32 rootClaim;
         uint256 l2BlockNumber;
         bytes32 l1OriginHash;
@@ -53,8 +58,13 @@ contract WorldChainProofSystemGame {
     uint8 public immutable PROOF_THRESHOLD;
     uint8 public constant PROOF_LANE_COUNT = WorldChainProofLib.PROOF_LANE_COUNT;
 
+    address public immutable factory;
+    address public immutable anchorStateRegistry;
+    uint256 public immutable attempt;
     address payable public immutable proposer;
     address public immutable parentRef;
+    bytes32 public immutable startingRootClaim;
+    uint256 public immutable startingL2BlockNumber;
     bytes32 public immutable rootClaim;
     uint256 public immutable l2BlockNumber;
     bytes32 public immutable l1OriginHash;
@@ -87,8 +97,13 @@ contract WorldChainProofSystemGame {
     constructor(ProposalInit memory proposal, ActivationConfig memory config) payable {
         if (msg.value != config.proposerBond) revert InvalidBond(config.proposerBond, msg.value);
 
+        factory = proposal.factory;
+        anchorStateRegistry = proposal.anchorStateRegistry;
+        attempt = proposal.attempt;
         proposer = payable(proposal.proposer);
         parentRef = proposal.parentRef;
+        startingRootClaim = proposal.startingRootClaim;
+        startingL2BlockNumber = proposal.startingL2BlockNumber;
         rootClaim = proposal.rootClaim;
         l2BlockNumber = proposal.l2BlockNumber;
         l1OriginHash = proposal.l1OriginHash;

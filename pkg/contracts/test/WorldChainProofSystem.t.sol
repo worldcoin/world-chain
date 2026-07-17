@@ -7,6 +7,7 @@ import {WorldChainAnchorStateRegistry} from "../src/proofs/WorldChainAnchorState
 import {WorldChainProofLib} from "../src/proofs/WorldChainProofLib.sol";
 import {WorldChainProofSystemFactory} from "../src/proofs/WorldChainProofSystemFactory.sol";
 import {WorldChainProofSystemGame} from "../src/proofs/WorldChainProofSystemGame.sol";
+import {IWorldChainAnchorStateRegistry} from "../src/proofs/interfaces/IWorldChainAnchorStateRegistry.sol";
 import {MockRootIdVerifier} from "../src/proofs/mocks/MockRootIdVerifier.sol";
 import {MockStakingRegistry} from "../src/proofs/mocks/MockStakingRegistry.sol";
 
@@ -42,23 +43,8 @@ contract WorldChainProofSystemTest is Test {
         teeVerifier = new MockRootIdVerifier(false);
         councilVerifier = new MockRootIdVerifier(false);
 
-        factory = new WorldChainProofSystemFactory(
-            WorldChainProofLib.Domain({
-                chainId: 4801,
-                proofSystemVersion: 1,
-                rollupConfigHash: keccak256("world-chain-devnet-rollup-config"),
-                blockInterval: 10
-            }),
-            CHALLENGE_PERIOD,
-            PROOF_PERIOD,
-            PROPOSER_BOND,
-            CHALLENGER_BOND,
-            WorldChainProofLib.PROOF_THRESHOLD,
-            validityVerifier,
-            teeVerifier,
-            councilVerifier,
-            staking
-        );
+        factory = _newFactory(anchor, WorldChainProofLib.PROOF_THRESHOLD);
+        anchor.initializeFactory(address(factory));
     }
 
     function testUnchallengedRootFinalizesAfterChallengePeriod() public {
@@ -117,11 +103,13 @@ contract WorldChainProofSystemTest is Test {
     }
 
     function testThresholdOneFinalizesWithSingleLane() public {
-        WorldChainProofSystemFactory thresholdOne = _thresholdFactory(1);
+        WorldChainAnchorStateRegistry thresholdAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
+        WorldChainProofSystemFactory thresholdOne = _newFactory(thresholdAnchor, 1);
+        thresholdAnchor.initializeFactory(address(thresholdOne));
 
         vm.prank(proposer);
         (address gameAddress, bytes32 rootId) =
-            thresholdOne.propose{value: PROPOSER_BOND}(address(anchor), keccak256("threshold-one-root"), 10);
+            thresholdOne.propose{value: PROPOSER_BOND}(address(thresholdAnchor), keccak256("threshold-one-root"), 10);
         WorldChainProofSystemGame game = WorldChainProofSystemGame(payable(gameAddress));
         assertEq(game.PROOF_THRESHOLD(), 1);
 
@@ -133,14 +121,19 @@ contract WorldChainProofSystemTest is Test {
     }
 
     function testFactoryRejectsOutOfRangeThreshold() public {
-        vm.expectRevert(WorldChainProofSystemFactory.InvalidActivationParameters.selector);
-        _thresholdFactory(0);
+        WorldChainAnchorStateRegistry thresholdAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
 
         vm.expectRevert(WorldChainProofSystemFactory.InvalidActivationParameters.selector);
-        _thresholdFactory(WorldChainProofLib.PROOF_LANE_COUNT + 1);
+        _newFactory(thresholdAnchor, 0);
+
+        vm.expectRevert(WorldChainProofSystemFactory.InvalidActivationParameters.selector);
+        _newFactory(thresholdAnchor, WorldChainProofLib.PROOF_LANE_COUNT + 1);
     }
 
-    function _thresholdFactory(uint8 threshold) internal returns (WorldChainProofSystemFactory) {
+    function _newFactory(WorldChainAnchorStateRegistry registry, uint8 threshold)
+        internal
+        returns (WorldChainProofSystemFactory)
+    {
         return new WorldChainProofSystemFactory(
             WorldChainProofLib.Domain({
                 chainId: 4801,
@@ -148,6 +141,7 @@ contract WorldChainProofSystemTest is Test {
                 rollupConfigHash: keccak256("world-chain-devnet-rollup-config"),
                 blockInterval: 10
             }),
+            IWorldChainAnchorStateRegistry(address(registry)),
             CHALLENGE_PERIOD,
             PROOF_PERIOD,
             PROPOSER_BOND,
@@ -223,6 +217,72 @@ contract WorldChainProofSystemTest is Test {
         factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10);
     }
 
+    function testFactoryRequiresRegistryInitializationBeforePropose() public {
+        WorldChainAnchorStateRegistry uninitializedAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
+        WorldChainProofSystemFactory uninitializedFactory =
+            _newFactory(uninitializedAnchor, WorldChainProofLib.PROOF_THRESHOLD);
+
+        vm.prank(proposer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                WorldChainProofSystemFactory.RegistryFactoryMismatch.selector, address(uninitializedFactory), address(0)
+            )
+        );
+        uninitializedFactory.propose{value: PROPOSER_BOND}(
+            address(uninitializedAnchor), keccak256("uninitialized-root"), 10
+        );
+    }
+
+    function testRegistryFactoryCanOnlyBeInitializedOnce() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(WorldChainAnchorStateRegistry.FactoryAlreadyInitialized.selector, address(factory))
+        );
+        anchor.initializeFactory(address(0xFACADE));
+    }
+
+    function testFactoryTracksCreatedGamesByIndexAndMembership() public {
+        assertEq(factory.gameCount(), 0);
+
+        (WorldChainProofSystemGame game,) = _propose(10);
+
+        assertEq(factory.gameCount(), 1);
+        assertEq(factory.gameAt(0), address(game));
+        assertTrue(factory.isGame(address(game)));
+        assertEq(game.factory(), address(factory));
+        assertEq(game.anchorStateRegistry(), address(anchor));
+        assertEq(game.attempt(), 0);
+        assertEq(game.startingRootClaim(), anchor.currentRootClaim());
+        assertEq(game.startingL2BlockNumber(), 0);
+    }
+
+    function testFactoryAllowsRegisteredGameParentAtNextInterval() public {
+        (WorldChainProofSystemGame parent,) = _propose(10);
+
+        vm.prank(proposer);
+        (address childAddress,) = factory.propose{value: PROPOSER_BOND}(address(parent), keccak256("child-root"), 20);
+        WorldChainProofSystemGame child = WorldChainProofSystemGame(payable(childAddress));
+
+        assertEq(child.parentRef(), address(parent));
+        assertEq(child.startingRootClaim(), parent.rootClaim());
+        assertEq(child.startingL2BlockNumber(), parent.l2BlockNumber());
+    }
+
+    function testFactoryRejectsUnexpectedBlockInterval() public {
+        vm.prank(proposer);
+        vm.expectRevert(
+            abi.encodeWithSelector(WorldChainProofSystemFactory.InvalidL2BlockNumber.selector, uint256(10), uint256(20))
+        );
+        factory.propose{value: PROPOSER_BOND}(address(anchor), keccak256("wrong-block"), 20);
+    }
+
+    function testFactoryRejectsUnregisteredParent() public {
+        address unknownParent = address(0xFACE);
+
+        vm.prank(proposer);
+        vm.expectRevert(abi.encodeWithSelector(WorldChainProofSystemFactory.InvalidParent.selector, unknownParent));
+        factory.propose{value: PROPOSER_BOND}(unknownParent, keccak256("unknown-parent"), 10);
+    }
+
     function testAnchorUpdatesOnlyAcceptFinalizedMonotonicRoots() public {
         (WorldChainProofSystemGame game,) = _finalizedGame(10);
 
@@ -251,9 +311,29 @@ contract WorldChainProofSystemTest is Test {
         anchor.setPaused(false);
 
         anchor.setAnchorState(address(finalized));
-        (WorldChainProofSystemGame lower,) = _finalizedGame(5);
         vm.expectRevert();
-        anchor.setAnchorState(address(lower));
+        anchor.setAnchorState(address(finalized));
+    }
+
+    function testAnchorRejectsFinalizedGameFromDifferentFactory() public {
+        WorldChainAnchorStateRegistry otherAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
+        WorldChainProofSystemFactory otherFactory = _newFactory(otherAnchor, WorldChainProofLib.PROOF_THRESHOLD);
+        otherAnchor.initializeFactory(address(otherFactory));
+
+        vm.prank(proposer);
+        (address gameAddress, bytes32 rootId) =
+            otherFactory.propose{value: PROPOSER_BOND}(address(otherAnchor), keccak256("other-root"), 10);
+        WorldChainProofSystemGame game = WorldChainProofSystemGame(payable(gameAddress));
+        _challenge(game, challenger);
+        game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
+        game.submitProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(rootId));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                WorldChainAnchorStateRegistry.InvalidGameFactory.selector, address(factory), address(otherFactory)
+            )
+        );
+        anchor.setAnchorState(address(game));
     }
 
     function _propose(uint256 l2BlockNumber) internal returns (WorldChainProofSystemGame game, bytes32 rootId) {

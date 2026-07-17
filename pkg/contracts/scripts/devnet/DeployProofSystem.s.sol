@@ -6,6 +6,7 @@ import {Script} from "forge-std/Script.sol";
 import {WorldChainAnchorStateRegistry} from "../../src/proofs/WorldChainAnchorStateRegistry.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
 import {WorldChainProofSystemFactory} from "../../src/proofs/WorldChainProofSystemFactory.sol";
+import {IWorldChainAnchorStateRegistry} from "../../src/proofs/interfaces/IWorldChainAnchorStateRegistry.sol";
 import {MockRootIdVerifier} from "../../src/proofs/mocks/MockRootIdVerifier.sol";
 import {MockStakingRegistry} from "../../src/proofs/mocks/MockStakingRegistry.sol";
 
@@ -47,6 +48,7 @@ contract DeployProofSystem is Script {
             deployment.staking.setStaked(config.challenger, true);
         }
         deployment.factory = _deployFactory(deployment, config);
+        deployment.anchor.initializeFactory(address(deployment.factory));
         vm.stopBroadcast();
 
         _writeDeployment(deployment, config);
@@ -72,6 +74,7 @@ contract DeployProofSystem is Script {
                 rollupConfigHash: config.rollupConfigHash,
                 blockInterval: config.blockInterval
             }),
+            IWorldChainAnchorStateRegistry(address(deployment.anchor)),
             CHALLENGE_PERIOD,
             PROOF_PERIOD,
             PROPOSER_BOND,
