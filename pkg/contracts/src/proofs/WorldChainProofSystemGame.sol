@@ -113,6 +113,8 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     WorldChainProofLib.RootState public state;
     WorldChainProofLib.InvalidationReason public invalidationReason;
 
+    // TODO: Revisit whether the game should allow only one challenger; additional challengers do not
+    // extend the proof deadline or receive the timeout reward.
     address[] public challengers;
     mapping(address challenger => uint256 amount) public challengerBonds;
     uint256 public totalChallengerBonds;
