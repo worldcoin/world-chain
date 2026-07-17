@@ -59,7 +59,7 @@ contract WorldChainProofSystemFactory {
     IWorldChainStakingRegistry public immutable stakingRegistry;
 
     mapping(bytes32 proposalKey => address game) public games;
-    mapping(address game => bool created) public isGame;
+    mapping(address game => bool created) public isFactoryGame;
     address[] private allGames;
 
     constructor(
@@ -151,7 +151,7 @@ contract WorldChainProofSystemFactory {
             )
         );
         games[key] = game;
-        isGame[game] = true;
+        isFactoryGame[game] = true;
         allGames.push(game);
 
         _emitGameCreated(
@@ -203,7 +203,7 @@ contract WorldChainProofSystemFactory {
             startingRootClaim = anchorStateRegistry.currentRootClaim();
             startingL2BlockNumber = anchorStateRegistry.currentL2BlockNumber();
         } else {
-            if (!isGame[parentRef]) revert InvalidParent(parentRef);
+            if (!isFactoryGame[parentRef]) revert InvalidParent(parentRef);
             if (anchorStateRegistry.blacklistedGames(parentRef)) revert ParentGameBlacklisted(parentRef);
 
             IWorldChainProofSystemGame parentGame = IWorldChainProofSystemGame(parentRef);

@@ -81,7 +81,7 @@ contract WorldChainAnchorStateRegistry {
         if (proofGame.anchorStateRegistry() != address(this)) {
             revert InvalidGameRegistry(address(this), proofGame.anchorStateRegistry());
         }
-        if (!IWorldChainProofSystemFactory(factory).isGame(game)) revert UnregisteredGame(game);
+        if (!IWorldChainProofSystemFactory(factory).isFactoryGame(game)) revert UnregisteredGame(game);
 
         if (proofGame.state() != IWorldChainProofSystemGame.RootState.FINALIZED) {
             revert GameNotFinalized(game);

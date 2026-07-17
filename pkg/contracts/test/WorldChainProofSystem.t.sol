@@ -247,7 +247,7 @@ contract WorldChainProofSystemTest is Test {
 
         assertEq(factory.gameCount(), 1);
         assertEq(factory.gameAt(0), address(game));
-        assertTrue(factory.isGame(address(game)));
+        assertTrue(factory.isFactoryGame(address(game)));
         assertEq(game.factory(), address(factory));
         assertEq(game.anchorStateRegistry(), address(anchor));
         assertEq(game.attempt(), 0);
