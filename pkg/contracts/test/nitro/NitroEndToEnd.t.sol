@@ -52,6 +52,7 @@ contract NitroEndToEndTest is Test {
     uint64 constant PRE_BLK = 41_999;
     bytes32 constant POST = keccak256("post-root");
     uint64 constant BLK = 42_000;
+    address constant ANCHOR_STATE_REGISTRY = address(0xA11CE);
 
     bytes constant TBS = hex"abcdabcd";
     bytes constant SIG = hex"feedfeed";
@@ -64,7 +65,7 @@ contract NitroEndToEndTest is Test {
         attestationVerifier = new MockNitroAttestationVerifier();
         registry = new NitroEnclaveKeyRegistry(attestationVerifier, owner);
         parent = new EndToEndParentGame(PRE);
-        proofVerifier = new NitroProofVerifier(registry, address(0));
+        proofVerifier = new NitroProofVerifier(registry, ANCHOR_STATE_REGISTRY);
 
         enclaveWallet = vm.createWallet("enclave-integration");
         enclavePubKey = _uncompressedKey(enclaveWallet.publicKeyX, enclaveWallet.publicKeyY);

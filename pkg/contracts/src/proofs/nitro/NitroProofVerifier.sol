@@ -56,6 +56,9 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     ///      Nitro enclave always emits this form.
     error InvalidPublicKey();
 
+    /// @dev Thrown when the anchor-state registry address is zero.
+    error ZeroAnchorStateRegistry();
+
     /*//////////////////////////////////////////////////////////////
                                 STORAGE
     //////////////////////////////////////////////////////////////*/
@@ -73,6 +76,8 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     /// @param registry_ The Nitro enclave key registry to consult.
     /// @param anchorStateRegistry_ Anchor-state registry used to resolve anchor parent roots.
     constructor(NitroEnclaveKeyRegistry registry_, address anchorStateRegistry_) {
+        if (anchorStateRegistry_ == address(0)) revert ZeroAnchorStateRegistry();
+
         registry = registry_;
         anchorStateRegistry = anchorStateRegistry_;
     }

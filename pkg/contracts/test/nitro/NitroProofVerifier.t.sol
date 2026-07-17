@@ -40,6 +40,7 @@ contract NitroProofVerifierTest is Test {
     bytes32 constant DOMAIN_HASH = keccak256("domain");
     bytes32 constant L1_ORIGIN_HASH = keccak256("l1-origin");
     uint256 constant L1_ORIGIN_NUMBER = 9_001;
+    address constant ANCHOR_STATE_REGISTRY = address(0xA11CE);
 
     Vm.Wallet enclaveWallet;
     bytes enclavePubKey;
@@ -49,7 +50,7 @@ contract NitroProofVerifierTest is Test {
         attestationVerifier = new MockNitroAttestationVerifier();
         registry = new NitroEnclaveKeyRegistry(attestationVerifier, owner);
         parent = new MockParentGame(L2_PRE_ROOT);
-        proofVerifier = new NitroProofVerifier(registry, address(0));
+        proofVerifier = new NitroProofVerifier(registry, ANCHOR_STATE_REGISTRY);
 
         enclaveWallet = vm.createWallet("enclave");
         enclavePubKey = _uncompressedKey(enclaveWallet.publicKeyX, enclaveWallet.publicKeyY);
@@ -112,6 +113,11 @@ contract NitroProofVerifierTest is Test {
     function test_Verify_HappyPath() public {
         bytes memory sig = _sign(_commitment());
         assertTrue(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+    }
+
+    function test_Constructor_RevertsForZeroAnchorStateRegistry() public {
+        vm.expectRevert(NitroProofVerifier.ZeroAnchorStateRegistry.selector);
+        new NitroProofVerifier(registry, address(0));
     }
 
     /*//////////////////////////////////////////////////////////////
