@@ -358,7 +358,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
         invalidatedAt = uint64(block.timestamp);
 
         uint256 balance = address(this).balance;
-        if (reason == WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT && challenger != address(0)) {
+        if (reason == WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT) {
             payoutCredits[challenger] += balance;
             postedChallengerBond = 0;
         } else {
