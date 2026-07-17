@@ -44,13 +44,12 @@ sol! {
         function l2BlockNumber() external view returns (uint256);
         function challengeDeadline() external view returns (uint64);
         function state() external view returns (uint8);
-        function invalidationReason() external view returns (uint8);
         function proofBitmap() external view returns (uint8);
         function proofCount() external view returns (uint8);
         function challenge() external payable;
         function submitProofLane(uint8 laneId, bytes calldata proof) external;
-        function resolutionStatus() external view returns (bool resolvable, uint8 outcome, uint8 reason);
-        function resolve() external returns (uint8 outcome, uint8 reason);
+        function finalize() external;
+        function invalidate() external;
     }
 
     #[sol(rpc)]
