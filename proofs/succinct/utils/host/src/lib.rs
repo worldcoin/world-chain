@@ -59,8 +59,9 @@ pub trait WorldSuccinctProver {
 pub fn range_artifact_from_sp1_proof(
     proof: &SP1ProofWithPublicValues,
 ) -> anyhow::Result<RangeProofArtifact> {
-    let boot_info: TransitionPublicValues = bincode::deserialize(proof.public_values.as_slice())
-        .context("range proof public values deserialization failed")?;
+    let transition_public_values: TransitionPublicValues =
+        bincode::deserialize(proof.public_values.as_slice())
+            .context("range proof public values deserialization failed")?;
 
     let SP1Proof::Compressed(_) = &proof.proof else {
         return Err(SuccinctProverError::NotCompressed.into());
@@ -69,7 +70,7 @@ pub fn range_artifact_from_sp1_proof(
     let proof_bytes = bincode::serialize(proof).context("range proof serialization failed")?;
 
     Ok(RangeProofArtifact {
-        boot_info,
+        transition_public_values,
         proof: proof_bytes,
     })
 }

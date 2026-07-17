@@ -122,7 +122,7 @@ async fn build_aggregation_request(
     request: &ValidityProofRequest,
     range: &RangeProofArtifact,
 ) -> anyhow::Result<AggregationSessionRequest> {
-    let l1_head = range.boot_info.l1Head;
+    let l1_head = range.transition_public_values.l1Head;
     let l1_header = fetch_l1_header_by_hash(&reqwest::Client::new(), &host.l1_rpc, l1_head)
         .await
         .context("failed to fetch L1 header for aggregation proof")?;
@@ -130,7 +130,7 @@ async fn build_aggregation_request(
         serde_cbor::to_vec(&vec![l1_header]).context("failed to encode aggregation L1 headers")?;
 
     Ok(AggregationSessionRequest {
-        boot_infos: vec![range.boot_info.clone()],
+        transition_public_values: vec![range.transition_public_values.clone()],
         latest_l1_checkpoint_head: l1_head,
         prover_address: request.prover_address,
         l1_headers_cbor,
@@ -191,43 +191,51 @@ fn validate_range_artifact(
     metadata: &RangeMetadata,
     artifact: &RangeProofArtifact,
 ) -> anyhow::Result<()> {
-    if artifact.boot_info.l1Head != metadata.l1_head {
+    if artifact.transition_public_values.l1Head != metadata.l1_head {
         bail!(
             "range proof l1 head mismatch: expected {:?}, got {:?}",
             metadata.l1_head,
-            artifact.boot_info.l1Head
+            artifact.transition_public_values.l1Head
         );
     }
 
-    if artifact.boot_info.l2PreRoot != metadata.l2_pre_root {
+    if artifact.transition_public_values.l2PreRoot != metadata.l2_pre_root {
         bail!(
             "range proof pre root mismatch: expected {:?}, got {:?}",
             metadata.l2_pre_root,
-            artifact.boot_info.l2PreRoot
+            artifact.transition_public_values.l2PreRoot
         );
     }
 
-    if artifact.boot_info.l2PostRoot != metadata.l2_post_root {
+    if artifact.transition_public_values.l2PreBlockNumber != metadata.start_block {
+        bail!(
+            "range proof pre block mismatch: expected {}, got {}",
+            metadata.start_block,
+            artifact.transition_public_values.l2PreBlockNumber
+        );
+    }
+
+    if artifact.transition_public_values.l2PostRoot != metadata.l2_post_root {
         bail!(
             "range proof post root mismatch: expected {:?}, got {:?}",
             metadata.l2_post_root,
-            artifact.boot_info.l2PostRoot
+            artifact.transition_public_values.l2PostRoot
         );
     }
 
-    if artifact.boot_info.l2BlockNumber != metadata.end_block {
+    if artifact.transition_public_values.l2PostBlockNumber != metadata.end_block {
         bail!(
             "range proof block mismatch: expected {}, got {}",
             metadata.end_block,
-            artifact.boot_info.l2BlockNumber
+            artifact.transition_public_values.l2PostBlockNumber
         );
     }
 
-    if artifact.boot_info.rollupConfigHash != metadata.rollup_config_hash {
+    if artifact.transition_public_values.rollupConfigHash != metadata.rollup_config_hash {
         bail!(
             "range proof rollup config hash mismatch: expected {:?}, got {:?}",
             metadata.rollup_config_hash,
-            artifact.boot_info.rollupConfigHash
+            artifact.transition_public_values.rollupConfigHash
         );
     }
 
@@ -304,11 +312,12 @@ mod tests {
 
     fn range_artifact(metadata: &RangeMetadata) -> RangeProofArtifact {
         RangeProofArtifact {
-            boot_info: TransitionPublicValues {
+            transition_public_values: TransitionPublicValues {
                 l1Head: metadata.l1_head,
                 l2PreRoot: metadata.l2_pre_root,
+                l2PreBlockNumber: metadata.start_block,
                 l2PostRoot: metadata.l2_post_root,
-                l2BlockNumber: metadata.end_block,
+                l2PostBlockNumber: metadata.end_block,
                 rollupConfigHash: metadata.rollup_config_hash,
             },
             proof: vec![1, 2, 3],
@@ -334,7 +343,7 @@ mod tests {
     fn range_validation_rejects_post_root_mismatch() {
         let metadata = metadata();
         let mut artifact = range_artifact(&metadata);
-        artifact.boot_info.l2PostRoot = B256::repeat_byte(0x99);
+        artifact.transition_public_values.l2PostRoot = B256::repeat_byte(0x99);
 
         let error = validate_range_artifact(&metadata, &artifact).unwrap_err();
 

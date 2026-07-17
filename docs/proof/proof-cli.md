@@ -413,7 +413,7 @@ world-chain-prover-nitro prove [RPC flags] [--cid <N>] [--pcr0/1/2 <HEX>] [--out
 | `--pcr0 <HEX>` | `PCR0` | — | Expected PCR0 (48-byte hex) — required |
 | `--pcr1 <HEX>` | `PCR1` | — | Expected PCR1 — required |
 | `--pcr2 <HEX>` | `PCR2` | — | Expected PCR2 — required |
-| `--output <FILE>` | — | — | Write JSON artifact (boot info + attestation doc hex) |
+| `--output <FILE>` | — | — | Write JSON artifact (transition public values + attestation doc hex) |
 
 All three of `--pcr0`, `--pcr1`, and `--pcr2` must be provided; providing only a subset is
 an error. PCR values are the hex-encoded 48-byte enclave measurements that identify the
@@ -440,7 +440,7 @@ The output JSON has the shape:
 
 ```json
 {
-  "bootInfo": { "l1Head": "0x...", "l2PreRoot": "0x...", "l2PostRoot": "0x...", "l2BlockNumber": 10000100, "rollupConfigHash": "0x..." },
+  "transitionPublicValues": { "l1Head": "0x...", "l2PreRoot": "0x...", "l2PreBlockNumber": 10000000, "l2PostRoot": "0x...", "l2PostBlockNumber": 10000100, "rollupConfigHash": "0x..." },
   "attestationDoc": "0x<hex-encoded COSE_Sign1 bytes>"
 }
 ```

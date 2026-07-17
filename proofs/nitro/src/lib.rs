@@ -125,21 +125,20 @@ pub struct NitroRangeProofRequest {
     /// the bytes since deserialization happens inside the enclave to keep the witness
     /// inside the attested execution scope.
     pub witness_rkyv: Vec<u8>,
-    /// Optional host-computed boot info that the enclave must match before returning a
-    /// signed boot info struct.
-    pub expected_boot_info: Option<TransitionPublicValues>,
+    /// Optional host-computed public values that the enclave must match before signing.
+    pub expected_transition_public_values: Option<TransitionPublicValues>,
 }
 
 impl NitroRangeProofRequest {
     /// Builds a request by rkyv-serializing the supplied witness data.
     pub fn from_witness_data(
         witness: &WorldRangeWitnessData,
-        expected_boot_info: Option<TransitionPublicValues>,
+        expected_transition_public_values: Option<TransitionPublicValues>,
     ) -> Result<Self, rkyv::rancor::Error> {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(witness)?;
         Ok(Self {
             witness_rkyv: bytes.to_vec(),
-            expected_boot_info,
+            expected_transition_public_values,
         })
     }
 }
@@ -147,36 +146,36 @@ impl NitroRangeProofRequest {
 /// Artifact returned by a Nitro range prover.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NitroRangeProofArtifact {
-    /// OP Succinct-compatible boot info committed by the enclave.
-    pub boot_info: TransitionPublicValues,
+    /// Transition public values committed by the enclave.
+    pub transition_public_values: TransitionPublicValues,
     /// `COSE_Sign1` attestation document bytes returned by the Nitro NSM device.
     ///
-    /// The document's `user_data` field commits to [`protocol::range_user_data`] of the boot
-    /// info, binding the attestation to this specific transition.
+    /// The document's `user_data` field commits to [`protocol::range_user_data`] of the
+    /// transition public values, binding the attestation to this specific transition.
     pub attestation_doc: Vec<u8>,
     /// 65-byte recoverable secp256k1 signature over
-    /// `keccak256(l2_post_root || l2_block_number_be || rollup_config_hash)`.
+    /// `keccak256(l2_post_root || l2_post_block_number_be || rollup_config_hash)`.
     ///
     /// Produced by the enclave's ephemeral signing key, which is certified by the NSM
     /// attestation document. Enables EVM-native on-chain signature recovery.
     pub signature: Vec<u8>,
 }
 
-/// Convenience hash used to bind boot info into the attestation `user_data` field.
+/// Convenience hash used to bind transition public values into the attestation `user_data` field.
 ///
 /// `SHA256(l1_head || l2_pre_root || l2_pre_block_number_be || l2_post_root ||
 /// l2_post_block_number_be || rollup_config_hash)`
 #[must_use]
-pub fn range_user_data(boot_info: &TransitionPublicValues) -> [u8; 32] {
-    protocol::range_user_data(boot_info)
+pub fn range_user_data(transition_public_values: &TransitionPublicValues) -> [u8; 32] {
+    protocol::range_user_data(transition_public_values)
 }
 
 /// Convenience re-export of the enclave signing commitment.
 ///
-/// `keccak256(l2_post_root || l2_block_number_be || rollup_config_hash)`
+/// `keccak256(l2_post_root || l2_post_block_number_be || rollup_config_hash)`
 #[must_use]
-pub fn signing_commitment(boot_info: &TransitionPublicValues) -> [u8; 32] {
-    protocol::signing_commitment(boot_info)
+pub fn signing_commitment(transition_public_values: &TransitionPublicValues) -> [u8; 32] {
+    protocol::signing_commitment(transition_public_values)
 }
 
 /// Re-exports of common host-facing types so callers can do `use world_chain_proof_nitro::*`.
@@ -263,7 +262,7 @@ mod tests {
         }
     }
 
-    fn boot_info() -> TransitionPublicValues {
+    fn transition_public_values() -> TransitionPublicValues {
         TransitionPublicValues {
             l1Head: B256::from([1; 32]),
             l2PreRoot: B256::from([2; 32]),
@@ -275,18 +274,18 @@ mod tests {
     }
 
     #[test]
-    fn range_artifact_user_data_binds_boot_info() {
-        let boot_info = boot_info();
-        let user_data = range_user_data(&boot_info);
+    fn range_artifact_user_data_binds_transition_public_values() {
+        let transition_public_values = transition_public_values();
+        let user_data = range_user_data(&transition_public_values);
         let attestation_doc = make_attestation_doc(&test_pcrs(), &user_data);
 
         let artifact = NitroRangeProofArtifact {
-            boot_info,
+            transition_public_values,
             attestation_doc,
             signature: vec![],
         };
 
-        let expected_user_data = range_user_data(&artifact.boot_info);
+        let expected_user_data = range_user_data(&artifact.transition_public_values);
         parse_and_check_pcrs(
             &artifact.attestation_doc,
             &test_expected_pcrs(),
@@ -296,12 +295,12 @@ mod tests {
     }
 
     #[test]
-    fn tampered_boot_info_fails_user_data_check() {
-        let boot_info = boot_info();
-        let user_data = range_user_data(&boot_info);
+    fn tampered_transition_public_values_fail_user_data_check() {
+        let transition_public_values = transition_public_values();
+        let user_data = range_user_data(&transition_public_values);
         let attestation_doc = make_attestation_doc(&test_pcrs(), &user_data);
 
-        let mut tampered = boot_info;
+        let mut tampered = transition_public_values;
         tampered.l2PostRoot = B256::from([9; 32]);
 
         let expected_user_data = range_user_data(&tampered);
@@ -314,8 +313,8 @@ mod tests {
 
     #[test]
     fn wrong_pcrs_fail_verification() {
-        let boot_info = boot_info();
-        let user_data = range_user_data(&boot_info);
+        let transition_public_values = transition_public_values();
+        let user_data = range_user_data(&transition_public_values);
         // Document carries PCR0 = 0x03; we verify against a different non-zero value.
         let attestation_doc = make_attestation_doc(&test_pcrs(), &user_data);
 
@@ -334,8 +333,8 @@ mod tests {
 
     #[test]
     fn placeholder_pcrs_are_rejected() {
-        let boot_info = boot_info();
-        let user_data = range_user_data(&boot_info);
+        let transition_public_values = transition_public_values();
+        let user_data = range_user_data(&transition_public_values);
         let attestation_doc = make_attestation_doc(&[[0u8; PCR_LEN]; 3], &user_data);
 
         let err = parse_and_check_pcrs(&attestation_doc, &ExpectedPcrs::PLACEHOLDER, &user_data)

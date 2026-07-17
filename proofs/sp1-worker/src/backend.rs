@@ -302,7 +302,7 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         let l1_headers_cbor = serde_cbor::to_vec(&vec![l1_header])?;
 
         Ok(AggregationSessionRequest {
-            boot_infos: vec![range.boot_info.clone()],
+            transition_public_values: vec![range.transition_public_values.clone()],
             latest_l1_checkpoint_head: request.l1_head,
             prover_address: self.config.prover_address,
             l1_headers_cbor,
@@ -338,35 +338,35 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         request: &ProofRequest,
         artifact: &RangeProofArtifact,
     ) -> anyhow::Result<()> {
-        if artifact.boot_info.l2PostRoot != request.root_claim {
+        if artifact.transition_public_values.l2PostRoot != request.root_claim {
             anyhow::bail!(
                 "range proof post root mismatch: expected {:?}, got {:?}",
                 request.root_claim,
-                artifact.boot_info.l2PostRoot,
+                artifact.transition_public_values.l2PostRoot,
             );
         }
 
-        if artifact.boot_info.l2BlockNumber != request.l2_block_number {
+        if artifact.transition_public_values.l2PostBlockNumber != request.l2_block_number {
             anyhow::bail!(
                 "range proof block mismatch: expected {}, got {}",
                 request.l2_block_number,
-                artifact.boot_info.l2BlockNumber,
+                artifact.transition_public_values.l2PostBlockNumber,
             );
         }
 
-        if artifact.boot_info.l1Head != request.l1_head {
+        if artifact.transition_public_values.l1Head != request.l1_head {
             anyhow::bail!(
                 "range proof l1 head mismatch: expected {:?}, got {:?}",
                 request.l1_head,
-                artifact.boot_info.l1Head,
+                artifact.transition_public_values.l1Head,
             );
         }
 
-        if artifact.boot_info.rollupConfigHash != self.host.rollup_config_hash {
+        if artifact.transition_public_values.rollupConfigHash != self.host.rollup_config_hash {
             anyhow::bail!(
                 "range proof rollup config hash mismatch: expected {:?}, got {:?}",
                 self.host.rollup_config_hash,
-                artifact.boot_info.rollupConfigHash,
+                artifact.transition_public_values.rollupConfigHash,
             );
         }
 

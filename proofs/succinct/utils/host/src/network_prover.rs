@@ -126,7 +126,7 @@ impl WorldSuccinctProver for NetworkSuccinctProver {
             Sp1ProofRequest::Aggregation(session_request) => {
                 let agg_request = AggregationProofRequest {
                     inputs: AggregationInputs {
-                        boot_infos: session_request.boot_infos,
+                        transition_public_values: session_request.transition_public_values,
                         latest_l1_checkpoint_head: session_request.latest_l1_checkpoint_head,
                         multi_block_vkey: self.multi_block_vkey,
                         prover_address: session_request.prover_address,

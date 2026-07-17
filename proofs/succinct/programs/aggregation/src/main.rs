@@ -20,25 +20,32 @@ pub fn main() {
     let agg_inputs = sp1_zkvm::io::read::<AggregationInputs>();
     let headers_bytes = sp1_zkvm::io::read_vec();
     let headers: Vec<Header> = serde_cbor::from_slice(&headers_bytes).unwrap();
-    assert!(!agg_inputs.boot_infos.is_empty());
+    assert!(!agg_inputs.transition_public_values.is_empty());
 
-    agg_inputs.boot_infos.windows(2).for_each(|pair| {
-        let (prev_boot_info, boot_info) = (&pair[0], &pair[1]);
-        assert_eq!(prev_boot_info.l2PostRoot, boot_info.l2PreRoot);
-        assert_eq!(prev_boot_info.rollupConfigHash, boot_info.rollupConfigHash);
-    });
+    agg_inputs
+        .transition_public_values
+        .windows(2)
+        .for_each(|pair| {
+            let (previous, current) = (&pair[0], &pair[1]);
+            assert_eq!(previous.l2PostRoot, current.l2PreRoot);
+            assert_eq!(previous.l2PostBlockNumber, current.l2PreBlockNumber);
+            assert_eq!(previous.rollupConfigHash, current.rollupConfigHash);
+        });
 
-    agg_inputs.boot_infos.iter().for_each(|boot_info| {
-        let serialized_boot_info = bincode::serialize(boot_info).unwrap();
-        let pv_digest = Sha256::digest(serialized_boot_info);
+    agg_inputs
+        .transition_public_values
+        .iter()
+        .for_each(|transition_public_values| {
+            let serialized_public_values = bincode::serialize(transition_public_values).unwrap();
+            let pv_digest = Sha256::digest(serialized_public_values);
 
-        sp1_lib::verify::verify_sp1_proof(&agg_inputs.multi_block_vkey, &pv_digest.into());
-    });
+            sp1_lib::verify::verify_sp1_proof(&agg_inputs.multi_block_vkey, &pv_digest.into());
+        });
 
     let mut l1_heads_map: HashMap<B256, bool> = agg_inputs
-        .boot_infos
+        .transition_public_values
         .iter()
-        .map(|boot_info| (boot_info.l1Head, false))
+        .map(|transition_public_values| (transition_public_values.l1Head, false))
         .collect();
 
     let mut current_hash = agg_inputs.latest_l1_checkpoint_head;
@@ -59,23 +66,25 @@ pub fn main() {
         );
     }
 
-    let first_boot_info = &agg_inputs.boot_infos[0];
-    let last_boot_info = &agg_inputs.boot_infos[agg_inputs.boot_infos.len() - 1];
-    let final_boot_info = TransitionPublicValues {
+    let first = &agg_inputs.transition_public_values[0];
+    let last =
+        &agg_inputs.transition_public_values[agg_inputs.transition_public_values.len() - 1];
+    let aggregated_transition_public_values = TransitionPublicValues {
         l1Head: agg_inputs.latest_l1_checkpoint_head,
-        l2PreRoot: first_boot_info.l2PreRoot,
-        l2PostRoot: last_boot_info.l2PostRoot,
-        l2BlockNumber: last_boot_info.l2BlockNumber,
-        rollupConfigHash: last_boot_info.rollupConfigHash,
+        l2PreRoot: first.l2PreRoot,
+        l2PreBlockNumber: first.l2PreBlockNumber,
+        l2PostRoot: last.l2PostRoot,
+        l2PostBlockNumber: last.l2PostBlockNumber,
+        rollupConfigHash: last.rollupConfigHash,
     };
 
     let multi_block_vkey_b256 = B256::from(u32_to_u8(agg_inputs.multi_block_vkey));
     let agg_outputs = AggregationOutputs {
-        l1Head: final_boot_info.l1Head,
-        l2PreRoot: final_boot_info.l2PreRoot,
-        l2PostRoot: final_boot_info.l2PostRoot,
-        l2BlockNumber: final_boot_info.l2BlockNumber,
-        rollupConfigHash: final_boot_info.rollupConfigHash,
+        l1Head: aggregated_transition_public_values.l1Head,
+        l2PreRoot: aggregated_transition_public_values.l2PreRoot,
+        l2PostRoot: aggregated_transition_public_values.l2PostRoot,
+        l2BlockNumber: aggregated_transition_public_values.l2PostBlockNumber,
+        rollupConfigHash: aggregated_transition_public_values.rollupConfigHash,
         multiBlockVKey: multi_block_vkey_b256,
         proverAddress: agg_inputs.prover_address,
     };

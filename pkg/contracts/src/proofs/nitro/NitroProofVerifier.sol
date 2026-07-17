@@ -107,7 +107,7 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
             bytes memory expectedPublicKey
         ) = abi.decode(proof, (bytes32, address, bytes32, uint256, bytes32, bytes32, uint64, bytes, bytes));
 
-        // 1. Bind the proof to the supplied rootId. The boot_info's
+        // 1. Bind the proof to the supplied rootId. The transition public values'
         //    `l2PostRoot` plays the role of `rootClaim` (the proposal's
         //    claimed L2 output root) in WorldChainProofLib.rootId.
         bytes32 expectedRootId = WorldChainProofLib.rootId(
@@ -120,7 +120,7 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
         // compare it against the root claim behind `parentRef` as in the SP1 lane.
 
         // 2. Verify the enclave signature over the signing commitment
-        //    derived from the same boot_info fields.
+        //    derived from the same transition public value fields.
         bytes32 commitment = _signingCommitment(l2PostRoot, l2BlockNumber, rollupConfigHash);
         return _verifyEnclaveSignature(commitment, signature, expectedPublicKey);
     }
@@ -130,7 +130,7 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     //////////////////////////////////////////////////////////////*/
 
     /// @dev Reconstructs the 32-byte commitment the enclave actually signed,
-    ///      matching `signing_commitment(boot_info)` in
+    ///      matching `signing_commitment(transition_public_values)` in
     ///      `proofs/nitro/src/protocol.rs`.
     ///      Layout: `l2PostRoot (32) || uint64BE(l2BlockNumber) (8) ||
     ///      rollupConfigHash (32)`, hashed with keccak256.

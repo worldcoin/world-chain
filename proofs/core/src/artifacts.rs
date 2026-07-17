@@ -7,8 +7,8 @@ use crate::{boot::TransitionPublicValues, types::AggregationOutputs};
 /// Public output and proof bytes returned by a range prover.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RangeProofArtifact {
-    /// OP Succinct-compatible boot info committed by the guest.
-    pub boot_info: TransitionPublicValues,
+    /// Transition public values committed by the guest.
+    pub transition_public_values: TransitionPublicValues,
     /// Serialized proof bytes (SP1 proof or attestation document, depending on backend).
     pub proof: Vec<u8>,
 }

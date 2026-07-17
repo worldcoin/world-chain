@@ -17,7 +17,7 @@
 //!   [`EnclaveRequest::PublicKey`], binding it to the enclave's PCR measurements.
 //!
 //! Every [`EnclaveResponse::Range`] includes a 65-byte recoverable secp256k1 signature over
-//! `keccak256(l2_post_root ‖ l2_block_number_be ‖ rollup_config_hash)`.
+//! `keccak256(l2_post_root ‖ l2_post_block_number_be ‖ rollup_config_hash)`.
 
 use std::sync::{Arc, OnceLock};
 
@@ -146,9 +146,11 @@ fn signing_key() -> &'static SigningKey {
 
 /// Computes the signing commitment and produces a 65-byte recoverable secp256k1 signature.
 ///
-/// Commitment: `keccak256(l2_post_root ‖ l2_block_number_be ‖ rollup_config_hash)`
-fn sign_boot_info(boot_info: &TransitionPublicValues) -> Result<Vec<u8>> {
-    let commitment = protocol::signing_commitment(boot_info);
+/// Commitment: `keccak256(l2_post_root ‖ l2_post_block_number_be ‖ rollup_config_hash)`
+fn sign_transition_public_values(
+    transition_public_values: &TransitionPublicValues,
+) -> Result<Vec<u8>> {
+    let commitment = protocol::signing_commitment(transition_public_values);
 
     let (sig, rec_id) = signing_key()
         .sign_prehash_recoverable(&commitment)
@@ -231,11 +233,11 @@ async fn dispatch(request: EnclaveRequest) -> Result<EnclaveResponse> {
         EnclaveRequest::Range {
             version,
             witness_rkyv,
-            expected_boot_info,
+            expected_transition_public_values,
             nonce,
         } => {
             check_version(version)?;
-            handle_range(witness_rkyv, expected_boot_info, nonce).await
+            handle_range(witness_rkyv, expected_transition_public_values, nonce).await
         }
         EnclaveRequest::PublicKey { nonce } => handle_public_key(nonce),
         EnclaveRequest::GetAttestation => handle_get_attestation(),
@@ -257,7 +259,7 @@ fn check_version(version: u32) -> Result<()> {
 
 async fn handle_range(
     witness_rkyv: Vec<u8>,
-    expected_boot_info: Option<TransitionPublicValues>,
+    expected_transition_public_values: Option<TransitionPublicValues>,
     nonce: [u8; 32],
 ) -> Result<EnclaveResponse> {
     info!(
@@ -275,7 +277,7 @@ async fn handle_range(
         .await
         .map_err(|err| anyhow!("failed to construct oracle/blob provider: {err}"))?;
 
-    let boot_info = run_full_range_program(
+    let transition_public_values = run_full_range_program(
         ETHDAWitnessExecutor::<PreimageStore, BlobStore>::new(),
         oracle,
         beacon,
@@ -283,17 +285,17 @@ async fn handle_range(
     )
     .await?;
 
-    if let Some(expected) = expected_boot_info {
-        ensure_boot_info_matches(&expected, &boot_info)?;
+    if let Some(expected) = expected_transition_public_values {
+        ensure_transition_public_values_match(&expected, &transition_public_values)?;
     }
 
-    let signature = sign_boot_info(&boot_info)?;
+    let signature = sign_transition_public_values(&transition_public_values)?;
 
-    let user_data = protocol::range_user_data(&boot_info);
+    let user_data = protocol::range_user_data(&transition_public_values);
     let attestation_doc = request_attestation_doc(Some(&user_data), &nonce)?;
 
     Ok(EnclaveResponse::Range {
-        boot_info,
+        transition_public_values,
         attestation_doc,
         signature,
     })
@@ -376,18 +378,25 @@ where
     Ok(TransitionPublicValues::try_from_kona_boot_info(
         boot_info,
         &world_schedule,
-        l2_pre_block_number
+        l2_pre_block_number,
     )?)
 }
 
-fn ensure_boot_info_matches(expected: &TransitionPublicValues, actual: &TransitionPublicValues) -> Result<()> {
+fn ensure_transition_public_values_match(
+    expected: &TransitionPublicValues,
+    actual: &TransitionPublicValues,
+) -> Result<()> {
     let mismatches = [
         ("l1Head", expected.l1Head == actual.l1Head),
         ("l2PreRoot", expected.l2PreRoot == actual.l2PreRoot),
+        (
+            "l2PreBlockNumber",
+            expected.l2PreBlockNumber == actual.l2PreBlockNumber,
+        ),
         ("l2PostRoot", expected.l2PostRoot == actual.l2PostRoot),
         (
-            "l2BlockNumber",
-            expected.l2BlockNumber == actual.l2BlockNumber,
+            "l2PostBlockNumber",
+            expected.l2PostBlockNumber == actual.l2PostBlockNumber,
         ),
         (
             "rollupConfigHash",
@@ -396,7 +405,7 @@ fn ensure_boot_info_matches(expected: &TransitionPublicValues, actual: &Transiti
     ];
     if let Some((field, _)) = mismatches.iter().find(|(_, ok)| !ok) {
         return Err(anyhow!(
-            "enclave-derived boot info disagrees with host expectation on {field}"
+            "enclave-derived transition public values disagree with host expectation on {field}"
         ));
     }
     Ok(())

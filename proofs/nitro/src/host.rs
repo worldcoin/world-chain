@@ -131,16 +131,16 @@ impl NitroProver {
         let enclave_request = EnclaveRequest::Range {
             version: PROTOCOL_VERSION,
             witness_rkyv: request.witness_rkyv,
-            expected_boot_info: request.expected_boot_info,
+            expected_transition_public_values: request.expected_transition_public_values,
             nonce,
         };
         let response = self.round_trip(enclave_request).await?;
-        let (boot_info, attestation_doc, signature) = match response {
+        let (transition_public_values, attestation_doc, signature) = match response {
             EnclaveResponse::Range {
-                boot_info,
+                transition_public_values,
                 attestation_doc,
                 signature,
-            } => (boot_info, attestation_doc, signature),
+            } => (transition_public_values, attestation_doc, signature),
             EnclaveResponse::Error { message } => return Err(NitroProverError::Enclave(message)),
             EnclaveResponse::Attestation { .. } => {
                 return Err(NitroProverError::UnexpectedResponse("attestation"));
@@ -156,7 +156,7 @@ impl NitroProver {
         // the enclave's ephemeral public key, so a single AWS-signed document certifies both.
         // Skipped in placeholder / dev mode.
         if !self.expected_pcrs.is_placeholder() {
-            let expected_user_data = protocol::range_user_data(&boot_info);
+            let expected_user_data = protocol::range_user_data(&transition_public_values);
             attestation::parse_check_and_verify(
                 &attestation_doc,
                 &self.expected_pcrs,
@@ -164,7 +164,7 @@ impl NitroProver {
             )?;
             attestation::verify_nonce(&attestation_doc, &nonce)?;
             let certified_pub_key = attestation::extract_nsm_public_key(&attestation_doc)?;
-            verify_proof_signature(&signature, &boot_info, &certified_pub_key)?;
+            verify_proof_signature(&signature, &transition_public_values, &certified_pub_key)?;
         } else {
             warn!(
                 target: "world_chain::nitro",
@@ -173,7 +173,7 @@ impl NitroProver {
         }
 
         Ok(NitroRangeProofArtifact {
-            boot_info,
+            transition_public_values,
             attestation_doc,
             signature,
         })
@@ -181,7 +181,7 @@ impl NitroProver {
 }
 
 /// Verifies the enclave's 65-byte recoverable secp256k1 signature over
-/// `signing_commitment(boot_info)` and checks that the recovered key matches
+/// `signing_commitment(transition_public_values)` and checks that the recovered key matches
 /// `expected_pub_key` (the uncompressed SEC1-encoded public key, `0x04 || X || Y`,
 /// from the key-attestation document).
 ///
@@ -191,7 +191,7 @@ impl NitroProver {
 /// Returns [`NitroProverError::SignatureMismatch`] if the recovered key differs.
 fn verify_proof_signature(
     signature: &[u8],
-    boot_info: &TransitionPublicValues,
+    transition_public_values: &TransitionPublicValues,
     expected_pub_key: &[u8],
 ) -> Result<(), NitroProverError> {
     if signature.len() != 65 {
@@ -200,7 +200,7 @@ fn verify_proof_signature(
             signature.len()
         )));
     }
-    let commitment = protocol::signing_commitment(boot_info);
+    let commitment = protocol::signing_commitment(transition_public_values);
     let sig = K256Signature::from_slice(&signature[..64])
         .map_err(|e| NitroProverError::InvalidSignature(e.to_string()))?;
     // Enclave encodes v as EVM-style (27 or 28); convert back to 0/1 for k256.

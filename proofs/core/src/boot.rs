@@ -88,7 +88,7 @@ struct WorldRollupConfigHashInput<'a, T: Serialize + ?Sized> {
 /// blob hashed here. The resulting `rollupConfigHash` is therefore an implicit
 /// domain separator: a Nitro signature whose payload commits to this hash
 /// cannot be replayed on a different chain id. The on-chain
-/// `NitroProofVerifier.signingCommitment(l2PostRoot, l2BlockNumber,
+/// `NitroProofVerifier.signingCommitment(l2PostRoot, l2PostBlockNumber,
 /// rollupConfigHash)` inherits the same property without needing an explicit
 /// `chainId` field in the commitment.
 pub fn hash_world_rollup_config(
