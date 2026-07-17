@@ -27,9 +27,7 @@
 use clap as _;
 
 use serde::{Deserialize, Serialize};
-use world_chain_proof_core::{
-    boot::BootInfoStruct, range::WorldRangeProofPublicValues, witness::WorldRangeWitnessData,
-};
+use world_chain_proof_core::{boot::BootInfoStruct, witness::WorldRangeWitnessData};
 
 // Used only by the feature-gated `enclave` module; bind with `as _`
 // so the default build doesn't trip `unused_crate_dependencies`.
@@ -127,21 +125,21 @@ pub struct NitroRangeProofRequest {
     /// the bytes since deserialization happens inside the enclave to keep the witness
     /// inside the attested execution scope.
     pub witness_rkyv: Vec<u8>,
-    /// Optional host-computed public values that the enclave must match before returning a
-    /// signed boot info struct. Mirrors `WorldRangeWitness::expected_public_values`.
-    pub expected_public_values: Option<WorldRangeProofPublicValues>,
+    /// Optional host-computed boot info that the enclave must match before returning a
+    /// signed boot info struct.
+    pub expected_boot_info: Option<BootInfoStruct>,
 }
 
 impl NitroRangeProofRequest {
     /// Builds a request by rkyv-serializing the supplied witness data.
     pub fn from_witness_data(
         witness: &WorldRangeWitnessData,
-        expected_public_values: Option<WorldRangeProofPublicValues>,
+        expected_boot_info: Option<BootInfoStruct>,
     ) -> Result<Self, rkyv::rancor::Error> {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(witness)?;
         Ok(Self {
             witness_rkyv: bytes.to_vec(),
-            expected_public_values,
+            expected_boot_info,
         })
     }
 }

@@ -131,7 +131,7 @@ impl NitroProver {
         let enclave_request = EnclaveRequest::Range {
             version: PROTOCOL_VERSION,
             witness_rkyv: request.witness_rkyv,
-            expected_public_values: request.expected_public_values,
+            expected_boot_info: request.expected_boot_info,
             nonce,
         };
         let response = self.round_trip(enclave_request).await?;

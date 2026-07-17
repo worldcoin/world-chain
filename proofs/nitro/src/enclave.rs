@@ -35,7 +35,7 @@ use tracing::{error, info, warn};
 use world_chain_proof_core::{
     BlobStore,
     boot::BootInfoStruct,
-    range::{WorldRangeHardforkConfig, WorldRangeProofPublicValues},
+    range::WorldRangeHardforkConfig,
     witness::{WitnessData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
 use world_chain_proof_kona_client_utils::{
@@ -231,11 +231,11 @@ async fn dispatch(request: EnclaveRequest) -> Result<EnclaveResponse> {
         EnclaveRequest::Range {
             version,
             witness_rkyv,
-            expected_public_values,
+            expected_boot_info,
             nonce,
         } => {
             check_version(version)?;
-            handle_range(witness_rkyv, expected_public_values, nonce).await
+            handle_range(witness_rkyv, expected_boot_info, nonce).await
         }
         EnclaveRequest::PublicKey { nonce } => handle_public_key(nonce),
         EnclaveRequest::GetAttestation => handle_get_attestation(),
@@ -257,7 +257,7 @@ fn check_version(version: u32) -> Result<()> {
 
 async fn handle_range(
     witness_rkyv: Vec<u8>,
-    expected_public_values: Option<WorldRangeProofPublicValues>,
+    expected_boot_info: Option<BootInfoStruct>,
     nonce: [u8; 32],
 ) -> Result<EnclaveResponse> {
     info!(
@@ -283,7 +283,7 @@ async fn handle_range(
     )
     .await?;
 
-    if let Some(expected) = expected_public_values {
+    if let Some(expected) = expected_boot_info {
         ensure_boot_info_matches(&expected, &boot_info)?;
     }
 
@@ -379,27 +379,18 @@ where
     )?)
 }
 
-fn ensure_boot_info_matches(
-    expected: &WorldRangeProofPublicValues,
-    actual: &BootInfoStruct,
-) -> Result<()> {
+fn ensure_boot_info_matches(expected: &BootInfoStruct, actual: &BootInfoStruct) -> Result<()> {
     let mismatches = [
-        ("l1Head", expected.boot_info.l1_head == actual.l1Head),
-        (
-            "l2PreRoot",
-            expected.boot_info.l2_pre_root == actual.l2PreRoot,
-        ),
-        (
-            "l2PostRoot",
-            expected.boot_info.l2_post_root == actual.l2PostRoot,
-        ),
+        ("l1Head", expected.l1Head == actual.l1Head),
+        ("l2PreRoot", expected.l2PreRoot == actual.l2PreRoot),
+        ("l2PostRoot", expected.l2PostRoot == actual.l2PostRoot),
         (
             "l2BlockNumber",
-            expected.boot_info.l2_block_number == actual.l2BlockNumber,
+            expected.l2BlockNumber == actual.l2BlockNumber,
         ),
         (
             "rollupConfigHash",
-            expected.boot_info.rollup_config_hash == actual.rollupConfigHash,
+            expected.rollupConfigHash == actual.rollupConfigHash,
         ),
     ];
     if let Some((field, _)) = mismatches.iter().find(|(_, ok)| !ok) {

@@ -270,7 +270,7 @@ Here is the full journey from "job available" to "proof accepted":
    (`run_full_range_program`), re-deriving the L2 state from L1 data. This produces
    `BootInfo` containing the pre-root, post-root, block number, and rollup config hash.
 
-8. **Optional validation.** If `expected_public_values` were provided, the enclave
+8. **Optional validation.** If `expected_boot_info` was provided, the enclave
    checks that the computed `BootInfo` matches.
 
 9. **Signing commitment computed.** The enclave computes
