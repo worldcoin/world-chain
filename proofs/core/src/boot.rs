@@ -25,7 +25,7 @@ pub fn hash_rollup_config<T: Serialize + ?Sized>(
 }
 
 sol! {
-    /// OP Succinct-compatible range proof public values.
+    /// Range proof public values.
     #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
     struct BootInfoStruct {
         bytes32 l1Head;
