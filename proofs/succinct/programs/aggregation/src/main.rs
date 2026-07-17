@@ -13,7 +13,7 @@ use alloy_sol_types::SolValue;
 use sha2::{Digest, Sha256};
 use world_chain_proof_core::{
     boot::TransitionPublicValues,
-    types::{AggregationInputs, AggregationOutputs, u32_to_u8},
+    types::{AggregationInputs, AggregationPublicValues, u32_to_u8},
 };
 
 pub fn main() {
@@ -79,15 +79,10 @@ pub fn main() {
     };
 
     let multi_block_vkey_b256 = B256::from(u32_to_u8(agg_inputs.multi_block_vkey));
-    let agg_outputs = AggregationOutputs {
-        l1Head: aggregated_transition_public_values.l1Head,
-        l2PreRoot: aggregated_transition_public_values.l2PreRoot,
-        l2PostRoot: aggregated_transition_public_values.l2PostRoot,
-        l2BlockNumber: aggregated_transition_public_values.l2PostBlockNumber,
-        rollupConfigHash: aggregated_transition_public_values.rollupConfigHash,
+    let aggregation_public_values = AggregationPublicValues {
+        transitionPublicValues: aggregated_transition_public_values,
         multiBlockVKey: multi_block_vkey_b256,
-        proverAddress: agg_inputs.prover_address,
     };
 
-    sp1_zkvm::io::commit_slice(&agg_outputs.abi_encode());
+    sp1_zkvm::io::commit_slice(&aggregation_public_values.abi_encode());
 }

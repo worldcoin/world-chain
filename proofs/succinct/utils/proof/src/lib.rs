@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, B256};
+use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
     boot::TransitionPublicValues, types::AggregationInputs, witness::WorldRangeWitnessData,
@@ -61,8 +61,6 @@ pub struct AggregationSessionRequest {
     pub transition_public_values: Vec<TransitionPublicValues>,
     /// Latest L1 checkpoint head committed by the aggregation guest.
     pub latest_l1_checkpoint_head: B256,
-    /// Prover address committed by the aggregation guest for on-chain attribution.
-    pub prover_address: Address,
     /// CBOR-encoded L1 headers, ordered from oldest to newest.
     pub l1_headers_cbor: Vec<u8>,
     /// Serialized compressed SP1 range proofs, ordered to match `transition_public_values`.

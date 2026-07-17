@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use alloy_primitives::{Address, B256};
+use alloy_primitives::B256;
 use alloy_sol_types::SolValue;
 use anyhow::Context;
 use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArtifact};
@@ -29,8 +29,6 @@ pub struct Sp1BackendConfig {
     pub block_interval: u64,
     /// Number of equal-length sub-ranges proved independently before aggregation.
     pub split_count: u64,
-    /// Prover address committed by the aggregation guest for on-chain attribution.
-    pub prover_address: Address,
     /// Allow proving blocks newer than the finalized L2 head.
     pub allow_unfinalized: bool,
     /// Sleep between SP1 prover session status polls while a proof is still running.
@@ -304,7 +302,6 @@ impl<P: WorldSuccinctProver> Sp1Backend<P> {
         Ok(AggregationSessionRequest {
             transition_public_values: vec![range.transition_public_values.clone()],
             latest_l1_checkpoint_head: request.l1_head,
-            prover_address: self.config.prover_address,
             l1_headers_cbor,
             range_proofs: vec![range.proof.clone()],
         })
@@ -385,28 +382,28 @@ enum ArtifactMismatch {
     L1Head { expected: B256, actual: B256 },
 }
 
-/// Checks that the aggregation outputs defend exactly the requested root.
+/// Checks that the aggregation public values defend exactly the requested root.
 fn check_artifact(
     request: &ProofRequest,
     artifact: &AggregationProofArtifact,
 ) -> Result<(), ArtifactMismatch> {
-    let outputs = &artifact.outputs;
-    if outputs.l2PostRoot != request.root_claim {
+    let transition = &artifact.public_values.transitionPublicValues;
+    if transition.l2PostRoot != request.root_claim {
         return Err(ArtifactMismatch::PostRoot {
             expected: request.root_claim,
-            actual: outputs.l2PostRoot,
+            actual: transition.l2PostRoot,
         });
     }
-    if outputs.l2BlockNumber != request.l2_block_number {
+    if transition.l2PostBlockNumber != request.l2_block_number {
         return Err(ArtifactMismatch::BlockNumber {
             expected: request.l2_block_number,
-            actual: outputs.l2BlockNumber,
+            actual: transition.l2PostBlockNumber,
         });
     }
-    if outputs.l1Head != request.l1_head {
+    if transition.l1Head != request.l1_head {
         return Err(ArtifactMismatch::L1Head {
             expected: request.l1_head,
-            actual: outputs.l1Head,
+            actual: transition.l1Head,
         });
     }
     Ok(())
@@ -415,6 +412,6 @@ fn check_artifact(
 fn proof_data_from_aggregation(artifact: AggregationProofArtifact) -> ProofData {
     ProofData::Sp1 {
         proof: artifact.proof.into(),
-        public_values: artifact.outputs.abi_encode().into(),
+        public_values: artifact.public_values.abi_encode().into(),
     }
 }

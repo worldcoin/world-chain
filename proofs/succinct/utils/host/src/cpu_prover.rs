@@ -132,7 +132,6 @@ impl WorldSuccinctProver for CpuSuccinctProver {
                         transition_public_values: session_request.transition_public_values,
                         latest_l1_checkpoint_head: session_request.latest_l1_checkpoint_head,
                         multi_block_vkey: self.multi_block_vkey,
-                        prover_address: session_request.prover_address,
                     },
                     l1_headers_cbor: session_request.l1_headers_cbor,
                     range_proofs: session_request.range_proofs,

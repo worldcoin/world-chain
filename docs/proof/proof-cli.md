@@ -209,7 +209,6 @@ world-chain-prover-sp1 prove [RPC flags] [options]
 | `--ranges <N>` | — | `1` | Number of sub-ranges; currently must be `1` |
 | `--prover <NAME>` | `SP1_PROVER` | `cpu` | `cpu`, `network`, or `mock` |
 | `--mode <NAME>` | — | `groth16` | Aggregation proof mode: `core`, `compressed`, `plonk`, `groth16` |
-| `--prover-address <ADDR>` | — | zero address | On-chain attribution address |
 | `--output <FILE>` | — | — | Write aggregation proof JSON to file |
 
 The range and aggregation ELFs are embedded into the SP1 prover binary at compile time —

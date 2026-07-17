@@ -14,7 +14,7 @@ use strum::EnumString;
 use world_chain_proof_core::{
     artifacts::{AggregationProofArtifact, RangeProofArtifact},
     boot::TransitionPublicValues,
-    types::AggregationOutputs,
+    types::AggregationPublicValues,
 };
 
 #[cfg(feature = "sp1")]
@@ -80,10 +80,10 @@ pub fn range_artifact_from_sp1_proof(
 pub fn aggregation_artifact_from_sp1_proof(
     proof: &SP1ProofWithPublicValues,
 ) -> anyhow::Result<AggregationProofArtifact> {
-    let outputs = <AggregationOutputs as alloy_sol_types::SolValue>::abi_decode(
+    let public_values = <AggregationPublicValues as alloy_sol_types::SolValue>::abi_decode(
         proof.public_values.as_slice(),
     )
-    .context("aggregation outputs abi decoding failed")?;
+    .context("aggregation public values abi decoding failed")?;
 
     // Groth16/Plonk proofs serialize to their on-chain calldata representation; other
     // modes (mock runs, compressed) keep the full sdk proof for offline use.
@@ -93,7 +93,7 @@ pub fn aggregation_artifact_from_sp1_proof(
     };
 
     Ok(AggregationProofArtifact {
-        outputs,
+        public_values,
         proof: proof_bytes,
     })
 }

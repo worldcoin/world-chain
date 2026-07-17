@@ -1,7 +1,7 @@
 use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
 
-use alloy_primitives::{Address, B256};
+use alloy_primitives::B256;
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
@@ -79,10 +79,6 @@ struct Sp1ProveArgs {
     /// Aggregation proof mode.
     #[arg(long, default_value = "groth16")]
     mode: Sp1Mode,
-
-    /// Prover address for on-chain attribution (defaults to zero address).
-    #[arg(long, default_value = "0x0000000000000000000000000000000000000000")]
-    prover_address: Address,
 
     /// Output path for the aggregation proof artifact JSON.
     #[arg(long)]
@@ -182,7 +178,6 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
         l1_head: args.rpc.l1_head,
         allow_unfinalized: args.rpc.allow_unfinalized,
         split_count: args.ranges.max(1),
-        prover_address: args.prover_address,
     };
 
     let artifact = match args.prover {
@@ -206,9 +201,12 @@ async fn sp1_prove(args: Sp1ProveArgs) -> Result<()> {
 
     println!(
         "aggregation proof complete: block {block} pre={pre:?} post={post:?}",
-        block = artifact.outputs.l2BlockNumber,
-        pre = artifact.outputs.l2PreRoot,
-        post = artifact.outputs.l2PostRoot,
+        block = artifact
+            .public_values
+            .transitionPublicValues
+            .l2PostBlockNumber,
+        pre = artifact.public_values.transitionPublicValues.l2PreRoot,
+        post = artifact.public_values.transitionPublicValues.l2PostRoot,
     );
 
     if let Some(path) = args.output {

@@ -5,7 +5,7 @@ use std::time::Duration;
 use crate::{
     WorldSuccinctProver, aggregation_artifact_from_sp1_proof, range_artifact_from_sp1_proof,
 };
-use alloy_primitives::{Address, B256};
+use alloy_primitives::B256;
 use anyhow::{Context, bail};
 use sp1_sdk::SP1ProofWithPublicValues;
 use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArtifact};
@@ -30,8 +30,6 @@ pub struct ValidityProofRequest {
     pub allow_unfinalized: bool,
     /// Number of range proofs to split the request into. Only one is currently supported.
     pub split_count: u64,
-    /// Prover address committed by the aggregation guest.
-    pub prover_address: Address,
 }
 
 struct BuiltRangeRequest {
@@ -76,7 +74,7 @@ where
 
     validate_range_artifact(&range_input.metadata, &range)?;
 
-    let aggregation_request = build_aggregation_request(host, &request, &range)
+    let aggregation_request = build_aggregation_request(host, &range)
         .await
         .context("failed to build aggregation proof request")?;
     let aggregation_session_id = prover
@@ -119,7 +117,6 @@ async fn build_range_request(
 
 async fn build_aggregation_request(
     host: &OnlineHostConfig,
-    request: &ValidityProofRequest,
     range: &RangeProofArtifact,
 ) -> anyhow::Result<AggregationSessionRequest> {
     let l1_head = range.transition_public_values.l1Head;
@@ -132,7 +129,6 @@ async fn build_aggregation_request(
     Ok(AggregationSessionRequest {
         transition_public_values: vec![range.transition_public_values.clone()],
         latest_l1_checkpoint_head: l1_head,
-        prover_address: request.prover_address,
         l1_headers_cbor,
         range_proofs: vec![range.proof.clone()],
     })
@@ -246,43 +242,53 @@ fn validate_aggregation_artifact(
     metadata: &RangeMetadata,
     artifact: &AggregationProofArtifact,
 ) -> anyhow::Result<()> {
-    if artifact.outputs.l2PreRoot != metadata.l2_pre_root {
+    let transition = &artifact.public_values.transitionPublicValues;
+
+    if transition.l2PreRoot != metadata.l2_pre_root {
         bail!(
             "aggregation pre root mismatch: expected {:?}, got {:?}",
             metadata.l2_pre_root,
-            artifact.outputs.l2PreRoot
+            transition.l2PreRoot
         );
     }
 
-    if artifact.outputs.l2PostRoot != metadata.l2_post_root {
+    if transition.l2PreBlockNumber != metadata.start_block {
+        bail!(
+            "aggregation pre block mismatch: expected {}, got {}",
+            metadata.start_block,
+            transition.l2PreBlockNumber
+        );
+    }
+
+    if transition.l2PostRoot != metadata.l2_post_root {
         bail!(
             "aggregation post root mismatch: expected {:?}, got {:?}",
             metadata.l2_post_root,
-            artifact.outputs.l2PostRoot
+            transition.l2PostRoot
         );
     }
 
-    if artifact.outputs.l2BlockNumber != metadata.end_block {
+    if transition.l2PostBlockNumber != metadata.end_block {
         bail!(
             "aggregation block mismatch: expected {}, got {}",
             metadata.end_block,
-            artifact.outputs.l2BlockNumber
+            transition.l2PostBlockNumber
         );
     }
 
-    if artifact.outputs.l1Head != metadata.l1_head {
+    if transition.l1Head != metadata.l1_head {
         bail!(
             "aggregation l1 head mismatch: expected {:?}, got {:?}",
             metadata.l1_head,
-            artifact.outputs.l1Head
+            transition.l1Head
         );
     }
 
-    if artifact.outputs.rollupConfigHash != metadata.rollup_config_hash {
+    if transition.rollupConfigHash != metadata.rollup_config_hash {
         bail!(
             "aggregation rollup config hash mismatch: expected {:?}, got {:?}",
             metadata.rollup_config_hash,
-            artifact.outputs.rollupConfigHash
+            transition.rollupConfigHash
         );
     }
 
@@ -291,8 +297,7 @@ fn validate_aggregation_artifact(
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::Address;
-    use world_chain_proof_core::{boot::TransitionPublicValues, types::AggregationOutputs};
+    use world_chain_proof_core::{boot::TransitionPublicValues, types::AggregationPublicValues};
 
     use super::*;
 
@@ -326,14 +331,16 @@ mod tests {
 
     fn aggregation_artifact(metadata: &RangeMetadata) -> AggregationProofArtifact {
         AggregationProofArtifact {
-            outputs: AggregationOutputs {
-                l1Head: metadata.l1_head,
-                l2PreRoot: metadata.l2_pre_root,
-                l2PostRoot: metadata.l2_post_root,
-                l2BlockNumber: metadata.end_block,
-                rollupConfigHash: metadata.rollup_config_hash,
+            public_values: AggregationPublicValues {
+                transitionPublicValues: TransitionPublicValues {
+                    l1Head: metadata.l1_head,
+                    l2PreRoot: metadata.l2_pre_root,
+                    l2PreBlockNumber: metadata.start_block,
+                    l2PostRoot: metadata.l2_post_root,
+                    l2PostBlockNumber: metadata.end_block,
+                    rollupConfigHash: metadata.rollup_config_hash,
+                },
                 multiBlockVKey: B256::repeat_byte(0x55),
-                proverAddress: Address::ZERO,
             },
             proof: vec![4, 5, 6],
         }
@@ -354,7 +361,7 @@ mod tests {
     fn aggregation_validation_rejects_post_root_mismatch() {
         let metadata = metadata();
         let mut artifact = aggregation_artifact(&metadata);
-        artifact.outputs.l2PostRoot = B256::repeat_byte(0x99);
+        artifact.public_values.transitionPublicValues.l2PostRoot = B256::repeat_byte(0x99);
 
         let error = validate_aggregation_artifact(&metadata, &artifact).unwrap_err();
 
