@@ -359,12 +359,14 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
         invalidationReason = reason;
         invalidatedAt = uint64(block.timestamp);
 
-        if (proposerBond != 0) {
+        uint256 payout = address(this).balance - totalChallengerBonds;
+        if (payout != 0) {
+            // Challenger principal stays claimable through `challengerBonds`; route any remaining balance, including surplus.
             // Only a direct proof timeout is attributable to this proposer; inherited and governance failures refund it.
             if (reason == WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT && challengers.length != 0) {
-                payoutCredits[challengers[0]] += proposerBond;
+                payoutCredits[challengers[0]] += payout;
             } else {
-                payoutCredits[proposer] += proposerBond;
+                payoutCredits[proposer] += payout;
             }
         }
 
@@ -375,7 +377,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
         state = WorldChainProofLib.RootState.FINALIZED;
         finalizedAt = uint64(block.timestamp);
 
-        uint256 payout = proposerBond + totalChallengerBonds;
+        uint256 payout = address(this).balance;
         if (payout != 0) {
             payoutCredits[proposer] += payout;
         }

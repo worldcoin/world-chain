@@ -121,6 +121,20 @@ contract WorldChainProofSystemTest is Test {
         assertEq(game.claimable(challenger), 0);
     }
 
+    function testFinalizationCreditsSurplusEthToProposer() public {
+        (WorldChainProofSystemGame game,) = _propose(10);
+        uint256 surplus = 0.25 ether;
+        vm.prank(keeper);
+        (bool ok,) = address(game).call{value: surplus}("");
+        assertTrue(ok);
+
+        vm.warp(block.timestamp + CHALLENGE_PERIOD);
+        game.resolve();
+
+        _assertWithdraws(game, proposer, PROPOSER_BOND + surplus);
+        assertEq(address(game).balance, 0);
+    }
+
     function testThresholdOneRequiresExplicitSettlementAfterSingleLane() public {
         WorldChainAnchorStateRegistry thresholdAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
         WorldChainProofSystemFactory thresholdOne = _newFactory(thresholdAnchor, 1);
@@ -265,6 +279,10 @@ contract WorldChainProofSystemTest is Test {
         _challenge(game, challenger);
         _challenge(game, secondChallenger);
         anchor.setGameBlacklisted(address(game), true);
+        uint256 surplus = 0.25 ether;
+        vm.prank(keeper);
+        (bool ok,) = address(game).call{value: surplus}("");
+        assertTrue(ok);
 
         uint256 proposerBalance = proposer.balance;
         uint256 firstChallengerBalance = challenger.balance;
@@ -276,9 +294,10 @@ contract WorldChainProofSystemTest is Test {
         assertEq(proposer.balance, proposerBalance);
         assertEq(challenger.balance, firstChallengerBalance);
         assertEq(secondChallenger.balance, secondChallengerBalance);
-        _assertWithdraws(game, proposer, PROPOSER_BOND);
+        _assertWithdraws(game, proposer, PROPOSER_BOND + surplus);
         _assertWithdraws(game, challenger, CHALLENGER_BOND);
         _assertWithdraws(game, secondChallenger, CHALLENGER_BOND);
+        assertEq(address(game).balance, 0);
     }
 
     function testBlacklistedParentInvalidatesChild() public {
@@ -325,6 +344,21 @@ contract WorldChainProofSystemTest is Test {
         _assertWithdraws(game, challenger, CHALLENGER_BOND + PROPOSER_BOND);
         _assertWithdraws(game, secondChallenger, CHALLENGER_BOND);
         assertEq(game.claimable(proposer), 0);
+    }
+
+    function testDirectProofTimeoutCreditsSurplusEthToFirstChallenger() public {
+        (WorldChainProofSystemGame game,) = _proposeAndChallenge(10);
+        _challenge(game, secondChallenger);
+        uint256 surplus = 0.25 ether;
+        vm.deal(address(game), address(game).balance + surplus);
+
+        vm.warp(block.timestamp + PROOF_PERIOD);
+        game.resolve();
+
+        _assertWithdraws(game, challenger, CHALLENGER_BOND + PROPOSER_BOND + surplus);
+        _assertWithdraws(game, secondChallenger, CHALLENGER_BOND);
+        assertEq(game.claimable(proposer), 0);
+        assertEq(address(game).balance, 0);
     }
 
     function testPermissionlessWithdrawPaysRecipientNotCaller() public {
