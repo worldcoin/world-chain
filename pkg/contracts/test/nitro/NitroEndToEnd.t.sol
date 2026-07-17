@@ -7,6 +7,7 @@ import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyReg
 import {NitroProofVerifier, TransitionPublicValues} from "../../src/proofs/nitro/NitroProofVerifier.sol";
 import {INitroAttestationVerifier} from "../../src/proofs/nitro/INitroAttestationVerifier.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
+import {MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
 import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier.sol";
 
 contract EndToEndParentGame {
@@ -60,12 +61,28 @@ contract NitroEndToEndTest is Test {
     Vm.Wallet enclaveWallet;
     bytes enclavePubKey;
     EndToEndParentGame parent;
+    MockProofSystemGame game;
 
     function setUp() public {
         attestationVerifier = new MockNitroAttestationVerifier();
         registry = new NitroEnclaveKeyRegistry(attestationVerifier, owner);
         parent = new EndToEndParentGame(PRE);
         proofVerifier = new NitroProofVerifier(registry, ANCHOR_STATE_REGISTRY);
+        game = new MockProofSystemGame();
+        game.setContext(
+            MockProofSystemGame.Context({
+                rootId: _rootId(POST, BLK),
+                anchorStateRegistry: ANCHOR_STATE_REGISTRY,
+                domainHash: DOMAIN,
+                parentRef: address(parent),
+                startingRootClaim: PRE,
+                startingL2BlockNumber: PRE_BLK,
+                rootClaim: POST,
+                l2BlockNumber: BLK,
+                l1OriginHash: L1H,
+                l1OriginNumber: L1N
+            })
+        );
 
         enclaveWallet = vm.createWallet("enclave-integration");
         enclavePubKey = _uncompressedKey(enclaveWallet.publicKeyX, enclaveWallet.publicKeyY);
@@ -132,6 +149,10 @@ contract NitroEndToEndTest is Test {
         return WorldChainProofLib.rootId(DOMAIN, address(parent), postRoot, uint256(blk), L1H, L1N);
     }
 
+    function _verify(bytes32 rootId, bytes memory proof) internal view returns (bool) {
+        return game.verify(address(proofVerifier), rootId, proof);
+    }
+
     /*//////////////////////////////////////////////////////////////
                               FULL PIPELINE
     //////////////////////////////////////////////////////////////*/
@@ -153,7 +174,7 @@ contract NitroEndToEndTest is Test {
         //    boot-info. The proposer wraps it up into a NitroProofVerifier
         //    proof tuple and submits it to dispute-game resolution.
         bytes memory sig = _signCommitment(enclaveWallet, POST, BLK, CFG);
-        assertTrue(proofVerifier.verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
+        assertTrue(_verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
     }
 
     function test_E2E_RevokeKeyInvalidatesFutureProofs() public {
@@ -161,7 +182,7 @@ contract NitroEndToEndTest is Test {
         bytes memory sig = _signCommitment(enclaveWallet, POST, BLK, CFG);
 
         // Pre-revoke: proof is valid.
-        assertTrue(proofVerifier.verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
+        assertTrue(_verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
 
         // Owner revokes the key (e.g. on compromise).
         vm.prank(owner);
@@ -170,7 +191,7 @@ contract NitroEndToEndTest is Test {
 
         // Same (previously valid) proof MUST now be rejected — the proof
         // verifier consults the registry on every call.
-        assertFalse(proofVerifier.verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
+        assertFalse(_verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
 
         // And the registry must permanently refuse to re-register the key,
         // even via a fresh attestation.
@@ -193,8 +214,8 @@ contract NitroEndToEndTest is Test {
         bytes memory sigA = _signCommitment(enclaveWallet, POST, BLK, CFG);
         bytes memory sigB = _signCommitment(secondWallet, POST, BLK, CFG);
 
-        assertTrue(proofVerifier.verify(_rootId(POST, BLK), _proof(sigA, enclavePubKey, POST, BLK, CFG)));
-        assertTrue(proofVerifier.verify(_rootId(POST, BLK), _proof(sigB, secondPubKey, POST, BLK, CFG)));
+        assertTrue(_verify(_rootId(POST, BLK), _proof(sigA, enclavePubKey, POST, BLK, CFG)));
+        assertTrue(_verify(_rootId(POST, BLK), _proof(sigB, secondPubKey, POST, BLK, CFG)));
     }
 
     function test_E2E_RevokeOneEnclaveDoesNotAffectPeer() public {
@@ -213,15 +234,15 @@ contract NitroEndToEndTest is Test {
 
         bytes memory sigA = _signCommitment(enclaveWallet, POST, BLK, CFG);
         bytes memory sigB = _signCommitment(secondWallet, POST, BLK, CFG);
-        assertFalse(proofVerifier.verify(_rootId(POST, BLK), _proof(sigA, enclavePubKey, POST, BLK, CFG)));
-        assertTrue(proofVerifier.verify(_rootId(POST, BLK), _proof(sigB, secondPubKey, POST, BLK, CFG)));
+        assertFalse(_verify(_rootId(POST, BLK), _proof(sigA, enclavePubKey, POST, BLK, CFG)));
+        assertTrue(_verify(_rootId(POST, BLK), _proof(sigB, secondPubKey, POST, BLK, CFG)));
     }
 
     function test_E2E_UnregisteredKeyFails() public {
         // Skip registration; the proof verifier MUST refuse even a
         // cryptographically-valid signature from an unknown key.
         bytes memory sig = _signCommitment(enclaveWallet, POST, BLK, CFG);
-        assertFalse(proofVerifier.verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
+        assertFalse(_verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
     }
 
     function test_E2E_ProofMustBindToRequestedRootId() public {
@@ -229,6 +250,6 @@ contract NitroEndToEndTest is Test {
         bytes memory sig = _signCommitment(enclaveWallet, POST, BLK, CFG);
 
         // Honest proof but the dispute game asks about a different rootId.
-        assertFalse(proofVerifier.verify(bytes32(uint256(0xdead)), _proof(sig, enclavePubKey, POST, BLK, CFG)));
+        assertFalse(_verify(bytes32(uint256(0xdead)), _proof(sig, enclavePubKey, POST, BLK, CFG)));
     }
 }

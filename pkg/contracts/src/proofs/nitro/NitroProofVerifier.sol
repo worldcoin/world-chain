@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {IWorldChainAnchorStateRegistry} from "../interfaces/IWorldChainAnchorStateRegistry.sol";
 import {IWorldChainProofSystemGame} from "../interfaces/IWorldChainProofSystemGame.sol";
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
 import {WorldChainProofLib} from "../WorldChainProofLib.sol";
@@ -32,7 +31,7 @@ struct TransitionPublicValues {
 ///           remaining context fields supplied in the proof and asserts it
 ///           equals the `rootId` the game is asking about. This binds the
 ///           Nitro signature to the *specific* proposal under dispute.
-///        2. Binds the transition's pre-root to the parent proposal.
+///        2. Binds the proposal transition fields to the calling game's immutable snapshot.
 ///        3. Checks that `expectedPublicKey` is currently registered in
 ///           `NitroEnclaveKeyRegistry`.
 ///        4. Recomputes the signing commitment from all transition public values.
@@ -66,7 +65,7 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     /// @notice Registry of attested enclave keys.
     NitroEnclaveKeyRegistry public immutable registry;
 
-    /// @notice Anchor-state registry used when the proposal parent is the current anchor.
+    /// @notice Anchor-state registry that calling games must belong to.
     address public immutable anchorStateRegistry;
 
     /*//////////////////////////////////////////////////////////////
@@ -74,7 +73,7 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     //////////////////////////////////////////////////////////////*/
 
     /// @param registry_ The Nitro enclave key registry to consult.
-    /// @param anchorStateRegistry_ Anchor-state registry used to resolve anchor parent roots.
+    /// @param anchorStateRegistry_ Anchor-state registry that calling games must belong to.
     constructor(NitroEnclaveKeyRegistry registry_, address anchorStateRegistry_) {
         if (anchorStateRegistry_ == address(0)) revert ZeroAnchorStateRegistry();
 
@@ -102,7 +101,7 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     ///      call so the try/catch in `verify` traps every revert path —
     ///      including a malformed ABI payload — and surfaces it as `false`.
     function verify(bytes32 rootId, bytes calldata proof) external view returns (bool) {
-        try this._decodeAndVerify(rootId, proof) returns (bool ok) {
+        try this._decodeAndVerify(msg.sender, rootId, proof) returns (bool ok) {
             return ok;
         } catch {
             return false;
@@ -113,7 +112,7 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     ///         directly.
     /// @dev External so that `verify` can invoke it via `this.` and trap
     ///      reverts (including the ABI decode revert) in a try/catch.
-    function _decodeAndVerify(bytes32 rootId, bytes calldata proof) external view returns (bool) {
+    function _decodeAndVerify(address gameAddress, bytes32 rootId, bytes calldata proof) external view returns (bool) {
         require(msg.sender == address(this), "internal");
         (
             bytes32 domainHash,
@@ -137,8 +136,8 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
         );
         if (expectedRootId != rootId) return false;
 
-        // 2. Bind the signed pre-root to the proposal's parent.
-        if (transition.l2PreRoot != _parentRootClaim(parentRef)) return false;
+        // 2. Bind the proposal transition fields to the calling game's immutable snapshot.
+        if (!_matchesGame(gameAddress, rootId, domainHash, parentRef, l1OriginNumber, transition)) return false;
 
         // 3. Verify the enclave signature over all transition public values.
         bytes32 commitment = _signingCommitment(transition);
@@ -157,11 +156,22 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
         return keccak256(abi.encode(transition));
     }
 
-    function _parentRootClaim(address parentRef) internal view returns (bytes32) {
-        if (parentRef == anchorStateRegistry) {
-            return IWorldChainAnchorStateRegistry(parentRef).currentRootClaim();
-        }
-        return IWorldChainProofSystemGame(parentRef).rootClaim();
+    function _matchesGame(
+        address gameAddress,
+        bytes32 rootId,
+        bytes32 domainHash,
+        address parentRef,
+        uint256 l1OriginNumber,
+        TransitionPublicValues memory transition
+    ) internal view returns (bool) {
+        IWorldChainProofSystemGame game = IWorldChainProofSystemGame(gameAddress);
+        return game.rootId() == rootId && game.anchorStateRegistry() == anchorStateRegistry
+            && game.domainHash() == domainHash && game.parentRef() == parentRef
+            && game.startingRootClaim() == transition.l2PreRoot
+            && game.startingL2BlockNumber() == uint256(transition.l2PreBlockNumber)
+            && game.rootClaim() == transition.l2PostRoot
+            && game.l2BlockNumber() == uint256(transition.l2PostBlockNumber) && game.l1OriginHash() == transition.l1Head
+            && game.l1OriginNumber() == l1OriginNumber;
     }
 
     /// @dev Checks that `signature` over `commitment` recovers to the address

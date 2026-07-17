@@ -10,6 +10,7 @@ import {
     TransitionPublicValues
 } from "../../src/proofs/sp1/SP1ValidityVerifier.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
+import {MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
 
 contract StubSP1Verifier is ISP1Verifier {
     bool public reject;
@@ -64,6 +65,7 @@ contract SP1ValidityVerifierTest is Test {
     StubAnchorStateRegistry internal anchor;
     StubParentGame internal parent;
     SP1ValidityVerifier internal verifier;
+    MockProofSystemGame internal game;
 
     bytes32 internal constant AGGREGATION_VKEY = bytes32(uint256(0xA66));
     bytes32 internal constant ROLLUP_CONFIG_HASH = keccak256("world-chain-rollup-config");
@@ -87,6 +89,8 @@ contract SP1ValidityVerifierTest is Test {
         verifier = new SP1ValidityVerifier(
             ISP1Verifier(address(sp1)), AGGREGATION_VKEY, ROLLUP_CONFIG_HASH, RANGE_VKEY_COMMITMENT, address(anchor)
         );
+        game = new MockProofSystemGame();
+        _setGameContext(address(parent));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -139,6 +143,27 @@ contract SP1ValidityVerifierTest is Test {
         sp1.setExpectation(AGGREGATION_VKEY, _publicValues(values), SP1_PROOF_BYTES);
     }
 
+    function _setGameContext(address parentRef) internal {
+        game.setContext(
+            MockProofSystemGame.Context({
+                rootId: _rootId(parentRef),
+                anchorStateRegistry: address(anchor),
+                domainHash: DOMAIN_HASH,
+                parentRef: parentRef,
+                startingRootClaim: L2_PRE_ROOT,
+                startingL2BlockNumber: L2_PRE_BLOCK_NUMBER,
+                rootClaim: L2_POST_ROOT,
+                l2BlockNumber: L2_BLOCK_NUMBER,
+                l1OriginHash: L1_ORIGIN_HASH,
+                l1OriginNumber: L1_ORIGIN_NUMBER
+            })
+        );
+    }
+
+    function _verify(bytes32 rootId, bytes memory proof) internal view returns (bool) {
+        return game.verify(address(verifier), rootId, proof);
+    }
+
     /*//////////////////////////////////////////////////////////////
                                CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
@@ -186,16 +211,28 @@ contract SP1ValidityVerifierTest is Test {
         AggregationPublicValues memory outputs = _publicValuesStruct();
         _expectSp1Call(outputs);
 
-        assertTrue(verifier.verify(_rootId(), _proof(outputs)));
+        assertTrue(_verify(_rootId(), _proof(outputs)));
     }
 
     function test_Verify_HappyPath_WithAnchorRegistryParent() public {
+        _setGameContext(address(anchor));
         AggregationPublicValues memory outputs = _publicValuesStruct();
         _expectSp1Call(outputs);
 
         bytes memory proof = _proof(DOMAIN_HASH, address(anchor), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
 
-        assertTrue(verifier.verify(_rootId(address(anchor)), proof));
+        assertTrue(_verify(_rootId(address(anchor)), proof));
+    }
+
+    function test_Verify_UsesGameSnapshotAfterAnchorAdvances() public {
+        _setGameContext(address(anchor));
+        anchor.setCurrentRootClaim(keccak256("new-anchor-root"));
+
+        AggregationPublicValues memory outputs = _publicValuesStruct();
+        _expectSp1Call(outputs);
+        bytes memory proof = _proof(DOMAIN_HASH, address(anchor), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
+
+        assertTrue(_verify(_rootId(address(anchor)), proof));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -203,13 +240,13 @@ contract SP1ValidityVerifierTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function test_Verify_FalseForMalformedOuterProof() public view {
-        assertFalse(verifier.verify(_rootId(), hex"deadbeef"));
+        assertFalse(_verify(_rootId(), hex"deadbeef"));
     }
 
     function test_Verify_FalseForMalformedPublicValues() public view {
         bytes memory proof = abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, hex"deadbeef", SP1_PROOF_BYTES);
 
-        assertFalse(verifier.verify(_rootId(), proof));
+        assertFalse(_verify(_rootId(), proof));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -221,14 +258,14 @@ contract SP1ValidityVerifierTest is Test {
         _expectSp1Call(outputs);
         sp1.setReject(true);
 
-        assertFalse(verifier.verify(_rootId(), _proof(outputs)));
+        assertFalse(_verify(_rootId(), _proof(outputs)));
     }
 
     function test_Verify_FalseWhenUnexpectedProofBytesForwarded() public {
         AggregationPublicValues memory outputs = _publicValuesStruct();
         sp1.setExpectation(AGGREGATION_VKEY, _publicValues(outputs), bytes("unexpected"));
 
-        assertFalse(verifier.verify(_rootId(), _proof(outputs)));
+        assertFalse(_verify(_rootId(), _proof(outputs)));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -239,29 +276,37 @@ contract SP1ValidityVerifierTest is Test {
         AggregationPublicValues memory outputs = _publicValuesStruct();
         outputs.transitionPublicValues.rollupConfigHash = keccak256("wrong-rollup-config");
 
-        assertFalse(verifier.verify(_rootId(), _proof(outputs)));
+        assertFalse(_verify(_rootId(), _proof(outputs)));
     }
 
     function test_Verify_FalseForRangeVKeyMismatch() public view {
         AggregationPublicValues memory outputs = _publicValuesStruct();
         outputs.multiBlockVKey = keccak256("wrong-range-vkey");
 
-        assertFalse(verifier.verify(_rootId(), _proof(outputs)));
+        assertFalse(_verify(_rootId(), _proof(outputs)));
     }
 
     function test_Verify_FalseForParentGamePreRootMismatch() public view {
         AggregationPublicValues memory outputs = _publicValuesStruct();
         outputs.transitionPublicValues.l2PreRoot = keccak256("wrong-pre-root");
 
-        assertFalse(verifier.verify(_rootId(), _proof(outputs)));
+        assertFalse(_verify(_rootId(), _proof(outputs)));
     }
 
-    function test_Verify_FalseForAnchorRegistryPreRootMismatch() public view {
+    function test_Verify_FalseForAnchorRegistryPreRootMismatch() public {
+        _setGameContext(address(anchor));
         AggregationPublicValues memory outputs = _publicValuesStruct();
         outputs.transitionPublicValues.l2PreRoot = keccak256("wrong-pre-root");
         bytes memory proof = _proof(DOMAIN_HASH, address(anchor), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
 
-        assertFalse(verifier.verify(_rootId(address(anchor)), proof));
+        assertFalse(_verify(_rootId(address(anchor)), proof));
+    }
+
+    function test_Verify_FalseForPreBlockNumberMismatch() public view {
+        AggregationPublicValues memory outputs = _publicValuesStruct();
+        outputs.transitionPublicValues.l2PreBlockNumber = L2_PRE_BLOCK_NUMBER + 1;
+
+        assertFalse(_verify(_rootId(), _proof(outputs)));
     }
 
     function test_Verify_FalseForUnreadableParentRef() public view {
@@ -269,7 +314,7 @@ contract SP1ValidityVerifierTest is Test {
         address unreadableParentRef = address(0xBEEF);
         bytes memory proof = _proof(DOMAIN_HASH, unreadableParentRef, L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
 
-        assertFalse(verifier.verify(_rootId(unreadableParentRef), proof));
+        assertFalse(_verify(_rootId(unreadableParentRef), proof));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -280,7 +325,7 @@ contract SP1ValidityVerifierTest is Test {
         AggregationPublicValues memory outputs = _publicValuesStruct();
         _expectSp1Call(outputs);
 
-        assertFalse(verifier.verify(bytes32(uint256(0xdead)), _proof(outputs)));
+        assertFalse(_verify(bytes32(uint256(0xdead)), _proof(outputs)));
     }
 
     function test_Verify_FalseForDomainHashMismatch() public view {
@@ -288,41 +333,41 @@ contract SP1ValidityVerifierTest is Test {
         bytes memory proof =
             _proof(keccak256("wrong-domain"), address(parent), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
 
-        assertFalse(verifier.verify(_rootId(), proof));
+        assertFalse(_verify(_rootId(), proof));
     }
 
     function test_Verify_FalseForParentRefMismatch() public view {
         AggregationPublicValues memory outputs = _publicValuesStruct();
         bytes memory proof = _proof(DOMAIN_HASH, address(0xBAD), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
 
-        assertFalse(verifier.verify(_rootId(), proof));
+        assertFalse(_verify(_rootId(), proof));
     }
 
     function test_Verify_FalseForPostRootMismatch() public view {
         AggregationPublicValues memory outputs = _publicValuesStruct();
         outputs.transitionPublicValues.l2PostRoot = keccak256("wrong-post-root");
 
-        assertFalse(verifier.verify(_rootId(), _proof(outputs)));
+        assertFalse(_verify(_rootId(), _proof(outputs)));
     }
 
     function test_Verify_FalseForBlockNumberMismatch() public view {
         AggregationPublicValues memory outputs = _publicValuesStruct();
         outputs.transitionPublicValues.l2PostBlockNumber = L2_BLOCK_NUMBER + 1;
 
-        assertFalse(verifier.verify(_rootId(), _proof(outputs)));
+        assertFalse(_verify(_rootId(), _proof(outputs)));
     }
 
     function test_Verify_FalseForL1HeadMismatch() public view {
         AggregationPublicValues memory outputs = _publicValuesStruct();
         outputs.transitionPublicValues.l1Head = keccak256("wrong-l1-head");
 
-        assertFalse(verifier.verify(_rootId(), _proof(outputs)));
+        assertFalse(_verify(_rootId(), _proof(outputs)));
     }
 
     function test_Verify_FalseForL1OriginNumberMismatch() public view {
         AggregationPublicValues memory outputs = _publicValuesStruct();
         bytes memory proof = _proof(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER + 1, outputs, SP1_PROOF_BYTES);
 
-        assertFalse(verifier.verify(_rootId(), proof));
+        assertFalse(_verify(_rootId(), proof));
     }
 }

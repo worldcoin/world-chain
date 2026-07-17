@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {IWorldChainAnchorStateRegistry} from "../interfaces/IWorldChainAnchorStateRegistry.sol";
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainProofSystemGame} from "../interfaces/IWorldChainProofSystemGame.sol";
 import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
@@ -69,7 +68,7 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     /// @notice Range-program verification key committed by the aggregation proof.
     bytes32 public immutable rangeVKeyCommitment;
 
-    /// @notice Anchor-state registry used when the proposal parent is the current anchor.
+    /// @notice Anchor-state registry that calling games must belong to.
     address public immutable anchorStateRegistry;
 
     /*//////////////////////////////////////////////////////////////
@@ -119,7 +118,7 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     ///      the try/catch in `verify` traps malformed ABI payloads, invalid
     ///      public values, and SP1 verifier reverts as `false`.
     function verify(bytes32 rootId, bytes calldata proof) external view returns (bool) {
-        try this._decodeAndVerify(rootId, proof) returns (bool ok) {
+        try this._decodeAndVerify(msg.sender, rootId, proof) returns (bool ok) {
             return ok;
         } catch {
             return false;
@@ -130,7 +129,7 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     ///         directly.
     /// @dev External so `verify` can catch every revert path, including ABI
     ///      decode failures and verifier-gateway reverts.
-    function _decodeAndVerify(bytes32 rootId, bytes calldata proof) external view returns (bool) {
+    function _decodeAndVerify(address gameAddress, bytes32 rootId, bytes calldata proof) external view returns (bool) {
         require(msg.sender == address(this), "internal");
 
         (
@@ -157,18 +156,27 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
         );
         if (expectedRootId != rootId) return false;
 
-        // `rootId` commits to the parent reference address, so the SP1 public
-        // values must separately bind the proved pre-root to that parent's root.
-        if (transition.l2PreRoot != _parentRootClaim(parentRef)) return false;
+        if (!_matchesGame(gameAddress, rootId, domainHash, parentRef, l1OriginNumber, transition)) return false;
 
         sp1Verifier.verifyProof(aggregationVKey, publicValues, proofBytes);
         return true;
     }
 
-    function _parentRootClaim(address parentRef) internal view returns (bytes32) {
-        if (parentRef == anchorStateRegistry) {
-            return IWorldChainAnchorStateRegistry(parentRef).currentRootClaim();
-        }
-        return IWorldChainProofSystemGame(parentRef).rootClaim();
+    function _matchesGame(
+        address gameAddress,
+        bytes32 rootId,
+        bytes32 domainHash,
+        address parentRef,
+        uint256 l1OriginNumber,
+        TransitionPublicValues memory transition
+    ) internal view returns (bool) {
+        IWorldChainProofSystemGame game = IWorldChainProofSystemGame(gameAddress);
+        return game.rootId() == rootId && game.anchorStateRegistry() == anchorStateRegistry
+            && game.domainHash() == domainHash && game.parentRef() == parentRef
+            && game.startingRootClaim() == transition.l2PreRoot
+            && game.startingL2BlockNumber() == uint256(transition.l2PreBlockNumber)
+            && game.rootClaim() == transition.l2PostRoot
+            && game.l2BlockNumber() == uint256(transition.l2PostBlockNumber) && game.l1OriginHash() == transition.l1Head
+            && game.l1OriginNumber() == l1OriginNumber;
     }
 }
