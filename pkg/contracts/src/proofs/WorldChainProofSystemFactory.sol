@@ -116,7 +116,14 @@ contract WorldChainProofSystemFactory {
 
         bytes32 key = WorldChainProofLib.proposalKey(domainHash, parentRef, rootClaim, l2BlockNumber);
         address existing = games[key];
-        if (existing != address(0)) revert GameAlreadyExists(key, existing);
+        uint256 attempt;
+        if (existing != address(0)) {
+            IWorldChainProofSystemGame existingGame = IWorldChainProofSystemGame(existing);
+            if (existingGame.state() != IWorldChainProofSystemGame.RootState.INVALIDATED) {
+                revert GameAlreadyExists(key, existing);
+            }
+            attempt = existingGame.attempt() + 1;
+        }
 
         (bytes32 startingRootClaim, uint256 startingL2BlockNumber) = _validateParent(parentRef, l2BlockNumber);
 
@@ -127,7 +134,7 @@ contract WorldChainProofSystemFactory {
                 WorldChainProofSystemGame.ProposalInit({
                     factory: address(this),
                     anchorStateRegistry: address(anchorStateRegistry),
-                    attempt: 0,
+                    attempt: attempt,
                     proposer: msg.sender,
                     parentRef: parentRef,
                     startingRootClaim: startingRootClaim,

@@ -217,6 +217,36 @@ contract WorldChainProofSystemTest is Test {
         factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10);
     }
 
+    function testFactoryAllowsReplacementAttemptAfterInvalidation() public {
+        bytes32 rootClaim = keccak256("retry-root");
+        bytes32 proposalKey = factory.computeProposalKey(address(anchor), rootClaim, 10);
+
+        vm.prank(proposer);
+        (address firstAddress, bytes32 firstRootId) =
+            factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10);
+        WorldChainProofSystemGame first = WorldChainProofSystemGame(payable(firstAddress));
+
+        _challenge(first, challenger);
+        vm.warp(block.timestamp + PROOF_PERIOD);
+        first.invalidate();
+        vm.roll(block.number + 1);
+
+        vm.prank(proposer);
+        (address replacementAddress, bytes32 replacementRootId) =
+            factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10);
+        WorldChainProofSystemGame replacement = WorldChainProofSystemGame(payable(replacementAddress));
+
+        assertNotEq(replacementAddress, firstAddress);
+        assertNotEq(replacementRootId, firstRootId);
+        assertEq(replacement.attempt(), 1);
+        assertEq(factory.games(proposalKey), replacementAddress);
+        assertTrue(factory.isFactoryGame(firstAddress));
+        assertTrue(factory.isFactoryGame(replacementAddress));
+        assertEq(factory.gameCount(), 2);
+        assertEq(factory.gameAt(0), firstAddress);
+        assertEq(factory.gameAt(1), replacementAddress);
+    }
+
     function testFactoryRequiresRegistryInitializationBeforePropose() public {
         WorldChainAnchorStateRegistry uninitializedAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
         WorldChainProofSystemFactory uninitializedFactory =
