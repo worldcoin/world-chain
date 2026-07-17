@@ -11,7 +11,13 @@ interface IWorldChainProofSystemGame {
     }
 
     function rootId() external view returns (bytes32);
+    function factory() external view returns (address);
+    function anchorStateRegistry() external view returns (address);
+    function domainHash() external view returns (bytes32);
+    function attempt() external view returns (uint256);
     function parentRef() external view returns (address);
+    function startingRootClaim() external view returns (bytes32);
+    function startingL2BlockNumber() external view returns (uint256);
     function rootClaim() external view returns (bytes32);
     function l2BlockNumber() external view returns (uint256);
     function state() external view returns (RootState);

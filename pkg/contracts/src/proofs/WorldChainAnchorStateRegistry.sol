@@ -2,20 +2,29 @@
 pragma solidity 0.8.28;
 
 import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
+import {IWorldChainProofSystemFactory} from "./interfaces/IWorldChainProofSystemFactory.sol";
 
 contract WorldChainAnchorStateRegistry {
     error NotOwner();
+    error InvalidFactory(address factory);
+    error FactoryAlreadyInitialized(address factory);
+    error FactoryNotInitialized();
     error RegistryPaused();
     error GameBlacklisted(address game);
+    error InvalidGameFactory(address expectedFactory, address actualFactory);
+    error InvalidGameRegistry(address expectedRegistry, address actualRegistry);
+    error UnregisteredGame(address game);
     error GameNotFinalized(address game);
     error NonMonotonicRoot(uint256 currentL2BlockNumber, uint256 nextL2BlockNumber);
     error InvalidParent(address parentRef);
 
     event AnchorUpdated(address indexed game, bytes32 indexed rootId, bytes32 rootClaim, uint256 l2BlockNumber);
+    event FactoryInitialized(address indexed factory);
     event PausedSet(bool paused);
     event GameBlacklistedSet(address indexed game, bool blacklisted);
 
     address public owner;
+    address public proofSystemFactory;
     bool public paused;
 
     bytes32 public currentRootId;
@@ -42,6 +51,14 @@ contract WorldChainAnchorStateRegistry {
         owner = nextOwner;
     }
 
+    function initializeFactory(address factory) external onlyOwner {
+        if (factory == address(0)) revert InvalidFactory(factory);
+        if (proofSystemFactory != address(0)) revert FactoryAlreadyInitialized(proofSystemFactory);
+
+        proofSystemFactory = factory;
+        emit FactoryInitialized(factory);
+    }
+
     function setPaused(bool nextPaused) external onlyOwner {
         paused = nextPaused;
         emit PausedSet(nextPaused);
@@ -56,7 +73,16 @@ contract WorldChainAnchorStateRegistry {
         if (paused) revert RegistryPaused();
         if (blacklistedGames[game]) revert GameBlacklisted(game);
 
+        address factory = proofSystemFactory;
+        if (factory == address(0)) revert FactoryNotInitialized();
+
         IWorldChainProofSystemGame proofGame = IWorldChainProofSystemGame(game);
+        if (proofGame.factory() != factory) revert InvalidGameFactory(factory, proofGame.factory());
+        if (proofGame.anchorStateRegistry() != address(this)) {
+            revert InvalidGameRegistry(address(this), proofGame.anchorStateRegistry());
+        }
+        if (!IWorldChainProofSystemFactory(factory).isFactoryGame(game)) revert UnregisteredGame(game);
+
         if (proofGame.state() != IWorldChainProofSystemGame.RootState.FINALIZED) {
             revert GameNotFinalized(game);
         }
