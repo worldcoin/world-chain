@@ -194,12 +194,11 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     ///      the caller cannot redirect funds away from `recipient`.
     function withdraw(address payable recipient) external nonReentrant {
         address account = recipient;
-        uint256 credit = payoutCredits[account];
-        uint256 refundablePrincipal = _refundableChallengerPrincipal(account);
-        uint256 amount = credit + refundablePrincipal;
+        uint256 amount = _claimable(account);
         if (amount == 0) revert NoClaim(account);
 
-        if (credit != 0) payoutCredits[account] = 0;
+        uint256 refundablePrincipal = _refundableChallengerPrincipal(account);
+        payoutCredits[account] = 0;
         if (refundablePrincipal != 0) postedChallengerBond = 0;
 
         _transfer(recipient, amount);
@@ -360,6 +359,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
         uint256 balance = address(this).balance;
         if (reason == WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT) {
             payoutCredits[challenger] += balance;
+            // The full-balance credit already includes the challenger bond, so it is no longer separately refundable.
             postedChallengerBond = 0;
         } else {
             uint256 proposerRefund = balance - postedChallengerBond;
@@ -394,8 +394,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     function _refundableChallengerPrincipal(address recipient) internal view returns (uint256) {
         if (state != WorldChainProofLib.RootState.INVALIDATED) return 0;
         if (
-            invalidationReason != WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT
-                && invalidationReason != WorldChainProofLib.InvalidationReason.INVALID_PARENT
+            invalidationReason != WorldChainProofLib.InvalidationReason.INVALID_PARENT
                 && invalidationReason != WorldChainProofLib.InvalidationReason.BLACKLISTED
         ) {
             return 0;
