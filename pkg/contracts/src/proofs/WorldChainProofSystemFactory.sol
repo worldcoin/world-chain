@@ -226,6 +226,7 @@ contract WorldChainProofSystemFactory {
             startingL2BlockNumber = parentGame.l2BlockNumber();
         }
 
+        // TODO(PROTO-4907): Confirm whether proposals require an exact block interval or only a bounded range.
         uint256 expectedL2BlockNumber = startingL2BlockNumber + domain.blockInterval;
         if (l2BlockNumber != expectedL2BlockNumber) {
             revert InvalidL2BlockNumber(expectedL2BlockNumber, l2BlockNumber);
