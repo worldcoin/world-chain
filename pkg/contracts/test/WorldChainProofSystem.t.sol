@@ -47,8 +47,7 @@ contract WorldChainProofSystemTest is Test {
                 chainId: 4801,
                 proofSystemVersion: 1,
                 rollupConfigHash: keccak256("world-chain-devnet-rollup-config"),
-                blockInterval: 10,
-                intermediateBlockInterval: 5
+                blockInterval: 10
             }),
             CHALLENGE_PERIOD,
             PROOF_PERIOD,
@@ -121,9 +120,8 @@ contract WorldChainProofSystemTest is Test {
         WorldChainProofSystemFactory thresholdOne = _thresholdFactory(1);
 
         vm.prank(proposer);
-        (address gameAddress, bytes32 rootId) = thresholdOne.propose{value: PROPOSER_BOND}(
-            address(anchor), keccak256("threshold-one-root"), 10, keccak256("threshold-one-intermediate")
-        );
+        (address gameAddress, bytes32 rootId) =
+            thresholdOne.propose{value: PROPOSER_BOND}(address(anchor), keccak256("threshold-one-root"), 10);
         WorldChainProofSystemGame game = WorldChainProofSystemGame(payable(gameAddress));
         assertEq(game.PROOF_THRESHOLD(), 1);
 
@@ -148,8 +146,7 @@ contract WorldChainProofSystemTest is Test {
                 chainId: 4801,
                 proofSystemVersion: 1,
                 rollupConfigHash: keccak256("world-chain-devnet-rollup-config"),
-                blockInterval: 10,
-                intermediateBlockInterval: 5
+                blockInterval: 10
             }),
             CHALLENGE_PERIOD,
             PROOF_PERIOD,
@@ -210,12 +207,10 @@ contract WorldChainProofSystemTest is Test {
 
     function testFactoryIndexesGamesByProposalKeyWithoutL1Origin() public {
         bytes32 rootClaim = keccak256("root");
-        bytes32 intermediateRootsHash = keccak256("intermediate");
-        bytes32 proposalKey = factory.computeProposalKey(address(anchor), rootClaim, 10, intermediateRootsHash);
+        bytes32 proposalKey = factory.computeProposalKey(address(anchor), rootClaim, 10);
 
         vm.prank(proposer);
-        (address game, bytes32 rootId) =
-            factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10, intermediateRootsHash);
+        (address game, bytes32 rootId) = factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10);
 
         assertEq(factory.games(proposalKey), game);
         assertEq(WorldChainProofSystemGame(payable(game)).rootId(), rootId);
@@ -225,7 +220,7 @@ contract WorldChainProofSystemTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(WorldChainProofSystemFactory.GameAlreadyExists.selector, proposalKey, game)
         );
-        factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10, intermediateRootsHash);
+        factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10);
     }
 
     function testAnchorUpdatesOnlyAcceptFinalizedMonotonicRoots() public {
@@ -265,10 +260,7 @@ contract WorldChainProofSystemTest is Test {
         proposalSalt++;
         vm.prank(proposer);
         (address gameAddress, bytes32 id) = factory.propose{value: PROPOSER_BOND}(
-            address(anchor),
-            keccak256(abi.encode("root", l2BlockNumber, proposalSalt)),
-            l2BlockNumber,
-            keccak256(abi.encode("intermediate", l2BlockNumber, proposalSalt))
+            address(anchor), keccak256(abi.encode("root", l2BlockNumber, proposalSalt)), l2BlockNumber
         );
         return (WorldChainProofSystemGame(payable(gameAddress)), id);
     }

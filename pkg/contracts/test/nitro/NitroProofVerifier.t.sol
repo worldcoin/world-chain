@@ -29,7 +29,6 @@ contract NitroProofVerifierTest is Test {
     // Context fields needed to rebuild rootId.
     bytes32 constant DOMAIN_HASH = keccak256("domain");
     address constant PARENT_REF = address(0xBEEF);
-    bytes32 constant INTERMEDIATE_ROOTS = keccak256("intermediate-roots");
     bytes32 constant L1_ORIGIN_HASH = keccak256("l1-origin");
     uint256 constant L1_ORIGIN_NUMBER = 9_001;
 
@@ -76,28 +75,13 @@ contract NitroProofVerifierTest is Test {
 
     function _expectedRootId() internal pure returns (bytes32) {
         return WorldChainProofLib.rootId(
-            DOMAIN_HASH,
-            PARENT_REF,
-            L2_POST_ROOT,
-            uint256(L2_BLOCK),
-            INTERMEDIATE_ROOTS,
-            L1_ORIGIN_HASH,
-            L1_ORIGIN_NUMBER
+            DOMAIN_HASH, PARENT_REF, L2_POST_ROOT, uint256(L2_BLOCK), L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
         );
     }
 
     function _proofBytes(bytes memory sig, bytes memory pub) internal pure returns (bytes memory) {
         return abi.encode(
-            DOMAIN_HASH,
-            PARENT_REF,
-            INTERMEDIATE_ROOTS,
-            L1_ORIGIN_HASH,
-            L1_ORIGIN_NUMBER,
-            ROLLUP_CFG,
-            L2_POST_ROOT,
-            L2_BLOCK,
-            sig,
-            pub
+            DOMAIN_HASH, PARENT_REF, L1_ORIGIN_HASH, L1_ORIGIN_NUMBER, ROLLUP_CFG, L2_POST_ROOT, L2_BLOCK, sig, pub
         );
     }
 
@@ -130,18 +114,11 @@ contract NitroProofVerifierTest is Test {
         bytes memory sig = _sign(_commitment());
         // Build a proof with a mismatched block number and a matching rootId.
         bytes32 wrongRootId = WorldChainProofLib.rootId(
-            DOMAIN_HASH,
-            PARENT_REF,
-            L2_POST_ROOT,
-            uint256(L2_BLOCK + 1),
-            INTERMEDIATE_ROOTS,
-            L1_ORIGIN_HASH,
-            L1_ORIGIN_NUMBER
+            DOMAIN_HASH, PARENT_REF, L2_POST_ROOT, uint256(L2_BLOCK + 1), L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
         );
         bytes memory proof = abi.encode(
             DOMAIN_HASH,
             PARENT_REF,
-            INTERMEDIATE_ROOTS,
             L1_ORIGIN_HASH,
             L1_ORIGIN_NUMBER,
             ROLLUP_CFG,
@@ -310,15 +287,13 @@ contract NitroProofVerifierTest is Test {
         // Boundary: l2BlockNumber = 0 must work, since the rootId is
         // recomputed deterministically and the commitment is signed over
         // exactly that value.
-        bytes32 rootId = WorldChainProofLib.rootId(
-            DOMAIN_HASH, PARENT_REF, L2_POST_ROOT, 0, INTERMEDIATE_ROOTS, L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
-        );
+        bytes32 rootId =
+            WorldChainProofLib.rootId(DOMAIN_HASH, PARENT_REF, L2_POST_ROOT, 0, L1_ORIGIN_HASH, L1_ORIGIN_NUMBER);
         bytes32 commitment = keccak256(abi.encodePacked(L2_POST_ROOT, uint64(0), ROLLUP_CFG));
         bytes memory sig = _sign(commitment);
         bytes memory proof = abi.encode(
             DOMAIN_HASH,
             PARENT_REF,
-            INTERMEDIATE_ROOTS,
             L1_ORIGIN_HASH,
             L1_ORIGIN_NUMBER,
             ROLLUP_CFG,
@@ -346,7 +321,6 @@ contract NitroProofVerifierTest is Test {
         bytes memory proof = abi.encode(
             DOMAIN_HASH,
             PARENT_REF,
-            INTERMEDIATE_ROOTS,
             L1_ORIGIN_HASH,
             L1_ORIGIN_NUMBER,
             ROLLUP_CFG,

@@ -25,7 +25,6 @@ contract DeployProofSystem is Script {
         uint256 l2ChainId;
         bytes32 rollupConfigHash;
         uint256 blockInterval;
-        uint256 intermediateBlockInterval;
         uint8 proofThreshold;
     }
 
@@ -59,7 +58,6 @@ contract DeployProofSystem is Script {
         config.l2ChainId = vm.envUint("WORLD_CHAIN_L2_CHAIN_ID");
         config.rollupConfigHash = vm.envBytes32("ROLLUP_CONFIG_HASH");
         config.blockInterval = vm.envOr("PROOF_SYSTEM_BLOCK_INTERVAL", uint256(10));
-        config.intermediateBlockInterval = vm.envOr("PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL", uint256(5));
         config.proofThreshold = uint8(vm.envOr("PROOF_THRESHOLD", uint256(WorldChainProofLib.PROOF_THRESHOLD)));
     }
 
@@ -72,8 +70,7 @@ contract DeployProofSystem is Script {
                 chainId: config.l2ChainId,
                 proofSystemVersion: 1,
                 rollupConfigHash: config.rollupConfigHash,
-                blockInterval: config.blockInterval,
-                intermediateBlockInterval: config.intermediateBlockInterval
+                blockInterval: config.blockInterval
             }),
             CHALLENGE_PERIOD,
             PROOF_PERIOD,
@@ -102,8 +99,7 @@ contract DeployProofSystem is Script {
         vm.serializeUint(root, "l2ChainId", config.l2ChainId);
         vm.serializeUint(root, "proofSystemVersion", 1);
         vm.serializeUint(root, "blockInterval", config.blockInterval);
-        vm.serializeUint(root, "proofThreshold", config.proofThreshold);
-        string memory json = vm.serializeUint(root, "intermediateBlockInterval", config.intermediateBlockInterval);
+        string memory json = vm.serializeUint(root, "proofThreshold", config.proofThreshold);
         vm.writeJson(json, out);
     }
 }

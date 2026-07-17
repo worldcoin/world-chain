@@ -27,19 +27,13 @@ library WorldChainProofLib {
         uint256 proofSystemVersion;
         bytes32 rollupConfigHash;
         uint256 blockInterval;
-        uint256 intermediateBlockInterval;
     }
 
     function domainHash(Domain memory domain) internal pure returns (bytes32) {
-        return keccak256(
-            abi.encode(
-                domain.chainId,
-                domain.proofSystemVersion,
-                domain.rollupConfigHash,
-                domain.blockInterval,
-                domain.intermediateBlockInterval
-            )
-        );
+        return
+            keccak256(
+                abi.encode(domain.chainId, domain.proofSystemVersion, domain.rollupConfigHash, domain.blockInterval)
+            );
     }
 
     function rootId(
@@ -47,25 +41,18 @@ library WorldChainProofLib {
         address parentRef,
         bytes32 rootClaim,
         uint256 l2BlockNumber,
-        bytes32 intermediateRootsHash,
         bytes32 l1OriginHash,
         uint256 l1OriginNumber
     ) internal pure returns (bytes32) {
-        return keccak256(
-            abi.encode(
-                domainHash_, parentRef, rootClaim, l2BlockNumber, intermediateRootsHash, l1OriginHash, l1OriginNumber
-            )
-        );
+        return keccak256(abi.encode(domainHash_, parentRef, rootClaim, l2BlockNumber, l1OriginHash, l1OriginNumber));
     }
 
-    function proposalKey(
-        bytes32 domainHash_,
-        address parentRef,
-        bytes32 rootClaim,
-        uint256 l2BlockNumber,
-        bytes32 intermediateRootsHash
-    ) internal pure returns (bytes32) {
-        return keccak256(abi.encode(domainHash_, parentRef, rootClaim, l2BlockNumber, intermediateRootsHash));
+    function proposalKey(bytes32 domainHash_, address parentRef, bytes32 rootClaim, uint256 l2BlockNumber)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(domainHash_, parentRef, rootClaim, l2BlockNumber));
     }
 
     function laneMask(ProofLane lane) internal pure returns (uint8) {

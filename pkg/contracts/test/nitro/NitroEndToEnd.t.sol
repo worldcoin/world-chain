@@ -38,7 +38,6 @@ contract NitroEndToEndTest is Test {
 
     bytes32 constant DOMAIN = keccak256("worldchain-integration");
     address constant PARENT = address(0x1234);
-    bytes32 constant INTER = keccak256("intermediate-roots");
     bytes32 constant L1H = keccak256("l1-origin");
     uint256 constant L1N = 7_777;
     bytes32 constant CFG = keccak256("rollup-cfg");
@@ -84,11 +83,11 @@ contract NitroEndToEndTest is Test {
         pure
         returns (bytes memory)
     {
-        return abi.encode(DOMAIN, PARENT, INTER, L1H, L1N, cfg, postRoot, blk, sig, pub);
+        return abi.encode(DOMAIN, PARENT, L1H, L1N, cfg, postRoot, blk, sig, pub);
     }
 
     function _rootId(bytes32 postRoot, uint64 blk) internal pure returns (bytes32) {
-        return WorldChainProofLib.rootId(DOMAIN, PARENT, postRoot, uint256(blk), INTER, L1H, L1N);
+        return WorldChainProofLib.rootId(DOMAIN, PARENT, postRoot, uint256(blk), L1H, L1N);
     }
 
     /*//////////////////////////////////////////////////////////////
