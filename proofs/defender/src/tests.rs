@@ -229,6 +229,7 @@ impl ProofRequester for MockProver {
             },
             ProofBackend::Nitro => ProofData::Nitro {
                 attestation: Bytes::from_static(b"attestation"),
+                public_values: Bytes::from_static(b"public values"),
                 signature: Bytes::from_static(b"signature"),
             },
         };

@@ -156,7 +156,7 @@ impl NitroProver {
         // the enclave's ephemeral public key, so a single AWS-signed document certifies both.
         // Skipped in placeholder / dev mode.
         if !self.expected_pcrs.is_placeholder() {
-            let expected_user_data = protocol::range_user_data(&transition_public_values);
+            let expected_user_data = protocol::transition_commitment(&transition_public_values);
             attestation::parse_check_and_verify(
                 &attestation_doc,
                 &self.expected_pcrs,
@@ -181,7 +181,7 @@ impl NitroProver {
 }
 
 /// Verifies the enclave's 65-byte recoverable secp256k1 signature over
-/// `signing_commitment(transition_public_values)` and checks that the recovered key matches
+/// `transition_commitment(transition_public_values)` and checks that the recovered key matches
 /// `expected_pub_key` (the uncompressed SEC1-encoded public key, `0x04 || X || Y`,
 /// from the key-attestation document).
 ///
@@ -200,7 +200,7 @@ fn verify_proof_signature(
             signature.len()
         )));
     }
-    let commitment = protocol::signing_commitment(transition_public_values);
+    let commitment = protocol::transition_commitment(transition_public_values);
     let sig = K256Signature::from_slice(&signature[..64])
         .map_err(|e| NitroProverError::InvalidSignature(e.to_string()))?;
     // Enclave encodes v as EVM-style (27 or 28); convert back to 0/1 for k256.

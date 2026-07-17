@@ -8,13 +8,14 @@
 //! program already consumes.
 
 use alloy_primitives::B256;
+use alloy_sol_types::SolValue;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use world_chain_proof_core::boot::TransitionPublicValues;
 
 /// Current protocol version. Bumped whenever the wire format changes incompatibly.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Default vsock port the enclave binary listens on.
 pub const DEFAULT_VSOCK_PORT: u32 = 5005;
@@ -64,8 +65,7 @@ pub enum EnclaveResponse {
         transition_public_values: TransitionPublicValues,
         /// `COSE_Sign1` attestation document bytes from the NSM device.
         attestation_doc: Vec<u8>,
-        /// 65-byte recoverable secp256k1 signature over
-        /// `keccak256(l2_post_root || l2_post_block_number_be || rollup_config_hash)`.
+        /// 65-byte recoverable secp256k1 signature over the ABI-encoded transition public values.
         ///
         /// The signing key is the enclave's ephemeral keypair, whose public key is
         /// certified by the NSM attestation document via [`EnclaveRequest::PublicKey`].
@@ -96,26 +96,6 @@ pub enum EnclaveResponse {
         /// Human-readable error message produced inside the enclave.
         message: String,
     },
-}
-
-/// Computes the 32-byte `user_data` that the enclave embeds in the attestation request when
-/// signing a range proof. Binding this commits the attestation to the exact transition.
-///
-/// `SHA256(l1_head || l2_pre_root || l2_pre_block_number_be || l2_post_root ||
-/// l2_post_block_number_be || rollup_config_hash)`
-#[must_use]
-pub fn range_user_data(transition_public_values: &TransitionPublicValues) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(transition_public_values.l1Head.as_slice());
-    hasher.update(transition_public_values.l2PreRoot.as_slice());
-    hasher.update(transition_public_values.l2PreBlockNumber.to_be_bytes());
-    hasher.update(transition_public_values.l2PostRoot.as_slice());
-    hasher.update(transition_public_values.l2PostBlockNumber.to_be_bytes());
-    hasher.update(transition_public_values.rollupConfigHash.as_slice());
-    let out = hasher.finalize();
-    let mut user_data = [0u8; 32];
-    user_data.copy_from_slice(out.as_slice());
-    user_data
 }
 
 /// Writes a length-prefixed CBOR frame.
@@ -175,20 +155,12 @@ pub enum FrameError {
     FrameTooLarge(usize),
 }
 
-/// Computes the 32-byte commitment the enclave signs with its ephemeral secp256k1 key.
+/// Computes the canonical commitment used for attestation and signing.
 ///
-/// `keccak256(l2_post_root || l2_post_block_number_be || rollup_config_hash)`
-///
-/// Unlike [`range_user_data`] (which uses SHA-256 and includes `l2_pre_root`), this
-/// commitment uses keccak256 for EVM-native verifiability and omits `l2_pre_root` so it
-/// can be reconstructed from only the minimal post-state fields.
+/// `keccak256(abi.encode(TransitionPublicValues))`
 #[must_use]
-pub fn signing_commitment(transition_public_values: &TransitionPublicValues) -> [u8; 32] {
-    let mut buf = Vec::with_capacity(32 + 8 + 32);
-    buf.extend_from_slice(transition_public_values.l2PostRoot.as_slice());
-    buf.extend_from_slice(&transition_public_values.l2PostBlockNumber.to_be_bytes());
-    buf.extend_from_slice(transition_public_values.rollupConfigHash.as_slice());
-    *alloy_primitives::keccak256(&buf)
+pub fn transition_commitment(transition_public_values: &TransitionPublicValues) -> [u8; 32] {
+    *alloy_primitives::keccak256(transition_public_values.abi_encode())
 }
 
 /// Hashes an arbitrary byte slice and returns it as a 32-byte `B256`.
@@ -216,35 +188,44 @@ mod tests {
     }
 
     #[test]
-    fn range_user_data_is_deterministic() {
-        let a = range_user_data(&transition_public_values());
-        let b = range_user_data(&transition_public_values());
+    fn transition_commitment_is_deterministic() {
+        let a = transition_commitment(&transition_public_values());
+        let b = transition_commitment(&transition_public_values());
         assert_eq!(a, b);
     }
 
     #[test]
-    fn range_user_data_depends_on_post_root() {
+    fn transition_commitment_depends_on_post_root() {
         let mut transition_public_values = transition_public_values();
-        let original = range_user_data(&transition_public_values);
+        let original = transition_commitment(&transition_public_values);
         transition_public_values.l2PostRoot = B256::from([9; 32]);
-        let mutated = range_user_data(&transition_public_values);
+        let mutated = transition_commitment(&transition_public_values);
         assert_ne!(original, mutated);
     }
 
     #[test]
-    fn range_user_data_depends_on_l1_head_and_block_numbers() {
-        let original = range_user_data(&transition_public_values());
+    fn transition_commitment_depends_on_l1_head_and_block_numbers() {
+        let original = transition_commitment(&transition_public_values());
 
         let mut changed_l1_head = transition_public_values();
         changed_l1_head.l1Head = B256::from([9; 32]);
-        assert_ne!(original, range_user_data(&changed_l1_head));
+        assert_ne!(original, transition_commitment(&changed_l1_head));
 
         let mut changed_pre_block = transition_public_values();
         changed_pre_block.l2PreBlockNumber += 1;
-        assert_ne!(original, range_user_data(&changed_pre_block));
+        assert_ne!(original, transition_commitment(&changed_pre_block));
 
         let mut changed_post_block = transition_public_values();
         changed_post_block.l2PostBlockNumber += 1;
-        assert_ne!(original, range_user_data(&changed_post_block));
+        assert_ne!(original, transition_commitment(&changed_post_block));
+    }
+
+    #[test]
+    fn transition_commitment_hashes_abi_encoded_public_values() {
+        let values = transition_public_values();
+        assert_eq!(
+            transition_commitment(&values),
+            *alloy_primitives::keccak256(values.abi_encode())
+        );
     }
 }
