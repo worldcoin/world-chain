@@ -15,7 +15,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use world_chain_proof_core::boot::TransitionPublicValues;
 
 /// Current protocol version. Bumped whenever the wire format changes incompatibly.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Default vsock port the enclave binary listens on.
 pub const DEFAULT_VSOCK_PORT: u32 = 5005;
