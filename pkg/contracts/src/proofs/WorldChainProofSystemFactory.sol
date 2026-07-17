@@ -60,6 +60,7 @@ contract WorldChainProofSystemFactory {
 
     mapping(bytes32 proposalKey => address game) public games;
     mapping(address game => bool created) public isFactoryGame;
+    // Lets stateless services reconstruct all games after restart without relying on historical logs.
     address[] private allGames;
 
     constructor(
