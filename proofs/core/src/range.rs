@@ -1,7 +1,5 @@
 //! Shared range-proof public-value types used by all World fault-proof backends.
 
-use crate::boot::BootInfoStruct;
-use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
 
 /// World hardfork activation schedule carried by World range proof inputs.
@@ -209,54 +207,6 @@ impl From<WorldRangeSpecId> for &'static str {
             WorldRangeSpecId::TROPO => "Tropo",
             WorldRangeSpecId::STRATO => "Strato",
         }
-    }
-}
-
-/// Claimed transition proven by the World range program.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorldRangeProofClaim {
-    /// L1 head used for the derivation pipeline.
-    pub l1_head: B256,
-    /// Agreed pre-state output root.
-    pub agreed_l2_output_root: B256,
-    /// Claimed post-state output root.
-    pub claimed_l2_output_root: B256,
-    /// Claimed post-state L2 block number.
-    pub claimed_l2_block_number: u64,
-}
-
-impl WorldRangeProofClaim {
-    /// Converts the claim into OP Succinct-compatible public boot values.
-    pub const fn boot_info(self, rollup_config_hash: B256) -> BootInfoStruct {
-        BootInfoStruct {
-            l1Head: self.l1_head,
-            l2PreRoot: self.agreed_l2_output_root,
-            l2PostRoot: self.claimed_l2_output_root,
-            l2BlockNumber: self.claimed_l2_block_number,
-            rollupConfigHash: rollup_config_hash,
-        }
-    }
-}
-
-/// Input needed to build World public values after executing the range proof.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorldRangeProofInput {
-    /// World hardfork schedule extracted from the rollup config.
-    pub schedule: WorldRangeHardforkConfig,
-    /// Claimed transition.
-    pub claim: WorldRangeProofClaim,
-    /// Timestamp of the claimed post-state L2 block.
-    pub claimed_l2_timestamp: u64,
-    /// Hash of the full rollup config, computed with OP Succinct's hashing method.
-    pub rollup_config_hash: B256,
-}
-
-impl WorldRangeProofInput {
-    /// Builds the concrete public values committed by the range proof.
-    pub const fn boot_info(self) -> BootInfoStruct {
-        self.claim.boot_info(self.rollup_config_hash)
     }
 }
 

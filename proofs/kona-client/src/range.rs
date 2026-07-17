@@ -1,8 +1,6 @@
 use alloy_primitives::{B256, keccak256};
 use serde::{Deserialize, Serialize};
 
-use world_chain_proof_core::{boot::BootInfoStruct, range::WorldRangeProofInput};
-
 /// Data needed to recompute an OP Stack output root for one L2 block.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputRootWitness {
@@ -23,54 +21,5 @@ impl OutputRootWitness {
         preimage[64..96].copy_from_slice(self.message_passer_storage_root.as_slice());
         preimage[96..128].copy_from_slice(self.block_hash.as_slice());
         keccak256(preimage)
-    }
-}
-
-/// Witness shape read by the World range guest.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WorldRangeWitness {
-    /// World proof input used to construct the committed boot values.
-    pub input: WorldRangeProofInput,
-    /// Optional output-root witness for the agreed pre-state.
-    pub pre_state: Option<OutputRootWitness>,
-    /// Optional output-root witness for the claimed post-state.
-    pub post_state: Option<OutputRootWitness>,
-    /// Optional host-computed boot info. When present, the guest checks it before committing.
-    pub expected_boot_info: Option<BootInfoStruct>,
-}
-
-impl WorldRangeWitness {
-    /// Creates a range witness without a separate expected public-value copy.
-    pub const fn new(input: WorldRangeProofInput) -> Self {
-        Self {
-            input,
-            pre_state: None,
-            post_state: None,
-            expected_boot_info: None,
-        }
-    }
-
-    /// Creates a range witness with explicit host-computed boot info to validate.
-    pub const fn with_expected_boot_info(
-        input: WorldRangeProofInput,
-        expected_boot_info: BootInfoStruct,
-    ) -> Self {
-        Self {
-            input,
-            pre_state: None,
-            post_state: None,
-            expected_boot_info: Some(expected_boot_info),
-        }
-    }
-
-    /// Attaches output-root witnesses for the pre/post L2 states.
-    pub fn with_output_root_witnesses(
-        mut self,
-        pre_state: OutputRootWitness,
-        post_state: OutputRootWitness,
-    ) -> Self {
-        self.pre_state = Some(pre_state);
-        self.post_state = Some(post_state);
-        self
     }
 }
