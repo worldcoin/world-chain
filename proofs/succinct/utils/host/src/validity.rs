@@ -284,7 +284,7 @@ fn validate_aggregation_artifact(
 #[cfg(test)]
 mod tests {
     use alloy_primitives::Address;
-    use world_chain_proof_core::{boot::BootInfoStruct, types::AggregationOutputs};
+    use world_chain_proof_core::{boot::TransitionPublicValues, types::AggregationOutputs};
 
     use super::*;
 
@@ -304,7 +304,7 @@ mod tests {
 
     fn range_artifact(metadata: &RangeMetadata) -> RangeProofArtifact {
         RangeProofArtifact {
-            boot_info: BootInfoStruct {
+            boot_info: TransitionPublicValues {
                 l1Head: metadata.l1_head,
                 l2PreRoot: metadata.l2_pre_root,
                 l2PostRoot: metadata.l2_post_root,

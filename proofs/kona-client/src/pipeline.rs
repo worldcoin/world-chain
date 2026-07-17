@@ -1,6 +1,6 @@
 use std::{fmt::Debug, sync::Arc};
 
-use alloy_primitives::Sealed;
+use alloy_primitives::{BlockNumber, Sealed};
 use anyhow::{Result, anyhow};
 use kona_driver::PipelineCursor;
 use kona_executor::TrieDBProvider as _;
@@ -23,6 +23,7 @@ pub async fn get_inputs_for_pipeline<O>(
         OracleL1ChainProvider<O>,
         OracleL2ChainProvider<O>,
     )>,
+    BlockNumber,
 )>
 where
     O: CommsClient + FlushableCache + Send + Sync + Debug,
@@ -46,6 +47,7 @@ where
     let safe_head = l2_provider
         .header_by_hash(safe_head_hash)
         .map(|header| Sealed::new_unchecked(header, safe_head_hash))?;
+    let safe_head_block_number = safe_head.number;
 
     if boot.claimed_l2_block_number < safe_head.number {
         return Err(anyhow!(
@@ -65,5 +67,9 @@ where
     .await?;
     l2_provider.set_cursor(cursor.clone());
 
-    Ok((boot_clone, Some((cursor, l1_provider, l2_provider))))
+    Ok((
+        boot_clone,
+        Some((cursor, l1_provider, l2_provider)),
+        safe_head_block_number,
+    ))
 }

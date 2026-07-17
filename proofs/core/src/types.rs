@@ -4,13 +4,13 @@ use alloy_primitives::{Address, B256};
 use alloy_sol_types::sol;
 use serde::{Deserialize, Serialize};
 
-use crate::boot::BootInfoStruct;
+use crate::boot::TransitionPublicValues;
 
 /// Inputs consumed by the aggregation guest program.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AggregationInputs {
     /// Public values from each range proof being aggregated.
-    pub boot_infos: Vec<BootInfoStruct>,
+    pub boot_infos: Vec<TransitionPublicValues>,
     /// L1 checkpoint head that the supplied header chain must terminate at.
     pub latest_l1_checkpoint_head: B256,
     /// SP1 verifying key for the range proof program.

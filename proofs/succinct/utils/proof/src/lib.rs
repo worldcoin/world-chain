@@ -1,7 +1,7 @@
 use alloy_primitives::{Address, B256};
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
-    boot::BootInfoStruct, types::AggregationInputs, witness::WorldRangeWitnessData,
+    boot::TransitionPublicValues, types::AggregationInputs, witness::WorldRangeWitnessData,
 };
 
 pub use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArtifact};
@@ -57,7 +57,7 @@ pub struct AggregationProofRequest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AggregationSessionRequest {
     /// Boot infos committed by the range proofs being aggregated.
-    pub boot_infos: Vec<BootInfoStruct>,
+    pub boot_infos: Vec<TransitionPublicValues>,
     /// Latest L1 checkpoint head committed by the aggregation guest.
     pub latest_l1_checkpoint_head: B256,
     /// Prover address committed by the aggregation guest for on-chain attribution.

@@ -12,7 +12,7 @@ use alloy_primitives::B256;
 use alloy_sol_types::SolValue;
 use sha2::{Digest, Sha256};
 use world_chain_proof_core::{
-    boot::BootInfoStruct,
+    boot::TransitionPublicValues,
     types::{AggregationInputs, AggregationOutputs, u32_to_u8},
 };
 
@@ -61,7 +61,7 @@ pub fn main() {
 
     let first_boot_info = &agg_inputs.boot_infos[0];
     let last_boot_info = &agg_inputs.boot_infos[agg_inputs.boot_infos.len() - 1];
-    let final_boot_info = BootInfoStruct {
+    let final_boot_info = TransitionPublicValues {
         l1Head: agg_inputs.latest_l1_checkpoint_head,
         l2PreRoot: first_boot_info.l2PreRoot,
         l2PostRoot: last_boot_info.l2PostRoot,

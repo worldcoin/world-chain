@@ -1,15 +1,15 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 //! AWS Nitro TEE-attested prover for the World Chain OP Succinct Lite fault-proof stack.
 //!
-//! The Succinct backend produces ZK proofs of `BootInfoStruct` by re-executing the OP Stack
+//! The Succinct backend produces ZK proofs of `TransitionPublicValues` by re-executing the OP Stack
 //! derivation pipeline inside an SP1 zkVM. This crate offers an alternative trust assumption:
 //! the same derivation pipeline runs unmodified inside an AWS Nitro Enclave, and the resulting
-//! `BootInfoStruct` is attested by the enclave's NSM device. Verifiers check the attestation
+//! `TransitionPublicValues` is attested by the enclave's NSM device. Verifiers check the attestation
 //! document instead of a ZK proof.
 //!
 //! - [`NitroRangeProofRequest`] carries the full rkyv-serialized [`WorldRangeWitnessData`]
 //!   that the enclave needs to drive the derivation pipeline.
-//! - [`NitroRangeProofArtifact`] returns the committed [`BootInfoStruct`] plus the raw
+//! - [`NitroRangeProofArtifact`] returns the committed [`TransitionPublicValues`] plus the raw
 //!   NSM attestation document (`COSE_Sign1` bytes) the host can hand to any verifier.
 //!
 //! Module layout:
@@ -27,7 +27,7 @@
 use clap as _;
 
 use serde::{Deserialize, Serialize};
-use world_chain_proof_core::{boot::BootInfoStruct, witness::WorldRangeWitnessData};
+use world_chain_proof_core::{boot::TransitionPublicValues, witness::WorldRangeWitnessData};
 
 // Used only by the feature-gated `enclave` module; bind with `as _`
 // so the default build doesn't trip `unused_crate_dependencies`.
@@ -116,7 +116,7 @@ impl Default for ExpectedPcrs {
 ///
 /// Unlike the Succinct equivalent, the Nitro prover needs the full execution witness
 /// (preimages, blobs, World fork schedule) because the enclave re-runs the derivation
-/// pipeline end-to-end and only returns an attested `BootInfoStruct`.
+/// pipeline end-to-end and only returns an attested `TransitionPublicValues`.
 #[derive(Clone, Debug)]
 pub struct NitroRangeProofRequest {
     /// rkyv-serialized [`WorldRangeWitnessData`].
@@ -127,14 +127,14 @@ pub struct NitroRangeProofRequest {
     pub witness_rkyv: Vec<u8>,
     /// Optional host-computed boot info that the enclave must match before returning a
     /// signed boot info struct.
-    pub expected_boot_info: Option<BootInfoStruct>,
+    pub expected_boot_info: Option<TransitionPublicValues>,
 }
 
 impl NitroRangeProofRequest {
     /// Builds a request by rkyv-serializing the supplied witness data.
     pub fn from_witness_data(
         witness: &WorldRangeWitnessData,
-        expected_boot_info: Option<BootInfoStruct>,
+        expected_boot_info: Option<TransitionPublicValues>,
     ) -> Result<Self, rkyv::rancor::Error> {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(witness)?;
         Ok(Self {
@@ -148,7 +148,7 @@ impl NitroRangeProofRequest {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NitroRangeProofArtifact {
     /// OP Succinct-compatible boot info committed by the enclave.
-    pub boot_info: BootInfoStruct,
+    pub boot_info: TransitionPublicValues,
     /// `COSE_Sign1` attestation document bytes returned by the Nitro NSM device.
     ///
     /// The document's `user_data` field commits to [`protocol::range_user_data`] of the boot
@@ -164,9 +164,10 @@ pub struct NitroRangeProofArtifact {
 
 /// Convenience hash used to bind boot info into the attestation `user_data` field.
 ///
-/// `SHA256(l2_pre_root || l2_post_root || l2_block_number_be || rollup_config_hash)`
+/// `SHA256(l1_head || l2_pre_root || l2_pre_block_number_be || l2_post_root ||
+/// l2_post_block_number_be || rollup_config_hash)`
 #[must_use]
-pub fn range_user_data(boot_info: &BootInfoStruct) -> [u8; 32] {
+pub fn range_user_data(boot_info: &TransitionPublicValues) -> [u8; 32] {
     protocol::range_user_data(boot_info)
 }
 
@@ -174,7 +175,7 @@ pub fn range_user_data(boot_info: &BootInfoStruct) -> [u8; 32] {
 ///
 /// `keccak256(l2_post_root || l2_block_number_be || rollup_config_hash)`
 #[must_use]
-pub fn signing_commitment(boot_info: &BootInfoStruct) -> [u8; 32] {
+pub fn signing_commitment(boot_info: &TransitionPublicValues) -> [u8; 32] {
     protocol::signing_commitment(boot_info)
 }
 
@@ -191,7 +192,7 @@ pub mod prelude {
 #[cfg(test)]
 mod tests {
     use alloy_primitives::B256;
-    use world_chain_proof_core::boot::BootInfoStruct;
+    use world_chain_proof_core::boot::TransitionPublicValues;
 
     use crate::{
         ExpectedPcrs, NitroRangeProofArtifact, PCR_LEN,
@@ -262,12 +263,13 @@ mod tests {
         }
     }
 
-    fn boot_info() -> BootInfoStruct {
-        BootInfoStruct {
+    fn boot_info() -> TransitionPublicValues {
+        TransitionPublicValues {
             l1Head: B256::from([1; 32]),
             l2PreRoot: B256::from([2; 32]),
+            l2PreBlockNumber: 41,
             l2PostRoot: B256::from([3; 32]),
-            l2BlockNumber: 42,
+            l2PostBlockNumber: 42,
             rollupConfigHash: B256::from([4; 32]),
         }
     }

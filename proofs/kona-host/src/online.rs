@@ -399,7 +399,7 @@ async fn collect_witness_from_channels(
     };
 
     let executor = WorldEthWitnessExecutor::new();
-    let (boot_info, input) = get_inputs_for_pipeline(oracle.clone())
+    let (boot_info, input, _l2_pre_block_number) = get_inputs_for_pipeline(oracle.clone())
         .await
         .map_err(|err| anyhow!("failed to load Kona pipeline inputs: {err:?}"))?;
 

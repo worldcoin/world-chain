@@ -3,7 +3,7 @@
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
 use tokio_vsock::{VsockAddr, VsockStream};
 use tracing::{debug, instrument, warn};
-use world_chain_proof_core::boot::BootInfoStruct;
+use world_chain_proof_core::boot::TransitionPublicValues;
 
 use crate::{
     ExpectedPcrs, NitroRangeProofArtifact, NitroRangeProofRequest,
@@ -191,7 +191,7 @@ impl NitroProver {
 /// Returns [`NitroProverError::SignatureMismatch`] if the recovered key differs.
 fn verify_proof_signature(
     signature: &[u8],
-    boot_info: &BootInfoStruct,
+    boot_info: &TransitionPublicValues,
     expected_pub_key: &[u8],
 ) -> Result<(), NitroProverError> {
     if signature.len() != 65 {

@@ -34,7 +34,7 @@ use tokio_vsock::{VsockAddr, VsockListener, VsockStream};
 use tracing::{error, info, warn};
 use world_chain_proof_core::{
     BlobStore,
-    boot::BootInfoStruct,
+    boot::TransitionPublicValues,
     range::WorldRangeHardforkConfig,
     witness::{WitnessData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
@@ -147,7 +147,7 @@ fn signing_key() -> &'static SigningKey {
 /// Computes the signing commitment and produces a 65-byte recoverable secp256k1 signature.
 ///
 /// Commitment: `keccak256(l2_post_root ‖ l2_block_number_be ‖ rollup_config_hash)`
-fn sign_boot_info(boot_info: &BootInfoStruct) -> Result<Vec<u8>> {
+fn sign_boot_info(boot_info: &TransitionPublicValues) -> Result<Vec<u8>> {
     let commitment = protocol::signing_commitment(boot_info);
 
     let (sig, rec_id) = signing_key()
@@ -257,7 +257,7 @@ fn check_version(version: u32) -> Result<()> {
 
 async fn handle_range(
     witness_rkyv: Vec<u8>,
-    expected_boot_info: Option<BootInfoStruct>,
+    expected_boot_info: Option<TransitionPublicValues>,
     nonce: [u8; 32],
 ) -> Result<EnclaveResponse> {
     info!(
@@ -328,7 +328,7 @@ async fn run_full_range_program<E>(
     oracle: Arc<PreimageStore>,
     beacon: BlobStore,
     world_schedule: WorldRangeHardforkConfig,
-) -> Result<BootInfoStruct>
+) -> Result<TransitionPublicValues>
 where
     E: WitnessExecutor<
             O = PreimageStore,
@@ -338,7 +338,7 @@ where
         > + Send
         + Sync,
 {
-    let (boot_info, input) = get_inputs_for_pipeline(oracle.clone())
+    let (boot_info, input, l2_pre_block_number) = get_inputs_for_pipeline(oracle.clone())
         .await
         .map_err(|err| anyhow!("get_inputs_for_pipeline: {err}"))?;
     let boot_info = match input {
@@ -373,13 +373,14 @@ where
         None => boot_info,
     };
 
-    Ok(BootInfoStruct::try_from_kona_boot_info(
+    Ok(TransitionPublicValues::try_from_kona_boot_info(
         boot_info,
         &world_schedule,
+        l2_pre_block_number
     )?)
 }
 
-fn ensure_boot_info_matches(expected: &BootInfoStruct, actual: &BootInfoStruct) -> Result<()> {
+fn ensure_boot_info_matches(expected: &TransitionPublicValues, actual: &TransitionPublicValues) -> Result<()> {
     let mismatches = [
         ("l1Head", expected.l1Head == actual.l1Head),
         ("l2PreRoot", expected.l2PreRoot == actual.l2PreRoot),
