@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import {WorldChainProofLib} from "./WorldChainProofLib.sol";
 import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
 import {IWorldChainProofSystemFactory} from "./interfaces/IWorldChainProofSystemFactory.sol";
 
@@ -83,7 +84,7 @@ contract WorldChainAnchorStateRegistry {
         }
         if (!IWorldChainProofSystemFactory(factory).isFactoryGame(game)) revert UnregisteredGame(game);
 
-        if (proofGame.state() != IWorldChainProofSystemGame.RootState.FINALIZED) {
+        if (proofGame.state() != WorldChainProofLib.RootState.FINALIZED) {
             revert GameNotFinalized(game);
         }
 

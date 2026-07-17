@@ -52,7 +52,7 @@ contract WorldChainProofSystemTest is Test {
         (WorldChainProofSystemGame game,) = _propose(10);
 
         vm.warp(block.timestamp + CHALLENGE_PERIOD);
-        game.finalize();
+        game.resolve();
 
         assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.FINALIZED));
     }
@@ -111,7 +111,7 @@ contract WorldChainProofSystemTest is Test {
         Vm.Log[] memory logs = vm.getRecordedLogs();
         assertEq(logs.length, 1, "threshold event must only be emitted once");
 
-        game.finalize();
+        game.resolve();
 
         assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.FINALIZED));
     }
@@ -133,7 +133,7 @@ contract WorldChainProofSystemTest is Test {
         assertEq(game.proofCount(), 1);
         assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.CHALLENGED));
 
-        game.finalize();
+        game.resolve();
 
         assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.FINALIZED));
     }
@@ -177,9 +177,141 @@ contract WorldChainProofSystemTest is Test {
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
 
         vm.warp(block.timestamp + PROOF_PERIOD);
-        game.invalidate();
+
+        (bool resolvable, WorldChainProofLib.RootState outcome, WorldChainProofLib.InvalidationReason reason) =
+            game.resolutionStatus();
+        assertTrue(resolvable);
+        assertEq(uint8(outcome), uint8(WorldChainProofLib.RootState.INVALIDATED));
+        assertEq(uint8(reason), uint8(WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT));
+
+        game.resolve();
 
         assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.INVALIDATED));
+        assertEq(uint8(game.invalidationReason()), uint8(WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT));
+    }
+
+    function testResolutionStatusReportsWhenUnchallengedGameBecomesReady() public {
+        (WorldChainProofSystemGame game,) = _propose(10);
+
+        (bool resolvable, WorldChainProofLib.RootState outcome, WorldChainProofLib.InvalidationReason reason) =
+            game.resolutionStatus();
+        assertFalse(resolvable);
+        assertEq(uint8(outcome), uint8(WorldChainProofLib.RootState.PROPOSED));
+        assertEq(uint8(reason), uint8(WorldChainProofLib.InvalidationReason.NONE));
+
+        vm.warp(block.timestamp + CHALLENGE_PERIOD);
+        (resolvable, outcome, reason) = game.resolutionStatus();
+        assertTrue(resolvable);
+        assertEq(uint8(outcome), uint8(WorldChainProofLib.RootState.FINALIZED));
+        assertEq(uint8(reason), uint8(WorldChainProofLib.InvalidationReason.NONE));
+    }
+
+    function testThresholdReadyChildWaitsForParentResolution() public {
+        (WorldChainProofSystemGame parent,) = _propose(10);
+        (WorldChainProofSystemGame child, bytes32 childRootId) = _proposeChild(parent, keccak256("child-root"));
+        _challenge(child, challenger);
+        child.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(childRootId));
+        child.submitProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(childRootId));
+
+        (bool resolvable, WorldChainProofLib.RootState outcome,) = child.resolutionStatus();
+        assertFalse(resolvable);
+        assertEq(uint8(outcome), uint8(WorldChainProofLib.RootState.CHALLENGED));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                WorldChainProofSystemGame.ParentGameNotResolved.selector,
+                address(parent),
+                WorldChainProofLib.RootState.PROPOSED
+            )
+        );
+        child.resolve();
+
+        vm.warp(block.timestamp + CHALLENGE_PERIOD);
+        parent.resolve();
+        child.resolve();
+
+        assertEq(uint8(parent.state()), uint8(WorldChainProofLib.RootState.FINALIZED));
+        assertEq(uint8(child.state()), uint8(WorldChainProofLib.RootState.FINALIZED));
+    }
+
+    function testInvalidParentPropagatesBeforeChildProofTimeout() public {
+        (WorldChainProofSystemGame parent,) = _proposeAndChallenge(10);
+        (WorldChainProofSystemGame child,) = _proposeChild(parent, keccak256("inherited-child"));
+        _challenge(child, secondChallenger);
+
+        vm.warp(block.timestamp + PROOF_PERIOD);
+        parent.resolve();
+
+        uint256 proposerBalance = proposer.balance;
+        uint256 childChallengerBalance = secondChallenger.balance;
+        child.resolve();
+
+        assertEq(uint8(child.state()), uint8(WorldChainProofLib.RootState.INVALIDATED));
+        assertEq(uint8(child.invalidationReason()), uint8(WorldChainProofLib.InvalidationReason.INVALID_PARENT));
+        assertEq(proposer.balance, proposerBalance + PROPOSER_BOND);
+        assertEq(secondChallenger.balance, childChallengerBalance + CHALLENGER_BOND);
+    }
+
+    function testBlacklistInvalidationRefundsAllBonds() public {
+        (WorldChainProofSystemGame parent,) = _propose(10);
+        (WorldChainProofSystemGame game,) = _proposeChild(parent, keccak256("blacklisted-child"));
+        _challenge(game, challenger);
+        _challenge(game, secondChallenger);
+        anchor.setGameBlacklisted(address(game), true);
+
+        uint256 proposerBalance = proposer.balance;
+        uint256 firstChallengerBalance = challenger.balance;
+        uint256 secondChallengerBalance = secondChallenger.balance;
+        game.resolve();
+
+        assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.INVALIDATED));
+        assertEq(uint8(game.invalidationReason()), uint8(WorldChainProofLib.InvalidationReason.BLACKLISTED));
+        assertEq(proposer.balance, proposerBalance + PROPOSER_BOND);
+        assertEq(challenger.balance, firstChallengerBalance + CHALLENGER_BOND);
+        assertEq(secondChallenger.balance, secondChallengerBalance + CHALLENGER_BOND);
+    }
+
+    function testBlacklistedParentInvalidatesChild() public {
+        (WorldChainProofSystemGame parent,) = _propose(10);
+        (WorldChainProofSystemGame child,) = _proposeChild(parent, keccak256("blacklisted-parent-child"));
+        anchor.setGameBlacklisted(address(parent), true);
+
+        child.resolve();
+
+        assertEq(uint8(child.state()), uint8(WorldChainProofLib.RootState.INVALIDATED));
+        assertEq(uint8(child.invalidationReason()), uint8(WorldChainProofLib.InvalidationReason.INVALID_PARENT));
+    }
+
+    function testResolveRevertsWhileGameIsNotReadyAndAfterResolution() public {
+        (WorldChainProofSystemGame game,) = _propose(10);
+
+        vm.expectRevert(WorldChainProofSystemGame.NotReady.selector);
+        game.resolve();
+
+        vm.warp(block.timestamp + CHALLENGE_PERIOD);
+        game.resolve();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                WorldChainProofSystemGame.AlreadyResolved.selector, WorldChainProofLib.RootState.FINALIZED
+            )
+        );
+        game.resolve();
+    }
+
+    function testDirectProofTimeoutRewardsFirstChallenger() public {
+        (WorldChainProofSystemGame game,) = _proposeAndChallenge(10);
+        _challenge(game, secondChallenger);
+        vm.warp(block.timestamp + PROOF_PERIOD);
+
+        uint256 proposerBalance = proposer.balance;
+        uint256 firstChallengerBalance = challenger.balance;
+        uint256 secondChallengerBalance = secondChallenger.balance;
+        game.resolve();
+
+        assertEq(proposer.balance, proposerBalance);
+        assertEq(challenger.balance, firstChallengerBalance + CHALLENGER_BOND + PROPOSER_BOND);
+        assertEq(secondChallenger.balance, secondChallengerBalance + CHALLENGER_BOND);
     }
 
     function testLaneSubmissionAtProofDeadlineReverts() public {
@@ -246,7 +378,7 @@ contract WorldChainProofSystemTest is Test {
 
         _challenge(first, challenger);
         vm.warp(block.timestamp + PROOF_PERIOD);
-        first.invalidate();
+        first.resolve();
         vm.roll(block.number + 1);
 
         vm.prank(proposer);
@@ -263,6 +395,42 @@ contract WorldChainProofSystemTest is Test {
         assertEq(factory.gameCount(), 2);
         assertEq(factory.gameAt(0), firstAddress);
         assertEq(factory.gameAt(1), replacementAddress);
+    }
+
+    function testFactoryRequiresInheritedInvalidationToRebaseOnReplacementParent() public {
+        (WorldChainProofSystemGame parent,) = _proposeAndChallenge(10);
+        bytes32 childRootClaim = keccak256("retry-inherited-child");
+        (WorldChainProofSystemGame child,) = _proposeChild(parent, childRootClaim);
+
+        vm.warp(block.timestamp + PROOF_PERIOD);
+        parent.resolve();
+        child.resolve();
+
+        bytes32 childProposalKey = factory.computeProposalKey(address(parent), childRootClaim, 20);
+        vm.prank(proposer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                WorldChainProofSystemFactory.GameNotRetryable.selector,
+                childProposalKey,
+                address(child),
+                WorldChainProofLib.InvalidationReason.INVALID_PARENT
+            )
+        );
+        factory.propose{value: PROPOSER_BOND}(address(parent), childRootClaim, 20);
+
+        vm.roll(block.number + 1);
+        vm.prank(proposer);
+        (address replacementParentAddress,) =
+            factory.propose{value: PROPOSER_BOND}(address(anchor), parent.rootClaim(), 10);
+
+        vm.prank(proposer);
+        (address rebasedChildAddress,) =
+            factory.propose{value: PROPOSER_BOND}(replacementParentAddress, childRootClaim, 20);
+        WorldChainProofSystemGame rebasedChild = WorldChainProofSystemGame(payable(rebasedChildAddress));
+
+        assertEq(rebasedChild.parentRef(), replacementParentAddress);
+        assertEq(rebasedChild.attempt(), 0);
+        assertNotEq(factory.computeProposalKey(replacementParentAddress, childRootClaim, 20), childProposalKey);
     }
 
     function testFactoryRequiresRegistryInitializationBeforePropose() public {
@@ -348,7 +516,7 @@ contract WorldChainProofSystemTest is Test {
         (WorldChainProofSystemGame invalidated, bytes32 rootId) = _proposeAndChallenge(10);
         invalidated.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
         vm.warp(block.timestamp + PROOF_PERIOD);
-        invalidated.invalidate();
+        invalidated.resolve();
         vm.expectRevert();
         anchor.setAnchorState(address(invalidated));
 
@@ -375,7 +543,7 @@ contract WorldChainProofSystemTest is Test {
         _challenge(game, challenger);
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(rootId));
-        game.finalize();
+        game.resolve();
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -402,11 +570,22 @@ contract WorldChainProofSystemTest is Test {
         _challenge(game, challenger);
     }
 
+    function _proposeChild(WorldChainProofSystemGame parent, bytes32 rootClaim)
+        internal
+        returns (WorldChainProofSystemGame game, bytes32 rootId)
+    {
+        uint256 l2BlockNumber = parent.l2BlockNumber() + 10;
+        vm.prank(proposer);
+        (address gameAddress, bytes32 id) =
+            factory.propose{value: PROPOSER_BOND}(address(parent), rootClaim, l2BlockNumber);
+        return (WorldChainProofSystemGame(payable(gameAddress)), id);
+    }
+
     function _finalizedGame(uint256 l2BlockNumber) internal returns (WorldChainProofSystemGame game, bytes32 rootId) {
         (game, rootId) = _proposeAndChallenge(l2BlockNumber);
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(rootId));
-        game.finalize();
+        game.resolve();
     }
 
     function _challenge(WorldChainProofSystemGame game, address account) internal {

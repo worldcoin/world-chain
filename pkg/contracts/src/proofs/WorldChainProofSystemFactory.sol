@@ -10,6 +10,7 @@ import {IWorldChainStakingRegistry} from "./interfaces/IWorldChainStakingRegistr
 
 contract WorldChainProofSystemFactory {
     error GameAlreadyExists(bytes32 proposalKey, address game);
+    error GameNotRetryable(bytes32 proposalKey, address game, WorldChainProofLib.InvalidationReason invalidationReason);
     error InvalidActivationParameters();
     error RegistryPaused();
     error RegistryFactoryMismatch(address expectedFactory, address actualFactory);
@@ -119,8 +120,14 @@ contract WorldChainProofSystemFactory {
         uint256 attempt;
         if (existing != address(0)) {
             IWorldChainProofSystemGame existingGame = IWorldChainProofSystemGame(existing);
-            if (existingGame.state() != IWorldChainProofSystemGame.RootState.INVALIDATED) {
+            if (existingGame.state() != WorldChainProofLib.RootState.INVALIDATED) {
                 revert GameAlreadyExists(key, existing);
+            }
+
+            WorldChainProofLib.InvalidationReason reason = existingGame.invalidationReason();
+            // Only direct timeouts retry the same transition. Inherited invalidations must rebase on the replacement parent.
+            if (reason != WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT) {
+                revert GameNotRetryable(key, existing, reason);
             }
             attempt = existingGame.attempt() + 1;
         }
@@ -224,8 +231,8 @@ contract WorldChainProofSystemFactory {
                 revert InvalidParent(parentRef);
             }
 
-            IWorldChainProofSystemGame.RootState parentState = parentGame.state();
-            if (parentState == IWorldChainProofSystemGame.RootState.INVALIDATED) {
+            WorldChainProofLib.RootState parentState = parentGame.state();
+            if (parentState == WorldChainProofLib.RootState.INVALIDATED) {
                 revert InvalidParentState(parentRef, WorldChainProofLib.RootState.INVALIDATED);
             }
 
