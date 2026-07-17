@@ -37,18 +37,17 @@ contract WorldChainProofSystemGame {
         IWorldChainStakingRegistry stakingRegistry;
     }
 
-    enum ResolutionBlocker {
-        NONE,
+    enum ResolutionStatus {
         NOT_READY,
+        RESOLVABLE,
         PARENT_NOT_RESOLVED,
         ALREADY_RESOLVED
     }
 
     struct ResolutionEvaluation {
-        bool resolvable;
+        ResolutionStatus status;
         WorldChainProofLib.RootState outcome;
         WorldChainProofLib.InvalidationReason reason;
-        ResolutionBlocker blocker;
         WorldChainProofLib.RootState parentState;
     }
 
@@ -218,7 +217,7 @@ contract WorldChainProofSystemGame {
         returns (bool resolvable, WorldChainProofLib.RootState outcome, WorldChainProofLib.InvalidationReason reason)
     {
         ResolutionEvaluation memory evaluation = _evaluateResolution();
-        return (evaluation.resolvable, evaluation.outcome, evaluation.reason);
+        return (evaluation.status == ResolutionStatus.RESOLVABLE, evaluation.outcome, evaluation.reason);
     }
 
     /// @notice Settles this game after evaluating its blacklist, parent, deadline, and proof-threshold conditions.
@@ -227,11 +226,11 @@ contract WorldChainProofSystemGame {
         returns (WorldChainProofLib.RootState outcome, WorldChainProofLib.InvalidationReason reason)
     {
         ResolutionEvaluation memory evaluation = _evaluateResolution();
-        if (!evaluation.resolvable) {
-            if (evaluation.blocker == ResolutionBlocker.PARENT_NOT_RESOLVED) {
+        if (evaluation.status != ResolutionStatus.RESOLVABLE) {
+            if (evaluation.status == ResolutionStatus.PARENT_NOT_RESOLVED) {
                 revert ParentGameNotResolved(parentRef, evaluation.parentState);
             }
-            if (evaluation.blocker == ResolutionBlocker.ALREADY_RESOLVED) revert AlreadyResolved(state);
+            if (evaluation.status == ResolutionStatus.ALREADY_RESOLVED) revert AlreadyResolved(state);
             revert NotReady();
         }
 
@@ -252,14 +251,14 @@ contract WorldChainProofSystemGame {
         ) {
             evaluation.outcome = currentState;
             evaluation.reason = invalidationReason;
-            evaluation.blocker = ResolutionBlocker.ALREADY_RESOLVED;
+            evaluation.status = ResolutionStatus.ALREADY_RESOLVED;
             return evaluation;
         }
 
         IWorldChainAnchorStateRegistry registry = IWorldChainAnchorStateRegistry(anchorStateRegistry);
         // 1. A governance blacklist invalidates this game before parent or deadline evaluation.
         if (registry.blacklistedGames(address(this))) {
-            evaluation.resolvable = true;
+            evaluation.status = ResolutionStatus.RESOLVABLE;
             evaluation.outcome = WorldChainProofLib.RootState.INVALIDATED;
             evaluation.reason = WorldChainProofLib.InvalidationReason.BLACKLISTED;
             return evaluation;
@@ -271,7 +270,7 @@ contract WorldChainProofSystemGame {
             parentState = WorldChainProofLib.RootState.FINALIZED;
         } else if (registry.blacklistedGames(parentRef)) {
             // 3. A blacklisted parent is invalid, regardless of its stored game state.
-            evaluation.resolvable = true;
+            evaluation.status = ResolutionStatus.RESOLVABLE;
             evaluation.outcome = WorldChainProofLib.RootState.INVALIDATED;
             evaluation.reason = WorldChainProofLib.InvalidationReason.INVALID_PARENT;
             return evaluation;
@@ -282,7 +281,7 @@ contract WorldChainProofSystemGame {
         if (parentState == WorldChainProofLib.RootState.INVALIDATED || parentState == WorldChainProofLib.RootState.NONE)
         {
             // 3. An invalidated or unset parent invalidates its descendant.
-            evaluation.resolvable = true;
+            evaluation.status = ResolutionStatus.RESOLVABLE;
             evaluation.outcome = WorldChainProofLib.RootState.INVALIDATED;
             evaluation.reason = WorldChainProofLib.InvalidationReason.INVALID_PARENT;
             return evaluation;
@@ -290,7 +289,7 @@ contract WorldChainProofSystemGame {
         if (parentState != WorldChainProofLib.RootState.FINALIZED) {
             // 2. A proposed or challenged parent must resolve before its descendant.
             evaluation.outcome = currentState;
-            evaluation.blocker = ResolutionBlocker.PARENT_NOT_RESOLVED;
+            evaluation.status = ResolutionStatus.PARENT_NOT_RESOLVED;
             evaluation.parentState = parentState;
             return evaluation;
         }
@@ -299,30 +298,28 @@ contract WorldChainProofSystemGame {
             if (block.timestamp < challengeDeadline) {
                 // 4. An unchallenged proposal cannot finalize while its challenge window is active.
                 evaluation.outcome = currentState;
-                evaluation.blocker = ResolutionBlocker.NOT_READY;
                 return evaluation;
             }
             // 5. An unchallenged proposal finalizes after its challenge window expires.
-            evaluation.resolvable = true;
+            evaluation.status = ResolutionStatus.RESOLVABLE;
             evaluation.outcome = WorldChainProofLib.RootState.FINALIZED;
             return evaluation;
         }
 
         // 6. A challenged game finalizes as soon as enough independent proof lanes support it.
         if (WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
-            evaluation.resolvable = true;
+            evaluation.status = ResolutionStatus.RESOLVABLE;
             evaluation.outcome = WorldChainProofLib.RootState.FINALIZED;
             return evaluation;
         }
         if (block.timestamp < proofDeadline) {
             // 7. A challenged game below threshold waits while its proof window is active.
             evaluation.outcome = currentState;
-            evaluation.blocker = ResolutionBlocker.NOT_READY;
             return evaluation;
         }
 
         // 8. A challenged game below threshold times out once its proof window expires.
-        evaluation.resolvable = true;
+        evaluation.status = ResolutionStatus.RESOLVABLE;
         evaluation.outcome = WorldChainProofLib.RootState.INVALIDATED;
         evaluation.reason = WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT;
     }
