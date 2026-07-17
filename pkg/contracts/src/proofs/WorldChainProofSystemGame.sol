@@ -391,6 +391,8 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
         return payoutCredits[recipient] + _refundableChallengerPrincipal(recipient);
     }
 
+    /// @dev Proof timeout credits the full balance to the challenger, so only inherited or governance invalidations
+    ///      refund the challenger bond separately.
     function _refundableChallengerPrincipal(address recipient) internal view returns (uint256) {
         if (state != WorldChainProofLib.RootState.INVALIDATED) return 0;
         if (
