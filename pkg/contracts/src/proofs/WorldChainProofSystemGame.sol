@@ -339,6 +339,7 @@ contract WorldChainProofSystemGame {
         }
 
         uint256 forfeited = address(this).balance;
+        // TODO: Confirm that INVALID_PARENT and BLACKLISTED should refund the proposer bond as currently specified.
         // Only a direct proof timeout is attributable to this proposer; inherited and governance failures refund it.
         if (forfeited != 0 && reason == WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT && challengers.length != 0)
         {
