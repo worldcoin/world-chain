@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 
 import {WorldChainAnchorStateRegistry} from "../src/proofs/WorldChainAnchorStateRegistry.sol";
 import {WorldChainProofLib} from "../src/proofs/WorldChainProofLib.sol";
@@ -92,17 +93,29 @@ contract WorldChainProofSystemTest is Test {
         assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.CHALLENGED));
     }
 
-    function testProposerDefendsWithTwoDistinctLanes() public {
+    function testProofThresholdDoesNotFinalizeUntilSettlement() public {
         (WorldChainProofSystemGame game, bytes32 rootId) = _proposeAndChallenge(10);
 
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
+
+        vm.expectEmit(true, false, false, true);
+        emit WorldChainProofSystemGame.ProofThresholdReached(rootId, 3);
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(rootId));
 
         assertEq(game.proofCount(), 2);
+        assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.CHALLENGED));
+
+        vm.recordLogs();
+        game.submitProofLane(uint8(WorldChainProofLib.ProofLane.SECURITY_COUNCIL), abi.encode(rootId));
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        assertEq(logs.length, 1, "threshold event must only be emitted once");
+
+        game.finalize();
+
         assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.FINALIZED));
     }
 
-    function testThresholdOneFinalizesWithSingleLane() public {
+    function testThresholdOneRequiresExplicitSettlementAfterSingleLane() public {
         WorldChainAnchorStateRegistry thresholdAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
         WorldChainProofSystemFactory thresholdOne = _newFactory(thresholdAnchor, 1);
         thresholdAnchor.initializeFactory(address(thresholdOne));
@@ -117,6 +130,10 @@ contract WorldChainProofSystemTest is Test {
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
 
         assertEq(game.proofCount(), 1);
+        assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.CHALLENGED));
+
+        game.finalize();
+
         assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.FINALIZED));
     }
 
@@ -357,6 +374,7 @@ contract WorldChainProofSystemTest is Test {
         _challenge(game, challenger);
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(rootId));
+        game.finalize();
 
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -387,6 +405,7 @@ contract WorldChainProofSystemTest is Test {
         (game, rootId) = _proposeAndChallenge(l2BlockNumber);
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(rootId));
+        game.finalize();
     }
 
     function _challenge(WorldChainProofSystemGame game, address account) internal {
