@@ -114,7 +114,7 @@ async fn nitro_prove(args: NitroArgs) -> Result<()> {
         ExpectedPcrs, NitroRangeProofRequest,
         attestation::parse_and_check_pcrs,
         host::{EnclaveEndpoint, NitroProver},
-        protocol::range_user_data,
+        protocol::transition_commitment,
     };
     use world_chain_prover::{build_range_input_from_args, write_json};
 
@@ -156,12 +156,12 @@ async fn nitro_prove(args: NitroArgs) -> Result<()> {
 
     println!(
         "enclave returned: l2_pre={pre:?} l2_post={post:?} block={block}",
-        pre = artifact.boot_info.l2PreRoot,
-        post = artifact.boot_info.l2PostRoot,
-        block = artifact.boot_info.l2BlockNumber,
+        pre = artifact.transition_public_values.l2PreRoot,
+        post = artifact.transition_public_values.l2PostRoot,
+        block = artifact.transition_public_values.l2PostBlockNumber,
     );
 
-    let expected_user_data = range_user_data(&artifact.boot_info);
+    let expected_user_data = transition_commitment(&artifact.transition_public_values);
     parse_and_check_pcrs(
         &artifact.attestation_doc,
         &expected_pcrs,
@@ -170,13 +170,16 @@ async fn nitro_prove(args: NitroArgs) -> Result<()> {
     .map_err(|e| anyhow!("attestation verification failed: {e}"))?;
 
     println!("attestation verified OK");
-    println!("{}", serde_json::to_string_pretty(&artifact.boot_info)?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&artifact.transition_public_values)?
+    );
 
     if let Some(output) = args.output {
         write_json(
             &output,
             &serde_json::json!({
-                "bootInfo": artifact.boot_info,
+                "transitionPublicValues": artifact.transition_public_values,
                 "attestationDoc": format!("0x{}", hex::encode(&artifact.attestation_doc)),
             }),
         )?;

@@ -16,13 +16,14 @@
 //!  │  NitroProver::prove_range  ────────────► Nitro Enclave                              │
 //!  │       │                                  (vsock / PCR-pinned)                       │
 //!  │       ▼                                                                              │
-//!  │  prover_submitProof(Nitro { attestation, signature })                               │
+//!  │  prover_submitProof(Nitro { attestation, public_values, signature })                │
 //!  └──────────────────────────────────────────────────────────────────────────────────────┘
 //! ```
 
 #![cfg(target_os = "linux")]
 
 use alloy_primitives::Bytes;
+use alloy_sol_types::SolValue;
 use anyhow::{Context, Result, anyhow, bail};
 use tracing::info;
 use world_chain_proof_kona_host_utils::online::{
@@ -102,45 +103,48 @@ impl ClaimedProofJobHandler for NitroBackend {
             .await
             .context("nitro enclave proving failed")?;
 
-        if artifact.boot_info.l2PostRoot != request.root_claim {
+        if artifact.transition_public_values.l2PostRoot != request.root_claim {
             bail!(
                 "enclave post root {:?} != claimed root {:?}",
-                artifact.boot_info.l2PostRoot,
+                artifact.transition_public_values.l2PostRoot,
                 request.root_claim
             );
         }
-        if artifact.boot_info.l2BlockNumber != request.l2_block_number {
+        if artifact.transition_public_values.l2PostBlockNumber != request.l2_block_number {
             bail!(
                 "enclave block number {} != claimed {}",
-                artifact.boot_info.l2BlockNumber,
+                artifact.transition_public_values.l2PostBlockNumber,
                 request.l2_block_number
             );
         }
-        if artifact.boot_info.l1Head != request.l1_head {
+        if artifact.transition_public_values.l1Head != request.l1_head {
             bail!(
                 "enclave l1 head {:?} != claimed {:?}",
-                artifact.boot_info.l1Head,
+                artifact.transition_public_values.l1Head,
                 request.l1_head
             );
         }
-        if artifact.boot_info.rollupConfigHash != self.config.online.rollup_config_hash {
+        if artifact.transition_public_values.rollupConfigHash
+            != self.config.online.rollup_config_hash
+        {
             bail!(
                 "enclave rollup config hash {:?} != expected {:?}",
-                artifact.boot_info.rollupConfigHash,
+                artifact.transition_public_values.rollupConfigHash,
                 self.config.online.rollup_config_hash
             );
         }
 
         info!(
-            post_root = ?artifact.boot_info.l2PostRoot,
-            block = artifact.boot_info.l2BlockNumber,
-            l1_head = ?artifact.boot_info.l1Head,
-            rollup_config_hash = ?artifact.boot_info.rollupConfigHash,
+            post_root = ?artifact.transition_public_values.l2PostRoot,
+            block = artifact.transition_public_values.l2PostBlockNumber,
+            l1_head = ?artifact.transition_public_values.l1Head,
+            rollup_config_hash = ?artifact.transition_public_values.rollupConfigHash,
             "enclave attested range proof"
         );
 
         Ok(ProofData::Nitro {
             attestation: Bytes::from(artifact.attestation_doc),
+            public_values: artifact.transition_public_values.abi_encode().into(),
             signature: Bytes::from(artifact.signature),
         })
     }

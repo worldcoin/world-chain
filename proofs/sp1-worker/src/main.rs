@@ -1,7 +1,7 @@
 //! `sp1-worker` binary: leases SP1 proof jobs from the `prover-service`, proves them, and
 //! submits the proofs back.
 
-use alloy_primitives::{Address, B256};
+use alloy_primitives::B256;
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -114,14 +114,6 @@ struct Cli {
     /// SP1 network private key. Required when --prover network.
     #[arg(long, env = "SP1_PRIVATE_KEY")]
     sp1_private_key: Option<String>,
-
-    /// Prover address for on-chain attribution (defaults to zero address).
-    #[arg(
-        long,
-        env = "PROVER_ADDRESS",
-        default_value = "0x0000000000000000000000000000000000000000"
-    )]
-    prover_address: Address,
 
     /// Seconds to sleep between job-queue polls when no work is available.
     #[arg(long, default_value_t = 10)]
@@ -253,7 +245,6 @@ where
         Sp1BackendConfig {
             block_interval: cli.block_interval,
             split_count: cli.ranges.max(1),
-            prover_address: cli.prover_address,
             allow_unfinalized: cli.allow_unfinalized,
             session_poll_interval: Duration::from_secs(cli.sp1_session_poll_interval_seconds),
         },

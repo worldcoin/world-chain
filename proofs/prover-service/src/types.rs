@@ -197,6 +197,8 @@ pub enum ProofData {
     Nitro {
         /// Attestation document produced by the enclave.
         attestation: Bytes,
+        /// ABI-encoded transition public values signed by the enclave.
+        public_values: Bytes,
         /// Enclave signature over the proven outputs.
         signature: Bytes,
     },

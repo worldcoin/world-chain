@@ -268,13 +268,14 @@ Here is the full journey from "job available" to "proof accepted":
 
 7. **State transition executed.** The enclave runs the full Kona derivation pipeline
    (`run_full_range_program`), re-deriving the L2 state from L1 data. This produces
-   `BootInfo` containing the pre-root, post-root, block number, and rollup config hash.
+   `TransitionPublicValues` containing the pre/post roots, pre/post block numbers, and
+   rollup config hash.
 
-8. **Optional validation.** If `expected_boot_info` was provided, the enclave
-   checks that the computed `BootInfo` matches.
+8. **Optional validation.** If `expected_transition_public_values` was provided, the enclave
+   checks that the computed `TransitionPublicValues` matches.
 
 9. **Signing commitment computed.** The enclave computes
-   `keccak256(l2_post_root || l2_block_number_be || rollup_config_hash)`.
+   `keccak256(abi.encode(TransitionPublicValues))`.
 
 10. **Signature produced.** The enclave signs the commitment with its ephemeral
     secp256k1 key, applying EIP-2 low-s normalization (required for `ecrecover`
@@ -282,11 +283,11 @@ Here is the full journey from "job available" to "proof accepted":
 
 11. **NSM attestation requested.** The enclave asks the NSM for an attestation
     document with:
-    - `user_data` = `SHA256(l2_pre_root || l2_post_root || l2_block_number_be || rollup_config_hash)`
+    - `user_data` = `keccak256(abi.encode(TransitionPublicValues))`
     - `nonce` = the caller-supplied nonce
     - `public_key` = the ephemeral secp256k1 public key (33-byte compressed)
 
-12. **Response returned.** The enclave sends back `BootInfo`, the raw attestation
+12. **Response returned.** The enclave sends back `TransitionPublicValues`, the raw attestation
     document bytes, and the secp256k1 signature.
 
 13. **Host-side verification.** Back in the worker (on the host), if production PCRs
@@ -296,14 +297,15 @@ Here is the full journey from "job available" to "proof accepted":
     - Check the certificate chain up to the hardcoded AWS Nitro Root CA
     - Validate certificate `notBefore`/`notAfter` periods
     - Check PCR0/1/2 match expected values
-    - Verify `user_data` matches the computed hash from `BootInfo`
+    - Verify `user_data` matches the computed hash from `TransitionPublicValues`
     - Verify the nonce matches what was sent
     - Extract the public key from the attestation and verify the secp256k1 signature
 
-14. **Boot info validated.** The worker checks that `BootInfo` fields match the job's
-    expected `root_claim`, `l2_block_number`, `l1_head`, and `rollup_config_hash`.
+14. **Public values validated.** The worker checks that `TransitionPublicValues` fields match
+    the job's expected `root_claim`, `l2_block_number`, `l1_head`, and `rollup_config_hash`.
 
-15. **Proof submitted.** The worker posts `ProofData::Nitro { attestation, signature }`
+15. **Proof submitted.** The worker posts
+    `ProofData::Nitro { attestation, public_values, signature }`
     back to the `prover-service`.
 
 ---
@@ -321,7 +323,7 @@ signature is backed by a certificate chain rooted at the AWS Nitro Root CA. It p
 - **Code identity:** PCR0/1/2 in the attestation identify _exactly which enclave
   image_ produced this document.
 - **Computation output:** The `user_data` field contains
-  `SHA256(l2_pre_root || l2_post_root || l2_block_number_be || rollup_config_hash)`,
+  `keccak256(abi.encode(TransitionPublicValues))`,
   binding the attestation to the specific state transition.
 - **Key certification:** The `public_key` field contains the enclave's ephemeral
   secp256k1 public key, certifying that this key was generated inside this specific
@@ -331,7 +333,7 @@ signature is backed by a certificate chain rooted at the AWS Nitro Root CA. It p
 
 ### Layer 2: Secp256k1 Signature (ECDSA)
 
-The enclave signs `keccak256(l2_post_root || l2_block_number_be || rollup_config_hash)`
+The enclave signs `keccak256(abi.encode(TransitionPublicValues))`
 with the ephemeral secp256k1 key. This signature is:
 
 - **EVM-native:** Verifiable via `ecrecover` (3,000 gas) — orders of magnitude cheaper
@@ -363,46 +365,17 @@ cert chain validation, done once at key registration) from the **cheap operation
 
 ---
 
-## Commitments: `user_data` vs `signing_commitment`
-
-There are two hash functions because they serve different purposes and face different
-constraints:
-
-### `range_user_data` — SHA-256
+## Transition commitment
 
 ```
-SHA256(l2_pre_root || l2_post_root || l2_block_number_be || rollup_config_hash)
+keccak256(abi.encode(TransitionPublicValues))
 ```
 
-- **Used in:** The `user_data` field of the NSM attestation document.
-- **Hash algorithm:** SHA-256, because the NSM device accepts arbitrary bytes in
-  `user_data` and SHA-256 is standard for non-EVM contexts.
-- **Includes `l2_pre_root`:** Yes — the full attestation should commit to the complete
-  state transition (from which state to which state).
-- **Verified:** Host-side only (during `parse_check_and_verify`). Not used on-chain
-  for per-proof verification.
-
-### `signing_commitment` — keccak256
-
-```
-keccak256(l2_post_root || l2_block_number_be || rollup_config_hash)
-```
-
-- **Used in:** The message signed by the ephemeral secp256k1 key.
-- **Hash algorithm:** keccak256, because `ecrecover` operates on keccak256 hashes
-  natively, and the EVM precompile for keccak256 costs only 30 gas + 6 gas/word.
-- **Omits `l2_pre_root`:** Yes — this makes the commitment reconstructable from
-  minimal post-state fields. The on-chain verifier only needs the claimed output state,
-  not the input state, to verify the signature. The pre-root is implicitly committed
-  via the fault proof's `parentRef`.
-- **Verified:** On-chain in `NitroProofVerifier.verify()` via `ecrecover`.
-
-### Why Two?
-
-The NSM attestation provides a complete audit trail (pre-root + post-root), verified
-host-side with full cert chain validation. The secp256k1 signature provides a minimal,
-EVM-efficient proof artifact. They commit to overlapping but different data because
-their verification contexts have different requirements.
+The canonical commitment includes `l1Head`, both L2 roots and block numbers, and
+`rollupConfigHash`. It is used both as the NSM attestation document's `user_data` and
+as the prehash signed by the enclave's ephemeral secp256k1 key. The host verifies the
+attestation binding, while `NitroProofVerifier` reconstructs the same ABI hash and
+verifies the recoverable signature with `ecrecover`.
 
 ---
 
@@ -488,26 +461,27 @@ verify(rootId, proof)
 NitroProofVerifier
         │
         ├─ 1. ABI-decode proof:
-        │      (domainHash, parentRef, l1OriginHash, l1OriginNumber,
-        │       rollupConfigHash,
-        │       l2PostRoot, l2BlockNumber, signature, expectedPublicKey)
+        │      (domainHash, parentRef, l1OriginNumber,
+        │       transitionPublicValues, signature, expectedPublicKey)
         │
         ├─ 2. Reconstruct rootId from proof fields
         │      └─ Assert reconstructed == supplied rootId
         │
-        ├─ 3. Check expectedPublicKey is registered in NitroEnclaveKeyRegistry
+        ├─ 3. Check l2PreRoot matches parentRef's root claim
+        │
+        ├─ 4. Check expectedPublicKey is registered in NitroEnclaveKeyRegistry
         │      └─ isKeyRegistered(expectedPublicKey) must return true
         │
-        ├─ 4. Compute signing commitment:
-        │      keccak256(l2PostRoot || l2BlockNumber || rollupConfigHash)
+        ├─ 5. Compute signing commitment:
+        │      keccak256(abi.encode(transitionPublicValues))
         │
-        ├─ 5. ecrecover(commitment, signature) → recovered address
+        ├─ 6. ecrecover(commitment, signature) → recovered address
         │      └─ EIP-2 low-s check: reject if s > secp256k1n/2
         │
-        ├─ 6. Compare recovered address with keccak256(expectedPublicKey[1:65])[12:]
+        ├─ 7. Compare recovered address with keccak256(expectedPublicKey[1:65])[12:]
         │      └─ Must match
         │
-        └─ 7. Return true (or false on any failure — never reverts)
+        └─ 8. Return true (or false on any failure — never reverts)
 ```
 
 > **Base comparison:** Base's `SystemConfigGlobal.registerSigner()` performs the same
@@ -887,7 +861,7 @@ When production PCRs are configured, the host performs five verification checks 
 every attestation:
 
 1. **PCR + user_data invariants:** PCR0/1/2 match expected values; `user_data` matches
-   `SHA256(l2_pre_root || l2_post_root || l2_block_number_be || rollup_config_hash)`.
+   `keccak256(abi.encode(TransitionPublicValues))`.
 2. **COSE_Sign1 signature:** P-384 ECDSA signature verified against the leaf
    certificate's public key.
 3. **Root certificate:** The root of the certificate chain matches the hardcoded

@@ -2,13 +2,13 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{boot::BootInfoStruct, types::AggregationOutputs};
+use crate::{boot::TransitionPublicValues, types::AggregationPublicValues};
 
 /// Public output and proof bytes returned by a range prover.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RangeProofArtifact {
-    /// OP Succinct-compatible boot info committed by the guest.
-    pub boot_info: BootInfoStruct,
+    /// Transition public values committed by the guest.
+    pub transition_public_values: TransitionPublicValues,
     /// Serialized proof bytes (SP1 proof or attestation document, depending on backend).
     pub proof: Vec<u8>,
 }
@@ -16,8 +16,8 @@ pub struct RangeProofArtifact {
 /// Public output and proof bytes returned by an aggregation prover.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AggregationProofArtifact {
-    /// ABI-compatible aggregation outputs committed by the guest.
-    pub outputs: AggregationOutputs,
+    /// ABI-compatible public values committed by the aggregation guest.
+    pub public_values: AggregationPublicValues,
     /// Serialized proof bytes (SP1 proof or attestation document, depending on backend).
     pub proof: Vec<u8>,
 }
