@@ -1,7 +1,7 @@
 use alloy_primitives::{B256, keccak256};
 use serde::{Deserialize, Serialize};
 
-use world_chain_proof_core::range::{WorldRangeProofInput, WorldRangeProofPublicValues};
+use world_chain_proof_core::{boot::BootInfoStruct, range::WorldRangeProofInput};
 
 /// Data needed to recompute an OP Stack output root for one L2 block.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,8 +35,8 @@ pub struct WorldRangeWitness {
     pub pre_state: Option<OutputRootWitness>,
     /// Optional output-root witness for the claimed post-state.
     pub post_state: Option<OutputRootWitness>,
-    /// Optional host-computed public values. When present, the guest checks them before committing.
-    pub expected_public_values: Option<WorldRangeProofPublicValues>,
+    /// Optional host-computed boot info. When present, the guest checks it before committing.
+    pub expected_boot_info: Option<BootInfoStruct>,
 }
 
 impl WorldRangeWitness {
@@ -46,20 +46,20 @@ impl WorldRangeWitness {
             input,
             pre_state: None,
             post_state: None,
-            expected_public_values: None,
+            expected_boot_info: None,
         }
     }
 
-    /// Creates a range witness with explicit host-computed public values to validate.
-    pub const fn with_expected_public_values(
+    /// Creates a range witness with explicit host-computed boot info to validate.
+    pub const fn with_expected_boot_info(
         input: WorldRangeProofInput,
-        expected_public_values: WorldRangeProofPublicValues,
+        expected_boot_info: BootInfoStruct,
     ) -> Self {
         Self {
             input,
             pre_state: None,
             post_state: None,
-            expected_public_values: Some(expected_public_values),
+            expected_boot_info: Some(expected_boot_info),
         }
     }
 
