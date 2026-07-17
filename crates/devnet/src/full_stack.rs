@@ -86,7 +86,6 @@ const SERVICE_RPC_PORT: u16 = 8545;
 const SERVICE_METRICS_PORT: u16 = 7300;
 const PROVER_SERVICE_POSTGRES_PORT: u16 = 5432;
 const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 10;
-const PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL: u64 = 5;
 /// Poll interval for the in-process SP1 worker leasing jobs from the prover-service.
 const SP1_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// Env var enabling the in-process defender, prover-service, and SP1 worker. Off by default:
@@ -265,7 +264,6 @@ struct WorldProofSystemDeployment {
     l2_chain_id: u64,
     proof_system_version: u64,
     block_interval: u64,
-    intermediate_block_interval: u64,
 }
 
 /// In-process World Chain proof-system proposer task. Aborted on devnet drop.
@@ -955,10 +953,6 @@ async fn deploy_world_proof_system(
         .env(
             "PROOF_SYSTEM_BLOCK_INTERVAL",
             PROOF_SYSTEM_BLOCK_INTERVAL.to_string(),
-        )
-        .env(
-            "PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL",
-            PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL.to_string(),
         )
         .env("PROOF_SYSTEM_DEPLOYMENT_OUT", &deployment_rel_path);
 
@@ -3135,10 +3129,8 @@ fn build_components(
                 deployment.proof_system_version
             ))
             .with_note(format!(
-                "l2_chain_id={}, block_interval={}, intermediate_block_interval={}",
-                deployment.l2_chain_id,
-                deployment.block_interval,
-                deployment.intermediate_block_interval
+                "l2_chain_id={}, block_interval={}",
+                deployment.l2_chain_id, deployment.block_interval
             ))
             .with_note(format!(
                 "rollup_config_hash={}",

@@ -68,7 +68,6 @@ where
                 parent_ref: parent.address,
                 root_claim,
                 l2_block_number,
-                intermediate_roots_hash: B256::ZERO,
                 proposal_key: B256::ZERO,
             };
             proposal.proposal_key = self

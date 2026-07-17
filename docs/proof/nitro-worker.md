@@ -488,8 +488,8 @@ verify(rootId, proof)
 NitroProofVerifier
         │
         ├─ 1. ABI-decode proof:
-        │      (domainHash, parentRef, intermediateRootsHash,
-        │       l1OriginHash, l1OriginNumber, rollupConfigHash,
+        │      (domainHash, parentRef, l1OriginHash, l1OriginNumber,
+        │       rollupConfigHash,
         │       l2PostRoot, l2BlockNumber, signature, expectedPublicKey)
         │
         ├─ 2. Reconstruct rootId from proof fields

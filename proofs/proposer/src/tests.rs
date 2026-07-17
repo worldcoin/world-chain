@@ -89,7 +89,6 @@ fn proposal_key(parent_ref: Address, root_claim: B256, l2_block_number: u64) -> 
         parent_ref,
         root_claim,
         l2_block_number,
-        intermediate_roots_hash: B256::ZERO,
     }
     .proposal_key(DOMAIN_HASH)
 }
@@ -120,7 +119,6 @@ async fn prepare_next_proposal_walks_existing_games_until_gap() {
     assert_eq!(proposal.parent_ref, GAME_1);
     assert_eq!(proposal.root_claim, root_20);
     assert_eq!(proposal.l2_block_number, 20);
-    assert_eq!(proposal.intermediate_roots_hash, B256::ZERO);
     assert_eq!(proposal.proposal_key, proposal_key(GAME_1, root_20, 20));
 }
 

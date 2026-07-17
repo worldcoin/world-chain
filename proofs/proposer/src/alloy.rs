@@ -70,7 +70,6 @@ where
                 commitment.parent_ref,
                 commitment.root_claim,
                 U256::from(commitment.l2_block_number),
-                commitment.intermediate_roots_hash,
             )
             .call()
             .await
@@ -102,7 +101,6 @@ where
                 proposal.parent_ref,
                 proposal.root_claim,
                 U256::from(proposal.l2_block_number),
-                proposal.intermediate_roots_hash,
             )
             .value(proposer_bond)
             .send()

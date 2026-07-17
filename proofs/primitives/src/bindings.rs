@@ -20,20 +20,17 @@ sol! {
         function propose(
             address parentRef,
             bytes32 rootClaim,
-            uint256 l2BlockNumber,
-            bytes32 intermediateRootsHash
+            uint256 l2BlockNumber
         ) external payable returns (address game, bytes32 rootId);
         function computeProposalKey(
             address parentRef,
             bytes32 rootClaim,
-            uint256 l2BlockNumber,
-            bytes32 intermediateRootsHash
+            uint256 l2BlockNumber
         ) external view returns (bytes32);
         function computeRootId(
             address parentRef,
             bytes32 rootClaim,
             uint256 l2BlockNumber,
-            bytes32 intermediateRootsHash,
             bytes32 l1OriginHash,
             uint256 l1OriginNumber
         ) external view returns (bytes32);
