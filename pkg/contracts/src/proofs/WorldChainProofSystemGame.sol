@@ -49,6 +49,7 @@ contract WorldChainProofSystemGame {
 
     event Challenged(address indexed challenger, uint64 proofDeadline);
     event ProofLaneSupported(WorldChainProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
+    event ProofThresholdReached(bytes32 indexed rootId, uint8 proofBitmap);
     event DuplicateProofLane(WorldChainProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
     event Finalized(bytes32 indexed rootId);
     event Invalidated(bytes32 indexed rootId);
@@ -181,11 +182,13 @@ contract WorldChainProofSystemGame {
             revert InvalidProof(lane, rootId);
         }
 
+        bool thresholdAlreadyReached = WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD);
         proofBitmap |= mask;
         emit ProofLaneSupported(lane, rootId, proofBitmap);
 
-        if (WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
-            _finalize();
+        // Emit only on the transition to settlement-ready so offchain consumers receive a single signal.
+        if (!thresholdAlreadyReached && WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
+            emit ProofThresholdReached(rootId, proofBitmap);
         }
     }
 
