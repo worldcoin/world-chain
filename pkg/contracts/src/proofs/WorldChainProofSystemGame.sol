@@ -265,32 +265,33 @@ contract WorldChainProofSystemGame {
         }
 
         WorldChainProofLib.RootState parentState;
+        bool parentBlacklisted;
         if (parentRef == anchorStateRegistry) {
             // The registry sentinel represents the accepted anchor, so it is a finalized parent without game state.
             parentState = WorldChainProofLib.RootState.FINALIZED;
-        } else if (registry.blacklistedGames(parentRef)) {
-            // 3. A blacklisted parent is invalid, regardless of its stored game state.
-            evaluation.status = ResolutionStatus.RESOLVABLE;
-            evaluation.outcome = WorldChainProofLib.RootState.INVALIDATED;
-            evaluation.reason = WorldChainProofLib.InvalidationReason.INVALID_PARENT;
-            return evaluation;
         } else {
-            parentState = IWorldChainProofSystemGame(parentRef).state();
+            parentBlacklisted = registry.blacklistedGames(parentRef);
+            if (!parentBlacklisted) parentState = IWorldChainProofSystemGame(parentRef).state();
         }
 
-        if (parentState == WorldChainProofLib.RootState.INVALIDATED || parentState == WorldChainProofLib.RootState.NONE)
-        {
-            // 3. An invalidated or unset parent invalidates its descendant.
-            evaluation.status = ResolutionStatus.RESOLVABLE;
-            evaluation.outcome = WorldChainProofLib.RootState.INVALIDATED;
-            evaluation.reason = WorldChainProofLib.InvalidationReason.INVALID_PARENT;
-            return evaluation;
-        }
-        if (parentState != WorldChainProofLib.RootState.FINALIZED) {
+        if (
+            parentState == WorldChainProofLib.RootState.PROPOSED
+                || parentState == WorldChainProofLib.RootState.CHALLENGED
+        ) {
             // 2. A proposed or challenged parent must resolve before its descendant.
             evaluation.outcome = currentState;
             evaluation.status = ResolutionStatus.PARENT_NOT_RESOLVED;
             evaluation.parentState = parentState;
+            return evaluation;
+        }
+        if (
+            parentBlacklisted || parentState == WorldChainProofLib.RootState.INVALIDATED
+                || parentState == WorldChainProofLib.RootState.NONE
+        ) {
+            // 3. A blacklisted, invalidated, or unset parent invalidates its descendant.
+            evaluation.status = ResolutionStatus.RESOLVABLE;
+            evaluation.outcome = WorldChainProofLib.RootState.INVALIDATED;
+            evaluation.reason = WorldChainProofLib.InvalidationReason.INVALID_PARENT;
             return evaluation;
         }
 
