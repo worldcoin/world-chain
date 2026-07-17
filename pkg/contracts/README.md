@@ -10,7 +10,7 @@ This repository contains smart contracts for World Chain, including PBH (Priorit
 
 ## Proof System Bond Claims
 
-`WorldChainProofSystemGame.resolve()` records the game outcome and assigns pull-based bond claims. It does not transfer ETH during resolution. After a game resolves, automation such as the challenger, the defender/prover-service flow, or any keeper should call `withdraw(recipient)` for claimable proposers and challengers.
+`WorldChainProofSystemGame.resolve()` records the game outcome and assigns pull-based bond claims. It does not transfer ETH during resolution. After a game resolves, automation such as the challenger, the defender/prover-service flow, or any keeper should call `withdraw(recipient)` for the claimable proposer or challenger.
 
 `claimable(recipient)` returns the amount currently owed to `recipient`. `withdraw(recipient)` is permissionless, but funds are always sent to `recipient`, so the caller cannot redirect or steal another account's claim.
 

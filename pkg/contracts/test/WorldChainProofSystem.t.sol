@@ -75,6 +75,8 @@ contract WorldChainProofSystemTest is Test {
         _challenge(game, challenger);
 
         assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.CHALLENGED));
+        assertEq(game.challenger(), challenger);
+        assertEq(game.postedChallengerBond(), CHALLENGER_BOND);
         assertEq(game.proofDeadline(), block.timestamp + PROOF_PERIOD);
     }
 
@@ -273,11 +275,10 @@ contract WorldChainProofSystemTest is Test {
         _assertWithdraws(child, secondChallenger, CHALLENGER_BOND);
     }
 
-    function testBlacklistInvalidationRefundsAllBonds() public {
+    function testBlacklistInvalidationRefundsBondAndSurplus() public {
         (WorldChainProofSystemGame parent,) = _propose(10);
         (WorldChainProofSystemGame game,) = _proposeChild(parent, keccak256("blacklisted-child"));
         _challenge(game, challenger);
-        _challenge(game, secondChallenger);
         anchor.setGameBlacklisted(address(game), true);
         uint256 surplus = 0.25 ether;
         vm.prank(keeper);
@@ -285,18 +286,15 @@ contract WorldChainProofSystemTest is Test {
         assertTrue(ok);
 
         uint256 proposerBalance = proposer.balance;
-        uint256 firstChallengerBalance = challenger.balance;
-        uint256 secondChallengerBalance = secondChallenger.balance;
+        uint256 challengerBalance = challenger.balance;
         game.resolve();
 
         assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.INVALIDATED));
         assertEq(uint8(game.invalidationReason()), uint8(WorldChainProofLib.InvalidationReason.BLACKLISTED));
         assertEq(proposer.balance, proposerBalance);
-        assertEq(challenger.balance, firstChallengerBalance);
-        assertEq(secondChallenger.balance, secondChallengerBalance);
+        assertEq(challenger.balance, challengerBalance);
         _assertWithdraws(game, proposer, PROPOSER_BOND + surplus);
         _assertWithdraws(game, challenger, CHALLENGER_BOND);
-        _assertWithdraws(game, secondChallenger, CHALLENGER_BOND);
         assertEq(address(game).balance, 0);
     }
 
@@ -328,27 +326,22 @@ contract WorldChainProofSystemTest is Test {
         game.resolve();
     }
 
-    function testDirectProofTimeoutRewardsFirstChallenger() public {
+    function testDirectProofTimeoutRewardsChallenger() public {
         (WorldChainProofSystemGame game,) = _proposeAndChallenge(10);
-        _challenge(game, secondChallenger);
         vm.warp(block.timestamp + PROOF_PERIOD);
 
         uint256 proposerBalance = proposer.balance;
-        uint256 firstChallengerBalance = challenger.balance;
-        uint256 secondChallengerBalance = secondChallenger.balance;
+        uint256 challengerBalance = challenger.balance;
         game.resolve();
 
         assertEq(proposer.balance, proposerBalance);
-        assertEq(challenger.balance, firstChallengerBalance);
-        assertEq(secondChallenger.balance, secondChallengerBalance);
+        assertEq(challenger.balance, challengerBalance);
         _assertWithdraws(game, challenger, CHALLENGER_BOND + PROPOSER_BOND);
-        _assertWithdraws(game, secondChallenger, CHALLENGER_BOND);
         assertEq(game.claimable(proposer), 0);
     }
 
-    function testDirectProofTimeoutCreditsSurplusEthToFirstChallenger() public {
+    function testDirectProofTimeoutCreditsSurplusEthToChallenger() public {
         (WorldChainProofSystemGame game,) = _proposeAndChallenge(10);
-        _challenge(game, secondChallenger);
         uint256 surplus = 0.25 ether;
         vm.deal(address(game), address(game).balance + surplus);
 
@@ -356,7 +349,6 @@ contract WorldChainProofSystemTest is Test {
         game.resolve();
 
         _assertWithdraws(game, challenger, CHALLENGER_BOND + PROPOSER_BOND + surplus);
-        _assertWithdraws(game, secondChallenger, CHALLENGER_BOND);
         assertEq(game.claimable(proposer), 0);
         assertEq(address(game).balance, 0);
     }
@@ -403,12 +395,14 @@ contract WorldChainProofSystemTest is Test {
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
     }
 
-    function testSubsequentChallengeDoesNotExtendProofDeadline() public {
+    function testSecondChallengeReverts() public {
         (WorldChainProofSystemGame game,) = _proposeAndChallenge(10);
         uint64 firstDeadline = game.proofDeadline();
 
         vm.warp(block.timestamp + 1 hours);
-        _challenge(game, secondChallenger);
+        vm.prank(secondChallenger);
+        vm.expectRevert(abi.encodeWithSelector(WorldChainProofSystemGame.DuplicateChallenge.selector, challenger));
+        game.challenge{value: CHALLENGER_BOND}();
 
         assertEq(game.proofDeadline(), firstDeadline);
     }

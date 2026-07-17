@@ -113,11 +113,8 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     WorldChainProofLib.RootState public state;
     WorldChainProofLib.InvalidationReason public invalidationReason;
 
-    // TODO: Revisit whether the game should allow only one challenger; additional challengers do not
-    // extend the proof deadline or receive the timeout reward.
-    address[] public challengers;
-    mapping(address challenger => uint256 amount) public challengerBonds;
-    uint256 public totalChallengerBonds;
+    address payable public challenger;
+    uint256 public postedChallengerBond;
     mapping(address recipient => uint256 amount) internal payoutCredits;
 
     constructor(ProposalInit memory proposal, ActivationConfig memory config) payable {
@@ -173,11 +170,10 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
         }
         if (!stakingRegistry.isStaked(msg.sender)) revert UnstakedChallenger(msg.sender);
         if (msg.value != challengerBond) revert InvalidBond(challengerBond, msg.value);
-        if (challengerBonds[msg.sender] != 0) revert DuplicateChallenge(msg.sender);
+        if (challenger != address(0)) revert DuplicateChallenge(challenger);
 
-        challengerBonds[msg.sender] = msg.value;
-        totalChallengerBonds += msg.value;
-        challengers.push(msg.sender);
+        challenger = payable(msg.sender);
+        postedChallengerBond = msg.value;
 
         if (state == WorldChainProofLib.RootState.PROPOSED) {
             state = WorldChainProofLib.RootState.CHALLENGED;
@@ -194,7 +190,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     }
 
     /// @notice Permissionlessly withdraws `recipient`'s claim to `recipient`.
-    /// @dev Challengers, defender/prover-service automation, or keepers can call this after resolution;
+    /// @dev The challenger, defender/prover-service automation, or keepers can call this after resolution;
     ///      the caller cannot redirect funds away from `recipient`.
     function withdraw(address payable recipient) external nonReentrant {
         address account = recipient;
@@ -204,7 +200,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
         if (amount == 0) revert NoClaim(account);
 
         if (credit != 0) payoutCredits[account] = 0;
-        if (refundablePrincipal != 0) challengerBonds[account] = 0;
+        if (refundablePrincipal != 0) postedChallengerBond = 0;
 
         _transfer(recipient, amount);
         emit Withdrawn(account, amount);
@@ -361,14 +357,14 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
         invalidationReason = reason;
         invalidatedAt = uint64(block.timestamp);
 
-        uint256 payout = address(this).balance - totalChallengerBonds;
-        if (payout != 0) {
-            // Challenger principal stays claimable through `challengerBonds`; route any remaining balance, including surplus.
+        uint256 residualPayout = address(this).balance - postedChallengerBond;
+        if (residualPayout != 0) {
+            // Reserve the challenger bond for its own withdraw(); route the remaining balance, including surplus.
             // Only a direct proof timeout is attributable to this proposer; inherited and governance failures refund it.
-            if (reason == WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT && challengers.length != 0) {
-                payoutCredits[challengers[0]] += payout;
+            if (reason == WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT && challenger != address(0)) {
+                payoutCredits[challenger] += residualPayout;
             } else {
-                payoutCredits[proposer] += payout;
+                payoutCredits[proposer] += residualPayout;
             }
         }
 
@@ -406,7 +402,8 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
         ) {
             return 0;
         }
-        return challengerBonds[recipient];
+        if (recipient != challenger) return 0;
+        return postedChallengerBond;
     }
 
     function _transfer(address payable recipient, uint256 amount) internal {

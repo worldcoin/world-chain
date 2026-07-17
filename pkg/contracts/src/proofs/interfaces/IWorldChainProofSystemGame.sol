@@ -30,7 +30,7 @@ interface IWorldChainProofSystemGame {
     /// @notice Returns the ETH amount `recipient` can withdraw from this game.
     function claimable(address recipient) external view returns (uint256);
     /// @notice Permissionlessly withdraws `recipient`'s claim to `recipient`.
-    /// @dev Challengers, defender/prover-service automation, or keepers can call this after resolution;
+    /// @dev The challenger, defender/prover-service automation, or keepers can call this after resolution;
     ///      the caller cannot redirect funds away from `recipient`.
     function withdraw(address payable recipient) external;
 }
