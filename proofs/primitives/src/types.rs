@@ -68,8 +68,6 @@ pub struct ProofDomain {
     pub rollup_config_hash: B256,
     /// Distance in L2 blocks between parent and proposed roots.
     pub block_interval: u64,
-    /// Distance in L2 blocks between intermediate roots.
-    pub intermediate_block_interval: u64,
 }
 
 impl ProofDomain {
@@ -81,7 +79,6 @@ impl ProofDomain {
             U256::from(self.proof_system_version),
             self.rollup_config_hash,
             U256::from(self.block_interval),
-            U256::from(self.intermediate_block_interval),
         )
             .abi_encode();
         keccak256(encoded)
@@ -97,8 +94,6 @@ pub struct ProposalCommitment {
     pub root_claim: B256,
     /// L2 block number for `root_claim`.
     pub l2_block_number: u64,
-    /// Commitment to ordered intermediate roots, or zero if unused.
-    pub intermediate_roots_hash: B256,
 }
 
 impl ProposalCommitment {
@@ -110,7 +105,6 @@ impl ProposalCommitment {
             self.parent_ref,
             self.root_claim,
             U256::from(self.l2_block_number),
-            self.intermediate_roots_hash,
         )
             .abi_encode();
         keccak256(encoded)
@@ -143,7 +137,6 @@ impl RootCommitment {
             self.proposal.parent_ref,
             self.proposal.root_claim,
             U256::from(self.proposal.l2_block_number),
-            self.proposal.intermediate_roots_hash,
             self.l1_origin_hash,
             U256::from(self.l1_origin_number),
         )
@@ -215,13 +208,11 @@ mod tests {
                 "1111111111111111111111111111111111111111111111111111111111111111"
             ),
             block_interval: 10,
-            intermediate_block_interval: 5,
         };
         let proposal = ProposalCommitment {
             parent_ref: address!("0000000000000000000000000000000000001006"),
             root_claim: b256!("2222222222222222222222222222222222222222222222222222222222222222"),
             l2_block_number: 10,
-            intermediate_roots_hash: B256::ZERO,
         };
         let commitment = RootCommitment {
             proposal,

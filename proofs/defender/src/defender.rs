@@ -432,7 +432,7 @@ fn proof_request(game_created: &GameCreated, backend: ProofBackend) -> ProofRequ
 ///
 /// TODO: encode proofs for their concrete on-chain verifiers. SP1 proofs must
 /// match `SP1ValidityVerifier`'s ABI tuple:
-/// `(domainHash, parentRef, intermediateRootsHash, l1OriginNumber, publicValues, proofBytes)`.
+/// `(domainHash, parentRef, l1OriginNumber, publicValues, proofBytes)`.
 /// That requires proposal context in addition to `ProofData`, so this helper
 /// should move closer to the game/lane submission path before real SP1 lanes
 /// are enabled.

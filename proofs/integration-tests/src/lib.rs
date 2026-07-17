@@ -30,7 +30,6 @@ use world_chain_prover_service::{
 };
 
 pub const BLOCK_INTERVAL: u64 = 10;
-pub const INTERMEDIATE_BLOCK_INTERVAL: u64 = 5;
 pub const CHAIN_ID: u64 = 4801;
 pub const ANCHOR: Address = address!("0000000000000000000000000000000000001006");
 
@@ -47,7 +46,6 @@ pub fn test_domain() -> ProofDomain {
         proof_system_version: PROOF_SYSTEM_VERSION,
         rollup_config_hash: B256::repeat_byte(0x99),
         block_interval: BLOCK_INTERVAL,
-        intermediate_block_interval: INTERMEDIATE_BLOCK_INTERVAL,
     }
 }
 

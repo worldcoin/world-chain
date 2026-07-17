@@ -19,8 +19,6 @@ pub struct Proposal {
     pub root_claim: B256,
     /// L2 block number for `root_claim`.
     pub l2_block_number: u64,
-    /// Commitment to ordered intermediate roots. Currently always zero.
-    pub intermediate_roots_hash: B256,
     /// Deterministic factory lookup key, excluding L1 origin.
     pub proposal_key: B256,
 }
@@ -33,7 +31,6 @@ impl Proposal {
             parent_ref: self.parent_ref,
             root_claim: self.root_claim,
             l2_block_number: self.l2_block_number,
-            intermediate_roots_hash: self.intermediate_roots_hash,
         }
     }
 }
