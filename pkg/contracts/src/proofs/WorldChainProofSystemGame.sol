@@ -186,6 +186,7 @@ contract WorldChainProofSystemGame {
         proofBitmap |= mask;
         emit ProofLaneSupported(lane, rootId, proofBitmap);
 
+        // Emit only on the transition to settlement-ready so offchain consumers receive a single signal.
         if (!thresholdAlreadyReached && WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
             emit ProofThresholdReached(rootId, proofBitmap);
         }
