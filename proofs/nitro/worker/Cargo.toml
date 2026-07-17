@@ -31,6 +31,7 @@ world-chain-chainspec.workspace = true
 
 # Alloy types
 alloy-primitives = { workspace = true, features = ["serde"] }
+alloy-sol-types.workspace = true
 
 # Async / runtime
 tokio = { workspace = true, features = ["full", "signal"] }

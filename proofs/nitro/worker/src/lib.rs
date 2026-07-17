@@ -16,13 +16,14 @@
 //!  │  NitroProver::prove_range  ────────────► Nitro Enclave                              │
 //!  │       │                                  (vsock / PCR-pinned)                       │
 //!  │       ▼                                                                              │
-//!  │  prover_submitProof(Nitro { attestation, signature })                               │
+//!  │  prover_submitProof(Nitro { attestation, public_values, signature })                │
 //!  └──────────────────────────────────────────────────────────────────────────────────────┘
 //! ```
 
 #![cfg(target_os = "linux")]
 
 use alloy_primitives::Bytes;
+use alloy_sol_types::SolValue;
 use anyhow::{Context, Result, anyhow, bail};
 use tracing::info;
 use world_chain_proof_kona_host_utils::online::{
@@ -143,6 +144,7 @@ impl ClaimedProofJobHandler for NitroBackend {
 
         Ok(ProofData::Nitro {
             attestation: Bytes::from(artifact.attestation_doc),
+            public_values: artifact.transition_public_values.abi_encode().into(),
             signature: Bytes::from(artifact.signature),
         })
     }

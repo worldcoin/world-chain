@@ -150,39 +150,29 @@ pub struct NitroRangeProofArtifact {
     pub transition_public_values: TransitionPublicValues,
     /// `COSE_Sign1` attestation document bytes returned by the Nitro NSM device.
     ///
-    /// The document's `user_data` field commits to [`protocol::range_user_data`] of the
+    /// The document's `user_data` field commits to [`protocol::transition_commitment`] of the
     /// transition public values, binding the attestation to this specific transition.
     pub attestation_doc: Vec<u8>,
     /// 65-byte recoverable secp256k1 signature over
-    /// `keccak256(l2_post_root || l2_post_block_number_be || rollup_config_hash)`.
+    /// `keccak256(abi.encode(TransitionPublicValues))`.
     ///
     /// Produced by the enclave's ephemeral signing key, which is certified by the NSM
     /// attestation document. Enables EVM-native on-chain signature recovery.
     pub signature: Vec<u8>,
 }
 
-/// Convenience hash used to bind transition public values into the attestation `user_data` field.
+/// Canonical transition commitment used for attestation and signing.
 ///
-/// `SHA256(l1_head || l2_pre_root || l2_pre_block_number_be || l2_post_root ||
-/// l2_post_block_number_be || rollup_config_hash)`
+/// `keccak256(abi.encode(TransitionPublicValues))`
 #[must_use]
-pub fn range_user_data(transition_public_values: &TransitionPublicValues) -> [u8; 32] {
-    protocol::range_user_data(transition_public_values)
-}
-
-/// Convenience re-export of the enclave signing commitment.
-///
-/// `keccak256(l2_post_root || l2_post_block_number_be || rollup_config_hash)`
-#[must_use]
-pub fn signing_commitment(transition_public_values: &TransitionPublicValues) -> [u8; 32] {
-    protocol::signing_commitment(transition_public_values)
+pub fn transition_commitment(transition_public_values: &TransitionPublicValues) -> [u8; 32] {
+    protocol::transition_commitment(transition_public_values)
 }
 
 /// Re-exports of common host-facing types so callers can do `use world_chain_proof_nitro::*`.
 pub mod prelude {
     pub use crate::{
-        ExpectedPcrs, NitroRangeProofArtifact, NitroRangeProofRequest, range_user_data,
-        signing_commitment,
+        ExpectedPcrs, NitroRangeProofArtifact, NitroRangeProofRequest, transition_commitment,
     };
     #[cfg(all(feature = "enclave", target_os = "linux"))]
     pub use crate::{NitroProver, NitroProverError};
@@ -196,7 +186,7 @@ mod tests {
     use crate::{
         ExpectedPcrs, NitroRangeProofArtifact, PCR_LEN,
         attestation::{AttestationError, parse_and_check_pcrs},
-        protocol::range_user_data,
+        protocol::transition_commitment,
     };
 
     /// Builds a minimal synthetic COSE_Sign1 attestation document suitable for unit tests.
@@ -276,7 +266,7 @@ mod tests {
     #[test]
     fn range_artifact_user_data_binds_transition_public_values() {
         let transition_public_values = transition_public_values();
-        let user_data = range_user_data(&transition_public_values);
+        let user_data = transition_commitment(&transition_public_values);
         let attestation_doc = make_attestation_doc(&test_pcrs(), &user_data);
 
         let artifact = NitroRangeProofArtifact {
@@ -285,7 +275,7 @@ mod tests {
             signature: vec![],
         };
 
-        let expected_user_data = range_user_data(&artifact.transition_public_values);
+        let expected_user_data = transition_commitment(&artifact.transition_public_values);
         parse_and_check_pcrs(
             &artifact.attestation_doc,
             &test_expected_pcrs(),
@@ -297,13 +287,13 @@ mod tests {
     #[test]
     fn tampered_transition_public_values_fail_user_data_check() {
         let transition_public_values = transition_public_values();
-        let user_data = range_user_data(&transition_public_values);
+        let user_data = transition_commitment(&transition_public_values);
         let attestation_doc = make_attestation_doc(&test_pcrs(), &user_data);
 
         let mut tampered = transition_public_values;
         tampered.l2PostRoot = B256::from([9; 32]);
 
-        let expected_user_data = range_user_data(&tampered);
+        let expected_user_data = transition_commitment(&tampered);
         let err =
             parse_and_check_pcrs(&attestation_doc, &test_expected_pcrs(), &expected_user_data)
                 .unwrap_err();
@@ -314,7 +304,7 @@ mod tests {
     #[test]
     fn wrong_pcrs_fail_verification() {
         let transition_public_values = transition_public_values();
-        let user_data = range_user_data(&transition_public_values);
+        let user_data = transition_commitment(&transition_public_values);
         // Document carries PCR0 = 0x03; we verify against a different non-zero value.
         let attestation_doc = make_attestation_doc(&test_pcrs(), &user_data);
 
@@ -334,7 +324,7 @@ mod tests {
     #[test]
     fn placeholder_pcrs_are_rejected() {
         let transition_public_values = transition_public_values();
-        let user_data = range_user_data(&transition_public_values);
+        let user_data = transition_commitment(&transition_public_values);
         let attestation_doc = make_attestation_doc(&[[0u8; PCR_LEN]; 3], &user_data);
 
         let err = parse_and_check_pcrs(&attestation_doc, &ExpectedPcrs::PLACEHOLDER, &user_data)

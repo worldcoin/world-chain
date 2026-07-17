@@ -444,8 +444,15 @@ fn encode_proof(proof: &ProofData) -> Bytes {
         } => [public_values.as_ref(), proof.as_ref()].concat().into(),
         ProofData::Nitro {
             attestation,
+            public_values,
             signature,
-        } => [attestation.as_ref(), signature.as_ref()].concat().into(),
+        } => [
+            public_values.as_ref(),
+            attestation.as_ref(),
+            signature.as_ref(),
+        ]
+        .concat()
+        .into(),
     }
 }
 

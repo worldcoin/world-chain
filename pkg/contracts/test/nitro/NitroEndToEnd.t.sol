@@ -4,10 +4,18 @@ pragma solidity ^0.8.28;
 import {Test, Vm} from "forge-std/Test.sol";
 import {NitroAttestationVerifier} from "../../src/proofs/nitro/NitroAttestationVerifier.sol";
 import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyRegistry.sol";
-import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol";
+import {NitroProofVerifier, TransitionPublicValues} from "../../src/proofs/nitro/NitroProofVerifier.sol";
 import {INitroAttestationVerifier} from "../../src/proofs/nitro/INitroAttestationVerifier.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
 import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier.sol";
+
+contract EndToEndParentGame {
+    bytes32 public rootClaim;
+
+    constructor(bytes32 rootClaim_) {
+        rootClaim = rootClaim_;
+    }
+}
 
 /// @title NitroEndToEndTest
 /// @notice Full pipeline integration test wiring:
@@ -18,7 +26,7 @@ import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier
 /// @dev A truly end-to-end test that goes through a real AWS-signed Nitro
 ///      attestation AND a real `NitroProofVerifier` verification would
 ///      require knowing the enclave's private key (so we could sign a fresh
-///      `signing_commitment`). Since we obviously don't have AWS NSM's
+///      `transition_commitment`). Since we obviously don't have AWS NSM's
 ///      private key, the integration test mocks the attestation step but
 ///      otherwise exercises the registry + proof-verifier code paths exactly
 ///      as they run in production. The PCR-allowlist piece of the
@@ -37,23 +45,27 @@ contract NitroEndToEndTest is Test {
     bytes32 constant PCR2 = bytes32(uint256(0xCAFE));
 
     bytes32 constant DOMAIN = keccak256("worldchain-integration");
-    address constant PARENT = address(0x1234);
     bytes32 constant L1H = keccak256("l1-origin");
     uint256 constant L1N = 7_777;
     bytes32 constant CFG = keccak256("rollup-cfg");
+    bytes32 constant PRE = keccak256("pre-root");
+    uint64 constant PRE_BLK = 41_999;
     bytes32 constant POST = keccak256("post-root");
     uint64 constant BLK = 42_000;
+    address constant ANCHOR_STATE_REGISTRY = address(0xA11CE);
 
     bytes constant TBS = hex"abcdabcd";
     bytes constant SIG = hex"feedfeed";
 
     Vm.Wallet enclaveWallet;
     bytes enclavePubKey;
+    EndToEndParentGame parent;
 
     function setUp() public {
         attestationVerifier = new MockNitroAttestationVerifier();
         registry = new NitroEnclaveKeyRegistry(attestationVerifier, owner);
-        proofVerifier = new NitroProofVerifier(registry);
+        parent = new EndToEndParentGame(PRE);
+        proofVerifier = new NitroProofVerifier(registry, ANCHOR_STATE_REGISTRY);
 
         enclaveWallet = vm.createWallet("enclave-integration");
         enclavePubKey = _uncompressedKey(enclaveWallet.publicKeyX, enclaveWallet.publicKeyY);
@@ -69,25 +81,55 @@ contract NitroEndToEndTest is Test {
         }
     }
 
-    function _signCommitment(Vm.Wallet memory w, bytes32 postRoot, uint64 blk, bytes32 cfg)
+    function _transition(bytes32 postRoot, uint64 blk, bytes32 cfg)
+        internal
+        pure
+        returns (TransitionPublicValues memory)
+    {
+        return TransitionPublicValues({
+            l1Head: L1H,
+            l2PreRoot: PRE,
+            l2PreBlockNumber: PRE_BLK,
+            l2PostRoot: postRoot,
+            l2PostBlockNumber: blk,
+            rollupConfigHash: cfg
+        });
+    }
+
+    function _signCommitment(Vm.Wallet memory w, TransitionPublicValues memory transition)
         internal
         returns (bytes memory)
     {
-        bytes32 commitment = keccak256(abi.encodePacked(postRoot, blk, cfg));
+        bytes32 commitment = keccak256(abi.encode(transition));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(w, commitment);
         return abi.encodePacked(r, s, v);
     }
 
-    function _proof(bytes memory sig, bytes memory pub, bytes32 postRoot, uint64 blk, bytes32 cfg)
+    function _signCommitment(Vm.Wallet memory w, bytes32 postRoot, uint64 blk, bytes32 cfg)
         internal
-        pure
         returns (bytes memory)
     {
-        return abi.encode(DOMAIN, PARENT, L1H, L1N, cfg, postRoot, blk, sig, pub);
+        return _signCommitment(w, _transition(postRoot, blk, cfg));
     }
 
-    function _rootId(bytes32 postRoot, uint64 blk) internal pure returns (bytes32) {
-        return WorldChainProofLib.rootId(DOMAIN, PARENT, postRoot, uint256(blk), L1H, L1N);
+    function _proof(bytes memory sig, bytes memory pub, TransitionPublicValues memory transition)
+        internal
+        view
+        returns (bytes memory)
+    {
+        return abi.encode(DOMAIN, address(parent), L1N, transition, sig, pub);
+    }
+
+    function _proof(bytes memory sig, bytes memory pub, bytes32 postRoot, uint64 blk, bytes32 cfg)
+        internal
+        view
+        returns (bytes memory)
+    {
+        return _proof(sig, pub, _transition(postRoot, blk, cfg));
+    }
+
+    function _rootId(bytes32 postRoot, uint64 blk) internal view returns (bytes32) {
+        return WorldChainProofLib.rootId(DOMAIN, address(parent), postRoot, uint256(blk), L1H, L1N);
     }
 
     /*//////////////////////////////////////////////////////////////
