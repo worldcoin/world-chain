@@ -64,8 +64,7 @@ contract WorldChainProofSystemFactory {
     ) {
         if (
             challengePeriod_ == 0 || proofPeriod_ == 0 || domain_.chainId == 0 || domain_.proofSystemVersion == 0
-                || domain_.blockInterval == 0 || domain_.intermediateBlockInterval == 0
-                || domain_.blockInterval % domain_.intermediateBlockInterval != 0 || proofThreshold_ == 0
+                || domain_.blockInterval == 0 || proofThreshold_ == 0
                 || proofThreshold_ > WorldChainProofLib.PROOF_LANE_COUNT
         ) {
             revert InvalidActivationParameters();
@@ -84,7 +83,7 @@ contract WorldChainProofSystemFactory {
         stakingRegistry = stakingRegistry_;
     }
 
-    function propose(address parentRef, bytes32 rootClaim, uint256 l2BlockNumber, bytes32 intermediateRootsHash)
+    function propose(address parentRef, bytes32 rootClaim, uint256 l2BlockNumber)
         external
         payable
         returns (address game, bytes32 id)
@@ -92,14 +91,11 @@ contract WorldChainProofSystemFactory {
         uint256 l1OriginNumber = block.number == 0 ? 0 : block.number - 1;
         bytes32 l1OriginHash = block.number == 0 ? bytes32(0) : blockhash(l1OriginNumber);
 
-        bytes32 key =
-            WorldChainProofLib.proposalKey(domainHash, parentRef, rootClaim, l2BlockNumber, intermediateRootsHash);
+        bytes32 key = WorldChainProofLib.proposalKey(domainHash, parentRef, rootClaim, l2BlockNumber);
         address existing = games[key];
         if (existing != address(0)) revert GameAlreadyExists(key, existing);
 
-        id = WorldChainProofLib.rootId(
-            domainHash, parentRef, rootClaim, l2BlockNumber, intermediateRootsHash, l1OriginHash, l1OriginNumber
-        );
+        id = WorldChainProofLib.rootId(domainHash, parentRef, rootClaim, l2BlockNumber, l1OriginHash, l1OriginNumber);
 
         game = address(
             new WorldChainProofSystemGame{value: msg.value}(
@@ -108,7 +104,6 @@ contract WorldChainProofSystemFactory {
                     parentRef: parentRef,
                     rootClaim: rootClaim,
                     l2BlockNumber: l2BlockNumber,
-                    intermediateRootsHash: intermediateRootsHash,
                     l1OriginHash: l1OriginHash,
                     l1OriginNumber: l1OriginNumber
                 }),
@@ -143,26 +138,22 @@ contract WorldChainProofSystemFactory {
         );
     }
 
-    function computeProposalKey(
-        address parentRef,
-        bytes32 rootClaim,
-        uint256 l2BlockNumber,
-        bytes32 intermediateRootsHash
-    ) external view returns (bytes32) {
-        return WorldChainProofLib.proposalKey(domainHash, parentRef, rootClaim, l2BlockNumber, intermediateRootsHash);
+    function computeProposalKey(address parentRef, bytes32 rootClaim, uint256 l2BlockNumber)
+        external
+        view
+        returns (bytes32)
+    {
+        return WorldChainProofLib.proposalKey(domainHash, parentRef, rootClaim, l2BlockNumber);
     }
 
     function computeRootId(
         address parentRef,
         bytes32 rootClaim,
         uint256 l2BlockNumber,
-        bytes32 intermediateRootsHash,
         bytes32 l1OriginHash,
         uint256 l1OriginNumber
     ) external view returns (bytes32) {
-        return WorldChainProofLib.rootId(
-            domainHash, parentRef, rootClaim, l2BlockNumber, intermediateRootsHash, l1OriginHash, l1OriginNumber
-        );
+        return WorldChainProofLib.rootId(domainHash, parentRef, rootClaim, l2BlockNumber, l1OriginHash, l1OriginNumber);
     }
 
     function _emitGameCreated(GameCreatedLog memory log) private {

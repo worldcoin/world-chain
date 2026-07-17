@@ -101,7 +101,6 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     ///        (
     ///            bytes32 domainHash,
     ///            address parentRef,
-    ///            bytes32 intermediateRootsHash,
     ///            uint256 l1OriginNumber,
     ///            bytes   publicValues,
     ///            bytes   proofBytes
@@ -132,11 +131,10 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
         (
             bytes32 domainHash,
             address parentRef,
-            bytes32 intermediateRootsHash,
             uint256 l1OriginNumber,
             bytes memory publicValues,
             bytes memory proofBytes
-        ) = abi.decode(proof, (bytes32, address, bytes32, uint256, bytes, bytes));
+        ) = abi.decode(proof, (bytes32, address, uint256, bytes, bytes));
 
         AggregationOutputs memory outputs = abi.decode(publicValues, (AggregationOutputs));
 
@@ -144,13 +142,7 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
         if (outputs.multiBlockVKey != rangeVKeyCommitment) return false;
 
         bytes32 expectedRootId = WorldChainProofLib.rootId(
-            domainHash,
-            parentRef,
-            outputs.l2PostRoot,
-            uint256(outputs.l2BlockNumber),
-            intermediateRootsHash,
-            outputs.l1Head,
-            l1OriginNumber
+            domainHash, parentRef, outputs.l2PostRoot, uint256(outputs.l2BlockNumber), outputs.l1Head, l1OriginNumber
         );
         if (expectedRootId != rootId) return false;
 

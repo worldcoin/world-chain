@@ -13,7 +13,6 @@ contract WorldChainProofSystemGame {
         address parentRef;
         bytes32 rootClaim;
         uint256 l2BlockNumber;
-        bytes32 intermediateRootsHash;
         bytes32 l1OriginHash;
         uint256 l1OriginNumber;
     }
@@ -58,7 +57,6 @@ contract WorldChainProofSystemGame {
     address public immutable parentRef;
     bytes32 public immutable rootClaim;
     uint256 public immutable l2BlockNumber;
-    bytes32 public immutable intermediateRootsHash;
     bytes32 public immutable l1OriginHash;
     uint256 public immutable l1OriginNumber;
     bytes32 public immutable domainHash;
@@ -93,7 +91,6 @@ contract WorldChainProofSystemGame {
         parentRef = proposal.parentRef;
         rootClaim = proposal.rootClaim;
         l2BlockNumber = proposal.l2BlockNumber;
-        intermediateRootsHash = proposal.intermediateRootsHash;
         l1OriginHash = proposal.l1OriginHash;
         l1OriginNumber = proposal.l1OriginNumber;
         domainHash = config.domainHash;
@@ -102,7 +99,6 @@ contract WorldChainProofSystemGame {
             proposal.parentRef,
             proposal.rootClaim,
             proposal.l2BlockNumber,
-            proposal.intermediateRootsHash,
             proposal.l1OriginHash,
             proposal.l1OriginNumber
         );

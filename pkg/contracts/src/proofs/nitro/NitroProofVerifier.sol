@@ -69,7 +69,6 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     ///        (
     ///            bytes32 domainHash,
     ///            address parentRef,
-    ///            bytes32 intermediateRootsHash,
     ///            bytes32 l1OriginHash,
     ///            uint256 l1OriginNumber,
     ///            bytes32 rollupConfigHash,
@@ -99,7 +98,6 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
         (
             bytes32 domainHash,
             address parentRef,
-            bytes32 intermediateRootsHash,
             bytes32 l1OriginHash,
             uint256 l1OriginNumber,
             bytes32 rollupConfigHash,
@@ -107,19 +105,13 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
             uint64 l2BlockNumber,
             bytes memory signature,
             bytes memory expectedPublicKey
-        ) = abi.decode(proof, (bytes32, address, bytes32, bytes32, uint256, bytes32, bytes32, uint64, bytes, bytes));
+        ) = abi.decode(proof, (bytes32, address, bytes32, uint256, bytes32, bytes32, uint64, bytes, bytes));
 
         // 1. Bind the proof to the supplied rootId. The boot_info's
         //    `l2PostRoot` plays the role of `rootClaim` (the proposal's
         //    claimed L2 output root) in WorldChainProofLib.rootId.
         bytes32 expectedRootId = WorldChainProofLib.rootId(
-            domainHash,
-            parentRef,
-            l2PostRoot,
-            uint256(l2BlockNumber),
-            intermediateRootsHash,
-            l1OriginHash,
-            l1OriginNumber
+            domainHash, parentRef, l2PostRoot, uint256(l2BlockNumber), l1OriginHash, l1OriginNumber
         );
         if (expectedRootId != rootId) return false;
 

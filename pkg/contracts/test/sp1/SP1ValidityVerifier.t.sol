@@ -66,7 +66,6 @@ contract SP1ValidityVerifierTest is Test {
     bytes32 internal constant RANGE_VKEY_COMMITMENT = keccak256("range-vkey");
 
     bytes32 internal constant DOMAIN_HASH = keccak256("domain");
-    bytes32 internal constant INTERMEDIATE_ROOTS_HASH = keccak256("intermediate-roots");
     bytes32 internal constant L1_ORIGIN_HASH = keccak256("l1-origin");
     uint256 internal constant L1_ORIGIN_NUMBER = 9_001;
 
@@ -107,20 +106,17 @@ contract SP1ValidityVerifierTest is Test {
     }
 
     function _proof(AggregationOutputs memory outputs) internal view returns (bytes memory) {
-        return _proof(DOMAIN_HASH, address(parent), INTERMEDIATE_ROOTS_HASH, L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
+        return _proof(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
     }
 
     function _proof(
         bytes32 domainHash,
         address parentRef,
-        bytes32 intermediateRootsHash,
         uint256 l1OriginNumber,
         AggregationOutputs memory outputs,
         bytes memory proofBytes
     ) internal pure returns (bytes memory) {
-        return abi.encode(
-            domainHash, parentRef, intermediateRootsHash, l1OriginNumber, _publicValues(outputs), proofBytes
-        );
+        return abi.encode(domainHash, parentRef, l1OriginNumber, _publicValues(outputs), proofBytes);
     }
 
     function _rootId() internal view returns (bytes32) {
@@ -129,13 +125,7 @@ contract SP1ValidityVerifierTest is Test {
 
     function _rootId(address parentRef) internal pure returns (bytes32) {
         return WorldChainProofLib.rootId(
-            DOMAIN_HASH,
-            parentRef,
-            L2_POST_ROOT,
-            uint256(L2_BLOCK_NUMBER),
-            INTERMEDIATE_ROOTS_HASH,
-            L1_ORIGIN_HASH,
-            L1_ORIGIN_NUMBER
+            DOMAIN_HASH, parentRef, L2_POST_ROOT, uint256(L2_BLOCK_NUMBER), L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
         );
     }
 
@@ -197,8 +187,7 @@ contract SP1ValidityVerifierTest is Test {
         AggregationOutputs memory outputs = _outputs();
         _expectSp1Call(outputs);
 
-        bytes memory proof =
-            _proof(DOMAIN_HASH, address(anchor), INTERMEDIATE_ROOTS_HASH, L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
+        bytes memory proof = _proof(DOMAIN_HASH, address(anchor), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
 
         assertTrue(verifier.verify(_rootId(address(anchor)), proof));
     }
@@ -212,9 +201,7 @@ contract SP1ValidityVerifierTest is Test {
     }
 
     function test_Verify_FalseForMalformedPublicValues() public view {
-        bytes memory proof = abi.encode(
-            DOMAIN_HASH, address(parent), INTERMEDIATE_ROOTS_HASH, L1_ORIGIN_NUMBER, hex"deadbeef", SP1_PROOF_BYTES
-        );
+        bytes memory proof = abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, hex"deadbeef", SP1_PROOF_BYTES);
 
         assertFalse(verifier.verify(_rootId(), proof));
     }
@@ -266,8 +253,7 @@ contract SP1ValidityVerifierTest is Test {
     function test_Verify_FalseForAnchorRegistryPreRootMismatch() public view {
         AggregationOutputs memory outputs = _outputs();
         outputs.l2PreRoot = keccak256("wrong-pre-root");
-        bytes memory proof =
-            _proof(DOMAIN_HASH, address(anchor), INTERMEDIATE_ROOTS_HASH, L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
+        bytes memory proof = _proof(DOMAIN_HASH, address(anchor), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
 
         assertFalse(verifier.verify(_rootId(address(anchor)), proof));
     }
@@ -275,9 +261,7 @@ contract SP1ValidityVerifierTest is Test {
     function test_Verify_FalseForUnreadableParentRef() public view {
         AggregationOutputs memory outputs = _outputs();
         address unreadableParentRef = address(0xBEEF);
-        bytes memory proof = _proof(
-            DOMAIN_HASH, unreadableParentRef, INTERMEDIATE_ROOTS_HASH, L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES
-        );
+        bytes memory proof = _proof(DOMAIN_HASH, unreadableParentRef, L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
 
         assertFalse(verifier.verify(_rootId(unreadableParentRef), proof));
     }
@@ -295,22 +279,15 @@ contract SP1ValidityVerifierTest is Test {
 
     function test_Verify_FalseForDomainHashMismatch() public view {
         AggregationOutputs memory outputs = _outputs();
-        bytes memory proof = _proof(
-            keccak256("wrong-domain"),
-            address(parent),
-            INTERMEDIATE_ROOTS_HASH,
-            L1_ORIGIN_NUMBER,
-            outputs,
-            SP1_PROOF_BYTES
-        );
+        bytes memory proof =
+            _proof(keccak256("wrong-domain"), address(parent), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
 
         assertFalse(verifier.verify(_rootId(), proof));
     }
 
     function test_Verify_FalseForParentRefMismatch() public view {
         AggregationOutputs memory outputs = _outputs();
-        bytes memory proof =
-            _proof(DOMAIN_HASH, address(0xBAD), INTERMEDIATE_ROOTS_HASH, L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
+        bytes memory proof = _proof(DOMAIN_HASH, address(0xBAD), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
 
         assertFalse(verifier.verify(_rootId(), proof));
     }
@@ -329,15 +306,6 @@ contract SP1ValidityVerifierTest is Test {
         assertFalse(verifier.verify(_rootId(), _proof(outputs)));
     }
 
-    function test_Verify_FalseForIntermediateRootsHashMismatch() public view {
-        AggregationOutputs memory outputs = _outputs();
-        bytes memory proof = _proof(
-            DOMAIN_HASH, address(parent), keccak256("wrong-intermediate"), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES
-        );
-
-        assertFalse(verifier.verify(_rootId(), proof));
-    }
-
     function test_Verify_FalseForL1HeadMismatch() public view {
         AggregationOutputs memory outputs = _outputs();
         outputs.l1Head = keccak256("wrong-l1-head");
@@ -347,9 +315,7 @@ contract SP1ValidityVerifierTest is Test {
 
     function test_Verify_FalseForL1OriginNumberMismatch() public view {
         AggregationOutputs memory outputs = _outputs();
-        bytes memory proof = _proof(
-            DOMAIN_HASH, address(parent), INTERMEDIATE_ROOTS_HASH, L1_ORIGIN_NUMBER + 1, outputs, SP1_PROOF_BYTES
-        );
+        bytes memory proof = _proof(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER + 1, outputs, SP1_PROOF_BYTES);
 
         assertFalse(verifier.verify(_rootId(), proof));
     }
