@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-d1f7deee.js";
+            window.path_to_searchindex_js = "searchindex-dbe53a13.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-87388434.js"></script>
@@ -3710,7 +3710,7 @@ contract EscalationGame {
 </div>
 <p>Multiple proofs from the same lane MUST NOT increase the threshold count.</p>
 <h3 id="root-commitments"><a class="header" href="#root-commitments">Root Commitments</a></h3>
-<p>The data bound by every proof and attestation is split into two layers so that the proposer’s submission surface is the same as the OP Stack and Base Azul proposer surfaces. Per-proposal data is supplied by the proposer or captured by the factory at proposal creation. Domain constants are fixed on the verifier implementation and are not part of the proposer’s calldata.</p>
+<p>The data bound by every proof and attestation is split into two layers so that the proposer’s submission surface stays aligned with the OP Stack. Per-proposal data is supplied by the proposer or captured by the factory at proposal creation. Domain constants are fixed on the verifier implementation and are not part of the proposer’s calldata.</p>
 <h4 id="proposal-per-proposal"><a class="header" href="#proposal-per-proposal">Proposal (per-proposal)</a></h4>
 <div class="table-wrapper">
 <table>
@@ -3721,13 +3721,12 @@ contract EscalationGame {
 <tr><td><code>rootClaim</code></td><td>Proposer</td><td>Claimed L2 output root, computed as in the <a href="https://specs.optimism.io/protocol/proposals.html#l2-output-commitment-construction">OP Stack output-root V1 encoding</a>.</td></tr>
 <tr><td><code>l2BlockNumber</code></td><td>Proposer</td><td>L2 block number for <code>rootClaim</code>, matching the <a href="https://specs.optimism.io/protocol/proposals.html"><code>l2BlockNumber</code> field of an OP Stack L2 output proposal</a>.</td></tr>
 <tr><td><code>parentRef</code></td><td>Proposer</td><td>Address of the parent — the <code>AnchorStateRegistry</code> for the first proposal, otherwise the parent proposal. Same convention as the OP Stack [Fault Dispute Game <code>extraData</code> parent reference][op-dgi] and the parent reference encoded in Base Azul’s <code>AggregateVerifier</code> extra-data layout (see [Base Azul proof system][base-azul]). The parent’s <code>rootClaim</code> and <code>l2BlockNumber</code> are read from this reference rather than re-supplied.</td></tr>
-<tr><td><code>intermediateRootsHash</code></td><td>Proposer</td><td>Commitment to ordered intermediate output roots, compatible with Base Azul’s intermediate-root commitment. Implementations that do not use intermediate roots MUST set this field to <code>bytes32(0)</code>.</td></tr>
 <tr><td><code>l1OriginHash</code></td><td>Factory</td><td>L1 origin hash captured at proposal creation. The proposer does not pass it as calldata; it is read via <code>blockhash()</code> or <a href="https://eips.ethereum.org/EIPS/eip-2935">EIP-2935</a> history and pinned by the factory, mirroring the OP Stack [<code>l1Head</code> snapshot at clone creation][op-dgi] that Base Azul inherits.</td></tr>
 <tr><td><code>l1OriginNumber</code></td><td>Factory</td><td>L1 block number paired with <code>l1OriginHash</code>.</td></tr>
 </tbody>
 </table>
 </div>
-<p>This matches the OP Stack and Base proposer surface field-for-field. Any OP Stack proposer that already submits <code>(rootClaim, l2BlockNumber)</code> against a parent reference can be reused without protocol-level change. See <a href="#backwards-compatibility-5">Backwards Compatibility</a> for the full compatibility statement.</p>
+<p>Any OP Stack proposer that already submits <code>(rootClaim, l2BlockNumber)</code> against a parent reference can be reused without protocol-level change. See <a href="#backwards-compatibility-5">Backwards Compatibility</a> for the full compatibility statement.</p>
 <h4 id="domain-verifier-immutable"><a class="header" href="#domain-verifier-immutable">Domain (verifier-immutable)</a></h4>
 <div class="table-wrapper">
 <table>
@@ -3739,11 +3738,10 @@ contract EscalationGame {
 <tr><td><code>proofSystemVersion</code></td><td>Version of this proof system’s proof-domain encoding.</td></tr>
 <tr><td><code>rollupConfigHash</code></td><td>Hash of the rollup configuration and World Chain hardfork schedule.</td></tr>
 <tr><td><code>blockInterval</code></td><td>Distance in L2 blocks between a parent root and a proposed root.</td></tr>
-<tr><td><code>intermediateBlockInterval</code></td><td>Distance in L2 blocks between intermediate roots inside one proposal.</td></tr>
 </tbody>
 </table>
 </div>
-<p>These values are set once on the verifier implementation (analogous to Base’s <code>CONFIG_HASH</code>, <code>L2_CHAIN_ID</code>, <code>BLOCK_INTERVAL</code>, and <code>INTERMEDIATE_BLOCK_INTERVAL</code> immutables) and are not supplied per proposal. Lane-specific verifier constants — such as the active TEE image hash, the validity proof program key, and the fault proof game type — live in the lane verifiers’ own configuration and are committed to in those lanes’ proof journals.</p>
+<p>These values are set once on the verifier implementation (analogous to Base’s <code>CONFIG_HASH</code>, <code>L2_CHAIN_ID</code>, and <code>BLOCK_INTERVAL</code> immutables) and are not supplied per proposal. Lane-specific verifier constants — such as the active TEE image hash, the validity proof program key, and the fault proof game type — live in the lane verifiers’ own configuration and are committed to in those lanes’ proof journals.</p>
 <h4 id="canonical-identifiers"><a class="header" href="#canonical-identifiers">Canonical identifiers</a></h4>
 <p>The contracts use two related identifiers:</p>
 <ul>
@@ -3755,16 +3753,14 @@ contract EscalationGame {
     chainId,
     proofSystemVersion,
     rollupConfigHash,
-    blockInterval,
-    intermediateBlockInterval
+    blockInterval
 ))
 
 proposalKey = keccak256(abi.encode(
     domainHash,
     parentRef,
     rootClaim,
-    l2BlockNumber,
-    intermediateRootsHash
+    l2BlockNumber
 ))
 
 rootId = keccak256(abi.encode(
@@ -3772,7 +3768,6 @@ rootId = keccak256(abi.encode(
     parentRef,
     rootClaim,
     l2BlockNumber,
-    intermediateRootsHash,
     l1OriginHash,
     l1OriginNumber
 ))
@@ -3886,7 +3881,7 @@ rootId = keccak256(abi.encode(
 <li><code>l1OriginHash</code> is factory-captured at proposal creation, matching the L1 head snapshot taken by <code>DisputeGameFactory</code> at clone creation.</li>
 <li>The factory lookup key intentionally excludes <code>l1OriginHash</code> and <code>l1OriginNumber</code>, matching the OP Stack/Base pattern where game existence is keyed by deterministic proposal data and the L1 origin is stored on the created game.</li>
 </ul>
-<p>An existing OP Stack proposer that already produces <code>(rootClaim, l2BlockNumber)</code> against a parent reference can be reused. Domain constants (<code>chainId</code>, <code>proofSystemVersion</code>, <code>rollupConfigHash</code>, <code>blockInterval</code>, <code>intermediateBlockInterval</code>) and lane-specific verifier constants live on the verifier implementation, not in the proposer’s calldata, so changes to those values do not require a proposer change.</p>
+<p>An existing OP Stack proposer that already produces <code>(rootClaim, l2BlockNumber)</code> against a parent reference can be reused. Domain constants (<code>chainId</code>, <code>proofSystemVersion</code>, <code>rollupConfigHash</code>, <code>blockInterval</code>) and lane-specific verifier constants live on the verifier implementation, not in the proposer’s calldata, so changes to those values do not require a proposer change.</p>
 <h2 id="test-cases-2"><a class="header" href="#test-cases-2">Test Cases</a></h2>
 <p>Before this WIP can move beyond Draft, implementations SHOULD cover at least:</p>
 <ul>
