@@ -200,6 +200,7 @@ contract WorldChainProofSystemFactory {
             revert RegistryFactoryMismatch(address(this), configuredFactory);
         }
 
+        // The registry is the parent sentinel for transitions starting from the current accepted anchor.
         if (parentRef == address(anchorStateRegistry)) {
             startingRootClaim = anchorStateRegistry.currentRootClaim();
             startingL2BlockNumber = anchorStateRegistry.currentL2BlockNumber();
