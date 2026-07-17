@@ -98,6 +98,7 @@ contract WorldChainProofSystemTest is Test {
 
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
 
+        // VALIDITY_PROOF (bit 0) and TEE_ATTESTATION (bit 1) produce the bitmap 0b011.
         vm.expectEmit(true, false, false, true);
         emit WorldChainProofSystemGame.ProofThresholdReached(rootId, 3);
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(rootId));
