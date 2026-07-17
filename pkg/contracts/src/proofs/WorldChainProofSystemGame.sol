@@ -394,15 +394,11 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     /// @dev Proof timeout credits the full balance to the challenger, so only inherited or governance invalidations
     ///      refund the challenger bond separately.
     function _refundableChallengerPrincipal(address recipient) internal view returns (uint256) {
-        if (state != WorldChainProofLib.RootState.INVALIDATED) return 0;
-        if (
-            invalidationReason != WorldChainProofLib.InvalidationReason.INVALID_PARENT
-                && invalidationReason != WorldChainProofLib.InvalidationReason.BLACKLISTED
-        ) {
-            return 0;
-        }
-        if (recipient != challenger) return 0;
-        return postedChallengerBond;
+        bool challengerBondIsRefundable = state == WorldChainProofLib.RootState.INVALIDATED && recipient == challenger
+            && (invalidationReason == WorldChainProofLib.InvalidationReason.INVALID_PARENT
+                || invalidationReason == WorldChainProofLib.InvalidationReason.BLACKLISTED);
+
+        return challengerBondIsRefundable ? postedChallengerBond : 0;
     }
 
     function _transfer(address payable recipient, uint256 amount) internal {
