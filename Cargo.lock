@@ -18694,6 +18694,7 @@ name = "world-chain-nitro-worker"
 version = "2.4.0"
 dependencies = [
  "alloy-primitives",
+ "alloy-sol-types",
  "anyhow",
  "async-trait",
  "clap",
@@ -19027,6 +19028,7 @@ name = "world-chain-proof-nitro"
 version = "2.4.0"
 dependencies = [
  "alloy-primitives",
+ "alloy-sol-types",
  "anyhow",
  "aws-nitro-enclaves-nsm-api",
  "base64 0.22.1",

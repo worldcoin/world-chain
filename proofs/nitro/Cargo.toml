@@ -45,6 +45,7 @@ enclave = [
 [dependencies]
 # Shared (host + enclave) ----------------------------------------------------
 alloy-primitives = { workspace = true, features = ["serde"] }
+alloy-sol-types.workspace = true
 anyhow.workspace = true
 base64 = { workspace = true }
 ciborium = "0.2"

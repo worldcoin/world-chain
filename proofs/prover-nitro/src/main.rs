@@ -114,7 +114,7 @@ async fn nitro_prove(args: NitroArgs) -> Result<()> {
         ExpectedPcrs, NitroRangeProofRequest,
         attestation::parse_and_check_pcrs,
         host::{EnclaveEndpoint, NitroProver},
-        protocol::range_user_data,
+        protocol::transition_commitment,
     };
     use world_chain_prover::{build_range_input_from_args, write_json};
 
@@ -161,7 +161,7 @@ async fn nitro_prove(args: NitroArgs) -> Result<()> {
         block = artifact.transition_public_values.l2PostBlockNumber,
     );
 
-    let expected_user_data = range_user_data(&artifact.transition_public_values);
+    let expected_user_data = transition_commitment(&artifact.transition_public_values);
     parse_and_check_pcrs(
         &artifact.attestation_doc,
         &expected_pcrs,

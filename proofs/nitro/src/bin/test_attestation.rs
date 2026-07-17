@@ -10,7 +10,7 @@ use world_chain_proof_nitro::{
     ExpectedPcrs, NitroRangeProofRequest,
     attestation::parse_and_check_pcrs,
     host::{EnclaveEndpoint, NitroProver},
-    protocol::range_user_data,
+    protocol::transition_commitment,
 };
 
 #[cfg(target_os = "linux")]
@@ -63,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
         "received artifact"
     );
 
-    let expected_user_data = range_user_data(&artifact.transition_public_values);
+    let expected_user_data = transition_commitment(&artifact.transition_public_values);
     parse_and_check_pcrs(
         &artifact.attestation_doc,
         &expected_pcrs,

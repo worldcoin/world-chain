@@ -3,9 +3,17 @@ pragma solidity ^0.8.28;
 
 import {Test, Vm} from "forge-std/Test.sol";
 import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyRegistry.sol";
-import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol";
+import {NitroProofVerifier, TransitionPublicValues} from "../../src/proofs/nitro/NitroProofVerifier.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
 import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier.sol";
+
+contract MockParentGame {
+    bytes32 public rootClaim;
+
+    constructor(bytes32 rootClaim_) {
+        rootClaim = rootClaim_;
+    }
+}
 
 contract NitroProofVerifierTest is Test {
     MockNitroAttestationVerifier attestationVerifier;
@@ -21,24 +29,27 @@ contract NitroProofVerifierTest is Test {
     bytes constant TBS = hex"deadbeef";
     bytes constant SIG = hex"cafebabe";
 
-    // Boot-info fields used to build a signing commitment.
+    // Transition public values used to build a signing commitment.
+    bytes32 constant L2_PRE_ROOT = keccak256("l2-pre-root");
+    uint64 constant L2_PRE_BLOCK = 123_455;
     bytes32 constant L2_POST_ROOT = keccak256("l2-post-root");
     uint64 constant L2_BLOCK = 123_456;
     bytes32 constant ROLLUP_CFG = keccak256("rollup-cfg");
 
     // Context fields needed to rebuild rootId.
     bytes32 constant DOMAIN_HASH = keccak256("domain");
-    address constant PARENT_REF = address(0xBEEF);
     bytes32 constant L1_ORIGIN_HASH = keccak256("l1-origin");
     uint256 constant L1_ORIGIN_NUMBER = 9_001;
 
     Vm.Wallet enclaveWallet;
     bytes enclavePubKey;
+    MockParentGame parent;
 
     function setUp() public {
         attestationVerifier = new MockNitroAttestationVerifier();
         registry = new NitroEnclaveKeyRegistry(attestationVerifier, owner);
-        proofVerifier = new NitroProofVerifier(registry);
+        parent = new MockParentGame(L2_PRE_ROOT);
+        proofVerifier = new NitroProofVerifier(registry, address(0));
 
         enclaveWallet = vm.createWallet("enclave");
         enclavePubKey = _uncompressedKey(enclaveWallet.publicKeyX, enclaveWallet.publicKeyY);
@@ -69,20 +80,29 @@ contract NitroProofVerifierTest is Test {
         return _sign(enclaveWallet, digest);
     }
 
+    function _transition() internal pure returns (TransitionPublicValues memory) {
+        return TransitionPublicValues({
+            l1Head: L1_ORIGIN_HASH,
+            l2PreRoot: L2_PRE_ROOT,
+            l2PreBlockNumber: L2_PRE_BLOCK,
+            l2PostRoot: L2_POST_ROOT,
+            l2PostBlockNumber: L2_BLOCK,
+            rollupConfigHash: ROLLUP_CFG
+        });
+    }
+
     function _commitment() internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(L2_POST_ROOT, L2_BLOCK, ROLLUP_CFG));
+        return keccak256(abi.encode(_transition()));
     }
 
-    function _expectedRootId() internal pure returns (bytes32) {
+    function _expectedRootId() internal view returns (bytes32) {
         return WorldChainProofLib.rootId(
-            DOMAIN_HASH, PARENT_REF, L2_POST_ROOT, uint256(L2_BLOCK), L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
+            DOMAIN_HASH, address(parent), L2_POST_ROOT, uint256(L2_BLOCK), L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
         );
     }
 
-    function _proofBytes(bytes memory sig, bytes memory pub) internal pure returns (bytes memory) {
-        return abi.encode(
-            DOMAIN_HASH, PARENT_REF, L1_ORIGIN_HASH, L1_ORIGIN_NUMBER, ROLLUP_CFG, L2_POST_ROOT, L2_BLOCK, sig, pub
-        );
+    function _proofBytes(bytes memory sig, bytes memory pub) internal view returns (bytes memory) {
+        return abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, _transition(), sig, pub);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -99,7 +119,7 @@ contract NitroProofVerifierTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function test_Verify_FalseForWrongRootId() public {
-        // Honest signature + boot_info, but the game asks about a different
+        // Honest signature + transition public values, but the game asks about a different
         // rootId — the verifier must NOT validate.
         bytes memory sig = _sign(_commitment());
         assertFalse(proofVerifier.verify(bytes32(uint256(0xdead)), _proofBytes(sig, enclavePubKey)));
@@ -109,25 +129,32 @@ contract NitroProofVerifierTest is Test {
         // The proof claims (L2_POST_ROOT, L2_BLOCK + 1, ROLLUP_CFG) but the
         // signature is over the L2_BLOCK commitment — rootId check still
         // passes for the modified block number? It must not: the signing
-        // commitment is recomputed from the proof's boot_info, so a wrong
+        // commitment is recomputed from the proof's transition public values, so a wrong
         // commitment surfaces as a signature mismatch.
         bytes memory sig = _sign(_commitment());
         // Build a proof with a mismatched block number and a matching rootId.
+        TransitionPublicValues memory wrongTransition = _transition();
+        wrongTransition.l2PostBlockNumber += 1;
         bytes32 wrongRootId = WorldChainProofLib.rootId(
-            DOMAIN_HASH, PARENT_REF, L2_POST_ROOT, uint256(L2_BLOCK + 1), L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
-        );
-        bytes memory proof = abi.encode(
             DOMAIN_HASH,
-            PARENT_REF,
-            L1_ORIGIN_HASH,
-            L1_ORIGIN_NUMBER,
-            ROLLUP_CFG,
+            address(parent),
             L2_POST_ROOT,
-            L2_BLOCK + 1,
-            sig,
-            enclavePubKey
+            uint256(wrongTransition.l2PostBlockNumber),
+            L1_ORIGIN_HASH,
+            L1_ORIGIN_NUMBER
         );
+        bytes memory proof =
+            abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
         assertFalse(proofVerifier.verify(wrongRootId, proof));
+    }
+
+    function test_Verify_FalseForWrongPreRoot() public {
+        bytes memory sig = _sign(_commitment());
+        TransitionPublicValues memory wrongTransition = _transition();
+        wrongTransition.l2PreRoot = keccak256("wrong-pre-root");
+        bytes memory proof =
+            abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
+        assertFalse(proofVerifier.verify(_expectedRootId(), proof));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -287,21 +314,13 @@ contract NitroProofVerifierTest is Test {
         // Boundary: l2BlockNumber = 0 must work, since the rootId is
         // recomputed deterministically and the commitment is signed over
         // exactly that value.
+        TransitionPublicValues memory transition = _transition();
+        transition.l2PostBlockNumber = 0;
         bytes32 rootId =
-            WorldChainProofLib.rootId(DOMAIN_HASH, PARENT_REF, L2_POST_ROOT, 0, L1_ORIGIN_HASH, L1_ORIGIN_NUMBER);
-        bytes32 commitment = keccak256(abi.encodePacked(L2_POST_ROOT, uint64(0), ROLLUP_CFG));
+            WorldChainProofLib.rootId(DOMAIN_HASH, address(parent), L2_POST_ROOT, 0, L1_ORIGIN_HASH, L1_ORIGIN_NUMBER);
+        bytes32 commitment = keccak256(abi.encode(transition));
         bytes memory sig = _sign(commitment);
-        bytes memory proof = abi.encode(
-            DOMAIN_HASH,
-            PARENT_REF,
-            L1_ORIGIN_HASH,
-            L1_ORIGIN_NUMBER,
-            ROLLUP_CFG,
-            L2_POST_ROOT,
-            uint64(0),
-            sig,
-            enclavePubKey
-        );
+        bytes memory proof = abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, transition, sig, enclavePubKey);
         assertTrue(proofVerifier.verify(rootId, proof));
     }
 
@@ -313,22 +332,15 @@ contract NitroProofVerifierTest is Test {
         // recovery to mismatch the expected key and surface as `false`,
         // even though `rootId` still reconstructs correctly.
         bytes32 wrongCfg = keccak256("wrong-cfg");
-        bytes32 commitment = keccak256(abi.encodePacked(L2_POST_ROOT, L2_BLOCK, wrongCfg));
+        TransitionPublicValues memory wrongTransition = _transition();
+        wrongTransition.rollupConfigHash = wrongCfg;
+        bytes32 commitment = keccak256(abi.encode(wrongTransition));
         bytes memory sig = _sign(commitment);
         // Build the proof claiming the ORIGINAL rollupConfigHash (so rootId
         // reconstructs to the expected one), but with a signature over the
         // wrong-cfg commitment.
-        bytes memory proof = abi.encode(
-            DOMAIN_HASH,
-            PARENT_REF,
-            L1_ORIGIN_HASH,
-            L1_ORIGIN_NUMBER,
-            ROLLUP_CFG,
-            L2_POST_ROOT,
-            L2_BLOCK,
-            sig,
-            enclavePubKey
-        );
+        bytes memory proof =
+            abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, _transition(), sig, enclavePubKey);
         assertFalse(proofVerifier.verify(_expectedRootId(), proof));
     }
 

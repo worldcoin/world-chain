@@ -540,6 +540,7 @@ impl ClaimedProofJobHandler for FakeProofBackend {
             },
             ProofBackend::Nitro => ProofData::Nitro {
                 attestation: request.l1_head.as_slice().to_vec().into(),
+                public_values: request.root_claim.as_slice().to_vec().into(),
                 signature: vec![0x7e, request.l2_block_number as u8].into(), // mock signature
             },
         })

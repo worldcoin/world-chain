@@ -1,29 +1,42 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+import {IWorldChainAnchorStateRegistry} from "../interfaces/IWorldChainAnchorStateRegistry.sol";
+import {IWorldChainProofSystemGame} from "../interfaces/IWorldChainProofSystemGame.sol";
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
 import {WorldChainProofLib} from "../WorldChainProofLib.sol";
 import {NitroEnclaveKeyRegistry} from "./NitroEnclaveKeyRegistry.sol";
+
+/// ABI-encoded public values signed by the World Chain Nitro enclave.
+/// Must match `world_chain_proof_core::boot::TransitionPublicValues`.
+struct TransitionPublicValues {
+    bytes32 l1Head;
+    bytes32 l2PreRoot;
+    uint64 l2PreBlockNumber;
+    bytes32 l2PostRoot;
+    uint64 l2PostBlockNumber;
+    bytes32 rollupConfigHash;
+}
 
 /// @title NitroProofVerifier
 /// @author Worldcoin
 /// @notice TEE-attestation proof lane verifier compatible with WIP-1006's
 ///         multi-proof system (`IWorldChainProofVerifier`).
 /// @dev The enclave produces an ECDSA (secp256k1) signature over the
-///      `signing_commitment` computed in `proofs/nitro/src/protocol.rs`:
+///      `transition_commitment` computed in `proofs/nitro/src/protocol.rs`:
 ///
-///         signingCommitment =
-///             keccak256( l2PostRoot || uint64BE(l2BlockNumber) || rollupConfigHash )
+///         signingCommitment = keccak256(abi.encode(transitionPublicValues))
 ///
 ///      The `verify` hook — the only public entry point on this contract —:
-///        1. Reconstructs the proposal's `rootId` from the boot-info plus the
+///        1. Reconstructs the proposal's `rootId` from the transition public values plus the
 ///           remaining context fields supplied in the proof and asserts it
 ///           equals the `rootId` the game is asking about. This binds the
 ///           Nitro signature to the *specific* proposal under dispute.
-///        2. Checks that `expectedPublicKey` is currently registered in
+///        2. Binds the transition's pre-root to the parent proposal.
+///        3. Checks that `expectedPublicKey` is currently registered in
 ///           `NitroEnclaveKeyRegistry`.
-///        3. Recomputes the signing commitment from the boot-info fields.
-///        4. Recovers the signer via `ecrecover` and matches it against the
+///        4. Recomputes the signing commitment from all transition public values.
+///        5. Recovers the signer via `ecrecover` and matches it against the
 ///           Ethereum address derived from `expectedPublicKey`.
 ///
 ///      Any decode or verification failure is surfaced as `false` (never
@@ -50,13 +63,18 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     /// @notice Registry of attested enclave keys.
     NitroEnclaveKeyRegistry public immutable registry;
 
+    /// @notice Anchor-state registry used when the proposal parent is the current anchor.
+    address public immutable anchorStateRegistry;
+
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
     /// @param registry_ The Nitro enclave key registry to consult.
-    constructor(NitroEnclaveKeyRegistry registry_) {
+    /// @param anchorStateRegistry_ Anchor-state registry used to resolve anchor parent roots.
+    constructor(NitroEnclaveKeyRegistry registry_, address anchorStateRegistry_) {
         registry = registry_;
+        anchorStateRegistry = anchorStateRegistry_;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -69,11 +87,8 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     ///        (
     ///            bytes32 domainHash,
     ///            address parentRef,
-    ///            bytes32 l1OriginHash,
     ///            uint256 l1OriginNumber,
-    ///            bytes32 rollupConfigHash,
-    ///            bytes32 l2PostRoot,
-    ///            uint64  l2BlockNumber,
+    ///            TransitionPublicValues transitionPublicValues,
     ///            bytes   signature,
     ///            bytes   expectedPublicKey
     ///        )
@@ -98,30 +113,30 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
         (
             bytes32 domainHash,
             address parentRef,
-            bytes32 l1OriginHash,
             uint256 l1OriginNumber,
-            bytes32 rollupConfigHash,
-            bytes32 l2PostRoot,
-            uint64 l2BlockNumber,
+            TransitionPublicValues memory transition,
             bytes memory signature,
             bytes memory expectedPublicKey
-        ) = abi.decode(proof, (bytes32, address, bytes32, uint256, bytes32, bytes32, uint64, bytes, bytes));
+        ) = abi.decode(proof, (bytes32, address, uint256, TransitionPublicValues, bytes, bytes));
 
         // 1. Bind the proof to the supplied rootId. The transition public values'
         //    `l2PostRoot` plays the role of `rootClaim` (the proposal's
         //    claimed L2 output root) in WorldChainProofLib.rootId.
         bytes32 expectedRootId = WorldChainProofLib.rootId(
-            domainHash, parentRef, l2PostRoot, uint256(l2BlockNumber), l1OriginHash, l1OriginNumber
+            domainHash,
+            parentRef,
+            transition.l2PostRoot,
+            uint256(transition.l2PostBlockNumber),
+            transition.l1Head,
+            l1OriginNumber
         );
         if (expectedRootId != rootId) return false;
 
-        // TODO: if Nitro becomes a production validity lane, extend this proof
-        // payload and the enclave-signed commitment with `l2PreRoot`, then
-        // compare it against the root claim behind `parentRef` as in the SP1 lane.
+        // 2. Bind the signed pre-root to the proposal's parent.
+        if (transition.l2PreRoot != _parentRootClaim(parentRef)) return false;
 
-        // 2. Verify the enclave signature over the signing commitment
-        //    derived from the same transition public value fields.
-        bytes32 commitment = _signingCommitment(l2PostRoot, l2BlockNumber, rollupConfigHash);
+        // 3. Verify the enclave signature over all transition public values.
+        bytes32 commitment = _signingCommitment(transition);
         return _verifyEnclaveSignature(commitment, signature, expectedPublicKey);
     }
 
@@ -130,16 +145,18 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     //////////////////////////////////////////////////////////////*/
 
     /// @dev Reconstructs the 32-byte commitment the enclave actually signed,
-    ///      matching `signing_commitment(transition_public_values)` in
+    ///      matching `transition_commitment(transition_public_values)` in
     ///      `proofs/nitro/src/protocol.rs`.
-    ///      Layout: `l2PostRoot (32) || uint64BE(l2BlockNumber) (8) ||
-    ///      rollupConfigHash (32)`, hashed with keccak256.
-    function _signingCommitment(bytes32 l2PostRoot, uint64 l2BlockNumber, bytes32 rollupConfigHash)
-        internal
-        pure
-        returns (bytes32)
-    {
-        return keccak256(abi.encodePacked(l2PostRoot, l2BlockNumber, rollupConfigHash));
+    ///      The entire struct is ABI-encoded before hashing.
+    function _signingCommitment(TransitionPublicValues memory transition) internal pure returns (bytes32) {
+        return keccak256(abi.encode(transition));
+    }
+
+    function _parentRootClaim(address parentRef) internal view returns (bytes32) {
+        if (parentRef == anchorStateRegistry) {
+            return IWorldChainAnchorStateRegistry(parentRef).currentRootClaim();
+        }
+        return IWorldChainProofSystemGame(parentRef).rootClaim();
     }
 
     /// @dev Checks that `signature` over `commitment` recovers to the address

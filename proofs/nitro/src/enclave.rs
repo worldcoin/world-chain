@@ -17,7 +17,7 @@
 //!   [`EnclaveRequest::PublicKey`], binding it to the enclave's PCR measurements.
 //!
 //! Every [`EnclaveResponse::Range`] includes a 65-byte recoverable secp256k1 signature over
-//! `keccak256(l2_post_root ‖ l2_post_block_number_be ‖ rollup_config_hash)`.
+//! `keccak256(abi.encode(TransitionPublicValues))`.
 
 use std::sync::{Arc, OnceLock};
 
@@ -146,11 +146,11 @@ fn signing_key() -> &'static SigningKey {
 
 /// Computes the signing commitment and produces a 65-byte recoverable secp256k1 signature.
 ///
-/// Commitment: `keccak256(l2_post_root ‖ l2_post_block_number_be ‖ rollup_config_hash)`
+/// Commitment: `keccak256(abi.encode(TransitionPublicValues))`
 fn sign_transition_public_values(
     transition_public_values: &TransitionPublicValues,
 ) -> Result<Vec<u8>> {
-    let commitment = protocol::signing_commitment(transition_public_values);
+    let commitment = protocol::transition_commitment(transition_public_values);
 
     let (sig, rec_id) = signing_key()
         .sign_prehash_recoverable(&commitment)
@@ -291,7 +291,7 @@ async fn handle_range(
 
     let signature = sign_transition_public_values(&transition_public_values)?;
 
-    let user_data = protocol::range_user_data(&transition_public_values);
+    let user_data = protocol::transition_commitment(&transition_public_values);
     let attestation_doc = request_attestation_doc(Some(&user_data), &nonce)?;
 
     Ok(EnclaveResponse::Range {

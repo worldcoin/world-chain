@@ -20,6 +20,7 @@ import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol"
 ///        - `OWNER` — address that becomes the owner of both
 ///          `NitroAttestationVerifier` (manages the PCR allowlist) and
 ///          `NitroEnclaveKeyRegistry` (revokes keys).
+///        - `ANCHOR_STATE_REGISTRY` — World Chain anchor-state registry.
 ///
 ///      ## Hinted P-384 verification (gas optimisation)
 ///      Signature verification uses off-chain-computed modular-inverse hints
@@ -66,6 +67,7 @@ import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol"
 contract DeployNitro is Script {
     function run() external {
         address owner = vm.envAddress("OWNER");
+        address anchorStateRegistry = vm.envAddress("ANCHOR_STATE_REGISTRY");
 
         vm.startBroadcast();
 
@@ -83,7 +85,7 @@ contract DeployNitro is Script {
         NitroEnclaveKeyRegistry registry = new NitroEnclaveKeyRegistry(verifier, owner);
         console.log("NitroEnclaveKeyRegistry:", address(registry));
 
-        NitroProofVerifier proofVerifier = new NitroProofVerifier(registry);
+        NitroProofVerifier proofVerifier = new NitroProofVerifier(registry, anchorStateRegistry);
         console.log("NitroProofVerifier:", address(proofVerifier));
 
         vm.stopBroadcast();
