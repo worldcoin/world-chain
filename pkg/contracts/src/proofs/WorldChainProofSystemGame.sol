@@ -357,15 +357,13 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
         invalidationReason = reason;
         invalidatedAt = uint64(block.timestamp);
 
-        uint256 residualPayout = address(this).balance - postedChallengerBond;
-        if (residualPayout != 0) {
-            // Reserve the challenger bond for its own withdraw(); route the remaining balance, including surplus.
-            // Only a direct proof timeout is attributable to this proposer; inherited and governance failures refund it.
-            if (reason == WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT && challenger != address(0)) {
-                payoutCredits[challenger] += residualPayout;
-            } else {
-                payoutCredits[proposer] += residualPayout;
-            }
+        uint256 balance = address(this).balance;
+        if (reason == WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT && challenger != address(0)) {
+            payoutCredits[challenger] += balance;
+            postedChallengerBond = 0;
+        } else {
+            uint256 proposerRefund = balance - postedChallengerBond;
+            if (proposerRefund != 0) payoutCredits[proposer] += proposerRefund;
         }
 
         emit Invalidated(rootId, reason);

@@ -336,6 +336,7 @@ contract WorldChainProofSystemTest is Test {
 
         assertEq(proposer.balance, proposerBalance);
         assertEq(challenger.balance, challengerBalance);
+        assertEq(game.postedChallengerBond(), 0);
         _assertWithdraws(game, challenger, CHALLENGER_BOND + PROPOSER_BOND);
         assertEq(game.claimable(proposer), 0);
     }
@@ -348,6 +349,7 @@ contract WorldChainProofSystemTest is Test {
         vm.warp(block.timestamp + PROOF_PERIOD);
         game.resolve();
 
+        assertEq(game.postedChallengerBond(), 0);
         _assertWithdraws(game, challenger, CHALLENGER_BOND + PROPOSER_BOND + surplus);
         assertEq(game.claimable(proposer), 0);
         assertEq(address(game).balance, 0);
