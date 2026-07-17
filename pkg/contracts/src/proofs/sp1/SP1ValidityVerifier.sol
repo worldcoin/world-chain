@@ -8,15 +8,20 @@ import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
 import {WorldChainProofLib} from "../WorldChainProofLib.sol";
 
 /// ABI-encoded public values committed by the World Chain SP1 aggregation proof.
-/// Must match `world_chain_proof_core::types::AggregationOutputs`.
-struct AggregationOutputs {
+/// Must match `world_chain_proof_core::boot::TransitionPublicValues`.
+struct TransitionPublicValues {
     bytes32 l1Head;
     bytes32 l2PreRoot;
+    uint64 l2PreBlockNumber;
     bytes32 l2PostRoot;
-    uint64 l2BlockNumber;
+    uint64 l2PostBlockNumber;
     bytes32 rollupConfigHash;
+}
+
+/// Must match `world_chain_proof_core::types::AggregationPublicValues`.
+struct AggregationPublicValues {
+    TransitionPublicValues transitionPublicValues;
     bytes32 multiBlockVKey;
-    address proverAddress;
 }
 
 /// @title SP1ValidityVerifier
@@ -106,7 +111,7 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     ///            bytes   proofBytes
     ///        )
     ///
-    ///      `publicValues` must be `abi.encode(AggregationOutputs)`.
+    ///      `publicValues` must be `abi.encode(AggregationPublicValues)`.
     ///      `proofBytes` is the SP1 on-chain proof payload; for gateway
     ///      deployments its first four bytes select the concrete verifier route.
     ///
@@ -136,19 +141,25 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
             bytes memory proofBytes
         ) = abi.decode(proof, (bytes32, address, uint256, bytes, bytes));
 
-        AggregationOutputs memory outputs = abi.decode(publicValues, (AggregationOutputs));
+        AggregationPublicValues memory outputs = abi.decode(publicValues, (AggregationPublicValues));
+        TransitionPublicValues memory transition = outputs.transitionPublicValues;
 
-        if (outputs.rollupConfigHash != rollupConfigHash) return false;
+        if (transition.rollupConfigHash != rollupConfigHash) return false;
         if (outputs.multiBlockVKey != rangeVKeyCommitment) return false;
 
         bytes32 expectedRootId = WorldChainProofLib.rootId(
-            domainHash, parentRef, outputs.l2PostRoot, uint256(outputs.l2BlockNumber), outputs.l1Head, l1OriginNumber
+            domainHash,
+            parentRef,
+            transition.l2PostRoot,
+            uint256(transition.l2PostBlockNumber),
+            transition.l1Head,
+            l1OriginNumber
         );
         if (expectedRootId != rootId) return false;
 
         // `rootId` commits to the parent reference address, so the SP1 public
         // values must separately bind the proved pre-root to that parent's root.
-        if (outputs.l2PreRoot != _parentRootClaim(parentRef)) return false;
+        if (transition.l2PreRoot != _parentRootClaim(parentRef)) return false;
 
         sp1Verifier.verifyProof(aggregationVKey, publicValues, proofBytes);
         return true;

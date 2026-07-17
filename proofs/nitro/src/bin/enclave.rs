@@ -2,7 +2,7 @@
 //!
 //! This file runs **inside** the Nitro Enclave. It is the same role the SP1 range program
 //! plays for the Succinct backend: it ingests a witness, drives the OP Stack derivation
-//! pipeline end-to-end, and emits the canonical `BootInfoStruct`. The difference is that
+//! pipeline end-to-end, and emits the canonical `TransitionPublicValues`. The difference is that
 //! integrity is established by an NSM-attested `COSE_Sign1` document rather than a ZK proof.
 //!
 //! Communication with the host happens over vsock using the framing defined in

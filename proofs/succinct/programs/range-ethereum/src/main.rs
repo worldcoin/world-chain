@@ -26,15 +26,15 @@ pub fn main() {
             .get_oracle_and_blob_provider()
             .await
             .expect("failed to load oracle and blob provider");
-        let boot_info = run_range_program(
+        let transition_public_values = run_range_program(
             ETHDAWitnessExecutor::new(),
             oracle,
             beacon,
             world_schedule,
         )
         .await
-        .expect("failed to hash World rollup config for boot info");
+        .expect("failed to construct transition public values");
 
-        sp1_zkvm::io::commit(&boot_info);
+        sp1_zkvm::io::commit(&transition_public_values);
     });
 }

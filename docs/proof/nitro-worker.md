@@ -268,10 +268,11 @@ Here is the full journey from "job available" to "proof accepted":
 
 7. **State transition executed.** The enclave runs the full Kona derivation pipeline
    (`run_full_range_program`), re-deriving the L2 state from L1 data. This produces
-   `BootInfo` containing the pre-root, post-root, block number, and rollup config hash.
+   `TransitionPublicValues` containing the pre/post roots, pre/post block numbers, and
+   rollup config hash.
 
-8. **Optional validation.** If `expected_boot_info` was provided, the enclave
-   checks that the computed `BootInfo` matches.
+8. **Optional validation.** If `expected_transition_public_values` was provided, the enclave
+   checks that the computed `TransitionPublicValues` matches.
 
 9. **Signing commitment computed.** The enclave computes
    `keccak256(l2_post_root || l2_block_number_be || rollup_config_hash)`.
@@ -282,11 +283,11 @@ Here is the full journey from "job available" to "proof accepted":
 
 11. **NSM attestation requested.** The enclave asks the NSM for an attestation
     document with:
-    - `user_data` = `SHA256(l2_pre_root || l2_post_root || l2_block_number_be || rollup_config_hash)`
+    - `user_data` = `SHA256(l1_head || l2_pre_root || l2_pre_block_number_be || l2_post_root || l2_post_block_number_be || rollup_config_hash)`
     - `nonce` = the caller-supplied nonce
     - `public_key` = the ephemeral secp256k1 public key (33-byte compressed)
 
-12. **Response returned.** The enclave sends back `BootInfo`, the raw attestation
+12. **Response returned.** The enclave sends back `TransitionPublicValues`, the raw attestation
     document bytes, and the secp256k1 signature.
 
 13. **Host-side verification.** Back in the worker (on the host), if production PCRs
@@ -296,12 +297,12 @@ Here is the full journey from "job available" to "proof accepted":
     - Check the certificate chain up to the hardcoded AWS Nitro Root CA
     - Validate certificate `notBefore`/`notAfter` periods
     - Check PCR0/1/2 match expected values
-    - Verify `user_data` matches the computed hash from `BootInfo`
+    - Verify `user_data` matches the computed hash from `TransitionPublicValues`
     - Verify the nonce matches what was sent
     - Extract the public key from the attestation and verify the secp256k1 signature
 
-14. **Boot info validated.** The worker checks that `BootInfo` fields match the job's
-    expected `root_claim`, `l2_block_number`, `l1_head`, and `rollup_config_hash`.
+14. **Public values validated.** The worker checks that `TransitionPublicValues` fields match
+    the job's expected `root_claim`, `l2_block_number`, `l1_head`, and `rollup_config_hash`.
 
 15. **Proof submitted.** The worker posts `ProofData::Nitro { attestation, signature }`
     back to the `prover-service`.
@@ -321,7 +322,7 @@ signature is backed by a certificate chain rooted at the AWS Nitro Root CA. It p
 - **Code identity:** PCR0/1/2 in the attestation identify _exactly which enclave
   image_ produced this document.
 - **Computation output:** The `user_data` field contains
-  `SHA256(l2_pre_root || l2_post_root || l2_block_number_be || rollup_config_hash)`,
+  `SHA256(l1_head || l2_pre_root || l2_pre_block_number_be || l2_post_root || l2_post_block_number_be || rollup_config_hash)`,
   binding the attestation to the specific state transition.
 - **Key certification:** The `public_key` field contains the enclave's ephemeral
   secp256k1 public key, certifying that this key was generated inside this specific
@@ -371,14 +372,14 @@ constraints:
 ### `range_user_data` — SHA-256
 
 ```
-SHA256(l2_pre_root || l2_post_root || l2_block_number_be || rollup_config_hash)
+SHA256(l1_head || l2_pre_root || l2_pre_block_number_be || l2_post_root || l2_post_block_number_be || rollup_config_hash)
 ```
 
 - **Used in:** The `user_data` field of the NSM attestation document.
 - **Hash algorithm:** SHA-256, because the NSM device accepts arbitrary bytes in
   `user_data` and SHA-256 is standard for non-EVM contexts.
-- **Includes `l2_pre_root`:** Yes — the full attestation should commit to the complete
-  state transition (from which state to which state).
+- **Includes all transition public values:** Yes — the full attestation commits to the L1
+  derivation context and the complete L2 state transition.
 - **Verified:** Host-side only (during `parse_check_and_verify`). Not used on-chain
   for per-proof verification.
 
@@ -887,7 +888,7 @@ When production PCRs are configured, the host performs five verification checks 
 every attestation:
 
 1. **PCR + user_data invariants:** PCR0/1/2 match expected values; `user_data` matches
-   `SHA256(l2_pre_root || l2_post_root || l2_block_number_be || rollup_config_hash)`.
+   `SHA256(l1_head || l2_pre_root || l2_pre_block_number_be || l2_post_root || l2_post_block_number_be || rollup_config_hash)`.
 2. **COSE_Sign1 signature:** P-384 ECDSA signature verified against the leaf
    certificate's public key.
 3. **Root certificate:** The root of the certificate chain matches the hardcoded

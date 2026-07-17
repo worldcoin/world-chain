@@ -1,7 +1,7 @@
-use alloy_primitives::{Address, B256};
+use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
 use world_chain_proof_core::{
-    boot::BootInfoStruct, types::AggregationInputs, witness::WorldRangeWitnessData,
+    boot::TransitionPublicValues, types::AggregationInputs, witness::WorldRangeWitnessData,
 };
 
 pub use world_chain_proof_core::artifacts::{AggregationProofArtifact, RangeProofArtifact};
@@ -43,7 +43,8 @@ pub struct AggregationProofRequest {
     pub inputs: AggregationInputs,
     /// CBOR-encoded L1 headers, ordered from oldest to newest.
     pub l1_headers_cbor: Vec<u8>,
-    /// Serialized compressed SP1 range proofs, ordered to match `inputs.boot_infos`.
+    /// Serialized compressed SP1 range proofs, ordered to match
+    /// `inputs.transition_public_values`.
     ///
     /// Each entry is the backend-serialized range proof returned in
     /// [`RangeProofArtifact::proof`]; the aggregation guest recursively verifies them.
@@ -56,15 +57,13 @@ pub struct AggregationProofRequest {
 /// low-level [`AggregationProofRequest`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AggregationSessionRequest {
-    /// Boot infos committed by the range proofs being aggregated.
-    pub boot_infos: Vec<BootInfoStruct>,
+    /// Transition public values committed by the range proofs being aggregated.
+    pub transition_public_values: Vec<TransitionPublicValues>,
     /// Latest L1 checkpoint head committed by the aggregation guest.
     pub latest_l1_checkpoint_head: B256,
-    /// Prover address committed by the aggregation guest for on-chain attribution.
-    pub prover_address: Address,
     /// CBOR-encoded L1 headers, ordered from oldest to newest.
     pub l1_headers_cbor: Vec<u8>,
-    /// Serialized compressed SP1 range proofs, ordered to match `boot_infos`.
+    /// Serialized compressed SP1 range proofs, ordered to match `transition_public_values`.
     pub range_proofs: Vec<Vec<u8>>,
 }
 
