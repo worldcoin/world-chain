@@ -26,7 +26,7 @@ use revm::{
 use revm_primitives::TxKind;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fmt::Debug,
     num::NonZeroUsize,
     sync::{Arc, Mutex},
@@ -162,6 +162,38 @@ pub enum SimulationStatus {
     Revert,
 }
 
+/// A safety-relevant effect detected during simulation.
+///
+/// Warning types describe objective state changes only. They do not classify
+/// the destination, asset, or operation as malicious.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SimulationWarningType {
+    UnlimitedErc20Approval,
+    OperatorApprovalForAll,
+    AccountOwnershipChange,
+    AccountModuleChange,
+    AccountProxyUpgrade,
+    AccountSelfDestruct,
+    AccountAuthorization,
+}
+
+/// Machine-readable warning emitted for a safety-relevant simulation effect.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SimulationWarning {
+    #[serde(rename = "type")]
+    pub warning_type: SimulationWarningType,
+    /// Smart account affected by the warning.
+    pub account: Address,
+    /// Spender or operator receiving authority, when applicable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counterparty: Option<Address>,
+    /// Token contract affected by an approval, when applicable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset: Option<Address>,
+}
+
 /// Full response for `simulate_unsignedUserOp`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -184,9 +216,9 @@ pub struct SimulateUnsignedUserOpResult {
     // BTreeMap so JSON key order is deterministic — snapshot tests, response
     // signing, and debugging all benefit from stable ordering.
     pub contract_management: BTreeMap<Address, Vec<ContractManagementAction>>,
-    /// Warning generation is not yet implemented. Always serialized as `[]`;
-    /// reserved so callers can rely on the field being present.
-    pub warnings: Vec<serde_json::Value>,
+    /// Deterministic warnings for safety-relevant effects on the simulated
+    /// smart account. Empty when the simulation reverts.
+    pub warnings: Vec<SimulationWarning>,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -818,6 +850,12 @@ where
             &logs,
             &result_and_state.state,
         );
+        let warnings = generate_simulation_warnings(
+            status,
+            request.sender,
+            &exposure_changes,
+            &contract_management,
+        );
 
         Ok(SimulateUnsignedUserOpResult {
             status,
@@ -828,9 +866,108 @@ where
             exposure_changes,
             trace,
             contract_management,
-            warnings: vec![],
+            warnings,
         })
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Safety warnings
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Returns safety-relevant effects on the simulated smart account.
+///
+/// Approval warnings reflect the final approval event for each
+/// `(asset, counterparty, approval kind)` tuple. This avoids warning about an
+/// unlimited approval that is reduced or revoked later in the same operation.
+pub fn generate_simulation_warnings(
+    status: SimulationStatus,
+    sender: Address,
+    exposure_changes: &[ExposureChange],
+    contract_management: &BTreeMap<Address, Vec<ContractManagementAction>>,
+) -> Vec<SimulationWarning> {
+    if status == SimulationStatus::Revert {
+        return Vec::new();
+    }
+
+    // `true` identifies ApprovalForAll events. A revocation has
+    // `is_approved_for_all == false`, so recognize its zero-value NFT form as
+    // the same approval kind to let it replace an earlier grant.
+    let mut final_approvals = BTreeMap::new();
+    for change in exposure_changes
+        .iter()
+        .filter(|change| change.owner == sender)
+    {
+        let operator_approval = change.is_approved_for_all
+            || (matches!(
+                change.asset.asset_type,
+                AssetType::Erc721 | AssetType::Erc1155
+            ) && change.raw_amount == "0");
+        final_approvals.insert(
+            (change.asset.address, change.spender, operator_approval),
+            change,
+        );
+    }
+
+    let mut warnings = BTreeSet::new();
+    let unlimited_approval = U256::MAX.to_string();
+
+    for ((asset, counterparty, operator_approval), change) in final_approvals {
+        let warning_type = if operator_approval {
+            change
+                .is_approved_for_all
+                .then_some(SimulationWarningType::OperatorApprovalForAll)
+        } else if change.asset.asset_type == AssetType::Erc20
+            && change.raw_amount == unlimited_approval
+        {
+            Some(SimulationWarningType::UnlimitedErc20Approval)
+        } else {
+            None
+        };
+
+        if let Some(warning_type) = warning_type {
+            warnings.insert(SimulationWarning {
+                warning_type,
+                account: sender,
+                counterparty: Some(counterparty),
+                asset: Some(asset),
+            });
+        }
+    }
+
+    if let Some(actions) = contract_management.get(&sender) {
+        for action in actions {
+            let warning_type = match action.action_type {
+                ContractManagementType::ContractCreation => None,
+                ContractManagementType::SelfDestruct => {
+                    Some(SimulationWarningType::AccountSelfDestruct)
+                }
+                ContractManagementType::ProxyUpgrade => {
+                    Some(SimulationWarningType::AccountProxyUpgrade)
+                }
+                ContractManagementType::OwnershipChange => {
+                    Some(SimulationWarningType::AccountOwnershipChange)
+                }
+                ContractManagementType::ModuleChange => {
+                    Some(SimulationWarningType::AccountModuleChange)
+                }
+                ContractManagementType::Authorization => {
+                    Some(SimulationWarningType::AccountAuthorization)
+                }
+            };
+
+            if let Some(warning_type) = warning_type {
+                warnings.insert(SimulationWarning {
+                    warning_type,
+                    account: sender,
+                    counterparty: None,
+                    asset: None,
+                });
+            }
+        }
+    }
+
+    warnings.into_iter().collect()
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1672,6 +1809,235 @@ mod tests {
         assert_eq!(asset.symbol, "GAME");
         assert_eq!(asset.name, "Game Items");
         assert_eq!(asset.asset_type, AssetType::Erc1155);
+    }
+
+    fn exposure_change(
+        owner: Address,
+        spender: Address,
+        asset: Address,
+        asset_type: AssetType,
+        raw_amount: impl Into<String>,
+        is_approved_for_all: bool,
+    ) -> ExposureChange {
+        ExposureChange {
+            owner,
+            spender,
+            raw_amount: raw_amount.into(),
+            is_approved_for_all,
+            asset: AssetInfo {
+                address: asset,
+                symbol: String::new(),
+                name: String::new(),
+                decimals: 0,
+                asset_type,
+            },
+        }
+    }
+
+    #[test]
+    fn warnings_reflect_final_erc20_approval_state() {
+        let sender = Address::repeat_byte(0x11);
+        let spender = Address::repeat_byte(0x22);
+        let token = Address::repeat_byte(0x33);
+        let unlimited = U256::MAX.to_string();
+        let mut exposures = vec![
+            exposure_change(
+                sender,
+                spender,
+                token,
+                AssetType::Erc20,
+                unlimited.clone(),
+                false,
+            ),
+            exposure_change(sender, spender, token, AssetType::Erc20, "7", false),
+        ];
+
+        let warnings = generate_simulation_warnings(
+            SimulationStatus::Success,
+            sender,
+            &exposures,
+            &BTreeMap::new(),
+        );
+        assert!(
+            warnings.is_empty(),
+            "a later finite approval must clear the warning"
+        );
+
+        exposures.reverse();
+        let warnings = generate_simulation_warnings(
+            SimulationStatus::Success,
+            sender,
+            &exposures,
+            &BTreeMap::new(),
+        );
+        assert_eq!(
+            warnings,
+            vec![SimulationWarning {
+                warning_type: SimulationWarningType::UnlimitedErc20Approval,
+                account: sender,
+                counterparty: Some(spender),
+                asset: Some(token),
+            }]
+        );
+    }
+
+    #[test]
+    fn warnings_reflect_final_operator_approval_state() {
+        let sender = Address::repeat_byte(0x11);
+        let operator = Address::repeat_byte(0x22);
+        let collection = Address::repeat_byte(0x33);
+        let grant = exposure_change(
+            sender,
+            operator,
+            collection,
+            AssetType::Erc721,
+            U256::MAX.to_string(),
+            true,
+        );
+        let revoke = exposure_change(sender, operator, collection, AssetType::Erc721, "0", false);
+
+        let warnings = generate_simulation_warnings(
+            SimulationStatus::Success,
+            sender,
+            &[grant.clone(), revoke.clone()],
+            &BTreeMap::new(),
+        );
+        assert!(
+            warnings.is_empty(),
+            "a later revocation must clear the warning"
+        );
+
+        let warnings = generate_simulation_warnings(
+            SimulationStatus::Success,
+            sender,
+            &[revoke, grant],
+            &BTreeMap::new(),
+        );
+        assert_eq!(
+            warnings,
+            vec![SimulationWarning {
+                warning_type: SimulationWarningType::OperatorApprovalForAll,
+                account: sender,
+                counterparty: Some(operator),
+                asset: Some(collection),
+            }]
+        );
+    }
+
+    #[test]
+    fn warnings_include_sender_authority_changes_once() {
+        let sender = Address::repeat_byte(0x11);
+        let actions = [
+            ContractManagementType::OwnershipChange,
+            ContractManagementType::ModuleChange,
+            ContractManagementType::ProxyUpgrade,
+            ContractManagementType::SelfDestruct,
+            ContractManagementType::Authorization,
+            ContractManagementType::ContractCreation,
+            ContractManagementType::OwnershipChange,
+        ]
+        .into_iter()
+        .map(|action_type| ContractManagementAction {
+            action_type,
+            deployer_address: None,
+        })
+        .collect();
+        let contract_management = BTreeMap::from([(sender, actions)]);
+
+        let warning_types: BTreeSet<_> = generate_simulation_warnings(
+            SimulationStatus::Success,
+            sender,
+            &[],
+            &contract_management,
+        )
+        .into_iter()
+        .map(|warning| warning.warning_type)
+        .collect();
+
+        assert_eq!(
+            warning_types,
+            BTreeSet::from([
+                SimulationWarningType::AccountOwnershipChange,
+                SimulationWarningType::AccountModuleChange,
+                SimulationWarningType::AccountProxyUpgrade,
+                SimulationWarningType::AccountSelfDestruct,
+                SimulationWarningType::AccountAuthorization,
+            ])
+        );
+    }
+
+    #[test]
+    fn warnings_ignore_other_accounts_and_reverted_simulations() {
+        let sender = Address::repeat_byte(0x11);
+        let other = Address::repeat_byte(0x22);
+        let spender = Address::repeat_byte(0x33);
+        let token = Address::repeat_byte(0x44);
+        let exposure = exposure_change(
+            other,
+            spender,
+            token,
+            AssetType::Erc20,
+            U256::MAX.to_string(),
+            false,
+        );
+        let contract_management = BTreeMap::from([(
+            other,
+            vec![ContractManagementAction {
+                action_type: ContractManagementType::OwnershipChange,
+                deployer_address: None,
+            }],
+        )]);
+
+        assert!(
+            generate_simulation_warnings(
+                SimulationStatus::Success,
+                sender,
+                std::slice::from_ref(&exposure),
+                &contract_management,
+            )
+            .is_empty()
+        );
+
+        let sender_exposure = ExposureChange {
+            owner: sender,
+            ..exposure
+        };
+        let sender_management = BTreeMap::from([(
+            sender,
+            vec![ContractManagementAction {
+                action_type: ContractManagementType::OwnershipChange,
+                deployer_address: None,
+            }],
+        )]);
+        assert!(
+            generate_simulation_warnings(
+                SimulationStatus::Revert,
+                sender,
+                &[sender_exposure],
+                &sender_management,
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn simulation_warning_serialization_is_stable() {
+        let warning = SimulationWarning {
+            warning_type: SimulationWarningType::UnlimitedErc20Approval,
+            account: Address::repeat_byte(0x11),
+            counterparty: Some(Address::repeat_byte(0x22)),
+            asset: Some(Address::repeat_byte(0x33)),
+        };
+
+        assert_eq!(
+            serde_json::to_value(warning).unwrap(),
+            serde_json::json!({
+                "type": "UNLIMITED_ERC20_APPROVAL",
+                "account": "0x1111111111111111111111111111111111111111",
+                "counterparty": "0x2222222222222222222222222222222222222222",
+                "asset": "0x3333333333333333333333333333333333333333"
+            })
+        );
     }
 
     /// A malicious `Error(string)` revert whose ABI offset field is crafted so
