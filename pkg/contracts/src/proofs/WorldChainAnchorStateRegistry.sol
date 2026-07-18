@@ -17,7 +17,6 @@ contract WorldChainAnchorStateRegistry {
     error UnregisteredGame(address game);
     error GameNotFinalized(address game);
     error NonMonotonicRoot(uint256 currentL2BlockNumber, uint256 nextL2BlockNumber);
-    error InvalidParent(address parentRef);
 
     event AnchorUpdated(address indexed game, bytes32 indexed rootId, bytes32 rootClaim, uint256 l2BlockNumber);
     event FactoryInitialized(address indexed factory);
@@ -88,11 +87,8 @@ contract WorldChainAnchorStateRegistry {
             revert GameNotFinalized(game);
         }
 
-        address parent = proofGame.parentRef();
-        if (parent != address(this) && !acceptedGames[parent]) {
-            revert InvalidParent(parent);
-        }
-
+        // Parent-aware resolution guarantees that every ancestor of a finalized game is finalized,
+        // so intermediate games do not need separate anchor transactions.
         uint256 nextL2BlockNumber = proofGame.l2BlockNumber();
         if (nextL2BlockNumber <= currentL2BlockNumber) {
             revert NonMonotonicRoot(currentL2BlockNumber, nextL2BlockNumber);

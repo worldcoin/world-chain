@@ -508,6 +508,27 @@ contract WorldChainProofSystemTest is Test {
         assertEq(anchor.anchorGame(), address(game));
     }
 
+    function testAnchorCanJumpToHighestFinalizedDescendant() public {
+        (WorldChainProofSystemGame first,) = _propose(10);
+        (WorldChainProofSystemGame second,) = _proposeChild(first, keccak256("second-root"));
+        (WorldChainProofSystemGame third,) = _proposeChild(second, keccak256("third-root"));
+
+        vm.warp(block.timestamp + CHALLENGE_PERIOD);
+        first.resolve();
+        second.resolve();
+        third.resolve();
+
+        anchor.setAnchorState(address(third));
+
+        assertFalse(anchor.acceptedGames(address(first)));
+        assertFalse(anchor.acceptedGames(address(second)));
+        assertTrue(anchor.acceptedGames(address(third)));
+        assertEq(anchor.currentRootId(), third.rootId());
+        assertEq(anchor.currentRootClaim(), third.rootClaim());
+        assertEq(anchor.currentL2BlockNumber(), third.l2BlockNumber());
+        assertEq(anchor.anchorGame(), address(third));
+    }
+
     function testAnchorRejectsNonFinalizedInvalidatedPausedAndNonMonotonicRoots() public {
         (WorldChainProofSystemGame nonFinalized,) = _propose(10);
         vm.expectRevert();
