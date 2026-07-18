@@ -7,7 +7,7 @@ import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyReg
 import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol";
 import {INitroAttestationVerifier} from "../../src/proofs/nitro/INitroAttestationVerifier.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
-import {MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
+import {MockProofSystemFactory, MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
 import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier.sol";
 
 contract EndToEndParentGame {
@@ -45,7 +45,6 @@ contract NitroEndToEndTest is Test {
     bytes32 constant PCR1 = bytes32(uint256(0xBEEF));
     bytes32 constant PCR2 = bytes32(uint256(0xCAFE));
 
-    bytes32 constant DOMAIN = keccak256("worldchain-integration");
     bytes32 constant L1H = keccak256("l1-origin");
     uint256 constant L1N = 7_777;
     bytes32 constant CFG = keccak256("rollup-cfg");
@@ -62,18 +61,26 @@ contract NitroEndToEndTest is Test {
     bytes enclavePubKey;
     EndToEndParentGame parent;
     MockProofSystemGame game;
+    MockProofSystemFactory proofSystemFactory;
+    bytes32 domainHash;
 
     function setUp() public {
         attestationVerifier = new MockNitroAttestationVerifier();
         registry = new NitroEnclaveKeyRegistry(attestationVerifier, owner);
         parent = new EndToEndParentGame(PRE);
         proofVerifier = new NitroProofVerifier(registry);
+        WorldChainProofLib.Domain memory domain = WorldChainProofLib.Domain({
+            chainId: 480, proofSystemVersion: 1, rollupConfigHash: CFG, blockInterval: BLK - PRE_BLK
+        });
+        proofSystemFactory = new MockProofSystemFactory(domain);
+        domainHash = WorldChainProofLib.domainHash(domain);
         game = new MockProofSystemGame();
         game.setContext(
             MockProofSystemGame.Context({
+                factory: address(proofSystemFactory),
                 rootId: _rootId(POST, BLK),
                 anchorStateRegistry: ANCHOR_STATE_REGISTRY,
-                domainHash: DOMAIN,
+                domainHash: domainHash,
                 parentRef: address(parent),
                 startingRootClaim: PRE,
                 startingL2BlockNumber: PRE_BLK,
@@ -134,7 +141,7 @@ contract NitroEndToEndTest is Test {
         view
         returns (bytes memory)
     {
-        return abi.encode(DOMAIN, address(parent), L1N, transition, sig, pub);
+        return abi.encode(domainHash, address(parent), L1N, transition, sig, pub);
     }
 
     function _proof(bytes memory sig, bytes memory pub, bytes32 postRoot, uint64 blk, bytes32 cfg)
@@ -146,7 +153,7 @@ contract NitroEndToEndTest is Test {
     }
 
     function _rootId(bytes32 postRoot, uint64 blk) internal view returns (bytes32) {
-        return WorldChainProofLib.rootId(DOMAIN, address(parent), postRoot, uint256(blk), L1H, L1N);
+        return WorldChainProofLib.rootId(domainHash, address(parent), postRoot, uint256(blk), L1H, L1N);
     }
 
     function _verify(bytes32 rootId, bytes memory proof) internal view returns (bool) {

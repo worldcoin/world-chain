@@ -5,7 +5,7 @@ import {Test, Vm} from "forge-std/Test.sol";
 import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyRegistry.sol";
 import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
-import {MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
+import {MockProofSystemFactory, MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
 import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier.sol";
 
 contract MockParentGame {
@@ -38,7 +38,6 @@ contract NitroProofVerifierTest is Test {
     bytes32 constant ROLLUP_CFG = keccak256("rollup-cfg");
 
     // Context fields needed to rebuild rootId.
-    bytes32 constant DOMAIN_HASH = keccak256("domain");
     bytes32 constant L1_ORIGIN_HASH = keccak256("l1-origin");
     uint256 constant L1_ORIGIN_NUMBER = 9_001;
     address constant ANCHOR_STATE_REGISTRY = address(0xA11CE);
@@ -47,12 +46,19 @@ contract NitroProofVerifierTest is Test {
     bytes enclavePubKey;
     MockParentGame parent;
     MockProofSystemGame game;
+    MockProofSystemFactory proofSystemFactory;
+    bytes32 domainHash;
 
     function setUp() public {
         attestationVerifier = new MockNitroAttestationVerifier();
         registry = new NitroEnclaveKeyRegistry(attestationVerifier, owner);
         parent = new MockParentGame(L2_PRE_ROOT);
         proofVerifier = new NitroProofVerifier(registry);
+        WorldChainProofLib.Domain memory domain = WorldChainProofLib.Domain({
+            chainId: 480, proofSystemVersion: 1, rollupConfigHash: ROLLUP_CFG, blockInterval: L2_BLOCK - L2_PRE_BLOCK
+        });
+        proofSystemFactory = new MockProofSystemFactory(domain);
+        domainHash = WorldChainProofLib.domainHash(domain);
         game = new MockProofSystemGame();
         _setGameContext(_transition());
 
@@ -102,17 +108,17 @@ contract NitroProofVerifierTest is Test {
 
     function _expectedRootId() internal view returns (bytes32) {
         return WorldChainProofLib.rootId(
-            DOMAIN_HASH, address(parent), L2_POST_ROOT, uint256(L2_BLOCK), L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
+            domainHash, address(parent), L2_POST_ROOT, uint256(L2_BLOCK), L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
         );
     }
 
     function _proofBytes(bytes memory sig, bytes memory pub) internal view returns (bytes memory) {
-        return abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, _transition(), sig, pub);
+        return abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, _transition(), sig, pub);
     }
 
     function _setGameContext(WorldChainProofLib.TransitionPublicValues memory transition) internal {
         bytes32 rootId = WorldChainProofLib.rootId(
-            DOMAIN_HASH,
+            domainHash,
             address(parent),
             transition.l2PostRoot,
             uint256(transition.l2PostBlockNumber),
@@ -121,9 +127,10 @@ contract NitroProofVerifierTest is Test {
         );
         game.setContext(
             MockProofSystemGame.Context({
+                factory: address(proofSystemFactory),
                 rootId: rootId,
                 anchorStateRegistry: ANCHOR_STATE_REGISTRY,
-                domainHash: DOMAIN_HASH,
+                domainHash: domainHash,
                 parentRef: address(parent),
                 startingRootClaim: L2_PRE_ROOT,
                 startingL2BlockNumber: L2_PRE_BLOCK,
@@ -164,7 +171,7 @@ contract NitroProofVerifierTest is Test {
         wrongTransition.l2PostBlockNumber += 1;
         bytes memory sig = _sign(keccak256(abi.encode(wrongTransition)));
         bytes32 wrongRootId = WorldChainProofLib.rootId(
-            DOMAIN_HASH,
+            domainHash,
             address(parent),
             L2_POST_ROOT,
             uint256(wrongTransition.l2PostBlockNumber),
@@ -172,7 +179,7 @@ contract NitroProofVerifierTest is Test {
             L1_ORIGIN_NUMBER
         );
         bytes memory proof =
-            abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
+            abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
         assertFalse(_verify(wrongRootId, proof));
     }
 
@@ -181,7 +188,7 @@ contract NitroProofVerifierTest is Test {
         wrongTransition.l2PreRoot = keccak256("wrong-pre-root");
         bytes memory sig = _sign(keccak256(abi.encode(wrongTransition)));
         bytes memory proof =
-            abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
+            abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
         assertFalse(_verify(_expectedRootId(), proof));
     }
 
@@ -190,7 +197,7 @@ contract NitroProofVerifierTest is Test {
         wrongTransition.l2PreBlockNumber += 1;
         bytes memory sig = _sign(keccak256(abi.encode(wrongTransition)));
         bytes memory proof =
-            abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
+            abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
 
         assertFalse(_verify(_expectedRootId(), proof));
     }
@@ -353,31 +360,24 @@ contract NitroProofVerifierTest is Test {
         WorldChainProofLib.TransitionPublicValues memory transition = _transition();
         transition.l2PostBlockNumber = 0;
         bytes32 rootId =
-            WorldChainProofLib.rootId(DOMAIN_HASH, address(parent), L2_POST_ROOT, 0, L1_ORIGIN_HASH, L1_ORIGIN_NUMBER);
+            WorldChainProofLib.rootId(domainHash, address(parent), L2_POST_ROOT, 0, L1_ORIGIN_HASH, L1_ORIGIN_NUMBER);
         bytes32 commitment = keccak256(abi.encode(transition));
         bytes memory sig = _sign(commitment);
-        bytes memory proof = abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, transition, sig, enclavePubKey);
+        bytes memory proof = abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, transition, sig, enclavePubKey);
         _setGameContext(transition);
         assertTrue(_verify(rootId, proof));
     }
 
     function test_Verify_FalseForWrongRollupConfigHash() public {
-        // The proof's `rollupConfigHash` participates in the signing
-        // commitment but NOT in the rootId reconstruction (see
-        // `NitroProofVerifier._decodeAndVerify`). A mismatched
-        // rollupConfigHash in the proof must therefore cause the signature
-        // recovery to mismatch the expected key and surface as `false`,
-        // even though `rootId` still reconstructs correctly.
+        // A valid enclave signature is insufficient when the transition was
+        // produced against a different rollup configuration than the game's factory domain.
         bytes32 wrongCfg = keccak256("wrong-cfg");
         WorldChainProofLib.TransitionPublicValues memory wrongTransition = _transition();
         wrongTransition.rollupConfigHash = wrongCfg;
         bytes32 commitment = keccak256(abi.encode(wrongTransition));
         bytes memory sig = _sign(commitment);
-        // Build the proof claiming the ORIGINAL rollupConfigHash (so rootId
-        // reconstructs to the expected one), but with a signature over the
-        // wrong-cfg commitment.
         bytes memory proof =
-            abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, _transition(), sig, enclavePubKey);
+            abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
         assertFalse(_verify(_expectedRootId(), proof));
     }
 

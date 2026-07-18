@@ -32,9 +32,6 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     /// @notice Thrown when the aggregation program verification key is zero.
     error ZeroAggregationVKey();
 
-    /// @notice Thrown when the expected rollup config hash is zero.
-    error ZeroRollupConfigHash();
-
     /// @notice Thrown when the expected range program verification key is zero.
     error ZeroRangeVKeyCommitment();
 
@@ -48,9 +45,6 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     /// @notice Verification key for the World Chain aggregation program.
     bytes32 public immutable aggregationVKey;
 
-    /// @notice Rollup config hash the aggregation public values must commit to.
-    bytes32 public immutable rollupConfigHash;
-
     /// @notice Range-program verification key committed by the aggregation proof.
     bytes32 public immutable rangeVKeyCommitment;
 
@@ -58,20 +52,13 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
                              CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
-    constructor(
-        ISP1Verifier sp1Verifier_,
-        bytes32 aggregationVKey_,
-        bytes32 rollupConfigHash_,
-        bytes32 rangeVKeyCommitment_
-    ) {
+    constructor(ISP1Verifier sp1Verifier_, bytes32 aggregationVKey_, bytes32 rangeVKeyCommitment_) {
         if (address(sp1Verifier_) == address(0)) revert ZeroSP1Verifier();
         if (aggregationVKey_ == bytes32(0)) revert ZeroAggregationVKey();
-        if (rollupConfigHash_ == bytes32(0)) revert ZeroRollupConfigHash();
         if (rangeVKeyCommitment_ == bytes32(0)) revert ZeroRangeVKeyCommitment();
 
         sp1Verifier = sp1Verifier_;
         aggregationVKey = aggregationVKey_;
-        rollupConfigHash = rollupConfigHash_;
         rangeVKeyCommitment = rangeVKeyCommitment_;
     }
 
@@ -123,7 +110,6 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
         AggregationPublicValues memory outputs = abi.decode(publicValues, (AggregationPublicValues));
         WorldChainProofLib.TransitionPublicValues memory transition = outputs.transitionPublicValues;
 
-        if (transition.rollupConfigHash != rollupConfigHash) return false;
         if (outputs.multiBlockVKey != rangeVKeyCommitment) return false;
 
         bool matchesGame = WorldChainProofVerificationLib.matchesGame(

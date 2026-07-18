@@ -2,9 +2,19 @@
 pragma solidity 0.8.28;
 
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
+import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
+
+contract MockProofSystemFactory {
+    WorldChainProofLib.Domain public domain;
+
+    constructor(WorldChainProofLib.Domain memory domain_) {
+        domain = domain_;
+    }
+}
 
 contract MockProofSystemGame {
     struct Context {
+        address factory;
         bytes32 rootId;
         address anchorStateRegistry;
         bytes32 domainHash;
@@ -17,6 +27,7 @@ contract MockProofSystemGame {
         uint256 l1OriginNumber;
     }
 
+    address public factory;
     bytes32 public rootId;
     address public anchorStateRegistry;
     bytes32 public domainHash;
@@ -29,6 +40,7 @@ contract MockProofSystemGame {
     uint256 public l1OriginNumber;
 
     function setContext(Context memory context) external {
+        factory = context.factory;
         rootId = context.rootId;
         anchorStateRegistry = context.anchorStateRegistry;
         domainHash = context.domainHash;

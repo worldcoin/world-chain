@@ -6,7 +6,7 @@ import {Test} from "forge-std/Test.sol";
 import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
 import {AggregationPublicValues, SP1ValidityVerifier} from "../../src/proofs/sp1/SP1ValidityVerifier.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
-import {MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
+import {MockProofSystemFactory, MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
 
 contract StubSP1Verifier is ISP1Verifier {
     bool public reject;
@@ -62,12 +62,13 @@ contract SP1ValidityVerifierTest is Test {
     StubParentGame internal parent;
     SP1ValidityVerifier internal verifier;
     MockProofSystemGame internal game;
+    MockProofSystemFactory internal proofSystemFactory;
+    bytes32 internal domainHash;
 
     bytes32 internal constant AGGREGATION_VKEY = bytes32(uint256(0xA66));
     bytes32 internal constant ROLLUP_CONFIG_HASH = keccak256("world-chain-rollup-config");
     bytes32 internal constant RANGE_VKEY_COMMITMENT = keccak256("range-vkey");
 
-    bytes32 internal constant DOMAIN_HASH = keccak256("domain");
     bytes32 internal constant L1_ORIGIN_HASH = keccak256("l1-origin");
     uint256 internal constant L1_ORIGIN_NUMBER = 9_001;
 
@@ -82,9 +83,15 @@ contract SP1ValidityVerifierTest is Test {
         sp1 = new StubSP1Verifier();
         anchor = new StubAnchorStateRegistry(L2_PRE_ROOT);
         parent = new StubParentGame(L2_PRE_ROOT);
-        verifier = new SP1ValidityVerifier(
-            ISP1Verifier(address(sp1)), AGGREGATION_VKEY, ROLLUP_CONFIG_HASH, RANGE_VKEY_COMMITMENT
-        );
+        WorldChainProofLib.Domain memory domain = WorldChainProofLib.Domain({
+            chainId: 480,
+            proofSystemVersion: 1,
+            rollupConfigHash: ROLLUP_CONFIG_HASH,
+            blockInterval: L2_BLOCK_NUMBER - L2_PRE_BLOCK_NUMBER
+        });
+        proofSystemFactory = new MockProofSystemFactory(domain);
+        domainHash = WorldChainProofLib.domainHash(domain);
+        verifier = new SP1ValidityVerifier(ISP1Verifier(address(sp1)), AGGREGATION_VKEY, RANGE_VKEY_COMMITMENT);
         game = new MockProofSystemGame();
         _setGameContext(address(parent));
     }
@@ -112,26 +119,26 @@ contract SP1ValidityVerifierTest is Test {
     }
 
     function _proof(AggregationPublicValues memory values) internal view returns (bytes memory) {
-        return _proof(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, values, SP1_PROOF_BYTES);
+        return _proof(domainHash, address(parent), L1_ORIGIN_NUMBER, values, SP1_PROOF_BYTES);
     }
 
     function _proof(
-        bytes32 domainHash,
+        bytes32 domainHash_,
         address parentRef,
         uint256 l1OriginNumber,
         AggregationPublicValues memory values,
         bytes memory proofBytes
     ) internal pure returns (bytes memory) {
-        return abi.encode(domainHash, parentRef, l1OriginNumber, _publicValues(values), proofBytes);
+        return abi.encode(domainHash_, parentRef, l1OriginNumber, _publicValues(values), proofBytes);
     }
 
     function _rootId() internal view returns (bytes32) {
         return _rootId(address(parent));
     }
 
-    function _rootId(address parentRef) internal pure returns (bytes32) {
+    function _rootId(address parentRef) internal view returns (bytes32) {
         return WorldChainProofLib.rootId(
-            DOMAIN_HASH, parentRef, L2_POST_ROOT, uint256(L2_BLOCK_NUMBER), L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
+            domainHash, parentRef, L2_POST_ROOT, uint256(L2_BLOCK_NUMBER), L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
         );
     }
 
@@ -142,9 +149,10 @@ contract SP1ValidityVerifierTest is Test {
     function _setGameContext(address parentRef) internal {
         game.setContext(
             MockProofSystemGame.Context({
+                factory: address(proofSystemFactory),
                 rootId: _rootId(parentRef),
                 anchorStateRegistry: address(anchor),
-                domainHash: DOMAIN_HASH,
+                domainHash: domainHash,
                 parentRef: parentRef,
                 startingRootClaim: L2_PRE_ROOT,
                 startingL2BlockNumber: L2_PRE_BLOCK_NUMBER,
@@ -166,22 +174,17 @@ contract SP1ValidityVerifierTest is Test {
 
     function test_Constructor_RevertsForZeroSP1Verifier() public {
         vm.expectRevert(SP1ValidityVerifier.ZeroSP1Verifier.selector);
-        new SP1ValidityVerifier(ISP1Verifier(address(0)), AGGREGATION_VKEY, ROLLUP_CONFIG_HASH, RANGE_VKEY_COMMITMENT);
+        new SP1ValidityVerifier(ISP1Verifier(address(0)), AGGREGATION_VKEY, RANGE_VKEY_COMMITMENT);
     }
 
     function test_Constructor_RevertsForZeroAggregationVKey() public {
         vm.expectRevert(SP1ValidityVerifier.ZeroAggregationVKey.selector);
-        new SP1ValidityVerifier(ISP1Verifier(address(sp1)), bytes32(0), ROLLUP_CONFIG_HASH, RANGE_VKEY_COMMITMENT);
-    }
-
-    function test_Constructor_RevertsForZeroRollupConfigHash() public {
-        vm.expectRevert(SP1ValidityVerifier.ZeroRollupConfigHash.selector);
-        new SP1ValidityVerifier(ISP1Verifier(address(sp1)), AGGREGATION_VKEY, bytes32(0), RANGE_VKEY_COMMITMENT);
+        new SP1ValidityVerifier(ISP1Verifier(address(sp1)), bytes32(0), RANGE_VKEY_COMMITMENT);
     }
 
     function test_Constructor_RevertsForZeroRangeVKeyCommitment() public {
         vm.expectRevert(SP1ValidityVerifier.ZeroRangeVKeyCommitment.selector);
-        new SP1ValidityVerifier(ISP1Verifier(address(sp1)), AGGREGATION_VKEY, ROLLUP_CONFIG_HASH, bytes32(0));
+        new SP1ValidityVerifier(ISP1Verifier(address(sp1)), AGGREGATION_VKEY, bytes32(0));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -200,7 +203,7 @@ contract SP1ValidityVerifierTest is Test {
         AggregationPublicValues memory outputs = _publicValuesStruct();
         _expectSp1Call(outputs);
 
-        bytes memory proof = _proof(DOMAIN_HASH, address(anchor), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
+        bytes memory proof = _proof(domainHash, address(anchor), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
 
         assertTrue(_verify(_rootId(address(anchor)), proof));
     }
@@ -211,7 +214,7 @@ contract SP1ValidityVerifierTest is Test {
 
         AggregationPublicValues memory outputs = _publicValuesStruct();
         _expectSp1Call(outputs);
-        bytes memory proof = _proof(DOMAIN_HASH, address(anchor), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
+        bytes memory proof = _proof(domainHash, address(anchor), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
 
         assertTrue(_verify(_rootId(address(anchor)), proof));
     }
@@ -225,7 +228,7 @@ contract SP1ValidityVerifierTest is Test {
     }
 
     function test_Verify_FalseForMalformedPublicValues() public view {
-        bytes memory proof = abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, hex"deadbeef", SP1_PROOF_BYTES);
+        bytes memory proof = abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, hex"deadbeef", SP1_PROOF_BYTES);
 
         assertFalse(_verify(_rootId(), proof));
     }
@@ -278,7 +281,7 @@ contract SP1ValidityVerifierTest is Test {
         _setGameContext(address(anchor));
         AggregationPublicValues memory outputs = _publicValuesStruct();
         outputs.transitionPublicValues.l2PreRoot = keccak256("wrong-pre-root");
-        bytes memory proof = _proof(DOMAIN_HASH, address(anchor), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
+        bytes memory proof = _proof(domainHash, address(anchor), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
 
         assertFalse(_verify(_rootId(address(anchor)), proof));
     }
@@ -293,7 +296,7 @@ contract SP1ValidityVerifierTest is Test {
     function test_Verify_FalseForUnreadableParentRef() public view {
         AggregationPublicValues memory outputs = _publicValuesStruct();
         address unreadableParentRef = address(0xBEEF);
-        bytes memory proof = _proof(DOMAIN_HASH, unreadableParentRef, L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
+        bytes memory proof = _proof(domainHash, unreadableParentRef, L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
 
         assertFalse(_verify(_rootId(unreadableParentRef), proof));
     }
@@ -319,7 +322,7 @@ contract SP1ValidityVerifierTest is Test {
 
     function test_Verify_FalseForParentRefMismatch() public view {
         AggregationPublicValues memory outputs = _publicValuesStruct();
-        bytes memory proof = _proof(DOMAIN_HASH, address(0xBAD), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
+        bytes memory proof = _proof(domainHash, address(0xBAD), L1_ORIGIN_NUMBER, outputs, SP1_PROOF_BYTES);
 
         assertFalse(_verify(_rootId(), proof));
     }
@@ -347,7 +350,7 @@ contract SP1ValidityVerifierTest is Test {
 
     function test_Verify_FalseForL1OriginNumberMismatch() public view {
         AggregationPublicValues memory outputs = _publicValuesStruct();
-        bytes memory proof = _proof(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER + 1, outputs, SP1_PROOF_BYTES);
+        bytes memory proof = _proof(domainHash, address(parent), L1_ORIGIN_NUMBER + 1, outputs, SP1_PROOF_BYTES);
 
         assertFalse(_verify(_rootId(), proof));
     }
