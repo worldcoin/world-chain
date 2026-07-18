@@ -562,61 +562,6 @@ contract WorldChainProofSystemTest is Test {
         assertEq(delayedAnchor.anchorGame(), address(game));
     }
 
-    function testBlacklistingCurrentAnchorPausesUntilItIsUnblacklisted() public {
-        (WorldChainProofSystemGame game,) = _finalizedGame(10);
-        game.closeGame();
-
-        anchor.setGameBlacklisted(address(game), true);
-
-        assertTrue(anchor.paused());
-        assertFalse(anchor.isGameClaimValid(address(game)));
-        vm.expectRevert(
-            abi.encodeWithSelector(WorldChainAnchorStateRegistry.CurrentAnchorInvalid.selector, address(game))
-        );
-        anchor.setPaused(false);
-
-        vm.prank(proposer);
-        vm.expectRevert(WorldChainProofSystemFactory.RegistryPaused.selector);
-        factory.propose{value: PROPOSER_BOND}(address(anchor), keccak256("blocked-root"), 20);
-
-        anchor.setGameBlacklisted(address(game), false);
-        anchor.setPaused(false);
-        assertFalse(anchor.paused());
-    }
-
-    function testRetirementInvalidatesExistingDescendants() public {
-        (WorldChainProofSystemGame parent,) = _propose(10);
-        (WorldChainProofSystemGame child,) = _proposeChild(parent, keccak256("child-root"));
-
-        vm.warp(block.timestamp + CHALLENGE_PERIOD);
-        parent.resolve();
-        child.resolve();
-        anchor.updateRetirementTimestamp();
-
-        assertTrue(anchor.paused());
-        assertTrue(anchor.isGameRetired(address(parent)));
-        assertTrue(anchor.isGameRetired(address(child)));
-        assertFalse(anchor.isGameClaimValid(address(child)));
-
-        anchor.setPaused(false);
-        vm.expectRevert(abi.encodeWithSelector(WorldChainAnchorStateRegistry.GameRetired.selector, address(child)));
-        child.closeGame();
-    }
-
-    function testRetiringCurrentAnchorBlocksUnpause() public {
-        (WorldChainProofSystemGame game,) = _finalizedGame(10);
-        game.closeGame();
-
-        anchor.updateRetirementTimestamp();
-
-        assertTrue(anchor.paused());
-        assertTrue(anchor.isGameRetired(address(game)));
-        vm.expectRevert(
-            abi.encodeWithSelector(WorldChainAnchorStateRegistry.CurrentAnchorInvalid.selector, address(game))
-        );
-        anchor.setPaused(false);
-    }
-
     function testAnchorCanJumpToHighestFinalizedDescendant() public {
         (WorldChainProofSystemGame first,) = _propose(10);
         (WorldChainProofSystemGame second,) = _proposeChild(first, keccak256("second-root"));

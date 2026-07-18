@@ -17,8 +17,6 @@ contract WorldChainAnchorStateRegistry {
     error UnregisteredGame(address game);
     error GameNotFinalized(address game);
     error GameNotMature(address game, uint256 eligibleAt);
-    error GameRetired(address game);
-    error CurrentAnchorInvalid(address game);
     error NonMonotonicRoot(uint256 currentL2BlockNumber, uint256 nextL2BlockNumber);
     error AnchorStateNotInAncestry(address game, bytes32 currentRootClaim, uint256 currentL2BlockNumber);
 
@@ -26,12 +24,10 @@ contract WorldChainAnchorStateRegistry {
     event FactoryInitialized(address indexed factory);
     event PausedSet(bool paused);
     event GameBlacklistedSet(address indexed game, bool blacklisted);
-    event RetirementTimestampUpdated(uint64 timestamp);
 
     address public owner;
     address public proofSystemFactory;
     uint64 public immutable finalityDelay;
-    uint64 public retirementTimestamp;
     bool public paused;
 
     bytes32 public currentRootId;
@@ -66,38 +62,13 @@ contract WorldChainAnchorStateRegistry {
     }
 
     function setPaused(bool nextPaused) external onlyOwner {
-        if (!nextPaused) {
-            address currentAnchor = anchorGame;
-            if (currentAnchor != address(0) && (blacklistedGames[currentAnchor] || isGameRetired(currentAnchor))) {
-                revert CurrentAnchorInvalid(currentAnchor);
-            }
-        }
-
         paused = nextPaused;
         emit PausedSet(nextPaused);
     }
 
-    /// @notice Blacklists one game. Use `updateRetirementTimestamp` to invalidate all existing games.
     function setGameBlacklisted(address game, bool blacklisted) external onlyOwner {
         blacklistedGames[game] = blacklisted;
         emit GameBlacklistedSet(game, blacklisted);
-
-        // Advancing from a newly distrusted accepted checkpoint must stop atomically.
-        if (blacklisted && game == anchorGame && !paused) {
-            paused = true;
-            emit PausedSet(true);
-        }
-    }
-
-    /// @notice Invalidates every game created up to the current timestamp and pauses anchor progression.
-    function updateRetirementTimestamp() external onlyOwner {
-        retirementTimestamp = uint64(block.timestamp);
-        emit RetirementTimestampUpdated(retirementTimestamp);
-
-        if (!paused) {
-            paused = true;
-            emit PausedSet(true);
-        }
     }
 
     /// @notice Returns whether a game has finalized and passed the registry's post-resolution delay.
@@ -118,27 +89,14 @@ contract WorldChainAnchorStateRegistry {
         }
     }
 
-    /// @notice Returns whether a game was created before the latest blanket invalidation.
-    function isGameRetired(address game) public view returns (bool) {
-        uint64 retiredAt = retirementTimestamp;
-        if (retiredAt == 0 || game.code.length == 0) return false;
-
-        try IWorldChainProofSystemGame(game).createdAt() returns (uint64 createdAt) {
-            return createdAt <= retiredAt;
-        } catch {
-            return false;
-        }
-    }
-
     /// @notice Returns whether a game is recognized by this registry and currently has a valid finalized claim.
     /// @dev Anchor advancement additionally requires a newer block and continuity with the current accepted anchor.
-    /// TODO: Before withdrawal integration, implement the OP IAnchorStateRegistry surface and wire OptimismPortal
-    /// to this predicate after confirming the emergency anchor recovery semantics.
+    /// TODO: Before withdrawal integration, define Base-compatible retirement and emergency anchor recovery semantics,
+    /// implement the OP IAnchorStateRegistry surface, and wire OptimismPortal to this predicate.
     function isGameClaimValid(address game) external view returns (bool) {
         address factory = proofSystemFactory;
         if (paused || factory == address(0) || blacklistedGames[game]) return false;
         if (!IWorldChainProofSystemFactory(factory).isFactoryGame(game)) return false;
-        if (isGameRetired(game)) return false;
 
         IWorldChainProofSystemGame proofGame = IWorldChainProofSystemGame(game);
         return
@@ -158,7 +116,6 @@ contract WorldChainAnchorStateRegistry {
             revert InvalidGameRegistry(address(this), proofGame.anchorStateRegistry());
         }
         if (!IWorldChainProofSystemFactory(factory).isFactoryGame(game)) revert UnregisteredGame(game);
-        if (isGameRetired(game)) revert GameRetired(game);
 
         if (proofGame.state() != WorldChainProofLib.RootState.FINALIZED) revert GameNotFinalized(game);
 

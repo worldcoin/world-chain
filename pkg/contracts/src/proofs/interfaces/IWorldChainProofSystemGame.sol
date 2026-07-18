@@ -19,7 +19,6 @@ interface IWorldChainProofSystemGame {
     function proofBitmap() external view returns (uint8);
     function proofDeadline() external view returns (uint64);
     function challengeDeadline() external view returns (uint64);
-    function createdAt() external view returns (uint64);
     function finalizedAt() external view returns (uint64);
     function resolutionStatus()
         external
