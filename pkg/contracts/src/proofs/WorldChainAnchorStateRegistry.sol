@@ -111,6 +111,8 @@ contract WorldChainAnchorStateRegistry {
         // Finalization proves that the candidate's own ancestry settled, but not that it extends
         // the registry's currently accepted checkpoint. Transition snapshots preserve that link
         // even when the registry sentinel, rather than anchorGame, is used as the direct parent.
+        // Traversal is linear in skipped games; callers can advance through finalized checkpoints
+        // in smaller chunks when a single jump would exceed the transaction gas limit.
         while (true) {
             IWorldChainProofSystemGame cursorGame = IWorldChainProofSystemGame(cursor);
             uint256 startingL2BlockNumber = cursorGame.startingL2BlockNumber();
