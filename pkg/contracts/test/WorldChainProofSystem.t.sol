@@ -526,6 +526,54 @@ contract WorldChainProofSystemTest is Test {
         assertEq(anchor.anchorGame(), address(third));
     }
 
+    function testAnchorRejectsFinalizedParallelBranch() public {
+        (WorldChainProofSystemGame acceptedBranch,) = _propose(10);
+        (WorldChainProofSystemGame parallelParent,) = _propose(10);
+        (WorldChainProofSystemGame parallelChild,) = _proposeChild(parallelParent, keccak256("parallel-child-root"));
+
+        vm.warp(block.timestamp + CHALLENGE_PERIOD);
+        acceptedBranch.resolve();
+        parallelParent.resolve();
+        parallelChild.resolve();
+
+        anchor.setAnchorState(address(acceptedBranch));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                WorldChainAnchorStateRegistry.AnchorStateNotInAncestry.selector,
+                address(parallelChild),
+                acceptedBranch.rootClaim(),
+                acceptedBranch.l2BlockNumber()
+            )
+        );
+        anchor.setAnchorState(address(parallelChild));
+    }
+
+    function testAnchorAcceptsAlternativeLineageFromSameCheckpoint() public {
+        bytes32 sharedRootClaim = keccak256("shared-root");
+        (WorldChainProofSystemGame first,) = _propose(10);
+        (WorldChainProofSystemGame acceptedCheckpoint,) = _proposeChild(first, sharedRootClaim);
+        (WorldChainProofSystemGame alternativeFirst,) = _propose(10);
+        (WorldChainProofSystemGame equivalentCheckpoint,) = _proposeChild(alternativeFirst, sharedRootClaim);
+
+        vm.warp(block.timestamp + CHALLENGE_PERIOD);
+        first.resolve();
+        acceptedCheckpoint.resolve();
+        alternativeFirst.resolve();
+        equivalentCheckpoint.resolve();
+        anchor.setAnchorState(address(acceptedCheckpoint));
+
+        (WorldChainProofSystemGame alternativeSuccessor,) =
+            _proposeChild(equivalentCheckpoint, keccak256("alternative-successor-root"));
+        vm.warp(block.timestamp + CHALLENGE_PERIOD);
+        alternativeSuccessor.resolve();
+        anchor.setAnchorState(address(alternativeSuccessor));
+
+        assertEq(anchor.anchorGame(), address(alternativeSuccessor));
+        assertEq(anchor.currentRootClaim(), alternativeSuccessor.rootClaim());
+        assertEq(anchor.currentL2BlockNumber(), alternativeSuccessor.l2BlockNumber());
+    }
+
     function testAnchorRejectsNonFinalizedInvalidatedPausedAndNonMonotonicRoots() public {
         (WorldChainProofSystemGame nonFinalized,) = _propose(10);
         vm.expectRevert();

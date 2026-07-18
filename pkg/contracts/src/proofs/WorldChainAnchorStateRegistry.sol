@@ -17,6 +17,7 @@ contract WorldChainAnchorStateRegistry {
     error UnregisteredGame(address game);
     error GameNotFinalized(address game);
     error NonMonotonicRoot(uint256 currentL2BlockNumber, uint256 nextL2BlockNumber);
+    error AnchorStateNotInAncestry(address game, bytes32 currentRootClaim, uint256 currentL2BlockNumber);
 
     event AnchorUpdated(address indexed game, bytes32 indexed rootId, bytes32 rootClaim, uint256 l2BlockNumber);
     event FactoryInitialized(address indexed factory);
@@ -91,6 +92,7 @@ contract WorldChainAnchorStateRegistry {
         if (nextL2BlockNumber <= currentL2BlockNumber) {
             revert NonMonotonicRoot(currentL2BlockNumber, nextL2BlockNumber);
         }
+        _requireExtendsCurrentAnchor(game, factory);
 
         bytes32 nextRootId = proofGame.rootId();
         currentRootId = nextRootId;
@@ -99,5 +101,35 @@ contract WorldChainAnchorStateRegistry {
         anchorGame = game;
 
         emit AnchorUpdated(game, nextRootId, currentRootClaim, nextL2BlockNumber);
+    }
+
+    function _requireExtendsCurrentAnchor(address candidate, address factory) private view {
+        bytes32 anchorRootClaim = currentRootClaim;
+        uint256 anchorL2BlockNumber = currentL2BlockNumber;
+        address cursor = candidate;
+
+        // Finalization proves that the candidate's own ancestry settled, but not that it extends
+        // the registry's currently accepted checkpoint. Transition snapshots preserve that link
+        // even when the registry sentinel, rather than anchorGame, is used as the direct parent.
+        while (true) {
+            IWorldChainProofSystemGame cursorGame = IWorldChainProofSystemGame(cursor);
+            uint256 startingL2BlockNumber = cursorGame.startingL2BlockNumber();
+
+            if (startingL2BlockNumber == anchorL2BlockNumber) {
+                if (cursorGame.startingRootClaim() != anchorRootClaim) {
+                    revert AnchorStateNotInAncestry(candidate, anchorRootClaim, anchorL2BlockNumber);
+                }
+                return;
+            }
+            if (startingL2BlockNumber < anchorL2BlockNumber) {
+                revert AnchorStateNotInAncestry(candidate, anchorRootClaim, anchorL2BlockNumber);
+            }
+
+            address parent = cursorGame.parentRef();
+            if (parent == address(this) || !IWorldChainProofSystemFactory(factory).isFactoryGame(parent)) {
+                revert AnchorStateNotInAncestry(candidate, anchorRootClaim, anchorL2BlockNumber);
+            }
+            cursor = parent;
+        }
     }
 }
