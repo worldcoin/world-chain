@@ -112,26 +112,13 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
             bytes memory expectedPublicKey
         ) = abi.decode(proof, (bytes32, address, uint256, WorldChainProofLib.TransitionPublicValues, bytes, bytes));
 
-        // 1. Bind the proof to the supplied rootId. The transition public values'
-        //    `l2PostRoot` plays the role of `rootClaim` (the proposal's
-        //    claimed L2 output root) in WorldChainProofLib.rootId.
-        bytes32 expectedRootId = WorldChainProofLib.rootId(
-            domainHash,
-            parentRef,
-            transition.l2PostRoot,
-            uint256(transition.l2PostBlockNumber),
-            transition.l1Head,
-            l1OriginNumber
-        );
-        if (expectedRootId != rootId) return false;
-
-        // 2. Bind the proposal transition fields to the calling game's immutable snapshot.
+        // 1. Bind the proof identity and transition fields to the calling game's immutable snapshot.
         bool matchesGame = WorldChainProofVerificationLib.matchesGame(
             gameAddress, anchorStateRegistry, rootId, domainHash, parentRef, l1OriginNumber, transition
         );
         if (!matchesGame) return false;
 
-        // 3. Verify the enclave signature over all transition public values.
+        // 2. Verify the enclave signature over all transition public values.
         bytes32 commitment = _signingCommitment(transition);
         return _verifyEnclaveSignature(commitment, signature, expectedPublicKey);
     }

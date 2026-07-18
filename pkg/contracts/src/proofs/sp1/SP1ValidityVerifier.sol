@@ -135,16 +135,6 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
         if (transition.rollupConfigHash != rollupConfigHash) return false;
         if (outputs.multiBlockVKey != rangeVKeyCommitment) return false;
 
-        bytes32 expectedRootId = WorldChainProofLib.rootId(
-            domainHash,
-            parentRef,
-            transition.l2PostRoot,
-            uint256(transition.l2PostBlockNumber),
-            transition.l1Head,
-            l1OriginNumber
-        );
-        if (expectedRootId != rootId) return false;
-
         bool matchesGame = WorldChainProofVerificationLib.matchesGame(
             gameAddress, anchorStateRegistry, rootId, domainHash, parentRef, l1OriginNumber, transition
         );

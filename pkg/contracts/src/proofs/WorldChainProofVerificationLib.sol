@@ -5,7 +5,7 @@ import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGam
 import {WorldChainProofLib} from "./WorldChainProofLib.sol";
 
 library WorldChainProofVerificationLib {
-    /// @dev Existing games remain bound to their creation-time snapshot when their parent or anchor later advances.
+    /// @dev Validates the proof's identity commitment before comparing it with the game's creation-time snapshot.
     function matchesGame(
         address gameAddress,
         address expectedAnchorStateRegistry,
@@ -15,6 +15,16 @@ library WorldChainProofVerificationLib {
         uint256 l1OriginNumber,
         WorldChainProofLib.TransitionPublicValues memory transition
     ) internal view returns (bool) {
+        bytes32 expectedRootId = WorldChainProofLib.rootId(
+            domainHash,
+            parentRef,
+            transition.l2PostRoot,
+            uint256(transition.l2PostBlockNumber),
+            transition.l1Head,
+            l1OriginNumber
+        );
+        if (expectedRootId != rootId) return false;
+
         IWorldChainProofSystemGame game = IWorldChainProofSystemGame(gameAddress);
         return game.rootId() == rootId && game.anchorStateRegistry() == expectedAnchorStateRegistry
             && game.domainHash() == domainHash && game.parentRef() == parentRef
