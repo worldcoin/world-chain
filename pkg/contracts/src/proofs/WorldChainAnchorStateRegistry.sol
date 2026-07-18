@@ -117,6 +117,8 @@ contract WorldChainAnchorStateRegistry {
             IWorldChainProofSystemGame cursorGame = IWorldChainProofSystemGame(cursor);
             uint256 startingL2BlockNumber = cursorGame.startingL2BlockNumber();
 
+            // A transition starting from the current root and block proves that the candidate
+            // extends the accepted checkpoint, even if it uses a different game lineage.
             if (startingL2BlockNumber == anchorL2BlockNumber) {
                 if (cursorGame.startingRootClaim() != anchorRootClaim) {
                     revert AnchorStateNotInAncestry(candidate, anchorRootClaim, anchorL2BlockNumber);
