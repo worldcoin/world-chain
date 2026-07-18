@@ -243,6 +243,12 @@ contract WorldChainProofSystemGame {
         return (evaluation.outcome, evaluation.reason);
     }
 
+    /// @notice Asks the registry to advance its accepted anchor to this game.
+    /// @dev The registry remains authoritative because eligibility depends on its current global anchor and policy.
+    function closeGame() external {
+        IWorldChainAnchorStateRegistry(anchorStateRegistry).setAnchorState(address(this));
+    }
+
     function _evaluateResolution() internal view returns (ResolutionEvaluation memory evaluation) {
         WorldChainProofLib.RootState currentState = state;
         if (
