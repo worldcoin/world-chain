@@ -67,7 +67,7 @@ contract NitroEndToEndTest is Test {
         attestationVerifier = new MockNitroAttestationVerifier();
         registry = new NitroEnclaveKeyRegistry(attestationVerifier, owner);
         parent = new EndToEndParentGame(PRE);
-        proofVerifier = new NitroProofVerifier(registry, ANCHOR_STATE_REGISTRY);
+        proofVerifier = new NitroProofVerifier(registry);
         game = new MockProofSystemGame();
         game.setContext(
             MockProofSystemGame.Context({

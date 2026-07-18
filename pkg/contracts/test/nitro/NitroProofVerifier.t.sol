@@ -52,7 +52,7 @@ contract NitroProofVerifierTest is Test {
         attestationVerifier = new MockNitroAttestationVerifier();
         registry = new NitroEnclaveKeyRegistry(attestationVerifier, owner);
         parent = new MockParentGame(L2_PRE_ROOT);
-        proofVerifier = new NitroProofVerifier(registry, ANCHOR_STATE_REGISTRY);
+        proofVerifier = new NitroProofVerifier(registry);
         game = new MockProofSystemGame();
         _setGameContext(_transition());
 
@@ -146,11 +146,6 @@ contract NitroProofVerifierTest is Test {
     function test_Verify_HappyPath() public {
         bytes memory sig = _sign(_commitment());
         assertTrue(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
-    }
-
-    function test_Constructor_RevertsForZeroAnchorStateRegistry() public {
-        vm.expectRevert(NitroProofVerifier.ZeroAnchorStateRegistry.selector);
-        new NitroProofVerifier(registry, address(0));
     }
 
     /*//////////////////////////////////////////////////////////////

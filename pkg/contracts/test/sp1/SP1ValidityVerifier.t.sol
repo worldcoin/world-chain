@@ -83,7 +83,7 @@ contract SP1ValidityVerifierTest is Test {
         anchor = new StubAnchorStateRegistry(L2_PRE_ROOT);
         parent = new StubParentGame(L2_PRE_ROOT);
         verifier = new SP1ValidityVerifier(
-            ISP1Verifier(address(sp1)), AGGREGATION_VKEY, ROLLUP_CONFIG_HASH, RANGE_VKEY_COMMITMENT, address(anchor)
+            ISP1Verifier(address(sp1)), AGGREGATION_VKEY, ROLLUP_CONFIG_HASH, RANGE_VKEY_COMMITMENT
         );
         game = new MockProofSystemGame();
         _setGameContext(address(parent));
@@ -166,37 +166,22 @@ contract SP1ValidityVerifierTest is Test {
 
     function test_Constructor_RevertsForZeroSP1Verifier() public {
         vm.expectRevert(SP1ValidityVerifier.ZeroSP1Verifier.selector);
-        new SP1ValidityVerifier(
-            ISP1Verifier(address(0)), AGGREGATION_VKEY, ROLLUP_CONFIG_HASH, RANGE_VKEY_COMMITMENT, address(anchor)
-        );
+        new SP1ValidityVerifier(ISP1Verifier(address(0)), AGGREGATION_VKEY, ROLLUP_CONFIG_HASH, RANGE_VKEY_COMMITMENT);
     }
 
     function test_Constructor_RevertsForZeroAggregationVKey() public {
         vm.expectRevert(SP1ValidityVerifier.ZeroAggregationVKey.selector);
-        new SP1ValidityVerifier(
-            ISP1Verifier(address(sp1)), bytes32(0), ROLLUP_CONFIG_HASH, RANGE_VKEY_COMMITMENT, address(anchor)
-        );
+        new SP1ValidityVerifier(ISP1Verifier(address(sp1)), bytes32(0), ROLLUP_CONFIG_HASH, RANGE_VKEY_COMMITMENT);
     }
 
     function test_Constructor_RevertsForZeroRollupConfigHash() public {
         vm.expectRevert(SP1ValidityVerifier.ZeroRollupConfigHash.selector);
-        new SP1ValidityVerifier(
-            ISP1Verifier(address(sp1)), AGGREGATION_VKEY, bytes32(0), RANGE_VKEY_COMMITMENT, address(anchor)
-        );
+        new SP1ValidityVerifier(ISP1Verifier(address(sp1)), AGGREGATION_VKEY, bytes32(0), RANGE_VKEY_COMMITMENT);
     }
 
     function test_Constructor_RevertsForZeroRangeVKeyCommitment() public {
         vm.expectRevert(SP1ValidityVerifier.ZeroRangeVKeyCommitment.selector);
-        new SP1ValidityVerifier(
-            ISP1Verifier(address(sp1)), AGGREGATION_VKEY, ROLLUP_CONFIG_HASH, bytes32(0), address(anchor)
-        );
-    }
-
-    function test_Constructor_RevertsForZeroAnchorStateRegistry() public {
-        vm.expectRevert(SP1ValidityVerifier.ZeroAnchorStateRegistry.selector);
-        new SP1ValidityVerifier(
-            ISP1Verifier(address(sp1)), AGGREGATION_VKEY, ROLLUP_CONFIG_HASH, RANGE_VKEY_COMMITMENT, address(0)
-        );
+        new SP1ValidityVerifier(ISP1Verifier(address(sp1)), AGGREGATION_VKEY, ROLLUP_CONFIG_HASH, bytes32(0));
     }
 
     /*//////////////////////////////////////////////////////////////

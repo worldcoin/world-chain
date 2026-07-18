@@ -38,9 +38,6 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     /// @notice Thrown when the expected range program verification key is zero.
     error ZeroRangeVKeyCommitment();
 
-    /// @notice Thrown when the anchor-state registry address is zero.
-    error ZeroAnchorStateRegistry();
-
     /*//////////////////////////////////////////////////////////////
                                STORAGE
     //////////////////////////////////////////////////////////////*/
@@ -57,9 +54,6 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     /// @notice Range-program verification key committed by the aggregation proof.
     bytes32 public immutable rangeVKeyCommitment;
 
-    /// @notice Anchor-state registry that calling games must belong to.
-    address public immutable anchorStateRegistry;
-
     /*//////////////////////////////////////////////////////////////
                              CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
@@ -68,20 +62,17 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
         ISP1Verifier sp1Verifier_,
         bytes32 aggregationVKey_,
         bytes32 rollupConfigHash_,
-        bytes32 rangeVKeyCommitment_,
-        address anchorStateRegistry_
+        bytes32 rangeVKeyCommitment_
     ) {
         if (address(sp1Verifier_) == address(0)) revert ZeroSP1Verifier();
         if (aggregationVKey_ == bytes32(0)) revert ZeroAggregationVKey();
         if (rollupConfigHash_ == bytes32(0)) revert ZeroRollupConfigHash();
         if (rangeVKeyCommitment_ == bytes32(0)) revert ZeroRangeVKeyCommitment();
-        if (anchorStateRegistry_ == address(0)) revert ZeroAnchorStateRegistry();
 
         sp1Verifier = sp1Verifier_;
         aggregationVKey = aggregationVKey_;
         rollupConfigHash = rollupConfigHash_;
         rangeVKeyCommitment = rangeVKeyCommitment_;
-        anchorStateRegistry = anchorStateRegistry_;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -136,7 +127,7 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
         if (outputs.multiBlockVKey != rangeVKeyCommitment) return false;
 
         bool matchesGame = WorldChainProofVerificationLib.matchesGame(
-            gameAddress, anchorStateRegistry, rootId, domainHash, parentRef, l1OriginNumber, transition
+            gameAddress, rootId, domainHash, parentRef, l1OriginNumber, transition
         );
         if (!matchesGame) return false;
 

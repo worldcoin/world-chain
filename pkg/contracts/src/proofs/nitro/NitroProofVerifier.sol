@@ -44,9 +44,6 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     ///      Nitro enclave always emits this form.
     error InvalidPublicKey();
 
-    /// @dev Thrown when the anchor-state registry address is zero.
-    error ZeroAnchorStateRegistry();
-
     /*//////////////////////////////////////////////////////////////
                                 STORAGE
     //////////////////////////////////////////////////////////////*/
@@ -54,20 +51,13 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     /// @notice Registry of attested enclave keys.
     NitroEnclaveKeyRegistry public immutable registry;
 
-    /// @notice Anchor-state registry that calling games must belong to.
-    address public immutable anchorStateRegistry;
-
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
     /// @param registry_ The Nitro enclave key registry to consult.
-    /// @param anchorStateRegistry_ Anchor-state registry that calling games must belong to.
-    constructor(NitroEnclaveKeyRegistry registry_, address anchorStateRegistry_) {
-        if (anchorStateRegistry_ == address(0)) revert ZeroAnchorStateRegistry();
-
+    constructor(NitroEnclaveKeyRegistry registry_) {
         registry = registry_;
-        anchorStateRegistry = anchorStateRegistry_;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -114,7 +104,7 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
 
         // 1. Bind the proof identity and transition fields to the calling game's immutable snapshot.
         bool matchesGame = WorldChainProofVerificationLib.matchesGame(
-            gameAddress, anchorStateRegistry, rootId, domainHash, parentRef, l1OriginNumber, transition
+            gameAddress, rootId, domainHash, parentRef, l1OriginNumber, transition
         );
         if (!matchesGame) return false;
 

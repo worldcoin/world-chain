@@ -8,7 +8,6 @@ library WorldChainProofVerificationLib {
     /// @dev Validates the proof's identity commitment before comparing it with the game's creation-time snapshot.
     function matchesGame(
         address gameAddress,
-        address expectedAnchorStateRegistry,
         bytes32 rootId,
         bytes32 domainHash,
         address parentRef,
@@ -26,8 +25,7 @@ library WorldChainProofVerificationLib {
         if (expectedRootId != rootId) return false;
 
         IWorldChainProofSystemGame game = IWorldChainProofSystemGame(gameAddress);
-        return game.rootId() == rootId && game.anchorStateRegistry() == expectedAnchorStateRegistry
-            && game.domainHash() == domainHash && game.parentRef() == parentRef
+        return game.rootId() == rootId && game.domainHash() == domainHash && game.parentRef() == parentRef
             && game.startingRootClaim() == transition.l2PreRoot
             && game.startingL2BlockNumber() == uint256(transition.l2PreBlockNumber)
             && game.rootClaim() == transition.l2PostRoot
