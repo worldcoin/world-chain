@@ -1525,18 +1525,25 @@ async fn test_event_stream_invariants() -> eyre::Result<()> {
 /// Eth JSON-RPC API at each block boundary.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
-    use alloy_eips::BlockNumberOrTag;
+    use alloy_eips::{BlockId, BlockNumberOrTag};
     use reth_rpc_api::EthApiClient;
 
     reth_tracing::init_test_tracing();
 
     const NUM_BLOCKS: usize = 3;
     const BLOCK_INTERVAL: Duration = Duration::from_millis(2000);
+    const FORCED_TX_SIGNER: u32 = 19;
 
     tokio::time::sleep(Duration::from_millis(100)).await;
 
+    let mut forced_transactions = Vec::with_capacity(NUM_BLOCKS);
+    for nonce in 0..NUM_BLOCKS as u64 {
+        let (transaction, _) = create_test_transaction(FORCED_TX_SIGNER, nonce).await;
+        forced_transactions.push(transaction);
+    }
+
     // 2 nodes: builder + follower
-    let (_, nodes, _tasks, mut env, tx_spammer) = WorldChainTestBuilder::builder()
+    let (_, nodes, _tasks, mut env, _tx_spammer) = WorldChainTestBuilder::builder()
         .nodes(2)
         .flashblocks(true)
         .build()
@@ -1546,15 +1553,11 @@ async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
     let builder_context = nodes[0].ext_context.clone().unwrap();
     let block_hash = nodes[0].node.block_hash(0);
     let chain_spec = nodes[0].node.inner.chain_spec().clone();
-    let rpc_url = nodes[0].node.rpc_url();
 
     // Initialize forkchoice on all nodes to genesis
     for node in &nodes {
         node.node.update_forkchoice(block_hash, block_hash).await?;
     }
-
-    // Spawn background transactions so blocks have content
-    tx_spammer.spawn(10, rpc_url);
 
     let builder_vk = builder_context
         .flashblocks_handle
@@ -1606,16 +1609,60 @@ async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
         authorization_gen,
         attributes_gen: Box::new({
             let chain_spec = chain_spec.clone();
-            move |_block_number, timestamp| {
+            move |block_number, timestamp| {
                 let eip1559 = encode_eip1559_params(chain_spec.as_ref(), timestamp)?;
+                let forced_transaction = forced_transactions
+                    .get(block_number.saturating_sub(1) as usize)
+                    .cloned()
+                    .ok_or_else(|| eyre!("missing forced transaction for block {block_number}"))?;
                 Ok(build_payload_attributes(
                     timestamp,
                     eip1559,
-                    Some(vec![TX_SET_L1_BLOCK.clone()]),
+                    Some(vec![TX_SET_L1_BLOCK.clone(), forced_transaction]),
                 ))
             }
         }),
-        during_build: None,
+        during_build: Some(Box::new({
+            let builder_rpc = builder_rpc.clone();
+            move |block_num| {
+                let builder_rpc = builder_rpc.clone();
+                Box::pin(async move {
+                    let address = account(FORCED_TX_SIGNER);
+                    let pending_nonce: U256 = EthApiClient::<
+                        TransactionRequest,
+                        alloy_rpc_types::Transaction,
+                        alloy_rpc_types_eth::Block,
+                        alloy_consensus::Receipt,
+                        alloy_consensus::Header,
+                        reth_optimism_primitives::OpTransactionSigned,
+                    >::transaction_count(
+                        &builder_rpc, address, Some(BlockId::pending())
+                    )
+                    .await?;
+                    let latest_nonce: U256 = EthApiClient::<
+                        TransactionRequest,
+                        alloy_rpc_types::Transaction,
+                        alloy_rpc_types_eth::Block,
+                        alloy_consensus::Receipt,
+                        alloy_consensus::Header,
+                        reth_optimism_primitives::OpTransactionSigned,
+                    >::transaction_count(
+                        &builder_rpc,
+                        address,
+                        Some(BlockNumberOrTag::Latest.into()),
+                    )
+                    .await?;
+
+                    assert_eq!(
+                        pending_nonce,
+                        latest_nonce + U256::from(1),
+                        "block {block_num}: pending state must include the executed Flashblock transaction"
+                    );
+
+                    Ok(())
+                })
+            }
+        })),
         on_block: Some(Box::new({
             let builder_rpc = builder_rpc.clone();
             let latest_stream_fb = latest_stream_fb.clone();
