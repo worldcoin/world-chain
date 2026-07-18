@@ -302,6 +302,7 @@ contract WorldChainProofSystemGame {
                 return evaluation;
             }
             // 5. An unchallenged proposal finalizes after its challenge window expires.
+            // Safety therefore relies on every incorrect claim being challenged before this deadline.
             evaluation.status = ResolutionStatus.RESOLVABLE;
             evaluation.outcome = WorldChainProofLib.RootState.FINALIZED;
             return evaluation;
