@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Test, Vm} from "forge-std/Test.sol";
 import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyRegistry.sol";
-import {NitroProofVerifier, TransitionPublicValues} from "../../src/proofs/nitro/NitroProofVerifier.sol";
+import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
 import {MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
 import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier.sol";
@@ -85,8 +85,8 @@ contract NitroProofVerifierTest is Test {
         return _sign(enclaveWallet, digest);
     }
 
-    function _transition() internal pure returns (TransitionPublicValues memory) {
-        return TransitionPublicValues({
+    function _transition() internal pure returns (WorldChainProofLib.TransitionPublicValues memory) {
+        return WorldChainProofLib.TransitionPublicValues({
             l1Head: L1_ORIGIN_HASH,
             l2PreRoot: L2_PRE_ROOT,
             l2PreBlockNumber: L2_PRE_BLOCK,
@@ -110,7 +110,7 @@ contract NitroProofVerifierTest is Test {
         return abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, _transition(), sig, pub);
     }
 
-    function _setGameContext(TransitionPublicValues memory transition) internal {
+    function _setGameContext(WorldChainProofLib.TransitionPublicValues memory transition) internal {
         bytes32 rootId = WorldChainProofLib.rootId(
             DOMAIN_HASH,
             address(parent),
@@ -165,7 +165,7 @@ contract NitroProofVerifierTest is Test {
     }
 
     function test_Verify_FalseForWrongBootInfo() public {
-        TransitionPublicValues memory wrongTransition = _transition();
+        WorldChainProofLib.TransitionPublicValues memory wrongTransition = _transition();
         wrongTransition.l2PostBlockNumber += 1;
         bytes memory sig = _sign(keccak256(abi.encode(wrongTransition)));
         bytes32 wrongRootId = WorldChainProofLib.rootId(
@@ -182,7 +182,7 @@ contract NitroProofVerifierTest is Test {
     }
 
     function test_Verify_FalseForWrongPreRoot() public {
-        TransitionPublicValues memory wrongTransition = _transition();
+        WorldChainProofLib.TransitionPublicValues memory wrongTransition = _transition();
         wrongTransition.l2PreRoot = keccak256("wrong-pre-root");
         bytes memory sig = _sign(keccak256(abi.encode(wrongTransition)));
         bytes memory proof =
@@ -191,7 +191,7 @@ contract NitroProofVerifierTest is Test {
     }
 
     function test_Verify_FalseForWrongPreBlockNumber() public {
-        TransitionPublicValues memory wrongTransition = _transition();
+        WorldChainProofLib.TransitionPublicValues memory wrongTransition = _transition();
         wrongTransition.l2PreBlockNumber += 1;
         bytes memory sig = _sign(keccak256(abi.encode(wrongTransition)));
         bytes memory proof =
@@ -355,7 +355,7 @@ contract NitroProofVerifierTest is Test {
         // Boundary: l2BlockNumber = 0 must work, since the rootId is
         // recomputed deterministically and the commitment is signed over
         // exactly that value.
-        TransitionPublicValues memory transition = _transition();
+        WorldChainProofLib.TransitionPublicValues memory transition = _transition();
         transition.l2PostBlockNumber = 0;
         bytes32 rootId =
             WorldChainProofLib.rootId(DOMAIN_HASH, address(parent), L2_POST_ROOT, 0, L1_ORIGIN_HASH, L1_ORIGIN_NUMBER);
@@ -374,7 +374,7 @@ contract NitroProofVerifierTest is Test {
         // recovery to mismatch the expected key and surface as `false`,
         // even though `rootId` still reconstructs correctly.
         bytes32 wrongCfg = keccak256("wrong-cfg");
-        TransitionPublicValues memory wrongTransition = _transition();
+        WorldChainProofLib.TransitionPublicValues memory wrongTransition = _transition();
         wrongTransition.rollupConfigHash = wrongCfg;
         bytes32 commitment = keccak256(abi.encode(wrongTransition));
         bytes memory sig = _sign(commitment);

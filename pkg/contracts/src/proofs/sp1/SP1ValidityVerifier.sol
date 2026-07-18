@@ -2,24 +2,13 @@
 pragma solidity 0.8.28;
 
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
-import {IWorldChainProofSystemGame} from "../interfaces/IWorldChainProofSystemGame.sol";
 import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
 import {WorldChainProofLib} from "../WorldChainProofLib.sol";
-
-/// ABI-encoded public values committed by the World Chain SP1 aggregation proof.
-/// Must match `world_chain_proof_core::boot::TransitionPublicValues`.
-struct TransitionPublicValues {
-    bytes32 l1Head;
-    bytes32 l2PreRoot;
-    uint64 l2PreBlockNumber;
-    bytes32 l2PostRoot;
-    uint64 l2PostBlockNumber;
-    bytes32 rollupConfigHash;
-}
+import {WorldChainProofVerificationLib} from "../WorldChainProofVerificationLib.sol";
 
 /// Must match `world_chain_proof_core::types::AggregationPublicValues`.
 struct AggregationPublicValues {
-    TransitionPublicValues transitionPublicValues;
+    WorldChainProofLib.TransitionPublicValues transitionPublicValues;
     bytes32 multiBlockVKey;
 }
 
@@ -141,7 +130,7 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
         ) = abi.decode(proof, (bytes32, address, uint256, bytes, bytes));
 
         AggregationPublicValues memory outputs = abi.decode(publicValues, (AggregationPublicValues));
-        TransitionPublicValues memory transition = outputs.transitionPublicValues;
+        WorldChainProofLib.TransitionPublicValues memory transition = outputs.transitionPublicValues;
 
         if (transition.rollupConfigHash != rollupConfigHash) return false;
         if (outputs.multiBlockVKey != rangeVKeyCommitment) return false;
@@ -156,27 +145,12 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
         );
         if (expectedRootId != rootId) return false;
 
-        if (!_matchesGame(gameAddress, rootId, domainHash, parentRef, l1OriginNumber, transition)) return false;
+        bool matchesGame = WorldChainProofVerificationLib.matchesGame(
+            gameAddress, anchorStateRegistry, rootId, domainHash, parentRef, l1OriginNumber, transition
+        );
+        if (!matchesGame) return false;
 
         sp1Verifier.verifyProof(aggregationVKey, publicValues, proofBytes);
         return true;
-    }
-
-    function _matchesGame(
-        address gameAddress,
-        bytes32 rootId,
-        bytes32 domainHash,
-        address parentRef,
-        uint256 l1OriginNumber,
-        TransitionPublicValues memory transition
-    ) internal view returns (bool) {
-        IWorldChainProofSystemGame game = IWorldChainProofSystemGame(gameAddress);
-        return game.rootId() == rootId && game.anchorStateRegistry() == anchorStateRegistry
-            && game.domainHash() == domainHash && game.parentRef() == parentRef
-            && game.startingRootClaim() == transition.l2PreRoot
-            && game.startingL2BlockNumber() == uint256(transition.l2PreBlockNumber)
-            && game.rootClaim() == transition.l2PostRoot
-            && game.l2BlockNumber() == uint256(transition.l2PostBlockNumber) && game.l1OriginHash() == transition.l1Head
-            && game.l1OriginNumber() == l1OriginNumber;
     }
 }

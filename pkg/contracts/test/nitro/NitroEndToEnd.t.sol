@@ -4,7 +4,7 @@ pragma solidity ^0.8.28;
 import {Test, Vm} from "forge-std/Test.sol";
 import {NitroAttestationVerifier} from "../../src/proofs/nitro/NitroAttestationVerifier.sol";
 import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyRegistry.sol";
-import {NitroProofVerifier, TransitionPublicValues} from "../../src/proofs/nitro/NitroProofVerifier.sol";
+import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol";
 import {INitroAttestationVerifier} from "../../src/proofs/nitro/INitroAttestationVerifier.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
 import {MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
@@ -101,9 +101,9 @@ contract NitroEndToEndTest is Test {
     function _transition(bytes32 postRoot, uint64 blk, bytes32 cfg)
         internal
         pure
-        returns (TransitionPublicValues memory)
+        returns (WorldChainProofLib.TransitionPublicValues memory)
     {
-        return TransitionPublicValues({
+        return WorldChainProofLib.TransitionPublicValues({
             l1Head: L1H,
             l2PreRoot: PRE,
             l2PreBlockNumber: PRE_BLK,
@@ -113,7 +113,7 @@ contract NitroEndToEndTest is Test {
         });
     }
 
-    function _signCommitment(Vm.Wallet memory w, TransitionPublicValues memory transition)
+    function _signCommitment(Vm.Wallet memory w, WorldChainProofLib.TransitionPublicValues memory transition)
         internal
         returns (bytes memory)
     {
@@ -129,7 +129,7 @@ contract NitroEndToEndTest is Test {
         return _signCommitment(w, _transition(postRoot, blk, cfg));
     }
 
-    function _proof(bytes memory sig, bytes memory pub, TransitionPublicValues memory transition)
+    function _proof(bytes memory sig, bytes memory pub, WorldChainProofLib.TransitionPublicValues memory transition)
         internal
         view
         returns (bytes memory)

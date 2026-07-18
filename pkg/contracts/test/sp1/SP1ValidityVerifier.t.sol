@@ -4,11 +4,7 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 
 import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
-import {
-    AggregationPublicValues,
-    SP1ValidityVerifier,
-    TransitionPublicValues
-} from "../../src/proofs/sp1/SP1ValidityVerifier.sol";
+import {AggregationPublicValues, SP1ValidityVerifier} from "../../src/proofs/sp1/SP1ValidityVerifier.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
 import {MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
 
@@ -99,7 +95,7 @@ contract SP1ValidityVerifierTest is Test {
 
     function _publicValuesStruct() internal pure returns (AggregationPublicValues memory) {
         return AggregationPublicValues({
-            transitionPublicValues: TransitionPublicValues({
+            transitionPublicValues: WorldChainProofLib.TransitionPublicValues({
                 l1Head: L1_ORIGIN_HASH,
                 l2PreRoot: L2_PRE_ROOT,
                 l2PreBlockNumber: L2_PRE_BLOCK_NUMBER,

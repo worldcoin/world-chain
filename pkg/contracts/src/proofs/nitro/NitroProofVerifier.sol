@@ -1,21 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {IWorldChainProofSystemGame} from "../interfaces/IWorldChainProofSystemGame.sol";
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
 import {WorldChainProofLib} from "../WorldChainProofLib.sol";
+import {WorldChainProofVerificationLib} from "../WorldChainProofVerificationLib.sol";
 import {NitroEnclaveKeyRegistry} from "./NitroEnclaveKeyRegistry.sol";
-
-/// ABI-encoded public values signed by the World Chain Nitro enclave.
-/// Must match `world_chain_proof_core::boot::TransitionPublicValues`.
-struct TransitionPublicValues {
-    bytes32 l1Head;
-    bytes32 l2PreRoot;
-    uint64 l2PreBlockNumber;
-    bytes32 l2PostRoot;
-    uint64 l2PostBlockNumber;
-    bytes32 rollupConfigHash;
-}
 
 /// @title NitroProofVerifier
 /// @author Worldcoin
@@ -118,10 +107,10 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
             bytes32 domainHash,
             address parentRef,
             uint256 l1OriginNumber,
-            TransitionPublicValues memory transition,
+            WorldChainProofLib.TransitionPublicValues memory transition,
             bytes memory signature,
             bytes memory expectedPublicKey
-        ) = abi.decode(proof, (bytes32, address, uint256, TransitionPublicValues, bytes, bytes));
+        ) = abi.decode(proof, (bytes32, address, uint256, WorldChainProofLib.TransitionPublicValues, bytes, bytes));
 
         // 1. Bind the proof to the supplied rootId. The transition public values'
         //    `l2PostRoot` plays the role of `rootClaim` (the proposal's
@@ -137,7 +126,10 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
         if (expectedRootId != rootId) return false;
 
         // 2. Bind the proposal transition fields to the calling game's immutable snapshot.
-        if (!_matchesGame(gameAddress, rootId, domainHash, parentRef, l1OriginNumber, transition)) return false;
+        bool matchesGame = WorldChainProofVerificationLib.matchesGame(
+            gameAddress, anchorStateRegistry, rootId, domainHash, parentRef, l1OriginNumber, transition
+        );
+        if (!matchesGame) return false;
 
         // 3. Verify the enclave signature over all transition public values.
         bytes32 commitment = _signingCommitment(transition);
@@ -152,26 +144,12 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     ///      matching `transition_commitment(transition_public_values)` in
     ///      `proofs/nitro/src/protocol.rs`.
     ///      The entire struct is ABI-encoded before hashing.
-    function _signingCommitment(TransitionPublicValues memory transition) internal pure returns (bytes32) {
+    function _signingCommitment(WorldChainProofLib.TransitionPublicValues memory transition)
+        internal
+        pure
+        returns (bytes32)
+    {
         return keccak256(abi.encode(transition));
-    }
-
-    function _matchesGame(
-        address gameAddress,
-        bytes32 rootId,
-        bytes32 domainHash,
-        address parentRef,
-        uint256 l1OriginNumber,
-        TransitionPublicValues memory transition
-    ) internal view returns (bool) {
-        IWorldChainProofSystemGame game = IWorldChainProofSystemGame(gameAddress);
-        return game.rootId() == rootId && game.anchorStateRegistry() == anchorStateRegistry
-            && game.domainHash() == domainHash && game.parentRef() == parentRef
-            && game.startingRootClaim() == transition.l2PreRoot
-            && game.startingL2BlockNumber() == uint256(transition.l2PreBlockNumber)
-            && game.rootClaim() == transition.l2PostRoot
-            && game.l2BlockNumber() == uint256(transition.l2PostBlockNumber) && game.l1OriginHash() == transition.l1Head
-            && game.l1OriginNumber() == l1OriginNumber;
     }
 
     /// @dev Checks that `signature` over `commitment` recovers to the address
