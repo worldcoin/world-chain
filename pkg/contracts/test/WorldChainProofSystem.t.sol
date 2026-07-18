@@ -520,9 +520,6 @@ contract WorldChainProofSystemTest is Test {
 
         anchor.setAnchorState(address(third));
 
-        assertFalse(anchor.acceptedGames(address(first)));
-        assertFalse(anchor.acceptedGames(address(second)));
-        assertTrue(anchor.acceptedGames(address(third)));
         assertEq(anchor.currentRootId(), third.rootId());
         assertEq(anchor.currentRootClaim(), third.rootClaim());
         assertEq(anchor.currentL2BlockNumber(), third.l2BlockNumber());

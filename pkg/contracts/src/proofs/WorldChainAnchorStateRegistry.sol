@@ -32,7 +32,6 @@ contract WorldChainAnchorStateRegistry {
     uint256 public currentL2BlockNumber;
     address public anchorGame;
 
-    mapping(address game => bool accepted) public acceptedGames;
     mapping(bytes32 rootId => bool accepted) public acceptedRoots;
     mapping(address game => bool blacklisted) public blacklistedGames;
 
@@ -99,7 +98,6 @@ contract WorldChainAnchorStateRegistry {
         currentRootClaim = proofGame.rootClaim();
         currentL2BlockNumber = nextL2BlockNumber;
         anchorGame = game;
-        acceptedGames[game] = true;
         acceptedRoots[nextRootId] = true;
 
         emit AnchorUpdated(game, nextRootId, currentRootClaim, nextL2BlockNumber);
