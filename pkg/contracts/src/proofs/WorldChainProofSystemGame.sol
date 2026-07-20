@@ -6,8 +6,9 @@ import {IWorldChainAnchorStateRegistry} from "./interfaces/IWorldChainAnchorStat
 import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
 import {IWorldChainStakingRegistry} from "./interfaces/IWorldChainStakingRegistry.sol";
+import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
-contract WorldChainProofSystemGame {
+contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     using WorldChainProofLib for uint8;
 
     struct ProposalInit {
@@ -62,6 +63,7 @@ contract WorldChainProofSystemGame {
     error DuplicateChallenge(address challenger);
     error InvalidLane(uint8 lane);
     error InvalidProof(WorldChainProofLib.ProofLane lane, bytes32 rootId);
+    error NoClaim(address recipient);
     error TransferFailed(address recipient, uint256 amount);
 
     event Challenged(address indexed challenger, uint64 proofDeadline);
@@ -70,6 +72,7 @@ contract WorldChainProofSystemGame {
     event DuplicateProofLane(WorldChainProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
     event Finalized(bytes32 indexed rootId);
     event Invalidated(bytes32 indexed rootId, WorldChainProofLib.InvalidationReason reason);
+    event Withdrawn(address indexed recipient, uint256 amount);
 
     /// Number of distinct proof lanes required to finalize a challenged root.
     /// Set per-deployment by the factory (defaults to `WorldChainProofLib.PROOF_THRESHOLD`).
@@ -110,8 +113,9 @@ contract WorldChainProofSystemGame {
     WorldChainProofLib.RootState public state;
     WorldChainProofLib.InvalidationReason public invalidationReason;
 
-    address[] public challengers;
-    mapping(address challenger => uint256 amount) public challengerBonds;
+    address payable public challenger;
+    uint256 public postedChallengerBond;
+    mapping(address recipient => uint256 amount) internal payoutCredits;
 
     constructor(ProposalInit memory proposal, ActivationConfig memory config) payable {
         if (msg.value != config.proposerBond) revert InvalidBond(config.proposerBond, msg.value);
@@ -166,10 +170,10 @@ contract WorldChainProofSystemGame {
         }
         if (!stakingRegistry.isStaked(msg.sender)) revert UnstakedChallenger(msg.sender);
         if (msg.value != challengerBond) revert InvalidBond(challengerBond, msg.value);
-        if (challengerBonds[msg.sender] != 0) revert DuplicateChallenge(msg.sender);
+        if (challenger != address(0)) revert DuplicateChallenge(challenger);
 
-        challengerBonds[msg.sender] = msg.value;
-        challengers.push(msg.sender);
+        challenger = payable(msg.sender);
+        postedChallengerBond = msg.value;
 
         if (state == WorldChainProofLib.RootState.PROPOSED) {
             state = WorldChainProofLib.RootState.CHALLENGED;
@@ -178,6 +182,27 @@ contract WorldChainProofSystemGame {
         }
 
         emit Challenged(msg.sender, proofDeadline);
+    }
+
+    /// @notice Returns the ETH amount `recipient` can withdraw from this game.
+    function claimable(address recipient) external view returns (uint256) {
+        return _claimable(recipient);
+    }
+
+    /// @notice Permissionlessly withdraws `recipient`'s claim to `recipient`.
+    /// @dev The challenger, defender/prover-service automation, or keepers can call this after resolution;
+    ///      the caller cannot redirect funds away from `recipient`.
+    function withdraw(address payable recipient) external nonReentrant {
+        address account = recipient;
+        uint256 amount = _claimable(account);
+        if (amount == 0) revert NoClaim(account);
+
+        uint256 refundablePrincipal = _refundableChallengerPrincipal(account);
+        payoutCredits[account] = 0;
+        if (refundablePrincipal != 0) postedChallengerBond = 0;
+
+        _transfer(recipient, amount);
+        emit Withdrawn(account, amount);
     }
 
     function submitProofLane(uint8 laneId, bytes calldata proof) external {
@@ -221,6 +246,7 @@ contract WorldChainProofSystemGame {
     }
 
     /// @notice Settles this game after evaluating its blacklist, parent, deadline, and proof-threshold conditions.
+    /// @dev Resolution assigns pull-based bond claims; call `withdraw(recipient)` to transfer claimable ETH.
     function resolve()
         external
         returns (WorldChainProofLib.RootState outcome, WorldChainProofLib.InvalidationReason reason)
@@ -337,22 +363,14 @@ contract WorldChainProofSystemGame {
         invalidationReason = reason;
         invalidatedAt = uint64(block.timestamp);
 
-        // TODO: Replace temporary push payouts with pull-based credits so recipient callbacks cannot block resolution.
-        for (uint256 i = 0; i < challengers.length; i++) {
-            address challenger = challengers[i];
-            uint256 amount = challengerBonds[challenger];
-            challengerBonds[challenger] = 0;
-            _transfer(payable(challenger), amount);
-        }
-
-        uint256 forfeited = address(this).balance;
-        // TODO: Confirm that INVALID_PARENT and BLACKLISTED should refund the proposer bond as currently specified.
-        // Only a direct proof timeout is attributable to this proposer; inherited and governance failures refund it.
-        if (forfeited != 0 && reason == WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT && challengers.length != 0)
-        {
-            _transfer(payable(challengers[0]), forfeited);
-        } else if (forfeited != 0) {
-            _transfer(proposer, forfeited);
+        uint256 balance = address(this).balance;
+        if (reason == WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT) {
+            payoutCredits[challenger] += balance;
+            // The full-balance credit already includes the challenger bond, so it is no longer separately refundable.
+            postedChallengerBond = 0;
+        } else {
+            uint256 proposerRefund = balance - postedChallengerBond;
+            if (proposerRefund != 0) payoutCredits[proposer] += proposerRefund;
         }
 
         emit Invalidated(rootId, reason);
@@ -364,7 +382,7 @@ contract WorldChainProofSystemGame {
 
         uint256 payout = address(this).balance;
         if (payout != 0) {
-            _transfer(proposer, payout);
+            payoutCredits[proposer] += payout;
         }
 
         emit Finalized(rootId);
@@ -374,6 +392,20 @@ contract WorldChainProofSystemGame {
         if (lane == WorldChainProofLib.ProofLane.VALIDITY_PROOF) return validityProofVerifier;
         if (lane == WorldChainProofLib.ProofLane.TEE_ATTESTATION) return teeVerifier;
         return securityCouncil;
+    }
+
+    function _claimable(address recipient) internal view returns (uint256) {
+        return payoutCredits[recipient] + _refundableChallengerPrincipal(recipient);
+    }
+
+    /// @dev Proof timeout credits the full balance to the challenger, so only inherited or governance invalidations
+    ///      refund the challenger bond separately.
+    function _refundableChallengerPrincipal(address recipient) internal view returns (uint256) {
+        bool challengerBondIsRefundable = state == WorldChainProofLib.RootState.INVALIDATED && recipient == challenger
+            && (invalidationReason == WorldChainProofLib.InvalidationReason.INVALID_PARENT
+                || invalidationReason == WorldChainProofLib.InvalidationReason.BLACKLISTED);
+
+        return challengerBondIsRefundable ? postedChallengerBond : 0;
     }
 
     function _transfer(address payable recipient, uint256 amount) internal {
