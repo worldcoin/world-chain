@@ -1,0 +1,136 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".cargo/**"
+      - ".github/workflows/rust-ci.yml"
+  merge_group:
+  pull_request:
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".cargo/**"
+      - ".github/workflows/rust-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  WORLDCHAIN_PROVIDER: "${{ secrets.WORLDCHAIN_PROVIDER }}"
+  AWS_REGION: us-east-1
+  SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
+
+jobs:
+  cargo-tests:
+    runs-on: arc-public-8xlarge-amd64-runner
+    environment: dev
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
+      SCCACHE_REGION: us-east-1
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@just
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::348981876543:role/oidc/github-deploy
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.5
+      - name: Cache
+        uses: actions/cache@v5
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-test-
+      - uses: taiki-e/install-action@nextest
+      - name: tests
+        run: just test
+
+  cargo-clippy:
+    runs-on: arc-public-8xlarge-amd64-runner
+    environment: dev
+    timeout-minutes: 20
+    name: clippy
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
+      SCCACHE_REGION: us-east-1
+    steps:
+      - uses: actions/checkout@v6
+      - uses: taiki-e/install-action@just
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::348981876543:role/oidc/github-deploy
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.5
+      - name: Cache
+        uses: actions/cache@v5
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-test-
+      - name: fmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  cargo-docs:
+    runs-on: arc-public-8xlarge-amd64-runner
+    timeout-minutes: 20
+    name: docs
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cache
+        uses: actions/cache@v5
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-test-
+      - name: Generate CLI docs
+        run: cargo xtask docs
+      - name: Check docs are up to date
+        run: git diff --exit-code specs/
