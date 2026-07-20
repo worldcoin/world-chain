@@ -653,7 +653,7 @@ contract WorldChainProofSystemTest is Test {
         assertEq(anchor.currentL2BlockNumber(), parallelChild.l2BlockNumber());
     }
 
-    function testAnchorDoesNotRecheckFinalizedSkippedAncestor() public {
+    function testFinalizedSkippedAncestorCannotBeBlacklisted() public {
         (WorldChainProofSystemGame first,) = _propose(10);
         (WorldChainProofSystemGame second,) = _proposeChild(first, keccak256("second-root"));
         (WorldChainProofSystemGame third,) = _proposeChild(second, keccak256("third-root"));
@@ -662,7 +662,14 @@ contract WorldChainProofSystemTest is Test {
         first.resolve();
         second.resolve();
         third.resolve();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                WorldChainAnchorStateRegistry.FinalizedGameCannotBeBlacklisted.selector, address(second)
+            )
+        );
         anchor.setGameBlacklisted(address(second), true);
+        assertFalse(anchor.blacklistedGames(address(second)));
 
         third.closeGame();
 

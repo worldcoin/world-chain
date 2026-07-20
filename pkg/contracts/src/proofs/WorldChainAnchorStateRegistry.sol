@@ -12,6 +12,7 @@ contract WorldChainAnchorStateRegistry {
     error FactoryNotInitialized();
     error RegistryPaused();
     error GameBlacklisted(address game);
+    error FinalizedGameCannotBeBlacklisted(address game);
     error InvalidGameFactory(address expectedFactory, address actualFactory);
     error InvalidGameRegistry(address expectedRegistry, address actualRegistry);
     error UnregisteredGame(address game);
@@ -63,6 +64,9 @@ contract WorldChainAnchorStateRegistry {
     }
 
     function setGameBlacklisted(address game, bool blacklisted) external onlyOwner {
+        // Descendant finality relies on finalized ancestor validity remaining immutable.
+        if (blacklisted && isGameFinalized(game)) revert FinalizedGameCannotBeBlacklisted(game);
+
         blacklistedGames[game] = blacklisted;
         emit GameBlacklistedSet(game, blacklisted);
     }
