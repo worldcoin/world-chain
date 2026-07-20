@@ -326,19 +326,23 @@ proof-get-pcrs env="alphanet":
     echo "PCR2=$(echo "$MEASUREMENTS" | jq -r '.PCR2')"
 
 # Phase 1 – Deploy the Nitro attestation stack.
-proof-deploy-nitro env="alphanet":
+proof-deploy-nitro env="alphanet" dry_run="false":
     #!/usr/bin/env bash
     set -euo pipefail
     : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
     : "${OWNER:?OWNER is required}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
     export NITRO_DEPLOYMENT_OUT="${NITRO_DEPLOYMENT_OUT:-pkg/contracts/deployments/{{env}}-nitro.json}"
-    echo "Deploying Nitro contracts (deployment → $NITRO_DEPLOYMENT_OUT)…"
+    BROADCAST_FLAG=""
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    fi
+    echo "Deploying Nitro contracts (deployment → $NITRO_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
     cd pkg/contracts && forge script scripts/devnet/DeployNitro.s.sol:DeployNitro \
-        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast --slow
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
 # Phase 2 – Deploy the proof system contracts.
-proof-deploy-system env="alphanet":
+proof-deploy-system env="alphanet" dry_run="false":
     #!/usr/bin/env bash
     set -euo pipefail
     : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
@@ -350,12 +354,16 @@ proof-deploy-system env="alphanet":
     export PROOF_THRESHOLD="${PROOF_THRESHOLD:-2}"
     export WORLD_CHALLENGER_ADDRESS="${WORLD_CHALLENGER_ADDRESS:-}"
     export PROOF_SYSTEM_DEPLOYMENT_OUT="${PROOF_SYSTEM_DEPLOYMENT_OUT:-pkg/contracts/deployments/{{env}}-proof-system.json}"
-    echo "Deploying proof system contracts (deployment → $PROOF_SYSTEM_DEPLOYMENT_OUT)…"
+    BROADCAST_FLAG=""
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    fi
+    echo "Deploying proof system contracts (deployment → $PROOF_SYSTEM_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
     cd pkg/contracts && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
-        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast --slow
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
 # Phase 3a – Pre-warm CertManager with the AWS Nitro CA cert chain.
-proof-certmanager-prewarm env="alphanet":
+proof-certmanager-prewarm env="alphanet" dry_run="false":
     #!/usr/bin/env bash
     set -euo pipefail
     if [ ! -f "scripts/proof-envs/{{env}}.env" ]; then
@@ -392,12 +400,16 @@ proof-certmanager-prewarm env="alphanet":
     }' "$PREWARM_PLAN_RAW" > "$PREWARM_PLAN"
     echo "Pre-warm plan saved to $PREWARM_PLAN"
     echo "Submitting cold cert entries via Forge script…"
+    BROADCAST_FLAG=""
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    fi
     cd pkg/contracts && CERT_MANAGER_ADDRESS="$CERT_MANAGER_ADDRESS" PREWARM_PLAN="$PREWARM_PLAN" \
         forge script scripts/devnet/PrewarmCertManager.s.sol:PrewarmCertManager \
-            --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast --slow
+            --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
 # Phase 3b – Approve the PCR set on NitroAttestationVerifier.
-proof-approve-pcrs env="alphanet":
+proof-approve-pcrs env="alphanet" dry_run="false":
     #!/usr/bin/env bash
     set -euo pipefail
     # Fall back to the deployment file if NITRO_ATTESTATION_VERIFIER is not set.
@@ -417,16 +429,24 @@ proof-approve-pcrs env="alphanet":
     [[ "$PCR0" == 0x* ]] || PCR0="0x$PCR0"
     [[ "$PCR1" == 0x* ]] || PCR1="0x$PCR1"
     [[ "$PCR2" == 0x* ]] || PCR2="0x$PCR2"
-    cast send "$NITRO_ATTESTATION_VERIFIER" \
-        "approvePCRSet(bytes32,bytes32,bytes32)" \
-        "$(cast keccak "$PCR0")" "$(cast keccak "$PCR1")" "$(cast keccak "$PCR2")" \
-        --rpc-url "$L1_RPC_URL" --private-key "$OWNER_KEY"
+    if [ "{{dry_run}}" = "true" ]; then
+        echo "[DRY RUN] Estimating gas…"
+        cast estimate "$NITRO_ATTESTATION_VERIFIER" \
+            "approvePCRSet(bytes32,bytes32,bytes32)" \
+            "$(cast keccak "$PCR0")" "$(cast keccak "$PCR1")" "$(cast keccak "$PCR2")" \
+            --rpc-url "$L1_RPC_URL" --from "$(cast wallet address --private-key "$OWNER_KEY")"
+    else
+        cast send "$NITRO_ATTESTATION_VERIFIER" \
+            "approvePCRSet(bytes32,bytes32,bytes32)" \
+            "$(cast keccak "$PCR0")" "$(cast keccak "$PCR1")" "$(cast keccak "$PCR2")" \
+            --rpc-url "$L1_RPC_URL" --private-key "$OWNER_KEY"
+    fi
     echo "PCR set approved."
 
 # Combined – Run all proof system deployment phases in sequence.
 # Automatically wires contract addresses between steps. PCR0/1/2 are
 # auto-fetched from the running enclave if not pre-set.
-proof-setup env="alphanet":
+proof-setup env="alphanet" dry_run="false":
     #!/usr/bin/env bash
     set -euo pipefail
     if [ ! -f "scripts/proof-envs/{{env}}.env" ]; then
@@ -446,7 +466,7 @@ proof-setup env="alphanet":
     echo "ROLLUP_CONFIG_HASH=$ROLLUP_CONFIG_HASH" >&2
 
     echo "=== Step 1: Deploying Nitro attestation stack ===" >&2
-    just proof-deploy-nitro {{env}}
+    just proof-deploy-nitro {{env}} {{dry_run}}
     NITRO_DEPLOYMENTS="pkg/contracts/deployments/{{env}}-nitro.json"
     CERT_MANAGER_ADDRESS=$(jq -r '.certManager' "$NITRO_DEPLOYMENTS")
     NITRO_ATTESTATION_VERIFIER=$(jq -r '.nitroAttestationVerifier' "$NITRO_DEPLOYMENTS")
@@ -455,10 +475,10 @@ proof-setup env="alphanet":
     echo "NITRO_ATTESTATION_VERIFIER=$NITRO_ATTESTATION_VERIFIER" >&2
 
     echo "=== Step 2: Deploying proof system contracts ===" >&2
-    just proof-deploy-system {{env}}
+    just proof-deploy-system {{env}} {{dry_run}}
 
     echo "=== Step 3a: Pre-warming CertManager ===" >&2
-    just proof-certmanager-prewarm {{env}}
+    just proof-certmanager-prewarm {{env}} {{dry_run}}
 
     if [ -z "${PCR0:-}" ] || [ -z "${PCR1:-}" ] || [ -z "${PCR2:-}" ]; then
         echo "=== Step 3b-pre: Fetching PCRs from running enclave ===" >&2
@@ -466,4 +486,4 @@ proof-setup env="alphanet":
     fi
 
     echo "=== Step 3b: Approving PCR set ===" >&2
-    just proof-approve-pcrs {{env}}
+    just proof-approve-pcrs {{env}} {{dry_run}}
