@@ -136,6 +136,7 @@ contract DeployNitro is Script {
     }
 
     /// @notice Writes deployed addresses to a JSON file if NITRO_DEPLOYMENT_OUT is set.
+    /// @dev Uses per-key writes so that existing fields (e.g. pcr0/pcr1/pcr2) are preserved.
     function _writeDeployment(
         address p384Verifier,
         address certManager,
@@ -146,13 +147,17 @@ contract DeployNitro is Script {
         string memory out = vm.envOr("NITRO_DEPLOYMENT_OUT", string(""));
         if (bytes(out).length == 0) return;
 
-        string memory root = "deployment";
-        vm.serializeAddress(root, "p384Verifier", p384Verifier);
-        vm.serializeAddress(root, "certManager", certManager);
-        vm.serializeAddress(root, "nitroAttestationVerifier", nitroAttestationVerifier);
-        vm.serializeAddress(root, "nitroEnclaveKeyRegistry", nitroEnclaveKeyRegistry);
-        string memory json = vm.serializeAddress(root, "nitroProofVerifier", nitroProofVerifier);
-        vm.writeJson(json, out);
+        // Seed the file with an empty JSON object if it doesn't exist yet.
+        if (!vm.isFile(out)) {
+            vm.writeJson("{}", out);
+        }
+
+        // Write each address to its own key, preserving any existing fields.
+        vm.writeJson(vm.toString(p384Verifier), out, ".p384Verifier");
+        vm.writeJson(vm.toString(certManager), out, ".certManager");
+        vm.writeJson(vm.toString(nitroAttestationVerifier), out, ".nitroAttestationVerifier");
+        vm.writeJson(vm.toString(nitroEnclaveKeyRegistry), out, ".nitroEnclaveKeyRegistry");
+        vm.writeJson(vm.toString(nitroProofVerifier), out, ".nitroProofVerifier");
         console.log("Deployment written to", out);
     }
 }
