@@ -3,8 +3,9 @@ pragma solidity ^0.8.28;
 
 import {Test, Vm} from "forge-std/Test.sol";
 import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyRegistry.sol";
-import {NitroProofVerifier, TransitionPublicValues} from "../../src/proofs/nitro/NitroProofVerifier.sol";
+import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
+import {MockProofSystemFactory, MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
 import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier.sol";
 
 contract MockParentGame {
@@ -37,7 +38,6 @@ contract NitroProofVerifierTest is Test {
     bytes32 constant ROLLUP_CFG = keccak256("rollup-cfg");
 
     // Context fields needed to rebuild rootId.
-    bytes32 constant DOMAIN_HASH = keccak256("domain");
     bytes32 constant L1_ORIGIN_HASH = keccak256("l1-origin");
     uint256 constant L1_ORIGIN_NUMBER = 9_001;
     address constant ANCHOR_STATE_REGISTRY = address(0xA11CE);
@@ -45,12 +45,22 @@ contract NitroProofVerifierTest is Test {
     Vm.Wallet enclaveWallet;
     bytes enclavePubKey;
     MockParentGame parent;
+    MockProofSystemGame game;
+    MockProofSystemFactory proofSystemFactory;
+    bytes32 domainHash;
 
     function setUp() public {
         attestationVerifier = new MockNitroAttestationVerifier();
         registry = new NitroEnclaveKeyRegistry(attestationVerifier, owner);
         parent = new MockParentGame(L2_PRE_ROOT);
-        proofVerifier = new NitroProofVerifier(registry, ANCHOR_STATE_REGISTRY);
+        proofVerifier = new NitroProofVerifier(registry);
+        WorldChainProofLib.Domain memory domain = WorldChainProofLib.Domain({
+            chainId: 480, proofSystemVersion: 1, rollupConfigHash: ROLLUP_CFG, blockInterval: L2_BLOCK - L2_PRE_BLOCK
+        });
+        proofSystemFactory = new MockProofSystemFactory(domain);
+        domainHash = WorldChainProofLib.domainHash(domain);
+        game = new MockProofSystemGame();
+        _setGameContext(_transition());
 
         enclaveWallet = vm.createWallet("enclave");
         enclavePubKey = _uncompressedKey(enclaveWallet.publicKeyX, enclaveWallet.publicKeyY);
@@ -81,8 +91,8 @@ contract NitroProofVerifierTest is Test {
         return _sign(enclaveWallet, digest);
     }
 
-    function _transition() internal pure returns (TransitionPublicValues memory) {
-        return TransitionPublicValues({
+    function _transition() internal pure returns (WorldChainProofLib.TransitionPublicValues memory) {
+        return WorldChainProofLib.TransitionPublicValues({
             l1Head: L1_ORIGIN_HASH,
             l2PreRoot: L2_PRE_ROOT,
             l2PreBlockNumber: L2_PRE_BLOCK,
@@ -98,12 +108,42 @@ contract NitroProofVerifierTest is Test {
 
     function _expectedRootId() internal view returns (bytes32) {
         return WorldChainProofLib.rootId(
-            DOMAIN_HASH, address(parent), L2_POST_ROOT, uint256(L2_BLOCK), L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
+            domainHash, address(parent), L2_POST_ROOT, uint256(L2_BLOCK), L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
         );
     }
 
     function _proofBytes(bytes memory sig, bytes memory pub) internal view returns (bytes memory) {
-        return abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, _transition(), sig, pub);
+        return abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, _transition(), sig, pub);
+    }
+
+    function _setGameContext(WorldChainProofLib.TransitionPublicValues memory transition) internal {
+        bytes32 rootId = WorldChainProofLib.rootId(
+            domainHash,
+            address(parent),
+            transition.l2PostRoot,
+            uint256(transition.l2PostBlockNumber),
+            transition.l1Head,
+            L1_ORIGIN_NUMBER
+        );
+        game.setContext(
+            MockProofSystemGame.Context({
+                factory: address(proofSystemFactory),
+                rootId: rootId,
+                anchorStateRegistry: ANCHOR_STATE_REGISTRY,
+                domainHash: domainHash,
+                parentRef: address(parent),
+                startingRootClaim: L2_PRE_ROOT,
+                startingL2BlockNumber: L2_PRE_BLOCK,
+                rootClaim: transition.l2PostRoot,
+                l2BlockNumber: transition.l2PostBlockNumber,
+                l1OriginHash: transition.l1Head,
+                l1OriginNumber: L1_ORIGIN_NUMBER
+            })
+        );
+    }
+
+    function _verify(bytes32 rootId, bytes memory proof) internal view returns (bool) {
+        return game.verify(address(proofVerifier), rootId, proof);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -112,12 +152,7 @@ contract NitroProofVerifierTest is Test {
 
     function test_Verify_HappyPath() public {
         bytes memory sig = _sign(_commitment());
-        assertTrue(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
-    }
-
-    function test_Constructor_RevertsForZeroAnchorStateRegistry() public {
-        vm.expectRevert(NitroProofVerifier.ZeroAnchorStateRegistry.selector);
-        new NitroProofVerifier(registry, address(0));
+        assertTrue(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -128,21 +163,15 @@ contract NitroProofVerifierTest is Test {
         // Honest signature + transition public values, but the game asks about a different
         // rootId — the verifier must NOT validate.
         bytes memory sig = _sign(_commitment());
-        assertFalse(proofVerifier.verify(bytes32(uint256(0xdead)), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(bytes32(uint256(0xdead)), _proofBytes(sig, enclavePubKey)));
     }
 
     function test_Verify_FalseForWrongBootInfo() public {
-        // The proof claims (L2_POST_ROOT, L2_BLOCK + 1, ROLLUP_CFG) but the
-        // signature is over the L2_BLOCK commitment — rootId check still
-        // passes for the modified block number? It must not: the signing
-        // commitment is recomputed from the proof's transition public values, so a wrong
-        // commitment surfaces as a signature mismatch.
-        bytes memory sig = _sign(_commitment());
-        // Build a proof with a mismatched block number and a matching rootId.
-        TransitionPublicValues memory wrongTransition = _transition();
+        WorldChainProofLib.TransitionPublicValues memory wrongTransition = _transition();
         wrongTransition.l2PostBlockNumber += 1;
+        bytes memory sig = _sign(keccak256(abi.encode(wrongTransition)));
         bytes32 wrongRootId = WorldChainProofLib.rootId(
-            DOMAIN_HASH,
+            domainHash,
             address(parent),
             L2_POST_ROOT,
             uint256(wrongTransition.l2PostBlockNumber),
@@ -150,17 +179,27 @@ contract NitroProofVerifierTest is Test {
             L1_ORIGIN_NUMBER
         );
         bytes memory proof =
-            abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
-        assertFalse(proofVerifier.verify(wrongRootId, proof));
+            abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
+        assertFalse(_verify(wrongRootId, proof));
     }
 
     function test_Verify_FalseForWrongPreRoot() public {
-        bytes memory sig = _sign(_commitment());
-        TransitionPublicValues memory wrongTransition = _transition();
+        WorldChainProofLib.TransitionPublicValues memory wrongTransition = _transition();
         wrongTransition.l2PreRoot = keccak256("wrong-pre-root");
+        bytes memory sig = _sign(keccak256(abi.encode(wrongTransition)));
         bytes memory proof =
-            abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
-        assertFalse(proofVerifier.verify(_expectedRootId(), proof));
+            abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
+        assertFalse(_verify(_expectedRootId(), proof));
+    }
+
+    function test_Verify_FalseForWrongPreBlockNumber() public {
+        WorldChainProofLib.TransitionPublicValues memory wrongTransition = _transition();
+        wrongTransition.l2PreBlockNumber += 1;
+        bytes memory sig = _sign(keccak256(abi.encode(wrongTransition)));
+        bytes memory proof =
+            abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
+
+        assertFalse(_verify(_expectedRootId(), proof));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -171,7 +210,7 @@ contract NitroProofVerifierTest is Test {
         Vm.Wallet memory rogue = vm.createWallet("rogue");
         bytes memory roguePub = _uncompressedKey(rogue.publicKeyX, rogue.publicKeyY);
         bytes memory sig = _sign(rogue, _commitment());
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, roguePub)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, roguePub)));
     }
 
     function test_Verify_FalseForRevokedKey() public {
@@ -180,7 +219,7 @@ contract NitroProofVerifierTest is Test {
         vm.prank(owner);
         registry.revokeKey(enclavePubKey);
 
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -191,24 +230,24 @@ contract NitroProofVerifierTest is Test {
         // Sign with a different key while passing the registered enclave key.
         Vm.Wallet memory rogue = vm.createWallet("rogue");
         bytes memory sig = _sign(rogue, _commitment());
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
     }
 
     function test_Verify_FalseForBadSignatureLength() public {
         bytes memory sig = hex"1234";
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
     }
 
     function test_Verify_FalseForSignatureLength64() public {
         // EIP-2098 "compact" 64-byte signatures are NOT accepted; the
         // contract is strict about 65-byte (r || s || v) tuples.
         bytes memory sig = new bytes(64);
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
     }
 
     function test_Verify_FalseForEmptySignature() public {
         bytes memory sig = "";
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
     }
 
     function test_Verify_FalseForHighSSignature() public {
@@ -230,9 +269,9 @@ contract NitroProofVerifierTest is Test {
         uint8 vFlipped = v == 27 ? 28 : 27;
         bytes memory malleable = abi.encodePacked(r, sHigh, vFlipped);
         // Original signature still validates...
-        assertTrue(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertTrue(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
         // ...but the malleable high-s twin must NOT.
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(malleable, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(malleable, enclavePubKey)));
     }
 
     function test_Verify_FalseForInvalidV() public {
@@ -242,24 +281,24 @@ contract NitroProofVerifierTest is Test {
         assembly {
             mstore8(add(add(sig, 32), 64), 29)
         }
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
         // Also v = 0 (legacy unsigned).
         assembly {
             mstore8(add(add(sig, 32), 64), 0)
         }
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
         // Also v = 26.
         assembly {
             mstore8(add(add(sig, 32), 64), 26)
         }
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
     }
 
     function test_Verify_FalseForAllZeroSignature() public {
         // r = s = 0, v = 27. ecrecover returns address(0) → false.
         bytes memory sig = new bytes(65);
         sig[64] = bytes1(uint8(27));
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -270,19 +309,19 @@ contract NitroProofVerifierTest is Test {
         bytes memory compressed = new bytes(33);
         compressed[0] = 0x02;
         bytes memory sig = _sign(_commitment());
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, compressed)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, compressed)));
     }
 
     function test_Verify_FalseForBadKey() public view {
         // 7-byte key cannot be SEC1-decoded → _verifyEnclaveSignature
         // reverts with InvalidPublicKey → verify() catches and returns false.
         bytes memory badKey = hex"01020304050607";
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(hex"00", badKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(hex"00", badKey)));
     }
 
     function test_Verify_FalseForEmptyPublicKey() public view {
         bytes memory emptyKey = "";
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(hex"00", emptyKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(hex"00", emptyKey)));
     }
 
     function test_Verify_FalseForKeyWithLength65AndWrongPrefix() public {
@@ -292,7 +331,7 @@ contract NitroProofVerifierTest is Test {
         key[0] = 0x03;
         // Use a real signature so we fail on the prefix check, not earlier.
         bytes memory sig = _sign(_commitment());
-        assertFalse(proofVerifier.verify(_expectedRootId(), _proofBytes(sig, key)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, key)));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -302,52 +341,44 @@ contract NitroProofVerifierTest is Test {
     function test_Verify_FalseForGarbage() public view {
         // Garbage proof bytes that don't decode into the expected tuple must
         // be surfaced as `false` — the ABI decode lives inside the try/catch.
-        assertFalse(proofVerifier.verify(bytes32(0), hex"00"));
+        assertFalse(_verify(bytes32(0), hex"00"));
     }
 
     function test_Verify_FalseForEmptyProof() public view {
-        assertFalse(proofVerifier.verify(bytes32(0), ""));
+        assertFalse(_verify(bytes32(0), ""));
     }
 
     function test_Verify_FalseForTruncatedProof() public view {
         // 31 bytes is too short to even decode the first uint256.
-        assertFalse(
-            proofVerifier.verify(_expectedRootId(), hex"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
-        );
+        assertFalse(_verify(_expectedRootId(), hex"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"));
     }
 
     function test_Verify_AcceptsZeroL2BlockNumber() public {
         // Boundary: l2BlockNumber = 0 must work, since the rootId is
         // recomputed deterministically and the commitment is signed over
         // exactly that value.
-        TransitionPublicValues memory transition = _transition();
+        WorldChainProofLib.TransitionPublicValues memory transition = _transition();
         transition.l2PostBlockNumber = 0;
         bytes32 rootId =
-            WorldChainProofLib.rootId(DOMAIN_HASH, address(parent), L2_POST_ROOT, 0, L1_ORIGIN_HASH, L1_ORIGIN_NUMBER);
+            WorldChainProofLib.rootId(domainHash, address(parent), L2_POST_ROOT, 0, L1_ORIGIN_HASH, L1_ORIGIN_NUMBER);
         bytes32 commitment = keccak256(abi.encode(transition));
         bytes memory sig = _sign(commitment);
-        bytes memory proof = abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, transition, sig, enclavePubKey);
-        assertTrue(proofVerifier.verify(rootId, proof));
+        bytes memory proof = abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, transition, sig, enclavePubKey);
+        _setGameContext(transition);
+        assertTrue(_verify(rootId, proof));
     }
 
     function test_Verify_FalseForWrongRollupConfigHash() public {
-        // The proof's `rollupConfigHash` participates in the signing
-        // commitment but NOT in the rootId reconstruction (see
-        // `NitroProofVerifier._decodeAndVerify`). A mismatched
-        // rollupConfigHash in the proof must therefore cause the signature
-        // recovery to mismatch the expected key and surface as `false`,
-        // even though `rootId` still reconstructs correctly.
+        // A valid enclave signature is insufficient when the transition was
+        // produced against a different rollup configuration than the game's factory domain.
         bytes32 wrongCfg = keccak256("wrong-cfg");
-        TransitionPublicValues memory wrongTransition = _transition();
+        WorldChainProofLib.TransitionPublicValues memory wrongTransition = _transition();
         wrongTransition.rollupConfigHash = wrongCfg;
         bytes32 commitment = keccak256(abi.encode(wrongTransition));
         bytes memory sig = _sign(commitment);
-        // Build the proof claiming the ORIGINAL rollupConfigHash (so rootId
-        // reconstructs to the expected one), but with a signature over the
-        // wrong-cfg commitment.
         bytes memory proof =
-            abi.encode(DOMAIN_HASH, address(parent), L1_ORIGIN_NUMBER, _transition(), sig, enclavePubKey);
-        assertFalse(proofVerifier.verify(_expectedRootId(), proof));
+            abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
+        assertFalse(_verify(_expectedRootId(), proof));
     }
 
     function test_Verify_PerCallIdempotent() public {
@@ -356,8 +387,8 @@ contract NitroProofVerifierTest is Test {
         bytes memory sig = _sign(_commitment());
         bytes memory proof = _proofBytes(sig, enclavePubKey);
         bytes32 root = _expectedRootId();
-        assertTrue(proofVerifier.verify(root, proof));
-        assertTrue(proofVerifier.verify(root, proof));
+        assertTrue(_verify(root, proof));
+        assertTrue(_verify(root, proof));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -366,6 +397,6 @@ contract NitroProofVerifierTest is Test {
 
     function test_DecodeAndVerify_NotCallableExternally() public {
         vm.expectRevert(bytes("internal"));
-        proofVerifier._decodeAndVerify(bytes32(0), hex"00");
+        proofVerifier._decodeAndVerify(address(game), bytes32(0), hex"00");
     }
 }

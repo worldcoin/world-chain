@@ -36,6 +36,17 @@ library WorldChainProofLib {
         uint256 blockInterval;
     }
 
+    /// ABI-encoded public values shared by all transition proof lanes.
+    /// Must match `world_chain_proof_core::boot::TransitionPublicValues`.
+    struct TransitionPublicValues {
+        bytes32 l1Head;
+        bytes32 l2PreRoot;
+        uint64 l2PreBlockNumber;
+        bytes32 l2PostRoot;
+        uint64 l2PostBlockNumber;
+        bytes32 rollupConfigHash;
+    }
+
     function domainHash(Domain memory domain) internal pure returns (bytes32) {
         return
             keccak256(
