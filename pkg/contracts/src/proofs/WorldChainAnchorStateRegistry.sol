@@ -80,8 +80,8 @@ contract WorldChainAnchorStateRegistry {
 
     /// @notice Returns whether a game is recognized by this registry and currently has a valid finalized claim.
     /// @dev Anchor advancement additionally requires a newer L2 block number.
-    /// TODO: Before withdrawal integration, define Base-compatible retirement and emergency anchor recovery semantics,
-    /// implement the OP IAnchorStateRegistry surface, and wire OptimismPortal to this predicate.
+    /// TODO: Before withdrawal integration, define OP-compatible retirement and emergency anchor recovery semantics,
+    /// implement the IAnchorStateRegistry surface, and wire OptimismPortal to this predicate.
     function isGameClaimValid(address game) external view returns (bool) {
         address factory = proofSystemFactory;
         if (paused || factory == address(0) || blacklistedGames[game]) return false;
