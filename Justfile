@@ -472,7 +472,7 @@ proof-setup env="alphanet":
     echo "ROLLUP_CONFIG_HASH=$ROLLUP_CONFIG_HASH" >&2
 
     echo "=== Step 1: Deploying Nitro attestation stack ===" >&2
-    just proof-deploy-nitro {{env}}
+    just dry_run={{dry_run}} proof-deploy-nitro {{env}}
     NITRO_DEPLOYMENTS="pkg/contracts/deployments/{{env}}-nitro.json"
     CERT_MANAGER_ADDRESS=$(jq -r '.certManager' "$NITRO_DEPLOYMENTS")
     NITRO_ATTESTATION_VERIFIER=$(jq -r '.nitroAttestationVerifier' "$NITRO_DEPLOYMENTS")
@@ -481,10 +481,10 @@ proof-setup env="alphanet":
     echo "NITRO_ATTESTATION_VERIFIER=$NITRO_ATTESTATION_VERIFIER" >&2
 
     echo "=== Step 2: Deploying proof system contracts ===" >&2
-    just proof-deploy-system {{env}}
+    just dry_run={{dry_run}} proof-deploy-system {{env}}
 
     echo "=== Step 3a: Pre-warming CertManager ===" >&2
-    just proof-certmanager-prewarm {{env}}
+    just dry_run={{dry_run}} proof-certmanager-prewarm {{env}}
 
     if [ -z "${PCR0:-}" ] || [ -z "${PCR1:-}" ] || [ -z "${PCR2:-}" ]; then
         echo "=== Step 3b-pre: Fetching PCRs from running enclave ===" >&2
@@ -492,4 +492,4 @@ proof-setup env="alphanet":
     fi
 
     echo "=== Step 3b: Approving PCR set ===" >&2
-    just proof-approve-pcrs {{env}}
+    just dry_run={{dry_run}} proof-approve-pcrs {{env}}
