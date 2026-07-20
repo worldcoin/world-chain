@@ -338,7 +338,7 @@ proof-deploy-nitro env="alphanet":
     : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
     : "${OWNER:?OWNER is required}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
-    export NITRO_DEPLOYMENT_OUT="${NITRO_DEPLOYMENT_OUT:-deployments/{{env}}-nitro.json}"
+    export NITRO_DEPLOYMENT_OUT="deployments/{{env}}-nitro.json"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
@@ -359,7 +359,7 @@ proof-deploy-system env="alphanet":
     export PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL="${PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL:-5}"
     export PROOF_THRESHOLD="${PROOF_THRESHOLD:-2}"
     export WORLD_CHALLENGER_ADDRESS="${WORLD_CHALLENGER_ADDRESS:-}"
-    export PROOF_SYSTEM_DEPLOYMENT_OUT="${PROOF_SYSTEM_DEPLOYMENT_OUT:-deployments/{{env}}-proof-system.json}"
+    export PROOF_SYSTEM_DEPLOYMENT_OUT="deployments/{{env}}-proof-system.json"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
