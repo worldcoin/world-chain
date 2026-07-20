@@ -326,13 +326,13 @@ proof-get-pcrs env="alphanet":
     echo "PCR2=$(echo "$MEASUREMENTS" | jq -r '.PCR2')"
 
 # Phase 1 – Deploy the Nitro attestation stack.
-proof-deploy-nitro env="alphanet" dry_run="false":
+proof-deploy-nitro dry_run="false" env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
     : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
     : "${OWNER:?OWNER is required}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
-    export NITRO_DEPLOYMENT_OUT="${NITRO_DEPLOYMENT_OUT:-pkg/contracts/deployments/{{env}}-nitro.json}"
+    export NITRO_DEPLOYMENT_OUT="${NITRO_DEPLOYMENT_OUT:-$(pwd)/pkg/contracts/deployments/{{env}}-nitro.json}"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
@@ -342,7 +342,7 @@ proof-deploy-nitro env="alphanet" dry_run="false":
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
 # Phase 2 – Deploy the proof system contracts.
-proof-deploy-system env="alphanet" dry_run="false":
+proof-deploy-system dry_run="false" env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
     : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
@@ -353,7 +353,7 @@ proof-deploy-system env="alphanet" dry_run="false":
     export PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL="${PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL:-5}"
     export PROOF_THRESHOLD="${PROOF_THRESHOLD:-2}"
     export WORLD_CHALLENGER_ADDRESS="${WORLD_CHALLENGER_ADDRESS:-}"
-    export PROOF_SYSTEM_DEPLOYMENT_OUT="${PROOF_SYSTEM_DEPLOYMENT_OUT:-pkg/contracts/deployments/{{env}}-proof-system.json}"
+    export PROOF_SYSTEM_DEPLOYMENT_OUT="${PROOF_SYSTEM_DEPLOYMENT_OUT:-$(pwd)/pkg/contracts/deployments/{{env}}-proof-system.json}"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
@@ -363,7 +363,7 @@ proof-deploy-system env="alphanet" dry_run="false":
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
 # Phase 3a – Pre-warm CertManager with the AWS Nitro CA cert chain.
-proof-certmanager-prewarm env="alphanet" dry_run="false":
+proof-certmanager-prewarm dry_run="false" env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
     if [ ! -f "scripts/proof-envs/{{env}}.env" ]; then
@@ -409,7 +409,7 @@ proof-certmanager-prewarm env="alphanet" dry_run="false":
             --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
 # Phase 3b – Approve the PCR set on NitroAttestationVerifier.
-proof-approve-pcrs env="alphanet" dry_run="false":
+proof-approve-pcrs dry_run="false" env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
     # Fall back to the deployment file if NITRO_ATTESTATION_VERIFIER is not set.
@@ -446,7 +446,7 @@ proof-approve-pcrs env="alphanet" dry_run="false":
 # Combined – Run all proof system deployment phases in sequence.
 # Automatically wires contract addresses between steps. PCR0/1/2 are
 # auto-fetched from the running enclave if not pre-set.
-proof-setup env="alphanet" dry_run="false":
+proof-setup dry_run="false" env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
     if [ ! -f "scripts/proof-envs/{{env}}.env" ]; then
@@ -466,7 +466,7 @@ proof-setup env="alphanet" dry_run="false":
     echo "ROLLUP_CONFIG_HASH=$ROLLUP_CONFIG_HASH" >&2
 
     echo "=== Step 1: Deploying Nitro attestation stack ===" >&2
-    just proof-deploy-nitro {{env}} {{dry_run}}
+    just proof-deploy-nitro {{dry_run}} {{env}}
     NITRO_DEPLOYMENTS="pkg/contracts/deployments/{{env}}-nitro.json"
     CERT_MANAGER_ADDRESS=$(jq -r '.certManager' "$NITRO_DEPLOYMENTS")
     NITRO_ATTESTATION_VERIFIER=$(jq -r '.nitroAttestationVerifier' "$NITRO_DEPLOYMENTS")
@@ -475,10 +475,10 @@ proof-setup env="alphanet" dry_run="false":
     echo "NITRO_ATTESTATION_VERIFIER=$NITRO_ATTESTATION_VERIFIER" >&2
 
     echo "=== Step 2: Deploying proof system contracts ===" >&2
-    just proof-deploy-system {{env}} {{dry_run}}
+    just proof-deploy-system {{dry_run}} {{env}}
 
     echo "=== Step 3a: Pre-warming CertManager ===" >&2
-    just proof-certmanager-prewarm {{env}} {{dry_run}}
+    just proof-certmanager-prewarm {{dry_run}} {{env}}
 
     if [ -z "${PCR0:-}" ] || [ -z "${PCR1:-}" ] || [ -z "${PCR2:-}" ]; then
         echo "=== Step 3b-pre: Fetching PCRs from running enclave ===" >&2
@@ -486,4 +486,4 @@ proof-setup env="alphanet" dry_run="false":
     fi
 
     echo "=== Step 3b: Approving PCR set ===" >&2
-    just proof-approve-pcrs {{env}} {{dry_run}}
+    just proof-approve-pcrs {{dry_run}} {{env}}
