@@ -17,7 +17,6 @@ contract WorldChainAnchorStateRegistry {
     error UnregisteredGame(address game);
     error GameNotFinalized(address game);
     error NonMonotonicRoot(uint256 currentL2BlockNumber, uint256 nextL2BlockNumber);
-    error InvalidParent(address parentRef);
 
     event AnchorUpdated(address indexed game, bytes32 indexed rootId, bytes32 rootClaim, uint256 l2BlockNumber);
     event FactoryInitialized(address indexed factory);
@@ -33,8 +32,6 @@ contract WorldChainAnchorStateRegistry {
     uint256 public currentL2BlockNumber;
     address public anchorGame;
 
-    mapping(address game => bool accepted) public acceptedGames;
-    mapping(bytes32 rootId => bool accepted) public acceptedRoots;
     mapping(address game => bool blacklisted) public blacklistedGames;
 
     constructor(bytes32 startingRootClaim, uint256 startingL2BlockNumber) {
@@ -70,6 +67,31 @@ contract WorldChainAnchorStateRegistry {
         emit GameBlacklistedSet(game, blacklisted);
     }
 
+    /// @notice Returns whether a game has finalized.
+    function isGameFinalized(address game) public view returns (bool) {
+        if (game.code.length == 0) return false;
+
+        try IWorldChainProofSystemGame(game).state() returns (WorldChainProofLib.RootState gameState) {
+            return gameState == WorldChainProofLib.RootState.FINALIZED;
+        } catch {
+            return false;
+        }
+    }
+
+    /// @notice Returns whether a game is recognized by this registry and currently has a valid finalized claim.
+    /// @dev Anchor advancement additionally requires a newer L2 block number.
+    /// TODO: Before withdrawal integration, define OP-compatible retirement and emergency anchor recovery semantics,
+    /// implement the IAnchorStateRegistry surface, and wire OptimismPortal to this predicate.
+    function isGameClaimValid(address game) external view returns (bool) {
+        address factory = proofSystemFactory;
+        if (paused || factory == address(0) || blacklistedGames[game]) return false;
+        if (!IWorldChainProofSystemFactory(factory).isFactoryGame(game)) return false;
+
+        IWorldChainProofSystemGame proofGame = IWorldChainProofSystemGame(game);
+        return
+            proofGame.factory() == factory && proofGame.anchorStateRegistry() == address(this) && isGameFinalized(game);
+    }
+
     function setAnchorState(address game) external {
         if (paused) revert RegistryPaused();
         if (blacklistedGames[game]) revert GameBlacklisted(game);
@@ -84,15 +106,10 @@ contract WorldChainAnchorStateRegistry {
         }
         if (!IWorldChainProofSystemFactory(factory).isFactoryGame(game)) revert UnregisteredGame(game);
 
-        if (proofGame.state() != WorldChainProofLib.RootState.FINALIZED) {
-            revert GameNotFinalized(game);
-        }
+        if (proofGame.state() != WorldChainProofLib.RootState.FINALIZED) revert GameNotFinalized(game);
 
-        address parent = proofGame.parentRef();
-        if (parent != address(this) && !acceptedGames[parent]) {
-            revert InvalidParent(parent);
-        }
-
+        // A game can only finalize after its parent has finalized, so FINALIZED recursively certifies
+        // its parent chain at resolution time without walking the whole chain again here.
         uint256 nextL2BlockNumber = proofGame.l2BlockNumber();
         if (nextL2BlockNumber <= currentL2BlockNumber) {
             revert NonMonotonicRoot(currentL2BlockNumber, nextL2BlockNumber);
@@ -103,8 +120,6 @@ contract WorldChainAnchorStateRegistry {
         currentRootClaim = proofGame.rootClaim();
         currentL2BlockNumber = nextL2BlockNumber;
         anchorGame = game;
-        acceptedGames[game] = true;
-        acceptedRoots[nextRootId] = true;
 
         emit AnchorUpdated(game, nextRootId, currentRootClaim, nextL2BlockNumber);
     }

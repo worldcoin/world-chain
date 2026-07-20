@@ -29,6 +29,7 @@ interface IWorldChainProofSystemGame {
     function resolve()
         external
         returns (WorldChainProofLib.RootState outcome, WorldChainProofLib.InvalidationReason reason);
+    function closeGame() external;
     /// @notice Returns the ETH amount `recipient` can withdraw from this game.
     function claimable(address recipient) external view returns (uint256);
     /// @notice Permissionlessly withdraws `recipient`'s claim to `recipient`.
