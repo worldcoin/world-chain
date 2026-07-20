@@ -42,7 +42,7 @@ contract PrewarmCertManager is Script {
         uint256 skipped = 0;
 
         // Verify CertManager has code deployed — abort early if not.
-        require(certManager.code.length > 0, "CertManager has no code — is the address correct and the contract deployed?");
+        require(certManager.code.length > 0, "CertManager has no code -- is the address correct and the contract deployed?");
 
         vm.startBroadcast();
 
