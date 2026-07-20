@@ -90,6 +90,14 @@ contract DeployNitro is Script {
 
         vm.stopBroadcast();
 
+        _writeDeployment(
+            address(p384Verifier),
+            address(certManager),
+            address(verifier),
+            address(registry),
+            address(proofVerifier)
+        );
+
         // ════════════════════════════════════════════════════════════════════
         // IMPORTANT: NEXT STEP — pre-warm CertManager *before* any user call
         // ════════════════════════════════════════════════════════════════════
@@ -126,5 +134,26 @@ contract DeployNitro is Script {
         console.log("     Use tools/hinted_attestation_calls.js to generate calls + hints.");
         console.log("     Without this, the first registerKey will OOG.");
         console.log("  2. verifier.approvePCRSet(pcr0, pcr1, pcr2) for each approved EIF.");
+    }
+
+    /// @notice Writes deployed addresses to a JSON file if NITRO_DEPLOYMENT_OUT is set.
+    function _writeDeployment(
+        address p384Verifier,
+        address certManager,
+        address nitroAttestationVerifier,
+        address nitroEnclaveKeyRegistry,
+        address nitroProofVerifier
+    ) internal {
+        string memory out = vm.envOr("NITRO_DEPLOYMENT_OUT", string(""));
+        if (bytes(out).length == 0) return;
+
+        string memory root = "deployment";
+        vm.serializeAddress(root, "p384Verifier", p384Verifier);
+        vm.serializeAddress(root, "certManager", certManager);
+        vm.serializeAddress(root, "nitroAttestationVerifier", nitroAttestationVerifier);
+        vm.serializeAddress(root, "nitroEnclaveKeyRegistry", nitroEnclaveKeyRegistry);
+        string memory json = vm.serializeAddress(root, "nitroProofVerifier", nitroProofVerifier);
+        vm.writeJson(json, out);
+        console.log("Deployment written to", out);
     }
 }
