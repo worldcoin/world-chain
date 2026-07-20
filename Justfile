@@ -407,10 +407,14 @@ proof-certmanager-prewarm env="alphanet":
     echo "Pre-warm plan saved to $PREWARM_PLAN"
     echo "Submitting cold cert entries via Forge script…"
     BROADCAST_FLAG=""
+    PREWARM_SKIP_IF_UNDEPLOYED="false"
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
+    else
+        PREWARM_SKIP_IF_UNDEPLOYED="true"
     fi
     cd pkg/contracts && CERT_MANAGER_ADDRESS="$CERT_MANAGER_ADDRESS" PREWARM_PLAN="$PREWARM_PLAN" \
+        PREWARM_SKIP_IF_UNDEPLOYED="$PREWARM_SKIP_IF_UNDEPLOYED" \
         forge script scripts/devnet/PrewarmCertManager.s.sol:PrewarmCertManager \
             --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
