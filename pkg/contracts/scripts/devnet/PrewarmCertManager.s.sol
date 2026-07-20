@@ -47,8 +47,16 @@ contract PrewarmCertManager is Script {
             bytes32 certHash = vm.parseBytes32(certHashHexArr[i]);
 
             // Check on-chain cache: loadVerified returns an empty pubKey when not cached.
-            ICertManager.VerifiedCert memory cached = ICertManager(certManager).loadVerified(certHash);
-            if (cached.pubKey.length != 0) {
+            // Wrap in try/catch to handle non-existent contract (e.g. dry_run mode).
+            bool alreadyCached = false;
+            try ICertManager(certManager).loadVerified(certHash) returns (ICertManager.VerifiedCert memory cached) {
+                alreadyCached = cached.pubKey.length != 0;
+            } catch {
+                // Not cached or contract doesn't exist yet — proceed with submission
+                alreadyCached = false;
+            }
+
+            if (alreadyCached) {
                 console.log("  Skipping (already cached): certHash %s", certHashHexArr[i]);
                 skipped++;
                 continue;
