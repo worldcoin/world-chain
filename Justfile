@@ -187,7 +187,7 @@ proof-rollup-config-hash env="alphanet":
         echo "Port-forwarding to $OP_NODE_POD in $OP_NODE_NAMESPACE (context: $KUBECONTEXT)…" >&2
         kubectl --context="$KUBECONTEXT" port-forward \
             -n "$OP_NODE_NAMESPACE" \
-            "pod/$OP_NODE_POD" "${LOCAL_PORT}:${OP_NODE_PORT}" &
+            "pod/$OP_NODE_POD" "${LOCAL_PORT}:${OP_NODE_PORT}" > /dev/null 2>&1 &
         PF_PID=$!
         trap 'kill $PF_PID 2>/dev/null || true' EXIT
         READY=false
@@ -237,7 +237,7 @@ proof-get-chain-id env="alphanet":
         echo "Port-forwarding to $OP_NODE_POD in $OP_NODE_NAMESPACE (context: $KUBECONTEXT)…" >&2
         kubectl --context="$KUBECONTEXT" port-forward \
             -n "$OP_NODE_NAMESPACE" \
-            "pod/$OP_NODE_POD" "${LOCAL_PORT}:${OP_NODE_PORT}" &
+            "pod/$OP_NODE_POD" "${LOCAL_PORT}:${OP_NODE_PORT}" > /dev/null 2>&1 &
         PF_PID=$!
         trap 'kill $PF_PID 2>/dev/null || true' EXIT
         READY=false
