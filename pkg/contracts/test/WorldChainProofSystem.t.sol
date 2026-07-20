@@ -37,7 +37,7 @@ contract WorldChainProofSystemTest is Test {
         vm.deal(secondChallenger, 100 ether);
         vm.deal(keeper, 100 ether);
 
-        anchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0, 0);
+        anchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
         staking = new MockStakingRegistry();
         staking.setStaked(challenger, true);
         staking.setStaked(secondChallenger, true);
@@ -138,7 +138,7 @@ contract WorldChainProofSystemTest is Test {
     }
 
     function testThresholdOneRequiresExplicitSettlementAfterSingleLane() public {
-        WorldChainAnchorStateRegistry thresholdAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0, 0);
+        WorldChainAnchorStateRegistry thresholdAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
         WorldChainProofSystemFactory thresholdOne = _newFactory(thresholdAnchor, 1);
         thresholdAnchor.initializeFactory(address(thresholdOne));
 
@@ -160,7 +160,7 @@ contract WorldChainProofSystemTest is Test {
     }
 
     function testFactoryRejectsOutOfRangeThreshold() public {
-        WorldChainAnchorStateRegistry thresholdAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0, 0);
+        WorldChainAnchorStateRegistry thresholdAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
 
         vm.expectRevert(WorldChainProofSystemFactory.InvalidActivationParameters.selector);
         _newFactory(thresholdAnchor, 0);
@@ -511,7 +511,7 @@ contract WorldChainProofSystemTest is Test {
     }
 
     function testFactoryRequiresRegistryInitializationBeforePropose() public {
-        WorldChainAnchorStateRegistry uninitializedAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0, 0);
+        WorldChainAnchorStateRegistry uninitializedAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
         WorldChainProofSystemFactory uninitializedFactory =
             _newFactory(uninitializedAnchor, WorldChainProofLib.PROOF_THRESHOLD);
 
@@ -603,40 +603,18 @@ contract WorldChainProofSystemTest is Test {
         game.closeGame();
     }
 
-    function testGameCannotCloseBeforeRegistryFinalityDelay() public {
-        uint64 finalityDelay = 1 days;
-        WorldChainAnchorStateRegistry delayedAnchor =
-            new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0, finalityDelay);
-        WorldChainProofSystemFactory delayedFactory = _newFactory(delayedAnchor, WorldChainProofLib.PROOF_THRESHOLD);
-        delayedAnchor.initializeFactory(address(delayedFactory));
+    function testFinalizedGameIsImmediatelyEligibleToClose() public {
+        (WorldChainProofSystemGame game,) = _finalizedGame(10);
 
-        vm.prank(proposer);
-        (address gameAddress, bytes32 rootId) =
-            delayedFactory.propose{value: PROPOSER_BOND}(address(delayedAnchor), keccak256("delayed-root"), 10);
-        WorldChainProofSystemGame game = WorldChainProofSystemGame(payable(gameAddress));
-        _challenge(game, challenger);
-        game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
-        game.submitProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(rootId));
-        game.resolve();
+        assertTrue(anchor.isGameFinalized(address(game)));
+        assertTrue(anchor.isGameClaimValid(address(game)));
 
-        uint256 eligibleAt = uint256(game.finalizedAt()) + finalityDelay;
-        assertFalse(delayedAnchor.isGameFinalized(address(game)));
-        assertFalse(delayedAnchor.isGameClaimValid(address(game)));
-        vm.expectRevert(
-            abi.encodeWithSelector(WorldChainAnchorStateRegistry.GameNotMature.selector, address(game), eligibleAt)
-        );
-        game.closeGame();
-
-        vm.warp(eligibleAt);
-        assertTrue(delayedAnchor.isGameFinalized(address(game)));
-        assertTrue(delayedAnchor.isGameClaimValid(address(game)));
-
-        delayedAnchor.setPaused(true);
-        assertFalse(delayedAnchor.isGameClaimValid(address(game)));
-        delayedAnchor.setPaused(false);
+        anchor.setPaused(true);
+        assertFalse(anchor.isGameClaimValid(address(game)));
+        anchor.setPaused(false);
 
         game.closeGame();
-        assertEq(delayedAnchor.anchorGame(), address(game));
+        assertEq(anchor.anchorGame(), address(game));
     }
 
     function testAnchorCanJumpToHighestFinalizedDescendant() public {
@@ -657,7 +635,7 @@ contract WorldChainProofSystemTest is Test {
         assertEq(anchor.anchorGame(), address(third));
     }
 
-    function testAnchorRejectsFinalizedParallelBranch() public {
+    function testAnchorAcceptsNewerFinalizedParallelBranch() public {
         (WorldChainProofSystemGame acceptedBranch,) = _propose(10);
         (WorldChainProofSystemGame parallelParent,) = _propose(10);
         (WorldChainProofSystemGame parallelChild,) = _proposeChild(parallelParent, keccak256("parallel-child-root"));
@@ -668,19 +646,14 @@ contract WorldChainProofSystemTest is Test {
         parallelChild.resolve();
 
         anchor.setAnchorState(address(acceptedBranch));
-
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                WorldChainAnchorStateRegistry.AnchorStateNotInAncestry.selector,
-                address(parallelChild),
-                acceptedBranch.rootClaim(),
-                acceptedBranch.l2BlockNumber()
-            )
-        );
         anchor.setAnchorState(address(parallelChild));
+
+        assertEq(anchor.anchorGame(), address(parallelChild));
+        assertEq(anchor.currentRootClaim(), parallelChild.rootClaim());
+        assertEq(anchor.currentL2BlockNumber(), parallelChild.l2BlockNumber());
     }
 
-    function testAnchorRejectsBlacklistedSkippedAncestor() public {
+    function testAnchorDoesNotRecheckFinalizedSkippedAncestor() public {
         (WorldChainProofSystemGame first,) = _propose(10);
         (WorldChainProofSystemGame second,) = _proposeChild(first, keccak256("second-root"));
         (WorldChainProofSystemGame third,) = _proposeChild(second, keccak256("third-root"));
@@ -691,8 +664,9 @@ contract WorldChainProofSystemTest is Test {
         third.resolve();
         anchor.setGameBlacklisted(address(second), true);
 
-        vm.expectRevert(abi.encodeWithSelector(WorldChainAnchorStateRegistry.GameBlacklisted.selector, address(second)));
         third.closeGame();
+
+        assertEq(anchor.anchorGame(), address(third));
     }
 
     function testAnchorAcceptsAlternativeLineageFromSameCheckpoint() public {
@@ -744,7 +718,7 @@ contract WorldChainProofSystemTest is Test {
     }
 
     function testAnchorRejectsFinalizedGameFromDifferentFactory() public {
-        WorldChainAnchorStateRegistry otherAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0, 0);
+        WorldChainAnchorStateRegistry otherAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
         WorldChainProofSystemFactory otherFactory = _newFactory(otherAnchor, WorldChainProofLib.PROOF_THRESHOLD);
         otherAnchor.initializeFactory(address(otherFactory));
 

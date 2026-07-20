@@ -38,8 +38,7 @@ contract DeployProofSystem is Script {
         Config memory config = _readConfig();
 
         vm.startBroadcast(config.privateKey);
-        // Devnet advances anchors immediately after resolution; production deployments must configure a maturity delay.
-        deployment.anchor = new WorldChainAnchorStateRegistry(bytes32(0), 0, 0);
+        deployment.anchor = new WorldChainAnchorStateRegistry(bytes32(0), 0);
         deployment.staking = new MockStakingRegistry();
         deployment.validityVerifier = new MockRootIdVerifier(false);
         deployment.teeVerifier = new MockRootIdVerifier(false);

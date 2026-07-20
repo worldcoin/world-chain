@@ -16,9 +16,7 @@ contract WorldChainAnchorStateRegistry {
     error InvalidGameRegistry(address expectedRegistry, address actualRegistry);
     error UnregisteredGame(address game);
     error GameNotFinalized(address game);
-    error GameNotMature(address game, uint256 eligibleAt);
     error NonMonotonicRoot(uint256 currentL2BlockNumber, uint256 nextL2BlockNumber);
-    error AnchorStateNotInAncestry(address game, bytes32 currentRootClaim, uint256 currentL2BlockNumber);
 
     event AnchorUpdated(address indexed game, bytes32 indexed rootId, bytes32 rootClaim, uint256 l2BlockNumber);
     event FactoryInitialized(address indexed factory);
@@ -27,7 +25,6 @@ contract WorldChainAnchorStateRegistry {
 
     address public owner;
     address public proofSystemFactory;
-    uint64 public immutable finalityDelay;
     bool public paused;
 
     bytes32 public currentRootId;
@@ -37,9 +34,8 @@ contract WorldChainAnchorStateRegistry {
 
     mapping(address game => bool blacklisted) public blacklistedGames;
 
-    constructor(bytes32 startingRootClaim, uint256 startingL2BlockNumber, uint64 finalityDelay_) {
+    constructor(bytes32 startingRootClaim, uint256 startingL2BlockNumber) {
         owner = msg.sender;
-        finalityDelay = finalityDelay_;
         currentRootClaim = startingRootClaim;
         currentL2BlockNumber = startingL2BlockNumber;
     }
@@ -71,26 +67,19 @@ contract WorldChainAnchorStateRegistry {
         emit GameBlacklistedSet(game, blacklisted);
     }
 
-    /// @notice Returns whether a game has finalized and passed the registry's post-resolution delay.
+    /// @notice Returns whether a game has finalized.
     function isGameFinalized(address game) public view returns (bool) {
         if (game.code.length == 0) return false;
 
-        IWorldChainProofSystemGame proofGame = IWorldChainProofSystemGame(game);
-        try proofGame.state() returns (WorldChainProofLib.RootState gameState) {
-            if (gameState != WorldChainProofLib.RootState.FINALIZED) return false;
-        } catch {
-            return false;
-        }
-
-        try proofGame.finalizedAt() returns (uint64 finalizedAt) {
-            return block.timestamp >= uint256(finalizedAt) + finalityDelay;
+        try IWorldChainProofSystemGame(game).state() returns (WorldChainProofLib.RootState gameState) {
+            return gameState == WorldChainProofLib.RootState.FINALIZED;
         } catch {
             return false;
         }
     }
 
     /// @notice Returns whether a game is recognized by this registry and currently has a valid finalized claim.
-    /// @dev Anchor advancement additionally requires a newer block and continuity with the current accepted anchor.
+    /// @dev Anchor advancement additionally requires a newer L2 block number.
     /// TODO: Before withdrawal integration, define Base-compatible retirement and emergency anchor recovery semantics,
     /// implement the OP IAnchorStateRegistry surface, and wire OptimismPortal to this predicate.
     function isGameClaimValid(address game) external view returns (bool) {
@@ -119,16 +108,12 @@ contract WorldChainAnchorStateRegistry {
 
         if (proofGame.state() != WorldChainProofLib.RootState.FINALIZED) revert GameNotFinalized(game);
 
-        uint256 eligibleAt = uint256(proofGame.finalizedAt()) + finalityDelay;
-        if (block.timestamp < eligibleAt) revert GameNotMature(game, eligibleAt);
-
-        // Parent-aware resolution guarantees that every ancestor of a finalized game is finalized,
-        // so intermediate games do not need separate anchor transactions.
+        // A game can only finalize after its parent has finalized, so FINALIZED recursively certifies
+        // its parent chain at resolution time without walking the whole chain again here.
         uint256 nextL2BlockNumber = proofGame.l2BlockNumber();
         if (nextL2BlockNumber <= currentL2BlockNumber) {
             revert NonMonotonicRoot(currentL2BlockNumber, nextL2BlockNumber);
         }
-        _requireExtendsCurrentAnchor(game, factory);
 
         bytes32 nextRootId = proofGame.rootId();
         currentRootId = nextRootId;
@@ -137,43 +122,5 @@ contract WorldChainAnchorStateRegistry {
         anchorGame = game;
 
         emit AnchorUpdated(game, nextRootId, currentRootClaim, nextL2BlockNumber);
-    }
-
-    function _requireExtendsCurrentAnchor(address candidate, address factory) private view {
-        bytes32 anchorRootClaim = currentRootClaim;
-        uint256 anchorL2BlockNumber = currentL2BlockNumber;
-        address cursor = candidate;
-
-        // Finalization proves that the candidate's own ancestry settled, but not that it extends
-        // the registry's currently accepted checkpoint. Transition snapshots preserve that link
-        // even when the registry sentinel, rather than anchorGame, is used as the direct parent.
-        // TODO: Revisit after emergency anchor recovery is designed. Continuity prevents a finalized sibling branch
-        // from replacing accepted history, but also makes an incorrectly accepted anchor sticky.
-        // Traversal is linear in skipped games; callers can advance through finalized checkpoints
-        // in smaller chunks when a single jump would exceed the transaction gas limit.
-        while (true) {
-            if (blacklistedGames[cursor]) revert GameBlacklisted(cursor);
-
-            IWorldChainProofSystemGame cursorGame = IWorldChainProofSystemGame(cursor);
-            uint256 startingL2BlockNumber = cursorGame.startingL2BlockNumber();
-
-            // A transition starting from the current root and block proves that the candidate
-            // extends the accepted checkpoint, even if it uses a different game lineage.
-            if (startingL2BlockNumber == anchorL2BlockNumber) {
-                if (cursorGame.startingRootClaim() != anchorRootClaim) {
-                    revert AnchorStateNotInAncestry(candidate, anchorRootClaim, anchorL2BlockNumber);
-                }
-                return;
-            }
-            if (startingL2BlockNumber < anchorL2BlockNumber) {
-                revert AnchorStateNotInAncestry(candidate, anchorRootClaim, anchorL2BlockNumber);
-            }
-
-            address parent = cursorGame.parentRef();
-            if (parent == address(this) || !IWorldChainProofSystemFactory(factory).isFactoryGame(parent)) {
-                revert AnchorStateNotInAncestry(candidate, anchorRootClaim, anchorL2BlockNumber);
-            }
-            cursor = parent;
-        }
     }
 }
