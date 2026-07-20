@@ -41,22 +41,27 @@ contract PrewarmCertManager is Script {
         uint256 submitted = 0;
         uint256 skipped = 0;
 
+        // Verify CertManager has code deployed — abort early if not.
+        require(certManager.code.length > 0, "CertManager has no code — is the address correct and the contract deployed?");
+
         vm.startBroadcast();
 
         for (uint256 i = 0; i < count; i++) {
             bytes32 certHash = vm.parseBytes32(certHashHexArr[i]);
 
-            // Use low-level staticcall to check cache — gracefully handles non-existent contract.
-            // A staticcall to a non-existent address returns (false, "") so alreadyCached = false.
+            // Check on-chain cache via low-level staticcall — returns (false, "") for non-existent contracts.
+            // An uncached cert returns an ABI-encoded VerifiedCert with empty pubKey, so we must
+            // decode the struct and check pubKey.length rather than just checking returnData.length.
             (bool ok, bytes memory returnData) = certManager.staticcall(
                 abi.encodeWithSignature("loadVerified(bytes32)", certHash)
             );
-            bool alreadyCached = ok && returnData.length > 32;
-
-            if (alreadyCached) {
-                console.log("  Skipping (already cached): certHash %s", certHashHexArr[i]);
-                skipped++;
-                continue;
+            if (ok && returnData.length >= 32) {
+                ICertManager.VerifiedCert memory cached = abi.decode(returnData, (ICertManager.VerifiedCert));
+                if (cached.pubKey.length != 0) {
+                    console.log("  Skipping (already cached): certHash %s", certHashHexArr[i]);
+                    skipped++;
+                    continue;
+                }
             }
 
             // Submit using the pre-computed ABI-encoded calldata from the plan.
