@@ -2,7 +2,9 @@
 pragma solidity 0.8.28;
 
 import {WorldChainProofLib} from "./WorldChainProofLib.sol";
+import {IWorldChainAnchorStateRegistry} from "./interfaces/IWorldChainAnchorStateRegistry.sol";
 import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.sol";
+import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
 import {IWorldChainStakingRegistry} from "./interfaces/IWorldChainStakingRegistry.sol";
 
 contract WorldChainProofSystemGame {
@@ -35,12 +37,27 @@ contract WorldChainProofSystemGame {
         IWorldChainStakingRegistry stakingRegistry;
     }
 
+    enum ResolutionStatus {
+        NOT_READY,
+        RESOLVABLE,
+        PARENT_NOT_RESOLVED,
+        ALREADY_RESOLVED
+    }
+
+    struct ResolutionEvaluation {
+        ResolutionStatus status;
+        WorldChainProofLib.RootState outcome;
+        WorldChainProofLib.InvalidationReason reason;
+        WorldChainProofLib.RootState parentState;
+    }
+
     error InvalidBond(uint256 expected, uint256 actual);
     error InvalidState(WorldChainProofLib.RootState expected, WorldChainProofLib.RootState actual);
     error ChallengePeriodElapsed(uint256 timestamp, uint256 challengeDeadline);
     error ProofPeriodElapsed(uint256 timestamp, uint256 proofDeadline);
-    error ProofPeriodOpen(uint256 timestamp, uint256 proofDeadline);
-    error ChallengePeriodOpen(uint256 timestamp, uint256 challengeDeadline);
+    error NotReady();
+    error ParentGameNotResolved(address parent, WorldChainProofLib.RootState state);
+    error AlreadyResolved(WorldChainProofLib.RootState state);
     error UnstakedChallenger(address challenger);
     error DuplicateChallenge(address challenger);
     error InvalidLane(uint8 lane);
@@ -52,7 +69,7 @@ contract WorldChainProofSystemGame {
     event ProofThresholdReached(bytes32 indexed rootId, uint8 proofBitmap);
     event DuplicateProofLane(WorldChainProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
     event Finalized(bytes32 indexed rootId);
-    event Invalidated(bytes32 indexed rootId);
+    event Invalidated(bytes32 indexed rootId, WorldChainProofLib.InvalidationReason reason);
 
     /// Number of distinct proof lanes required to finalize a challenged root.
     /// Set per-deployment by the factory (defaults to `WorldChainProofLib.PROOF_THRESHOLD`).
@@ -91,6 +108,7 @@ contract WorldChainProofSystemGame {
     uint64 public invalidatedAt;
     uint8 public proofBitmap;
     WorldChainProofLib.RootState public state;
+    WorldChainProofLib.InvalidationReason public invalidationReason;
 
     address[] public challengers;
     mapping(address challenger => uint256 amount) public challengerBonds;
@@ -192,40 +210,127 @@ contract WorldChainProofSystemGame {
         }
     }
 
-    function finalize() external {
-        if (state == WorldChainProofLib.RootState.PROPOSED) {
-            if (block.timestamp < challengeDeadline) {
-                revert ChallengePeriodOpen(block.timestamp, challengeDeadline);
-            }
-            _finalize();
-            return;
-        }
-
-        if (state == WorldChainProofLib.RootState.CHALLENGED) {
-            if (!WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
-                revert InvalidState(WorldChainProofLib.RootState.FINALIZED, state);
-            }
-            _finalize();
-            return;
-        }
-
-        revert InvalidState(WorldChainProofLib.RootState.PROPOSED, state);
+    /// @notice Returns whether this game can resolve now and the resulting state and invalidation reason.
+    function resolutionStatus()
+        external
+        view
+        returns (bool resolvable, WorldChainProofLib.RootState outcome, WorldChainProofLib.InvalidationReason reason)
+    {
+        ResolutionEvaluation memory evaluation = _evaluateResolution();
+        return (evaluation.status == ResolutionStatus.RESOLVABLE, evaluation.outcome, evaluation.reason);
     }
 
-    function invalidate() external {
-        if (state != WorldChainProofLib.RootState.CHALLENGED) {
-            revert InvalidState(WorldChainProofLib.RootState.CHALLENGED, state);
+    /// @notice Settles this game after evaluating its blacklist, parent, deadline, and proof-threshold conditions.
+    function resolve()
+        external
+        returns (WorldChainProofLib.RootState outcome, WorldChainProofLib.InvalidationReason reason)
+    {
+        ResolutionEvaluation memory evaluation = _evaluateResolution();
+        if (evaluation.status != ResolutionStatus.RESOLVABLE) {
+            if (evaluation.status == ResolutionStatus.PARENT_NOT_RESOLVED) {
+                revert ParentGameNotResolved(parentRef, evaluation.parentState);
+            }
+            if (evaluation.status == ResolutionStatus.ALREADY_RESOLVED) revert AlreadyResolved(state);
+            revert NotReady();
+        }
+
+        if (evaluation.outcome == WorldChainProofLib.RootState.FINALIZED) {
+            _finalize();
+        } else {
+            _invalidate(evaluation.reason);
+        }
+
+        return (evaluation.outcome, evaluation.reason);
+    }
+
+    function _evaluateResolution() internal view returns (ResolutionEvaluation memory evaluation) {
+        WorldChainProofLib.RootState currentState = state;
+        if (
+            currentState == WorldChainProofLib.RootState.FINALIZED
+                || currentState == WorldChainProofLib.RootState.INVALIDATED
+        ) {
+            evaluation.outcome = currentState;
+            evaluation.reason = invalidationReason;
+            evaluation.status = ResolutionStatus.ALREADY_RESOLVED;
+            return evaluation;
+        }
+
+        IWorldChainAnchorStateRegistry registry = IWorldChainAnchorStateRegistry(anchorStateRegistry);
+        // 1. A governance blacklist invalidates this game before parent or deadline evaluation.
+        if (registry.blacklistedGames(address(this))) {
+            evaluation.status = ResolutionStatus.RESOLVABLE;
+            evaluation.outcome = WorldChainProofLib.RootState.INVALIDATED;
+            evaluation.reason = WorldChainProofLib.InvalidationReason.BLACKLISTED;
+            return evaluation;
+        }
+
+        WorldChainProofLib.RootState parentState;
+        bool parentBlacklisted;
+        if (parentRef == anchorStateRegistry) {
+            // The registry sentinel represents the accepted anchor, so it is a finalized parent without game state.
+            parentState = WorldChainProofLib.RootState.FINALIZED;
+        } else {
+            parentBlacklisted = registry.blacklistedGames(parentRef);
+            if (!parentBlacklisted) parentState = IWorldChainProofSystemGame(parentRef).state();
+        }
+
+        if (
+            parentState == WorldChainProofLib.RootState.PROPOSED
+                || parentState == WorldChainProofLib.RootState.CHALLENGED
+        ) {
+            // 2. A proposed or challenged parent must resolve before its descendant.
+            evaluation.outcome = currentState;
+            evaluation.status = ResolutionStatus.PARENT_NOT_RESOLVED;
+            evaluation.parentState = parentState;
+            return evaluation;
+        }
+        if (
+            parentBlacklisted || parentState == WorldChainProofLib.RootState.INVALIDATED
+                || parentState == WorldChainProofLib.RootState.NONE
+        ) {
+            // 3. A blacklisted, invalidated, or unset parent invalidates its descendant.
+            evaluation.status = ResolutionStatus.RESOLVABLE;
+            evaluation.outcome = WorldChainProofLib.RootState.INVALIDATED;
+            evaluation.reason = WorldChainProofLib.InvalidationReason.INVALID_PARENT;
+            return evaluation;
+        }
+
+        if (currentState == WorldChainProofLib.RootState.PROPOSED) {
+            if (block.timestamp < challengeDeadline) {
+                // 4. An unchallenged proposal cannot finalize while its challenge window is active.
+                evaluation.outcome = currentState;
+                return evaluation;
+            }
+            // 5. An unchallenged proposal finalizes after its challenge window expires.
+            evaluation.status = ResolutionStatus.RESOLVABLE;
+            evaluation.outcome = WorldChainProofLib.RootState.FINALIZED;
+            return evaluation;
+        }
+
+        // 6. A challenged game finalizes as soon as enough independent proof lanes support it.
+        if (WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
+            evaluation.status = ResolutionStatus.RESOLVABLE;
+            evaluation.outcome = WorldChainProofLib.RootState.FINALIZED;
+            return evaluation;
         }
         if (block.timestamp < proofDeadline) {
-            revert ProofPeriodOpen(block.timestamp, proofDeadline);
-        }
-        if (WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
-            revert InvalidState(WorldChainProofLib.RootState.INVALIDATED, state);
+            // 7. A challenged game below threshold waits while its proof window is active.
+            evaluation.outcome = currentState;
+            return evaluation;
         }
 
+        // 8. A challenged game below threshold times out once its proof window expires.
+        evaluation.status = ResolutionStatus.RESOLVABLE;
+        evaluation.outcome = WorldChainProofLib.RootState.INVALIDATED;
+        evaluation.reason = WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT;
+    }
+
+    function _invalidate(WorldChainProofLib.InvalidationReason reason) internal {
         state = WorldChainProofLib.RootState.INVALIDATED;
+        invalidationReason = reason;
         invalidatedAt = uint64(block.timestamp);
 
+        // TODO: Replace temporary push payouts with pull-based credits so recipient callbacks cannot block resolution.
         for (uint256 i = 0; i < challengers.length; i++) {
             address challenger = challengers[i];
             uint256 amount = challengerBonds[challenger];
@@ -234,13 +339,16 @@ contract WorldChainProofSystemGame {
         }
 
         uint256 forfeited = address(this).balance;
-        if (forfeited != 0 && challengers.length != 0) {
+        // TODO: Confirm that INVALID_PARENT and BLACKLISTED should refund the proposer bond as currently specified.
+        // Only a direct proof timeout is attributable to this proposer; inherited and governance failures refund it.
+        if (forfeited != 0 && reason == WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT && challengers.length != 0)
+        {
             _transfer(payable(challengers[0]), forfeited);
         } else if (forfeited != 0) {
             _transfer(proposer, forfeited);
         }
 
-        emit Invalidated(rootId);
+        emit Invalidated(rootId, reason);
     }
 
     function _finalize() internal {

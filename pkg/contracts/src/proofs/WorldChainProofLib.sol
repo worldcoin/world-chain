@@ -16,6 +16,13 @@ library WorldChainProofLib {
         INVALIDATED
     }
 
+    enum InvalidationReason {
+        NONE,
+        PROOF_TIMEOUT,
+        INVALID_PARENT,
+        BLACKLISTED
+    }
+
     enum ProofLane {
         VALIDITY_PROOF,
         TEE_ATTESTATION,
