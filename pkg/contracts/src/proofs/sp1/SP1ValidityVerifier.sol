@@ -1,26 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {IWorldChainAnchorStateRegistry} from "../interfaces/IWorldChainAnchorStateRegistry.sol";
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
-import {IWorldChainProofSystemGame} from "../interfaces/IWorldChainProofSystemGame.sol";
 import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
 import {WorldChainProofLib} from "../WorldChainProofLib.sol";
-
-/// ABI-encoded public values committed by the World Chain SP1 aggregation proof.
-/// Must match `world_chain_proof_core::boot::TransitionPublicValues`.
-struct TransitionPublicValues {
-    bytes32 l1Head;
-    bytes32 l2PreRoot;
-    uint64 l2PreBlockNumber;
-    bytes32 l2PostRoot;
-    uint64 l2PostBlockNumber;
-    bytes32 rollupConfigHash;
-}
+import {WorldChainProofVerificationLib} from "../WorldChainProofVerificationLib.sol";
 
 /// Must match `world_chain_proof_core::types::AggregationPublicValues`.
 struct AggregationPublicValues {
-    TransitionPublicValues transitionPublicValues;
+    WorldChainProofLib.TransitionPublicValues transitionPublicValues;
     bytes32 multiBlockVKey;
 }
 
@@ -44,14 +32,8 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     /// @notice Thrown when the aggregation program verification key is zero.
     error ZeroAggregationVKey();
 
-    /// @notice Thrown when the expected rollup config hash is zero.
-    error ZeroRollupConfigHash();
-
     /// @notice Thrown when the expected range program verification key is zero.
     error ZeroRangeVKeyCommitment();
-
-    /// @notice Thrown when the anchor-state registry address is zero.
-    error ZeroAnchorStateRegistry();
 
     /*//////////////////////////////////////////////////////////////
                                STORAGE
@@ -63,37 +45,21 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     /// @notice Verification key for the World Chain aggregation program.
     bytes32 public immutable aggregationVKey;
 
-    /// @notice Rollup config hash the aggregation public values must commit to.
-    bytes32 public immutable rollupConfigHash;
-
     /// @notice Range-program verification key committed by the aggregation proof.
     bytes32 public immutable rangeVKeyCommitment;
-
-    /// @notice Anchor-state registry used when the proposal parent is the current anchor.
-    address public immutable anchorStateRegistry;
 
     /*//////////////////////////////////////////////////////////////
                              CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
-    constructor(
-        ISP1Verifier sp1Verifier_,
-        bytes32 aggregationVKey_,
-        bytes32 rollupConfigHash_,
-        bytes32 rangeVKeyCommitment_,
-        address anchorStateRegistry_
-    ) {
+    constructor(ISP1Verifier sp1Verifier_, bytes32 aggregationVKey_, bytes32 rangeVKeyCommitment_) {
         if (address(sp1Verifier_) == address(0)) revert ZeroSP1Verifier();
         if (aggregationVKey_ == bytes32(0)) revert ZeroAggregationVKey();
-        if (rollupConfigHash_ == bytes32(0)) revert ZeroRollupConfigHash();
         if (rangeVKeyCommitment_ == bytes32(0)) revert ZeroRangeVKeyCommitment();
-        if (anchorStateRegistry_ == address(0)) revert ZeroAnchorStateRegistry();
 
         sp1Verifier = sp1Verifier_;
         aggregationVKey = aggregationVKey_;
-        rollupConfigHash = rollupConfigHash_;
         rangeVKeyCommitment = rangeVKeyCommitment_;
-        anchorStateRegistry = anchorStateRegistry_;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -119,7 +85,7 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     ///      the try/catch in `verify` traps malformed ABI payloads, invalid
     ///      public values, and SP1 verifier reverts as `false`.
     function verify(bytes32 rootId, bytes calldata proof) external view returns (bool) {
-        try this._decodeAndVerify(rootId, proof) returns (bool ok) {
+        try this._decodeAndVerify(msg.sender, rootId, proof) returns (bool ok) {
             return ok;
         } catch {
             return false;
@@ -130,7 +96,7 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
     ///         directly.
     /// @dev External so `verify` can catch every revert path, including ABI
     ///      decode failures and verifier-gateway reverts.
-    function _decodeAndVerify(bytes32 rootId, bytes calldata proof) external view returns (bool) {
+    function _decodeAndVerify(address gameAddress, bytes32 rootId, bytes calldata proof) external view returns (bool) {
         require(msg.sender == address(this), "internal");
 
         (
@@ -142,33 +108,16 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
         ) = abi.decode(proof, (bytes32, address, uint256, bytes, bytes));
 
         AggregationPublicValues memory outputs = abi.decode(publicValues, (AggregationPublicValues));
-        TransitionPublicValues memory transition = outputs.transitionPublicValues;
+        WorldChainProofLib.TransitionPublicValues memory transition = outputs.transitionPublicValues;
 
-        if (transition.rollupConfigHash != rollupConfigHash) return false;
         if (outputs.multiBlockVKey != rangeVKeyCommitment) return false;
 
-        bytes32 expectedRootId = WorldChainProofLib.rootId(
-            domainHash,
-            parentRef,
-            transition.l2PostRoot,
-            uint256(transition.l2PostBlockNumber),
-            transition.l1Head,
-            l1OriginNumber
+        bool matchesGame = WorldChainProofVerificationLib.matchesGame(
+            gameAddress, rootId, domainHash, parentRef, l1OriginNumber, transition
         );
-        if (expectedRootId != rootId) return false;
-
-        // `rootId` commits to the parent reference address, so the SP1 public
-        // values must separately bind the proved pre-root to that parent's root.
-        if (transition.l2PreRoot != _parentRootClaim(parentRef)) return false;
+        if (!matchesGame) return false;
 
         sp1Verifier.verifyProof(aggregationVKey, publicValues, proofBytes);
         return true;
-    }
-
-    function _parentRootClaim(address parentRef) internal view returns (bytes32) {
-        if (parentRef == anchorStateRegistry) {
-            return IWorldChainAnchorStateRegistry(parentRef).currentRootClaim();
-        }
-        return IWorldChainProofSystemGame(parentRef).rootClaim();
     }
 }

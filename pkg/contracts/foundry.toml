@@ -8,7 +8,7 @@ optimizer = true
 optimizer_runs = 200
 bytecode_hash = "none"
 cbor_metadata = false
-fs_permissions = [{access = "read-write", path = "./"}]
+fs_permissions = [{access = "read-write", path = "./"}, {access = "read", path = "/tmp"}]
 
 remappings = [
   "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
