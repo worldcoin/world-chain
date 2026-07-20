@@ -41,8 +41,16 @@ contract PrewarmCertManager is Script {
         uint256 submitted = 0;
         uint256 skipped = 0;
 
-        // Verify CertManager has code deployed — abort early if not.
-        require(certManager.code.length > 0, "CertManager has no code -- is the address correct and the contract deployed?");
+        // Verify CertManager has code deployed -- abort early if not.
+        if (certManager.code.length == 0) {
+            bool skipOnMissing = vm.envOr("PREWARM_SKIP_IF_UNDEPLOYED", false);
+            if (skipOnMissing) {
+                console.log("WARNING: CertManager not deployed at this address -- skipping prewarm (dry run mode)");
+                console.log("  Address:", vm.toString(certManager));
+                return;
+            }
+            revert("CertManager has no code -- is the address correct and the contract deployed?");
+        }
 
         vm.startBroadcast();
 
