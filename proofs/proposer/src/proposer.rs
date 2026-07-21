@@ -132,6 +132,10 @@ where
         }
     }
 
+    /// Resolves positively resolvable games parent-first and returns all finalized games.
+    ///
+    /// Games finalized by an earlier iteration or another keeper are included so anchor
+    /// advancement can be retried.
     pub async fn resolve_games(
         &self,
         canonical_line: &CanonicalLine,
@@ -160,6 +164,7 @@ where
         Ok(finalized_games)
     }
 
+    /// Advances the anchor to the highest finalized game, if one is available.
     pub async fn advance_anchor(
         &self,
         finalized_games: FinalizedGames,
@@ -182,6 +187,10 @@ where
         Ok(())
     }
 
+    /// Executes the next proposal action selected during canonical-line scanning.
+    ///
+    /// New and timed-out transitions are submitted, negative-ready games wait for the
+    /// challenger, and non-retryable invalidations stop with a governance warning.
     pub async fn propose(&self, scan: &CanonicalScan) -> Result<(), ProposerError> {
         let (proposal, retry_of) = match scan.next_action() {
             NextProposalAction::Propose(proposal) => (proposal, None),

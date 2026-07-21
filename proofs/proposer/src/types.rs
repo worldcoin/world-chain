@@ -108,16 +108,20 @@ impl CanonicalLine {
     }
 }
 
+/// Canonical games that have reached the finalized state and may advance the anchor.
 #[derive(Debug, Default)]
 pub struct FinalizedGames {
+    /// Finalized games ordered by increasing L2 block number.
     pub games: Vec<ParentRef>,
 }
 
 impl FinalizedGames {
+    /// Appends a finalized game to the ordered collection.
     pub fn push(&mut self, game: ParentRef) {
         self.games.push(game);
     }
 
+    /// Returns the finalized game with the highest L2 block number, if any.
     #[must_use]
     pub fn last(&self) -> Option<ParentRef> {
         self.games.last().copied()
