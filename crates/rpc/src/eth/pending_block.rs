@@ -68,12 +68,12 @@ where
             return self.inner.local_pending_state().await;
         };
 
-        let historical = self
+        let parent_state = self
             .provider()
-            .history_by_block_hash(pending_block.recovered_block.parent_hash)
+            .state_by_block_hash(pending_block.recovered_block.parent_hash)
             .map_err(Self::Error::from_eth_err)?;
 
-        Ok(Some(flashblock_state_provider(pending_block, historical)))
+        Ok(Some(flashblock_state_provider(pending_block, parent_state)))
     }
 
     /// Returns the locally built pending block
@@ -142,9 +142,9 @@ where
 
 fn flashblock_state_provider(
     pending_block: ExecutedBlock<OpPrimitives>,
-    historical: StateProviderBox,
+    parent_state: StateProviderBox,
 ) -> StateProviderBox {
-    Box::new(BlockState::new(pending_block).state_provider(historical))
+    Box::new(BlockState::new(pending_block).state_provider(parent_state))
 }
 
 #[cfg(test)]
