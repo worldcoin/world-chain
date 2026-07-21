@@ -315,20 +315,42 @@ impl ProposerClient for FakeExecution {
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
-        let root_state = self.game_state(game);
+        let state = self.state.lock().expect("fake execution mutex poisoned");
+        let record = state
+            .games_by_address
+            .get(&game)
+            .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
+
+        if record.state == STATE_CHALLENGED && has_threshold(record.proof_bitmap) {
+            return Ok(ResolutionStatus {
+                resolvable: true,
+                root_state: RootState::Finalized,
+                invalidation_reason: InvalidationReason::None,
+            });
+        }
+
+        let root_state = RootState::try_from(record.state)
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
         Ok(ResolutionStatus {
-            resolvable: root_state == RootState::Finalized,
+            resolvable: false,
             root_state,
             invalidation_reason: InvalidationReason::None,
         })
     }
 
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
-        if self.game_state(game) != RootState::Finalized {
+        let mut state = self.state.lock().expect("fake execution mutex poisoned");
+        let record = state
+            .games_by_address
+            .get_mut(&game)
+            .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
+        if record.state != STATE_CHALLENGED || !has_threshold(record.proof_bitmap) {
             return Err(ProposerError::Contract(format!(
                 "game {game} is not positively resolvable"
             )));
         }
+        record.state = STATE_FINALIZED;
+
         Ok(ResolveSubmission {
             tx_hash: B256::with_last_byte(game.as_slice()[19]),
         })
@@ -518,9 +540,6 @@ impl DefenderClient for FakeExecution {
         if record.proof_bitmap & mask == 0 {
             record.proof_bitmap |= mask;
             record.submitted_lanes.push(lane);
-            if has_threshold(record.proof_bitmap) {
-                record.state = STATE_FINALIZED;
-            }
         }
 
         Ok(DefenderSubmission {
