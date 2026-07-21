@@ -16,5 +16,5 @@ pub use consensus_provider::{ConsensusError, ConsensusProvider, OptimismConsensu
 pub use types::{
     GameCreated, InvalidationReason, InvalidationReasonError, PROOF_LANE_COUNT,
     PROOF_SYSTEM_VERSION, PROOF_THRESHOLD, ProofDomain, ProofLane, ProposalCommitment,
-    ResolutionStatus, RootCommitment, RootState, RootStateError, has_threshold, proof_count, w,
+    ResolutionStatus, RootCommitment, RootState, RootStateError, has_threshold, proof_count,
 };

@@ -3,7 +3,7 @@ use alloy_provider::Provider;
 use async_trait::async_trait;
 use world_chain_proofs::{
     IWorldChainAnchorStateRegistry, IWorldChainProofSystemFactory, IWorldChainProofSystemGame,
-    ProposalCommitment, ResolutionStatus,
+    InvalidationReasonError, ProposalCommitment, ResolutionStatus, RootStateError,
 };
 
 use crate::{
@@ -107,11 +107,11 @@ where
         let root_state = resolution_status_result
             .outcome
             .try_into()
-            .map_err(|err| ProposerError::Contract(err.to_string()))?;
+            .map_err(|err: RootStateError| ProposerError::Contract(err.to_string()))?;
         let invalidation_reason = resolution_status_result
             .reason
             .try_into()
-            .map_err(|err| ProposerError::Contract(err.to_string()))?;
+            .map_err(|err: InvalidationReasonError| ProposerError::Contract(err.to_string()))?;
         let resolution_status = ResolutionStatus {
             resolvable,
             root_state,

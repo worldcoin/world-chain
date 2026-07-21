@@ -24,6 +24,14 @@ impl Iterator for CanonicalLine {
     }
 }
 
+impl Iterator for &CanonicalLine {
+    type Item = ParentRef;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.games.iter().next().copied()
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ResolvedGames {
     pub games: Vec<ParentRef>,

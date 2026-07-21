@@ -107,7 +107,7 @@ where
 
     pub async fn resolve_games(
         &self,
-        canonical_line: CanonicalLine,
+        canonical_line: &CanonicalLine,
     ) -> Result<ResolvedGames, ProposerError> {
         let mut resolved_games = ResolvedGames::default();
         for game in canonical_line {
@@ -150,7 +150,7 @@ where
         Ok(())
     }
 
-    pub async fn propose(&self, canonical_line: CanonicalLine) -> Result<(), ProposerError> {
+    pub async fn propose(&self, canonical_line: &CanonicalLine) -> Result<(), ProposerError> {
         let maybe_last_canonical_game = canonical_line.last();
         if let Some(last_canonical_game) = maybe_last_canonical_game {
             let mut cursor = last_canonical_game;
@@ -221,16 +221,24 @@ where
         let mut interval = tokio::time::interval(self.config.poll_interval);
         loop {
             interval.tick().await;
-            // 1. refresh the anchor and canonical line
-            let canonical_line = self.anchor_and_canonical_line().await?;
-            // 2. resolve positive-ready games parent-first
-            let resolved_games = self.resolve_games(canonical_line).await?;
-            // 3. advance the anchor to the highest finalized canonical game
-            self.advance_anchor(resolved_games).await?;
-            // 4. attempt a new canonical proposal or retry
-            let new_proposal = self.propose(canonical_line).await?;
-            // 5. withdraw known proposer credits
-            // TODO: add withdraw credits logic
+            let iteration: Result<(), ProposerError> = async {
+                // 1. refresh the anchor and canonical line
+                let canonical_line = self.anchor_and_canonical_line().await?;
+                // 2. resolve positive-ready games parent-first
+                let resolved_games = self.resolve_games(&canonical_line).await?;
+                // 3. advance the anchor to the highest finalized canonical game
+                self.advance_anchor(resolved_games).await?;
+                // 4. attempt a new canonical proposal or retry
+                self.propose(&canonical_line).await?;
+                // 5. withdraw known proposer credits
+                // TODO: add withdraw credits logic
+                Ok(())
+            }
+            .await;
+
+            if let Err(error) = iteration {
+                warn!(%error, "proposer iteration failed; retrying on next tick");
+            }
         }
     }
 }
