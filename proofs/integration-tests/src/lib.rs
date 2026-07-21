@@ -392,6 +392,7 @@ impl ProposerClient for FakeExecution {
         let event = Self::create_game(&mut state, proposal);
         Ok(ProposalSubmission {
             tx_hash: B256::with_last_byte(event.game.as_slice()[19]),
+            game_address: event.game,
         })
     }
 }

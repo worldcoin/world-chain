@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
         proposer_bond: U256::from(cli.proposer_bond_wei),
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
     };
-    let proposer = WorldChainProposer::new(config, contracts, output_roots);
+    let mut proposer = WorldChainProposer::new(config, contracts, output_roots);
 
     info!(
         l1_rpc_url = %cli.l1_rpc,

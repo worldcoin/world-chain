@@ -1,10 +1,12 @@
-use alloy_primitives::B256;
+use std::collections::HashSet;
+
+use alloy_primitives::{Address, B256, U256};
 use tracing::{info, warn};
 use world_chain_proofs::{ConsensusProvider, InvalidationReason, RootState};
 
 use crate::{
     ParentRef, Proposal, ProposerClient, ProposerConfig, ProposerError,
-    types::{CanonicalLine, CanonicalScan, FinalizedGames, NextProposalAction},
+    types::{CanonicalLine, CanonicalScan,  FinalizedGames, NextProposalAction},
 };
 
 /// World Chain Proposer.
@@ -13,15 +15,17 @@ pub struct WorldChainProposer<E, C> {
     config: ProposerConfig,
     execution_provider: E,
     consensus_provider: C,
+    proposed_games: HashSet<Address>,
 }
 
 impl<E, C> WorldChainProposer<E, C> {
     /// Creates a proposer from execution and consensus providers.
-    pub const fn new(config: ProposerConfig, execution_provider: E, consensus_provider: C) -> Self {
+    pub fn new(config: ProposerConfig, execution_provider: E, consensus_provider: C) -> Self {
         Self {
             config,
             execution_provider,
             consensus_provider,
+            proposed_games: HashSet::default(),
         }
     }
 
@@ -190,7 +194,7 @@ where
     ///
     /// New and timed-out transitions are submitted, negative-ready games wait for the
     /// challenger, and non-retryable invalidations stop with a governance warning.
-    pub async fn propose(&self, scan: &CanonicalScan) -> Result<(), ProposerError> {
+    pub async fn propose(&mut self, scan: &CanonicalScan) -> Result<(), ProposerError> {
         let (proposal, retry_of) = match scan.next_action() {
             NextProposalAction::Propose(proposal) => (proposal, None),
             NextProposalAction::RetryTimedOut {
@@ -222,17 +226,40 @@ where
             .await?;
         info!(
             tx_hash = ?submission.tx_hash,
+            game_address = %submission.game_address,
             l2_block_number = proposal.l2_block_number,
             parent_ref = %proposal.parent_ref,
             proposal_key = ?proposal.proposal_key,
             retry_of = ?retry_of,
             "submitted World Chain proof-system game"
         );
+        self.proposed_games.insert(submission.game_address);
+        Ok(())
+    }
+
+    pub async fn withdraw_credits(&mut self) -> Result<(), ProposerError> {
+        let mut withdrawn = Vec::new();
+        for &game in &self.proposed_games {
+            let claimable_amount = self.execution_provider.claimable(game).await?;
+            if claimable_amount > U256::ZERO {
+                let withdraw_submission = self.execution_provider.withdraw(game).await?;
+                info!(
+                    tx_hash = ?withdraw_submission.tx_hash,
+                    amount = ?withdraw_submission.amount,
+                    game_address = %game,
+                    "withdrew claimable credits"
+                );
+                withdrawn.push(game);
+            }
+        }
+        for game in withdrawn {
+            self.proposed_games.remove(&game);
+        }
         Ok(())
     }
 
     /// Runs the proposer forever, logging transient failures and retrying on each tick.
-    pub async fn run_forever(&self) -> Result<(), ProposerError> {
+    pub async fn run_forever(&mut self) -> Result<(), ProposerError> {
         self.config.validate()?;
 
         let mut interval = tokio::time::interval(self.config.poll_interval);
@@ -248,7 +275,7 @@ where
                 // 4. attempt a new canonical proposal or retry
                 self.propose(&canonical_scan).await?;
                 // 5. withdraw known proposer credits
-                // TODO: add withdraw credits logic
+                self.withdraw_credits().await?;
                 Ok(())
             }
             .await;

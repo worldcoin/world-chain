@@ -76,6 +76,7 @@ impl ProposerClient for MockContracts {
             .push(*proposal);
         Ok(ProposalSubmission {
             tx_hash: B256::repeat_byte(0xaa),
+            game_address: Address::repeat_byte(0xaa),
         })
     }
 }
