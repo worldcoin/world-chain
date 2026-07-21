@@ -141,17 +141,11 @@ async fn anchor_and_canonical_line_walks_existing_games_until_gap() {
     let canonical_line = proposer.anchor_and_canonical_line().await.unwrap();
 
     assert_eq!(
-        canonical_line.games,
-        vec![
-            ParentRef {
-                address: ANCHOR,
-                l2_block_number: 0,
-            },
-            ParentRef {
-                address: GAME_1,
-                l2_block_number: 10,
-            },
-        ]
+        canonical_line.games(),
+        &[ParentRef {
+            address: GAME_1,
+            l2_block_number: 10,
+        }]
     );
 }
 
@@ -171,8 +165,7 @@ async fn propose_submits_proposal_after_last_canonical_game() {
         finalized_l2_block: 10,
     };
     let proposer = WorldChainProposer::new(config(), contracts, output_roots);
-    let mut canonical_line = CanonicalLine::default();
-    canonical_line.push(ParentRef {
+    let canonical_line = CanonicalLine::new(ParentRef {
         address: ANCHOR,
         l2_block_number: 0,
     });

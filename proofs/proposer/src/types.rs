@@ -1,36 +1,44 @@
 use alloy_primitives::{Address, B256, TxHash};
 use world_chain_proofs::ProposalCommitment;
 
-#[derive(Debug, Default)]
+/// The current anchor checkpoint and the canonical games built on top of it.
+#[derive(Debug)]
 pub struct CanonicalLine {
-    pub games: Vec<ParentRef>,
+    anchor: ParentRef,
+    games: Vec<ParentRef>,
 }
 
 impl CanonicalLine {
-    pub fn push(&mut self, game: ParentRef) {
+    /// Creates an empty canonical line rooted at `anchor`.
+    #[must_use]
+    pub const fn new(anchor: ParentRef) -> Self {
+        Self {
+            anchor,
+            games: Vec::new(),
+        }
+    }
+
+    /// Returns the checkpoint this canonical line is rooted at.
+    #[must_use]
+    pub const fn anchor(&self) -> ParentRef {
+        self.anchor
+    }
+
+    /// Appends a canonical game built on the current tip.
+    pub fn push_game(&mut self, game: ParentRef) {
         self.games.push(game);
     }
 
-    pub fn last(&self) -> Option<ParentRef> {
-        self.games.last().copied()
+    /// Returns the canonical games built on top of the anchor.
+    #[must_use]
+    pub fn games(&self) -> &[ParentRef] {
+        &self.games
     }
-}
 
-impl IntoIterator for CanonicalLine {
-    type Item = ParentRef;
-    type IntoIter = std::vec::IntoIter<ParentRef>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.games.into_iter()
-    }
-}
-
-impl<'a> IntoIterator for &'a CanonicalLine {
-    type Item = &'a ParentRef;
-    type IntoIter = std::slice::Iter<'a, ParentRef>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.games.iter()
+    /// Returns the last canonical game, or the anchor when no game exists yet.
+    #[must_use]
+    pub fn tip(&self) -> ParentRef {
+        self.games.last().copied().unwrap_or(self.anchor)
     }
 }
 

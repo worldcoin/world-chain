@@ -46,12 +46,10 @@ where
     pub async fn anchor_and_canonical_line(&self) -> Result<CanonicalLine, ProposerError> {
         self.config.validate()?;
 
-        let mut canonical_line = CanonicalLine::default();
+        let anchor_parent = self.execution_provider.anchor_parent().await?;
+        let mut canonical_line = CanonicalLine::new(anchor_parent);
 
-        let anchor_game = self.execution_provider.anchor_parent().await?;
-        canonical_line.push(anchor_game);
-
-        let mut cursor = anchor_game;
+        let mut cursor = anchor_parent;
 
         // loop to the next canonical game until it reaches the last one
         loop {
@@ -96,7 +94,7 @@ where
                     address: next_game_addr,
                     l2_block_number: next_l2_block_number,
                 };
-                canonical_line.push(next_game);
+                canonical_line.push_game(next_game);
                 cursor = next_game;
             } else {
                 break;
@@ -110,7 +108,7 @@ where
         canonical_line: &CanonicalLine,
     ) -> Result<ResolvedGames, ProposerError> {
         let mut resolved_games = ResolvedGames::default();
-        for game in canonical_line {
+        for game in canonical_line.games() {
             let resolution_status = self
                 .execution_provider
                 .resolution_status(game.address)
@@ -151,66 +149,63 @@ where
     }
 
     pub async fn propose(&self, canonical_line: &CanonicalLine) -> Result<(), ProposerError> {
-        let maybe_last_canonical_game = canonical_line.last();
-        if let Some(last_canonical_game) = maybe_last_canonical_game {
-            let mut cursor = last_canonical_game;
-            let proposal = loop {
-                let next_l2_block_number = cursor
-                    .l2_block_number
-                    .checked_add(self.config.block_interval)
-                    .ok_or(ProposerError::BlockNumberOverflow {
-                        parent_block: cursor.l2_block_number,
-                        block_interval: self.config.block_interval,
-                    })?;
+        let mut cursor = canonical_line.tip();
+        let proposal = loop {
+            let next_l2_block_number = cursor
+                .l2_block_number
+                .checked_add(self.config.block_interval)
+                .ok_or(ProposerError::BlockNumberOverflow {
+                    parent_block: cursor.l2_block_number,
+                    block_interval: self.config.block_interval,
+                })?;
 
-                let latest_finalized_l2_block =
-                    self.consensus_provider.latest_l2_finalized_block().await?;
-                if next_l2_block_number > latest_finalized_l2_block {
-                    return Err(ProposerError::ProposalNotReady {
-                        target_block: next_l2_block_number,
-                        finalized_block: latest_finalized_l2_block,
-                    });
-                }
-                let root_claim = self
-                    .consensus_provider
-                    .output_root_at_block(next_l2_block_number)
-                    .await?;
-                let mut proposal = Proposal {
-                    parent_ref: cursor.address,
-                    root_claim,
-                    l2_block_number: next_l2_block_number,
-                    proposal_key: B256::ZERO,
-                };
-                proposal.proposal_key = self
-                    .execution_provider
-                    .proposal_key(proposal.commitment())
-                    .await?;
-                if let Some(next_game_addr) = self
-                    .execution_provider
-                    .game_for_proposal_key(proposal.proposal_key)
-                    .await?
-                {
-                    // game already exists, build on top of it
-                    cursor = ParentRef {
-                        address: next_game_addr,
-                        l2_block_number: next_l2_block_number,
-                    };
-                } else {
-                    break proposal;
-                }
-            };
-            let submission = self
-                .execution_provider
-                .submit_proposal(&proposal, self.config.proposer_bond)
+            let latest_finalized_l2_block =
+                self.consensus_provider.latest_l2_finalized_block().await?;
+            if next_l2_block_number > latest_finalized_l2_block {
+                return Err(ProposerError::ProposalNotReady {
+                    target_block: next_l2_block_number,
+                    finalized_block: latest_finalized_l2_block,
+                });
+            }
+            let root_claim = self
+                .consensus_provider
+                .output_root_at_block(next_l2_block_number)
                 .await?;
-            info!(
-                tx_hash = ?submission.tx_hash,
-                l2_block_number = proposal.l2_block_number,
-                parent_ref = %proposal.parent_ref,
-                proposal_key = ?proposal.proposal_key,
-                "submitted World Chain proof-system game"
-            );
-        }
+            let mut proposal = Proposal {
+                parent_ref: cursor.address,
+                root_claim,
+                l2_block_number: next_l2_block_number,
+                proposal_key: B256::ZERO,
+            };
+            proposal.proposal_key = self
+                .execution_provider
+                .proposal_key(proposal.commitment())
+                .await?;
+            if let Some(next_game_addr) = self
+                .execution_provider
+                .game_for_proposal_key(proposal.proposal_key)
+                .await?
+            {
+                // game already exists, build on top of it
+                cursor = ParentRef {
+                    address: next_game_addr,
+                    l2_block_number: next_l2_block_number,
+                };
+            } else {
+                break proposal;
+            }
+        };
+        let submission = self
+            .execution_provider
+            .submit_proposal(&proposal, self.config.proposer_bond)
+            .await?;
+        info!(
+            tx_hash = ?submission.tx_hash,
+            l2_block_number = proposal.l2_block_number,
+            parent_ref = %proposal.parent_ref,
+            proposal_key = ?proposal.proposal_key,
+            "submitted World Chain proof-system game"
+        );
         Ok(())
     }
 
