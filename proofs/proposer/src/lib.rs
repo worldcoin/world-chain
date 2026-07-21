@@ -16,7 +16,10 @@ pub use config::ProposerConfig;
 pub use error::ProposerError;
 pub use proposer::WorldChainProposer;
 pub use traits::ProposerClient;
-pub use types::{ParentRef, Proposal, ProposalSubmission};
+pub use types::{
+    CanonicalLine, CloseGameSubmission, ParentRef, Proposal, ProposalSubmission, ResolveSubmission,
+    ResolvedGames,
+};
 
 #[cfg(test)]
 mod tests;

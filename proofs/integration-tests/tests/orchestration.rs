@@ -154,7 +154,14 @@ async fn invalid_root_is_challenged_by_real_challenger() {
 
     let proposer =
         WorldChainProposer::new(proposer_config(), chain.clone(), bad_proposer_consensus);
-    proposer.propose_once().await.expect("bad proposal posted");
+    let canonical_line = proposer
+        .anchor_and_canonical_line()
+        .await
+        .expect("canonical line reconstructed");
+    proposer
+        .propose(&canonical_line)
+        .await
+        .expect("bad proposal posted");
     let game = chain.latest_game().expect("game created").game;
 
     let mut challenger =
@@ -175,7 +182,14 @@ async fn valid_challenged_root_is_defended_through_workers() {
     let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
 
     let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus.clone());
-    proposer.propose_once().await.expect("proposal posted");
+    let canonical_line = proposer
+        .anchor_and_canonical_line()
+        .await
+        .expect("canonical line reconstructed");
+    proposer
+        .propose(&canonical_line)
+        .await
+        .expect("proposal posted");
     let game = chain.latest_game().expect("game created").game;
     chain.challenge_game(game);
 
@@ -210,7 +224,14 @@ async fn valid_challenged_root_survives_transient_proof_failure() {
     let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
 
     let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus.clone());
-    proposer.propose_once().await.expect("proposal posted");
+    let canonical_line = proposer
+        .anchor_and_canonical_line()
+        .await
+        .expect("canonical line reconstructed");
+    proposer
+        .propose(&canonical_line)
+        .await
+        .expect("proposal posted");
     let game = chain.latest_game().expect("game created").game;
     chain.challenge_game(game);
 
@@ -255,7 +276,14 @@ async fn defender_ignores_challenged_invalid_root() {
 
     let proposer =
         WorldChainProposer::new(proposer_config(), chain.clone(), bad_proposer_consensus);
-    proposer.propose_once().await.expect("bad proposal posted");
+    let canonical_line = proposer
+        .anchor_and_canonical_line()
+        .await
+        .expect("canonical line reconstructed");
+    proposer
+        .propose(&canonical_line)
+        .await
+        .expect("bad proposal posted");
     let game = chain.latest_game().expect("game created").game;
     chain.challenge_game(game);
 
