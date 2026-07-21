@@ -48,6 +48,7 @@ where
         let mut canonical_line = CanonicalLine::new(anchor_parent);
 
         let mut cursor = anchor_parent;
+        let latest_finalized_l2_block = self.consensus_provider.latest_l2_finalized_block().await?;
 
         // loop to the next canonical game until it reaches the last one
         loop {
@@ -59,8 +60,6 @@ where
                     block_interval: self.config.block_interval,
                 })?;
 
-            let latest_finalized_l2_block =
-                self.consensus_provider.latest_l2_finalized_block().await?;
             if next_l2_block_number > latest_finalized_l2_block {
                 return Ok(CanonicalScan::new(
                     canonical_line,
