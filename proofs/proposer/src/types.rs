@@ -1,5 +1,71 @@
 use alloy_primitives::{Address, B256, TxHash};
-use world_chain_proofs::ProposalCommitment;
+use world_chain_proofs::{InvalidationReason, ProposalCommitment};
+
+/// The canonical lineage discovered by the proposer and the action available at its tip.
+#[derive(Debug)]
+pub struct CanonicalScan {
+    canonical_line: CanonicalLine,
+    next_action: NextProposalAction,
+}
+
+impl CanonicalScan {
+    pub(crate) const fn new(
+        canonical_line: CanonicalLine,
+        next_action: NextProposalAction,
+    ) -> Self {
+        Self {
+            canonical_line,
+            next_action,
+        }
+    }
+
+    /// Returns the valid canonical lineage found by the scan.
+    #[must_use]
+    pub const fn canonical_line(&self) -> &CanonicalLine {
+        &self.canonical_line
+    }
+
+    /// Returns the action available at the tip of the canonical lineage.
+    #[must_use]
+    pub const fn next_action(&self) -> &NextProposalAction {
+        &self.next_action
+    }
+}
+
+/// The action the proposer may take after scanning the canonical lineage.
+#[derive(Debug, PartialEq, Eq)]
+pub enum NextProposalAction {
+    /// Submit a new transition for which no game exists.
+    Propose(Proposal),
+    /// Replace a game invalidated by a direct proof timeout.
+    RetryTimedOut {
+        /// Proposal data for the replacement game.
+        proposal: Proposal,
+        /// Invalidated game that this proposal replaces.
+        invalidated_game: Address,
+    },
+    /// Wait for the challenger to resolve a game whose outcome is negative.
+    AwaitNegativeResolution {
+        /// Game that is ready to resolve negatively.
+        game: Address,
+        /// Negative outcome reported by the game.
+        reason: InvalidationReason,
+    },
+    /// Stop because the factory does not permit retrying this invalidated transition.
+    BlockedByInvalidation {
+        /// Invalidated game occupying the proposal key.
+        game: Address,
+        /// Reason the transition cannot be retried automatically.
+        reason: InvalidationReason,
+    },
+    /// No transition can be proposed beyond the current finalized L2 head.
+    CaughtUp {
+        /// Next L2 block the proposer would target.
+        target_block: u64,
+        /// Current finalized L2 block reported by the consensus client.
+        finalized_block: u64,
+    },
+}
 
 /// The current anchor checkpoint and the canonical games built on top of it.
 #[derive(Debug)]
@@ -52,6 +118,7 @@ impl FinalizedGames {
         self.games.push(game);
     }
 
+    #[must_use]
     pub fn last(&self) -> Option<ParentRef> {
         self.games.last().copied()
     }

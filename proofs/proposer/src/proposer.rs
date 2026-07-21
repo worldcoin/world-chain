@@ -1,10 +1,10 @@
 use alloy_primitives::B256;
 use tracing::{info, warn};
-use world_chain_proofs::{ConsensusProvider, RootState};
+use world_chain_proofs::{ConsensusProvider, InvalidationReason, RootState};
 
 use crate::{
     ParentRef, Proposal, ProposerClient, ProposerConfig, ProposerError,
-    types::{CanonicalLine, FinalizedGames},
+    types::{CanonicalLine, CanonicalScan, FinalizedGames, NextProposalAction},
 };
 
 /// World Chain Proposer.
@@ -37,13 +37,11 @@ where
     E: ProposerClient,
     C: ConsensusProvider,
 {
-    /// Fetch the anchor game and reconconstruct the canonical line of games that is built on
-    /// top of the current anchor (if any) until the last created canonical game.
-    ///
+    /// Fetches the anchor, reconstructs its canonical descendants, and determines the next action.
     ///
     /// A game is considered canonical if it's built on top of a valid game and its root_claim
     /// is correct - i.e. it matches the one computed by the proposer itself.
-    pub async fn anchor_and_canonical_line(&self) -> Result<CanonicalLine, ProposerError> {
+    pub async fn anchor_and_canonical_line(&self) -> Result<CanonicalScan, ProposerError> {
         self.config.validate()?;
 
         let anchor_parent = self.execution_provider.anchor_parent().await?;
@@ -64,7 +62,13 @@ where
             let latest_finalized_l2_block =
                 self.consensus_provider.latest_l2_finalized_block().await?;
             if next_l2_block_number > latest_finalized_l2_block {
-                break;
+                return Ok(CanonicalScan::new(
+                    canonical_line,
+                    NextProposalAction::CaughtUp {
+                        target_block: next_l2_block_number,
+                        finalized_block: latest_finalized_l2_block,
+                    },
+                ));
             }
 
             let root_claim = self
@@ -87,6 +91,32 @@ where
                 .game_for_proposal_key(proposal.proposal_key)
                 .await?
             {
+                let resolution_status = self
+                    .execution_provider
+                    .resolution_status(next_game_addr)
+                    .await?;
+                if resolution_status.root_state == RootState::Invalidated {
+                    let next_action = if resolution_status.resolvable {
+                        NextProposalAction::AwaitNegativeResolution {
+                            game: next_game_addr,
+                            reason: resolution_status.invalidation_reason,
+                        }
+                    } else if resolution_status.invalidation_reason
+                        == InvalidationReason::ProofTimeout
+                    {
+                        NextProposalAction::RetryTimedOut {
+                            proposal,
+                            invalidated_game: next_game_addr,
+                        }
+                    } else {
+                        NextProposalAction::BlockedByInvalidation {
+                            game: next_game_addr,
+                            reason: resolution_status.invalidation_reason,
+                        }
+                    };
+                    return Ok(CanonicalScan::new(canonical_line, next_action));
+                }
+
                 let next_game = ParentRef {
                     address: next_game_addr,
                     l2_block_number: next_l2_block_number,
@@ -94,10 +124,12 @@ where
                 canonical_line.push_game(next_game);
                 cursor = next_game;
             } else {
-                break;
+                return Ok(CanonicalScan::new(
+                    canonical_line,
+                    NextProposalAction::Propose(proposal),
+                ));
             }
         }
-        Ok(canonical_line)
     }
 
     pub async fn resolve_games(
@@ -150,59 +182,42 @@ where
         Ok(())
     }
 
-    pub async fn propose(&self, canonical_line: &CanonicalLine) -> Result<(), ProposerError> {
-        let mut cursor = canonical_line.tip();
-        let proposal = loop {
-            let next_l2_block_number = cursor
-                .l2_block_number
-                .checked_add(self.config.block_interval)
-                .ok_or(ProposerError::BlockNumberOverflow {
-                    parent_block: cursor.l2_block_number,
-                    block_interval: self.config.block_interval,
-                })?;
-
-            let latest_finalized_l2_block =
-                self.consensus_provider.latest_l2_finalized_block().await?;
-            if next_l2_block_number > latest_finalized_l2_block {
+    pub async fn propose(&self, scan: &CanonicalScan) -> Result<(), ProposerError> {
+        let (proposal, retry_of) = match scan.next_action() {
+            NextProposalAction::Propose(proposal) => (proposal, None),
+            NextProposalAction::RetryTimedOut {
+                proposal,
+                invalidated_game,
+            } => (proposal, Some(*invalidated_game)),
+            NextProposalAction::AwaitNegativeResolution { game, reason } => {
+                info!(
+                    game_address = %game,
+                    invalidation_reason = ?reason,
+                    "waiting for challenger to resolve game with negative outcome"
+                );
                 return Ok(());
             }
-            let root_claim = self
-                .consensus_provider
-                .output_root_at_block(next_l2_block_number)
-                .await?;
-            let mut proposal = Proposal {
-                parent_ref: cursor.address,
-                root_claim,
-                l2_block_number: next_l2_block_number,
-                proposal_key: B256::ZERO,
-            };
-            proposal.proposal_key = self
-                .execution_provider
-                .proposal_key(proposal.commitment())
-                .await?;
-            if let Some(next_game_addr) = self
-                .execution_provider
-                .game_for_proposal_key(proposal.proposal_key)
-                .await?
-            {
-                // game already exists, build on top of it
-                cursor = ParentRef {
-                    address: next_game_addr,
-                    l2_block_number: next_l2_block_number,
-                };
-            } else {
-                break proposal;
+            NextProposalAction::BlockedByInvalidation { game, reason } => {
+                warn!(
+                    game_address = %game,
+                    invalidation_reason = ?reason,
+                    "invalidated transition is not automatically retryable; governance intervention required"
+                );
+                return Ok(());
             }
+            NextProposalAction::CaughtUp { .. } => return Ok(()),
         };
+
         let submission = self
             .execution_provider
-            .submit_proposal(&proposal, self.config.proposer_bond)
+            .submit_proposal(proposal, self.config.proposer_bond)
             .await?;
         info!(
             tx_hash = ?submission.tx_hash,
             l2_block_number = proposal.l2_block_number,
             parent_ref = %proposal.parent_ref,
             proposal_key = ?proposal.proposal_key,
+            retry_of = ?retry_of,
             "submitted World Chain proof-system game"
         );
         Ok(())
@@ -217,13 +232,13 @@ where
             interval.tick().await;
             let iteration: Result<(), ProposerError> = async {
                 // 1. refresh the anchor and canonical line
-                let canonical_line = self.anchor_and_canonical_line().await?;
+                let canonical_scan = self.anchor_and_canonical_line().await?;
                 // 2. resolve positive-ready games parent-first
-                let finalized_games = self.resolve_games(&canonical_line).await?;
+                let finalized_games = self.resolve_games(canonical_scan.canonical_line()).await?;
                 // 3. advance the anchor to the highest finalized canonical game
                 self.advance_anchor(finalized_games).await?;
                 // 4. attempt a new canonical proposal or retry
-                self.propose(&canonical_line).await?;
+                self.propose(&canonical_scan).await?;
                 // 5. withdraw known proposer credits
                 // TODO: add withdraw credits logic
                 Ok(())

@@ -14,7 +14,7 @@ use world_chain_proofs::{
 use crate::{
     ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerConfig, ProposerError,
     WorldChainProposer,
-    types::{CanonicalLine, CloseGameSubmission, ResolveSubmission},
+    types::{CloseGameSubmission, ResolveSubmission},
 };
 
 const DOMAIN_HASH: B256 = b256!("1111111111111111111111111111111111111111111111111111111111111111");
@@ -138,10 +138,10 @@ async fn anchor_and_canonical_line_walks_existing_games_until_gap() {
     };
     let proposer = WorldChainProposer::new(config(), contracts, output_roots);
 
-    let canonical_line = proposer.anchor_and_canonical_line().await.unwrap();
+    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
 
     assert_eq!(
-        canonical_line.games(),
+        canonical_scan.canonical_line().games(),
         &[ParentRef {
             address: GAME_1,
             l2_block_number: 10,
@@ -165,12 +165,9 @@ async fn propose_submits_proposal_after_last_canonical_game() {
         finalized_l2_block: 10,
     };
     let proposer = WorldChainProposer::new(config(), contracts, output_roots);
-    let canonical_line = CanonicalLine::new(ParentRef {
-        address: ANCHOR,
-        l2_block_number: 0,
-    });
+    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
 
-    proposer.propose(&canonical_line).await.unwrap();
+    proposer.propose(&canonical_scan).await.unwrap();
 
     let proposal = submissions.lock().expect("not poisoned")[0];
     assert_eq!(proposal.parent_ref, ANCHOR);
@@ -226,11 +223,11 @@ async fn anchor_and_canonical_line_stops_at_finalized_l2_block() {
     };
     let proposer = WorldChainProposer::new(config(), contracts, output_roots);
 
-    let canonical_line = proposer.anchor_and_canonical_line().await.unwrap();
+    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
 
-    assert!(canonical_line.games().is_empty());
+    assert!(canonical_scan.canonical_line().games().is_empty());
     assert_eq!(
-        canonical_line.anchor(),
+        canonical_scan.canonical_line().anchor(),
         ParentRef {
             address: ANCHOR,
             l2_block_number: 0,
