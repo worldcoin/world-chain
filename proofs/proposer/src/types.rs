@@ -43,11 +43,11 @@ impl CanonicalLine {
 }
 
 #[derive(Debug, Default)]
-pub struct ResolvedGames {
+pub struct FinalizedGames {
     pub games: Vec<ParentRef>,
 }
 
-impl ResolvedGames {
+impl FinalizedGames {
     pub fn push(&mut self, game: ParentRef) {
         self.games.push(game);
     }

@@ -1,10 +1,10 @@
 use alloy_primitives::B256;
 use tracing::{info, warn};
-use world_chain_proofs::ConsensusProvider;
+use world_chain_proofs::{ConsensusProvider, RootState};
 
 use crate::{
     ParentRef, Proposal, ProposerClient, ProposerConfig, ProposerError,
-    types::{CanonicalLine, ResolvedGames},
+    types::{CanonicalLine, FinalizedGames},
 };
 
 /// World Chain Proposer.
@@ -103,8 +103,8 @@ where
     pub async fn resolve_games(
         &self,
         canonical_line: &CanonicalLine,
-    ) -> Result<ResolvedGames, ProposerError> {
-        let mut resolved_games = ResolvedGames::default();
+    ) -> Result<FinalizedGames, ProposerError> {
+        let mut finalized_games = FinalizedGames::default();
         for game in canonical_line.games() {
             let resolution_status = self
                 .execution_provider
@@ -119,25 +119,30 @@ where
                     tx_hash = ?resolve_submission.tx_hash,
                     "resolved World Chain proof-system game"
                 );
-                // add resolved game to the result list
-                resolved_games.push(*game);
+                finalized_games.push(*game);
+            } else if resolution_status.root_state == RootState::Finalized {
+                // the game was finalized in an earlier iteration or by another keeper
+                finalized_games.push(*game);
             }
         }
-        Ok(resolved_games)
+        Ok(finalized_games)
     }
 
-    pub async fn advance_anchor(&self, resolved_games: ResolvedGames) -> Result<(), ProposerError> {
+    pub async fn advance_anchor(
+        &self,
+        finalized_games: FinalizedGames,
+    ) -> Result<(), ProposerError> {
         // games are ordered by l2 block number, therefore taking the last one
         // means taking the one with the highest l2 block number
-        let maybe_highest_resolved_game = resolved_games.last();
-        if let Some(highest_resolved_game) = maybe_highest_resolved_game {
+        let maybe_highest_finalized_game = finalized_games.last();
+        if let Some(highest_finalized_game) = maybe_highest_finalized_game {
             let close_game_submission = self
                 .execution_provider
-                .close_game(highest_resolved_game.address)
+                .close_game(highest_finalized_game.address)
                 .await?;
             info!(
-                game_address = %highest_resolved_game.address,
-                l2_block_number = highest_resolved_game.l2_block_number,
+                game_address = %highest_finalized_game.address,
+                l2_block_number = highest_finalized_game.l2_block_number,
                 tx_hash = ?close_game_submission.tx_hash,
                 "closed World Chain proof-system game"
             );
@@ -214,9 +219,9 @@ where
                 // 1. refresh the anchor and canonical line
                 let canonical_line = self.anchor_and_canonical_line().await?;
                 // 2. resolve positive-ready games parent-first
-                let resolved_games = self.resolve_games(&canonical_line).await?;
+                let finalized_games = self.resolve_games(&canonical_line).await?;
                 // 3. advance the anchor to the highest finalized canonical game
-                self.advance_anchor(resolved_games).await?;
+                self.advance_anchor(finalized_games).await?;
                 // 4. attempt a new canonical proposal or retry
                 self.propose(&canonical_line).await?;
                 // 5. withdraw known proposer credits
