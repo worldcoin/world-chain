@@ -125,7 +125,7 @@ where
                     "resolved World Chain proof-system game"
                 );
                 // add resolved game to the result list
-                resolved_games.push(game);
+                resolved_games.push(*game);
             }
         }
         Ok(resolved_games)

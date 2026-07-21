@@ -16,19 +16,21 @@ impl CanonicalLine {
     }
 }
 
-impl Iterator for CanonicalLine {
+impl IntoIterator for CanonicalLine {
     type Item = ParentRef;
+    type IntoIter = std::vec::IntoIter<ParentRef>;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        self.games.iter().next().copied()
+    fn into_iter(self) -> Self::IntoIter {
+        self.games.into_iter()
     }
 }
 
-impl Iterator for &CanonicalLine {
-    type Item = ParentRef;
+impl<'a> IntoIterator for &'a CanonicalLine {
+    type Item = &'a ParentRef;
+    type IntoIter = std::slice::Iter<'a, ParentRef>;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        self.games.iter().next().copied()
+    fn into_iter(self) -> Self::IntoIter {
+        self.games.iter()
     }
 }
 
