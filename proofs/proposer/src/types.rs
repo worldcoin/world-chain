@@ -1,6 +1,44 @@
 use alloy_primitives::{Address, B256, TxHash};
 use world_chain_proofs::ProposalCommitment;
 
+#[derive(Debug, Default)]
+pub struct CanonicalLine {
+    pub games: Vec<ParentRef>,
+}
+
+impl CanonicalLine {
+    pub fn push(&mut self, game: ParentRef) {
+        self.games.push(game);
+    }
+
+    pub fn last(&self) -> Option<ParentRef> {
+        self.games.last().copied()
+    }
+}
+
+impl Iterator for CanonicalLine {
+    type Item = ParentRef;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.games.iter().next().copied()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ResolvedGames {
+    pub games: Vec<ParentRef>,
+}
+
+impl ResolvedGames {
+    pub fn push(&mut self, game: ParentRef) {
+        self.games.push(game);
+    }
+
+    pub fn last(&self) -> Option<ParentRef> {
+        self.games.last().copied()
+    }
+}
+
 /// A parent reference that the next proposal should build on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParentRef {
@@ -39,5 +77,19 @@ impl Proposal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProposalSubmission {
     /// Transaction hash for the proposal submission.
+    pub tx_hash: TxHash,
+}
+
+/// Result of a resolve transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolveSubmission {
+    /// Transaction hash for the resolve submission.
+    pub tx_hash: TxHash,
+}
+
+/// Result of a closeGame transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CloseGameSubmission {
+    /// Transaction hash for the closeGame submission.
     pub tx_hash: TxHash,
 }
