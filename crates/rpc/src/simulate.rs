@@ -1446,6 +1446,9 @@ fn decode_abi_string(data: &[u8]) -> Option<String> {
     let len: usize = U256::from_be_slice(&data[offset..str_start])
         .try_into()
         .ok()?;
+    if len > MAX_METADATA_STRING_BYTES {
+        return None;
+    }
     let str_end = str_start.checked_add(len)?;
     if str_end > data.len() {
         return None;
@@ -1797,6 +1800,44 @@ mod tests {
         assert!(
             result.is_err(),
             "should reject more than MAX_LOG_ASSET_CHANGES"
+        );
+    }
+
+    fn encode_abi_string(value: &[u8]) -> Vec<u8> {
+        let padded_len = value.len().div_ceil(32) * 32;
+        let mut encoded = vec![0_u8; 64 + padded_len];
+
+        // The length word begins at byte 32.
+        encoded[31] = 32;
+
+        // Store the string's byte length.
+        encoded[32..64].copy_from_slice(&U256::from(value.len() as u64).to_be_bytes::<32>());
+
+        // Store the contents. The zero-filled remainder provides ABI padding.
+        encoded[64..64 + value.len()].copy_from_slice(value);
+
+        encoded
+    }
+
+    #[test]
+    fn decode_abi_string_accepts_exact_metadata_limit() {
+        let value = vec![b'A'; MAX_METADATA_STRING_BYTES];
+        let encoded = encode_abi_string(&value);
+
+        let decoded = decode_abi_string(&encoded)
+            .expect("metadata exactly at the byte limit should be accepted");
+
+        assert_eq!(decoded.as_bytes(), value.as_slice());
+    }
+
+    #[test]
+    fn decode_abi_string_rejects_metadata_limit_plus_one() {
+        let value = vec![b'A'; MAX_METADATA_STRING_BYTES + 1];
+        let encoded = encode_abi_string(&value);
+
+        assert!(
+            decode_abi_string(&encoded).is_none(),
+            "metadata above the byte limit should be rejected"
         );
     }
 }
