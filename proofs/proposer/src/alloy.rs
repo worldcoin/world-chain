@@ -7,7 +7,7 @@ use world_chain_proofs::{
 };
 
 use crate::{
-    ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
+    BondManagerClient, ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
     types::{CloseGameSubmission, ResolveSubmission, WithdrawSubmission},
 };
 
@@ -39,6 +39,57 @@ where
             anchor,
             provider,
         }
+    }
+}
+
+#[async_trait]
+impl<P> BondManagerClient for AlloyProofSystemClient<P>
+where
+    P: Provider + WalletProvider + Clone + Send + Sync + 'static,
+{
+    fn proposer_address(&self) -> Address {
+        self.provider.default_signer_address()
+    }
+
+    async fn game_count(&self) -> Result<u64, ProposerError> {
+        let count = self
+            .factory
+            .gameCount()
+            .call()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        u256_to_u64(count, "gameCount")
+    }
+
+    async fn game_at(&self, index: u64) -> Result<Address, ProposerError> {
+        self.factory
+            .gameAt(U256::from(index))
+            .call()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))
+    }
+
+    async fn game_proposer(&self, game: Address) -> Result<Address, ProposerError> {
+        IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
+            game,
+            self.provider.clone(),
+        )
+        .proposer()
+        .call()
+        .await
+        .map_err(|error| ProposerError::Contract(error.to_string()))
+    }
+
+    async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
+        ProposerClient::resolution_status(self, game).await
+    }
+
+    async fn claimable(&self, game: Address) -> Result<U256, ProposerError> {
+        ProposerClient::claimable(self, game).await
+    }
+
+    async fn withdraw(&self, game: Address) -> Result<WithdrawSubmission, ProposerError> {
+        ProposerClient::withdraw(self, game).await
     }
 }
 
