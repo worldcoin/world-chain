@@ -27,6 +27,12 @@ pub const SIMULATION_TIMEOUT: Duration = Duration::from_secs(5);
 /// in `decode_batch_transfer_data`.
 pub const MAX_BATCH_TRANSFERS: usize = 1000;
 
+/// Maximum number of asset-change rows decoded from logs.
+pub const MAX_LOG_ASSET_CHANGES: usize = 1000;
+
+/// Maximum UTF-8 byte length accepted for a token name or symbol.
+pub const MAX_METADATA_STRING_BYTES: usize = 256;
+
 // ─── Asset / approval event topics ───────────────────────────────────────────
 
 /// `Transfer(address,address,uint256)` — ERC-20 and ERC-721

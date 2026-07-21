@@ -855,6 +855,7 @@ pub fn parse_asset_changes(
                     let from = address_from_topic(topics[1]);
                     let to = address_from_topic(topics[2]);
                     let token_id = U256::from_be_bytes(topics[3].0);
+                    ensure_log_asset_change_capacity(changes.len(), 1)?;
                     changes.push(AssetChange {
                         change_type: AssetType::Erc721,
                         from,
@@ -868,6 +869,7 @@ pub fn parse_asset_changes(
                     let from = address_from_topic(topics[1]);
                     let to = address_from_topic(topics[2]);
                     let amount = U256::from_be_slice(&log.data.data[..32]);
+                    ensure_log_asset_change_capacity(changes.len(), 1)?;
                     changes.push(AssetChange {
                         change_type: AssetType::Erc20,
                         from,
@@ -887,6 +889,7 @@ pub fn parse_asset_changes(
                 let to = address_from_topic(topics[3]);
                 let id = U256::from_be_slice(&log.data.data[..32]);
                 let value = U256::from_be_slice(&log.data.data[32..64]);
+                ensure_log_asset_change_capacity(changes.len(), 1)?;
                 changes.push(AssetChange {
                     change_type: AssetType::Erc1155,
                     from,
@@ -904,6 +907,7 @@ pub fn parse_asset_changes(
                 let from = address_from_topic(topics[2]);
                 let to = address_from_topic(topics[3]);
                 if let Some(pairs) = decode_batch_transfer_data(&log.data.data)? {
+                    ensure_log_asset_change_capacity(changes.len(), pairs.len())?;
                     for (id, value) in pairs {
                         changes.push(AssetChange {
                             change_type: AssetType::Erc1155,
@@ -921,6 +925,15 @@ pub fn parse_asset_changes(
     }
 
     Ok(changes)
+}
+
+/// Ensure that the number of asset changes from logs does not exceed the maximum allowed.
+fn ensure_log_asset_change_capacity(current: usize, additional: usize) -> Result<(), &'static str> {
+    if current.saturating_add(additional) > MAX_LOG_ASSET_CHANGES {
+        return Err("log asset change limit exceeded");
+    }
+
+    Ok(())
 }
 
 /// Decode ABI-encoded `(uint256[], uint256[])` from TransferBatch data.
@@ -1433,6 +1446,9 @@ fn decode_abi_string(data: &[u8]) -> Option<String> {
     let len: usize = U256::from_be_slice(&data[offset..str_start])
         .try_into()
         .ok()?;
+    if len > MAX_METADATA_STRING_BYTES {
+        return None;
+    }
     let str_end = str_start.checked_add(len)?;
     if str_end > data.len() {
         return None;
@@ -1698,5 +1714,130 @@ mod tests {
         data[24..32].copy_from_slice(&offset.to_be_bytes());
 
         assert_eq!(decode_abi_string(&data), None);
+    }
+
+    fn make_transfer_batch_log(entry_count: usize) -> alloy_primitives::Log {
+        let ids_offset = 64;
+        let values_offset = ids_offset + 32 + entry_count * 32;
+
+        let mut data = Vec::new();
+
+        // The first two ABI words point to the dynamic arrays.
+        data.extend_from_slice(&U256::from(ids_offset as u64).to_be_bytes::<32>());
+        data.extend_from_slice(&U256::from(values_offset as u64).to_be_bytes::<32>());
+
+        // Encode ids.length followed by each ID.
+        data.extend_from_slice(&U256::from(entry_count as u64).to_be_bytes::<32>());
+        for id in 0..entry_count {
+            data.extend_from_slice(&U256::from(id as u64).to_be_bytes::<32>());
+        }
+
+        // Encode values.length followed by each value.
+        data.extend_from_slice(&U256::from(entry_count as u64).to_be_bytes::<32>());
+        for _ in 0..entry_count {
+            data.extend_from_slice(&U256::from(1_u64).to_be_bytes::<32>());
+        }
+
+        let operator = Address::repeat_byte(0xaa);
+        let from = Address::repeat_byte(0xbb);
+        let to = Address::repeat_byte(0xcc);
+
+        alloy_primitives::Log::new(
+            Address::repeat_byte(0x11),
+            vec![
+                TRANSFER_BATCH_TOPIC,
+                B256::left_padding_from(operator.as_slice()),
+                B256::left_padding_from(from.as_slice()),
+                B256::left_padding_from(to.as_slice()),
+            ],
+            data.into(),
+        )
+        .unwrap()
+    }
+
+    fn make_transfer_single_log() -> alloy_primitives::Log {
+        let operator = Address::repeat_byte(0xaa);
+        let from = Address::repeat_byte(0xbb);
+        let to = Address::repeat_byte(0xcc);
+
+        let mut data = Vec::new();
+        data.extend_from_slice(&U256::from(42_u64).to_be_bytes::<32>());
+        data.extend_from_slice(&U256::from(1_u64).to_be_bytes::<32>());
+
+        alloy_primitives::Log::new(
+            Address::repeat_byte(0x11),
+            vec![
+                TRANSFER_SINGLE_TOPIC,
+                B256::left_padding_from(operator.as_slice()),
+                B256::left_padding_from(from.as_slice()),
+                B256::left_padding_from(to.as_slice()),
+            ],
+            data.into(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn parse_asset_changes_accepts_exact_limit() {
+        let batch_log = make_transfer_batch_log(MAX_LOG_ASSET_CHANGES - 1);
+        let single_log = make_transfer_single_log();
+
+        // The single transfer brings the aggregate count exactly to the limit.
+        let changes = parse_asset_changes(&[batch_log, single_log])
+            .expect("exactly MAX_LOG_ASSET_CHANGES should be accepted");
+
+        assert_eq!(changes.len(), MAX_LOG_ASSET_CHANGES);
+    }
+
+    #[test]
+    fn parse_asset_changes_rejects_limit_plus_one() {
+        let batch_log = make_transfer_batch_log(MAX_LOG_ASSET_CHANGES);
+        let single_log = make_transfer_single_log();
+
+        // The single transfer pushes the aggregate count over the limit.
+        let result = parse_asset_changes(&[batch_log, single_log]);
+
+        assert!(
+            result.is_err(),
+            "should reject more than MAX_LOG_ASSET_CHANGES"
+        );
+    }
+
+    fn encode_abi_string(value: &[u8]) -> Vec<u8> {
+        let padded_len = value.len().div_ceil(32) * 32;
+        let mut encoded = vec![0_u8; 64 + padded_len];
+
+        // The length word begins at byte 32.
+        encoded[31] = 32;
+
+        // Store the string's byte length.
+        encoded[32..64].copy_from_slice(&U256::from(value.len() as u64).to_be_bytes::<32>());
+
+        // Store the contents. The zero-filled remainder provides ABI padding.
+        encoded[64..64 + value.len()].copy_from_slice(value);
+
+        encoded
+    }
+
+    #[test]
+    fn decode_abi_string_accepts_exact_metadata_limit() {
+        let value = vec![b'A'; MAX_METADATA_STRING_BYTES];
+        let encoded = encode_abi_string(&value);
+
+        let decoded = decode_abi_string(&encoded)
+            .expect("metadata exactly at the byte limit should be accepted");
+
+        assert_eq!(decoded.as_bytes(), value.as_slice());
+    }
+
+    #[test]
+    fn decode_abi_string_rejects_metadata_limit_plus_one() {
+        let value = vec![b'A'; MAX_METADATA_STRING_BYTES + 1];
+        let encoded = encode_abi_string(&value);
+
+        assert!(
+            decode_abi_string(&encoded).is_none(),
+            "metadata above the byte limit should be rejected"
+        );
     }
 }
