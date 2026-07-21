@@ -1782,7 +1782,7 @@ mod tests {
         let batch_log = make_transfer_batch_log(MAX_LOG_ASSET_CHANGES - 1);
         let single_log = make_transfer_single_log();
 
-        // 2 logs: batch_log has MAX_LOG_ASSET_CHANGES - 1 asset changes, single_log has 1 change, total = MAX_LOG_ASSET_CHANGES
+        // The single transfer brings the aggregate count exactly to the limit.
         let changes = parse_asset_changes(&[batch_log, single_log])
             .expect("exactly MAX_LOG_ASSET_CHANGES should be accepted");
 
@@ -1794,7 +1794,7 @@ mod tests {
         let batch_log = make_transfer_batch_log(MAX_LOG_ASSET_CHANGES);
         let single_log = make_transfer_single_log();
 
-        // 2 logs: batch_log has MAX_LOG_ASSET_CHANGES asset changes, single_log has 1 change, total = MAX_LOG_ASSET_CHANGES + 1
+        // The single transfer pushes the aggregate count over the limit.
         let result = parse_asset_changes(&[batch_log, single_log]);
 
         assert!(
