@@ -211,7 +211,7 @@ async fn zero_block_interval_is_rejected() {
 }
 
 #[tokio::test]
-async fn anchor_and_canonical_line_waits_for_finalized_l2_block() {
+async fn anchor_and_canonical_line_stops_at_finalized_l2_block() {
     let contracts = MockContracts {
         anchor: ParentRef {
             address: ANCHOR,
@@ -226,11 +226,14 @@ async fn anchor_and_canonical_line_waits_for_finalized_l2_block() {
     };
     let proposer = WorldChainProposer::new(config(), contracts, output_roots);
 
-    assert!(matches!(
-        proposer.anchor_and_canonical_line().await,
-        Err(ProposerError::ProposalNotReady {
-            target_block: 10,
-            finalized_block: 9,
-        })
-    ));
+    let canonical_line = proposer.anchor_and_canonical_line().await.unwrap();
+
+    assert!(canonical_line.games().is_empty());
+    assert_eq!(
+        canonical_line.anchor(),
+        ParentRef {
+            address: ANCHOR,
+            l2_block_number: 0,
+        }
+    );
 }

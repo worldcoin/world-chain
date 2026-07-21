@@ -64,10 +64,7 @@ where
             let latest_finalized_l2_block =
                 self.consensus_provider.latest_l2_finalized_block().await?;
             if next_l2_block_number > latest_finalized_l2_block {
-                return Err(ProposerError::ProposalNotReady {
-                    target_block: next_l2_block_number,
-                    finalized_block: latest_finalized_l2_block,
-                });
+                break;
             }
 
             let root_claim = self
@@ -162,10 +159,7 @@ where
             let latest_finalized_l2_block =
                 self.consensus_provider.latest_l2_finalized_block().await?;
             if next_l2_block_number > latest_finalized_l2_block {
-                return Err(ProposerError::ProposalNotReady {
-                    target_block: next_l2_block_number,
-                    finalized_block: latest_finalized_l2_block,
-                });
+                return Ok(());
             }
             let root_claim = self
                 .consensus_provider
