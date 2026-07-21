@@ -270,16 +270,16 @@ where
         loop {
             interval.tick().await;
             let iteration: Result<(), ProposerError> = async {
-                // 1. refresh the anchor and canonical line
-                let canonical_scan = self.anchor_and_canonical_line().await?;
-                // 2. resolve positive-ready games parent-first
-                let finalized_games = self.resolve_games(canonical_scan.canonical_line()).await?;
-                // 3. advance the anchor to the highest finalized canonical game
-                self.advance_anchor(finalized_games).await?;
-                // 4. attempt a new canonical proposal or retry
-                self.propose(&canonical_scan).await?;
-                // 5. withdraw known proposer credits
+                // 1. withdraw known proposer credits
                 self.withdraw_credits().await?;
+                // 2. refresh the anchor and canonical line
+                let canonical_scan = self.anchor_and_canonical_line().await?;
+                // 3. resolve positive-ready games parent-first
+                let finalized_games = self.resolve_games(canonical_scan.canonical_line()).await?;
+                // 4. advance the anchor to the highest finalized canonical game
+                self.advance_anchor(finalized_games).await?;
+                // 5. attempt a new canonical proposal or retry
+                self.propose(&canonical_scan).await?;
                 Ok(())
             }
             .await;
