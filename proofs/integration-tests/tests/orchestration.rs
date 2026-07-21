@@ -67,7 +67,7 @@ async fn fake_resolution_matches_contract_transition_semantics() {
     let chain = FakeExecution::new();
     let canonical_root = B256::repeat_byte(0x20);
     let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
-    let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus);
+    let mut proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus);
 
     let canonical_scan = proposer
         .anchor_and_canonical_line()
@@ -221,7 +221,7 @@ async fn invalid_root_is_challenged_by_real_challenger() {
     let honest_consensus =
         FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
 
-    let proposer =
+    let mut proposer =
         WorldChainProposer::new(proposer_config(), chain.clone(), bad_proposer_consensus);
     let canonical_scan = proposer
         .anchor_and_canonical_line()
@@ -250,7 +250,7 @@ async fn valid_challenged_root_is_defended_through_workers() {
     let canonical_root = B256::repeat_byte(0x20);
     let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
 
-    let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus.clone());
+    let mut proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus.clone());
     let canonical_scan = proposer
         .anchor_and_canonical_line()
         .await
@@ -296,7 +296,7 @@ async fn valid_challenged_root_survives_transient_proof_failure() {
     let canonical_root = B256::repeat_byte(0x20);
     let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
 
-    let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus.clone());
+    let mut proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus.clone());
     let canonical_scan = proposer
         .anchor_and_canonical_line()
         .await
@@ -351,7 +351,7 @@ async fn defender_ignores_challenged_invalid_root() {
     let honest_consensus =
         FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
 
-    let proposer =
+    let mut proposer =
         WorldChainProposer::new(proposer_config(), chain.clone(), bad_proposer_consensus);
     let canonical_scan = proposer
         .anchor_and_canonical_line()
