@@ -1,9 +1,9 @@
 use alloy_primitives::B256;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 use world_chain_proofs::ConsensusProvider;
 
 use crate::{
-    ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerConfig, ProposerError,
+    ParentRef, Proposal, ProposerClient, ProposerConfig, ProposerError,
     types::{CanonicalLine, ResolvedGames},
 };
 
