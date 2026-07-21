@@ -6,7 +6,7 @@ use world_chain_proofs::{ConsensusProvider, InvalidationReason, RootState};
 
 use crate::{
     ParentRef, Proposal, ProposerClient, ProposerConfig, ProposerError,
-    types::{CanonicalLine, CanonicalScan,  FinalizedGames, NextProposalAction},
+    types::{CanonicalLine, CanonicalScan, FinalizedGames, NextProposalAction},
 };
 
 /// World Chain Proposer.
@@ -194,6 +194,8 @@ where
     ///
     /// New and timed-out transitions are submitted, negative-ready games wait for the
     /// challenger, and non-retryable invalidations stop with a governance warning.
+    ///
+    /// The newly created game is added to the `self.proposed_games` field.
     pub async fn propose(&mut self, scan: &CanonicalScan) -> Result<(), ProposerError> {
         let (proposal, retry_of) = match scan.next_action() {
             NextProposalAction::Propose(proposal) => (proposal, None),
@@ -237,6 +239,8 @@ where
         Ok(())
     }
 
+    /// Scan all games stored in `self.proposed_games` and withdraw from them
+    /// if `claimable_amount` is greater than zero.
     pub async fn withdraw_credits(&mut self) -> Result<(), ProposerError> {
         let mut withdrawn = Vec::new();
         for &game in &self.proposed_games {
