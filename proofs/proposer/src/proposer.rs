@@ -239,26 +239,48 @@ where
         Ok(())
     }
 
-    /// Scan all games stored in `self.proposed_games` and withdraw from them
-    /// if `claimable_amount` is greater than zero.
+    /// Scans all games stored in `self.proposed_games`, withdrawing available credits and
+    /// pruning games that have already resolved.
     pub async fn withdraw_credits(&mut self) -> Result<(), ProposerError> {
-        let mut withdrawn = Vec::new();
-        for &game in &self.proposed_games {
-            let claimable_amount = self.execution_provider.claimable(game).await?;
-            if claimable_amount > U256::ZERO {
-                let withdraw_submission = self.execution_provider.withdraw(game).await?;
-                info!(
-                    tx_hash = ?withdraw_submission.tx_hash,
-                    amount = ?withdraw_submission.amount,
-                    game_address = %game,
-                    "withdrew claimable credits"
-                );
-                withdrawn.push(game);
+        let proposed_games: Vec<_> = self.proposed_games.iter().copied().collect();
+
+        for game in proposed_games {
+            let result: Result<bool, ProposerError> = async {
+                let resolution_status = self.execution_provider.resolution_status(game).await?;
+                if !resolution_status.is_resolved() {
+                    return Ok(false);
+                }
+
+                let claimable_amount = self.execution_provider.claimable(game).await?;
+                if claimable_amount > U256::ZERO {
+                    let withdraw_submission = self.execution_provider.withdraw(game).await?;
+                    info!(
+                        tx_hash = ?withdraw_submission.tx_hash,
+                        amount = ?withdraw_submission.amount,
+                        game_address = %game,
+                        "withdrew claimable credits"
+                    );
+                }
+
+                Ok(true)
+            }
+            .await;
+
+            match result {
+                Ok(true) => {
+                    self.proposed_games.remove(&game);
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    warn!(
+                        %error,
+                        game_address = %game,
+                        "failed to process proposer credits"
+                    );
+                }
             }
         }
-        for game in withdrawn {
-            self.proposed_games.remove(&game);
-        }
+
         Ok(())
     }
 
