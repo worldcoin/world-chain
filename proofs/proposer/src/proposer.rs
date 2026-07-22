@@ -127,6 +127,9 @@ where
                 canonical_line.push_game(next_game);
                 cursor = next_game;
             } else {
+                // game doesn't exist onchain yet, exit the loop with a
+                // `NextProposalAction::Propose`. The `propose` fn will
+                // later publish this proposal onchain
                 return Ok(CanonicalScan::new(
                     canonical_line,
                     NextProposalAction::Propose(proposal),
