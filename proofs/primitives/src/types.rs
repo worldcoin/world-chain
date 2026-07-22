@@ -227,6 +227,16 @@ impl ResolutionStatus {
     pub fn positive_resolvable(&self) -> bool {
         self.resolvable && self.root_state == RootState::Finalized
     }
+
+    /// Returns whether the game has already reached a terminal state.
+    ///
+    /// The root state may describe the expected outcome of a game that is currently resolvable,
+    /// so a terminal root state is considered resolved only when `resolvable` is false.
+    pub fn is_resolved(&self) -> bool {
+        !self.resolvable
+            && (self.root_state == RootState::Finalized
+                || self.root_state == RootState::Invalidated)
+    }
 }
 
 #[cfg(test)]

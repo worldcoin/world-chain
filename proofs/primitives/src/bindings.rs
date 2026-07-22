@@ -48,6 +48,8 @@ sol! {
 
     #[sol(rpc)]
     interface IWorldChainProofSystemGame {
+        event Withdrawn(address indexed recipient, uint256 amount);
+
         function rootId() external view returns (bytes32);
         function factory() external view returns (address);
         function anchorStateRegistry() external view returns (address);

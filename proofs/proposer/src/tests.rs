@@ -14,7 +14,7 @@ use world_chain_proofs::{
 use crate::{
     ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerConfig, ProposerError,
     WorldChainProposer,
-    types::{CloseGameSubmission, ResolveSubmission},
+    types::{CloseGameSubmission, ResolveSubmission, WithdrawSubmission},
 };
 
 const DOMAIN_HASH: B256 = b256!("1111111111111111111111111111111111111111111111111111111111111111");
@@ -65,6 +65,17 @@ impl ProposerClient for MockContracts {
         })
     }
 
+    async fn claimable(&self, _game: Address) -> Result<U256, ProposerError> {
+        Ok(U256::ZERO)
+    }
+
+    async fn withdraw(&self, _game: Address) -> Result<WithdrawSubmission, ProposerError> {
+        Ok(WithdrawSubmission {
+            tx_hash: B256::repeat_byte(0xdd),
+            amount: U256::ZERO,
+        })
+    }
+
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
@@ -76,6 +87,7 @@ impl ProposerClient for MockContracts {
             .push(*proposal);
         Ok(ProposalSubmission {
             tx_hash: B256::repeat_byte(0xaa),
+            game_address: Address::repeat_byte(0xaa),
         })
     }
 }
@@ -164,7 +176,7 @@ async fn propose_submits_proposal_after_last_canonical_game() {
         roots: HashMap::from([(10, B256::repeat_byte(0x10))]),
         finalized_l2_block: 10,
     };
-    let proposer = WorldChainProposer::new(config(), contracts, output_roots);
+    let mut proposer = WorldChainProposer::new(config(), contracts, output_roots);
     let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
 
     proposer.propose(&canonical_scan).await.unwrap();

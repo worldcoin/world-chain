@@ -4,7 +4,7 @@ use world_chain_proofs::{ProposalCommitment, ResolutionStatus};
 
 use crate::{
     ParentRef, Proposal, ProposalSubmission, ProposerError,
-    types::{CloseGameSubmission, ResolveSubmission},
+    types::{CloseGameSubmission, ResolveSubmission, WithdrawSubmission},
 };
 
 /// Minimal contract surface needed by the proposer.
@@ -28,7 +28,14 @@ pub trait ProposerClient: Send + Sync {
     /// Submits a resolve transaction to the provided game.
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError>;
 
+    /// Submits a closeGame transaction to the provided game.
     async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError>;
+
+    /// Returns the claimable amount the proposer can withdraw from the provided game.
+    async fn claimable(&self, game: Address) -> Result<U256, ProposerError>;
+
+    /// Submits a withdraw transaction to the provided game.
+    async fn withdraw(&self, game: Address) -> Result<WithdrawSubmission, ProposerError>;
 
     /// Submits a proposal transaction to the factory.
     async fn submit_proposal(

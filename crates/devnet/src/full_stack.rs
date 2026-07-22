@@ -2424,7 +2424,7 @@ async fn start_world_chain_proposer(
         proposer_bond: U256::from(WORLD_PROPOSER_BOND_WEI),
         poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
     };
-    let proposer = WorldChainProposer::new(config, contracts, output_roots);
+    let mut proposer = WorldChainProposer::new(config, contracts, output_roots);
 
     info!(
         l1_rpc_url,

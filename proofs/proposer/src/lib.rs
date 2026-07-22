@@ -18,7 +18,7 @@ pub use proposer::WorldChainProposer;
 pub use traits::ProposerClient;
 pub use types::{
     CanonicalLine, CanonicalScan, CloseGameSubmission, FinalizedGames, NextProposalAction,
-    ParentRef, Proposal, ProposalSubmission, ResolveSubmission,
+    ParentRef, Proposal, ProposalSubmission, ResolveSubmission, WithdrawSubmission,
 };
 
 #[cfg(test)]

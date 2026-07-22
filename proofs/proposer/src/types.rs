@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, B256, TxHash};
+use alloy_primitives::{Address, B256, TxHash, U256};
 use world_chain_proofs::{InvalidationReason, ProposalCommitment};
 
 /// The canonical lineage discovered by the proposer and the action available at its tip.
@@ -167,6 +167,8 @@ impl Proposal {
 pub struct ProposalSubmission {
     /// Transaction hash for the proposal submission.
     pub tx_hash: TxHash,
+    /// Address of the proof-system game created by the proposal.
+    pub game_address: Address,
 }
 
 /// Result of a resolve transaction.
@@ -181,4 +183,13 @@ pub struct ResolveSubmission {
 pub struct CloseGameSubmission {
     /// Transaction hash for the closeGame submission.
     pub tx_hash: TxHash,
+}
+
+/// Result of a withdraw transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WithdrawSubmission {
+    /// Transaction hash for the withdraw submission.
+    pub tx_hash: TxHash,
+    /// Amount withdrawn from the game.
+    pub amount: U256,
 }

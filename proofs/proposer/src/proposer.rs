@@ -1,4 +1,6 @@
-use alloy_primitives::B256;
+use std::collections::HashSet;
+
+use alloy_primitives::{Address, B256, U256};
 use tracing::{info, warn};
 use world_chain_proofs::{ConsensusProvider, InvalidationReason, RootState};
 
@@ -13,15 +15,17 @@ pub struct WorldChainProposer<E, C> {
     config: ProposerConfig,
     execution_provider: E,
     consensus_provider: C,
+    proposed_games: HashSet<Address>,
 }
 
 impl<E, C> WorldChainProposer<E, C> {
     /// Creates a proposer from execution and consensus providers.
-    pub const fn new(config: ProposerConfig, execution_provider: E, consensus_provider: C) -> Self {
+    pub fn new(config: ProposerConfig, execution_provider: E, consensus_provider: C) -> Self {
         Self {
             config,
             execution_provider,
             consensus_provider,
+            proposed_games: HashSet::default(),
         }
     }
 
@@ -190,7 +194,9 @@ where
     ///
     /// New and timed-out transitions are submitted, negative-ready games wait for the
     /// challenger, and non-retryable invalidations stop with a governance warning.
-    pub async fn propose(&self, scan: &CanonicalScan) -> Result<(), ProposerError> {
+    ///
+    /// The newly created game is added to the `self.proposed_games` field.
+    pub async fn propose(&mut self, scan: &CanonicalScan) -> Result<(), ProposerError> {
         let (proposal, retry_of) = match scan.next_action() {
             NextProposalAction::Propose(proposal) => (proposal, None),
             NextProposalAction::RetryTimedOut {
@@ -222,33 +228,80 @@ where
             .await?;
         info!(
             tx_hash = ?submission.tx_hash,
+            game_address = %submission.game_address,
             l2_block_number = proposal.l2_block_number,
             parent_ref = %proposal.parent_ref,
             proposal_key = ?proposal.proposal_key,
             retry_of = ?retry_of,
             "submitted World Chain proof-system game"
         );
+        self.proposed_games.insert(submission.game_address);
+        Ok(())
+    }
+
+    /// Scans all games stored in `self.proposed_games`, withdrawing available credits and
+    /// pruning games that have already resolved.
+    pub async fn withdraw_credits(&mut self) -> Result<(), ProposerError> {
+        let proposed_games: Vec<_> = self.proposed_games.iter().copied().collect();
+
+        for game in proposed_games {
+            let result: Result<bool, ProposerError> = async {
+                let resolution_status = self.execution_provider.resolution_status(game).await?;
+                if !resolution_status.is_resolved() {
+                    return Ok(false);
+                }
+
+                let claimable_amount = self.execution_provider.claimable(game).await?;
+                if claimable_amount > U256::ZERO {
+                    let withdraw_submission = self.execution_provider.withdraw(game).await?;
+                    info!(
+                        tx_hash = ?withdraw_submission.tx_hash,
+                        amount = ?withdraw_submission.amount,
+                        game_address = %game,
+                        "withdrew claimable credits"
+                    );
+                }
+
+                Ok(true)
+            }
+            .await;
+
+            match result {
+                Ok(true) => {
+                    self.proposed_games.remove(&game);
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    warn!(
+                        %error,
+                        game_address = %game,
+                        "failed to process proposer credits"
+                    );
+                }
+            }
+        }
+
         Ok(())
     }
 
     /// Runs the proposer forever, logging transient failures and retrying on each tick.
-    pub async fn run_forever(&self) -> Result<(), ProposerError> {
+    pub async fn run_forever(&mut self) -> Result<(), ProposerError> {
         self.config.validate()?;
 
         let mut interval = tokio::time::interval(self.config.poll_interval);
         loop {
             interval.tick().await;
             let iteration: Result<(), ProposerError> = async {
-                // 1. refresh the anchor and canonical line
+                // 1. withdraw known proposer credits
+                self.withdraw_credits().await?;
+                // 2. refresh the anchor and canonical line
                 let canonical_scan = self.anchor_and_canonical_line().await?;
-                // 2. resolve positive-ready games parent-first
+                // 3. resolve positive-ready games parent-first
                 let finalized_games = self.resolve_games(canonical_scan.canonical_line()).await?;
-                // 3. advance the anchor to the highest finalized canonical game
+                // 4. advance the anchor to the highest finalized canonical game
                 self.advance_anchor(finalized_games).await?;
-                // 4. attempt a new canonical proposal or retry
+                // 5. attempt a new canonical proposal or retry
                 self.propose(&canonical_scan).await?;
-                // 5. withdraw known proposer credits
-                // TODO: add withdraw credits logic
                 Ok(())
             }
             .await;

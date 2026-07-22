@@ -20,7 +20,7 @@ use world_chain_proofs::{
 };
 use world_chain_proposer::{
     CloseGameSubmission, ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
-    ResolveSubmission,
+    ResolveSubmission, WithdrawSubmission,
 };
 use world_chain_prover_service::{
     GetNextProofRequest, GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse,
@@ -377,6 +377,17 @@ impl ProposerClient for FakeExecution {
         })
     }
 
+    async fn claimable(&self, _game: Address) -> Result<U256, ProposerError> {
+        Ok(U256::ZERO)
+    }
+
+    async fn withdraw(&self, game: Address) -> Result<WithdrawSubmission, ProposerError> {
+        Ok(WithdrawSubmission {
+            tx_hash: B256::with_last_byte(game.as_slice()[19]),
+            amount: U256::ZERO,
+        })
+    }
+
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
@@ -392,6 +403,7 @@ impl ProposerClient for FakeExecution {
         let event = Self::create_game(&mut state, proposal);
         Ok(ProposalSubmission {
             tx_hash: B256::with_last_byte(event.game.as_slice()[19]),
+            game_address: event.game,
         })
     }
 }
