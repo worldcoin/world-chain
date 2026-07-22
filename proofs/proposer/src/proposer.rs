@@ -90,6 +90,10 @@ where
                 .game_for_proposal_key(proposal.proposal_key)
                 .await?
             {
+                // game already exists onchain, look at the resolution status now:
+                // - if the root_state becomes `Invalidated`, then immediately return
+                //   because we don't want to keep building on top of an invalid game
+                // - otherwise, add the game to the canonical line and continue the loop
                 let resolution_status = self
                     .execution_provider
                     .resolution_status(next_game_addr)
