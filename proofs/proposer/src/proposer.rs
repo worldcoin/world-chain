@@ -206,7 +206,7 @@ where
                 invalidated_game,
             } => (proposal, Some(*invalidated_game)),
             NextProposalAction::AwaitNegativeResolution { game, reason } => {
-                info!(
+                warn!(
                     game_address = %game,
                     invalidation_reason = ?reason,
                     "waiting for challenger to resolve game with negative outcome"
