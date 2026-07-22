@@ -316,7 +316,7 @@ tower = "0.5.0"
 backon = { version = "1", default-features = false, features = ["std", "tokio-sleep"] }
 arbitrary = { version = "=1.4.2", features = ["derive"] }
 blake3 = "1.8.4"
-ed25519-dalek = { version = "2", features = ["serde"] }
+ed25519-dalek = { version = "3", features = ["serde"] }
 sha2 = "0.10.9"
 kzg-rs = { version = "0.2.8", features = ["rkyv", "serde"] }
 c-kzg = { version = "2.0.0", default-features = false }
