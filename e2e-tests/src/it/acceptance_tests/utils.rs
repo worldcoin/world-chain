@@ -63,6 +63,7 @@ impl L2TxSender {
         expected_success: bool,
     ) -> eyre::Result<TransactionReceipt> {
         let request = self.transaction_request(to, data, gas_limit);
+        eprintln!("karst: submitting {label} transaction");
         let pending_tx = self
             .provider
             .send_transaction(request)
@@ -90,6 +91,11 @@ impl L2TxSender {
             success = receipt.status(),
             "{label}"
         );
+        eprintln!(
+            "karst: {label} receipt: success={}, block={:?}, tx={hash:?}",
+            receipt.status(),
+            receipt.block_number
+        );
 
         Ok(receipt)
     }
@@ -102,6 +108,7 @@ impl L2TxSender {
         gas_limit: u64,
     ) -> eyre::Result<()> {
         let request = self.transaction_request(to, data, gas_limit);
+        eprintln!("karst: expecting {label} transaction submission to be rejected");
 
         match self.provider.send_transaction(request).await {
             Ok(pending_tx) => {
@@ -125,6 +132,7 @@ impl L2TxSender {
                     err = %err,
                     "{label}: transaction rejected as expected"
                 );
+                eprintln!("karst: {label} transaction rejected as expected: {err}");
                 Ok(())
             }
         }
