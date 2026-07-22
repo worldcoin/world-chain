@@ -86,6 +86,10 @@ impl ProposerClient for MockContracts {
         })
     }
 
+    async fn proposer_bond(&self) -> Result<U256, ProposerError> {
+        Ok(U256::from(1))
+    }
+
     async fn submit_proposal(
         &self,
         proposal: &Proposal,

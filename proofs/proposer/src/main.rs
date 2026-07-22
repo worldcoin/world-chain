@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use alloy_network::EthereumWallet;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::Address;
 use alloy_provider::ProviderBuilder;
 use alloy_signer_local::PrivateKeySigner;
 use anyhow::{Context, Result};
@@ -17,7 +17,8 @@ use tracing::info;
 use url::Url;
 use world_chain_proofs::OptimismConsensusClient;
 use world_chain_proposer::{
-    AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerConfig, WorldChainProposer,
+    AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerClient, ProposerConfig,
+    WorldChainProposer,
 };
 
 #[derive(Debug, Parser)]
@@ -49,14 +50,6 @@ struct Cli {
     /// L2 blocks between a proposal's parent and its claimed block.
     #[arg(long, env = "BLOCK_INTERVAL")]
     block_interval: u64,
-
-    /// Bond posted with each proposal, in wei (default 1 ETH).
-    #[arg(
-        long,
-        env = "PROPOSER_BOND_WEI",
-        default_value_t = 1_000_000_000_000_000_000
-    )]
-    proposer_bond_wei: u128,
 
     /// Seconds between output-root polls.
     #[arg(long, env = "POLL_INTERVAL_SECONDS", default_value_t = 12)]
@@ -101,9 +94,13 @@ async fn main() -> Result<()> {
     };
     let mut bond_manager = BondManager::new(bond_manager_config, contracts.clone());
     let output_roots = OptimismConsensusClient::new(cli.output_root_rpc.clone());
+    let proposer_bond = contracts
+        .proposer_bond()
+        .await
+        .context("failed to read proposer bond")?;
     let config = ProposerConfig {
         block_interval: cli.block_interval,
-        proposer_bond: U256::from(cli.proposer_bond_wei),
+        proposer_bond,
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_resolutions_per_tick: cli.max_resolutions_per_tick,
     };

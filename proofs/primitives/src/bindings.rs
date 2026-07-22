@@ -25,6 +25,7 @@ sol! {
                 uint256 blockInterval
             );
         function domainHash() external view returns (bytes32);
+        function proposerBond() external view returns (uint256);
         function games(bytes32 proposalKey) external view returns (address);
         function gameCount() external view returns (uint256);
         function gameAt(uint256 index) external view returns (address);

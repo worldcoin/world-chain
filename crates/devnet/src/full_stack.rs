@@ -54,7 +54,8 @@ use world_chain_proof_worker::{
 };
 use world_chain_proofs::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
 use world_chain_proposer::{
-    AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerConfig, WorldChainProposer,
+    AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerClient, ProposerConfig,
+    WorldChainProposer,
 };
 use world_chain_prover_service::{
     ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
@@ -95,9 +96,6 @@ const SP1_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const SP1_WORKER_PROVER_ENV: &str = "DEVNET_SP1_WORKER_PROVER";
 /// SP1 network private key. Required when `DEVNET_SP1_WORKER_PROVER=network`.
 const SP1_PRIVATE_KEY_ENV: &str = "SP1_PRIVATE_KEY";
-/// Bond, in wei, sent with every `WorldChainProofSystemFactory.propose`.
-/// Matches `PROPOSER_BOND` (1 ether) in `scripts/devnet/DeployProofSystem.s.sol`.
-const WORLD_PROPOSER_BOND_WEI: u128 = 1_000_000_000_000_000_000;
 /// Delay between World Chain proof-system proposal attempts.
 const WORLD_PROPOSER_POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// Bond, in wei, sent with every `WorldChainProofSystemGame.challenge`.
@@ -2422,9 +2420,13 @@ async fn start_world_chain_proposer(
     let contracts = AlloyProofSystemClient::new(provider, factory_address, anchor_address);
     let mut bond_manager = BondManager::new(BondManagerConfig::default(), contracts.clone());
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
+    let proposer_bond = contracts
+        .proposer_bond()
+        .await
+        .wrap_err("failed to read proposer bond")?;
     let config = ProposerConfig {
         block_interval: deployment.block_interval,
-        proposer_bond: U256::from(WORLD_PROPOSER_BOND_WEI),
+        proposer_bond,
         poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
         max_resolutions_per_tick: ProposerConfig::default().max_resolutions_per_tick,
     };
