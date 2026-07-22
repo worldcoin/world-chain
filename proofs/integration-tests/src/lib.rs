@@ -15,11 +15,12 @@ use world_chain_challenger::{ChallengeSubmission, ChallengerClient, ChallengerEr
 use world_chain_defender::{DefenderClient, DefenderError, DefenderSubmission};
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_proofs::{
-    ConsensusError, ConsensusProvider, GameCreated, PROOF_SYSTEM_VERSION, ProofDomain, ProofLane,
-    RootCommitment, RootState, has_threshold,
+    ConsensusError, ConsensusProvider, GameCreated, InvalidationReason, PROOF_SYSTEM_VERSION,
+    ProofDomain, ProofLane, ResolutionStatus, RootCommitment, RootState, has_threshold,
 };
 use world_chain_proposer::{
-    ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
+    CloseGameSubmission, ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
+    ResolveSubmission,
 };
 use world_chain_prover_service::{
     GetNextProofRequest, GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse,
@@ -313,6 +314,69 @@ impl ProposerClient for FakeExecution {
             .copied())
     }
 
+    async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
+        let state = self.state.lock().expect("fake execution mutex poisoned");
+        let record = state
+            .games_by_address
+            .get(&game)
+            .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
+
+        if record.state == STATE_CHALLENGED && has_threshold(record.proof_bitmap) {
+            return Ok(ResolutionStatus {
+                resolvable: true,
+                root_state: RootState::Finalized,
+                invalidation_reason: InvalidationReason::None,
+            });
+        }
+
+        let root_state = RootState::try_from(record.state)
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        Ok(ResolutionStatus {
+            resolvable: false,
+            root_state,
+            invalidation_reason: InvalidationReason::None,
+        })
+    }
+
+    async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
+        let mut state = self.state.lock().expect("fake execution mutex poisoned");
+        let record = state
+            .games_by_address
+            .get_mut(&game)
+            .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
+        if record.state != STATE_CHALLENGED || !has_threshold(record.proof_bitmap) {
+            return Err(ProposerError::Contract(format!(
+                "game {game} is not positively resolvable"
+            )));
+        }
+        record.state = STATE_FINALIZED;
+
+        Ok(ResolveSubmission {
+            tx_hash: B256::with_last_byte(game.as_slice()[19]),
+        })
+    }
+
+    async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError> {
+        let mut state = self.state.lock().expect("fake execution mutex poisoned");
+        let record = state
+            .games_by_address
+            .get(&game)
+            .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
+        if record.state != STATE_FINALIZED {
+            return Err(ProposerError::Contract(format!(
+                "game {game} is not finalized"
+            )));
+        }
+        let l2_block_number = record.event.l2_block_number;
+        state.anchor = ParentRef {
+            address: game,
+            l2_block_number,
+        };
+        Ok(CloseGameSubmission {
+            tx_hash: B256::with_last_byte(game.as_slice()[19]),
+        })
+    }
+
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
@@ -476,9 +540,6 @@ impl DefenderClient for FakeExecution {
         if record.proof_bitmap & mask == 0 {
             record.proof_bitmap |= mask;
             record.submitted_lanes.push(lane);
-            if has_threshold(record.proof_bitmap) {
-                record.state = STATE_FINALIZED;
-            }
         }
 
         Ok(DefenderSubmission {

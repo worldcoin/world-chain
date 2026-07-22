@@ -185,6 +185,50 @@ pub const fn has_threshold(bitmap: u8) -> bool {
     proof_count(bitmap) >= PROOF_THRESHOLD
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum InvalidationReason {
+    None,
+    ProofTimeout,
+    InvalidParent,
+    Blacklisted,
+}
+
+#[derive(Debug, Error)]
+pub enum InvalidationReasonError {
+    #[error("Invalid invalidation reason: {0}")]
+    InvalidReason(u8),
+}
+
+impl TryFrom<u8> for InvalidationReason {
+    type Error = InvalidationReasonError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(InvalidationReason::None),
+            1 => Ok(InvalidationReason::ProofTimeout),
+            2 => Ok(InvalidationReason::InvalidParent),
+            3 => Ok(InvalidationReason::Blacklisted),
+            _ => Err(InvalidationReasonError::InvalidReason(value)),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct ResolutionStatus {
+    pub resolvable: bool,
+    pub root_state: RootState,
+    pub invalidation_reason: InvalidationReason,
+}
+
+impl ResolutionStatus {
+    /// Returns true whether this resolution status is positive resolvable:
+    /// - `resolvable` is true AND
+    /// - the expected root state outcome is `Finalized`.
+    pub fn positive_resolvable(&self) -> bool {
+        self.resolvable && self.root_state == RootState::Finalized
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

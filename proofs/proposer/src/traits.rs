@@ -1,8 +1,11 @@
 use alloy_primitives::{Address, B256, U256};
 use async_trait::async_trait;
-use world_chain_proofs::ProposalCommitment;
+use world_chain_proofs::{ProposalCommitment, ResolutionStatus};
 
-use crate::{ParentRef, Proposal, ProposalSubmission, ProposerError};
+use crate::{
+    ParentRef, Proposal, ProposalSubmission, ProposerError,
+    types::{CloseGameSubmission, ResolveSubmission},
+};
 
 /// Minimal contract surface needed by the proposer.
 #[async_trait]
@@ -18,6 +21,14 @@ pub trait ProposerClient: Send + Sync {
         &self,
         proposal_key: B256,
     ) -> Result<Option<Address>, ProposerError>;
+
+    /// Returns the resolution status of the provided game, if game exists.
+    async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError>;
+
+    /// Submits a resolve transaction to the provided game.
+    async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError>;
+
+    async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError>;
 
     /// Submits a proposal transaction to the factory.
     async fn submit_proposal(

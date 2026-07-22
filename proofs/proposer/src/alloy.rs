@@ -3,10 +3,13 @@ use alloy_provider::Provider;
 use async_trait::async_trait;
 use world_chain_proofs::{
     IWorldChainAnchorStateRegistry, IWorldChainProofSystemFactory, IWorldChainProofSystemGame,
-    ProposalCommitment,
+    InvalidationReasonError, ProposalCommitment, ResolutionStatus, RootStateError,
 };
 
-use crate::{ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError};
+use crate::{
+    ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
+    types::{CloseGameSubmission, ResolveSubmission},
+};
 
 /// Alloy-backed implementation of [`ProofSystemClient`].
 #[derive(Debug, Clone)]
@@ -88,6 +91,79 @@ where
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
 
         Ok((game != Address::ZERO).then_some(game))
+    }
+
+    async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
+        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
+            game,
+            self.provider.clone(),
+        );
+        let resolution_status_result = game
+            .resolutionStatus()
+            .call()
+            .await
+            .map_err(|err| ProposerError::Contract(err.to_string()))?;
+        let resolvable = resolution_status_result.resolvable;
+        let root_state = resolution_status_result
+            .outcome
+            .try_into()
+            .map_err(|err: RootStateError| ProposerError::Contract(err.to_string()))?;
+        let invalidation_reason = resolution_status_result
+            .reason
+            .try_into()
+            .map_err(|err: InvalidationReasonError| ProposerError::Contract(err.to_string()))?;
+        let resolution_status = ResolutionStatus {
+            resolvable,
+            root_state,
+            invalidation_reason,
+        };
+        Ok(resolution_status)
+    }
+
+    async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
+        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
+            game,
+            self.provider.clone(),
+        );
+        let pending = game
+            .resolve()
+            .send()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+
+        let tx_hash = *pending.tx_hash();
+        let receipt = pending
+            .get_receipt()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        if !receipt.status() {
+            return Err(ProposerError::Revert(tx_hash));
+        }
+
+        Ok(ResolveSubmission { tx_hash })
+    }
+
+    async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError> {
+        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
+            game,
+            self.provider.clone(),
+        );
+        let pending = game
+            .closeGame()
+            .send()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+
+        let tx_hash = *pending.tx_hash();
+        let receipt = pending
+            .get_receipt()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        if !receipt.status() {
+            return Err(ProposerError::Revert(tx_hash));
+        }
+
+        Ok(CloseGameSubmission { tx_hash })
     }
 
     async fn submit_proposal(

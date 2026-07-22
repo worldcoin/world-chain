@@ -6,11 +6,15 @@ use std::{
 
 use alloy_primitives::{Address, B256, BlockNumber, U256, address, b256};
 use async_trait::async_trait;
-use world_chain_proofs::{ConsensusError, ConsensusProvider, ProposalCommitment};
+use world_chain_proofs::{
+    ConsensusError, ConsensusProvider, InvalidationReason, ProposalCommitment, ResolutionStatus,
+    RootState,
+};
 
 use crate::{
     ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerConfig, ProposerError,
     WorldChainProposer,
+    types::{CloseGameSubmission, ResolveSubmission},
 };
 
 const DOMAIN_HASH: B256 = b256!("1111111111111111111111111111111111111111111111111111111111111111");
@@ -39,6 +43,26 @@ impl ProposerClient for MockContracts {
         proposal_key: B256,
     ) -> Result<Option<Address>, ProposerError> {
         Ok(self.games.get(&proposal_key).copied())
+    }
+
+    async fn resolution_status(&self, _game: Address) -> Result<ResolutionStatus, ProposerError> {
+        Ok(ResolutionStatus {
+            resolvable: false,
+            root_state: RootState::Proposed,
+            invalidation_reason: InvalidationReason::None,
+        })
+    }
+
+    async fn resolve_game(&self, _game: Address) -> Result<ResolveSubmission, ProposerError> {
+        Ok(ResolveSubmission {
+            tx_hash: B256::repeat_byte(0xbb),
+        })
+    }
+
+    async fn close_game(&self, _game: Address) -> Result<CloseGameSubmission, ProposerError> {
+        Ok(CloseGameSubmission {
+            tx_hash: B256::repeat_byte(0xcc),
+        })
     }
 
     async fn submit_proposal(
@@ -94,7 +118,7 @@ fn proposal_key(parent_ref: Address, root_claim: B256, l2_block_number: u64) -> 
 }
 
 #[tokio::test]
-async fn prepare_next_proposal_walks_existing_games_until_gap() {
+async fn anchor_and_canonical_line_walks_existing_games_until_gap() {
     let root_10 = B256::repeat_byte(0x10);
     let root_20 = B256::repeat_byte(0x20);
     let mut games = HashMap::new();
@@ -114,16 +138,19 @@ async fn prepare_next_proposal_walks_existing_games_until_gap() {
     };
     let proposer = WorldChainProposer::new(config(), contracts, output_roots);
 
-    let proposal = proposer.prepare_next_proposal().await.unwrap();
+    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
 
-    assert_eq!(proposal.parent_ref, GAME_1);
-    assert_eq!(proposal.root_claim, root_20);
-    assert_eq!(proposal.l2_block_number, 20);
-    assert_eq!(proposal.proposal_key, proposal_key(GAME_1, root_20, 20));
+    assert_eq!(
+        canonical_scan.canonical_line().games(),
+        &[ParentRef {
+            address: GAME_1,
+            l2_block_number: 10,
+        }]
+    );
 }
 
 #[tokio::test]
-async fn propose_once_submits_prepared_proposal() {
+async fn propose_submits_proposal_after_last_canonical_game() {
     let submissions = Arc::default();
     let contracts = MockContracts {
         anchor: ParentRef {
@@ -138,13 +165,17 @@ async fn propose_once_submits_prepared_proposal() {
         finalized_l2_block: 10,
     };
     let proposer = WorldChainProposer::new(config(), contracts, output_roots);
+    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
 
-    let (proposal, submission) = proposer.propose_once().await.unwrap();
+    proposer.propose(&canonical_scan).await.unwrap();
 
-    assert_eq!(submission.tx_hash, B256::repeat_byte(0xaa));
+    let proposal = submissions.lock().expect("not poisoned")[0];
+    assert_eq!(proposal.parent_ref, ANCHOR);
+    assert_eq!(proposal.root_claim, B256::repeat_byte(0x10));
+    assert_eq!(proposal.l2_block_number, 10);
     assert_eq!(
-        submissions.lock().expect("not poisoned").as_slice(),
-        &[proposal]
+        proposal.proposal_key,
+        proposal_key(ANCHOR, B256::repeat_byte(0x10), 10)
     );
 }
 
@@ -171,13 +202,13 @@ async fn zero_block_interval_is_rejected() {
     );
 
     assert!(matches!(
-        proposer.prepare_next_proposal().await,
+        proposer.anchor_and_canonical_line().await,
         Err(ProposerError::InvalidConfig(_))
     ));
 }
 
 #[tokio::test]
-async fn prepare_next_proposal_waits_for_finalized_l2_block() {
+async fn anchor_and_canonical_line_stops_at_finalized_l2_block() {
     let contracts = MockContracts {
         anchor: ParentRef {
             address: ANCHOR,
@@ -192,11 +223,14 @@ async fn prepare_next_proposal_waits_for_finalized_l2_block() {
     };
     let proposer = WorldChainProposer::new(config(), contracts, output_roots);
 
-    assert!(matches!(
-        proposer.prepare_next_proposal().await,
-        Err(ProposerError::ProposalNotReady {
-            target_block: 10,
-            finalized_block: 9,
-        })
-    ));
+    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
+
+    assert!(canonical_scan.canonical_line().games().is_empty());
+    assert_eq!(
+        canonical_scan.canonical_line().anchor(),
+        ParentRef {
+            address: ANCHOR,
+            l2_block_number: 0,
+        }
+    );
 }

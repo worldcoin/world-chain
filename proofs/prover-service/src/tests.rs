@@ -50,6 +50,23 @@ async fn service(config: ProverServiceConfig) -> Option<TestService> {
     })
 }
 
+async fn expire_proof_lock(service: &ProverService, id: ProofRequestId, lock_id: LockId) {
+    let result = sqlx::query(
+        r#"
+        UPDATE proof_requests
+        SET lock_expires_at = NOW() - INTERVAL '1 hour'
+        WHERE proof_id = $1 AND lock_id = $2
+        "#,
+    )
+    .bind(id.0.as_slice().to_vec())
+    .bind(lock_id.0)
+    .execute(service.pool())
+    .await
+    .expect("expire proof lock");
+
+    assert_eq!(result.rows_affected(), 1);
+}
+
 fn request(backend: ProofBackend, seed: u8) -> ProofRequest {
     ProofRequest {
         backend,
@@ -225,12 +242,7 @@ async fn get_next_proof_on_empty_queue_returns_none() {
 
 #[tokio::test]
 async fn stale_lock_is_rejected_and_reclaim_succeeds() {
-    let Some(ctx) = service(ProverServiceConfig {
-        lock_timeout: Duration::from_millis(50),
-        ..test_config()
-    })
-    .await
-    else {
+    let Some(ctx) = service(test_config()).await else {
         return;
     };
     let service = ctx.service;
@@ -245,7 +257,7 @@ async fn stale_lock_is_rejected_and_reclaim_succeeds() {
         .expect("first lock");
 
     // Let the first lock expire so the job can be reclaimed.
-    tokio::time::sleep(Duration::from_millis(80)).await;
+    expire_proof_lock(&service, id, first.lock_id).await;
     let second = service
         .get_next_proof(get_next_proof_request(ProofBackend::Sp1))
         .await
@@ -310,10 +322,7 @@ async fn submit_proof_with_wrong_backend_is_rejected() {
 
 #[tokio::test]
 async fn status_poller_marks_expired_exhausted_jobs_failed() {
-    let config = ProverServiceConfig {
-        lock_timeout: Duration::from_millis(50),
-        ..test_config()
-    };
+    let config = test_config();
     let max_attempts = config.max_attempts;
     let expected_failure_reason = format!("proof request exhausted max attempts ({max_attempts})");
     let Some(ctx) = service(config).await else {
@@ -329,7 +338,7 @@ async fn status_poller_marks_expired_exhausted_jobs_failed() {
         .unwrap()
         .locked_request
         .expect("first lock");
-    tokio::time::sleep(Duration::from_millis(80)).await;
+    expire_proof_lock(&service, id, first.lock_id).await;
 
     let second = service
         .get_next_proof(get_next_proof_request(ProofBackend::Sp1))
@@ -364,7 +373,7 @@ async fn status_poller_marks_expired_exhausted_jobs_failed() {
         ProofStatus::Running
     );
 
-    tokio::time::sleep(Duration::from_millis(80)).await;
+    expire_proof_lock(&service, id, second.lock_id).await;
 
     // without status poller, this job is not claimable
     assert!(

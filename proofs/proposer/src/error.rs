@@ -23,14 +23,4 @@ pub enum ProposerError {
     OutputRoot(#[from] ConsensusError),
     #[error("The proposal transaction didn't execute succesfully: {0}")]
     Revert(TxHash),
-    /// The next proposal target is ahead of the op-node L2 finalized block.
-    #[error(
-        "next proposal target {target_block} is ahead of the finalized block {finalized_block}"
-    )]
-    ProposalNotReady {
-        /// L2 block number the proposer wants to propose next.
-        target_block: u64,
-        /// Current L2 head reported by the op-node.
-        finalized_block: u64,
-    },
 }
