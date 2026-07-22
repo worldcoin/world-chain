@@ -273,6 +273,17 @@ where
         Ok(WithdrawSubmission { tx_hash, amount })
     }
 
+    async fn proposer_bond(&self) -> Result<U256, ProposerError> {
+        let proposer_bond = self
+            .factory
+            .proposerBond()
+            .call()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+
+        Ok(proposer_bond)
+    }
+
     async fn submit_proposal(
         &self,
         proposal: &Proposal,

@@ -62,6 +62,9 @@ pub trait ProposerClient: Send + Sync {
     /// Submits a withdraw transaction to the provided game.
     async fn withdraw(&self, game: Address) -> Result<WithdrawSubmission, ProposerError>;
 
+    /// Reads the proposer bond from the factory contract.
+    async fn proposer_bond(&self) -> Result<U256, ProposerError>;
+
     /// Submits a proposal transaction to the factory.
     async fn submit_proposal(
         &self,
