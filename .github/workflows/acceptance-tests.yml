@@ -13,7 +13,7 @@ on:
           - prod
           - stage
           - betanet
-          - alphanet
+          - alchemy-dev
       bundler_rpc_url:
         description: Optional Rundler RPC URL for ERC-4337 sponsored user operation checks
         required: false
@@ -87,7 +87,7 @@ jobs:
             karst_deposit_enabled: "true"
             optimism_portal: "0x081a60097c9e1fbe7f55a950eaf77c81dbe3c7af"
             allow_failure: true
-          - network: alphanet
+          - network: alchemy-dev
             environment: dev-eu-central-2
             include_in_all: true
             rpc_url: https://tx-proxy-devnet-eu-central-2.worldcoin.dev
@@ -98,9 +98,9 @@ jobs:
             entry_point: ""
             safe_4337_module: ""
             safe_4337_wallet_deployer: ""
-            karst_enabled: "false"
-            karst_deposit_enabled: "false"
-            optimism_portal: ""
+            karst_enabled: "true"
+            karst_deposit_enabled: "true"
+            optimism_portal: "0x58b38d8155f5bf9bfde8c8435cfbb3eb7dc66bb5"
             allow_failure: true
     steps:
       - name: Skip unselected network
@@ -151,8 +151,9 @@ jobs:
           ACCEPTANCE_NETWORK: ${{ matrix.network }}
           ACCEPTANCE_RPC_URL: ${{ matrix.rpc_url }}
           ACCEPTANCE_L1_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
-          ACCEPTANCE_BUNDLER_RPC_URL: ${{ matrix.network == 'alphanet' && inputs.bundler_rpc_url != '' && inputs.bundler_rpc_url || matrix.bundler_rpc_url }}
+          ACCEPTANCE_BUNDLER_RPC_URL: ${{ matrix.network == 'alchemy-dev' && inputs.bundler_rpc_url != '' && inputs.bundler_rpc_url || matrix.bundler_rpc_url }}
           ACCEPTANCE_CHAIN_ID: ${{ matrix.expected_chain_id }}
+          ACCEPTANCE_L2_KEY: ${{ secrets.ACCEPTANCE_L2_KEY }}
           ACCEPTANCE_4337_RPC_URL: ${{ matrix.erc4337_rpc_url }}
           ACCEPTANCE_4337_ENTRY_POINT: ${{ matrix.entry_point }}
           ACCEPTANCE_4337_MODULE: ${{ matrix.safe_4337_module }}
