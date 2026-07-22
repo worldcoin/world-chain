@@ -49,6 +49,14 @@ pub enum ReceiveStatus {
 /// Shared connection metadata for a single peer connection.
 #[derive(Clone, Debug)]
 pub struct FlashblocksPeerState {
+    /// Identifies the connection this state belongs to.
+    ///
+    /// Simultaneous dials between two mutually-trusted peers routinely produce two
+    /// short-lived overlapping connections to the same peer (reth resolves the duplicate
+    /// with `AlreadyConnected`). Since this map is keyed by peer id, the superseded
+    /// connection's teardown must not remove the state that now belongs to its
+    /// replacement — see [`FlashblocksP2PProtocolHandle::on_peer_disconnected`].
+    pub connection_id: u64,
     /// Metric handles bound to this peer's current label set.
     /// Peers begin as `untrusted` until trust classification resolves.
     pub metrics: FlashblocksPeerMetrics,
@@ -70,8 +78,9 @@ pub struct FlashblocksPeerState {
 }
 
 impl FlashblocksPeerState {
-    pub(crate) fn new(peer_id: PeerId) -> Self {
+    pub(crate) fn new(peer_id: PeerId, connection_id: u64) -> Self {
         Self {
+            connection_id,
             metrics: FlashblocksPeerMetrics::for_peer(peer_id, false),
             trusted: false,
             send_enabled: false,
@@ -108,6 +117,9 @@ pub struct FlashblocksConnection<N> {
     conn: ProtocolConnection,
     /// The unique identifier of the connected peer.
     peer_id: PeerId,
+    /// Identifies this connection in the shared peer state, so that a superseded
+    /// connection's teardown cannot remove state belonging to its replacement.
+    connection_id: u64,
     /// Receiver for already serialized protocol messages targeted at this specific peer.
     outbound_rx: mpsc::Receiver<BytesMut>,
 }
@@ -126,14 +138,16 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
     ) -> Self {
         let (outbound_tx, outbound_rx) = mpsc::channel(OUTBOUND_CHANNEL_CAPACITY);
 
-        protocol
-            .handle
-            .on_peer_connected(protocol.network.clone(), peer_id, outbound_tx);
+        let connection_id =
+            protocol
+                .handle
+                .on_peer_connected(protocol.network.clone(), peer_id, outbound_tx);
 
         Self {
             protocol,
             conn,
             peer_id,
+            connection_id,
             outbound_rx,
         }
     }
@@ -144,10 +158,13 @@ impl<N> Drop for FlashblocksConnection<N> {
         tracing::trace!(
             target: "flashblocks::p2p",
             peer_id = %self.peer_id,
+            connection_id = self.connection_id,
             "dropping flashblocks connection"
         );
 
-        self.protocol.handle.on_peer_disconnected(self.peer_id);
+        self.protocol
+            .handle
+            .on_peer_disconnected(self.peer_id, self.connection_id);
     }
 }
 
@@ -181,9 +198,7 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                         %error,
                         "failed to decode flashblocks message from peer",
                     );
-                    this.protocol
-                        .network
-                        .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
+                    this.penalize(ReputationChangeKind::BadMessage, "undecodable message");
                     return Poll::Ready(None);
                 }
             };
@@ -208,9 +223,10 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                             %error,
                             "failed to verify flashblock",
                         );
-                        this.protocol
-                            .network
-                            .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
+                        this.penalize(
+                            ReputationChangeKind::BadMessage,
+                            "invalid authorization signature",
+                        );
                         continue;
                     }
 
@@ -241,9 +257,10 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                         .handle_request_message(this.peer_id)
                         .is_err()
                     {
-                        this.protocol
-                            .network
-                            .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
+                        this.penalize(
+                            ReputationChangeKind::BadMessage,
+                            "unexpected RequestFlashblocks",
+                        );
                     }
                 }
                 FlashblocksP2PMsg::AcceptFlashblocks => {
@@ -258,9 +275,10 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                         .handle_accept_message(this.peer_id)
                         .is_err()
                     {
-                        this.protocol
-                            .network
-                            .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
+                        this.penalize(
+                            ReputationChangeKind::BadMessage,
+                            "unexpected AcceptFlashblocks",
+                        );
                     }
                 }
                 FlashblocksP2PMsg::RejectFlashblocks => {
@@ -275,9 +293,10 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                         .handle_reject_message(this.peer_id)
                         .is_err()
                     {
-                        this.protocol
-                            .network
-                            .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
+                        this.penalize(
+                            ReputationChangeKind::BadMessage,
+                            "unexpected RejectFlashblocks",
+                        );
                     }
                 }
                 FlashblocksP2PMsg::CancelFlashblocks => {
@@ -292,9 +311,10 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
                         .handle_cancel_message(this.peer_id)
                         .is_err()
                     {
-                        this.protocol
-                            .network
-                            .reputation_change(this.peer_id, ReputationChangeKind::BadMessage);
+                        this.penalize(
+                            ReputationChangeKind::BadMessage,
+                            "unexpected CancelFlashblocks",
+                        );
                     }
                 }
             }
@@ -303,6 +323,67 @@ impl<N: FlashblocksP2PNetworkHandle> Stream for FlashblocksConnection<N> {
 }
 
 impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
+    /// Applies a reputation penalty for a flashblocks protocol violation, resolving the
+    /// peer's trust classification from the shared state.
+    ///
+    /// Must not be called while holding the state lock; use
+    /// [`Self::penalize_classified`] with the already-known trust flag instead.
+    fn penalize(&self, kind: ReputationChangeKind, context: &'static str) {
+        let trusted = self
+            .protocol
+            .handle
+            .state
+            .lock()
+            .connection_state(&self.peer_id)
+            .is_some_and(|peer| peer.trusted);
+        self.penalize_classified(trusted, kind, context);
+    }
+
+    /// Applies a reputation penalty for a flashblocks protocol violation, unless the
+    /// peer is trusted (resolved classification or operator-configured via
+    /// `--flashblocks.force-receive-peers`).
+    ///
+    /// Trusted peers are exempt: these violations are byproducts of benign reconnect
+    /// races (e.g. control messages crossing a simultaneous-dial collision), and
+    /// accumulated penalties escalate into a reth-level ban that severs the
+    /// operator-configured mesh — both sides then reject each other's dials
+    /// indefinitely. Every decision is logged; previously-silent penalties made this
+    /// failure mode undiagnosable from logs.
+    fn penalize_classified(
+        &self,
+        trusted: bool,
+        kind: ReputationChangeKind,
+        context: &'static str,
+    ) {
+        let trusted = trusted
+            || self
+                .protocol
+                .handle
+                .ctx
+                .fanout_args
+                .force_receive_peers
+                .contains(&self.peer_id);
+
+        if trusted {
+            tracing::warn!(
+                target: "flashblocks::p2p",
+                peer_id = %self.peer_id,
+                context,
+                "flashblocks protocol violation from trusted peer; skipping reputation penalty",
+            );
+            return;
+        }
+
+        tracing::debug!(
+            target: "flashblocks::p2p",
+            peer_id = %self.peer_id,
+            ?kind,
+            context,
+            "penalizing peer for flashblocks protocol violation",
+        );
+        self.protocol.network.reputation_change(self.peer_id, kind);
+    }
+
     /// Handles incoming flashblock payload messages from a peer.
     ///
     /// This method validates the flashblock payload, checks for duplicates and ordering,
@@ -343,9 +424,14 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                 grace_sec = AUTHORIZATION_TIMESTAMP_GRACE_SEC,
                 "received flashblock with outdated timestamp",
             );
-            self.protocol
-                .network
-                .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
+            let trusted = p2p_state
+                .connection_state(&self.peer_id)
+                .is_some_and(|peer| peer.trusted);
+            self.penalize_classified(
+                trusted,
+                ReputationChangeKind::BadMessage,
+                "flashblock with outdated timestamp",
+            );
             return;
         }
 
@@ -367,6 +453,7 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
         };
 
         let peer_metrics = peer_state.metrics.clone();
+        let peer_trusted = peer_state.trusted;
         peer_metrics.record_inbound_bandwidth_bytes(buf_len);
 
         match &peer_state.receive_status {
@@ -378,9 +465,11 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                     index = msg.index,
                     "received flashblock before request was accepted",
                 );
-                self.protocol
-                    .network
-                    .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
+                self.penalize_classified(
+                    peer_trusted,
+                    ReputationChangeKind::BadMessage,
+                    "flashblock before request accepted",
+                );
                 return;
             }
             ReceiveStatus::NotReceiving => {
@@ -392,9 +481,11 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                         index = msg.index,
                         "received flashblock from peer outside receive window",
                     );
-                    self.protocol
-                        .network
-                        .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
+                    self.penalize_classified(
+                        peer_trusted,
+                        ReputationChangeKind::BadMessage,
+                        "flashblock outside receive window",
+                    );
                 }
                 return;
             }
@@ -410,9 +501,11 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                 index = msg.index,
                 "received duplicate flashblock from peer",
             );
-            self.protocol
-                .network
-                .reputation_change(self.peer_id, ReputationChangeKind::AlreadySeenTransaction);
+            self.penalize_classified(
+                peer_trusted,
+                ReputationChangeKind::AlreadySeenTransaction,
+                "duplicate flashblock",
+            );
             return;
         }
 
@@ -497,9 +590,10 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                 "received initiate build request with outdated timestamp",
             );
             drop(state);
-            self.protocol
-                .network
-                .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
+            self.penalize(
+                ReputationChangeKind::BadMessage,
+                "StartPublish with outdated timestamp",
+            );
             return;
         }
 
@@ -585,9 +679,10 @@ impl<N: FlashblocksP2PNetworkHandle> FlashblocksConnection<N> {
                 "Received initiate build response with outdated timestamp",
             );
             drop(state);
-            self.protocol
-                .network
-                .reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
+            self.penalize(
+                ReputationChangeKind::BadMessage,
+                "StopPublish with outdated timestamp",
+            );
             return;
         }
 
