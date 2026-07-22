@@ -98,7 +98,7 @@ jobs:
             entry_point: ""
             safe_4337_module: ""
             safe_4337_wallet_deployer: ""
-            karst_enabled: "false"
+            karst_enabled: "true"
             karst_deposit_enabled: "false"
             optimism_portal: ""
             allow_failure: true
@@ -153,6 +153,7 @@ jobs:
           ACCEPTANCE_L1_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
           ACCEPTANCE_BUNDLER_RPC_URL: ${{ matrix.network == 'alchemy-dev' && inputs.bundler_rpc_url != '' && inputs.bundler_rpc_url || matrix.bundler_rpc_url }}
           ACCEPTANCE_CHAIN_ID: ${{ matrix.expected_chain_id }}
+          ACCEPTANCE_L2_KEY: ${{ secrets.ACCEPTANCE_L2_KEY }}
           ACCEPTANCE_4337_RPC_URL: ${{ matrix.erc4337_rpc_url }}
           ACCEPTANCE_4337_ENTRY_POINT: ${{ matrix.entry_point }}
           ACCEPTANCE_4337_MODULE: ${{ matrix.safe_4337_module }}
