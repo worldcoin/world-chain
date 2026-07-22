@@ -90,6 +90,10 @@ where
                 .game_for_proposal_key(proposal.proposal_key)
                 .await?
             {
+                // game already exists onchain, look at the resolution status now:
+                // - if the root_state becomes `Invalidated`, then immediately return
+                //   because we don't want to keep building on top of an invalid game
+                // - otherwise, add the game to the canonical line and continue the loop
                 let resolution_status = self
                     .execution_provider
                     .resolution_status(next_game_addr)
@@ -123,6 +127,9 @@ where
                 canonical_line.push_game(next_game);
                 cursor = next_game;
             } else {
+                // game doesn't exist onchain yet, exit the loop with a
+                // `NextProposalAction::Propose`. The `propose` fn will
+                // later publish this proposal onchain
                 return Ok(CanonicalScan::new(
                     canonical_line,
                     NextProposalAction::Propose(proposal),
@@ -140,12 +147,22 @@ where
         canonical_line: &CanonicalLine,
     ) -> Result<FinalizedGames, ProposerError> {
         let mut finalized_games = FinalizedGames::default();
+        let mut resolutions_submitted = 0;
         for game in canonical_line.games() {
             let resolution_status = self
                 .execution_provider
                 .resolution_status(game.address)
                 .await?;
             if resolution_status.positive_resolvable() {
+                if resolutions_submitted >= self.config.max_resolutions_per_tick {
+                    info!(
+                        game_address = %game.address,
+                        l2_block_number = game.l2_block_number,
+                        max_resolutions_per_tick = self.config.max_resolutions_per_tick,
+                        "skipping game resolution because proposer tick budget is exhausted"
+                    );
+                    continue;
+                }
                 // resolve the game
                 let resolve_submission = self.execution_provider.resolve_game(game.address).await?;
                 info!(
@@ -155,6 +172,7 @@ where
                     "resolved World Chain proof-system game"
                 );
                 finalized_games.push(*game);
+                resolutions_submitted += 1;
             } else if resolution_status.root_state == RootState::Finalized {
                 // the game was finalized in an earlier iteration or by another keeper
                 finalized_games.push(*game);
@@ -199,7 +217,7 @@ where
                 invalidated_game,
             } => (proposal, Some(*invalidated_game)),
             NextProposalAction::AwaitNegativeResolution { game, reason } => {
-                info!(
+                warn!(
                     game_address = %game,
                     invalidation_reason = ?reason,
                     "waiting for challenger to resolve game with negative outcome"

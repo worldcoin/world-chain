@@ -62,6 +62,10 @@ struct Cli {
     #[arg(long, env = "POLL_INTERVAL_SECONDS", default_value_t = 12)]
     poll_interval_seconds: u64,
 
+    /// Maximum game-resolution transactions submitted during one proposer tick.
+    #[arg(long, env = "MAX_RESOLUTIONS_PER_TICK", default_value_t = 1)]
+    max_resolutions_per_tick: usize,
+
     /// Seconds between proposer-bond discovery and withdrawal passes.
     #[arg(
         long,
@@ -101,6 +105,7 @@ async fn main() -> Result<()> {
         block_interval: cli.block_interval,
         proposer_bond: U256::from(cli.proposer_bond_wei),
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
+        max_resolutions_per_tick: cli.max_resolutions_per_tick,
     };
     let proposer = WorldChainProposer::new(config, contracts, output_roots);
 
@@ -111,6 +116,7 @@ async fn main() -> Result<()> {
         anchor = %cli.anchor_registry_address,
         proposer = %proposer_address,
         block_interval = cli.block_interval,
+        max_resolutions_per_tick = cli.max_resolutions_per_tick,
         bond_manager_poll_interval_seconds = cli.bond_manager_poll_interval_seconds,
         bond_manager_initial_scan_limit = cli.bond_manager_initial_scan_limit,
         "starting World Chain proof-system proposer"
