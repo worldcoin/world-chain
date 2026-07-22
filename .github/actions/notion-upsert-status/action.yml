@@ -31,9 +31,13 @@ runs:
       env:
         NOTION_TOKEN: ${{ inputs.notion_token }}
         NOTION_DATABASE_ID: ${{ inputs.notion_database_id }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        STATUS: ${{ inputs.status }}
+        TAG: ${{ inputs.tag }}
       run: |
         set -euo pipefail
-        "${{ github.action_path }}/../../scripts/notion-upsert-status.sh" \
-          --environment "${{ inputs.environment }}" \
-          --status "${{ inputs.status }}" \
-          ${{ inputs.tag != '' && format('--tag {0}', inputs.tag) || '' }}
+        args=(--environment "${ENVIRONMENT}" --status "${STATUS}")
+        if [[ -n "${TAG}" ]]; then
+          args+=(--tag "${TAG}")
+        fi
+        "${{ github.action_path }}/../../scripts/notion-upsert-status.sh" "${args[@]}"

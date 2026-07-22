@@ -52,6 +52,7 @@ jobs:
     outputs:
       release_branch: ${{ steps.compute.outputs.release_branch }}
       version: ${{ steps.compute.outputs.version }}
+      sha: ${{ steps.compute.outputs.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -114,11 +115,12 @@ jobs:
       contents: write
     outputs:
       head_sha: ${{ steps.push.outputs.head_sha }}
+      short_sha: ${{ steps.push.outputs.short_sha }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ needs.validate.outputs.sha }}
 
       - name: Bump workspace version if needed
         id: bump
@@ -162,7 +164,9 @@ jobs:
           fi
 
           git push --force-with-lease origin "HEAD:${RELEASE_BRANCH}"
-          echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          head_sha="$(git rev-parse HEAD)"
+          echo "head_sha=${head_sha}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${head_sha:0:7}" >> "$GITHUB_OUTPUT"
 
   build-and-push:
     name: build and push candidate image
@@ -212,12 +216,16 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}
-          tags: type=sha
+          # type=sha would tag with the sha of the *dispatch* ref (main HEAD at
+          # the time this workflow was started), not the release-branch head we
+          # actually built — the two differ whenever source_sha is older than
+          # main or a version-bump commit was created. Pin the tag explicitly.
+          tags: type=raw,value=sha-${{ needs.prepare-branch.outputs.short_sha }}
       - name: Resolve published sha tag
         id: tag
         env:
-          HEAD_SHA: ${{ needs.prepare-branch.outputs.head_sha }}
-        run: echo "tag=sha-${HEAD_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          SHORT_SHA: ${{ needs.prepare-branch.outputs.short_sha }}
+        run: echo "tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Summary
         env:

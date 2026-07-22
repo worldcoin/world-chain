@@ -5,7 +5,7 @@ name: promote-release
 # "Rolling out" in the Notion Release Deployment Tracker. This is the ONLY
 # place that writes to crypto-apps on behalf of the release lifecycle — the
 # mechanical bump lives in crypto-apps' own promote-image-tag.sh, and the
-# promotion-order safety check (dev before staging before prod, no skipping
+# promotion-order safety check (dev before stage before prod, no skipping
 # ahead) runs as crypto-apps CI (image-tag-promotion-gate.yaml) against the PR
 # this workflow opens, not duplicated here.
 #
@@ -19,14 +19,19 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Tag to promote — sha-<7-40 hex> for dev, vX.Y.Z for staging/prod."
+        description: "Tag to promote — sha-<7-40 hex> for dev, vX.Y.Z for stage/prod."
         required: true
         type: string
       environment:
+        # These names must match the repo's existing GitHub environments
+        # (dev/stage/prod) — referencing a non-existent environment would make
+        # GitHub silently auto-create it with no protection rules, bypassing
+        # any approval gate. They also match the keys in crypto-apps'
+        # .github/release-environments.json.
         description: "Target environment."
         required: true
         type: choice
-        options: [dev, staging, prod]
+        options: [dev, stage, prod]
 
 permissions:
   contents: read
