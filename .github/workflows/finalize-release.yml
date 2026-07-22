@@ -3,9 +3,13 @@ name: finalize-release
 # Tags the exact, already-built sha-* commit at the head of release/vX.Y as
 # vX.Y.Z. Contains NO checkout-of-source-for-build step and NO docker build
 # step by construction — finalizing a release must never rebuild the artifact
-# that was already validated on Alphanet/Betanet/Alchemy Sepolia. Pushing the
-# tag triggers the existing release.yml (tag-push trigger), which drafts the
-# GitHub release from the image built here.
+# that was already validated on Alphanet/Betanet/Alchemy Sepolia. The vX.Y.Z
+# (and latest) image tags are created here by re-tagging the validated sha-*
+# manifest (docker buildx imagetools create), byte-for-byte identical to what
+# soaked. Pushing the git tag then triggers the existing release.yml
+# (tag-push trigger), which only builds the signed binaries and drafts the
+# GitHub release — it must not build or push container images, or it would
+# silently overwrite the validated ones.
 #
 # See the Release Runbook: https://app.notion.com/p/3568614bdf8c80afa4a3de10fb9f1fc7
 
@@ -43,6 +47,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -129,6 +134,23 @@ jobs:
             exit 1
           fi
 
+      - name: Re-tag validated image as vX.Y.Z (no rebuild)
+        # Promote the exact manifest that soaked — imagetools create only adds
+        # tags to the existing sha-* manifest, it never rebuilds. This is what
+        # stage/prod promotions will deploy. Idempotent, so a re-run after a
+        # partial failure is safe.
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+          SHA_TAG: sha-${{ steps.resolve.outputs.short_sha }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            -t "${IMAGE}:v${VERSION}" \
+            -t "${IMAGE}:latest" \
+            "${IMAGE}:${SHA_TAG}"
+
       - name: Tag and push
         env:
           VERSION: ${{ inputs.version }}
@@ -151,7 +173,7 @@ jobs:
             echo "## Finalized v${VERSION}"
             echo ""
             echo "- Tagged from \`${RELEASE_BRANCH}\` at \`${{ steps.resolve.outputs.head_sha }}\`"
-            echo "- No rebuild occurred — this is the exact artifact already validated through Betanet and Alchemy Sepolia."
+            echo "- Image \`v${VERSION}\` (and \`latest\`) re-tagged from \`sha-${{ steps.resolve.outputs.short_sha }}\` — no rebuild occurred; this is the exact artifact already validated through Betanet and Alchemy Sepolia."
             echo ""
-            echo "release.yml will now draft the GitHub release. Once ready, run **promote-release.yml** with \`environment=staging\` and \`version=v${VERSION}\`."
+            echo "release.yml will now build binaries and draft the GitHub release. Once ready, run **promote-release.yml** with \`environment=stage\` and \`version=v${VERSION}\`."
           } >> "$GITHUB_STEP_SUMMARY"
