@@ -16,7 +16,9 @@ use clap::Parser;
 use tracing::info;
 use url::Url;
 use world_chain_proofs::OptimismConsensusClient;
-use world_chain_proposer::{AlloyProofSystemClient, ProposerConfig, WorldChainProposer};
+use world_chain_proposer::{
+    AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerConfig, WorldChainProposer,
+};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -59,6 +61,18 @@ struct Cli {
     /// Seconds between output-root polls.
     #[arg(long, env = "POLL_INTERVAL_SECONDS", default_value_t = 12)]
     poll_interval_seconds: u64,
+
+    /// Seconds between proposer-bond discovery and withdrawal passes.
+    #[arg(
+        long,
+        env = "BOND_MANAGER_POLL_INTERVAL_SECONDS",
+        default_value_t = 300
+    )]
+    bond_manager_poll_interval_seconds: u64,
+
+    /// Number of recent factory games scanned when the bond manager starts.
+    #[arg(long, env = "BOND_MANAGER_INITIAL_SCAN_LIMIT", default_value_t = 1_000)]
+    bond_manager_initial_scan_limit: u64,
 }
 
 #[tokio::main]
@@ -77,13 +91,18 @@ async fn main() -> Result<()> {
 
     let contracts =
         AlloyProofSystemClient::new(provider, cli.factory_address, cli.anchor_registry_address);
+    let bond_manager_config = BondManagerConfig {
+        poll_interval: Duration::from_secs(cli.bond_manager_poll_interval_seconds),
+        initial_scan_limit: cli.bond_manager_initial_scan_limit,
+    };
+    let mut bond_manager = BondManager::new(bond_manager_config, contracts.clone());
     let output_roots = OptimismConsensusClient::new(cli.output_root_rpc.clone());
     let config = ProposerConfig {
         block_interval: cli.block_interval,
         proposer_bond: U256::from(cli.proposer_bond_wei),
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
     };
-    let mut proposer = WorldChainProposer::new(config, contracts, output_roots);
+    let proposer = WorldChainProposer::new(config, contracts, output_roots);
 
     info!(
         l1_rpc_url = %cli.l1_rpc,
@@ -92,11 +111,14 @@ async fn main() -> Result<()> {
         anchor = %cli.anchor_registry_address,
         proposer = %proposer_address,
         block_interval = cli.block_interval,
+        bond_manager_poll_interval_seconds = cli.bond_manager_poll_interval_seconds,
+        bond_manager_initial_scan_limit = cli.bond_manager_initial_scan_limit,
         "starting World Chain proof-system proposer"
     );
 
     tokio::select! {
         result = proposer.run_forever() => result.context("proposer stopped")?,
+        result = bond_manager.run_forever() => result.context("bond manager stopped")?,
         _ = tokio::signal::ctrl_c() => info!("received ctrl-c, shutting down"),
     }
     Ok(())

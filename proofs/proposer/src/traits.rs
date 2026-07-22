@@ -7,6 +7,31 @@ use crate::{
     types::{CloseGameSubmission, ResolveSubmission, WithdrawSubmission},
 };
 
+/// Contract surface needed by the asynchronous bond manager.
+#[async_trait]
+pub trait BondManagerClient: Send + Sync {
+    /// Returns the address whose proposal credits are managed.
+    fn proposer_address(&self) -> Address;
+
+    /// Returns the number of games created by the factory.
+    async fn game_count(&self) -> Result<u64, ProposerError>;
+
+    /// Returns the game at the provided factory creation index.
+    async fn game_at(&self, index: u64) -> Result<Address, ProposerError>;
+
+    /// Returns the proposer that created the provided game.
+    async fn game_proposer(&self, game: Address) -> Result<Address, ProposerError>;
+
+    /// Returns the resolution status of the provided game.
+    async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError>;
+
+    /// Returns the claimable amount for the managed proposer.
+    async fn claimable(&self, game: Address) -> Result<U256, ProposerError>;
+
+    /// Withdraws credits for the managed proposer.
+    async fn withdraw(&self, game: Address) -> Result<WithdrawSubmission, ProposerError>;
+}
+
 /// Minimal contract surface needed by the proposer.
 #[async_trait]
 pub trait ProposerClient: Send + Sync {

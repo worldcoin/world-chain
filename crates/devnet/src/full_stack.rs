@@ -53,7 +53,9 @@ use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
 };
 use world_chain_proofs::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
-use world_chain_proposer::{AlloyProofSystemClient, ProposerConfig, WorldChainProposer};
+use world_chain_proposer::{
+    AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerConfig, WorldChainProposer,
+};
 use world_chain_prover_service::{
     ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
 };
@@ -2418,13 +2420,14 @@ async fn start_world_chain_proposer(
         .connect_http(Url::parse(l1_rpc_url)?);
 
     let contracts = AlloyProofSystemClient::new(provider, factory_address, anchor_address);
+    let mut bond_manager = BondManager::new(BondManagerConfig::default(), contracts.clone());
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let config = ProposerConfig {
         block_interval: deployment.block_interval,
         proposer_bond: U256::from(WORLD_PROPOSER_BOND_WEI),
         poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
     };
-    let mut proposer = WorldChainProposer::new(config, contracts, output_roots);
+    let proposer = WorldChainProposer::new(config, contracts, output_roots);
 
     info!(
         l1_rpc_url,
@@ -2438,8 +2441,17 @@ async fn start_world_chain_proposer(
 
     let handle = tokio::spawn(
         async move {
-            if let Err(error) = proposer.run_forever().await {
-                warn!(%error, "World Chain proof-system proposer stopped");
+            tokio::select! {
+                result = proposer.run_forever() => {
+                    if let Err(error) = result {
+                        warn!(%error, "World Chain proof-system proposer stopped");
+                    }
+                }
+                result = bond_manager.run_forever() => {
+                    if let Err(error) = result {
+                        warn!(%error, "World Chain bond manager stopped");
+                    }
+                }
             }
         }
         .instrument(info_span!(

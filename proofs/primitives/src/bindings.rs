@@ -26,6 +26,8 @@ sol! {
             );
         function domainHash() external view returns (bytes32);
         function games(bytes32 proposalKey) external view returns (address);
+        function gameCount() external view returns (uint256);
+        function gameAt(uint256 index) external view returns (address);
         function isFactoryGame(address game) external view returns (bool);
         function propose(
             address parentRef,
@@ -52,6 +54,7 @@ sol! {
 
         function rootId() external view returns (bytes32);
         function factory() external view returns (address);
+        function proposer() external view returns (address);
         function anchorStateRegistry() external view returns (address);
         function domainHash() external view returns (bytes32);
         function attempt() external view returns (uint256);
