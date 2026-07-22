@@ -99,8 +99,8 @@ jobs:
             safe_4337_module: ""
             safe_4337_wallet_deployer: ""
             karst_enabled: "true"
-            karst_deposit_enabled: "false"
-            optimism_portal: ""
+            karst_deposit_enabled: "true"
+            optimism_portal: "0x58b38d8155f5bf9bfde8c8435cfbb3eb7dc66bb5"
             allow_failure: true
     steps:
       - name: Skip unselected network
