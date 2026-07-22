@@ -53,6 +53,8 @@ pub struct ProposerConfig {
     pub proposer_bond: U256,
     /// Delay between periodic proposal attempts.
     pub poll_interval: Duration,
+    /// Maximum number of game-resolution transactions submitted per proposer tick.
+    pub max_resolutions_per_tick: usize,
 }
 
 impl ProposerConfig {
@@ -67,6 +69,11 @@ impl ProposerConfig {
                 "poll_interval must be greater than zero",
             ));
         }
+        if self.max_resolutions_per_tick == 0 {
+            return Err(ProposerError::InvalidConfig(
+                "max_resolutions_per_tick must be greater than zero",
+            ));
+        }
         Ok(())
     }
 }
@@ -77,6 +84,7 @@ impl Default for ProposerConfig {
             block_interval: 6,
             proposer_bond: U256::ZERO,
             poll_interval: Duration::from_secs(12),
+            max_resolutions_per_tick: 1,
         }
     }
 }

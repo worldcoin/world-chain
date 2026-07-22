@@ -2426,6 +2426,7 @@ async fn start_world_chain_proposer(
         block_interval: deployment.block_interval,
         proposer_bond: U256::from(WORLD_PROPOSER_BOND_WEI),
         poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
+        max_resolutions_per_tick: ProposerConfig::default().max_resolutions_per_tick,
     };
     let proposer = WorldChainProposer::new(config, contracts, output_roots);
 

@@ -22,6 +22,7 @@ fn proposer_config() -> ProposerConfig {
         block_interval: BLOCK_INTERVAL,
         proposer_bond: U256::from(1),
         poll_interval: Duration::from_secs(1),
+        max_resolutions_per_tick: 1,
     }
 }
 

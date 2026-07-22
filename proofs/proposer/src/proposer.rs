@@ -147,12 +147,22 @@ where
         canonical_line: &CanonicalLine,
     ) -> Result<FinalizedGames, ProposerError> {
         let mut finalized_games = FinalizedGames::default();
+        let mut resolutions_submitted = 0;
         for game in canonical_line.games() {
             let resolution_status = self
                 .execution_provider
                 .resolution_status(game.address)
                 .await?;
             if resolution_status.positive_resolvable() {
+                if resolutions_submitted >= self.config.max_resolutions_per_tick {
+                    info!(
+                        game_address = %game.address,
+                        l2_block_number = game.l2_block_number,
+                        max_resolutions_per_tick = self.config.max_resolutions_per_tick,
+                        "skipping game resolution because proposer tick budget is exhausted"
+                    );
+                    continue;
+                }
                 // resolve the game
                 let resolve_submission = self.execution_provider.resolve_game(game.address).await?;
                 info!(
@@ -162,6 +172,7 @@ where
                     "resolved World Chain proof-system game"
                 );
                 finalized_games.push(*game);
+                resolutions_submitted += 1;
             } else if resolution_status.root_state == RootState::Finalized {
                 // the game was finalized in an earlier iteration or by another keeper
                 finalized_games.push(*game);
