@@ -7,7 +7,7 @@ import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyReg
 import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol";
 import {INitroAttestationVerifier} from "../../src/proofs/nitro/INitroAttestationVerifier.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
-import {MockProofSystemFactory, MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
+import {MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
 import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier.sol";
 
 contract EndToEndParentGame {
@@ -61,7 +61,6 @@ contract NitroEndToEndTest is Test {
     bytes enclavePubKey;
     EndToEndParentGame parent;
     MockProofSystemGame game;
-    MockProofSystemFactory proofSystemFactory;
     bytes32 domainHash;
 
     function setUp() public {
@@ -72,12 +71,11 @@ contract NitroEndToEndTest is Test {
         WorldChainProofLib.Domain memory domain = WorldChainProofLib.Domain({
             chainId: 480, proofSystemVersion: 1, rollupConfigHash: CFG, blockInterval: BLK - PRE_BLK
         });
-        proofSystemFactory = new MockProofSystemFactory(domain);
         domainHash = WorldChainProofLib.domainHash(domain);
         game = new MockProofSystemGame();
         game.setContext(
             MockProofSystemGame.Context({
-                factory: address(proofSystemFactory),
+                domain: domain,
                 rootId: _rootId(POST, BLK),
                 anchorStateRegistry: ANCHOR_STATE_REGISTRY,
                 domainHash: domainHash,

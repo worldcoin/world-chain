@@ -41,6 +41,10 @@ struct Cli {
     #[arg(long, env = "FACTORY_ADDRESS")]
     factory_address: Address,
 
+    /// World Chain game type registered on the DisputeGameFactory.
+    #[arg(long, env = "GAME_TYPE", default_value_t = 42)]
+    game_type: u32,
+
     /// Hex-encoded private key the defender signs L1 transactions with.
     #[arg(long, env = "DEFENDER_KEY", hide_env_values = true)]
     defender_key: PrivateKeySigner,
@@ -72,7 +76,7 @@ async fn main() -> Result<()> {
         .wallet(EthereumWallet::from(cli.defender_key))
         .connect_http(Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?);
 
-    let client = AlloyDefenderClient::new(provider, cli.factory_address);
+    let client = AlloyDefenderClient::new(provider, cli.factory_address, cli.game_type);
     let output_roots = OptimismConsensusClient::new(cli.output_root_rpc.clone());
     let proof_requester = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;

@@ -12,10 +12,13 @@ pub const PROOF_LANE_COUNT: u8 = 3;
 /// Version of the World Chain proof-domain encoding implemented here.
 pub const PROOF_SYSTEM_VERSION: u64 = 1;
 
-/// The `GameCreated` event.
+/// Factory index sentinel marking a proposal that starts from the current anchor.
+pub const ANCHOR_PARENT_INDEX: U256 = U256::MAX;
+
+/// The `WorldChainGameCreated` event emitted by each game at creation, paired with the
+/// emitting game address.
 #[derive(Debug, Clone, Copy)]
 pub struct GameCreated {
-    pub proposal_key: B256,
     pub root_id: B256,
     pub game: Address,
     pub proposer: Address,
@@ -24,6 +27,45 @@ pub struct GameCreated {
     pub parent_ref: Address,
     pub l1_origin_hash: B256,
     pub l1_origin_number: BlockNumber,
+    pub attempt: U256,
+}
+
+/// ABI-encodes the `extraData` payload for `DisputeGameFactory.create`:
+/// `abi.encode(l2BlockNumber, parentIndex, attempt)`.
+///
+/// `parent_index` is the factory index of the parent game, or [`ANCHOR_PARENT_INDEX`] for a
+/// proposal that starts from the current anchor. Together with the game type and root claim
+/// this uniquely identifies a game in the factory (`DisputeGameFactory.games`).
+#[must_use]
+pub fn extra_data(l2_block_number: u64, parent_index: U256, attempt: U256) -> Vec<u8> {
+    (U256::from(l2_block_number), parent_index, attempt).abi_encode()
+}
+
+/// OP Stack `GameStatus`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameStatus {
+    InProgress,
+    ChallengerWins,
+    DefenderWins,
+}
+
+#[derive(Debug, Error)]
+pub enum GameStatusError {
+    #[error("Invalid game status: {0}")]
+    InvalidGameStatus(u8),
+}
+
+impl TryFrom<u8> for GameStatus {
+    type Error = GameStatusError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(GameStatus::InProgress),
+            1 => Ok(GameStatus::ChallengerWins),
+            2 => Ok(GameStatus::DefenderWins),
+            _ => Err(GameStatusError::InvalidGameStatus(value)),
+        }
+    }
 }
 
 /// A game root state.
@@ -96,21 +138,6 @@ pub struct ProposalCommitment {
     pub l2_block_number: u64,
 }
 
-impl ProposalCommitment {
-    /// Compute the Solidity-compatible proposal key used for factory lookups.
-    #[must_use]
-    pub fn proposal_key(self, domain_hash: B256) -> B256 {
-        let encoded = (
-            domain_hash,
-            self.parent_ref,
-            self.root_claim,
-            U256::from(self.l2_block_number),
-        )
-            .abi_encode();
-        keccak256(encoded)
-    }
-}
-
 /// Per-proposal commitment fields used to compute a canonical root id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RootCommitment {
@@ -123,12 +150,6 @@ pub struct RootCommitment {
 }
 
 impl RootCommitment {
-    /// Compute the Solidity-compatible proposal key used for factory lookups.
-    #[must_use]
-    pub fn proposal_key(self, domain_hash: B256) -> B256 {
-        self.proposal.proposal_key(domain_hash)
-    }
-
     /// Compute the Solidity-compatible root id for this proposal.
     #[must_use]
     pub fn root_id(self, domain_hash: B256) -> B256 {
@@ -190,6 +211,8 @@ pub enum InvalidationReason {
     None,
     ProofTimeout,
     InvalidParent,
+    /// No longer produced on-chain: blacklisting now flips settlement to refund mode at
+    /// `closeGame` instead of surfacing as an invalidation reason. Kept for ABI completeness.
     Blacklisted,
 }
 
@@ -277,7 +300,11 @@ mod tests {
         };
 
         let root_id = commitment.root_id(domain.hash());
-        assert_ne!(B256::ZERO, proposal.proposal_key(domain.hash()));
+        // extraData is three 32-byte words: l2BlockNumber, parentIndex, attempt.
+        assert_eq!(
+            extra_data(proposal.l2_block_number, ANCHOR_PARENT_INDEX, U256::ZERO).len(),
+            96
+        );
         let changed = ProofDomain {
             chain_id: 4802,
             ..domain

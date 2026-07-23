@@ -1,0 +1,22 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+allow_paths = ["../lib/optimism"]
+optimizer = true
+optimizer_runs = 5000
+bytecode_hash = "none"
+cbor_metadata = false
+
+remappings = [
+  "@optimism-bedrock/=lib/optimism/packages/contracts-bedrock/",
+  "src/=lib/optimism/packages/contracts-bedrock/src/",
+  "interfaces/=lib/optimism/packages/contracts-bedrock/interfaces/",
+  "@openzeppelin/contracts/=lib/optimism/packages/contracts-bedrock/lib/openzeppelin-contracts/contracts/",
+  "@openzeppelin/contracts-upgradeable/=lib/optimism/packages/contracts-bedrock/lib/openzeppelin-contracts-upgradeable/contracts/",
+  "@openzeppelin/contracts-v5/=lib/optimism/packages/contracts-bedrock/lib/openzeppelin-contracts-v5/contracts/",
+  "@solady/=lib/optimism/packages/contracts-bedrock/lib/solady/src/",
+  "@solady-v0.0.245/=lib/optimism/packages/contracts-bedrock/lib/solady-v0.0.245/src/",
+  "@lib-keccak/=lib/optimism/packages/contracts-bedrock/lib/lib-keccak/contracts/lib/",
+  "@rari-capital/solmate/=lib/optimism/packages/contracts-bedrock/lib/solmate/",
+]

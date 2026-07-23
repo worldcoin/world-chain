@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
-use alloy_primitives::{Address, U256};
+use alloy_primitives::Address;
 use tracing::{info, warn};
 
-use crate::{BondManagerClient, BondManagerConfig, ProposerError};
+use crate::{BondManagerClient, BondManagerConfig, ProposerError, types::ClaimOutcome};
 
 /// Discovers games created by the proposer and asynchronously withdraws resolved bond credits.
 #[derive(Debug)]
@@ -63,7 +63,10 @@ where
         let proposer = self.execution_provider.proposer_address();
 
         for index in start..game_count {
-            let game = self.execution_provider.game_at(index).await?;
+            // Games of other types (e.g. the stock cannon games) are skipped.
+            let Some(game) = self.execution_provider.game_at(index).await? else {
+                continue;
+            };
             if self.execution_provider.game_proposer(game).await? == proposer {
                 self.proposed_games.insert(game);
             }
@@ -79,7 +82,11 @@ where
         Ok(())
     }
 
-    /// Withdraws available credits and prunes games that have reached a terminal state.
+    /// Advances two-phase DelayedWETH claims and prunes games whose credits are fully settled.
+    ///
+    /// Each resolved game walks through: unlock (after the registry's finality airgap) →
+    /// withdrawal (after the DelayedWETH delay). A game is pruned once its funds land or it
+    /// holds no credit for the proposer.
     pub async fn withdraw_credits(&mut self) -> Result<(), ProposerError> {
         let proposed_games: Vec<_> = self.proposed_games.iter().copied().collect();
 
@@ -90,18 +97,28 @@ where
                     return Ok(false);
                 }
 
-                let claimable_amount = self.execution_provider.claimable(game).await?;
-                if claimable_amount > U256::ZERO {
-                    let withdraw_submission = self.execution_provider.withdraw(game).await?;
-                    info!(
-                        tx_hash = ?withdraw_submission.tx_hash,
-                        amount = ?withdraw_submission.amount,
-                        game_address = %game,
-                        "withdrew claimable credits"
-                    );
+                match self.execution_provider.claim_credits(game).await? {
+                    ClaimOutcome::NotReady => Ok(false),
+                    ClaimOutcome::Unlocked { tx_hash, amount } => {
+                        info!(
+                            tx_hash = ?tx_hash,
+                            amount = ?amount,
+                            game_address = %game,
+                            "unlocked bond credits in DelayedWETH"
+                        );
+                        Ok(false)
+                    }
+                    ClaimOutcome::Claimed { tx_hash, amount } => {
+                        info!(
+                            tx_hash = ?tx_hash,
+                            amount = ?amount,
+                            game_address = %game,
+                            "withdrew bond credits"
+                        );
+                        Ok(true)
+                    }
+                    ClaimOutcome::NoCredit => Ok(true),
                 }
-
-                Ok(true)
             }
             .await;
 

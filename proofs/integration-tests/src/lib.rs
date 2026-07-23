@@ -15,13 +15,18 @@ use world_chain_challenger::{ChallengeSubmission, ChallengerClient, ChallengerEr
 use world_chain_defender::{DefenderClient, DefenderError, DefenderSubmission};
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_proofs::{
-    ConsensusError, ConsensusProvider, GameCreated, InvalidationReason, PROOF_SYSTEM_VERSION,
-    ProofDomain, ProofLane, ResolutionStatus, RootCommitment, RootState, has_threshold,
+    ANCHOR_PARENT_INDEX, ConsensusError, ConsensusProvider, GameCreated, InvalidationReason,
+    PROOF_SYSTEM_VERSION, ProofDomain, ProofLane, ProposalCommitment, ResolutionStatus,
+    RootCommitment, RootState, has_threshold,
 };
 use world_chain_proposer::{
     CloseGameSubmission, ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
-    ResolveSubmission, WithdrawSubmission,
+    ResolveSubmission,
 };
+
+/// Factory identity of a game, mirroring `DisputeGameFactory.games`:
+/// `(root_claim, extraData)` where `extraData == abi.encode(l2BlockNumber, parentIndex, attempt)`.
+type GameKey = (B256, Vec<u8>);
 use world_chain_prover_service::{
     GetNextProofRequest, GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse,
     HeartbeatRequest, HeartbeatResponse, ProofBackend, ProofData, ProofJobQueue,
@@ -123,10 +128,14 @@ pub struct FakeExecution {
 #[derive(Debug)]
 struct FakeExecutionState {
     domain_hash: B256,
+    /// The anchor sentinel; its `parent_index` is always [`ANCHOR_PARENT_INDEX`].
     anchor: ParentRef,
+    /// The game that currently backs the anchor, once one has been closed. `None` at genesis,
+    /// when the anchor is the `AnchorStateRegistry`.
+    anchor_game: Option<Address>,
     finalized_l1_block: BlockNumber,
     next_game_nonce: u8,
-    games_by_key: HashMap<B256, Address>,
+    games_by_key: HashMap<GameKey, Address>,
     games_by_address: HashMap<Address, GameRecord>,
     game_order: Vec<Address>,
 }
@@ -139,6 +148,9 @@ struct GameRecord {
     proof_bitmap: u8,
     challenge_count: u32,
     submitted_lanes: Vec<ProofLane>,
+    /// Whether the registry's finality airgap has elapsed for this game. Defaults to `true`;
+    /// tests flip it to `false` to exercise deferred `closeGame`.
+    finality_airgap_elapsed: bool,
 }
 
 impl Default for FakeExecution {
@@ -156,7 +168,9 @@ impl FakeExecution {
                 anchor: ParentRef {
                     address: ANCHOR,
                     l2_block_number: 0,
+                    parent_index: ANCHOR_PARENT_INDEX,
                 },
+                anchor_game: None,
                 finalized_l1_block: 10_000,
                 next_game_nonce: 1,
                 games_by_key: HashMap::new(),
@@ -223,6 +237,37 @@ impl FakeExecution {
         challenge_record(state.games_by_address.get_mut(&game).expect("game exists"));
     }
 
+    /// Programs the finality airgap for a game, modelling the delay `AnchorStateRegistry`
+    /// enforces before `is_game_finalized` returns `true`.
+    pub fn set_game_finalized(&self, game: Address, finalized: bool) {
+        self.state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .games_by_address
+            .get_mut(&game)
+            .expect("game exists")
+            .finality_airgap_elapsed = finalized;
+    }
+
+    /// Returns the L2 block number the anchor currently sits at.
+    #[must_use]
+    pub fn anchor_l2_block(&self) -> u64 {
+        self.state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .anchor
+            .l2_block_number
+    }
+
+    /// Returns the game currently backing the anchor, if the anchor has advanced past genesis.
+    #[must_use]
+    pub fn anchor_game(&self) -> Option<Address> {
+        self.state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .anchor_game
+    }
+
     fn create_game(state: &mut FakeExecutionState, proposal: &Proposal) -> GameCreated {
         let game = Address::with_last_byte(state.next_game_nonce);
         state.next_game_nonce = state.next_game_nonce.saturating_add(1);
@@ -230,12 +275,15 @@ impl FakeExecution {
         let l1_origin_number = state.finalized_l1_block.saturating_sub(1);
         let l1_origin_hash = B256::with_last_byte(l1_origin_number as u8);
         let root = RootCommitment {
-            proposal: proposal.commitment(),
+            proposal: ProposalCommitment {
+                parent_ref: proposal.parent_ref,
+                root_claim: proposal.root_claim,
+                l2_block_number: proposal.l2_block_number,
+            },
             l1_origin_hash,
             l1_origin_number,
         };
         let event = GameCreated {
-            proposal_key: proposal.proposal_key,
             root_id: root.root_id(state.domain_hash),
             game,
             proposer: Address::repeat_byte(0xa1),
@@ -244,9 +292,10 @@ impl FakeExecution {
             parent_ref: proposal.parent_ref,
             l1_origin_hash,
             l1_origin_number,
+            attempt: proposal.attempt,
         };
 
-        state.games_by_key.insert(proposal.proposal_key, game);
+        state.games_by_key.insert(game_key(proposal), game);
         state.game_order.push(game);
         state.games_by_address.insert(
             game,
@@ -257,10 +306,26 @@ impl FakeExecution {
                 proof_bitmap: 0,
                 challenge_count: 0,
                 submitted_lanes: Vec::new(),
+                finality_airgap_elapsed: true,
             },
         );
         event
     }
+}
+
+/// Factory identity of a proposal: `(root_claim, extraData)`, mirroring the key used by
+/// `DisputeGameFactory.games`.
+fn game_key(proposal: &Proposal) -> GameKey {
+    (proposal.root_claim, proposal.extra_data())
+}
+
+/// Returns the factory creation index of `game`, i.e. its position in creation order.
+fn game_index_of(state: &FakeExecutionState, game: Address) -> Option<U256> {
+    state
+        .game_order
+        .iter()
+        .position(|candidate| *candidate == game)
+        .map(U256::from)
 }
 
 fn challenge_record(record: &mut GameRecord) {
@@ -281,37 +346,39 @@ fn proof_lane(lane: u8) -> Option<ProofLane> {
 
 #[async_trait]
 impl ProposerClient for FakeExecution {
-    async fn anchor_parent(&self) -> Result<ParentRef, ProposerError> {
-        Ok(self
-            .state
-            .lock()
-            .expect("fake execution mutex poisoned")
-            .anchor)
+    async fn anchor_parents(&self) -> Result<Vec<ParentRef>, ProposerError> {
+        let state = self.state.lock().expect("fake execution mutex poisoned");
+        let mut parents = Vec::with_capacity(2);
+        // A closed anchor game is addressable by its factory index (children created before the
+        // anchor advanced reference it that way); the sentinel always follows.
+        if let Some(anchor_game) = state.anchor_game {
+            let parent_index = game_index_of(&state, anchor_game).ok_or_else(|| {
+                ProposerError::Contract(format!("anchor game {anchor_game} missing from factory"))
+            })?;
+            parents.push(ParentRef {
+                address: anchor_game,
+                l2_block_number: state.anchor.l2_block_number,
+                parent_index,
+            });
+        }
+        parents.push(state.anchor);
+        Ok(parents)
     }
 
-    async fn proposal_key(
-        &self,
-        commitment: world_chain_proofs::ProposalCommitment,
-    ) -> Result<B256, ProposerError> {
-        Ok(commitment.proposal_key(
-            self.state
-                .lock()
-                .expect("fake execution mutex poisoned")
-                .domain_hash,
-        ))
-    }
-
-    async fn game_for_proposal_key(
-        &self,
-        proposal_key: B256,
-    ) -> Result<Option<Address>, ProposerError> {
+    async fn find_game(&self, proposal: &Proposal) -> Result<Option<Address>, ProposerError> {
         Ok(self
             .state
             .lock()
             .expect("fake execution mutex poisoned")
             .games_by_key
-            .get(&proposal_key)
+            .get(&game_key(proposal))
             .copied())
+    }
+
+    async fn game_index(&self, game: Address) -> Result<U256, ProposerError> {
+        let state = self.state.lock().expect("fake execution mutex poisoned");
+        game_index_of(&state, game)
+            .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
@@ -336,6 +403,16 @@ impl ProposerClient for FakeExecution {
             root_state,
             invalidation_reason: InvalidationReason::None,
         })
+    }
+
+    async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError> {
+        let state = self.state.lock().expect("fake execution mutex poisoned");
+        let record = state
+            .games_by_address
+            .get(&game)
+            .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
+        // Finalized in the registry means resolved positively AND past the finality airgap.
+        Ok(record.state == STATE_FINALIZED && record.finality_airgap_elapsed)
     }
 
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
@@ -367,24 +444,17 @@ impl ProposerClient for FakeExecution {
                 "game {game} is not finalized"
             )));
         }
+        // `closeGame` advances the anchor onto this game (`setAnchorState`), so later
+        // `anchor_parents()` calls surface it as the anchor game.
         let l2_block_number = record.event.l2_block_number;
         state.anchor = ParentRef {
             address: game,
             l2_block_number,
+            parent_index: ANCHOR_PARENT_INDEX,
         };
+        state.anchor_game = Some(game);
         Ok(CloseGameSubmission {
             tx_hash: B256::with_last_byte(game.as_slice()[19]),
-        })
-    }
-
-    async fn claimable(&self, _game: Address) -> Result<U256, ProposerError> {
-        Ok(U256::ZERO)
-    }
-
-    async fn withdraw(&self, game: Address) -> Result<WithdrawSubmission, ProposerError> {
-        Ok(WithdrawSubmission {
-            tx_hash: B256::with_last_byte(game.as_slice()[19]),
-            amount: U256::ZERO,
         })
     }
 
@@ -398,10 +468,11 @@ impl ProposerClient for FakeExecution {
         _proposer_bond: U256,
     ) -> Result<ProposalSubmission, ProposerError> {
         let mut state = self.state.lock().expect("fake execution mutex poisoned");
-        if let Some(existing) = state.games_by_key.get(&proposal.proposal_key) {
+        // The real factory reverts `GameAlreadyExists` for a duplicate (gameType, rootClaim,
+        // extraData).
+        if let Some(existing) = state.games_by_key.get(&game_key(proposal)) {
             return Err(ProposerError::Contract(format!(
-                "game already exists for proposal key {} at {existing}",
-                proposal.proposal_key
+                "game already exists at {existing}"
             )));
         }
         let event = Self::create_game(&mut state, proposal);

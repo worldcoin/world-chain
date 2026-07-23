@@ -3,5 +3,17 @@ set positional-arguments
 deploy-contracts:
     chmod +x ./scripts/devnet/deploy_kurtosis.sh && ./scripts/devnet/deploy_kurtosis.sh
 
-fmt: 
+fmt:
     forge fmt
+
+# Build the pinned Optimism implementation contracts (solc 0.8.15) in the isolated
+# opstack/ sub-project. Tests and deploy scripts read these artifacts via
+# vm.getCode/vm.deployCode; run this before `forge test`.
+build-opstack:
+    cd opstack && forge build
+
+build: build-opstack
+    forge build
+
+test: build-opstack
+    forge test
