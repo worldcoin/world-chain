@@ -303,8 +303,6 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IWorldChainProof
 
     /// @notice Asks the registry to advance its accepted anchor to this game.
     /// @dev This is separate from Portal withdrawal finalization, which reads `isGameClaimValid` directly.
-    ///      TODO: Before Portal activation, confirm whether anchor-update failures should remain
-    ///      visible or follow Base's best-effort close behavior after eligibility checks.
     function closeGame() external override {
         IWorldChainAnchorStateRegistry(anchorStateRegistry).setAnchorState(address(this));
     }
