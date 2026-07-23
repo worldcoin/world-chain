@@ -1,17 +1,13 @@
-use std::{
-    borrow::Cow,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_network::EthereumWallet;
 use alloy_primitives::{Address, B256, Bytes, U256, address, keccak256};
-use alloy_provider::{Provider, ProviderBuilder};
+use alloy_provider::{Provider, ProviderBuilder, ext::AnvilApi};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{SolValue, sol};
-use eyre::eyre::{Context, OptionExt, bail, ensure};
-use serde_json::Value;
+use eyre::eyre::{OptionExt, bail, ensure};
 use url::Url;
 use world_chain_devnet::{
     HaSequencerConfig, ObservabilityConfig, WorldDevnetBuilder, WorldDevnetPreset,
@@ -23,7 +19,6 @@ use world_chain_proofs::{
 
 const PROOF_SYSTEM_OWNER_KEY: &str =
     "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";
-const CHALLENGE_PERIOD_SECONDS: u64 = 24 * 60 * 60;
 const L2_TO_L1_MESSAGE_PASSER: Address = address!("4200000000000000000000000000000000000016");
 const GAME_WAIT_TIMEOUT: Duration = Duration::from_secs(180);
 const GAME_IN_PROGRESS: u8 = 0;
@@ -64,7 +59,7 @@ sol! {
     #[sol(rpc)]
     interface OptimismPortal {
         error OptimismPortal_ImproperDisputeGame();
-        error OptimismPortal_InvalidRootClaim();
+        error OptimismPortal_ProofNotOldEnough();
 
         function anchorStateRegistry() external view returns (address);
         function disputeGameFactory() external view returns (address);
@@ -93,7 +88,7 @@ async fn wip_1006_portal_withdrawal_happy_and_rejection_paths() -> eyre::Result<
     reth_tracing::init_test_tracing();
 
     let ha_config = HaSequencerConfig::default()
-        .with_sequencer_count(3)
+        .with_sequencer_count(1)
         .with_observability(ObservabilityConfig::default());
     let devnet = match WorldDevnetBuilder::new()
         .preset(WorldDevnetPreset::HaSequencer)
@@ -217,54 +212,50 @@ async fn wip_1006_portal_withdrawal_happy_and_rejection_paths() -> eyre::Result<
             .status(),
         "Portal withdrawal proof transaction reverted"
     );
+
+    let Err(immature_error) = portal
+        .finalizeWithdrawalTransaction(withdrawal.transaction.clone())
+        .call()
+        .await
+    else {
+        bail!("Portal finalized a withdrawal before its proof matured");
+    };
+    ensure!(
+        immature_error
+            .as_decoded_error::<OptimismPortal::OptimismPortal_ProofNotOldEnough>()
+            .is_some(),
+        "Portal did not enforce its proof maturity delay"
+    );
+
     let maturity_delay: u64 = portal
         .proofMaturityDelaySeconds()
         .call()
         .await?
         .try_into()?;
+    let current_timestamp = l1_provider
+        .get_block_by_number(BlockNumberOrTag::Latest)
+        .await?
+        .ok_or_eyre("latest L1 block missing")?
+        .header
+        .timestamp();
+    let challenge_deadline = game.challengeDeadline().call().await?;
+    let settlement_time = current_timestamp
+        .saturating_add(maturity_delay)
+        .max(challenge_deadline)
+        .saturating_add(1);
     advance_time(
         &l1_provider,
-        maturity_delay.max(CHALLENGE_PERIOD_SECONDS) + 1,
+        settlement_time.saturating_sub(current_timestamp),
     )
     .await?;
 
-    let Err(unresolved_error) = portal
-        .finalizeWithdrawalTransaction(withdrawal.transaction.clone())
-        .call()
-        .await
-    else {
-        bail!("Portal finalized a withdrawal against an unresolved WIP-1006 game");
-    };
-    ensure!(
-        unresolved_error
-            .as_decoded_error::<OptimismPortal::OptimismPortal_InvalidRootClaim>()
-            .is_some(),
-        "Portal did not reject the unresolved WIP-1006 root claim"
-    );
-
-    resolve_games_through(
-        l1_provider.clone(),
-        factory_address,
-        withdrawal_sender,
-        game_index,
-    )
-    .await?;
-    ensure!(
-        game.status().call().await? == GAME_DEFENDER_WINS,
-        "withdrawal game did not resolve defender-win"
-    );
+    wait_for_defender_win(l1_provider.clone(), game_address).await?;
 
     advance_time(&l1_provider, 1).await?;
 
     ensure!(
         portal
             .finalizeWithdrawalTransaction(withdrawal.transaction)
-            .nonce(
-                l1_provider
-                    .get_transaction_count(withdrawal_sender)
-                    .pending()
-                    .await?,
-            )
             .send()
             .await?
             .get_receipt()
@@ -339,7 +330,8 @@ where
 
     loop {
         let game_count: u64 = factory.gameCount().call().await?.try_into()?;
-        for index in (0..game_count).rev() {
+        if game_count != 0 {
+            let index = game_count - 1;
             let game_address = factory.gameAtIndex(U256::from(index)).call().await?.game;
             let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
                 game_address,
@@ -395,57 +387,34 @@ where
     Ok((output_root_proof, storage_proof.proof.clone()))
 }
 
-async fn resolve_games_through<P>(
-    provider: P,
-    factory_address: Address,
-    sender: Address,
-    game_index: u64,
-) -> eyre::Result<()>
+async fn wait_for_defender_win<P>(provider: P, game_address: Address) -> eyre::Result<()>
 where
-    P: Provider + Clone,
+    P: Provider,
 {
-    let factory = IWorldChainProofSystemFactory::IWorldChainProofSystemFactoryInstance::new(
-        factory_address,
-        provider.clone(),
-    );
+    let game =
+        IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(game_address, provider);
+    let started = Instant::now();
 
-    for index in 0..=game_index {
-        let game_address = factory.gameAtIndex(U256::from(index)).call().await?.game;
-        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game_address,
-            provider.clone(),
-        );
-        if game.status().call().await? != GAME_IN_PROGRESS {
-            continue;
+    loop {
+        let status = game.status().call().await?;
+        if status == GAME_DEFENDER_WINS {
+            return Ok(());
         }
-
-        let nonce = provider.get_transaction_count(sender).pending().await?;
-        match game.resolve().nonce(nonce).send().await {
-            Ok(pending) => ensure!(
-                pending.get_receipt().await?.status(),
-                "game resolution reverted"
-            ),
-            Err(error) => ensure!(
-                game.status().call().await? == GAME_DEFENDER_WINS,
-                "failed to resolve game {game_address}: {error}"
-            ),
+        if status != GAME_IN_PROGRESS {
+            bail!("game {game_address} resolved with unexpected status {status}");
         }
+        if started.elapsed() >= GAME_WAIT_TIMEOUT {
+            bail!("timed out waiting for game {game_address} to resolve");
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
-
-    Ok(())
 }
 
 async fn advance_time<P>(provider: &P, seconds: u64) -> eyre::Result<()>
 where
     P: Provider,
 {
-    let _: Value = provider
-        .raw_request(Cow::Borrowed("evm_increaseTime"), (seconds,))
-        .await
-        .context("evm_increaseTime failed")?;
-    let _: Value = provider
-        .raw_request(Cow::Borrowed("evm_mine"), ())
-        .await
-        .context("evm_mine failed")?;
+    provider.anvil_increase_time(seconds).await?;
+    provider.evm_mine(None).await?;
     Ok(())
 }
