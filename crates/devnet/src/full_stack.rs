@@ -1048,6 +1048,10 @@ async fn deploy_world_proof_system(
         validity = %deployment.validity_proof_verifier,
         tee = %deployment.tee_verifier,
         council = %deployment.security_council,
+        game_implementation = %deployment.game_implementation,
+        game_type = deployment.game_type,
+        delayed_weth = %deployment.delayed_weth,
+        delayed_weth_proxy_admin = %deployment.delayed_weth_proxy_admin,
         "World Chain proof-system contracts deployed"
     );
 
