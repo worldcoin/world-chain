@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 import {Claim, GameStatus, GameType, Hash, Timestamp} from "../DisputeTypes.sol";
 
-/// @notice Game read surface consumed by OptimismPortal2 and WorldChainAnchorStateRegistry.
+/// @notice OP-compatible game read facade shared by OptimismPortal2 and World Chain proof contracts.
 /// @dev Pinned to OptimismPortal2 5.6.1 from op-deployer v0.7.1 (optimism commit
 ///      7525482253bdc076548840638cde165c9004349f). This is not the complete OP Stack
 ///      IDisputeGame lifecycle interface: in particular, World Chain's resolve() returns WIP-1006

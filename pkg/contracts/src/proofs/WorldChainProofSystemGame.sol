@@ -4,13 +4,12 @@ pragma solidity 0.8.28;
 import {WorldChainProofLib} from "./WorldChainProofLib.sol";
 import {Claim, GameStatus, GameType, Hash, Timestamp, GameTypes} from "./DisputeTypes.sol";
 import {IWorldChainAnchorStateRegistry} from "./interfaces/IWorldChainAnchorStateRegistry.sol";
-import {IDisputeGame} from "./interfaces/IDisputeGame.sol";
 import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
 import {IWorldChainStakingRegistry} from "./interfaces/IWorldChainStakingRegistry.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
-contract WorldChainProofSystemGame is ReentrancyGuardTransient, IDisputeGame {
+contract WorldChainProofSystemGame is ReentrancyGuardTransient, IWorldChainProofSystemGame {
     using WorldChainProofLib for uint8;
 
     struct ProposalInit {
@@ -81,19 +80,19 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IDisputeGame {
     uint8 public immutable PROOF_THRESHOLD;
     uint8 public constant PROOF_LANE_COUNT = WorldChainProofLib.PROOF_LANE_COUNT;
 
-    address public immutable factory;
-    address public immutable anchorStateRegistry;
-    uint256 public immutable attempt;
+    address public immutable override factory;
+    address public immutable override anchorStateRegistry;
+    uint256 public immutable override attempt;
     address public immutable override gameCreator;
-    address public immutable parentRef;
-    bytes32 public immutable startingRootClaim;
-    uint256 public immutable startingL2BlockNumber;
+    address public immutable override parentRef;
+    bytes32 public immutable override startingRootClaim;
+    uint256 public immutable override startingL2BlockNumber;
     bytes32 public immutable override rootClaim;
     uint256 public immutable override l2SequenceNumber;
     bytes32 private immutable _l1Head;
-    uint256 public immutable l1OriginNumber;
-    bytes32 public immutable domainHash;
-    bytes32 public immutable rootId;
+    uint256 public immutable override l1OriginNumber;
+    bytes32 public immutable override domainHash;
+    bytes32 public immutable override rootId;
 
     uint64 public immutable challengePeriod;
     uint64 public immutable proofPeriod;
@@ -106,12 +105,12 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IDisputeGame {
     IWorldChainStakingRegistry public immutable stakingRegistry;
 
     uint64 public override createdAt;
-    uint64 public challengeDeadline;
-    uint64 public proofDeadline;
+    uint64 public override challengeDeadline;
+    uint64 public override proofDeadline;
     uint64 private _resolvedAt;
-    uint8 public proofBitmap;
-    WorldChainProofLib.RootState public state;
-    WorldChainProofLib.InvalidationReason public invalidationReason;
+    uint8 public override proofBitmap;
+    WorldChainProofLib.RootState public override state;
+    WorldChainProofLib.InvalidationReason public override invalidationReason;
     bool public override wasRespectedGameTypeWhenCreated;
 
     address payable public challenger;
@@ -216,14 +215,14 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IDisputeGame {
     }
 
     /// @notice Returns the ETH amount `recipient` can withdraw from this game.
-    function claimable(address recipient) external view returns (uint256) {
+    function claimable(address recipient) external view override returns (uint256) {
         return _claimable(recipient);
     }
 
     /// @notice Permissionlessly withdraws `recipient`'s claim to `recipient`.
     /// @dev The challenger, defender/prover-service automation, or keepers can call this after resolution;
     ///      the caller cannot redirect funds away from `recipient`.
-    function withdraw(address payable recipient) external nonReentrant {
+    function withdraw(address payable recipient) external override nonReentrant {
         address account = recipient;
         uint256 amount = _claimable(account);
         if (amount == 0) revert NoClaim(account);
@@ -270,6 +269,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IDisputeGame {
     function resolutionStatus()
         external
         view
+        override
         returns (bool resolvable, WorldChainProofLib.RootState outcome, WorldChainProofLib.InvalidationReason reason)
     {
         ResolutionEvaluation memory evaluation = _evaluateResolution();
@@ -280,6 +280,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IDisputeGame {
     /// @dev Resolution assigns pull-based bond claims; call `withdraw(recipient)` to transfer claimable ETH.
     function resolve()
         external
+        override
         returns (WorldChainProofLib.RootState outcome, WorldChainProofLib.InvalidationReason reason)
     {
         ResolutionEvaluation memory evaluation = _evaluateResolution();
@@ -304,7 +305,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IDisputeGame {
     /// @dev This is separate from Portal withdrawal finalization, which reads `isGameClaimValid` directly.
     ///      TODO: Before Portal activation, confirm whether anchor-update failures should remain
     ///      visible or follow Base's best-effort close behavior after eligibility checks.
-    function closeGame() external {
+    function closeGame() external override {
         IWorldChainAnchorStateRegistry(anchorStateRegistry).setAnchorState(address(this));
     }
 

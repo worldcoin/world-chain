@@ -3,8 +3,10 @@ pragma solidity 0.8.28;
 
 import {Claim, GameId, GameType, Timestamp} from "../DisputeTypes.sol";
 import {IDisputeGame} from "./IDisputeGame.sol";
+import {IOptimismPortal2DisputeGameFactory} from "./IOptimismPortal2.sol";
 
-interface IWorldChainProofSystemFactory {
+interface IWorldChainProofSystemFactory is IOptimismPortal2DisputeGameFactory {
+    /// @dev ABI-compatible with the pinned OP Stack IDisputeGameFactory.GameSearchResult.
     struct GameSearchResult {
         uint256 index;
         GameId metadata;
@@ -18,9 +20,6 @@ interface IWorldChainProofSystemFactory {
         external
         view
         returns (uint256 chainId, uint256 proofSystemVersion, bytes32 rollupConfigHash, uint256 blockInterval);
-
-    /// @notice Returns the indexed game selected by OptimismPortal2 when proving a withdrawal.
-    function gameAtIndex(uint256 index) external view returns (GameType, Timestamp, IDisputeGame);
 
     function gameCount() external view returns (uint256);
 

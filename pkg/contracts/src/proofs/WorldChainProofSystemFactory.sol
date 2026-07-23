@@ -6,13 +6,12 @@ import {Claim, GameId, GameType, Hash, Proposal, Timestamp, GameTypes} from "./D
 import {WorldChainProofSystemGame} from "./WorldChainProofSystemGame.sol";
 import {IWorldChainAnchorStateRegistry} from "./interfaces/IWorldChainAnchorStateRegistry.sol";
 import {IDisputeGame} from "./interfaces/IDisputeGame.sol";
-import {IOptimismPortal2DisputeGameFactory} from "./interfaces/IOptimismPortal2.sol";
 import {IWorldChainProofSystemFactory} from "./interfaces/IWorldChainProofSystemFactory.sol";
 import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
 import {IWorldChainStakingRegistry} from "./interfaces/IWorldChainStakingRegistry.sol";
 
-contract WorldChainProofSystemFactory is IOptimismPortal2DisputeGameFactory {
+contract WorldChainProofSystemFactory is IWorldChainProofSystemFactory {
     error GameAlreadyExists(bytes32 proposalKey, address game);
     error GameNotRetryable(bytes32 proposalKey, address game, WorldChainProofLib.InvalidationReason invalidationReason);
     error InvalidActivationParameters();
@@ -49,7 +48,7 @@ contract WorldChainProofSystemFactory is IOptimismPortal2DisputeGameFactory {
         uint256 l1OriginNumber;
     }
 
-    WorldChainProofLib.Domain public domain;
+    WorldChainProofLib.Domain public override domain;
     bytes32 public immutable domainHash;
     IWorldChainAnchorStateRegistry public immutable anchorStateRegistry;
 
@@ -106,7 +105,7 @@ contract WorldChainProofSystemFactory is IOptimismPortal2DisputeGameFactory {
         stakingRegistry = stakingRegistry_;
     }
 
-    function gameCount() external view returns (uint256) {
+    function gameCount() external view override returns (uint256) {
         return allGames.length;
     }
 
@@ -126,6 +125,7 @@ contract WorldChainProofSystemFactory is IOptimismPortal2DisputeGameFactory {
     function findLatestGames(GameType gameType, uint256 start, uint256 n)
         external
         view
+        override
         returns (IWorldChainProofSystemFactory.GameSearchResult[] memory games_)
     {
         if (start >= allGames.length || n == 0 || GameType.unwrap(gameType) != GameType.unwrap(GameTypes.WIP_1006)) {
@@ -155,6 +155,7 @@ contract WorldChainProofSystemFactory is IOptimismPortal2DisputeGameFactory {
     function games(GameType gameType, Claim rootClaim, bytes calldata extraData)
         external
         view
+        override
         returns (IDisputeGame, Timestamp)
     {
         if (GameType.unwrap(gameType) != GameType.unwrap(GameTypes.WIP_1006)) {
