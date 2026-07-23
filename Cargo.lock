@@ -659,6 +659,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-pubsub",
  "alloy-rpc-client",
+ "alloy-rpc-types-anvil",
  "alloy-rpc-types-debug",
  "alloy-rpc-types-eth 2.0.5",
  "alloy-rpc-types-trace",
@@ -19135,6 +19136,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider",
  "alloy-signer-local 2.0.5",
+ "alloy-sol-types",
  "anyhow",
  "async-trait",
  "clap",
@@ -19400,6 +19402,7 @@ name = "world-chain-tests"
 version = "2.4.0"
 dependencies = [
  "alloy-consensus 2.0.5",
+ "alloy-contract",
  "alloy-eips 2.0.5",
  "alloy-network 2.0.5",
  "alloy-primitives",
@@ -19454,6 +19457,7 @@ dependencies = [
  "world-chain-node",
  "world-chain-p2p",
  "world-chain-primitives",
+ "world-chain-proofs",
  "world-chain-test-utils",
  "world-chain-validator",
 ]

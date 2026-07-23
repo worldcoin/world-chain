@@ -26,27 +26,21 @@ sol! {
             );
         function domainHash() external view returns (bytes32);
         function proposerBond() external view returns (uint256);
-        function games(bytes32 proposalKey) external view returns (address);
+        function games(
+            uint32 gameType,
+            bytes32 rootClaim,
+            bytes calldata extraData
+        ) external view returns (address game, uint64 timestamp);
         function gameCount() external view returns (uint256);
-        function gameAt(uint256 index) external view returns (address);
-        function isFactoryGame(address game) external view returns (bool);
+        function gameAtIndex(uint256 index)
+            external
+            view
+            returns (uint32 gameType, uint64 timestamp, address game);
         function propose(
             address parentRef,
             bytes32 rootClaim,
             uint256 l2BlockNumber
         ) external payable returns (address game, bytes32 rootId);
-        function computeProposalKey(
-            address parentRef,
-            bytes32 rootClaim,
-            uint256 l2BlockNumber
-        ) external view returns (bytes32);
-        function computeRootId(
-            address parentRef,
-            bytes32 rootClaim,
-            uint256 l2BlockNumber,
-            bytes32 l1OriginHash,
-            uint256 l1OriginNumber
-        ) external view returns (bytes32);
     }
 
     #[sol(rpc)]
@@ -55,7 +49,7 @@ sol! {
 
         function rootId() external view returns (bytes32);
         function factory() external view returns (address);
-        function proposer() external view returns (address);
+        function gameCreator() external view returns (address);
         function anchorStateRegistry() external view returns (address);
         function domainHash() external view returns (bytes32);
         function attempt() external view returns (uint256);
@@ -63,16 +57,17 @@ sol! {
         function startingRootClaim() external view returns (bytes32);
         function startingL2BlockNumber() external view returns (uint256);
         function rootClaim() external view returns (bytes32);
-        function l2BlockNumber() external view returns (uint256);
-        function l1OriginHash() external view returns (bytes32);
+        function l2SequenceNumber() external view returns (uint256);
+        function l1Head() external view returns (bytes32);
         function l1OriginNumber() external view returns (uint256);
         function challengeDeadline() external view returns (uint64);
         function proofDeadline() external view returns (uint64);
-        function finalizedAt() external view returns (uint64);
+        function resolvedAt() external view returns (uint64);
         function state() external view returns (uint8);
         function invalidationReason() external view returns (uint8);
         function proofBitmap() external view returns (uint8);
         function proofCount() external view returns (uint8);
+        function status() external view returns (uint8);
         function resolutionStatus()
             external
             view
@@ -90,11 +85,14 @@ sol! {
         function setAnchorState(address game) external;
         function isGameFinalized(address game) external view returns (bool);
         function isGameClaimValid(address game) external view returns (bool);
-        function proofSystemFactory() external view returns (address);
+        function disputeGameFactory() external view returns (address);
         function paused() external view returns (bool);
-        function currentRootClaim() external view returns (bytes32);
-        function currentL2BlockNumber() external view returns (uint256);
+        function getAnchorRoot()
+            external
+            view
+            returns (bytes32 root, uint256 l2SequenceNumber);
         function anchorGame() external view returns (address);
-        function blacklistedGames(address game) external view returns (bool);
+        function isGameBlacklisted(address game) external view returns (bool);
+        function setGameBlacklisted(address game, bool blacklisted) external;
     }
 }

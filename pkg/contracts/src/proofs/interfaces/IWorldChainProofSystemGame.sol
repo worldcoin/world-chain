@@ -2,8 +2,9 @@
 pragma solidity 0.8.28;
 
 import {WorldChainProofLib} from "../WorldChainProofLib.sol";
+import {IDisputeGame} from "./IDisputeGame.sol";
 
-interface IWorldChainProofSystemGame {
+interface IWorldChainProofSystemGame is IDisputeGame {
     function rootId() external view returns (bytes32);
     function factory() external view returns (address);
     function anchorStateRegistry() external view returns (address);
@@ -12,16 +13,12 @@ interface IWorldChainProofSystemGame {
     function parentRef() external view returns (address);
     function startingRootClaim() external view returns (bytes32);
     function startingL2BlockNumber() external view returns (uint256);
-    function rootClaim() external view returns (bytes32);
-    function l2BlockNumber() external view returns (uint256);
-    function l1OriginHash() external view returns (bytes32);
     function l1OriginNumber() external view returns (uint256);
     function state() external view returns (WorldChainProofLib.RootState);
     function invalidationReason() external view returns (WorldChainProofLib.InvalidationReason);
     function proofBitmap() external view returns (uint8);
     function proofDeadline() external view returns (uint64);
     function challengeDeadline() external view returns (uint64);
-    function finalizedAt() external view returns (uint64);
     function resolutionStatus()
         external
         view

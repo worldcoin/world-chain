@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
+import {Hash} from "../../src/proofs/DisputeTypes.sol";
 
 contract MockProofSystemFactory {
     WorldChainProofLib.Domain public domain;
@@ -35,8 +36,8 @@ contract MockProofSystemGame {
     bytes32 public startingRootClaim;
     uint256 public startingL2BlockNumber;
     bytes32 public rootClaim;
-    uint256 public l2BlockNumber;
-    bytes32 public l1OriginHash;
+    uint256 public l2SequenceNumber;
+    bytes32 private _l1Head;
     uint256 public l1OriginNumber;
 
     function setContext(Context memory context) external {
@@ -48,9 +49,13 @@ contract MockProofSystemGame {
         startingRootClaim = context.startingRootClaim;
         startingL2BlockNumber = context.startingL2BlockNumber;
         rootClaim = context.rootClaim;
-        l2BlockNumber = context.l2BlockNumber;
-        l1OriginHash = context.l1OriginHash;
+        l2SequenceNumber = context.l2BlockNumber;
+        _l1Head = context.l1OriginHash;
         l1OriginNumber = context.l1OriginNumber;
+    }
+
+    function l1Head() external view returns (Hash) {
+        return Hash.wrap(_l1Head);
     }
 
     function verify(address verifier, bytes32 rootId_, bytes calldata proof) external view returns (bool) {

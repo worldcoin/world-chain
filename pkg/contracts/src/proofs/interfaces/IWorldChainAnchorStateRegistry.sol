@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-interface IWorldChainAnchorStateRegistry {
+import {Hash, Proposal} from "../DisputeTypes.sol";
+import {IOptimismPortal2AnchorStateRegistry} from "./IOptimismPortal2.sol";
+
+interface IWorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
     function setAnchorState(address game) external;
     function isGameFinalized(address game) external view returns (bool);
-    function isGameClaimValid(address game) external view returns (bool);
-    function proofSystemFactory() external view returns (address);
+    function isGameRegistered(address game) external view returns (bool);
+    function getAnchorRoot() external view returns (Hash, uint256);
+    function getStartingAnchorRoot() external view returns (Proposal memory);
     function paused() external view returns (bool);
-    function currentRootClaim() external view returns (bytes32);
-    function currentL2BlockNumber() external view returns (uint256);
     function anchorGame() external view returns (address);
-    function blacklistedGames(address game) external view returns (bool);
+    function isGameBlacklisted(address game) external view returns (bool);
 }

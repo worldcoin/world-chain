@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
 import {IWorldChainProofSystemFactory} from "./interfaces/IWorldChainProofSystemFactory.sol";
 import {WorldChainProofLib} from "./WorldChainProofLib.sol";
+import {Hash} from "./DisputeTypes.sol";
 
 library WorldChainProofVerificationLib {
     /// @dev Validates the proof against the game's root, factory domain, and creation-time transition snapshot.
@@ -76,7 +77,7 @@ library WorldChainProofVerificationLib {
         return game.startingRootClaim() == transition.l2PreRoot
             && game.startingL2BlockNumber() == uint256(transition.l2PreBlockNumber)
             && game.rootClaim() == transition.l2PostRoot
-            && game.l2BlockNumber() == uint256(transition.l2PostBlockNumber) && game.l1OriginHash() == transition.l1Head
-            && game.l1OriginNumber() == proofL1OriginNumber;
+            && game.l2SequenceNumber() == uint256(transition.l2PostBlockNumber)
+            && Hash.unwrap(game.l1Head()) == transition.l1Head && game.l1OriginNumber() == proofL1OriginNumber;
     }
 }

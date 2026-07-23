@@ -89,6 +89,8 @@ const SERVICE_RPC_PORT: u16 = 8545;
 const SERVICE_METRICS_PORT: u16 = 7300;
 const PROVER_SERVICE_POSTGRES_PORT: u16 = 5432;
 const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 10;
+/// Retains historical state needed for Portal proofs against finalized devnet games.
+const DEVNET_ETH_PROOF_WINDOW: u64 = 10_000;
 /// Poll interval for the in-process SP1 worker leasing jobs from the prover-service.
 const SP1_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// Env var enabling the in-process defender, prover-service, and SP1 worker. Off by default:
@@ -114,6 +116,9 @@ const WORLD_DEFENDER_GENESIS_BALANCE_WEI: &str = "0x56bc75e2d63100000";
 
 const DEVNET_PRIVATE_KEY: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+const OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY: &str =
+    "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a";
+const WORLD_PROOF_SYSTEM_OWNER: &str = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
 const UNSAFE_BLOCK_SIGNER_PRIVATE_KEY: &str =
     "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e";
 const BATCHER_PRIVATE_KEY: &str =
@@ -392,10 +397,23 @@ impl FullStackWorldDevnet {
             "L1 dev chain has OP contracts loaded"
         );
 
+        let game_factory = l1_address(&artifacts.l1_addresses, "DisputeGameFactoryProxy")?;
+        let optimism_portal = l1_address(&artifacts.l1_addresses, "OptimismPortalProxy")?;
+
         let proof_system = if config.world_contracts.proof_system {
+            let anchor_state_registry =
+                l1_address(&artifacts.l1_addresses, "AnchorStateRegistryProxy")?;
+            let op_chain_proxy_admin =
+                l1_address(&artifacts.l1_addresses, "OpChainProxyAdminImpl")?;
             Some(
-                deploy_world_proof_system(&l1_public_rpc, &artifacts.rollup_path, &workdir_path)
-                    .await?,
+                deploy_world_proof_system(
+                    &l1_public_rpc,
+                    &artifacts.rollup_path,
+                    &workdir_path,
+                    &anchor_state_registry,
+                    &op_chain_proxy_admin,
+                )
+                .await?,
             )
         } else {
             None
@@ -505,10 +523,21 @@ impl FullStackWorldDevnet {
 
         let conductor_rpc_internal = host_internal_url(&conductors[0].rpc_url)?;
         let l2_rpc_internal = host_internal_url(&sequencers[0].rpc_url)?;
-        let game_factory = l1_address(&artifacts.l1_addresses, "DisputeGameFactoryProxy")?;
-        let optimism_portal = l1_address(&artifacts.l1_addresses, "OptimismPortalProxy")?;
 
-        let (batcher, proposer, challenger) = if config.op_challenger {
+        let (batcher, proposer, challenger) = if proof_system.is_some() {
+            (
+                Some(
+                    start_batcher(
+                        &config.images.op_batcher,
+                        &l1_internal_rpc,
+                        &conductor_rpc_internal,
+                    )
+                    .await?,
+                ),
+                None,
+                None,
+            )
+        } else if config.op_challenger {
             let (batcher, proposer, challenger) = tokio::try_join!(
                 start_batcher(
                     &config.images.op_batcher,
@@ -684,6 +713,18 @@ impl FullStackWorldDevnet {
 
     pub fn optimism_portal(&self) -> &str {
         &self.optimism_portal
+    }
+
+    pub fn proof_system_factory(&self) -> Option<&str> {
+        self._proof_system
+            .as_ref()
+            .map(|deployment| deployment.proof_system_factory.as_str())
+    }
+
+    pub fn anchor_state_registry(&self) -> Option<&str> {
+        self._proof_system
+            .as_ref()
+            .map(|deployment| deployment.anchor_state_registry.as_str())
     }
 
     pub fn l2_rpc_url(&self) -> &str {
@@ -907,6 +948,8 @@ async fn deploy_world_proof_system(
     l1_rpc_url: &str,
     rollup_path: &Path,
     workdir: &Path,
+    anchor_state_registry: &str,
+    op_chain_proxy_admin: &str,
 ) -> Result<WorldProofSystemDeployment> {
     let rollup_config = fs::read(rollup_path)
         .wrap_err_with(|| format!("failed to read rollup config {}", rollup_path.display()))?;
@@ -944,6 +987,13 @@ async fn deploy_world_proof_system(
         .arg("--evm-version")
         .arg("cancun")
         .env("PRIVATE_KEY", DEVNET_PRIVATE_KEY)
+        .env("PROOF_SYSTEM_OWNER", WORLD_PROOF_SYSTEM_OWNER)
+        .env("ANCHOR_STATE_REGISTRY_PROXY", anchor_state_registry)
+        .env("OP_CHAIN_PROXY_ADMIN", op_chain_proxy_admin)
+        .env(
+            "OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY",
+            OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY,
+        )
         .env(
             "WORLD_CHALLENGER_ADDRESS",
             world_challenger_address()?.to_string(),
@@ -1441,6 +1491,8 @@ async fn start_world_chain_el(
         rpc_port_arg,
         "--http.api".to_string(),
         "admin,net,eth,web3,debug,trace,miner".to_string(),
+        "--rpc.eth-proof-window".to_string(),
+        DEVNET_ETH_PROOF_WINDOW.to_string(),
         "--ws".to_string(),
         "--ws.addr".to_string(),
         "0.0.0.0".to_string(),
@@ -3138,6 +3190,9 @@ fn build_components(
             .with_endpoint("tee-verifier", deployment.tee_verifier.clone())
             .with_endpoint("security-council", deployment.security_council.clone())
             .with_endpoint("staking-registry", deployment.staking_registry.clone())
+            .with_note(
+                "the OP-deployed AnchorStateRegistryProxy runs the World Chain implementation; the Portal address reference is unchanged",
+            )
             .with_note(format!(
                 "WIP-1006 threshold {PROOF_THRESHOLD}/3, proof_system_version={}",
                 deployment.proof_system_version

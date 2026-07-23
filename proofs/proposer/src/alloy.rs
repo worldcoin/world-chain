@@ -1,5 +1,6 @@
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_provider::{Provider, WalletProvider};
+use alloy_sol_types::SolValue;
 use async_trait::async_trait;
 use world_chain_proofs::{
     IWorldChainAnchorStateRegistry, IWorldChainProofSystemFactory, IWorldChainProofSystemGame,
@@ -10,6 +11,8 @@ use crate::{
     BondManagerClient, ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
     types::{CloseGameSubmission, ResolveSubmission, WithdrawSubmission},
 };
+
+const WIP_1006_GAME_TYPE: u32 = 1006;
 
 /// Alloy-backed implementation of [`ProofSystemClient`].
 #[derive(Debug, Clone)]
@@ -62,11 +65,13 @@ where
     }
 
     async fn game_at(&self, index: u64) -> Result<Address, ProposerError> {
-        self.factory
-            .gameAt(U256::from(index))
+        let game = self
+            .factory
+            .gameAtIndex(U256::from(index))
             .call()
             .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        Ok(game.game)
     }
 
     async fn game_proposer(&self, game: Address) -> Result<Address, ProposerError> {
@@ -74,7 +79,7 @@ where
             game,
             self.provider.clone(),
         )
-        .proposer()
+        .gameCreator()
         .call()
         .await
         .map_err(|error| ProposerError::Contract(error.to_string()))
@@ -99,9 +104,9 @@ where
     P: Provider + WalletProvider + Clone + Send + Sync + 'static,
 {
     async fn anchor_parent(&self) -> Result<ParentRef, ProposerError> {
-        let l2_block_number = self
+        let anchor_root = self
             .anchor
-            .currentL2BlockNumber()
+            .getAnchorRoot()
             .call()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
@@ -114,34 +119,41 @@ where
 
         Ok(ParentRef {
             address: anchor_parent_address(*self.anchor.address(), anchor_game),
-            l2_block_number: u256_to_u64(l2_block_number, "currentL2BlockNumber")?,
+            l2_block_number: u256_to_u64(anchor_root.l2SequenceNumber, "l2SequenceNumber")?,
         })
     }
 
     async fn proposal_key(&self, commitment: ProposalCommitment) -> Result<B256, ProposerError> {
-        self.factory
-            .computeProposalKey(
-                commitment.parent_ref,
-                commitment.root_claim,
-                U256::from(commitment.l2_block_number),
-            )
+        let domain_hash = self
+            .factory
+            .domainHash()
             .call()
             .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        Ok(commitment.proposal_key(domain_hash))
     }
 
-    async fn game_for_proposal_key(
+    async fn game_for_proposal(
         &self,
-        proposal_key: B256,
+        commitment: ProposalCommitment,
     ) -> Result<Option<Address>, ProposerError> {
-        let game = self
+        let extra_data = (
+            U256::from(commitment.l2_block_number),
+            commitment.parent_ref,
+        )
+            .abi_encode();
+        let result = self
             .factory
-            .games(proposal_key)
+            .games(
+                WIP_1006_GAME_TYPE,
+                commitment.root_claim,
+                Bytes::from(extra_data),
+            )
             .call()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
 
-        Ok((game != Address::ZERO).then_some(game))
+        Ok((result.game != Address::ZERO).then_some(result.game))
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
@@ -345,12 +357,12 @@ where
             self.provider.clone(),
         );
         let l2_block_number = game
-            .l2BlockNumber()
+            .l2SequenceNumber()
             .call()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
 
-        u256_to_u64(l2_block_number, "l2BlockNumber")
+        u256_to_u64(l2_block_number, "l2SequenceNumber")
     }
 }
 

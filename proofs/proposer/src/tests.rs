@@ -41,11 +41,14 @@ impl ProposerClient for MockContracts {
         Ok(commitment.proposal_key(DOMAIN_HASH))
     }
 
-    async fn game_for_proposal_key(
+    async fn game_for_proposal(
         &self,
-        proposal_key: B256,
+        commitment: ProposalCommitment,
     ) -> Result<Option<Address>, ProposerError> {
-        Ok(self.games.get(&proposal_key).copied())
+        Ok(self
+            .games
+            .get(&commitment.proposal_key(DOMAIN_HASH))
+            .copied())
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {

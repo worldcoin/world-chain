@@ -2,13 +2,14 @@
 pragma solidity 0.8.28;
 
 import {WorldChainProofLib} from "./WorldChainProofLib.sol";
+import {Claim, GameStatus, GameType, Hash, Timestamp, GameTypes} from "./DisputeTypes.sol";
 import {IWorldChainAnchorStateRegistry} from "./interfaces/IWorldChainAnchorStateRegistry.sol";
 import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
 import {IWorldChainStakingRegistry} from "./interfaces/IWorldChainStakingRegistry.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
-contract WorldChainProofSystemGame is ReentrancyGuardTransient {
+contract WorldChainProofSystemGame is ReentrancyGuardTransient, IWorldChainProofSystemGame {
     using WorldChainProofLib for uint8;
 
     struct ProposalInit {
@@ -79,19 +80,19 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     uint8 public immutable PROOF_THRESHOLD;
     uint8 public constant PROOF_LANE_COUNT = WorldChainProofLib.PROOF_LANE_COUNT;
 
-    address public immutable factory;
-    address public immutable anchorStateRegistry;
-    uint256 public immutable attempt;
-    address payable public immutable proposer;
-    address public immutable parentRef;
-    bytes32 public immutable startingRootClaim;
-    uint256 public immutable startingL2BlockNumber;
-    bytes32 public immutable rootClaim;
-    uint256 public immutable l2BlockNumber;
-    bytes32 public immutable l1OriginHash;
-    uint256 public immutable l1OriginNumber;
-    bytes32 public immutable domainHash;
-    bytes32 public immutable rootId;
+    address public immutable override factory;
+    address public immutable override anchorStateRegistry;
+    uint256 public immutable override attempt;
+    address public immutable override gameCreator;
+    address public immutable override parentRef;
+    bytes32 public immutable override startingRootClaim;
+    uint256 public immutable override startingL2BlockNumber;
+    bytes32 public immutable override rootClaim;
+    uint256 public immutable override l2SequenceNumber;
+    bytes32 private immutable _l1Head;
+    uint256 public immutable override l1OriginNumber;
+    bytes32 public immutable override domainHash;
+    bytes32 public immutable override rootId;
 
     uint64 public immutable challengePeriod;
     uint64 public immutable proofPeriod;
@@ -103,15 +104,14 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     IWorldChainProofVerifier public immutable securityCouncil;
     IWorldChainStakingRegistry public immutable stakingRegistry;
 
-    uint64 public createdAt;
-    uint64 public challengeDeadline;
-    uint64 public challengedAt;
-    uint64 public proofDeadline;
-    uint64 public finalizedAt;
-    uint64 public invalidatedAt;
-    uint8 public proofBitmap;
-    WorldChainProofLib.RootState public state;
-    WorldChainProofLib.InvalidationReason public invalidationReason;
+    uint64 public override createdAt;
+    uint64 public override challengeDeadline;
+    uint64 public override proofDeadline;
+    uint64 private _resolvedAt;
+    uint8 public override proofBitmap;
+    WorldChainProofLib.RootState public override state;
+    WorldChainProofLib.InvalidationReason public override invalidationReason;
+    bool public override wasRespectedGameTypeWhenCreated;
 
     address payable public challenger;
     uint256 public postedChallengerBond;
@@ -123,13 +123,13 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
         factory = proposal.factory;
         anchorStateRegistry = proposal.anchorStateRegistry;
         attempt = proposal.attempt;
-        proposer = payable(proposal.proposer);
+        gameCreator = proposal.proposer;
         parentRef = proposal.parentRef;
         startingRootClaim = proposal.startingRootClaim;
         startingL2BlockNumber = proposal.startingL2BlockNumber;
         rootClaim = proposal.rootClaim;
-        l2BlockNumber = proposal.l2BlockNumber;
-        l1OriginHash = proposal.l1OriginHash;
+        l2SequenceNumber = proposal.l2BlockNumber;
+        _l1Head = proposal.l1OriginHash;
         l1OriginNumber = proposal.l1OriginNumber;
         domainHash = config.domainHash;
         rootId = WorldChainProofLib.rootId(
@@ -153,9 +153,40 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
         createdAt = uint64(block.timestamp);
         challengeDeadline = uint64(block.timestamp + config.challengePeriod);
         state = WorldChainProofLib.RootState.PROPOSED;
+        wasRespectedGameTypeWhenCreated = GameType.unwrap(
+            IWorldChainAnchorStateRegistry(proposal.anchorStateRegistry).respectedGameType()
+        ) == GameType.unwrap(GameTypes.WIP_1006);
     }
 
     receive() external payable {}
+
+    /// @notice Translates the WIP-1006 lifecycle state into the outcome read by the Portal and ASR.
+    function status() external view override returns (GameStatus) {
+        WorldChainProofLib.RootState currentState = state;
+        if (currentState == WorldChainProofLib.RootState.FINALIZED) return GameStatus.DEFENDER_WINS;
+        if (currentState == WorldChainProofLib.RootState.INVALIDATED) return GameStatus.CHALLENGER_WINS;
+        return GameStatus.IN_PROGRESS;
+    }
+
+    function resolvedAt() external view override returns (Timestamp) {
+        return Timestamp.wrap(_resolvedAt);
+    }
+
+    function gameType() external pure override returns (GameType) {
+        return GameTypes.WIP_1006;
+    }
+
+    function l1Head() external view override returns (Hash) {
+        return Hash.wrap(_l1Head);
+    }
+
+    function extraData() public view override returns (bytes memory) {
+        return abi.encode(l2SequenceNumber, parentRef);
+    }
+
+    function gameData() external view override returns (GameType, Claim, bytes memory) {
+        return (GameTypes.WIP_1006, Claim.wrap(rootClaim), extraData());
+    }
 
     function proofCount() external view returns (uint8) {
         return WorldChainProofLib.proofCount(proofBitmap);
@@ -177,7 +208,6 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
 
         if (state == WorldChainProofLib.RootState.PROPOSED) {
             state = WorldChainProofLib.RootState.CHALLENGED;
-            challengedAt = uint64(block.timestamp);
             proofDeadline = uint64(block.timestamp + proofPeriod);
         }
 
@@ -185,14 +215,14 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     }
 
     /// @notice Returns the ETH amount `recipient` can withdraw from this game.
-    function claimable(address recipient) external view returns (uint256) {
+    function claimable(address recipient) external view override returns (uint256) {
         return _claimable(recipient);
     }
 
     /// @notice Permissionlessly withdraws `recipient`'s claim to `recipient`.
     /// @dev The challenger, defender/prover-service automation, or keepers can call this after resolution;
     ///      the caller cannot redirect funds away from `recipient`.
-    function withdraw(address payable recipient) external nonReentrant {
+    function withdraw(address payable recipient) external override nonReentrant {
         address account = recipient;
         uint256 amount = _claimable(account);
         if (amount == 0) revert NoClaim(account);
@@ -239,6 +269,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     function resolutionStatus()
         external
         view
+        override
         returns (bool resolvable, WorldChainProofLib.RootState outcome, WorldChainProofLib.InvalidationReason reason)
     {
         ResolutionEvaluation memory evaluation = _evaluateResolution();
@@ -249,6 +280,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     /// @dev Resolution assigns pull-based bond claims; call `withdraw(recipient)` to transfer claimable ETH.
     function resolve()
         external
+        override
         returns (WorldChainProofLib.RootState outcome, WorldChainProofLib.InvalidationReason reason)
     {
         ResolutionEvaluation memory evaluation = _evaluateResolution();
@@ -270,8 +302,8 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     }
 
     /// @notice Asks the registry to advance its accepted anchor to this game.
-    /// @dev The registry remains authoritative because eligibility depends on its current global anchor and policy.
-    function closeGame() external {
+    /// @dev This is separate from Portal withdrawal finalization, which reads `isGameClaimValid` directly.
+    function closeGame() external override {
         IWorldChainAnchorStateRegistry(anchorStateRegistry).setAnchorState(address(this));
     }
 
@@ -289,7 +321,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
 
         IWorldChainAnchorStateRegistry registry = IWorldChainAnchorStateRegistry(anchorStateRegistry);
         // 1. A governance blacklist invalidates this game before parent or deadline evaluation.
-        if (registry.blacklistedGames(address(this))) {
+        if (registry.isGameBlacklisted(address(this))) {
             evaluation.status = ResolutionStatus.RESOLVABLE;
             evaluation.outcome = WorldChainProofLib.RootState.INVALIDATED;
             evaluation.reason = WorldChainProofLib.InvalidationReason.BLACKLISTED;
@@ -299,10 +331,10 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
         WorldChainProofLib.RootState parentState;
         bool parentBlacklisted;
         if (parentRef == anchorStateRegistry) {
-            // The registry sentinel represents the accepted anchor, so it is a finalized parent without game state.
+            // The registry sentinel represents the immutable deployment anchor before a game anchor exists.
             parentState = WorldChainProofLib.RootState.FINALIZED;
         } else {
-            parentBlacklisted = registry.blacklistedGames(parentRef);
+            parentBlacklisted = registry.isGameBlacklisted(parentRef);
             if (!parentBlacklisted) parentState = IWorldChainProofSystemGame(parentRef).state();
         }
 
@@ -361,7 +393,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     function _invalidate(WorldChainProofLib.InvalidationReason reason) internal {
         state = WorldChainProofLib.RootState.INVALIDATED;
         invalidationReason = reason;
-        invalidatedAt = uint64(block.timestamp);
+        _resolvedAt = uint64(block.timestamp);
 
         uint256 balance = address(this).balance;
         if (reason == WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT) {
@@ -370,7 +402,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
             postedChallengerBond = 0;
         } else {
             uint256 proposerRefund = balance - postedChallengerBond;
-            if (proposerRefund != 0) payoutCredits[proposer] += proposerRefund;
+            if (proposerRefund != 0) payoutCredits[gameCreator] += proposerRefund;
         }
 
         emit Invalidated(rootId, reason);
@@ -378,11 +410,11 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
 
     function _finalize() internal {
         state = WorldChainProofLib.RootState.FINALIZED;
-        finalizedAt = uint64(block.timestamp);
+        _resolvedAt = uint64(block.timestamp);
 
         uint256 payout = address(this).balance;
         if (payout != 0) {
-            payoutCredits[proposer] += payout;
+            payoutCredits[gameCreator] += payout;
         }
 
         emit Finalized(rootId);

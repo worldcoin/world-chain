@@ -406,15 +406,17 @@ impl HaSequencerTopology {
             .with_image(config.images.op_batcher.clone())
             .with_note("submits L2 batches through the active sequencer/conductor"),
         );
-        components.push(
-            DevnetComponent::new(
-                "op-proposer",
-                DevnetComponentKind::OpProposer,
-                DevnetComponentStatus::Planned,
-            )
-            .with_image(config.images.op_proposer.clone())
-            .with_note("posts L2 output roots / dispute-game proposals to L1"),
-        );
+        if !config.world_contracts.proof_system {
+            components.push(
+                DevnetComponent::new(
+                    "op-proposer",
+                    DevnetComponentKind::OpProposer,
+                    DevnetComponentStatus::Planned,
+                )
+                .with_image(config.images.op_proposer.clone())
+                .with_note("posts L2 output roots / dispute-game proposals to L1"),
+            );
+        }
 
         if config.world_contracts.proof_system {
             components.push(
@@ -423,7 +425,7 @@ impl HaSequencerTopology {
                     DevnetComponentKind::WorldProofSystem,
                     DevnetComponentStatus::Planned,
                 )
-                .with_note("deploys WIP-1006 proof-system contracts to the local L1"),
+                .with_note("deploys WIP-1006 proof-system contracts and wires the local Portal"),
             );
             components.push(
                 DevnetComponent::new(
@@ -443,8 +445,9 @@ impl HaSequencerTopology {
             );
         }
 
-        let challenger_config = config.op_challenger.then(OpChallengerConfig::local);
-        if config.op_challenger {
+        let challenger_config = (config.op_challenger && !config.world_contracts.proof_system)
+            .then(OpChallengerConfig::local);
+        if challenger_config.is_some() {
             components.push(
                 DevnetComponent::new(
                     "op-challenger",
@@ -546,7 +549,7 @@ mod tests {
         assert_eq!(count(DevnetComponentKind::OpNode), 3);
         assert_eq!(count(DevnetComponentKind::OpConductor), 3);
         assert_eq!(count(DevnetComponentKind::OpBatcher), 1);
-        assert_eq!(count(DevnetComponentKind::OpProposer), 1);
+        assert_eq!(count(DevnetComponentKind::OpProposer), 0);
         assert_eq!(count(DevnetComponentKind::OpChallenger), 0);
         assert_eq!(count(DevnetComponentKind::Prometheus), 1);
         assert_eq!(count(DevnetComponentKind::Grafana), 1);
