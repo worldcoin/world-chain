@@ -29,7 +29,9 @@ World Chain deliberately keeps finalized game outcomes immutable: the registry o
 
 This is intentionally not a claim that WIP-1006 implements OP's complete `IDisputeGame`, `IDisputeGameFactory`, or `IAnchorStateRegistry` administration and lifecycle APIs. In particular, WIP-1006's `resolve()` returns its root state and invalidation reason instead of OP's single `GameStatus`. The Portal never calls `resolve()`. `closeGame` is also separate: it advances the anchor used by future proposals and is not part of withdrawal finalization.
 
-Compiler enforcement is paired with the full-stack withdrawal E2E test: the real OP-deployer Portal proves against a WIP-1006 game, rejects blacklisted and unresolved games, and finalizes after the game becomes valid. Because the WIP contracts are deployed after the local L1 genesis is rendered, the devnet performs this retargeting with Anvil's local state API. Production deployment still requires an explicit, audited ProxyAdmin-governed Portal migration; the devnet shortcut is not a production migration mechanism.
+Compiler enforcement is paired with the full-stack withdrawal E2E test: the real OP-deployer Portal proves against a WIP-1006 game, rejects blacklisted and unresolved games, and finalizes after the game becomes valid. The OP deployment initializes the Portal with its `AnchorStateRegistryProxy`. The World Chain devnet preserves that proxy address and uses the OP chain `ProxyAdmin` to atomically upgrade it to `WorldChainAnchorStateRegistry` and initialize the WIP-1006 factory, so neither the Portal proxy nor its storage is modified out of band.
+
+This upgrade path is appropriate for a fresh devnet, before the replaced OP registry has live games or withdrawal proofs. A production migration must separately account for existing games, anchor history, and in-flight withdrawals and must be audited before execution.
 
 ## PBH Contracts
 

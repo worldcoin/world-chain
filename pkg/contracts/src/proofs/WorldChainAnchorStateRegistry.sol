@@ -9,6 +9,7 @@ import {IOptimismPortal2AnchorStateRegistry} from "./interfaces/IOptimismPortal2
 
 contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
     error NotOwner();
+    error AlreadyInitialized();
     error InvalidOwner(address owner);
     error InvalidFactory(address factory);
     error FactoryAlreadyInitialized(address factory);
@@ -33,46 +34,77 @@ contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
     // It is intentionally zero for the current WIP-1006 Portal integration.
     uint256 internal constant DISPUTE_GAME_FINALITY_DELAY_SECONDS = 0;
 
-    address public owner;
-    address public override disputeGameFactory;
-    bool public paused;
-    GameType public override respectedGameType;
+    /// @custom:storage-location erc7201:worldchain.storage.WorldChainAnchorStateRegistry
+    struct RegistryStorage {
+        address owner;
+        address disputeGameFactory;
+        bool paused;
+        GameType respectedGameType;
+        Proposal startingAnchorRoot;
+        address anchorGame;
+        mapping(address game => bool blacklisted) blacklistedGames;
+    }
 
-    Proposal private startingAnchorRoot;
-    address public anchorGame;
-
-    mapping(address game => bool blacklisted) public blacklistedGames;
+    // Isolates World Chain state from the implementation previously used by the OP-deployed proxy.
+    bytes32 private constant REGISTRY_STORAGE_LOCATION =
+        0x1a10faa84117cdd4e9160b243ebd4a784f48ab33f31bcfb06e1ea06aef377500;
 
     constructor(bytes32 startingRootClaim, uint256 startingL2BlockNumber) {
-        owner = msg.sender;
-        emit OwnershipTransferred(address(0), msg.sender);
-        startingAnchorRoot = Proposal({root: Hash.wrap(startingRootClaim), l2SequenceNumber: startingL2BlockNumber});
-        respectedGameType = GameTypes.WIP_1006;
+        _initialize(startingRootClaim, startingL2BlockNumber, msg.sender);
     }
 
     modifier onlyOwner() {
-        if (msg.sender != owner) revert NotOwner();
+        if (msg.sender != _getRegistryStorage().owner) revert NotOwner();
         _;
+    }
+
+    /// @notice Initializes the implementation after an atomic ProxyAdmin upgrade.
+    function initialize(bytes32 startingRootClaim, uint256 startingL2BlockNumber, address factory, address initialOwner)
+        external
+    {
+        _initialize(startingRootClaim, startingL2BlockNumber, initialOwner);
+        _initializeFactory(factory);
+    }
+
+    function owner() external view returns (address) {
+        return _getRegistryStorage().owner;
+    }
+
+    function disputeGameFactory() public view override returns (address) {
+        return _getRegistryStorage().disputeGameFactory;
+    }
+
+    function paused() public view returns (bool) {
+        return _getRegistryStorage().paused;
+    }
+
+    function respectedGameType() public view override returns (GameType) {
+        return _getRegistryStorage().respectedGameType;
+    }
+
+    function anchorGame() public view returns (address) {
+        return _getRegistryStorage().anchorGame;
+    }
+
+    function blacklistedGames(address game) public view returns (bool) {
+        return _getRegistryStorage().blacklistedGames[game];
     }
 
     function transferOwnership(address nextOwner) external onlyOwner {
         if (nextOwner == address(0)) revert InvalidOwner(nextOwner);
 
-        address previousOwner = owner;
-        owner = nextOwner;
+        RegistryStorage storage registryStorage = _getRegistryStorage();
+        address previousOwner = registryStorage.owner;
+        registryStorage.owner = nextOwner;
         emit OwnershipTransferred(previousOwner, nextOwner);
     }
 
     function initializeFactory(address factory) external onlyOwner {
-        if (factory == address(0)) revert InvalidFactory(factory);
-        if (disputeGameFactory != address(0)) revert FactoryAlreadyInitialized(disputeGameFactory);
-
-        disputeGameFactory = factory;
-        emit FactoryInitialized(factory);
+        _initializeFactory(factory);
     }
 
     function setPaused(bool nextPaused) external onlyOwner {
-        paused = nextPaused;
+        _getRegistryStorage().paused = nextPaused;
         emit PausedSet(nextPaused);
     }
 
@@ -85,12 +117,12 @@ contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
             if (gameStatus == GameStatus.DEFENDER_WINS) revert FinalizedGameCannotBeBlacklisted(game);
         }
 
-        blacklistedGames[game] = blacklisted;
+        _getRegistryStorage().blacklistedGames[game] = blacklisted;
         emit GameBlacklistedSet(game, blacklisted);
     }
 
     function setRespectedGameType(GameType gameType) external onlyOwner {
-        respectedGameType = gameType;
+        _getRegistryStorage().respectedGameType = gameType;
         emit RespectedGameTypeSet(gameType);
     }
 
@@ -105,23 +137,24 @@ contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
 
     /// @notice OP-compatible blacklist getter used by OptimismPortal2's legacy facade.
     function disputeGameBlacklist(address game) external view override returns (bool) {
-        return blacklistedGames[game];
+        return _getRegistryStorage().blacklistedGames[game];
     }
 
     /// @notice OP-compatible blacklist getter used by standard registry tooling.
     function isGameBlacklisted(address game) external view returns (bool) {
-        return blacklistedGames[game];
+        return _getRegistryStorage().blacklistedGames[game];
     }
 
     /// @notice Returns the immutable deployment anchor, which does not move with getAnchorRoot().
     function getStartingAnchorRoot() external view returns (Proposal memory) {
-        return startingAnchorRoot;
+        return _getRegistryStorage().startingAnchorRoot;
     }
 
     function getAnchorRoot() public view returns (Hash, uint256) {
-        address game = anchorGame;
+        RegistryStorage storage registryStorage = _getRegistryStorage();
+        address game = registryStorage.anchorGame;
         if (game == address(0)) {
-            return (startingAnchorRoot.root, startingAnchorRoot.l2SequenceNumber);
+            return (registryStorage.startingAnchorRoot.root, registryStorage.startingAnchorRoot.l2SequenceNumber);
         }
 
         IDisputeGame disputeGame = IDisputeGame(game);
@@ -131,7 +164,7 @@ contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
     function isGameRegistered(address game) public view returns (bool) {
         if (game.code.length == 0) return false;
 
-        address factory = disputeGameFactory;
+        address factory = _getRegistryStorage().disputeGameFactory;
         if (factory == address(0)) return false;
 
         try IDisputeGame(game).gameData() returns (GameType gameType, Claim rootClaim, bytes memory extraData) {
@@ -178,9 +211,10 @@ contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
     /// @notice Returns whether the Portal may record a withdrawal proof against this game.
     /// @dev Proper does not mean the root claim is valid; finalization uses isGameClaimValid.
     function isGameProper(address game) public view override returns (bool) {
+        RegistryStorage storage registryStorage = _getRegistryStorage();
         if (!isGameRegistered(game)) return false;
-        if (blacklistedGames[game]) return false;
-        if (paused) return false;
+        if (registryStorage.blacklistedGames[game]) return false;
+        if (registryStorage.paused) return false;
         return true;
     }
 
@@ -211,10 +245,11 @@ contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
 
     /// @notice Advances the starting checkpoint for future games; this does not finalize Portal withdrawals.
     function setAnchorState(address game) external {
-        address factory = disputeGameFactory;
+        RegistryStorage storage registryStorage = _getRegistryStorage();
+        address factory = registryStorage.disputeGameFactory;
         if (factory == address(0)) revert FactoryNotInitialized();
-        if (paused) revert RegistryPaused();
-        if (blacklistedGames[game]) revert GameBlacklisted(game);
+        if (registryStorage.paused) revert RegistryPaused();
+        if (registryStorage.blacklistedGames[game]) revert GameBlacklisted(game);
 
         IWorldChainProofSystemGame proofGame = IWorldChainProofSystemGame(game);
         if (proofGame.factory() != factory) revert InvalidGameFactory(factory, proofGame.factory());
@@ -234,8 +269,40 @@ contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
         }
 
         bytes32 nextRootId = proofGame.rootId();
-        anchorGame = game;
+        registryStorage.anchorGame = game;
 
         emit AnchorUpdated(game, nextRootId, proofGame.rootClaim(), nextL2BlockNumber);
+    }
+
+    function _initialize(bytes32 startingRootClaim, uint256 startingL2BlockNumber, address initialOwner) internal {
+        RegistryStorage storage registryStorage = _getRegistryStorage();
+        if (registryStorage.owner != address(0)) revert AlreadyInitialized();
+        if (initialOwner == address(0)) revert InvalidOwner(initialOwner);
+
+        registryStorage.owner = initialOwner;
+        registryStorage.startingAnchorRoot =
+            Proposal({root: Hash.wrap(startingRootClaim), l2SequenceNumber: startingL2BlockNumber});
+        registryStorage.respectedGameType = GameTypes.WIP_1006;
+
+        emit OwnershipTransferred(address(0), initialOwner);
+    }
+
+    function _initializeFactory(address factory) internal {
+        if (factory == address(0)) revert InvalidFactory(factory);
+
+        RegistryStorage storage registryStorage = _getRegistryStorage();
+        if (registryStorage.disputeGameFactory != address(0)) {
+            revert FactoryAlreadyInitialized(registryStorage.disputeGameFactory);
+        }
+
+        registryStorage.disputeGameFactory = factory;
+        emit FactoryInitialized(factory);
+    }
+
+    function _getRegistryStorage() private pure returns (RegistryStorage storage registryStorage) {
+        bytes32 location = REGISTRY_STORAGE_LOCATION;
+        assembly {
+            registryStorage.slot := location
+        }
     }
 }

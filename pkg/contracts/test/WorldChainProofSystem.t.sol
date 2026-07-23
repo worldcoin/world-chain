@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {WorldChainAnchorStateRegistry} from "../src/proofs/WorldChainAnchorStateRegistry.sol";
 import {
@@ -66,6 +67,32 @@ contract WorldChainProofSystemTest is Test {
 
         factory = _newFactory(anchor, WorldChainProofLib.PROOF_THRESHOLD);
         anchor.initializeFactory(address(factory));
+    }
+
+    function testRegistryInitializesThroughProxyWithNamespacedStorage() public {
+        WorldChainAnchorStateRegistry implementation = new WorldChainAnchorStateRegistry(bytes32(0), 0);
+        address proxyFactory = address(0xFACADE);
+        address proxyOwner = address(0xA11CE);
+        bytes32 startingRoot = keccak256("proxy-starting-root");
+
+        ERC1967Proxy proxy = new ERC1967Proxy(
+            address(implementation),
+            abi.encodeCall(WorldChainAnchorStateRegistry.initialize, (startingRoot, 42, proxyFactory, proxyOwner))
+        );
+        WorldChainAnchorStateRegistry proxyRegistry = WorldChainAnchorStateRegistry(address(proxy));
+
+        assertEq(proxyRegistry.owner(), proxyOwner);
+        assertEq(proxyRegistry.disputeGameFactory(), proxyFactory);
+        assertEq(GameType.unwrap(proxyRegistry.respectedGameType()), GameType.unwrap(GameTypes.WIP_1006));
+        (Hash root, uint256 l2BlockNumber) = proxyRegistry.getAnchorRoot();
+        assertEq(Hash.unwrap(root), startingRoot);
+        assertEq(l2BlockNumber, 42);
+
+        vm.expectRevert(WorldChainAnchorStateRegistry.AlreadyInitialized.selector);
+        proxyRegistry.initialize(startingRoot, 42, proxyFactory, proxyOwner);
+
+        vm.expectRevert(WorldChainAnchorStateRegistry.AlreadyInitialized.selector);
+        implementation.initialize(startingRoot, 42, proxyFactory, proxyOwner);
     }
 
     function testUnchallengedRootFinalizesAfterChallengePeriod() public {
