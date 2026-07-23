@@ -65,7 +65,8 @@ contract WorldChainProofSystemFactory is IWorldChainProofSystemFactory {
 
     mapping(bytes32 proposalKey => address game) private proposalGames;
     mapping(address game => bool created) private factoryGames;
-    // Before the first anchor is established, only an invalidated starting game may be replaced.
+    // Tracks the registry sentinel's latest child so only an invalidated bootstrap game may be replaced.
+    // Once the registry records an anchor game, descendants must reference game addresses instead.
     address private currentStartingGame;
     // Lets stateless services reconstruct all games after restart without relying on historical logs.
     address[] private allGames;
@@ -182,6 +183,8 @@ contract WorldChainProofSystemFactory is IWorldChainProofSystemFactory {
         bytes32 key = WorldChainProofLib.proposalKey(domainHash, parentRef, rootClaim, l2BlockNumber);
         address existing = proposalGames[key];
         if (parentRef == address(anchorStateRegistry)) {
+            // The registry address identifies the immutable deployment anchor, not the mutable current anchor.
+            // It may bootstrap one live game; `existing` is exempted so same-key retry handling remains below.
             if (anchorStateRegistry.anchorGame() != address(0)) revert AnchorRegistryParentAlreadyUsed();
 
             address startingGame = currentStartingGame;
