@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::{
     error::ChallengerError,
     traits::{BondManagerClient, ChallengerClient, ResolutionManagerClient},
@@ -9,7 +7,6 @@ use alloy_primitives::{Address, U256};
 use alloy_provider::{Provider, WalletProvider};
 use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
-use tokio::sync::Mutex;
 use world_chain_proofs::{
     IWorldChainProofSystemFactory, IWorldChainProofSystemGame, InvalidationReasonError,
     ResolutionStatus, RootState, RootStateError,
@@ -20,7 +17,6 @@ use world_chain_proofs::{
 pub struct AlloyChallengerClient<P> {
     factory: IWorldChainProofSystemFactory::IWorldChainProofSystemFactoryInstance<P>,
     provider: P,
-    transaction_lock: Arc<Mutex<()>>,
 }
 
 impl<P> AlloyChallengerClient<P>
@@ -34,11 +30,7 @@ where
             provider.clone(),
         );
 
-        Self {
-            factory,
-            provider,
-            transaction_lock: Arc::new(Mutex::new(())),
-        }
+        Self { factory, provider }
     }
 
     fn game(
@@ -169,7 +161,6 @@ where
         address: Address,
         challenger_bond: U256,
     ) -> Result<ChallengeSubmission, ChallengerError> {
-        let _guard = self.transaction_lock.lock().await;
         let pending = self
             .game(address)
             .challenge()
@@ -199,7 +190,6 @@ where
     }
 
     async fn resolve(&self, address: Address) -> Result<ResolveSubmission, ChallengerError> {
-        let _guard = self.transaction_lock.lock().await;
         let pending = self
             .game(address)
             .resolve()
@@ -254,7 +244,6 @@ where
 
     async fn withdraw(&self, address: Address) -> Result<WithdrawSubmission, ChallengerError> {
         let challenger = self.challenger_address();
-        let _guard = self.transaction_lock.lock().await;
         let game = self.game(address);
         let pending = game
             .withdraw(challenger)
