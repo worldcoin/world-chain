@@ -8,14 +8,17 @@
 use std::time::Duration;
 
 use alloy_network::EthereumWallet;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::Address;
 use alloy_provider::ProviderBuilder;
 use alloy_signer_local::PrivateKeySigner;
 use anyhow::{Context, Result};
 use clap::Parser;
 use tracing::info;
 use url::Url;
-use world_chain_challenger::{AlloyChallengerClient, ChallengerConfig, WorldChainChallenger};
+use world_chain_challenger::{
+    AlloyChallengerClient, BondManager, BondManagerConfig, ChallengerClient, ChallengerConfig,
+    OwnedGames, ResolutionManager, ResolutionManagerConfig, WorldChainChallenger,
+};
 use world_chain_proofs::OptimismConsensusClient;
 
 #[derive(Debug, Parser)]
@@ -40,14 +43,6 @@ struct Cli {
     #[arg(long, env = "CHALLENGER_KEY", hide_env_values = true)]
     challenger_key: PrivateKeySigner,
 
-    /// Bond posted with each challenge, in wei (default 0.1 ETH).
-    #[arg(
-        long,
-        env = "CHALLENGER_BOND_WEI",
-        default_value_t = 100_000_000_000_000_000
-    )]
-    challenger_bond_wei: u128,
-
     /// Seconds between game-factory polls.
     #[arg(long, env = "POLL_INTERVAL_SECONDS", default_value_t = 12)]
     poll_interval_seconds: u64,
@@ -55,6 +50,34 @@ struct Cli {
     /// Maximum number of games processed concurrently.
     #[arg(long, env = "MAX_GAME_CONCURRENCY", default_value_t = 10)]
     max_game_concurrency: usize,
+
+    /// Maximum number of newly created games discovered per challenger tick.
+    #[arg(long, env = "MAX_GAMES_PER_TICK", default_value_t = 100)]
+    max_games_per_tick: u64,
+
+    /// Seconds between challenger-owned game resolution passes.
+    #[arg(
+        long,
+        env = "RESOLUTION_MANAGER_POLL_INTERVAL_SECONDS",
+        default_value_t = 30
+    )]
+    resolution_manager_poll_interval_seconds: u64,
+
+    /// Maximum number of game resolutions submitted per resolution pass.
+    #[arg(long, env = "MAX_RESOLUTIONS_PER_TICK", default_value_t = 1)]
+    max_resolutions_per_tick: usize,
+
+    /// Seconds between challenger-bond discovery and withdrawal passes.
+    #[arg(
+        long,
+        env = "BOND_MANAGER_POLL_INTERVAL_SECONDS",
+        default_value_t = 300
+    )]
+    bond_manager_poll_interval_seconds: u64,
+
+    /// Number of recent factory games scanned when the bond manager starts.
+    #[arg(long, env = "BOND_MANAGER_INITIAL_SCAN_LIMIT", default_value_t = 1_000)]
+    bond_manager_initial_scan_limit: u64,
 }
 
 #[tokio::main]
@@ -73,23 +96,54 @@ async fn main() -> Result<()> {
 
     let client = AlloyChallengerClient::new(provider, cli.factory_address);
     let output_roots = OptimismConsensusClient::new(cli.output_root_rpc.clone());
+    let challenger_bond = client
+        .challenger_bond()
+        .await
+        .context("failed to read challenger bond")?;
     let config = ChallengerConfig {
-        challenger_bond: U256::from(cli.challenger_bond_wei),
+        challenger_bond,
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_game_concurrency: cli.max_game_concurrency,
+        max_games_per_tick: cli.max_games_per_tick,
     };
-    let mut challenger = WorldChainChallenger::new(config, client, output_roots);
+    let resolution_config = ResolutionManagerConfig {
+        poll_interval: Duration::from_secs(cli.resolution_manager_poll_interval_seconds),
+        max_resolutions_per_tick: cli.max_resolutions_per_tick,
+    };
+    let bond_manager_config = BondManagerConfig {
+        poll_interval: Duration::from_secs(cli.bond_manager_poll_interval_seconds),
+        initial_scan_limit: cli.bond_manager_initial_scan_limit,
+    };
+    let owned_games = OwnedGames::default();
+    let mut challenger = WorldChainChallenger::with_owned_games(
+        config,
+        client.clone(),
+        output_roots,
+        owned_games.clone(),
+    );
+    let resolution_manager =
+        ResolutionManager::new(resolution_config, client.clone(), owned_games.clone());
+    let mut bond_manager = BondManager::new(bond_manager_config, client, owned_games);
 
     info!(
         l1_rpc_url = %cli.l1_rpc,
         output_root_rpc_url = %cli.output_root_rpc,
         factory = %cli.factory_address,
         challenger = %challenger_address,
+        challenger_bond = ?challenger_bond,
+        max_games_per_tick = cli.max_games_per_tick,
+        resolution_manager_poll_interval_seconds =
+            cli.resolution_manager_poll_interval_seconds,
+        max_resolutions_per_tick = cli.max_resolutions_per_tick,
+        bond_manager_poll_interval_seconds = cli.bond_manager_poll_interval_seconds,
+        bond_manager_initial_scan_limit = cli.bond_manager_initial_scan_limit,
         "starting World Chain proof-system challenger"
     );
 
     tokio::select! {
         result = challenger.run_forever() => result.context("challenger stopped")?,
+        result = resolution_manager.run_forever() => result.context("resolution manager stopped")?,
+        result = bond_manager.run_forever() => result.context("bond manager stopped")?,
         _ = tokio::signal::ctrl_c() => info!("received ctrl-c, shutting down"),
     }
     Ok(())

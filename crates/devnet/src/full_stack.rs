@@ -11,7 +11,7 @@ use std::{
 use alloy_eips::{BlockNumberOrTag, eip1559::BaseFeeParams};
 use alloy_genesis::Genesis;
 use alloy_network::EthereumWallet;
-use alloy_primitives::{Address, B64, U256, hex, keccak256};
+use alloy_primitives::{Address, B64, hex, keccak256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_local::PrivateKeySigner;
 use base64::prelude::{BASE64_STANDARD, Engine};
@@ -40,7 +40,11 @@ use tokio::{
 use tracing::{Instrument, debug, info, info_span, warn};
 use url::{Host, Url};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
-use world_chain_challenger::{AlloyChallengerClient, ChallengerConfig, WorldChainChallenger};
+use world_chain_challenger::{
+    AlloyChallengerClient, BondManager as ChallengerBondManager,
+    BondManagerConfig as ChallengerBondManagerConfig, ChallengerClient, ChallengerConfig,
+    OwnedGames, ResolutionManager, ResolutionManagerConfig, WorldChainChallenger,
+};
 use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
 use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
 use world_chain_proof_succinct_host_utils::{
@@ -98,9 +102,6 @@ const SP1_WORKER_PROVER_ENV: &str = "DEVNET_SP1_WORKER_PROVER";
 const SP1_PRIVATE_KEY_ENV: &str = "SP1_PRIVATE_KEY";
 /// Delay between World Chain proof-system proposal attempts.
 const WORLD_PROPOSER_POLL_INTERVAL: Duration = Duration::from_secs(2);
-/// Bond, in wei, sent with every `WorldChainProofSystemGame.challenge`.
-/// Matches `CHALLENGER_BOND` (0.1 ether) in `scripts/devnet/DeployProofSystem.s.sol`.
-const WORLD_CHALLENGER_BOND_WEI: u128 = 100_000_000_000_000_000;
 /// Delay between World Chain proof-system challenger scans.
 const WORLD_CHALLENGER_POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// Delay between World Chain proof-system defender scans.
@@ -2471,7 +2472,7 @@ async fn start_world_chain_proposer(
 /// The challenger signs with [`WORLD_CHALLENGER_PRIVATE_KEY`], a dedicated dev
 /// account that is funded through the L1 genesis (see [`fund_world_challenger`])
 /// and staked in the `MockStakingRegistry` by `DeployProofSystem.s.sol`. It scans
-/// `WorldChainProofSystemFactory.GameCreated` events, recomputes the expected
+/// indexed factory games, recomputes the expected
 /// output root from the op-node rollup RPC, and challenges any game whose
 /// `rootClaim` disagrees by calling `WorldChainProofSystemGame.challenge` on L1.
 async fn start_world_chain_challenger(
@@ -2494,25 +2495,57 @@ async fn start_world_chain_challenger(
 
     let client = AlloyChallengerClient::new(provider, factory_address);
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
+    let challenger_bond = client
+        .challenger_bond()
+        .await
+        .wrap_err("failed to read challenger bond")?;
     let config = ChallengerConfig {
-        challenger_bond: U256::from(WORLD_CHALLENGER_BOND_WEI),
+        challenger_bond,
         poll_interval: WORLD_CHALLENGER_POLL_INTERVAL,
         ..ChallengerConfig::default()
     };
-    let mut challenger = WorldChainChallenger::new(config, client, output_roots);
+    let owned_games = OwnedGames::default();
+    let mut challenger = WorldChainChallenger::with_owned_games(
+        config,
+        client.clone(),
+        output_roots,
+        owned_games.clone(),
+    );
+    let resolution_manager = ResolutionManager::new(
+        ResolutionManagerConfig::default(),
+        client.clone(),
+        owned_games.clone(),
+    );
+    let mut bond_manager =
+        ChallengerBondManager::new(ChallengerBondManagerConfig::default(), client, owned_games);
 
     info!(
         l1_rpc_url,
         output_root_rpc_url,
         factory = %deployment.proof_system_factory,
         challenger = %challenger_address,
+        challenger_bond = ?challenger_bond,
         "starting native World Chain proof-system challenger"
     );
 
     let handle = tokio::spawn(
         async move {
-            if let Err(error) = challenger.run_forever().await {
-                warn!(%error, "World Chain proof-system challenger stopped");
+            tokio::select! {
+                result = challenger.run_forever() => {
+                    if let Err(error) = result {
+                        warn!(%error, "World Chain proof-system challenger stopped");
+                    }
+                }
+                result = resolution_manager.run_forever() => {
+                    if let Err(error) = result {
+                        warn!(%error, "World Chain challenger resolution manager stopped");
+                    }
+                }
+                result = bond_manager.run_forever() => {
+                    if let Err(error) = result {
+                        warn!(%error, "World Chain challenger bond manager stopped");
+                    }
+                }
             }
         }
         .instrument(info_span!(
