@@ -41,10 +41,10 @@ pub trait ProposerClient: Send + Sync {
     /// Computes the deterministic proposal key used by the factory lookup.
     async fn proposal_key(&self, commitment: ProposalCommitment) -> Result<B256, ProposerError>;
 
-    /// Returns an existing game for `proposal_key`, if one exists.
-    async fn game_for_proposal_key(
+    /// Returns an existing game for `commitment`, if one exists.
+    async fn game_for_proposal(
         &self,
-        proposal_key: B256,
+        commitment: ProposalCommitment,
     ) -> Result<Option<Address>, ProposerError>;
 
     /// Returns the resolution status of the provided game, if game exists.

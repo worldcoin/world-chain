@@ -416,6 +416,20 @@ impl WorldDevnet {
             .map(FullStackWorldDevnet::optimism_portal)
     }
 
+    /// WIP-1006 dispute-game factory used by the local Portal, when deployed.
+    pub fn proof_system_factory(&self) -> Option<&str> {
+        self.full_stack
+            .as_ref()
+            .and_then(FullStackWorldDevnet::proof_system_factory)
+    }
+
+    /// WIP-1006 anchor-state registry used by the local Portal, when deployed.
+    pub fn anchor_state_registry(&self) -> Option<&str> {
+        self.full_stack
+            .as_ref()
+            .and_then(FullStackWorldDevnet::anchor_state_registry)
+    }
+
     /// Prometheus UI URL, when observability is enabled.
     pub fn prometheus_url(&self) -> Option<&str> {
         self.full_stack

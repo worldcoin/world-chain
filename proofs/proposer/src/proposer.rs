@@ -87,7 +87,7 @@ where
 
             if let Some(next_game_addr) = self
                 .execution_provider
-                .game_for_proposal_key(proposal.proposal_key)
+                .game_for_proposal(proposal.commitment())
                 .await?
             {
                 // game already exists onchain, look at the resolution status now:

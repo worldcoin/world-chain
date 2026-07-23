@@ -37,7 +37,7 @@ async fn direct_sequencer_devnet_smoke() -> eyre::Result<()> {
     assert!(devnet.l1_rpc_url().is_some());
     assert!(devnet.flashblocks_url().is_some());
     assert_component_running(&devnet, DevnetComponentKind::OpBatcher);
-    assert_component_running(&devnet, DevnetComponentKind::OpProposer);
+    assert_component_running(&devnet, DevnetComponentKind::WorldChainProposer);
     ensure_dev_chain_id(devnet.chain_spec().as_ref())?;
 
     assert_eq!(devnet.chain_id().await?, DEV_CHAIN_ID);

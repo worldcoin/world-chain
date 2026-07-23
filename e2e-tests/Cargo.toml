@@ -46,6 +46,7 @@ reth-tracing.workspace = true
 jsonrpsee = { workspace = true, features = ["http-client"] }
 
 # alloy
+alloy-contract.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-network.workspace = true

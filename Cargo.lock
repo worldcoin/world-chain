@@ -19135,6 +19135,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider",
  "alloy-signer-local 2.0.5",
+ "alloy-sol-types",
  "anyhow",
  "async-trait",
  "clap",
@@ -19400,6 +19401,7 @@ name = "world-chain-tests"
 version = "2.4.0"
 dependencies = [
  "alloy-consensus 2.0.5",
+ "alloy-contract",
  "alloy-eips 2.0.5",
  "alloy-network 2.0.5",
  "alloy-primitives",

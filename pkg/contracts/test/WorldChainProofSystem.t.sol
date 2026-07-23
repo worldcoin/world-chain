@@ -5,16 +5,35 @@ import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 import {WorldChainAnchorStateRegistry} from "../src/proofs/WorldChainAnchorStateRegistry.sol";
+import {
+    Claim,
+    GameId,
+    GameStatus,
+    GameType,
+    Hash,
+    Proposal,
+    Timestamp,
+    GameTypes
+} from "../src/proofs/DisputeTypes.sol";
 import {WorldChainProofLib} from "../src/proofs/WorldChainProofLib.sol";
 import {WorldChainProofSystemFactory} from "../src/proofs/WorldChainProofSystemFactory.sol";
 import {WorldChainProofSystemGame} from "../src/proofs/WorldChainProofSystemGame.sol";
+import {IDisputeGame} from "../src/proofs/interfaces/IDisputeGame.sol";
+import {
+    IOptimismPortal2AnchorStateRegistry,
+    IOptimismPortal2DisputeGameFactory
+} from "../src/proofs/interfaces/IOptimismPortal2.sol";
 import {IWorldChainAnchorStateRegistry} from "../src/proofs/interfaces/IWorldChainAnchorStateRegistry.sol";
+import {IWorldChainProofSystemFactory} from "../src/proofs/interfaces/IWorldChainProofSystemFactory.sol";
 import {MockRootIdVerifier} from "../src/proofs/mocks/MockRootIdVerifier.sol";
 import {MockStakingRegistry} from "../src/proofs/mocks/MockStakingRegistry.sol";
 
 contract WorldChainProofSystemTest is Test {
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
     uint64 internal constant CHALLENGE_PERIOD = 1 days;
     uint64 internal constant PROOF_PERIOD = 7 days;
+    uint256 internal constant DISPUTE_GAME_FINALITY_DELAY_SECONDS = 1;
     uint256 internal constant PROPOSER_BOND = 1 ether;
     uint256 internal constant CHALLENGER_BOND = 0.1 ether;
 
@@ -37,7 +56,7 @@ contract WorldChainProofSystemTest is Test {
         vm.deal(secondChallenger, 100 ether);
         vm.deal(keeper, 100 ether);
 
-        anchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
+        anchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0, DISPUTE_GAME_FINALITY_DELAY_SECONDS);
         staking = new MockStakingRegistry();
         staking.setStaked(challenger, true);
         staking.setStaked(secondChallenger, true);
@@ -138,7 +157,8 @@ contract WorldChainProofSystemTest is Test {
     }
 
     function testThresholdOneRequiresExplicitSettlementAfterSingleLane() public {
-        WorldChainAnchorStateRegistry thresholdAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
+        WorldChainAnchorStateRegistry thresholdAnchor =
+            new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0, DISPUTE_GAME_FINALITY_DELAY_SECONDS);
         WorldChainProofSystemFactory thresholdOne = _newFactory(thresholdAnchor, 1);
         thresholdAnchor.initializeFactory(address(thresholdOne));
 
@@ -160,7 +180,8 @@ contract WorldChainProofSystemTest is Test {
     }
 
     function testFactoryRejectsOutOfRangeThreshold() public {
-        WorldChainAnchorStateRegistry thresholdAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
+        WorldChainAnchorStateRegistry thresholdAnchor =
+            new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0, DISPUTE_GAME_FINALITY_DELAY_SECONDS);
 
         vm.expectRevert(WorldChainProofSystemFactory.InvalidActivationParameters.selector);
         _newFactory(thresholdAnchor, 0);
@@ -428,12 +449,12 @@ contract WorldChainProofSystemTest is Test {
 
     function testFactoryIndexesGamesByProposalKeyWithoutL1Origin() public {
         bytes32 rootClaim = keccak256("root");
-        bytes32 proposalKey = factory.computeProposalKey(address(anchor), rootClaim, 10);
+        bytes32 proposalKey = _proposalKey(address(anchor), rootClaim, 10);
 
         vm.prank(proposer);
         (address game, bytes32 rootId) = factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10);
 
-        assertEq(factory.games(proposalKey), game);
+        assertEq(_registeredGame(address(anchor), rootClaim, 10), game);
         assertEq(WorldChainProofSystemGame(payable(game)).rootId(), rootId);
 
         vm.roll(block.number + 1);
@@ -446,7 +467,6 @@ contract WorldChainProofSystemTest is Test {
 
     function testFactoryAllowsReplacementAttemptAfterInvalidation() public {
         bytes32 rootClaim = keccak256("retry-root");
-        bytes32 proposalKey = factory.computeProposalKey(address(anchor), rootClaim, 10);
 
         vm.prank(proposer);
         (address firstAddress, bytes32 firstRootId) =
@@ -466,12 +486,12 @@ contract WorldChainProofSystemTest is Test {
         assertNotEq(replacementAddress, firstAddress);
         assertNotEq(replacementRootId, firstRootId);
         assertEq(replacement.attempt(), 1);
-        assertEq(factory.games(proposalKey), replacementAddress);
-        assertTrue(factory.isFactoryGame(firstAddress));
-        assertTrue(factory.isFactoryGame(replacementAddress));
+        assertEq(_registeredGame(address(anchor), rootClaim, 10), replacementAddress);
         assertEq(factory.gameCount(), 2);
-        assertEq(factory.gameAt(0), firstAddress);
-        assertEq(factory.gameAt(1), replacementAddress);
+        (,, IDisputeGame firstIndexedGame) = factory.gameAtIndex(0);
+        (,, IDisputeGame replacementIndexedGame) = factory.gameAtIndex(1);
+        assertEq(address(firstIndexedGame), firstAddress);
+        assertEq(address(replacementIndexedGame), replacementAddress);
     }
 
     function testFactoryRequiresInheritedInvalidationToRebaseOnReplacementParent() public {
@@ -483,7 +503,7 @@ contract WorldChainProofSystemTest is Test {
         parent.resolve();
         child.resolve();
 
-        bytes32 childProposalKey = factory.computeProposalKey(address(parent), childRootClaim, 20);
+        bytes32 childProposalKey = _proposalKey(address(parent), childRootClaim, 20);
         vm.prank(proposer);
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -507,11 +527,12 @@ contract WorldChainProofSystemTest is Test {
 
         assertEq(rebasedChild.parentRef(), replacementParentAddress);
         assertEq(rebasedChild.attempt(), 0);
-        assertNotEq(factory.computeProposalKey(replacementParentAddress, childRootClaim, 20), childProposalKey);
+        assertNotEq(_proposalKey(replacementParentAddress, childRootClaim, 20), childProposalKey);
     }
 
     function testFactoryRequiresRegistryInitializationBeforePropose() public {
-        WorldChainAnchorStateRegistry uninitializedAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
+        WorldChainAnchorStateRegistry uninitializedAnchor =
+            new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0, DISPUTE_GAME_FINALITY_DELAY_SECONDS);
         WorldChainProofSystemFactory uninitializedFactory =
             _newFactory(uninitializedAnchor, WorldChainProofLib.PROOF_THRESHOLD);
 
@@ -533,19 +554,246 @@ contract WorldChainProofSystemTest is Test {
         anchor.initializeFactory(address(0xFACADE));
     }
 
-    function testFactoryTracksCreatedGamesByIndexAndMembership() public {
+    function testRegistryOwnershipTransferRejectsZeroAndEmits() public {
+        vm.expectRevert(abi.encodeWithSelector(WorldChainAnchorStateRegistry.InvalidOwner.selector, address(0)));
+        anchor.transferOwnership(address(0));
+
+        vm.expectEmit(true, true, false, true);
+        emit OwnershipTransferred(address(this), keeper);
+        anchor.transferOwnership(keeper);
+
+        assertEq(anchor.owner(), keeper);
+        vm.expectRevert(WorldChainAnchorStateRegistry.NotOwner.selector);
+        anchor.setPaused(true);
+        vm.prank(keeper);
+        anchor.setPaused(true);
+        assertTrue(anchor.paused());
+    }
+
+    function testFactoryTracksCreatedGamesByIndex() public {
         assertEq(factory.gameCount(), 0);
 
         (WorldChainProofSystemGame game,) = _propose(10);
 
         assertEq(factory.gameCount(), 1);
-        assertEq(factory.gameAt(0), address(game));
-        assertTrue(factory.isFactoryGame(address(game)));
+        (,, IDisputeGame indexedGame) = factory.gameAtIndex(0);
+        assertEq(address(indexedGame), address(game));
+        assertTrue(anchor.isGameRegistered(address(game)));
         assertEq(game.factory(), address(factory));
         assertEq(game.anchorStateRegistry(), address(anchor));
         assertEq(game.attempt(), 0);
-        assertEq(game.startingRootClaim(), anchor.currentRootClaim());
+        (bytes32 anchorRoot,) = _anchorRoot();
+        assertEq(game.startingRootClaim(), anchorRoot);
         assertEq(game.startingL2BlockNumber(), 0);
+    }
+
+    function testFactoryAllowsOnlyOneLiveAnchorRegistryParent() public {
+        (WorldChainProofSystemGame first,) = _propose(10);
+
+        vm.prank(proposer);
+        vm.expectRevert(WorldChainProofSystemFactory.AnchorRegistryParentAlreadyUsed.selector);
+        factory.propose{value: PROPOSER_BOND}(address(anchor), keccak256("alternative-initial-root"), 10);
+
+        vm.warp(block.timestamp + CHALLENGE_PERIOD);
+        first.resolve();
+        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
+        first.closeGame();
+        bytes32 childRoot = keccak256("child-root");
+
+        vm.prank(proposer);
+        vm.expectRevert(WorldChainProofSystemFactory.AnchorRegistryParentAlreadyUsed.selector);
+        factory.propose{value: PROPOSER_BOND}(address(anchor), childRoot, 20);
+
+        (WorldChainProofSystemGame child,) = _proposeChild(first, childRoot);
+        assertEq(child.parentRef(), address(first));
+    }
+
+    function testFactoryAllowsCorrectedStartingProposalAfterTimeout() public {
+        (WorldChainProofSystemGame first,) = _proposeAndChallenge(10);
+        vm.warp(block.timestamp + PROOF_PERIOD);
+        first.resolve();
+
+        vm.prank(proposer);
+        (address correctedAddress,) =
+            factory.propose{value: PROPOSER_BOND}(address(anchor), keccak256("corrected-root"), 10);
+        WorldChainProofSystemGame corrected = WorldChainProofSystemGame(payable(correctedAddress));
+
+        assertEq(corrected.parentRef(), address(anchor));
+        assertEq(corrected.attempt(), 0);
+    }
+
+    function testFactoryAllowsStartingProposalAfterBlacklistedGameInvalidates() public {
+        (WorldChainProofSystemGame first,) = _propose(10);
+        anchor.setGameBlacklisted(address(first), true);
+        first.resolve();
+
+        vm.prank(proposer);
+        (address replacementAddress,) =
+            factory.propose{value: PROPOSER_BOND}(address(anchor), keccak256("replacement-root"), 10);
+
+        assertEq(WorldChainProofSystemGame(payable(replacementAddress)).parentRef(), address(anchor));
+    }
+
+    function testFactoryExposesOpGameIndexAndGameDataLookup() public {
+        (WorldChainProofSystemGame game,) = _propose(10);
+
+        (GameType indexedType, Timestamp createdAt, IDisputeGame indexedGame) = factory.gameAtIndex(0);
+        assertEq(GameType.unwrap(indexedType), GameType.unwrap(GameTypes.WIP_1006));
+        assertEq(Timestamp.unwrap(createdAt), game.createdAt());
+        assertEq(address(indexedGame), address(game));
+
+        (GameType gameType, Claim rootClaim, bytes memory extraData) = IDisputeGame(address(game)).gameData();
+        assertEq(GameType.unwrap(gameType), GameType.unwrap(GameTypes.WIP_1006));
+        assertEq(Claim.unwrap(rootClaim), game.rootClaim());
+
+        (uint256 l2BlockNumber, address parentRef) = abi.decode(extraData, (uint256, address));
+        assertEq(l2BlockNumber, game.l2SequenceNumber());
+        assertEq(parentRef, game.parentRef());
+
+        (IDisputeGame registeredGame, Timestamp registeredAt) = factory.games(gameType, rootClaim, extraData);
+        assertEq(address(registeredGame), address(game));
+        assertEq(Timestamp.unwrap(registeredAt), game.createdAt());
+    }
+
+    function testContractsImplementPinnedOptimismPortal2Boundary() public {
+        (WorldChainProofSystemGame game,) = _propose(10);
+        IOptimismPortal2AnchorStateRegistry portalRegistry = IOptimismPortal2AnchorStateRegistry(address(anchor));
+        IOptimismPortal2DisputeGameFactory portalFactory = IOptimismPortal2DisputeGameFactory(address(factory));
+
+        assertEq(portalRegistry.disputeGameFactory(), address(factory));
+        assertEq(portalRegistry.disputeGameFinalityDelaySeconds(), DISPUTE_GAME_FINALITY_DELAY_SECONDS);
+        assertEq(portalRegistry.retirementTimestamp(), 0);
+        assertFalse(portalRegistry.disputeGameBlacklist(address(game)));
+        assertTrue(portalRegistry.isGameProper(address(game)));
+        assertTrue(portalRegistry.isGameRespected(address(game)));
+        assertFalse(portalRegistry.isGameClaimValid(address(game)));
+
+        (GameType gameType, Timestamp createdAt, IDisputeGame indexedGame) = portalFactory.gameAtIndex(0);
+        assertEq(GameType.unwrap(gameType), GameType.unwrap(GameTypes.WIP_1006));
+        assertEq(Timestamp.unwrap(createdAt), game.createdAt());
+        assertEq(address(indexedGame), address(game));
+    }
+
+    function testFactoryFindLatestGamesMatchesOpWithdrawalDiscovery() public {
+        (WorldChainProofSystemGame first,) = _propose(10);
+        (WorldChainProofSystemGame second,) = _proposeChild(first, keccak256("second-root"));
+
+        IWorldChainProofSystemFactory.GameSearchResult[] memory games =
+            factory.findLatestGames(GameTypes.WIP_1006, 1, 2);
+
+        assertEq(games.length, 2);
+        assertEq(games[0].index, 1);
+        assertEq(Claim.unwrap(games[0].rootClaim), second.rootClaim());
+        assertEq(Timestamp.unwrap(games[0].timestamp), second.createdAt());
+        assertEq(GameId.unwrap(games[0].metadata), _gameId(address(second), second.createdAt()));
+        (uint256 l2SequenceNumber, address parentRef) = abi.decode(games[0].extraData, (uint256, address));
+        assertEq(l2SequenceNumber, second.l2SequenceNumber());
+        assertEq(parentRef, second.parentRef());
+
+        assertEq(games[1].index, 0);
+        assertEq(Claim.unwrap(games[1].rootClaim), first.rootClaim());
+        assertEq(GameId.unwrap(games[1].metadata), _gameId(address(first), first.createdAt()));
+    }
+
+    function testFactoryFindLatestGamesReturnsEmptyForUnsupportedSearch() public {
+        _propose(10);
+
+        assertEq(factory.findLatestGames(GameType.wrap(1), 0, 1).length, 0);
+        assertEq(factory.findLatestGames(GameTypes.WIP_1006, 1, 1).length, 0);
+        assertEq(factory.findLatestGames(GameTypes.WIP_1006, 0, 0).length, 0);
+    }
+
+    function testGameExposesOpDisputeGameFacade() public {
+        (WorldChainProofSystemGame game, bytes32 rootId) = _proposeAndChallenge(10);
+        IDisputeGame opGame = IDisputeGame(address(game));
+
+        assertEq(uint8(opGame.status()), uint8(GameStatus.IN_PROGRESS));
+        assertEq(Timestamp.unwrap(opGame.resolvedAt()), 0);
+        assertEq(opGame.gameCreator(), proposer);
+        assertEq(opGame.rootClaim(), game.rootClaim());
+        assertEq(Claim.unwrap(opGame.rootClaimByChainId(4801)), game.rootClaim());
+        assertEq(opGame.l2SequenceNumber(), game.l2SequenceNumber());
+        assertEq(GameType.unwrap(opGame.gameType()), GameType.unwrap(GameTypes.WIP_1006));
+        assertEq(opGame.wasRespectedGameTypeWhenCreated(), true);
+
+        game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
+        game.submitProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(rootId));
+        game.resolve();
+
+        assertEq(uint8(opGame.status()), uint8(GameStatus.DEFENDER_WINS));
+        assertEq(Timestamp.unwrap(opGame.resolvedAt()), Timestamp.unwrap(game.resolvedAt()));
+    }
+
+    function testInvalidatedGameExposesChallengerWinAndInvalidClaim() public {
+        (WorldChainProofSystemGame game,) = _proposeAndChallenge(10);
+
+        vm.warp(block.timestamp + PROOF_PERIOD);
+        game.resolve();
+        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
+
+        assertEq(uint8(IDisputeGame(address(game)).status()), uint8(GameStatus.CHALLENGER_WINS));
+        assertFalse(anchor.isGameClaimValid(address(game)));
+    }
+
+    function testAnchorPredicatesMatchPortalExpectations() public {
+        (WorldChainProofSystemGame game, bytes32 rootId) = _proposeAndChallenge(10);
+
+        assertTrue(anchor.isGameRegistered(address(game)));
+        assertTrue(anchor.isGameProper(address(game)));
+        assertTrue(anchor.isGameRespected(address(game)));
+        assertFalse(anchor.isGameClaimValid(address(game)));
+
+        game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
+        game.submitProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(rootId));
+        game.resolve();
+
+        assertFalse(anchor.isGameFinalized(address(game)));
+        assertFalse(anchor.isGameClaimValid(address(game)));
+
+        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
+        assertTrue(anchor.isGameFinalized(address(game)));
+        assertTrue(anchor.isGameClaimValid(address(game)));
+
+        anchor.setPaused(true);
+        assertFalse(anchor.isGameProper(address(game)));
+        assertFalse(anchor.isGameClaimValid(address(game)));
+    }
+
+    function testRespectedGameTypeIsSnapshottedAtGameCreation() public {
+        (WorldChainProofSystemGame respectedGame,) = _propose(10);
+        anchor.setRespectedGameType(GameType.wrap(1));
+
+        assertTrue(respectedGame.wasRespectedGameTypeWhenCreated());
+        assertTrue(anchor.isGameRespected(address(respectedGame)));
+
+        (WorldChainProofSystemGame unrespectedGame,) = _proposeChild(respectedGame, keccak256("unrespected-root"));
+        address unrespectedGameAddress = address(unrespectedGame);
+
+        assertFalse(WorldChainProofSystemGame(payable(unrespectedGameAddress)).wasRespectedGameTypeWhenCreated());
+        assertFalse(anchor.isGameRespected(unrespectedGameAddress));
+    }
+
+    function testOpRegistrationFollowsReplacementAttempt() public {
+        bytes32 rootClaim = keccak256("op-replacement-root");
+
+        vm.prank(proposer);
+        (address firstAddress, bytes32 firstRootId) =
+            factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10);
+        WorldChainProofSystemGame first = WorldChainProofSystemGame(payable(firstAddress));
+
+        _challenge(first, challenger);
+        vm.warp(block.timestamp + PROOF_PERIOD);
+        first.resolve();
+        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
+        assertFalse(anchor.isGameClaimValid(firstAddress));
+
+        vm.roll(block.number + 1);
+        vm.prank(proposer);
+        (address replacementAddress,) = factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10);
+
+        assertEq(first.rootId(), firstRootId);
+        assertFalse(anchor.isGameRegistered(firstAddress));
+        assertTrue(anchor.isGameRegistered(replacementAddress));
     }
 
     function testFactoryAllowsRegisteredGameParentAtNextInterval() public {
@@ -557,7 +805,7 @@ contract WorldChainProofSystemTest is Test {
 
         assertEq(child.parentRef(), address(parent));
         assertEq(child.startingRootClaim(), parent.rootClaim());
-        assertEq(child.startingL2BlockNumber(), parent.l2BlockNumber());
+        assertEq(child.startingL2BlockNumber(), parent.l2SequenceNumber());
     }
 
     function testFactoryRejectsUnexpectedBlockInterval() public {
@@ -581,7 +829,8 @@ contract WorldChainProofSystemTest is Test {
 
         anchor.setAnchorState(address(game));
 
-        assertEq(anchor.currentL2BlockNumber(), 10);
+        (, uint256 anchorBlock) = _anchorRoot();
+        assertEq(anchorBlock, 10);
         assertEq(anchor.anchorGame(), address(game));
     }
 
@@ -590,10 +839,24 @@ contract WorldChainProofSystemTest is Test {
 
         game.closeGame();
 
-        assertEq(anchor.currentRootId(), game.rootId());
-        assertEq(anchor.currentRootClaim(), game.rootClaim());
-        assertEq(anchor.currentL2BlockNumber(), game.l2BlockNumber());
+        (bytes32 anchorRoot, uint256 anchorBlock) = _anchorRoot();
+        assertEq(anchorRoot, game.rootClaim());
+        assertEq(anchorBlock, game.l2SequenceNumber());
         assertEq(anchor.anchorGame(), address(game));
+    }
+
+    function testStartingAnchorRootDoesNotMoveWhenAnchorAdvances() public {
+        Proposal memory startingAnchor = anchor.getStartingAnchorRoot();
+        (WorldChainProofSystemGame game,) = _finalizedGame(10);
+
+        game.closeGame();
+
+        Proposal memory unchangedStartingAnchor = anchor.getStartingAnchorRoot();
+        assertEq(Hash.unwrap(unchangedStartingAnchor.root), Hash.unwrap(startingAnchor.root));
+        assertEq(unchangedStartingAnchor.l2SequenceNumber, startingAnchor.l2SequenceNumber);
+        (bytes32 currentRoot, uint256 currentBlock) = _anchorRoot();
+        assertEq(currentRoot, game.rootClaim());
+        assertEq(currentBlock, game.l2SequenceNumber());
     }
 
     function testGameClosePropagatesAnchorRegistryRejection() public {
@@ -603,7 +866,7 @@ contract WorldChainProofSystemTest is Test {
         game.closeGame();
     }
 
-    function testFinalizedGameIsImmediatelyEligibleToClose() public {
+    function testFinalizedGameIsEligibleToCloseAfterAsrTimestampCheck() public {
         (WorldChainProofSystemGame game,) = _finalizedGame(10);
 
         assertTrue(anchor.isGameFinalized(address(game)));
@@ -626,34 +889,39 @@ contract WorldChainProofSystemTest is Test {
         first.resolve();
         second.resolve();
         third.resolve();
+        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
 
         anchor.setAnchorState(address(third));
 
-        assertEq(anchor.currentRootId(), third.rootId());
-        assertEq(anchor.currentRootClaim(), third.rootClaim());
-        assertEq(anchor.currentL2BlockNumber(), third.l2BlockNumber());
+        (bytes32 anchorRoot, uint256 anchorBlock) = _anchorRoot();
+        assertEq(anchorRoot, third.rootClaim());
+        assertEq(anchorBlock, third.l2SequenceNumber());
         assertEq(anchor.anchorGame(), address(third));
     }
 
     function testAnchorAcceptsNewerFinalizedParallelBranch() public {
-        (WorldChainProofSystemGame acceptedBranch,) = _propose(10);
-        (WorldChainProofSystemGame parallelParent,) = _propose(10);
+        (WorldChainProofSystemGame first,) = _propose(10);
+        (WorldChainProofSystemGame acceptedBranch,) = _proposeChild(first, keccak256("accepted-root"));
+        (WorldChainProofSystemGame parallelParent,) = _proposeChild(first, keccak256("parallel-parent-root"));
         (WorldChainProofSystemGame parallelChild,) = _proposeChild(parallelParent, keccak256("parallel-child-root"));
 
         vm.warp(block.timestamp + CHALLENGE_PERIOD);
+        first.resolve();
         acceptedBranch.resolve();
         parallelParent.resolve();
         parallelChild.resolve();
+        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
 
         anchor.setAnchorState(address(acceptedBranch));
         anchor.setAnchorState(address(parallelChild));
 
         assertEq(anchor.anchorGame(), address(parallelChild));
-        assertEq(anchor.currentRootClaim(), parallelChild.rootClaim());
-        assertEq(anchor.currentL2BlockNumber(), parallelChild.l2BlockNumber());
+        (bytes32 anchorRoot, uint256 anchorBlock) = _anchorRoot();
+        assertEq(anchorRoot, parallelChild.rootClaim());
+        assertEq(anchorBlock, parallelChild.l2SequenceNumber());
     }
 
-    function testFinalizedSkippedAncestorCannotBeBlacklisted() public {
+    function testFinalizedAncestorCannotBeBlacklisted() public {
         (WorldChainProofSystemGame first,) = _propose(10);
         (WorldChainProofSystemGame second,) = _proposeChild(first, keccak256("second-root"));
         (WorldChainProofSystemGame third,) = _proposeChild(second, keccak256("third-root"));
@@ -671,6 +939,7 @@ contract WorldChainProofSystemTest is Test {
         anchor.setGameBlacklisted(address(second), true);
         assertFalse(anchor.blacklistedGames(address(second)));
 
+        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
         third.closeGame();
 
         assertEq(anchor.anchorGame(), address(third));
@@ -678,27 +947,32 @@ contract WorldChainProofSystemTest is Test {
 
     function testAnchorAcceptsAlternativeLineageFromSameCheckpoint() public {
         bytes32 sharedRootClaim = keccak256("shared-root");
-        (WorldChainProofSystemGame first,) = _propose(10);
+        (WorldChainProofSystemGame initialGame,) = _propose(10);
+        (WorldChainProofSystemGame first,) = _proposeChild(initialGame, keccak256("first-root"));
         (WorldChainProofSystemGame acceptedCheckpoint,) = _proposeChild(first, sharedRootClaim);
-        (WorldChainProofSystemGame alternativeFirst,) = _propose(10);
+        (WorldChainProofSystemGame alternativeFirst,) = _proposeChild(initialGame, keccak256("alternative-first-root"));
         (WorldChainProofSystemGame equivalentCheckpoint,) = _proposeChild(alternativeFirst, sharedRootClaim);
 
         vm.warp(block.timestamp + CHALLENGE_PERIOD);
+        initialGame.resolve();
         first.resolve();
         acceptedCheckpoint.resolve();
         alternativeFirst.resolve();
         equivalentCheckpoint.resolve();
+        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
         anchor.setAnchorState(address(acceptedCheckpoint));
 
         (WorldChainProofSystemGame alternativeSuccessor,) =
             _proposeChild(equivalentCheckpoint, keccak256("alternative-successor-root"));
         vm.warp(block.timestamp + CHALLENGE_PERIOD);
         alternativeSuccessor.resolve();
+        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
         anchor.setAnchorState(address(alternativeSuccessor));
 
         assertEq(anchor.anchorGame(), address(alternativeSuccessor));
-        assertEq(anchor.currentRootClaim(), alternativeSuccessor.rootClaim());
-        assertEq(anchor.currentL2BlockNumber(), alternativeSuccessor.l2BlockNumber());
+        (bytes32 anchorRoot, uint256 anchorBlock) = _anchorRoot();
+        assertEq(anchorRoot, alternativeSuccessor.rootClaim());
+        assertEq(anchorBlock, alternativeSuccessor.l2SequenceNumber());
     }
 
     function testAnchorRejectsNonFinalizedInvalidatedPausedAndNonMonotonicRoots() public {
@@ -706,14 +980,25 @@ contract WorldChainProofSystemTest is Test {
         vm.expectRevert();
         anchor.setAnchorState(address(nonFinalized));
 
-        (WorldChainProofSystemGame invalidated, bytes32 rootId) = _proposeAndChallenge(10);
-        invalidated.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
+        vm.warp(block.timestamp + CHALLENGE_PERIOD);
+        nonFinalized.resolve();
+
+        (WorldChainProofSystemGame invalidated, bytes32 invalidatedRootId) =
+            _proposeChild(nonFinalized, keccak256("invalidated-root"));
+        _challenge(invalidated, challenger);
+        invalidated.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(invalidatedRootId));
         vm.warp(block.timestamp + PROOF_PERIOD);
         invalidated.resolve();
         vm.expectRevert();
         anchor.setAnchorState(address(invalidated));
 
-        (WorldChainProofSystemGame finalized,) = _finalizedGame(10);
+        (WorldChainProofSystemGame finalized, bytes32 finalizedRootId) =
+            _proposeChild(nonFinalized, keccak256("finalized-root"));
+        _challenge(finalized, challenger);
+        finalized.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(finalizedRootId));
+        finalized.submitProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(finalizedRootId));
+        finalized.resolve();
+        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
         anchor.setPaused(true);
         vm.expectRevert();
         anchor.setAnchorState(address(finalized));
@@ -725,7 +1010,8 @@ contract WorldChainProofSystemTest is Test {
     }
 
     function testAnchorRejectsFinalizedGameFromDifferentFactory() public {
-        WorldChainAnchorStateRegistry otherAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
+        WorldChainAnchorStateRegistry otherAnchor =
+            new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0, DISPUTE_GAME_FINALITY_DELAY_SECONDS);
         WorldChainProofSystemFactory otherFactory = _newFactory(otherAnchor, WorldChainProofLib.PROOF_THRESHOLD);
         otherAnchor.initializeFactory(address(otherFactory));
 
@@ -774,7 +1060,7 @@ contract WorldChainProofSystemTest is Test {
         internal
         returns (WorldChainProofSystemGame game, bytes32 rootId)
     {
-        uint256 l2BlockNumber = parent.l2BlockNumber() + 10;
+        uint256 l2BlockNumber = parent.l2SequenceNumber() + 10;
         vm.prank(proposer);
         (address gameAddress, bytes32 id) =
             factory.propose{value: PROPOSER_BOND}(address(parent), rootClaim, l2BlockNumber);
@@ -786,11 +1072,38 @@ contract WorldChainProofSystemTest is Test {
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(rootId));
         game.resolve();
+        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
     }
 
     function _challenge(WorldChainProofSystemGame game, address account) internal {
         vm.prank(account);
         game.challenge{value: CHALLENGER_BOND}();
+    }
+
+    function _registeredGame(address parentRef, bytes32 rootClaim, uint256 l2BlockNumber)
+        internal
+        view
+        returns (address)
+    {
+        (IDisputeGame game,) =
+            factory.games(GameTypes.WIP_1006, Claim.wrap(rootClaim), abi.encode(l2BlockNumber, parentRef));
+        return address(game);
+    }
+
+    function _proposalKey(address parentRef, bytes32 rootClaim, uint256 l2BlockNumber) internal view returns (bytes32) {
+        return WorldChainProofLib.proposalKey(factory.domainHash(), parentRef, rootClaim, l2BlockNumber);
+    }
+
+    function _gameId(address game, uint64 timestamp) internal pure returns (bytes32) {
+        return bytes32(
+            (uint256(GameType.unwrap(GameTypes.WIP_1006)) << 224) | (uint256(timestamp) << 160) | uint256(uint160(game))
+        );
+    }
+
+    function _anchorRoot() internal view returns (bytes32 root, uint256 l2SequenceNumber) {
+        Hash anchorRoot;
+        (anchorRoot, l2SequenceNumber) = anchor.getAnchorRoot();
+        root = Hash.unwrap(anchorRoot);
     }
 
     function _assertWithdraws(WorldChainProofSystemGame game, address account, uint256 amount) internal {

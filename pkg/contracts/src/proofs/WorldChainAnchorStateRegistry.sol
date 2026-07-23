@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {WorldChainProofLib} from "./WorldChainProofLib.sol";
+import {Claim, GameStatus, GameType, Hash, Proposal, Timestamp, GameTypes} from "./DisputeTypes.sol";
+import {IDisputeGame} from "./interfaces/IDisputeGame.sol";
 import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
 import {IWorldChainProofSystemFactory} from "./interfaces/IWorldChainProofSystemFactory.sol";
+import {IOptimismPortal2AnchorStateRegistry} from "./interfaces/IOptimismPortal2.sol";
 
-contract WorldChainAnchorStateRegistry {
+contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
     error NotOwner();
+    error InvalidOwner(address owner);
     error InvalidFactory(address factory);
     error FactoryAlreadyInitialized(address factory);
     error FactoryNotInitialized();
@@ -20,25 +23,31 @@ contract WorldChainAnchorStateRegistry {
     error NonMonotonicRoot(uint256 currentL2BlockNumber, uint256 nextL2BlockNumber);
 
     event AnchorUpdated(address indexed game, bytes32 indexed rootId, bytes32 rootClaim, uint256 l2BlockNumber);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     event FactoryInitialized(address indexed factory);
     event PausedSet(bool paused);
     event GameBlacklistedSet(address indexed game, bool blacklisted);
+    event RespectedGameTypeSet(GameType gameType);
+
+    /// @notice Post-resolution airgap before a game may anchor or finalize Portal withdrawals.
+    uint256 internal immutable DISPUTE_GAME_FINALITY_DELAY_SECONDS;
 
     address public owner;
-    address public proofSystemFactory;
+    address public override disputeGameFactory;
     bool public paused;
+    GameType public override respectedGameType;
 
-    bytes32 public currentRootId;
-    bytes32 public currentRootClaim;
-    uint256 public currentL2BlockNumber;
+    Proposal private startingAnchorRoot;
     address public anchorGame;
 
     mapping(address game => bool blacklisted) public blacklistedGames;
 
-    constructor(bytes32 startingRootClaim, uint256 startingL2BlockNumber) {
+    constructor(bytes32 startingRootClaim, uint256 startingL2BlockNumber, uint256 disputeGameFinalityDelaySeconds_) {
         owner = msg.sender;
-        currentRootClaim = startingRootClaim;
-        currentL2BlockNumber = startingL2BlockNumber;
+        emit OwnershipTransferred(address(0), msg.sender);
+        startingAnchorRoot = Proposal({root: Hash.wrap(startingRootClaim), l2SequenceNumber: startingL2BlockNumber});
+        DISPUTE_GAME_FINALITY_DELAY_SECONDS = disputeGameFinalityDelaySeconds_;
+        respectedGameType = GameTypes.WIP_1006;
     }
 
     modifier onlyOwner() {
@@ -47,14 +56,18 @@ contract WorldChainAnchorStateRegistry {
     }
 
     function transferOwnership(address nextOwner) external onlyOwner {
+        if (nextOwner == address(0)) revert InvalidOwner(nextOwner);
+
+        address previousOwner = owner;
         owner = nextOwner;
+        emit OwnershipTransferred(previousOwner, nextOwner);
     }
 
     function initializeFactory(address factory) external onlyOwner {
         if (factory == address(0)) revert InvalidFactory(factory);
-        if (proofSystemFactory != address(0)) revert FactoryAlreadyInitialized(proofSystemFactory);
+        if (disputeGameFactory != address(0)) revert FactoryAlreadyInitialized(disputeGameFactory);
 
-        proofSystemFactory = factory;
+        disputeGameFactory = factory;
         emit FactoryInitialized(factory);
     }
 
@@ -64,67 +77,165 @@ contract WorldChainAnchorStateRegistry {
     }
 
     function setGameBlacklisted(address game, bool blacklisted) external onlyOwner {
-        // Descendant finality relies on finalized ancestor validity remaining immutable.
-        if (blacklisted && isGameFinalized(game)) revert FinalizedGameCannotBeBlacklisted(game);
+        if (blacklisted && game.code.length != 0) {
+            GameStatus gameStatus;
+            try IDisputeGame(game).status() returns (GameStatus status_) {
+                gameStatus = status_;
+            } catch {}
+            if (gameStatus == GameStatus.DEFENDER_WINS) revert FinalizedGameCannotBeBlacklisted(game);
+        }
 
         blacklistedGames[game] = blacklisted;
         emit GameBlacklistedSet(game, blacklisted);
     }
 
-    /// @notice Returns whether a game has finalized.
-    function isGameFinalized(address game) public view returns (bool) {
+    function setRespectedGameType(GameType gameType) external onlyOwner {
+        respectedGameType = gameType;
+        emit RespectedGameTypeSet(gameType);
+    }
+
+    function disputeGameFinalityDelaySeconds() external view override returns (uint256) {
+        return DISPUTE_GAME_FINALITY_DELAY_SECONDS;
+    }
+
+    /// @notice WIP-1006 does not currently retire games by creation timestamp.
+    function retirementTimestamp() external pure override returns (uint64) {
+        return 0;
+    }
+
+    /// @notice OP-compatible blacklist getter used by OptimismPortal2's legacy facade.
+    function disputeGameBlacklist(address game) external view override returns (bool) {
+        return blacklistedGames[game];
+    }
+
+    /// @notice OP-compatible blacklist getter used by standard registry tooling.
+    function isGameBlacklisted(address game) external view returns (bool) {
+        return blacklistedGames[game];
+    }
+
+    /// @notice Returns the immutable deployment anchor, which does not move with getAnchorRoot().
+    function getStartingAnchorRoot() external view returns (Proposal memory) {
+        return startingAnchorRoot;
+    }
+
+    function getAnchorRoot() public view returns (Hash, uint256) {
+        address game = anchorGame;
+        if (game == address(0)) {
+            return (startingAnchorRoot.root, startingAnchorRoot.l2SequenceNumber);
+        }
+
+        IDisputeGame disputeGame = IDisputeGame(game);
+        return (Hash.wrap(disputeGame.rootClaim()), disputeGame.l2SequenceNumber());
+    }
+
+    function isGameRegistered(address game) public view returns (bool) {
         if (game.code.length == 0) return false;
 
-        try IWorldChainProofSystemGame(game).state() returns (WorldChainProofLib.RootState gameState) {
-            return gameState == WorldChainProofLib.RootState.FINALIZED;
+        address factory = disputeGameFactory;
+        if (factory == address(0)) return false;
+
+        try IDisputeGame(game).gameData() returns (GameType gameType, Claim rootClaim, bytes memory extraData) {
+            (IDisputeGame registeredGame,) =
+                IWorldChainProofSystemFactory(factory).games(gameType, rootClaim, extraData);
+            if (address(registeredGame) != game) return false;
+        } catch {
+            return false;
+        }
+
+        try IWorldChainProofSystemGame(game).anchorStateRegistry() returns (address registry) {
+            return registry == address(this);
         } catch {
             return false;
         }
     }
 
-    /// @notice Returns whether a game is recognized by this registry and currently has a valid finalized claim.
-    /// @dev Anchor advancement additionally requires a newer L2 block number.
-    /// TODO: Before withdrawal integration, define OP-compatible retirement and emergency anchor recovery semantics,
-    /// implement the IAnchorStateRegistry surface, and wire OptimismPortal to this predicate.
-    function isGameClaimValid(address game) external view returns (bool) {
-        address factory = proofSystemFactory;
-        if (paused || factory == address(0) || blacklistedGames[game]) return false;
-        if (!IWorldChainProofSystemFactory(factory).isFactoryGame(game)) return false;
+    function isGameRespected(address game) public view override returns (bool) {
+        if (game.code.length == 0) return false;
 
-        IWorldChainProofSystemGame proofGame = IWorldChainProofSystemGame(game);
-        return
-            proofGame.factory() == factory && proofGame.anchorStateRegistry() == address(this) && isGameFinalized(game);
+        try IDisputeGame(game).wasRespectedGameTypeWhenCreated() returns (bool respected) {
+            return respected;
+        } catch {
+            return false;
+        }
     }
 
+    function isGameResolved(address game) public view returns (bool) {
+        if (game.code.length == 0) return false;
+
+        try IDisputeGame(game).resolvedAt() returns (Timestamp resolvedAt) {
+            if (Timestamp.unwrap(resolvedAt) == 0) return false;
+        } catch {
+            return false;
+        }
+
+        try IDisputeGame(game).status() returns (GameStatus gameStatus) {
+            return gameStatus == GameStatus.DEFENDER_WINS || gameStatus == GameStatus.CHALLENGER_WINS;
+        } catch {
+            return false;
+        }
+    }
+
+    /// @notice Returns whether the Portal may record a withdrawal proof against this game.
+    /// @dev Proper does not mean the root claim is valid; finalization uses isGameClaimValid.
+    function isGameProper(address game) public view override returns (bool) {
+        if (!isGameRegistered(game)) return false;
+        if (blacklistedGames[game]) return false;
+        if (paused) return false;
+        return true;
+    }
+
+    /// @notice Returns whether a game has resolved and passed the ASR finality timestamp check.
+    function isGameFinalized(address game) public view returns (bool) {
+        if (!isGameResolved(game)) return false;
+
+        try IDisputeGame(game).resolvedAt() returns (Timestamp resolvedAt) {
+            return block.timestamp - Timestamp.unwrap(resolvedAt) > DISPUTE_GAME_FINALITY_DELAY_SECONDS;
+        } catch {
+            return false;
+        }
+    }
+
+    /// @notice Returns whether the Portal may finalize a withdrawal proven against this game.
+    /// @dev Anchor advancement separately requires a newer L2 sequence number.
+    function isGameClaimValid(address game) public view override returns (bool) {
+        if (!isGameProper(game)) return false;
+        if (!isGameRespected(game)) return false;
+        if (!isGameFinalized(game)) return false;
+
+        try IDisputeGame(game).status() returns (GameStatus gameStatus) {
+            return gameStatus == GameStatus.DEFENDER_WINS;
+        } catch {
+            return false;
+        }
+    }
+
+    /// @notice Advances the starting checkpoint for future games; this does not finalize Portal withdrawals.
     function setAnchorState(address game) external {
+        address factory = disputeGameFactory;
+        if (factory == address(0)) revert FactoryNotInitialized();
         if (paused) revert RegistryPaused();
         if (blacklistedGames[game]) revert GameBlacklisted(game);
-
-        address factory = proofSystemFactory;
-        if (factory == address(0)) revert FactoryNotInitialized();
 
         IWorldChainProofSystemGame proofGame = IWorldChainProofSystemGame(game);
         if (proofGame.factory() != factory) revert InvalidGameFactory(factory, proofGame.factory());
         if (proofGame.anchorStateRegistry() != address(this)) {
             revert InvalidGameRegistry(address(this), proofGame.anchorStateRegistry());
         }
-        if (!IWorldChainProofSystemFactory(factory).isFactoryGame(game)) revert UnregisteredGame(game);
+        if (!isGameRegistered(game)) revert UnregisteredGame(game);
 
-        if (proofGame.state() != WorldChainProofLib.RootState.FINALIZED) revert GameNotFinalized(game);
+        if (!isGameClaimValid(game)) revert GameNotFinalized(game);
 
         // A game can only finalize after its parent has finalized, so FINALIZED recursively certifies
         // its parent chain at resolution time without walking the whole chain again here.
-        uint256 nextL2BlockNumber = proofGame.l2BlockNumber();
+        uint256 nextL2BlockNumber = proofGame.l2SequenceNumber();
+        (, uint256 currentL2BlockNumber) = getAnchorRoot();
         if (nextL2BlockNumber <= currentL2BlockNumber) {
             revert NonMonotonicRoot(currentL2BlockNumber, nextL2BlockNumber);
         }
 
         bytes32 nextRootId = proofGame.rootId();
-        currentRootId = nextRootId;
-        currentRootClaim = proofGame.rootClaim();
-        currentL2BlockNumber = nextL2BlockNumber;
         anchorGame = game;
 
-        emit AnchorUpdated(game, nextRootId, currentRootClaim, nextL2BlockNumber);
+        emit AnchorUpdated(game, nextRootId, proofGame.rootClaim(), nextL2BlockNumber);
     }
 }

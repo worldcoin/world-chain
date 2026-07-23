@@ -301,17 +301,13 @@ impl ProposerClient for FakeExecution {
         ))
     }
 
-    async fn game_for_proposal_key(
+    async fn game_for_proposal(
         &self,
-        proposal_key: B256,
+        commitment: world_chain_proofs::ProposalCommitment,
     ) -> Result<Option<Address>, ProposerError> {
-        Ok(self
-            .state
-            .lock()
-            .expect("fake execution mutex poisoned")
-            .games_by_key
-            .get(&proposal_key)
-            .copied())
+        let state = self.state.lock().expect("fake execution mutex poisoned");
+        let proposal_key = commitment.proposal_key(state.domain_hash);
+        Ok(state.games_by_key.get(&proposal_key).copied())
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {

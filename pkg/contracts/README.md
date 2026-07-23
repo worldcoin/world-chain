@@ -14,6 +14,23 @@ This repository contains smart contracts for World Chain, including PBH (Priorit
 
 `claimable(recipient)` returns the amount currently owed to `recipient`. `withdraw(recipient)` is permissionless, but funds are always sent to `recipient`, so the caller cannot redirect or steal another account's claim.
 
+## OP Stack Withdrawal Boundary
+
+The compatibility target is `OptimismPortal2` 5.6.1 shipped by the devnet's version-tagged `op-deployer:v0.7.1` image ([OP source at commit `7525482`](https://github.com/ethereum-optimism/optimism/blob/7525482253bdc076548840638cde165c9004349f/packages/contracts-bedrock/src/L1/OptimismPortal2.sol)). The concrete World Chain game, factory, and registry explicitly implement the narrow interfaces in `src/proofs/interfaces/IOptimismPortal2.sol` and `src/proofs/interfaces/IDisputeGame.sol`; changing a required signature now fails compilation.
+
+| Portal phase | Required calls | World Chain implementation |
+| --- | --- | --- |
+| Discover | `disputeGameFactory()`, `gameAtIndex(index)` | `WorldChainAnchorStateRegistry`, `WorldChainProofSystemFactory` |
+| Prove | `isGameProper`, `isGameRespected`, `status`, `createdAt`, `gameType`, `rootClaim` | Registration and respect are checked while an in-progress game remains proveable |
+| Finalize | `isGameClaimValid` | Requires a proper, respected, finalized `DEFENDER_WINS` game |
+| Legacy reads | `disputeGameFinalityDelaySeconds`, `respectedGameType`, `retirementTimestamp`, `disputeGameBlacklist` | Exposed with OP-compatible ABI; the finality delay is deployment-configured and defaults to the OP/Base 3.5-day airgap, while WIP-1006 currently has no timestamp-based retirement |
+
+World Chain deliberately keeps finalized game outcomes immutable: the registry owner may pause the registry, change the respected game type, and blacklist an in-progress game, but may not blacklist a `DEFENDER_WINS` game. Production deployment must assign this owner role to the configured guardian Safe. If a finalized root is found invalid during the post-resolution airgap, the supported recovery path is to pause the registry and use the ProxyAdmin-governed Portal migration process before withdrawals can finalize against that root.
+
+This is intentionally not a claim that WIP-1006 implements OP's complete `IDisputeGame`, `IDisputeGameFactory`, or `IAnchorStateRegistry` administration and lifecycle APIs. In particular, WIP-1006's `resolve()` returns its root state and invalidation reason instead of OP's single `GameStatus`. The Portal never calls `resolve()`. `closeGame` is also separate: it advances the anchor used by future proposals and is not part of withdrawal finalization.
+
+Compiler enforcement is paired with the full-stack withdrawal E2E test: the real OP-deployer Portal proves against a WIP-1006 game, rejects blacklisted and unresolved games, and finalizes after the game becomes valid. Because the WIP contracts are deployed after the local L1 genesis is rendered, the devnet performs this retargeting with Anvil's local state API. Production deployment still requires an explicit, audited ProxyAdmin-governed Portal migration; the devnet shortcut is not a production migration mechanism.
+
 ## PBH Contracts
 
 [Priority blockspace for humans (PBH)](https://github.com/worldcoin/world-chain?tab=readme-ov-file#world-chain-builder) enables verified World ID users to execute transactions with top of block priority, enabling a more frictionless user experience onchain. This mechanism is designed to ensure that ordinary users aren't unfairly disadvantaged by automated systems and greatly mitigates the negative impact of MEV.

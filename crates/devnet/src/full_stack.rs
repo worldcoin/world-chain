@@ -89,6 +89,8 @@ const SERVICE_RPC_PORT: u16 = 8545;
 const SERVICE_METRICS_PORT: u16 = 7300;
 const PROVER_SERVICE_POSTGRES_PORT: u16 = 5432;
 const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 10;
+/// Retains historical state needed for Portal proofs against finalized devnet games.
+const DEVNET_ETH_PROOF_WINDOW: u64 = 10_000;
 /// Poll interval for the in-process SP1 worker leasing jobs from the prover-service.
 const SP1_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// Env var enabling the in-process defender, prover-service, and SP1 worker. Off by default:
@@ -114,6 +116,7 @@ const WORLD_DEFENDER_GENESIS_BALANCE_WEI: &str = "0x56bc75e2d63100000";
 
 const DEVNET_PRIVATE_KEY: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+const WORLD_PROOF_SYSTEM_OWNER: &str = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
 const UNSAFE_BLOCK_SIGNER_PRIVATE_KEY: &str =
     "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e";
 const BATCHER_PRIVATE_KEY: &str =
@@ -392,11 +395,16 @@ impl FullStackWorldDevnet {
             "L1 dev chain has OP contracts loaded"
         );
 
+        let game_factory = l1_address(&artifacts.l1_addresses, "DisputeGameFactoryProxy")?;
+        let optimism_portal = l1_address(&artifacts.l1_addresses, "OptimismPortalProxy")?;
+
         let proof_system = if config.world_contracts.proof_system {
-            Some(
+            let deployment =
                 deploy_world_proof_system(&l1_public_rpc, &artifacts.rollup_path, &workdir_path)
-                    .await?,
-            )
+                    .await?;
+            wire_devnet_portal_to_world_proof_system(&l1_public_rpc, &optimism_portal, &deployment)
+                .await?;
+            Some(deployment)
         } else {
             None
         };
@@ -505,10 +513,21 @@ impl FullStackWorldDevnet {
 
         let conductor_rpc_internal = host_internal_url(&conductors[0].rpc_url)?;
         let l2_rpc_internal = host_internal_url(&sequencers[0].rpc_url)?;
-        let game_factory = l1_address(&artifacts.l1_addresses, "DisputeGameFactoryProxy")?;
-        let optimism_portal = l1_address(&artifacts.l1_addresses, "OptimismPortalProxy")?;
 
-        let (batcher, proposer, challenger) = if config.op_challenger {
+        let (batcher, proposer, challenger) = if proof_system.is_some() {
+            (
+                Some(
+                    start_batcher(
+                        &config.images.op_batcher,
+                        &l1_internal_rpc,
+                        &conductor_rpc_internal,
+                    )
+                    .await?,
+                ),
+                None,
+                None,
+            )
+        } else if config.op_challenger {
             let (batcher, proposer, challenger) = tokio::try_join!(
                 start_batcher(
                     &config.images.op_batcher,
@@ -684,6 +703,18 @@ impl FullStackWorldDevnet {
 
     pub fn optimism_portal(&self) -> &str {
         &self.optimism_portal
+    }
+
+    pub fn proof_system_factory(&self) -> Option<&str> {
+        self._proof_system
+            .as_ref()
+            .map(|deployment| deployment.proof_system_factory.as_str())
+    }
+
+    pub fn anchor_state_registry(&self) -> Option<&str> {
+        self._proof_system
+            .as_ref()
+            .map(|deployment| deployment.anchor_state_registry.as_str())
     }
 
     pub fn l2_rpc_url(&self) -> &str {
@@ -944,6 +975,7 @@ async fn deploy_world_proof_system(
         .arg("--evm-version")
         .arg("cancun")
         .env("PRIVATE_KEY", DEVNET_PRIVATE_KEY)
+        .env("PROOF_SYSTEM_OWNER", WORLD_PROOF_SYSTEM_OWNER)
         .env(
             "WORLD_CHALLENGER_ADDRESS",
             world_challenger_address()?.to_string(),
@@ -1010,6 +1042,112 @@ async fn deploy_world_proof_system(
     );
 
     Ok(deployment)
+}
+
+/// Retargets the genesis-deployed Portal to the WIP-1006 registry on the local Anvil chain.
+///
+/// The proof-system contracts are deployed after op-deployer has rendered the L1 genesis, so its
+/// Portal cannot reference their addresses at genesis construction time. Production deployments
+/// must perform an audited ProxyAdmin-governed Portal migration; this local-only state mutation
+/// exists to exercise the real Portal prove/finalize path without introducing a test Portal.
+async fn wire_devnet_portal_to_world_proof_system(
+    l1_rpc_url: &str,
+    optimism_portal: &str,
+    deployment: &WorldProofSystemDeployment,
+) -> Result<()> {
+    let old_anchor = portal_address_getter(l1_rpc_url, optimism_portal, "anchorStateRegistry()")
+        .await
+        .wrap_err("failed to read the OP-deployer Portal anchor registry")?;
+    let old_anchor_word = address_storage_word(&old_anchor)?;
+
+    let mut matching_slots = Vec::new();
+    for slot in 0..128_u64 {
+        let value = json_rpc(
+            l1_rpc_url,
+            "eth_getStorageAt",
+            json!([optimism_portal, format!("0x{slot:064x}"), "latest"]),
+        )
+        .await?;
+        if value.as_str() == Some(old_anchor_word.as_str()) {
+            matching_slots.push(slot);
+        }
+    }
+    let [anchor_slot] = matching_slots.as_slice() else {
+        bail!(
+            "expected exactly one Portal storage slot containing anchor registry {old_anchor}, found {matching_slots:?}"
+        );
+    };
+
+    let new_anchor_word = address_storage_word(&deployment.anchor_state_registry)?;
+    json_rpc(
+        l1_rpc_url,
+        "anvil_setStorageAt",
+        json!([
+            optimism_portal,
+            format!("0x{anchor_slot:064x}"),
+            new_anchor_word
+        ]),
+    )
+    .await
+    .wrap_err("failed to retarget the local Portal anchor registry")?;
+
+    let configured_anchor =
+        portal_address_getter(l1_rpc_url, optimism_portal, "anchorStateRegistry()").await?;
+    if !configured_anchor.eq_ignore_ascii_case(&deployment.anchor_state_registry) {
+        bail!(
+            "Portal anchor registry wiring failed: expected {}, got {configured_anchor}",
+            deployment.anchor_state_registry
+        );
+    }
+    let configured_factory =
+        portal_address_getter(l1_rpc_url, optimism_portal, "disputeGameFactory()").await?;
+    if !configured_factory.eq_ignore_ascii_case(&deployment.proof_system_factory) {
+        bail!(
+            "Portal dispute-game factory wiring failed: expected {}, got {configured_factory}",
+            deployment.proof_system_factory
+        );
+    }
+
+    info!(
+        portal = optimism_portal,
+        anchor = %deployment.anchor_state_registry,
+        factory = %deployment.proof_system_factory,
+        storage_slot = anchor_slot,
+        "wired local Portal withdrawals to the WIP-1006 proof system"
+    );
+    Ok(())
+}
+
+async fn portal_address_getter(
+    l1_rpc_url: &str,
+    optimism_portal: &str,
+    signature: &str,
+) -> Result<String> {
+    let selector = keccak256(signature.as_bytes());
+    let result = json_rpc(
+        l1_rpc_url,
+        "eth_call",
+        json!([{
+            "to": optimism_portal,
+            "data": format!("0x{}", hex::encode(&selector[..4])),
+        }, "latest"]),
+    )
+    .await?;
+    let encoded = result
+        .as_str()
+        .ok_or_else(|| eyre!("{signature} returned a non-string value: {result}"))?;
+    let digits = encoded.strip_prefix("0x").unwrap_or(encoded);
+    if digits.len() != 64 {
+        bail!("{signature} returned malformed address data: {encoded}");
+    }
+    Ok(format!("0x{}", &digits[24..]))
+}
+
+fn address_storage_word(address: &str) -> Result<String> {
+    let address: Address = address
+        .parse()
+        .wrap_err_with(|| format!("invalid address {address}"))?;
+    Ok(format!("0x{:0>64}", hex::encode(address.as_slice())))
 }
 
 fn write_l1_genesis(state_path: &Path, output_path: &Path) -> Result<()> {
@@ -1441,6 +1579,8 @@ async fn start_world_chain_el(
         rpc_port_arg,
         "--http.api".to_string(),
         "admin,net,eth,web3,debug,trace,miner".to_string(),
+        "--rpc.eth-proof-window".to_string(),
+        DEVNET_ETH_PROOF_WINDOW.to_string(),
         "--ws".to_string(),
         "--ws.addr".to_string(),
         "0.0.0.0".to_string(),
@@ -3138,6 +3278,7 @@ fn build_components(
             .with_endpoint("tee-verifier", deployment.tee_verifier.clone())
             .with_endpoint("security-council", deployment.security_council.clone())
             .with_endpoint("staking-registry", deployment.staking_registry.clone())
+            .with_note("the local OptimismPortal is wired to this registry and factory")
             .with_note(format!(
                 "WIP-1006 threshold {PROOF_THRESHOLD}/3, proof_system_version={}",
                 deployment.proof_system_version
@@ -3560,6 +3701,14 @@ mod tests {
         assert_eq!(json_rpc_quantity_to_u64(&json!("0x0")).unwrap(), 0);
         assert_eq!(json_rpc_quantity_to_u64(&json!("0x2")).unwrap(), 2);
         assert_eq!(json_rpc_quantity_to_u64(&json!(3)).unwrap(), 3);
+    }
+
+    #[test]
+    fn encodes_address_as_full_storage_word() {
+        assert_eq!(
+            address_storage_word("0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC").unwrap(),
+            "0x0000000000000000000000003c44cdddb6a900fa2b585dd299e03d12fa4293bc"
+        );
     }
 
     #[test]

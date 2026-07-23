@@ -22,15 +22,18 @@ contract DeployProofSystem is Script {
 
     struct Config {
         uint256 privateKey;
+        address owner;
         address challenger;
         uint256 l2ChainId;
         bytes32 rollupConfigHash;
         uint256 blockInterval;
         uint8 proofThreshold;
+        uint256 disputeGameFinalityDelaySeconds;
     }
 
     uint64 internal constant CHALLENGE_PERIOD = 1 days;
     uint64 internal constant PROOF_PERIOD = 7 days;
+    uint256 internal constant DISPUTE_GAME_FINALITY_DELAY_SECONDS = 3.5 days;
     uint256 internal constant PROPOSER_BOND = 1 ether;
     uint256 internal constant CHALLENGER_BOND = 0.1 ether;
 
@@ -38,7 +41,7 @@ contract DeployProofSystem is Script {
         Config memory config = _readConfig();
 
         vm.startBroadcast(config.privateKey);
-        deployment.anchor = new WorldChainAnchorStateRegistry(bytes32(0), 0);
+        deployment.anchor = new WorldChainAnchorStateRegistry(bytes32(0), 0, config.disputeGameFinalityDelaySeconds);
         deployment.staking = new MockStakingRegistry();
         deployment.validityVerifier = new MockRootIdVerifier(false);
         deployment.teeVerifier = new MockRootIdVerifier(false);
@@ -49,6 +52,9 @@ contract DeployProofSystem is Script {
         }
         deployment.factory = _deployFactory(deployment, config);
         deployment.anchor.initializeFactory(address(deployment.factory));
+        if (config.owner != vm.addr(config.privateKey)) {
+            deployment.anchor.transferOwnership(config.owner);
+        }
         vm.stopBroadcast();
 
         _writeDeployment(deployment, config);
@@ -56,11 +62,14 @@ contract DeployProofSystem is Script {
 
     function _readConfig() internal view returns (Config memory config) {
         config.privateKey = vm.envUint("PRIVATE_KEY");
+        config.owner = vm.envOr("PROOF_SYSTEM_OWNER", vm.addr(config.privateKey));
         config.challenger = vm.envOr("WORLD_CHALLENGER_ADDRESS", address(0));
         config.l2ChainId = vm.envUint("WORLD_CHAIN_L2_CHAIN_ID");
         config.rollupConfigHash = vm.envBytes32("ROLLUP_CONFIG_HASH");
         config.blockInterval = vm.envOr("PROOF_SYSTEM_BLOCK_INTERVAL", uint256(10));
         config.proofThreshold = uint8(vm.envOr("PROOF_THRESHOLD", uint256(WorldChainProofLib.PROOF_THRESHOLD)));
+        config.disputeGameFinalityDelaySeconds =
+            vm.envOr("DISPUTE_GAME_FINALITY_DELAY_SECONDS", DISPUTE_GAME_FINALITY_DELAY_SECONDS);
     }
 
     function _deployFactory(Deployment memory deployment, Config memory config)
@@ -102,6 +111,7 @@ contract DeployProofSystem is Script {
         vm.serializeUint(root, "l2ChainId", config.l2ChainId);
         vm.serializeUint(root, "proofSystemVersion", 1);
         vm.serializeUint(root, "blockInterval", config.blockInterval);
+        vm.serializeUint(root, "disputeGameFinalityDelaySeconds", config.disputeGameFinalityDelaySeconds);
         string memory json = vm.serializeUint(root, "proofThreshold", config.proofThreshold);
         vm.writeJson(json, out);
     }
