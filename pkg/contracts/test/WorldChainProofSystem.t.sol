@@ -734,7 +734,6 @@ contract WorldChainProofSystemTest is Test {
         assertEq(Timestamp.unwrap(opGame.resolvedAt()), 0);
         assertEq(opGame.gameCreator(), proposer);
         assertEq(opGame.rootClaim(), game.rootClaim());
-        assertEq(Claim.unwrap(opGame.rootClaimByChainId(4801)), game.rootClaim());
         assertEq(opGame.l2SequenceNumber(), game.l2SequenceNumber());
         assertEq(GameType.unwrap(opGame.gameType()), GameType.unwrap(GameTypes.WIP_1006));
         assertEq(opGame.wasRespectedGameTypeWhenCreated(), true);

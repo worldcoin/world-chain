@@ -177,10 +177,6 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IDisputeGame {
         return GameTypes.WIP_1006;
     }
 
-    function rootClaimByChainId(uint256) external view override returns (Claim) {
-        return Claim.wrap(rootClaim);
-    }
-
     function l1Head() external view override returns (Hash) {
         return Hash.wrap(_l1Head);
     }

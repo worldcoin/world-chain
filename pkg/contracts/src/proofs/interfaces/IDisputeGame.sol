@@ -17,7 +17,6 @@ interface IDisputeGame {
     function gameType() external view returns (GameType);
     function gameCreator() external view returns (address);
     function rootClaim() external view returns (bytes32);
-    function rootClaimByChainId(uint256 chainId) external view returns (Claim);
     function l1Head() external view returns (Hash);
     function l2SequenceNumber() external view returns (uint256);
     function extraData() external view returns (bytes memory);
