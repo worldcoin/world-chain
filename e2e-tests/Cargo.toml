@@ -14,6 +14,7 @@ workspace = true
 # World Chain
 world-chain-node.workspace = true
 world-chain-devnet.workspace = true
+world-chain-proofs.workspace = true
 world-chain-test-utils = { workspace = true}
 world-chain-primitives.workspace = true
 world-chain-validator.workspace = true

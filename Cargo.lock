@@ -19456,6 +19456,7 @@ dependencies = [
  "world-chain-node",
  "world-chain-p2p",
  "world-chain-primitives",
+ "world-chain-proofs",
  "world-chain-test-utils",
  "world-chain-validator",
 ]

@@ -67,6 +67,7 @@ sol! {
         function invalidationReason() external view returns (uint8);
         function proofBitmap() external view returns (uint8);
         function proofCount() external view returns (uint8);
+        function status() external view returns (uint8);
         function resolutionStatus()
             external
             view
@@ -91,6 +92,7 @@ sol! {
             view
             returns (bytes32 root, uint256 l2SequenceNumber);
         function anchorGame() external view returns (address);
-        function blacklistedGames(address game) external view returns (bool);
+        function isGameBlacklisted(address game) external view returns (bool);
+        function setGameBlacklisted(address game, bool blacklisted) external;
     }
 }

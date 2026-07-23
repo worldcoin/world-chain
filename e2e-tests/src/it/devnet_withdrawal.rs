@@ -17,11 +17,17 @@ use world_chain_devnet::{
     HaSequencerConfig, ObservabilityConfig, WorldDevnetBuilder, WorldDevnetPreset,
     is_docker_unavailable,
 };
+use world_chain_proofs::{
+    IWorldChainAnchorStateRegistry, IWorldChainProofSystemFactory, IWorldChainProofSystemGame,
+};
 
 const PROOF_SYSTEM_OWNER_KEY: &str =
     "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";
 const CHALLENGE_PERIOD_SECONDS: u64 = 24 * 60 * 60;
 const L2_TO_L1_MESSAGE_PASSER: Address = address!("4200000000000000000000000000000000000016");
+const GAME_WAIT_TIMEOUT: Duration = Duration::from_secs(180);
+const GAME_IN_PROGRESS: u8 = 0;
+const GAME_DEFENDER_WINS: u8 = 2;
 
 sol! {
     struct WithdrawalTransaction {
@@ -38,14 +44,6 @@ sol! {
         bytes32 stateRoot;
         bytes32 messagePasserStorageRoot;
         bytes32 latestBlockhash;
-    }
-
-    struct GameSearchResult {
-        uint256 index;
-        bytes32 metadata;
-        uint64 timestamp;
-        bytes32 rootClaim;
-        bytes extraData;
     }
 
     #[sol(rpc)]
@@ -67,7 +65,6 @@ sol! {
     interface OptimismPortal {
         error OptimismPortal_ImproperDisputeGame();
         error OptimismPortal_InvalidRootClaim();
-        error OptimismPortal_ProofNotOldEnough();
 
         function anchorStateRegistry() external view returns (address);
         function disputeGameFactory() external view returns (address);
@@ -82,34 +79,12 @@ sol! {
         function finalizeWithdrawalTransaction(WithdrawalTransaction tx_) external;
         function finalizedWithdrawals(bytes32 withdrawalHash) external view returns (bool);
     }
+}
 
-    #[sol(rpc)]
-    interface WorldChainProofSystemFactory {
-        function gameCount() external view returns (uint256);
-        function gameAtIndex(uint256 index)
-            external
-            view
-            returns (uint32 gameType, uint64 timestamp, address game);
-        function findLatestGames(uint32 gameType, uint256 start, uint256 n)
-            external
-            view
-            returns (GameSearchResult[] games);
-    }
-
-    #[sol(rpc)]
-    interface WorldChainProofSystemGame {
-        error AlreadyResolved(uint8 state);
-
-        function rootClaim() external view returns (bytes32);
-        function l2SequenceNumber() external view returns (uint256);
-        function status() external view returns (uint8);
-        function resolve() external returns (uint8 outcome, uint8 reason);
-    }
-
-    #[sol(rpc)]
-    interface WorldChainAnchorStateRegistry {
-        function setGameBlacklisted(address game, bool blacklisted) external;
-    }
+struct InitiatedWithdrawal {
+    transaction: WithdrawalTransaction,
+    hash: B256,
+    l2_block: u64,
 }
 
 #[ignore = "requires Docker, Foundry, and the full local OP Stack"]
@@ -174,23 +149,157 @@ async fn wip_1006_portal_withdrawal_happy_and_rejection_paths() -> eyre::Result<
         "Portal is not wired to the WIP-1006 factory"
     );
 
-    let messenger = L2ToL1MessagePasser::new(L2_TO_L1_MESSAGE_PASSER, l2_provider.clone());
-    let withdrawal_receipt = messenger
+    let withdrawal = initiate_withdrawal(l2_provider.clone(), withdrawal_sender).await?;
+    let (game_index, game_address, game_l2_block) =
+        wait_for_covering_game(l1_provider.clone(), factory_address, withdrawal.l2_block).await?;
+    let (output_root_proof, withdrawal_proof) =
+        build_withdrawal_proof(l2_provider, game_l2_block, withdrawal.hash).await?;
+
+    let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
+        game_address,
+        l1_provider.clone(),
+    );
+    let anchor = IWorldChainAnchorStateRegistry::IWorldChainAnchorStateRegistryInstance::new(
+        anchor_address,
+        l1_provider.clone(),
+    );
+    let blacklist_receipt = anchor
+        .setGameBlacklisted(game_address, true)
+        .send()
+        .await?
+        .get_receipt()
+        .await?;
+    ensure!(
+        blacklist_receipt.status(),
+        "blacklisting the in-progress game reverted"
+    );
+    let Err(blacklisted_error) = portal
+        .proveWithdrawalTransaction(
+            withdrawal.transaction.clone(),
+            U256::from(game_index),
+            output_root_proof.clone(),
+            withdrawal_proof.clone(),
+        )
+        .call()
+        .await
+    else {
+        bail!("Portal accepted a withdrawal proof against a blacklisted WIP-1006 game");
+    };
+    ensure!(
+        blacklisted_error
+            .as_decoded_error::<OptimismPortal::OptimismPortal_ImproperDisputeGame>()
+            .is_some(),
+        "Portal accepted a withdrawal proof against a blacklisted WIP-1006 game"
+    );
+    ensure!(
+        anchor
+            .setGameBlacklisted(game_address, false)
+            .send()
+            .await?
+            .get_receipt()
+            .await?
+            .status(),
+        "unblacklisting the WIP-1006 game reverted"
+    );
+
+    ensure!(
+        portal
+            .proveWithdrawalTransaction(
+                withdrawal.transaction.clone(),
+                U256::from(game_index),
+                output_root_proof,
+                withdrawal_proof,
+            )
+            .send()
+            .await?
+            .get_receipt()
+            .await?
+            .status(),
+        "Portal withdrawal proof transaction reverted"
+    );
+    let maturity_delay: u64 = portal
+        .proofMaturityDelaySeconds()
+        .call()
+        .await?
+        .try_into()?;
+    advance_time(
+        &l1_provider,
+        maturity_delay.max(CHALLENGE_PERIOD_SECONDS) + 1,
+    )
+    .await?;
+
+    let Err(unresolved_error) = portal
+        .finalizeWithdrawalTransaction(withdrawal.transaction.clone())
+        .call()
+        .await
+    else {
+        bail!("Portal finalized a withdrawal against an unresolved WIP-1006 game");
+    };
+    ensure!(
+        unresolved_error
+            .as_decoded_error::<OptimismPortal::OptimismPortal_InvalidRootClaim>()
+            .is_some(),
+        "Portal did not reject the unresolved WIP-1006 root claim"
+    );
+
+    resolve_games_through(
+        l1_provider.clone(),
+        factory_address,
+        withdrawal_sender,
+        game_index,
+    )
+    .await?;
+    ensure!(
+        game.status().call().await? == GAME_DEFENDER_WINS,
+        "withdrawal game did not resolve defender-win"
+    );
+
+    advance_time(&l1_provider, 1).await?;
+
+    ensure!(
+        portal
+            .finalizeWithdrawalTransaction(withdrawal.transaction)
+            .nonce(
+                l1_provider
+                    .get_transaction_count(withdrawal_sender)
+                    .pending()
+                    .await?,
+            )
+            .send()
+            .await?
+            .get_receipt()
+            .await?
+            .status(),
+        "Portal withdrawal finalization reverted"
+    );
+    ensure!(
+        portal.finalizedWithdrawals(withdrawal.hash).call().await?,
+        "Portal did not persist the finalized withdrawal"
+    );
+
+    Ok(())
+}
+
+async fn initiate_withdrawal<P>(
+    provider: P,
+    withdrawal_sender: Address,
+) -> eyre::Result<InitiatedWithdrawal>
+where
+    P: Provider,
+{
+    let receipt = L2ToL1MessagePasser::new(L2_TO_L1_MESSAGE_PASSER, provider)
         .initiateWithdrawal(withdrawal_sender, U256::from(100_000), Bytes::new())
         .gas(250_000)
         .send()
         .await?
         .get_receipt()
         .await?;
-    ensure!(
-        withdrawal_receipt.status(),
-        "L2 withdrawal initiation reverted"
-    );
-    let withdrawal_block = withdrawal_receipt
+    ensure!(receipt.status(), "L2 withdrawal initiation reverted");
+
+    let l2_block = receipt
         .block_number
         .ok_or_eyre("withdrawal receipt missing L2 block number")?;
-
-    let message = withdrawal_receipt
+    let message = receipt
         .logs()
         .iter()
         .find_map(|log| {
@@ -199,75 +308,66 @@ async fn wip_1006_portal_withdrawal_happy_and_rejection_paths() -> eyre::Result<
         })
         .ok_or_eyre("withdrawal receipt missing MessagePassed event")?;
     let message = message.data();
-    let withdrawal = WithdrawalTransaction {
-        nonce: message.nonce,
-        sender: message.sender,
-        target: message.target,
-        value: message.value,
-        gasLimit: message.gasLimit,
-        data: message.data.clone(),
-    };
-    let withdrawal_hash = keccak256(
-        (
-            withdrawal.nonce,
-            withdrawal.sender,
-            withdrawal.target,
-            withdrawal.value,
-            withdrawal.gasLimit,
-            withdrawal.data.clone(),
-        )
-            .abi_encode_params(),
-    );
-    ensure!(
-        withdrawal_hash == message.withdrawalHash,
-        "MessagePassed withdrawal hash does not match the Portal encoding"
-    );
 
-    let factory = WorldChainProofSystemFactory::new(factory_address, l1_provider.clone());
+    Ok(InitiatedWithdrawal {
+        transaction: WithdrawalTransaction {
+            nonce: message.nonce,
+            sender: message.sender,
+            target: message.target,
+            value: message.value,
+            gasLimit: message.gasLimit,
+            data: message.data.clone(),
+        },
+        hash: message.withdrawalHash,
+        l2_block,
+    })
+}
+
+async fn wait_for_covering_game<P>(
+    provider: P,
+    factory_address: Address,
+    withdrawal_block: u64,
+) -> eyre::Result<(u64, Address, u64)>
+where
+    P: Provider + Clone,
+{
+    let factory = IWorldChainProofSystemFactory::IWorldChainProofSystemFactoryInstance::new(
+        factory_address,
+        provider.clone(),
+    );
     let started = Instant::now();
-    let (game_index, game_address, game_l2_block) = loop {
-        let count: u64 = factory.gameCount().call().await?.try_into()?;
-        let mut selected = None;
-        if count != 0 {
-            let games = factory
-                .findLatestGames(1006, U256::from(count - 1), U256::from(count))
-                .call()
-                .await?;
-            for result in games {
-                let index: u64 = result.index.try_into()?;
-                let game_at = factory.gameAtIndex(result.index).call().await?;
-                ensure!(
-                    game_at.game == Address::from_slice(&result.metadata.as_slice()[12..]),
-                    "findLatestGames returned inconsistent packed game metadata"
-                );
-                ensure!(
-                    game_at.timestamp == result.timestamp,
-                    "findLatestGames returned an inconsistent creation timestamp"
-                );
 
-                let game = WorldChainProofSystemGame::new(game_at.game, l1_provider.clone());
-                ensure!(
-                    game.rootClaim().call().await? == result.rootClaim,
-                    "findLatestGames returned an inconsistent root claim"
-                );
-                let l2_block: u64 = game.l2SequenceNumber().call().await?.try_into()?;
-                if l2_block >= withdrawal_block {
-                    selected = Some((index, game_at.game, l2_block));
-                    break;
-                }
+    loop {
+        let game_count: u64 = factory.gameCount().call().await?.try_into()?;
+        for index in (0..game_count).rev() {
+            let game_address = factory.gameAtIndex(U256::from(index)).call().await?.game;
+            let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
+                game_address,
+                provider.clone(),
+            );
+            let l2_block: u64 = game.l2SequenceNumber().call().await?.try_into()?;
+            if l2_block >= withdrawal_block {
+                return Ok((index, game_address, l2_block));
             }
         }
-        if let Some(selected) = selected {
-            break selected;
-        }
-        if started.elapsed() >= Duration::from_secs(180) {
+
+        if started.elapsed() >= GAME_WAIT_TIMEOUT {
             bail!(
                 "timed out waiting for a WIP-1006 game covering withdrawal block {withdrawal_block}"
             );
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
-    };
+    }
+}
 
+async fn build_withdrawal_proof<P>(
+    l2_provider: P,
+    game_l2_block: u64,
+    withdrawal_hash: B256,
+) -> eyre::Result<(OutputRootProof, Vec<Bytes>)>
+where
+    P: Provider,
+{
     let block = l2_provider
         .get_block_by_number(BlockNumberOrTag::Number(game_l2_block))
         .await?
@@ -292,183 +392,60 @@ async fn wip_1006_portal_withdrawal_happy_and_rejection_paths() -> eyre::Result<
         messagePasserStorageRoot: account_proof.storage_hash,
         latestBlockhash: block.header.hash,
     };
-    let game = WorldChainProofSystemGame::new(game_address, l1_provider.clone());
-    let output_root = keccak256(
-        (
-            output_root_proof.version,
-            output_root_proof.stateRoot,
-            output_root_proof.messagePasserStorageRoot,
-            output_root_proof.latestBlockhash,
-        )
-            .abi_encode_params(),
-    );
-    ensure!(
-        output_root == game.rootClaim().call().await?,
-        "locally reconstructed output root does not match the WIP-1006 game"
-    );
-    let withdrawal_proof = storage_proof.proof.clone();
+    Ok((output_root_proof, storage_proof.proof.clone()))
+}
 
-    let anchor = WorldChainAnchorStateRegistry::new(anchor_address, l1_provider.clone());
-    let blacklist_receipt = anchor
-        .setGameBlacklisted(game_address, true)
-        .send()
-        .await?
-        .get_receipt()
-        .await?;
-    ensure!(
-        blacklist_receipt.status(),
-        "blacklisting the in-progress game reverted"
-    );
-    let blacklisted_error = match portal
-        .proveWithdrawalTransaction(
-            withdrawal.clone(),
-            U256::from(game_index),
-            output_root_proof.clone(),
-            withdrawal_proof.clone(),
-        )
-        .call()
-        .await
-    {
-        Ok(_) => bail!("Portal accepted a withdrawal proof against a blacklisted WIP-1006 game"),
-        Err(error) => error,
-    };
-    ensure!(
-        blacklisted_error
-            .as_decoded_error::<OptimismPortal::OptimismPortal_ImproperDisputeGame>()
-            .is_some(),
-        "Portal accepted a withdrawal proof against a blacklisted WIP-1006 game"
-    );
-    ensure!(
-        anchor
-            .setGameBlacklisted(game_address, false)
-            .send()
-            .await?
-            .get_receipt()
-            .await?
-            .status(),
-        "unblacklisting the WIP-1006 game reverted"
-    );
-
-    ensure!(
-        portal
-            .proveWithdrawalTransaction(
-                withdrawal.clone(),
-                U256::from(game_index),
-                output_root_proof,
-                withdrawal_proof,
-            )
-            .send()
-            .await?
-            .get_receipt()
-            .await?
-            .status(),
-        "Portal withdrawal proof transaction reverted"
-    );
-    let immature_error = match portal
-        .finalizeWithdrawalTransaction(withdrawal.clone())
-        .call()
-        .await
-    {
-        Ok(_) => bail!("Portal finalized a withdrawal before its proof matured"),
-        Err(error) => error,
-    };
-    ensure!(
-        immature_error
-            .as_decoded_error::<OptimismPortal::OptimismPortal_ProofNotOldEnough>()
-            .is_some(),
-        "Portal did not enforce its proof maturity delay"
-    );
-
-    let maturity_delay: u64 = portal
-        .proofMaturityDelaySeconds()
-        .call()
-        .await?
-        .try_into()?;
-    let _: Value = l1_provider
-        .raw_request(
-            Cow::Borrowed("evm_increaseTime"),
-            (maturity_delay.max(CHALLENGE_PERIOD_SECONDS) + 1,),
-        )
-        .await
-        .context("failed to advance beyond the proof maturity and challenge periods")?;
-    let _: Value = l1_provider
-        .raw_request(Cow::Borrowed("evm_mine"), ())
-        .await?;
-
-    let unresolved_error = match portal
-        .finalizeWithdrawalTransaction(withdrawal.clone())
-        .call()
-        .await
-    {
-        Ok(_) => bail!("Portal finalized a withdrawal against an unresolved WIP-1006 game"),
-        Err(error) => error,
-    };
-    ensure!(
-        unresolved_error
-            .as_decoded_error::<OptimismPortal::OptimismPortal_InvalidRootClaim>()
-            .is_some(),
-        "Portal did not reject the unresolved WIP-1006 root claim"
+async fn resolve_games_through<P>(
+    provider: P,
+    factory_address: Address,
+    sender: Address,
+    game_index: u64,
+) -> eyre::Result<()>
+where
+    P: Provider + Clone,
+{
+    let factory = IWorldChainProofSystemFactory::IWorldChainProofSystemFactoryInstance::new(
+        factory_address,
+        provider.clone(),
     );
 
     for index in 0..=game_index {
-        let game_at = factory.gameAtIndex(U256::from(index)).call().await?;
-        let ancestor = WorldChainProofSystemGame::new(game_at.game, l1_provider.clone());
-        if ancestor.status().call().await? == 0 {
-            let nonce = l1_provider
-                .get_transaction_count(withdrawal_sender)
-                .pending()
-                .await?;
-            match ancestor.resolve().nonce(nonce).send().await {
-                Ok(pending) => ensure!(
-                    pending.get_receipt().await?.status(),
-                    "game resolution reverted"
-                ),
-                Err(error) => {
-                    let finalized_by_keeper = error
-                        .as_decoded_error::<WorldChainProofSystemGame::AlreadyResolved>()
-                        .is_some_and(|decoded| decoded.state == 3);
-                    ensure!(
-                        finalized_by_keeper || ancestor.status().call().await? == 2,
-                        "failed to resolve game {}: {error}",
-                        game_at.game
-                    );
-                }
-            }
+        let game_address = factory.gameAtIndex(U256::from(index)).call().await?.game;
+        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
+            game_address,
+            provider.clone(),
+        );
+        if game.status().call().await? != GAME_IN_PROGRESS {
+            continue;
+        }
+
+        let nonce = provider.get_transaction_count(sender).pending().await?;
+        match game.resolve().nonce(nonce).send().await {
+            Ok(pending) => ensure!(
+                pending.get_receipt().await?.status(),
+                "game resolution reverted"
+            ),
+            Err(error) => ensure!(
+                game.status().call().await? == GAME_DEFENDER_WINS,
+                "failed to resolve game {game_address}: {error}"
+            ),
         }
     }
-    ensure!(
-        game.status().call().await? == 2,
-        "withdrawal game did not resolve defender-win"
-    );
 
-    let _: Value = l1_provider
-        .raw_request(Cow::Borrowed("evm_increaseTime"), (1_u64,))
+    Ok(())
+}
+
+async fn advance_time<P>(provider: &P, seconds: u64) -> eyre::Result<()>
+where
+    P: Provider,
+{
+    let _: Value = provider
+        .raw_request(Cow::Borrowed("evm_increaseTime"), (seconds,))
         .await
-        .context("failed to advance past the ASR finality timestamp check")?;
-    let _: Value = l1_provider
+        .context("evm_increaseTime failed")?;
+    let _: Value = provider
         .raw_request(Cow::Borrowed("evm_mine"), ())
-        .await?;
-
-    ensure!(
-        portal
-            .finalizeWithdrawalTransaction(withdrawal)
-            .nonce(
-                l1_provider
-                    .get_transaction_count(withdrawal_sender)
-                    .pending()
-                    .await?,
-            )
-            .send()
-            .await?
-            .get_receipt()
-            .await?
-            .status(),
-        "Portal withdrawal finalization reverted"
-    );
-    ensure!(
-        portal.finalizedWithdrawals(withdrawal_hash).call().await?,
-        "Portal did not persist the finalized withdrawal"
-    );
-
+        .await
+        .context("evm_mine failed")?;
     Ok(())
 }
