@@ -339,6 +339,9 @@ proof-deploy-nitro:
         | tee "$PROOF_DEPLOY_OUT"
 
 # Phase 2 – Deploy the proof system contracts.
+# Registers the WC game type on the stock OP DisputeGameFactory/AnchorStateRegistry deployed
+# by op-deployer. DGF_OWNER_KEY / GUARDIAN_KEY are optional: without them the required admin
+# calls are logged as calldata for out-of-band (multisig) execution instead of broadcast.
 proof-deploy-system:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -346,13 +349,21 @@ proof-deploy-system:
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
     : "${WORLD_CHAIN_L2_CHAIN_ID:?WORLD_CHAIN_L2_CHAIN_ID is required}"
     : "${ROLLUP_CONFIG_HASH:?ROLLUP_CONFIG_HASH is required}"
+    : "${DISPUTE_GAME_FACTORY:?DISPUTE_GAME_FACTORY is required (op-deployer DisputeGameFactoryProxy)}"
+    : "${ANCHOR_STATE_REGISTRY:?ANCHOR_STATE_REGISTRY is required (op-deployer AnchorStateRegistryProxy)}"
+    : "${SYSTEM_CONFIG:?SYSTEM_CONFIG is required (op-deployer SystemConfigProxy)}"
     export PROOF_SYSTEM_BLOCK_INTERVAL="${PROOF_SYSTEM_BLOCK_INTERVAL:-10}"
     export PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL="${PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL:-5}"
     export PROOF_THRESHOLD="${PROOF_THRESHOLD:-2}"
     export WORLD_CHALLENGER_ADDRESS="${WORLD_CHALLENGER_ADDRESS:-}"
+    export WC_GAME_TYPE="${WC_GAME_TYPE:-42}"
+    export DELAYED_WETH_DELAY="${DELAYED_WETH_DELAY:-300}"
+    export DGF_OWNER_KEY="${DGF_OWNER_KEY:-0}"
+    export GUARDIAN_KEY="${GUARDIAN_KEY:-0}"
+    export SET_RESPECTED_GAME_TYPE="${SET_RESPECTED_GAME_TYPE:-false}"
     export PROOF_SYSTEM_DEPLOYMENT_OUT="${PROOF_SYSTEM_DEPLOYMENT_OUT:-/tmp/proof-system-deploy-$(date +%s).json}"
     echo "Deploying proof system contracts (output → $PROOF_SYSTEM_DEPLOYMENT_OUT)…"
-    cd pkg/contracts && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
+    cd pkg/contracts && just build-opstack && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast --slow
 
 # Phase 3a – Pre-warm CertManager with the AWS Nitro CA cert chain.
