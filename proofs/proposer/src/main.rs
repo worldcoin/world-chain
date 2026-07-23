@@ -35,13 +35,17 @@ struct Cli {
     #[arg(long, env = "OUTPUT_ROOT_RPC_URL")]
     output_root_rpc: String,
 
-    /// `WorldChainProofSystemFactory` address on L1.
+    /// Stock `DisputeGameFactory` proxy address on L1.
     #[arg(long, env = "FACTORY_ADDRESS")]
     factory_address: Address,
 
-    /// `WorldChainAnchorStateRegistry` address on L1.
+    /// Stock `AnchorStateRegistry` proxy address on L1.
     #[arg(long, env = "ANCHOR_REGISTRY_ADDRESS")]
     anchor_registry_address: Address,
+
+    /// World Chain game type registered on the DisputeGameFactory.
+    #[arg(long, env = "GAME_TYPE", default_value_t = 42)]
+    game_type: u32,
 
     /// Hex-encoded private key the proposer signs L1 transactions with.
     #[arg(long, env = "PROPOSER_KEY", hide_env_values = true)]
@@ -86,8 +90,12 @@ async fn main() -> Result<()> {
         .wallet(EthereumWallet::from(cli.proposer_key))
         .connect_http(Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?);
 
-    let contracts =
-        AlloyProofSystemClient::new(provider, cli.factory_address, cli.anchor_registry_address);
+    let contracts = AlloyProofSystemClient::new(
+        provider,
+        cli.factory_address,
+        cli.anchor_registry_address,
+        cli.game_type,
+    );
     let bond_manager_config = BondManagerConfig {
         poll_interval: Duration::from_secs(cli.bond_manager_poll_interval_seconds),
         initial_scan_limit: cli.bond_manager_initial_scan_limit,

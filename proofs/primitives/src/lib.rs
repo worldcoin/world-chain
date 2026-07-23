@@ -10,11 +10,12 @@ mod types;
 
 // re-exports
 pub use bindings::{
-    IWorldChainAnchorStateRegistry, IWorldChainProofSystemFactory, IWorldChainProofSystemGame,
+    IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IWorldChainProofSystemGame,
 };
 pub use consensus_provider::{ConsensusError, ConsensusProvider, OptimismConsensusClient};
 pub use types::{
-    GameCreated, InvalidationReason, InvalidationReasonError, PROOF_LANE_COUNT,
-    PROOF_SYSTEM_VERSION, PROOF_THRESHOLD, ProofDomain, ProofLane, ProposalCommitment,
-    ResolutionStatus, RootCommitment, RootState, RootStateError, has_threshold, proof_count,
+    ANCHOR_PARENT_INDEX, GameCreated, GameStatus, GameStatusError, InvalidationReason,
+    InvalidationReasonError, PROOF_LANE_COUNT, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD, ProofDomain,
+    ProofLane, ProposalCommitment, ResolutionStatus, RootCommitment, RootState, RootStateError,
+    extra_data, has_threshold, proof_count,
 };

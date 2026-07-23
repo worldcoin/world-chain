@@ -136,6 +136,19 @@ const WORLD_CHALLENGER_PRIVATE_KEY: &str =
 /// submissions never race another local service on L1 nonces.
 const WORLD_DEFENDER_PRIVATE_KEY: &str =
     "0x5e2f0f1d8a7c6b5e4d3c2b1a09182736455463728190a0b0c0d0e0f102132435";
+/// Anvil account #3 (`0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65`) — the
+/// `l1ProxyAdminOwner` in the op-deployer intent and therefore the
+/// `DisputeGameFactory` owner; used to register the World Chain game type.
+const DGF_OWNER_PRIVATE_KEY: &str =
+    "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6";
+/// Anvil account #2 (`0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC`) — the
+/// `SuperchainGuardian` in the op-deployer intent; used to set the respected
+/// game type on the `AnchorStateRegistry`.
+const GUARDIAN_PRIVATE_KEY: &str =
+    "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";
+/// Game type the World Chain proof-system game registers under on the stock
+/// `DisputeGameFactory`.
+const WORLD_CHAIN_GAME_TYPE: u32 = 42;
 
 const FLASHBLOCKS_BUILDER_KEYS: [&str; 3] = [
     "40645f645e9e28a3f00637d8d629736e7934ee857154ec3fd336c3cc014ebb62",
@@ -254,12 +267,18 @@ struct ContainerService {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WorldProofSystemDeployment {
+    /// Stock `AnchorStateRegistry` proxy (op-deployer output).
     anchor_state_registry: String,
     validity_proof_verifier: String,
     tee_verifier: String,
     security_council: String,
     staking_registry: String,
+    /// Stock `DisputeGameFactory` proxy (op-deployer output); legacy key name retained.
     proof_system_factory: String,
+    game_implementation: String,
+    delayed_weth: String,
+    delayed_weth_proxy_admin: String,
+    game_type: u32,
     rollup_config_hash: String,
     l2_chain_id: u64,
     proof_system_version: u64,
@@ -394,8 +413,13 @@ impl FullStackWorldDevnet {
 
         let proof_system = if config.world_contracts.proof_system {
             Some(
-                deploy_world_proof_system(&l1_public_rpc, &artifacts.rollup_path, &workdir_path)
-                    .await?,
+                deploy_world_proof_system(
+                    &l1_public_rpc,
+                    &artifacts.rollup_path,
+                    &workdir_path,
+                    &artifacts.l1_addresses,
+                )
+                .await?,
             )
         } else {
             None
@@ -868,6 +892,11 @@ useInterop = false
 l1ContractsLocator = "{}"
 l2ContractsLocator = "{}"
 
+# Shrink the AnchorStateRegistry finality airgap so devnet anchor advancement and
+# bond payouts do not stall for the production default (3.5 days).
+[globalDeployOverrides]
+  disputeGameFinalityDelaySeconds = 60
+
 [superchainRoles]
   SuperchainProxyAdminOwner = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
   SuperchainGuardian = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
@@ -907,7 +936,11 @@ async fn deploy_world_proof_system(
     l1_rpc_url: &str,
     rollup_path: &Path,
     workdir: &Path,
+    l1_addresses: &Value,
 ) -> Result<WorldProofSystemDeployment> {
+    let dispute_game_factory = l1_address(l1_addresses, "DisputeGameFactoryProxy")?;
+    let anchor_state_registry = l1_address(l1_addresses, "AnchorStateRegistryProxy")?;
+    let system_config = l1_address(l1_addresses, "SystemConfigProxy")?;
     let rollup_config = fs::read(rollup_path)
         .wrap_err_with(|| format!("failed to read rollup config {}", rollup_path.display()))?;
     let rollup_config_hash = keccak256(&rollup_config);
@@ -954,6 +987,15 @@ async fn deploy_world_proof_system(
             "PROOF_SYSTEM_BLOCK_INTERVAL",
             PROOF_SYSTEM_BLOCK_INTERVAL.to_string(),
         )
+        .env("DISPUTE_GAME_FACTORY", &dispute_game_factory)
+        .env("ANCHOR_STATE_REGISTRY", &anchor_state_registry)
+        .env("SYSTEM_CONFIG", &system_config)
+        .env("WC_GAME_TYPE", WORLD_CHAIN_GAME_TYPE.to_string())
+        .env("DGF_OWNER_KEY", DGF_OWNER_PRIVATE_KEY)
+        .env("GUARDIAN_KEY", GUARDIAN_PRIVATE_KEY)
+        // Make the World Chain game type the respected type so its games can advance the
+        // anchor and (eventually) serve portal withdrawals on the devnet.
+        .env("SET_RESPECTED_GAME_TYPE", "true")
         .env("PROOF_SYSTEM_DEPLOYMENT_OUT", &deployment_rel_path);
 
     info!(
@@ -2394,7 +2436,7 @@ async fn start_challenger(
 /// The proposer signs with the dev proposer key (Anvil account #1), which
 /// `DeployProofSystem.s.sol` stakes in the `MockStakingRegistry` and funds via
 /// `fundDevAccounts`. Output roots are read from the op-node rollup RPC and
-/// proposals are submitted to `WorldChainProofSystemFactory.propose` on L1.
+/// proposals are submitted through `DisputeGameFactory.create` on L1.
 async fn start_world_chain_proposer(
     l1_rpc_url: &str,
     output_root_rpc_url: &str,
@@ -2417,7 +2459,12 @@ async fn start_world_chain_proposer(
         .wallet(EthereumWallet::from(signer))
         .connect_http(Url::parse(l1_rpc_url)?);
 
-    let contracts = AlloyProofSystemClient::new(provider, factory_address, anchor_address);
+    let contracts = AlloyProofSystemClient::new(
+        provider,
+        factory_address,
+        anchor_address,
+        deployment.game_type,
+    );
     let mut bond_manager = BondManager::new(BondManagerConfig::default(), contracts.clone());
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let proposer_bond = contracts
@@ -2471,9 +2518,9 @@ async fn start_world_chain_proposer(
 /// The challenger signs with [`WORLD_CHALLENGER_PRIVATE_KEY`], a dedicated dev
 /// account that is funded through the L1 genesis (see [`fund_world_challenger`])
 /// and staked in the `MockStakingRegistry` by `DeployProofSystem.s.sol`. It scans
-/// `WorldChainProofSystemFactory.GameCreated` events, recomputes the expected
-/// output root from the op-node rollup RPC, and challenges any game whose
-/// `rootClaim` disagrees by calling `WorldChainProofSystemGame.challenge` on L1.
+/// `DisputeGameFactory.DisputeGameCreated` events for the World Chain game type,
+/// recomputes the expected output root from the op-node rollup RPC, and challenges
+/// any game whose `rootClaim` disagrees by calling `WorldChainProofSystemGame.challenge` on L1.
 async fn start_world_chain_challenger(
     l1_rpc_url: &str,
     output_root_rpc_url: &str,
@@ -2492,7 +2539,7 @@ async fn start_world_chain_challenger(
         .wallet(EthereumWallet::from(signer))
         .connect_http(Url::parse(l1_rpc_url)?);
 
-    let client = AlloyChallengerClient::new(provider, factory_address);
+    let client = AlloyChallengerClient::new(provider, factory_address, deployment.game_type);
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let config = ChallengerConfig {
         challenger_bond: U256::from(WORLD_CHALLENGER_BOND_WEI),
@@ -2528,8 +2575,8 @@ async fn start_world_chain_challenger(
 ///
 /// The defender signs with [`WORLD_DEFENDER_PRIVATE_KEY`], a dedicated dev
 /// account that is funded through the L1 genesis. It watches challenged valid
-/// `WorldChainProofSystemFactory` games, requests proofs from the
-/// prover-service, and submits completed proof lanes on L1.
+/// World Chain games created through the `DisputeGameFactory`, requests proofs
+/// from the prover-service, and submits completed proof lanes on L1.
 async fn start_world_chain_defender(
     l1_rpc_url: &str,
     output_root_rpc_url: &str,
@@ -2549,7 +2596,7 @@ async fn start_world_chain_defender(
         .wallet(EthereumWallet::from(signer))
         .connect_http(Url::parse(l1_rpc_url)?);
 
-    let client = AlloyDefenderClient::new(provider, factory_address);
+    let client = AlloyDefenderClient::new(provider, factory_address, deployment.game_type);
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let proof_requester = RpcProverServiceClient::new(prover_service_url)
         .map_err(|error| eyre!("failed to connect defender to prover-service: {error}"))?;

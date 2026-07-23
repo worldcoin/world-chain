@@ -14,7 +14,9 @@ use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
 };
 use world_chain_proofs::{ProofLane, RootState, has_threshold};
-use world_chain_proposer::{ProposerClient, ProposerConfig, WorldChainProposer};
+use world_chain_proposer::{
+    NextProposalAction, Proposal, ProposerClient, ProposerConfig, WorldChainProposer,
+};
 use world_chain_prover_service::{ProofBackend, ProverServiceConfig};
 
 fn proposer_config() -> ProposerConfig {
@@ -115,6 +117,139 @@ async fn fake_resolution_matches_contract_transition_semantics() {
     assert!(!finalized.resolvable);
     assert_eq!(finalized.root_state, RootState::Finalized);
     assert!(chain.resolve_game(game).await.is_err());
+}
+
+#[tokio::test]
+async fn proposer_defers_close_inside_finality_airgap() {
+    let chain = FakeExecution::new();
+    let canonical_root = B256::repeat_byte(0x20);
+    let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
+    let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus);
+
+    let canonical_scan = proposer
+        .anchor_and_canonical_line()
+        .await
+        .expect("canonical line reconstructed");
+    proposer
+        .propose(&canonical_scan)
+        .await
+        .expect("proposal posted");
+    let game = chain.latest_game().expect("game created").game;
+    chain.challenge_game(game);
+    chain
+        .submit_proof(
+            game,
+            ProofLane::ValidityProof as u8,
+            Bytes::from_static(&[1]),
+        )
+        .await
+        .expect("validity proof submitted");
+    chain
+        .submit_proof(
+            game,
+            ProofLane::TeeAttestation as u8,
+            Bytes::from_static(&[1]),
+        )
+        .await
+        .expect("TEE proof submitted");
+
+    // The game resolves, but is still inside the registry finality airgap: the proposer must
+    // resolve it yet defer `closeGame`, leaving the anchor at genesis.
+    chain.set_game_finalized(game, false);
+    settle_with_proposer(&proposer).await;
+    assert_eq!(chain.game_state(game), RootState::Finalized);
+    assert_eq!(chain.anchor_l2_block(), 0);
+    assert!(chain.anchor_game().is_none());
+
+    // Once the airgap elapses, the next settle advances the anchor onto the finalized game.
+    chain.set_game_finalized(game, true);
+    settle_with_proposer(&proposer).await;
+    assert_eq!(chain.anchor_l2_block(), BLOCK_INTERVAL);
+    assert_eq!(chain.anchor_game(), Some(game));
+}
+
+#[tokio::test]
+async fn proposer_continues_chain_from_index_addressed_child() {
+    let chain = FakeExecution::new();
+    let root_10 = B256::repeat_byte(0x10);
+    let root_20 = B256::repeat_byte(0x20);
+    let root_30 = B256::repeat_byte(0x30);
+    let consensus = FakeConsensus::new(3 * BLOCK_INTERVAL)
+        .with_root(BLOCK_INTERVAL, root_10)
+        .with_root(2 * BLOCK_INTERVAL, root_20)
+        .with_root(3 * BLOCK_INTERVAL, root_30);
+    let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus);
+
+    // The proposer creates the block-10 game against the anchor sentinel.
+    let canonical_scan = proposer
+        .anchor_and_canonical_line()
+        .await
+        .expect("canonical line reconstructed");
+    proposer
+        .propose(&canonical_scan)
+        .await
+        .expect("anchor child proposed");
+    let anchor_game = chain.latest_game().expect("anchor game created").game;
+    let anchor_index = chain
+        .game_index(anchor_game)
+        .await
+        .expect("anchor game index");
+
+    // Before the anchor advances, a block-20 child is created referencing the block-10 game by
+    // its factory index (the only way to address a not-yet-anchor parent).
+    let child = chain
+        .submit_proposal(
+            &Proposal {
+                parent_index: anchor_index,
+                parent_ref: anchor_game,
+                root_claim: root_20,
+                l2_block_number: 2 * BLOCK_INTERVAL,
+                attempt: U256::ZERO,
+            },
+            U256::from(1),
+        )
+        .await
+        .expect("index-addressed child created")
+        .game_address;
+
+    // Finalize the block-10 game and advance the anchor onto it.
+    chain.challenge_game(anchor_game);
+    chain
+        .submit_proof(
+            anchor_game,
+            ProofLane::ValidityProof as u8,
+            Bytes::from_static(&[1]),
+        )
+        .await
+        .expect("validity proof submitted");
+    chain
+        .submit_proof(
+            anchor_game,
+            ProofLane::TeeAttestation as u8,
+            Bytes::from_static(&[1]),
+        )
+        .await
+        .expect("TEE proof submitted");
+    settle_with_proposer(&proposer).await;
+    assert_eq!(chain.anchor_game(), Some(anchor_game));
+    assert_eq!(chain.anchor_l2_block(), BLOCK_INTERVAL);
+
+    // The child now references the anchor game by index; the proposer must discover it and
+    // continue the canonical line from it rather than re-proposing block 20.
+    let canonical_scan = proposer
+        .anchor_and_canonical_line()
+        .await
+        .expect("canonical line reconstructed");
+    let games = canonical_scan.canonical_line().games();
+    assert_eq!(games.len(), 1);
+    assert_eq!(games[0].address, child);
+    match canonical_scan.next_action() {
+        NextProposalAction::Propose(proposal) => {
+            assert_eq!(proposal.l2_block_number, 3 * BLOCK_INTERVAL);
+            assert_eq!(proposal.parent_ref, child);
+        }
+        other => panic!("expected new proposal on the index-addressed child, got {other:?}"),
+    }
 }
 
 struct ProofStack {

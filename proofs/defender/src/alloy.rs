@@ -3,14 +3,13 @@ use alloy_primitives::{Address, BlockNumber, Bytes, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
-use world_chain_proofs::{
-    GameCreated, IWorldChainProofSystemFactory, IWorldChainProofSystemGame, RootState,
-};
+use world_chain_proofs::{GameCreated, IDisputeGameFactory, IWorldChainProofSystemGame, RootState};
 
 /// Alloy-backed implementation of [`DefenderClient`].
 #[derive(Debug, Clone)]
 pub struct AlloyDefenderClient<P> {
-    factory: IWorldChainProofSystemFactory::IWorldChainProofSystemFactoryInstance<P>,
+    factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
+    game_type: u32,
     provider: P,
 }
 
@@ -19,13 +18,60 @@ where
     P: Provider + Clone,
 {
     /// Creates a new Alloy-backed contract client.
-    pub fn new(provider: P, factory_address: Address) -> Self {
-        let factory = IWorldChainProofSystemFactory::IWorldChainProofSystemFactoryInstance::new(
+    pub fn new(provider: P, factory_address: Address, game_type: u32) -> Self {
+        let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
             provider.clone(),
         );
 
-        Self { factory, provider }
+        Self {
+            factory,
+            game_type,
+            provider,
+        }
+    }
+
+    fn game_instance(
+        &self,
+        game: Address,
+    ) -> IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance<P> {
+        IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
+            game,
+            self.provider.clone(),
+        )
+    }
+
+    /// Reads the proposal context of a factory-created game.
+    ///
+    /// Discovery filters the trusted factory's `DisputeGameCreated` event, so every game read
+    /// here is a genuine `WorldChainProofSystemGame`; the rich per-proposal fields live on the
+    /// game itself rather than in the factory event.
+    async fn read_game_created(
+        &self,
+        game_address: Address,
+        root_claim: alloy_primitives::B256,
+    ) -> Result<GameCreated, DefenderError> {
+        let game = self.game_instance(game_address);
+        macro_rules! call {
+            ($method:ident) => {
+                game.$method()
+                    .call()
+                    .await
+                    .map_err(|err| DefenderError::Contract(err.to_string()))?
+            };
+        }
+
+        Ok(GameCreated {
+            root_id: call!(rootId),
+            game: game_address,
+            proposer: call!(gameCreator),
+            root_claim,
+            l2_block_number: u256_to_u64(call!(l2BlockNumber), "l2BlockNumber")?,
+            parent_ref: call!(parentRef),
+            l1_origin_hash: call!(l1OriginHash),
+            l1_origin_number: u256_to_u64(call!(l1OriginNumber), "l1OriginNumber")?,
+            attempt: call!(attempt),
+        })
     }
 }
 
@@ -64,28 +110,22 @@ where
     ) -> Result<Vec<GameCreated>, DefenderError> {
         let logs = self
             .factory
-            .GameCreated_filter()
+            .DisputeGameCreated_filter()
+            .topic2(U256::from(self.game_type))
             .from_block(from)
             .to_block(to)
             .query()
             .await
             .map_err(|err| DefenderError::Rpc(err.to_string()))?;
 
-        logs.into_iter()
-            .map(|(event, _log)| {
-                Ok(GameCreated {
-                    proposal_key: event.proposalKey,
-                    root_id: event.rootId,
-                    game: event.game,
-                    proposer: event.proposer,
-                    root_claim: event.rootClaim,
-                    l2_block_number: u256_to_u64(event.l2BlockNumber, "l2BlockNumber")?,
-                    parent_ref: event.parentRef,
-                    l1_origin_hash: event.l1OriginHash,
-                    l1_origin_number: u256_to_u64(event.l1OriginNumber, "l1OriginNumber")?,
-                })
-            })
-            .collect()
+        let mut games = Vec::with_capacity(logs.len());
+        for (event, _log) in logs {
+            games.push(
+                self.read_game_created(event.disputeProxy, event.rootClaim)
+                    .await?,
+            );
+        }
+        Ok(games)
     }
 
     async fn challenge_deadline(&self, game: Address) -> Result<u64, DefenderError> {

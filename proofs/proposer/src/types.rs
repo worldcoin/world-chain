@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, B256, TxHash, U256};
-use world_chain_proofs::{InvalidationReason, ProposalCommitment};
+use world_chain_proofs::{ANCHOR_PARENT_INDEX, InvalidationReason, extra_data};
 
 /// The canonical lineage discovered by the proposer and the action available at its tip.
 #[derive(Debug)]
@@ -135,31 +135,65 @@ pub struct ParentRef {
     pub address: Address,
     /// L2 block number of the parent output root.
     pub l2_block_number: u64,
+    /// `parentIndex` a child proposal must reference: the parent game's factory index, or
+    /// [`ANCHOR_PARENT_INDEX`] when the parent is the current anchor.
+    pub parent_index: U256,
 }
 
-/// Candidate proposal data supplied to the proof-system factory.
+impl ParentRef {
+    /// Returns whether this parent is the anchor sentinel.
+    #[must_use]
+    pub fn is_anchor(&self) -> bool {
+        self.parent_index == ANCHOR_PARENT_INDEX
+    }
+}
+
+/// Candidate proposal data supplied to `DisputeGameFactory.create`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Proposal {
-    /// Address of the anchor registry or parent game.
+    /// Factory index of the parent game, or [`ANCHOR_PARENT_INDEX`].
+    pub parent_index: U256,
+    /// Address of the anchor registry or parent game (informational; the on-chain identity is
+    /// `parent_index`).
     pub parent_ref: Address,
     /// Claimed OP Stack output root.
     pub root_claim: B256,
     /// L2 block number for `root_claim`.
     pub l2_block_number: u64,
-    /// Deterministic factory lookup key, excluding L1 origin.
-    pub proposal_key: B256,
+    /// Retry nonce; attempt N requires attempt N-1 to have timed out on proofs.
+    pub attempt: U256,
 }
 
 impl Proposal {
-    /// Returns the proposal commitment used to compute the factory lookup key.
+    /// ABI-encoded `extraData` identifying this proposal in the factory.
     #[must_use]
-    pub const fn commitment(&self) -> ProposalCommitment {
-        ProposalCommitment {
-            parent_ref: self.parent_ref,
-            root_claim: self.root_claim,
-            l2_block_number: self.l2_block_number,
-        }
+    pub fn extra_data(&self) -> Vec<u8> {
+        extra_data(self.l2_block_number, self.parent_index, self.attempt)
     }
+}
+
+/// Outcome of one bond-claim step against a game (two-phase DelayedWETH flow).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClaimOutcome {
+    /// The game is not yet claimable (unresolved, inside the finality airgap, or inside the
+    /// DelayedWETH withdrawal delay).
+    NotReady,
+    /// Phase 1 executed: credit unlocked in DelayedWETH.
+    Unlocked {
+        /// Transaction hash for the unlock submission.
+        tx_hash: TxHash,
+        /// Amount unlocked.
+        amount: U256,
+    },
+    /// Phase 2 executed: funds withdrawn and transferred to the proposer.
+    Claimed {
+        /// Transaction hash for the withdrawal submission.
+        tx_hash: TxHash,
+        /// Amount transferred.
+        amount: U256,
+    },
+    /// The game holds no credit for the proposer; nothing to claim now or later.
+    NoCredit,
 }
 
 /// Result of a submitted proposal transaction.
@@ -183,13 +217,4 @@ pub struct ResolveSubmission {
 pub struct CloseGameSubmission {
     /// Transaction hash for the closeGame submission.
     pub tx_hash: TxHash,
-}
-
-/// Result of a withdraw transaction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WithdrawSubmission {
-    /// Transaction hash for the withdraw submission.
-    pub tx_hash: TxHash,
-    /// Amount withdrawn from the game.
-    pub amount: U256,
 }
