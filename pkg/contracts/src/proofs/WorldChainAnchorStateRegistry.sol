@@ -3,11 +3,11 @@ pragma solidity 0.8.28;
 
 import {Claim, GameStatus, GameType, Hash, Proposal, Timestamp, GameTypes} from "./DisputeTypes.sol";
 import {IDisputeGame} from "./interfaces/IDisputeGame.sol";
+import {IWorldChainAnchorStateRegistry} from "./interfaces/IWorldChainAnchorStateRegistry.sol";
 import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
 import {IWorldChainProofSystemFactory} from "./interfaces/IWorldChainProofSystemFactory.sol";
-import {IOptimismPortal2AnchorStateRegistry} from "./interfaces/IOptimismPortal2.sol";
 
-contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
+contract WorldChainAnchorStateRegistry is IWorldChainAnchorStateRegistry {
     error NotOwner();
     error AlreadyInitialized();
     error InvalidOwner(address owner);
@@ -74,7 +74,7 @@ contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
         return _getRegistryStorage().disputeGameFactory;
     }
 
-    function paused() public view returns (bool) {
+    function paused() public view override returns (bool) {
         return _getRegistryStorage().paused;
     }
 
@@ -82,12 +82,8 @@ contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
         return _getRegistryStorage().respectedGameType;
     }
 
-    function anchorGame() public view returns (address) {
+    function anchorGame() public view override returns (address) {
         return _getRegistryStorage().anchorGame;
-    }
-
-    function blacklistedGames(address game) public view returns (bool) {
-        return _getRegistryStorage().blacklistedGames[game];
     }
 
     function transferOwnership(address nextOwner) external onlyOwner {
@@ -141,16 +137,16 @@ contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
     }
 
     /// @notice OP-compatible blacklist getter used by standard registry tooling.
-    function isGameBlacklisted(address game) external view returns (bool) {
+    function isGameBlacklisted(address game) external view override returns (bool) {
         return _getRegistryStorage().blacklistedGames[game];
     }
 
     /// @notice Returns the immutable deployment anchor, which does not move with getAnchorRoot().
-    function getStartingAnchorRoot() external view returns (Proposal memory) {
+    function getStartingAnchorRoot() external view override returns (Proposal memory) {
         return _getRegistryStorage().startingAnchorRoot;
     }
 
-    function getAnchorRoot() public view returns (Hash, uint256) {
+    function getAnchorRoot() public view override returns (Hash, uint256) {
         RegistryStorage storage registryStorage = _getRegistryStorage();
         address game = registryStorage.anchorGame;
         if (game == address(0)) {
@@ -161,7 +157,7 @@ contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
         return (Hash.wrap(disputeGame.rootClaim()), disputeGame.l2SequenceNumber());
     }
 
-    function isGameRegistered(address game) public view returns (bool) {
+    function isGameRegistered(address game) public view override returns (bool) {
         if (game.code.length == 0) return false;
 
         address factory = _getRegistryStorage().disputeGameFactory;
@@ -219,7 +215,7 @@ contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
     }
 
     /// @notice Returns whether a game has resolved and passed the ASR finality timestamp check.
-    function isGameFinalized(address game) public view returns (bool) {
+    function isGameFinalized(address game) public view override returns (bool) {
         if (!isGameResolved(game)) return false;
 
         try IDisputeGame(game).resolvedAt() returns (Timestamp resolvedAt) {
@@ -244,7 +240,7 @@ contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
     }
 
     /// @notice Advances the starting checkpoint for future games; this does not finalize Portal withdrawals.
-    function setAnchorState(address game) external {
+    function setAnchorState(address game) external override {
         RegistryStorage storage registryStorage = _getRegistryStorage();
         address factory = registryStorage.disputeGameFactory;
         if (factory == address(0)) revert FactoryNotInitialized();

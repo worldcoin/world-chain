@@ -322,7 +322,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IDisputeGame {
 
         IWorldChainAnchorStateRegistry registry = IWorldChainAnchorStateRegistry(anchorStateRegistry);
         // 1. A governance blacklist invalidates this game before parent or deadline evaluation.
-        if (registry.blacklistedGames(address(this))) {
+        if (registry.isGameBlacklisted(address(this))) {
             evaluation.status = ResolutionStatus.RESOLVABLE;
             evaluation.outcome = WorldChainProofLib.RootState.INVALIDATED;
             evaluation.reason = WorldChainProofLib.InvalidationReason.BLACKLISTED;
@@ -335,7 +335,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IDisputeGame {
             // The registry sentinel represents the immutable deployment anchor before a game anchor exists.
             parentState = WorldChainProofLib.RootState.FINALIZED;
         } else {
-            parentBlacklisted = registry.blacklistedGames(parentRef);
+            parentBlacklisted = registry.isGameBlacklisted(parentRef);
             if (!parentBlacklisted) parentState = IWorldChainProofSystemGame(parentRef).state();
         }
 

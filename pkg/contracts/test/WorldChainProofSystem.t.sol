@@ -959,7 +959,7 @@ contract WorldChainProofSystemTest is Test {
             )
         );
         anchor.setGameBlacklisted(address(second), true);
-        assertFalse(anchor.blacklistedGames(address(second)));
+        assertFalse(anchor.isGameBlacklisted(address(second)));
 
         vm.warp(block.timestamp + 1);
         third.closeGame();

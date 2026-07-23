@@ -289,7 +289,7 @@ contract WorldChainProofSystemFactory is IOptimismPortal2DisputeGameFactory {
             startingL2BlockNumber = startingAnchor.l2SequenceNumber;
         } else {
             if (!factoryGames[parentRef]) revert InvalidParent(parentRef);
-            if (anchorStateRegistry.blacklistedGames(parentRef)) revert ParentGameBlacklisted(parentRef);
+            if (anchorStateRegistry.isGameBlacklisted(parentRef)) revert ParentGameBlacklisted(parentRef);
 
             IWorldChainProofSystemGame parentGame = IWorldChainProofSystemGame(parentRef);
             if (
