@@ -33,7 +33,6 @@ contract WorldChainProofSystemTest is Test {
 
     uint64 internal constant CHALLENGE_PERIOD = 1 days;
     uint64 internal constant PROOF_PERIOD = 7 days;
-    uint256 internal constant DISPUTE_GAME_FINALITY_DELAY_SECONDS = 1;
     uint256 internal constant PROPOSER_BOND = 1 ether;
     uint256 internal constant CHALLENGER_BOND = 0.1 ether;
 
@@ -56,7 +55,7 @@ contract WorldChainProofSystemTest is Test {
         vm.deal(secondChallenger, 100 ether);
         vm.deal(keeper, 100 ether);
 
-        anchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0, DISPUTE_GAME_FINALITY_DELAY_SECONDS);
+        anchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
         staking = new MockStakingRegistry();
         staking.setStaked(challenger, true);
         staking.setStaked(secondChallenger, true);
@@ -157,8 +156,7 @@ contract WorldChainProofSystemTest is Test {
     }
 
     function testThresholdOneRequiresExplicitSettlementAfterSingleLane() public {
-        WorldChainAnchorStateRegistry thresholdAnchor =
-            new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0, DISPUTE_GAME_FINALITY_DELAY_SECONDS);
+        WorldChainAnchorStateRegistry thresholdAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
         WorldChainProofSystemFactory thresholdOne = _newFactory(thresholdAnchor, 1);
         thresholdAnchor.initializeFactory(address(thresholdOne));
 
@@ -180,8 +178,7 @@ contract WorldChainProofSystemTest is Test {
     }
 
     function testFactoryRejectsOutOfRangeThreshold() public {
-        WorldChainAnchorStateRegistry thresholdAnchor =
-            new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0, DISPUTE_GAME_FINALITY_DELAY_SECONDS);
+        WorldChainAnchorStateRegistry thresholdAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
 
         vm.expectRevert(WorldChainProofSystemFactory.InvalidActivationParameters.selector);
         _newFactory(thresholdAnchor, 0);
@@ -531,8 +528,7 @@ contract WorldChainProofSystemTest is Test {
     }
 
     function testFactoryRequiresRegistryInitializationBeforePropose() public {
-        WorldChainAnchorStateRegistry uninitializedAnchor =
-            new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0, DISPUTE_GAME_FINALITY_DELAY_SECONDS);
+        WorldChainAnchorStateRegistry uninitializedAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
         WorldChainProofSystemFactory uninitializedFactory =
             _newFactory(uninitializedAnchor, WorldChainProofLib.PROOF_THRESHOLD);
 
@@ -596,7 +592,7 @@ contract WorldChainProofSystemTest is Test {
 
         vm.warp(block.timestamp + CHALLENGE_PERIOD);
         first.resolve();
-        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
+        vm.warp(block.timestamp + 1);
         first.closeGame();
         bytes32 childRoot = keccak256("child-root");
 
@@ -661,7 +657,7 @@ contract WorldChainProofSystemTest is Test {
         IOptimismPortal2DisputeGameFactory portalFactory = IOptimismPortal2DisputeGameFactory(address(factory));
 
         assertEq(portalRegistry.disputeGameFactory(), address(factory));
-        assertEq(portalRegistry.disputeGameFinalityDelaySeconds(), DISPUTE_GAME_FINALITY_DELAY_SECONDS);
+        assertEq(portalRegistry.disputeGameFinalityDelaySeconds(), 0);
         assertEq(portalRegistry.retirementTimestamp(), 0);
         assertFalse(portalRegistry.disputeGameBlacklist(address(game)));
         assertTrue(portalRegistry.isGameProper(address(game)));
@@ -729,7 +725,7 @@ contract WorldChainProofSystemTest is Test {
 
         vm.warp(block.timestamp + PROOF_PERIOD);
         game.resolve();
-        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
+        vm.warp(block.timestamp + 1);
 
         assertEq(uint8(IDisputeGame(address(game)).status()), uint8(GameStatus.CHALLENGER_WINS));
         assertFalse(anchor.isGameClaimValid(address(game)));
@@ -750,7 +746,7 @@ contract WorldChainProofSystemTest is Test {
         assertFalse(anchor.isGameFinalized(address(game)));
         assertFalse(anchor.isGameClaimValid(address(game)));
 
-        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
+        vm.warp(block.timestamp + 1);
         assertTrue(anchor.isGameFinalized(address(game)));
         assertTrue(anchor.isGameClaimValid(address(game)));
 
@@ -784,7 +780,7 @@ contract WorldChainProofSystemTest is Test {
         _challenge(first, challenger);
         vm.warp(block.timestamp + PROOF_PERIOD);
         first.resolve();
-        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
+        vm.warp(block.timestamp + 1);
         assertFalse(anchor.isGameClaimValid(firstAddress));
 
         vm.roll(block.number + 1);
@@ -889,7 +885,7 @@ contract WorldChainProofSystemTest is Test {
         first.resolve();
         second.resolve();
         third.resolve();
-        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
+        vm.warp(block.timestamp + 1);
 
         anchor.setAnchorState(address(third));
 
@@ -910,7 +906,7 @@ contract WorldChainProofSystemTest is Test {
         acceptedBranch.resolve();
         parallelParent.resolve();
         parallelChild.resolve();
-        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
+        vm.warp(block.timestamp + 1);
 
         anchor.setAnchorState(address(acceptedBranch));
         anchor.setAnchorState(address(parallelChild));
@@ -939,7 +935,7 @@ contract WorldChainProofSystemTest is Test {
         anchor.setGameBlacklisted(address(second), true);
         assertFalse(anchor.blacklistedGames(address(second)));
 
-        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
+        vm.warp(block.timestamp + 1);
         third.closeGame();
 
         assertEq(anchor.anchorGame(), address(third));
@@ -959,14 +955,14 @@ contract WorldChainProofSystemTest is Test {
         acceptedCheckpoint.resolve();
         alternativeFirst.resolve();
         equivalentCheckpoint.resolve();
-        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
+        vm.warp(block.timestamp + 1);
         anchor.setAnchorState(address(acceptedCheckpoint));
 
         (WorldChainProofSystemGame alternativeSuccessor,) =
             _proposeChild(equivalentCheckpoint, keccak256("alternative-successor-root"));
         vm.warp(block.timestamp + CHALLENGE_PERIOD);
         alternativeSuccessor.resolve();
-        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
+        vm.warp(block.timestamp + 1);
         anchor.setAnchorState(address(alternativeSuccessor));
 
         assertEq(anchor.anchorGame(), address(alternativeSuccessor));
@@ -998,7 +994,7 @@ contract WorldChainProofSystemTest is Test {
         finalized.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(finalizedRootId));
         finalized.submitProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(finalizedRootId));
         finalized.resolve();
-        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
+        vm.warp(block.timestamp + 1);
         anchor.setPaused(true);
         vm.expectRevert();
         anchor.setAnchorState(address(finalized));
@@ -1010,8 +1006,7 @@ contract WorldChainProofSystemTest is Test {
     }
 
     function testAnchorRejectsFinalizedGameFromDifferentFactory() public {
-        WorldChainAnchorStateRegistry otherAnchor =
-            new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0, DISPUTE_GAME_FINALITY_DELAY_SECONDS);
+        WorldChainAnchorStateRegistry otherAnchor = new WorldChainAnchorStateRegistry(bytes32(uint256(1)), 0);
         WorldChainProofSystemFactory otherFactory = _newFactory(otherAnchor, WorldChainProofLib.PROOF_THRESHOLD);
         otherAnchor.initializeFactory(address(otherFactory));
 
@@ -1072,7 +1067,7 @@ contract WorldChainProofSystemTest is Test {
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(rootId));
         game.resolve();
-        vm.warp(block.timestamp + DISPUTE_GAME_FINALITY_DELAY_SECONDS + 1);
+        vm.warp(block.timestamp + 1);
     }
 
     function _challenge(WorldChainProofSystemGame game, address account) internal {

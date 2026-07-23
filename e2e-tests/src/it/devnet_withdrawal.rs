@@ -108,7 +108,6 @@ sol! {
 
     #[sol(rpc)]
     interface WorldChainAnchorStateRegistry {
-        function disputeGameFinalityDelaySeconds() external view returns (uint256);
         function setGameBlacklisted(address game, bool blacklisted) external;
     }
 }
@@ -442,31 +441,8 @@ async fn wip_1006_portal_withdrawal_happy_and_rejection_paths() -> eyre::Result<
         "withdrawal game did not resolve defender-win"
     );
 
-    let airgap_error = match portal
-        .finalizeWithdrawalTransaction(withdrawal.clone())
-        .call()
-        .await
-    {
-        Ok(_) => bail!("Portal finalized a withdrawal inside the ASR finality airgap"),
-        Err(error) => error,
-    };
-    ensure!(
-        airgap_error
-            .as_decoded_error::<OptimismPortal::OptimismPortal_InvalidRootClaim>()
-            .is_some(),
-        "Portal did not enforce the ASR finality airgap"
-    );
-
-    let game_finality_delay: u64 = anchor
-        .disputeGameFinalityDelaySeconds()
-        .call()
-        .await?
-        .try_into()?;
     let _: Value = l1_provider
-        .raw_request(
-            Cow::Borrowed("evm_increaseTime"),
-            (game_finality_delay + 1,),
-        )
+        .raw_request(Cow::Borrowed("evm_increaseTime"), (1_u64,))
         .await
         .context("failed to advance past the ASR finality timestamp check")?;
     let _: Value = l1_provider

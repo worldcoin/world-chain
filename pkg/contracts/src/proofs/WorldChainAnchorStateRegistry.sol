@@ -29,8 +29,9 @@ contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
     event GameBlacklistedSet(address indexed game, bool blacklisted);
     event RespectedGameTypeSet(GameType gameType);
 
-    /// @notice Post-resolution airgap before a game may anchor or finalize Portal withdrawals.
-    uint256 internal immutable DISPUTE_GAME_FINALITY_DELAY_SECONDS;
+    // TODO: Evaluate a post-resolution ASR finality delay in a follow-up protocol ticket.
+    // It is intentionally zero for the current WIP-1006 Portal integration.
+    uint256 internal constant DISPUTE_GAME_FINALITY_DELAY_SECONDS = 0;
 
     address public owner;
     address public override disputeGameFactory;
@@ -42,11 +43,10 @@ contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
 
     mapping(address game => bool blacklisted) public blacklistedGames;
 
-    constructor(bytes32 startingRootClaim, uint256 startingL2BlockNumber, uint256 disputeGameFinalityDelaySeconds_) {
+    constructor(bytes32 startingRootClaim, uint256 startingL2BlockNumber) {
         owner = msg.sender;
         emit OwnershipTransferred(address(0), msg.sender);
         startingAnchorRoot = Proposal({root: Hash.wrap(startingRootClaim), l2SequenceNumber: startingL2BlockNumber});
-        DISPUTE_GAME_FINALITY_DELAY_SECONDS = disputeGameFinalityDelaySeconds_;
         respectedGameType = GameTypes.WIP_1006;
     }
 
@@ -94,7 +94,7 @@ contract WorldChainAnchorStateRegistry is IOptimismPortal2AnchorStateRegistry {
         emit RespectedGameTypeSet(gameType);
     }
 
-    function disputeGameFinalityDelaySeconds() external view override returns (uint256) {
+    function disputeGameFinalityDelaySeconds() external pure override returns (uint256) {
         return DISPUTE_GAME_FINALITY_DELAY_SECONDS;
     }
 
