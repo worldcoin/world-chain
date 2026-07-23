@@ -19,6 +19,13 @@ contract WorldChainProofSystemFactory {
     error ParentGameBlacklisted(address parentRef);
     error InvalidL2BlockNumber(uint256 expectedL2BlockNumber, uint256 actualL2BlockNumber);
     error TargetBlockNotNewer(uint256 currentL2BlockNumber, uint256 targetL2BlockNumber);
+    error L1OriginInFuture(uint256 l1OriginNumber, uint256 currentBlock);
+    error L1OriginTooOld(uint256 l1OriginNumber, uint256 currentBlock);
+    error L1OriginHashMismatch(bytes32 claimed, bytes32 actual);
+
+    address public constant EIP2935_CONTRACT = 0x0000F90827F1C53a10cb7A02335B175320002935;
+    uint256 public constant BLOCKHASH_WINDOW = 256;
+    uint256 public constant EIP2935_WINDOW = 8191;
 
     event GameCreated(
         bytes32 indexed proposalKey,
@@ -42,6 +49,15 @@ contract WorldChainProofSystemFactory {
         address parentRef;
         bytes32 l1OriginHash;
         uint256 l1OriginNumber;
+    }
+
+    struct ProposalRequest {
+        address parentRef;
+        bytes32 rootClaim;
+        uint256 l2BlockNumber;
+        bytes32 l1OriginHash;
+        uint256 l1OriginNumber;
+        uint8 laneId;
     }
 
     WorldChainProofLib.Domain public domain;
@@ -107,15 +123,31 @@ contract WorldChainProofSystemFactory {
         return allGames[index];
     }
 
-    function propose(address parentRef, bytes32 rootClaim, uint256 l2BlockNumber)
-        external
-        payable
-        returns (address game, bytes32 id)
-    {
-        uint256 l1OriginNumber = block.number == 0 ? 0 : block.number - 1;
-        bytes32 l1OriginHash = block.number == 0 ? bytes32(0) : blockhash(l1OriginNumber);
+    function propose(
+        address parentRef,
+        bytes32 rootClaim,
+        uint256 l2BlockNumber,
+        bytes32 l1OriginHash,
+        uint256 l1OriginNumber,
+        uint8 laneId,
+        bytes calldata proof
+    ) external payable returns (address game, bytes32 id) {
+        return _propose(
+            ProposalRequest({
+                parentRef: parentRef,
+                rootClaim: rootClaim,
+                l2BlockNumber: l2BlockNumber,
+                l1OriginHash: l1OriginHash,
+                l1OriginNumber: l1OriginNumber,
+                laneId: laneId
+            }),
+            proof
+        );
+    }
 
-        bytes32 key = WorldChainProofLib.proposalKey(domainHash, parentRef, rootClaim, l2BlockNumber);
+    function _propose(ProposalRequest memory request, bytes calldata proof) private returns (address game, bytes32 id) {
+        bytes32 key =
+            WorldChainProofLib.proposalKey(domainHash, request.parentRef, request.rootClaim, request.l2BlockNumber);
         address existing = games[key];
         uint256 attempt;
         if (existing != address(0)) {
@@ -132,9 +164,18 @@ contract WorldChainProofSystemFactory {
             attempt = existingGame.attempt() + 1;
         }
 
-        (bytes32 startingRootClaim, uint256 startingL2BlockNumber) = _validateParent(parentRef, l2BlockNumber);
+        (bytes32 startingRootClaim, uint256 startingL2BlockNumber) =
+            _validateParent(request.parentRef, request.l2BlockNumber);
+        _validateL1Origin(request.l1OriginHash, request.l1OriginNumber);
 
-        id = WorldChainProofLib.rootId(domainHash, parentRef, rootClaim, l2BlockNumber, l1OriginHash, l1OriginNumber);
+        id = WorldChainProofLib.rootId(
+            domainHash,
+            request.parentRef,
+            request.rootClaim,
+            request.l2BlockNumber,
+            request.l1OriginHash,
+            request.l1OriginNumber
+        );
 
         game = address(
             new WorldChainProofSystemGame{value: msg.value}(
@@ -143,13 +184,13 @@ contract WorldChainProofSystemFactory {
                     anchorStateRegistry: address(anchorStateRegistry),
                     attempt: attempt,
                     proposer: msg.sender,
-                    parentRef: parentRef,
+                    parentRef: request.parentRef,
                     startingRootClaim: startingRootClaim,
                     startingL2BlockNumber: startingL2BlockNumber,
-                    rootClaim: rootClaim,
-                    l2BlockNumber: l2BlockNumber,
-                    l1OriginHash: l1OriginHash,
-                    l1OriginNumber: l1OriginNumber
+                    rootClaim: request.rootClaim,
+                    l2BlockNumber: request.l2BlockNumber,
+                    l1OriginHash: request.l1OriginHash,
+                    l1OriginNumber: request.l1OriginNumber
                 }),
                 WorldChainProofSystemGame.ActivationConfig({
                     domainHash: domainHash,
@@ -165,6 +206,8 @@ contract WorldChainProofSystemFactory {
                 })
             )
         );
+        WorldChainProofSystemGame(payable(game)).submitInitialProofLane(request.laneId, proof);
+
         games[key] = game;
         isFactoryGame[game] = true;
         allGames.push(game);
@@ -175,11 +218,11 @@ contract WorldChainProofSystemFactory {
                 rootId: id,
                 game: game,
                 proposer: msg.sender,
-                rootClaim: rootClaim,
-                l2BlockNumber: l2BlockNumber,
-                parentRef: parentRef,
-                l1OriginHash: l1OriginHash,
-                l1OriginNumber: l1OriginNumber
+                rootClaim: request.rootClaim,
+                l2BlockNumber: request.l2BlockNumber,
+                parentRef: request.parentRef,
+                l1OriginHash: request.l1OriginHash,
+                l1OriginNumber: request.l1OriginNumber
             })
         );
     }
@@ -250,6 +293,25 @@ contract WorldChainProofSystemFactory {
         if (l2BlockNumber <= currentAnchorBlock) {
             revert TargetBlockNotNewer(currentAnchorBlock, l2BlockNumber);
         }
+    }
+
+    function _validateL1Origin(bytes32 l1OriginHash, uint256 l1OriginNumber) private view {
+        if (l1OriginNumber >= block.number) revert L1OriginInFuture(l1OriginNumber, block.number);
+
+        uint256 blockAge = block.number - l1OriginNumber;
+        bytes32 actualHash;
+        if (blockAge <= BLOCKHASH_WINDOW) {
+            actualHash = blockhash(l1OriginNumber);
+        } else if (blockAge <= EIP2935_WINDOW) {
+            (bool success, bytes memory result) = EIP2935_CONTRACT.staticcall(abi.encode(l1OriginNumber));
+            if (!success || result.length != 32) revert L1OriginTooOld(l1OriginNumber, block.number);
+            actualHash = abi.decode(result, (bytes32));
+        } else {
+            revert L1OriginTooOld(l1OriginNumber, block.number);
+        }
+
+        if (actualHash == bytes32(0)) revert L1OriginTooOld(l1OriginNumber, block.number);
+        if (actualHash != l1OriginHash) revert L1OriginHashMismatch(l1OriginHash, actualHash);
     }
 
     function _emitGameCreated(GameCreatedLog memory log) private {
