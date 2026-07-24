@@ -1,7 +1,7 @@
 use crate::{
     config::DefenderConfig,
     error::DefenderError,
-    game::{GameEvaluator, GameObservation, GameScanOutcome, WatchOutcome},
+    game::{GameEvaluator, GameObservation, GameOutcome},
     lane::{DEFENDED_LANE_COUNT, DEFENDED_LANES, LaneDriver, LaneState},
     traits::DefenderClient,
     types::GameMetadata,
@@ -138,7 +138,7 @@ where
         &self,
         games: impl IntoIterator<Item = GameMetadata>,
         now: u64,
-    ) -> Vec<(GameMetadata, Result<GameScanOutcome, DefenderError>)> {
+    ) -> Vec<(GameMetadata, Result<GameOutcome, DefenderError>)> {
         let evaluator = GameEvaluator::new(&self.execution_provider, &self.consensus_provider);
         stream::iter(games)
             .map(move |game| {
@@ -155,14 +155,15 @@ where
 
     fn handle_game_scan_results(
         &mut self,
-        results: Vec<(GameMetadata, Result<GameScanOutcome, DefenderError>)>,
+        results: Vec<(GameMetadata, Result<GameOutcome, DefenderError>)>,
     ) {
         for (game, result) in results {
             match result {
-                Ok(GameScanOutcome::Track) => {
+                Ok(GameOutcome::Track) => {
                     self.watched_games.insert(game.address, game);
                 }
-                Ok(GameScanOutcome::Skip) => {}
+                Ok(GameOutcome::Defend) => self.start_defense(game),
+                Ok(GameOutcome::Drop) => {}
                 Err(error) => {
                     warn!(
                         game = %game.address,
@@ -179,7 +180,7 @@ where
         &self,
         latest_finalized_l2_block: BlockNumber,
         now: u64,
-    ) -> Vec<(GameMetadata, Result<WatchOutcome, DefenderError>)> {
+    ) -> Vec<(GameMetadata, Result<GameOutcome, DefenderError>)> {
         let evaluator = GameEvaluator::new(&self.execution_provider, &self.consensus_provider);
         stream::iter(self.watched_games.values().copied().collect::<Vec<_>>())
             .map(move |game| {
@@ -196,26 +197,29 @@ where
 
     fn handle_watch_outcomes(
         &mut self,
-        results: Vec<(GameMetadata, Result<WatchOutcome, DefenderError>)>,
+        results: Vec<(GameMetadata, Result<GameOutcome, DefenderError>)>,
     ) {
         for (metadata, result) in results {
             let game = metadata.address;
             match result {
-                Ok(WatchOutcome::Defend) => {
-                    info!(%game, "challenged game has a valid root; starting defense");
-                    self.watched_games.remove(&game);
-                    self.active_defenses
-                        .insert(game, ActiveDefense::new(metadata));
-                }
-                Ok(WatchOutcome::Drop) => {
+                Ok(GameOutcome::Defend) => self.start_defense(metadata),
+                Ok(GameOutcome::Drop) => {
                     self.watched_games.remove(&game);
                 }
-                Ok(WatchOutcome::Keep) => {}
+                Ok(GameOutcome::Track) => {}
                 Err(err) => {
                     warn!(game = %game, error = %err, "game watch failed; retrying next tick");
                 }
             }
         }
+    }
+
+    fn start_defense(&mut self, metadata: GameMetadata) {
+        let game = metadata.address;
+        info!(%game, "challenged game has a valid root; starting defense");
+        self.watched_games.remove(&game);
+        self.active_defenses
+            .insert(game, ActiveDefense::new(metadata));
     }
 
     async fn advance_defense(
