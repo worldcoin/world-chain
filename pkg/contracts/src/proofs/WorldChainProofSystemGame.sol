@@ -53,6 +53,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     }
 
     error InvalidBond(uint256 expected, uint256 actual);
+    error InvalidPeriods(uint64 challengePeriod, uint64 proofPeriod);
     error InvalidState(WorldChainProofLib.RootState expected, WorldChainProofLib.RootState actual);
     error ChallengePeriodElapsed(uint256 timestamp, uint256 challengeDeadline);
     error ProofPeriodElapsed(uint256 timestamp, uint256 proofDeadline);
@@ -118,6 +119,9 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
 
     constructor(ProposalInit memory proposal, ActivationConfig memory config) payable {
         if (msg.value != config.proposerBond) revert InvalidBond(config.proposerBond, msg.value);
+        if (config.proofPeriod <= config.challengePeriod) {
+            revert InvalidPeriods(config.challengePeriod, config.proofPeriod);
+        }
 
         factory = proposal.factory;
         anchorStateRegistry = proposal.anchorStateRegistry;
