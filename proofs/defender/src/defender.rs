@@ -549,12 +549,12 @@ where
         }
     }
 
-    pub(crate) async fn scan_once_with_timestamp(&mut self, now: u64) -> Result<(), DefenderError> {
-        self.config.validate()?;
-
+    async fn advance_active_defenses(&mut self, now: u64) {
         let defense_results = self.scan_active_defenses(now).await;
         self.handle_defense_progress(defense_results);
+    }
 
+    async fn discover_games(&mut self, now: u64) -> Result<(), DefenderError> {
         let game_count = self.execution_provider.game_count().await?;
         if self
             .next_game_index
@@ -589,7 +589,10 @@ where
         let scan_results = self.scan_games(new_games, now).await;
         self.handle_game_scan_results(scan_results);
         self.next_game_index = Some(end);
+        Ok(())
+    }
 
+    async fn advance_watched_games(&mut self, now: u64) -> Result<(), DefenderError> {
         if self.watched_games.is_empty() {
             return Ok(());
         }
@@ -601,6 +604,14 @@ where
             .await;
         self.handle_watch_outcomes(watch_results);
         Ok(())
+    }
+
+    pub(crate) async fn scan_once_with_timestamp(&mut self, now: u64) -> Result<(), DefenderError> {
+        self.config.validate()?;
+
+        self.advance_active_defenses(now).await;
+        self.discover_games(now).await?;
+        self.advance_watched_games(now).await
     }
 
     /// Scans one bounded factory range and advances every tracked defense.
