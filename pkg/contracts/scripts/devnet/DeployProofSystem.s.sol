@@ -72,6 +72,7 @@ contract DeployProofSystem is Script {
 
         if (config.anchorProxy != address(0)) {
             vm.startBroadcast(config.proxyAdminOwnerPrivateKey);
+            // A clean devnet has no anchor history. Live upgrades must use the frozen prior getAnchorRoot().
             IProxyAdmin(config.proxyAdmin)
                 .upgradeAndCall(
                     payable(config.anchorProxy),

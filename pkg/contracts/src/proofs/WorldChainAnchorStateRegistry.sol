@@ -46,6 +46,7 @@ contract WorldChainAnchorStateRegistry is IWorldChainAnchorStateRegistry {
     }
 
     // Isolates World Chain state from the implementation previously used by the OP-deployed proxy.
+    // Legacy state is not read; a live migration must seed its current anchor through initialize().
     bytes32 private constant REGISTRY_STORAGE_LOCATION =
         0x1a10faa84117cdd4e9160b243ebd4a784f48ab33f31bcfb06e1ea06aef377500;
 
@@ -59,6 +60,8 @@ contract WorldChainAnchorStateRegistry is IWorldChainAnchorStateRegistry {
     }
 
     /// @notice Initializes the implementation after an atomic ProxyAdmin upgrade.
+    /// @dev A live migration must pass the previous implementation's frozen `getAnchorRoot()` checkpoint.
+    ///      This initializer does not read or migrate the previous implementation's storage.
     function initialize(bytes32 startingRootClaim, uint256 startingL2BlockNumber, address factory, address initialOwner)
         external
     {

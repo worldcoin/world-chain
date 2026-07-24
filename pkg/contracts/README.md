@@ -31,7 +31,19 @@ This is intentionally not a claim that WIP-1006 implements OP's complete `IDispu
 
 Compiler enforcement is paired with the full-stack withdrawal E2E test: the real OP-deployer Portal proves against a WIP-1006 game, rejects blacklisted and unresolved games, and finalizes after the game becomes valid. The OP deployment initializes the Portal with its `AnchorStateRegistryProxy`. The World Chain devnet preserves that proxy address and uses the OP chain `ProxyAdmin` to atomically upgrade it to `WorldChainAnchorStateRegistry` and initialize the WIP-1006 factory, so neither the Portal proxy nor its storage is modified out of band.
 
-This upgrade path is appropriate for a fresh devnet, before the replaced OP registry has live games or withdrawal proofs. A production migration must separately account for existing games, anchor history, and in-flight withdrawals and must be audited before execution.
+This upgrade path is appropriate for a fresh devnet, before the replaced OP registry has live games or withdrawal proofs. The devnet therefore initializes the World Chain registry with the synthetic starting checkpoint `(bytes32(0), 0)`.
+
+### Production registry migration
+
+A live deployment must use a controlled cutover instead of the devnet checkpoint:
+
+1. Stop the old proposer and freeze updates to the old `AnchorStateRegistry` through the approved governance procedure.
+2. Read and record the old proxy's current `getAnchorRoot()`. This current root and L2 block, not its historical `getStartingAnchorRoot()`, become the WIP-1006 starting checkpoint.
+3. Complete the audited compatibility or retirement procedure for existing games and in-flight withdrawal proofs. The World Chain storage namespace does not migrate legacy registry state.
+4. Atomically call `ProxyAdmin.upgradeAndCall()` with `WorldChainAnchorStateRegistry.initialize(currentRoot, currentL2BlockNumber, factory, owner)`.
+5. Verify the initialized checkpoint and Portal-facing registry reads before starting the WIP-1006 proposer. Its first game uses the registry proxy as `parentRef`; later games use parent game addresses.
+
+The captured checkpoint must not be allowed to change between freezing the old registry and executing the upgrade.
 
 ## PBH Contracts
 
