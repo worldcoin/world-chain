@@ -165,6 +165,12 @@ reth-rpc-layer = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", 
 reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", default-features = false }
 reth-storage-api = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", default-features = false }
 reth-storage-errors = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", default-features = false }
+reth-engine-util = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", default-features = false }
+reth-exex = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", default-features = false }
+reth-stages-api = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", default-features = false }
+reth-tokio-util = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", default-features = false }
+reth-node-events = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", default-features = false }
+reth-prune = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", default-features = false }
 
 # reth-optimism
 reth-optimism-evm = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da", default-features = false }

@@ -1,5 +1,6 @@
 use clap::Parser;
 use eyre::config::HookBuilder;
+use reth_engine_tree::tree::TreeConfig;
 use reth_node_builder::NodeHandle;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_tracing::tracing::info;
@@ -9,7 +10,9 @@ use world_chain_cli::{
     Cli, WorldChainArgs, WorldChainNodeConfig, WorldChainRpcModuleValidator, WorldChainSpecParser,
 };
 use world_chain_evm::WorldChainEvmConfig;
-use world_chain_node::{context::WorldChainDefaultContext, node::WorldChainNode};
+use world_chain_node::{
+    context::WorldChainDefaultContext, launch::WorldChainEngineNodeLauncher, node::WorldChainNode,
+};
 
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
@@ -39,13 +42,25 @@ fn main() {
             |mut builder, args| async move {
                 info!(target: "reth::cli", "Launching node");
                 let config: WorldChainNodeConfig = args.into_config(builder.config_mut())?;
+                let no_backfill = config.args.no_backfill;
 
                 info!(target: "reth::cli", "Starting in Flashblocks mode");
                 let node = WorldChainNode::<WorldChainDefaultContext>::new(config.clone());
+                let engine_tree_config = TreeConfig::default();
+                let task_executor = builder.task_executor().clone();
+                let handle = builder.node(node).launch_with_fn(|node_builder| {
+                    let launcher = WorldChainEngineNodeLauncher::new(
+                        task_executor,
+                        node_builder.config().datadir(),
+                        engine_tree_config,
+                        no_backfill,
+                    );
+                    node_builder.launch_with(launcher)
+                });
                 let NodeHandle {
                     node_exit_future,
                     node: _node,
-                } = builder.node(node).launch().await?;
+                } = handle.await?;
                 node_exit_future.await?;
 
                 Ok(())
