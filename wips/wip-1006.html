@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-dbe53a13.js";
+            window.path_to_searchindex_js = "../searchindex-fce7cf65.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-87388434.js"></script>
@@ -210,7 +210,7 @@
 </thead>
 <tbody>
 <tr><td><code>CHALLENGE_PERIOD</code></td><td><code>1 day</code></td><td>Duration after proposal creation during which a staked participant MAY challenge a root without submitting proof material. Per-proposal <code>challengeDeadline = createdAt + CHALLENGE_PERIOD</code>.</td></tr>
-<tr><td><code>PROOF_PERIOD</code></td><td><code>7 days</code></td><td>Duration after a root is challenged during which the proposer MAY defend the root by accumulating lane submissions toward <code>PROOF_THRESHOLD</code>. Per-proposal <code>proofDeadline = challengedAt + PROOF_PERIOD</code>. A challenged root that the proposer has not defended to <code>PROOF_THRESHOLD</code> by <code>proofDeadline</code> MUST be invalidated.</td></tr>
+<tr><td><code>PROOF_PERIOD</code></td><td><code>7 days</code></td><td>Duration after proposal creation during which the proposer MAY defend a challenged root by accumulating lane submissions toward <code>PROOF_THRESHOLD</code>. Per-proposal <code>proofDeadline = createdAt + PROOF_PERIOD</code>. <code>PROOF_PERIOD</code> MUST be greater than <code>CHALLENGE_PERIOD</code>. A challenged root that the proposer has not defended to <code>PROOF_THRESHOLD</code> by <code>proofDeadline</code> MUST be invalidated.</td></tr>
 <tr><td><code>PROPOSER_BOND</code></td><td>TBD</td><td>Slashable stake required of the proposer. Locked at proposal time, refunded if the root reaches <code>FINALIZED</code>, and forfeited if the root reaches <code>INVALIDATED</code>.</td></tr>
 <tr><td><code>CHALLENGER_BOND</code></td><td>TBD</td><td>Slashable stake required of each challenger. Locked at challenge time and forfeited if the challenged root finalizes; refunded if the root is invalidated.</td></tr>
 </tbody>
@@ -311,7 +311,7 @@ rootId = keccak256(abi.encode(
 <p>A root enters the system in the <code>PROPOSED</code> state.</p>
 <ol>
 <li>The proposer submits the root commitment and locks <code>PROPOSER_BOND</code> as slashable collateral against the proposal.</li>
-<li>The contract records <code>createdAt = block.timestamp</code> and <code>challengeDeadline = createdAt + CHALLENGE_PERIOD</code>.</li>
+<li>The contract records <code>createdAt = block.timestamp</code>, <code>challengeDeadline = createdAt + CHALLENGE_PERIOD</code>, and <code>proofDeadline = createdAt + PROOF_PERIOD</code>. The contract MUST reject configurations where <code>proofDeadline &lt;= challengeDeadline</code>.</li>
 <li>The root remains open to challenges until <code>challengeDeadline</code>.</li>
 </ol>
 <p>The proposer MUST NOT be required to submit material from any proof lane when creating the proposal, however they may choose to do so.</p>
@@ -324,7 +324,7 @@ rootId = keccak256(abi.encode(
 <li>MUST NOT require the caller to submit proof material.</li>
 <li>MUST lock <code>CHALLENGER_BOND</code> of the caller’s stake as slashable collateral against the challenged root.</li>
 <li>MUST mark the root as <code>CHALLENGED</code>.</li>
-<li>MUST record <code>challengedAt = block.timestamp</code> and <code>proofDeadline = challengedAt + PROOF_PERIOD</code> on the root, the first time it transitions to <code>CHALLENGED</code>. Subsequent challenges MUST NOT extend <code>proofDeadline</code>.</li>
+<li>MUST record <code>challengedAt = block.timestamp</code> on the root the first time it transitions to <code>CHALLENGED</code>. The challenge MUST NOT change the <code>proofDeadline</code> recorded at proposal creation.</li>
 </ul>
 <p>If the challenged root finalizes through the proof-lane threshold, the locked <code>CHALLENGER_BOND</code> is forfeited. If the root is invalidated, the locked <code>CHALLENGER_BOND</code> is refunded to the challenger.</p>
 <p>Multiple challenges MAY be recorded for accounting, but only the existence of at least one valid challenge affects the finality path. Each additional challenger locks their own <code>CHALLENGER_BOND</code>.</p>
@@ -355,7 +355,7 @@ rootId = keccak256(abi.encode(
 <p>A lane submission at or after <code>proofDeadline</code> MUST revert. Finalization of a challenged root is permissionless once the threshold is met.</p>
 <p>If <code>block.timestamp &gt;= proofDeadline</code> and the root’s proof bitmap contains fewer than <code>PROOF_THRESHOLD</code> distinct lanes, anyone MAY call <code>invalidate(rootId)</code>. The contract MUST move the root to <code>INVALIDATED</code> and forfeit <code>PROPOSER_BOND</code> per <a href="#proposal-lifecycle">Proposal Lifecycle</a>. This is the only path to <code>INVALIDATED</code>; see <a href="#invalidity-and-conflicts">Invalidity and Conflicts</a>.</p>
 <h3 id="invalidity-and-conflicts"><a class="header" href="#invalidity-and-conflicts">Invalidity and Conflicts</a></h3>
-<p>Invalidation occurs only via the <code>CHALLENGED → INVALIDATED</code> transition described in <a href="#proposer-defense-and-challenged-finality">Proposer Defense and Challenged Finality</a>: a challenged root that the proposer has not defended to <code>PROOF_THRESHOLD</code> distinct supporting lanes by <code>proofDeadline</code> MUST be invalidated. There is no fast-path invalidation from <code>PROPOSED</code>. A party in possession of evidence that a proposed root is incorrect MUST challenge the root; absence of supporting proofs within <code>PROOF_PERIOD</code> is the protocol’s sole in-band signal of invalidity.</p>
+<p>Invalidation occurs only via the <code>CHALLENGED → INVALIDATED</code> transition described in <a href="#proposer-defense-and-challenged-finality">Proposer Defense and Challenged Finality</a>: a challenged root that the proposer has not defended to <code>PROOF_THRESHOLD</code> distinct supporting lanes by <code>proofDeadline</code> MUST be invalidated. There is no fast-path invalidation from <code>PROPOSED</code>. A party in possession of evidence that a proposed root is incorrect MUST challenge the root; absence of supporting proofs before the creation-relative <code>proofDeadline</code> is the protocol’s sole in-band signal of invalidity.</p>
 <p>An invalidated root MUST NOT finalize, and descendants of an invalidated root MUST NOT become accepted anchors.</p>
 <p>If invalidity of a finalized root is discovered after the fact — for example, via an offchain proof exhibiting a conflicting <code>(parent, l2BlockNumber) → rootId'</code> — the protocol MUST NOT silently roll back finalized state. The configured safety process MUST be triggered: pausing the proof game type, blacklisting the game, or routing the incident to governance.</p>
 <h3 id="lane-specific-requirements"><a class="header" href="#lane-specific-requirements">Lane-Specific Requirements</a></h3>
@@ -411,11 +411,12 @@ rootId = keccak256(abi.encode(
 <li>an unstaked account cannot challenge;</li>
 <li>a staked account can challenge without proof before the deadline;</li>
 <li>a challenge at or after the deadline reverts;</li>
+<li>a configuration where <code>proofDeadline &lt;= challengeDeadline</code> is rejected;</li>
 <li>a challenged root with one supporting lane does not finalize;</li>
 <li>a proposer defends a challenged root to finalization with two distinct supporting lanes;</li>
 <li>a challenged root the proposer fails to defend to <code>PROOF_THRESHOLD</code> lanes by <code>proofDeadline</code> invalidates and forfeits <code>PROPOSER_BOND</code>;</li>
 <li>a lane submission at or after <code>proofDeadline</code> reverts and does not affect the proof bitmap;</li>
-<li>subsequent challenges on an already-challenged root do not extend <code>proofDeadline</code>;</li>
+<li>challenging a root does not change its creation-time <code>proofDeadline</code>;</li>
 <li>duplicate submissions from the same lane do not increase the threshold count;</li>
 <li>every proof lane rejects material that does not bind to <code>rootId</code>;</li>
 <li>anchor updates reject non-finalized, invalidated, paused, retired, or non-monotonic roots.</li>
