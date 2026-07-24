@@ -2,7 +2,7 @@
 
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
 use tokio_vsock::{VsockAddr, VsockStream};
-use tracing::{debug, instrument, warn};
+use tracing::{debug, info, instrument, warn};
 use world_chain_proof_core::boot::TransitionPublicValues;
 
 use crate::{
@@ -128,6 +128,14 @@ impl NitroProver {
     ) -> Result<NitroRangeProofArtifact, NitroProverError> {
         // ── Step 1: Prove ──
         let nonce = generate_nonce()?;
+        info!(
+            target: "world_chain::nitro",
+            cid = self.endpoint.cid,
+            port = self.endpoint.port,
+            witness_bytes = request.witness_rkyv.len(),
+            nonce = %hex::encode(nonce),
+            "sending range proof request to enclave over vsock"
+        );
         let enclave_request = EnclaveRequest::Range {
             version: PROTOCOL_VERSION,
             witness_rkyv: request.witness_rkyv,
