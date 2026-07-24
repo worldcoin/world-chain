@@ -207,6 +207,48 @@ impl ClaimedProofJobHandler for NitroBackend {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────────────
+// PCR helpers (used by the binary to validate CLI inputs)
+// ──────────────────────────────────────────────────────────────────────────────────────
+
+pub fn build_expected_pcrs(
+    pcr0: Option<&str>,
+    pcr1: Option<&str>,
+    pcr2: Option<&str>,
+) -> Result<ExpectedPcrs> {
+    use tracing::warn;
+    match (pcr0, pcr1, pcr2) {
+        (Some(p0), Some(p1), Some(p2)) => Ok(ExpectedPcrs {
+            pcr0: hex_to_pcr(p0)?,
+            pcr1: hex_to_pcr(p1)?,
+            pcr2: hex_to_pcr(p2)?,
+        }),
+        (None, None, None) => {
+            warn!(
+                "PCRs not configured; using placeholder zeros. \
+                 Production REQUIRES --pcr0/--pcr1/--pcr2."
+            );
+            Ok(ExpectedPcrs::PLACEHOLDER)
+        }
+        _ => bail!("provide all three of --pcr0/--pcr1/--pcr2, or none"),
+    }
+}
+
+pub fn hex_to_pcr(s: &str) -> Result<[u8; world_chain_proof_nitro::PCR_LEN]> {
+    let bytes =
+        hex::decode(s.trim_start_matches("0x")).with_context(|| format!("invalid PCR hex: {s}"))?;
+    if bytes.len() != world_chain_proof_nitro::PCR_LEN {
+        bail!(
+            "PCR must be {} bytes, got {}",
+            world_chain_proof_nitro::PCR_LEN,
+            bytes.len()
+        );
+    }
+    let mut arr = [0u8; world_chain_proof_nitro::PCR_LEN];
+    arr.copy_from_slice(&bytes);
+    Ok(arr)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────
 // Fast-fail validation
 // ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -293,46 +335,4 @@ mod fast_fail_tests {
                 .contains("does not correspond to a known L2 block")
         );
     }
-}
-
-// ──────────────────────────────────────────────────────────────────────────────────────
-// PCR helpers (used by the binary to validate CLI inputs)
-// ──────────────────────────────────────────────────────────────────────────────────────
-
-pub fn build_expected_pcrs(
-    pcr0: Option<&str>,
-    pcr1: Option<&str>,
-    pcr2: Option<&str>,
-) -> Result<ExpectedPcrs> {
-    use tracing::warn;
-    match (pcr0, pcr1, pcr2) {
-        (Some(p0), Some(p1), Some(p2)) => Ok(ExpectedPcrs {
-            pcr0: hex_to_pcr(p0)?,
-            pcr1: hex_to_pcr(p1)?,
-            pcr2: hex_to_pcr(p2)?,
-        }),
-        (None, None, None) => {
-            warn!(
-                "PCRs not configured; using placeholder zeros. \
-                 Production REQUIRES --pcr0/--pcr1/--pcr2."
-            );
-            Ok(ExpectedPcrs::PLACEHOLDER)
-        }
-        _ => bail!("provide all three of --pcr0/--pcr1/--pcr2, or none"),
-    }
-}
-
-pub fn hex_to_pcr(s: &str) -> Result<[u8; world_chain_proof_nitro::PCR_LEN]> {
-    let bytes =
-        hex::decode(s.trim_start_matches("0x")).with_context(|| format!("invalid PCR hex: {s}"))?;
-    if bytes.len() != world_chain_proof_nitro::PCR_LEN {
-        bail!(
-            "PCR must be {} bytes, got {}",
-            world_chain_proof_nitro::PCR_LEN,
-            bytes.len()
-        );
-    }
-    let mut arr = [0u8; world_chain_proof_nitro::PCR_LEN];
-    arr.copy_from_slice(&bytes);
-    Ok(arr)
 }
