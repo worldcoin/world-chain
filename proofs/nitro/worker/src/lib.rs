@@ -1,6 +1,12 @@
 //! `nitro-worker` library: leases Nitro TEE proof jobs from the `prover-service`, proves
 //! them inside a running Nitro Enclave, and submits the signed attestations back.
 //!
+//! Before dispatching a claimed job, the worker fast-fails requests whose pre-state
+//! checkpoint isn't a real L2 block (see `validate_pre_state_block`). It does **not**
+//! fast-fail on `root_claim` (the post-state, disputed claim) disagreeing with any
+//! node's opinion — that's exactly the case fault proofs exist to resolve, and it
+//! must always go through full derivation via the enclave.
+//!
 //! # Architecture
 //!
 //! ```text
@@ -22,7 +28,7 @@
 
 #![cfg(target_os = "linux")]
 
-use alloy_primitives::{B256, Bytes};
+use alloy_primitives::Bytes;
 use alloy_sol_types::SolValue;
 use anyhow::{Context, Result, anyhow, bail};
 use tracing::info;
@@ -49,7 +55,8 @@ pub struct NitroBackendConfig {
     pub enclave_port: u32,
     pub expected_pcrs: ExpectedPcrs,
     /// op-node (rollup) JSON-RPC URL used for the fast-fail `optimism_outputAtBlock`
-    /// sanity check performed before dispatching a job to the enclave.
+    /// sanity check of the request's pre-state block, performed before dispatching a job
+    /// to the enclave.
     pub output_root_rpc: String,
 }
 
@@ -83,17 +90,23 @@ impl ClaimedProofJobHandler for NitroBackend {
                 )
             })?;
 
-        // Fast-fail: check the claimed post-state output root against the L2 rollup node's
-        // authoritative view *before* dispatching expensive witness generation to the
-        // enclave. Without this, a request with an `l2_block_number` that hasn't been
-        // produced yet (or a `root_claim` that simply doesn't match the real chain) still
-        // runs the full witness-generation pipeline and only fails once the enclave returns,
-        // up to `witness_timeout` (900s by default) later. Rejecting here turns that into an
-        // immediate error.
-        validate_output_root(
+        // Fast-fail: confirm the request's pre-state block (`start_block`) is a real,
+        // known L2 block before dispatching expensive witness generation to the enclave.
+        //
+        // This deliberately does NOT touch `root_claim` (the post-state, disputed claim).
+        // The entire point of the Nitro worker is to independently re-derive that claim
+        // via the enclave and let on-chain verification decide whether it's correct — a
+        // request whose `root_claim` disagrees with this (or any single) node's opinion is
+        // exactly the legitimate dispute scenario fault proofs exist to resolve, so it must
+        // still go through full derivation. Only the *pre-state* is expected to already be
+        // an agreed-upon, finalized safe checkpoint both parties recognize; if it doesn't
+        // correspond to a real L2 block at all, the request is malformed input (for example
+        // a typo'd or not-yet-produced block number), not a dispute, and we can reject it
+        // immediately instead of burning up to `witness_timeout` (900s by default) finding
+        // that out the hard way.
+        validate_pre_state_block(
             &OptimismConsensusClient::new(self.config.output_root_rpc.clone()),
-            request.l2_block_number,
-            request.root_claim,
+            start_block,
         )
         .await?;
 
@@ -172,45 +185,45 @@ impl ClaimedProofJobHandler for NitroBackend {
 // Fast-fail validation
 // ──────────────────────────────────────────────────────────────────────────────────────
 
-/// Checks the request's claimed post-state output root against the real output root the
-/// L2 rollup node reports for `l2_block_number`, without touching the enclave.
+/// Confirms the request's pre-state checkpoint (`start_block` = `l2_block_number -
+/// block_interval`) is a real, known L2 block the rollup node recognizes, without
+/// touching the enclave.
 ///
-/// Returns an error immediately when:
-/// - `l2_block_number` doesn't correspond to a real, known L2 block (the rollup node's
-///   `optimism_outputAtBlock` call errors or has nothing to report), or
-/// - the rollup node's real output root at that block differs from `root_claim`.
+/// Returns an error immediately when `pre_state_block` doesn't correspond to a real,
+/// known L2 block (the rollup node's `optimism_outputAtBlock` call errors or has nothing
+/// to report) — for example because the request carries a malformed or not-yet-produced
+/// block number.
 ///
-/// This is deliberately generic over [`ConsensusProvider`] so the comparison logic can be
-/// unit tested without a live RPC endpoint.
-async fn validate_output_root<C: ConsensusProvider>(
+/// Deliberately does **not** validate `root_claim` (the post-state, disputed claim)
+/// against this or any other node's opinion: the whole point of the Nitro worker is to
+/// independently re-derive that claim via the enclave and let on-chain verification
+/// decide if it's correct. A `root_claim` that disagrees with a single node's view is not
+/// necessarily wrong — it may be exactly the legitimate dispute fault proofs exist to
+/// resolve — so it must always go through full derivation regardless of whether it
+/// matches.
+///
+/// This is deliberately generic over [`ConsensusProvider`] so the check can be unit
+/// tested without a live RPC endpoint.
+async fn validate_pre_state_block<C: ConsensusProvider>(
     consensus: &C,
-    l2_block_number: u64,
-    root_claim: B256,
+    pre_state_block: u64,
 ) -> Result<()> {
-    let real_root = consensus
-        .output_root_at_block(l2_block_number)
+    consensus
+        .output_root_at_block(pre_state_block)
         .await
         .map_err(|error: ConsensusError| {
             anyhow!(
-                "fast-fail validation failed: l2_block_number {l2_block_number} does not \
+                "fast-fail validation failed: pre-state block {pre_state_block} does not \
                  correspond to a known L2 block (optimism_outputAtBlock error: {error})"
             )
         })?;
-
-    if real_root != root_claim {
-        bail!(
-            "fast-fail validation failed: claimed root_claim {root_claim:?} does not match \
-             the real output root {real_root:?} at L2 block {l2_block_number}; refusing to \
-             start enclave witness generation"
-        );
-    }
 
     Ok(())
 }
 
 #[cfg(test)]
 mod fast_fail_tests {
-    use super::{ConsensusError, ConsensusProvider, validate_output_root};
+    use super::{ConsensusError, ConsensusProvider, validate_pre_state_block};
     use alloy_primitives::{B256, BlockNumber};
 
     struct FixedConsensusProvider {
@@ -227,40 +240,28 @@ mod fast_fail_tests {
         }
 
         async fn latest_l2_finalized_block(&self) -> Result<BlockNumber, ConsensusError> {
-            unimplemented!("not used by validate_output_root")
+            unimplemented!("not used by validate_pre_state_block")
         }
     }
 
     #[tokio::test]
-    async fn accepts_matching_root() {
-        let root = B256::repeat_byte(0x42);
+    async fn accepts_known_pre_state_block() {
         let provider = FixedConsensusProvider {
-            output_root: Ok(root),
+            output_root: Ok(B256::repeat_byte(0x42)),
         };
-        validate_output_root(&provider, 100, root)
+        validate_pre_state_block(&provider, 100)
             .await
-            .expect("matching root should validate");
+            .expect("known pre-state block should validate");
     }
 
     #[tokio::test]
-    async fn rejects_mismatched_root() {
-        let provider = FixedConsensusProvider {
-            output_root: Ok(B256::repeat_byte(0x01)),
-        };
-        let error = validate_output_root(&provider, 100, B256::repeat_byte(0x02))
-            .await
-            .expect_err("mismatched root must fail fast");
-        assert!(error.to_string().contains("does not match"));
-    }
-
-    #[tokio::test]
-    async fn rejects_unknown_block() {
+    async fn rejects_unknown_pre_state_block() {
         let provider = FixedConsensusProvider {
             output_root: Err("block not found".to_string()),
         };
-        let error = validate_output_root(&provider, 100, B256::repeat_byte(0x02))
+        let error = validate_pre_state_block(&provider, 100)
             .await
-            .expect_err("unknown block must fail fast");
+            .expect_err("unknown pre-state block must fail fast");
         assert!(
             error
                 .to_string()
