@@ -13,8 +13,8 @@ pub trait ChallengerClient: Send + Sync {
     async fn challenger_bond(&self) -> Result<U256, ChallengerError>;
     /// Returns the number of games created by the factory.
     async fn game_count(&self) -> Result<u64, ChallengerError>;
-    /// Returns the game address at a factory creation index.
-    async fn game_address_at(&self, index: u64) -> Result<Address, ChallengerError>;
+    /// Returns the WIP-1006 game at a global factory index, or `None` for another game type.
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, ChallengerError>;
     /// Reads the immutable game data needed to validate its root claim.
     async fn game_metadata(&self, game: Address) -> Result<GameMetadata, ChallengerError>;
     /// Reads the root state of the provided game.
@@ -45,8 +45,8 @@ pub trait BondManagerClient: ResolutionManagerClient {
     fn challenger_address(&self) -> Address;
     /// Returns the number of games created by the factory.
     async fn game_count(&self) -> Result<u64, ChallengerError>;
-    /// Returns the game address at a factory creation index.
-    async fn game_address_at(&self, index: u64) -> Result<Address, ChallengerError>;
+    /// Returns the WIP-1006 game at a global factory index, or `None` for another game type.
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, ChallengerError>;
     /// Returns the challenger recorded by the provided game.
     async fn game_challenger(&self, game: Address) -> Result<Address, ChallengerError>;
     /// Returns the amount claimable by the managed challenger.

@@ -53,7 +53,7 @@ pub enum NextProposalAction {
     },
     /// Stop because the factory does not permit retrying this invalidated transition.
     BlockedByInvalidation {
-        /// Invalidated game occupying the proposal key.
+        /// Invalidated game occupying this transition.
         game: Address,
         /// Reason the transition cannot be retried automatically.
         reason: InvalidationReason,
@@ -146,12 +146,12 @@ pub struct Proposal {
     pub root_claim: B256,
     /// L2 block number for `root_claim`.
     pub l2_block_number: u64,
-    /// Deterministic factory lookup key, excluding L1 origin.
-    pub proposal_key: B256,
+    /// Deterministic offchain transition key, excluding retry attempt and L1 origin.
+    pub transition_key: B256,
 }
 
 impl Proposal {
-    /// Returns the proposal commitment used to compute the factory lookup key.
+    /// Returns the proposal commitment used to compute the transition key.
     #[must_use]
     pub const fn commitment(&self) -> ProposalCommitment {
         ProposalCommitment {

@@ -56,7 +56,9 @@ where
         let challenger = self.execution_provider.challenger_address();
 
         for index in start..game_count {
-            let game = self.execution_provider.game_address_at(index).await?;
+            let Some(game) = self.execution_provider.game_address_at(index).await? else {
+                continue;
+            };
             if self.execution_provider.game_challenger(game).await? == challenger {
                 self.owned_games.insert(game);
             }
@@ -90,10 +92,10 @@ where
                         game_address = %game,
                         tx_hash = ?submission.tx_hash,
                         amount = ?submission.amount,
-                        "withdrew challenger bond credits"
+                        "processed challenger bond credit"
                     );
                 }
-                Ok(true)
+                Ok(self.execution_provider.claimable(game).await? == U256::ZERO)
             }
             .await;
 

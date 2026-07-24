@@ -8,14 +8,14 @@ use alloy_provider::{Provider, WalletProvider};
 use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
 use world_chain_proofs::{
-    IWorldChainProofSystemFactory, IWorldChainProofSystemGame, InvalidationReasonError,
-    ResolutionStatus, RootState, RootStateError,
+    IDelayedWETH, IDisputeGameFactory, IWorldChainProofSystemGame, InvalidationReasonError,
+    ResolutionStatus, RootState, RootStateError, WIP_1006_GAME_TYPE,
 };
 
 /// Alloy-backed implementation of the challenger contract clients.
 #[derive(Debug, Clone)]
 pub struct AlloyChallengerClient<P> {
-    factory: IWorldChainProofSystemFactory::IWorldChainProofSystemFactoryInstance<P>,
+    factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
     provider: P,
 }
 
@@ -25,7 +25,7 @@ where
 {
     /// Creates an Alloy-backed contract client.
     pub fn new(provider: P, factory_address: Address) -> Self {
-        let factory = IWorldChainProofSystemFactory::IWorldChainProofSystemFactoryInstance::new(
+        let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
             provider.clone(),
         );
@@ -54,13 +54,57 @@ where
         u256_to_u64(count, "gameCount")
     }
 
-    async fn read_game_address(&self, index: u64) -> Result<Address, ChallengerError> {
-        self.factory
-            .gameAt(U256::from(index))
+    async fn read_game_address(&self, index: u64) -> Result<Option<Address>, ChallengerError> {
+        let game = self
+            .factory
+            .gameAtIndex(U256::from(index))
             .block(BlockId::finalized())
             .call()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))
+            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+        Ok((game.gameType == WIP_1006_GAME_TYPE).then_some(game.proxy))
+    }
+
+    async fn game_implementation(&self) -> Result<Address, ChallengerError> {
+        let implementation = self
+            .factory
+            .gameImpls(WIP_1006_GAME_TYPE)
+            .call()
+            .await
+            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+        if implementation == Address::ZERO {
+            return Err(ChallengerError::Contract(
+                "WIP-1006 game implementation is not registered".into(),
+            ));
+        }
+        Ok(implementation)
+    }
+
+    async fn claimable_credit(
+        &self,
+        game_address: Address,
+        recipient: Address,
+    ) -> Result<U256, ChallengerError> {
+        let game = self.game(game_address);
+        let credit = game
+            .credit(recipient)
+            .call()
+            .await
+            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+        let weth_address = game
+            .weth()
+            .call()
+            .await
+            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+        let pending = IDelayedWETH::IDelayedWETHInstance::new(weth_address, self.provider.clone())
+            .withdrawals(game_address, recipient)
+            .call()
+            .await
+            .map_err(|error| ChallengerError::Contract(error.to_string()))?
+            .amount;
+        credit
+            .checked_add(pending)
+            .ok_or_else(|| ChallengerError::Contract("claimable credit overflow".into()))
     }
 
     async fn read_resolution_status(
@@ -99,7 +143,7 @@ where
     P: Provider + Clone + Send + Sync + 'static,
 {
     async fn challenger_bond(&self) -> Result<U256, ChallengerError> {
-        self.factory
+        self.game(self.game_implementation().await?)
             .challengerBond()
             .call()
             .await
@@ -110,7 +154,7 @@ where
         self.read_game_count().await
     }
 
-    async fn game_address_at(&self, index: u64) -> Result<Address, ChallengerError> {
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, ChallengerError> {
         self.read_game_address(index).await
     }
 
@@ -221,7 +265,7 @@ where
         self.read_game_count().await
     }
 
-    async fn game_address_at(&self, index: u64) -> Result<Address, ChallengerError> {
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, ChallengerError> {
         self.read_game_address(index).await
     }
 
@@ -234,19 +278,16 @@ where
     }
 
     async fn claimable(&self, address: Address) -> Result<U256, ChallengerError> {
-        let challenger = self.challenger_address();
-        self.game(address)
-            .claimable(challenger)
-            .call()
+        self.claimable_credit(address, self.challenger_address())
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))
     }
 
     async fn withdraw(&self, address: Address) -> Result<WithdrawSubmission, ChallengerError> {
         let challenger = self.challenger_address();
         let game = self.game(address);
+        let amount = self.claimable_credit(address, challenger).await?;
         let pending = game
-            .withdraw(challenger)
+            .claimCredit(challenger)
             .send()
             .await
             .map_err(|error| ChallengerError::Contract(error.to_string()))?;
@@ -258,23 +299,6 @@ where
         if !receipt.status() {
             return Err(ChallengerError::Revert(tx_hash));
         }
-
-        let amount = receipt
-            .logs()
-            .iter()
-            .filter(|log| log.address() == address)
-            .find_map(|log| {
-                log.log_decode_validate::<IWorldChainProofSystemGame::Withdrawn>()
-                    .ok()
-                    .map(|decoded| decoded.inner.data)
-            })
-            .filter(|event| event.recipient == challenger)
-            .map(|event| event.amount)
-            .ok_or_else(|| {
-                ChallengerError::Contract(format!(
-                    "Withdrawn event missing from withdraw transaction {tx_hash}"
-                ))
-            })?;
 
         Ok(WithdrawSubmission { tx_hash, amount })
     }

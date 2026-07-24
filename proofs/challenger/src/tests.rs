@@ -117,14 +117,15 @@ impl ChallengerClient for MockClient {
         Ok(self.state.lock().expect("not poisoned").order.len() as u64)
     }
 
-    async fn game_address_at(&self, index: u64) -> Result<Address, ChallengerError> {
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, ChallengerError> {
         let mut state = self.state.lock().expect("not poisoned");
         state.requested_indices.push(index);
-        state
+        let game = state
             .order
             .get(index as usize)
             .copied()
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))
+            .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))?;
+        Ok((game != Address::ZERO).then_some(game))
     }
 
     async fn game_metadata(&self, game: Address) -> Result<GameMetadata, ChallengerError> {
@@ -222,7 +223,7 @@ impl BondManagerClient for MockClient {
         ChallengerClient::game_count(self).await
     }
 
-    async fn game_address_at(&self, index: u64) -> Result<Address, ChallengerError> {
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, ChallengerError> {
         ChallengerClient::game_address_at(self, index).await
     }
 
@@ -461,6 +462,25 @@ async fn bond_manager_recovers_only_recent_owned_games() {
     assert!(!owned_games.contains(GAME_1));
     assert!(owned_games.contains(GAME_3));
     assert_eq!(manager.next_game_index(), Some(3));
+}
+
+#[tokio::test]
+async fn bond_manager_skips_other_factory_game_types() {
+    let mut owned = MockGame::proposed(GAME_1, B256::ZERO, L2_BLOCK);
+    owned.challenger = CHALLENGER;
+    let client = MockClient::new(vec![owned]);
+    client
+        .state
+        .lock()
+        .expect("not poisoned")
+        .order
+        .insert(0, Address::ZERO);
+    let owned_games = OwnedGames::default();
+    let mut manager = BondManager::new(BondManagerConfig::default(), client, owned_games.clone());
+
+    manager.scan_games().await.unwrap();
+
+    assert!(owned_games.contains(GAME_1));
 }
 
 #[tokio::test]

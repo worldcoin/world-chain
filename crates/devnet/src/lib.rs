@@ -416,6 +416,20 @@ impl WorldDevnet {
             .map(FullStackWorldDevnet::optimism_portal)
     }
 
+    /// Stock dispute-game factory in which WIP-1006 is registered, when deployed.
+    pub fn proof_system_factory(&self) -> Option<&str> {
+        self.full_stack
+            .as_ref()
+            .and_then(FullStackWorldDevnet::proof_system_factory)
+    }
+
+    /// Stock anchor-state registry configured to respect WIP-1006, when deployed.
+    pub fn anchor_state_registry(&self) -> Option<&str> {
+        self.full_stack
+            .as_ref()
+            .and_then(FullStackWorldDevnet::anchor_state_registry)
+    }
+
     /// Prometheus UI URL, when observability is enabled.
     pub fn prometheus_url(&self) -> Option<&str> {
         self.full_stack

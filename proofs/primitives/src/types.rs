@@ -12,13 +12,16 @@ pub const PROOF_LANE_COUNT: u8 = 3;
 /// Version of the World Chain proof-domain encoding implemented here.
 pub const PROOF_SYSTEM_VERSION: u64 = 1;
 
+/// OP Stack dispute game type reserved for WIP-1006.
+pub const WIP_1006_GAME_TYPE: u32 = 1006;
+
 /// The `GameCreated` event.
 #[derive(Debug, Clone, Copy)]
 pub struct GameCreated {
-    pub proposal_key: B256,
+    pub transition_key: B256,
     pub root_id: B256,
     pub game: Address,
-    pub proposer: Address,
+    pub game_creator: Address,
     pub root_claim: B256,
     pub l2_block_number: BlockNumber,
     pub parent_ref: Address,
@@ -97,9 +100,10 @@ pub struct ProposalCommitment {
 }
 
 impl ProposalCommitment {
-    /// Compute the Solidity-compatible proposal key used for factory lookups.
+    /// Compute an offchain transition key. The stock dispute factory uses its own UUID,
+    /// which additionally commits to the WIP-1006 attempt encoded in `extraData`.
     #[must_use]
-    pub fn proposal_key(self, domain_hash: B256) -> B256 {
+    pub fn transition_key(self, domain_hash: B256) -> B256 {
         let encoded = (
             domain_hash,
             self.parent_ref,
@@ -123,10 +127,10 @@ pub struct RootCommitment {
 }
 
 impl RootCommitment {
-    /// Compute the Solidity-compatible proposal key used for factory lookups.
+    /// Compute the offchain transition key for this proposal.
     #[must_use]
-    pub fn proposal_key(self, domain_hash: B256) -> B256 {
-        self.proposal.proposal_key(domain_hash)
+    pub fn transition_key(self, domain_hash: B256) -> B256 {
+        self.proposal.transition_key(domain_hash)
     }
 
     /// Compute the Solidity-compatible root id for this proposal.
@@ -277,7 +281,7 @@ mod tests {
         };
 
         let root_id = commitment.root_id(domain.hash());
-        assert_ne!(B256::ZERO, proposal.proposal_key(domain.hash()));
+        assert_ne!(B256::ZERO, proposal.transition_key(domain.hash()));
         let changed = ProofDomain {
             chain_id: 4802,
             ..domain

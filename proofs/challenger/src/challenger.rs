@@ -91,21 +91,18 @@ where
         game_count: u64,
         now: u64,
     ) -> Result<u64, ChallengerError> {
-        let mut low = 0;
-        let mut high = game_count;
-
-        while low < high {
-            let middle = low + (high - low) / 2;
-            let game = self.execution_provider.game_address_at(middle).await?;
+        let mut index = game_count;
+        while index > 0 {
+            index -= 1;
+            let Some(game) = self.execution_provider.game_address_at(index).await? else {
+                continue;
+            };
             let deadline = self.execution_provider.challenge_deadline(game).await?;
             if deadline <= now {
-                low = middle + 1;
-            } else {
-                high = middle;
+                return Ok(index + 1);
             }
         }
-
-        Ok(low)
+        Ok(0)
     }
 
     async fn process_game(
@@ -258,7 +255,9 @@ where
             .min(game_count);
         let mut new_games = Vec::with_capacity((end - start) as usize);
         for index in start..end {
-            let game = self.execution_provider.game_address_at(index).await?;
+            let Some(game) = self.execution_provider.game_address_at(index).await? else {
+                continue;
+            };
             let metadata = self.execution_provider.game_metadata(game).await?;
             if !self.retry_games.contains_key(&game) {
                 new_games.push(metadata);

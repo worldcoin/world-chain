@@ -1,7 +1,7 @@
 //! World Chain proposer primitives.
 //!
 //! The proposer watches L2 output roots and creates `WorldChainProofSystemGame`
-//! contracts on L1 through `WorldChainProofSystemFactory`.
+//! contracts on L1 through the stock OP `DisputeGameFactory`.
 
 mod alloy;
 mod bond_manager;

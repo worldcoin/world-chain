@@ -37,15 +37,18 @@ impl ProposerClient for MockContracts {
         Ok(self.anchor)
     }
 
-    async fn proposal_key(&self, commitment: ProposalCommitment) -> Result<B256, ProposerError> {
-        Ok(commitment.proposal_key(DOMAIN_HASH))
+    async fn transition_key(&self, commitment: ProposalCommitment) -> Result<B256, ProposerError> {
+        Ok(commitment.transition_key(DOMAIN_HASH))
     }
 
-    async fn game_for_proposal_key(
+    async fn game_for_proposal(
         &self,
-        proposal_key: B256,
+        commitment: ProposalCommitment,
     ) -> Result<Option<Address>, ProposerError> {
-        Ok(self.games.get(&proposal_key).copied())
+        Ok(self
+            .games
+            .get(&commitment.transition_key(DOMAIN_HASH))
+            .copied())
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
@@ -73,6 +76,10 @@ impl ProposerClient for MockContracts {
         Ok(CloseGameSubmission {
             tx_hash: B256::repeat_byte(0xcc),
         })
+    }
+
+    async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError> {
+        Ok(game != Address::repeat_byte(0xfe))
     }
 
     async fn claimable(&self, _game: Address) -> Result<U256, ProposerError> {
@@ -116,6 +123,7 @@ struct MockBondClient {
     withdrawals: Arc<Mutex<Vec<Address>>>,
     fail_game_at_once: Arc<Mutex<Option<u64>>>,
     fail_withdraw_once: Arc<Mutex<HashSet<Address>>>,
+    pending_withdrawal_rounds: Arc<Mutex<HashMap<Address, u8>>>,
 }
 
 impl MockBondClient {
@@ -129,6 +137,7 @@ impl MockBondClient {
             withdrawals: Arc::default(),
             fail_game_at_once: Arc::default(),
             fail_withdraw_once: Arc::default(),
+            pending_withdrawal_rounds: Arc::default(),
         }
     }
 }
@@ -143,7 +152,7 @@ impl BondManagerClient for MockBondClient {
         Ok(self.games.lock().expect("not poisoned").len() as u64)
     }
 
-    async fn game_at(&self, index: u64) -> Result<Address, ProposerError> {
+    async fn game_at(&self, index: u64) -> Result<Option<Address>, ProposerError> {
         self.requested_indices
             .lock()
             .expect("not poisoned")
@@ -157,7 +166,7 @@ impl BondManagerClient for MockBondClient {
             .lock()
             .expect("not poisoned")
             .get(index as usize)
-            .map(|(game, _)| *game)
+            .map(|(game, _)| (*game != Address::ZERO).then_some(*game))
             .ok_or_else(|| ProposerError::Contract(format!("missing game at index {index}")))
     }
 
@@ -209,15 +218,24 @@ impl BondManagerClient for MockBondClient {
             ));
         }
         self.withdrawals.lock().expect("not poisoned").push(game);
+        let amount = self
+            .claimable
+            .lock()
+            .expect("not poisoned")
+            .get(&game)
+            .copied()
+            .unwrap_or_default();
+        let mut pending_rounds = self.pending_withdrawal_rounds.lock().expect("not poisoned");
+        if let Some(rounds) = pending_rounds.get_mut(&game)
+            && *rounds > 0
+        {
+            *rounds -= 1;
+        } else {
+            self.claimable.lock().expect("not poisoned").remove(&game);
+        }
         Ok(WithdrawSubmission {
             tx_hash: B256::repeat_byte(0xdd),
-            amount: self
-                .claimable
-                .lock()
-                .expect("not poisoned")
-                .get(&game)
-                .copied()
-                .unwrap_or_default(),
+            amount,
         })
     }
 }
@@ -259,13 +277,13 @@ fn positive_ready_status() -> ResolutionStatus {
     }
 }
 
-fn proposal_key(parent_ref: Address, root_claim: B256, l2_block_number: u64) -> B256 {
+fn transition_key(parent_ref: Address, root_claim: B256, l2_block_number: u64) -> B256 {
     ProposalCommitment {
         parent_ref,
         root_claim,
         l2_block_number,
     }
-    .proposal_key(DOMAIN_HASH)
+    .transition_key(DOMAIN_HASH)
 }
 
 fn game_address(index: u64) -> Address {
@@ -286,7 +304,7 @@ async fn anchor_and_canonical_line_walks_existing_games_until_gap() {
     let root_10 = B256::repeat_byte(0x10);
     let root_20 = B256::repeat_byte(0x20);
     let mut games = HashMap::new();
-    games.insert(proposal_key(ANCHOR, root_10, 10), GAME_1);
+    games.insert(transition_key(ANCHOR, root_10, 10), GAME_1);
 
     let contracts = MockContracts {
         anchor: ParentRef {
@@ -344,8 +362,8 @@ async fn propose_submits_proposal_after_last_canonical_game() {
     assert_eq!(proposal.root_claim, B256::repeat_byte(0x10));
     assert_eq!(proposal.l2_block_number, 10);
     assert_eq!(
-        proposal.proposal_key,
-        proposal_key(ANCHOR, B256::repeat_byte(0x10), 10)
+        proposal.transition_key,
+        transition_key(ANCHOR, B256::repeat_byte(0x10), 10)
     );
 }
 
@@ -543,6 +561,40 @@ async fn finalized_games_do_not_consume_resolution_budget() {
 }
 
 #[tokio::test]
+async fn advance_anchor_waits_for_registry_finality() {
+    let game = Address::repeat_byte(0xfe);
+    let closures = Arc::default();
+    let contracts = MockContracts {
+        anchor: ParentRef {
+            address: ANCHOR,
+            l2_block_number: 0,
+        },
+        games: HashMap::new(),
+        submissions: Arc::default(),
+        resolution_statuses: Arc::default(),
+        resolutions: Arc::default(),
+        closures: Arc::clone(&closures),
+    };
+    let proposer = WorldChainProposer::new(
+        config(),
+        contracts,
+        MockOutputRoots {
+            roots: HashMap::new(),
+            finalized_l2_block: 0,
+        },
+    );
+    let mut finalized_games = crate::FinalizedGames::default();
+    finalized_games.push(ParentRef {
+        address: game,
+        l2_block_number: 10,
+    });
+
+    proposer.advance_anchor(finalized_games).await.unwrap();
+
+    assert!(closures.lock().expect("not poisoned").is_empty());
+}
+
+#[tokio::test]
 async fn zero_resolution_budget_is_rejected() {
     let contracts = MockContracts {
         anchor: ParentRef {
@@ -626,6 +678,20 @@ async fn bond_manager_scans_bounded_initial_window_then_only_new_games() {
 }
 
 #[tokio::test]
+async fn bond_manager_skips_other_factory_game_types() {
+    let proposer = Address::repeat_byte(0xa1);
+    let client = MockBondClient::new(
+        proposer,
+        vec![(Address::ZERO, Address::ZERO), (GAME_1, proposer)],
+    );
+    let mut manager = BondManager::new(bond_manager_config(100), client);
+
+    manager.scan_games().await.unwrap();
+
+    assert!(manager.tracks_game(GAME_1));
+}
+
+#[tokio::test]
 async fn bond_manager_retries_complete_range_after_partial_scan_failure() {
     let proposer = Address::repeat_byte(0xa1);
     let games: Vec<_> = (1..=3)
@@ -699,4 +765,33 @@ async fn bond_manager_prunes_resolved_games_and_retries_failed_withdrawals() {
     let withdrawals = client.withdrawals.lock().expect("not poisoned");
     assert!(withdrawals.contains(&withdrawable));
     assert!(withdrawals.contains(&retry_withdrawal));
+}
+
+#[tokio::test]
+async fn bond_manager_retains_game_between_delayed_weth_phases() {
+    let proposer = Address::repeat_byte(0xa1);
+    let client = MockBondClient::new(proposer, vec![(GAME_1, proposer)]);
+    client
+        .resolved_games
+        .lock()
+        .expect("not poisoned")
+        .insert(GAME_1);
+    client
+        .claimable
+        .lock()
+        .expect("not poisoned")
+        .insert(GAME_1, U256::from(10));
+    client
+        .pending_withdrawal_rounds
+        .lock()
+        .expect("not poisoned")
+        .insert(GAME_1, 1);
+    let mut manager = BondManager::new(bond_manager_config(100), client);
+    manager.scan_games().await.unwrap();
+
+    manager.withdraw_credits().await.unwrap();
+    assert!(manager.tracks_game(GAME_1));
+
+    manager.withdraw_credits().await.unwrap();
+    assert!(!manager.tracks_game(GAME_1));
 }

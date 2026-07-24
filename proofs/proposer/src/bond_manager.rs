@@ -63,7 +63,9 @@ where
         let proposer = self.execution_provider.proposer_address();
 
         for index in start..game_count {
-            let game = self.execution_provider.game_at(index).await?;
+            let Some(game) = self.execution_provider.game_at(index).await? else {
+                continue;
+            };
             if self.execution_provider.game_proposer(game).await? == proposer {
                 self.proposed_games.insert(game);
             }
@@ -97,11 +99,11 @@ where
                         tx_hash = ?withdraw_submission.tx_hash,
                         amount = ?withdraw_submission.amount,
                         game_address = %game,
-                        "withdrew claimable credits"
+                        "processed proposer bond credit"
                     );
                 }
 
-                Ok(true)
+                Ok(self.execution_provider.claimable(game).await? == U256::ZERO)
             }
             .await;
 

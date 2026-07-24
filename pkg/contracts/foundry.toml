@@ -24,7 +24,19 @@ remappings = [
   "base-contracts/=vendor/base-contracts/",
   "@forge-std/=lib/forge-std/src/",
   "forge-std/=lib/forge-std/src/",
-  "@solady=lib/solady/src/utils/",
+  # --- Optimism contracts-bedrock (lib/optimism, pinned to op-contracts/v7.0.0) ---
+  # World-chain sources import ONLY interfaces (^0.8.0) and dispute libs (^0.8.15)
+  # from here — never implementation contracts (they pin solc 0.8.15). Implementations
+  # are compiled by the isolated `opstack/` sub-project and deployed in tests/scripts
+  # via `vm.getCode`/`vm.deployCode` on its artifacts.
+  "@optimism-bedrock/=lib/optimism/packages/contracts-bedrock/",
+  "@solady/=lib/optimism/packages/contracts-bedrock/lib/solady/src/",
+  # Canonicalize contracts-bedrock's internal cross-imports (interfaces import each
+  # other as `interfaces/...` and pull dispute libs as `src/dispute/...`) onto the same
+  # source-unit names as the @optimism-bedrock/ paths, so each type exists exactly once.
+  # No world-chain source uses these prefixes.
+  "interfaces/=lib/optimism/packages/contracts-bedrock/interfaces/",
+  "src/dispute/=lib/optimism/packages/contracts-bedrock/src/dispute/",
   "@nitro-validator/=lib/nitro-validator/src/",
   "@solarity/=lib/nitro-validator/lib/solidity-lib/contracts/",
   "@sp1-contracts/=lib/sp1-contracts/contracts/",

@@ -1,9 +1,11 @@
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_provider::{Provider, WalletProvider};
+use alloy_sol_types::SolValue;
 use async_trait::async_trait;
 use world_chain_proofs::{
-    IWorldChainAnchorStateRegistry, IWorldChainProofSystemFactory, IWorldChainProofSystemGame,
+    IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IWorldChainProofSystemGame,
     InvalidationReasonError, ProposalCommitment, ResolutionStatus, RootStateError,
+    WIP_1006_GAME_TYPE,
 };
 
 use crate::{
@@ -14,8 +16,8 @@ use crate::{
 /// Alloy-backed implementation of [`ProofSystemClient`].
 #[derive(Debug, Clone)]
 pub struct AlloyProofSystemClient<P> {
-    factory: IWorldChainProofSystemFactory::IWorldChainProofSystemFactoryInstance<P>,
-    anchor: IWorldChainAnchorStateRegistry::IWorldChainAnchorStateRegistryInstance<P>,
+    factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
+    anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
     provider: P,
 }
 
@@ -25,11 +27,11 @@ where
 {
     /// Creates a new Alloy-backed contract client.
     pub fn new(provider: P, factory_address: Address, anchor_address: Address) -> Self {
-        let factory = IWorldChainProofSystemFactory::IWorldChainProofSystemFactoryInstance::new(
+        let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
             provider.clone(),
         );
-        let anchor = IWorldChainAnchorStateRegistry::IWorldChainAnchorStateRegistryInstance::new(
+        let anchor = IAnchorStateRegistry::IAnchorStateRegistryInstance::new(
             anchor_address,
             provider.clone(),
         );
@@ -39,6 +41,110 @@ where
             anchor,
             provider,
         }
+    }
+
+    fn game(
+        &self,
+        address: Address,
+    ) -> IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance<P> {
+        IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
+            address,
+            self.provider.clone(),
+        )
+    }
+
+    async fn game_implementation(&self) -> Result<Address, ProposerError> {
+        let implementation = self
+            .factory
+            .gameImpls(WIP_1006_GAME_TYPE)
+            .call()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        if implementation == Address::ZERO {
+            return Err(ProposerError::Contract(
+                "WIP-1006 game implementation is not registered".into(),
+            ));
+        }
+        Ok(implementation)
+    }
+
+    async fn domain_hash(&self) -> Result<B256, ProposerError> {
+        self.game(self.game_implementation().await?)
+            .domainHash()
+            .call()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))
+    }
+
+    async fn lookup_game(
+        &self,
+        commitment: ProposalCommitment,
+        domain_hash: B256,
+        attempt: u64,
+    ) -> Result<Address, ProposerError> {
+        let extra_data = proposal_extra_data(commitment, domain_hash, attempt);
+        self.factory
+            .games(WIP_1006_GAME_TYPE, commitment.root_claim, extra_data)
+            .call()
+            .await
+            .map(|result| result.proxy)
+            .map_err(|error| ProposerError::Contract(error.to_string()))
+    }
+
+    async fn next_attempt(
+        &self,
+        commitment: ProposalCommitment,
+        domain_hash: B256,
+    ) -> Result<(u64, Option<Address>), ProposerError> {
+        let mut attempt = 0_u64;
+        let mut latest_respected_game = None;
+        loop {
+            let game = self.lookup_game(commitment, domain_hash, attempt).await?;
+            if game == Address::ZERO {
+                return Ok((attempt, latest_respected_game));
+            }
+            if self
+                .game(game)
+                .wasRespectedGameTypeWhenCreated()
+                .call()
+                .await
+                .map_err(|error| ProposerError::Contract(error.to_string()))?
+            {
+                latest_respected_game = Some(game);
+            } else {
+                latest_respected_game = None;
+            }
+            attempt = attempt
+                .checked_add(1)
+                .ok_or_else(|| ProposerError::Contract("proposal attempt overflow".into()))?;
+        }
+    }
+
+    async fn claimable_credit(
+        &self,
+        game_address: Address,
+        recipient: Address,
+    ) -> Result<U256, ProposerError> {
+        let game = self.game(game_address);
+        let credit = game
+            .credit(recipient)
+            .call()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let weth_address = game
+            .weth()
+            .call()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let pending = IDelayedWETH::IDelayedWETHInstance::new(weth_address, self.provider.clone())
+            .withdrawals(game_address, recipient)
+            .call()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?
+            .amount;
+        credit
+            .checked_add(pending)
+            .ok_or_else(|| ProposerError::Contract("claimable credit overflow".into()))
     }
 }
 
@@ -61,23 +167,22 @@ where
         u256_to_u64(count, "gameCount")
     }
 
-    async fn game_at(&self, index: u64) -> Result<Address, ProposerError> {
-        self.factory
-            .gameAt(U256::from(index))
+    async fn game_at(&self, index: u64) -> Result<Option<Address>, ProposerError> {
+        let game = self
+            .factory
+            .gameAtIndex(U256::from(index))
             .call()
             .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        Ok((game.gameType == WIP_1006_GAME_TYPE).then_some(game.proxy))
     }
 
     async fn game_proposer(&self, game: Address) -> Result<Address, ProposerError> {
-        IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        )
-        .proposer()
-        .call()
-        .await
-        .map_err(|error| ProposerError::Contract(error.to_string()))
+        self.game(game)
+            .gameCreator()
+            .call()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
@@ -99,56 +204,34 @@ where
     P: Provider + WalletProvider + Clone + Send + Sync + 'static,
 {
     async fn anchor_parent(&self) -> Result<ParentRef, ProposerError> {
-        let l2_block_number = self
+        let anchor_root = self
             .anchor
-            .currentL2BlockNumber()
+            .getAnchorRoot()
             .call()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
-        let anchor_game = self
-            .anchor
-            .anchorGame()
-            .call()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
-
         Ok(ParentRef {
-            address: anchor_parent_address(*self.anchor.address(), anchor_game),
-            l2_block_number: u256_to_u64(l2_block_number, "currentL2BlockNumber")?,
+            address: *self.anchor.address(),
+            l2_block_number: u256_to_u64(anchor_root.l2SequenceNumber, "l2SequenceNumber")?,
         })
     }
 
-    async fn proposal_key(&self, commitment: ProposalCommitment) -> Result<B256, ProposerError> {
-        self.factory
-            .computeProposalKey(
-                commitment.parent_ref,
-                commitment.root_claim,
-                U256::from(commitment.l2_block_number),
-            )
-            .call()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))
+    async fn transition_key(&self, commitment: ProposalCommitment) -> Result<B256, ProposerError> {
+        let domain_hash = self.domain_hash().await?;
+        Ok(commitment.transition_key(domain_hash))
     }
 
-    async fn game_for_proposal_key(
+    async fn game_for_proposal(
         &self,
-        proposal_key: B256,
+        commitment: ProposalCommitment,
     ) -> Result<Option<Address>, ProposerError> {
-        let game = self
-            .factory
-            .games(proposal_key)
-            .call()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
-
-        Ok((game != Address::ZERO).then_some(game))
+        let domain_hash = self.domain_hash().await?;
+        let (_, latest_respected_game) = self.next_attempt(commitment, domain_hash).await?;
+        Ok(latest_respected_game)
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
-        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        );
+        let game = self.game(game);
         let resolution_status_result = game
             .resolutionStatus()
             .call()
@@ -172,10 +255,7 @@ where
     }
 
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
-        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        );
+        let game = self.game(game);
         let pending = game
             .resolve()
             .send()
@@ -195,10 +275,7 @@ where
     }
 
     async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError> {
-        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        );
+        let game = self.game(game);
         let pending = game
             .closeGame()
             .send()
@@ -217,29 +294,27 @@ where
         Ok(CloseGameSubmission { tx_hash })
     }
 
-    async fn claimable(&self, game: Address) -> Result<U256, ProposerError> {
-        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        );
-        let proposer_address = self.provider.default_signer_address();
-        let amount = game
-            .claimable(proposer_address)
+    async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError> {
+        self.anchor
+            .isGameFinalized(game)
             .call()
             .await
-            .map_err(|err| ProposerError::Contract(err.to_string()))?;
-
-        Ok(amount)
+            .map_err(|error| ProposerError::Contract(error.to_string()))
     }
 
-    async fn withdraw(&self, game: Address) -> Result<WithdrawSubmission, ProposerError> {
-        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        );
+    async fn claimable(&self, game: Address) -> Result<U256, ProposerError> {
+        self.claimable_credit(game, self.provider.default_signer_address())
+            .await
+    }
+
+    async fn withdraw(&self, game_address: Address) -> Result<WithdrawSubmission, ProposerError> {
+        let game = self.game(game_address);
         let proposer_address = self.provider.default_signer_address();
+        let amount = self
+            .claimable_credit(game_address, proposer_address)
+            .await?;
         let pending = game
-            .withdraw(proposer_address)
+            .claimCredit(proposer_address)
             .send()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
@@ -253,30 +328,13 @@ where
             return Err(ProposerError::Revert(tx_hash));
         }
 
-        let amount = receipt
-            .logs()
-            .iter()
-            .filter(|log| log.address() == *game.address())
-            .find_map(|log| {
-                log.log_decode_validate::<IWorldChainProofSystemGame::Withdrawn>()
-                    .ok()
-                    .map(|decoded| decoded.inner.data)
-            })
-            .filter(|event| event.recipient == proposer_address)
-            .map(|event| event.amount)
-            .ok_or_else(|| {
-                ProposerError::Contract(format!(
-                    "Withdrawn event missing from withdraw transaction {tx_hash}"
-                ))
-            })?;
-
         Ok(WithdrawSubmission { tx_hash, amount })
     }
 
     async fn proposer_bond(&self) -> Result<U256, ProposerError> {
         let proposer_bond = self
             .factory
-            .proposerBond()
+            .initBonds(WIP_1006_GAME_TYPE)
             .call()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
@@ -289,13 +347,14 @@ where
         proposal: &Proposal,
         proposer_bond: U256,
     ) -> Result<ProposalSubmission, ProposerError> {
+        let domain_hash = self.domain_hash().await?;
+        let (attempt, _) = self
+            .next_attempt(proposal.commitment(), domain_hash)
+            .await?;
+        let extra_data = proposal_extra_data(proposal.commitment(), domain_hash, attempt);
         let pending = self
             .factory
-            .propose(
-                proposal.parent_ref,
-                proposal.root_claim,
-                U256::from(proposal.l2_block_number),
-            )
+            .create(WIP_1006_GAME_TYPE, proposal.root_claim, extra_data)
             .value(proposer_bond)
             .send()
             .await
@@ -315,15 +374,17 @@ where
             .iter()
             .filter(|log| log.address() == *self.factory.address())
             .find_map(|log| {
-                log.log_decode_validate::<IWorldChainProofSystemFactory::GameCreated>()
+                log.log_decode_validate::<IDisputeGameFactory::DisputeGameCreated>()
                     .ok()
                     .map(|decoded| decoded.inner.data)
             })
-            .filter(|event| event.proposalKey == proposal.proposal_key)
-            .map(|event| event.game)
+            .filter(|event| {
+                event.gameType == WIP_1006_GAME_TYPE && event.rootClaim == proposal.root_claim
+            })
+            .map(|event| event.disputeProxy)
             .ok_or_else(|| {
                 ProposerError::Contract(format!(
-                    "GameCreated event missing from proposal transaction {tx_hash}"
+                    "DisputeGameCreated event missing from proposal transaction {tx_hash}"
                 ))
             })?;
 
@@ -340,50 +401,31 @@ where
 {
     /// Reads an L2 block number from a game contract.
     pub async fn game_l2_block_number(&self, game: Address) -> Result<u64, ProposerError> {
-        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        );
+        let game = self.game(game);
         let l2_block_number = game
-            .l2BlockNumber()
+            .l2SequenceNumber()
             .call()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
 
-        u256_to_u64(l2_block_number, "l2BlockNumber")
+        u256_to_u64(l2_block_number, "l2SequenceNumber")
     }
+}
+
+fn proposal_extra_data(commitment: ProposalCommitment, domain_hash: B256, attempt: u64) -> Bytes {
+    Bytes::from(
+        (
+            domain_hash,
+            U256::from(commitment.l2_block_number),
+            commitment.parent_ref,
+            U256::from(attempt),
+        )
+            .abi_encode(),
+    )
 }
 
 fn u256_to_u64(value: U256, field: &'static str) -> Result<u64, ProposerError> {
     value
         .try_into()
         .map_err(|_| ProposerError::Contract(format!("{field} overflows u64")))
-}
-
-fn anchor_parent_address(anchor_address: Address, anchor_game: Address) -> Address {
-    if anchor_game == Address::ZERO {
-        anchor_address
-    } else {
-        anchor_game
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use alloy_primitives::{Address, address};
-
-    use super::anchor_parent_address;
-
-    const ANCHOR: Address = address!("0000000000000000000000000000000000001006");
-    const GAME: Address = address!("0000000000000000000000000000000000000001");
-
-    #[test]
-    fn anchor_parent_address_uses_registry_before_first_game() {
-        assert_eq!(anchor_parent_address(ANCHOR, Address::ZERO), ANCHOR);
-    }
-
-    #[test]
-    fn anchor_parent_address_uses_anchor_game_after_registry_advances() {
-        assert_eq!(anchor_parent_address(ANCHOR, GAME), GAME);
-    }
 }
