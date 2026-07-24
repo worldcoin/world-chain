@@ -2,12 +2,11 @@
 pragma solidity 0.8.28;
 
 import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
-import {IWorldChainProofSystemFactory} from "./interfaces/IWorldChainProofSystemFactory.sol";
 import {WorldChainProofLib} from "./WorldChainProofLib.sol";
 import {Hash} from "./DisputeTypes.sol";
 
 library WorldChainProofVerificationLib {
-    /// @dev Validates the proof against the game's root, factory domain, and creation-time transition snapshot.
+    /// @dev Validates the proof against the game's root, domain, and creation-time transition snapshot.
     function matchesGame(
         address gameAddress,
         bytes32 rootId,
@@ -21,21 +20,9 @@ library WorldChainProofVerificationLib {
             return false;
         }
 
-        WorldChainProofLib.Domain memory factoryDomain = _readFactoryDomain(game.factory());
-        if (!_matchesDomain(game, proofDomainHash, transition.rollupConfigHash, factoryDomain)) return false;
+        if (!_matchesDomain(game, proofDomainHash, transition.rollupConfigHash, game.domain())) return false;
 
         return _matchesTransition(game, proofL1OriginNumber, transition);
-    }
-
-    function _readFactoryDomain(address factory) private view returns (WorldChainProofLib.Domain memory domain) {
-        (uint256 chainId, uint256 proofSystemVersion, bytes32 rollupConfigHash, uint256 blockInterval) =
-            IWorldChainProofSystemFactory(factory).domain();
-        domain = WorldChainProofLib.Domain({
-            chainId: chainId,
-            proofSystemVersion: proofSystemVersion,
-            rollupConfigHash: rollupConfigHash,
-            blockInterval: blockInterval
-        });
     }
 
     function _matchesRoot(
@@ -63,10 +50,10 @@ library WorldChainProofVerificationLib {
         IWorldChainProofSystemGame game,
         bytes32 proofDomainHash,
         bytes32 transitionRollupConfigHash,
-        WorldChainProofLib.Domain memory factoryDomain
+        WorldChainProofLib.Domain memory gameDomain
     ) private view returns (bool) {
-        return game.domainHash() == proofDomainHash && WorldChainProofLib.domainHash(factoryDomain) == proofDomainHash
-            && transitionRollupConfigHash == factoryDomain.rollupConfigHash;
+        return game.domainHash() == proofDomainHash && WorldChainProofLib.domainHash(gameDomain) == proofDomainHash
+            && transitionRollupConfigHash == gameDomain.rollupConfigHash;
     }
 
     function _matchesTransition(

@@ -2,32 +2,66 @@
 pragma solidity 0.8.28;
 
 import {WorldChainProofLib} from "./WorldChainProofLib.sol";
-import {Claim, GameStatus, GameType, Hash, Timestamp, GameTypes} from "./DisputeTypes.sol";
-import {IWorldChainAnchorStateRegistry} from "./interfaces/IWorldChainAnchorStateRegistry.sol";
-import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
+import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainStakingRegistry} from "./interfaces/IWorldChainStakingRegistry.sol";
-import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 
-contract WorldChainProofSystemGame is ReentrancyGuardTransient, IWorldChainProofSystemGame {
-    using WorldChainProofLib for uint8;
+import {Clone} from "@solady/utils/Clone.sol";
+import {
+    BondDistributionMode,
+    Claim,
+    GameStatus,
+    GameType,
+    Hash,
+    Timestamp
+} from "@optimism-bedrock/src/dispute/lib/Types.sol";
+import {
+    AlreadyInitialized,
+    BadExtraData,
+    BondTransferFailed,
+    ClaimAlreadyChallenged,
+    ClaimAlreadyResolved,
+    GameNotFinalized,
+    GameNotOver,
+    GameNotResolved,
+    GamePaused,
+    IncorrectBondAmount,
+    InvalidBondDistributionMode,
+    InvalidParentGame,
+    NoCreditToClaim,
+    ParentGameNotResolved,
+    UnexpectedGameType,
+    UnexpectedRootClaim,
+    UnknownChainId
+} from "@optimism-bedrock/src/dispute/lib/Errors.sol";
+import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
+import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
+import {IAnchorStateRegistry} from "@optimism-bedrock/interfaces/dispute/IAnchorStateRegistry.sol";
+import {IDelayedWETH} from "@optimism-bedrock/interfaces/dispute/IDelayedWETH.sol";
+import {ISemver} from "@optimism-bedrock/interfaces/universal/ISemver.sol";
 
-    struct ProposalInit {
-        address factory;
-        address anchorStateRegistry;
-        uint256 attempt;
-        address proposer;
-        address parentRef;
-        bytes32 startingRootClaim;
-        uint256 startingL2BlockNumber;
-        bytes32 rootClaim;
-        uint256 l2BlockNumber;
-        bytes32 l1OriginHash;
-        uint256 l1OriginNumber;
-    }
+/// @title WorldChainProofSystemGame
+/// @notice A multi-proof dispute game created through the stock Optimism `DisputeGameFactory`
+///         using the Clone-With-Immutable-Args (CWIA) pattern. Proposals chain parent-to-parent
+///         at a fixed block interval; a challenged proposal finalizes only once enough
+///         independent proof lanes (validity proof, TEE attestation, security council) support
+///         it. Bond custody uses `DelayedWETH` with the two-phase unlock/withdraw claim flow.
+/// @dev Implements the `IDisputeGame` ABI without inheriting the interface: `IDisputeGame`
+///      declares `rootClaimByChainId` (among others) as `pure`, while this implementation
+///      reads a constructor immutable (`view`). `FaultDisputeGame` takes the same approach.
+///      Structure follows `ZKDisputeGame`; challenge/lane semantics are World Chain specific.
+contract WorldChainProofSystemGame is Clone, ISemver {
+    ////////////////////////////////////////////////////////////////
+    //                         Structs                            //
+    ////////////////////////////////////////////////////////////////
 
-    struct ActivationConfig {
-        bytes32 domainHash;
+    /// @notice Per-deployment configuration, fixed as immutables on the implementation.
+    /// @dev The implementation is registered with the two-argument
+    ///      `DisputeGameFactory.setImplementation(gameType, impl)`, so none of this rides in
+    ///      the CWIA payload and `extraData` stays minimal.
+    struct GameConfig {
+        WorldChainProofLib.Domain domain;
+        GameType gameType;
         uint64 challengePeriod;
         uint64 proofPeriod;
         uint256 proposerBond;
@@ -37,65 +71,73 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IWorldChainProof
         IWorldChainProofVerifier teeVerifier;
         IWorldChainProofVerifier securityCouncil;
         IWorldChainStakingRegistry stakingRegistry;
+        IDisputeGameFactory disputeGameFactory;
+        IAnchorStateRegistry anchorStateRegistry;
+        IDelayedWETH weth;
     }
 
-    enum ResolutionStatus {
-        NOT_READY,
-        RESOLVABLE,
-        PARENT_NOT_RESOLVED,
-        ALREADY_RESOLVED
-    }
+    ////////////////////////////////////////////////////////////////
+    //                         Errors                             //
+    ////////////////////////////////////////////////////////////////
 
-    struct ResolutionEvaluation {
-        ResolutionStatus status;
-        WorldChainProofLib.RootState outcome;
-        WorldChainProofLib.InvalidationReason reason;
-        WorldChainProofLib.RootState parentState;
-    }
-
-    error InvalidBond(uint256 expected, uint256 actual);
-    error InvalidPeriods(uint64 challengePeriod, uint64 proofPeriod);
-    error InvalidState(WorldChainProofLib.RootState expected, WorldChainProofLib.RootState actual);
+    error InvalidActivationParameters();
+    error NotDisputeGameFactory(address caller);
+    error AnchorRootNotFound();
+    error InvalidL2BlockNumber(uint256 expectedL2BlockNumber, uint256 actualL2BlockNumber);
+    error GameNotRetryable(bytes32 uuidPreimageHash);
+    error UnstakedChallenger(address challenger);
     error ChallengePeriodElapsed(uint256 timestamp, uint256 challengeDeadline);
     error ProofPeriodElapsed(uint256 timestamp, uint256 proofDeadline);
-    error NotReady();
-    error ParentGameNotResolved(address parent, WorldChainProofLib.RootState state);
-    error AlreadyResolved(WorldChainProofLib.RootState state);
-    error UnstakedChallenger(address challenger);
-    error DuplicateChallenge(address challenger);
     error InvalidLane(uint8 lane);
     error InvalidProof(WorldChainProofLib.ProofLane lane, bytes32 rootId);
-    error NoClaim(address recipient);
-    error TransferFailed(address recipient, uint256 amount);
+
+    ////////////////////////////////////////////////////////////////
+    //                         Events                             //
+    ////////////////////////////////////////////////////////////////
+
+    /// @notice Emitted at creation with the full proposal context. Replaces the former
+    ///         factory `GameCreated` event for offchain indexers; the stock factory's
+    ///         `DisputeGameCreated` event only carries (proxy, gameType, rootClaim).
+    event WorldChainGameCreated(
+        bytes32 indexed rootId,
+        address indexed parentRef,
+        bytes32 rootClaim,
+        uint256 l2BlockNumber,
+        bytes32 l1OriginHash,
+        uint256 l1OriginNumber,
+        uint256 attempt,
+        address proposer
+    );
+
+    /// @notice Emitted when the game is resolved. Matches the `IDisputeGame` event.
+    event Resolved(GameStatus indexed status);
 
     event Challenged(address indexed challenger, uint64 proofDeadline);
     event ProofLaneSupported(WorldChainProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
     event ProofThresholdReached(bytes32 indexed rootId, uint8 proofBitmap);
     event DuplicateProofLane(WorldChainProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
-    event Finalized(bytes32 indexed rootId);
-    event Invalidated(bytes32 indexed rootId, WorldChainProofLib.InvalidationReason reason);
-    event Withdrawn(address indexed recipient, uint256 amount);
+    event GameClosed(BondDistributionMode bondDistributionMode);
+
+    ////////////////////////////////////////////////////////////////
+    //                       Immutables                           //
+    ////////////////////////////////////////////////////////////////
+
+    /// @notice Sentinel `parentIndex` marking a proposal that starts from the current anchor.
+    uint256 public constant ANCHOR_PARENT_INDEX = type(uint256).max;
 
     /// Number of distinct proof lanes required to finalize a challenged root.
-    /// Set per-deployment by the factory (defaults to `WorldChainProofLib.PROOF_THRESHOLD`).
     uint8 public immutable PROOF_THRESHOLD;
     uint8 public constant PROOF_LANE_COUNT = WorldChainProofLib.PROOF_LANE_COUNT;
 
-    address public immutable override factory;
-    address public immutable override anchorStateRegistry;
-    uint256 public immutable override attempt;
-    address public immutable override gameCreator;
-    address public immutable override parentRef;
-    bytes32 public immutable override startingRootClaim;
-    uint256 public immutable override startingL2BlockNumber;
-    bytes32 public immutable override rootClaim;
-    uint256 public immutable override l2SequenceNumber;
-    bytes32 private immutable _l1Head;
-    uint256 public immutable override l1OriginNumber;
-    bytes32 public immutable override domainHash;
-    bytes32 public immutable override rootId;
+    uint256 internal immutable DOMAIN_CHAIN_ID;
+    uint256 internal immutable DOMAIN_PROOF_SYSTEM_VERSION;
+    bytes32 internal immutable DOMAIN_ROLLUP_CONFIG_HASH;
+    uint256 internal immutable DOMAIN_BLOCK_INTERVAL;
+    bytes32 public immutable domainHash;
 
+    GameType internal immutable GAME_TYPE;
     uint64 public immutable challengePeriod;
+    uint64 public immutable proofPeriod;
     uint256 public immutable proposerBond;
     uint256 public immutable challengerBond;
 
@@ -103,48 +145,63 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IWorldChainProof
     IWorldChainProofVerifier public immutable teeVerifier;
     IWorldChainProofVerifier public immutable securityCouncil;
     IWorldChainStakingRegistry public immutable stakingRegistry;
+    IDisputeGameFactory public immutable disputeGameFactory;
+    IAnchorStateRegistry public immutable anchorStateRegistry;
+    IDelayedWETH public immutable weth;
 
-    uint64 public override createdAt;
-    uint64 public override challengeDeadline;
+    ////////////////////////////////////////////////////////////////
+    //                         Storage                            //
+    ////////////////////////////////////////////////////////////////
+
+    /// @notice Semantic version.
+    /// @custom:semver 1.0.0
+    string public constant version = "1.0.0";
+
+    Timestamp public createdAt;
+    Timestamp public resolvedAt;
+    GameStatus public status;
+    bool internal initialized;
+
+    /// @notice The proposal transition identifier bound by every proof lane.
+    bytes32 public rootId;
+    /// @notice The parent game address, or `anchorStateRegistry` for anchor-parented proposals.
+    address public parentRef;
+    bytes32 public startingRootClaim;
+    uint256 public startingL2BlockNumber;
+    uint64 internal _l1OriginNumber;
+
+    uint64 public challengeDeadline;
     uint64 public challengedAt;
-    uint64 public override proofDeadline;
-    uint64 private _resolvedAt;
-    uint8 public override proofBitmap;
-    WorldChainProofLib.RootState public override state;
-    WorldChainProofLib.InvalidationReason public override invalidationReason;
-    bool public override wasRespectedGameTypeWhenCreated;
-
+    uint64 public proofDeadline;
     address payable public challenger;
-    uint256 public postedChallengerBond;
-    mapping(address recipient => uint256 amount) internal payoutCredits;
+    uint8 public proofBitmap;
+    WorldChainProofLib.InvalidationReason public invalidationReason;
 
-    constructor(ProposalInit memory proposal, ActivationConfig memory config) payable {
-        if (msg.value != config.proposerBond) revert InvalidBond(config.proposerBond, msg.value);
-        if (config.proofPeriod <= config.challengePeriod) {
-            revert InvalidPeriods(config.challengePeriod, config.proofPeriod);
+    mapping(address recipient => uint256 amount) public normalModeCredit;
+    mapping(address recipient => uint256 amount) public refundModeCredit;
+    uint256 public totalBonds;
+    BondDistributionMode public bondDistributionMode;
+    bool public wasRespectedGameTypeWhenCreated;
+
+    constructor(GameConfig memory config) {
+        if (
+            config.challengePeriod == 0 || config.proofPeriod == 0 || config.domain.chainId == 0
+                || config.domain.proofSystemVersion == 0 || config.domain.blockInterval == 0
+                || config.proofThreshold == 0 || config.proofThreshold > WorldChainProofLib.PROOF_LANE_COUNT
+                || address(config.disputeGameFactory) == address(0) || address(config.anchorStateRegistry) == address(0)
+                || address(config.weth) == address(0) || address(config.stakingRegistry) == address(0)
+        ) {
+            revert InvalidActivationParameters();
         }
 
-        factory = proposal.factory;
-        anchorStateRegistry = proposal.anchorStateRegistry;
-        attempt = proposal.attempt;
-        gameCreator = proposal.proposer;
-        parentRef = proposal.parentRef;
-        startingRootClaim = proposal.startingRootClaim;
-        startingL2BlockNumber = proposal.startingL2BlockNumber;
-        rootClaim = proposal.rootClaim;
-        l2SequenceNumber = proposal.l2BlockNumber;
-        _l1Head = proposal.l1OriginHash;
-        l1OriginNumber = proposal.l1OriginNumber;
-        domainHash = config.domainHash;
-        rootId = WorldChainProofLib.rootId(
-            config.domainHash,
-            proposal.parentRef,
-            proposal.rootClaim,
-            proposal.l2BlockNumber,
-            proposal.l1OriginHash,
-            proposal.l1OriginNumber
-        );
+        DOMAIN_CHAIN_ID = config.domain.chainId;
+        DOMAIN_PROOF_SYSTEM_VERSION = config.domain.proofSystemVersion;
+        DOMAIN_ROLLUP_CONFIG_HASH = config.domain.rollupConfigHash;
+        DOMAIN_BLOCK_INTERVAL = config.domain.blockInterval;
+        domainHash = WorldChainProofLib.domainHash(config.domain);
+        GAME_TYPE = config.gameType;
         challengePeriod = config.challengePeriod;
+        proofPeriod = config.proofPeriod;
         proposerBond = config.proposerBond;
         challengerBond = config.challengerBond;
         PROOF_THRESHOLD = config.proofThreshold;
@@ -152,96 +209,268 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IWorldChainProof
         teeVerifier = config.teeVerifier;
         securityCouncil = config.securityCouncil;
         stakingRegistry = config.stakingRegistry;
-
-        createdAt = uint64(block.timestamp);
-        challengeDeadline = uint64(block.timestamp + config.challengePeriod);
-        proofDeadline = uint64(block.timestamp + config.proofPeriod);
-        state = WorldChainProofLib.RootState.PROPOSED;
-        wasRespectedGameTypeWhenCreated = GameType.unwrap(
-            IWorldChainAnchorStateRegistry(proposal.anchorStateRegistry).respectedGameType()
-        ) == GameType.unwrap(GameTypes.WIP_1006);
+        disputeGameFactory = config.disputeGameFactory;
+        anchorStateRegistry = config.anchorStateRegistry;
+        weth = config.weth;
     }
 
-    receive() external payable {}
+    ////////////////////////////////////////////////////////////////
+    //                       CWIA getters                         //
+    ////////////////////////////////////////////////////////////////
 
-    /// @notice Translates the WIP-1006 lifecycle state into the outcome read by the Portal and ASR.
-    function status() external view override returns (GameStatus) {
-        WorldChainProofLib.RootState currentState = state;
-        if (currentState == WorldChainProofLib.RootState.FINALIZED) return GameStatus.DEFENDER_WINS;
-        if (currentState == WorldChainProofLib.RootState.INVALIDATED) return GameStatus.CHALLENGER_WINS;
-        return GameStatus.IN_PROGRESS;
+    // CWIA layout appended by `DisputeGameFactory.create` (no implementation args):
+    //   [0x00, 0x14) creator address
+    //   [0x14, 0x34) root claim
+    //   [0x34, 0x54) l1 head (parent block hash at creation)
+    //   [0x54, 0xB4) extraData = abi.encode(l2BlockNumber, parentIndex, attempt)
+
+    function gameCreator() public pure returns (address creator_) {
+        creator_ = _getArgAddress(0x00);
     }
 
-    function resolvedAt() external view override returns (Timestamp) {
-        return Timestamp.wrap(_resolvedAt);
+    function rootClaim() public pure returns (Claim rootClaim_) {
+        rootClaim_ = Claim.wrap(_getArgBytes32(0x14));
     }
 
-    function gameType() external pure override returns (GameType) {
-        return GameTypes.WIP_1006;
+    function l1Head() public pure returns (Hash l1Head_) {
+        l1Head_ = Hash.wrap(_getArgBytes32(0x34));
     }
 
-    function l1Head() external view override returns (Hash) {
-        return Hash.wrap(_l1Head);
+    /// @notice The L2 block number of the output root claimed by this proposal.
+    function l2SequenceNumber() public pure returns (uint256 l2SequenceNumber_) {
+        l2SequenceNumber_ = _getArgUint256(0x54);
     }
 
-    function extraData() public view override returns (bytes memory) {
-        return abi.encode(l2SequenceNumber, parentRef);
+    /// @notice Factory index of the parent game, or `ANCHOR_PARENT_INDEX` when the proposal
+    ///         starts from the current anchor.
+    function parentIndex() public pure returns (uint256 parentIndex_) {
+        parentIndex_ = _getArgUint256(0x74);
     }
 
-    function gameData() external view override returns (GameType, Claim, bytes memory) {
-        return (GameTypes.WIP_1006, Claim.wrap(rootClaim), extraData());
+    /// @notice Retry nonce for this transition. Attempt N requires attempt N-1 to have been
+    ///         invalidated with `PROOF_TIMEOUT`.
+    function attempt() public pure returns (uint256 attempt_) {
+        attempt_ = _getArgUint256(0x94);
+    }
+
+    function extraData() public pure returns (bytes memory extraData_) {
+        // 96 bytes: l2BlockNumber, parentIndex and attempt words.
+        extraData_ = _getArgBytes(0x54, 0x60);
+    }
+
+    ////////////////////////////////////////////////////////////////
+    //                  `IDisputeGame` surface                    //
+    ////////////////////////////////////////////////////////////////
+
+    function gameType() public view returns (GameType gameType_) {
+        gameType_ = GAME_TYPE;
+    }
+
+    function rootClaimByChainId(uint256 chainId) external view returns (Claim rootClaim_) {
+        if (chainId != DOMAIN_CHAIN_ID) revert UnknownChainId();
+        rootClaim_ = rootClaim();
+    }
+
+    function gameData() external view returns (GameType gameType_, Claim rootClaim_, bytes memory extraData_) {
+        gameType_ = gameType();
+        rootClaim_ = rootClaim();
+        extraData_ = extraData();
+    }
+
+    ////////////////////////////////////////////////////////////////
+    //                     Legacy-named views                     //
+    ////////////////////////////////////////////////////////////////
+
+    /// @notice Domain parameters this deployment proves against.
+    function domain() external view returns (WorldChainProofLib.Domain memory) {
+        return WorldChainProofLib.Domain({
+            chainId: DOMAIN_CHAIN_ID,
+            proofSystemVersion: DOMAIN_PROOF_SYSTEM_VERSION,
+            rollupConfigHash: DOMAIN_ROLLUP_CONFIG_HASH,
+            blockInterval: DOMAIN_BLOCK_INTERVAL
+        });
+    }
+
+    /// @notice Alias of `l2SequenceNumber` retained for proof-lane and offchain consumers.
+    function l2BlockNumber() external pure returns (uint256) {
+        return l2SequenceNumber();
+    }
+
+    /// @notice Alias of `l1Head` retained for proof-lane and offchain consumers.
+    function l1OriginHash() external pure returns (bytes32) {
+        return Hash.unwrap(l1Head());
+    }
+
+    function l1OriginNumber() external view returns (uint256) {
+        return _l1OriginNumber;
+    }
+
+    /// @notice Derived legacy state machine view.
+    function state() public view returns (WorldChainProofLib.RootState) {
+        if (status == GameStatus.DEFENDER_WINS) return WorldChainProofLib.RootState.FINALIZED;
+        if (status == GameStatus.CHALLENGER_WINS) return WorldChainProofLib.RootState.INVALIDATED;
+        return
+            challenger == address(0) ? WorldChainProofLib.RootState.PROPOSED : WorldChainProofLib.RootState.CHALLENGED;
+    }
+
+    function finalizedAt() external view returns (uint64) {
+        return status == GameStatus.DEFENDER_WINS ? resolvedAt.raw() : 0;
+    }
+
+    function invalidatedAt() external view returns (uint64) {
+        return status == GameStatus.CHALLENGER_WINS ? resolvedAt.raw() : 0;
     }
 
     function proofCount() external view returns (uint8) {
         return WorldChainProofLib.proofCount(proofBitmap);
     }
 
-    function challenge() external payable {
-        if (state != WorldChainProofLib.RootState.PROPOSED && state != WorldChainProofLib.RootState.CHALLENGED) {
-            revert InvalidState(WorldChainProofLib.RootState.PROPOSED, state);
+    ////////////////////////////////////////////////////////////////
+    //                     Initialization                         //
+    ////////////////////////////////////////////////////////////////
+
+    /// @notice Initializes the game. Performs every validation the former
+    ///         `WorldChainProofSystemFactory.propose` enforced; any revert bubbles up through
+    ///         `DisputeGameFactory.create` and prevents creation.
+    function initialize() external payable {
+        if (initialized) revert AlreadyInitialized();
+
+        // Reject any calldata whose length differs from the exact CWIA payload. This prevents
+        // extraData padding games that would mint distinct factory UUIDs for the same proposal,
+        // and blocks direct `initialize` calls on clones with malformed payloads.
+        //
+        // Expected length: 0xBA
+        // - 0x04 selector
+        // - 0x14 creator address
+        // - 0x20 root claim
+        // - 0x20 l1 head
+        // - 0x60 extraData (l2BlockNumber, parentIndex, attempt)
+        // - 0x02 CWIA length suffix
+        if (msg.data.length != 0xBA) revert BadExtraData();
+
+        // Only the configured factory may initialize; this also rules out direct initialization
+        // of the implementation contract itself.
+        if (msg.sender != address(disputeGameFactory)) revert NotDisputeGameFactory(msg.sender);
+
+        // Defense-in-depth against `setInitBond` drifting from the configured proposer bond.
+        if (msg.value != proposerBond) revert IncorrectBondAmount();
+
+        // Preserves the former propose-time registry pause gate.
+        if (anchorStateRegistry.paused()) revert GamePaused();
+
+        (Hash anchorRoot, uint256 anchorL2BlockNumber) = anchorStateRegistry.getAnchorRoot();
+
+        if (parentIndex() == ANCHOR_PARENT_INDEX) {
+            // The proposal extends the accepted anchor; the registry acts as the parent sentinel.
+            if (Hash.unwrap(anchorRoot) == bytes32(0)) revert AnchorRootNotFound();
+            parentRef = address(anchorStateRegistry);
+            startingRootClaim = Hash.unwrap(anchorRoot);
+            startingL2BlockNumber = anchorL2BlockNumber;
+        } else {
+            (GameType parentType,, IDisputeGame parent) = disputeGameFactory.gameAtIndex(parentIndex());
+
+            if (parentType.raw() != GAME_TYPE.raw()) revert UnexpectedGameType();
+            if (parent.status() == GameStatus.CHALLENGER_WINS) revert InvalidParentGame();
+            if (anchorStateRegistry.isGameBlacklisted(parent) || anchorStateRegistry.isGameRetired(parent)) {
+                revert InvalidParentGame();
+            }
+            // Guards against chaining onto games from an older implementation with a different
+            // domain (e.g. after a proof-system version bump reusing the same game type).
+            if (IWorldChainProofSystemGame(address(parent)).domainHash() != domainHash) revert InvalidParentGame();
+
+            startingRootClaim = Claim.unwrap(parent.rootClaim());
+            startingL2BlockNumber = parent.l2SequenceNumber();
+
+            // A parent at or below the anchor is stale: proposals extending the anchor state
+            // must use the anchor sentinel instead so their starting root is registry-attested.
+            if (startingL2BlockNumber <= anchorL2BlockNumber) revert InvalidParentGame();
+
+            parentRef = address(parent);
         }
+
+        // TODO(PROTO-4907): Confirm whether proposals require an exact block interval or only
+        // a bounded range.
+        uint256 expectedL2BlockNumber = startingL2BlockNumber + DOMAIN_BLOCK_INTERVAL;
+        if (l2SequenceNumber() != expectedL2BlockNumber) {
+            revert InvalidL2BlockNumber(expectedL2BlockNumber, l2SequenceNumber());
+        }
+        // Per spec, the sequence number must fit within a uint64.
+        if (l2SequenceNumber() > type(uint64).max) revert UnexpectedRootClaim(rootClaim());
+
+        // Retries: attempt N is only proposable when attempt N-1 for the identical transition
+        // timed out on proofs. Inherited invalidations must rebase onto a replacement parent,
+        // which changes `parentIndex` and therefore starts back at attempt zero. Duplicate
+        // attempts are impossible: the factory UUID covers (gameType, rootClaim, extraData).
+        if (attempt() > 0) {
+            bytes memory previousExtraData = abi.encode(l2SequenceNumber(), parentIndex(), attempt() - 1);
+            (IDisputeGame previous,) = disputeGameFactory.games(GAME_TYPE, rootClaim(), previousExtraData);
+            if (
+                address(previous) == address(0) || previous.status() != GameStatus.CHALLENGER_WINS
+                    || IWorldChainProofSystemGame(address(previous)).invalidationReason()
+                        != WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT
+            ) {
+                revert GameNotRetryable(keccak256(abi.encode(GAME_TYPE, rootClaim(), previousExtraData)));
+            }
+        }
+
+        // `initialize` runs in the same transaction as `DisputeGameFactory.create`, which set
+        // `l1Head = blockhash(block.number - 1)`.
+        _l1OriginNumber = uint64(block.number - 1);
+        rootId = WorldChainProofLib.rootId(
+            domainHash, parentRef, Claim.unwrap(rootClaim()), l2SequenceNumber(), Hash.unwrap(l1Head()), _l1OriginNumber
+        );
+
+        challengeDeadline = uint64(block.timestamp + challengePeriod);
+        createdAt = Timestamp.wrap(uint64(block.timestamp));
+        initialized = true;
+
+        // Custody the proposer bond in DelayedWETH and track the refund-mode credit.
+        refundModeCredit[gameCreator()] += msg.value;
+        totalBonds += msg.value;
+        weth.deposit{value: msg.value}();
+
+        wasRespectedGameTypeWhenCreated = anchorStateRegistry.respectedGameType().raw() == GAME_TYPE.raw();
+
+        emit WorldChainGameCreated(
+            rootId,
+            parentRef,
+            Claim.unwrap(rootClaim()),
+            l2SequenceNumber(),
+            Hash.unwrap(l1Head()),
+            _l1OriginNumber,
+            attempt(),
+            gameCreator()
+        );
+    }
+
+    ////////////////////////////////////////////////////////////////
+    //                    Challenge and proofs                    //
+    ////////////////////////////////////////////////////////////////
+
+    function challenge() external payable {
+        if (status != GameStatus.IN_PROGRESS) revert ClaimAlreadyResolved();
+        if (challenger != address(0)) revert ClaimAlreadyChallenged();
         if (block.timestamp >= challengeDeadline) {
             revert ChallengePeriodElapsed(block.timestamp, challengeDeadline);
         }
         if (!stakingRegistry.isStaked(msg.sender)) revert UnstakedChallenger(msg.sender);
-        if (msg.value != challengerBond) revert InvalidBond(challengerBond, msg.value);
-        if (challenger != address(0)) revert DuplicateChallenge(challenger);
+        if (msg.value != challengerBond) revert IncorrectBondAmount();
 
         challenger = payable(msg.sender);
-        postedChallengerBond = msg.value;
+        challengedAt = uint64(block.timestamp);
+        proofDeadline = uint64(block.timestamp + proofPeriod);
 
-        if (state == WorldChainProofLib.RootState.PROPOSED) {
-            state = WorldChainProofLib.RootState.CHALLENGED;
-            challengedAt = uint64(block.timestamp);
-        }
+        // Custody the challenger bond in DelayedWETH and track the refund-mode credit.
+        refundModeCredit[msg.sender] += msg.value;
+        totalBonds += msg.value;
+        weth.deposit{value: msg.value}();
 
         emit Challenged(msg.sender, proofDeadline);
     }
 
-    /// @notice Returns the ETH amount `recipient` can withdraw from this game.
-    function claimable(address recipient) external view override returns (uint256) {
-        return _claimable(recipient);
-    }
-
-    /// @notice Permissionlessly withdraws `recipient`'s claim to `recipient`.
-    /// @dev The challenger, defender/prover-service automation, or keepers can call this after resolution;
-    ///      the caller cannot redirect funds away from `recipient`.
-    function withdraw(address payable recipient) external override nonReentrant {
-        address account = recipient;
-        uint256 amount = _claimable(account);
-        if (amount == 0) revert NoClaim(account);
-
-        uint256 refundablePrincipal = _refundableChallengerPrincipal(account);
-        payoutCredits[account] = 0;
-        if (refundablePrincipal != 0) postedChallengerBond = 0;
-
-        _transfer(recipient, amount);
-        emit Withdrawn(account, amount);
-    }
-
     function submitProofLane(uint8 laneId, bytes calldata proof) external {
-        if (state != WorldChainProofLib.RootState.CHALLENGED) {
-            revert InvalidState(WorldChainProofLib.RootState.CHALLENGED, state);
+        if (status != GameStatus.IN_PROGRESS || challenger == address(0)) {
+            revert ClaimAlreadyResolved();
         }
         if (block.timestamp >= proofDeadline) {
             revert ProofPeriodElapsed(block.timestamp, proofDeadline);
@@ -269,184 +498,202 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IWorldChainProof
         }
     }
 
-    /// @notice Returns whether this game can resolve now and the resulting state and invalidation reason.
+    ////////////////////////////////////////////////////////////////
+    //                        Resolution                          //
+    ////////////////////////////////////////////////////////////////
+
+    /// @notice Returns whether this game can resolve now and the resulting legacy outcome.
     function resolutionStatus()
         external
         view
-        override
         returns (bool resolvable, WorldChainProofLib.RootState outcome, WorldChainProofLib.InvalidationReason reason)
     {
-        ResolutionEvaluation memory evaluation = _evaluateResolution();
-        return (evaluation.status == ResolutionStatus.RESOLVABLE, evaluation.outcome, evaluation.reason);
-    }
-
-    /// @notice Settles this game after evaluating its blacklist, parent, deadline, and proof-threshold conditions.
-    /// @dev Resolution assigns pull-based bond claims; call `withdraw(recipient)` to transfer claimable ETH.
-    function resolve()
-        external
-        override
-        returns (WorldChainProofLib.RootState outcome, WorldChainProofLib.InvalidationReason reason)
-    {
-        ResolutionEvaluation memory evaluation = _evaluateResolution();
-        if (evaluation.status != ResolutionStatus.RESOLVABLE) {
-            if (evaluation.status == ResolutionStatus.PARENT_NOT_RESOLVED) {
-                revert ParentGameNotResolved(parentRef, evaluation.parentState);
-            }
-            if (evaluation.status == ResolutionStatus.ALREADY_RESOLVED) revert AlreadyResolved(state);
-            revert NotReady();
+        if (status != GameStatus.IN_PROGRESS) {
+            return (false, state(), invalidationReason);
         }
 
-        if (evaluation.outcome == WorldChainProofLib.RootState.FINALIZED) {
-            _finalize();
-        } else {
-            _invalidate(evaluation.reason);
+        (GameStatus parentStatus, bool parentBlacklisted) = _parentResolution();
+        if (parentBlacklisted || parentStatus == GameStatus.CHALLENGER_WINS) {
+            return
+                (true, WorldChainProofLib.RootState.INVALIDATED, WorldChainProofLib.InvalidationReason.INVALID_PARENT);
+        }
+        if (parentStatus == GameStatus.IN_PROGRESS) {
+            return (false, state(), WorldChainProofLib.InvalidationReason.NONE);
         }
 
-        return (evaluation.outcome, evaluation.reason);
-    }
-
-    /// @notice Asks the registry to advance its accepted anchor to this game.
-    /// @dev This is separate from Portal withdrawal finalization, which reads `isGameClaimValid` directly.
-    function closeGame() external override {
-        IWorldChainAnchorStateRegistry(anchorStateRegistry).setAnchorState(address(this));
-    }
-
-    function _evaluateResolution() internal view returns (ResolutionEvaluation memory evaluation) {
-        WorldChainProofLib.RootState currentState = state;
-        if (
-            currentState == WorldChainProofLib.RootState.FINALIZED
-                || currentState == WorldChainProofLib.RootState.INVALIDATED
-        ) {
-            evaluation.outcome = currentState;
-            evaluation.reason = invalidationReason;
-            evaluation.status = ResolutionStatus.ALREADY_RESOLVED;
-            return evaluation;
+        if (challenger == address(0)) {
+            return block.timestamp >= challengeDeadline
+                ? (true, WorldChainProofLib.RootState.FINALIZED, WorldChainProofLib.InvalidationReason.NONE)
+                : (false, WorldChainProofLib.RootState.PROPOSED, WorldChainProofLib.InvalidationReason.NONE);
         }
 
-        IWorldChainAnchorStateRegistry registry = IWorldChainAnchorStateRegistry(anchorStateRegistry);
-        // 1. A governance blacklist invalidates this game before parent or deadline evaluation.
-        if (registry.isGameBlacklisted(address(this))) {
-            evaluation.status = ResolutionStatus.RESOLVABLE;
-            evaluation.outcome = WorldChainProofLib.RootState.INVALIDATED;
-            evaluation.reason = WorldChainProofLib.InvalidationReason.BLACKLISTED;
-            return evaluation;
-        }
-
-        WorldChainProofLib.RootState parentState;
-        bool parentBlacklisted;
-        if (parentRef == anchorStateRegistry) {
-            // The registry sentinel represents the immutable deployment anchor before a game anchor exists.
-            parentState = WorldChainProofLib.RootState.FINALIZED;
-        } else {
-            parentBlacklisted = registry.isGameBlacklisted(parentRef);
-            if (!parentBlacklisted) parentState = IWorldChainProofSystemGame(parentRef).state();
-        }
-
-        if (
-            parentState == WorldChainProofLib.RootState.PROPOSED
-                || parentState == WorldChainProofLib.RootState.CHALLENGED
-        ) {
-            // 2. A proposed or challenged parent must resolve before its descendant.
-            evaluation.outcome = currentState;
-            evaluation.status = ResolutionStatus.PARENT_NOT_RESOLVED;
-            evaluation.parentState = parentState;
-            return evaluation;
-        }
-        if (
-            parentBlacklisted || parentState == WorldChainProofLib.RootState.INVALIDATED
-                || parentState == WorldChainProofLib.RootState.NONE
-        ) {
-            // 3. A blacklisted, invalidated, or unset parent invalidates its descendant.
-            evaluation.status = ResolutionStatus.RESOLVABLE;
-            evaluation.outcome = WorldChainProofLib.RootState.INVALIDATED;
-            evaluation.reason = WorldChainProofLib.InvalidationReason.INVALID_PARENT;
-            return evaluation;
-        }
-
-        if (currentState == WorldChainProofLib.RootState.PROPOSED) {
-            if (block.timestamp < challengeDeadline) {
-                // 4. An unchallenged proposal cannot finalize while its challenge window is active.
-                evaluation.outcome = currentState;
-                return evaluation;
-            }
-            // 5. An unchallenged proposal finalizes after its challenge window expires.
-            // Safety therefore relies on every incorrect claim being challenged before this deadline.
-            evaluation.status = ResolutionStatus.RESOLVABLE;
-            evaluation.outcome = WorldChainProofLib.RootState.FINALIZED;
-            return evaluation;
-        }
-
-        // 6. A challenged game finalizes as soon as enough independent proof lanes support it.
         if (WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
-            evaluation.status = ResolutionStatus.RESOLVABLE;
-            evaluation.outcome = WorldChainProofLib.RootState.FINALIZED;
-            return evaluation;
+            return (true, WorldChainProofLib.RootState.FINALIZED, WorldChainProofLib.InvalidationReason.NONE);
         }
-        if (block.timestamp < proofDeadline) {
-            // 7. A challenged game below threshold waits while its proof window is active.
-            evaluation.outcome = currentState;
-            return evaluation;
-        }
-
-        // 8. A challenged game below threshold times out once its proof window expires.
-        evaluation.status = ResolutionStatus.RESOLVABLE;
-        evaluation.outcome = WorldChainProofLib.RootState.INVALIDATED;
-        evaluation.reason = WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT;
+        return block.timestamp >= proofDeadline
+            ? (true, WorldChainProofLib.RootState.INVALIDATED, WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT)
+            : (false, WorldChainProofLib.RootState.CHALLENGED, WorldChainProofLib.InvalidationReason.NONE);
     }
 
-    function _invalidate(WorldChainProofLib.InvalidationReason reason) internal {
-        state = WorldChainProofLib.RootState.INVALIDATED;
-        invalidationReason = reason;
-        _resolvedAt = uint64(block.timestamp);
+    /// @notice Resolves the game.
+    ///         `DEFENDER_WINS` when the challenge window expires unchallenged, or when enough
+    ///         proof lanes support a challenged claim. `CHALLENGER_WINS` when the proof window
+    ///         expires below threshold, or when the parent game is invalid.
+    /// @dev Resolution gates on the parent's *status*, never on its claim validity, so the
+    ///      anchor registry's finality airgap does not slow the proposal cadence. Bonds are
+    ///      credited here and paid out through `claimCredit` after `closeGame`.
+    function resolve() external returns (GameStatus status_) {
+        if (status != GameStatus.IN_PROGRESS) revert ClaimAlreadyResolved();
 
-        uint256 balance = address(this).balance;
-        if (reason == WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT) {
-            payoutCredits[challenger] += balance;
-            // The full-balance credit already includes the challenger bond, so it is no longer separately refundable.
-            postedChallengerBond = 0;
+        (GameStatus parentStatus, bool parentBlacklisted) = _parentResolution();
+
+        if (parentBlacklisted || parentStatus == GameStatus.CHALLENGER_WINS) {
+            // An invalid parent invalidates this game regardless of its own proof state. Unlike
+            // ZKDisputeGame (which awards the challenger), both bonds are refunded: neither
+            // party is at fault for an ancestor's failure.
+            status = GameStatus.CHALLENGER_WINS;
+            invalidationReason = WorldChainProofLib.InvalidationReason.INVALID_PARENT;
+            normalModeCredit[gameCreator()] += proposerBond;
+            if (challenger != address(0)) normalModeCredit[challenger] += challengerBond;
+        } else if (parentStatus == GameStatus.IN_PROGRESS) {
+            // A proposed or challenged parent must resolve before its descendant.
+            revert ParentGameNotResolved();
+        } else if (challenger == address(0)) {
+            // An unchallenged proposal finalizes after its challenge window expires. Safety
+            // therefore relies on every incorrect claim being challenged before this deadline.
+            if (block.timestamp < challengeDeadline) revert GameNotOver();
+            status = GameStatus.DEFENDER_WINS;
+            normalModeCredit[gameCreator()] = totalBonds;
+        } else if (WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
+            // A challenged game finalizes as soon as enough independent proof lanes support it.
+            // The proposer takes the challenger bond.
+            status = GameStatus.DEFENDER_WINS;
+            normalModeCredit[gameCreator()] = totalBonds;
+        } else if (block.timestamp >= proofDeadline) {
+            // A challenged game below threshold times out once its proof window expires. The
+            // challenger takes the proposer bond.
+            status = GameStatus.CHALLENGER_WINS;
+            invalidationReason = WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT;
+            normalModeCredit[challenger] = totalBonds;
         } else {
-            uint256 proposerRefund = balance - postedChallengerBond;
-            if (proposerRefund != 0) payoutCredits[gameCreator] += proposerRefund;
+            revert GameNotOver();
         }
 
-        emit Invalidated(rootId, reason);
+        resolvedAt = Timestamp.wrap(uint64(block.timestamp));
+        emit Resolved(status);
+
+        return status;
     }
 
-    function _finalize() internal {
-        state = WorldChainProofLib.RootState.FINALIZED;
-        _resolvedAt = uint64(block.timestamp);
+    /// @notice Returns the parent's resolution inputs.
+    /// @dev The anchor sentinel counts as a finalized parent: the anchor is only ever set from
+    ///      a claim-valid game, so its root is already trusted. Parent blacklist evaluation is
+    ///      retained from the legacy game (stock ZKDisputeGame leaves it to the guardian): a
+    ///      blacklisted parent invalidates descendants at resolution without further guardian
+    ///      action, even while that parent is unresolved.
+    function _parentResolution() internal view returns (GameStatus parentStatus, bool parentBlacklisted) {
+        if (parentIndex() == ANCHOR_PARENT_INDEX) {
+            return (GameStatus.DEFENDER_WINS, false);
+        }
+        (,, IDisputeGame parent) = disputeGameFactory.gameAtIndex(parentIndex());
+        parentBlacklisted = anchorStateRegistry.isGameBlacklisted(parent);
+        if (!parentBlacklisted) parentStatus = parent.status();
+    }
 
-        uint256 payout = address(this).balance;
-        if (payout != 0) {
-            payoutCredits[gameCreator] += payout;
+    ////////////////////////////////////////////////////////////////
+    //                      Bond settlement                       //
+    ////////////////////////////////////////////////////////////////
+
+    /// @notice Closes out the game: requires the registry to consider it finalized (resolution
+    ///         plus the finality airgap), attempts to advance the anchor to it, and locks in
+    ///         the bond distribution mode (`REFUND` for improper games — blacklisted, retired,
+    ///         or otherwise invalidated by the registry).
+    function closeGame() public {
+        if (bondDistributionMode == BondDistributionMode.REFUND || bondDistributionMode == BondDistributionMode.NORMAL)
+        {
+            // Already closed; must not revert or `claimCredit` would break.
+            return;
+        } else if (bondDistributionMode != BondDistributionMode.UNDECIDED) {
+            revert InvalidBondDistributionMode();
         }
 
-        emit Finalized(rootId);
+        // While the system is paused games are temporarily invalid; closing now would lock in
+        // refund mode spuriously.
+        if (anchorStateRegistry.paused()) revert GamePaused();
+
+        if (resolvedAt.raw() == 0) revert GameNotResolved();
+
+        IDisputeGame self = IDisputeGame(address(this));
+
+        // The finality airgap must elapse after resolution before any payout.
+        if (!anchorStateRegistry.isGameFinalized(self)) revert GameNotFinalized();
+
+        // Advancing the anchor is best-effort: this game may legitimately be ineligible (e.g.
+        // an older block number than the current anchor, or an unrespected game type).
+        // nosemgrep: sol-safety-trycatch-eip150
+        try anchorStateRegistry.setAnchorState(self) {} catch {}
+
+        bondDistributionMode =
+            anchorStateRegistry.isGameProper(self) ? BondDistributionMode.NORMAL : BondDistributionMode.REFUND;
+
+        emit GameClosed(bondDistributionMode);
+    }
+
+    /// @notice Claims the credit belonging to `recipient` using the two-phase DelayedWETH
+    ///         withdrawal pattern: the first call unlocks, the second (after the WETH delay)
+    ///         withdraws and transfers. Permissionless; funds only ever move to `recipient`.
+    function claimCredit(address recipient) external {
+        // If closeGame() flips the distribution mode within this call and there is nothing to
+        // claim, return instead of reverting so the close is not rolled back.
+        bool gameWasOpen = bondDistributionMode == BondDistributionMode.UNDECIDED;
+
+        closeGame();
+
+        uint256 recipientCredit;
+        if (bondDistributionMode == BondDistributionMode.REFUND) {
+            recipientCredit = refundModeCredit[recipient];
+        } else if (bondDistributionMode == BondDistributionMode.NORMAL) {
+            recipientCredit = normalModeCredit[recipient];
+        } else {
+            revert InvalidBondDistributionMode();
+        }
+
+        // Phase 1: zero the credit and unlock it in DelayedWETH.
+        if (recipientCredit > 0) {
+            refundModeCredit[recipient] = 0;
+            normalModeCredit[recipient] = 0;
+            weth.unlock(recipient, recipientCredit);
+            return;
+        }
+
+        // Phase 2: finalize the pending DelayedWETH withdrawal.
+        (uint256 amount,) = weth.withdrawals(address(this), recipient);
+        if (amount == 0) {
+            if (gameWasOpen) return;
+            revert NoCreditToClaim();
+        }
+
+        weth.withdraw(recipient, amount);
+
+        // solady's CWIA proxy implements `receive()`, so the WETH98 2300-gas transfer above
+        // succeeds without a `receive()` on this implementation.
+        (bool success,) = recipient.call{value: amount}(hex"");
+        if (!success) revert BondTransferFailed();
+    }
+
+    /// @notice Returns the claimable credit of `recipient` under the current (or default
+    ///         normal) distribution mode.
+    function credit(address recipient) external view returns (uint256 credit_) {
+        if (bondDistributionMode == BondDistributionMode.REFUND) {
+            credit_ = refundModeCredit[recipient];
+        } else {
+            credit_ = normalModeCredit[recipient];
+        }
     }
 
     function _verifierFor(WorldChainProofLib.ProofLane lane) internal view returns (IWorldChainProofVerifier) {
         if (lane == WorldChainProofLib.ProofLane.VALIDITY_PROOF) return validityProofVerifier;
         if (lane == WorldChainProofLib.ProofLane.TEE_ATTESTATION) return teeVerifier;
         return securityCouncil;
-    }
-
-    function _claimable(address recipient) internal view returns (uint256) {
-        return payoutCredits[recipient] + _refundableChallengerPrincipal(recipient);
-    }
-
-    /// @dev Proof timeout credits the full balance to the challenger, so only inherited or governance invalidations
-    ///      refund the challenger bond separately.
-    function _refundableChallengerPrincipal(address recipient) internal view returns (uint256) {
-        bool challengerBondIsRefundable = state == WorldChainProofLib.RootState.INVALIDATED && recipient == challenger
-            && (invalidationReason == WorldChainProofLib.InvalidationReason.INVALID_PARENT
-                || invalidationReason == WorldChainProofLib.InvalidationReason.BLACKLISTED);
-
-        return challengerBondIsRefundable ? postedChallengerBond : 0;
-    }
-
-    function _transfer(address payable recipient, uint256 amount) internal {
-        if (amount == 0) return;
-        (bool ok,) = recipient.call{value: amount}("");
-        if (!ok) revert TransferFailed(recipient, amount);
     }
 }
