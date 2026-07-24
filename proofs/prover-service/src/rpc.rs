@@ -57,6 +57,16 @@ pub mod error_code {
 #[rpc(server, client, namespace = "prover")]
 pub trait ProverServiceApi {
     /// Queue a proof request, returning its deterministic id.
+    ///
+    /// The `prover-service` itself is backend-agnostic and does not validate `root_claim`
+    /// against the real L2 chain here — nor should it, since `root_claim` is the
+    /// (potentially disputed) claim under test; independently re-deriving and verifying it
+    /// is the whole point of proof generation. Backend-specific workers may still perform
+    /// their own fast-fail sanity checks on well-formedness before starting expensive proof
+    /// generation: for example, the Nitro worker rejects requests whose pre-state
+    /// checkpoint doesn't correspond to a real L2 block (via the L2 rollup node's
+    /// `optimism_outputAtBlock`) before dispatching to the enclave, see
+    /// `world_chain_nitro_worker::NitroBackend`.
     #[method(name = "requestProof")]
     async fn request_proof(&self, proof_request: ProofRequest) -> RpcResult<ProofRequestId>;
 

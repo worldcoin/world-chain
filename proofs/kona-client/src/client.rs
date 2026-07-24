@@ -49,6 +49,23 @@ where
     DP: DriverPipeline<P> + Send + Sync + Debug,
     P: Pipeline + SignalReceiver + Send + Sync + Debug,
 {
+    let start_block_number = driver.cursor.read().tip().l2_safe_head.block_info.number;
+    // Progress is logged at least every 10% of the range, but never less often than every
+    // 100 blocks, so small ranges still get a handful of updates and huge ranges don't get
+    // spammed. `target` is `None` for open-ended derivation (no fixed range), in which case
+    // we just fall back to a flat every-100-blocks cadence.
+    let progress_interval = target
+        .map(|target_block| {
+            target_block
+                .saturating_sub(start_block_number)
+                .max(1)
+                .div_ceil(10)
+                .min(100)
+        })
+        .unwrap_or(100)
+        .max(1);
+    let mut last_logged_block_number = start_block_number;
+
     loop {
         let pipeline_cursor = driver.cursor.read();
         let tip_cursor = pipeline_cursor.tip();
@@ -163,6 +180,25 @@ where
 
         drop(pipeline_cursor);
         driver.cursor.write().advance(origin, tip_cursor);
+
+        let processed_block_number = l2_info.block_info.number;
+        if processed_block_number.saturating_sub(last_logged_block_number) >= progress_interval {
+            last_logged_block_number = processed_block_number;
+            match target {
+                Some(target_block) => {
+                    let total = target_block.saturating_sub(start_block_number).max(1);
+                    let done = processed_block_number.saturating_sub(start_block_number);
+                    let percent = done.saturating_mul(100) / total;
+                    info!(
+                        target: "client",
+                        "Processed block {processed_block_number} ({done}/{total}, {percent}%)"
+                    );
+                }
+                None => {
+                    info!(target: "client", "Processed block {processed_block_number}");
+                }
+            }
+        }
 
         #[cfg(target_os = "zkvm")]
         std::mem::forget(block);
