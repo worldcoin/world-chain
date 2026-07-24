@@ -112,7 +112,11 @@ where
         game: &GameMetadata,
         now: u64,
     ) -> Result<GameScanOutcome, DefenderError> {
-        match self.execution_provider.root_state(game.address).await? {
+        let status = self
+            .execution_provider
+            .resolution_status(game.address)
+            .await?;
+        match status.root_state {
             RootState::Proposed => {
                 if now < game.challenge_deadline {
                     Ok(GameScanOutcome::Track)
@@ -125,34 +129,36 @@ where
                     return Ok(GameScanOutcome::Track);
                 }
 
-                let status = self
-                    .execution_provider
-                    .resolution_status(game.address)
-                    .await?;
-                if status.positive_resolvable() {
-                    info!(
-                        game = %game.address,
-                        "challenged game already has sufficient proof support"
-                    );
-                } else if status.resolvable
-                    && status.root_state == RootState::Invalidated
-                    && status.invalidation_reason != InvalidationReason::ProofTimeout
-                {
-                    warn!(
-                        game = %game.address,
-                        reason = ?status.invalidation_reason,
-                        "challenged game is invalidatable without defense"
-                    );
-                } else {
+                error!(
+                    game = %game.address,
+                    proof_deadline = game.proof_deadline,
+                    "challenged game proof deadline elapsed before defense completed"
+                );
+                Ok(GameScanOutcome::Skip)
+            }
+            RootState::Finalized => {
+                info!(
+                    game = %game.address,
+                    "game already has a positive resolution outcome"
+                );
+                Ok(GameScanOutcome::Skip)
+            }
+            RootState::Invalidated => {
+                if status.invalidation_reason == InvalidationReason::ProofTimeout {
                     error!(
                         game = %game.address,
                         proof_deadline = game.proof_deadline,
                         "challenged game proof deadline elapsed before defense completed"
                     );
+                } else {
+                    warn!(
+                        game = %game.address,
+                        reason = ?status.invalidation_reason,
+                        "game is invalidatable without defense"
+                    );
                 }
                 Ok(GameScanOutcome::Skip)
             }
-            RootState::Finalized | RootState::Invalidated => Ok(GameScanOutcome::Skip),
             RootState::None => {
                 error!(game = %game.address, "factory game has unset root state");
                 Ok(GameScanOutcome::Skip)
@@ -204,7 +210,8 @@ where
         now: u64,
     ) -> Result<WatchOutcome, DefenderError> {
         let address = game.address;
-        match self.execution_provider.root_state(address).await? {
+        let status = self.execution_provider.resolution_status(address).await?;
+        match status.root_state {
             RootState::Proposed => {
                 if now >= game.challenge_deadline {
                     // the game can no longer be challenged
@@ -213,30 +220,6 @@ where
                 Ok(WatchOutcome::Keep)
             }
             RootState::Challenged => {
-                let status = self.execution_provider.resolution_status(address).await?;
-                if status.positive_resolvable() {
-                    info!(game = %address, "challenged game already has sufficient proof support");
-                    return Ok(WatchOutcome::Drop);
-                }
-                if status.resolvable && status.root_state == RootState::Invalidated {
-                    if status.invalidation_reason == InvalidationReason::ProofTimeout {
-                        error!(
-                            game = %address,
-                            proof_deadline = game.proof_deadline,
-                            "challenged game proof deadline elapsed before defense completed"
-                        );
-                    } else {
-                        warn!(
-                            game = %address,
-                            reason = ?status.invalidation_reason,
-                            "challenged game is invalidatable without defense"
-                        );
-                    }
-                    return Ok(WatchOutcome::Drop);
-                }
-                if status.is_resolved() {
-                    return Ok(WatchOutcome::Drop);
-                }
                 if now >= game.proof_deadline {
                     error!(
                         game = %address,
@@ -266,7 +249,26 @@ where
                     Ok(WatchOutcome::Drop)
                 }
             }
-            RootState::Finalized | RootState::Invalidated => Ok(WatchOutcome::Drop),
+            RootState::Finalized => {
+                info!(game = %address, "game has a positive resolution outcome");
+                Ok(WatchOutcome::Drop)
+            }
+            RootState::Invalidated => {
+                if status.invalidation_reason == InvalidationReason::ProofTimeout {
+                    error!(
+                        game = %address,
+                        proof_deadline = game.proof_deadline,
+                        "challenged game proof deadline elapsed before defense completed"
+                    );
+                } else {
+                    warn!(
+                        game = %address,
+                        reason = ?status.invalidation_reason,
+                        "game is invalidatable without defense"
+                    );
+                }
+                Ok(WatchOutcome::Drop)
+            }
             RootState::None => {
                 error!(game = %address, "factory game has unset root state");
                 Ok(WatchOutcome::Drop)
@@ -436,22 +438,17 @@ where
     ) -> Result<DefenseProgress, DefenderError> {
         let metadata = &defense.game;
         let game = metadata.address;
-        if self.execution_provider.root_state(game).await? != RootState::Challenged {
-            return Ok(DefenseProgress::Closed);
-        }
-
         let status = self.execution_provider.resolution_status(game).await?;
-        if status.positive_resolvable() {
-            return Ok(DefenseProgress::Complete);
-        }
-        if status.resolvable && status.root_state == RootState::Invalidated {
-            if status.invalidation_reason == InvalidationReason::ProofTimeout {
-                return Ok(DefenseProgress::DeadlineElapsed);
+        match status.root_state {
+            RootState::Finalized => return Ok(DefenseProgress::Complete),
+            RootState::Invalidated => {
+                if status.invalidation_reason == InvalidationReason::ProofTimeout {
+                    return Ok(DefenseProgress::DeadlineElapsed);
+                }
+                return Ok(DefenseProgress::Closed);
             }
-            return Ok(DefenseProgress::Closed);
-        }
-        if status.is_resolved() {
-            return Ok(DefenseProgress::Closed);
+            RootState::Challenged => {}
+            RootState::None | RootState::Proposed => return Ok(DefenseProgress::Closed),
         }
         if now >= metadata.proof_deadline {
             return Ok(DefenseProgress::DeadlineElapsed);
