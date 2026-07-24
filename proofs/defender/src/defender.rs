@@ -1,25 +1,50 @@
 use crate::{
     config::DefenderConfig,
     error::DefenderError,
+    game::{GameEvaluator, GameObservation, GameOutcome},
+    lane::{DEFENDED_LANE_COUNT, DEFENDED_LANES, LaneDriver, LaneState},
     traits::DefenderClient,
-    types::{
-        ActiveDefense, DEFENDED_LANES, DefenseProgress, GameMetadata, GameScanOutcome, LaneState,
-        WatchOutcome,
-    },
+    types::GameMetadata,
 };
-use alloy_primitives::{Address, BlockNumber, Bytes};
+use alloy_primitives::{Address, BlockNumber};
 use futures_util::{StreamExt, stream};
 use std::{
     collections::HashMap,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::{error, info, warn};
-use world_chain_proofs::{
-    ConsensusProvider, InvalidationReason, ProofLane, RootState, proof_count,
-};
-use world_chain_prover_service::{
-    ProofBackend, ProofData, ProofRequest, ProofRequester, ProofResponse, ProofStatus,
-};
+use world_chain_proofs::{ConsensusProvider, InvalidationReason};
+use world_chain_prover_service::ProofRequester;
+
+/// An active defense of a challenged game with a valid root.
+#[derive(Debug, Clone, Copy)]
+struct ActiveDefense {
+    game: GameMetadata,
+    /// Lane progress, indexed like [`DEFENDED_LANES`].
+    lanes: [LaneState; DEFENDED_LANE_COUNT],
+}
+
+impl ActiveDefense {
+    const fn new(game: GameMetadata) -> Self {
+        Self {
+            game,
+            lanes: [LaneState::Pending; DEFENDED_LANE_COUNT],
+        }
+    }
+}
+
+/// Result of advancing a single defense for one tick.
+#[derive(Debug, Clone, Copy)]
+enum DefenseProgress {
+    /// The game left the `Challenged` state on-chain.
+    Closed,
+    /// The game already has enough proof support to complete the defense.
+    Complete,
+    /// The proof deadline elapsed before the defense completed.
+    DeadlineElapsed,
+    /// Lane progress after this tick.
+    Lanes([LaneState; DEFENDED_LANE_COUNT]),
+}
 
 /// World Chain Defender.
 ///
@@ -109,100 +134,36 @@ where
         Ok(low)
     }
 
-    async fn scan_game(
-        &self,
-        game: &GameMetadata,
-        now: u64,
-    ) -> Result<GameScanOutcome, DefenderError> {
-        let status = self
-            .execution_provider
-            .resolution_status(game.address)
-            .await?;
-        match status.root_state {
-            RootState::Proposed => {
-                if now < game.challenge_deadline {
-                    Ok(GameScanOutcome::Track)
-                } else {
-                    Ok(GameScanOutcome::Skip)
-                }
-            }
-            RootState::Challenged => {
-                let proof_bitmap = self.execution_provider.proof_bitmap(game.address).await?;
-                if has_required_proof_support(game, proof_bitmap) {
-                    info!(
-                        game = %game.address,
-                        proof_bitmap,
-                        proof_threshold = game.proof_threshold,
-                        "challenged game already has sufficient proof support"
-                    );
-                    return Ok(GameScanOutcome::Skip);
-                }
-                if now < game.proof_deadline {
-                    return Ok(GameScanOutcome::Track);
-                }
-
-                error!(
-                    game = %game.address,
-                    proof_deadline = game.proof_deadline,
-                    "challenged game proof deadline elapsed before defense completed"
-                );
-                Ok(GameScanOutcome::Skip)
-            }
-            RootState::Finalized => {
-                info!(
-                    game = %game.address,
-                    "game already has a positive resolution outcome"
-                );
-                Ok(GameScanOutcome::Skip)
-            }
-            RootState::Invalidated => {
-                if status.invalidation_reason == InvalidationReason::ProofTimeout {
-                    error!(
-                        game = %game.address,
-                        proof_deadline = game.proof_deadline,
-                        "challenged game proof deadline elapsed before defense completed"
-                    );
-                } else {
-                    warn!(
-                        game = %game.address,
-                        reason = ?status.invalidation_reason,
-                        "game is invalidatable without defense"
-                    );
-                }
-                Ok(GameScanOutcome::Skip)
-            }
-            RootState::None => {
-                error!(game = %game.address, "factory game has unset root state");
-                Ok(GameScanOutcome::Skip)
-            }
-        }
-    }
-
-    async fn scan_games(
+    async fn evaluate_discovered_games(
         &self,
         games: impl IntoIterator<Item = GameMetadata>,
         now: u64,
-    ) -> Vec<(GameMetadata, Result<GameScanOutcome, DefenderError>)> {
+    ) -> Vec<(GameMetadata, Result<GameOutcome, DefenderError>)> {
+        let evaluator = GameEvaluator::new(&self.execution_provider, &self.consensus_provider);
         stream::iter(games)
-            .map(|game| async move {
-                let result = self.scan_game(&game, now).await;
-                (game, result)
+            .map(move |game| {
+                let evaluator = evaluator;
+                async move {
+                    let result = evaluator.evaluate_discovered(&game, now).await;
+                    (game, result)
+                }
             })
             .buffer_unordered(self.config.max_game_concurrency)
             .collect()
             .await
     }
 
-    fn handle_game_scan_results(
+    fn handle_discovered_game_outcomes(
         &mut self,
-        results: Vec<(GameMetadata, Result<GameScanOutcome, DefenderError>)>,
+        outcomes: Vec<(GameMetadata, Result<GameOutcome, DefenderError>)>,
     ) {
-        for (game, result) in results {
-            match result {
-                Ok(GameScanOutcome::Track) => {
+        for (game, outcome) in outcomes {
+            match outcome {
+                Ok(GameOutcome::Track) => {
                     self.watched_games.insert(game.address, game);
                 }
-                Ok(GameScanOutcome::Skip) => {}
+                Ok(GameOutcome::Defend) => self.start_defense(game),
+                Ok(GameOutcome::Drop) => {}
                 Err(error) => {
                     warn!(
                         game = %game.address,
@@ -215,121 +176,39 @@ where
         }
     }
 
-    async fn watch_game(
-        &self,
-        game: &GameMetadata,
-        latest_finalized_l2_block: BlockNumber,
-        now: u64,
-    ) -> Result<WatchOutcome, DefenderError> {
-        let address = game.address;
-        let status = self.execution_provider.resolution_status(address).await?;
-        match status.root_state {
-            RootState::Proposed => {
-                if now >= game.challenge_deadline {
-                    // the game can no longer be challenged
-                    return Ok(WatchOutcome::Drop);
-                }
-                Ok(WatchOutcome::Keep)
-            }
-            RootState::Challenged => {
-                let proof_bitmap = self.execution_provider.proof_bitmap(address).await?;
-                if has_required_proof_support(game, proof_bitmap) {
-                    info!(
-                        game = %address,
-                        proof_bitmap,
-                        proof_threshold = game.proof_threshold,
-                        "challenged game already has sufficient proof support"
-                    );
-                    return Ok(WatchOutcome::Drop);
-                }
-                if now >= game.proof_deadline {
-                    error!(
-                        game = %address,
-                        proof_deadline = game.proof_deadline,
-                        "challenged game proof deadline elapsed before defense completed"
-                    );
-                    return Ok(WatchOutcome::Drop);
-                }
-
-                // only judge the root against finalized L2 state
-                if game.l2_block_number > latest_finalized_l2_block {
-                    return Ok(WatchOutcome::Keep);
-                }
-                let root = self
-                    .consensus_provider
-                    .output_root_at_block(game.l2_block_number)
-                    .await?;
-                if root == game.root_claim {
-                    Ok(WatchOutcome::Defend)
-                } else {
-                    error!(
-                        game = %address,
-                        claimed_root = %game.root_claim,
-                        canonical_root = %root,
-                        "allowlisted proposer published a non-canonical root; refusing to defend"
-                    );
-                    Ok(WatchOutcome::Drop)
-                }
-            }
-            RootState::Finalized => {
-                info!(game = %address, "game has a positive resolution outcome");
-                Ok(WatchOutcome::Drop)
-            }
-            RootState::Invalidated => {
-                if status.invalidation_reason == InvalidationReason::ProofTimeout {
-                    error!(
-                        game = %address,
-                        proof_deadline = game.proof_deadline,
-                        "challenged game proof deadline elapsed before defense completed"
-                    );
-                } else {
-                    warn!(
-                        game = %address,
-                        reason = ?status.invalidation_reason,
-                        "game is invalidatable without defense"
-                    );
-                }
-                Ok(WatchOutcome::Drop)
-            }
-            RootState::None => {
-                error!(game = %address, "factory game has unset root state");
-                Ok(WatchOutcome::Drop)
-            }
-        }
-    }
-
-    async fn scan_watched_games(
+    async fn evaluate_tracked_games(
         &self,
         latest_finalized_l2_block: BlockNumber,
         now: u64,
-    ) -> Vec<(GameMetadata, Result<WatchOutcome, DefenderError>)> {
+    ) -> Vec<(GameMetadata, Result<GameOutcome, DefenderError>)> {
+        let evaluator = GameEvaluator::new(&self.execution_provider, &self.consensus_provider);
         stream::iter(self.watched_games.values().copied().collect::<Vec<_>>())
-            .map(|game| async move {
-                let result = self.watch_game(&game, latest_finalized_l2_block, now).await;
-                (game, result)
+            .map(move |game| {
+                let evaluator = evaluator;
+                async move {
+                    let result = evaluator
+                        .evaluate_tracked(&game, latest_finalized_l2_block, now)
+                        .await;
+                    (game, result)
+                }
             })
             .buffer_unordered(self.config.max_game_concurrency)
             .collect()
             .await
     }
 
-    fn handle_watch_outcomes(
+    fn handle_tracked_game_outcomes(
         &mut self,
-        results: Vec<(GameMetadata, Result<WatchOutcome, DefenderError>)>,
+        outcomes: Vec<(GameMetadata, Result<GameOutcome, DefenderError>)>,
     ) {
-        for (metadata, result) in results {
+        for (metadata, outcome) in outcomes {
             let game = metadata.address;
-            match result {
-                Ok(WatchOutcome::Defend) => {
-                    info!(%game, "challenged game has a valid root; starting defense");
-                    self.watched_games.remove(&game);
-                    self.active_defenses
-                        .insert(game, ActiveDefense::new(metadata));
-                }
-                Ok(WatchOutcome::Drop) => {
+            match outcome {
+                Ok(GameOutcome::Defend) => self.start_defense(metadata),
+                Ok(GameOutcome::Drop) => {
                     self.watched_games.remove(&game);
                 }
-                Ok(WatchOutcome::Keep) => {}
+                Ok(GameOutcome::Track) => {}
                 Err(err) => {
                     warn!(game = %game, error = %err, "game watch failed; retrying next tick");
                 }
@@ -337,120 +216,12 @@ where
         }
     }
 
-    async fn advance_lane(
-        &self,
-        metadata: &GameMetadata,
-        lane: ProofLane,
-        backend: ProofBackend,
-        state: LaneState,
-    ) -> LaneState {
+    fn start_defense(&mut self, metadata: GameMetadata) {
         let game = metadata.address;
-        match state {
-            LaneState::Proven | LaneState::Abandoned => state,
-            LaneState::Pending => {
-                match self
-                    .proof_requester
-                    .request_proof(proof_request(metadata, backend))
-                    .await
-                {
-                    Ok(id) => LaneState::Requested { id, attempts: 1 },
-                    Err(error) => {
-                        warn!(%game, ?lane, %error, "proof request failed; retrying next tick");
-                        LaneState::Pending
-                    }
-                }
-            }
-            LaneState::Requested { id, attempts } => {
-                let status = match self.proof_requester.proof_status(id).await {
-                    Ok(status) => status,
-                    Err(error) => {
-                        warn!(%game, ?lane, %id, %error, "proof status check failed; retrying next tick");
-                        return state;
-                    }
-                };
-                match status {
-                    ProofStatus::Created | ProofStatus::Running => state,
-                    ProofStatus::Succeeded => {
-                        let response = match self.proof_requester.get_proof(id).await {
-                            Ok(ProofResponse::Succeeded(response)) => response,
-                            Ok(ProofResponse::Pending(response)) => {
-                                warn!(
-                                    %game,
-                                    ?lane,
-                                    %id,
-                                    status = %response.status,
-                                    "proof status was succeeded but proof response is pending; retrying next tick"
-                                );
-                                return state;
-                            }
-                            Ok(ProofResponse::Failed(response)) => {
-                                warn!(
-                                    %game,
-                                    ?lane,
-                                    %id,
-                                    reason = %response.reason,
-                                    "proof status was succeeded but proof response is failed; retrying next tick"
-                                );
-                                return state;
-                            }
-                            Err(error) => {
-                                warn!(%game, ?lane, %id, %error, "proof retrieval failed; retrying next tick");
-                                return state;
-                            }
-                        };
-                        match self
-                            .execution_provider
-                            .submit_proof(game, lane as u8, encode_proof(&response.proof))
-                            .await
-                        {
-                            Ok(submission) => {
-                                info!(%game, ?lane, tx_hash = %submission.tx_hash, "proof lane submitted");
-                                LaneState::Proven
-                            }
-                            Err(error) => {
-                                // if the transaction actually landed, the
-                                // proof bitmap check resolves the lane on the
-                                // next tick
-                                warn!(%game, ?lane, %error, "proof submission failed; retrying next tick");
-                                state
-                            }
-                        }
-                    }
-                    ProofStatus::Failed => {
-                        if attempts >= self.config.max_proof_attempts {
-                            error!(%game, ?lane, attempts, "proving permanently failed; abandoning lane");
-                            return LaneState::Abandoned;
-                        }
-                        // re-requesting a failed proof re-queues it
-                        match self
-                            .proof_requester
-                            .request_proof(proof_request(metadata, backend))
-                            .await
-                        {
-                            Ok(id) => {
-                                let next_attempt = attempts + 1;
-                                warn!(
-                                    %game,
-                                    ?lane,
-                                    %id,
-                                    attempts = next_attempt,
-                                    max_attempts = self.config.max_proof_attempts,
-                                    "proof failed; re-requested proof"
-                                );
-                                LaneState::Requested {
-                                    id,
-                                    attempts: next_attempt,
-                                }
-                            }
-                            Err(error) => {
-                                warn!(%game, ?lane, %error, "proof re-request failed; retrying next tick");
-                                state
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        info!(%game, "challenged game has a valid root; starting defense");
+        self.watched_games.remove(&game);
+        self.active_defenses
+            .insert(game, ActiveDefense::new(metadata));
     }
 
     async fn advance_defense(
@@ -459,36 +230,46 @@ where
         now: u64,
     ) -> Result<DefenseProgress, DefenderError> {
         let metadata = &defense.game;
-        let game = metadata.address;
-        let status = self.execution_provider.resolution_status(game).await?;
-        match status.root_state {
-            RootState::Finalized => return Ok(DefenseProgress::Complete),
-            RootState::Invalidated => {
-                if status.invalidation_reason == InvalidationReason::ProofTimeout {
+        let evaluator = GameEvaluator::new(&self.execution_provider, &self.consensus_provider);
+        let proof_bitmap = match evaluator.observe(metadata).await? {
+            GameObservation::Finalized => return Ok(DefenseProgress::Complete),
+            GameObservation::Invalidated(reason) => {
+                if reason == InvalidationReason::ProofTimeout {
                     return Ok(DefenseProgress::DeadlineElapsed);
                 }
                 return Ok(DefenseProgress::Closed);
             }
-            RootState::Challenged => {}
-            RootState::None | RootState::Proposed => return Ok(DefenseProgress::Closed),
-        }
-        let proof_bitmap = self.execution_provider.proof_bitmap(game).await?;
-        if has_required_proof_support(metadata, proof_bitmap) {
-            return Ok(DefenseProgress::Complete);
-        }
+            GameObservation::Challenged {
+                proof_bitmap,
+                has_required_support,
+            } => {
+                if has_required_support {
+                    return Ok(DefenseProgress::Complete);
+                }
+                proof_bitmap
+            }
+            GameObservation::Unset | GameObservation::Proposed => {
+                return Ok(DefenseProgress::Closed);
+            }
+        };
         if now >= metadata.proof_deadline {
             return Ok(DefenseProgress::DeadlineElapsed);
         }
 
         let mut lanes = defense.lanes;
-        for (slot, (lane, backend)) in DEFENDED_LANES.into_iter().enumerate() {
+        let lane_driver = LaneDriver::new(
+            &self.execution_provider,
+            &self.proof_requester,
+            self.config.max_proof_attempts,
+        );
+        for (slot, (proof_lane, backend)) in DEFENDED_LANES.into_iter().enumerate() {
             // skip lanes already proven on-chain, by us or by anyone else
-            if proof_bitmap & lane.mask() != 0 {
+            if proof_bitmap & proof_lane.mask() != 0 {
                 lanes[slot] = LaneState::Proven;
                 continue;
             }
-            lanes[slot] = self
-                .advance_lane(metadata, lane, backend, lanes[slot])
+            lanes[slot] = lane_driver
+                .advance(metadata, proof_lane, backend, lanes[slot])
                 .await;
         }
         Ok(DefenseProgress::Lanes(lanes))
@@ -549,12 +330,12 @@ where
         }
     }
 
-    pub(crate) async fn scan_once_with_timestamp(&mut self, now: u64) -> Result<(), DefenderError> {
-        self.config.validate()?;
-
+    async fn advance_active_defenses(&mut self, now: u64) {
         let defense_results = self.scan_active_defenses(now).await;
         self.handle_defense_progress(defense_results);
+    }
 
+    async fn discover_games(&mut self, now: u64) -> Result<(), DefenderError> {
         let game_count = self.execution_provider.game_count().await?;
         if self
             .next_game_index
@@ -586,26 +367,37 @@ where
             new_games.push(self.execution_provider.game_metadata(game).await?);
         }
 
-        let scan_results = self.scan_games(new_games, now).await;
-        self.handle_game_scan_results(scan_results);
+        let outcomes = self.evaluate_discovered_games(new_games, now).await;
+        self.handle_discovered_game_outcomes(outcomes);
         self.next_game_index = Some(end);
+        Ok(())
+    }
 
+    async fn advance_tracked_games(&mut self, now: u64) -> Result<(), DefenderError> {
         if self.watched_games.is_empty() {
             return Ok(());
         }
 
         let latest_finalized_l2_block = self.consensus_provider.latest_l2_finalized_block().await?;
 
-        let watch_results = self
-            .scan_watched_games(latest_finalized_l2_block, now)
+        let outcomes = self
+            .evaluate_tracked_games(latest_finalized_l2_block, now)
             .await;
-        self.handle_watch_outcomes(watch_results);
+        self.handle_tracked_game_outcomes(outcomes);
         Ok(())
     }
 
-    /// Scans one bounded factory range and advances every tracked defense.
-    pub async fn scan_once(&mut self) -> Result<(), DefenderError> {
-        self.scan_once_with_timestamp(unix_now()).await
+    pub(crate) async fn tick_at(&mut self, now: u64) -> Result<(), DefenderError> {
+        self.config.validate()?;
+
+        self.advance_active_defenses(now).await;
+        self.discover_games(now).await?;
+        self.advance_tracked_games(now).await
+    }
+
+    /// Advances the defender by one polling tick.
+    pub async fn tick(&mut self) -> Result<(), DefenderError> {
+        self.tick_at(unix_now()).await
     }
 
     /// Runs the defender forever, logging transient failures and retrying on each tick.
@@ -615,56 +407,11 @@ where
         let mut interval = tokio::time::interval(self.config.poll_interval);
         loop {
             interval.tick().await;
-            if let Err(e) = self.scan_once().await {
+            if let Err(e) = self.tick().await {
                 warn!(%e, "scan attempt failed");
             }
         }
     }
-}
-
-/// Builds the proof request for one lane of a defended game.
-fn proof_request(game: &GameMetadata, backend: ProofBackend) -> ProofRequest {
-    ProofRequest {
-        backend,
-        game: game.address,
-        root_claim: game.root_claim,
-        l2_block_number: game.l2_block_number,
-        // pin the witness to the L1 origin committed at proposal time, so
-        // the request id stays stable across defender restarts
-        l1_head: game.l1_origin_hash,
-    }
-}
-
-/// Encode a proof payload into the `bytes` argument of `submitProofLane`.
-///
-/// TODO: encode proofs for their concrete on-chain verifiers. SP1 proofs must
-/// match `SP1ValidityVerifier`'s ABI tuple:
-/// `(domainHash, parentRef, l1OriginNumber, publicValues, proofBytes)`.
-/// That requires proposal context in addition to `ProofData`, so this helper
-/// should move closer to the game/lane submission path before real SP1 lanes
-/// are enabled.
-fn encode_proof(proof: &ProofData) -> Bytes {
-    match proof {
-        ProofData::Sp1 {
-            proof,
-            public_values,
-        } => [public_values.as_ref(), proof.as_ref()].concat().into(),
-        ProofData::Nitro {
-            attestation,
-            public_values,
-            signature,
-        } => [
-            public_values.as_ref(),
-            attestation.as_ref(),
-            signature.as_ref(),
-        ]
-        .concat()
-        .into(),
-    }
-}
-
-fn has_required_proof_support(game: &GameMetadata, proof_bitmap: u8) -> bool {
-    proof_count(proof_bitmap) >= game.proof_threshold
 }
 
 fn unix_now() -> u64 {
