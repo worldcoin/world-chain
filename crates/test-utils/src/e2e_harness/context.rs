@@ -29,7 +29,7 @@ use reth_primitives_traits::{Block as _, BlockTy, SealedBlock};
 use reth_rpc_api::eth::RpcTypes;
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_cli::{WorldChainArgs, WorldChainNodeConfig};
-use world_chain_evm::{OpRethReceiptBuilder, WorldChainEvmConfig};
+use world_chain_evm::{OpEvmConfig, OpRethReceiptBuilder};
 use world_chain_node::{
     context::{FlashblocksComponentsContext, WorldChainNetworkBuilder},
     engine::FlashblocksEngineApiBuilder,
@@ -131,13 +131,10 @@ impl<Node> ExecutorBuilder<Node> for WorldExecutorBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = WorldChainSpec, Primitives = WorldPrimitives>>,
 {
-    type EVM = WorldChainEvmConfig<WorldPrimitives, WorldReceiptBuilder>;
+    type EVM = OpEvmConfig<WorldChainSpec, WorldPrimitives, WorldReceiptBuilder>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        Ok(WorldChainEvmConfig::new(
-            ctx.chain_spec(),
-            WorldReceiptBuilder,
-        ))
+        Ok(OpEvmConfig::new(ctx.chain_spec(), WorldReceiptBuilder))
     }
 }
 
@@ -195,12 +192,12 @@ where
             BasicWorldChainPool<
                 N,
                 OpPooledTransaction,
-                WorldChainEvmConfig<WorldPrimitives, WorldReceiptBuilder>,
+                OpEvmConfig<WorldChainSpec, WorldPrimitives, WorldReceiptBuilder>,
             >,
-            WorldChainEvmConfig<WorldPrimitives, WorldReceiptBuilder>,
+            OpEvmConfig<WorldChainSpec, WorldPrimitives, WorldReceiptBuilder>,
         >,
 {
-    type Evm = WorldChainEvmConfig<WorldPrimitives, WorldReceiptBuilder>;
+    type Evm = OpEvmConfig<WorldChainSpec, WorldPrimitives, WorldReceiptBuilder>;
     type Pool = BasicWorldChainPool<N, OpPooledTransaction, Self::Evm>;
     type Net = WorldChainNetworkBuilder;
     type PayloadServiceBuilder = BasicPayloadServiceBuilder<OpPayloadBuilder>;

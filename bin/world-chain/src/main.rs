@@ -46,6 +46,7 @@ fn main() {
                     node_exit_future,
                     node: _node,
                 } = builder.node(node).launch().await?;
+
                 node_exit_future.await?;
 
                 Ok(())
