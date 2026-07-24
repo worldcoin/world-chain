@@ -1,7 +1,7 @@
 use crate::{
     config::DefenderConfig,
     error::DefenderError,
-    lane,
+    lane::LaneDriver,
     traits::DefenderClient,
     types::{
         ActiveDefense, DEFENDED_LANES, DefenseProgress, GameMetadata, GameObservation,
@@ -385,22 +385,20 @@ where
         }
 
         let mut lanes = defense.lanes;
+        let lane_driver = LaneDriver::new(
+            &self.execution_provider,
+            &self.proof_requester,
+            self.config.max_proof_attempts,
+        );
         for (slot, (proof_lane, backend)) in DEFENDED_LANES.into_iter().enumerate() {
             // skip lanes already proven on-chain, by us or by anyone else
             if proof_bitmap & proof_lane.mask() != 0 {
                 lanes[slot] = LaneState::Proven;
                 continue;
             }
-            lanes[slot] = lane::advance_lane(
-                &self.execution_provider,
-                &self.proof_requester,
-                self.config.max_proof_attempts,
-                metadata,
-                proof_lane,
-                backend,
-                lanes[slot],
-            )
-            .await;
+            lanes[slot] = lane_driver
+                .advance(metadata, proof_lane, backend, lanes[slot])
+                .await;
         }
         Ok(DefenseProgress::Lanes(lanes))
     }
