@@ -120,6 +120,7 @@ reth-cli-commands = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0
 reth-cli-runner = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", default-features = false }
 reth-engine-primitives = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", default-features = false }
 reth-evm = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", default-features = false }
+reth-errors = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", default-features = false }
 reth-db = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", default-features = false }
 reth-db-api = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", default-features = false }
 reth-provider = { git = "https://github.com/paradigmxyz/reth", tag = "v2.3.0", default-features = false }
