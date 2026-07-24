@@ -14,7 +14,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::{error, info, warn};
-use world_chain_proofs::{ConsensusProvider, InvalidationReason, ProofLane, RootState};
+use world_chain_proofs::{
+    ConsensusProvider, InvalidationReason, ProofLane, RootState, proof_count,
+};
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequester, ProofResponse, ProofStatus,
 };
@@ -125,6 +127,16 @@ where
                 }
             }
             RootState::Challenged => {
+                let proof_bitmap = self.execution_provider.proof_bitmap(game.address).await?;
+                if has_required_proof_support(game, proof_bitmap) {
+                    info!(
+                        game = %game.address,
+                        proof_bitmap,
+                        proof_threshold = game.proof_threshold,
+                        "challenged game already has sufficient proof support"
+                    );
+                    return Ok(GameScanOutcome::Skip);
+                }
                 if now < game.proof_deadline {
                     return Ok(GameScanOutcome::Track);
                 }
@@ -220,6 +232,16 @@ where
                 Ok(WatchOutcome::Keep)
             }
             RootState::Challenged => {
+                let proof_bitmap = self.execution_provider.proof_bitmap(address).await?;
+                if has_required_proof_support(game, proof_bitmap) {
+                    info!(
+                        game = %address,
+                        proof_bitmap,
+                        proof_threshold = game.proof_threshold,
+                        "challenged game already has sufficient proof support"
+                    );
+                    return Ok(WatchOutcome::Drop);
+                }
                 if now >= game.proof_deadline {
                     error!(
                         game = %address,
@@ -450,11 +472,13 @@ where
             RootState::Challenged => {}
             RootState::None | RootState::Proposed => return Ok(DefenseProgress::Closed),
         }
+        let proof_bitmap = self.execution_provider.proof_bitmap(game).await?;
+        if has_required_proof_support(metadata, proof_bitmap) {
+            return Ok(DefenseProgress::Complete);
+        }
         if now >= metadata.proof_deadline {
             return Ok(DefenseProgress::DeadlineElapsed);
         }
-
-        let proof_bitmap = self.execution_provider.proof_bitmap(game).await?;
 
         let mut lanes = defense.lanes;
         for (slot, (lane, backend)) in DEFENDED_LANES.into_iter().enumerate() {
@@ -637,6 +661,10 @@ fn encode_proof(proof: &ProofData) -> Bytes {
         .concat()
         .into(),
     }
+}
+
+fn has_required_proof_support(game: &GameMetadata, proof_bitmap: u8) -> bool {
+    proof_count(proof_bitmap) >= game.proof_threshold
 }
 
 fn unix_now() -> u64 {

@@ -11,6 +11,7 @@ pub struct GameMetadata {
     pub l1_origin_hash: B256,
     pub challenge_deadline: u64,
     pub proof_deadline: u64,
+    pub proof_threshold: u8,
 }
 
 /// Result of a submitted `submitProofLane` transaction.

@@ -20,7 +20,8 @@ use world_chain_defender::{
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_proofs::{
     ConsensusError, ConsensusProvider, GameCreated, InvalidationReason, PROOF_SYSTEM_VERSION,
-    ProofDomain, ProofLane, ResolutionStatus, RootCommitment, RootState, has_threshold,
+    PROOF_THRESHOLD, ProofDomain, ProofLane, ResolutionStatus, RootCommitment, RootState,
+    has_threshold,
 };
 use world_chain_proposer::{
     CloseGameSubmission, ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
@@ -286,6 +287,16 @@ fn proof_lane(lane: u8) -> Option<ProofLane> {
     }
 }
 
+fn parent_is_unresolved(state: &FakeExecutionState, record: &GameRecord) -> bool {
+    if record.event.parent_ref == ANCHOR {
+        return false;
+    }
+    state
+        .games_by_address
+        .get(&record.event.parent_ref)
+        .is_some_and(|parent| parent.state == STATE_PROPOSED || parent.state == STATE_CHALLENGED)
+}
+
 #[async_trait]
 impl ProposerClient for FakeExecution {
     async fn anchor_parent(&self) -> Result<ParentRef, ProposerError> {
@@ -328,6 +339,22 @@ impl ProposerClient for FakeExecution {
             .get(&game)
             .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
 
+        let root_state = RootState::try_from(record.state)
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        if root_state == RootState::Finalized {
+            return Ok(ResolutionStatus {
+                resolvable: false,
+                root_state,
+                invalidation_reason: InvalidationReason::None,
+            });
+        }
+        if parent_is_unresolved(&state, record) {
+            return Ok(ResolutionStatus {
+                resolvable: false,
+                root_state,
+                invalidation_reason: InvalidationReason::None,
+            });
+        }
         if record.state == STATE_CHALLENGED && has_threshold(record.proof_bitmap) {
             return Ok(ResolutionStatus {
                 resolvable: true,
@@ -336,8 +363,6 @@ impl ProposerClient for FakeExecution {
             });
         }
 
-        let root_state = RootState::try_from(record.state)
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
         Ok(ResolutionStatus {
             resolvable: false,
             root_state,
@@ -347,11 +372,21 @@ impl ProposerClient for FakeExecution {
 
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
         let mut state = self.state.lock().expect("fake execution mutex poisoned");
+        let parent_unresolved = {
+            let record = state
+                .games_by_address
+                .get(&game)
+                .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
+            parent_is_unresolved(&state, record)
+        };
         let record = state
             .games_by_address
             .get_mut(&game)
             .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
-        if record.state != STATE_CHALLENGED || !has_threshold(record.proof_bitmap) {
+        if parent_unresolved
+            || record.state != STATE_CHALLENGED
+            || !has_threshold(record.proof_bitmap)
+        {
             return Err(ProposerError::Contract(format!(
                 "game {game} is not positively resolvable"
             )));
@@ -543,6 +578,7 @@ impl DefenderClient for FakeExecution {
                 l1_origin_hash: record.event.l1_origin_hash,
                 challenge_deadline: record.challenge_deadline,
                 proof_deadline: record.proof_deadline,
+                proof_threshold: PROOF_THRESHOLD,
             })
             .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
     }
@@ -565,6 +601,20 @@ impl DefenderClient for FakeExecution {
             .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))?;
         let current_state = RootState::try_from(record.state)?;
 
+        if current_state == RootState::Finalized {
+            return Ok(ResolutionStatus {
+                resolvable: false,
+                root_state: current_state,
+                invalidation_reason: InvalidationReason::None,
+            });
+        }
+        if parent_is_unresolved(&state, record) {
+            return Ok(ResolutionStatus {
+                resolvable: false,
+                root_state: current_state,
+                invalidation_reason: InvalidationReason::None,
+            });
+        }
         if current_state == RootState::Challenged && has_threshold(record.proof_bitmap) {
             return Ok(ResolutionStatus {
                 resolvable: true,

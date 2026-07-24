@@ -8,7 +8,7 @@ use alloy_provider::Provider;
 use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
 use world_chain_proofs::{
-    IWorldChainProofSystemFactory, IWorldChainProofSystemGame, ResolutionStatus,
+    IWorldChainProofSystemFactory, IWorldChainProofSystemGame, PROOF_LANE_COUNT, ResolutionStatus,
 };
 
 /// Alloy-backed implementation of [`DefenderClient`].
@@ -78,7 +78,14 @@ where
 
     async fn game_metadata(&self, address: Address) -> Result<GameMetadata, DefenderError> {
         let game = self.game(address);
-        let (root_claim, l2_block_number, l1_origin_hash, challenge_deadline, proof_deadline) = tokio::try_join!(
+        let (
+            root_claim,
+            l2_block_number,
+            l1_origin_hash,
+            challenge_deadline,
+            proof_deadline,
+            proof_threshold,
+        ) = tokio::try_join!(
             async {
                 game.rootClaim()
                     .call()
@@ -109,7 +116,18 @@ where
                     .await
                     .map_err(|error| DefenderError::Contract(error.to_string()))
             },
+            async {
+                game.PROOF_THRESHOLD()
+                    .call()
+                    .await
+                    .map_err(|error| DefenderError::Contract(error.to_string()))
+            },
         )?;
+        if proof_threshold == 0 || proof_threshold > PROOF_LANE_COUNT {
+            return Err(DefenderError::Contract(format!(
+                "invalid proof threshold {proof_threshold} for game {address}"
+            )));
+        }
 
         Ok(GameMetadata {
             address,
@@ -118,6 +136,7 @@ where
             l1_origin_hash,
             challenge_deadline,
             proof_deadline,
+            proof_threshold,
         })
     }
 
