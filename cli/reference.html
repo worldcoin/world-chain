@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-fce7cf65.js";
+            window.path_to_searchindex_js = "../searchindex-19ebe382.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-87388434.js"></script>
@@ -405,6 +405,14 @@ Flashblocks:
           These peers will be requested as soon as they connect and will never be evicted by rotation. They count toward `max_receive_peers`.
           
           [env: FLASHBLOCKS_FORCE_RECEIVE_PEERS=]
+
+      --witness.collect
+          Enable live pre-image witness collection for the proof system
+
+      --witness.depth &lt;DEPTH&gt;
+          Ring-buffer depth: the maximum number of recent block witnesses retained in the in-memory cache served over `debug_collectRangeWitness`
+          
+          [default: 1024]
 
       --tx-peers &lt;PEER_ID&gt;
           Comma-separated list of peer IDs to which transactions should be propagated
