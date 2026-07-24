@@ -11484,7 +11484,7 @@ dependencies = [
  "toml",
  "tracing",
  "url",
- "vergen",
+ "vergen 9.1.0",
  "vergen-git2",
 ]
 
@@ -17416,7 +17416,19 @@ dependencies = [
  "regex",
  "rustversion",
  "time",
- "vergen-lib",
+ "vergen-lib 9.1.0",
+]
+
+[[package]]
+name = "vergen"
+version = "10.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5574dd2f922b1a46a06a4b1dc11193a4012108fd54cf725e1816cb8183d8778"
+dependencies = [
+ "anyhow",
+ "bon",
+ "rustversion",
+ "vergen-lib 10.0.1",
 ]
 
 [[package]]
@@ -17430,8 +17442,8 @@ dependencies = [
  "git2",
  "rustversion",
  "time",
- "vergen",
- "vergen-lib",
+ "vergen 9.1.0",
+ "vergen-lib 9.1.0",
 ]
 
 [[package]]
@@ -17442,6 +17454,17 @@ checksum = "b34a29ba7e9c59e62f229ae1932fb1b8fb8a6fdcc99215a641913f5f5a59a569"
 dependencies = [
  "anyhow",
  "derive_builder",
+ "rustversion",
+]
+
+[[package]]
+name = "vergen-lib"
+version = "10.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cd42fd155c2c2971f6d00face12ec245fbb604fce011ccaf2306d014c2e97ca"
+dependencies = [
+ "anyhow",
+ "bon",
  "rustversion",
 ]
 
@@ -18754,7 +18777,7 @@ dependencies = [
  "reth-transaction-pool",
  "tokio",
  "tracing",
- "vergen",
+ "vergen 10.0.1",
  "vergen-git2",
  "world-chain-builder",
  "world-chain-chainspec",

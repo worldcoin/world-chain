@@ -329,7 +329,7 @@ lru = "0.18"
 either = { version = "1.16.0", default-features = false }
 pin-project = "1.1.13"
 uuid = { version = "1", features = ["serde", "v4"] }
-vergen = "9.1.0"
+vergen = "10.0.1"
 vergen-git2 = "9.1.0"
 
 # Test
