@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, B256, TxHash};
-use world_chain_proofs::ProofLane;
+use world_chain_proofs::{InvalidationReason, ProofLane};
 use world_chain_prover_service::{ProofBackend, ProofRequestId};
 
 /// Immutable game data needed to monitor and defend an output-root claim.
@@ -30,6 +30,19 @@ pub(crate) const DEFENDED_LANES: [(ProofLane, ProofBackend); DEFENDED_LANE_COUNT
     (ProofLane::ValidityProof, ProofBackend::Sp1),
     (ProofLane::TeeAttestation, ProofBackend::Nitro),
 ];
+
+/// On-chain state relevant to the defender for a single game.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum GameObservation {
+    Proposed,
+    Challenged {
+        proof_bitmap: u8,
+        has_required_support: bool,
+    },
+    Finalized,
+    Invalidated(InvalidationReason),
+    Unset,
+}
 
 /// Result of watching a single game for one tick.
 #[derive(Debug, Clone, Copy)]

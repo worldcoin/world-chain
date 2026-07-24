@@ -3,8 +3,8 @@ use crate::{
     error::DefenderError,
     traits::DefenderClient,
     types::{
-        ActiveDefense, DEFENDED_LANES, DefenseProgress, GameMetadata, GameScanOutcome, LaneState,
-        WatchOutcome,
+        ActiveDefense, DEFENDED_LANES, DefenseProgress, GameMetadata, GameObservation,
+        GameScanOutcome, LaneState, WatchOutcome,
     },
 };
 use alloy_primitives::{Address, BlockNumber, Bytes};
@@ -109,26 +109,44 @@ where
         Ok(low)
     }
 
+    async fn observe_game(&self, game: &GameMetadata) -> Result<GameObservation, DefenderError> {
+        let status = self
+            .execution_provider
+            .resolution_status(game.address)
+            .await?;
+        Ok(match status.root_state {
+            RootState::Proposed => GameObservation::Proposed,
+            RootState::Challenged => {
+                let proof_bitmap = self.execution_provider.proof_bitmap(game.address).await?;
+                GameObservation::Challenged {
+                    proof_bitmap,
+                    has_required_support: has_required_proof_support(game, proof_bitmap),
+                }
+            }
+            RootState::Finalized => GameObservation::Finalized,
+            RootState::Invalidated => GameObservation::Invalidated(status.invalidation_reason),
+            RootState::None => GameObservation::Unset,
+        })
+    }
+
     async fn scan_game(
         &self,
         game: &GameMetadata,
         now: u64,
     ) -> Result<GameScanOutcome, DefenderError> {
-        let status = self
-            .execution_provider
-            .resolution_status(game.address)
-            .await?;
-        match status.root_state {
-            RootState::Proposed => {
+        match self.observe_game(game).await? {
+            GameObservation::Proposed => {
                 if now < game.challenge_deadline {
                     Ok(GameScanOutcome::Track)
                 } else {
                     Ok(GameScanOutcome::Skip)
                 }
             }
-            RootState::Challenged => {
-                let proof_bitmap = self.execution_provider.proof_bitmap(game.address).await?;
-                if has_required_proof_support(game, proof_bitmap) {
+            GameObservation::Challenged {
+                proof_bitmap,
+                has_required_support,
+            } => {
+                if has_required_support {
                     info!(
                         game = %game.address,
                         proof_bitmap,
@@ -148,15 +166,15 @@ where
                 );
                 Ok(GameScanOutcome::Skip)
             }
-            RootState::Finalized => {
+            GameObservation::Finalized => {
                 info!(
                     game = %game.address,
                     "game already has a positive resolution outcome"
                 );
                 Ok(GameScanOutcome::Skip)
             }
-            RootState::Invalidated => {
-                if status.invalidation_reason == InvalidationReason::ProofTimeout {
+            GameObservation::Invalidated(reason) => {
+                if reason == InvalidationReason::ProofTimeout {
                     error!(
                         game = %game.address,
                         proof_deadline = game.proof_deadline,
@@ -165,13 +183,13 @@ where
                 } else {
                     warn!(
                         game = %game.address,
-                        reason = ?status.invalidation_reason,
+                        reason = ?reason,
                         "game is invalidatable without defense"
                     );
                 }
                 Ok(GameScanOutcome::Skip)
             }
-            RootState::None => {
+            GameObservation::Unset => {
                 error!(game = %game.address, "factory game has unset root state");
                 Ok(GameScanOutcome::Skip)
             }
@@ -222,18 +240,19 @@ where
         now: u64,
     ) -> Result<WatchOutcome, DefenderError> {
         let address = game.address;
-        let status = self.execution_provider.resolution_status(address).await?;
-        match status.root_state {
-            RootState::Proposed => {
+        match self.observe_game(game).await? {
+            GameObservation::Proposed => {
                 if now >= game.challenge_deadline {
                     // the game can no longer be challenged
                     return Ok(WatchOutcome::Drop);
                 }
                 Ok(WatchOutcome::Keep)
             }
-            RootState::Challenged => {
-                let proof_bitmap = self.execution_provider.proof_bitmap(address).await?;
-                if has_required_proof_support(game, proof_bitmap) {
+            GameObservation::Challenged {
+                proof_bitmap,
+                has_required_support,
+            } => {
+                if has_required_support {
                     info!(
                         game = %address,
                         proof_bitmap,
@@ -271,12 +290,12 @@ where
                     Ok(WatchOutcome::Drop)
                 }
             }
-            RootState::Finalized => {
+            GameObservation::Finalized => {
                 info!(game = %address, "game has a positive resolution outcome");
                 Ok(WatchOutcome::Drop)
             }
-            RootState::Invalidated => {
-                if status.invalidation_reason == InvalidationReason::ProofTimeout {
+            GameObservation::Invalidated(reason) => {
+                if reason == InvalidationReason::ProofTimeout {
                     error!(
                         game = %address,
                         proof_deadline = game.proof_deadline,
@@ -285,13 +304,13 @@ where
                 } else {
                     warn!(
                         game = %address,
-                        reason = ?status.invalidation_reason,
+                        reason = ?reason,
                         "game is invalidatable without defense"
                     );
                 }
                 Ok(WatchOutcome::Drop)
             }
-            RootState::None => {
+            GameObservation::Unset => {
                 error!(game = %address, "factory game has unset root state");
                 Ok(WatchOutcome::Drop)
             }
@@ -459,23 +478,27 @@ where
         now: u64,
     ) -> Result<DefenseProgress, DefenderError> {
         let metadata = &defense.game;
-        let game = metadata.address;
-        let status = self.execution_provider.resolution_status(game).await?;
-        match status.root_state {
-            RootState::Finalized => return Ok(DefenseProgress::Complete),
-            RootState::Invalidated => {
-                if status.invalidation_reason == InvalidationReason::ProofTimeout {
+        let proof_bitmap = match self.observe_game(metadata).await? {
+            GameObservation::Finalized => return Ok(DefenseProgress::Complete),
+            GameObservation::Invalidated(reason) => {
+                if reason == InvalidationReason::ProofTimeout {
                     return Ok(DefenseProgress::DeadlineElapsed);
                 }
                 return Ok(DefenseProgress::Closed);
             }
-            RootState::Challenged => {}
-            RootState::None | RootState::Proposed => return Ok(DefenseProgress::Closed),
-        }
-        let proof_bitmap = self.execution_provider.proof_bitmap(game).await?;
-        if has_required_proof_support(metadata, proof_bitmap) {
-            return Ok(DefenseProgress::Complete);
-        }
+            GameObservation::Challenged {
+                proof_bitmap,
+                has_required_support,
+            } => {
+                if has_required_support {
+                    return Ok(DefenseProgress::Complete);
+                }
+                proof_bitmap
+            }
+            GameObservation::Unset | GameObservation::Proposed => {
+                return Ok(DefenseProgress::Closed);
+            }
+        };
         if now >= metadata.proof_deadline {
             return Ok(DefenseProgress::DeadlineElapsed);
         }
