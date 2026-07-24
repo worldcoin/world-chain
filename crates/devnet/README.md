@@ -1,8 +1,7 @@
 # World Chain Devnet
 
-The current local devnet path is the native Rust harness in `crates/devnet`, exposed through
-`xtask` and the root `just devnet` recipe. The older Kurtosis devnet under `pkg/devnet` is still
-kept for reference and fallback, but it is no longer the preferred local workflow.
+This crate contains the native Rust local devnet harness, exposed through `xtask` and the root
+`just devnet` recipe.
 
 ## Native Rust Devnet
 
@@ -69,19 +68,19 @@ The default HA preset starts:
 - Prometheus.
 - Grafana with World Chain flashblocks dashboards provisioned.
 
-All native presets sequence directly with flashblocks enabled by default. The new path intentionally
-does not wire rollup-boost or tx-proxy. PBH is disabled for native World Chain execution nodes with
-zero reserved PBH blockspace and an undeployed sentinel PBH entrypoint.
+All native presets sequence directly with flashblocks enabled by default. PBH is disabled for native
+World Chain execution nodes with zero reserved PBH blockspace and an undeployed sentinel PBH
+entrypoint.
 
-Because rollup-boost is not present, local flashblocks use the node's dev-only override authorizer
-and force-publish mode. `op-node` still drives normal Engine API payload jobs, while the native
-World Chain EL self-authorizes flashblock publication for the active local sequencer.
+Local flashblocks use the node's dev-only override authorizer and force-publish mode. `op-node`
+still drives normal Engine API payload jobs, while the native World Chain EL self-authorizes
+flashblock publication for the active local sequencer.
 
 The native HA devnet deploys the WIP-1006 proof-system suite by default: the anchor-state
 registry, proof-system factory, mock validity/TEE/security-council verifiers, and a mock staking
 registry. Disable that deployment with `just devnet up --no-proof-system` when testing a topology
 without proof contracts. `FeeEscrow`, `FeeRecipient`, PBH contracts, rollup-boost, tx-proxy, and
-rundler are not part of the native default HA path.
+rundler, and account-abstraction support contracts are not part of the native default HA path.
 
 `op-challenger` is disabled by default because the native devnet does not yet generate the Cannon
 prestates required to play local permissioned dispute games. Enable it explicitly with
@@ -220,9 +219,9 @@ Grafana provisions the Prometheus datasource and imports these dashboards into t
 `World Chain Devnet` folder:
 
 ```text
-pkg/devnet/grafana/dashboards/flashblocks-payload-builder.json
-pkg/devnet/grafana/dashboards/flashblocks-validation-pipeline.json
-pkg/devnet/grafana/dashboards/flashblocks-p2p.json
+crates/devnet/grafana/dashboards/flashblocks-payload-builder.json
+crates/devnet/grafana/dashboards/flashblocks-validation-pipeline.json
+crates/devnet/grafana/dashboards/flashblocks-p2p.json
 reth-overview.json
 ```
 
@@ -245,19 +244,6 @@ upstream Reth dashboard is skipped with a warning and the rest of the devnet sti
 - HA failover is wired through op-conductor, but failover behavior is not yet covered by an automated test.
 - Stable ports are available through `--stable-ports`; tests should continue to use dynamic ports.
 - `FeeEscrow` and `FeeRecipient` are not deployed by the native devnet.
-- Rundler and the multi-client EL/CL matrix are deferred until a specific test or workflow needs them.
-
-## Legacy Kurtosis Devnet
-
-The old Kurtosis path remains under `pkg/devnet` and can still be run explicitly:
-
-```bash
-just devnet-up
-just ./pkg/devnet/devnet-down
-```
-
-That path builds and runs the Docker image and preserves the older service wiring. Keep using the
-native `just devnet up` path for current local HA sequencing work.
 
 ## Testing
 
