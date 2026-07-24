@@ -18707,6 +18707,7 @@ dependencies = [
  "world-chain-proof-kona-host-utils",
  "world-chain-proof-nitro",
  "world-chain-proof-worker",
+ "world-chain-proofs",
  "world-chain-prover-service",
 ]
 
@@ -19164,6 +19165,23 @@ dependencies = [
  "world-chain-chainspec",
  "world-chain-proof-core",
  "world-chain-proof-kona-host-utils",
+]
+
+[[package]]
+name = "world-chain-prover-cli"
+version = "2.4.0"
+dependencies = [
+ "alloy-primitives",
+ "anyhow",
+ "clap",
+ "dotenvy",
+ "reqwest 0.12.28",
+ "tokio",
+ "tracing",
+ "tracing-subscriber 0.3.23",
+ "world-chain-proof-kona-host-utils",
+ "world-chain-proofs",
+ "world-chain-prover-service",
 ]
 
 [[package]]
