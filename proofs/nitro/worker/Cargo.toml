@@ -20,6 +20,9 @@ path = "src/main.rs"
 world-chain-proof-worker.workspace = true
 world-chain-prover-service.workspace = true
 
+# Fast-fail output-root validation against the L2 rollup node
+world-chain-proofs.workspace = true
+
 # Nitro prover (host-side, requires Linux + enclave feature)
 world-chain-proof-nitro = { path = "..", features = ["enclave"] }
 

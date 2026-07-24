@@ -22,7 +22,7 @@
 
 #![cfg(target_os = "linux")]
 
-use alloy_primitives::Bytes;
+use alloy_primitives::{B256, Bytes};
 use alloy_sol_types::SolValue;
 use anyhow::{Context, Result, anyhow, bail};
 use tracing::info;
@@ -34,6 +34,7 @@ use world_chain_proof_nitro::{
     host::{EnclaveEndpoint, NitroProver},
 };
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
+use world_chain_proofs::{ConsensusError, ConsensusProvider, OptimismConsensusClient};
 use world_chain_prover_service::{ProofBackend, ProofData};
 
 // ──────────────────────────────────────────────────────────────────────────────────────
@@ -47,6 +48,9 @@ pub struct NitroBackendConfig {
     pub enclave_cid: u32,
     pub enclave_port: u32,
     pub expected_pcrs: ExpectedPcrs,
+    /// op-node (rollup) JSON-RPC URL used for the fast-fail `optimism_outputAtBlock`
+    /// sanity check performed before dispatching a job to the enclave.
+    pub output_root_rpc: String,
 }
 
 pub struct NitroBackend {
@@ -78,6 +82,20 @@ impl ClaimedProofJobHandler for NitroBackend {
                     self.config.block_interval
                 )
             })?;
+
+        // Fast-fail: check the claimed post-state output root against the L2 rollup node's
+        // authoritative view *before* dispatching expensive witness generation to the
+        // enclave. Without this, a request with an `l2_block_number` that hasn't been
+        // produced yet (or a `root_claim` that simply doesn't match the real chain) still
+        // runs the full witness-generation pipeline and only fails once the enclave returns,
+        // up to `witness_timeout` (900s by default) later. Rejecting here turns that into an
+        // immediate error.
+        validate_output_root(
+            &OptimismConsensusClient::new(self.config.output_root_rpc.clone()),
+            request.l2_block_number,
+            request.root_claim,
+        )
+        .await?;
 
         let endpoint =
             EnclaveEndpoint::with_port(self.config.enclave_cid, self.config.enclave_port);
@@ -147,6 +165,107 @@ impl ClaimedProofJobHandler for NitroBackend {
             public_values: artifact.transition_public_values.abi_encode().into(),
             signature: Bytes::from(artifact.signature),
         })
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────────────
+// Fast-fail validation
+// ──────────────────────────────────────────────────────────────────────────────────────
+
+/// Checks the request's claimed post-state output root against the real output root the
+/// L2 rollup node reports for `l2_block_number`, without touching the enclave.
+///
+/// Returns an error immediately when:
+/// - `l2_block_number` doesn't correspond to a real, known L2 block (the rollup node's
+///   `optimism_outputAtBlock` call errors or has nothing to report), or
+/// - the rollup node's real output root at that block differs from `root_claim`.
+///
+/// This is deliberately generic over [`ConsensusProvider`] so the comparison logic can be
+/// unit tested without a live RPC endpoint.
+async fn validate_output_root<C: ConsensusProvider>(
+    consensus: &C,
+    l2_block_number: u64,
+    root_claim: B256,
+) -> Result<()> {
+    let real_root = consensus
+        .output_root_at_block(l2_block_number)
+        .await
+        .map_err(|error: ConsensusError| {
+            anyhow!(
+                "fast-fail validation failed: l2_block_number {l2_block_number} does not \
+                 correspond to a known L2 block (optimism_outputAtBlock error: {error})"
+            )
+        })?;
+
+    if real_root != root_claim {
+        bail!(
+            "fast-fail validation failed: claimed root_claim {root_claim:?} does not match \
+             the real output root {real_root:?} at L2 block {l2_block_number}; refusing to \
+             start enclave witness generation"
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod fast_fail_tests {
+    use super::{ConsensusError, ConsensusProvider, validate_output_root};
+    use alloy_primitives::{B256, BlockNumber};
+
+    struct FixedConsensusProvider {
+        output_root: Result<B256, String>,
+    }
+
+    #[async_trait::async_trait]
+    impl ConsensusProvider for FixedConsensusProvider {
+        async fn output_root_at_block(
+            &self,
+            _l2_block_number: u64,
+        ) -> Result<B256, ConsensusError> {
+            self.output_root.clone().map_err(ConsensusError::Rpc)
+        }
+
+        async fn latest_l2_finalized_block(&self) -> Result<BlockNumber, ConsensusError> {
+            unimplemented!("not used by validate_output_root")
+        }
+    }
+
+    #[tokio::test]
+    async fn accepts_matching_root() {
+        let root = B256::repeat_byte(0x42);
+        let provider = FixedConsensusProvider {
+            output_root: Ok(root),
+        };
+        validate_output_root(&provider, 100, root)
+            .await
+            .expect("matching root should validate");
+    }
+
+    #[tokio::test]
+    async fn rejects_mismatched_root() {
+        let provider = FixedConsensusProvider {
+            output_root: Ok(B256::repeat_byte(0x01)),
+        };
+        let error = validate_output_root(&provider, 100, B256::repeat_byte(0x02))
+            .await
+            .expect_err("mismatched root must fail fast");
+        assert!(error.to_string().contains("does not match"));
+    }
+
+    #[tokio::test]
+    async fn rejects_unknown_block() {
+        let provider = FixedConsensusProvider {
+            output_root: Err("block not found".to_string()),
+        };
+        let error = validate_output_root(&provider, 100, B256::repeat_byte(0x02))
+            .await
+            .expect_err("unknown block must fail fast");
+        assert!(
+            error
+                .to_string()
+                .contains("does not correspond to a known L2 block")
+        );
     }
 }
 

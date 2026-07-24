@@ -68,6 +68,11 @@ pub struct WorkerArgs {
     #[arg(long, env = "L1_BEACON_RPC_URL")]
     l1_beacon_rpc: String,
 
+    /// op-node (rollup) JSON-RPC URL used to fast-fail proof requests whose claimed
+    /// output root doesn't match the real L2 chain, before dispatching to the enclave.
+    #[arg(long, env = "OUTPUT_ROOT_RPC_URL")]
+    output_root_rpc: String,
+
     /// World Chain network.
     #[arg(long, env = "NETWORK", default_value = "worldchain")]
     network: Network,
@@ -182,6 +187,7 @@ pub async fn run(args: WorkerArgs) -> Result<()> {
         prover_service = %args.prover_service_url,
         enclave_cid = args.enclave_cid,
         block_interval = args.block_interval,
+        output_root_rpc = %args.output_root_rpc,
         submit_proof_retry_max_retries = args.submit_proof_retry_max_retries,
         submit_proof_retry_initial_delay_ms = args.submit_proof_retry_initial_delay_ms,
         submit_proof_retry_max_delay_ms = args.submit_proof_retry_max_delay_ms,
@@ -194,6 +200,7 @@ pub async fn run(args: WorkerArgs) -> Result<()> {
         enclave_cid: args.enclave_cid,
         enclave_port: args.enclave_port,
         expected_pcrs,
+        output_root_rpc: args.output_root_rpc.clone(),
     });
 
     let queue = RpcProverServiceClient::new(&args.prover_service_url)
