@@ -1,12 +1,10 @@
 use crate::{
     config::DefenderConfig,
     error::DefenderError,
+    game::{GameEvaluator, GameObservation, GameScanOutcome, WatchOutcome},
     lane::LaneDriver,
     traits::DefenderClient,
-    types::{
-        ActiveDefense, DEFENDED_LANES, DefenseProgress, GameMetadata, GameObservation,
-        GameScanOutcome, LaneState, WatchOutcome,
-    },
+    types::{ActiveDefense, DEFENDED_LANES, DefenseProgress, GameMetadata, LaneState},
 };
 use alloy_primitives::{Address, BlockNumber};
 use futures_util::{StreamExt, stream};
@@ -15,7 +13,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::{error, info, warn};
-use world_chain_proofs::{ConsensusProvider, InvalidationReason, RootState, proof_count};
+use world_chain_proofs::{ConsensusProvider, InvalidationReason};
 use world_chain_prover_service::ProofRequester;
 
 /// World Chain Defender.
@@ -106,102 +104,19 @@ where
         Ok(low)
     }
 
-    async fn observe_game(&self, game: &GameMetadata) -> Result<GameObservation, DefenderError> {
-        let status = self
-            .execution_provider
-            .resolution_status(game.address)
-            .await?;
-        Ok(match status.root_state {
-            RootState::Proposed => GameObservation::Proposed,
-            RootState::Challenged => {
-                let proof_bitmap = self.execution_provider.proof_bitmap(game.address).await?;
-                GameObservation::Challenged {
-                    proof_bitmap,
-                    has_required_support: has_required_proof_support(game, proof_bitmap),
-                }
-            }
-            RootState::Finalized => GameObservation::Finalized,
-            RootState::Invalidated => GameObservation::Invalidated(status.invalidation_reason),
-            RootState::None => GameObservation::Unset,
-        })
-    }
-
-    async fn scan_game(
-        &self,
-        game: &GameMetadata,
-        now: u64,
-    ) -> Result<GameScanOutcome, DefenderError> {
-        match self.observe_game(game).await? {
-            GameObservation::Proposed => {
-                if now < game.challenge_deadline {
-                    Ok(GameScanOutcome::Track)
-                } else {
-                    Ok(GameScanOutcome::Skip)
-                }
-            }
-            GameObservation::Challenged {
-                proof_bitmap,
-                has_required_support,
-            } => {
-                if has_required_support {
-                    info!(
-                        game = %game.address,
-                        proof_bitmap,
-                        proof_threshold = game.proof_threshold,
-                        "challenged game already has sufficient proof support"
-                    );
-                    return Ok(GameScanOutcome::Skip);
-                }
-                if now < game.proof_deadline {
-                    return Ok(GameScanOutcome::Track);
-                }
-
-                error!(
-                    game = %game.address,
-                    proof_deadline = game.proof_deadline,
-                    "challenged game proof deadline elapsed before defense completed"
-                );
-                Ok(GameScanOutcome::Skip)
-            }
-            GameObservation::Finalized => {
-                info!(
-                    game = %game.address,
-                    "game already has a positive resolution outcome"
-                );
-                Ok(GameScanOutcome::Skip)
-            }
-            GameObservation::Invalidated(reason) => {
-                if reason == InvalidationReason::ProofTimeout {
-                    error!(
-                        game = %game.address,
-                        proof_deadline = game.proof_deadline,
-                        "challenged game proof deadline elapsed before defense completed"
-                    );
-                } else {
-                    warn!(
-                        game = %game.address,
-                        reason = ?reason,
-                        "game is invalidatable without defense"
-                    );
-                }
-                Ok(GameScanOutcome::Skip)
-            }
-            GameObservation::Unset => {
-                error!(game = %game.address, "factory game has unset root state");
-                Ok(GameScanOutcome::Skip)
-            }
-        }
-    }
-
     async fn scan_games(
         &self,
         games: impl IntoIterator<Item = GameMetadata>,
         now: u64,
     ) -> Vec<(GameMetadata, Result<GameScanOutcome, DefenderError>)> {
+        let evaluator = GameEvaluator::new(&self.execution_provider, &self.consensus_provider);
         stream::iter(games)
-            .map(|game| async move {
-                let result = self.scan_game(&game, now).await;
-                (game, result)
+            .map(move |game| {
+                let evaluator = evaluator;
+                async move {
+                    let result = evaluator.scan(&game, now).await;
+                    (game, result)
+                }
             })
             .buffer_unordered(self.config.max_game_concurrency)
             .collect()
@@ -230,99 +145,19 @@ where
         }
     }
 
-    async fn watch_game(
-        &self,
-        game: &GameMetadata,
-        latest_finalized_l2_block: BlockNumber,
-        now: u64,
-    ) -> Result<WatchOutcome, DefenderError> {
-        let address = game.address;
-        match self.observe_game(game).await? {
-            GameObservation::Proposed => {
-                if now >= game.challenge_deadline {
-                    // the game can no longer be challenged
-                    return Ok(WatchOutcome::Drop);
-                }
-                Ok(WatchOutcome::Keep)
-            }
-            GameObservation::Challenged {
-                proof_bitmap,
-                has_required_support,
-            } => {
-                if has_required_support {
-                    info!(
-                        game = %address,
-                        proof_bitmap,
-                        proof_threshold = game.proof_threshold,
-                        "challenged game already has sufficient proof support"
-                    );
-                    return Ok(WatchOutcome::Drop);
-                }
-                if now >= game.proof_deadline {
-                    error!(
-                        game = %address,
-                        proof_deadline = game.proof_deadline,
-                        "challenged game proof deadline elapsed before defense completed"
-                    );
-                    return Ok(WatchOutcome::Drop);
-                }
-
-                // only judge the root against finalized L2 state
-                if game.l2_block_number > latest_finalized_l2_block {
-                    return Ok(WatchOutcome::Keep);
-                }
-                let root = self
-                    .consensus_provider
-                    .output_root_at_block(game.l2_block_number)
-                    .await?;
-                if root == game.root_claim {
-                    Ok(WatchOutcome::Defend)
-                } else {
-                    error!(
-                        game = %address,
-                        claimed_root = %game.root_claim,
-                        canonical_root = %root,
-                        "allowlisted proposer published a non-canonical root; refusing to defend"
-                    );
-                    Ok(WatchOutcome::Drop)
-                }
-            }
-            GameObservation::Finalized => {
-                info!(game = %address, "game has a positive resolution outcome");
-                Ok(WatchOutcome::Drop)
-            }
-            GameObservation::Invalidated(reason) => {
-                if reason == InvalidationReason::ProofTimeout {
-                    error!(
-                        game = %address,
-                        proof_deadline = game.proof_deadline,
-                        "challenged game proof deadline elapsed before defense completed"
-                    );
-                } else {
-                    warn!(
-                        game = %address,
-                        reason = ?reason,
-                        "game is invalidatable without defense"
-                    );
-                }
-                Ok(WatchOutcome::Drop)
-            }
-            GameObservation::Unset => {
-                error!(game = %address, "factory game has unset root state");
-                Ok(WatchOutcome::Drop)
-            }
-        }
-    }
-
     async fn scan_watched_games(
         &self,
         latest_finalized_l2_block: BlockNumber,
         now: u64,
     ) -> Vec<(GameMetadata, Result<WatchOutcome, DefenderError>)> {
+        let evaluator = GameEvaluator::new(&self.execution_provider, &self.consensus_provider);
         stream::iter(self.watched_games.values().copied().collect::<Vec<_>>())
-            .map(|game| async move {
-                let result = self.watch_game(&game, latest_finalized_l2_block, now).await;
-                (game, result)
+            .map(move |game| {
+                let evaluator = evaluator;
+                async move {
+                    let result = evaluator.watch(&game, latest_finalized_l2_block, now).await;
+                    (game, result)
+                }
             })
             .buffer_unordered(self.config.max_game_concurrency)
             .collect()
@@ -359,7 +194,8 @@ where
         now: u64,
     ) -> Result<DefenseProgress, DefenderError> {
         let metadata = &defense.game;
-        let proof_bitmap = match self.observe_game(metadata).await? {
+        let evaluator = GameEvaluator::new(&self.execution_provider, &self.consensus_provider);
+        let proof_bitmap = match evaluator.observe(metadata).await? {
             GameObservation::Finalized => return Ok(DefenseProgress::Complete),
             GameObservation::Invalidated(reason) => {
                 if reason == InvalidationReason::ProofTimeout {
@@ -540,10 +376,6 @@ where
             }
         }
     }
-}
-
-fn has_required_proof_support(game: &GameMetadata, proof_bitmap: u8) -> bool {
-    proof_count(proof_bitmap) >= game.proof_threshold
 }
 
 fn unix_now() -> u64 {

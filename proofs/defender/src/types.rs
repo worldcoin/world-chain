@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, B256, TxHash};
-use world_chain_proofs::{InvalidationReason, ProofLane};
+use world_chain_proofs::ProofLane;
 use world_chain_prover_service::{ProofBackend, ProofRequestId};
 
 /// Immutable game data needed to monitor and defend an output-root claim.
@@ -30,30 +30,6 @@ pub(crate) const DEFENDED_LANES: [(ProofLane, ProofBackend); DEFENDED_LANE_COUNT
     (ProofLane::ValidityProof, ProofBackend::Sp1),
     (ProofLane::TeeAttestation, ProofBackend::Nitro),
 ];
-
-/// On-chain state relevant to the defender for a single game.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum GameObservation {
-    Proposed,
-    Challenged {
-        proof_bitmap: u8,
-        has_required_support: bool,
-    },
-    Finalized,
-    Invalidated(InvalidationReason),
-    Unset,
-}
-
-/// Result of watching a single game for one tick.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum WatchOutcome {
-    /// Keep watching the game.
-    Keep,
-    /// The game was challenged and its root is valid: start a defense.
-    Defend,
-    /// The game no longer needs watching.
-    Drop,
-}
 
 /// Progress of a single proof lane within an active defense.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,13 +79,4 @@ pub(crate) enum DefenseProgress {
     DeadlineElapsed,
     /// Lane progress after this tick.
     Lanes([LaneState; DEFENDED_LANE_COUNT]),
-}
-
-/// Result of scanning a newly discovered allowlisted game.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum GameScanOutcome {
-    /// Retain the game for monitoring.
-    Track,
-    /// The game does not need defense monitoring.
-    Skip,
 }
