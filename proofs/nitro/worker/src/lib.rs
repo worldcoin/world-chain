@@ -90,6 +90,15 @@ impl ClaimedProofJobHandler for NitroBackend {
                 )
             })?;
 
+        info!(
+            job_id = %request.id(),
+            game = %request.game,
+            l2_block_number = request.l2_block_number,
+            pre_state_block = start_block,
+            worker_id = %job.worker_id,
+            "nitro worker claimed proof job"
+        );
+
         // Fast-fail: confirm the request's pre-state block (`start_block`) is a real,
         // known L2 block before dispatching expensive witness generation to the enclave.
         //
@@ -114,6 +123,14 @@ impl ClaimedProofJobHandler for NitroBackend {
             EnclaveEndpoint::with_port(self.config.enclave_cid, self.config.enclave_port);
         let prover = NitroProver::new(endpoint, self.config.expected_pcrs);
 
+        info!(
+            start_block,
+            end_block = request.l2_block_number,
+            l1_rpc = %self.config.online.l1_rpc,
+            l2_rpc = %self.config.online.l2_rpc,
+            "collecting witness data for range"
+        );
+        let witness_collection_started_at = std::time::Instant::now();
         let input = build_range_input(
             &self.config.online,
             RangeWitnessRequest {
@@ -128,6 +145,14 @@ impl ClaimedProofJobHandler for NitroBackend {
 
         let nitro_request = NitroRangeProofRequest::from_witness_data(&input.witness, None)
             .context("witness serialize")?;
+
+        info!(
+            start_block,
+            end_block = request.l2_block_number,
+            duration_secs = witness_collection_started_at.elapsed().as_secs_f64(),
+            witness_bytes = nitro_request.witness_rkyv.len(),
+            "witness data collection complete"
+        );
 
         let artifact = prover
             .prove_range(nitro_request)
