@@ -1,25 +1,22 @@
 use crate::{
     config::DefenderConfig,
     error::DefenderError,
+    lane,
     traits::DefenderClient,
     types::{
         ActiveDefense, DEFENDED_LANES, DefenseProgress, GameMetadata, GameObservation,
         GameScanOutcome, LaneState, WatchOutcome,
     },
 };
-use alloy_primitives::{Address, BlockNumber, Bytes};
+use alloy_primitives::{Address, BlockNumber};
 use futures_util::{StreamExt, stream};
 use std::{
     collections::HashMap,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::{error, info, warn};
-use world_chain_proofs::{
-    ConsensusProvider, InvalidationReason, ProofLane, RootState, proof_count,
-};
-use world_chain_prover_service::{
-    ProofBackend, ProofData, ProofRequest, ProofRequester, ProofResponse, ProofStatus,
-};
+use world_chain_proofs::{ConsensusProvider, InvalidationReason, RootState, proof_count};
+use world_chain_prover_service::ProofRequester;
 
 /// World Chain Defender.
 ///
@@ -356,122 +353,6 @@ where
         }
     }
 
-    async fn advance_lane(
-        &self,
-        metadata: &GameMetadata,
-        lane: ProofLane,
-        backend: ProofBackend,
-        state: LaneState,
-    ) -> LaneState {
-        let game = metadata.address;
-        match state {
-            LaneState::Proven | LaneState::Abandoned => state,
-            LaneState::Pending => {
-                match self
-                    .proof_requester
-                    .request_proof(proof_request(metadata, backend))
-                    .await
-                {
-                    Ok(id) => LaneState::Requested { id, attempts: 1 },
-                    Err(error) => {
-                        warn!(%game, ?lane, %error, "proof request failed; retrying next tick");
-                        LaneState::Pending
-                    }
-                }
-            }
-            LaneState::Requested { id, attempts } => {
-                let status = match self.proof_requester.proof_status(id).await {
-                    Ok(status) => status,
-                    Err(error) => {
-                        warn!(%game, ?lane, %id, %error, "proof status check failed; retrying next tick");
-                        return state;
-                    }
-                };
-                match status {
-                    ProofStatus::Created | ProofStatus::Running => state,
-                    ProofStatus::Succeeded => {
-                        let response = match self.proof_requester.get_proof(id).await {
-                            Ok(ProofResponse::Succeeded(response)) => response,
-                            Ok(ProofResponse::Pending(response)) => {
-                                warn!(
-                                    %game,
-                                    ?lane,
-                                    %id,
-                                    status = %response.status,
-                                    "proof status was succeeded but proof response is pending; retrying next tick"
-                                );
-                                return state;
-                            }
-                            Ok(ProofResponse::Failed(response)) => {
-                                warn!(
-                                    %game,
-                                    ?lane,
-                                    %id,
-                                    reason = %response.reason,
-                                    "proof status was succeeded but proof response is failed; retrying next tick"
-                                );
-                                return state;
-                            }
-                            Err(error) => {
-                                warn!(%game, ?lane, %id, %error, "proof retrieval failed; retrying next tick");
-                                return state;
-                            }
-                        };
-                        match self
-                            .execution_provider
-                            .submit_proof(game, lane as u8, encode_proof(&response.proof))
-                            .await
-                        {
-                            Ok(submission) => {
-                                info!(%game, ?lane, tx_hash = %submission.tx_hash, "proof lane submitted");
-                                LaneState::Proven
-                            }
-                            Err(error) => {
-                                // if the transaction actually landed, the
-                                // proof bitmap check resolves the lane on the
-                                // next tick
-                                warn!(%game, ?lane, %error, "proof submission failed; retrying next tick");
-                                state
-                            }
-                        }
-                    }
-                    ProofStatus::Failed => {
-                        if attempts >= self.config.max_proof_attempts {
-                            error!(%game, ?lane, attempts, "proving permanently failed; abandoning lane");
-                            return LaneState::Abandoned;
-                        }
-                        // re-requesting a failed proof re-queues it
-                        match self
-                            .proof_requester
-                            .request_proof(proof_request(metadata, backend))
-                            .await
-                        {
-                            Ok(id) => {
-                                let next_attempt = attempts + 1;
-                                warn!(
-                                    %game,
-                                    ?lane,
-                                    %id,
-                                    attempts = next_attempt,
-                                    max_attempts = self.config.max_proof_attempts,
-                                    "proof failed; re-requested proof"
-                                );
-                                LaneState::Requested {
-                                    id,
-                                    attempts: next_attempt,
-                                }
-                            }
-                            Err(error) => {
-                                warn!(%game, ?lane, %error, "proof re-request failed; retrying next tick");
-                                state
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     async fn advance_defense(
         &self,
         defense: &ActiveDefense,
@@ -504,15 +385,22 @@ where
         }
 
         let mut lanes = defense.lanes;
-        for (slot, (lane, backend)) in DEFENDED_LANES.into_iter().enumerate() {
+        for (slot, (proof_lane, backend)) in DEFENDED_LANES.into_iter().enumerate() {
             // skip lanes already proven on-chain, by us or by anyone else
-            if proof_bitmap & lane.mask() != 0 {
+            if proof_bitmap & proof_lane.mask() != 0 {
                 lanes[slot] = LaneState::Proven;
                 continue;
             }
-            lanes[slot] = self
-                .advance_lane(metadata, lane, backend, lanes[slot])
-                .await;
+            lanes[slot] = lane::advance_lane(
+                &self.execution_provider,
+                &self.proof_requester,
+                self.config.max_proof_attempts,
+                metadata,
+                proof_lane,
+                backend,
+                lanes[slot],
+            )
+            .await;
         }
         Ok(DefenseProgress::Lanes(lanes))
     }
@@ -653,47 +541,6 @@ where
                 warn!(%e, "scan attempt failed");
             }
         }
-    }
-}
-
-/// Builds the proof request for one lane of a defended game.
-fn proof_request(game: &GameMetadata, backend: ProofBackend) -> ProofRequest {
-    ProofRequest {
-        backend,
-        game: game.address,
-        root_claim: game.root_claim,
-        l2_block_number: game.l2_block_number,
-        // pin the witness to the L1 origin committed at proposal time, so
-        // the request id stays stable across defender restarts
-        l1_head: game.l1_origin_hash,
-    }
-}
-
-/// Encode a proof payload into the `bytes` argument of `submitProofLane`.
-///
-/// TODO: encode proofs for their concrete on-chain verifiers. SP1 proofs must
-/// match `SP1ValidityVerifier`'s ABI tuple:
-/// `(domainHash, parentRef, l1OriginNumber, publicValues, proofBytes)`.
-/// That requires proposal context in addition to `ProofData`, so this helper
-/// should move closer to the game/lane submission path before real SP1 lanes
-/// are enabled.
-fn encode_proof(proof: &ProofData) -> Bytes {
-    match proof {
-        ProofData::Sp1 {
-            proof,
-            public_values,
-        } => [public_values.as_ref(), proof.as_ref()].concat().into(),
-        ProofData::Nitro {
-            attestation,
-            public_values,
-            signature,
-        } => [
-            public_values.as_ref(),
-            attestation.as_ref(),
-            signature.as_ref(),
-        ]
-        .concat()
-        .into(),
     }
 }
 

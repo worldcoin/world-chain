@@ -4,6 +4,7 @@ mod alloy;
 mod config;
 mod defender;
 mod error;
+mod lane;
 mod traits;
 mod types;
 
