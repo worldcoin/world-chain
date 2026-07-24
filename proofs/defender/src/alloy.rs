@@ -8,7 +8,7 @@ use alloy_provider::Provider;
 use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
 use world_chain_proofs::{
-    IWorldChainProofSystemFactory, IWorldChainProofSystemGame, ResolutionStatus, RootState,
+    IWorldChainProofSystemFactory, IWorldChainProofSystemGame, ResolutionStatus,
 };
 
 /// Alloy-backed implementation of [`DefenderClient`].
@@ -119,16 +119,6 @@ where
             challenge_deadline,
             proof_deadline,
         })
-    }
-
-    async fn root_state(&self, address: Address) -> Result<RootState, DefenderError> {
-        let root_state_raw = self
-            .game(address)
-            .state()
-            .call()
-            .await
-            .map_err(|error| DefenderError::Contract(error.to_string()))?;
-        root_state_raw.try_into().map_err(Into::into)
     }
 
     async fn proof_deadline(&self, address: Address) -> Result<u64, DefenderError> {

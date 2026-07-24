@@ -4,7 +4,7 @@ use crate::{
 };
 use alloy_primitives::{Address, Bytes};
 use async_trait::async_trait;
-use world_chain_proofs::{ResolutionStatus, RootState};
+use world_chain_proofs::ResolutionStatus;
 
 #[async_trait]
 pub trait DefenderClient: Send + Sync {
@@ -16,8 +16,6 @@ pub trait DefenderClient: Send + Sync {
     async fn game_proposer(&self, game: Address) -> Result<Address, DefenderError>;
     /// Reads the immutable game data needed to monitor and defend its root claim.
     async fn game_metadata(&self, game: Address) -> Result<GameMetadata, DefenderError>;
-    /// Reads the root state of the provided game.
-    async fn root_state(&self, game: Address) -> Result<RootState, DefenderError>;
     /// Reads the proof deadline used by startup cursor initialization.
     async fn proof_deadline(&self, game: Address) -> Result<u64, DefenderError>;
     /// Returns the current resolution evaluation for the provided game.

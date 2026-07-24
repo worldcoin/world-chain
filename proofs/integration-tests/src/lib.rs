@@ -547,17 +547,6 @@ impl DefenderClient for FakeExecution {
             .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
     }
 
-    async fn root_state(&self, game: Address) -> Result<RootState, DefenderError> {
-        let raw = self
-            .state
-            .lock()
-            .expect("fake execution mutex poisoned")
-            .games_by_address
-            .get(&game)
-            .map_or(STATE_NONE, |record| record.state);
-        RootState::try_from(raw).map_err(Into::into)
-    }
-
     async fn proof_deadline(&self, game: Address) -> Result<u64, DefenderError> {
         self.state
             .lock()

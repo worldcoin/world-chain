@@ -96,6 +96,17 @@ impl MockClient {
             .insert(game, state);
     }
 
+    fn state(&self, game: Address) -> Result<RootState, DefenderError> {
+        let raw = self
+            .states
+            .lock()
+            .expect("not poisoned")
+            .get(&game)
+            .copied()
+            .unwrap_or(STATE_PROPOSED);
+        RootState::try_from(raw).map_err(Into::into)
+    }
+
     fn submissions(&self) -> Vec<(Address, u8)> {
         self.submissions.lock().expect("not poisoned").clone()
     }
@@ -129,17 +140,6 @@ impl DefenderClient for MockClient {
             .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
     }
 
-    async fn root_state(&self, game: Address) -> Result<RootState, DefenderError> {
-        let raw = self
-            .states
-            .lock()
-            .expect("not poisoned")
-            .get(&game)
-            .copied()
-            .unwrap_or(STATE_PROPOSED);
-        RootState::try_from(raw).map_err(Into::into)
-    }
-
     async fn proof_deadline(&self, game: Address) -> Result<u64, DefenderError> {
         self.games
             .iter()
@@ -149,7 +149,7 @@ impl DefenderClient for MockClient {
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, DefenderError> {
-        let state = self.root_state(game).await?;
+        let state = self.state(game)?;
         if state == RootState::Challenged {
             if has_threshold(self.proof_bitmap(game).await?) {
                 return Ok(ResolutionStatus {
