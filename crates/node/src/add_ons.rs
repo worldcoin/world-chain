@@ -45,11 +45,11 @@ use world_chain_evm::{
     BlockExecutionWitness, ExecutionWitnessHandle, OpTx, spawn_witness_collector,
 };
 use world_chain_rpc::{
-    DebugWitnessOracle, DebugWitnessOracleApiServer, EthApiExtServer,
-    SequencerClient as WorldChainSequencerClient, Simulate, SimulateApiServer, WorldChainEthApiExt,
+    AdminApiExtServer, DebugWitnessOracle, DebugWitnessOracleApiServer, EthApiExtServer,
+    SequencerClient as WorldChainSequencerClient, Simulate, SimulateApiServer,
+    WorldChainAdminApiExt, WorldChainEthApiExt,
     op::{FlashblocksOpApi, OpApiExtServer},
 };
-
 /// Primitive bounds required by the OP RPC extensions used by World Chain.
 pub trait WorldChainRpcPrimitives<Tx>:
     OpPayloadPrimitives<_Header = Header, _TX = Tx>
