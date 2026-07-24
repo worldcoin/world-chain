@@ -11,7 +11,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -48,6 +48,7 @@ struct MockClient {
     bitmaps: Arc<Mutex<HashMap<Address, u8>>>,
     parent_unresolved: Arc<Mutex<HashSet<Address>>>,
     proof_bitmap_reads: Arc<AtomicUsize>,
+    fail_game_count: Arc<AtomicBool>,
     submissions: Arc<Mutex<Vec<(Address, u8)>>>,
 }
 
@@ -76,6 +77,7 @@ impl MockClient {
             bitmaps: Arc::default(),
             parent_unresolved: Arc::default(),
             proof_bitmap_reads: Arc::default(),
+            fail_game_count: Arc::default(),
             submissions: Arc::default(),
         }
     }
@@ -151,6 +153,10 @@ impl MockClient {
         self.proof_bitmap_reads.load(Ordering::SeqCst)
     }
 
+    fn set_game_count_failure(&self, fail: bool) {
+        self.fail_game_count.store(fail, Ordering::SeqCst);
+    }
+
     fn submissions(&self) -> Vec<(Address, u8)> {
         self.submissions.lock().expect("not poisoned").clone()
     }
@@ -159,6 +165,11 @@ impl MockClient {
 #[async_trait]
 impl DefenderClient for MockClient {
     async fn game_count(&self) -> Result<u64, DefenderError> {
+        if self.fail_game_count.load(Ordering::SeqCst) {
+            return Err(DefenderError::Contract(
+                "configured game_count failure".into(),
+            ));
+        }
         Ok(self.games.len() as u64)
     }
 
@@ -520,6 +531,9 @@ async fn active_defense_is_removed_after_proof_deadline() {
 
     defender.scan_once_with_timestamp(5).await.unwrap();
     assert_eq!(defender.active_defenses(), [GAME_1]);
+    assert!(prover.requests().is_empty());
+
+    defender.scan_once_with_timestamp(6).await.unwrap();
     assert_eq!(prover.requests().len(), 2);
 
     defender.scan_once_with_timestamp(20).await.unwrap();
@@ -529,6 +543,33 @@ async fn active_defense_is_removed_after_proof_deadline() {
     // Removal makes the critical deadline condition one-shot.
     defender.scan_once_with_timestamp(21).await.unwrap();
     assert!(defender.active_defenses().is_empty());
+}
+
+#[tokio::test]
+async fn active_defense_advances_before_discovery_failure() {
+    let canonical_root = B256::repeat_byte(0x20);
+    let client = MockClient::new(
+        vec![(GAME_1, canonical_root, L2_BLOCK)],
+        HashMap::from([(GAME_1, STATE_CHALLENGED)]),
+    );
+    let (output_roots, _finalized_l2_block) =
+        mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
+    let prover = MockProver::default();
+    let mut defender =
+        WorldChainDefender::new(config(), client.clone(), output_roots, prover.clone());
+
+    // Discovery and validation promote the game, but active work starts on
+    // the next tick because existing defenses run first.
+    defender.scan_once().await.unwrap();
+    assert_eq!(defender.active_defenses(), [GAME_1]);
+    assert!(prover.requests().is_empty());
+
+    client.set_game_count_failure(true);
+    let error = defender.scan_once().await.unwrap_err();
+
+    assert!(matches!(error, DefenderError::Contract(_)));
+    assert_eq!(prover.requests().len(), 2);
+    assert_eq!(defender.active_defenses(), [GAME_1]);
 }
 
 #[tokio::test]
@@ -613,6 +654,9 @@ async fn active_defense_accepts_sufficient_proof_support_hidden_by_an_unresolved
 
     defender.scan_once_with_timestamp(5).await.unwrap();
     assert_eq!(defender.active_defenses(), [GAME_1]);
+    assert!(prover.requests().is_empty());
+
+    defender.scan_once_with_timestamp(6).await.unwrap();
     assert_eq!(prover.requests().len(), 2);
 
     client.set_bitmap(
@@ -642,10 +686,13 @@ async fn scan_once_defends_challenged_valid_root() {
     let mut defender =
         WorldChainDefender::new(config(), client.clone(), output_roots, prover.clone());
 
-    // first tick: the challenged game is promoted to an active defense and
-    // both lane proofs are requested
+    // First tick: discovery and validation promote the challenged game.
     defender.scan_once().await.unwrap();
+    assert_eq!(defender.active_defenses(), [GAME_1]);
+    assert!(prover.requests().is_empty());
 
+    // Second tick: both lane proofs are requested.
+    defender.scan_once().await.unwrap();
     let requests = prover.requests();
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[0].backend, ProofBackend::Sp1);
@@ -658,7 +705,7 @@ async fn scan_once_defends_challenged_valid_root() {
     }
     assert!(client.submissions().is_empty());
 
-    // second tick: both proofs are completed, fetched and submitted on-chain
+    // Third tick: both proofs are completed, fetched and submitted on-chain.
     defender.scan_once().await.unwrap();
 
     assert_eq!(
@@ -691,8 +738,11 @@ async fn scan_once_waits_for_proposed_game_to_be_challenged() {
     client.set_state(GAME_1, STATE_CHALLENGED);
     defender.scan_once().await.unwrap();
 
-    assert_eq!(prover.requests().len(), 2);
+    assert!(prover.requests().is_empty());
     assert_eq!(defender.active_defenses(), [GAME_1]);
+
+    defender.scan_once().await.unwrap();
+    assert_eq!(prover.requests().len(), 2);
 }
 
 #[tokio::test]
@@ -740,8 +790,11 @@ async fn scan_once_defers_validity_check_until_l2_block_is_finalized() {
     finalized_l2_block.store(L2_BLOCK, Ordering::SeqCst);
     defender.scan_once().await.unwrap();
 
-    assert_eq!(prover.requests().len(), 2);
+    assert!(prover.requests().is_empty());
     assert_eq!(defender.active_defenses(), [GAME_1]);
+
+    defender.scan_once().await.unwrap();
+    assert_eq!(prover.requests().len(), 2);
 }
 
 #[tokio::test]
@@ -759,6 +812,7 @@ async fn scan_once_skips_lane_already_proven() {
     let mut defender =
         WorldChainDefender::new(config(), client.clone(), output_roots, prover.clone());
 
+    defender.scan_once().await.unwrap();
     defender.scan_once().await.unwrap();
     defender.scan_once().await.unwrap();
 
@@ -794,8 +848,9 @@ async fn failed_proofs_are_rerequested_up_to_the_attempt_bound() {
         prover.clone(),
     );
 
-    // tick 1: first request per lane; tick 2: failed, re-requested once per
-    // lane; tick 3: failed again, attempts exhausted, lanes abandoned
+    // Tick 1 promotes the game. Tick 2 makes the first request per lane;
+    // tick 3 re-requests each failed proof; tick 4 exhausts the attempts.
+    defender.scan_once().await.unwrap();
     defender.scan_once().await.unwrap();
     defender.scan_once().await.unwrap();
     defender.scan_once().await.unwrap();

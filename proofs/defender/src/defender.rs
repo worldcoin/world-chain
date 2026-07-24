@@ -552,6 +552,9 @@ where
     pub(crate) async fn scan_once_with_timestamp(&mut self, now: u64) -> Result<(), DefenderError> {
         self.config.validate()?;
 
+        let defense_results = self.scan_active_defenses(now).await;
+        self.handle_defense_progress(defense_results);
+
         let game_count = self.execution_provider.game_count().await?;
         if self
             .next_game_index
@@ -587,7 +590,7 @@ where
         self.handle_game_scan_results(scan_results);
         self.next_game_index = Some(end);
 
-        if self.watched_games.is_empty() && self.active_defenses.is_empty() {
+        if self.watched_games.is_empty() {
             return Ok(());
         }
 
@@ -597,9 +600,6 @@ where
             .scan_watched_games(latest_finalized_l2_block, now)
             .await;
         self.handle_watch_outcomes(watch_results);
-
-        let defense_results = self.scan_active_defenses(now).await;
-        self.handle_defense_progress(defense_results);
         Ok(())
     }
 
