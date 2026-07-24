@@ -94,7 +94,6 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     bytes32 public immutable rootId;
 
     uint64 public immutable challengePeriod;
-    uint64 public immutable proofPeriod;
     uint256 public immutable proposerBond;
     uint256 public immutable challengerBond;
 
@@ -141,7 +140,6 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
             proposal.l1OriginNumber
         );
         challengePeriod = config.challengePeriod;
-        proofPeriod = config.proofPeriod;
         proposerBond = config.proposerBond;
         challengerBond = config.challengerBond;
         PROOF_THRESHOLD = config.proofThreshold;
@@ -152,6 +150,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
 
         createdAt = uint64(block.timestamp);
         challengeDeadline = uint64(block.timestamp + config.challengePeriod);
+        proofDeadline = uint64(block.timestamp + config.proofPeriod);
         state = WorldChainProofLib.RootState.PROPOSED;
     }
 
@@ -178,7 +177,6 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
         if (state == WorldChainProofLib.RootState.PROPOSED) {
             state = WorldChainProofLib.RootState.CHALLENGED;
             challengedAt = uint64(block.timestamp);
-            proofDeadline = uint64(block.timestamp + proofPeriod);
         }
 
         emit Challenged(msg.sender, proofDeadline);
