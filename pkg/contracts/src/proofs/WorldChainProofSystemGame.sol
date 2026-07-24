@@ -53,6 +53,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     }
 
     error InvalidBond(uint256 expected, uint256 actual);
+    error InvalidPeriods(uint64 challengePeriod, uint64 proofPeriod);
     error InvalidState(WorldChainProofLib.RootState expected, WorldChainProofLib.RootState actual);
     error ChallengePeriodElapsed(uint256 timestamp, uint256 challengeDeadline);
     error ProofPeriodElapsed(uint256 timestamp, uint256 proofDeadline);
@@ -94,7 +95,6 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     bytes32 public immutable rootId;
 
     uint64 public immutable challengePeriod;
-    uint64 public immutable proofPeriod;
     uint256 public immutable proposerBond;
     uint256 public immutable challengerBond;
 
@@ -119,6 +119,9 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
 
     constructor(ProposalInit memory proposal, ActivationConfig memory config) payable {
         if (msg.value != config.proposerBond) revert InvalidBond(config.proposerBond, msg.value);
+        if (config.proofPeriod <= config.challengePeriod) {
+            revert InvalidPeriods(config.challengePeriod, config.proofPeriod);
+        }
 
         factory = proposal.factory;
         anchorStateRegistry = proposal.anchorStateRegistry;
@@ -141,7 +144,6 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
             proposal.l1OriginNumber
         );
         challengePeriod = config.challengePeriod;
-        proofPeriod = config.proofPeriod;
         proposerBond = config.proposerBond;
         challengerBond = config.challengerBond;
         PROOF_THRESHOLD = config.proofThreshold;
@@ -152,6 +154,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
 
         createdAt = uint64(block.timestamp);
         challengeDeadline = uint64(block.timestamp + config.challengePeriod);
+        proofDeadline = uint64(block.timestamp + config.proofPeriod);
         state = WorldChainProofLib.RootState.PROPOSED;
     }
 
@@ -178,7 +181,6 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
         if (state == WorldChainProofLib.RootState.PROPOSED) {
             state = WorldChainProofLib.RootState.CHALLENGED;
             challengedAt = uint64(block.timestamp);
-            proofDeadline = uint64(block.timestamp + proofPeriod);
         }
 
         emit Challenged(msg.sender, proofDeadline);
