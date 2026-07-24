@@ -139,7 +139,7 @@ where
         }
     }
 
-    pub(crate) async fn scan(
+    pub(crate) async fn evaluate_discovered(
         &self,
         game: &GameMetadata,
         now: u64,
@@ -157,7 +157,7 @@ where
         })
     }
 
-    pub(crate) async fn watch(
+    pub(crate) async fn evaluate_tracked(
         &self,
         game: &GameMetadata,
         latest_finalized_l2_block: BlockNumber,

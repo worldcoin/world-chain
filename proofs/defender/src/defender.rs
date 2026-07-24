@@ -134,7 +134,7 @@ where
         Ok(low)
     }
 
-    async fn scan_games(
+    async fn evaluate_discovered_games(
         &self,
         games: impl IntoIterator<Item = GameMetadata>,
         now: u64,
@@ -144,7 +144,7 @@ where
             .map(move |game| {
                 let evaluator = evaluator;
                 async move {
-                    let result = evaluator.scan(&game, now).await;
+                    let result = evaluator.evaluate_discovered(&game, now).await;
                     (game, result)
                 }
             })
@@ -153,12 +153,12 @@ where
             .await
     }
 
-    fn handle_game_scan_results(
+    fn handle_discovered_game_outcomes(
         &mut self,
-        results: Vec<(GameMetadata, Result<GameOutcome, DefenderError>)>,
+        outcomes: Vec<(GameMetadata, Result<GameOutcome, DefenderError>)>,
     ) {
-        for (game, result) in results {
-            match result {
+        for (game, outcome) in outcomes {
+            match outcome {
                 Ok(GameOutcome::Track) => {
                     self.watched_games.insert(game.address, game);
                 }
@@ -176,7 +176,7 @@ where
         }
     }
 
-    async fn scan_watched_games(
+    async fn evaluate_tracked_games(
         &self,
         latest_finalized_l2_block: BlockNumber,
         now: u64,
@@ -186,7 +186,9 @@ where
             .map(move |game| {
                 let evaluator = evaluator;
                 async move {
-                    let result = evaluator.watch(&game, latest_finalized_l2_block, now).await;
+                    let result = evaluator
+                        .evaluate_tracked(&game, latest_finalized_l2_block, now)
+                        .await;
                     (game, result)
                 }
             })
@@ -195,13 +197,13 @@ where
             .await
     }
 
-    fn handle_watch_outcomes(
+    fn handle_tracked_game_outcomes(
         &mut self,
-        results: Vec<(GameMetadata, Result<GameOutcome, DefenderError>)>,
+        outcomes: Vec<(GameMetadata, Result<GameOutcome, DefenderError>)>,
     ) {
-        for (metadata, result) in results {
+        for (metadata, outcome) in outcomes {
             let game = metadata.address;
-            match result {
+            match outcome {
                 Ok(GameOutcome::Defend) => self.start_defense(metadata),
                 Ok(GameOutcome::Drop) => {
                     self.watched_games.remove(&game);
@@ -365,23 +367,23 @@ where
             new_games.push(self.execution_provider.game_metadata(game).await?);
         }
 
-        let scan_results = self.scan_games(new_games, now).await;
-        self.handle_game_scan_results(scan_results);
+        let outcomes = self.evaluate_discovered_games(new_games, now).await;
+        self.handle_discovered_game_outcomes(outcomes);
         self.next_game_index = Some(end);
         Ok(())
     }
 
-    async fn advance_watched_games(&mut self, now: u64) -> Result<(), DefenderError> {
+    async fn advance_tracked_games(&mut self, now: u64) -> Result<(), DefenderError> {
         if self.watched_games.is_empty() {
             return Ok(());
         }
 
         let latest_finalized_l2_block = self.consensus_provider.latest_l2_finalized_block().await?;
 
-        let watch_results = self
-            .scan_watched_games(latest_finalized_l2_block, now)
+        let outcomes = self
+            .evaluate_tracked_games(latest_finalized_l2_block, now)
             .await;
-        self.handle_watch_outcomes(watch_results);
+        self.handle_tracked_game_outcomes(outcomes);
         Ok(())
     }
 
@@ -390,7 +392,7 @@ where
 
         self.advance_active_defenses(now).await;
         self.discover_games(now).await?;
-        self.advance_watched_games(now).await
+        self.advance_tracked_games(now).await
     }
 
     /// Advances the defender by one polling tick.
