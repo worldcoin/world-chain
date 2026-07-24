@@ -629,7 +629,7 @@ where
         Ok(())
     }
 
-    pub(crate) async fn scan_once_with_timestamp(&mut self, now: u64) -> Result<(), DefenderError> {
+    pub(crate) async fn tick_at(&mut self, now: u64) -> Result<(), DefenderError> {
         self.config.validate()?;
 
         self.advance_active_defenses(now).await;
@@ -637,9 +637,9 @@ where
         self.advance_watched_games(now).await
     }
 
-    /// Scans one bounded factory range and advances every tracked defense.
-    pub async fn scan_once(&mut self) -> Result<(), DefenderError> {
-        self.scan_once_with_timestamp(unix_now()).await
+    /// Advances the defender by one polling tick.
+    pub async fn tick(&mut self) -> Result<(), DefenderError> {
+        self.tick_at(unix_now()).await
     }
 
     /// Runs the defender forever, logging transient failures and retrying on each tick.
@@ -649,7 +649,7 @@ where
         let mut interval = tokio::time::interval(self.config.poll_interval);
         loop {
             interval.tick().await;
-            if let Err(e) = self.scan_once().await {
+            if let Err(e) = self.tick().await {
                 warn!(%e, "scan attempt failed");
             }
         }
