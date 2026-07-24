@@ -32,6 +32,9 @@
   "lib/forge-std": {
     "rev": "06c5a8f760f7d2392697cb092eda80c864e4fc06"
   },
+  "lib/nitro-validator": {
+    "rev": "75c1145"
+  },
   "lib/openzeppelin-contracts": {
     "rev": "69c8def5f222ff96f2b5beff05dfba996368aa79"
   },

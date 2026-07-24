@@ -11,7 +11,7 @@ use std::{
 use alloy_eips::{BlockNumberOrTag, eip1559::BaseFeeParams};
 use alloy_genesis::Genesis;
 use alloy_network::EthereumWallet;
-use alloy_primitives::{Address, B64, U256, hex, keccak256};
+use alloy_primitives::{Address, B64, hex, keccak256};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_local::PrivateKeySigner;
 use base64::prelude::{BASE64_STANDARD, Engine};
@@ -40,13 +40,27 @@ use tokio::{
 use tracing::{Instrument, debug, info, info_span, warn};
 use url::{Host, Url};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
-use world_chain_challenger::{AlloyChallengerClient, ChallengerConfig, WorldChainChallenger};
+use world_chain_challenger::{
+    AlloyChallengerClient, BondManager as ChallengerBondManager,
+    BondManagerConfig as ChallengerBondManagerConfig, ChallengerClient, ChallengerConfig,
+    OwnedGames, ResolutionManager, ResolutionManagerConfig, WorldChainChallenger,
+};
 use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
 use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
-use world_chain_proof_succinct_host_utils::prover::{SP1ProofMode, Sp1ProverKind, SuccinctProver};
-use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig};
+use world_chain_proof_succinct_host_utils::{
+    Sp1ProverKind, WorldSuccinctProver,
+    cpu_prover::{CpuSuccinctProver, SP1ProofMode},
+    mock_prover::MockSuccinctProver,
+    network_prover::NetworkSuccinctProver,
+};
+use world_chain_proof_worker::{
+    ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
+};
 use world_chain_proofs::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
-use world_chain_proposer::{AlloyProofSystemClient, ProposerConfig, WorldChainProposer};
+use world_chain_proposer::{
+    AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerClient, ProposerConfig,
+    WorldChainProposer,
+};
 use world_chain_prover_service::{
     ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
 };
@@ -79,20 +93,15 @@ const SERVICE_RPC_PORT: u16 = 8545;
 const SERVICE_METRICS_PORT: u16 = 7300;
 const PROVER_SERVICE_POSTGRES_PORT: u16 = 5432;
 const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 10;
-const PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL: u64 = 5;
 /// Poll interval for the in-process SP1 worker leasing jobs from the prover-service.
 const SP1_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
 /// Env var enabling the in-process defender, prover-service, and SP1 worker. Off by default:
-/// real proving needs the SP1 ELFs. Set a prover backend (`cpu`/`mock`/`network`) to turn it on.
+/// real proving needs the SP1 ELFs. Set a prover backend to turn it on.
 const SP1_WORKER_PROVER_ENV: &str = "DEVNET_SP1_WORKER_PROVER";
-/// Bond, in wei, sent with every `WorldChainProofSystemFactory.propose`.
-/// Matches `PROPOSER_BOND` (1 ether) in `scripts/devnet/DeployProofSystem.s.sol`.
-const WORLD_PROPOSER_BOND_WEI: u128 = 1_000_000_000_000_000_000;
+/// SP1 network private key. Required when `DEVNET_SP1_WORKER_PROVER=network`.
+const SP1_PRIVATE_KEY_ENV: &str = "SP1_PRIVATE_KEY";
 /// Delay between World Chain proof-system proposal attempts.
 const WORLD_PROPOSER_POLL_INTERVAL: Duration = Duration::from_secs(2);
-/// Bond, in wei, sent with every `WorldChainProofSystemGame.challenge`.
-/// Matches `CHALLENGER_BOND` (0.1 ether) in `scripts/devnet/DeployProofSystem.s.sol`.
-const WORLD_CHALLENGER_BOND_WEI: u128 = 100_000_000_000_000_000;
 /// Delay between World Chain proof-system challenger scans.
 const WORLD_CHALLENGER_POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// Delay between World Chain proof-system defender scans.
@@ -158,6 +167,7 @@ pub struct FullStackWorldDevnet {
     sequencers: Vec<SequencerService>,
     observability: Option<ObservabilityStack>,
     l1: L1DevChain,
+    optimism_portal: String,
     components: Vec<DevnetComponent>,
     removed_services: Vec<DevnetComponent>,
     _tempdir: TempDir,
@@ -255,7 +265,6 @@ struct WorldProofSystemDeployment {
     l2_chain_id: u64,
     proof_system_version: u64,
     block_interval: u64,
-    intermediate_block_interval: u64,
 }
 
 /// In-process World Chain proof-system proposer task. Aborted on devnet drop.
@@ -498,6 +507,7 @@ impl FullStackWorldDevnet {
         let conductor_rpc_internal = host_internal_url(&conductors[0].rpc_url)?;
         let l2_rpc_internal = host_internal_url(&sequencers[0].rpc_url)?;
         let game_factory = l1_address(&artifacts.l1_addresses, "DisputeGameFactoryProxy")?;
+        let optimism_portal = l1_address(&artifacts.l1_addresses, "OptimismPortalProxy")?;
 
         let (batcher, proposer, challenger) = if config.op_challenger {
             let (batcher, proposer, challenger) = tokio::try_join!(
@@ -568,7 +578,7 @@ impl FullStackWorldDevnet {
         // requests for challenged valid games; the worker leases SP1 jobs, builds witnesses
         // from the devnet L1/L2 RPCs, and proves them with the selected backend.
         let (prover_service, sp1_worker, world_defender, prover_service_url) =
-            match (proof_system.as_ref(), sp1_worker_prover_kind()) {
+            match (proof_system.as_ref(), sp1_worker_prover_kind()?) {
                 (Some(deployment), Some(kind)) => {
                     let output_root_rpc = op_nodes
                         .first()
@@ -662,6 +672,7 @@ impl FullStackWorldDevnet {
             sequencers,
             observability,
             l1,
+            optimism_portal,
             components,
             removed_services: topology.removed_services,
             _tempdir: artifacts.workdir,
@@ -670,6 +681,10 @@ impl FullStackWorldDevnet {
 
     pub fn l1_rpc_url(&self) -> &str {
         self.l1.rpc_url()
+    }
+
+    pub fn optimism_portal(&self) -> &str {
+        &self.optimism_portal
     }
 
     pub fn l2_rpc_url(&self) -> &str {
@@ -858,17 +873,22 @@ l2ContractsLocator = "{}"
   SuperchainProxyAdminOwner = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
   SuperchainGuardian = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
   ProtocolVersionsOwner = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
+  Challenger = "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720"
 
 [[chains]]
   id = "0x{:064x}"
   baseFeeVaultRecipient = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
   l1FeeVaultRecipient = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
   sequencerFeeVaultRecipient = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
+  operatorFeeVaultRecipient = "0x1CBd3b2770909D4e10f157cABC84C7264073C9Ec"
   eip1559DenominatorCanyon = 250
   eip1559Denominator = 50
   eip1559Elasticity = 10
+  gasLimit = 60000000
   operatorFeeScalar = 0
   operatorFeeConstant = 0
+  minBaseFee = 0
+  daFootprintGasScalar = 0
   [chains.roles]
     l1ProxyAdminOwner = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
     l2ProxyAdminOwner = "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
@@ -934,10 +954,6 @@ async fn deploy_world_proof_system(
         .env(
             "PROOF_SYSTEM_BLOCK_INTERVAL",
             PROOF_SYSTEM_BLOCK_INTERVAL.to_string(),
-        )
-        .env(
-            "PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL",
-            PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL.to_string(),
         )
         .env("PROOF_SYSTEM_DEPLOYMENT_OUT", &deployment_rel_path);
 
@@ -1575,7 +1591,7 @@ async fn connect_execution_peers(sequencers: &[SequencerService]) -> Result<()> 
             bail!(
                 "EL peer graph is not connected yet: {} (need every node >= {min_peers_per_node}, total >= {min_total_peer_connections})",
                 peer_counts_summary(&counts)
-            )
+            );
         }
     })
     .await
@@ -1653,12 +1669,12 @@ async fn add_execution_peer_once(source: &SequencerService, enode: &str) -> Resu
     )
     .await?;
     if trusted.as_bool() == Some(false) {
-        bail!("admin_addTrustedPeer returned false")
+        bail!("admin_addTrustedPeer returned false");
     }
 
     let added = json_rpc(&source.rpc_url, "admin_addPeer", json!([enode])).await?;
     if added.as_bool() == Some(false) {
-        bail!("admin_addPeer returned false")
+        bail!("admin_addPeer returned false");
     }
     Ok(())
 }
@@ -2046,7 +2062,7 @@ async fn wait_for_op_node_peer_mesh(op_nodes: &[OpNodeService]) -> Result<()> {
                     bail!(
                         "{} has {connected} connected op-node peers, expected {expected}",
                         node.id
-                    )
+                    );
                 }
             },
         )
@@ -2132,7 +2148,7 @@ async fn wait_for_conductor_health(conductors: &[ConductorService]) -> Result<()
                 if healthy {
                     Ok(())
                 } else {
-                    bail!("{} sequencer is not healthy yet", conductor.id)
+                    bail!("{} sequencer is not healthy yet", conductor.id);
                 }
             },
         )
@@ -2153,7 +2169,7 @@ async fn wait_for_conductor_leader(bootstrap: &ConductorService, timeout: Durati
         if leader {
             Ok(())
         } else {
-            bail!("bootstrap conductor is not raft leader yet")
+            bail!("bootstrap conductor is not raft leader yet");
         }
     })
     .await
@@ -2403,11 +2419,17 @@ async fn start_world_chain_proposer(
         .connect_http(Url::parse(l1_rpc_url)?);
 
     let contracts = AlloyProofSystemClient::new(provider, factory_address, anchor_address);
+    let mut bond_manager = BondManager::new(BondManagerConfig::default(), contracts.clone());
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
+    let proposer_bond = contracts
+        .proposer_bond()
+        .await
+        .wrap_err("failed to read proposer bond")?;
     let config = ProposerConfig {
         block_interval: deployment.block_interval,
-        proposer_bond: U256::from(WORLD_PROPOSER_BOND_WEI),
+        proposer_bond,
         poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
+        max_resolutions_per_tick: ProposerConfig::default().max_resolutions_per_tick,
     };
     let proposer = WorldChainProposer::new(config, contracts, output_roots);
 
@@ -2423,8 +2445,17 @@ async fn start_world_chain_proposer(
 
     let handle = tokio::spawn(
         async move {
-            if let Err(error) = proposer.run_forever().await {
-                warn!(%error, "World Chain proof-system proposer stopped");
+            tokio::select! {
+                result = proposer.run_forever() => {
+                    if let Err(error) = result {
+                        warn!(%error, "World Chain proof-system proposer stopped");
+                    }
+                }
+                result = bond_manager.run_forever() => {
+                    if let Err(error) = result {
+                        warn!(%error, "World Chain bond manager stopped");
+                    }
+                }
             }
         }
         .instrument(info_span!(
@@ -2441,7 +2472,7 @@ async fn start_world_chain_proposer(
 /// The challenger signs with [`WORLD_CHALLENGER_PRIVATE_KEY`], a dedicated dev
 /// account that is funded through the L1 genesis (see [`fund_world_challenger`])
 /// and staked in the `MockStakingRegistry` by `DeployProofSystem.s.sol`. It scans
-/// `WorldChainProofSystemFactory.GameCreated` events, recomputes the expected
+/// indexed factory games, recomputes the expected
 /// output root from the op-node rollup RPC, and challenges any game whose
 /// `rootClaim` disagrees by calling `WorldChainProofSystemGame.challenge` on L1.
 async fn start_world_chain_challenger(
@@ -2464,25 +2495,57 @@ async fn start_world_chain_challenger(
 
     let client = AlloyChallengerClient::new(provider, factory_address);
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
+    let challenger_bond = client
+        .challenger_bond()
+        .await
+        .wrap_err("failed to read challenger bond")?;
     let config = ChallengerConfig {
-        challenger_bond: U256::from(WORLD_CHALLENGER_BOND_WEI),
+        challenger_bond,
         poll_interval: WORLD_CHALLENGER_POLL_INTERVAL,
         ..ChallengerConfig::default()
     };
-    let mut challenger = WorldChainChallenger::new(config, client, output_roots);
+    let owned_games = OwnedGames::default();
+    let mut challenger = WorldChainChallenger::with_owned_games(
+        config,
+        client.clone(),
+        output_roots,
+        owned_games.clone(),
+    );
+    let resolution_manager = ResolutionManager::new(
+        ResolutionManagerConfig::default(),
+        client.clone(),
+        owned_games.clone(),
+    );
+    let mut bond_manager =
+        ChallengerBondManager::new(ChallengerBondManagerConfig::default(), client, owned_games);
 
     info!(
         l1_rpc_url,
         output_root_rpc_url,
         factory = %deployment.proof_system_factory,
         challenger = %challenger_address,
+        challenger_bond = ?challenger_bond,
         "starting native World Chain proof-system challenger"
     );
 
     let handle = tokio::spawn(
         async move {
-            if let Err(error) = challenger.run_forever().await {
-                warn!(%error, "World Chain proof-system challenger stopped");
+            tokio::select! {
+                result = challenger.run_forever() => {
+                    if let Err(error) = result {
+                        warn!(%error, "World Chain proof-system challenger stopped");
+                    }
+                }
+                result = resolution_manager.run_forever() => {
+                    if let Err(error) = result {
+                        warn!(%error, "World Chain challenger resolution manager stopped");
+                    }
+                }
+                result = bond_manager.run_forever() => {
+                    if let Err(error) = result {
+                        warn!(%error, "World Chain challenger bond manager stopped");
+                    }
+                }
             }
         }
         .instrument(info_span!(
@@ -2555,10 +2618,11 @@ async fn start_world_chain_defender(
 
 /// Reads the SP1 worker prover backend from [`SP1_WORKER_PROVER_ENV`], or `None` when the
 /// defender proving loop is disabled.
-fn sp1_worker_prover_kind() -> Option<Sp1ProverKind> {
-    std::env::var(SP1_WORKER_PROVER_ENV)
-        .ok()
-        .and_then(|value| value.parse().ok())
+fn sp1_worker_prover_kind() -> Result<Option<Sp1ProverKind>> {
+    match std::env::var(SP1_WORKER_PROVER_ENV) {
+        Ok(value) => value.parse().map(Some).map_err(|error| eyre!("{error}")),
+        Err(_) => Ok(None),
+    }
 }
 
 /// Starts the in-process defender prover-service and returns its task handle and JSON-RPC URL.
@@ -2665,39 +2729,75 @@ async fn start_sp1_worker(
     )
     .map_err(|error| eyre!("failed to build SP1 worker host config: {error}"))?;
 
-    // `SuccinctProver` owns its own runtime, so build it off the async runtime.
-    let prover =
-        tokio::task::spawn_blocking(move || SuccinctProver::new(kind, SP1ProofMode::Groth16))
-            .await
-            .wrap_err("SP1 prover setup task panicked")?
-            .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+    match kind {
+        Sp1ProverKind::Cpu => {
+            let prover = CpuSuccinctProver::new(SP1ProofMode::Groth16)
+                .await
+                .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+            start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
+        }
+        Sp1ProverKind::Mock => {
+            let prover = MockSuccinctProver::new(SP1ProofMode::Groth16)
+                .await
+                .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+            start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
+        }
+        Sp1ProverKind::Network => {
+            let private_key = std::env::var(SP1_PRIVATE_KEY_ENV).wrap_err_with(|| {
+                format!("{SP1_PRIVATE_KEY_ENV} is required when {SP1_WORKER_PROVER_ENV}=network")
+            })?;
+            let prover = NetworkSuccinctProver::new(SP1ProofMode::Groth16, &private_key)
+                .await
+                .map_err(|error| eyre!("failed to build SP1 prover: {error}"))?;
+            start_sp1_worker_with_prover(prover_service_url, deployment, kind, host, prover)
+        }
+    }
+}
 
+fn start_sp1_worker_with_prover<P>(
+    prover_service_url: &str,
+    deployment: &WorldProofSystemDeployment,
+    kind: Sp1ProverKind,
+    host: OnlineHostConfig,
+    prover: P,
+) -> Result<Sp1WorkerTask>
+where
+    P: WorldSuccinctProver + Send + Sync + 'static,
+{
     let backend = Sp1Backend::new(
         host,
         prover,
         Sp1BackendConfig {
             block_interval: deployment.block_interval,
             split_count: 1,
-            prover_address: Address::ZERO,
             allow_unfinalized: false,
+            session_poll_interval: Duration::from_secs(10),
         },
     );
 
     let queue = RpcProverServiceClient::new(prover_service_url)
         .map_err(|error| eyre!("failed to connect SP1 worker to prover-service: {error}"))?;
+    let retry_config = RetryConfig::default();
+    let heartbeat_config = WorkerHeartbeatConfig::default();
     let worker = ProofWorker::new(
         queue,
         backend,
         ProofWorkerConfig {
+            worker_id: "devnet-sp1-worker".to_string(),
             poll_interval: SP1_WORKER_POLL_INTERVAL,
             max_concurrent_jobs: 1,
+            retry_config,
+            heartbeat_config,
         },
     );
 
     info!(
         prover_service = %prover_service_url,
         block_interval = deployment.block_interval,
-        prover = ?kind,
+        prover = %kind,
+        submit_proof_retry_max_retries = retry_config.max_attempts,
+        submit_proof_retry_initial_delay_ms = retry_config.initial_delay.as_millis(),
+        submit_proof_retry_max_delay_ms = retry_config.max_delay.as_millis(),
         "starting native defender SP1 worker"
     );
 
@@ -2812,7 +2912,7 @@ async fn require_http_success(url: &str) -> Result<()> {
     if response.status().is_success() {
         Ok(())
     } else {
-        bail!("metrics endpoint {url} returned {}", response.status())
+        bail!("metrics endpoint {url} returned {}", response.status());
     }
 }
 
@@ -3076,10 +3176,8 @@ fn build_components(
                 deployment.proof_system_version
             ))
             .with_note(format!(
-                "l2_chain_id={}, block_interval={}, intermediate_block_interval={}",
-                deployment.l2_chain_id,
-                deployment.block_interval,
-                deployment.intermediate_block_interval
+                "l2_chain_id={}, block_interval={}",
+                deployment.l2_chain_id, deployment.block_interval
             ))
             .with_note(format!(
                 "rollup_config_hash={}",
@@ -3215,7 +3313,7 @@ async fn wait_for_l2_blocks(rpc_url: &str, min_block: u64, timeout: Duration) ->
         if block >= min_block {
             Ok(())
         } else {
-            bail!("latest L2 block {block} is below expected {min_block}")
+            bail!("latest L2 block {block} is below expected {min_block}");
         }
     })
     .await
@@ -3291,7 +3389,7 @@ async fn wait_for_rpc_chain_id(rpc_url: &str, timeout: Duration) -> Result<()> {
         if chain_id == DEV_CHAIN_ID {
             Ok(())
         } else {
-            bail!("expected chain id {DEV_CHAIN_ID}, got {chain_id}")
+            bail!("expected chain id {DEV_CHAIN_ID}, got {chain_id}");
         }
     })
     .await
@@ -3460,7 +3558,7 @@ fn world_chain_binary() -> Result<PathBuf> {
 
     bail!(
         "failed to find native world-chain binary; run `cargo build -p world-chain` or set WORLD_CHAIN_BIN"
-    )
+    );
 }
 
 fn repo_root() -> Result<PathBuf> {
@@ -3525,11 +3623,16 @@ mod tests {
     }
 
     #[test]
-    fn renders_op_deployer_intent_with_tagged_contract_locators() {
+    fn renders_op_deployer_intent_with_embedded_contract_artifacts() {
         let intent = render_intent(&HaSequencerConfig::default());
 
-        assert!(intent.contains("l1ContractsLocator = \"tag://op-contracts/v7.0.0-rc.4\""));
-        assert!(intent.contains("l2ContractsLocator = \"tag://op-contracts/v7.0.0-rc.4\""));
+        assert!(intent.contains("l1ContractsLocator = \"embedded\""));
+        assert!(intent.contains("l2ContractsLocator = \"embedded\""));
+        assert!(intent.contains("Challenger = \"0xa0Ee7A142d267C1f36714E4a8F75612F20a79720\""));
+        assert!(intent.contains(
+            "operatorFeeVaultRecipient = \"0x1CBd3b2770909D4e10f157cABC84C7264073C9Ec\""
+        ));
+        assert!(intent.contains("gasLimit = 60000000"));
         assert!(!intent.contains("https://storage.googleapis.com/oplabs-contract-artifacts"));
     }
 }

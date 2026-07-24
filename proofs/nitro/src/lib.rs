@@ -1,20 +1,16 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 //! AWS Nitro TEE-attested prover for the World Chain OP Succinct Lite fault-proof stack.
 //!
-//! The Succinct backend produces ZK proofs of `BootInfoStruct` by re-executing the OP Stack
+//! The Succinct backend produces ZK proofs of `TransitionPublicValues` by re-executing the OP Stack
 //! derivation pipeline inside an SP1 zkVM. This crate offers an alternative trust assumption:
 //! the same derivation pipeline runs unmodified inside an AWS Nitro Enclave, and the resulting
-//! `BootInfoStruct` is attested by the enclave's NSM device. Verifiers check the attestation
+//! `TransitionPublicValues` is attested by the enclave's NSM device. Verifiers check the attestation
 //! document instead of a ZK proof.
-//!
-//! The boundary mirrors [`world_chain_proof_succinct_proof_utils::WorldSuccinctProver`]:
 //!
 //! - [`NitroRangeProofRequest`] carries the full rkyv-serialized [`WorldRangeWitnessData`]
 //!   that the enclave needs to drive the derivation pipeline.
-//! - [`NitroRangeProofArtifact`] returns the committed [`BootInfoStruct`] plus the raw
+//! - [`NitroRangeProofArtifact`] returns the committed [`TransitionPublicValues`] plus the raw
 //!   NSM attestation document (`COSE_Sign1` bytes) the host can hand to any verifier.
-//! - [`WorldNitroProver`] is the analogue of `WorldSuccinctProver` for attestation-backed
-//!   backends.
 //!
 //! Module layout:
 //!
@@ -26,13 +22,12 @@
 //!
 //! The enclave-side guest is the `world-chain-nitro-enclave` binary (`src/enclave.rs`).
 
+// clap is used by the p384-hints binary; reference it here so the
+// `unused_crate_dependencies` lint does not fire on the lib target.
+use clap as _;
+
 use serde::{Deserialize, Serialize};
-use world_chain_proof_core::{
-    boot::BootInfoStruct,
-    range::WorldRangeProofPublicValues,
-    types::{AggregationInputs, AggregationOutputs},
-    witness::WorldRangeWitnessData,
-};
+use world_chain_proof_core::{boot::TransitionPublicValues, witness::WorldRangeWitnessData};
 
 // Used only by the feature-gated `enclave` module; bind with `as _`
 // so the default build doesn't trip `unused_crate_dependencies`.
@@ -49,6 +44,10 @@ use tracing as _;
 use tracing_subscriber as _;
 
 pub mod attestation;
+
+/// P-384 modular-inverse hint generator for on-chain hinted ECDSA384 verification.
+/// See [`p384_hints::collect_hints`] for the primary entry point.
+pub mod p384_hints;
 
 #[cfg(all(feature = "enclave", target_os = "linux"))]
 pub mod host;
@@ -117,7 +116,7 @@ impl Default for ExpectedPcrs {
 ///
 /// Unlike the Succinct equivalent, the Nitro prover needs the full execution witness
 /// (preimages, blobs, World fork schedule) because the enclave re-runs the derivation
-/// pipeline end-to-end and only returns an attested `BootInfoStruct`.
+/// pipeline end-to-end and only returns an attested `TransitionPublicValues`.
 #[derive(Clone, Debug)]
 pub struct NitroRangeProofRequest {
     /// rkyv-serialized [`WorldRangeWitnessData`].
@@ -126,21 +125,20 @@ pub struct NitroRangeProofRequest {
     /// the bytes since deserialization happens inside the enclave to keep the witness
     /// inside the attested execution scope.
     pub witness_rkyv: Vec<u8>,
-    /// Optional host-computed public values that the enclave must match before returning a
-    /// signed boot info struct. Mirrors `WorldRangeWitness::expected_public_values`.
-    pub expected_public_values: Option<WorldRangeProofPublicValues>,
+    /// Optional host-computed public values that the enclave must match before signing.
+    pub expected_transition_public_values: Option<TransitionPublicValues>,
 }
 
 impl NitroRangeProofRequest {
     /// Builds a request by rkyv-serializing the supplied witness data.
     pub fn from_witness_data(
         witness: &WorldRangeWitnessData,
-        expected_public_values: Option<WorldRangeProofPublicValues>,
+        expected_transition_public_values: Option<TransitionPublicValues>,
     ) -> Result<Self, rkyv::rancor::Error> {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(witness)?;
         Ok(Self {
             witness_rkyv: bytes.to_vec(),
-            expected_public_values,
+            expected_transition_public_values,
         })
     }
 }
@@ -148,97 +146,33 @@ impl NitroRangeProofRequest {
 /// Artifact returned by a Nitro range prover.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NitroRangeProofArtifact {
-    /// OP Succinct-compatible boot info committed by the enclave.
-    pub boot_info: BootInfoStruct,
+    /// Transition public values committed by the enclave.
+    pub transition_public_values: TransitionPublicValues,
     /// `COSE_Sign1` attestation document bytes returned by the Nitro NSM device.
     ///
-    /// The document's `user_data` field commits to [`protocol::range_user_data`] of the boot
-    /// info, binding the attestation to this specific transition.
+    /// The document's `user_data` field commits to [`protocol::transition_commitment`] of the
+    /// transition public values, binding the attestation to this specific transition.
     pub attestation_doc: Vec<u8>,
     /// 65-byte recoverable secp256k1 signature over
-    /// `keccak256(l2_post_root || l2_block_number_be || rollup_config_hash)`.
+    /// `keccak256(abi.encode(TransitionPublicValues))`.
     ///
     /// Produced by the enclave's ephemeral signing key, which is certified by the NSM
     /// attestation document. Enables EVM-native on-chain signature recovery.
     pub signature: Vec<u8>,
 }
 
-/// Host request for a Nitro-attested aggregation proof.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NitroAggregationProofRequest {
-    /// Same aggregation inputs as the Succinct backend.
-    pub inputs: AggregationInputs,
-    /// CBOR-encoded L1 headers, ordered from oldest to newest.
-    pub l1_headers_cbor: Vec<u8>,
-}
-
-/// Artifact returned by a Nitro aggregation prover.
+/// Canonical transition commitment used for attestation and signing.
 ///
-/// Unlike the generic [`world_chain_proof_core::artifacts::AggregationProofArtifact`], this
-/// struct also preserves the 65-byte recoverable secp256k1 `signature` that the enclave
-/// produced and that was cryptographically verified against the enclave's certified key
-/// before being included here. Dropping it would prevent callers from performing
-/// EVM-native on-chain signature recovery over the aggregated output.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct NitroAggregationProofArtifact {
-    /// ABI-compatible aggregation outputs committed by the enclave.
-    pub outputs: AggregationOutputs,
-    /// `COSE_Sign1` attestation document bytes returned by the Nitro NSM device.
-    ///
-    /// The document's `user_data` field commits to
-    /// [`protocol::aggregation_user_data`] of the boot info and inputs,
-    /// binding the attestation to this specific aggregation.
-    pub proof: Vec<u8>,
-    /// 65-byte recoverable secp256k1 signature over the signing commitment.
-    ///
-    /// Produced by the enclave's ephemeral signing key, which is certified by the
-    /// NSM attestation document. Enables EVM-native on-chain signature recovery.
-    pub signature: Vec<u8>,
-}
-
-/// Backend trait for TEE-attested World prover implementations.
-///
-/// Modeled after [`world_chain_proof_succinct_proof_utils::WorldSuccinctProver`], but the
-/// request and artifact types carry attestation material instead of ZK proofs.
-pub trait WorldNitroProver {
-    /// Backend-specific error type.
-    type Error;
-
-    /// Proves one range witness inside an attested execution environment.
-    fn prove_range(
-        &self,
-        request: NitroRangeProofRequest,
-    ) -> Result<NitroRangeProofArtifact, Self::Error>;
-
-    /// Aggregates already-attested range proofs.
-    fn prove_aggregation(
-        &self,
-        request: NitroAggregationProofRequest,
-    ) -> Result<NitroAggregationProofArtifact, Self::Error>;
-}
-
-/// Convenience hash used to bind boot info into the attestation `user_data` field.
-///
-/// `SHA256(l2_pre_root || l2_post_root || l2_block_number_be || rollup_config_hash)`
+/// `keccak256(abi.encode(TransitionPublicValues))`
 #[must_use]
-pub fn range_user_data(boot_info: &BootInfoStruct) -> [u8; 32] {
-    protocol::range_user_data(boot_info)
-}
-
-/// Convenience re-export of the enclave signing commitment.
-///
-/// `keccak256(l2_post_root || l2_block_number_be || rollup_config_hash)`
-#[must_use]
-pub fn signing_commitment(boot_info: &BootInfoStruct) -> [u8; 32] {
-    protocol::signing_commitment(boot_info)
+pub fn transition_commitment(transition_public_values: &TransitionPublicValues) -> [u8; 32] {
+    protocol::transition_commitment(transition_public_values)
 }
 
 /// Re-exports of common host-facing types so callers can do `use world_chain_proof_nitro::*`.
 pub mod prelude {
     pub use crate::{
-        ExpectedPcrs, NitroAggregationProofArtifact, NitroAggregationProofRequest,
-        NitroRangeProofArtifact, NitroRangeProofRequest, WorldNitroProver, range_user_data,
-        signing_commitment,
+        ExpectedPcrs, NitroRangeProofArtifact, NitroRangeProofRequest, transition_commitment,
     };
     #[cfg(all(feature = "enclave", target_os = "linux"))]
     pub use crate::{NitroProver, NitroProverError};
@@ -247,12 +181,12 @@ pub mod prelude {
 #[cfg(test)]
 mod tests {
     use alloy_primitives::B256;
-    use world_chain_proof_core::boot::BootInfoStruct;
+    use world_chain_proof_core::boot::TransitionPublicValues;
 
     use crate::{
         ExpectedPcrs, NitroRangeProofArtifact, PCR_LEN,
         attestation::{AttestationError, parse_and_check_pcrs},
-        protocol::range_user_data,
+        protocol::transition_commitment,
     };
 
     /// Builds a minimal synthetic COSE_Sign1 attestation document suitable for unit tests.
@@ -318,29 +252,30 @@ mod tests {
         }
     }
 
-    fn boot_info() -> BootInfoStruct {
-        BootInfoStruct {
+    fn transition_public_values() -> TransitionPublicValues {
+        TransitionPublicValues {
             l1Head: B256::from([1; 32]),
             l2PreRoot: B256::from([2; 32]),
+            l2PreBlockNumber: 41,
             l2PostRoot: B256::from([3; 32]),
-            l2BlockNumber: 42,
+            l2PostBlockNumber: 42,
             rollupConfigHash: B256::from([4; 32]),
         }
     }
 
     #[test]
-    fn range_artifact_user_data_binds_boot_info() {
-        let boot_info = boot_info();
-        let user_data = range_user_data(&boot_info);
+    fn range_artifact_user_data_binds_transition_public_values() {
+        let transition_public_values = transition_public_values();
+        let user_data = transition_commitment(&transition_public_values);
         let attestation_doc = make_attestation_doc(&test_pcrs(), &user_data);
 
         let artifact = NitroRangeProofArtifact {
-            boot_info,
+            transition_public_values,
             attestation_doc,
             signature: vec![],
         };
 
-        let expected_user_data = range_user_data(&artifact.boot_info);
+        let expected_user_data = transition_commitment(&artifact.transition_public_values);
         parse_and_check_pcrs(
             &artifact.attestation_doc,
             &test_expected_pcrs(),
@@ -350,15 +285,15 @@ mod tests {
     }
 
     #[test]
-    fn tampered_boot_info_fails_user_data_check() {
-        let boot_info = boot_info();
-        let user_data = range_user_data(&boot_info);
+    fn tampered_transition_public_values_fail_user_data_check() {
+        let transition_public_values = transition_public_values();
+        let user_data = transition_commitment(&transition_public_values);
         let attestation_doc = make_attestation_doc(&test_pcrs(), &user_data);
 
-        let mut tampered = boot_info;
+        let mut tampered = transition_public_values;
         tampered.l2PostRoot = B256::from([9; 32]);
 
-        let expected_user_data = range_user_data(&tampered);
+        let expected_user_data = transition_commitment(&tampered);
         let err =
             parse_and_check_pcrs(&attestation_doc, &test_expected_pcrs(), &expected_user_data)
                 .unwrap_err();
@@ -368,8 +303,8 @@ mod tests {
 
     #[test]
     fn wrong_pcrs_fail_verification() {
-        let boot_info = boot_info();
-        let user_data = range_user_data(&boot_info);
+        let transition_public_values = transition_public_values();
+        let user_data = transition_commitment(&transition_public_values);
         // Document carries PCR0 = 0x03; we verify against a different non-zero value.
         let attestation_doc = make_attestation_doc(&test_pcrs(), &user_data);
 
@@ -388,8 +323,8 @@ mod tests {
 
     #[test]
     fn placeholder_pcrs_are_rejected() {
-        let boot_info = boot_info();
-        let user_data = range_user_data(&boot_info);
+        let transition_public_values = transition_public_values();
+        let user_data = transition_commitment(&transition_public_values);
         let attestation_doc = make_attestation_doc(&[[0u8; PCR_LEN]; 3], &user_data);
 
         let err = parse_and_check_pcrs(&attestation_doc, &ExpectedPcrs::PLACEHOLDER, &user_data)

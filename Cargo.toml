@@ -1,5 +1,5 @@
 [workspace.package]
-version = "2.3.0"
+version = "2.4.0"
 edition = "2024"
 rust-version = "1.95.0"
 license = "MIT"
@@ -24,15 +24,12 @@ members = [
     "crates/evm",
     "crates/pbh",
     "proofs/core",
-    "proofs/protocol",
     "proofs/nitro",
     "proofs/nitro/worker",
     "proofs/prover-sp1",
     "proofs/prover-nitro",
     "proofs/kona-client",
     "proofs/kona-host",
-    "proofs/succinct/utils/client",
-    "proofs/succinct/utils/ethereum-client",
     "proofs/succinct/utils/host",
     "proofs/succinct/utils/proof",
     "proofs/succinct/elfs",
@@ -67,7 +64,11 @@ inherits = "dev"
 inherits = "dev"
 
 
-[workspace.lints]
+[workspace.lints.rust]
+# eyre 0.6's `bail!` macro ends with a trailing semicolon, which nightly Rust
+# now warns about when the macro is used in expression position (match arms, etc.).
+# This is a known upstream issue; suppress until eyre is updated or we migrate.
+semicolon_in_expressions_from_macros = "allow"
 
 
 [workspace.dependencies]
@@ -92,13 +93,10 @@ world-chain-prover = { path = "proofs/prover", default-features = false }
 world-chain-prover-sp1 = { path = "proofs/prover-sp1", default-features = false }
 world-chain-prover-nitro = { path = "proofs/prover-nitro", default-features = false }
 world-chain-proof-core = { path = "proofs/core", default-features = false }
-world-chain-proof-protocol = { path = "proofs/protocol", default-features = false }
 world-chain-proof-nitro = { path = "proofs/nitro", default-features = false }
 world-chain-proof-kona-client-utils = { path = "proofs/kona-client", default-features = false }
 world-chain-proof-kona-host-utils = { path = "proofs/kona-host", default-features = false }
 world-chain-nitro-worker = { path = "proofs/nitro/worker", default-features = false }
-world-chain-proof-succinct-client-utils = { path = "proofs/succinct/utils/client", default-features = false }
-world-chain-proof-succinct-ethereum-client-utils = { path = "proofs/succinct/utils/ethereum-client", default-features = false }
 world-chain-proof-succinct-elfs = { path = "proofs/succinct/elfs" }
 world-chain-proof-succinct-host-utils = { path = "proofs/succinct/utils/host", default-features = false }
 world-chain-proof-succinct-utils = { path = "proofs/succinct/utils/proof", default-features = false }
@@ -306,7 +304,7 @@ test-case = "3"
 serde_json = "1"
 rand = { version = "0.9", features = ["small_rng"] }
 reqwest = { version = "0.12", default-features = false }
-sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "postgres", "migrate", "macros", "uuid", "chrono"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "migrate", "macros", "uuid", "chrono"] }
 bon = "3.3.0"
 rayon = "1.12.0"
 auto_impl = "1"

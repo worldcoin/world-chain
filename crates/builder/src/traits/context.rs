@@ -1,5 +1,6 @@
 use crate::payload_builder_metrics::PayloadBuildAttemptMetrics;
 use alloy_eips::eip4895::Withdrawals;
+use alloy_op_evm::block::PreRefundGasUsed;
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::PayloadId;
 use op_alloy_consensus::EIP1559ParamError;
@@ -159,6 +160,7 @@ pub trait PayloadBuilderCtx: Send + Sync {
                         DB: reth_evm::block::StateDB + reth_evm::Database,
                         BlockEnv = BlockEnv,
                     >,
+                    Result: PreRefundGasUsed,
                 >,
             >,
         Txs: PayloadTransactions<Transaction = Self::Transaction>;

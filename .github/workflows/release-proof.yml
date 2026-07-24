@@ -248,15 +248,16 @@ jobs:
             type=raw,value=${{ needs.extract-version.outputs.VERSION }}
             type=sha
 
-  # nitro-worker is Linux x86_64 only (requires AF_VSOCK), so it is built
-  # outside the multi-arch service matrix.
+  # nitro-worker is Linux x86_64 only (requires AF_VSOCK), so it cannot be
+  # built in the multi-arch service matrix above.
   build-nitro-worker-image:
     name: build nitro-worker image
     environment: dev
     needs: approve-release
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
-      - uses: actions/checkout@v6
+      - name: Check Out Repo
+        uses: actions/checkout@v6
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -276,7 +277,8 @@ jobs:
     needs: [extract-version, build-nitro-worker-image]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - name: Check Out Repo
+        uses: actions/checkout@v6
       - name: Merge multi-arch manifest
         uses: ./.github/actions/docker-merge-manifest
         with:
@@ -288,14 +290,16 @@ jobs:
             type=raw,value=${{ needs.extract-version.outputs.VERSION }}
             type=sha
 
-  # nitro-worker-enclave uses its own Dockerfile and is x86_64 only.
+  # nitro-worker-enclave uses its own Dockerfile (proofs/nitro/Dockerfile) and
+  # is x86_64 only (Nitro Enclaves are x86_64).
   build-nitro-worker-enclave-image:
     name: build nitro-worker-enclave image
     environment: dev
     needs: approve-release
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
-      - uses: actions/checkout@v6
+      - name: Check Out Repo
+        uses: actions/checkout@v6
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -312,7 +316,8 @@ jobs:
     needs: [extract-version, build-nitro-worker-enclave-image]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - name: Check Out Repo
+        uses: actions/checkout@v6
       - name: Merge multi-arch manifest
         uses: ./.github/actions/docker-merge-manifest
         with:
@@ -322,6 +327,45 @@ jobs:
           tags: |
             type=raw,value=${{ needs.extract-version.outputs.VERSION }}
             type=sha
+
+  # Build the Nitro Enclave Image Format (EIF) file from the enclave Docker image,
+  # then package it into a minimal OCI carrier image pushed to GHCR so Kubernetes
+  # pods can pull it via an init container (AWS Nitro Enclaves K8s device plugin pattern).
+  build-nitro-worker-enclave-eif-image:
+    name: build nitro-worker-enclave EIF carrier image
+    # Depends on build-eif so we package the exact same EIF whose PCRs land
+    # in pcrs.json / manifest.json — not a second independent build.
+    needs: [build-nitro-worker-enclave-image, extract-version, build-eif]
+    runs-on: arc-public-8xlarge-amd64-runner
+    outputs:
+      digest: ${{ steps.push_eif_image.outputs.digest }}
+    steps:
+      - name: Check Out Repo
+        uses: actions/checkout@v6
+      - name: Download EIF artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: nitro-enclave
+          path: target/eif
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build and push EIF carrier image
+        id: push_eif_image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: proofs/nitro/Dockerfile.eif
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}-nitro-worker-enclave-eif:${{ needs.extract-version.outputs.VERSION }}
+            ${{ env.REGISTRY }}/${{ github.repository }}-nitro-worker-enclave-eif:sha-${{ github.sha }}
 
   build-binaries:
     name: build binaries
@@ -396,7 +440,7 @@ jobs:
         with:
           name: nitro-enclave
           path: |
-            target/eif/world-chain-nitro-enclave.eif
+            target/eif/world-chain-nitro-worker-enclave.eif
             target/eif/pcrs.json
           if-no-files-found: error
 
@@ -410,6 +454,7 @@ jobs:
       - merge-nitro-prover-image
       - build-binaries
       - build-eif
+      - build-nitro-worker-enclave-eif-image
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -417,6 +462,7 @@ jobs:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
       SP1_PROVER_IMAGE_DIGEST: ${{ needs.merge-sp1-prover-image.outputs.digest }}
       NITRO_PROVER_IMAGE_DIGEST: ${{ needs.merge-nitro-prover-image.outputs.digest }}
+      EIF_IMAGE_DIGEST: ${{ needs.build-nitro-worker-enclave-eif-image.outputs.digest }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -430,7 +476,7 @@ jobs:
           mkdir -p assets
           cp artifacts/vkeys/vkeys.json assets/
           cp artifacts/nitro-enclave/pcrs.json assets/
-          cp artifacts/nitro-enclave/world-chain-nitro-enclave.eif assets/
+          cp artifacts/nitro-enclave/world-chain-nitro-worker-enclave.eif assets/
           cp artifacts/world-chain-prover-*/*.tar.gz* assets/
       - name: Build manifest
         run: |
@@ -441,6 +487,8 @@ jobs:
             --arg sp1_image_digest "$SP1_PROVER_IMAGE_DIGEST" \
             --arg nitro_image "${REGISTRY}/${PROOF_IMAGE_NAME}-nitro:${VERSION}" \
             --arg nitro_image_digest "$NITRO_PROVER_IMAGE_DIGEST" \
+            --arg eif_image "${REGISTRY}/${GITHUB_REPOSITORY}-nitro-worker-enclave-eif:${VERSION}" \
+            --arg eif_image_digest "$EIF_IMAGE_DIGEST" \
             --slurpfile vkeys assets/vkeys.json \
             --slurpfile pcrs assets/pcrs.json \
             '{
@@ -450,7 +498,8 @@ jobs:
               nitro_enclave: { pcrs: $pcrs[0] },
               images: {
                 sp1_prover: { name: $sp1_image, digest: $sp1_image_digest },
-                nitro_prover: { name: $nitro_image, digest: $nitro_image_digest }
+                nitro_prover: { name: $nitro_image, digest: $nitro_image_digest },
+                eif_launcher: { name: $eif_image, digest: $eif_image_digest }
               }
             }' > assets/manifest.json
           cat assets/manifest.json
@@ -514,10 +563,11 @@ jobs:
           | `manifest.json` | Binds git SHA, vkeys, PCRs, and image digests for this release |
           | `vkeys.json` | SP1 range vkey commitment + aggregation vkey |
           | `pcrs.json` | Nitro enclave PCR0/PCR1/PCR2 |
-          | `world-chain-nitro-enclave.eif` | Enclave image (measurements in `pcrs.json`) |
+          | `world-chain-nitro-worker-enclave.eif` | Enclave image (measurements in `pcrs.json`) |
           | `world-chain-prover-*.tar.gz` | `world-chain-prover-sp1` and `world-chain-prover-nitro` binaries, signed with PGP key `C75F BC64 E9D4 8E89 FB60 418B 8949 B352 D042 2E74` |
           | SP1 Docker | `ghcr.io/${{ env.PROOF_IMAGE_NAME }}-sp1:${{ env.VERSION }}` |
           | Nitro Docker | `ghcr.io/${{ env.PROOF_IMAGE_NAME }}-nitro:${{ env.VERSION }}` |
+          | EIF Launcher | `ghcr.io/${{ github.repository }}-nitro-worker-enclave-eif:${{ env.VERSION }}` |
           ENDBODY
           )
           gh release create --draft -t "proof/${VERSION}" -F - "proof/${VERSION}" assets/* <<< "$body"

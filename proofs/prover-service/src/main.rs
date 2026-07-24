@@ -11,7 +11,9 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use anyhow::{Context, Result};
 use clap::Parser;
 use tracing::info;
-use world_chain_prover_service::{ProverService, ProverServiceConfig, start_rpc_server};
+use world_chain_prover_service::{
+    ProverService, ProverServiceConfig, run_status_poller, start_rpc_server,
+};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -35,13 +37,17 @@ struct Cli {
     #[arg(long, env = "MAX_ATTEMPTS", default_value_t = 3)]
     max_attempts: u32,
 
-    /// Maximum number of requests queued per backend.
-    #[arg(long, env = "MAX_QUEUE_LEN", default_value_t = 1024)]
-    max_queue_len: usize,
+    /// Maximum proving retries per request before it is failed.
+    #[arg(long, env = "MAX_RETRIES", default_value_t = 3)]
+    max_retries: u32,
 
     /// Seconds to wait before polling an unchanged backend job again.
     #[arg(long, env = "BACKEND_POLL_INTERVAL_SECONDS", default_value_t = 30)]
     backend_poll_interval_seconds: u64,
+
+    /// Seconds between scans that fail proof requests after exhausted attempts.
+    #[arg(long, env = "STATUS_POLLER_INTERVAL_SECS", default_value_t = 30)]
+    status_poller_interval_secs: u64,
 }
 
 #[tokio::main]
@@ -54,19 +60,23 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let config = ProverServiceConfig {
-        lease_timeout: Duration::from_secs(cli.lease_timeout_seconds),
+        lock_timeout: Duration::from_secs(cli.lease_timeout_seconds),
         max_attempts: cli.max_attempts,
-        max_queue_len: cli.max_queue_len,
         backend_poll_interval: Duration::from_secs(cli.backend_poll_interval_seconds),
+        max_retries: cli.max_retries,
+        status_poller_interval: Duration::from_secs(cli.status_poller_interval_secs),
     };
+    let status_poller_interval = config.status_poller_interval;
     let service = Arc::new(
         ProverService::connect(&cli.database_url, config)
             .await
             .context("failed to initialize postgres-backed prover-service")?,
     );
-    let (addr, handle) = start_rpc_server(cli.listen_addr, service)
+    let (addr, handle) = start_rpc_server(cli.listen_addr, Arc::clone(&service))
         .await
         .context("failed to start prover-service RPC server")?;
+
+    let status_poller = tokio::spawn(run_status_poller(service, status_poller_interval));
 
     info!(listen_addr = %addr, "world-chain prover-service started");
 
@@ -77,5 +87,6 @@ async fn main() -> Result<()> {
             let _ = handle.stop();
         }
     }
+    status_poller.abort();
     Ok(())
 }

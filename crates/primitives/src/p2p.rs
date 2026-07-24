@@ -608,19 +608,15 @@ impl Decodable for AuthorizedMsg {
 #[cfg(test)]
 mod tests {
     use crate::{
-        access_list::{FlashblockAccessList, FlashblockAccessListData},
         flashblocks::FlashblockMetadata,
         primitives::{
             ExecutionPayloadBaseV1, ExecutionPayloadFlashblockDeltaV1, FlashblocksPayloadV1,
         },
+        test_fixtures::{decode_hex, sample_access_list_data},
     };
 
     use super::*;
 
-    use alloy_eip7928::{
-        AccountChanges, BalanceChange, BlockAccessIndex, CodeChange, NonceChange, SlotChanges,
-        StorageChange,
-    };
     use alloy_primitives::{Address, B256, Bloom, U256};
     use alloy_rlp::{Decodable, Encodable, encode};
     use alloy_rpc_types_eth::Withdrawal;
@@ -658,40 +654,7 @@ mod tests {
             transactions: vec![Bytes::from_static(b"\xDE\xAD\xBE\xEF")],
             withdrawals: vec![Withdrawal::default()],
             withdrawals_root: B256::from([0x44; 32]),
-            access_list_data: Some(FlashblockAccessListData {
-                access_list: sample_access_list(),
-                access_list_hash: B256::with_last_byte(0x4),
-            }),
-        }
-    }
-
-    fn sample_access_list() -> FlashblockAccessList {
-        FlashblockAccessList {
-            changes: vec![AccountChanges {
-                address: Address::default(),
-                storage_changes: vec![SlotChanges {
-                    slot: U256::from(0x2),
-                    changes: vec![StorageChange {
-                        block_access_index: BlockAccessIndex::new(1),
-                        new_value: U256::from(0x3),
-                    }],
-                }],
-                code_changes: vec![CodeChange {
-                    block_access_index: BlockAccessIndex::new(2),
-                    new_code: Bytes::from_static(b"\xCA\xFE"),
-                }],
-                storage_reads: vec![U256::from(0x4)],
-                balance_changes: vec![BalanceChange {
-                    block_access_index: BlockAccessIndex::new(3),
-                    post_balance: U256::from(1_000_000u64),
-                }],
-                nonce_changes: vec![NonceChange {
-                    block_access_index: BlockAccessIndex::new(4),
-                    new_nonce: 42,
-                }],
-            }],
-            max_tx_index: 5,
-            min_tx_index: 0,
+            access_list_data: Some(sample_access_list_data()),
         }
     }
 
@@ -717,6 +680,18 @@ mod tests {
             metadata: FlashblockMetadata::default(),
             base: Some(sample_base()),
         }
+    }
+
+    fn assert_p2p_msg_encoding_hex(msg: FlashblocksP2PMsg, expected_hex: &str) {
+        let expected = decode_hex(expected_hex);
+        let encoded = msg.encode();
+        let encoded: &[u8] = encoded.as_ref();
+        assert_eq!(encoded, expected.as_slice());
+
+        let mut slice = expected.as_slice();
+        let decoded = FlashblocksP2PMsg::decode(&mut slice).expect("decode pinned p2p message");
+        assert!(slice.is_empty());
+        assert_eq!(decoded, msg);
     }
 
     #[test]
@@ -853,6 +828,52 @@ mod tests {
             let decoded = FlashblocksP2PMsg::decode(&mut view).expect("decoding succeeds");
             assert!(view.is_empty(), "all bytes consumed");
             assert_eq!(decoded, msg);
+        }
+    }
+
+    #[test]
+    fn p2p_msg_encoding_regression() {
+        let (builder_sk, _) = key_pair(2);
+        let (authorization, _) = sample_authorization();
+
+        let variants = vec![
+            (
+                FlashblocksP2PMsg::Authorized(Authorized::new(
+                    &builder_sk,
+                    authorization,
+                    AuthorizedMsg::FlashblocksPayloadV1(sample_flashblocks_payload()),
+                )),
+                format!(
+                    "{}{}{}",
+                    "00f90368f902b080f902ac8800000000000000002af90201a01111111111111111111111111111111111111111111111111111111111111111a02222222222222222222222222222222222222222222222222222222222222222b90100",
+                    "00".repeat(256),
+                    "825208a03333333333333333333333333333333333333333333333333333333333333333c584deadbeefd9d8808094000000000000000000000000000000000000000080a04444444444444444444444444444444444444444444444444444444444444444f855f3f0ef940000000000000000000000000000000000000042c6c502c3c20103c104c6c503830f4240c3c2042ac5c40282cafe8005a036056e5d8e724530c6aa1548d2d40a02e385a6f874f7c94946d0899c32ab6b788e7b2266656573223a22307830227df88da05555555555555555555555555555555555555555555555555555555555555555a06666666666666666666666666666666666666666666666666666666666666666940000000000000000000000000000000000000000a077777777777777777777777777777777777777777777777777777777777777778204d28401c9c380846553f4e7826869843b9aca00f871880000000000000000846553f101a08139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394b840c9fb8b6311ebc286ef1976fe3149a1086a4349b531843241653cbd5cfefd0c3bd629a987b20d422cd4a58159cce1570b9b85209b9b8b43ec517109dfae27470db840d4a3306d8f030309df67af5a5bcf9128f8c8c0fd2fedf72b19d5f1ff067b878c5f7c432c92fa234d58aef6441508450738f2f0e1497abee89e7002722404c500",
+                ),
+            ),
+            (
+                FlashblocksP2PMsg::Authorized(Authorized::new(
+                    &builder_sk,
+                    authorization,
+                    AuthorizedMsg::StartPublish(StartPublish),
+                )),
+                "00f8b7c101f871880000000000000000846553f101a08139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394b840c9fb8b6311ebc286ef1976fe3149a1086a4349b531843241653cbd5cfefd0c3bd629a987b20d422cd4a58159cce1570b9b85209b9b8b43ec517109dfae27470db8400c121d65aa6696f6e6d2cd9a05e148f5e01b5d1d93f896357a209998d815b302dcf74ac52263f9760616d2ad5386d950189be9663cf6709accff6d23622f630f".to_string(),
+            ),
+            (
+                FlashblocksP2PMsg::Authorized(Authorized::new(
+                    &builder_sk,
+                    authorization,
+                    AuthorizedMsg::StopPublish(StopPublish),
+                )),
+                "00f8b7c102f871880000000000000000846553f101a08139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394b840c9fb8b6311ebc286ef1976fe3149a1086a4349b531843241653cbd5cfefd0c3bd629a987b20d422cd4a58159cce1570b9b85209b9b8b43ec517109dfae27470db840bf08c0a53bffe047ca4449c97bef1cf9dfc8f284cac35aeee1cd9ca9d4e80a755a5f95f59b7873c5ccea48392e439185cbee748fd765625c5d6a47216f30af03".to_string(),
+            ),
+            (FlashblocksP2PMsg::RequestFlashblocks, "01".to_string()),
+            (FlashblocksP2PMsg::AcceptFlashblocks, "02".to_string()),
+            (FlashblocksP2PMsg::RejectFlashblocks, "03".to_string()),
+            (FlashblocksP2PMsg::CancelFlashblocks, "04".to_string()),
+        ];
+
+        for (msg, expected_hex) in variants {
+            assert_p2p_msg_encoding_hex(msg, &expected_hex);
         }
     }
 

@@ -13,7 +13,7 @@ use std::{
 use tracing::{error, info, warn};
 use world_chain_proofs::{ConsensusProvider, GameCreated, ProofLane, RootState};
 use world_chain_prover_service::{
-    ProofBackend, ProofData, ProofRequest, ProofRequester, ProofStatus,
+    ProofBackend, ProofData, ProofRequest, ProofRequester, ProofResponse, ProofStatus,
 };
 
 /// The number of L1 blocks published in 24h.
@@ -205,12 +205,30 @@ where
                     }
                 };
                 match status {
-                    ProofStatus::Queued | ProofStatus::Starting | ProofStatus::BackendPending => {
-                        state
-                    }
-                    ProofStatus::Completed => {
+                    ProofStatus::Created | ProofStatus::Running => state,
+                    ProofStatus::Succeeded => {
                         let response = match self.proof_requester.get_proof(id).await {
-                            Ok(response) => response,
+                            Ok(ProofResponse::Succeeded(response)) => response,
+                            Ok(ProofResponse::Pending(response)) => {
+                                warn!(
+                                    %game,
+                                    ?lane,
+                                    %id,
+                                    status = %response.status,
+                                    "proof status was succeeded but proof response is pending; retrying next tick"
+                                );
+                                return state;
+                            }
+                            Ok(ProofResponse::Failed(response)) => {
+                                warn!(
+                                    %game,
+                                    ?lane,
+                                    %id,
+                                    reason = %response.reason,
+                                    "proof status was succeeded but proof response is failed; retrying next tick"
+                                );
+                                return state;
+                            }
                             Err(error) => {
                                 warn!(%game, ?lane, %id, %error, "proof retrieval failed; retrying next tick");
                                 return state;
@@ -245,10 +263,21 @@ where
                             .request_proof(proof_request(game_created, backend))
                             .await
                         {
-                            Ok(id) => LaneState::Requested {
-                                id,
-                                attempts: attempts + 1,
-                            },
+                            Ok(id) => {
+                                let next_attempt = attempts + 1;
+                                warn!(
+                                    %game,
+                                    ?lane,
+                                    %id,
+                                    attempts = next_attempt,
+                                    max_attempts = self.config.max_proof_attempts,
+                                    "proof failed; re-requested proof"
+                                );
+                                LaneState::Requested {
+                                    id,
+                                    attempts: next_attempt,
+                                }
+                            }
                             Err(error) => {
                                 warn!(%game, ?lane, %error, "proof re-request failed; retrying next tick");
                                 state
@@ -401,8 +430,12 @@ fn proof_request(game_created: &GameCreated, backend: ProofBackend) -> ProofRequ
 
 /// Encode a proof payload into the `bytes` argument of `submitProofLane`.
 ///
-/// TODO: the on-chain proof calldata format is not defined yet. Replace this
-/// placeholder encoding once the game contract specifies it.
+/// TODO: encode proofs for their concrete on-chain verifiers. SP1 proofs must
+/// match `SP1ValidityVerifier`'s ABI tuple:
+/// `(domainHash, parentRef, l1OriginNumber, publicValues, proofBytes)`.
+/// That requires proposal context in addition to `ProofData`, so this helper
+/// should move closer to the game/lane submission path before real SP1 lanes
+/// are enabled.
 fn encode_proof(proof: &ProofData) -> Bytes {
     match proof {
         ProofData::Sp1 {
@@ -411,8 +444,15 @@ fn encode_proof(proof: &ProofData) -> Bytes {
         } => [public_values.as_ref(), proof.as_ref()].concat().into(),
         ProofData::Nitro {
             attestation,
+            public_values,
             signature,
-        } => [attestation.as_ref(), signature.as_ref()].concat().into(),
+        } => [
+            public_values.as_ref(),
+            attestation.as_ref(),
+            signature.as_ref(),
+        ]
+        .concat()
+        .into(),
     }
 }
 

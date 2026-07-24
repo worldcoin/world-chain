@@ -8,15 +8,17 @@ use std::{
 use alloy_primitives::B256;
 use anyhow::{Context, Result, bail};
 use clap::Args;
-use reqwest::blocking::Client;
+use reqwest::Client;
 use serde::Serialize;
 use serde_json::{Value, json};
 use world_chain_chainspec::WorldChainSpec;
-use world_chain_proof_core::{range::WorldRangeHardforkConfig, witness::WorldRangeWitnessData};
-use world_chain_proof_kona_host_utils::online::{
-    OnlineHostConfig, RangeProofInput, RangeWitnessRequest, build_range_input, rpc,
+use world_chain_proof_core::{
+    hash_rollup_config, range::WorldRangeHardforkConfig, witness::WorldRangeWitnessData,
 };
-use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
+use world_chain_proof_kona_host_utils::online::{
+    OnlineHostConfig, RangeProofInput, RangeWitnessRequest, build_range_input,
+    hardfork_config_from_chain_spec, rpc,
+};
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum Network {
@@ -48,7 +50,7 @@ pub struct HashRollupConfigArgs {
     #[arg(long, env = "ROLLUP_CONFIG", conflicts_with = "l2_rpc")]
     pub rollup_config: Option<PathBuf>,
 
-    /// L2 RPC URL to fetch the rollup config from. Mutually exclusive with --rollup-config.
+    /// L2 consensus RPC URL to fetch the rollup config from. Mutually exclusive with --rollup-config.
     #[arg(long, env = "L2_RPC_URL", conflicts_with = "rollup_config")]
     pub l2_rpc: Option<String>,
 }
@@ -75,7 +77,8 @@ pub struct RpcArgs {
     #[arg(long, env = "L1_BEACON_RPC_URL")]
     pub l1_beacon_rpc: String,
 
-    /// Rollup config JSON file. If omitted, uses the built-in World Chain mainnet config.
+    /// Rollup config JSON file. If omitted, uses the selected network's built-in fork schedule
+    /// and requires --rollup-config-hash.
     #[arg(long, env = "ROLLUP_CONFIG")]
     pub rollup_config: Option<PathBuf>,
 
@@ -110,27 +113,28 @@ pub struct WitnessArgs {
     pub output: PathBuf,
 }
 
-pub fn print_rollup_config_hash(args: HashRollupConfigArgs) -> Result<()> {
-    let hash = rollup_config_hash_from_args(args)?;
+pub async fn print_rollup_config_hash(args: HashRollupConfigArgs) -> Result<()> {
+    let hash = rollup_config_hash_from_args(args).await?;
     println!("{hash:?}");
     Ok(())
 }
 
-pub fn rollup_config_hash_from_args(args: HashRollupConfigArgs) -> Result<B256> {
+pub async fn rollup_config_hash_from_args(args: HashRollupConfigArgs) -> Result<B256> {
     match (args.rollup_config, args.l2_rpc) {
         (Some(path), _) => Ok(proof_config_from_file(&path)?.1),
         (None, Some(url)) => {
             let client = Client::new();
-            let value: Value = rpc(&client, &url, "optimism_rollupConfig", json!([]))?
+            let value: Value = rpc(&client, &url, "optimism_rollupConfig", json!([]))
+                .await?
                 .context("optimism_rollupConfig returned null")?;
-            Ok(world_chain_proof_protocol::hash_rollup_config(&value)?)
+            Ok(hash_rollup_config(&value)?)
         }
         (None, None) => bail!("provide --rollup-config or --l2-rpc"),
     }
 }
 
-pub fn write_witness(args: WitnessArgs) -> Result<()> {
-    let input = build_range_input_from_args(&args.rpc)?;
+pub async fn write_witness(args: WitnessArgs) -> Result<()> {
+    let input = build_range_input_from_args(&args.rpc).await?;
     let bytes = witness_bytes(&input.witness)?;
     write_bytes(&args.output, &bytes)?;
     let metadata_path = sibling_path(&args.output, "metadata.json");
@@ -163,7 +167,7 @@ pub fn online_host_config(args: &RpcArgs) -> Result<OnlineHostConfig> {
     })
 }
 
-pub fn build_range_input_from_args(args: &RpcArgs) -> Result<RangeProofInput> {
+pub async fn build_range_input_from_args(args: &RpcArgs) -> Result<RangeProofInput> {
     let config = online_host_config(args)?;
     build_range_input(
         &config,
@@ -174,6 +178,7 @@ pub fn build_range_input_from_args(args: &RpcArgs) -> Result<RangeProofInput> {
             allow_unfinalized: args.allow_unfinalized,
         },
     )
+    .await
 }
 
 pub fn proof_config(
@@ -188,17 +193,16 @@ pub fn proof_config(
     let hash = rollup_config_hash
         .context("provide --rollup-config or ROLLUP_CONFIG, or supply --rollup-config-hash")?;
     let spec = network.chain_spec();
-    let protocol_config = ProtocolHardforkConfig::from_chain_spec(spec.as_ref());
-    Ok((range_hardfork_config(&protocol_config), hash))
+    Ok((hardfork_config_from_chain_spec(spec.as_ref()), hash))
 }
 
 pub fn proof_config_from_file(path: &Path) -> Result<(WorldRangeHardforkConfig, B256)> {
     let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
     let value: Value = serde_json::from_slice(&bytes)
         .with_context(|| format!("failed to parse {}", path.display()))?;
-    let protocol_config = ProtocolHardforkConfig::from_rollup_config_value(&value)?;
-    let hash = world_chain_proof_protocol::hash_rollup_config(&value)?;
-    Ok((range_hardfork_config(&protocol_config), hash))
+    let schedule = serde_json::from_value(value.clone())?;
+    let hash = hash_rollup_config(&value)?;
+    Ok((schedule, hash))
 }
 
 pub fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
@@ -213,23 +217,6 @@ pub fn ensure_parent_dir(path: &Path) -> Result<()> {
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
     Ok(())
-}
-
-fn range_hardfork_config(config: &ProtocolHardforkConfig) -> WorldRangeHardforkConfig {
-    WorldRangeHardforkConfig {
-        bedrock_block: config.bedrock_block,
-        regolith_time: config.regolith_time,
-        canyon_time: config.canyon_time,
-        ecotone_time: config.ecotone_time,
-        fjord_time: config.fjord_time,
-        granite_time: config.granite_time,
-        holocene_time: config.holocene_time,
-        isthmus_time: config.isthmus_time,
-        jovian_time: config.jovian_time,
-        karst_time: config.karst_time,
-        tropo_time: config.tropo_time,
-        strato_time: config.strato_time,
-    }
 }
 
 fn witness_bytes(witness: &WorldRangeWitnessData) -> Result<Vec<u8>> {

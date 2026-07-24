@@ -31,4 +31,4 @@ tokio.workspace = true
 tracing.workspace = true
 world-chain-proof-core.workspace = true
 world-chain-proof-kona-client-utils.workspace = true
-world-chain-proof-protocol.workspace = true
+world-chain-chainspec.workspace = true

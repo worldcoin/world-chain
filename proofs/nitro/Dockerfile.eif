@@ -1,0 +1,56 @@
+# syntax=docker/dockerfile:1
+# Launcher image for the Nitro Enclave Image Format (EIF) file.
+# Used by Kubernetes pods to launch the enclave on Nitro-enabled EC2 instances.
+#
+# Build context: target/eif/  (produced by scripts/build-eif.sh)
+# Required file in context: world-chain-nitro-worker-enclave.eif
+#
+# Environment variables (defaults shown):
+#   EIF_PATH              /home/world-chain-nitro-worker-enclave.eif
+#   ENCLAVE_CPU_COUNT     2
+#   ENCLAVE_MEMORY_SIZE   512   (MiB)
+#   ENCLAVE_DEBUG_MODE    false  (set to "true" or "1" to pass --debug-mode)
+
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023
+
+RUN dnf install -y aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel jq && \
+    dnf clean all
+
+# EIF file from the build context (target/eif/).
+COPY target/eif/world-chain-nitro-worker-enclave.eif /home/world-chain-nitro-worker-enclave.eif
+
+# Defaults; override at runtime via -e / K8s env:.
+ENV EIF_PATH="/home/world-chain-nitro-worker-enclave.eif" \
+    ENCLAVE_CPU_COUNT=2 \
+    ENCLAVE_MEMORY_SIZE=512 \
+    ENCLAVE_DEBUG_MODE=false
+
+COPY <<'EOF' /home/run.sh
+#!/bin/bash
+set -euo pipefail
+
+echo "[run.sh] Starting enclave: eif=${EIF_PATH} cpu=${ENCLAVE_CPU_COUNT} mem=${ENCLAVE_MEMORY_SIZE}MiB debug=${ENCLAVE_DEBUG_MODE}"
+
+DEBUG_FLAG=""
+if [[ "${ENCLAVE_DEBUG_MODE}" == "true" || "${ENCLAVE_DEBUG_MODE}" == "1" ]]; then
+    DEBUG_FLAG="--debug-mode"
+fi
+
+# Capture run-enclave output to extract EnclaveID reliably.
+run_output=$(nitro-cli run-enclave \
+    --cpu-count  "${ENCLAVE_CPU_COUNT}" \
+    --memory     "${ENCLAVE_MEMORY_SIZE}" \
+    --eif-path   "${EIF_PATH}" \
+    ${DEBUG_FLAG})
+
+enclave_id=$(echo "${run_output}" | jq -r '.EnclaveID')
+echo "[run.sh] Enclave started: ${enclave_id}"
+
+# Attach to the enclave console (blocking — keeps the container alive).
+# In non-debug mode the console produces no output but still blocks correctly.
+nitro-cli console --enclave-id "${enclave_id}"
+EOF
+
+RUN chmod +x /home/run.sh
+
+CMD ["/home/run.sh"]

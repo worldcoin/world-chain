@@ -33,11 +33,15 @@ use alloy_provider::{Provider, RootProvider};
 use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_engine::PayloadId;
 use ed25519_dalek::SigningKey;
+use proptest::{
+    strategy::{Strategy, ValueTree},
+    test_runner::TestRunner,
+};
 use reth_network::{Peers, PeersInfo};
 use reth_network_peers::PeerId;
 use reth_tracing::tracing_subscriber::{self, util::SubscriberInitExt};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     io::Write,
     time::{SystemTime, UNIX_EPOCH},
@@ -323,6 +327,242 @@ async fn test_without_block_uncompressed_size_limit_includes_all_transactions() 
             .iter()
             .any(|tx| *tx.tx_hash() == tx3_hash),
         "tx3 should be included"
+    );
+
+    Ok(())
+}
+
+/// Sign a transaction that burns real gas via non-zero calldata, carrying an explicit `gas_limit`.
+///
+/// Under Prague (EIP-7623, active at Karst) every non-zero calldata byte costs a flat 40 gas, so
+/// `calldata_len` deterministically dials the transaction's *actual* (pre-refund) gas consumption,
+/// while `gas_limit` is what the builder reserves against the block limit. Accumulating real gas is
+/// what makes the reservation gate in `WorldChainPayloadBuilderCtx::execute_best_transactions`
+/// actually engage — a plain transfer (21k) never grows `cumulative_evm_gas_used` enough to matter.
+async fn signed_gas_burner(
+    signer_index: u32,
+    nonce: u64,
+    calldata_len: usize,
+    gas_limit: u64,
+) -> eyre::Result<(Bytes, B256)> {
+    let mut tx_request = tx(
+        CHAIN_SPEC.chain.id(),
+        Some(Bytes::from(vec![1u8; calldata_len])),
+        nonce,
+        Address::random(),
+        gas_limit,
+    );
+    tx_request.value = Some(U256::from(1));
+
+    let wallet = EthereumWallet::from(signer(signer_index));
+    let signed =
+        <TransactionRequest as NetworkTransactionBuilder<Ethereum>>::build(tx_request, &wallet)
+            .await?;
+
+    Ok((signed.encoded_2718().into(), *signed.tx_hash()))
+}
+
+/// Fuzz transaction gas through the real `WorldChainPayloadBuilder` / `WorldChainPayloadBuilderCtx`
+/// payload-building path **with flashblocks enabled**, deliberately overcommitting a block so the
+/// gas-limit overflow is caught at *validation* time (the reservation gate) rather than surfacing
+/// during the critical execution path.
+///
+/// The validator-side prop tests in `crate::fuzz` fuzz gas limits against the parallel BAL execution
+/// strategy. This is the producer-side counterpart: it drives gas-heavy transactions through the
+/// flashblocks builder via [`EngineDriver`], so `execute_best_transactions`' reservation logic is
+/// stressed *across* the chained flashblocks that make up each block (the continuation-build
+/// accounting that carries `cumulative_evm_gas_used` forward — the focus of this branch's fix).
+///
+/// Each transaction burns a fuzzed amount of real gas via non-zero calldata and carries a fuzzed,
+/// over-provisioned `gas_limit`. The total real gas injected far exceeds one block, forcing the
+/// builder to stop including transactions before the block overflows. Invariants:
+///
+/// 1. **Caps at validation, never overflows** – every built block reports `gas_used <= gas_limit`.
+///    The builder must reject the over-the-limit transaction at the `is_tx_over_limits` gate, not by
+///    failing mid-execution.
+/// 2. **Validator accepts every block** – the driver canonicalizes each block via `newPayload`; a
+///    block that overflowed (or a builder that mis-accounted gas) would be rejected there. Reaching
+///    the end means the builder produced only valid blocks.
+/// 3. **The gate actually engaged** – the load spills across multiple blocks and at least one block
+///    fills close to the limit, proving the overflow path was exercised rather than trivially fitting.
+/// 4. **No transaction is wrongly dropped** – deferred transactions drain over subsequent blocks.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_payload_builder_fuzzed_gas_limits_flashblocks() -> eyre::Result<()> {
+    use std::sync::Mutex;
+
+    reth_tracing::init_test_tracing();
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Constrain the built block to the genesis gas limit (30M, an unchanged value FCU accepts) so a
+    // modest number of gas-heavy transactions overcommits it and forces the reservation gate to fire.
+    const BLOCK_GAS_LIMIT: u64 = 30_000_000;
+    // Distinct funded senders (res/genesis.json funds 20 test-mnemonic accounts); signer 0 is skipped
+    // because the e2e chain spec funds it with only 0.1 ETH. Each sends one nonce-0 transaction.
+    const SENDERS: u32 = 12;
+    // Cycles to fully drain the overcommitted load.
+    const NUM_BLOCKS: usize = 5;
+    const BLOCK_INTERVAL: Duration = Duration::from_millis(2000);
+
+    let (_, nodes, _tasks, mut env, _spammer) = WorldChainTestBuilder::builder()
+        .nodes(1)
+        .flashblocks(true)
+        .build()
+        .setup::<WorldChainDefaultContext>()
+        .await?;
+
+    let builder_context = nodes[0].ext_context.clone().unwrap();
+    let block_hash = nodes[0].node.block_hash(0);
+    let chain_spec = nodes[0].node.inner.chain_spec().clone();
+
+    for node in &nodes {
+        node.node.update_forkchoice(block_hash, block_hash).await?;
+    }
+
+    // Deterministic runner so a failure reproduces from the same seed.
+    let mut runner = TestRunner::deterministic();
+    // Fuzz the real gas burned (via calldata length) and the over-provisioned headroom independently.
+    // At 40 gas/non-zero-byte each tx burns ~3.2M–4.4M real gas, so SENDERS of them (~46M) overcommit
+    // the 30M block; declared gas_limit always covers the floor cost (21k + 40*len) and stays below
+    // the block limit so the pool accepts every tx.
+    let calldata_len_strategy = 80_000usize..=110_000usize;
+    let headroom_strategy = 0u64..=3_000_000u64;
+
+    let mut injected: HashSet<Bytes> = HashSet::new();
+    for signer_index in 1..=SENDERS {
+        let calldata_len = calldata_len_strategy
+            .new_tree(&mut runner)
+            .expect("calldata strategy should produce a value")
+            .current();
+        let headroom = headroom_strategy
+            .new_tree(&mut runner)
+            .expect("headroom strategy should produce a value")
+            .current();
+        // Floor cost (21k + 40*len) plus slack, plus fuzzed over-provisioning.
+        let gas_limit = 40 * calldata_len as u64 + 100_000 + headroom;
+        let (raw, _hash) = signed_gas_burner(signer_index, 0, calldata_len, gas_limit).await?;
+        nodes[0].node.rpc.inject_tx(raw.clone()).await?;
+        injected.insert(raw);
+    }
+
+    let injected = Arc::new(injected);
+    // Every user tx observed across all built blocks.
+    let included: Arc<Mutex<HashSet<Bytes>>> = Arc::new(Mutex::new(HashSet::new()));
+    // Per-block (gas_used, gas_limit, user_tx_count).
+    let stats: Arc<Mutex<Vec<(u64, u64, usize)>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let builder_vk = builder_context
+        .flashblocks_handle
+        .builder_sk()
+        .unwrap()
+        .verifying_key();
+
+    let authorization_gen =
+        move |parent_hash: B256, attrs: reth_optimism_payload_builder::OpPayloadAttrs| {
+            let authorizer_sk = ed25519_dalek::SigningKey::from_bytes(&[0; 32]);
+            let payload_id = force_op_payload_id_v3(attrs.payload_id(&parent_hash));
+            world_chain_primitives::p2p::Authorization::new(
+                payload_id,
+                attrs.payload_attributes.timestamp,
+                &authorizer_sk,
+                builder_vk,
+            )
+        };
+
+    let mut driver = world_chain_test_utils::e2e_harness::actions::EngineDriver {
+        builder_idx: 0,
+        follower_idxs: vec![],
+        initial_parent_hash: Some(block_hash),
+        num_blocks: NUM_BLOCKS,
+        block_interval: BLOCK_INTERVAL,
+        flashblocks: true,
+        authorization_gen,
+        attributes_gen: Box::new({
+            let chain_spec = chain_spec.clone();
+            move |_block_number, timestamp| {
+                let eip1559 = encode_eip1559_params(chain_spec.as_ref(), timestamp)?;
+                let mut attrs = build_payload_attributes(
+                    timestamp,
+                    eip1559,
+                    Some(vec![TX_SET_L1_BLOCK.clone()]),
+                );
+                attrs.0.gas_limit = Some(BLOCK_GAS_LIMIT);
+                Ok(attrs)
+            }
+        }),
+        during_build: None,
+        on_block: Some(Box::new({
+            let injected = injected.clone();
+            let included = included.clone();
+            let stats = stats.clone();
+            move |_block_num, payload| {
+                let injected = injected.clone();
+                let included = included.clone();
+                let stats = stats.clone();
+
+                let inner = &payload
+                    .execution_payload
+                    .payload_inner
+                    .payload_inner
+                    .payload_inner;
+                let gas_used = inner.gas_used;
+                let gas_limit = inner.gas_limit;
+                let transactions = inner.transactions.clone();
+
+                Box::pin(async move {
+                    let mut included = included.lock().unwrap();
+                    let mut user_txs = 0;
+                    for raw in &transactions {
+                        if injected.contains(raw) {
+                            included.insert(raw.clone());
+                            user_txs += 1;
+                        }
+                    }
+                    stats.lock().unwrap().push((gas_used, gas_limit, user_txs));
+                    Ok(())
+                })
+            }
+        })),
+    };
+
+    driver.execute(&mut env).await?;
+
+    let stats = stats.lock().unwrap();
+
+    // Invariant 1: the builder caps every block at its gas limit. A correct reservation gate stops
+    // including transactions *before* the block overflows; it never produces gas_used > gas_limit.
+    for (i, (gas_used, gas_limit, _)) in stats.iter().enumerate() {
+        assert!(
+            gas_used <= gas_limit,
+            "block {i}: gas_used {gas_used} exceeds gas_limit {gas_limit}",
+        );
+    }
+
+    // Invariant 2: the driver canonicalized every block via newPayload, so reaching here means the
+    // validator accepted each block — an overflow would have surfaced as an Invalid status, i.e. it
+    // is caught at validation time rather than crashing the critical execution path.
+
+    // Invariant 3: the fuzzed load genuinely overcommitted a single block, so the gate had to defer
+    // transactions across blocks and at least one block filled close to the limit.
+    let block_gas_limit = stats.first().map(|(_, l, _)| *l).unwrap_or(BLOCK_GAS_LIMIT);
+    let blocks_with_user_txs = stats.iter().filter(|(_, _, n)| *n > 0).count();
+    assert!(
+        blocks_with_user_txs >= 2,
+        "expected the overcommitted load to spill across >= 2 blocks, got {blocks_with_user_txs}",
+    );
+    let max_gas_used = stats.iter().map(|(g, _, _)| *g).max().unwrap_or(0);
+    assert!(
+        max_gas_used > block_gas_limit / 2,
+        "expected at least one block to fill past half its gas limit; max gas_used was {max_gas_used} of {block_gas_limit}",
+    );
+
+    // Invariant 4: deferred transactions are never dropped — they all drain across the driven blocks.
+    let included = included.lock().unwrap();
+    assert_eq!(
+        included.len(),
+        injected.len(),
+        "{} of {} fuzzed transactions were never included across {NUM_BLOCKS} blocks",
+        injected.len() - included.len(),
+        injected.len(),
     );
 
     Ok(())

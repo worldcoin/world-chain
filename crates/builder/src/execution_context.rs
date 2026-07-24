@@ -5,6 +5,7 @@ use crate::{
 use alloy_consensus::{Block, SignableTransaction, Transaction, transaction::SignerRecoverable};
 use alloy_eips::{Encodable2718, Typed2718};
 use alloy_network::{TransactionBuilder, TxSignerSync};
+use alloy_op_evm::block::PreRefundGasUsed;
 use alloy_primitives::{Address, U256};
 use alloy_signer_local::PrivateKeySigner;
 use eyre::eyre::eyre;
@@ -83,12 +84,15 @@ where
         info: &mut ExecutionInfo,
         base_fee: u64,
         gas_used: u64,
+        evm_gas_used: u64,
         tx_da_size: u64,
         tx: Recovered<OpTransactionSigned>,
     ) {
         // add gas used by the transaction to cumulative gas used, before creating the
         // receipt
         info.cumulative_gas_used += gas_used;
+
+        info.cumulative_evm_gas_used += evm_gas_used;
         info.cumulative_da_bytes_used += tx_da_size;
 
         // update add to total fees
@@ -229,6 +233,7 @@ where
                         DB: reth_evm::block::StateDB + reth_evm::Database,
                         BlockEnv = BlockEnv,
                     >,
+                    Result: PreRefundGasUsed,
                 >,
             >,
         Txs: PayloadTransactions<
@@ -266,10 +271,16 @@ where
             let tx_uncompressed_size = tx.encode_2718_len() as u64;
             attempt_metrics.record_transaction_size_bytes(tx_uncompressed_size);
             attempt_metrics.record_transaction_da_size_bytes(tx_da_size);
-            cumulative_uncompressed_bytes += tx_uncompressed_size;
+            // Note: `cumulative_uncompressed_bytes` is only advanced once a transaction is actually
+            // committed to the block (see after `commit_changes` below). It must not be mutated for
+            // transactions that are merely considered, otherwise rejected / skipped transactions
+            // (e.g. a just-mined tx that the pool has not yet dropped and that fails with
+            // nonce-too-low) would permanently inflate the running total and cause otherwise-fitting
+            // transactions to be spuriously rejected against the limit.
             let is_uncompressed_block_full =
                 if let Some(block_uncompressed_size_limit) = self.block_uncompressed_size_limit {
-                    let result = cumulative_uncompressed_bytes > block_uncompressed_size_limit;
+                    let result = cumulative_uncompressed_bytes + tx_uncompressed_size
+                        > block_uncompressed_size_limit;
                     if result {
                         tracing::warn!(
                             "we've reached block uncompressed size limit - rejecting tx: {:?}",
@@ -339,7 +350,12 @@ where
             }
 
             let tx_execution_started = Instant::now();
-            let execution_result = builder.execute_transaction(tx.clone());
+
+            let mut evm_gas_used = 0u64;
+            let execution_result =
+                builder.execute_transaction_with_result_closure(tx.clone(), |result| {
+                    evm_gas_used = result.evm_gas_used();
+                });
             attempt_metrics.record_transaction_execution_duration(tx_execution_started.elapsed());
             let gas_used = match execution_result {
                 Ok(res) => {
@@ -387,7 +403,10 @@ where
             let gas_used = gas_used.tx_gas_used();
             attempt_metrics.record_transaction_gas_used(gas_used);
             transactions_executed += 1;
-            self.commit_changes(info, base_fee, gas_used, tx_da_size, tx);
+            self.commit_changes(info, base_fee, gas_used, evm_gas_used, tx_da_size, tx);
+            // Only count bytes for transactions that made it into the block, mirroring how gas and
+            // DA usage are accumulated in `commit_changes`.
+            cumulative_uncompressed_bytes += tx_uncompressed_size;
         }
 
         if !spent_nullifier_hashes.is_empty() {
@@ -409,11 +428,14 @@ where
             // insufficient funds, continue with the built payload. This ensures that
             // PBH transactions still receive priority inclusion, even if the PBH nullifier
             // is not spent rather than sitting in the default execution client's mempool.
-            match builder.execute_transaction(tx.clone()) {
+            let mut evm_gas_used = 0u64;
+            match builder.execute_transaction_with_result_closure(tx.clone(), |result| {
+                evm_gas_used = result.evm_gas_used();
+            }) {
                 Ok(gas_used) => {
                     let gas_used = gas_used.tx_gas_used();
                     let tx_da_size = estimated_da_size_bytes(&tx);
-                    self.commit_changes(info, base_fee, gas_used, tx_da_size, tx);
+                    self.commit_changes(info, base_fee, gas_used, evm_gas_used, tx_da_size, tx);
                     attempt_metrics
                         .record_spend_nullifiers_outcome(PayloadBuildTaskOutcome::Success);
                 }

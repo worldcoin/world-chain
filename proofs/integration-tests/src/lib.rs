@@ -11,25 +11,28 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
-use world_chain_challenger::{ChallengeSubmission, ChallengerClient, ChallengerError};
+use world_chain_challenger::{
+    ChallengeSubmission, ChallengerClient, ChallengerError, GameMetadata,
+};
 use world_chain_defender::{DefenderClient, DefenderError, DefenderSubmission};
-use world_chain_proof_worker::ProofJobBackend;
+use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_proofs::{
-    ConsensusError, ConsensusProvider, GameCreated, PROOF_SYSTEM_VERSION, ProofDomain, ProofLane,
-    RootCommitment, RootState, has_threshold,
+    ConsensusError, ConsensusProvider, GameCreated, InvalidationReason, PROOF_SYSTEM_VERSION,
+    ProofDomain, ProofLane, ResolutionStatus, RootCommitment, RootState, has_threshold,
 };
 use world_chain_proposer::{
-    ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
+    CloseGameSubmission, ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
+    ResolveSubmission, WithdrawSubmission,
 };
 use world_chain_prover_service::{
-    BackendProofState, BackendUpdate, LeaseToken, LeasedBackendProofWork, LeasedProofRequest,
-    ProofBackend, ProofData, ProofJobQueue, ProofJobQueueError, ProofRequest, ProofRequestError,
-    ProofRequestId, ProofRequester, ProofResponse, ProofStatus, ProofSubmissionLease,
-    ProverService, ProverServiceConfig,
+    GetNextProofRequest, GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse,
+    HeartbeatRequest, HeartbeatResponse, ProofBackend, ProofData, ProofJobQueue,
+    ProofJobQueueError, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
+    ProofResponse, ProofStatus, ProverService, ProverServiceConfig, RecordProofSessionRequest,
+    RecordProofSessionResponse, SubmitProofRequest, SubmitProofResponse,
 };
 
 pub const BLOCK_INTERVAL: u64 = 10;
-pub const INTERMEDIATE_BLOCK_INTERVAL: u64 = 5;
 pub const CHAIN_ID: u64 = 4801;
 pub const ANCHOR: Address = address!("0000000000000000000000000000000000001006");
 
@@ -46,7 +49,6 @@ pub fn test_domain() -> ProofDomain {
         proof_system_version: PROOF_SYSTEM_VERSION,
         rollup_config_hash: B256::repeat_byte(0x99),
         block_interval: BLOCK_INTERVAL,
-        intermediate_block_interval: INTERMEDIATE_BLOCK_INTERVAL,
     }
 }
 
@@ -314,6 +316,84 @@ impl ProposerClient for FakeExecution {
             .copied())
     }
 
+    async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
+        let state = self.state.lock().expect("fake execution mutex poisoned");
+        let record = state
+            .games_by_address
+            .get(&game)
+            .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
+
+        if record.state == STATE_CHALLENGED && has_threshold(record.proof_bitmap) {
+            return Ok(ResolutionStatus {
+                resolvable: true,
+                root_state: RootState::Finalized,
+                invalidation_reason: InvalidationReason::None,
+            });
+        }
+
+        let root_state = RootState::try_from(record.state)
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        Ok(ResolutionStatus {
+            resolvable: false,
+            root_state,
+            invalidation_reason: InvalidationReason::None,
+        })
+    }
+
+    async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
+        let mut state = self.state.lock().expect("fake execution mutex poisoned");
+        let record = state
+            .games_by_address
+            .get_mut(&game)
+            .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
+        if record.state != STATE_CHALLENGED || !has_threshold(record.proof_bitmap) {
+            return Err(ProposerError::Contract(format!(
+                "game {game} is not positively resolvable"
+            )));
+        }
+        record.state = STATE_FINALIZED;
+
+        Ok(ResolveSubmission {
+            tx_hash: B256::with_last_byte(game.as_slice()[19]),
+        })
+    }
+
+    async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError> {
+        let mut state = self.state.lock().expect("fake execution mutex poisoned");
+        let record = state
+            .games_by_address
+            .get(&game)
+            .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
+        if record.state != STATE_FINALIZED {
+            return Err(ProposerError::Contract(format!(
+                "game {game} is not finalized"
+            )));
+        }
+        let l2_block_number = record.event.l2_block_number;
+        state.anchor = ParentRef {
+            address: game,
+            l2_block_number,
+        };
+        Ok(CloseGameSubmission {
+            tx_hash: B256::with_last_byte(game.as_slice()[19]),
+        })
+    }
+
+    async fn claimable(&self, _game: Address) -> Result<U256, ProposerError> {
+        Ok(U256::ZERO)
+    }
+
+    async fn withdraw(&self, game: Address) -> Result<WithdrawSubmission, ProposerError> {
+        Ok(WithdrawSubmission {
+            tx_hash: B256::with_last_byte(game.as_slice()[19]),
+            amount: U256::ZERO,
+        })
+    }
+
+    async fn proposer_bond(&self) -> Result<U256, ProposerError> {
+        Ok(U256::from(1))
+    }
+
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
@@ -329,12 +409,50 @@ impl ProposerClient for FakeExecution {
         let event = Self::create_game(&mut state, proposal);
         Ok(ProposalSubmission {
             tx_hash: B256::with_last_byte(event.game.as_slice()[19]),
+            game_address: event.game,
         })
     }
 }
 
 #[async_trait]
 impl ChallengerClient for FakeExecution {
+    async fn challenger_bond(&self) -> Result<U256, ChallengerError> {
+        Ok(U256::from(1))
+    }
+
+    async fn game_count(&self) -> Result<u64, ChallengerError> {
+        Ok(self
+            .state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .game_order
+            .len() as u64)
+    }
+
+    async fn game_address_at(&self, index: u64) -> Result<Address, ChallengerError> {
+        self.state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .game_order
+            .get(index as usize)
+            .copied()
+            .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))
+    }
+
+    async fn game_metadata(&self, game: Address) -> Result<GameMetadata, ChallengerError> {
+        self.state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .games_by_address
+            .get(&game)
+            .map(|record| GameMetadata {
+                address: game,
+                root_claim: record.event.root_claim,
+                l2_block_number: record.event.l2_block_number,
+            })
+            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+    }
+
     async fn root_state(&self, game: Address) -> Result<RootState, ChallengerError> {
         let raw = self
             .state
@@ -344,28 +462,6 @@ impl ChallengerClient for FakeExecution {
             .get(&game)
             .map_or(STATE_NONE, |record| record.state);
         RootState::try_from(raw).map_err(Into::into)
-    }
-
-    async fn finalized_l1_block_num(&self) -> Result<BlockNumber, ChallengerError> {
-        Ok(self
-            .state
-            .lock()
-            .expect("fake execution mutex poisoned")
-            .finalized_l1_block)
-    }
-
-    async fn games_created(
-        &self,
-        _from: BlockNumber,
-        _to: BlockNumber,
-    ) -> Result<Vec<GameCreated>, ChallengerError> {
-        let state = self.state.lock().expect("fake execution mutex poisoned");
-        Ok(state
-            .game_order
-            .iter()
-            .filter_map(|game| state.games_by_address.get(game))
-            .map(|record| record.event)
-            .collect())
     }
 
     async fn challenge_deadline(&self, game: Address) -> Result<u64, ChallengerError> {
@@ -477,9 +573,6 @@ impl DefenderClient for FakeExecution {
         if record.proof_bitmap & mask == 0 {
             record.proof_bitmap |= mask;
             record.submitted_lanes.push(lane);
-            if has_threshold(record.proof_bitmap) {
-                record.state = STATE_FINALIZED;
-            }
         }
 
         Ok(DefenderSubmission {
@@ -515,39 +608,36 @@ impl FakeProofBackend {
     }
 }
 
-impl ProofJobBackend for FakeProofBackend {
+#[async_trait]
+impl ClaimedProofJobHandler for FakeProofBackend {
     fn lane(&self) -> ProofBackend {
         self.lane
     }
 
-    fn start(&self, request: &ProofRequest) -> anyhow::Result<BackendUpdate> {
+    async fn handle_claimed_job(&self, job: ProofJob) -> anyhow::Result<ProofData> {
+        let request = &job.request;
         let id = request.id();
-        let mut attempts = self.attempts.lock().expect("fake backend mutex poisoned");
-        let count = attempts.entry(id).or_default();
-        if *count < self.failures_before_success {
+        {
+            let mut attempts = self.attempts.lock().expect("fake backend mutex poisoned");
+            let count = attempts.entry(id).or_default();
+            if *count < self.failures_before_success {
+                *count += 1;
+                anyhow::bail!("configured fake proof failure for {id}");
+            }
             *count += 1;
-            anyhow::bail!("configured fake proof failure for {id}");
         }
-        *count += 1;
 
-        Ok(BackendUpdate::Complete(match self.lane {
+        Ok(match self.lane {
             ProofBackend::Sp1 => ProofData::Sp1 {
                 public_values: request.root_claim.as_slice().to_vec().into(),
                 proof: vec![0x51, request.l2_block_number as u8].into(), // mock proof
             },
             ProofBackend::Nitro => ProofData::Nitro {
                 attestation: request.l1_head.as_slice().to_vec().into(),
+                public_values: request.root_claim.as_slice().to_vec().into(),
                 signature: vec![0x7e, request.l2_block_number as u8].into(), // mock signature
             },
-        }))
-    }
-
-    fn advance(
-        &self,
-        _request: &ProofRequest,
-        _state: BackendProofState,
-    ) -> anyhow::Result<BackendUpdate> {
-        anyhow::bail!("fake backend does not support durable backend jobs")
+        })
     }
 }
 
@@ -595,65 +685,36 @@ impl ProofRequester for SharedProverService {
 impl ProofJobQueue for SharedProverService {
     async fn get_next_proof(
         &self,
-        backend: ProofBackend,
-    ) -> Result<Option<LeasedProofRequest>, ProofJobQueueError> {
-        self.service.get_next_proof(backend).await
-    }
-
-    async fn submit_backend_proof_state(
-        &self,
-        proof_id: ProofRequestId,
-        backend_proof_state: BackendProofState,
-        lease_token: LeaseToken,
-    ) -> Result<(), ProofJobQueueError> {
-        self.service
-            .submit_backend_proof_state(proof_id, backend_proof_state, lease_token)
-            .await
-    }
-
-    async fn get_next_backend_proof(
-        &self,
-        backend: ProofBackend,
-    ) -> Result<Option<LeasedBackendProofWork>, ProofJobQueueError> {
-        self.service.get_next_backend_proof(backend).await
-    }
-
-    async fn complete_backend_proof_job(
-        &self,
-        backend_job_id: i64,
-        lease_token: LeaseToken,
-        next_update: BackendUpdate,
-    ) -> Result<(), ProofJobQueueError> {
-        self.service
-            .complete_backend_proof_job(backend_job_id, lease_token, next_update)
-            .await
-    }
-
-    async fn fail_backend_proof_job(
-        &self,
-        backend_job_id: i64,
-        reason: String,
-        lease_token: LeaseToken,
-    ) -> Result<(), ProofJobQueueError> {
-        self.service
-            .fail_backend_proof_job(backend_job_id, reason, lease_token)
-            .await
+        request: GetNextProofRequest,
+    ) -> Result<GetNextProofResponse, ProofJobQueueError> {
+        self.service.get_next_proof(request).await
     }
 
     async fn submit_proof(
         &self,
-        proof: ProofResponse,
-        lease: ProofSubmissionLease,
-    ) -> Result<(), ProofJobQueueError> {
-        self.service.submit_proof(proof, lease).await
+        request: SubmitProofRequest,
+    ) -> Result<SubmitProofResponse, ProofJobQueueError> {
+        self.service.submit_proof(request).await
     }
 
-    async fn fail_proof(
+    async fn get_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        reason: String,
-        lease_token: LeaseToken,
-    ) -> Result<(), ProofJobQueueError> {
-        self.service.fail_proof(proof_id, reason, lease_token).await
+        request: GetProofSessionRequest,
+    ) -> Result<GetProofSessionResponse, ProofJobQueueError> {
+        self.service.get_proof_session(request).await
+    }
+
+    async fn record_proof_session(
+        &self,
+        request: RecordProofSessionRequest,
+    ) -> Result<RecordProofSessionResponse, ProofJobQueueError> {
+        self.service.record_proof_session(request).await
+    }
+
+    async fn heartbeat(
+        &self,
+        request: HeartbeatRequest,
+    ) -> Result<HeartbeatResponse, ProofJobQueueError> {
+        self.service.heartbeat(request).await
     }
 }

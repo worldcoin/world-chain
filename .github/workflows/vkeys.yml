@@ -17,6 +17,10 @@ on:
       - 'proofs/succinct/programs/**'
       - 'proofs/succinct/elfs/**'
       - 'proofs/succinct/elf/vkeys.json'
+      - 'proofs/core/**'
+      - 'proofs/kona-client/**'
+      - 'proofs/primitives/**'
+      - 'Cargo.lock'
       - 'Justfile'
 
 jobs:

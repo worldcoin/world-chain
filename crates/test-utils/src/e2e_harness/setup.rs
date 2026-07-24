@@ -43,6 +43,7 @@ use reth_optimism_forks::OpHardfork;
 use reth_optimism_node::OpPayloadAttributes;
 use reth_optimism_payload_builder::OpPayloadAttrs;
 use reth_provider::providers::{BlockchainProvider, ChainStorage};
+use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::{Runtime, TaskExecutor};
 use revm_primitives::{B256, Bytes, TxKind, U256};
 use std::{
@@ -183,6 +184,9 @@ pub struct WorldChainTestBuilder {
     tx_peers: bool,
     #[builder(default)]
     disable_gossip: bool,
+    /// Enables the `admin` RPC namespace on the HTTP server (off by default).
+    #[builder(default)]
+    admin_rpc: bool,
     block_uncompressed_size_limit: Option<u64>,
     #[builder(default = Arc::new(CHAIN_SPEC.clone()))]
     chain_spec: Arc<WorldChainSpec>,
@@ -236,6 +240,7 @@ impl WorldChainTestBuilder {
             self.disable_gossip,
             self.flashblocks,
             self.access_list,
+            self.admin_rpc,
             self.block_uncompressed_size_limit,
             self.chain_spec,
         )
@@ -330,6 +335,7 @@ async fn setup_inner<T, G>(
     disable_gossip: bool,
     flashblocks_enabled: bool,
     access_list: bool,
+    admin_rpc: bool,
     block_uncompressed_size_limit: Option<u64>,
     chain_spec: Arc<WorldChainSpec>,
 ) -> eyre::Result<(
@@ -354,15 +360,20 @@ where
 
     let exec = Runtime::test();
 
+    let mut rpc_args = RpcServerArgs::default()
+        .with_unused_ports()
+        .with_auth_unused_port()
+        .with_http_unused_port()
+        .with_http();
+    if admin_rpc {
+        // Expose all standard namespaces (incl. `admin`) so the
+        // `admin_tracingDirectives` endpoint is reachable in tests.
+        rpc_args = rpc_args.with_http_api(RpcModuleSelection::All);
+    }
+
     let mut node_config: NodeConfig<WorldChainSpec> = NodeConfig::new(chain_spec.clone())
         .with_chain(chain_spec)
-        .with_rpc(
-            RpcServerArgs::default()
-                .with_unused_ports()
-                .with_auth_unused_port()
-                .with_http_unused_port()
-                .with_http(),
-        )
+        .with_rpc(rpc_args)
         .with_payload_builder(PayloadBuilderArgs {
             deadline: Duration::from_secs(12),
             max_payload_tasks: 20,

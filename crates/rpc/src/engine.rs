@@ -14,11 +14,13 @@ use reth_optimism_rpc::{OpEngineApi, OpEngineApiServer};
 use reth_provider::{BalProvider, BlockReader, HeaderProvider, StateProviderFactory};
 use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_transaction_pool::TransactionPool;
+use std::future::Future;
 use tracing::trace;
 use world_chain_primitives::{
     p2p::Authorization,
     payload_id::{force_op_payload_id_v3, op_reth_payload_id_v4_lookup},
 };
+use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
 
 #[derive(Debug, Clone)]
 pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec> {
@@ -26,6 +28,9 @@ pub struct OpEngineApiExt<Provider, EngineT: EngineTypes, Pool, Validator, Chain
     inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
     /// A (optional) watch channel notifier to the jobs generator.
     to_jobs_generator: Option<tokio::sync::watch::Sender<Option<Authorization>>>,
+    /// An (optional) handle to the [`FlashblocksExecutionCoordinator`]
+    ///  - `Some` when flashblocks is enabled, `None` otherwise.
+    pending_state: Option<FlashblocksExecutionCoordinator>,
 }
 
 impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
@@ -35,10 +40,34 @@ impl<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec>
     pub fn new(
         inner: OpEngineApi<Provider, EngineT, Pool, Validator, ChainSpec>,
         to_jobs_generator: Option<tokio::sync::watch::Sender<Option<Authorization>>>,
+        pending_state: Option<FlashblocksExecutionCoordinator>,
     ) -> Self {
         Self {
             inner,
             to_jobs_generator,
+            pending_state,
+        }
+    }
+
+    /// Starts payload validation while waiting for a matching pending flashblock to resolve.
+    async fn race_pending_payload(
+        &self,
+        block_hash: B256,
+        validate: impl Future<Output = RpcResult<PayloadStatus>>,
+    ) -> RpcResult<PayloadStatus> {
+        let Some(state) = &self.pending_state else {
+            return validate.await;
+        };
+
+        // Poll validation first: `resolve_pending` may never resolve, so it must
+        // not short-circuit before the engine is handed the payload to validate.
+        tokio::pin!(validate);
+        tokio::select! {
+            biased;
+            result = &mut validate => result,
+            // Use the event to unblock/cache the pending payload path, but still return
+            // the engine's validation result for this `newPayload` request.
+            () = state.resolve_pending(block_hash) => validate.await,
         }
     }
 }
@@ -63,10 +92,12 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
-        Ok(self
-            .inner
-            .new_payload_v3(payload, versioned_hashes, parent_beacon_block_root)
-            .await?)
+        let block_hash = payload.payload_inner.payload_inner.block_hash;
+        let validate =
+            self.inner
+                .new_payload_v3(payload, versioned_hashes, parent_beacon_block_root);
+
+        self.race_pending_payload(block_hash, validate).await
     }
 
     async fn new_payload_v4(
@@ -76,15 +107,14 @@ where
         parent_beacon_block_root: B256,
         execution_requests: Requests,
     ) -> RpcResult<PayloadStatus> {
-        Ok(self
-            .inner
-            .new_payload_v4(
-                payload,
-                versioned_hashes,
-                parent_beacon_block_root,
-                execution_requests,
-            )
-            .await?)
+        let block_hash = payload.payload_inner.payload_inner.payload_inner.block_hash;
+        let validate = self.inner.new_payload_v4(
+            payload,
+            versioned_hashes,
+            parent_beacon_block_root,
+            execution_requests,
+        );
+        self.race_pending_payload(block_hash, validate).await
     }
 
     async fn fork_choice_updated_v1(

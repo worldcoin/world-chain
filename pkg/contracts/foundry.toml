@@ -8,7 +8,7 @@ optimizer = true
 optimizer_runs = 200
 bytecode_hash = "none"
 cbor_metadata = false
-fs_permissions = [{access = "read-write", path = "./"}]
+fs_permissions = [{access = "read-write", path = "./"}, {access = "read", path = "/tmp"}]
 
 remappings = [
   "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
@@ -25,6 +25,9 @@ remappings = [
   "@forge-std/=lib/forge-std/src/",
   "forge-std/=lib/forge-std/src/",
   "@solady=lib/solady/src/utils/",
+  "@nitro-validator/=lib/nitro-validator/src/",
+  "@solarity/=lib/nitro-validator/lib/solidity-lib/contracts/",
+  "@sp1-contracts/=lib/sp1-contracts/contracts/",
 ]
 
 [profile.ci]

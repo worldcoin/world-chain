@@ -1,6 +1,18 @@
+# ⚠️ Active Development Warning
+
+> **This code is currently under active development and has not been audited.**
+>
+> Any external security audits conducted prior to the completion of development will not be valid. Please do not rely on this code for production use until a full audit has been completed and development is finalized.
+
 # World Chain Contracts
 
 This repository contains smart contracts for World Chain, including PBH (Priority Blockspace for Humans) and Fee Vault contracts.
+
+## Proof System Bond Claims
+
+`WorldChainProofSystemGame.resolve()` records the game outcome and assigns pull-based bond claims. It does not transfer ETH during resolution. After a game resolves, automation such as the challenger, the defender/prover-service flow, or any keeper should call `withdraw(recipient)` for the claimable proposer or challenger.
+
+`claimable(recipient)` returns the amount currently owed to `recipient`. `withdraw(recipient)` is permissionless, but funds are always sent to `recipient`, so the caller cannot redirect or steal another account's claim.
 
 ## PBH Contracts
 
@@ -58,4 +70,3 @@ The `FeeEscrow` contract handles the conversion of ETH to WLD for burning. Key f
 - Includes slippage protection (0.03%) to ensure fair execution
 
 The burn mechanism requires executors to implement the `IBurnCallback` interface, providing flexibility in how the ETH-to-WLD swap is performed (e.g., via Uniswap V3).
-

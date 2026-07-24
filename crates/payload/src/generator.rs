@@ -4,9 +4,7 @@ use std::{
 };
 
 use ::eyre::eyre::eyre;
-use alloy_consensus::Block;
 use alloy_primitives::B256;
-use op_alloy_consensus::OpTxEnvelope;
 use reth_basic_payload_builder::{
     HeaderForPayload, PayloadBuilder, PayloadConfig, PayloadState, PayloadTaskGuard, PrecachedState,
 };
@@ -15,7 +13,7 @@ use reth_optimism_payload_builder::OpPayloadAttrs;
 use reth_optimism_primitives::OpPrimitives;
 use reth_payload_builder::{BuildNewPayload, PayloadId, PayloadJobGenerator};
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderError};
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockReaderIdExt, CanonStateNotification, ChainSpecProvider, StateProviderFactory,
 };
@@ -28,15 +26,14 @@ use world_chain_p2p::protocol::handler::FlashblocksHandle;
 use world_chain_primitives::{
     access_list::FlashblockAccessList,
     ed25519_dalek::SigningKey,
-    flashblocks::recovered_block_from_flashblocks,
     p2p::Authorization,
     payload_id::{force_op_payload_id_v3, payload_id_with_version},
 };
 
 use crate::job::{CommittedPayloadState, FlashblocksPayloadJob};
 use world_chain_builder::traits::payload_builder::FlashblockPayloadBuilder;
-use world_chain_primitives::flashblocks::Flashblock;
-use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
+use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};
+use world_chain_validator::coordinator::{CoordinatorSnapshot, FlashblocksExecutionCoordinator};
 
 /// A type that initiates payload building jobs on the [`crate::builder::FlashblocksPayloadBuilder`].
 pub struct FlashblocksPayloadJobGenerator<Client, Builder> {
@@ -182,7 +179,7 @@ where
 
         let payload_task_guard = PayloadTaskGuard::new(self.config.max_payload_tasks);
 
-        let maybe_pre_state = self.check_for_pre_state(self.client.chain_spec(), id)?;
+        let maybe_pre_state = self.check_for_pre_state(id)?;
 
         let payload_id = config.payload_id();
         let mut authorization = self.authorizations.clone();
@@ -340,50 +337,52 @@ where
     /// next flashblock index to build on top of.
     fn check_for_pre_state(
         &self,
-        chain_spec: Arc<WorldChainSpec>,
         id: PayloadId,
     ) -> Result<
         Option<(Builder::BuiltPayload, u64, Option<FlashblockAccessList>)>,
         PayloadBuilderError,
     > {
-        // check for any pending pre state received over p2p
-        let flashblocks = self.flashblocks_state.flashblocks();
+        let CoordinatorSnapshot {
+            latest_payload: payload,
+            flashblocks,
+        } = self.flashblocks_state.snapshot();
 
-        let flashblock = Flashblock::reduce(flashblocks).map_err(|e| {
+        let Some((latest, _)) = payload.filter(|latest| latest.0.id() == id) else {
+            return Ok(None);
+        };
+
+        let payload_hash = latest.block().hash();
+
+        // treat this as fatal as this should never hit.
+        let executed_pos = flashblocks
+            .flashblocks()
+            .iter()
+            .position(|fb| fb.diff().block_hash == payload_hash)
+            .ok_or_else(|| {
+                PayloadBuilderError::Other(
+                    eyre!("No flashblock matching payload hash {payload_hash}").into(),
+                )
+            })?;
+
+        let composed_flashblock = Flashblock::reduce(Flashblocks(
+            flashblocks.flashblocks()[..=executed_pos].to_vec(),
+        ))
+        .map_err(|e| {
             PayloadBuilderError::Other(eyre!("Failed to reduce flashblocks: {}", e).into())
         })?;
 
-        if *flashblock.payload_id() == id {
-            // If we have a pre-confirmed state, we can use it to build the payload
-            debug!(target: "flashblocks::payload_builder", payload_id = %id, "Using pre-confirmed state for payload");
+        // If we have a pre-confirmed state, we can use it to build the payload
+        debug!(target: "flashblocks::payload_builder", payload_id = %id, "Using pre-confirmed state for payload");
 
-            let block: RecoveredBlock<Block<OpTxEnvelope>> =
-                recovered_block_from_flashblocks(chain_spec, flashblock.clone()).map_err(|e| {
-                    PayloadBuilderError::Other(
-                        eyre!("Failed to recover block from flashblocks: {}", e).into(),
-                    )
-                })?;
-            let sealed = block.into_sealed_block();
-
-            let payload = OpBuiltPayload::new(
-                id,
-                Arc::new(sealed),
-                flashblock.flashblock().metadata.fees,
-                None,
-            );
-
-            return Ok(Some((
-                payload,
-                flashblock.flashblock().index + 1,
-                flashblock
-                    .diff()
-                    .access_list_data
-                    .as_ref()
-                    .map(|d| d.access_list.clone()),
-            )));
-        }
-
-        Ok(None)
+        Ok(Some((
+            latest,
+            composed_flashblock.flashblock().index + 1,
+            composed_flashblock
+                .diff()
+                .access_list_data
+                .as_ref()
+                .map(|d| d.access_list.clone()),
+        )))
     }
 }
 

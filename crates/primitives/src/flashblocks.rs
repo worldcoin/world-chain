@@ -293,7 +293,7 @@ impl Flashblocks {
     /// Returns an error if any of these conditions are not met.
     pub fn new(flashblocks: Vec<Flashblock>) -> eyre::Result<Self> {
         if flashblocks.is_empty() {
-            bail!("Flashblocks cannot be empty")
+            bail!("Flashblocks cannot be empty");
         }
 
         let mut iter = flashblocks.iter();
@@ -305,7 +305,7 @@ impl Flashblocks {
 
         let payload_id = first.payload_id();
         if iter.any(|fb| fb.payload_id() != payload_id) {
-            bail!("All flashblocks must have the same payload_id")
+            bail!("All flashblocks must have the same payload_id");
         }
 
         for (i, fb) in flashblocks.iter().enumerate() {

@@ -480,6 +480,19 @@ where
                 modules.replace_configured(world_chain_eth_ext.into_rpc())?;
                 modules.replace_configured(flashblocks_op_api.into_rpc())?;
 
+                let admin = RethRpcModule::Admin;
+                let admin_on_http = modules.module_config().contains_http(&admin);
+                let admin_on_ws = modules.module_config().contains_ws(&admin);
+                if admin_on_http || admin_on_ws {
+                    let admin_ext = WorldChainAdminApiExt::new().into_rpc();
+                    if admin_on_http {
+                        modules.merge_http(admin_ext.clone())?;
+                    }
+                    if admin_on_ws {
+                        modules.merge_ws(admin_ext)?;
+                    }
+                }
+
                 if simulate_enabled {
                     let simulate_api =
                         Simulate::from_eth_api(provider, evm_config, registry.eth_api());

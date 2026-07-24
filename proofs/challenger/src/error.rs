@@ -2,7 +2,7 @@ use alloy_primitives::{Address, TxHash};
 use thiserror::Error;
 use world_chain_proofs::{ConsensusError, RootStateError};
 
-/// Errors returned by the proposer.
+/// Errors returned by the challenger and its lifecycle managers.
 #[derive(Debug, Error)]
 pub enum ChallengerError {
     /// Invalid challenger configuration.

@@ -26,6 +26,13 @@ enum Command {
     Witness(WitnessArgs),
     /// Generate witness and send to a running Nitro enclave for attested proving.
     Prove(NitroArgs),
+    /// Fetch a bare attestation document from a running Nitro enclave.
+    ///
+    /// This does not run any proof — it simply asks the enclave's NSM device for an
+    /// attestation document and prints the raw COSE_Sign1 bytes as hex to stdout.
+    /// Useful for CertManager pre-warm workflows. Connects to CID 16 on the default
+    /// vsock port. Pipe the output directly into hinted_attestation_calls.js.
+    GetAttestation,
 }
 
 #[derive(Debug, Args)]
@@ -36,6 +43,10 @@ struct NitroArgs {
     /// vsock CID of the running Nitro enclave.
     #[arg(long, env = "ENCLAVE_CID", default_value_t = 16)]
     cid: u32,
+
+    /// vsock port the enclave is listening on.
+    #[arg(long, env = "ENCLAVE_PORT", default_value_t = 5005)]
+    port: u32,
 
     /// PCR0 hex (48 bytes).
     #[arg(long, env = "PCR0")]
@@ -54,30 +65,67 @@ struct NitroArgs {
     output: Option<PathBuf>,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
     match Cli::parse().command {
-        Command::HashRollupConfig(args) => print_rollup_config_hash(args)?,
-        Command::Witness(args) => write_witness(args)?,
-        Command::Prove(args) => nitro_prove(args)?,
+        Command::HashRollupConfig(args) => print_rollup_config_hash(args).await?,
+        Command::Witness(args) => write_witness(args).await?,
+        Command::Prove(args) => nitro_prove(args).await?,
+        Command::GetAttestation => get_attestation().await?,
     }
 
     Ok(())
 }
 
 #[cfg(target_os = "linux")]
-fn nitro_prove(args: NitroArgs) -> Result<()> {
+async fn get_attestation() -> Result<()> {
+    use world_chain_proof_nitro::{
+        ExpectedPcrs,
+        host::{EnclaveEndpoint, NitroProver},
+        protocol::DEFAULT_VSOCK_PORT,
+    };
+
+    let cid: u32 = match std::env::var("ENCLAVE_CID") {
+        Ok(v) => v
+            .parse()
+            .map_err(|_| anyhow::anyhow!("ENCLAVE_CID is set but not a valid u32: {v:?}"))?,
+        Err(_) => 16,
+    };
+
+    let prover = NitroProver::new(
+        EnclaveEndpoint::with_port(cid, DEFAULT_VSOCK_PORT),
+        ExpectedPcrs::PLACEHOLDER,
+    );
+
+    let attestation_doc = prover
+        .get_attestation()
+        .await
+        .map_err(|e| anyhow::anyhow!("get_attestation failed: {e}"))?;
+
+    println!("{}", hex::encode(attestation_doc));
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn get_attestation() -> Result<()> {
+    bail!("get-attestation requires Linux with AF_VSOCK support")
+}
+
+#[cfg(target_os = "linux")]
+async fn nitro_prove(args: NitroArgs) -> Result<()> {
     use anyhow::anyhow;
     use world_chain_proof_nitro::{
         ExpectedPcrs, NitroRangeProofRequest,
         attestation::parse_and_check_pcrs,
         host::{EnclaveEndpoint, NitroProver},
-        protocol::range_user_data,
+        protocol::transition_commitment,
     };
     use world_chain_prover::{build_range_input_from_args, write_json};
 
-    let input = build_range_input_from_args(&args.rpc)?;
+    let input = build_range_input_from_args(&args.rpc).await?;
 
     let expected_pcrs = match (args.pcr0, args.pcr1, args.pcr2) {
         (Some(p0), Some(p1), Some(p2)) => ExpectedPcrs {
@@ -96,11 +144,9 @@ fn nitro_prove(args: NitroArgs) -> Result<()> {
     let request = NitroRangeProofRequest::from_witness_data(&input.witness, None)
         .map_err(|e| anyhow!("failed to serialize witness: {e}"))?;
 
-    let rt = tokio::runtime::Runtime::new()?;
-    let prover = NitroProver::with_runtime(
-        EnclaveEndpoint::new(args.cid),
+    let prover = NitroProver::new(
+        EnclaveEndpoint::with_port(args.cid, args.port),
         expected_pcrs,
-        rt.handle().clone(),
     );
 
     println!(
@@ -110,18 +156,19 @@ fn nitro_prove(args: NitroArgs) -> Result<()> {
         cid = args.cid,
     );
 
-    let artifact = rt
-        .block_on(prover.prove_range_async(request))
+    let artifact = prover
+        .prove_range(request)
+        .await
         .map_err(|e| anyhow!("enclave proving failed: {e}"))?;
 
     println!(
         "enclave returned: l2_pre={pre:?} l2_post={post:?} block={block}",
-        pre = artifact.boot_info.l2PreRoot,
-        post = artifact.boot_info.l2PostRoot,
-        block = artifact.boot_info.l2BlockNumber,
+        pre = artifact.transition_public_values.l2PreRoot,
+        post = artifact.transition_public_values.l2PostRoot,
+        block = artifact.transition_public_values.l2PostBlockNumber,
     );
 
-    let expected_user_data = range_user_data(&artifact.boot_info);
+    let expected_user_data = transition_commitment(&artifact.transition_public_values);
     parse_and_check_pcrs(
         &artifact.attestation_doc,
         &expected_pcrs,
@@ -130,13 +177,16 @@ fn nitro_prove(args: NitroArgs) -> Result<()> {
     .map_err(|e| anyhow!("attestation verification failed: {e}"))?;
 
     println!("attestation verified OK");
-    println!("{}", serde_json::to_string_pretty(&artifact.boot_info)?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&artifact.transition_public_values)?
+    );
 
     if let Some(output) = args.output {
         write_json(
             &output,
             &serde_json::json!({
-                "bootInfo": artifact.boot_info,
+                "transitionPublicValues": artifact.transition_public_values,
                 "attestationDoc": format!("0x{}", hex::encode(&artifact.attestation_doc)),
             }),
         )?;
@@ -147,7 +197,7 @@ fn nitro_prove(args: NitroArgs) -> Result<()> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn nitro_prove(_args: NitroArgs) -> Result<()> {
+async fn nitro_prove(_args: NitroArgs) -> Result<()> {
     bail!("world-chain-prover-nitro requires Linux with AF_VSOCK support")
 }
 

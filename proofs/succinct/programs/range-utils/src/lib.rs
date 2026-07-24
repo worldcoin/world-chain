@@ -5,7 +5,7 @@ use std::sync::Arc;
 use kona_proof::{l1::OracleL1ChainProvider, l2::OracleL2ChainProvider};
 use world_chain_proof_core::{
     BlobStore,
-    boot::{BootInfoStruct, RollupConfigHashError},
+    boot::{TransitionPublicValues, RollupConfigHashError},
     range::WorldRangeHardforkConfig,
     witness::preimage_store::PreimageStore,
 };
@@ -31,7 +31,7 @@ pub async fn run_range_program<E>(
     oracle: Arc<PreimageStore>,
     beacon: BlobStore,
     world_schedule: WorldRangeHardforkConfig,
-) -> Result<BootInfoStruct, RollupConfigHashError>
+) -> Result<TransitionPublicValues, RollupConfigHashError>
 where
     E: WitnessExecutor<
             O = PreimageStore,
@@ -41,7 +41,7 @@ where
         > + Send
         + Sync,
 {
-    let (boot_info, input) = get_inputs_for_pipeline(oracle.clone()).await.unwrap();
+    let (boot_info, input, l2_pre_block_number) = get_inputs_for_pipeline(oracle.clone()).await.unwrap();
     let boot_info = match input {
         Some((cursor, l1_provider, l2_provider)) => {
             let rollup_config = Arc::new(boot_info.rollup_config.clone());
@@ -74,5 +74,5 @@ where
         None => boot_info,
     };
 
-    BootInfoStruct::try_from_kona_boot_info(boot_info, &world_schedule)
+    TransitionPublicValues::try_from_kona_boot_info(boot_info, &world_schedule, l2_pre_block_number)
 }

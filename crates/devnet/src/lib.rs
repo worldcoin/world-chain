@@ -409,6 +409,13 @@ impl WorldDevnet {
             .or_else(|| self.l1.as_ref().map(L1DevChain::rpc_url))
     }
 
+    /// L1 OptimismPortal proxy address, when the preset started a full OP Stack.
+    pub fn optimism_portal(&self) -> Option<&str> {
+        self.full_stack
+            .as_ref()
+            .map(FullStackWorldDevnet::optimism_portal)
+    }
+
     /// Prometheus UI URL, when observability is enabled.
     pub fn prometheus_url(&self) -> Option<&str> {
         self.full_stack
@@ -616,6 +623,9 @@ impl WorldDevnet {
         if let Some(url) = self.l1_rpc_url() {
             info!(url, "L1 RPC");
         }
+        if let Some(address) = self.optimism_portal() {
+            info!(address, "OptimismPortal proxy");
+        }
         info!(url = %self.sequencer_rpc_url(), "L2 sequencer RPC");
         if let Some(url) = self.flashblocks_url() {
             info!(url, "Flashblocks RPC capability endpoint");
@@ -651,6 +661,9 @@ impl WorldDevnet {
 
         if let Some(url) = self.l1_rpc_url() {
             summary.push_str(&format!("  L1 RPC:              {url}\n"));
+        }
+        if let Some(address) = self.optimism_portal() {
+            summary.push_str(&format!("  OptimismPortal:      {address}\n"));
         }
         summary.push_str(&format!(
             "  Sequencer RPC:       {}\n",

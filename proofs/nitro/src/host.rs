@@ -3,11 +3,10 @@
 use k256::ecdsa::{RecoveryId, Signature as K256Signature, VerifyingKey};
 use tokio_vsock::{VsockAddr, VsockStream};
 use tracing::{debug, instrument, warn};
-use world_chain_proof_core::boot::BootInfoStruct;
+use world_chain_proof_core::boot::TransitionPublicValues;
 
 use crate::{
-    ExpectedPcrs, NitroAggregationProofArtifact, NitroAggregationProofRequest,
-    NitroRangeProofArtifact, NitroRangeProofRequest, WorldNitroProver,
+    ExpectedPcrs, NitroRangeProofArtifact, NitroRangeProofRequest,
     attestation::{self, AttestationError},
     protocol::{
         self, DEFAULT_VSOCK_PORT, EnclaveRequest, EnclaveResponse, FrameError, PROTOCOL_VERSION,
@@ -40,36 +39,20 @@ impl EnclaveEndpoint {
     }
 }
 
-/// Host-side prover that proxies range and aggregation requests to a Nitro enclave.
+/// Host-side prover that proxies range requests to a Nitro enclave.
 #[derive(Clone, Debug)]
 pub struct NitroProver {
     endpoint: EnclaveEndpoint,
     expected_pcrs: ExpectedPcrs,
-    runtime: tokio::runtime::Handle,
 }
 
 impl NitroProver {
-    /// Creates a new prover bound to the current tokio runtime.
-    ///
-    /// # Panics
-    /// Panics if no tokio runtime is currently active. Use [`NitroProver::with_runtime`]
-    /// when calling from a non-async context.
+    /// Creates a new prover.
     #[must_use]
     pub fn new(endpoint: EnclaveEndpoint, expected_pcrs: ExpectedPcrs) -> Self {
-        Self::with_runtime(endpoint, expected_pcrs, tokio::runtime::Handle::current())
-    }
-
-    /// Creates a new prover with an explicit tokio runtime handle.
-    #[must_use]
-    pub fn with_runtime(
-        endpoint: EnclaveEndpoint,
-        expected_pcrs: ExpectedPcrs,
-        runtime: tokio::runtime::Handle,
-    ) -> Self {
         Self {
             endpoint,
             expected_pcrs,
-            runtime,
         }
     }
 
@@ -111,13 +94,35 @@ impl NitroProver {
                 Ok((attestation_doc, public_key))
             }
             EnclaveResponse::Error { message } => Err(NitroProverError::Enclave(message)),
-            _ => Err(NitroProverError::UnexpectedResponse("non-attestation")),
+            EnclaveResponse::Range { .. } => Err(NitroProverError::UnexpectedResponse("range")),
+            EnclaveResponse::BareAttestation { .. } => {
+                Err(NitroProverError::UnexpectedResponse("bare_attestation"))
+            }
         }
     }
 
-    /// Async version of [`WorldNitroProver::prove_range`].
+    /// Requests a bare attestation document from the enclave.
+    ///
+    /// This is a lightweight call that does not run any proof — the enclave simply
+    /// asks the NSM device for an attestation document and returns the raw `COSE_Sign1`
+    /// bytes. Useful for CertManager pre-warm workflows where operators need a real
+    /// attestation document before any `registerKey` call can succeed.
     #[instrument(skip_all, fields(endpoint = ?self.endpoint))]
-    pub async fn prove_range_async(
+    pub async fn get_attestation(&self) -> Result<Vec<u8>, NitroProverError> {
+        let response = self.round_trip(EnclaveRequest::GetAttestation).await?;
+        match response {
+            EnclaveResponse::BareAttestation { attestation_doc } => Ok(attestation_doc),
+            EnclaveResponse::Error { message } => Err(NitroProverError::Enclave(message)),
+            EnclaveResponse::Attestation { .. } => {
+                Err(NitroProverError::UnexpectedResponse("attestation"))
+            }
+            EnclaveResponse::Range { .. } => Err(NitroProverError::UnexpectedResponse("range")),
+        }
+    }
+
+    /// Proves one range witness inside the Nitro enclave.
+    #[instrument(skip_all, fields(endpoint = ?self.endpoint))]
+    pub async fn prove_range(
         &self,
         request: NitroRangeProofRequest,
     ) -> Result<NitroRangeProofArtifact, NitroProverError> {
@@ -126,22 +131,22 @@ impl NitroProver {
         let enclave_request = EnclaveRequest::Range {
             version: PROTOCOL_VERSION,
             witness_rkyv: request.witness_rkyv,
-            expected_public_values: request.expected_public_values,
+            expected_transition_public_values: request.expected_transition_public_values,
             nonce,
         };
         let response = self.round_trip(enclave_request).await?;
-        let (boot_info, attestation_doc, signature) = match response {
+        let (transition_public_values, attestation_doc, signature) = match response {
             EnclaveResponse::Range {
-                boot_info,
+                transition_public_values,
                 attestation_doc,
                 signature,
-            } => (boot_info, attestation_doc, signature),
+            } => (transition_public_values, attestation_doc, signature),
             EnclaveResponse::Error { message } => return Err(NitroProverError::Enclave(message)),
-            EnclaveResponse::Aggregation { .. } => {
-                return Err(NitroProverError::UnexpectedResponse("aggregation"));
-            }
             EnclaveResponse::Attestation { .. } => {
                 return Err(NitroProverError::UnexpectedResponse("attestation"));
+            }
+            EnclaveResponse::BareAttestation { .. } => {
+                return Err(NitroProverError::UnexpectedResponse("bare_attestation"));
             }
         };
 
@@ -151,7 +156,7 @@ impl NitroProver {
         // the enclave's ephemeral public key, so a single AWS-signed document certifies both.
         // Skipped in placeholder / dev mode.
         if !self.expected_pcrs.is_placeholder() {
-            let expected_user_data = protocol::range_user_data(&boot_info);
+            let expected_user_data = protocol::transition_commitment(&transition_public_values);
             attestation::parse_check_and_verify(
                 &attestation_doc,
                 &self.expected_pcrs,
@@ -159,7 +164,7 @@ impl NitroProver {
             )?;
             attestation::verify_nonce(&attestation_doc, &nonce)?;
             let certified_pub_key = attestation::extract_nsm_public_key(&attestation_doc)?;
-            verify_proof_signature(&signature, &boot_info, &certified_pub_key)?;
+            verify_proof_signature(&signature, &transition_public_values, &certified_pub_key)?;
         } else {
             warn!(
                 target: "world_chain::nitro",
@@ -168,75 +173,17 @@ impl NitroProver {
         }
 
         Ok(NitroRangeProofArtifact {
-            boot_info,
+            transition_public_values,
             attestation_doc,
-            signature,
-        })
-    }
-
-    /// Async version of [`WorldNitroProver::prove_aggregation`].
-    #[instrument(skip_all, fields(endpoint = ?self.endpoint))]
-    pub async fn prove_aggregation_async(
-        &self,
-        request: NitroAggregationProofRequest,
-    ) -> Result<NitroAggregationProofArtifact, NitroProverError> {
-        // ── Step 1: Prove ──
-        let nonce = generate_nonce()?;
-        let enclave_request = EnclaveRequest::Aggregation {
-            version: PROTOCOL_VERSION,
-            inputs: request.inputs.clone(),
-            l1_headers_cbor: request.l1_headers_cbor,
-            nonce,
-        };
-        let response = self.round_trip(enclave_request).await?;
-        let (boot_info, attestation_doc, signature) = match response {
-            EnclaveResponse::Aggregation {
-                boot_info,
-                attestation_doc,
-                signature,
-            } => (boot_info, attestation_doc, signature),
-            EnclaveResponse::Error { message } => return Err(NitroProverError::Enclave(message)),
-            EnclaveResponse::Range { .. } => {
-                return Err(NitroProverError::UnexpectedResponse("range"));
-            }
-            EnclaveResponse::Attestation { .. } => {
-                return Err(NitroProverError::UnexpectedResponse("attestation"));
-            }
-        };
-
-        // ── Step 2: Verify attestation doc + proof signature ──
-        if !self.expected_pcrs.is_placeholder() {
-            let expected_user_data = protocol::aggregation_user_data(&boot_info, &request.inputs);
-            attestation::parse_check_and_verify(
-                &attestation_doc,
-                &self.expected_pcrs,
-                &expected_user_data,
-            )?;
-            attestation::verify_nonce(&attestation_doc, &nonce)?;
-            let certified_pub_key = attestation::extract_nsm_public_key(&attestation_doc)?;
-            verify_proof_signature(&signature, &boot_info, &certified_pub_key)?;
-        } else {
-            warn!(
-                target: "world_chain::nitro",
-                "placeholder PCRs in use — skipping attestation and signature verification (dev/test mode only)"
-            );
-        }
-
-        // The aggregation artifact carries the attestation document as `proof` and
-        // the enclave's verified secp256k1 signature so callers can perform
-        // EVM-native on-chain recovery without re-requesting the signature.
-        Ok(NitroAggregationProofArtifact {
-            outputs: aggregation_outputs(&boot_info, &request.inputs),
-            proof: attestation_doc,
             signature,
         })
     }
 }
 
 /// Verifies the enclave's 65-byte recoverable secp256k1 signature over
-/// `signing_commitment(boot_info)` and checks that the recovered key matches
-/// `expected_pub_key` (the compressed SEC1-encoded public key from the key-attestation
-/// document).
+/// `transition_commitment(transition_public_values)` and checks that the recovered key matches
+/// `expected_pub_key` (the uncompressed SEC1-encoded public key, `0x04 || X || Y`,
+/// from the key-attestation document).
 ///
 /// # Errors
 ///
@@ -244,7 +191,7 @@ impl NitroProver {
 /// Returns [`NitroProverError::SignatureMismatch`] if the recovered key differs.
 fn verify_proof_signature(
     signature: &[u8],
-    boot_info: &BootInfoStruct,
+    transition_public_values: &TransitionPublicValues,
     expected_pub_key: &[u8],
 ) -> Result<(), NitroProverError> {
     if signature.len() != 65 {
@@ -253,7 +200,7 @@ fn verify_proof_signature(
             signature.len()
         )));
     }
-    let commitment = protocol::signing_commitment(boot_info);
+    let commitment = protocol::transition_commitment(transition_public_values);
     let sig = K256Signature::from_slice(&signature[..64])
         .map_err(|e| NitroProverError::InvalidSignature(e.to_string()))?;
     // Enclave encodes v as EVM-style (27 or 28); convert back to 0/1 for k256.
@@ -265,7 +212,7 @@ fn verify_proof_signature(
     })?;
     let recovered_vk = VerifyingKey::recover_from_prehash(&commitment, &sig, rec_id)
         .map_err(|e| NitroProverError::InvalidSignature(e.to_string()))?;
-    let recovered_key_bytes = recovered_vk.to_encoded_point(true).as_bytes().to_vec();
+    let recovered_key_bytes = recovered_vk.to_encoded_point(false).as_bytes().to_vec();
     if recovered_key_bytes.as_slice() != expected_pub_key {
         return Err(NitroProverError::SignatureMismatch {
             recovered: hex::encode(&recovered_key_bytes),
@@ -273,45 +220,6 @@ fn verify_proof_signature(
         });
     }
     Ok(())
-}
-
-fn aggregation_outputs(
-    boot_info: &world_chain_proof_core::boot::BootInfoStruct,
-    inputs: &world_chain_proof_core::types::AggregationInputs,
-) -> world_chain_proof_core::types::AggregationOutputs {
-    use alloy_primitives::B256;
-    use world_chain_proof_core::types::{AggregationOutputs, u32_to_u8};
-    AggregationOutputs {
-        l1Head: boot_info.l1Head,
-        l2PreRoot: boot_info.l2PreRoot,
-        l2PostRoot: boot_info.l2PostRoot,
-        l2BlockNumber: boot_info.l2BlockNumber,
-        rollupConfigHash: boot_info.rollupConfigHash,
-        multiBlockVKey: B256::from(u32_to_u8(inputs.multi_block_vkey)),
-        proverAddress: inputs.prover_address,
-    }
-}
-
-impl WorldNitroProver for NitroProver {
-    type Error = NitroProverError;
-
-    fn prove_range(
-        &self,
-        request: NitroRangeProofRequest,
-    ) -> Result<NitroRangeProofArtifact, Self::Error> {
-        let runtime = self.runtime.clone();
-        let prover = self.clone();
-        runtime.block_on(prover.prove_range_async(request))
-    }
-
-    fn prove_aggregation(
-        &self,
-        request: NitroAggregationProofRequest,
-    ) -> Result<NitroAggregationProofArtifact, Self::Error> {
-        let runtime = self.runtime.clone();
-        let prover = self.clone();
-        runtime.block_on(prover.prove_aggregation_async(request))
-    }
 }
 
 /// Reads 32 bytes from the OS CSPRNG (`/dev/urandom`) for use as a per-request nonce.
