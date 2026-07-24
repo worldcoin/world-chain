@@ -1,7 +1,4 @@
-use crate::{
-    traits::DefenderClient,
-    types::{GameMetadata, LaneState},
-};
+use crate::{traits::DefenderClient, types::GameMetadata};
 use alloy_primitives::Bytes;
 use tracing::{error, info, warn};
 use world_chain_proofs::ProofLane;
@@ -9,6 +6,36 @@ use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestId, ProofRequester, ProofResponse,
     ProofStatus,
 };
+
+/// Number of proof lanes the defender drives.
+pub(crate) const DEFENDED_LANE_COUNT: usize = 2;
+
+/// The proof lanes the defender drives, paired with the prover-service
+/// backend that generates each proof.
+pub(crate) const DEFENDED_LANES: [(ProofLane, ProofBackend); DEFENDED_LANE_COUNT] = [
+    (ProofLane::ValidityProof, ProofBackend::Sp1),
+    (ProofLane::TeeAttestation, ProofBackend::Nitro),
+];
+
+/// Progress of a single proof lane within an active defense.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LaneState {
+    /// The proof has not been requested yet.
+    Pending,
+    /// The proof was requested from the prover-service.
+    Requested { id: ProofRequestId, attempts: u32 },
+    /// The lane is proven on-chain.
+    Proven,
+    /// Proving permanently failed after exhausting all attempts.
+    Abandoned,
+}
+
+impl LaneState {
+    /// Whether the lane needs no further work.
+    pub(crate) const fn is_terminal(self) -> bool {
+        matches!(self, Self::Proven | Self::Abandoned)
+    }
+}
 
 pub(crate) struct LaneDriver<'a, E, P> {
     execution_client: &'a E,

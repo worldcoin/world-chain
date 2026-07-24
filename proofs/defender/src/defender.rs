@@ -2,9 +2,9 @@ use crate::{
     config::DefenderConfig,
     error::DefenderError,
     game::{GameEvaluator, GameObservation, GameScanOutcome, WatchOutcome},
-    lane::LaneDriver,
+    lane::{DEFENDED_LANE_COUNT, DEFENDED_LANES, LaneDriver, LaneState},
     traits::DefenderClient,
-    types::{ActiveDefense, DEFENDED_LANES, DefenseProgress, GameMetadata, LaneState},
+    types::GameMetadata,
 };
 use alloy_primitives::{Address, BlockNumber};
 use futures_util::{StreamExt, stream};
@@ -15,6 +15,36 @@ use std::{
 use tracing::{error, info, warn};
 use world_chain_proofs::{ConsensusProvider, InvalidationReason};
 use world_chain_prover_service::ProofRequester;
+
+/// An active defense of a challenged game with a valid root.
+#[derive(Debug, Clone, Copy)]
+struct ActiveDefense {
+    game: GameMetadata,
+    /// Lane progress, indexed like [`DEFENDED_LANES`].
+    lanes: [LaneState; DEFENDED_LANE_COUNT],
+}
+
+impl ActiveDefense {
+    const fn new(game: GameMetadata) -> Self {
+        Self {
+            game,
+            lanes: [LaneState::Pending; DEFENDED_LANE_COUNT],
+        }
+    }
+}
+
+/// Result of advancing a single defense for one tick.
+#[derive(Debug, Clone, Copy)]
+enum DefenseProgress {
+    /// The game left the `Challenged` state on-chain.
+    Closed,
+    /// The game already has enough proof support to complete the defense.
+    Complete,
+    /// The proof deadline elapsed before the defense completed.
+    DeadlineElapsed,
+    /// Lane progress after this tick.
+    Lanes([LaneState; DEFENDED_LANE_COUNT]),
+}
 
 /// World Chain Defender.
 ///
