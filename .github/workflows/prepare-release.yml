@@ -1,0 +1,247 @@
+name: prepare-release
+
+# Cuts (or refreshes) a release/vX.Y branch from a main commit that has already
+# passed fuzzed Alphanet + acceptance tests, and publishes the immutable
+# sha-* image for that exact commit. It does NOT open a crypto-apps PR and does
+# NOT tag vX.Y.Z — see promote-release.yml (Alchemy Sepolia rollout) and
+# finalize-release.yml (cutting the version tag) for those steps. Keeping this
+# workflow single-purpose means a partial failure here can't leave a
+# half-promoted or half-tagged release behind.
+#
+# See the Release Runbook: https://app.notion.com/p/3568614bdf8c80afa4a3de10fb9f1fc7
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: "Commit on main to prepare (immutable, 40-char SHA)."
+        required: true
+        type: string
+      version:
+        description: "Target release version, X.Y.Z (no leading 'v')."
+        required: true
+        type: string
+      replace_prepared_release:
+        description: "Set true only when replacing an already-prepared release/vX.Y for this same X.Y version (e.g. a fix was cherry-picked)."
+        required: false
+        type: boolean
+        default: false
+
+env:
+  REPO_NAME: ${{ github.event.repository.name }}
+  IMAGE_NAME: ${{ github.repository }}
+  REGISTRY: ghcr.io
+  AWS_REGION: us-east-1
+  SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
+
+permissions:
+  contents: read
+
+jobs:
+  approve-release:
+    name: approve release
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - run: true
+
+  validate:
+    name: validate inputs
+    needs: approve-release
+    runs-on: ubuntu-latest
+    outputs:
+      release_branch: ${{ steps.compute.outputs.release_branch }}
+      version: ${{ steps.compute.outputs.version }}
+      sha: ${{ steps.compute.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate source_sha and version, compute release branch
+        id: compute
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+          REPLACE: ${{ inputs.replace_prepared_release }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sha="${SOURCE_SHA,,}"
+          if [[ ! "${sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::source_sha must be a full 40-character commit SHA, got '${SOURCE_SHA}'."
+            exit 1
+          fi
+          if ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+            echo "::error::source_sha ${sha} was not found in this repository."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${sha}" origin/main; then
+            echo "::error::source_sha ${sha} is not an ancestor of main. Release candidates must come from main."
+            exit 1
+          fi
+
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version must be X.Y.Z (no 'v' prefix), got '${VERSION}'."
+            exit 1
+          fi
+
+          major_minor="$(cut -d. -f1,2 <<<"${VERSION}")"
+          release_branch="release/v${major_minor}"
+
+          if git ls-remote --exit-code --heads origin "${release_branch}" >/dev/null 2>&1; then
+            if [[ "${REPLACE}" != "true" ]]; then
+              echo "::error::${release_branch} already exists. Pass replace_prepared_release=true if you intend to replace it (e.g. after a cherry-picked fix)."
+              exit 1
+            fi
+            echo "Replacing existing ${release_branch} as requested."
+          fi
+
+          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+            echo "::error::Tag v${VERSION} already exists. Choose a version that hasn't been finalized."
+            exit 1
+          fi
+
+          echo "release_branch=${release_branch}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+  prepare-branch:
+    name: create/refresh release branch
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      head_sha: ${{ steps.push.outputs.head_sha }}
+      short_sha: ${{ steps.push.outputs.short_sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.validate.outputs.sha }}
+
+      - name: Bump workspace version if needed
+        id: bump
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          target="${{ needs.validate.outputs.version }}"
+          if [[ "${current}" == "${target}" ]]; then
+            echo "Cargo.toml already at ${target}; no version bump needed."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            sed -i "0,/^version = \".*\"/s//version = \"${target}\"/" Cargo.toml
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Rust toolchain
+        if: steps.bump.outputs.changed == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Refresh Cargo.lock for workspace members
+        if: steps.bump.outputs.changed == 'true'
+        shell: bash
+        run: cargo update --workspace
+
+      - name: Commit and push release branch
+        id: push
+        env:
+          RELEASE_BRANCH: ${{ needs.validate.outputs.release_branch }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout -B "${RELEASE_BRANCH}"
+
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add Cargo.toml Cargo.lock
+            git commit -m "chore(release): bump workspace version to ${VERSION}"
+          fi
+
+          git push --force-with-lease origin "HEAD:${RELEASE_BRANCH}"
+          head_sha="$(git rev-parse HEAD)"
+          echo "head_sha=${head_sha}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${head_sha:0:7}" >> "$GITHUB_OUTPUT"
+
+  build-and-push:
+    name: build and push candidate image
+    needs: [validate, prepare-branch]
+    environment: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: arc-public-8xlarge-amd64-runner
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-branch.outputs.head_sha }}
+      - name: Build and push digest
+        uses: ./.github/actions/docker-build-push-digest
+        with:
+          platform: ${{ matrix.platform }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}
+          aws_region: ${{ env.AWS_REGION }}
+          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
+          git_sha: ${{ needs.prepare-branch.outputs.head_sha }}
+          cache_scope: prepare-release-${{ needs.validate.outputs.version }}
+
+  merge:
+    name: merge multi-arch manifest
+    needs: [validate, prepare-branch, build-and-push]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare-branch.outputs.head_sha }}
+      - name: Merge multi-arch manifest
+        uses: ./.github/actions/docker-merge-manifest
+        with:
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}
+          # type=sha would tag with the sha of the *dispatch* ref (main HEAD at
+          # the time this workflow was started), not the release-branch head we
+          # actually built — the two differ whenever source_sha is older than
+          # main or a version-bump commit was created. Pin the tag explicitly.
+          tags: type=raw,value=sha-${{ needs.prepare-branch.outputs.short_sha }}
+      - name: Resolve published sha tag
+        id: tag
+        env:
+          SHORT_SHA: ${{ needs.prepare-branch.outputs.short_sha }}
+        run: echo "tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        env:
+          RELEASE_BRANCH: ${{ needs.validate.outputs.release_branch }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          HEAD_SHA: ${{ needs.prepare-branch.outputs.head_sha }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        shell: bash
+        run: |
+          {
+            echo "## Prepared release candidate"
+            echo ""
+            echo "- Branch: \`${RELEASE_BRANCH}\`"
+            echo "- Commit: \`${HEAD_SHA}\`"
+            echo "- Target version: \`v${VERSION}\`"
+            echo "- Published image: \`${REGISTRY}/${IMAGE_NAME}:${TAG}\`"
+            echo ""
+            echo "Next: once this candidate has soaked on Betanet, run **promote-release.yml** with \`environment=dev\` and \`version=${TAG}\` to open the crypto-apps PR for Alchemy Sepolia."
+          } >> "$GITHUB_STEP_SUMMARY"

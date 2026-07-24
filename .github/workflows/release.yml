@@ -1,5 +1,13 @@
 # This workflow is modified from Reth:
 # https://github.com/paradigmxyz/reth/blob/main/.github/workflows/release.yml
+#
+# Builds the signed release binaries and drafts the GitHub release when a
+# vX.Y.Z tag is pushed by finalize-release.yml. It deliberately does NOT
+# build or push container images: the vX.Y.Z / latest image tags are created
+# by finalize-release.yml re-tagging the already-validated sha-* manifest,
+# and a rebuild here would silently overwrite that validated artifact. To
+# build an image outside the release lifecycle, use docker.yml
+# (workflow_dispatch, image_tag=tag).
 
 name: release
 
@@ -13,14 +21,9 @@ env:
   REPO_NAME: ${{ github.event.repository.name }}
   IMAGE_NAME: ${{ github.repository }}
   CARGO_TERM_COLOR: always
-  REGISTRY: ghcr.io
-  AWS_REGION: us-east-1
-  SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
 
 permissions:
   contents: read
-  packages: write
-  id-token: write
 
 jobs:
   approve-release:
@@ -40,48 +43,6 @@ jobs:
         id: extract_version
     outputs:
       VERSION: ${{ steps.extract_version.outputs.VERSION }}
-
-  build-and-push:
-    name: build and push docker
-    environment: dev
-    needs: extract-version
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: arc-public-8xlarge-amd64-runner
-            platform: linux/amd64
-          - runner: ubuntu-24.04-arm
-            platform: linux/arm64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Check Out Repo
-        uses: actions/checkout@v6
-      - name: Build and push digest
-        uses: ./.github/actions/docker-build-push-digest
-        with:
-          platform: ${{ matrix.platform }}
-          registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.IMAGE_NAME }}
-          aws_region: ${{ env.AWS_REGION }}
-          sccache_bucket: ${{ env.SCCACHE_BUCKET }}
-
-  merge:
-    runs-on: ubuntu-latest
-    needs:
-      - build-and-push
-    steps:
-      - name: Check Out Repo
-        uses: actions/checkout@v6
-      - name: Merge multi-arch manifest
-        uses: ./.github/actions/docker-merge-manifest
-        with:
-          registry: ${{ env.REGISTRY }}
-          image_name: ${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=latest
-            type=ref,event=tag
-            type=sha
 
   build-binaries:
     name: build binaries
@@ -143,7 +104,7 @@ jobs:
 
   draft-release:
     name: draft release
-    needs: [build-and-push, merge, extract-version, build-binaries]
+    needs: [extract-version, build-binaries]
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}

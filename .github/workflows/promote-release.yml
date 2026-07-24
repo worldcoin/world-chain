@@ -1,0 +1,193 @@
+name: promote-release
+
+# Opens (or updates) a PR in crypto-apps that pins one environment to an
+# already-published world-chain image tag, and marks that environment
+# "Rolling out" in the Notion Release Deployment Tracker. This is the ONLY
+# place that writes to crypto-apps on behalf of the release lifecycle — the
+# mechanical bump lives in crypto-apps' own promote-image-tag.sh, and the
+# promotion-order safety check (dev before stage before prod, no skipping
+# ahead) runs as crypto-apps CI (image-tag-promotion-gate.yaml) against the PR
+# this workflow opens, not duplicated here.
+#
+# A rollback is just this workflow run again with a prior, already-validated
+# version and the affected environment — there is no separate hotfix path for
+# the highest-risk operation.
+#
+# See the Release Runbook: https://app.notion.com/p/3568614bdf8c80afa4a3de10fb9f1fc7
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Tag to promote — sha-<7-40 hex> for dev, vX.Y.Z for stage/prod."
+        required: true
+        type: string
+      environment:
+        # These names must match the repo's existing GitHub environments
+        # (dev/stage/prod) — referencing a non-existent environment would make
+        # GitHub silently auto-create it with no protection rules, bypassing
+        # any approval gate. They also match the keys in crypto-apps'
+        # .github/release-environments.json.
+        description: "Target environment."
+        required: true
+        type: choice
+        options: [dev, stage, prod]
+
+permissions:
+  contents: read
+
+jobs:
+  approve:
+    name: approve promotion
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - run: true
+
+  verify-image:
+    name: verify image tag exists
+    needs: approve
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check tag is published in ghcr
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          if ! docker buildx imagetools inspect "ghcr.io/${{ github.repository }}:${VERSION}" >/dev/null 2>&1; then
+            echo "::error::ghcr.io/${{ github.repository }}:${VERSION} does not exist. Refusing to promote a tag that was never published."
+            exit 1
+          fi
+
+  promote:
+    name: open crypto-apps promotion PR
+    needs: verify-image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out world-chain (for the local notion-upsert-status action)
+        uses: actions/checkout@v6
+
+      - name: Check out crypto-apps
+        uses: actions/checkout@v6
+        with:
+          repository: worldcoin/crypto-apps
+          token: ${{ secrets.CRYPTO_APPS_RELEASE_TOKEN }}
+          path: crypto-apps
+          fetch-depth: 0
+
+      - name: Install yq
+        uses: dcarbone/install-yq-action@v1.3.1
+        with:
+          version: v4.44.5
+
+      - name: Install just and Helm
+        uses: taiki-e/install-action@just
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.0
+
+      - name: Bump image tag
+        id: bump
+        working-directory: crypto-apps
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: bash .github/scripts/promote-image-tag.sh --environment "${ENVIRONMENT}" --tag "${VERSION}"
+
+      - name: Re-render rendered manifests
+        # crypto-apps CI (template-check.yaml) requires .rendered/manifests to
+        # match a fresh `just template` of the source values files. Without
+        # this step the PR would fail that check, forcing a human to manually
+        # run `just template` and push a fixup commit — exactly the manual
+        # toil this workflow exists to remove.
+        if: steps.bump.outputs.changed != '0'
+        working-directory: crypto-apps
+        shell: bash
+        run: just template --quiet
+
+      - name: Commit, push, and open PR
+        if: steps.bump.outputs.changed != '0'
+        id: pr
+        working-directory: crypto-apps
+        env:
+          GH_TOKEN: ${{ secrets.CRYPTO_APPS_RELEASE_TOKEN }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          VERSION: ${{ inputs.version }}
+          SOURCE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="promote/${ENVIRONMENT}/${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B "${branch}"
+          git add -A
+          git commit -m "chore(release): promote ${ENVIRONMENT} to ${VERSION}"
+          git push --force-with-lease origin "HEAD:${branch}"
+
+          body=$(cat <<EOF
+          Promotes **${ENVIRONMENT}** to \`${VERSION}\`.
+
+          Opened automatically by [promote-release.yml](${SOURCE_RUN_URL}) in worldcoin/world-chain.
+          The image-tag-promotion-gate and (for prod) prod-gate checks on this PR are the actual
+          safety gates — this description is informational only.
+          EOF
+          )
+
+          extra_args=()
+          if [[ "${ENVIRONMENT}" == "prod" ]]; then
+            extra_args+=(--label prod)
+          fi
+
+          existing_pr="$(gh pr list --head "${branch}" --json number --jq '.[0].number' || true)"
+          if [[ -n "${existing_pr}" ]]; then
+            gh pr edit "${existing_pr}" --body "${body}"
+            echo "pr_number=${existing_pr}" >> "$GITHUB_OUTPUT"
+          else
+            pr_url="$(gh pr create --title "chore(release): promote ${ENVIRONMENT} to ${VERSION}" --body "${body}" --base main --head "${branch}" "${extra_args[@]}")"
+            echo "pr_url=${pr_url}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve Notion environment name
+        id: notion
+        if: steps.bump.outputs.changed != '0'
+        working-directory: crypto-apps
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          notion_environment="$(jq -re --arg env "${ENVIRONMENT}" '.environments[$env].notion_environment' .github/release-environments.json)"
+          echo "notion_environment=${notion_environment}" >> "$GITHUB_OUTPUT"
+
+      - name: Mark Notion row "Rolling out"
+        if: steps.bump.outputs.changed != '0'
+        uses: ./.github/actions/notion-upsert-status
+        with:
+          environment: ${{ steps.notion.outputs.notion_environment }}
+          status: "Rolling out"
+          tag: ${{ inputs.version }}
+          notion_token: ${{ secrets.NOTION_TOKEN }}
+          notion_database_id: ${{ secrets.NOTION_RELEASE_TRACKER_DATABASE_ID }}
+
+      - name: Summary
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          VERSION: ${{ inputs.version }}
+          CHANGED: ${{ steps.bump.outputs.changed }}
+        shell: bash
+        run: |
+          {
+            echo "## Promote ${ENVIRONMENT} -> ${VERSION}"
+            echo ""
+            if [[ "${CHANGED}" == "0" ]]; then
+              echo "${ENVIRONMENT} was already pinned to ${VERSION}; no PR opened."
+            else
+              echo "PR opened/updated in crypto-apps. Merging it is what actually deploys — this workflow only prepares the change."
+              echo ""
+              echo "Notion \"${{ steps.notion.outputs.notion_environment }}\" row set to **Rolling out**. It will move to **Deployed** once the tracker reconciler confirms the cluster is running this tag (not yet wired up — until then, update it by hand after verifying the rollout)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
