@@ -41,17 +41,35 @@ contract PrewarmCertManager is Script {
         uint256 submitted = 0;
         uint256 skipped = 0;
 
+        // Verify CertManager has code deployed -- abort early if not.
+        if (certManager.code.length == 0) {
+            bool skipOnMissing = vm.envOr("PREWARM_SKIP_IF_UNDEPLOYED", false);
+            if (skipOnMissing) {
+                console.log("WARNING: CertManager not deployed at this address -- skipping prewarm (dry run mode)");
+                console.log("  Address:", vm.toString(certManager));
+                return;
+            }
+            revert("CertManager has no code -- is the address correct and the contract deployed?");
+        }
+
         vm.startBroadcast();
 
         for (uint256 i = 0; i < count; i++) {
             bytes32 certHash = vm.parseBytes32(certHashHexArr[i]);
 
-            // Check on-chain cache: loadVerified returns an empty pubKey when not cached.
-            ICertManager.VerifiedCert memory cached = ICertManager(certManager).loadVerified(certHash);
-            if (cached.pubKey.length != 0) {
-                console.log("  Skipping (already cached): certHash %s", certHashHexArr[i]);
-                skipped++;
-                continue;
+            // Check on-chain cache via low-level staticcall — returns (false, "") for non-existent contracts.
+            // An uncached cert returns an ABI-encoded VerifiedCert with empty pubKey, so we must
+            // decode the struct and check pubKey.length rather than just checking returnData.length.
+            (bool ok, bytes memory returnData) = certManager.staticcall(
+                abi.encodeWithSignature("loadVerified(bytes32)", certHash)
+            );
+            if (ok && returnData.length >= 32) {
+                ICertManager.VerifiedCert memory cached = abi.decode(returnData, (ICertManager.VerifiedCert));
+                if (cached.pubKey.length != 0) {
+                    console.log("  Skipping (already cached): certHash %s", certHashHexArr[i]);
+                    skipped++;
+                    continue;
+                }
             }
 
             // Submit using the pre-computed ABI-encoded calldata from the plan.
