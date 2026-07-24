@@ -1,6 +1,9 @@
 use crate::{
-    config::DefenderConfig, defender::WorldChainDefender, error::DefenderError,
-    traits::DefenderClient, types::DefenderSubmission,
+    config::DefenderConfig,
+    defender::WorldChainDefender,
+    error::DefenderError,
+    traits::DefenderClient,
+    types::{DefenderSubmission, GameMetadata},
 };
 use alloy_primitives::{Address, B256, BlockNumber, Bytes, address};
 use async_trait::async_trait;
@@ -12,14 +15,19 @@ use std::{
     },
     time::Duration,
 };
-use world_chain_proofs::{ConsensusError, ConsensusProvider, GameCreated, ProofLane, RootState};
+use world_chain_proofs::{
+    ConsensusError, ConsensusProvider, InvalidationReason, ProofLane, ResolutionStatus, RootState,
+    has_threshold,
+};
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
     ProofResponse, ProofStatus, SucceededProofResponse,
 };
 
 const GAME_1: Address = address!("0000000000000000000000000000000000000001");
-const FINALIZED_L1_BLOCK: BlockNumber = 10_000;
+const GAME_2: Address = address!("0000000000000000000000000000000000000002");
+const ALLOWED_PROPOSER: Address = address!("00000000000000000000000000000000000000a1");
+const OTHER_PROPOSER: Address = address!("00000000000000000000000000000000000000b2");
 const L2_BLOCK: u64 = 100;
 const L1_ORIGIN_HASH: B256 = B256::repeat_byte(0x42);
 
@@ -29,27 +37,56 @@ const STATE_PROPOSED: u8 = 1;
 const STATE_CHALLENGED: u8 = 2;
 /// State discriminant matching [`RootState::Finalized`].
 const STATE_FINALIZED: u8 = 3;
+/// State discriminant matching [`RootState::Invalidated`].
+const STATE_INVALIDATED: u8 = 4;
 
 #[derive(Debug, Clone)]
 struct MockClient {
-    finalized: BlockNumber,
-    games: Vec<(Address, B256, u64)>,
+    games: Vec<GameMetadata>,
+    proposers: HashMap<Address, Address>,
     states: Arc<Mutex<HashMap<Address, u8>>>,
-    deadlines: HashMap<Address, u64>,
     bitmaps: HashMap<Address, u8>,
     submissions: Arc<Mutex<Vec<(Address, u8)>>>,
 }
 
 impl MockClient {
     fn new(games: Vec<(Address, B256, u64)>, states: HashMap<Address, u8>) -> Self {
+        let games: Vec<_> = games
+            .into_iter()
+            .map(|(address, root_claim, l2_block_number)| GameMetadata {
+                address,
+                root_claim,
+                l2_block_number,
+                l1_origin_hash: L1_ORIGIN_HASH,
+                challenge_deadline: u64::MAX,
+                proof_deadline: u64::MAX,
+            })
+            .collect();
+        let proposers = games
+            .iter()
+            .map(|game| (game.address, ALLOWED_PROPOSER))
+            .collect();
         Self {
-            finalized: FINALIZED_L1_BLOCK,
             games,
+            proposers,
             states: Arc::new(Mutex::new(states)),
-            deadlines: HashMap::new(),
             bitmaps: HashMap::new(),
             submissions: Arc::default(),
         }
+    }
+
+    fn set_proposer(&mut self, game: Address, proposer: Address) {
+        self.proposers.insert(game, proposer);
+    }
+
+    fn set_deadlines(&mut self, game: Address, challenge_deadline: u64, proof_deadline: u64) {
+        let metadata = self
+            .games
+            .iter_mut()
+            .find(|metadata| metadata.address == game)
+            .expect("game exists");
+        metadata.challenge_deadline = challenge_deadline;
+        metadata.proof_deadline = proof_deadline;
     }
 
     fn set_state(&self, game: Address, state: u8) {
@@ -66,6 +103,32 @@ impl MockClient {
 
 #[async_trait]
 impl DefenderClient for MockClient {
+    async fn game_count(&self) -> Result<u64, DefenderError> {
+        Ok(self.games.len() as u64)
+    }
+
+    async fn game_address_at(&self, index: u64) -> Result<Address, DefenderError> {
+        self.games
+            .get(index as usize)
+            .map(|game| game.address)
+            .ok_or_else(|| DefenderError::Contract(format!("unknown game index {index}")))
+    }
+
+    async fn game_proposer(&self, game: Address) -> Result<Address, DefenderError> {
+        self.proposers
+            .get(&game)
+            .copied()
+            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
+    }
+
+    async fn game_metadata(&self, game: Address) -> Result<GameMetadata, DefenderError> {
+        self.games
+            .iter()
+            .find(|metadata| metadata.address == game)
+            .copied()
+            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
+    }
+
     async fn root_state(&self, game: Address) -> Result<RootState, DefenderError> {
         let raw = self
             .states
@@ -77,34 +140,37 @@ impl DefenderClient for MockClient {
         RootState::try_from(raw).map_err(Into::into)
     }
 
-    async fn finalized_l1_block_num(&self) -> Result<BlockNumber, DefenderError> {
-        Ok(self.finalized)
-    }
-
-    async fn games_created(
-        &self,
-        _from: BlockNumber,
-        _to: BlockNumber,
-    ) -> Result<Vec<GameCreated>, DefenderError> {
-        Ok(self
-            .games
+    async fn proof_deadline(&self, game: Address) -> Result<u64, DefenderError> {
+        self.games
             .iter()
-            .map(|&(game, root_claim, l2_block_number)| GameCreated {
-                proposal_key: B256::ZERO,
-                root_id: B256::ZERO,
-                game,
-                proposer: Address::ZERO,
-                root_claim,
-                l2_block_number,
-                parent_ref: Address::ZERO,
-                l1_origin_hash: L1_ORIGIN_HASH,
-                l1_origin_number: 0,
-            })
-            .collect())
+            .find(|metadata| metadata.address == game)
+            .map(|metadata| metadata.proof_deadline)
+            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
     }
 
-    async fn challenge_deadline(&self, game: Address) -> Result<u64, DefenderError> {
-        Ok(self.deadlines.get(&game).copied().unwrap_or(u64::MAX))
+    async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, DefenderError> {
+        let state = self.root_state(game).await?;
+        if state == RootState::Challenged {
+            if has_threshold(self.proof_bitmap(game).await?) {
+                return Ok(ResolutionStatus {
+                    resolvable: true,
+                    root_state: RootState::Finalized,
+                    invalidation_reason: InvalidationReason::None,
+                });
+            }
+            if self.proof_deadline(game).await? == 0 {
+                return Ok(ResolutionStatus {
+                    resolvable: true,
+                    root_state: RootState::Invalidated,
+                    invalidation_reason: InvalidationReason::ProofTimeout,
+                });
+            }
+        }
+        Ok(ResolutionStatus {
+            resolvable: false,
+            root_state: state,
+            invalidation_reason: InvalidationReason::None,
+        })
     }
 
     async fn proof_bitmap(&self, game: Address) -> Result<u8, DefenderError> {
@@ -242,9 +308,159 @@ impl ProofRequester for MockProver {
 
 fn config() -> DefenderConfig {
     DefenderConfig {
+        allowed_proposer: ALLOWED_PROPOSER,
         poll_interval: Duration::from_secs(1),
         ..DefenderConfig::default()
     }
+}
+
+#[tokio::test]
+async fn scan_once_requires_an_allowed_proposer() {
+    let client = MockClient::new(Vec::new(), HashMap::new());
+    let (output_roots, _finalized_l2_block) = mock_output_roots(HashMap::new(), 0);
+    let mut defender = WorldChainDefender::new(
+        DefenderConfig::default(),
+        client,
+        output_roots,
+        MockProver::default(),
+    );
+
+    let error = defender.scan_once().await.unwrap_err();
+    assert!(matches!(error, DefenderError::InvalidConfig(_)));
+}
+
+#[tokio::test]
+async fn scan_once_binary_searches_for_first_unexpired_proof_deadline() {
+    let canonical_root = B256::repeat_byte(0x20);
+    let mut client = MockClient::new(
+        vec![
+            (GAME_1, canonical_root, L2_BLOCK),
+            (GAME_2, canonical_root, L2_BLOCK),
+        ],
+        HashMap::new(),
+    );
+    client.set_deadlines(GAME_1, 0, 0);
+    let (output_roots, _finalized_l2_block) =
+        mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
+    let mut defender =
+        WorldChainDefender::new(config(), client, output_roots, MockProver::default());
+
+    defender.scan_once().await.unwrap();
+
+    assert_eq!(defender.next_game_index(), Some(2));
+    assert_eq!(defender.watched_games(), [GAME_2]);
+}
+
+#[tokio::test]
+async fn scan_once_respects_factory_scan_budget() {
+    let canonical_root = B256::repeat_byte(0x20);
+    let client = MockClient::new(
+        vec![
+            (GAME_1, canonical_root, L2_BLOCK),
+            (GAME_2, canonical_root, L2_BLOCK),
+        ],
+        HashMap::new(),
+    );
+    let (output_roots, _finalized_l2_block) =
+        mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
+    let mut limited_config = config();
+    limited_config.max_games_per_tick = 1;
+    let mut defender =
+        WorldChainDefender::new(limited_config, client, output_roots, MockProver::default());
+
+    defender.scan_once().await.unwrap();
+    assert_eq!(defender.next_game_index(), Some(1));
+    assert_eq!(defender.watched_games(), [GAME_1]);
+
+    defender.scan_once().await.unwrap();
+    assert_eq!(defender.next_game_index(), Some(2));
+    let watched = defender.watched_games();
+    assert_eq!(watched.len(), 2);
+    assert!(watched.contains(&GAME_1));
+    assert!(watched.contains(&GAME_2));
+}
+
+#[tokio::test]
+async fn scan_once_ignores_games_from_other_proposers() {
+    let canonical_root = B256::repeat_byte(0x20);
+    let mut client = MockClient::new(
+        vec![(GAME_1, canonical_root, L2_BLOCK)],
+        HashMap::from([(GAME_1, STATE_CHALLENGED)]),
+    );
+    client.set_proposer(GAME_1, OTHER_PROPOSER);
+    let (output_roots, _finalized_l2_block) =
+        mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
+    let prover = MockProver::default();
+    let mut defender = WorldChainDefender::new(config(), client, output_roots, prover.clone());
+
+    defender.scan_once().await.unwrap();
+
+    assert_eq!(defender.next_game_index(), Some(1));
+    assert!(prover.requests().is_empty());
+    assert!(defender.watched_games().is_empty());
+    assert!(defender.active_defenses().is_empty());
+}
+
+#[tokio::test]
+async fn scan_once_discards_invalidated_games() {
+    let canonical_root = B256::repeat_byte(0x20);
+    let client = MockClient::new(
+        vec![(GAME_1, canonical_root, L2_BLOCK)],
+        HashMap::from([(GAME_1, STATE_INVALIDATED)]),
+    );
+    let (output_roots, _finalized_l2_block) =
+        mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
+    let prover = MockProver::default();
+    let mut defender = WorldChainDefender::new(config(), client, output_roots, prover.clone());
+
+    defender.scan_once().await.unwrap();
+
+    assert!(prover.requests().is_empty());
+    assert!(defender.watched_games().is_empty());
+    assert!(defender.active_defenses().is_empty());
+}
+
+#[tokio::test]
+async fn proposed_game_is_removed_after_challenge_deadline() {
+    let canonical_root = B256::repeat_byte(0x20);
+    let mut client = MockClient::new(vec![(GAME_1, canonical_root, L2_BLOCK)], HashMap::new());
+    client.set_deadlines(GAME_1, 10, 20);
+    let (output_roots, _finalized_l2_block) =
+        mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
+    let mut defender =
+        WorldChainDefender::new(config(), client, output_roots, MockProver::default());
+
+    defender.scan_once_with_timestamp(5).await.unwrap();
+    assert_eq!(defender.watched_games(), [GAME_1]);
+
+    defender.scan_once_with_timestamp(10).await.unwrap();
+    assert!(defender.watched_games().is_empty());
+}
+
+#[tokio::test]
+async fn active_defense_is_removed_after_proof_deadline() {
+    let canonical_root = B256::repeat_byte(0x20);
+    let mut client = MockClient::new(
+        vec![(GAME_1, canonical_root, L2_BLOCK)],
+        HashMap::from([(GAME_1, STATE_CHALLENGED)]),
+    );
+    client.set_deadlines(GAME_1, 10, 20);
+    let (output_roots, _finalized_l2_block) =
+        mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
+    let prover = MockProver::default();
+    let mut defender = WorldChainDefender::new(config(), client, output_roots, prover.clone());
+
+    defender.scan_once_with_timestamp(5).await.unwrap();
+    assert_eq!(defender.active_defenses(), [GAME_1]);
+    assert_eq!(prover.requests().len(), 2);
+
+    defender.scan_once_with_timestamp(20).await.unwrap();
+    assert!(defender.active_defenses().is_empty());
+    assert!(defender.watched_games().is_empty());
+
+    // Removal makes the critical deadline condition one-shot.
+    defender.scan_once_with_timestamp(21).await.unwrap();
+    assert!(defender.active_defenses().is_empty());
 }
 
 #[tokio::test]

@@ -1,10 +1,14 @@
-use crate::{error::DefenderError, traits::DefenderClient, types::DefenderSubmission};
-use alloy_primitives::{Address, BlockNumber, Bytes, U256};
+use crate::{
+    error::DefenderError,
+    traits::DefenderClient,
+    types::{DefenderSubmission, GameMetadata},
+};
+use alloy_primitives::{Address, Bytes, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
 use world_chain_proofs::{
-    GameCreated, IWorldChainProofSystemFactory, IWorldChainProofSystemGame, RootState,
+    IWorldChainProofSystemFactory, IWorldChainProofSystemGame, ResolutionStatus, RootState,
 };
 
 /// Alloy-backed implementation of [`DefenderClient`].
@@ -27,6 +31,16 @@ where
 
         Self { factory, provider }
     }
+
+    fn game(
+        &self,
+        address: Address,
+    ) -> IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance<P> {
+        IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
+            address,
+            self.provider.clone(),
+        )
+    }
 }
 
 #[async_trait]
@@ -34,84 +48,120 @@ impl<P> DefenderClient for AlloyDefenderClient<P>
 where
     P: Provider + Clone + Send + Sync + 'static,
 {
-    async fn root_state(&self, game: Address) -> Result<RootState, DefenderError> {
-        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        );
-        let root_state_raw = game
+    async fn game_count(&self) -> Result<u64, DefenderError> {
+        let count = self
+            .factory
+            .gameCount()
+            .block(BlockId::finalized())
+            .call()
+            .await
+            .map_err(|error| DefenderError::Contract(error.to_string()))?;
+        u256_to_u64(count, "gameCount")
+    }
+
+    async fn game_address_at(&self, index: u64) -> Result<Address, DefenderError> {
+        self.factory
+            .gameAt(U256::from(index))
+            .block(BlockId::finalized())
+            .call()
+            .await
+            .map_err(|error| DefenderError::Contract(error.to_string()))
+    }
+
+    async fn game_proposer(&self, address: Address) -> Result<Address, DefenderError> {
+        self.game(address)
+            .proposer()
+            .call()
+            .await
+            .map_err(|error| DefenderError::Contract(error.to_string()))
+    }
+
+    async fn game_metadata(&self, address: Address) -> Result<GameMetadata, DefenderError> {
+        let game = self.game(address);
+        let (root_claim, l2_block_number, l1_origin_hash, challenge_deadline, proof_deadline) = tokio::try_join!(
+            async {
+                game.rootClaim()
+                    .call()
+                    .await
+                    .map_err(|error| DefenderError::Contract(error.to_string()))
+            },
+            async {
+                game.l2BlockNumber()
+                    .call()
+                    .await
+                    .map_err(|error| DefenderError::Contract(error.to_string()))
+            },
+            async {
+                game.l1OriginHash()
+                    .call()
+                    .await
+                    .map_err(|error| DefenderError::Contract(error.to_string()))
+            },
+            async {
+                game.challengeDeadline()
+                    .call()
+                    .await
+                    .map_err(|error| DefenderError::Contract(error.to_string()))
+            },
+            async {
+                game.proofDeadline()
+                    .call()
+                    .await
+                    .map_err(|error| DefenderError::Contract(error.to_string()))
+            },
+        )?;
+
+        Ok(GameMetadata {
+            address,
+            root_claim,
+            l2_block_number: u256_to_u64(l2_block_number, "l2BlockNumber")?,
+            l1_origin_hash,
+            challenge_deadline,
+            proof_deadline,
+        })
+    }
+
+    async fn root_state(&self, address: Address) -> Result<RootState, DefenderError> {
+        let root_state_raw = self
+            .game(address)
             .state()
             .call()
             .await
-            .map_err(|err| DefenderError::Contract(err.to_string()))?;
-        let root_state: RootState = root_state_raw.try_into()?;
-        Ok(root_state)
+            .map_err(|error| DefenderError::Contract(error.to_string()))?;
+        root_state_raw.try_into().map_err(Into::into)
     }
 
-    async fn finalized_l1_block_num(&self) -> Result<BlockNumber, DefenderError> {
-        self.provider
-            .get_block(BlockId::finalized())
-            .await
-            .map_err(|err| DefenderError::Rpc(err.to_string()))?
-            .map(|block| block.number())
-            .ok_or(DefenderError::L1FinalizedBlockNotFound)
-    }
-
-    async fn games_created(
-        &self,
-        from: BlockNumber,
-        to: BlockNumber,
-    ) -> Result<Vec<GameCreated>, DefenderError> {
-        let logs = self
-            .factory
-            .GameCreated_filter()
-            .from_block(from)
-            .to_block(to)
-            .query()
-            .await
-            .map_err(|err| DefenderError::Rpc(err.to_string()))?;
-
-        logs.into_iter()
-            .map(|(event, _log)| {
-                Ok(GameCreated {
-                    proposal_key: event.proposalKey,
-                    root_id: event.rootId,
-                    game: event.game,
-                    proposer: event.proposer,
-                    root_claim: event.rootClaim,
-                    l2_block_number: u256_to_u64(event.l2BlockNumber, "l2BlockNumber")?,
-                    parent_ref: event.parentRef,
-                    l1_origin_hash: event.l1OriginHash,
-                    l1_origin_number: u256_to_u64(event.l1OriginNumber, "l1OriginNumber")?,
-                })
-            })
-            .collect()
-    }
-
-    async fn challenge_deadline(&self, game: Address) -> Result<u64, DefenderError> {
-        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        );
-        let challenge_deadline = game
-            .challengeDeadline()
+    async fn proof_deadline(&self, address: Address) -> Result<u64, DefenderError> {
+        self.game(address)
+            .proofDeadline()
             .call()
             .await
-            .map_err(|err| DefenderError::Contract(err.to_string()))?;
-        Ok(challenge_deadline)
+            .map_err(|error| DefenderError::Contract(error.to_string()))
     }
 
-    async fn proof_bitmap(&self, game: Address) -> Result<u8, DefenderError> {
-        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        );
-        let proof_bitmap = game
+    async fn resolution_status(&self, address: Address) -> Result<ResolutionStatus, DefenderError> {
+        let result = self
+            .game(address)
+            .resolutionStatus()
+            .call()
+            .await
+            .map_err(|error| DefenderError::Contract(error.to_string()))?;
+        let root_state = result.outcome.try_into()?;
+        let invalidation_reason = result.reason.try_into()?;
+
+        Ok(ResolutionStatus {
+            resolvable: result.resolvable,
+            root_state,
+            invalidation_reason,
+        })
+    }
+
+    async fn proof_bitmap(&self, address: Address) -> Result<u8, DefenderError> {
+        self.game(address)
             .proofBitmap()
             .call()
             .await
-            .map_err(|err| DefenderError::Contract(err.to_string()))?;
-        Ok(proof_bitmap)
+            .map_err(|error| DefenderError::Contract(error.to_string()))
     }
 
     async fn submit_proof(
@@ -120,11 +170,8 @@ where
         lane: u8,
         proof: Bytes,
     ) -> Result<DefenderSubmission, DefenderError> {
-        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        );
-        let pending = game
+        let pending = self
+            .game(game)
             .submitProofLane(lane, proof)
             .send()
             .await

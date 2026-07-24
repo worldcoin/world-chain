@@ -12,9 +12,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 use world_chain_challenger::{
-    ChallengeSubmission, ChallengerClient, ChallengerError, GameMetadata,
+    ChallengeSubmission, ChallengerClient, ChallengerError, GameMetadata as ChallengerGameMetadata,
 };
-use world_chain_defender::{DefenderClient, DefenderError, DefenderSubmission};
+use world_chain_defender::{
+    DefenderClient, DefenderError, DefenderSubmission, GameMetadata as DefenderGameMetadata,
+};
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_proofs::{
     ConsensusError, ConsensusProvider, GameCreated, InvalidationReason, PROOF_SYSTEM_VERSION,
@@ -35,6 +37,7 @@ use world_chain_prover_service::{
 pub const BLOCK_INTERVAL: u64 = 10;
 pub const CHAIN_ID: u64 = 4801;
 pub const ANCHOR: Address = address!("0000000000000000000000000000000000001006");
+pub const FAKE_PROPOSER: Address = address!("a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1");
 
 const STATE_NONE: u8 = 0;
 const STATE_PROPOSED: u8 = 1;
@@ -138,6 +141,7 @@ struct GameRecord {
     event: GameCreated,
     state: u8,
     challenge_deadline: u64,
+    proof_deadline: u64,
     proof_bitmap: u8,
     challenge_count: u32,
     submitted_lanes: Vec<ProofLane>,
@@ -240,7 +244,7 @@ impl FakeExecution {
             proposal_key: proposal.proposal_key,
             root_id: root.root_id(state.domain_hash),
             game,
-            proposer: Address::repeat_byte(0xa1),
+            proposer: FAKE_PROPOSER,
             root_claim: proposal.root_claim,
             l2_block_number: proposal.l2_block_number,
             parent_ref: proposal.parent_ref,
@@ -256,6 +260,7 @@ impl FakeExecution {
                 event,
                 state: STATE_PROPOSED,
                 challenge_deadline: u64::MAX,
+                proof_deadline: u64::MAX,
                 proof_bitmap: 0,
                 challenge_count: 0,
                 submitted_lanes: Vec::new(),
@@ -439,13 +444,16 @@ impl ChallengerClient for FakeExecution {
             .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))
     }
 
-    async fn game_metadata(&self, game: Address) -> Result<GameMetadata, ChallengerError> {
+    async fn game_metadata(
+        &self,
+        game: Address,
+    ) -> Result<ChallengerGameMetadata, ChallengerError> {
         self.state
             .lock()
             .expect("fake execution mutex poisoned")
             .games_by_address
             .get(&game)
-            .map(|record| GameMetadata {
+            .map(|record| ChallengerGameMetadata {
                 address: game,
                 root_claim: record.event.root_claim,
                 l2_block_number: record.event.l2_block_number,
@@ -493,6 +501,52 @@ impl ChallengerClient for FakeExecution {
 
 #[async_trait]
 impl DefenderClient for FakeExecution {
+    async fn game_count(&self) -> Result<u64, DefenderError> {
+        Ok(self
+            .state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .game_order
+            .len() as u64)
+    }
+
+    async fn game_address_at(&self, index: u64) -> Result<Address, DefenderError> {
+        self.state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .game_order
+            .get(index as usize)
+            .copied()
+            .ok_or_else(|| DefenderError::Contract(format!("unknown game index {index}")))
+    }
+
+    async fn game_proposer(&self, game: Address) -> Result<Address, DefenderError> {
+        self.state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .games_by_address
+            .get(&game)
+            .map(|record| record.event.proposer)
+            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
+    }
+
+    async fn game_metadata(&self, game: Address) -> Result<DefenderGameMetadata, DefenderError> {
+        self.state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .games_by_address
+            .get(&game)
+            .map(|record| DefenderGameMetadata {
+                address: game,
+                root_claim: record.event.root_claim,
+                l2_block_number: record.event.l2_block_number,
+                l1_origin_hash: record.event.l1_origin_hash,
+                challenge_deadline: record.challenge_deadline,
+                proof_deadline: record.proof_deadline,
+            })
+            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
+    }
+
     async fn root_state(&self, game: Address) -> Result<RootState, DefenderError> {
         let raw = self
             .state
@@ -504,36 +558,44 @@ impl DefenderClient for FakeExecution {
         RootState::try_from(raw).map_err(Into::into)
     }
 
-    async fn finalized_l1_block_num(&self) -> Result<BlockNumber, DefenderError> {
-        Ok(self
-            .state
-            .lock()
-            .expect("fake execution mutex poisoned")
-            .finalized_l1_block)
-    }
-
-    async fn games_created(
-        &self,
-        _from: BlockNumber,
-        _to: BlockNumber,
-    ) -> Result<Vec<GameCreated>, DefenderError> {
-        let state = self.state.lock().expect("fake execution mutex poisoned");
-        Ok(state
-            .game_order
-            .iter()
-            .filter_map(|game| state.games_by_address.get(game))
-            .map(|record| record.event)
-            .collect())
-    }
-
-    async fn challenge_deadline(&self, game: Address) -> Result<u64, DefenderError> {
+    async fn proof_deadline(&self, game: Address) -> Result<u64, DefenderError> {
         self.state
             .lock()
             .expect("fake execution mutex poisoned")
             .games_by_address
             .get(&game)
-            .map(|record| record.challenge_deadline)
+            .map(|record| record.proof_deadline)
             .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
+    }
+
+    async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, DefenderError> {
+        let state = self.state.lock().expect("fake execution mutex poisoned");
+        let record = state
+            .games_by_address
+            .get(&game)
+            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))?;
+        let current_state = RootState::try_from(record.state)?;
+
+        if current_state == RootState::Challenged && has_threshold(record.proof_bitmap) {
+            return Ok(ResolutionStatus {
+                resolvable: true,
+                root_state: RootState::Finalized,
+                invalidation_reason: InvalidationReason::None,
+            });
+        }
+        if current_state == RootState::Challenged && record.proof_deadline == 0 {
+            return Ok(ResolutionStatus {
+                resolvable: true,
+                root_state: RootState::Invalidated,
+                invalidation_reason: InvalidationReason::ProofTimeout,
+            });
+        }
+
+        Ok(ResolutionStatus {
+            resolvable: false,
+            root_state: current_state,
+            invalidation_reason: InvalidationReason::None,
+        })
     }
 
     async fn proof_bitmap(&self, game: Address) -> Result<u8, DefenderError> {

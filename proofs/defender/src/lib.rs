@@ -13,7 +13,7 @@ pub use config::DefenderConfig;
 pub use defender::WorldChainDefender;
 pub use error::DefenderError;
 pub use traits::DefenderClient;
-pub use types::DefenderSubmission;
+pub use types::{DefenderSubmission, GameMetadata};
 
 #[cfg(test)]
 mod tests;

@@ -8,7 +8,8 @@ use tokio_util::sync::CancellationToken;
 use world_chain_challenger::{ChallengerConfig, WorldChainChallenger};
 use world_chain_defender::{DefenderClient, DefenderConfig, WorldChainDefender};
 use world_chain_proof_integration_tests::{
-    BLOCK_INTERVAL, FakeConsensus, FakeExecution, FakeProofBackend, SharedProverService,
+    BLOCK_INTERVAL, FAKE_PROPOSER, FakeConsensus, FakeExecution, FakeProofBackend,
+    SharedProverService,
 };
 use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
@@ -36,6 +37,7 @@ fn challenger_config() -> ChallengerConfig {
 
 fn defender_config() -> DefenderConfig {
     DefenderConfig {
+        allowed_proposer: FAKE_PROPOSER,
         poll_interval: Duration::from_secs(1),
         max_proof_attempts: 2,
         ..DefenderConfig::default()
@@ -98,8 +100,7 @@ async fn fake_resolution_matches_contract_transition_semantics() {
         .await
         .expect("TEE proof submitted");
 
-    let ready = chain
-        .resolution_status(game)
+    let ready = ProposerClient::resolution_status(&chain, game)
         .await
         .expect("resolution status available");
     assert!(ready.resolvable);
@@ -108,8 +109,7 @@ async fn fake_resolution_matches_contract_transition_semantics() {
 
     settle_with_proposer(&proposer).await;
 
-    let finalized = chain
-        .resolution_status(game)
+    let finalized = ProposerClient::resolution_status(&chain, game)
         .await
         .expect("resolution status available");
     assert!(!finalized.resolvable);
