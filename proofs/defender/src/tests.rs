@@ -90,10 +90,10 @@ impl DefenderClient for MockClient {
             .games
             .iter()
             .map(|&(game, root_claim, l2_block_number)| GameCreated {
-                proposal_key: B256::ZERO,
+                transition_key: B256::ZERO,
                 root_id: B256::ZERO,
                 game,
-                proposer: Address::ZERO,
+                game_creator: Address::ZERO,
                 root_claim,
                 l2_block_number,
                 parent_ref: Address::ZERO,

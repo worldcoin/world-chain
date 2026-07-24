@@ -8,29 +8,31 @@ Periodically post L2 output root to L1.
 
 ## How
 
-Propose a new L2 output root by creating a new `WorldChainProofSystemGame` contract through the `WorldChainProofSystemFactory.propose(..)` contract fn.
+Create a `WorldChainProofSystemGame` through the stock OP Stack
+`DisputeGameFactory.create(gameType, rootClaim, extraData)` entrypoint. WIP-1006
+uses game type `1006` and:
 
-## Items needed to propose a new L2 output root
+```text
+extraData = abi.encode(domainHash, l2BlockNumber, parentRef, attempt)
+```
 
-- `parent_ref`: address of the parent game, or the `WorldChainAnchorStateRegistry` contract address if there is no parent game.
-- `root_claim`: OP stack output root.
-- `l2_block_number`: L2 block number for the root claim.
+## Proposal Inputs
 
-## How to get these items
+- `parentRef`: the parent WIP-1006 game, or the stock `AnchorStateRegistry` when
+  extending its current anchor.
+- `rootClaim`: the OP Stack output root returned by `optimism_outputAtBlock`.
+- `l2BlockNumber`: the parent's L2 block number plus the game implementation's
+  configured block interval.
+- `domainHash`: read from the registered WIP-1006 implementation.
+- `attempt`: zero for a new transition. The proposer increments it only when the
+  previous attempt timed out on proofs or was created before WIP-1006 became
+  respected.
 
-### `Parent_ref`
+## Lineage Discovery
 
-- start with `parent_ref` equal to `WorldChainAnchorStateRegistry`
-- compute L2 output root for block equal to `parent_ref`'s `l2_block_number` + `BLOCK_INTERVAL` (a protocol constant that we don't currently have, therefore we need to add it)
-- compute the proposal key from `domain_hash`, `parent_ref`, `root_claim`, and `l2_block_number`
-- check whether the game already exists
-- if so, this game becomes the `parent_ref` and we continue this loop
-- if it doesn't exist - i.e. the address is `0x00..00`, then the current `parent_ref` is returned
-
-### `root_claim`
-
-- rpc request to a consensus client - i.e. `optimism_outputAtBlock`
-
-### `l2_block_number`
-
-- `parent_ref`'s `l2_block_number` field + `BLOCK_INTERVAL`
+The proposer starts at `AnchorStateRegistry.getAnchorRoot()`, scans the shared
+factory for the WIP-1006 transition at each next block, and follows valid games
+until it finds the canonical tip. It filters every global factory read by game
+type `1006`; other OP Stack game types are unrelated. The local
+`transitionKey` is used only for logs and in-memory indexing. Factory identity
+is the stock OP `gameUUID`, which also commits to `attempt`.

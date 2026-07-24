@@ -1,4 +1,4 @@
-//! `world-chain-challenger` binary: scans `WorldChainProofSystemFactory` games and
+//! `world-chain-challenger` binary: scans WIP-1006 games in the OP dispute factory and
 //! challenges any whose claimed output root disagrees with the canonical L2 root.
 //!
 //! Mirrors the in-process challenger wired by the devnet harness
@@ -35,7 +35,7 @@ struct Cli {
     #[arg(long, env = "OUTPUT_ROOT_RPC_URL")]
     output_root_rpc: String,
 
-    /// `WorldChainProofSystemFactory` address on L1.
+    /// Stock OP `DisputeGameFactory` address on L1.
     #[arg(long, env = "FACTORY_ADDRESS")]
     factory_address: Address,
 

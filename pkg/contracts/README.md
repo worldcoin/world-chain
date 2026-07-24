@@ -10,40 +10,28 @@ This repository contains smart contracts for World Chain, including PBH (Priorit
 
 ## Proof System Bond Claims
 
-`WorldChainProofSystemGame.resolve()` records the game outcome and assigns pull-based bond claims. It does not transfer ETH during resolution. After a game resolves, automation such as the challenger, the defender/prover-service flow, or any keeper should call `withdraw(recipient)` for the claimable proposer or challenger.
+`WorldChainProofSystemGame.resolve()` records the game outcome and assigns pull-based bond credit in the game type's OP Stack `DelayedWETH` contract. It does not transfer ETH during resolution.
 
-`claimable(recipient)` returns the amount currently owed to `recipient`. `withdraw(recipient)` is permissionless, but funds are always sent to `recipient`, so the caller cannot redirect or steal another account's claim.
+`credit(recipient)` returns the amount assigned to `recipient`. `claimCredit(recipient)` is permissionless and always pays `recipient`: its first call unlocks the credit in `DelayedWETH`, and a call after the withdrawal delay transfers the funds. Automation must retain resolved games until both phases complete.
 
 ## OP Stack Withdrawal Boundary
 
-The compatibility target is `OptimismPortal2` 5.6.1 shipped by the devnet's version-tagged `op-deployer:v0.7.1` image ([OP source at commit `7525482`](https://github.com/ethereum-optimism/optimism/blob/7525482253bdc076548840638cde165c9004349f/packages/contracts-bedrock/src/L1/OptimismPortal2.sol)). The concrete World Chain game, factory, and registry explicitly implement the narrow interfaces in `src/proofs/interfaces/IOptimismPortal2.sol` and `src/proofs/interfaces/IDisputeGame.sol`; changing a required signature now fails compilation.
+The compatibility target is `OptimismPortal2` 5.6.1 shipped by the devnet's version-tagged `op-deployer:v0.7.1` image. Solidity imports are pinned separately to [`op-contracts/v7.0.0` at `a7c88c8`](https://github.com/ethereum-optimism/optimism/tree/a7c88c8d636ceb9944ea0edaf7d033da258778ab/packages/contracts-bedrock), which exposes the same Portal version and the stock dispute interfaces compiled by this repository. `WorldChainProofSystemGame` implements the Portal-facing `IDisputeGame` ABI and adds the WIP-1006 proof-lane API. The withdrawal E2E runs these compiled game contracts against the Portal, factory, and registry deployed from the pinned `op-deployer` image.
 
 | Portal phase | Required calls | World Chain implementation |
 | --- | --- | --- |
-| Discover | `disputeGameFactory()`, `gameAtIndex(index)` | `WorldChainAnchorStateRegistry`, `WorldChainProofSystemFactory` |
-| Prove | `isGameProper`, `isGameRespected`, `status`, `createdAt`, `gameType`, `rootClaim` | Registration and respect are checked while an in-progress game remains proveable |
-| Finalize | `isGameClaimValid` | Requires a proper, respected, finalized `DEFENDER_WINS` game |
-| Legacy reads | `disputeGameFinalityDelaySeconds`, `respectedGameType`, `retirementTimestamp`, `disputeGameBlacklist` | Exposed with OP-compatible ABI; WIP-1006 currently has no separate ASR finality delay or timestamp-based retirement |
+| Discover | `disputeGameFactory()`, `gameAtIndex(index)` | Stock OP `AnchorStateRegistry` and `DisputeGameFactory`, filtered to game type `1006` |
+| Prove | `isGameProper`, `isGameRespected`, `status`, `createdAt`, `gameType`, `rootClaim` | A proper, respected game may be used while it is still in progress |
+| Finalize | `isGameClaimValid` | Requires a proper, respected, non-blacklisted, finalized `DEFENDER_WINS` game after the registry finality delay |
+| Emergency controls | `pause`, `blacklistDisputeGame`, `updateRetirementTimestamp` | Stock OP guardian controls; no World Chain registry fork |
 
-World Chain deliberately keeps finalized game outcomes immutable: the registry owner may pause the registry, change the respected game type, and blacklist an in-progress game, but may not blacklist a `DEFENDER_WINS` game. Production deployment must assign this owner role to the configured guardian Safe. Whether to add a post-resolution ASR finality delay and its corresponding pause-and-migrate incident process is deferred to a follow-up protocol decision.
+`proveWithdrawalTransaction()` selects and records a dispute game, but does not finalize that game or advance the anchor. `finalizeWithdrawalTransaction()` later asks the registry whether the recorded game claim is valid. `closeGame()` is a separate permissionless maintenance call that attempts to advance the anchor used by future WIP-1006 games.
 
-This is intentionally not a claim that WIP-1006 implements OP's complete `IDisputeGame`, `IDisputeGameFactory`, or `IAnchorStateRegistry` administration and lifecycle APIs. In particular, WIP-1006's `resolve()` returns its root state and invalidation reason instead of OP's single `GameStatus`. The Portal never calls `resolve()`. `closeGame` is also separate: it advances the anchor used by future proposals and is not part of withdrawal finalization.
+Blacklisting an individual game immediately makes it improper for Portal proofs. An in-progress WIP-1006 child also invalidates itself if its parent is blacklisted or invalid. Stock OP registry semantics do not recursively invalidate already-resolved descendants after a late parent blacklist. An incident affecting an already-resolved lineage therefore requires the guardian to pause and update the retirement timestamp through the approved governance procedure. That update retires every game created at or before the governance transaction, including all existing descendants; proposal activity resumes from games created after the cutover.
 
-Compiler enforcement is paired with the full-stack withdrawal E2E test: the real OP-deployer Portal proves against a WIP-1006 game, rejects blacklisted and unresolved games, and finalizes after the game becomes valid. The OP deployment initializes the Portal with its `AnchorStateRegistryProxy`. The World Chain devnet preserves that proxy address and uses the OP chain `ProxyAdmin` to atomically upgrade it to `WorldChainAnchorStateRegistry` and initialize the WIP-1006 factory, so neither the Portal proxy nor its storage is modified out of band.
+The full-stack withdrawal E2E test uses the real OP-deployer Portal, factory, and registry. It proves against an in-progress WIP-1006 game, verifies the proof-maturity and registry-finality delays, finalizes after `DEFENDER_WINS`, and checks that a blacklisted game is rejected.
 
-This upgrade path is appropriate for a fresh devnet, before the replaced OP registry has live games or withdrawal proofs. The devnet therefore initializes the World Chain registry with the synthetic starting checkpoint `(bytes32(0), 0)`.
-
-### Production registry migration
-
-A live deployment must use a controlled cutover instead of the devnet checkpoint:
-
-1. Stop the old proposer and freeze updates to the old `AnchorStateRegistry` through the approved governance procedure.
-2. Read and record the old proxy's current `getAnchorRoot()`. This current root and L2 block, not its historical `getStartingAnchorRoot()`, become the WIP-1006 starting checkpoint.
-3. Complete the audited compatibility or retirement procedure for existing games and in-flight withdrawal proofs. The World Chain storage namespace does not migrate legacy registry state.
-4. Atomically call `ProxyAdmin.upgradeAndCall()` with `WorldChainAnchorStateRegistry.initialize(currentRoot, currentL2BlockNumber, factory, owner)`.
-5. Verify the initialized checkpoint and Portal-facing registry reads before starting the WIP-1006 proposer. Its first game uses the registry proxy as `parentRef`; later games use parent game addresses.
-
-The captured checkpoint must not be allowed to change between freezing the old registry and executing the upgrade.
+The devnet deployment registers `WorldChainProofSystemGame` as game type `1006`, configures its bond and `DelayedWETH`, and changes the stock registry's respected game type. It deploys mock verifier and staking contracts and is not a production deployment procedure. A production activation must use real audited verifier dependencies and the audited OP governance process for registering and respecting the new game type; it does not upgrade or replace the factory or registry.
 
 ## PBH Contracts
 

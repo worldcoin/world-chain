@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {stdError} from "@forge-std/Test.sol";
-
 import {OPStackFixtures} from "./OPStackFixtures.sol";
 import {WorldChainProofSystemGame} from "../../src/proofs/WorldChainProofSystemGame.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
@@ -20,7 +18,6 @@ import {
     IncorrectBondAmount,
     InvalidParentGame,
     ParentGameNotResolved,
-    UnexpectedGameType,
     UnknownChainId
 } from "@optimism-bedrock/src/dispute/lib/Errors.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
@@ -39,7 +36,7 @@ contract WorldChainProofSystemGameTest is OPStackFixtures {
         assertEq(Hash.unwrap(game.l1Head()), blockhash(block.number - 1));
         assertEq(game.l2SequenceNumber(), target);
         assertEq(game.l2BlockNumber(), target);
-        assertEq(game.parentIndex(), type(uint256).max);
+        assertEq(game.proposalDomainHash(), game.domainHash());
         assertEq(game.attempt(), 0);
         assertEq(game.parentRef(), address(asr));
         assertEq(game.startingRootClaim(), STARTING_ANCHOR_ROOT);
@@ -115,8 +112,32 @@ contract WorldChainProofSystemGameTest is OPStackFixtures {
         dgf.create{value: PROPOSER_BOND}(
             WC_GAME_TYPE,
             Claim.wrap(_rootClaimFor(target)),
-            abi.encode(target, type(uint256).max, uint256(0), uint256(0))
+            abi.encode(bytes32(0), target, address(asr), uint256(0), uint256(0))
         );
+    }
+
+    function test_Create_NonCanonicalParentEncodingReverts() public {
+        uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
+        uint256 malformedParent = uint256(uint160(address(asr))) | (uint256(1) << 160);
+        bytes memory extraData =
+            abi.encode(WorldChainProofLib.domainHash(_domain()), target, malformedParent, uint256(0));
+
+        vm.prank(proposer);
+        vm.expectRevert(BadExtraData.selector);
+        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);
+    }
+
+    function test_Create_DomainMismatchReverts() public {
+        uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
+        bytes32 wrongDomain = keccak256("wrong-domain");
+        bytes memory extraData = abi.encode(wrongDomain, target, address(asr), uint256(0));
+        vm.prank(proposer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                WorldChainProofSystemGame.InvalidDomainHash.selector, gameImpl.domainHash(), wrongDomain
+            )
+        );
+        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);
     }
 
     function test_Initialize_DirectImplementationCallReverts() public {
@@ -156,18 +177,19 @@ contract WorldChainProofSystemGameTest is OPStackFixtures {
         );
     }
 
-    function test_Create_OutOfRangeParentIndexReverts() public {
+    function test_Create_UnregisteredParentReverts() public {
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
+        bytes memory extraData = _extraDataForParent(target, makeAddr("unregistered-parent"), 0);
         vm.prank(proposer);
-        vm.expectRevert(stdError.indexOOBError);
-        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), _extraData(target, 5, 0));
+        vm.expectRevert(InvalidParentGame.selector);
+        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);
     }
 
-    function test_Create_ParentOfDifferentGameTypeReverts() public {
+    function test_Create_ParentRegisteredUnderDifferentGameTypeReverts() public {
         // Register a second implementation under game type 43 and create a game with it.
         GameType otherType = GameType.wrap(43);
-        WorldChainProofSystemGame otherImpl = new WorldChainProofSystemGame(_gameConfig(otherType));
-        dgf.setImplementation(otherType, IDisputeGame(address(otherImpl)));
+        WorldChainProofSystemGame otherImpl = new WorldChainProofSystemGame(_gameConfig());
+        dgf.setImplementation(otherType, IDisputeGame(address(otherImpl)), hex"");
         dgf.setInitBond(otherType, PROPOSER_BOND);
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
         vm.prank(proposer);
@@ -175,13 +197,12 @@ contract WorldChainProofSystemGameTest is OPStackFixtures {
             otherType, Claim.wrap(_rootClaimFor(target)), _extraData(target, type(uint256).max, 0)
         );
 
-        // Chaining a WC_GAME_TYPE child onto the type-43 game at index 0 must fail.
+        // Chaining a WIP-1006 child onto a game registered under type 43 must fail.
         uint256 childTarget = target + BLOCK_INTERVAL;
+        bytes memory childExtraData = _extraData(childTarget, 0, 0);
         vm.prank(proposer);
-        vm.expectRevert(UnexpectedGameType.selector);
-        dgf.create{value: PROPOSER_BOND}(
-            WC_GAME_TYPE, Claim.wrap(_rootClaimFor(childTarget)), _extraData(childTarget, 0, 0)
-        );
+        vm.expectRevert(InvalidParentGame.selector);
+        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(childTarget)), childExtraData);
     }
 
     function test_Create_InvalidatedParentReverts() public {
@@ -192,11 +213,10 @@ contract WorldChainProofSystemGameTest is OPStackFixtures {
         assertEq(uint8(parent.status()), uint8(GameStatus.CHALLENGER_WINS));
 
         uint256 childTarget = parent.l2SequenceNumber() + BLOCK_INTERVAL;
+        bytes memory childExtraData = _extraData(childTarget, 0, 0);
         vm.prank(proposer);
         vm.expectRevert(InvalidParentGame.selector);
-        dgf.create{value: PROPOSER_BOND}(
-            WC_GAME_TYPE, Claim.wrap(_rootClaimFor(childTarget)), _extraData(childTarget, 0, 0)
-        );
+        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(childTarget)), childExtraData);
     }
 
     function test_Create_BlacklistedParentReverts() public {
@@ -205,11 +225,10 @@ contract WorldChainProofSystemGameTest is OPStackFixtures {
         asr.blacklistDisputeGame(IDisputeGame(address(parent)));
 
         uint256 childTarget = parent.l2SequenceNumber() + BLOCK_INTERVAL;
+        bytes memory childExtraData = _extraData(childTarget, 0, 0);
         vm.prank(proposer);
         vm.expectRevert(InvalidParentGame.selector);
-        dgf.create{value: PROPOSER_BOND}(
-            WC_GAME_TYPE, Claim.wrap(_rootClaimFor(childTarget)), _extraData(childTarget, 0, 0)
-        );
+        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(childTarget)), childExtraData);
     }
 
     function test_Create_ParentAtOrBelowAnchorRequiresSentinel() public {
@@ -223,11 +242,10 @@ contract WorldChainProofSystemGameTest is OPStackFixtures {
 
         // Chaining onto the now-anchored game by index is rejected as stale...
         uint256 childTarget = game.l2SequenceNumber() + BLOCK_INTERVAL;
+        bytes memory childExtraData = _extraData(childTarget, 0, 0);
         vm.prank(proposer);
         vm.expectRevert(InvalidParentGame.selector);
-        dgf.create{value: PROPOSER_BOND}(
-            WC_GAME_TYPE, Claim.wrap(_rootClaimFor(childTarget)), _extraData(childTarget, 0, 0)
-        );
+        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(childTarget)), childExtraData);
 
         // ...while the anchor sentinel path proposes the same transition.
         WorldChainProofSystemGame child = _proposeAtAnchor();
@@ -240,7 +258,7 @@ contract WorldChainProofSystemGameTest is OPStackFixtures {
     //////////////////////////////////////////////////////////////*/
 
     function test_Constructor_RejectsOutOfRangeThreshold() public {
-        WorldChainProofSystemGame.GameConfig memory config = _gameConfig(WC_GAME_TYPE);
+        WorldChainProofSystemGame.GameConfig memory config = _gameConfig();
         config.proofThreshold = 0;
         vm.expectRevert(WorldChainProofSystemGame.InvalidActivationParameters.selector);
         new WorldChainProofSystemGame(config);
@@ -255,14 +273,28 @@ contract WorldChainProofSystemGameTest is OPStackFixtures {
     }
 
     function test_Constructor_RejectsZeroParameters() public {
-        WorldChainProofSystemGame.GameConfig memory config = _gameConfig(WC_GAME_TYPE);
+        WorldChainProofSystemGame.GameConfig memory config = _gameConfig();
         config.challengePeriod = 0;
         vm.expectRevert(WorldChainProofSystemGame.InvalidActivationParameters.selector);
         new WorldChainProofSystemGame(config);
 
-        config = _gameConfig(WC_GAME_TYPE);
+        config = _gameConfig();
         config.domain.blockInterval = 0;
         vm.expectRevert(WorldChainProofSystemGame.InvalidActivationParameters.selector);
+        new WorldChainProofSystemGame(config);
+    }
+
+    function test_Constructor_RejectsProofPeriodAtOrBeforeChallengePeriod() public {
+        WorldChainProofSystemGame.GameConfig memory config = _gameConfig();
+        config.proofPeriod = config.challengePeriod;
+        vm.expectRevert(WorldChainProofSystemGame.InvalidActivationParameters.selector);
+        new WorldChainProofSystemGame(config);
+    }
+
+    function test_Constructor_RejectsDomainChainIdMismatch() public {
+        WorldChainProofSystemGame.GameConfig memory config = _gameConfig();
+        config.domain.chainId = CHAIN_ID + 1;
+        vm.expectRevert(WorldChainProofSystemGame.InconsistentSystemConfiguration.selector);
         new WorldChainProofSystemGame(config);
     }
 
@@ -307,11 +339,24 @@ contract WorldChainProofSystemGameTest is OPStackFixtures {
 
     function test_Challenge_SucceedsForStaked() public {
         WorldChainProofSystemGame game = _proposeAtAnchor();
+        uint64 proofDeadline = game.proofDeadline();
         _challenge(game);
         assertEq(game.challenger(), challengerAccount);
+        assertEq(game.challengedAt(), uint64(block.timestamp));
         assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.CHALLENGED));
-        assertEq(game.proofDeadline(), uint64(block.timestamp + PROOF_PERIOD));
+        assertEq(game.proofDeadline(), proofDeadline);
         assertEq(weth.balanceOf(address(game)), PROPOSER_BOND + CHALLENGER_BOND);
+    }
+
+    function test_Challenge_DoesNotExtendCreationRelativeProofDeadline() public {
+        WorldChainProofSystemGame game = _proposeAtAnchor();
+        uint64 proofDeadline = game.proofDeadline();
+        vm.warp(game.challengeDeadline() - 1);
+
+        _challenge(game);
+
+        assertEq(game.proofDeadline(), proofDeadline);
+        assertLt(game.proofDeadline() - game.challengedAt(), game.proofPeriod());
     }
 
     function test_Challenge_RevertsAtOrAfterDeadline() public {
@@ -480,7 +525,7 @@ contract WorldChainProofSystemGameTest is OPStackFixtures {
 
     function test_Retry_InheritedInvalidationMustRebase() public {
         // Parent times out; its child is invalidated with INVALID_PARENT and is not retryable
-        // under the same parent index.
+        // under the same parent reference.
         WorldChainProofSystemGame parent = _proposeAtAnchor();
         _challenge(parent);
         WorldChainProofSystemGame child = _proposeChild(0);
@@ -491,9 +536,10 @@ contract WorldChainProofSystemGameTest is OPStackFixtures {
 
         Claim claim = child.rootClaim();
         uint256 target = child.l2SequenceNumber();
+        bytes memory retryExtraData = _extraData(target, 0, 1);
         vm.prank(proposer);
         vm.expectRevert();
-        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, claim, _extraData(target, 0, 1));
+        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, claim, retryExtraData);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -655,6 +701,54 @@ contract WorldChainProofSystemGameTest is OPStackFixtures {
         assertFalse(before.wasRespectedGameTypeWhenCreated());
     }
 
+    function test_Create_UnrespectedParentRevertsAfterCutover() public {
+        vm.prank(guardian);
+        asr.setRespectedGameType(GameType.wrap(999));
+        WorldChainProofSystemGame parent = _proposeAtAnchor();
+
+        vm.prank(guardian);
+        asr.setRespectedGameType(WC_GAME_TYPE);
+
+        uint256 childTarget = parent.l2SequenceNumber() + BLOCK_INTERVAL;
+        bytes memory childExtraData = _extraData(childTarget, 0, 0);
+        vm.prank(proposer);
+        vm.expectRevert(InvalidParentGame.selector);
+        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(childTarget)), childExtraData);
+    }
+
+    function test_Retry_UnrespectedPreCutoverGame() public {
+        vm.prank(guardian);
+        asr.setRespectedGameType(GameType.wrap(999));
+        WorldChainProofSystemGame before = _proposeAtAnchor();
+
+        vm.prank(guardian);
+        asr.setRespectedGameType(WC_GAME_TYPE);
+        WorldChainProofSystemGame afterCutover =
+            _propose(type(uint256).max, Claim.unwrap(before.rootClaim()), before.l2SequenceNumber(), 1);
+
+        assertFalse(before.wasRespectedGameTypeWhenCreated());
+        assertTrue(afterCutover.wasRespectedGameTypeWhenCreated());
+        assertEq(afterCutover.attempt(), 1);
+    }
+
+    function test_Retirement_InvalidatesResolvedLineage() public {
+        WorldChainProofSystemGame parent = _proposeAtAnchor();
+        WorldChainProofSystemGame child = _proposeChild(0);
+        _resolveUnchallenged(parent);
+        _resolveUnchallenged(child);
+
+        vm.prank(guardian);
+        asr.updateRetirementTimestamp();
+
+        assertTrue(asr.isGameRetired(IDisputeGame(address(parent))));
+        assertTrue(asr.isGameRetired(IDisputeGame(address(child))));
+        assertFalse(asr.isGameClaimValid(IDisputeGame(address(child))));
+
+        _passAirgap(child);
+        child.closeGame();
+        assertEq(uint8(child.bondDistributionMode()), uint8(BondDistributionMode.REFUND));
+    }
+
     /*//////////////////////////////////////////////////////////////
                    BOND SETTLEMENT / DELAYEDWETH
     //////////////////////////////////////////////////////////////*/
@@ -713,6 +807,9 @@ contract WorldChainProofSystemGameTest is OPStackFixtures {
         // The guardian blacklists during the airgap; settlement flips to refund mode.
         vm.prank(guardian);
         asr.blacklistDisputeGame(IDisputeGame(address(game)));
+        assertEq(game.credit(proposer), PROPOSER_BOND);
+        assertEq(game.credit(challengerAccount), CHALLENGER_BOND);
+
         _passAirgap(game);
         game.closeGame();
         assertEq(uint8(game.bondDistributionMode()), uint8(BondDistributionMode.REFUND));

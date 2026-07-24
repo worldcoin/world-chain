@@ -119,7 +119,8 @@ const DEVNET_PRIVATE_KEY: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 const OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY: &str =
     "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a";
-const WORLD_PROOF_SYSTEM_OWNER: &str = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
+const SUPERCHAIN_GUARDIAN_PRIVATE_KEY: &str =
+    "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";
 const UNSAFE_BLOCK_SIGNER_PRIVATE_KEY: &str =
     "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e";
 const BATCHER_PRIVATE_KEY: &str =
@@ -406,12 +407,15 @@ impl FullStackWorldDevnet {
                 l1_address(&artifacts.l1_addresses, "AnchorStateRegistryProxy")?;
             let op_chain_proxy_admin =
                 l1_address(&artifacts.l1_addresses, "OpChainProxyAdminImpl")?;
+            let system_config = l1_address(&artifacts.l1_addresses, "SystemConfigProxy")?;
             Some(
                 deploy_world_proof_system(
                     &l1_public_rpc,
                     &artifacts.rollup_path,
                     &workdir_path,
+                    &game_factory,
                     &anchor_state_registry,
+                    &system_config,
                     &op_chain_proxy_admin,
                 )
                 .await?,
@@ -949,7 +953,9 @@ async fn deploy_world_proof_system(
     l1_rpc_url: &str,
     rollup_path: &Path,
     workdir: &Path,
+    dispute_game_factory: &str,
     anchor_state_registry: &str,
+    system_config: &str,
     op_chain_proxy_admin: &str,
 ) -> Result<WorldProofSystemDeployment> {
     let rollup_config = fs::read(rollup_path)
@@ -974,6 +980,21 @@ async fn deploy_world_proof_system(
         })?;
     }
 
+    let build_output = Command::new("just")
+        .current_dir(&contracts_dir)
+        .arg("build-opstack")
+        .output()
+        .await
+        .wrap_err("failed to build pinned OP Stack contract artifacts")?;
+    if !build_output.status.success() {
+        bail!(
+            "OP Stack contract build failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+            build_output.status.code(),
+            String::from_utf8_lossy(&build_output.stdout),
+            String::from_utf8_lossy(&build_output.stderr)
+        );
+    }
+
     let mut command = Command::new("forge");
     command
         .current_dir(&contracts_dir)
@@ -988,13 +1009,17 @@ async fn deploy_world_proof_system(
         .arg("--evm-version")
         .arg("cancun")
         .env("PRIVATE_KEY", DEVNET_PRIVATE_KEY)
-        .env("PROOF_SYSTEM_OWNER", WORLD_PROOF_SYSTEM_OWNER)
-        .env("ANCHOR_STATE_REGISTRY_PROXY", anchor_state_registry)
+        .env("DISPUTE_GAME_FACTORY", dispute_game_factory)
+        .env("ANCHOR_STATE_REGISTRY", anchor_state_registry)
+        .env("SYSTEM_CONFIG", system_config)
         .env("OP_CHAIN_PROXY_ADMIN", op_chain_proxy_admin)
         .env(
             "OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY",
             OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY,
         )
+        .env("DGF_OWNER_KEY", OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY)
+        .env("GUARDIAN_KEY", SUPERCHAIN_GUARDIAN_PRIVATE_KEY)
+        .env("SET_RESPECTED_GAME_TYPE", "true")
         .env(
             "WORLD_CHALLENGER_ADDRESS",
             world_challenger_address()?.to_string(),
@@ -2447,7 +2472,7 @@ async fn start_challenger(
 /// The proposer signs with the dev proposer key (Anvil account #1), which
 /// `DeployProofSystem.s.sol` stakes in the `MockStakingRegistry` and funds via
 /// `fundDevAccounts`. Output roots are read from the op-node rollup RPC and
-/// proposals are submitted to `WorldChainProofSystemFactory.propose` on L1.
+/// proposals are submitted as game type 1006 through the stock `DisputeGameFactory` on L1.
 async fn start_world_chain_proposer(
     l1_rpc_url: &str,
     output_root_rpc_url: &str,
@@ -2613,7 +2638,7 @@ async fn start_world_chain_challenger(
 ///
 /// The defender signs with [`WORLD_DEFENDER_PRIVATE_KEY`], a dedicated dev
 /// account that is funded through the L1 genesis. It watches challenged valid
-/// `WorldChainProofSystemFactory` games, requests proofs from the
+/// WIP-1006 games in the stock `DisputeGameFactory`, requests proofs from the
 /// prover-service, and submits completed proof lanes on L1.
 async fn start_world_chain_defender(
     l1_rpc_url: &str,
@@ -3224,7 +3249,7 @@ fn build_components(
             .with_endpoint("security-council", deployment.security_council.clone())
             .with_endpoint("staking-registry", deployment.staking_registry.clone())
             .with_note(
-                "the OP-deployed AnchorStateRegistryProxy runs the World Chain implementation; the Portal address reference is unchanged",
+                "game type 1006 is registered in the OP-deployed DisputeGameFactory and respected by the stock AnchorStateRegistry",
             )
             .with_note(format!(
                 "WIP-1006 threshold {PROOF_THRESHOLD}/3, proof_system_version={}",
@@ -3248,7 +3273,7 @@ fn build_components(
             .with_endpoint("factory", deployment.proof_system_factory.clone())
             .with_endpoint("anchor", deployment.anchor_state_registry.clone())
             .with_note(format!(
-                "native in-process proposer posting OP output roots every {} L2 blocks via WorldChainProofSystemFactory.propose",
+                "native in-process proposer posting OP output roots every {} L2 blocks via DisputeGameFactory.create",
                 deployment.block_interval
             ))
             .with_note("signs with the dev proposer key staked in the MockStakingRegistry"),
@@ -3261,7 +3286,7 @@ fn build_components(
             )
             .with_endpoint("factory", deployment.proof_system_factory.clone())
             .with_note(
-                "native in-process challenger that disputes invalid WorldChainProofSystemFactory games via WorldChainProofSystemGame.challenge",
+                "native in-process challenger that disputes invalid WIP-1006 games via WorldChainProofSystemGame.challenge",
             )
             .with_note(
                 "signs with a dedicated dev key funded in the L1 genesis and staked in the MockStakingRegistry",

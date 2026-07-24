@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {Test} from "@forge-std/Test.sol";
 
 import {WorldChainProofSystemGame} from "../../src/proofs/WorldChainProofSystemGame.sol";
+import {WorldChainGameTypes} from "../../src/proofs/WorldChainGameTypes.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainStakingRegistry} from "../../src/proofs/interfaces/IWorldChainStakingRegistry.sol";
@@ -24,7 +25,7 @@ import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 ///      wired to a `WorldChainProofSystemGame` implementation. Run `just build-opstack`
 ///      before `forge test`.
 abstract contract OPStackFixtures is Test {
-    GameType internal constant WC_GAME_TYPE = GameType.wrap(42);
+    GameType internal constant WC_GAME_TYPE = WorldChainGameTypes.WIP_1006;
     uint256 internal constant FINALITY_DELAY_SECONDS = 3.5 days;
     uint256 internal constant WETH_DELAY_SECONDS = 7 days;
     uint64 internal constant CHALLENGE_PERIOD = 1 days;
@@ -58,7 +59,7 @@ abstract contract OPStackFixtures is Test {
     WorldChainProofSystemGame internal gameImpl;
 
     function setUp() public virtual {
-        systemConfig = new MockSystemConfig(guardian);
+        systemConfig = new MockSystemConfig(guardian, CHAIN_ID);
 
         proxyAdmin = IProxyAdmin(deployCode("opstack/out/ProxyAdmin.sol/ProxyAdmin.json", abi.encode(address(this))));
 
@@ -103,8 +104,8 @@ abstract contract OPStackFixtures is Test {
         teeVerifier = new MockRootIdVerifier(false);
         councilVerifier = new MockRootIdVerifier(false);
 
-        gameImpl = new WorldChainProofSystemGame(_gameConfig(WC_GAME_TYPE));
-        dgf.setImplementation(WC_GAME_TYPE, IDisputeGame(address(gameImpl)));
+        gameImpl = new WorldChainProofSystemGame(_gameConfig());
+        dgf.setImplementation(WC_GAME_TYPE, IDisputeGame(address(gameImpl)), hex"");
         dgf.setInitBond(WC_GAME_TYPE, PROPOSER_BOND);
 
         // The registry retires every game created at or before its initialization timestamp.
@@ -124,10 +125,9 @@ abstract contract OPStackFixtures is Test {
         proxy_ = deployCode("opstack/out/Proxy.sol/Proxy.json", abi.encode(address(proxyAdmin)));
     }
 
-    function _gameConfig(GameType gameType_) internal view returns (WorldChainProofSystemGame.GameConfig memory) {
+    function _gameConfig() internal view returns (WorldChainProofSystemGame.GameConfig memory) {
         return WorldChainProofSystemGame.GameConfig({
             domain: _domain(),
-            gameType: gameType_,
             challengePeriod: CHALLENGE_PERIOD,
             proofPeriod: PROOF_PERIOD,
             proposerBond: PROPOSER_BOND,
@@ -154,10 +154,23 @@ abstract contract OPStackFixtures is Test {
 
     function _extraData(uint256 l2BlockNumber, uint256 parentIndex, uint256 attempt)
         internal
+        view
+        returns (bytes memory)
+    {
+        address parent = address(asr);
+        if (parentIndex != type(uint256).max) {
+            (,, IDisputeGame parentGame) = dgf.gameAtIndex(parentIndex);
+            parent = address(parentGame);
+        }
+        return _extraDataForParent(l2BlockNumber, parent, attempt);
+    }
+
+    function _extraDataForParent(uint256 l2BlockNumber, address parent, uint256 attempt)
+        internal
         pure
         returns (bytes memory)
     {
-        return abi.encode(l2BlockNumber, parentIndex, attempt);
+        return abi.encode(WorldChainProofLib.domainHash(_domain()), l2BlockNumber, parent, attempt);
     }
 
     function _rootClaimFor(uint256 l2BlockNumber) internal pure returns (bytes32) {
@@ -169,10 +182,9 @@ abstract contract OPStackFixtures is Test {
         internal
         returns (WorldChainProofSystemGame)
     {
+        bytes memory extraData = _extraData(l2BlockNumber, parentIndex, attempt);
         vm.prank(proposer);
-        IDisputeGame proxy = dgf.create{value: PROPOSER_BOND}(
-            WC_GAME_TYPE, Claim.wrap(rootClaim), _extraData(l2BlockNumber, parentIndex, attempt)
-        );
+        IDisputeGame proxy = dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(rootClaim), extraData);
         return WorldChainProofSystemGame(address(proxy));
     }
 

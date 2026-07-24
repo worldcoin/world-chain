@@ -49,7 +49,7 @@ impl Default for BondManagerConfig {
 pub struct ProposerConfig {
     /// Number of L2 blocks between proposals.
     pub block_interval: u64,
-    /// Bond sent with `WorldChainProofSystemFactory.propose`.
+    /// Bond sent with `DisputeGameFactory.create` for game type 1006.
     pub proposer_bond: U256,
     /// Delay between periodic proposal attempts.
     pub poll_interval: Duration,

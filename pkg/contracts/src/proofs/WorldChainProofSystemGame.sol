@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {WorldChainProofLib} from "./WorldChainProofLib.sol";
+import {WorldChainGameTypes} from "./WorldChainGameTypes.sol";
 import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
 import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainStakingRegistry} from "./interfaces/IWorldChainStakingRegistry.sol";
@@ -56,12 +57,10 @@ contract WorldChainProofSystemGame is Clone, ISemver {
     ////////////////////////////////////////////////////////////////
 
     /// @notice Per-deployment configuration, fixed as immutables on the implementation.
-    /// @dev The implementation is registered with the two-argument
-    ///      `DisputeGameFactory.setImplementation(gameType, impl)`, so none of this rides in
-    ///      the CWIA payload and `extraData` stays minimal.
+    /// @dev The implementation is registered with empty DGF implementation args, so none of
+    ///      this configuration rides in the CWIA payload.
     struct GameConfig {
         WorldChainProofLib.Domain domain;
-        GameType gameType;
         uint64 challengePeriod;
         uint64 proofPeriod;
         uint256 proposerBond;
@@ -90,6 +89,8 @@ contract WorldChainProofSystemGame is Clone, ISemver {
     error ProofPeriodElapsed(uint256 timestamp, uint256 proofDeadline);
     error InvalidLane(uint8 lane);
     error InvalidProof(WorldChainProofLib.ProofLane lane, bytes32 rootId);
+    error InvalidDomainHash(bytes32 expected, bytes32 actual);
+    error InconsistentSystemConfiguration();
 
     ////////////////////////////////////////////////////////////////
     //                         Events                             //
@@ -106,7 +107,7 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         bytes32 l1OriginHash,
         uint256 l1OriginNumber,
         uint256 attempt,
-        address proposer
+        address gameCreator
     );
 
     /// @notice Emitted when the game is resolved. Matches the `IDisputeGame` event.
@@ -122,9 +123,6 @@ contract WorldChainProofSystemGame is Clone, ISemver {
     //                       Immutables                           //
     ////////////////////////////////////////////////////////////////
 
-    /// @notice Sentinel `parentIndex` marking a proposal that starts from the current anchor.
-    uint256 public constant ANCHOR_PARENT_INDEX = type(uint256).max;
-
     /// Number of distinct proof lanes required to finalize a challenged root.
     uint8 public immutable PROOF_THRESHOLD;
     uint8 public constant PROOF_LANE_COUNT = WorldChainProofLib.PROOF_LANE_COUNT;
@@ -135,7 +133,6 @@ contract WorldChainProofSystemGame is Clone, ISemver {
     uint256 internal immutable DOMAIN_BLOCK_INTERVAL;
     bytes32 public immutable domainHash;
 
-    GameType internal immutable GAME_TYPE;
     uint64 public immutable challengePeriod;
     uint64 public immutable proofPeriod;
     uint256 public immutable proposerBond;
@@ -164,8 +161,6 @@ contract WorldChainProofSystemGame is Clone, ISemver {
 
     /// @notice The proposal transition identifier bound by every proof lane.
     bytes32 public rootId;
-    /// @notice The parent game address, or `anchorStateRegistry` for anchor-parented proposals.
-    address public parentRef;
     bytes32 public startingRootClaim;
     uint256 public startingL2BlockNumber;
     uint64 internal _l1OriginNumber;
@@ -185,13 +180,22 @@ contract WorldChainProofSystemGame is Clone, ISemver {
 
     constructor(GameConfig memory config) {
         if (
-            config.challengePeriod == 0 || config.proofPeriod == 0 || config.domain.chainId == 0
+            config.challengePeriod == 0 || config.proofPeriod <= config.challengePeriod || config.domain.chainId == 0
                 || config.domain.proofSystemVersion == 0 || config.domain.blockInterval == 0
                 || config.proofThreshold == 0 || config.proofThreshold > WorldChainProofLib.PROOF_LANE_COUNT
                 || address(config.disputeGameFactory) == address(0) || address(config.anchorStateRegistry) == address(0)
                 || address(config.weth) == address(0) || address(config.stakingRegistry) == address(0)
+                || address(config.validityProofVerifier) == address(0) || address(config.teeVerifier) == address(0)
+                || address(config.securityCouncil) == address(0)
         ) {
             revert InvalidActivationParameters();
+        }
+        if (
+            address(config.anchorStateRegistry.disputeGameFactory()) != address(config.disputeGameFactory)
+                || address(config.weth.systemConfig()) != address(config.anchorStateRegistry.systemConfig())
+                || config.domain.chainId != config.anchorStateRegistry.systemConfig().l2ChainId()
+        ) {
+            revert InconsistentSystemConfiguration();
         }
 
         DOMAIN_CHAIN_ID = config.domain.chainId;
@@ -199,7 +203,6 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         DOMAIN_ROLLUP_CONFIG_HASH = config.domain.rollupConfigHash;
         DOMAIN_BLOCK_INTERVAL = config.domain.blockInterval;
         domainHash = WorldChainProofLib.domainHash(config.domain);
-        GAME_TYPE = config.gameType;
         challengePeriod = config.challengePeriod;
         proofPeriod = config.proofPeriod;
         proposerBond = config.proposerBond;
@@ -222,7 +225,7 @@ contract WorldChainProofSystemGame is Clone, ISemver {
     //   [0x00, 0x14) creator address
     //   [0x14, 0x34) root claim
     //   [0x34, 0x54) l1 head (parent block hash at creation)
-    //   [0x54, 0xB4) extraData = abi.encode(l2BlockNumber, parentIndex, attempt)
+    //   [0x54, 0xD4) extraData = abi.encode(domainHash, l2BlockNumber, parentRef, attempt)
 
     function gameCreator() public pure returns (address creator_) {
         creator_ = _getArgAddress(0x00);
@@ -236,34 +239,38 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         l1Head_ = Hash.wrap(_getArgBytes32(0x34));
     }
 
+    function proposalDomainHash() public pure returns (bytes32 domainHash_) {
+        domainHash_ = _getArgBytes32(0x54);
+    }
+
     /// @notice The L2 block number of the output root claimed by this proposal.
     function l2SequenceNumber() public pure returns (uint256 l2SequenceNumber_) {
-        l2SequenceNumber_ = _getArgUint256(0x54);
+        l2SequenceNumber_ = _getArgUint256(0x74);
     }
 
-    /// @notice Factory index of the parent game, or `ANCHOR_PARENT_INDEX` when the proposal
-    ///         starts from the current anchor.
-    function parentIndex() public pure returns (uint256 parentIndex_) {
-        parentIndex_ = _getArgUint256(0x74);
+    /// @notice Parent game, or the anchor registry when the proposal starts from its current root.
+    function parentRef() public pure returns (address parentRef_) {
+        uint256 rawParentRef = _getArgUint256(0x94);
+        if (rawParentRef > type(uint160).max) revert BadExtraData();
+        parentRef_ = address(uint160(rawParentRef));
     }
 
-    /// @notice Retry nonce for this transition. Attempt N requires attempt N-1 to have been
-    ///         invalidated with `PROOF_TIMEOUT`.
+    /// @notice Retry nonce for this transition. Attempt N requires attempt N-1 to have timed
+    ///         out on proofs or to have been created before this game type became respected.
     function attempt() public pure returns (uint256 attempt_) {
-        attempt_ = _getArgUint256(0x94);
+        attempt_ = _getArgUint256(0xB4);
     }
 
     function extraData() public pure returns (bytes memory extraData_) {
-        // 96 bytes: l2BlockNumber, parentIndex and attempt words.
-        extraData_ = _getArgBytes(0x54, 0x60);
+        extraData_ = _getArgBytes(0x54, 0x80);
     }
 
     ////////////////////////////////////////////////////////////////
     //                  `IDisputeGame` surface                    //
     ////////////////////////////////////////////////////////////////
 
-    function gameType() public view returns (GameType gameType_) {
-        gameType_ = GAME_TYPE;
+    function gameType() public pure returns (GameType gameType_) {
+        gameType_ = WorldChainGameTypes.WIP_1006;
     }
 
     function rootClaimByChainId(uint256 chainId) external view returns (Claim rootClaim_) {
@@ -271,7 +278,7 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         rootClaim_ = rootClaim();
     }
 
-    function gameData() external view returns (GameType gameType_, Claim rootClaim_, bytes memory extraData_) {
+    function gameData() external pure returns (GameType gameType_, Claim rootClaim_, bytes memory extraData_) {
         gameType_ = gameType();
         rootClaim_ = rootClaim();
         extraData_ = extraData();
@@ -329,9 +336,8 @@ contract WorldChainProofSystemGame is Clone, ISemver {
     //                     Initialization                         //
     ////////////////////////////////////////////////////////////////
 
-    /// @notice Initializes the game. Performs every validation the former
-    ///         `WorldChainProofSystemFactory.propose` enforced; any revert bubbles up through
-    ///         `DisputeGameFactory.create` and prevents creation.
+    /// @notice Initializes a WIP-1006 clone and validates its domain, parent, interval, retry,
+    ///         and bond invariants. Any revert bubbles through `DisputeGameFactory.create`.
     function initialize() external payable {
         if (initialized) revert AlreadyInitialized();
 
@@ -339,14 +345,14 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         // extraData padding games that would mint distinct factory UUIDs for the same proposal,
         // and blocks direct `initialize` calls on clones with malformed payloads.
         //
-        // Expected length: 0xBA
+        // Expected length: 0xDA
         // - 0x04 selector
         // - 0x14 creator address
         // - 0x20 root claim
         // - 0x20 l1 head
-        // - 0x60 extraData (l2BlockNumber, parentIndex, attempt)
+        // - 0x80 extraData (domainHash, l2BlockNumber, parentRef, attempt)
         // - 0x02 CWIA length suffix
-        if (msg.data.length != 0xBA) revert BadExtraData();
+        if (msg.data.length != 0xDA) revert BadExtraData();
 
         // Only the configured factory may initialize; this also rules out direct initialization
         // of the implementation contract itself.
@@ -357,23 +363,29 @@ contract WorldChainProofSystemGame is Clone, ISemver {
 
         // Preserves the former propose-time registry pause gate.
         if (anchorStateRegistry.paused()) revert GamePaused();
+        if (proposalDomainHash() != domainHash) revert InvalidDomainHash(domainHash, proposalDomainHash());
 
         (Hash anchorRoot, uint256 anchorL2BlockNumber) = anchorStateRegistry.getAnchorRoot();
+        address parentRef_ = parentRef();
 
-        if (parentIndex() == ANCHOR_PARENT_INDEX) {
+        if (parentRef_ == address(anchorStateRegistry)) {
             // The proposal extends the accepted anchor; the registry acts as the parent sentinel.
             if (Hash.unwrap(anchorRoot) == bytes32(0)) revert AnchorRootNotFound();
-            parentRef = address(anchorStateRegistry);
             startingRootClaim = Hash.unwrap(anchorRoot);
             startingL2BlockNumber = anchorL2BlockNumber;
         } else {
-            (GameType parentType,, IDisputeGame parent) = disputeGameFactory.gameAtIndex(parentIndex());
+            if (parentRef_.code.length == 0) revert InvalidParentGame();
+            IDisputeGame parent = IDisputeGame(parentRef_);
+            (GameType parentType, Claim parentClaim, bytes memory parentExtraData) = parent.gameData();
+            (IDisputeGame registeredParent,) = disputeGameFactory.games(parentType, parentClaim, parentExtraData);
 
-            if (parentType.raw() != GAME_TYPE.raw()) revert UnexpectedGameType();
+            if (address(registeredParent) != parentRef_) revert InvalidParentGame();
+            if (parentType.raw() != WorldChainGameTypes.WIP_1006.raw()) revert UnexpectedGameType();
             if (parent.status() == GameStatus.CHALLENGER_WINS) revert InvalidParentGame();
             if (anchorStateRegistry.isGameBlacklisted(parent) || anchorStateRegistry.isGameRetired(parent)) {
                 revert InvalidParentGame();
             }
+            if (!parent.wasRespectedGameTypeWhenCreated()) revert InvalidParentGame();
             // Guards against chaining onto games from an older implementation with a different
             // domain (e.g. after a proof-system version bump reusing the same game type).
             if (IWorldChainProofSystemGame(address(parent)).domainHash() != domainHash) revert InvalidParentGame();
@@ -384,8 +396,6 @@ contract WorldChainProofSystemGame is Clone, ISemver {
             // A parent at or below the anchor is stale: proposals extending the anchor state
             // must use the anchor sentinel instead so their starting root is registry-attested.
             if (startingL2BlockNumber <= anchorL2BlockNumber) revert InvalidParentGame();
-
-            parentRef = address(parent);
         }
 
         // TODO(PROTO-4907): Confirm whether proposals require an exact block interval or only
@@ -398,18 +408,25 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         if (l2SequenceNumber() > type(uint64).max) revert UnexpectedRootClaim(rootClaim());
 
         // Retries: attempt N is only proposable when attempt N-1 for the identical transition
-        // timed out on proofs. Inherited invalidations must rebase onto a replacement parent,
-        // which changes `parentIndex` and therefore starts back at attempt zero. Duplicate
-        // attempts are impossible: the factory UUID covers (gameType, rootClaim, extraData).
+        // timed out on proofs or was created before WIP-1006 became respected. The latter
+        // prevents a pre-cutover game from permanently occupying the factory UUID. Inherited
+        // invalidations must rebase onto a replacement parent, which changes `parentRef` and
+        // therefore starts back at attempt zero. Duplicate attempts are impossible: the factory
+        // UUID covers (gameType, rootClaim, extraData).
         if (attempt() > 0) {
-            bytes memory previousExtraData = abi.encode(l2SequenceNumber(), parentIndex(), attempt() - 1);
-            (IDisputeGame previous,) = disputeGameFactory.games(GAME_TYPE, rootClaim(), previousExtraData);
+            bytes memory previousExtraData = abi.encode(domainHash, l2SequenceNumber(), parentRef_, attempt() - 1);
+            (IDisputeGame previous,) =
+                disputeGameFactory.games(WorldChainGameTypes.WIP_1006, rootClaim(), previousExtraData);
             if (
-                address(previous) == address(0) || previous.status() != GameStatus.CHALLENGER_WINS
-                    || IWorldChainProofSystemGame(address(previous)).invalidationReason()
-                        != WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT
+                address(previous) == address(0)
+                    || (previous.wasRespectedGameTypeWhenCreated()
+                        && (previous.status() != GameStatus.CHALLENGER_WINS
+                            || IWorldChainProofSystemGame(address(previous)).invalidationReason()
+                                != WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT))
             ) {
-                revert GameNotRetryable(keccak256(abi.encode(GAME_TYPE, rootClaim(), previousExtraData)));
+                revert GameNotRetryable(keccak256(
+                        abi.encode(WorldChainGameTypes.WIP_1006, rootClaim(), previousExtraData)
+                    ));
             }
         }
 
@@ -417,10 +434,16 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         // `l1Head = blockhash(block.number - 1)`.
         _l1OriginNumber = uint64(block.number - 1);
         rootId = WorldChainProofLib.rootId(
-            domainHash, parentRef, Claim.unwrap(rootClaim()), l2SequenceNumber(), Hash.unwrap(l1Head()), _l1OriginNumber
+            domainHash,
+            parentRef_,
+            Claim.unwrap(rootClaim()),
+            l2SequenceNumber(),
+            Hash.unwrap(l1Head()),
+            _l1OriginNumber
         );
 
         challengeDeadline = uint64(block.timestamp + challengePeriod);
+        proofDeadline = uint64(block.timestamp + proofPeriod);
         createdAt = Timestamp.wrap(uint64(block.timestamp));
         initialized = true;
 
@@ -429,11 +452,12 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         totalBonds += msg.value;
         weth.deposit{value: msg.value}();
 
-        wasRespectedGameTypeWhenCreated = anchorStateRegistry.respectedGameType().raw() == GAME_TYPE.raw();
+        wasRespectedGameTypeWhenCreated =
+            anchorStateRegistry.respectedGameType().raw() == WorldChainGameTypes.WIP_1006.raw();
 
         emit WorldChainGameCreated(
             rootId,
-            parentRef,
+            parentRef_,
             Claim.unwrap(rootClaim()),
             l2SequenceNumber(),
             Hash.unwrap(l1Head()),
@@ -458,7 +482,6 @@ contract WorldChainProofSystemGame is Clone, ISemver {
 
         challenger = payable(msg.sender);
         challengedAt = uint64(block.timestamp);
-        proofDeadline = uint64(block.timestamp + proofPeriod);
 
         // Custody the challenger bond in DelayedWETH and track the refund-mode credit.
         refundModeCredit[msg.sender] += msg.value;
@@ -592,10 +615,11 @@ contract WorldChainProofSystemGame is Clone, ISemver {
     ///      blacklisted parent invalidates descendants at resolution without further guardian
     ///      action, even while that parent is unresolved.
     function _parentResolution() internal view returns (GameStatus parentStatus, bool parentBlacklisted) {
-        if (parentIndex() == ANCHOR_PARENT_INDEX) {
+        address parentRef_ = parentRef();
+        if (parentRef_ == address(anchorStateRegistry)) {
             return (GameStatus.DEFENDER_WINS, false);
         }
-        (,, IDisputeGame parent) = disputeGameFactory.gameAtIndex(parentIndex());
+        IDisputeGame parent = IDisputeGame(parentRef_);
         parentBlacklisted = anchorStateRegistry.isGameBlacklisted(parent);
         if (!parentBlacklisted) parentStatus = parent.status();
     }
@@ -681,10 +705,15 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         if (!success) revert BondTransferFailed();
     }
 
-    /// @notice Returns the claimable credit of `recipient` under the current (or default
-    ///         normal) distribution mode.
+    /// @notice Returns the credit `recipient` will receive under the current distribution mode.
+    /// @dev Before `closeGame`, registry-invalid games report refund credit so keepers do not
+    ///      miss challenger refunds merely because normal-mode credit is zero.
     function credit(address recipient) external view returns (uint256 credit_) {
-        if (bondDistributionMode == BondDistributionMode.REFUND) {
+        if (
+            bondDistributionMode == BondDistributionMode.REFUND
+                || (bondDistributionMode == BondDistributionMode.UNDECIDED
+                    && !anchorStateRegistry.isGameProper(IDisputeGame(address(this))))
+        ) {
             credit_ = refundModeCredit[recipient];
         } else {
             credit_ = normalModeCredit[recipient];

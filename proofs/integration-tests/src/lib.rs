@@ -237,10 +237,10 @@ impl FakeExecution {
             l1_origin_number,
         };
         let event = GameCreated {
-            proposal_key: proposal.proposal_key,
+            transition_key: proposal.transition_key,
             root_id: root.root_id(state.domain_hash),
             game,
-            proposer: Address::repeat_byte(0xa1),
+            game_creator: Address::repeat_byte(0xa1),
             root_claim: proposal.root_claim,
             l2_block_number: proposal.l2_block_number,
             parent_ref: proposal.parent_ref,
@@ -248,7 +248,7 @@ impl FakeExecution {
             l1_origin_number,
         };
 
-        state.games_by_key.insert(proposal.proposal_key, game);
+        state.games_by_key.insert(proposal.transition_key, game);
         state.game_order.push(game);
         state.games_by_address.insert(
             game,
@@ -291,11 +291,11 @@ impl ProposerClient for FakeExecution {
             .anchor)
     }
 
-    async fn proposal_key(
+    async fn transition_key(
         &self,
         commitment: world_chain_proofs::ProposalCommitment,
     ) -> Result<B256, ProposerError> {
-        Ok(commitment.proposal_key(
+        Ok(commitment.transition_key(
             self.state
                 .lock()
                 .expect("fake execution mutex poisoned")
@@ -308,8 +308,8 @@ impl ProposerClient for FakeExecution {
         commitment: world_chain_proofs::ProposalCommitment,
     ) -> Result<Option<Address>, ProposerError> {
         let state = self.state.lock().expect("fake execution mutex poisoned");
-        let proposal_key = commitment.proposal_key(state.domain_hash);
-        Ok(state.games_by_key.get(&proposal_key).copied())
+        let transition_key = commitment.transition_key(state.domain_hash);
+        Ok(state.games_by_key.get(&transition_key).copied())
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
@@ -375,6 +375,10 @@ impl ProposerClient for FakeExecution {
         })
     }
 
+    async fn is_game_finalized(&self, _game: Address) -> Result<bool, ProposerError> {
+        Ok(true)
+    }
+
     async fn claimable(&self, _game: Address) -> Result<U256, ProposerError> {
         Ok(U256::ZERO)
     }
@@ -396,10 +400,10 @@ impl ProposerClient for FakeExecution {
         _proposer_bond: U256,
     ) -> Result<ProposalSubmission, ProposerError> {
         let mut state = self.state.lock().expect("fake execution mutex poisoned");
-        if let Some(existing) = state.games_by_key.get(&proposal.proposal_key) {
+        if let Some(existing) = state.games_by_key.get(&proposal.transition_key) {
             return Err(ProposerError::Contract(format!(
-                "game already exists for proposal key {} at {existing}",
-                proposal.proposal_key
+                "game already exists for transition key {} at {existing}",
+                proposal.transition_key
             )));
         }
         let event = Self::create_game(&mut state, proposal);
@@ -425,13 +429,14 @@ impl ChallengerClient for FakeExecution {
             .len() as u64)
     }
 
-    async fn game_address_at(&self, index: u64) -> Result<Address, ChallengerError> {
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, ChallengerError> {
         self.state
             .lock()
             .expect("fake execution mutex poisoned")
             .game_order
             .get(index as usize)
             .copied()
+            .map(Some)
             .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))
     }
 

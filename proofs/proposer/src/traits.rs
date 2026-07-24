@@ -16,8 +16,8 @@ pub trait BondManagerClient: Send + Sync {
     /// Returns the number of games created by the factory.
     async fn game_count(&self) -> Result<u64, ProposerError>;
 
-    /// Returns the game at the provided factory creation index.
-    async fn game_at(&self, index: u64) -> Result<Address, ProposerError>;
+    /// Returns the WIP-1006 game at a global factory index, or `None` for another game type.
+    async fn game_at(&self, index: u64) -> Result<Option<Address>, ProposerError>;
 
     /// Returns the proposer that created the provided game.
     async fn game_proposer(&self, game: Address) -> Result<Address, ProposerError>;
@@ -38,8 +38,8 @@ pub trait ProposerClient: Send + Sync {
     /// Reads the parent state from the anchor registry.
     async fn anchor_parent(&self) -> Result<ParentRef, ProposerError>;
 
-    /// Computes the deterministic proposal key used by the factory lookup.
-    async fn proposal_key(&self, commitment: ProposalCommitment) -> Result<B256, ProposerError>;
+    /// Computes the deterministic offchain transition key used in logs and local indexing.
+    async fn transition_key(&self, commitment: ProposalCommitment) -> Result<B256, ProposerError>;
 
     /// Returns an existing game for `commitment`, if one exists.
     async fn game_for_proposal(
@@ -55,6 +55,9 @@ pub trait ProposerClient: Send + Sync {
 
     /// Submits a closeGame transaction to the provided game.
     async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError>;
+
+    /// Returns whether the stock anchor registry's finality delay has elapsed for the game.
+    async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError>;
 
     /// Returns the claimable amount the proposer can withdraw from the provided game.
     async fn claimable(&self, game: Address) -> Result<U256, ProposerError>;

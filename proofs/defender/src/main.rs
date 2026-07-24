@@ -1,4 +1,4 @@
-//! `world-chain-defender` binary: watches challenged valid `WorldChainProofSystemFactory`
+//! `world-chain-defender` binary: watches challenged valid WIP-1006
 //! games, requests proofs from the prover-service, and submits completed proof lanes on L1.
 //!
 //! Mirrors the in-process defender wired by the devnet harness
@@ -37,7 +37,7 @@ struct Cli {
     #[arg(long, env = "PROVER_SERVICE_URL")]
     prover_service_url: String,
 
-    /// `WorldChainProofSystemFactory` address on L1.
+    /// Stock OP `DisputeGameFactory` address on L1.
     #[arg(long, env = "FACTORY_ADDRESS")]
     factory_address: Address,
 

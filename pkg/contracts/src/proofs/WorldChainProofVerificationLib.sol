@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
 import {WorldChainProofLib} from "./WorldChainProofLib.sol";
-import {Hash} from "./DisputeTypes.sol";
+import {Hash} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 
 library WorldChainProofVerificationLib {
     /// @dev Validates the proof against the game's root, domain, and creation-time transition snapshot.

@@ -78,11 +78,11 @@ where
                 parent_ref: cursor.address,
                 root_claim,
                 l2_block_number: next_l2_block_number,
-                proposal_key: B256::ZERO,
+                transition_key: B256::ZERO,
             };
-            proposal.proposal_key = self
+            proposal.transition_key = self
                 .execution_provider
-                .proposal_key(proposal.commitment())
+                .transition_key(proposal.commitment())
                 .await?;
 
             if let Some(next_game_addr) = self
@@ -190,6 +190,13 @@ where
         // means taking the one with the highest l2 block number
         let maybe_highest_finalized_game = finalized_games.last();
         if let Some(highest_finalized_game) = maybe_highest_finalized_game {
+            if !self
+                .execution_provider
+                .is_game_finalized(highest_finalized_game.address)
+                .await?
+            {
+                return Ok(());
+            }
             let close_game_submission = self
                 .execution_provider
                 .close_game(highest_finalized_game.address)
@@ -244,7 +251,7 @@ where
             game_address = %submission.game_address,
             l2_block_number = proposal.l2_block_number,
             parent_ref = %proposal.parent_ref,
-            proposal_key = ?proposal.proposal_key,
+            transition_key = ?proposal.transition_key,
             retry_of = ?retry_of,
             "submitted World Chain proof-system game"
         );

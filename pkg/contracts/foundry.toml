@@ -24,7 +24,7 @@ remappings = [
   "base-contracts/=vendor/base-contracts/",
   "@forge-std/=lib/forge-std/src/",
   "forge-std/=lib/forge-std/src/",
-  # --- Optimism contracts-bedrock (lib/optimism, pinned to op-contracts/v7.0.0-rc.4) ---
+  # --- Optimism contracts-bedrock (lib/optimism, pinned to op-contracts/v7.0.0) ---
   # World-chain sources import ONLY interfaces (^0.8.0) and dispute libs (^0.8.15)
   # from here — never implementation contracts (they pin solc 0.8.15). Implementations
   # are compiled by the isolated `opstack/` sub-project and deployed in tests/scripts

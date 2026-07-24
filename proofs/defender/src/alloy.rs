@@ -4,13 +4,14 @@ use alloy_provider::Provider;
 use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
 use world_chain_proofs::{
-    GameCreated, IWorldChainProofSystemFactory, IWorldChainProofSystemGame, RootState,
+    GameCreated, IDisputeGameFactory, IWorldChainProofSystemGame, ProposalCommitment, RootState,
+    WIP_1006_GAME_TYPE,
 };
 
 /// Alloy-backed implementation of [`DefenderClient`].
 #[derive(Debug, Clone)]
 pub struct AlloyDefenderClient<P> {
-    factory: IWorldChainProofSystemFactory::IWorldChainProofSystemFactoryInstance<P>,
+    factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
     provider: P,
 }
 
@@ -20,7 +21,7 @@ where
 {
     /// Creates a new Alloy-backed contract client.
     pub fn new(provider: P, factory_address: Address) -> Self {
-        let factory = IWorldChainProofSystemFactory::IWorldChainProofSystemFactoryInstance::new(
+        let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
             provider.clone(),
         );
@@ -64,28 +65,66 @@ where
     ) -> Result<Vec<GameCreated>, DefenderError> {
         let logs = self
             .factory
-            .GameCreated_filter()
+            .DisputeGameCreated_filter()
             .from_block(from)
             .to_block(to)
             .query()
             .await
             .map_err(|err| DefenderError::Rpc(err.to_string()))?;
 
-        logs.into_iter()
-            .map(|(event, _log)| {
-                Ok(GameCreated {
-                    proposal_key: event.proposalKey,
-                    root_id: event.rootId,
-                    game: event.game,
-                    proposer: event.proposer,
+        let mut games = Vec::new();
+        for (event, _log) in logs {
+            if event.gameType != WIP_1006_GAME_TYPE {
+                continue;
+            }
+            let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
+                event.disputeProxy,
+                self.provider.clone(),
+            );
+            let root_id_call = game.rootId();
+            let game_creator_call = game.gameCreator();
+            let parent_ref_call = game.parentRef();
+            let l2_block_number_call = game.l2SequenceNumber();
+            let l1_origin_hash_call = game.l1Head();
+            let l1_origin_number_call = game.l1OriginNumber();
+            let domain_hash_call = game.domainHash();
+            let (
+                root_id,
+                game_creator,
+                parent_ref,
+                l2_block_number,
+                l1_origin_hash,
+                l1_origin_number,
+                domain_hash,
+            ) = tokio::try_join!(
+                root_id_call.call(),
+                game_creator_call.call(),
+                parent_ref_call.call(),
+                l2_block_number_call.call(),
+                l1_origin_hash_call.call(),
+                l1_origin_number_call.call(),
+                domain_hash_call.call(),
+            )
+            .map_err(|error| DefenderError::Contract(error.to_string()))?;
+            let l2_block_number = u256_to_u64(l2_block_number, "l2SequenceNumber")?;
+            games.push(GameCreated {
+                transition_key: ProposalCommitment {
+                    parent_ref,
                     root_claim: event.rootClaim,
-                    l2_block_number: u256_to_u64(event.l2BlockNumber, "l2BlockNumber")?,
-                    parent_ref: event.parentRef,
-                    l1_origin_hash: event.l1OriginHash,
-                    l1_origin_number: u256_to_u64(event.l1OriginNumber, "l1OriginNumber")?,
-                })
-            })
-            .collect()
+                    l2_block_number,
+                }
+                .transition_key(domain_hash),
+                root_id,
+                game: event.disputeProxy,
+                game_creator,
+                root_claim: event.rootClaim,
+                l2_block_number,
+                parent_ref,
+                l1_origin_hash,
+                l1_origin_number: u256_to_u64(l1_origin_number, "l1OriginNumber")?,
+            });
+        }
+        Ok(games)
     }
 
     async fn challenge_deadline(&self, game: Address) -> Result<u64, DefenderError> {

@@ -35,11 +35,11 @@ struct Cli {
     #[arg(long, env = "OUTPUT_ROOT_RPC_URL")]
     output_root_rpc: String,
 
-    /// `WorldChainProofSystemFactory` address on L1.
+    /// Stock OP `DisputeGameFactory` address on L1.
     #[arg(long, env = "FACTORY_ADDRESS")]
     factory_address: Address,
 
-    /// `WorldChainAnchorStateRegistry` address on L1.
+    /// Stock OP `AnchorStateRegistry` address on L1.
     #[arg(long, env = "ANCHOR_REGISTRY_ADDRESS")]
     anchor_registry_address: Address,
 

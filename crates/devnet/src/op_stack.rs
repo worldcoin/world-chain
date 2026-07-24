@@ -111,8 +111,8 @@ impl WorldContractsDeploymentConfig {
         let mut contracts = Vec::new();
         if self.proof_system {
             contracts.extend([
-                "WorldChainAnchorStateRegistry",
-                "WorldChainProofSystemFactory",
+                "WorldChainProofSystemGame(WIP-1006)",
+                "DelayedWETH(WIP-1006)",
                 "MockRootIdVerifier(VALIDITY_PROOF)",
                 "MockRootIdVerifier(TEE_ATTESTATION)",
                 "MockRootIdVerifier(SECURITY_COUNCIL)",
@@ -425,7 +425,9 @@ impl HaSequencerTopology {
                     DevnetComponentKind::WorldProofSystem,
                     DevnetComponentStatus::Planned,
                 )
-                .with_note("deploys WIP-1006 proof-system contracts and wires the local Portal"),
+                .with_note(
+                    "registers WIP-1006 in the stock dispute factory and activates it in the stock anchor registry",
+                ),
             );
             components.push(
                 DevnetComponent::new(
