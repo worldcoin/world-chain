@@ -54,6 +54,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IWorldChainProof
     }
 
     error InvalidBond(uint256 expected, uint256 actual);
+    error InvalidPeriods(uint64 challengePeriod, uint64 proofPeriod);
     error InvalidState(WorldChainProofLib.RootState expected, WorldChainProofLib.RootState actual);
     error ChallengePeriodElapsed(uint256 timestamp, uint256 challengeDeadline);
     error ProofPeriodElapsed(uint256 timestamp, uint256 proofDeadline);
@@ -95,7 +96,6 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IWorldChainProof
     bytes32 public immutable override rootId;
 
     uint64 public immutable challengePeriod;
-    uint64 public immutable proofPeriod;
     uint256 public immutable proposerBond;
     uint256 public immutable challengerBond;
 
@@ -106,6 +106,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IWorldChainProof
 
     uint64 public override createdAt;
     uint64 public override challengeDeadline;
+    uint64 public challengedAt;
     uint64 public override proofDeadline;
     uint64 private _resolvedAt;
     uint8 public override proofBitmap;
@@ -119,6 +120,9 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IWorldChainProof
 
     constructor(ProposalInit memory proposal, ActivationConfig memory config) payable {
         if (msg.value != config.proposerBond) revert InvalidBond(config.proposerBond, msg.value);
+        if (config.proofPeriod <= config.challengePeriod) {
+            revert InvalidPeriods(config.challengePeriod, config.proofPeriod);
+        }
 
         factory = proposal.factory;
         anchorStateRegistry = proposal.anchorStateRegistry;
@@ -141,7 +145,6 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IWorldChainProof
             proposal.l1OriginNumber
         );
         challengePeriod = config.challengePeriod;
-        proofPeriod = config.proofPeriod;
         proposerBond = config.proposerBond;
         challengerBond = config.challengerBond;
         PROOF_THRESHOLD = config.proofThreshold;
@@ -152,6 +155,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IWorldChainProof
 
         createdAt = uint64(block.timestamp);
         challengeDeadline = uint64(block.timestamp + config.challengePeriod);
+        proofDeadline = uint64(block.timestamp + config.proofPeriod);
         state = WorldChainProofLib.RootState.PROPOSED;
         wasRespectedGameTypeWhenCreated = GameType.unwrap(
             IWorldChainAnchorStateRegistry(proposal.anchorStateRegistry).respectedGameType()
@@ -208,7 +212,7 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient, IWorldChainProof
 
         if (state == WorldChainProofLib.RootState.PROPOSED) {
             state = WorldChainProofLib.RootState.CHALLENGED;
-            proofDeadline = uint64(block.timestamp + proofPeriod);
+            challengedAt = uint64(block.timestamp);
         }
 
         emit Challenged(msg.sender, proofDeadline);

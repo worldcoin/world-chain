@@ -11,7 +11,9 @@ use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
 };
-use world_chain_challenger::{ChallengeSubmission, ChallengerClient, ChallengerError};
+use world_chain_challenger::{
+    ChallengeSubmission, ChallengerClient, ChallengerError, GameMetadata,
+};
 use world_chain_defender::{DefenderClient, DefenderError, DefenderSubmission};
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_proofs::{
@@ -410,6 +412,43 @@ impl ProposerClient for FakeExecution {
 
 #[async_trait]
 impl ChallengerClient for FakeExecution {
+    async fn challenger_bond(&self) -> Result<U256, ChallengerError> {
+        Ok(U256::from(1))
+    }
+
+    async fn game_count(&self) -> Result<u64, ChallengerError> {
+        Ok(self
+            .state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .game_order
+            .len() as u64)
+    }
+
+    async fn game_address_at(&self, index: u64) -> Result<Address, ChallengerError> {
+        self.state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .game_order
+            .get(index as usize)
+            .copied()
+            .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))
+    }
+
+    async fn game_metadata(&self, game: Address) -> Result<GameMetadata, ChallengerError> {
+        self.state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .games_by_address
+            .get(&game)
+            .map(|record| GameMetadata {
+                address: game,
+                root_claim: record.event.root_claim,
+                l2_block_number: record.event.l2_block_number,
+            })
+            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+    }
+
     async fn root_state(&self, game: Address) -> Result<RootState, ChallengerError> {
         let raw = self
             .state
@@ -419,28 +458,6 @@ impl ChallengerClient for FakeExecution {
             .get(&game)
             .map_or(STATE_NONE, |record| record.state);
         RootState::try_from(raw).map_err(Into::into)
-    }
-
-    async fn finalized_l1_block_num(&self) -> Result<BlockNumber, ChallengerError> {
-        Ok(self
-            .state
-            .lock()
-            .expect("fake execution mutex poisoned")
-            .finalized_l1_block)
-    }
-
-    async fn games_created(
-        &self,
-        _from: BlockNumber,
-        _to: BlockNumber,
-    ) -> Result<Vec<GameCreated>, ChallengerError> {
-        let state = self.state.lock().expect("fake execution mutex poisoned");
-        Ok(state
-            .game_order
-            .iter()
-            .filter_map(|game| state.games_by_address.get(game))
-            .map(|record| record.event)
-            .collect())
     }
 
     async fn challenge_deadline(&self, game: Address) -> Result<u64, ChallengerError> {

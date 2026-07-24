@@ -26,6 +26,7 @@ sol! {
             );
         function domainHash() external view returns (bytes32);
         function proposerBond() external view returns (uint256);
+        function challengerBond() external view returns (uint256);
         function games(
             uint32 gameType,
             bytes32 rootClaim,
@@ -50,6 +51,7 @@ sol! {
         function rootId() external view returns (bytes32);
         function factory() external view returns (address);
         function gameCreator() external view returns (address);
+        function challenger() external view returns (address);
         function anchorStateRegistry() external view returns (address);
         function domainHash() external view returns (bytes32);
         function attempt() external view returns (uint256);
