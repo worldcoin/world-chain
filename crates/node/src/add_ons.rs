@@ -142,7 +142,6 @@ where
         enable_tx_conditional: bool,
         min_suggested_priority_fee: u64,
         simulate_enabled: bool,
-        pending_block: Option<LatestFlashblockReceiver>,
         witness: Option<(ExecutionWitnessHandle, Receiver<BlockExecutionWitness>)>,
     ) -> Self {
         Self {
@@ -155,10 +154,20 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
-            pending_block,
+            pending_block: None,
             witness,
             _tx: PhantomData,
         }
+    }
+
+    /// Configures access to the latest flashblock-backed pending block, when
+    /// flashblocks are enabled.
+    pub fn with_latest_flashblock(
+        mut self,
+        pending_block: Option<LatestFlashblockReceiver>,
+    ) -> Self {
+        self.pending_block = pending_block;
+        self
     }
 }
 
@@ -197,9 +206,9 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
-            pending_block,
             witness,
         )
+        .with_latest_flashblock(pending_block)
     }
 
     /// Maps the [`PayloadValidatorBuilder`] builder type.
@@ -231,9 +240,9 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
-            pending_block,
             witness,
         )
+        .with_latest_flashblock(pending_block)
     }
 
     /// Maps the [`EngineValidatorBuilder`] builder type.
@@ -265,9 +274,9 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
-            pending_block,
             witness,
         )
+        .with_latest_flashblock(pending_block)
     }
 
     /// Sets the RPC middleware stack for processing RPC requests.
@@ -299,9 +308,9 @@ where
             enable_tx_conditional,
             min_suggested_priority_fee,
             simulate_enabled,
-            pending_block,
             witness,
         )
+        .with_latest_flashblock(pending_block)
     }
 
     /// Sets the hook that is run once the rpc server is started.
@@ -507,12 +516,9 @@ where
                 }
 
                 if simulate_enabled {
-                    let simulate_api = Simulate::from_eth_api(
-                        provider,
-                        evm_config,
-                        pending_block,
-                        registry.eth_api(),
-                    );
+                    let simulate_api =
+                        Simulate::from_eth_api(provider, evm_config, registry.eth_api())
+                            .with_latest_flashblock(pending_block);
                     modules.merge_http(simulate_api.into_rpc())?;
                 }
 

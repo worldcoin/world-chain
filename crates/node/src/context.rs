@@ -395,11 +395,11 @@ where
             false,
             1_000_000,
             self.config.args.simulate_enabled,
-            maybe_pending_block,
             self.witness
                 .as_ref()
                 .map(|w| (w.cache.clone(), w.receiver.clone())),
         )
+        .with_latest_flashblock(maybe_pending_block)
     }
 
     fn ext_context(&self) -> Self::ExtContext {

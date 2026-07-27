@@ -21,6 +21,42 @@ async fn simulate_endpoint_rejects_latest_flashblock_when_flashblocks_are_disabl
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn simulate_endpoint_defaults_to_latest_full_block_without_flashblock_flag() {
+    let provider = WorldChainNoopProvider::default();
+    let evm_config = WorldChainEvmConfig::optimism(provider.chain_spec());
+    let module = Simulate::new(
+        provider,
+        evm_config,
+        BlockingTaskPool::build().expect("build blocking pool"),
+        BlockingTaskGuard::new(1),
+    )
+    .into_rpc();
+
+    let (response, _) = module
+        .raw_json_request(
+            &serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "simulate_unsignedUserOp",
+                "params": [{
+                    "sender": Address::ZERO,
+                    "callData": Bytes::new(),
+                    "entryPoint": Address::ZERO,
+                }],
+                "id": 1,
+            })
+            .to_string(),
+            1,
+        )
+        .await
+        .expect("valid JSON-RPC request");
+
+    assert_rpc_error(
+        serde_json::from_str(response.get()).expect("valid JSON-RPC response"),
+        "Block not found: latest",
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn simulate_endpoint_rejects_latest_flashblock_when_no_flashblock_exists() {
     let (_, pending_block) = watch::channel::<Option<ExecutedBlock<OpPrimitives>>>(None);
     let response = call_simulate_latest_flashblock(Some(pending_block), None).await;
@@ -47,10 +83,10 @@ async fn call_simulate_latest_flashblock(
     let module = Simulate::new(
         provider,
         evm_config,
-        pending_block,
         BlockingTaskPool::build().expect("build blocking pool"),
         BlockingTaskGuard::new(1),
     )
+    .with_latest_flashblock(pending_block)
     .into_rpc();
     let mut request = serde_json::json!({
         "sender": Address::ZERO,

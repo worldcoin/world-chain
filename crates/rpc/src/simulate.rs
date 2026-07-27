@@ -522,14 +522,13 @@ impl<Client, EvmConfig> Simulate<Client, EvmConfig> {
     pub fn new(
         client: Client,
         evm_config: EvmConfig,
-        pending_block: Option<LatestFlashblockReceiver>,
         task_pool: BlockingTaskPool,
         task_guard: BlockingTaskGuard,
     ) -> Self {
         Self {
             client,
             evm_config,
-            pending_block,
+            pending_block: None,
             metadata_cache: Arc::new(Mutex::new(LruCache::new(
                 NonZeroUsize::new(METADATA_CACHE_CAPACITY).expect("non-zero capacity"),
             ))),
@@ -538,19 +537,27 @@ impl<Client, EvmConfig> Simulate<Client, EvmConfig> {
         }
     }
 
+    /// Configures access to the latest flashblock-backed pending block, when
+    /// flashblocks are enabled.
+    pub fn with_latest_flashblock(
+        mut self,
+        pending_block: Option<LatestFlashblockReceiver>,
+    ) -> Self {
+        self.pending_block = pending_block;
+        self
+    }
+
     /// Wire the simulate API to the same blocking pool and concurrency guard
     /// the node uses for `eth_call` / `debug_trace*`, by pulling them off the
     /// already-installed eth API.
     pub fn from_eth_api<E: SpawnBlocking>(
         client: Client,
         evm_config: EvmConfig,
-        pending_block: Option<LatestFlashblockReceiver>,
         eth_api: &E,
     ) -> Self {
         Self::new(
             client,
             evm_config,
-            pending_block,
             eth_api.tracing_task_pool().clone(),
             eth_api.tracing_task_guard().clone(),
         )
