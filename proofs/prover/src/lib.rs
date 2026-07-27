@@ -212,10 +212,10 @@ pub fn proof_config_from_file(path: &Path) -> Result<(WorldRangeHardforkConfig, 
 /// cannot match the worker/enclave for any `rollup.json` that isn't already in Kona's exact
 /// canonical serialized form (see `OnlineHostConfig::from_rollup_config_value`).
 fn rollup_config_hash_from_value(value: &Value) -> Result<(WorldRangeHardforkConfig, B256)> {
-    let schedule: WorldRangeHardforkConfig = serde_json::from_value(value.clone())
-        .context("failed to parse rollup config hardforks")?;
-    let parsed_rollup_config: kona_genesis::RollupConfig = serde_json::from_value(value.clone())
-        .context("failed to parse rollup config")?;
+    let schedule: WorldRangeHardforkConfig =
+        serde_json::from_value(value.clone()).context("failed to parse rollup config hardforks")?;
+    let parsed_rollup_config: kona_genesis::RollupConfig =
+        serde_json::from_value(value.clone()).context("failed to parse rollup config")?;
     let hash = hash_world_rollup_config(&parsed_rollup_config, &schedule)
         .context("failed to hash rollup config")?;
     Ok((schedule, hash))
