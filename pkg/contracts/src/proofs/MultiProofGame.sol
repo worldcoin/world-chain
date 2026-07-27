@@ -32,8 +32,7 @@ import {
     NoCreditToClaim,
     ParentGameNotResolved,
     UnexpectedGameType,
-    UnexpectedRootClaim,
-    UnknownChainId
+    UnexpectedRootClaim
 } from "@optimism-bedrock/src/dispute/lib/Errors.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
 import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
@@ -47,11 +46,8 @@ import {ISemver} from "@optimism-bedrock/interfaces/universal/ISemver.sol";
 ///         at a fixed block interval; a challenged proposal finalizes only once enough
 ///         independent proof lanes (validity proof, TEE attestation, security council) support
 ///         it. Bond custody uses `DelayedWETH` with the two-phase unlock/withdraw claim flow.
-/// @dev Implements the `IDisputeGame` ABI without inheriting the interface: `IDisputeGame`
-///      declares `rootClaimByChainId` (among others) as `pure`, while this implementation
-///      reads a constructor immutable (`view`). `FaultDisputeGame` takes the same approach.
-///      Structure follows `ZKDisputeGame`; challenge/lane semantics are World Chain specific.
-contract MultiProofGame is Clone, ISemver {
+/// @dev Structure follows `ZKDisputeGame`; challenge/lane semantics are World Chain specific.
+contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     ////////////////////////////////////////////////////////////////
     //                         Structs                            //
     ////////////////////////////////////////////////////////////////
@@ -109,9 +105,6 @@ contract MultiProofGame is Clone, ISemver {
         uint256 attempt,
         address gameCreator
     );
-
-    /// @notice Emitted when the game is resolved. Matches the `IDisputeGame` event.
-    event Resolved(GameStatus indexed status);
 
     event Challenged(address indexed challenger, uint64 proofDeadline);
     event ProofLaneSupported(ProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
@@ -275,8 +268,10 @@ contract MultiProofGame is Clone, ISemver {
         gameType_ = GameTypes.MULTI_PROOF_GAME_TYPE;
     }
 
-    function rootClaimByChainId(uint256 chainId) external view returns (Claim rootClaim_) {
-        if (chainId != DOMAIN_CHAIN_ID) revert UnknownChainId();
+    /// @dev `IDisputeGame` declares this `pure`, so it cannot gate on the `DOMAIN_CHAIN_ID`
+    ///      immutable. This matches `ZKDisputeGame`; only super game types carry per-chain
+    ///      root claims, and `OptimismPortal2` reads `rootClaim()` for non-super types.
+    function rootClaimByChainId(uint256) external pure returns (Claim rootClaim_) {
         rootClaim_ = rootClaim();
     }
 

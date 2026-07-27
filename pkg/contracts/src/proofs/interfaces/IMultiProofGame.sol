@@ -3,14 +3,16 @@ pragma solidity 0.8.28;
 
 import {ProofLib} from "../lib/ProofLib.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
+import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
+import {IAnchorStateRegistry} from "@optimism-bedrock/interfaces/dispute/IAnchorStateRegistry.sol";
 
 /// @notice The WIP-1006 proof-lane extensions layered on top of the stock `IDisputeGame`
 ///         surface. Only the members `IDisputeGame` does not already declare live here;
 ///         proof-lane verifiers and offchain services need them to bind a proof to a game.
 interface IMultiProofGame is IDisputeGame {
     function rootId() external view returns (bytes32);
-    function anchorStateRegistry() external view returns (address);
-    function disputeGameFactory() external view returns (address);
+    function anchorStateRegistry() external view returns (IAnchorStateRegistry);
+    function disputeGameFactory() external view returns (IDisputeGameFactory);
     function domain() external view returns (ProofLib.Domain memory);
     function domainHash() external view returns (bytes32);
     function proposalDomainHash() external view returns (bytes32);

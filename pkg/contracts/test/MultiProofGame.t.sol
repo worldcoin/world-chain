@@ -13,8 +13,7 @@ import {
     GamePaused,
     IncorrectBondAmount,
     InvalidParentGame,
-    ParentGameNotResolved,
-    UnknownChainId
+    ParentGameNotResolved
 } from "@optimism-bedrock/src/dispute/lib/Errors.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
 
@@ -370,9 +369,9 @@ contract MultiProofGameTest is OPStackFixtures {
 
     function test_IDisputeGameSurfaceAndProofDomain() public {
         MultiProofGame game = _proposeAtAnchor();
+        // Non-super game type: `rootClaimByChainId` is chain-agnostic, matching `ZKDisputeGame`.
         assertEq(Claim.unwrap(game.rootClaimByChainId(CHAIN_ID)), Claim.unwrap(game.rootClaim()));
-        vm.expectRevert(UnknownChainId.selector);
-        game.rootClaimByChainId(CHAIN_ID + 1);
+        assertEq(Claim.unwrap(game.rootClaimByChainId(CHAIN_ID + 1)), Claim.unwrap(game.rootClaim()));
 
         ProofLib.Domain memory domain = game.domain();
         assertEq(domain.chainId, CHAIN_ID);
