@@ -308,8 +308,7 @@ where
         let pending = self
             .pending_proposal
             .as_ref()
-            .expect("pending proposal initialized")
-            .clone();
+            .expect("pending proposal initialized");
 
         // Reissuing the exact request is idempotent and requeues a failed request
         // according to the prover-service retry policy.
