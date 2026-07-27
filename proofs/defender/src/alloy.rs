@@ -85,44 +85,18 @@ where
             challenge_deadline,
             proof_deadline,
             proof_threshold,
-        ) = tokio::try_join!(
-            async {
-                game.rootClaim()
-                    .call()
-                    .await
-                    .map_err(|error| DefenderError::Contract(error.to_string()))
-            },
-            async {
-                game.l2BlockNumber()
-                    .call()
-                    .await
-                    .map_err(|error| DefenderError::Contract(error.to_string()))
-            },
-            async {
-                game.l1OriginHash()
-                    .call()
-                    .await
-                    .map_err(|error| DefenderError::Contract(error.to_string()))
-            },
-            async {
-                game.challengeDeadline()
-                    .call()
-                    .await
-                    .map_err(|error| DefenderError::Contract(error.to_string()))
-            },
-            async {
-                game.proofDeadline()
-                    .call()
-                    .await
-                    .map_err(|error| DefenderError::Contract(error.to_string()))
-            },
-            async {
-                game.PROOF_THRESHOLD()
-                    .call()
-                    .await
-                    .map_err(|error| DefenderError::Contract(error.to_string()))
-            },
-        )?;
+        ) = self
+            .provider
+            .multicall()
+            .add(game.rootClaim())
+            .add(game.l2BlockNumber())
+            .add(game.l1OriginHash())
+            .add(game.challengeDeadline())
+            .add(game.proofDeadline())
+            .add(game.PROOF_THRESHOLD())
+            .aggregate()
+            .await
+            .map_err(|error| DefenderError::Contract(error.to_string()))?;
         if proof_threshold == 0 || proof_threshold > PROOF_LANE_COUNT {
             return Err(DefenderError::Contract(format!(
                 "invalid proof threshold {proof_threshold} for game {address}"
