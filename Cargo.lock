@@ -18723,7 +18723,6 @@ dependencies = [
  "world-chain-proof-kona-host-utils",
  "world-chain-proof-nitro",
  "world-chain-proof-worker",
- "world-chain-proofs",
  "world-chain-prover-service",
 ]
 
