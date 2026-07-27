@@ -884,7 +884,7 @@ where
         let block_number = header.number();
         let state_provider = self
             .client
-            .history_by_block_hash(header.parent_hash)
+            .state_by_block_hash(header.parent_hash)
             .map_err(internal_err)?;
         let state_provider = BlockState::new(pending_block)
             .state_provider(state_provider)
