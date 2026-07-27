@@ -20,6 +20,7 @@ use world_chain_proposer::{
     AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerClient, ProposerConfig,
     WorldChainProposer,
 };
+use world_chain_prover_service::RpcProverServiceClient;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -34,6 +35,10 @@ struct Cli {
     /// op-node rollup RPC URL used to read canonical L2 output roots.
     #[arg(long, env = "OUTPUT_ROOT_RPC_URL")]
     output_root_rpc: String,
+
+    /// prover-service JSON-RPC URL.
+    #[arg(long, env = "PROVER_SERVICE_URL")]
+    prover_service_url: String,
 
     /// `WorldChainProofSystemFactory` address on L1.
     #[arg(long, env = "FACTORY_ADDRESS")]
@@ -94,6 +99,8 @@ async fn main() -> Result<()> {
     };
     let mut bond_manager = BondManager::new(bond_manager_config, contracts.clone());
     let output_roots = OptimismConsensusClient::new(cli.output_root_rpc.clone());
+    let proof_requester = RpcProverServiceClient::new(&cli.prover_service_url)
+        .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
     let proposer_bond = contracts
         .proposer_bond()
         .await
@@ -104,11 +111,12 @@ async fn main() -> Result<()> {
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_resolutions_per_tick: cli.max_resolutions_per_tick,
     };
-    let proposer = WorldChainProposer::new(config, contracts, output_roots);
+    let mut proposer = WorldChainProposer::new(config, contracts, output_roots, proof_requester);
 
     info!(
         l1_rpc_url = %cli.l1_rpc,
         output_root_rpc_url = %cli.output_root_rpc,
+        prover_service = %cli.prover_service_url,
         factory = %cli.factory_address,
         anchor = %cli.anchor_registry_address,
         proposer = %proposer_address,

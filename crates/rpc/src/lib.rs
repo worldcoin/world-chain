@@ -24,3 +24,6 @@ pub mod simulate;
 pub use simulate::{Simulate, SimulateApiServer};
 
 pub mod simulate_consts;
+
+pub mod witness;
+pub use witness::{DebugWitnessOracle, DebugWitnessOracleApiServer};

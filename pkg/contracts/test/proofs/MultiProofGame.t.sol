@@ -262,6 +262,17 @@ contract MultiProofGameTest is OPStackFixtures {
         new MultiProofGame(config);
     }
 
+    function test_Constructor_RejectsProofPeriodNotAfterChallengePeriod() public {
+        MultiProofGame.GameConfig memory config = _gameConfig(WC_GAME_TYPE);
+        config.proofPeriod = config.challengePeriod;
+        vm.expectRevert(MultiProofGame.InvalidActivationParameters.selector);
+        new MultiProofGame(config);
+
+        config.proofPeriod = 0;
+        vm.expectRevert(MultiProofGame.InvalidActivationParameters.selector);
+        new MultiProofGame(config);
+    }
+
     /*//////////////////////////////////////////////////////////////
                           CHALLENGE WINDOW
     //////////////////////////////////////////////////////////////*/
@@ -306,8 +317,21 @@ contract MultiProofGameTest is OPStackFixtures {
         _challenge(game);
         assertEq(game.challenger(), challengerAccount);
         assertEq(uint8(game.state()), uint8(ProofLib.RootState.CHALLENGED));
-        assertEq(game.proofDeadline(), uint64(block.timestamp + PROOF_PERIOD));
+        assertEq(game.proofDeadline(), game.createdAt().raw() + PROOF_PERIOD);
         assertEq(weth.balanceOf(address(game)), PROPOSER_BOND + CHALLENGER_BOND);
+    }
+
+    function test_Challenge_DoesNotExtendProofDeadline() public {
+        MultiProofGame game = _proposeAtAnchor();
+        uint64 deadlineAtCreation = game.proofDeadline();
+        assertEq(deadlineAtCreation, game.createdAt().raw() + PROOF_PERIOD);
+
+        // Challenge as late as the window allows: the proof window is creation-relative, so the
+        // deadline is unchanged.
+        vm.warp(game.challengeDeadline() - 1);
+        _challenge(game);
+        assertEq(game.challengedAt(), uint64(block.timestamp));
+        assertEq(game.proofDeadline(), deadlineAtCreation);
     }
 
     function test_Challenge_RevertsAtOrAfterDeadline() public {

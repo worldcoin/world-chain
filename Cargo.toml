@@ -39,6 +39,7 @@ members = [
     "proofs/proposer",
     "proofs/challenger",
     "proofs/prover-service",
+    "proofs/prover-cli",
     "proofs/worker",
     "proofs/sp1-worker",
     "proofs/defender",

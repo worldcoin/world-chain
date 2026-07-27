@@ -4057,7 +4057,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding",
- "syn 2.0.117",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -5168,11 +5168,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
 dependencies = [
  "cfg-if",
- "js-sys",
  "libc",
  "r-efi 5.3.0",
  "wasip2",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -5182,11 +5180,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0de51e6874e94e7bf76d726fc5d13ba782deca734ff60d5bb2fb2607c7406555"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 6.0.0",
  "rand_core 0.10.1",
  "wasip2",
  "wasip3",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -9457,15 +9457,16 @@ dependencies = [
 
 [[package]]
 name = "quinn-proto"
-version = "0.11.14"
+version = "0.11.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "434b42fec591c96ef50e21e886936e66d3cc3f737104fdb9b737c40ffb94c098"
+checksum = "2f4bfc015262b9df63c8845072ce59068853ff5872180c2ce2f13038b970e560"
 dependencies = [
  "aws-lc-rs",
  "bytes",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "lru-slab",
- "rand 0.9.4",
+ "rand 0.10.1",
+ "rand_pcg",
  "ring",
  "rustc-hash",
  "rustls 0.23.40",
@@ -9605,6 +9606,15 @@ name = "rand_core"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
+
+[[package]]
+name = "rand_pcg"
+version = "0.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "caa0f4137e1c0a72f4c651489402276c8e8e1cf081f3b0ba156d2cbeef09e86a"
+dependencies = [
+ "rand_core 0.10.1",
+]
 
 [[package]]
 name = "rand_xorshift"
@@ -18664,12 +18674,15 @@ dependencies = [
  "alloy-eips 2.0.5",
  "alloy-op-evm",
  "alloy-primitives",
+ "alloy-rpc-types-debug",
  "auto_impl",
  "bon",
  "color-eyre",
  "crossbeam-channel",
+ "futures",
  "op-alloy-consensus",
  "op-revm",
+ "parking_lot",
  "reth-evm",
  "reth-node-api",
  "reth-node-builder",
@@ -18679,11 +18692,14 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-revm",
+ "reth-tasks",
  "reth-trie-common",
  "revm",
  "revm-database",
  "serde",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "world-chain-chainspec",
  "world-chain-primitives",
@@ -18721,6 +18737,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth 2.0.5",
  "color-eyre",
+ "crossbeam-channel",
  "ed25519-dalek",
  "hex",
  "op-alloy-consensus",
@@ -19131,6 +19148,7 @@ dependencies = [
 name = "world-chain-proposer"
 version = "2.4.0"
 dependencies = [
+ "alloy-eips 2.0.5",
  "alloy-network 2.0.5",
  "alloy-primitives",
  "alloy-provider",
@@ -19148,6 +19166,7 @@ dependencies = [
  "tracing-subscriber 0.3.23",
  "url",
  "world-chain-proofs",
+ "world-chain-prover-service",
 ]
 
 [[package]]
@@ -19164,6 +19183,23 @@ dependencies = [
  "world-chain-chainspec",
  "world-chain-proof-core",
  "world-chain-proof-kona-host-utils",
+]
+
+[[package]]
+name = "world-chain-prover-cli"
+version = "2.4.0"
+dependencies = [
+ "alloy-primitives",
+ "anyhow",
+ "clap",
+ "dotenvy",
+ "reqwest 0.12.28",
+ "tokio",
+ "tracing",
+ "tracing-subscriber 0.3.23",
+ "world-chain-proof-kona-host-utils",
+ "world-chain-proofs",
+ "world-chain-prover-service",
 ]
 
 [[package]]
@@ -19235,6 +19271,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-types",
+ "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
  "alloy-sol-types",
  "color-eyre",

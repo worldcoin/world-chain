@@ -63,6 +63,7 @@ eyre.workspace = true
 tracing.workspace = true
 ed25519-dalek.workspace = true
 hex.workspace = true
+crossbeam-channel.workspace = true
 
 [build-dependencies]
 vergen.workspace = true

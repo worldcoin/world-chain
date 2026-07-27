@@ -174,7 +174,7 @@ contract MultiProofGame is Clone, ISemver, IDisputeGame {
 
     constructor(GameConfig memory config) {
         if (
-            config.challengePeriod == 0 || config.proofPeriod == 0 || config.domain.chainId == 0
+            config.challengePeriod == 0 || config.proofPeriod <= config.challengePeriod || config.domain.chainId == 0
                 || config.domain.proofSystemVersion == 0 || config.domain.blockInterval == 0
                 || config.proofThreshold == 0 || config.proofThreshold > ProofLib.PROOF_LANE_COUNT
                 || address(config.disputeGameFactory) == address(0) || address(config.anchorStateRegistry) == address(0)
@@ -404,6 +404,9 @@ contract MultiProofGame is Clone, ISemver, IDisputeGame {
         );
 
         challengeDeadline = uint64(block.timestamp + challengePeriod);
+        // Both windows are creation-relative, so a proposal's worst-case time to resolution is
+        // fixed at creation and a late challenge cannot extend it.
+        proofDeadline = uint64(block.timestamp + proofPeriod);
         createdAt = Timestamp.wrap(uint64(block.timestamp));
         initialized = true;
 
@@ -441,7 +444,6 @@ contract MultiProofGame is Clone, ISemver, IDisputeGame {
 
         challenger = payable(msg.sender);
         challengedAt = uint64(block.timestamp);
-        proofDeadline = uint64(block.timestamp + proofPeriod);
 
         // Custody the challenger bond in DelayedWETH and track the refund-mode credit.
         refundModeCredit[msg.sender] += msg.value;

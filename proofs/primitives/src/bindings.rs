@@ -26,6 +26,7 @@ sol! {
             );
         function domainHash() external view returns (bytes32);
         function proposerBond() external view returns (uint256);
+        function challengerBond() external view returns (uint256);
         function games(bytes32 proposalKey) external view returns (address);
         function gameCount() external view returns (uint256);
         function gameAt(uint256 index) external view returns (address);
@@ -56,6 +57,7 @@ sol! {
         function rootId() external view returns (bytes32);
         function factory() external view returns (address);
         function proposer() external view returns (address);
+        function challenger() external view returns (address);
         function anchorStateRegistry() external view returns (address);
         function domainHash() external view returns (bytes32);
         function attempt() external view returns (uint256);
@@ -68,6 +70,7 @@ sol! {
         function l1OriginNumber() external view returns (uint256);
         function challengeDeadline() external view returns (uint64);
         function proofDeadline() external view returns (uint64);
+        function PROOF_THRESHOLD() external view returns (uint8);
         function finalizedAt() external view returns (uint64);
         function state() external view returns (uint8);
         function invalidationReason() external view returns (uint8);
