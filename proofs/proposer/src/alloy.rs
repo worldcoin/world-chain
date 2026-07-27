@@ -1,10 +1,12 @@
-use alloy_primitives::{Address, B256, U256};
+use alloy_eips::BlockId;
+use alloy_primitives::{Address, B256, BlockHash, U256};
 use alloy_provider::{Provider, WalletProvider};
 use async_trait::async_trait;
 use world_chain_proofs::{
     IWorldChainAnchorStateRegistry, IWorldChainProofSystemFactory, IWorldChainProofSystemGame,
     InvalidationReasonError, ProposalCommitment, ResolutionStatus, RootStateError,
 };
+use world_chain_prover_service::ProofData;
 
 use crate::{
     BondManagerClient, ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
@@ -284,9 +286,21 @@ where
         Ok(proposer_bond)
     }
 
+    async fn latest_finalized_l1_block(&self) -> Result<BlockHash, ProposerError> {
+        let block = self
+            .provider
+            .get_block(BlockId::finalized())
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let block = block.ok_or_else(|| ProposerError::FinalizedBlockNotFound)?;
+        let hash = block.hash();
+        Ok(hash)
+    }
+
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
+        _proof: ProofData,
         proposer_bond: U256,
     ) -> Result<ProposalSubmission, ProposerError> {
         let pending = self

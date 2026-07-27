@@ -307,7 +307,7 @@ impl Drop for DefenderTask {
     }
 }
 
-/// In-process defender prover-service RPC server. Stopped on devnet drop.
+/// In-process proof-system prover-service RPC server. Stopped on devnet drop.
 #[derive(Debug)]
 struct ProverServiceTask {
     handle: ServerHandle,
@@ -569,7 +569,15 @@ impl FullStackWorldDevnet {
                 .ok_or_else(|| {
                     eyre!("full-stack devnet has no op-node for the World Chain proposer")
                 })?;
-            Some(start_world_chain_proposer(&l1_public_rpc, &output_root_rpc, deployment).await?)
+            Some(
+                start_world_chain_proposer(
+                    &l1_public_rpc,
+                    &output_root_rpc,
+                    prover_service_url,
+                    deployment,
+                )
+                .await?,
+            )
         } else {
             None
         };
@@ -2449,6 +2457,7 @@ async fn start_challenger(
 async fn start_world_chain_proposer(
     l1_rpc_url: &str,
     output_root_rpc_url: &str,
+    prover_service_url: &str,
     deployment: &WorldProofSystemDeployment,
 ) -> Result<ProposerTask> {
     let factory_address: Address = deployment
@@ -2471,6 +2480,8 @@ async fn start_world_chain_proposer(
     let contracts = AlloyProofSystemClient::new(provider, factory_address, anchor_address);
     let mut bond_manager = BondManager::new(BondManagerConfig::default(), contracts.clone());
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
+    let proof_requester = RpcProverServiceClient::new(prover_service_url)
+        .map_err(|error| eyre!("failed to connect proposer to prover-service: {error}"))?;
     let proposer_bond = contracts
         .proposer_bond()
         .await
@@ -2481,11 +2492,12 @@ async fn start_world_chain_proposer(
         poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
         max_resolutions_per_tick: ProposerConfig::default().max_resolutions_per_tick,
     };
-    let proposer = WorldChainProposer::new(config, contracts, output_roots);
+    let mut proposer = WorldChainProposer::new(config, contracts, output_roots, proof_requester);
 
     info!(
         l1_rpc_url,
         output_root_rpc_url,
+        prover_service = %prover_service_url,
         factory = %deployment.proof_system_factory,
         anchor = %deployment.anchor_state_registry,
         proposer = %proposer_address,

@@ -434,9 +434,14 @@ impl ProposerClient for FakeExecution {
         Ok(U256::from(1))
     }
 
+    async fn latest_finalized_l1_block(&self) -> Result<B256, ProposerError> {
+        Ok(B256::repeat_byte(0xf1))
+    }
+
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
+        _proof: ProofData,
         _proposer_bond: U256,
     ) -> Result<ProposalSubmission, ProposerError> {
         let mut state = self.state.lock().expect("fake execution mutex poisoned");
