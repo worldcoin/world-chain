@@ -530,10 +530,13 @@ async fn active_defense_is_removed_after_proof_deadline() {
     let mut defender = WorldChainDefender::new(config(), client, output_roots, prover.clone());
 
     defender.tick_at(5).await.unwrap();
+    assert_eq!(defender.watched_games(), [GAME_1]);
+
+    defender.tick_at(6).await.unwrap();
     assert_eq!(defender.active_defenses(), [GAME_1]);
     assert!(prover.requests().is_empty());
 
-    defender.tick_at(6).await.unwrap();
+    defender.tick_at(7).await.unwrap();
     assert_eq!(prover.requests().len(), 2);
 
     defender.tick_at(20).await.unwrap();
@@ -558,8 +561,12 @@ async fn active_defense_advances_before_discovery_failure() {
     let mut defender =
         WorldChainDefender::new(config(), client.clone(), output_roots, prover.clone());
 
-    // Discovery and validation promote the game, but active work starts on
-    // the next tick because existing defenses run first.
+    // Discovery retains the game for monitoring, then validation promotes it
+    // on the next tick because tracked games run before discovery.
+    defender.tick().await.unwrap();
+    assert_eq!(defender.watched_games(), [GAME_1]);
+    assert!(prover.requests().is_empty());
+
     defender.tick().await.unwrap();
     assert_eq!(defender.active_defenses(), [GAME_1]);
     assert!(prover.requests().is_empty());
@@ -653,10 +660,13 @@ async fn active_defense_accepts_sufficient_proof_support_hidden_by_an_unresolved
         WorldChainDefender::new(config(), client.clone(), output_roots, prover.clone());
 
     defender.tick_at(5).await.unwrap();
+    assert_eq!(defender.watched_games(), [GAME_1]);
+
+    defender.tick_at(6).await.unwrap();
     assert_eq!(defender.active_defenses(), [GAME_1]);
     assert!(prover.requests().is_empty());
 
-    defender.tick_at(6).await.unwrap();
+    defender.tick_at(7).await.unwrap();
     assert_eq!(prover.requests().len(), 2);
 
     client.set_bitmap(
@@ -686,12 +696,17 @@ async fn tick_defends_challenged_valid_root() {
     let mut defender =
         WorldChainDefender::new(config(), client.clone(), output_roots, prover.clone());
 
-    // First tick: discovery and validation promote the challenged game.
+    // First tick: discovery retains the challenged game for monitoring.
+    defender.tick().await.unwrap();
+    assert_eq!(defender.watched_games(), [GAME_1]);
+    assert!(prover.requests().is_empty());
+
+    // Second tick: validation promotes the challenged game.
     defender.tick().await.unwrap();
     assert_eq!(defender.active_defenses(), [GAME_1]);
     assert!(prover.requests().is_empty());
 
-    // Second tick: both lane proofs are requested.
+    // Third tick: both lane proofs are requested.
     defender.tick().await.unwrap();
     let requests = prover.requests();
     assert_eq!(requests.len(), 2);
@@ -705,7 +720,7 @@ async fn tick_defends_challenged_valid_root() {
     }
     assert!(client.submissions().is_empty());
 
-    // Third tick: both proofs are completed, fetched and submitted on-chain.
+    // Fourth tick: both proofs are completed, fetched and submitted on-chain.
     defender.tick().await.unwrap();
 
     assert_eq!(
@@ -764,6 +779,10 @@ async fn tick_ignores_challenged_invalid_root() {
 
     // an invalid root is the challenger's business, not ours
     assert!(prover.requests().is_empty());
+    assert_eq!(defender.watched_games(), [GAME_1]);
+
+    defender.tick().await.unwrap();
+
     assert!(defender.watched_games().is_empty());
     assert!(defender.active_defenses().is_empty());
 }
@@ -815,6 +834,7 @@ async fn tick_skips_lane_already_proven() {
     defender.tick().await.unwrap();
     defender.tick().await.unwrap();
     defender.tick().await.unwrap();
+    defender.tick().await.unwrap();
 
     // the validity lane is already proven on-chain: only the TEE lane runs
     let requests = prover.requests();
@@ -848,8 +868,10 @@ async fn failed_proofs_are_rerequested_up_to_the_attempt_bound() {
         prover.clone(),
     );
 
-    // Tick 1 promotes the game. Tick 2 makes the first request per lane;
-    // tick 3 re-requests each failed proof; tick 4 exhausts the attempts.
+    // Tick 1 discovers the game and tick 2 promotes it. Tick 3 makes the first
+    // request per lane; tick 4 re-requests each failed proof; tick 5 exhausts
+    // the attempts.
+    defender.tick().await.unwrap();
     defender.tick().await.unwrap();
     defender.tick().await.unwrap();
     defender.tick().await.unwrap();
@@ -873,6 +895,9 @@ async fn defense_closes_when_game_leaves_challenged_state() {
     let prover = MockProver::default();
     let mut defender =
         WorldChainDefender::new(config(), client.clone(), output_roots, prover.clone());
+
+    defender.tick().await.unwrap();
+    assert_eq!(defender.watched_games(), [GAME_1]);
 
     defender.tick().await.unwrap();
     assert_eq!(defender.active_defenses(), [GAME_1]);
