@@ -85,3 +85,4 @@ alloy-sol-types.workspace = true
 revm-database = { workspace = true, features = ["alloydb"] }
 revm-database-interface.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+world-chain-test-utils.workspace = true
