@@ -11,9 +11,6 @@ use crate::{
 };
 
 /// Proposal and exact Nitro request retained while proof generation is in flight.
-///
-/// This state is intentionally process-local. After a restart, the proposer builds a new request
-/// from the then-current finalized L1 head; persistent proof-session recovery is handled separately.
 #[derive(Debug, Clone)]
 struct PendingProposal {
     proposal: Proposal,
