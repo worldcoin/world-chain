@@ -2586,7 +2586,12 @@ async fn start_world_chain_defender(
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let proof_requester = RpcProverServiceClient::new(prover_service_url)
         .map_err(|error| eyre!("failed to connect defender to prover-service: {error}"))?;
+    let allowed_proposer = DEVNET_PRIVATE_KEY
+        .parse::<PrivateKeySigner>()
+        .wrap_err("invalid allowed World Chain proposer key")?
+        .address();
     let config = DefenderConfig {
+        allowed_proposer,
         poll_interval: WORLD_DEFENDER_POLL_INTERVAL,
         ..DefenderConfig::default()
     };
@@ -2598,6 +2603,7 @@ async fn start_world_chain_defender(
         prover_service = %prover_service_url,
         factory = %deployment.proof_system_factory,
         defender = %defender_address,
+        allowed_proposer = %allowed_proposer,
         "starting native World Chain proof-system defender"
     );
 

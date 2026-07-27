@@ -1,0 +1,12 @@
+{
+  "proofSystemFactory": "0xE448d0ac4e076c7D5260f4fbB6D6770e24706037",
+  "anchorStateRegistry": "0xB1466BaC099De16fdd745CE3c5dDc10CC3e12AcD",
+  "validityProofVerifier": "0x426889014616524fb03763037cC3654bfdF9Aa49",
+  "teeVerifier": "0x59388AB900B0691A135AEfc4250Ea897643ED7Fa",
+  "securityCouncil": "0xf0e671Bb4ce8f68Bd691B62acf623B3d03f51660",
+  "stakingRegistry": "0xcF3f55E3A97955E13F7BedCfeA756B367d282010",
+  "proofSystemVersion": 1,
+  "blockInterval": 10,
+  "intermediateBlockInterval": 5,
+  "proofThreshold": 2
+}
