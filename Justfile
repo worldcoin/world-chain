@@ -146,7 +146,13 @@ install *args='':
 #
 # Optional (proof-rollup-config-hash — one of these, in priority order):
 #   L2_RPC_URL, ROLLUP_CONFIG_URL, ROLLUP_CONFIG
+#
+# Simulation mode (no on-chain broadcast):
+#   dry_run=true   Simulate without broadcasting (all other steps still run)
 # ==============================================================================
+
+# Set dry_run=true on the command line to simulate without broadcasting.
+dry_run := "false"
 
 # Phase 0a – Compute and print the rollup config hash.
 # Sources (checked in priority order):
@@ -181,7 +187,7 @@ proof-rollup-config-hash env="alphanet":
         echo "Port-forwarding to $OP_NODE_POD in $OP_NODE_NAMESPACE (context: $KUBECONTEXT)…" >&2
         kubectl --context="$KUBECONTEXT" port-forward \
             -n "$OP_NODE_NAMESPACE" \
-            "pod/$OP_NODE_POD" "${LOCAL_PORT}:${OP_NODE_PORT}" &
+            "pod/$OP_NODE_POD" "${LOCAL_PORT}:${OP_NODE_PORT}" > /dev/null 2>&1 &
         PF_PID=$!
         trap 'kill $PF_PID 2>/dev/null || true' EXIT
         READY=false
@@ -231,7 +237,7 @@ proof-get-chain-id env="alphanet":
         echo "Port-forwarding to $OP_NODE_POD in $OP_NODE_NAMESPACE (context: $KUBECONTEXT)…" >&2
         kubectl --context="$KUBECONTEXT" port-forward \
             -n "$OP_NODE_NAMESPACE" \
-            "pod/$OP_NODE_POD" "${LOCAL_PORT}:${OP_NODE_PORT}" &
+            "pod/$OP_NODE_POD" "${LOCAL_PORT}:${OP_NODE_PORT}" > /dev/null 2>&1 &
         PF_PID=$!
         trap 'kill $PF_PID 2>/dev/null || true' EXIT
         READY=false
@@ -326,20 +332,23 @@ proof-get-pcrs env="alphanet":
     echo "PCR2=$(echo "$MEASUREMENTS" | jq -r '.PCR2')"
 
 # Phase 1 – Deploy the Nitro attestation stack.
-proof-deploy-nitro:
+proof-deploy-nitro env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
     : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
     : "${OWNER:?OWNER is required}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
-    PROOF_DEPLOY_OUT="${PROOF_DEPLOY_OUT:-/tmp/nitro-deploy-$(date +%s).log}"
-    echo "Deploying Nitro contracts (output → $PROOF_DEPLOY_OUT)…"
-    cd pkg/contracts && forge script scripts/devnet/DeployNitro.s.sol:DeployNitro \
-        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast --slow \
-        | tee "$PROOF_DEPLOY_OUT"
+    export NITRO_DEPLOYMENT_OUT="deployments/{{env}}-nitro.json"
+    BROADCAST_FLAG=""
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    fi
+    echo "Deploying Nitro contracts (deployment → $NITRO_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
+    cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployNitro.s.sol:DeployNitro \
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
 # Phase 2 – Deploy the proof system contracts.
-proof-deploy-system:
+proof-deploy-system env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
     : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
@@ -350,10 +359,14 @@ proof-deploy-system:
     export PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL="${PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL:-5}"
     export PROOF_THRESHOLD="${PROOF_THRESHOLD:-2}"
     export WORLD_CHALLENGER_ADDRESS="${WORLD_CHALLENGER_ADDRESS:-}"
-    export PROOF_SYSTEM_DEPLOYMENT_OUT="${PROOF_SYSTEM_DEPLOYMENT_OUT:-/tmp/proof-system-deploy-$(date +%s).json}"
-    echo "Deploying proof system contracts (output → $PROOF_SYSTEM_DEPLOYMENT_OUT)…"
-    cd pkg/contracts && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
-        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast --slow
+    export PROOF_SYSTEM_DEPLOYMENT_OUT="deployments/{{env}}-proof-system.json"
+    BROADCAST_FLAG=""
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    fi
+    echo "Deploying proof system contracts (deployment → $PROOF_SYSTEM_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
+    cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
 # Phase 3a – Pre-warm CertManager with the AWS Nitro CA cert chain.
 proof-certmanager-prewarm env="alphanet":
@@ -366,6 +379,12 @@ proof-certmanager-prewarm env="alphanet":
     source scripts/proof-envs/{{env}}.env
     if [ -f "scripts/proof-envs/{{env}}.local.env" ]; then
         source scripts/proof-envs/{{env}}.local.env
+    fi
+    # Fall back to the deployment file if CERT_MANAGER_ADDRESS is not set.
+    DEPLOYMENTS_FILE="pkg/contracts/deployments/{{env}}-nitro.json"
+    if [ -z "${CERT_MANAGER_ADDRESS:-}" ] && [ -f "$DEPLOYMENTS_FILE" ]; then
+        CERT_MANAGER_ADDRESS=$(jq -r '.certManager' "$DEPLOYMENTS_FILE")
+        export CERT_MANAGER_ADDRESS
     fi
     : "${CERT_MANAGER_ADDRESS:?CERT_MANAGER_ADDRESS is required}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
@@ -387,14 +406,28 @@ proof-certmanager-prewarm env="alphanet":
     }' "$PREWARM_PLAN_RAW" > "$PREWARM_PLAN"
     echo "Pre-warm plan saved to $PREWARM_PLAN"
     echo "Submitting cold cert entries via Forge script…"
+    BROADCAST_FLAG=""
+    PREWARM_SKIP_IF_UNDEPLOYED="false"
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    else
+        PREWARM_SKIP_IF_UNDEPLOYED="true"
+    fi
     cd pkg/contracts && CERT_MANAGER_ADDRESS="$CERT_MANAGER_ADDRESS" PREWARM_PLAN="$PREWARM_PLAN" \
+        PREWARM_SKIP_IF_UNDEPLOYED="$PREWARM_SKIP_IF_UNDEPLOYED" \
         forge script scripts/devnet/PrewarmCertManager.s.sol:PrewarmCertManager \
-            --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" --broadcast --slow
+            --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
 # Phase 3b – Approve the PCR set on NitroAttestationVerifier.
-proof-approve-pcrs:
+proof-approve-pcrs env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
+    # Fall back to the deployment file if NITRO_ATTESTATION_VERIFIER is not set.
+    DEPLOYMENTS_FILE="pkg/contracts/deployments/{{env}}-nitro.json"
+    if [ -z "${NITRO_ATTESTATION_VERIFIER:-}" ] && [ -f "$DEPLOYMENTS_FILE" ]; then
+        NITRO_ATTESTATION_VERIFIER=$(jq -r '.nitroAttestationVerifier' "$DEPLOYMENTS_FILE")
+        export NITRO_ATTESTATION_VERIFIER
+    fi
     : "${NITRO_ATTESTATION_VERIFIER:?NITRO_ATTESTATION_VERIFIER is required}"
     : "${OWNER_KEY:?OWNER_KEY is required}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
@@ -406,10 +439,18 @@ proof-approve-pcrs:
     [[ "$PCR0" == 0x* ]] || PCR0="0x$PCR0"
     [[ "$PCR1" == 0x* ]] || PCR1="0x$PCR1"
     [[ "$PCR2" == 0x* ]] || PCR2="0x$PCR2"
-    cast send "$NITRO_ATTESTATION_VERIFIER" \
-        "approvePCRSet(bytes32,bytes32,bytes32)" \
-        "$(cast keccak "$PCR0")" "$(cast keccak "$PCR1")" "$(cast keccak "$PCR2")" \
-        --rpc-url "$L1_RPC_URL" --private-key "$OWNER_KEY"
+    if [ "{{dry_run}}" = "true" ]; then
+        echo "[DRY RUN] Estimating gas…"
+        cast estimate "$NITRO_ATTESTATION_VERIFIER" \
+            "approvePCRSet(bytes32,bytes32,bytes32)" \
+            "$(cast keccak "$PCR0")" "$(cast keccak "$PCR1")" "$(cast keccak "$PCR2")" \
+            --rpc-url "$L1_RPC_URL" --from "$(cast wallet address --private-key "$OWNER_KEY")"
+    else
+        cast send "$NITRO_ATTESTATION_VERIFIER" \
+            "approvePCRSet(bytes32,bytes32,bytes32)" \
+            "$(cast keccak "$PCR0")" "$(cast keccak "$PCR1")" "$(cast keccak "$PCR2")" \
+            --rpc-url "$L1_RPC_URL" --private-key "$OWNER_KEY"
+    fi
     echo "PCR set approved."
 
 # Combined – Run all proof system deployment phases in sequence.
@@ -435,20 +476,19 @@ proof-setup env="alphanet":
     echo "ROLLUP_CONFIG_HASH=$ROLLUP_CONFIG_HASH" >&2
 
     echo "=== Step 1: Deploying Nitro attestation stack ===" >&2
-    NITRO_LOG=$(mktemp)
-    just proof-deploy-nitro | tee "$NITRO_LOG"
-    CERT_MANAGER_ADDRESS=$(grep -oP 'CertManager:\s+\K0x[0-9a-fA-F]{40}' "$NITRO_LOG")
-    NITRO_ATTESTATION_VERIFIER=$(grep -oP 'NitroAttestationVerifier:\s+\K0x[0-9a-fA-F]{40}' "$NITRO_LOG")
+    just dry_run={{dry_run}} proof-deploy-nitro {{env}}
+    NITRO_DEPLOYMENTS="pkg/contracts/deployments/{{env}}-nitro.json"
+    CERT_MANAGER_ADDRESS=$(jq -r '.certManager' "$NITRO_DEPLOYMENTS")
+    NITRO_ATTESTATION_VERIFIER=$(jq -r '.nitroAttestationVerifier' "$NITRO_DEPLOYMENTS")
     export CERT_MANAGER_ADDRESS NITRO_ATTESTATION_VERIFIER
     echo "CERT_MANAGER_ADDRESS=$CERT_MANAGER_ADDRESS" >&2
     echo "NITRO_ATTESTATION_VERIFIER=$NITRO_ATTESTATION_VERIFIER" >&2
-    rm -f "$NITRO_LOG"
 
     echo "=== Step 2: Deploying proof system contracts ===" >&2
-    just proof-deploy-system
+    just dry_run={{dry_run}} proof-deploy-system {{env}}
 
     echo "=== Step 3a: Pre-warming CertManager ===" >&2
-    just proof-certmanager-prewarm {{env}}
+    just dry_run={{dry_run}} proof-certmanager-prewarm {{env}}
 
     if [ -z "${PCR0:-}" ] || [ -z "${PCR1:-}" ] || [ -z "${PCR2:-}" ]; then
         echo "=== Step 3b-pre: Fetching PCRs from running enclave ===" >&2
@@ -456,4 +496,4 @@ proof-setup env="alphanet":
     fi
 
     echo "=== Step 3b: Approving PCR set ===" >&2
-    just proof-approve-pcrs
+    just dry_run={{dry_run}} proof-approve-pcrs {{env}}
