@@ -1,27 +1,48 @@
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
 use tracing::{info, warn};
 use world_chain_proofs::{ConsensusProvider, InvalidationReason, RootState};
+use world_chain_prover_service::{
+    ProofBackend, ProofRequest, ProofRequestId, ProofRequester, ProofResponse, ProofStatus,
+};
 
 use crate::{
     ParentRef, Proposal, ProposerClient, ProposerConfig, ProposerError,
     types::{CanonicalLine, CanonicalScan, FinalizedGames, NextProposalAction},
 };
 
+/// Proposal and exact Nitro request retained while proof generation is in flight.
+#[derive(Debug, Clone)]
+struct PendingProposal {
+    proposal: Proposal,
+    retry_of: Option<Address>,
+    proof_request: ProofRequest,
+    proof_id: ProofRequestId,
+}
+
 /// World Chain Proposer.
 #[derive(Debug)]
-pub struct WorldChainProposer<E, C> {
+pub struct WorldChainProposer<E, C, P> {
     config: ProposerConfig,
     execution_provider: E,
     consensus_provider: C,
+    proof_requester: P,
+    pending_proposal: Option<PendingProposal>,
 }
 
-impl<E, C> WorldChainProposer<E, C> {
-    /// Creates a proposer from execution and consensus providers.
-    pub fn new(config: ProposerConfig, execution_provider: E, consensus_provider: C) -> Self {
+impl<E, C, P> WorldChainProposer<E, C, P> {
+    /// Creates a proposer from execution, consensus, and proof-requester providers.
+    pub fn new(
+        config: ProposerConfig,
+        execution_provider: E,
+        consensus_provider: C,
+        proof_requester: P,
+    ) -> Self {
         Self {
             config,
             execution_provider,
             consensus_provider,
+            proof_requester,
+            pending_proposal: None,
         }
     }
 
@@ -30,12 +51,19 @@ impl<E, C> WorldChainProposer<E, C> {
     pub const fn config(&self) -> &ProposerConfig {
         &self.config
     }
+
+    /// Returns whether a proposal is waiting for its Nitro proof or L1 submission.
+    #[must_use]
+    pub const fn has_pending_proposal(&self) -> bool {
+        self.pending_proposal.is_some()
+    }
 }
 
-impl<E, C> WorldChainProposer<E, C>
+impl<E, C, P> WorldChainProposer<E, C, P>
 where
     E: ProposerClient,
     C: ConsensusProvider,
+    P: ProofRequester,
 {
     /// Fetches the anchor, reconstructs its canonical descendants, and determines the next action.
     ///
@@ -204,24 +232,21 @@ where
         Ok(())
     }
 
-    /// Executes the next proposal action selected during canonical-line scanning.
-    ///
-    /// New and timed-out transitions are submitted, negative-ready games wait for the
-    /// challenger, and non-retryable invalidations stop with a governance warning.
-    ///
-    pub async fn propose(&self, scan: &CanonicalScan) -> Result<(), ProposerError> {
+    /// Reconciles and requests the proof for the next canonical proposal action.
+    pub async fn request_proof(&mut self, scan: &CanonicalScan) -> Result<(), ProposerError> {
         let (proposal, retry_of) = match scan.next_action() {
-            NextProposalAction::Propose(proposal) => (proposal, None),
+            NextProposalAction::Propose(proposal) => (*proposal, None),
             NextProposalAction::RetryTimedOut {
                 proposal,
                 invalidated_game,
-            } => (proposal, Some(*invalidated_game)),
+            } => (*proposal, Some(*invalidated_game)),
             NextProposalAction::AwaitNegativeResolution { game, reason } => {
                 warn!(
                     game_address = %game,
                     invalidation_reason = ?reason,
                     "waiting for challenger to resolve game with negative outcome"
                 );
+                self.pending_proposal = None;
                 return Ok(());
             }
             NextProposalAction::BlockedByInvalidation { game, reason } => {
@@ -230,29 +255,141 @@ where
                     invalidation_reason = ?reason,
                     "invalidated transition is not automatically retryable; governance intervention required"
                 );
+                self.pending_proposal = None;
                 return Ok(());
             }
-            NextProposalAction::CaughtUp { .. } => return Ok(()),
+            NextProposalAction::CaughtUp { .. } => {
+                self.pending_proposal = None;
+                return Ok(());
+            }
         };
+
+        if self
+            .pending_proposal
+            .as_ref()
+            .is_some_and(|pending| pending.proposal.proposal_key != proposal.proposal_key)
+        {
+            let pending = self
+                .pending_proposal
+                .take()
+                .expect("pending proposal exists");
+            warn!(
+                old_proposal_key = ?pending.proposal.proposal_key,
+                new_proposal_key = ?proposal.proposal_key,
+                "canonical proposal changed; discarding stale pending proof"
+            );
+        }
+
+        if self.pending_proposal.is_none() {
+            let latest_finalized_l1 = self.execution_provider.latest_finalized_l1_block().await?;
+            let proof_request = ProofRequest {
+                backend: ProofBackend::Nitro,
+                // No game exists until the proof-backed proposal transaction is submitted.
+                game: Address::ZERO,
+                root_claim: proposal.root_claim,
+                l2_block_number: proposal.l2_block_number,
+                l1_head: latest_finalized_l1,
+            };
+            let proof_id = proof_request.id();
+            self.pending_proposal = Some(PendingProposal {
+                proposal,
+                retry_of,
+                proof_request,
+                proof_id,
+            });
+        }
+
+        let pending = self
+            .pending_proposal
+            .as_ref()
+            .expect("pending proposal initialized");
+
+        let returned_id = self
+            .proof_requester
+            .request_proof(pending.proof_request.clone())
+            .await?;
+        if returned_id != pending.proof_id {
+            return Err(ProposerError::InvalidProofResponse(format!(
+                "prover-service returned proof id {returned_id}, expected {}",
+                pending.proof_id
+            )));
+        }
+        Ok(())
+    }
+
+    /// Polls the pending Nitro proof and submits its proposal once the proof is ready.
+    ///
+    /// Pending and failed proofs remain queued for a later tick. Proof retrieval and proposal
+    /// submission errors retain the pending state so the same completed proof can be retried.
+    pub async fn poll_and_submit(&mut self) -> Result<(), ProposerError> {
+        let Some(pending) = self.pending_proposal.as_ref() else {
+            return Ok(());
+        };
+        match self.proof_requester.proof_status(pending.proof_id).await? {
+            ProofStatus::Created | ProofStatus::Running => return Ok(()),
+            ProofStatus::Failed => {
+                warn!(
+                    proof_id = %pending.proof_id,
+                    proposal_key = ?pending.proposal.proposal_key,
+                    "proposal proof failed; retrying the same request next tick"
+                );
+                return Ok(());
+            }
+            ProofStatus::Succeeded => {}
+        }
+
+        let proof = match self.proof_requester.get_proof(pending.proof_id).await? {
+            ProofResponse::Succeeded(response) if response.id == pending.proof_id => response.proof,
+            ProofResponse::Succeeded(response) => {
+                return Err(ProposerError::InvalidProofResponse(format!(
+                    "proof response id {} does not match requested id {}",
+                    response.id, pending.proof_id
+                )));
+            }
+            ProofResponse::Pending(response) => {
+                warn!(
+                    proof_id = %pending.proof_id,
+                    status = %response.status,
+                    "proof status succeeded but proof response is pending; retrying next tick"
+                );
+                return Ok(());
+            }
+            ProofResponse::Failed(response) => {
+                warn!(
+                    proof_id = %pending.proof_id,
+                    reason = %response.reason,
+                    "proof status succeeded but proof response failed; retrying next tick"
+                );
+                return Ok(());
+            }
+        };
+        if proof.backend() != ProofBackend::Nitro {
+            return Err(ProposerError::InvalidProofResponse(format!(
+                "proof {} was produced by {}, expected nitro",
+                pending.proof_id,
+                proof.backend()
+            )));
+        }
 
         let submission = self
             .execution_provider
-            .submit_proposal(proposal, self.config.proposer_bond)
+            .submit_proposal(&pending.proposal, proof, self.config.proposer_bond)
             .await?;
         info!(
             tx_hash = ?submission.tx_hash,
             game_address = %submission.game_address,
-            l2_block_number = proposal.l2_block_number,
-            parent_ref = %proposal.parent_ref,
-            proposal_key = ?proposal.proposal_key,
-            retry_of = ?retry_of,
+            l2_block_number = pending.proposal.l2_block_number,
+            parent_ref = %pending.proposal.parent_ref,
+            proposal_key = ?pending.proposal.proposal_key,
+            retry_of = ?pending.retry_of,
             "submitted World Chain proof-system game"
         );
+        self.pending_proposal = None;
         Ok(())
     }
 
     /// Runs the proposer forever, logging transient failures and retrying on each tick.
-    pub async fn run_forever(&self) -> Result<(), ProposerError> {
+    pub async fn run_forever(&mut self) -> Result<(), ProposerError> {
         self.config.validate()?;
 
         let mut interval = tokio::time::interval(self.config.poll_interval);
@@ -265,8 +402,10 @@ where
                 let finalized_games = self.resolve_games(canonical_scan.canonical_line()).await?;
                 // 3. advance the anchor to the highest finalized canonical game
                 self.advance_anchor(finalized_games).await?;
-                // 4. attempt a new canonical proposal or retry
-                self.propose(&canonical_scan).await?;
+                // 4. request the proof for a new canonical proposal or retry
+                self.request_proof(&canonical_scan).await?;
+                // 5. submit the proposal once its proof is ready
+                self.poll_and_submit().await?;
                 Ok(())
             }
             .await;
