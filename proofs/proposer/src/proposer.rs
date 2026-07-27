@@ -236,9 +236,6 @@ where
     }
 
     /// Reconciles and requests the proof for the next canonical proposal action.
-    ///
-    /// New and timed-out transitions request a Nitro proof, negative-ready games wait for the
-    /// challenger, and non-retryable invalidations clear any pending proposal.
     pub async fn request_proof(&mut self, scan: &CanonicalScan) -> Result<(), ProposerError> {
         let (proposal, retry_of) = match scan.next_action() {
             NextProposalAction::Propose(proposal) => (*proposal, None),
@@ -310,8 +307,6 @@ where
             .as_ref()
             .expect("pending proposal initialized");
 
-        // Reissuing the exact request is idempotent and requeues a failed request
-        // according to the prover-service retry policy.
         let returned_id = self
             .proof_requester
             .request_proof(pending.proof_request.clone())
