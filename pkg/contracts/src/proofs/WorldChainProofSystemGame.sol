@@ -64,6 +64,9 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
     error DuplicateChallenge(address challenger);
     error InvalidLane(uint8 lane);
     error InvalidProof(WorldChainProofLib.ProofLane lane, bytes32 rootId);
+    error EmptyProof();
+    error NotFactory(address caller);
+    error InitialProofAlreadySubmitted();
     error NoClaim(address recipient);
     error TransferFailed(address recipient, uint256 amount);
 
@@ -214,6 +217,22 @@ contract WorldChainProofSystemGame is ReentrancyGuardTransient {
         if (block.timestamp >= proofDeadline) {
             revert ProofPeriodElapsed(block.timestamp, proofDeadline);
         }
+        _submitProofLane(laneId, proof);
+    }
+
+    /// @notice Records the mandatory proof supplied atomically while the factory creates this game.
+    function submitInitialProofLane(uint8 laneId, bytes calldata proof) external {
+        if (msg.sender != factory) revert NotFactory(msg.sender);
+        if (state != WorldChainProofLib.RootState.PROPOSED) {
+            revert InvalidState(WorldChainProofLib.RootState.PROPOSED, state);
+        }
+        if (proofBitmap != 0) revert InitialProofAlreadySubmitted();
+        if (proof.length == 0) revert EmptyProof();
+
+        _submitProofLane(laneId, proof);
+    }
+
+    function _submitProofLane(uint8 laneId, bytes calldata proof) internal {
         if (laneId >= PROOF_LANE_COUNT) revert InvalidLane(laneId);
 
         WorldChainProofLib.ProofLane lane = WorldChainProofLib.ProofLane(laneId);

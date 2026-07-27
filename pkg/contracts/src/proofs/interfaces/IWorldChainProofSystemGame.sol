@@ -36,4 +36,5 @@ interface IWorldChainProofSystemGame {
     /// @dev The challenger, defender/prover-service automation, or keepers can call this after resolution;
     ///      the caller cannot redirect funds away from `recipient`.
     function withdraw(address payable recipient) external;
+    function submitInitialProofLane(uint8 laneId, bytes calldata proof) external;
 }

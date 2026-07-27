@@ -32,6 +32,7 @@ contract WorldChainProofSystemTest is Test {
     uint256 internal proposalSalt;
 
     function setUp() public {
+        vm.roll(100);
         vm.deal(proposer, 100 ether);
         vm.deal(challenger, 100 ether);
         vm.deal(secondChallenger, 100 ether);
@@ -142,9 +143,8 @@ contract WorldChainProofSystemTest is Test {
         WorldChainProofSystemFactory thresholdOne = _newFactory(thresholdAnchor, 1);
         thresholdAnchor.initializeFactory(address(thresholdOne));
 
-        vm.prank(proposer);
         (address gameAddress, bytes32 rootId) =
-            thresholdOne.propose{value: PROPOSER_BOND}(address(thresholdAnchor), keccak256("threshold-one-root"), 10);
+            _callPropose(thresholdOne, proposer, address(thresholdAnchor), keccak256("threshold-one-root"), 10);
         WorldChainProofSystemGame game = WorldChainProofSystemGame(payable(gameAddress));
         assertEq(game.PROOF_THRESHOLD(), 1);
 
@@ -423,34 +423,182 @@ contract WorldChainProofSystemTest is Test {
         (WorldChainProofSystemGame game,) = _proposeAndChallenge(10);
 
         vm.expectRevert();
-        game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(bytes32(uint256(0x1234))));
+        game.submitProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(bytes32(uint256(0x1234))));
+    }
+
+    function testFactoryRequiresValidInitialProofAtomically() public {
+        bytes32 rootClaim = keccak256("invalid-initial-proof");
+        bytes32 proposalKey = factory.computeProposalKey(address(anchor), rootClaim, 10);
+        (bytes32 l1OriginHash, uint256 l1OriginNumber, bytes32 rootId) =
+            _proposalContext(address(anchor), rootClaim, 10);
+
+        vm.prank(proposer);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                WorldChainProofSystemGame.InvalidProof.selector, WorldChainProofLib.ProofLane.VALIDITY_PROOF, rootId
+            )
+        );
+        factory.propose{value: PROPOSER_BOND}(
+            address(anchor),
+            rootClaim,
+            10,
+            l1OriginHash,
+            l1OriginNumber,
+            uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF),
+            abi.encode(bytes32(uint256(0xBAD)))
+        );
+
+        assertEq(factory.games(proposalKey), address(0));
+        assertEq(factory.gameCount(), 0);
+    }
+
+    function testFactoryRejectsEmptyInitialProofAtomically() public {
+        bytes32 rootClaim = keccak256("empty-initial-proof");
+        bytes32 proposalKey = factory.computeProposalKey(address(anchor), rootClaim, 10);
+        (bytes32 l1OriginHash, uint256 l1OriginNumber,) = _proposalContext(address(anchor), rootClaim, 10);
+
+        vm.prank(proposer);
+        vm.expectRevert(WorldChainProofSystemGame.EmptyProof.selector);
+        factory.propose{value: PROPOSER_BOND}(
+            address(anchor),
+            rootClaim,
+            10,
+            l1OriginHash,
+            l1OriginNumber,
+            uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF),
+            ""
+        );
+
+        assertEq(factory.games(proposalKey), address(0));
+        assertEq(factory.gameCount(), 0);
+    }
+
+    function testFactoryAcceptsEveryInitialProofLane() public {
+        for (uint8 laneId; laneId < WorldChainProofLib.PROOF_LANE_COUNT; laneId++) {
+            bytes32 rootClaim = keccak256(abi.encode("initial-lane", laneId));
+            (address gameAddress,) = _callProposeWithLane(
+                factory, proposer, address(anchor), rootClaim, 10, WorldChainProofLib.ProofLane(laneId)
+            );
+            WorldChainProofSystemGame game = WorldChainProofSystemGame(payable(gameAddress));
+
+            assertEq(game.proofBitmap(), uint8(1 << laneId));
+            assertEq(game.proofCount(), 1);
+            assertEq(uint8(game.state()), uint8(WorldChainProofLib.RootState.PROPOSED));
+        }
+    }
+
+    function testOnlyFactoryCanSubmitInitialProofAndItCannotSubmitTwice() public {
+        (WorldChainProofSystemGame game, bytes32 rootId) = _propose(10);
+
+        vm.expectRevert(abi.encodeWithSelector(WorldChainProofSystemGame.NotFactory.selector, address(this)));
+        game.submitInitialProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(rootId));
+
+        vm.prank(address(factory));
+        vm.expectRevert(WorldChainProofSystemGame.InitialProofAlreadySubmitted.selector);
+        game.submitInitialProofLane(uint8(WorldChainProofLib.ProofLane.TEE_ATTESTATION), abi.encode(rootId));
+    }
+
+    function testFactoryRejectsInvalidL1Origins() public {
+        bytes32 rootClaim = keccak256("invalid-l1-origin");
+        (bytes32 l1OriginHash, uint256 l1OriginNumber, bytes32 rootId) =
+            _proposalContext(address(anchor), rootClaim, 10);
+        bytes32 wrongHash = keccak256("wrong-l1-origin");
+
+        vm.prank(proposer);
+        vm.expectRevert(
+            abi.encodeWithSelector(WorldChainProofSystemFactory.L1OriginHashMismatch.selector, wrongHash, l1OriginHash)
+        );
+        factory.propose{value: PROPOSER_BOND}(
+            address(anchor),
+            rootClaim,
+            10,
+            wrongHash,
+            l1OriginNumber,
+            uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF),
+            abi.encode(rootId)
+        );
+
+        vm.prank(proposer);
+        vm.expectRevert(
+            abi.encodeWithSelector(WorldChainProofSystemFactory.L1OriginInFuture.selector, block.number, block.number)
+        );
+        factory.propose{value: PROPOSER_BOND}(
+            address(anchor),
+            rootClaim,
+            10,
+            l1OriginHash,
+            block.number,
+            uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF),
+            abi.encode(rootId)
+        );
+    }
+
+    function testFactoryRejectsUnavailableL1Origin() public {
+        uint256 historyWindow = factory.EIP2935_WINDOW();
+        vm.roll(historyWindow + 100);
+        uint256 oldOriginNumber = block.number - historyWindow - 1;
+
+        vm.prank(proposer);
+        vm.expectRevert(
+            abi.encodeWithSelector(WorldChainProofSystemFactory.L1OriginTooOld.selector, oldOriginNumber, block.number)
+        );
+        factory.propose{value: PROPOSER_BOND}(
+            address(anchor),
+            keccak256("stale-l1-origin"),
+            10,
+            keccak256("old-hash"),
+            oldOriginNumber,
+            uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF),
+            abi.encode(bytes32(uint256(1)))
+        );
+    }
+
+    function testFactoryAcceptsCanonicalL1OriginFromEIP2935History() public {
+        vm.roll(500);
+        uint256 l1OriginNumber = block.number - factory.BLOCKHASH_WINDOW() - 1;
+        bytes32 l1OriginHash = keccak256("historical-l1-origin");
+        bytes32 rootClaim = keccak256("historical-root");
+        bytes32 rootId =
+            WorldChainProofLib.rootId(_domainHash(), address(anchor), rootClaim, 10, l1OriginHash, l1OriginNumber);
+        vm.mockCall(factory.EIP2935_CONTRACT(), abi.encode(l1OriginNumber), abi.encode(l1OriginHash));
+
+        vm.prank(proposer);
+        (address gameAddress,) = factory.propose{value: PROPOSER_BOND}(
+            address(anchor),
+            rootClaim,
+            10,
+            l1OriginHash,
+            l1OriginNumber,
+            uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF),
+            abi.encode(rootId)
+        );
+
+        WorldChainProofSystemGame game = WorldChainProofSystemGame(payable(gameAddress));
+        assertEq(game.l1OriginHash(), l1OriginHash);
+        assertEq(game.l1OriginNumber(), l1OriginNumber);
     }
 
     function testFactoryIndexesGamesByProposalKeyWithoutL1Origin() public {
         bytes32 rootClaim = keccak256("root");
         bytes32 proposalKey = factory.computeProposalKey(address(anchor), rootClaim, 10);
 
-        vm.prank(proposer);
-        (address game, bytes32 rootId) = factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10);
+        (address game, bytes32 rootId) = _callPropose(factory, proposer, address(anchor), rootClaim, 10);
 
         assertEq(factory.games(proposalKey), game);
         assertEq(WorldChainProofSystemGame(payable(game)).rootId(), rootId);
 
         vm.roll(block.number + 1);
-        vm.prank(proposer);
         vm.expectRevert(
             abi.encodeWithSelector(WorldChainProofSystemFactory.GameAlreadyExists.selector, proposalKey, game)
         );
-        factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10);
+        _callPropose(factory, proposer, address(anchor), rootClaim, 10);
     }
 
     function testFactoryAllowsReplacementAttemptAfterInvalidation() public {
         bytes32 rootClaim = keccak256("retry-root");
         bytes32 proposalKey = factory.computeProposalKey(address(anchor), rootClaim, 10);
 
-        vm.prank(proposer);
-        (address firstAddress, bytes32 firstRootId) =
-            factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10);
+        (address firstAddress, bytes32 firstRootId) = _callPropose(factory, proposer, address(anchor), rootClaim, 10);
         WorldChainProofSystemGame first = WorldChainProofSystemGame(payable(firstAddress));
 
         _challenge(first, challenger);
@@ -458,9 +606,8 @@ contract WorldChainProofSystemTest is Test {
         first.resolve();
         vm.roll(block.number + 1);
 
-        vm.prank(proposer);
         (address replacementAddress, bytes32 replacementRootId) =
-            factory.propose{value: PROPOSER_BOND}(address(anchor), rootClaim, 10);
+            _callPropose(factory, proposer, address(anchor), rootClaim, 10);
         WorldChainProofSystemGame replacement = WorldChainProofSystemGame(payable(replacementAddress));
 
         assertNotEq(replacementAddress, firstAddress);
@@ -484,7 +631,6 @@ contract WorldChainProofSystemTest is Test {
         child.resolve();
 
         bytes32 childProposalKey = factory.computeProposalKey(address(parent), childRootClaim, 20);
-        vm.prank(proposer);
         vm.expectRevert(
             abi.encodeWithSelector(
                 WorldChainProofSystemFactory.GameNotRetryable.selector,
@@ -493,16 +639,12 @@ contract WorldChainProofSystemTest is Test {
                 WorldChainProofLib.InvalidationReason.INVALID_PARENT
             )
         );
-        factory.propose{value: PROPOSER_BOND}(address(parent), childRootClaim, 20);
+        _callPropose(factory, proposer, address(parent), childRootClaim, 20);
 
         vm.roll(block.number + 1);
-        vm.prank(proposer);
-        (address replacementParentAddress,) =
-            factory.propose{value: PROPOSER_BOND}(address(anchor), parent.rootClaim(), 10);
+        (address replacementParentAddress,) = _callPropose(factory, proposer, address(anchor), parent.rootClaim(), 10);
 
-        vm.prank(proposer);
-        (address rebasedChildAddress,) =
-            factory.propose{value: PROPOSER_BOND}(replacementParentAddress, childRootClaim, 20);
+        (address rebasedChildAddress,) = _callPropose(factory, proposer, replacementParentAddress, childRootClaim, 20);
         WorldChainProofSystemGame rebasedChild = WorldChainProofSystemGame(payable(rebasedChildAddress));
 
         assertEq(rebasedChild.parentRef(), replacementParentAddress);
@@ -515,15 +657,12 @@ contract WorldChainProofSystemTest is Test {
         WorldChainProofSystemFactory uninitializedFactory =
             _newFactory(uninitializedAnchor, WorldChainProofLib.PROOF_THRESHOLD);
 
-        vm.prank(proposer);
         vm.expectRevert(
             abi.encodeWithSelector(
                 WorldChainProofSystemFactory.RegistryFactoryMismatch.selector, address(uninitializedFactory), address(0)
             )
         );
-        uninitializedFactory.propose{value: PROPOSER_BOND}(
-            address(uninitializedAnchor), keccak256("uninitialized-root"), 10
-        );
+        _callPropose(uninitializedFactory, proposer, address(uninitializedAnchor), keccak256("uninitialized-root"), 10);
     }
 
     function testRegistryFactoryCanOnlyBeInitializedOnce() public {
@@ -551,8 +690,7 @@ contract WorldChainProofSystemTest is Test {
     function testFactoryAllowsRegisteredGameParentAtNextInterval() public {
         (WorldChainProofSystemGame parent,) = _propose(10);
 
-        vm.prank(proposer);
-        (address childAddress,) = factory.propose{value: PROPOSER_BOND}(address(parent), keccak256("child-root"), 20);
+        (address childAddress,) = _callPropose(factory, proposer, address(parent), keccak256("child-root"), 20);
         WorldChainProofSystemGame child = WorldChainProofSystemGame(payable(childAddress));
 
         assertEq(child.parentRef(), address(parent));
@@ -561,19 +699,17 @@ contract WorldChainProofSystemTest is Test {
     }
 
     function testFactoryRejectsUnexpectedBlockInterval() public {
-        vm.prank(proposer);
         vm.expectRevert(
             abi.encodeWithSelector(WorldChainProofSystemFactory.InvalidL2BlockNumber.selector, uint256(10), uint256(20))
         );
-        factory.propose{value: PROPOSER_BOND}(address(anchor), keccak256("wrong-block"), 20);
+        _callPropose(factory, proposer, address(anchor), keccak256("wrong-block"), 20);
     }
 
     function testFactoryRejectsUnregisteredParent() public {
         address unknownParent = address(0xFACE);
 
-        vm.prank(proposer);
         vm.expectRevert(abi.encodeWithSelector(WorldChainProofSystemFactory.InvalidParent.selector, unknownParent));
-        factory.propose{value: PROPOSER_BOND}(unknownParent, keccak256("unknown-parent"), 10);
+        _callPropose(factory, proposer, unknownParent, keccak256("unknown-parent"), 10);
     }
 
     function testAnchorUpdatesOnlyAcceptFinalizedMonotonicRoots() public {
@@ -729,9 +865,8 @@ contract WorldChainProofSystemTest is Test {
         WorldChainProofSystemFactory otherFactory = _newFactory(otherAnchor, WorldChainProofLib.PROOF_THRESHOLD);
         otherAnchor.initializeFactory(address(otherFactory));
 
-        vm.prank(proposer);
         (address gameAddress, bytes32 rootId) =
-            otherFactory.propose{value: PROPOSER_BOND}(address(otherAnchor), keccak256("other-root"), 10);
+            _callPropose(otherFactory, proposer, address(otherAnchor), keccak256("other-root"), 10);
         WorldChainProofSystemGame game = WorldChainProofSystemGame(payable(gameAddress));
         _challenge(game, challenger);
         game.submitProofLane(uint8(WorldChainProofLib.ProofLane.VALIDITY_PROOF), abi.encode(rootId));
@@ -755,9 +890,8 @@ contract WorldChainProofSystemTest is Test {
         returns (WorldChainProofSystemGame game, bytes32 rootId)
     {
         proposalSalt++;
-        vm.prank(account);
-        (address gameAddress, bytes32 id) = factory.propose{value: PROPOSER_BOND}(
-            address(anchor), keccak256(abi.encode("root", l2BlockNumber, proposalSalt)), l2BlockNumber
+        (address gameAddress, bytes32 id) = _callPropose(
+            factory, account, address(anchor), keccak256(abi.encode("root", l2BlockNumber, proposalSalt)), l2BlockNumber
         );
         return (WorldChainProofSystemGame(payable(gameAddress)), id);
     }
@@ -775,10 +909,58 @@ contract WorldChainProofSystemTest is Test {
         returns (WorldChainProofSystemGame game, bytes32 rootId)
     {
         uint256 l2BlockNumber = parent.l2BlockNumber() + 10;
-        vm.prank(proposer);
-        (address gameAddress, bytes32 id) =
-            factory.propose{value: PROPOSER_BOND}(address(parent), rootClaim, l2BlockNumber);
+        (address gameAddress, bytes32 id) = _callPropose(factory, proposer, address(parent), rootClaim, l2BlockNumber);
         return (WorldChainProofSystemGame(payable(gameAddress)), id);
+    }
+
+    function _callPropose(
+        WorldChainProofSystemFactory targetFactory,
+        address account,
+        address parent,
+        bytes32 claim,
+        uint256 targetL2Block
+    ) internal returns (address game, bytes32 rootId) {
+        return _callProposeWithLane(
+            targetFactory, account, parent, claim, targetL2Block, WorldChainProofLib.ProofLane.VALIDITY_PROOF
+        );
+    }
+
+    function _callProposeWithLane(
+        WorldChainProofSystemFactory targetFactory,
+        address account,
+        address parent,
+        bytes32 claim,
+        uint256 targetL2Block,
+        WorldChainProofLib.ProofLane lane
+    ) internal returns (address game, bytes32 rootId) {
+        (bytes32 l1OriginHash, uint256 l1OriginNumber, bytes32 id) = _proposalContext(parent, claim, targetL2Block);
+        rootId = id;
+
+        vm.prank(account);
+        return targetFactory.propose{value: PROPOSER_BOND}(
+            parent, claim, targetL2Block, l1OriginHash, l1OriginNumber, uint8(lane), abi.encode(rootId)
+        );
+    }
+
+    function _proposalContext(address parent, bytes32 claim, uint256 targetL2Block)
+        internal
+        view
+        returns (bytes32 l1OriginHash, uint256 l1OriginNumber, bytes32 rootId)
+    {
+        l1OriginNumber = block.number - 1;
+        l1OriginHash = blockhash(l1OriginNumber);
+        rootId = WorldChainProofLib.rootId(_domainHash(), parent, claim, targetL2Block, l1OriginHash, l1OriginNumber);
+    }
+
+    function _domainHash() internal pure returns (bytes32) {
+        return WorldChainProofLib.domainHash(
+            WorldChainProofLib.Domain({
+                chainId: 4801,
+                proofSystemVersion: 1,
+                rollupConfigHash: keccak256("world-chain-devnet-rollup-config"),
+                blockInterval: 10
+            })
+        );
     }
 
     function _finalizedGame(uint256 l2BlockNumber) internal returns (WorldChainProofSystemGame game, bytes32 rootId) {
