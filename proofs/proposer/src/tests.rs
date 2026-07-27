@@ -344,6 +344,14 @@ fn config() -> ProposerConfig {
     }
 }
 
+async fn advance_proposal(
+    proposer: &mut WorldChainProposer<MockContracts, MockOutputRoots, MockProofRequester>,
+    scan: &CanonicalScan,
+) -> Result<(), ProposerError> {
+    proposer.request_proof(scan).await?;
+    proposer.poll_and_submit().await
+}
+
 fn positive_ready_status() -> ResolutionStatus {
     ResolutionStatus {
         resolvable: true,
@@ -442,7 +450,9 @@ async fn propose_submits_proposal_after_last_canonical_game() {
     );
     let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
 
-    proposer.propose(&canonical_scan).await.unwrap();
+    advance_proposal(&mut proposer, &canonical_scan)
+        .await
+        .unwrap();
 
     let proposal = submissions.lock().expect("not poisoned")[0].0;
     assert_eq!(proposal.parent_ref, ANCHOR);
@@ -478,7 +488,9 @@ async fn propose_waits_for_pending_proof_and_reuses_exact_request() {
         WorldChainProposer::new(config(), contracts, output_roots, proof_requester.clone());
     let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
 
-    proposer.propose(&canonical_scan).await.unwrap();
+    advance_proposal(&mut proposer, &canonical_scan)
+        .await
+        .unwrap();
 
     assert!(submissions.lock().expect("not poisoned").is_empty());
     let first_request = proof_requester.requests.lock().expect("not poisoned")[0].clone();
@@ -487,7 +499,9 @@ async fn propose_waits_for_pending_proof_and_reuses_exact_request() {
     assert_eq!(first_request.l1_head, B256::repeat_byte(0xf1));
 
     proof_requester.set_status(ProofStatus::Succeeded);
-    proposer.propose(&canonical_scan).await.unwrap();
+    advance_proposal(&mut proposer, &canonical_scan)
+        .await
+        .unwrap();
 
     let requests = proof_requester.requests.lock().expect("not poisoned");
     assert_eq!(requests.as_slice(), &[first_request.clone(), first_request]);
@@ -518,8 +532,12 @@ async fn propose_rerequests_failed_proof_without_submitting() {
         WorldChainProposer::new(config(), contracts, output_roots, proof_requester.clone());
     let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
 
-    proposer.propose(&canonical_scan).await.unwrap();
-    proposer.propose(&canonical_scan).await.unwrap();
+    advance_proposal(&mut proposer, &canonical_scan)
+        .await
+        .unwrap();
+    advance_proposal(&mut proposer, &canonical_scan)
+        .await
+        .unwrap();
 
     let requests = proof_requester.requests.lock().expect("not poisoned");
     assert_eq!(requests.len(), 2);
@@ -553,14 +571,16 @@ async fn propose_retains_request_after_transient_status_error() {
     let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
 
     assert!(matches!(
-        proposer.propose(&canonical_scan).await,
+        advance_proposal(&mut proposer, &canonical_scan).await,
         Err(ProposerError::ProofRequest(
             ProofRequestError::RemoteInternal
         ))
     ));
     assert!(submissions.lock().expect("not poisoned").is_empty());
 
-    proposer.propose(&canonical_scan).await.unwrap();
+    advance_proposal(&mut proposer, &canonical_scan)
+        .await
+        .unwrap();
 
     let requests = proof_requester.requests.lock().expect("not poisoned");
     assert_eq!(requests.len(), 2);
@@ -594,12 +614,14 @@ async fn propose_retries_submission_with_same_completed_proof() {
     let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
 
     assert!(matches!(
-        proposer.propose(&canonical_scan).await,
+        advance_proposal(&mut proposer, &canonical_scan).await,
         Err(ProposerError::Contract(_))
     ));
     assert!(submissions.lock().expect("not poisoned").is_empty());
 
-    proposer.propose(&canonical_scan).await.unwrap();
+    advance_proposal(&mut proposer, &canonical_scan)
+        .await
+        .unwrap();
 
     let requests = proof_requester.requests.lock().expect("not poisoned");
     assert_eq!(requests.len(), 2);
@@ -644,7 +666,7 @@ async fn propose_replaces_pending_request_when_canonical_candidate_changes() {
             proposal_key: B256::repeat_byte(0xa1),
         }),
     );
-    proposer.propose(&first).await.unwrap();
+    advance_proposal(&mut proposer, &first).await.unwrap();
 
     let second = CanonicalScan::new(
         CanonicalLine::new(ParentRef {
@@ -658,7 +680,7 @@ async fn propose_replaces_pending_request_when_canonical_candidate_changes() {
             proposal_key: B256::repeat_byte(0xa2),
         }),
     );
-    proposer.propose(&second).await.unwrap();
+    advance_proposal(&mut proposer, &second).await.unwrap();
 
     {
         let requests = proof_requester.requests.lock().expect("not poisoned");
@@ -677,7 +699,7 @@ async fn propose_replaces_pending_request_when_canonical_candidate_changes() {
             finalized_block: 10,
         },
     );
-    proposer.propose(&caught_up).await.unwrap();
+    advance_proposal(&mut proposer, &caught_up).await.unwrap();
     assert!(!proposer.has_pending_proposal());
 }
 

@@ -235,12 +235,11 @@ where
         Ok(())
     }
 
-    /// Executes the next proposal action selected during canonical-line scanning.
+    /// Reconciles and requests the proof for the next canonical proposal action.
     ///
-    /// New and timed-out transitions are submitted, negative-ready games wait for the
-    /// challenger, and non-retryable invalidations stop with a governance warning.
-    ///
-    pub async fn propose(&mut self, scan: &CanonicalScan) -> Result<(), ProposerError> {
+    /// New and timed-out transitions request a Nitro proof, negative-ready games wait for the
+    /// challenger, and non-retryable invalidations clear any pending proposal.
+    pub async fn request_proof(&mut self, scan: &CanonicalScan) -> Result<(), ProposerError> {
         let (proposal, retry_of) = match scan.next_action() {
             NextProposalAction::Propose(proposal) => (*proposal, None),
             NextProposalAction::RetryTimedOut {
@@ -324,7 +323,17 @@ where
                 pending.proof_id
             )));
         }
+        Ok(())
+    }
 
+    /// Polls the pending Nitro proof and submits its proposal once the proof is ready.
+    ///
+    /// Pending and failed proofs remain queued for a later tick. Proof retrieval and proposal
+    /// submission errors retain the pending state so the same completed proof can be retried.
+    pub async fn poll_and_submit(&mut self) -> Result<(), ProposerError> {
+        let Some(pending) = self.pending_proposal.as_ref() else {
+            return Ok(());
+        };
         match self.proof_requester.proof_status(pending.proof_id).await? {
             ProofStatus::Created | ProofStatus::Running => return Ok(()),
             ProofStatus::Failed => {
@@ -402,8 +411,10 @@ where
                 let finalized_games = self.resolve_games(canonical_scan.canonical_line()).await?;
                 // 3. advance the anchor to the highest finalized canonical game
                 self.advance_anchor(finalized_games).await?;
-                // 4. attempt a new canonical proposal or retry
-                self.propose(&canonical_scan).await?;
+                // 4. request the proof for a new canonical proposal or retry
+                self.request_proof(&canonical_scan).await?;
+                // 5. submit the proposal once its proof is ready
+                self.poll_and_submit().await?;
                 Ok(())
             }
             .await;

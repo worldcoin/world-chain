@@ -16,7 +16,9 @@ use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
 };
 use world_chain_proofs::{ProofLane, RootState, has_threshold};
-use world_chain_proposer::{ProposerClient, ProposerConfig, WorldChainProposer};
+use world_chain_proposer::{
+    CanonicalScan, ProposerClient, ProposerConfig, ProposerError, WorldChainProposer,
+};
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
     ProofResponse, ProofStatus, ProverServiceConfig, SucceededProofResponse,
@@ -106,6 +108,17 @@ where
         .expect("anchor advanced");
 }
 
+async fn post_proposal<P>(
+    proposer: &mut WorldChainProposer<FakeExecution, FakeConsensus, P>,
+    scan: &CanonicalScan,
+) -> Result<(), ProposerError>
+where
+    P: ProofRequester,
+{
+    proposer.request_proof(scan).await?;
+    proposer.poll_and_submit().await
+}
+
 #[tokio::test]
 async fn fake_resolution_matches_contract_transition_semantics() {
     let chain = FakeExecution::new();
@@ -122,8 +135,7 @@ async fn fake_resolution_matches_contract_transition_semantics() {
         .anchor_and_canonical_line()
         .await
         .expect("canonical line reconstructed");
-    proposer
-        .propose(&canonical_scan)
+    post_proposal(&mut proposer, &canonical_scan)
         .await
         .expect("proposal posted");
     let game = chain.latest_game().expect("game created").game;
@@ -278,8 +290,7 @@ async fn invalid_root_is_challenged_by_real_challenger() {
         .anchor_and_canonical_line()
         .await
         .expect("canonical line reconstructed");
-    proposer
-        .propose(&canonical_scan)
+    post_proposal(&mut proposer, &canonical_scan)
         .await
         .expect("bad proposal posted");
     let game = chain.latest_game().expect("game created").game;
@@ -311,8 +322,7 @@ async fn valid_challenged_root_is_defended_through_workers() {
         .anchor_and_canonical_line()
         .await
         .expect("canonical line reconstructed");
-    proposer
-        .propose(&canonical_scan)
+    post_proposal(&mut proposer, &canonical_scan)
         .await
         .expect("proposal posted");
     let game = chain.latest_game().expect("game created").game;
@@ -362,8 +372,7 @@ async fn valid_challenged_root_survives_transient_proof_failure() {
         .anchor_and_canonical_line()
         .await
         .expect("canonical line reconstructed");
-    proposer
-        .propose(&canonical_scan)
+    post_proposal(&mut proposer, &canonical_scan)
         .await
         .expect("proposal posted");
     let game = chain.latest_game().expect("game created").game;
@@ -422,8 +431,7 @@ async fn defender_ignores_challenged_invalid_root() {
         .anchor_and_canonical_line()
         .await
         .expect("canonical line reconstructed");
-    proposer
-        .propose(&canonical_scan)
+    post_proposal(&mut proposer, &canonical_scan)
         .await
         .expect("bad proposal posted");
     let game = chain.latest_game().expect("game created").game;
