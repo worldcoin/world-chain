@@ -14,6 +14,7 @@ path = "src/lib.rs"
 alloy-primitives.workspace = true
 anyhow.workspace = true
 clap.workspace = true
+kona-genesis.workspace = true
 reqwest = { workspace = true, features = ["blocking", "json", "rustls-tls"] }
 rkyv.workspace = true
 serde.workspace = true
@@ -21,3 +22,6 @@ serde_json.workspace = true
 world-chain-chainspec.workspace = true
 world-chain-proof-core.workspace = true
 world-chain-proof-kona-host-utils.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
