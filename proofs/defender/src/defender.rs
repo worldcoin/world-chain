@@ -391,8 +391,9 @@ where
         self.config.validate()?;
 
         self.advance_active_defenses(now).await;
+        self.advance_tracked_games(now).await?;
         self.discover_games(now).await?;
-        self.advance_tracked_games(now).await
+        Ok(())
     }
 
     /// Advances the defender by one polling tick.
