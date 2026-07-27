@@ -19025,6 +19025,7 @@ dependencies = [
  "c-kzg",
  "hex",
  "kona-derive",
+ "kona-genesis",
  "kona-host",
  "kona-preimage",
  "kona-proof",

@@ -140,6 +140,66 @@ mod tests {
         );
     }
 
+    /// Regression test for a class of bug where a rollup config hash is computed from the raw
+    /// source JSON (e.g. via [`hash_rollup_config`]) instead of from the same
+    /// parsed-then-reserialized [`RollupConfig`] the enclave/guest commits to via
+    /// [`hash_world_rollup_config`].
+    ///
+    /// Kona's `RollupConfig` fills in a default for `granite_channel_timeout` (and reorders
+    /// fields to its own struct declaration order) even when the source JSON omits that key
+    /// entirely — which is exactly what happens for rollup.json files not authored by Kona's own
+    /// serializer (e.g. one produced by `op-node` instead of `kona-node`). Hashing the raw JSON
+    /// therefore silently diverges from the value the enclave actually computes, causing spurious
+    /// "enclave rollup config hash != expected" failures. Callers MUST hash the parsed
+    /// [`RollupConfig`] (via [`hash_world_rollup_config`]), never the raw source JSON.
+    #[test]
+    fn raw_json_hash_diverges_from_parsed_rollup_config_hash_when_fields_are_omitted() {
+        // A minimal rollup config JSON, as might be produced by a non-Kona tool (e.g. op-node),
+        // that omits `granite_channel_timeout` entirely.
+        let raw = serde_json::json!({
+            "genesis": {
+                "l1": { "hash": format!("0x{}", "11".repeat(32)), "number": 1 },
+                "l2": { "hash": format!("0x{}", "22".repeat(32)), "number": 0 },
+                "l2_time": 0,
+                "system_config": null,
+            },
+            "block_time": 2,
+            "max_sequencer_drift": 600,
+            "seq_window_size": 3600,
+            "channel_timeout": 300,
+            "l1_chain_id": 11155111,
+            "l2_chain_id": 5496749,
+            "regolith_time": 0,
+            "canyon_time": 0,
+            "delta_time": 0,
+            "ecotone_time": 0,
+            "fjord_time": 0,
+            "granite_time": 0,
+            "holocene_time": 0,
+            "isthmus_time": 0,
+            "batch_inbox_address": format!("0x{}", "33".repeat(20)),
+            "deposit_contract_address": format!("0x{}", "44".repeat(20)),
+            "l1_system_config_address": format!("0x{}", "55".repeat(20)),
+        });
+
+        let raw_hash = hash_rollup_config(&raw).unwrap();
+
+        let parsed: RollupConfig = serde_json::from_value(raw).unwrap();
+        let schedule = WorldRangeHardforkConfig::default();
+        let parsed_hash = hash_world_rollup_config(&parsed, &schedule).unwrap();
+
+        // These MUST differ given the missing `granite_channel_timeout` field (Kona fills in a
+        // default of 50 when re-serializing `parsed`), demonstrating why any code path computing
+        // an "expected" rollup config hash must hash the parsed `RollupConfig`, not the raw JSON.
+        assert_ne!(
+            raw_hash, parsed_hash,
+            "raw-JSON and parsed-RollupConfig hashes were expected to diverge for a JSON \
+             document missing granite_channel_timeout — if this now passes, re-check whether \
+             kona_genesis::RollupConfig still fills in defaults for fields absent from the \
+             source JSON before relying on raw-JSON hashing anywhere in the proving pipeline"
+        );
+    }
+
     #[test]
     fn world_rollup_hash_matches_op_hash_without_world_forks() {
         let rollup_config = RollupConfig::default();

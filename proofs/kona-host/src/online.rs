@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainHardforks};
 use world_chain_proof_core::{
-    hash_rollup_config,
+    hash_world_rollup_config,
     range::{WorldRangeHardforkConfig, WorldRangeSpecId},
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
@@ -66,6 +66,24 @@ impl OnlineHostConfig {
     /// Builds a host config from a rollup config JSON value, deriving the World fork schedule
     /// and rollup config hash from it. The same JSON should be written to `rollup_config_path`
     /// so the kona host and the witness collector agree.
+    ///
+    /// # Rollup config hash canonicalization
+    ///
+    /// The hash committed here MUST be computed the same way the enclave/guest computes
+    /// [`TransitionPublicValues::rollupConfigHash`] (via [`hash_world_rollup_config`] over a
+    /// parsed [`kona_genesis::RollupConfig`]), not a hash of the raw input JSON text.
+    ///
+    /// Kona's `RollupConfig` fills in defaults for fields that are optional-with-a-default in
+    /// the Rust struct (e.g. `granite_channel_timeout`) even when they are absent from the
+    /// source JSON, and serializes struct fields in declaration order regardless of the
+    /// source JSON's key order. The enclave only ever sees a `RollupConfig` reconstructed from
+    /// Kona's own (de)serialization, so hashing the *raw* JSON text here (as opposed to hashing
+    /// the same round-tripped `RollupConfig`) silently diverges from the enclave's hash
+    /// whenever the source rollup.json isn't already in that exact canonical form — e.g. any
+    /// rollup.json that omits `granite_channel_timeout`, or isn't ordered/produced by Kona's own
+    /// serializer (such as one emitted by op-node instead of kona-node). This previously caused
+    /// spurious "enclave rollup config hash != expected" failures on chains whose rollup.json
+    /// wasn't authored by Kona (see World Chain alphanet's kona-node -> op-node migration).
     pub fn from_rollup_config_value(
         rollup_config: &serde_json::Value,
         l1_rpc: String,
@@ -74,10 +92,13 @@ impl OnlineHostConfig {
         rollup_config_path: Option<PathBuf>,
         witness_timeout: Duration,
     ) -> anyhow::Result<Self> {
-        let schedule = serde_json::from_value(rollup_config.clone())
+        let schedule: WorldRangeHardforkConfig = serde_json::from_value(rollup_config.clone())
             .context("failed to parse rollup config hardforks")?;
-        let rollup_config_hash =
-            hash_rollup_config(rollup_config).context("failed to hash rollup config")?;
+        let parsed_rollup_config: kona_genesis::RollupConfig =
+            serde_json::from_value(rollup_config.clone())
+                .context("failed to parse rollup config")?;
+        let rollup_config_hash = hash_world_rollup_config(&parsed_rollup_config, &schedule)
+            .context("failed to hash rollup config")?;
         Ok(Self {
             l1_rpc,
             l1_beacon_rpc,
