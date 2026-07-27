@@ -6,6 +6,7 @@ import {Script} from "forge-std/Script.sol";
 import {GameTypes} from "../../src/proofs/GameTypes.sol";
 import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
 import {MultiProofGame} from "../../src/proofs/MultiProofGame.sol";
+import {IMultiProofGame} from "../../src/proofs/interfaces/IMultiProofGame.sol";
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainStakingRegistry} from "../../src/proofs/interfaces/IWorldChainStakingRegistry.sol";
 import {MockRootIdVerifier} from "../../src/proofs/mocks/MockRootIdVerifier.sol";
@@ -118,7 +119,8 @@ contract DeployProofSystem is Script {
         vm.stopBroadcast();
 
         require(
-            address(config.disputeGameFactory.gameImpls(GameTypes.MULTI_PROOF_GAME_TYPE)) == address(deployment.gameImpl),
+            address(config.disputeGameFactory.gameImpls(GameTypes.MULTI_PROOF_GAME_TYPE))
+                == address(deployment.gameImpl),
             "DeployProofSystem: game implementation not registered"
         );
         require(
@@ -182,9 +184,9 @@ contract DeployProofSystem is Script {
     function _gameConfig(Deployment memory deployment, Config memory config)
         internal
         pure
-        returns (MultiProofGame.GameConfig memory)
+        returns (IMultiProofGame.GameConfig memory)
     {
-        return MultiProofGame.GameConfig({
+        return IMultiProofGame.GameConfig({
             domain: ProofLib.Domain({
                 chainId: config.l2ChainId,
                 proofSystemVersion: 1,

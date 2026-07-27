@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import {OPStackFixtures} from "./proofs/OPStackFixtures.sol";
 import {MultiProofGame} from "../src/proofs/MultiProofGame.sol";
+import {IMultiProofGame} from "../src/proofs/interfaces/IMultiProofGame.sol";
 import {ProofLib} from "../src/proofs/lib/ProofLib.sol";
 
 import {BondDistributionMode, Claim, GameStatus, GameType, Hash} from "@optimism-bedrock/src/dispute/lib/Types.sol";
@@ -61,7 +62,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         vm.prank(proposer);
         vm.expectRevert(
-            abi.encodeWithSelector(MultiProofGame.InvalidDomainHash.selector, gameImpl.domainHash(), wrongDomain)
+            abi.encodeWithSelector(IMultiProofGame.InvalidDomainHash.selector, gameImpl.domainHash(), wrongDomain)
         );
         dgf.create{value: PROPOSER_BOND}(
             WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), abi.encode(wrongDomain, target, address(asr), uint256(0))
@@ -69,7 +70,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         uint256 wrongTarget = target + 1;
         vm.prank(proposer);
-        vm.expectRevert(abi.encodeWithSelector(MultiProofGame.InvalidL2BlockNumber.selector, target, wrongTarget));
+        vm.expectRevert(abi.encodeWithSelector(IMultiProofGame.InvalidL2BlockNumber.selector, target, wrongTarget));
         dgf.create{value: PROPOSER_BOND}(
             WC_GAME_TYPE, Claim.wrap(_rootClaimFor(wrongTarget)), _extraData(wrongTarget, type(uint256).max, 0)
         );
@@ -131,19 +132,19 @@ contract MultiProofGameTest is OPStackFixtures {
     }
 
     function test_Constructor_RejectsInvalidConfiguration() public {
-        MultiProofGame.GameConfig memory config = _gameConfig();
+        IMultiProofGame.GameConfig memory config = _gameConfig();
         config.proofThreshold = 0;
-        vm.expectRevert(MultiProofGame.InvalidActivationParameters.selector);
+        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
         new MultiProofGame(config);
 
         config = _gameConfig();
         config.proofPeriod = config.challengePeriod;
-        vm.expectRevert(MultiProofGame.InvalidActivationParameters.selector);
+        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
         new MultiProofGame(config);
 
         config = _gameConfig();
         config.domain.chainId = CHAIN_ID + 1;
-        vm.expectRevert(MultiProofGame.InconsistentSystemConfiguration.selector);
+        vm.expectRevert(IMultiProofGame.InconsistentSystemConfiguration.selector);
         new MultiProofGame(config);
     }
 
@@ -196,7 +197,7 @@ contract MultiProofGameTest is OPStackFixtures {
         vm.deal(unstaked, CHALLENGER_BOND);
 
         vm.prank(unstaked);
-        vm.expectRevert(abi.encodeWithSelector(MultiProofGame.UnstakedChallenger.selector, unstaked));
+        vm.expectRevert(abi.encodeWithSelector(IMultiProofGame.UnstakedChallenger.selector, unstaked));
         game.challenge{value: CHALLENGER_BOND}();
 
         vm.prank(challengerAccount);

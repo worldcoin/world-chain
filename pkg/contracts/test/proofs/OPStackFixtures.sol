@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {Test} from "@forge-std/Test.sol";
 
 import {MultiProofGame} from "../../src/proofs/MultiProofGame.sol";
+import {IMultiProofGame} from "../../src/proofs/interfaces/IMultiProofGame.sol";
 import {GameTypes} from "../../src/proofs/GameTypes.sol";
 import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
@@ -125,8 +126,8 @@ abstract contract OPStackFixtures is Test {
         proxy_ = deployCode("opstack/out/Proxy.sol/Proxy.json", abi.encode(address(proxyAdmin)));
     }
 
-    function _gameConfig() internal view returns (MultiProofGame.GameConfig memory) {
-        return MultiProofGame.GameConfig({
+    function _gameConfig() internal view returns (IMultiProofGame.GameConfig memory) {
+        return IMultiProofGame.GameConfig({
             domain: _domain(),
             challengePeriod: CHALLENGE_PERIOD,
             proofPeriod: PROOF_PERIOD,

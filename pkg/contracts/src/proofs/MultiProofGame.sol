@@ -49,75 +49,13 @@ import {ISemver} from "@optimism-bedrock/interfaces/universal/ISemver.sol";
 /// @dev Structure follows `ZKDisputeGame`; challenge/lane semantics are World Chain specific.
 contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     ////////////////////////////////////////////////////////////////
-    //                         Structs                            //
-    ////////////////////////////////////////////////////////////////
-
-    /// @notice Per-deployment configuration, fixed as immutables on the implementation.
-    /// @dev The implementation is registered with empty DGF implementation args, so none of
-    ///      this configuration rides in the CWIA payload.
-    struct GameConfig {
-        ProofLib.Domain domain;
-        uint64 challengePeriod;
-        uint64 proofPeriod;
-        uint256 proposerBond;
-        uint256 challengerBond;
-        uint8 proofThreshold;
-        IWorldChainProofVerifier validityProofVerifier;
-        IWorldChainProofVerifier teeVerifier;
-        IWorldChainProofVerifier securityCouncil;
-        IWorldChainStakingRegistry stakingRegistry;
-        IDisputeGameFactory disputeGameFactory;
-        IAnchorStateRegistry anchorStateRegistry;
-        IDelayedWETH weth;
-    }
-
-    ////////////////////////////////////////////////////////////////
-    //                         Errors                             //
-    ////////////////////////////////////////////////////////////////
-
-    error InvalidActivationParameters();
-    error NotDisputeGameFactory(address caller);
-    error AnchorRootNotFound();
-    error InvalidL2BlockNumber(uint256 expectedL2BlockNumber, uint256 actualL2BlockNumber);
-    error GameNotRetryable(bytes32 uuidPreimageHash);
-    error UnstakedChallenger(address challenger);
-    error ChallengePeriodElapsed(uint256 timestamp, uint256 challengeDeadline);
-    error ProofPeriodElapsed(uint256 timestamp, uint256 proofDeadline);
-    error InvalidLane(uint8 lane);
-    error InvalidProof(ProofLib.ProofLane lane, bytes32 rootId);
-    error InvalidDomainHash(bytes32 expected, bytes32 actual);
-    error InconsistentSystemConfiguration();
-
-    ////////////////////////////////////////////////////////////////
-    //                         Events                             //
-    ////////////////////////////////////////////////////////////////
-
-    /// @notice Emitted at creation with the full proposal context. Replaces the former
-    ///         factory `GameCreated` event for offchain indexers; the stock factory's
-    ///         `DisputeGameCreated` event only carries (proxy, gameType, rootClaim).
-    event WorldChainGameCreated(
-        bytes32 indexed rootId,
-        address indexed parentRef,
-        bytes32 rootClaim,
-        uint256 l2BlockNumber,
-        bytes32 l1OriginHash,
-        uint256 l1OriginNumber,
-        uint256 attempt,
-        address gameCreator
-    );
-
-    event Challenged(address indexed challenger, uint64 proofDeadline);
-    event ProofLaneSupported(ProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
-    event ProofThresholdReached(bytes32 indexed rootId, uint8 proofBitmap);
-    event DuplicateProofLane(ProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
-    event GameClosed(BondDistributionMode bondDistributionMode);
-
-    ////////////////////////////////////////////////////////////////
     //                       Immutables                           //
     ////////////////////////////////////////////////////////////////
 
-    /// Number of distinct proof lanes required to finalize a challenged root.
+    /// @inheritdoc IMultiProofGame
     uint8 public immutable PROOF_THRESHOLD;
+
+    /// @inheritdoc IMultiProofGame
     uint8 public constant PROOF_LANE_COUNT = ProofLib.PROOF_LANE_COUNT;
 
     uint256 internal immutable DOMAIN_CHAIN_ID;
@@ -152,7 +90,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     GameStatus public status;
     bool internal initialized;
 
-    /// @notice The proposal transition identifier bound by every proof lane.
+    /// @inheritdoc IMultiProofGame
     bytes32 public rootId;
     bytes32 public startingRootClaim;
     uint256 public startingL2BlockNumber;
@@ -232,6 +170,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         l1Head_ = Hash.wrap(_getArgBytes32(0x34));
     }
 
+    /// @inheritdoc IMultiProofGame
     function proposalDomainHash() public pure returns (bytes32 domainHash_) {
         domainHash_ = _getArgBytes32(0x54);
     }
@@ -241,7 +180,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         l2SequenceNumber_ = _getArgUint256(0x74);
     }
 
-    /// @notice Parent game, or the anchor registry when the proposal starts from its current root.
+    /// @inheritdoc IMultiProofGame
     function parentRef() public pure returns (address parentRef_) {
         uint256 rawParentRef = _getArgUint256(0x94);
         if (rawParentRef > type(uint160).max) revert BadExtraData();
@@ -250,8 +189,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         parentRef_ = address(uint160(rawParentRef));
     }
 
-    /// @notice Retry nonce for this transition. Attempt N requires attempt N-1 to have timed
-    ///         out on proofs or to have been created before this game type became respected.
+    /// @inheritdoc IMultiProofGame
     function attempt() public pure returns (uint256 attempt_) {
         attempt_ = _getArgUint256(0xB4);
     }
@@ -285,7 +223,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     //                     Legacy-named views                     //
     ////////////////////////////////////////////////////////////////
 
-    /// @notice Domain parameters this deployment proves against.
+    /// @inheritdoc IMultiProofGame
     function domain() external view returns (ProofLib.Domain memory) {
         return ProofLib.Domain({
             chainId: DOMAIN_CHAIN_ID,
@@ -295,35 +233,39 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         });
     }
 
-    /// @notice Alias of `l2SequenceNumber` retained for proof-lane and offchain consumers.
+    /// @inheritdoc IMultiProofGame
     function l2BlockNumber() external pure returns (uint256) {
         return l2SequenceNumber();
     }
 
-    /// @notice Alias of `l1Head` retained for proof-lane and offchain consumers.
+    /// @inheritdoc IMultiProofGame
     function l1OriginHash() external pure returns (bytes32) {
         return Hash.unwrap(l1Head());
     }
 
+    /// @inheritdoc IMultiProofGame
     function l1OriginNumber() external view returns (uint256) {
         return _l1OriginNumber;
     }
 
-    /// @notice Derived legacy state machine view.
+    /// @inheritdoc IMultiProofGame
     function state() public view returns (ProofLib.RootState) {
         if (status == GameStatus.DEFENDER_WINS) return ProofLib.RootState.FINALIZED;
         if (status == GameStatus.CHALLENGER_WINS) return ProofLib.RootState.INVALIDATED;
         return challenger == address(0) ? ProofLib.RootState.PROPOSED : ProofLib.RootState.CHALLENGED;
     }
 
+    /// @inheritdoc IMultiProofGame
     function finalizedAt() external view returns (uint64) {
         return status == GameStatus.DEFENDER_WINS ? resolvedAt.raw() : 0;
     }
 
+    /// @inheritdoc IMultiProofGame
     function invalidatedAt() external view returns (uint64) {
         return status == GameStatus.CHALLENGER_WINS ? resolvedAt.raw() : 0;
     }
 
+    /// @inheritdoc IMultiProofGame
     function proofCount() external view returns (uint8) {
         return ProofLib.proofCount(proofBitmap);
     }
@@ -467,6 +409,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     //                    Challenge and proofs                    //
     ////////////////////////////////////////////////////////////////
 
+    /// @inheritdoc IMultiProofGame
     function challenge() external payable {
         if (status != GameStatus.IN_PROGRESS) revert ClaimAlreadyResolved();
         if (challenger != address(0)) revert ClaimAlreadyChallenged();
@@ -487,6 +430,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         emit Challenged(msg.sender, proofDeadline);
     }
 
+    /// @inheritdoc IMultiProofGame
     function submitProofLane(uint8 laneId, bytes calldata proof) external {
         if (status != GameStatus.IN_PROGRESS || challenger == address(0)) {
             revert ClaimAlreadyResolved();
@@ -521,7 +465,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     //                        Resolution                          //
     ////////////////////////////////////////////////////////////////
 
-    /// @notice Returns whether this game can resolve now and the resulting legacy outcome.
+    /// @inheritdoc IMultiProofGame
     function resolutionStatus()
         external
         view
@@ -623,10 +567,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     //                      Bond settlement                       //
     ////////////////////////////////////////////////////////////////
 
-    /// @notice Closes out the game: requires the registry to consider it finalized (resolution
-    ///         plus the finality airgap), attempts to advance the anchor to it, and locks in
-    ///         the bond distribution mode (`REFUND` for improper games — blacklisted, retired,
-    ///         or otherwise invalidated by the registry).
+    /// @inheritdoc IMultiProofGame
+    /// @dev Locks in `REFUND` for improper games — blacklisted, retired, or otherwise
+    ///      invalidated by the registry. Must not revert once closed, or `claimCredit` breaks.
     function closeGame() public {
         if (bondDistributionMode == BondDistributionMode.REFUND || bondDistributionMode == BondDistributionMode.NORMAL)
         {
@@ -658,9 +601,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         emit GameClosed(bondDistributionMode);
     }
 
-    /// @notice Claims the credit belonging to `recipient` using the two-phase DelayedWETH
-    ///         withdrawal pattern: the first call unlocks, the second (after the WETH delay)
-    ///         withdraws and transfers. Permissionless; funds only ever move to `recipient`.
+    /// @inheritdoc IMultiProofGame
+    /// @dev Two-phase: the first call unlocks in DelayedWETH, the second (after the WETH
+    ///      delay) withdraws and transfers.
     function claimCredit(address recipient) external {
         // If closeGame() flips the distribution mode within this call and there is nothing to
         // claim, return instead of reverting so the close is not rolled back.
@@ -700,7 +643,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         if (!success) revert BondTransferFailed();
     }
 
-    /// @notice Returns the credit `recipient` will receive under the current distribution mode.
+    /// @inheritdoc IMultiProofGame
     /// @dev Before `closeGame`, registry-invalid games report refund credit so keepers do not
     ///      miss challenger refunds merely because normal-mode credit is zero.
     function credit(address recipient) external view returns (uint256 credit_) {
