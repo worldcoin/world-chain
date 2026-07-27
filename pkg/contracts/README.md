@@ -10,13 +10,13 @@ This repository contains smart contracts for World Chain, including PBH (Priorit
 
 ## Proof System Bond Claims
 
-`WorldChainProofSystemGame.resolve()` records the game outcome and assigns pull-based bond credit in the game type's OP Stack `DelayedWETH` contract. It does not transfer ETH during resolution.
+`MultiProofGame.resolve()` records the game outcome and assigns pull-based bond credit in the game type's OP Stack `DelayedWETH` contract. It does not transfer ETH during resolution.
 
 `credit(recipient)` returns the amount assigned to `recipient`. `claimCredit(recipient)` is permissionless and always pays `recipient`: its first call unlocks the credit in `DelayedWETH`, and a call after the withdrawal delay transfers the funds. Automation must retain resolved games until both phases complete.
 
 ## OP Stack Withdrawal Boundary
 
-The compatibility target is `OptimismPortal2` 5.6.1 shipped by the devnet's version-tagged `op-deployer:v0.7.1` image. Solidity imports are pinned separately to [`op-contracts/v7.0.0` at `a7c88c8`](https://github.com/ethereum-optimism/optimism/tree/a7c88c8d636ceb9944ea0edaf7d033da258778ab/packages/contracts-bedrock), which exposes the same Portal version and the stock dispute interfaces compiled by this repository. `WorldChainProofSystemGame` implements the Portal-facing `IDisputeGame` ABI and adds the WIP-1006 proof-lane API. The withdrawal E2E runs these compiled game contracts against the Portal, factory, and registry deployed from the pinned `op-deployer` image.
+The compatibility target is `OptimismPortal2` 5.6.1 shipped by the devnet's version-tagged `op-deployer:v0.7.1` image. Solidity imports are pinned separately to [`op-contracts/v7.0.0` at `a7c88c8`](https://github.com/ethereum-optimism/optimism/tree/a7c88c8d636ceb9944ea0edaf7d033da258778ab/packages/contracts-bedrock), which exposes the same Portal version and the stock dispute interfaces compiled by this repository. `MultiProofGame` implements the Portal-facing `IDisputeGame` ABI and adds the WIP-1006 proof-lane API. The withdrawal E2E runs these compiled game contracts against the Portal, factory, and registry deployed from the pinned `op-deployer` image.
 
 | Portal phase | Required calls | World Chain implementation |
 | --- | --- | --- |
@@ -31,7 +31,7 @@ Blacklisting an individual game immediately makes it improper for Portal proofs.
 
 The full-stack withdrawal E2E test uses the real OP-deployer Portal, factory, and registry. It proves against an in-progress WIP-1006 game, verifies the proof-maturity and registry-finality delays, finalizes after `DEFENDER_WINS`, and checks that a blacklisted game is rejected.
 
-The devnet deployment registers `WorldChainProofSystemGame` as game type `1006`, configures its bond and `DelayedWETH`, and changes the stock registry's respected game type. It deploys mock verifier and staking contracts and is not a production deployment procedure. A production activation must use real audited verifier dependencies and the audited OP governance process for registering and respecting the new game type; it does not upgrade or replace the factory or registry.
+The devnet deployment registers `MultiProofGame` as game type `1006`, configures its bond and `DelayedWETH`, and changes the stock registry's respected game type. It deploys mock verifier and staking contracts and is not a production deployment procedure. A production activation must use real audited verifier dependencies and the audited OP governance process for registering and respecting the new game type; it does not upgrade or replace the factory or registry.
 
 ## PBH Contracts
 

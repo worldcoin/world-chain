@@ -19,6 +19,16 @@ devnet-up: build
 deploy-contracts:
     @just ./pkg/contracts/deploy-contracts
 
+# Build the pinned Optimism implementation contracts in the isolated opstack/ sub-project.
+build-opstack:
+    @just ./pkg/contracts/build-opstack
+
+build-contracts *args='':
+    @just ./pkg/contracts/build-contracts $@
+
+test-contracts *args='':
+    @just ./pkg/contracts/test-contracts $@
+
 test *args='':
     RUST_LOG="info" cargo nextest run --workspace $@
 

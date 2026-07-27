@@ -12,8 +12,8 @@ fmt:
 build-opstack:
     cd opstack && forge build
 
-build: build-opstack
-    forge build
+build-contracts *args='': build-opstack
+    forge build $@
 
-test: build-opstack
-    forge test
+test-contracts *args='': build-opstack
+    forge test $@

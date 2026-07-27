@@ -3,9 +3,9 @@ pragma solidity 0.8.28;
 
 import {Test} from "@forge-std/Test.sol";
 
-import {WorldChainProofSystemGame} from "../../src/proofs/WorldChainProofSystemGame.sol";
-import {WorldChainGameTypes} from "../../src/proofs/WorldChainGameTypes.sol";
-import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
+import {MultiProofGame} from "../../src/proofs/MultiProofGame.sol";
+import {GameTypes} from "../../src/proofs/GameTypes.sol";
+import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainStakingRegistry} from "../../src/proofs/interfaces/IWorldChainStakingRegistry.sol";
 import {MockRootIdVerifier} from "../../src/proofs/mocks/MockRootIdVerifier.sol";
@@ -22,10 +22,10 @@ import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 
 /// @dev Test harness deploying the real (pinned) OP `DisputeGameFactory`,
 ///      `AnchorStateRegistry`, and `DelayedWETH` from the `opstack/` sub-project artifacts,
-///      wired to a `WorldChainProofSystemGame` implementation. Run `just build-opstack`
+///      wired to a `MultiProofGame` implementation. Run `just build-opstack`
 ///      before `forge test`.
 abstract contract OPStackFixtures is Test {
-    GameType internal constant WC_GAME_TYPE = WorldChainGameTypes.WIP_1006;
+    GameType internal constant WC_GAME_TYPE = GameTypes.MULTI_PROOF_GAME_TYPE;
     uint256 internal constant FINALITY_DELAY_SECONDS = 3.5 days;
     uint256 internal constant WETH_DELAY_SECONDS = 7 days;
     uint64 internal constant CHALLENGE_PERIOD = 1 days;
@@ -56,7 +56,7 @@ abstract contract OPStackFixtures is Test {
     MockRootIdVerifier internal validityVerifier;
     MockRootIdVerifier internal teeVerifier;
     MockRootIdVerifier internal councilVerifier;
-    WorldChainProofSystemGame internal gameImpl;
+    MultiProofGame internal gameImpl;
 
     function setUp() public virtual {
         systemConfig = new MockSystemConfig(guardian, CHAIN_ID);
@@ -104,7 +104,7 @@ abstract contract OPStackFixtures is Test {
         teeVerifier = new MockRootIdVerifier(false);
         councilVerifier = new MockRootIdVerifier(false);
 
-        gameImpl = new WorldChainProofSystemGame(_gameConfig());
+        gameImpl = new MultiProofGame(_gameConfig());
         dgf.setImplementation(WC_GAME_TYPE, IDisputeGame(address(gameImpl)), hex"");
         dgf.setInitBond(WC_GAME_TYPE, PROPOSER_BOND);
 
@@ -125,8 +125,8 @@ abstract contract OPStackFixtures is Test {
         proxy_ = deployCode("opstack/out/Proxy.sol/Proxy.json", abi.encode(address(proxyAdmin)));
     }
 
-    function _gameConfig() internal view returns (WorldChainProofSystemGame.GameConfig memory) {
-        return WorldChainProofSystemGame.GameConfig({
+    function _gameConfig() internal view returns (MultiProofGame.GameConfig memory) {
+        return MultiProofGame.GameConfig({
             domain: _domain(),
             challengePeriod: CHALLENGE_PERIOD,
             proofPeriod: PROOF_PERIOD,
@@ -143,8 +143,8 @@ abstract contract OPStackFixtures is Test {
         });
     }
 
-    function _domain() internal pure returns (WorldChainProofLib.Domain memory) {
-        return WorldChainProofLib.Domain({
+    function _domain() internal pure returns (ProofLib.Domain memory) {
+        return ProofLib.Domain({
             chainId: CHAIN_ID,
             proofSystemVersion: PROOF_SYSTEM_VERSION,
             rollupConfigHash: ROLLUP_CONFIG_HASH,
@@ -170,7 +170,7 @@ abstract contract OPStackFixtures is Test {
         pure
         returns (bytes memory)
     {
-        return abi.encode(WorldChainProofLib.domainHash(_domain()), l2BlockNumber, parent, attempt);
+        return abi.encode(ProofLib.domainHash(_domain()), l2BlockNumber, parent, attempt);
     }
 
     function _rootClaimFor(uint256 l2BlockNumber) internal pure returns (bytes32) {
@@ -180,43 +180,43 @@ abstract contract OPStackFixtures is Test {
     /// @dev Creates a game through the stock factory as `proposer`.
     function _propose(uint256 parentIndex, bytes32 rootClaim, uint256 l2BlockNumber, uint256 attempt)
         internal
-        returns (WorldChainProofSystemGame)
+        returns (MultiProofGame)
     {
         bytes memory extraData = _extraData(l2BlockNumber, parentIndex, attempt);
         vm.prank(proposer);
         IDisputeGame proxy = dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(rootClaim), extraData);
-        return WorldChainProofSystemGame(address(proxy));
+        return MultiProofGame(address(proxy));
     }
 
     /// @dev Creates the first game, parented on the current anchor.
-    function _proposeAtAnchor() internal returns (WorldChainProofSystemGame) {
+    function _proposeAtAnchor() internal returns (MultiProofGame) {
         (, uint256 anchorBlock) = asr.getAnchorRoot();
         uint256 target = anchorBlock + BLOCK_INTERVAL;
         return _propose(type(uint256).max, _rootClaimFor(target), target, 0);
     }
 
     /// @dev Creates a child chained onto the game at factory index `parentIndex`.
-    function _proposeChild(uint256 parentIndex) internal returns (WorldChainProofSystemGame) {
+    function _proposeChild(uint256 parentIndex) internal returns (MultiProofGame) {
         (,, IDisputeGame parent) = dgf.gameAtIndex(parentIndex);
         uint256 target = parent.l2SequenceNumber() + BLOCK_INTERVAL;
         return _propose(parentIndex, _rootClaimFor(target), target, 0);
     }
 
-    function _challenge(WorldChainProofSystemGame game) internal {
+    function _challenge(MultiProofGame game) internal {
         vm.prank(challengerAccount);
         game.challenge{value: CHALLENGER_BOND}();
     }
 
     /// @dev Submits `laneCount` valid proof lanes; the mock verifiers accept a 32-byte proof
     ///      equal to the game's rootId.
-    function _submitLanes(WorldChainProofSystemGame game, uint8 laneCount) internal {
+    function _submitLanes(MultiProofGame game, uint8 laneCount) internal {
         for (uint8 lane = 0; lane < laneCount; lane++) {
             game.submitProofLane(lane, abi.encodePacked(game.rootId()));
         }
     }
 
     /// @dev Warps past the challenge window and resolves (unchallenged path).
-    function _resolveUnchallenged(WorldChainProofSystemGame game) internal {
+    function _resolveUnchallenged(MultiProofGame game) internal {
         if (block.timestamp < game.challengeDeadline()) {
             vm.warp(game.challengeDeadline());
         }
@@ -224,12 +224,12 @@ abstract contract OPStackFixtures is Test {
     }
 
     /// @dev Warps past the registry's finality airgap for a resolved game.
-    function _passAirgap(WorldChainProofSystemGame game) internal {
+    function _passAirgap(MultiProofGame game) internal {
         vm.warp(game.resolvedAt().raw() + FINALITY_DELAY_SECONDS + 1);
     }
 
     /// @dev Runs the full two-phase DelayedWETH claim for `recipient`.
-    function _claim(WorldChainProofSystemGame game, address recipient) internal {
+    function _claim(MultiProofGame game, address recipient) internal {
         game.claimCredit(recipient);
         vm.warp(block.timestamp + WETH_DELAY_SECONDS);
         game.claimCredit(recipient);

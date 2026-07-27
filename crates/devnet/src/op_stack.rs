@@ -114,7 +114,7 @@ impl WorldContractsDeploymentConfig {
         let mut contracts = Vec::new();
         if self.proof_system {
             contracts.extend([
-                "WorldChainProofSystemGame(WIP_1006)",
+                "MultiProofGame(WIP_1006)",
                 "DelayedWETH(WIP_1006)",
                 "MockRootIdVerifier(VALIDITY_PROOF)",
                 "MockRootIdVerifier(TEE_ATTESTATION)",

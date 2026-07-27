@@ -2,11 +2,11 @@
 pragma solidity 0.8.28;
 
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
-import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
+import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
 
 contract MockProofSystemGame {
     struct Context {
-        WorldChainProofLib.Domain domain;
+        ProofLib.Domain domain;
         bytes32 rootId;
         address anchorStateRegistry;
         bytes32 domainHash;
@@ -19,7 +19,7 @@ contract MockProofSystemGame {
         uint256 l1OriginNumber;
     }
 
-    WorldChainProofLib.Domain internal _domain;
+    ProofLib.Domain internal _domain;
     bytes32 public rootId;
     address public anchorStateRegistry;
     bytes32 public domainHash;
@@ -45,7 +45,7 @@ contract MockProofSystemGame {
         l1OriginNumber = context.l1OriginNumber;
     }
 
-    function domain() external view returns (WorldChainProofLib.Domain memory) {
+    function domain() external view returns (ProofLib.Domain memory) {
         return _domain;
     }
 

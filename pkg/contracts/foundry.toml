@@ -42,6 +42,15 @@ remappings = [
   "@sp1-contracts/=lib/sp1-contracts/contracts/",
 ]
 
+[lint]
+# `block.timestamp` comparisons are load-bearing across this codebase and the few seconds
+# of validator drift the lint warns about cannot affect any of them: dispute-game challenge
+# and proof windows are hours long, the fee-escrow buyback interval is a rate limit, the
+# oracle `expiresAt` comparison *is* the staleness guard, and PBH external nullifiers are
+# deliberately scoped to the calendar month. Suppressed project-wide rather than annotated
+# at ~14 call sites, each of which would carry the same justification.
+exclude_lints = ["block-timestamp"]
+
 [profile.ci]
 
 [fuzz]

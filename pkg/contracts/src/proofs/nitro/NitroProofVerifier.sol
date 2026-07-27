@@ -2,8 +2,8 @@
 pragma solidity 0.8.28;
 
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
-import {WorldChainProofLib} from "../WorldChainProofLib.sol";
-import {WorldChainProofVerificationLib} from "../WorldChainProofVerificationLib.sol";
+import {ProofLib} from "../lib/ProofLib.sol";
+import {ProofVerificationLib} from "../lib/ProofVerificationLib.sol";
 import {NitroEnclaveKeyRegistry} from "./NitroEnclaveKeyRegistry.sol";
 
 /// @title NitroProofVerifier
@@ -97,15 +97,14 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
             bytes32 domainHash,
             address parentRef,
             uint256 l1OriginNumber,
-            WorldChainProofLib.TransitionPublicValues memory transition,
+            ProofLib.TransitionPublicValues memory transition,
             bytes memory signature,
             bytes memory expectedPublicKey
-        ) = abi.decode(proof, (bytes32, address, uint256, WorldChainProofLib.TransitionPublicValues, bytes, bytes));
+        ) = abi.decode(proof, (bytes32, address, uint256, ProofLib.TransitionPublicValues, bytes, bytes));
 
         // 1. Bind the proof identity and transition fields to the calling game's immutable snapshot.
-        bool matchesGame = WorldChainProofVerificationLib.matchesGame(
-            gameAddress, rootId, domainHash, parentRef, l1OriginNumber, transition
-        );
+        bool matchesGame =
+            ProofVerificationLib.matchesGame(gameAddress, rootId, domainHash, parentRef, l1OriginNumber, transition);
         if (!matchesGame) return false;
 
         // 2. Verify the enclave signature over all transition public values.
@@ -121,11 +120,7 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     ///      matching `transition_commitment(transition_public_values)` in
     ///      `proofs/nitro/src/protocol.rs`.
     ///      The entire struct is ABI-encoded before hashing.
-    function _signingCommitment(WorldChainProofLib.TransitionPublicValues memory transition)
-        internal
-        pure
-        returns (bytes32)
-    {
+    function _signingCommitment(ProofLib.TransitionPublicValues memory transition) internal pure returns (bytes32) {
         return keccak256(abi.encode(transition));
     }
 

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-library WorldChainProofLib {
+library ProofLib {
     /// Default number of distinct proof lanes required to finalize a challenged
     /// root. Deployments may override this per game implementation (see
-    /// `WorldChainProofSystemGame.GameConfig.proofThreshold`).
+    /// `MultiProofGame.GameConfig.proofThreshold`).
     uint8 internal constant PROOF_THRESHOLD = 2;
     uint8 internal constant PROOF_LANE_COUNT = 3;
 
@@ -66,12 +66,12 @@ library WorldChainProofLib {
     }
 
     function laneMask(ProofLane lane) internal pure returns (uint8) {
-        return uint8(1 << uint8(lane));
+        return uint8(1) << uint8(lane);
     }
 
     function proofCount(uint8 bitmap) internal pure returns (uint8 count) {
         for (uint8 i = 0; i < PROOF_LANE_COUNT; i++) {
-            if ((bitmap & (1 << i)) != 0) {
+            if ((bitmap & (uint8(1) << i)) != 0) {
                 count++;
             }
         }

@@ -3,9 +3,9 @@ pragma solidity 0.8.28;
 
 import {Script} from "forge-std/Script.sol";
 
-import {WorldChainGameTypes} from "../../src/proofs/WorldChainGameTypes.sol";
-import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
-import {WorldChainProofSystemGame} from "../../src/proofs/WorldChainProofSystemGame.sol";
+import {GameTypes} from "../../src/proofs/GameTypes.sol";
+import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
+import {MultiProofGame} from "../../src/proofs/MultiProofGame.sol";
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainStakingRegistry} from "../../src/proofs/interfaces/IWorldChainStakingRegistry.sol";
 import {MockRootIdVerifier} from "../../src/proofs/mocks/MockRootIdVerifier.sol";
@@ -23,7 +23,7 @@ import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 ///         infrastructure deployed by op-deployer.
 ///
 /// Deploys: mock verifiers + staking registry (devnet), a DelayedWETH proxy dedicated to the
-/// World Chain game type, and the `WorldChainProofSystemGame` implementation. Then registers
+/// World Chain game type, and the `MultiProofGame` implementation. Then registers
 /// the implementation on the existing `DisputeGameFactory` (`setImplementation` + `setInitBond`)
 /// and optionally flips the `AnchorStateRegistry`'s respected game type — the withdrawal
 /// cutover switch. `setImplementation(WC_GAME_TYPE, address(0))` is the kill switch: it stops
@@ -44,7 +44,7 @@ contract DeployProofSystem is Script {
         MockStakingRegistry staking;
         IProxyAdmin wethProxyAdmin;
         IDelayedWETH weth;
-        WorldChainProofSystemGame gameImpl;
+        MultiProofGame gameImpl;
     }
 
     struct Config {
@@ -106,37 +106,37 @@ contract DeployProofSystem is Script {
         vm.stopBroadcast();
 
         vm.startBroadcast(config.privateKey);
-        deployment.gameImpl = new WorldChainProofSystemGame(_gameConfig(deployment, config));
+        deployment.gameImpl = new MultiProofGame(_gameConfig(deployment, config));
         vm.stopBroadcast();
 
         // 2. Register the game type on the existing DisputeGameFactory (factory owner).
         // The three-argument overload explicitly clears any stale implementation args.
         vm.startBroadcast(config.dgfOwnerKey);
         config.disputeGameFactory
-            .setImplementation(WorldChainGameTypes.WIP_1006, IDisputeGame(address(deployment.gameImpl)), hex"");
-        config.disputeGameFactory.setInitBond(WorldChainGameTypes.WIP_1006, PROPOSER_BOND);
+            .setImplementation(GameTypes.MULTI_PROOF_GAME_TYPE, IDisputeGame(address(deployment.gameImpl)), hex"");
+        config.disputeGameFactory.setInitBond(GameTypes.MULTI_PROOF_GAME_TYPE, PROPOSER_BOND);
         vm.stopBroadcast();
 
         require(
-            address(config.disputeGameFactory.gameImpls(WorldChainGameTypes.WIP_1006)) == address(deployment.gameImpl),
+            address(config.disputeGameFactory.gameImpls(GameTypes.MULTI_PROOF_GAME_TYPE)) == address(deployment.gameImpl),
             "DeployProofSystem: game implementation not registered"
         );
         require(
-            config.disputeGameFactory.gameArgs(WorldChainGameTypes.WIP_1006).length == 0,
+            config.disputeGameFactory.gameArgs(GameTypes.MULTI_PROOF_GAME_TYPE).length == 0,
             "DeployProofSystem: stale game implementation args"
         );
         require(
-            config.disputeGameFactory.initBonds(WorldChainGameTypes.WIP_1006) == deployment.gameImpl.proposerBond(),
+            config.disputeGameFactory.initBonds(GameTypes.MULTI_PROOF_GAME_TYPE) == deployment.gameImpl.proposerBond(),
             "DeployProofSystem: init bond does not match proposer bond"
         );
 
         // 3. Optional cutover: make the WC game type the respected game type (guardian).
         if (config.setRespectedGameType) {
             vm.startBroadcast(config.guardianKey);
-            config.anchorStateRegistry.setRespectedGameType(WorldChainGameTypes.WIP_1006);
+            config.anchorStateRegistry.setRespectedGameType(GameTypes.MULTI_PROOF_GAME_TYPE);
             vm.stopBroadcast();
             require(
-                config.anchorStateRegistry.respectedGameType().raw() == WorldChainGameTypes.WIP_1006.raw(),
+                config.anchorStateRegistry.respectedGameType().raw() == GameTypes.MULTI_PROOF_GAME_TYPE.raw(),
                 "DeployProofSystem: respected game type not activated"
             );
         }
@@ -150,7 +150,7 @@ contract DeployProofSystem is Script {
         config.l2ChainId = vm.envUint("WORLD_CHAIN_L2_CHAIN_ID");
         config.rollupConfigHash = vm.envBytes32("ROLLUP_CONFIG_HASH");
         config.blockInterval = vm.envOr("PROOF_SYSTEM_BLOCK_INTERVAL", uint256(10));
-        config.proofThreshold = uint8(vm.envOr("PROOF_THRESHOLD", uint256(WorldChainProofLib.PROOF_THRESHOLD)));
+        config.proofThreshold = uint8(vm.envOr("PROOF_THRESHOLD", uint256(ProofLib.PROOF_THRESHOLD)));
         config.disputeGameFactory = IDisputeGameFactory(vm.envAddress("DISPUTE_GAME_FACTORY"));
         config.anchorStateRegistry = IAnchorStateRegistry(vm.envAddress("ANCHOR_STATE_REGISTRY"));
         config.systemConfig = ISystemConfig(vm.envAddress("SYSTEM_CONFIG"));
@@ -182,10 +182,10 @@ contract DeployProofSystem is Script {
     function _gameConfig(Deployment memory deployment, Config memory config)
         internal
         pure
-        returns (WorldChainProofSystemGame.GameConfig memory)
+        returns (MultiProofGame.GameConfig memory)
     {
-        return WorldChainProofSystemGame.GameConfig({
-            domain: WorldChainProofLib.Domain({
+        return MultiProofGame.GameConfig({
+            domain: ProofLib.Domain({
                 chainId: config.l2ChainId,
                 proofSystemVersion: 1,
                 rollupConfigHash: config.rollupConfigHash,
@@ -222,7 +222,7 @@ contract DeployProofSystem is Script {
         vm.serializeAddress(root, "gameImplementation", address(deployment.gameImpl));
         vm.serializeAddress(root, "delayedWeth", address(deployment.weth));
         vm.serializeAddress(root, "delayedWethProxyAdmin", address(deployment.wethProxyAdmin));
-        vm.serializeUint(root, "gameType", uint256(GameType.unwrap(WorldChainGameTypes.WIP_1006)));
+        vm.serializeUint(root, "gameType", uint256(GameType.unwrap(GameTypes.MULTI_PROOF_GAME_TYPE)));
         vm.serializeBytes32(root, "rollupConfigHash", config.rollupConfigHash);
         vm.serializeUint(root, "l2ChainId", config.l2ChainId);
         vm.serializeUint(root, "proofSystemVersion", 1);

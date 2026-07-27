@@ -5,6 +5,7 @@ import {Test, console2} from "forge-std/Test.sol";
 import {FeeEscrow, IChainLinkPriceFeed, IBurnCallback} from "../src/FeeEscrow.sol";
 import {ReentrancyGuardTransient} from "@openzeppelin/contracts/utils/ReentrancyGuardTransient.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 interface ISwapRouter {
@@ -41,6 +42,8 @@ interface IUniswapV3Pool {
 
 /// @notice Real swap executor using Uniswap V3 pool directly
 contract UniswapV3BurnExecutor is IBurnCallback {
+    using SafeERC20 for IERC20;
+
     IERC20 public immutable wld;
     IWETH public immutable weth;
     IUniswapV3Pool public immutable pool;
@@ -79,27 +82,25 @@ contract UniswapV3BurnExecutor is IBurnCallback {
             abi.encode(expectedBurn)
         );
         if (shouldRepay) {
-            IERC20(wld).transfer(recipient, wld.balanceOf(address(this)));
+            wld.safeTransfer(recipient, wld.balanceOf(address(this)));
         }
     }
 
-    /// @notice Uniswap V3 callback - pay the pool
+    /// @notice Uniswap V3 callback - pay the pool.
+    /// @dev Only settles what the swap owes. Burn sufficiency is asserted by
+    ///      `FeeEscrow.executeBurn`, which measures the DEAD_ADDRESS balance delta and reverts
+    ///      `InsufficientBurn`; the callback must not pre-empt that.
     function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata) external {
         require(msg.sender == address(pool), "Invalid callback");
-        uint256 expectedBurn = abi.decode(msg.data, (uint256));
 
-        // Pay the positive delta (what we owe)
+        // Pay the positive delta (what we owe). Each cast is guarded by its sign check.
         if (amount0Delta > 0) {
-            IERC20(pool.token0()).transfer(msg.sender, uint256(amount0Delta));
-            if (uint256(amount1Delta) < expectedBurn) {
-                revert("Insufficient burn here");
-            }
+            // forge-lint: disable-next-line(unsafe-typecast)
+            IERC20(pool.token0()).safeTransfer(msg.sender, uint256(amount0Delta));
         }
         if (amount1Delta > 0) {
-            IERC20(pool.token1()).transfer(msg.sender, uint256(amount1Delta));
-            if (uint256(amount0Delta) < expectedBurn) {
-                revert("Insufficient burn here");
-            }
+            // forge-lint: disable-next-line(unsafe-typecast)
+            IERC20(pool.token1()).safeTransfer(msg.sender, uint256(amount1Delta));
         }
     }
 }

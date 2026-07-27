@@ -562,7 +562,18 @@ impl FullStackWorldDevnet {
             .as_ref()
             .filter(|_| OP_NATIVE_PROOF_SERVICES_READY);
 
-        let world_proposer = if let Some(deployment) = proof_services {
+        // The proposer always needs the prover-service for its creation-time Nitro proof.
+        // Defender and SP1 worker startup remains optional below.
+        let (prover_service, prover_service_url) = if proof_services.is_some() {
+            let (service, url) = start_prover_service().await?;
+            (Some(service), Some(url))
+        } else {
+            (None, None)
+        };
+
+        let world_proposer = if let (Some(deployment), Some(prover_service_url)) =
+            (proof_services, prover_service_url.as_deref())
+        {
             let output_root_rpc = op_nodes
                 .first()
                 .map(|node| node.rpc_url.clone())
@@ -594,52 +605,46 @@ impl FullStackWorldDevnet {
             None
         };
 
-        // Defender proving loop: an in-process defender, prover-service, and SP1 worker,
-        // enabled by the `DEVNET_SP1_WORKER_PROVER` env var. The defender enqueues proof
-        // requests for challenged valid games; the worker leases SP1 jobs, builds witnesses
-        // from the devnet L1/L2 RPCs, and proves them with the selected backend.
-        let (prover_service, sp1_worker, world_defender, prover_service_url) =
-            if let Some(deployment) = proof_services {
-                match sp1_worker_prover_kind()? {
-                    Some(kind) => {
-                        let output_root_rpc = op_nodes
-                            .first()
-                            .map(|node| node.rpc_url.clone())
-                            .ok_or_else(|| {
-                                eyre!(
-                                    "full-stack devnet has no op-node for the World Chain defender"
-                                )
-                            })?;
-                        let l2_rpc = sequencers
-                            .first()
-                            .map(|sequencer| sequencer.rpc_url.clone())
-                            .ok_or_else(|| {
-                                eyre!("full-stack devnet has no sequencer for the SP1 worker")
-                            })?;
-                        let (service, url) = start_prover_service().await?;
-                        let defender = start_world_chain_defender(
-                            &l1_public_rpc,
-                            &output_root_rpc,
-                            &url,
-                            deployment,
-                        )
-                        .await?;
-                        let worker = start_sp1_worker(
-                            &l1_public_rpc,
-                            &l2_rpc,
-                            &url,
-                            &artifacts.rollup_path,
-                            deployment,
-                            kind,
-                        )
-                        .await?;
-                        (Some(service), Some(worker), Some(defender), Some(url))
-                    }
-                    None => (None, None, None, None),
-                }
-            } else {
-                (None, None, None, None)
-            };
+        // Optional defender proving loop: an in-process defender and SP1 worker, enabled by
+        // `DEVNET_SP1_WORKER_PROVER`. They share the prover-service started for the proposer.
+        let (sp1_worker, world_defender) = match (
+            proof_services,
+            sp1_worker_prover_kind()?,
+            prover_service_url.as_deref(),
+        ) {
+            (Some(deployment), Some(kind), Some(prover_service_url)) => {
+                let output_root_rpc = op_nodes
+                    .first()
+                    .map(|node| node.rpc_url.clone())
+                    .ok_or_else(|| {
+                        eyre!("full-stack devnet has no op-node for the World Chain defender")
+                    })?;
+                let l2_rpc = sequencers
+                    .first()
+                    .map(|sequencer| sequencer.rpc_url.clone())
+                    .ok_or_else(|| {
+                        eyre!("full-stack devnet has no sequencer for the SP1 worker")
+                    })?;
+                let defender = start_world_chain_defender(
+                    &l1_public_rpc,
+                    &output_root_rpc,
+                    prover_service_url,
+                    deployment,
+                )
+                .await?;
+                let worker = start_sp1_worker(
+                    &l1_public_rpc,
+                    &l2_rpc,
+                    prover_service_url,
+                    &artifacts.rollup_path,
+                    deployment,
+                    kind,
+                )
+                .await?;
+                (Some(worker), Some(defender))
+            }
+            _ => (None, None),
+        };
 
         let mut metrics_targets = Vec::new();
         metrics_targets.extend(
@@ -2536,7 +2541,7 @@ async fn start_world_chain_proposer(
 /// and staked in the `MockStakingRegistry` by `DeployProofSystem.s.sol`. It scans
 /// indexed factory games, recomputes the expected
 /// output root from the op-node rollup RPC, and challenges any game whose
-/// `rootClaim` disagrees by calling `WorldChainProofSystemGame.challenge` on L1.
+/// `rootClaim` disagrees by calling `MultiProofGame.challenge` on L1.
 async fn start_world_chain_challenger(
     l1_rpc_url: &str,
     output_root_rpc_url: &str,

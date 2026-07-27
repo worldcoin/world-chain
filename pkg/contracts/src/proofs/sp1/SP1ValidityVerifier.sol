@@ -3,12 +3,12 @@ pragma solidity 0.8.28;
 
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
 import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
-import {WorldChainProofLib} from "../WorldChainProofLib.sol";
-import {WorldChainProofVerificationLib} from "../WorldChainProofVerificationLib.sol";
+import {ProofLib} from "../lib/ProofLib.sol";
+import {ProofVerificationLib} from "../lib/ProofVerificationLib.sol";
 
 /// Must match `world_chain_proof_core::types::AggregationPublicValues`.
 struct AggregationPublicValues {
-    WorldChainProofLib.TransitionPublicValues transitionPublicValues;
+    ProofLib.TransitionPublicValues transitionPublicValues;
     bytes32 multiBlockVKey;
 }
 
@@ -20,7 +20,7 @@ struct AggregationPublicValues {
 ///      gateway, then binds the aggregation public values to the supplied
 ///      World Chain `rootId`. Invalid proofs return `false` rather than
 ///      bubbling reverts, matching the predicate contract expected by
-///      `WorldChainProofSystemGame`.
+///      `MultiProofGame`.
 contract SP1ValidityVerifier is IWorldChainProofVerifier {
     /*//////////////////////////////////////////////////////////////
                                 ERRORS
@@ -108,13 +108,12 @@ contract SP1ValidityVerifier is IWorldChainProofVerifier {
         ) = abi.decode(proof, (bytes32, address, uint256, bytes, bytes));
 
         AggregationPublicValues memory outputs = abi.decode(publicValues, (AggregationPublicValues));
-        WorldChainProofLib.TransitionPublicValues memory transition = outputs.transitionPublicValues;
+        ProofLib.TransitionPublicValues memory transition = outputs.transitionPublicValues;
 
         if (outputs.multiBlockVKey != rangeVKeyCommitment) return false;
 
-        bool matchesGame = WorldChainProofVerificationLib.matchesGame(
-            gameAddress, rootId, domainHash, parentRef, l1OriginNumber, transition
-        );
+        bool matchesGame =
+            ProofVerificationLib.matchesGame(gameAddress, rootId, domainHash, parentRef, l1OriginNumber, transition);
         if (!matchesGame) return false;
 
         sp1Verifier.verifyProof(aggregationVKey, publicValues, proofBytes);
