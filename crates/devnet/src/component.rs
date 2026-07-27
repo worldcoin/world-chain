@@ -69,8 +69,6 @@ pub enum DevnetComponentKind {
     Sp1Worker,
     /// Flashblocks capability on the World Chain execution node.
     Flashblocks,
-    /// Deprecated/removed legacy component.
-    RemovedLegacyService,
 }
 
 impl DevnetComponentKind {
@@ -95,7 +93,6 @@ impl DevnetComponentKind {
             Self::ProverService => "prover-service",
             Self::Sp1Worker => "sp1-worker",
             Self::Flashblocks => "flashblocks",
-            Self::RemovedLegacyService => "removed-legacy-service",
         }
     }
 }

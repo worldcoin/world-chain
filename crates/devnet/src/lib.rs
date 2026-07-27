@@ -1,12 +1,8 @@
 //! Native World Chain devnet harness.
 //!
-//! This crate is the Rust replacement path for the Kurtosis package under
-//! `pkg/devnet`. The mapping is intentionally not 1:1: the new default preset
-//! keeps the useful local-dev configuration, genesis, and flashblocks setup,
-//! while dropping the historical rollup-boost and tx-proxy wiring. PBH
-//! contracts are not part of the new deployment scope. The World Chain
-//! execution node sequences directly, with lifecycle ownership held by
-//! [`WorldDevnet`].
+//! This crate owns the local devnet topology used by `just devnet`: an L1 dev
+//! chain, World Chain execution nodes, OP Stack services, and optional
+//! observability, with lifecycle ownership held by [`WorldDevnet`].
 
 mod component;
 mod full_stack;
@@ -66,8 +62,7 @@ pub use op_stack::{
 /// Devnet topology presets.
 ///
 /// `DirectSequencer` is the intended new local-dev shape: one L1 dev chain and
-/// one World Chain sequencing execution node, with flashblocks enabled and no
-/// rollup-boost or tx-proxy.
+/// one World Chain sequencing execution node, with flashblocks enabled.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum WorldDevnetPreset {
     /// New default topology: direct sequencing World Chain node plus L1 dev chain.
@@ -338,13 +333,8 @@ impl WorldDevnetBuilder {
             .await
             .wrap_err("failed to start Prometheus/Grafana observability stack")?;
 
-        let components = build_component_manifest(
-            self.preset,
-            &l1,
-            &nodes,
-            observability.as_ref(),
-            ha_topology.as_ref(),
-        );
+        let components =
+            build_component_manifest(&l1, &nodes, observability.as_ref(), ha_topology.as_ref());
 
         Ok(WorldDevnet {
             preset: self.preset,
@@ -468,7 +458,7 @@ impl WorldDevnet {
     ///
     /// The native in-process harness serves the flashblocks capability through
     /// the same HTTP RPC endpoint (`op_supportedCapabilities` and Engine API
-    /// extensions), rather than the old Kurtosis sidecar-style WS port.
+    /// extensions).
     pub fn flashblocks_url(&self) -> Option<String> {
         if let Some(full_stack) = &self.full_stack {
             self.flashblocks
@@ -815,7 +805,6 @@ impl WorldDevnet {
 }
 
 fn build_component_manifest(
-    preset: WorldDevnetPreset,
     l1: &Option<L1DevChain>,
     nodes: &[WorldChainTestingNodeContext<WorldChainDefaultContext>],
     observability: Option<&ObservabilityStack>,
@@ -883,27 +872,6 @@ fn build_component_manifest(
             );
             components.push(component.clone());
         }
-        components.extend(topology.removed_services.clone());
-    } else if matches!(
-        preset,
-        WorldDevnetPreset::DirectSequencer | WorldDevnetPreset::Minimal
-    ) {
-        components.push(
-            DevnetComponent::new(
-                "rollup-boost",
-                DevnetComponentKind::RemovedLegacyService,
-                DevnetComponentStatus::Removed,
-            )
-            .with_note("not present in direct-sequencer topology"),
-        );
-        components.push(
-            DevnetComponent::new(
-                "tx-proxy",
-                DevnetComponentKind::RemovedLegacyService,
-                DevnetComponentStatus::Removed,
-            )
-            .with_note("not present unless a future test independently needs it"),
-        );
     }
 
     components

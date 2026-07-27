@@ -23,11 +23,10 @@ const RETH_DASHBOARD_URL: &str =
     "https://raw.githubusercontent.com/paradigmxyz/reth/main/etc/grafana/dashboards/overview.json";
 const RETH_DASHBOARD_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 const FLASHBLOCKS_PAYLOAD_BUILDER_DASHBOARD: &str =
-    include_str!("../../../pkg/devnet/grafana/dashboards/flashblocks-payload-builder.json");
+    include_str!("../grafana/dashboards/flashblocks-payload-builder.json");
 const FLASHBLOCKS_VALIDATION_PIPELINE_DASHBOARD: &str =
-    include_str!("../../../pkg/devnet/grafana/dashboards/flashblocks-validation-pipeline.json");
-const FLASHBLOCKS_P2P_DASHBOARD: &str =
-    include_str!("../../../pkg/devnet/grafana/dashboards/flashblocks-p2p.json");
+    include_str!("../grafana/dashboards/flashblocks-validation-pipeline.json");
+const FLASHBLOCKS_P2P_DASHBOARD: &str = include_str!("../grafana/dashboards/flashblocks-p2p.json");
 const WORLD_CHAIN_DASHBOARDS: [(&str, &str); 3] = [
     (
         "flashblocks-payload-builder.json",
