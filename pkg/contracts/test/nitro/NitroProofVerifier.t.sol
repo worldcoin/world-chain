@@ -5,7 +5,7 @@ import {Test, Vm} from "forge-std/Test.sol";
 import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyRegistry.sol";
 import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol";
 import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
-import {MockProofSystemFactory, MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
+import {MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
 import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier.sol";
 
 contract MockParentGame {
@@ -46,7 +46,7 @@ contract NitroProofVerifierTest is Test {
     bytes enclavePubKey;
     MockParentGame parent;
     MockProofSystemGame game;
-    MockProofSystemFactory proofSystemFactory;
+    WorldChainProofLib.Domain domain;
     bytes32 domainHash;
 
     function setUp() public {
@@ -54,10 +54,9 @@ contract NitroProofVerifierTest is Test {
         registry = new NitroEnclaveKeyRegistry(attestationVerifier, owner);
         parent = new MockParentGame(L2_PRE_ROOT);
         proofVerifier = new NitroProofVerifier(registry);
-        WorldChainProofLib.Domain memory domain = WorldChainProofLib.Domain({
+        domain = WorldChainProofLib.Domain({
             chainId: 480, proofSystemVersion: 1, rollupConfigHash: ROLLUP_CFG, blockInterval: L2_BLOCK - L2_PRE_BLOCK
         });
-        proofSystemFactory = new MockProofSystemFactory(domain);
         domainHash = WorldChainProofLib.domainHash(domain);
         game = new MockProofSystemGame();
         _setGameContext(_transition());
@@ -127,7 +126,7 @@ contract NitroProofVerifierTest is Test {
         );
         game.setContext(
             MockProofSystemGame.Context({
-                factory: address(proofSystemFactory),
+                domain: domain,
                 rootId: rootId,
                 anchorStateRegistry: ANCHOR_STATE_REGISTRY,
                 domainHash: domainHash,
