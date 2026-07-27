@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use alloy_primitives::{B256, Bytes, U256};
+use async_trait::async_trait;
 use testcontainers::{ContainerAsync, runners::AsyncRunner};
 use testcontainers_modules::postgres;
 use tokio::task::JoinHandle;
@@ -16,7 +17,10 @@ use world_chain_proof_worker::{
 };
 use world_chain_proofs::{ProofLane, RootState, has_threshold};
 use world_chain_proposer::{ProposerClient, ProposerConfig, WorldChainProposer};
-use world_chain_prover_service::{ProofBackend, ProverServiceConfig};
+use world_chain_prover_service::{
+    ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
+    ProofResponse, ProofStatus, ProverServiceConfig, SucceededProofResponse,
+};
 
 fn proposer_config() -> ProposerConfig {
     ProposerConfig {
@@ -50,7 +54,44 @@ fn assert_defense_lanes(lanes: Vec<ProofLane>) {
     assert!(lanes.contains(&ProofLane::TeeAttestation));
 }
 
-async fn settle_with_proposer(proposer: &WorldChainProposer<FakeExecution, FakeConsensus>) {
+#[derive(Debug, Clone, Copy)]
+struct InstantProofRequester;
+
+#[async_trait]
+impl ProofRequester for InstantProofRequester {
+    async fn request_proof(
+        &self,
+        request: ProofRequest,
+    ) -> Result<ProofRequestId, ProofRequestError> {
+        Ok(request.id())
+    }
+
+    async fn proof_status(
+        &self,
+        _proof_id: ProofRequestId,
+    ) -> Result<ProofStatus, ProofRequestError> {
+        Ok(ProofStatus::Succeeded)
+    }
+
+    async fn get_proof(
+        &self,
+        proof_id: ProofRequestId,
+    ) -> Result<ProofResponse, ProofRequestError> {
+        Ok(ProofResponse::Succeeded(SucceededProofResponse {
+            id: proof_id,
+            proof: ProofData::Nitro {
+                attestation: Bytes::from_static(&[1]),
+                public_values: Bytes::from_static(&[2]),
+                signature: Bytes::from_static(&[3]),
+            },
+        }))
+    }
+}
+
+async fn settle_with_proposer<P>(proposer: &WorldChainProposer<FakeExecution, FakeConsensus, P>)
+where
+    P: ProofRequester,
+{
     let canonical_scan = proposer
         .anchor_and_canonical_line()
         .await
@@ -70,7 +111,12 @@ async fn fake_resolution_matches_contract_transition_semantics() {
     let chain = FakeExecution::new();
     let canonical_root = B256::repeat_byte(0x20);
     let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
-    let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus);
+    let mut proposer = WorldChainProposer::new(
+        proposer_config(),
+        chain.clone(),
+        consensus,
+        InstantProofRequester,
+    );
 
     let canonical_scan = proposer
         .anchor_and_canonical_line()
@@ -222,8 +268,12 @@ async fn invalid_root_is_challenged_by_real_challenger() {
     let honest_consensus =
         FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
 
-    let proposer =
-        WorldChainProposer::new(proposer_config(), chain.clone(), bad_proposer_consensus);
+    let mut proposer = WorldChainProposer::new(
+        proposer_config(),
+        chain.clone(),
+        bad_proposer_consensus,
+        InstantProofRequester,
+    );
     let canonical_scan = proposer
         .anchor_and_canonical_line()
         .await
@@ -251,7 +301,12 @@ async fn valid_challenged_root_is_defended_through_workers() {
     let canonical_root = B256::repeat_byte(0x20);
     let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
 
-    let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus.clone());
+    let mut proposer = WorldChainProposer::new(
+        proposer_config(),
+        chain.clone(),
+        consensus.clone(),
+        InstantProofRequester,
+    );
     let canonical_scan = proposer
         .anchor_and_canonical_line()
         .await
@@ -297,7 +352,12 @@ async fn valid_challenged_root_survives_transient_proof_failure() {
     let canonical_root = B256::repeat_byte(0x20);
     let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
 
-    let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus.clone());
+    let mut proposer = WorldChainProposer::new(
+        proposer_config(),
+        chain.clone(),
+        consensus.clone(),
+        InstantProofRequester,
+    );
     let canonical_scan = proposer
         .anchor_and_canonical_line()
         .await
@@ -352,8 +412,12 @@ async fn defender_ignores_challenged_invalid_root() {
     let honest_consensus =
         FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
 
-    let proposer =
-        WorldChainProposer::new(proposer_config(), chain.clone(), bad_proposer_consensus);
+    let mut proposer = WorldChainProposer::new(
+        proposer_config(),
+        chain.clone(),
+        bad_proposer_consensus,
+        InstantProofRequester,
+    );
     let canonical_scan = proposer
         .anchor_and_canonical_line()
         .await

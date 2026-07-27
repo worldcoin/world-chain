@@ -300,7 +300,7 @@ where
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
-        proof: ProofData,
+        _proof: ProofData,
         proposer_bond: U256,
     ) -> Result<ProposalSubmission, ProposerError> {
         let pending = self

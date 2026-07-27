@@ -303,7 +303,7 @@ impl Drop for DefenderTask {
     }
 }
 
-/// In-process defender prover-service RPC server. Stopped on devnet drop.
+/// In-process proof-system prover-service RPC server. Stopped on devnet drop.
 #[derive(Debug)]
 struct ProverServiceTask {
     handle: ServerHandle,
@@ -549,14 +549,33 @@ impl FullStackWorldDevnet {
             (Some(batcher), Some(proposer), None)
         };
 
-        let world_proposer = if let Some(deployment) = proof_system.as_ref() {
+        // The proposer always needs the prover-service for its creation-time Nitro proof.
+        // Defender and SP1 worker startup remains optional below.
+        let (prover_service, prover_service_url) = if proof_system.is_some() {
+            let (service, url) = start_prover_service().await?;
+            (Some(service), Some(url))
+        } else {
+            (None, None)
+        };
+
+        let world_proposer = if let (Some(deployment), Some(prover_service_url)) =
+            (proof_system.as_ref(), prover_service_url.as_deref())
+        {
             let output_root_rpc = op_nodes
                 .first()
                 .map(|node| node.rpc_url.clone())
                 .ok_or_else(|| {
                     eyre!("full-stack devnet has no op-node for the World Chain proposer")
                 })?;
-            Some(start_world_chain_proposer(&l1_public_rpc, &output_root_rpc, deployment).await?)
+            Some(
+                start_world_chain_proposer(
+                    &l1_public_rpc,
+                    &output_root_rpc,
+                    prover_service_url,
+                    deployment,
+                )
+                .await?,
+            )
         } else {
             None
         };
@@ -573,46 +592,46 @@ impl FullStackWorldDevnet {
             None
         };
 
-        // Defender proving loop: an in-process defender, prover-service, and SP1 worker,
-        // enabled by the `DEVNET_SP1_WORKER_PROVER` env var. The defender enqueues proof
-        // requests for challenged valid games; the worker leases SP1 jobs, builds witnesses
-        // from the devnet L1/L2 RPCs, and proves them with the selected backend.
-        let (prover_service, sp1_worker, world_defender, prover_service_url) =
-            match (proof_system.as_ref(), sp1_worker_prover_kind()?) {
-                (Some(deployment), Some(kind)) => {
-                    let output_root_rpc = op_nodes
-                        .first()
-                        .map(|node| node.rpc_url.clone())
-                        .ok_or_else(|| {
-                            eyre!("full-stack devnet has no op-node for the World Chain defender")
-                        })?;
-                    let l2_rpc = sequencers
-                        .first()
-                        .map(|sequencer| sequencer.rpc_url.clone())
-                        .ok_or_else(|| {
-                            eyre!("full-stack devnet has no sequencer for the SP1 worker")
-                        })?;
-                    let (service, url) = start_prover_service().await?;
-                    let defender = start_world_chain_defender(
-                        &l1_public_rpc,
-                        &output_root_rpc,
-                        &url,
-                        deployment,
-                    )
-                    .await?;
-                    let worker = start_sp1_worker(
-                        &l1_public_rpc,
-                        &l2_rpc,
-                        &url,
-                        &artifacts.rollup_path,
-                        deployment,
-                        kind,
-                    )
-                    .await?;
-                    (Some(service), Some(worker), Some(defender), Some(url))
-                }
-                _ => (None, None, None, None),
-            };
+        // Optional defender proving loop: an in-process defender and SP1 worker, enabled by
+        // `DEVNET_SP1_WORKER_PROVER`. They share the prover-service started for the proposer.
+        let (sp1_worker, world_defender) = match (
+            proof_system.as_ref(),
+            sp1_worker_prover_kind()?,
+            prover_service_url.as_deref(),
+        ) {
+            (Some(deployment), Some(kind), Some(prover_service_url)) => {
+                let output_root_rpc = op_nodes
+                    .first()
+                    .map(|node| node.rpc_url.clone())
+                    .ok_or_else(|| {
+                        eyre!("full-stack devnet has no op-node for the World Chain defender")
+                    })?;
+                let l2_rpc = sequencers
+                    .first()
+                    .map(|sequencer| sequencer.rpc_url.clone())
+                    .ok_or_else(|| {
+                        eyre!("full-stack devnet has no sequencer for the SP1 worker")
+                    })?;
+                let defender = start_world_chain_defender(
+                    &l1_public_rpc,
+                    &output_root_rpc,
+                    prover_service_url,
+                    deployment,
+                )
+                .await?;
+                let worker = start_sp1_worker(
+                    &l1_public_rpc,
+                    &l2_rpc,
+                    prover_service_url,
+                    &artifacts.rollup_path,
+                    deployment,
+                    kind,
+                )
+                .await?;
+                (Some(worker), Some(defender))
+            }
+            _ => (None, None),
+        };
 
         let mut metrics_targets = Vec::new();
         metrics_targets.extend(
@@ -2399,6 +2418,7 @@ async fn start_challenger(
 async fn start_world_chain_proposer(
     l1_rpc_url: &str,
     output_root_rpc_url: &str,
+    prover_service_url: &str,
     deployment: &WorldProofSystemDeployment,
 ) -> Result<ProposerTask> {
     let factory_address: Address = deployment
@@ -2421,6 +2441,8 @@ async fn start_world_chain_proposer(
     let contracts = AlloyProofSystemClient::new(provider, factory_address, anchor_address);
     let mut bond_manager = BondManager::new(BondManagerConfig::default(), contracts.clone());
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
+    let proof_requester = RpcProverServiceClient::new(prover_service_url)
+        .map_err(|error| eyre!("failed to connect proposer to prover-service: {error}"))?;
     let proposer_bond = contracts
         .proposer_bond()
         .await
@@ -2431,11 +2453,12 @@ async fn start_world_chain_proposer(
         poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
         max_resolutions_per_tick: ProposerConfig::default().max_resolutions_per_tick,
     };
-    let proposer = WorldChainProposer::new(config, contracts, output_roots);
+    let mut proposer = WorldChainProposer::new(config, contracts, output_roots, proof_requester);
 
     info!(
         l1_rpc_url,
         output_root_rpc_url,
+        prover_service = %prover_service_url,
         factory = %deployment.proof_system_factory,
         anchor = %deployment.anchor_state_registry,
         proposer = %proposer_address,
