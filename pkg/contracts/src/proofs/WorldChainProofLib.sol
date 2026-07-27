@@ -3,8 +3,8 @@ pragma solidity 0.8.28;
 
 library WorldChainProofLib {
     /// Default number of distinct proof lanes required to finalize a challenged
-    /// root. Deployments may override this per-factory (see
-    /// `WorldChainProofSystemFactory`'s `proofThreshold`).
+    /// root. Deployments may override this per game implementation (see
+    /// `WorldChainProofSystemGame.GameConfig.proofThreshold`).
     uint8 internal constant PROOF_THRESHOLD = 2;
     uint8 internal constant PROOF_LANE_COUNT = 3;
 
@@ -63,14 +63,6 @@ library WorldChainProofLib {
         uint256 l1OriginNumber
     ) internal pure returns (bytes32) {
         return keccak256(abi.encode(domainHash_, parentRef, rootClaim, l2BlockNumber, l1OriginHash, l1OriginNumber));
-    }
-
-    function proposalKey(bytes32 domainHash_, address parentRef, bytes32 rootClaim, uint256 l2BlockNumber)
-        internal
-        pure
-        returns (bytes32)
-    {
-        return keccak256(abi.encode(domainHash_, parentRef, rootClaim, l2BlockNumber));
     }
 
     function laneMask(ProofLane lane) internal pure returns (uint8) {
