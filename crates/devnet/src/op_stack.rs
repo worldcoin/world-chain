@@ -11,6 +11,9 @@ pub const DEFAULT_OP_CONTRACT_ARTIFACTS_LOCATOR: &str = "embedded";
 const DEFAULT_DEVNET_PRIVATE_KEY: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 
+// TODO: Enable after the proof services use the stock DisputeGameFactory and game credit APIs.
+pub(crate) const OP_NATIVE_PROOF_SERVICES_READY: bool = false;
+
 /// OP Stack container images used by the HA topology.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpStackImages {
@@ -111,8 +114,8 @@ impl WorldContractsDeploymentConfig {
         let mut contracts = Vec::new();
         if self.proof_system {
             contracts.extend([
-                "WorldChainAnchorStateRegistry",
-                "WorldChainProofSystemFactory",
+                "WorldChainProofSystemGame(WIP_1006)",
+                "DelayedWETH(WIP_1006)",
                 "MockRootIdVerifier(VALIDITY_PROOF)",
                 "MockRootIdVerifier(TEE_ATTESTATION)",
                 "MockRootIdVerifier(SECURITY_COUNCIL)",
@@ -429,17 +432,33 @@ impl HaSequencerTopology {
                 DevnetComponent::new(
                     "world-chain-proposer",
                     DevnetComponentKind::WorldChainProposer,
-                    DevnetComponentStatus::Planned,
+                    if OP_NATIVE_PROOF_SERVICES_READY {
+                        DevnetComponentStatus::Planned
+                    } else {
+                        DevnetComponentStatus::Deferred
+                    },
                 )
-                .with_note("native proposer posting OP output roots to the WIP-1006 proof system"),
+                .with_note(if OP_NATIVE_PROOF_SERVICES_READY {
+                    "native proposer posting OP output roots to the WIP-1006 proof system"
+                } else {
+                    "awaiting migration to the stock DisputeGameFactory API"
+                }),
             );
             components.push(
                 DevnetComponent::new(
                     "world-chain-challenger",
                     DevnetComponentKind::WorldChainChallenger,
-                    DevnetComponentStatus::Planned,
+                    if OP_NATIVE_PROOF_SERVICES_READY {
+                        DevnetComponentStatus::Planned
+                    } else {
+                        DevnetComponentStatus::Deferred
+                    },
                 )
-                .with_note("native challenger disputing invalid WIP-1006 proof-system games"),
+                .with_note(if OP_NATIVE_PROOF_SERVICES_READY {
+                    "native challenger disputing invalid WIP-1006 proof-system games"
+                } else {
+                    "awaiting migration to the stock DisputeGameFactory API"
+                }),
             );
         }
 

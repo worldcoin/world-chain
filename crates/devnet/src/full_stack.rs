@@ -71,7 +71,7 @@ use crate::{
     DevnetComponent, DevnetComponentKind, DevnetComponentStatus, DevnetPortMode, L1DevChain,
     L1DevChainConfig, MetricsTarget, ObservabilityStack, WorldChainHardforkConfig,
     component::ContainerImage,
-    op_stack::{HaSequencerConfig, HaSequencerTopology},
+    op_stack::{HaSequencerConfig, HaSequencerTopology, OP_NATIVE_PROOF_SERVICES_READY},
     process_logs::{ProcessLogTarget, container_log_consumer, emit_process_log},
 };
 
@@ -115,6 +115,10 @@ const WORLD_DEFENDER_GENESIS_BALANCE_WEI: &str = "0x56bc75e2d63100000";
 
 const DEVNET_PRIVATE_KEY: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+const SUPERCHAIN_GUARDIAN_PRIVATE_KEY: &str =
+    "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";
+const L1_PROXY_ADMIN_OWNER_PRIVATE_KEY: &str =
+    "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a";
 const UNSAFE_BLOCK_SIGNER_PRIVATE_KEY: &str =
     "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e";
 const BATCHER_PRIVATE_KEY: &str =
@@ -395,8 +399,13 @@ impl FullStackWorldDevnet {
 
         let proof_system = if config.world_contracts.proof_system {
             Some(
-                deploy_world_proof_system(&l1_public_rpc, &artifacts.rollup_path, &workdir_path)
-                    .await?,
+                deploy_world_proof_system(
+                    &l1_public_rpc,
+                    &artifacts.rollup_path,
+                    &artifacts.l1_addresses,
+                    &workdir_path,
+                )
+                .await?,
             )
         } else {
             None
@@ -549,7 +558,11 @@ impl FullStackWorldDevnet {
             (Some(batcher), Some(proposer), None)
         };
 
-        let world_proposer = if let Some(deployment) = proof_system.as_ref() {
+        let proof_services = proof_system
+            .as_ref()
+            .filter(|_| OP_NATIVE_PROOF_SERVICES_READY);
+
+        let world_proposer = if let Some(deployment) = proof_services {
             let output_root_rpc = op_nodes
                 .first()
                 .map(|node| node.rpc_url.clone())
@@ -561,7 +574,7 @@ impl FullStackWorldDevnet {
             None
         };
 
-        let world_challenger = if let Some(deployment) = proof_system.as_ref() {
+        let world_challenger = if let Some(deployment) = proof_services {
             let output_root_rpc = op_nodes
                 .first()
                 .map(|node| node.rpc_url.clone())
@@ -578,40 +591,46 @@ impl FullStackWorldDevnet {
         // requests for challenged valid games; the worker leases SP1 jobs, builds witnesses
         // from the devnet L1/L2 RPCs, and proves them with the selected backend.
         let (prover_service, sp1_worker, world_defender, prover_service_url) =
-            match (proof_system.as_ref(), sp1_worker_prover_kind()?) {
-                (Some(deployment), Some(kind)) => {
-                    let output_root_rpc = op_nodes
-                        .first()
-                        .map(|node| node.rpc_url.clone())
-                        .ok_or_else(|| {
-                            eyre!("full-stack devnet has no op-node for the World Chain defender")
-                        })?;
-                    let l2_rpc = sequencers
-                        .first()
-                        .map(|sequencer| sequencer.rpc_url.clone())
-                        .ok_or_else(|| {
-                            eyre!("full-stack devnet has no sequencer for the SP1 worker")
-                        })?;
-                    let (service, url) = start_prover_service().await?;
-                    let defender = start_world_chain_defender(
-                        &l1_public_rpc,
-                        &output_root_rpc,
-                        &url,
-                        deployment,
-                    )
-                    .await?;
-                    let worker = start_sp1_worker(
-                        &l1_public_rpc,
-                        &l2_rpc,
-                        &url,
-                        &artifacts.rollup_path,
-                        deployment,
-                        kind,
-                    )
-                    .await?;
-                    (Some(service), Some(worker), Some(defender), Some(url))
+            if let Some(deployment) = proof_services {
+                match sp1_worker_prover_kind()? {
+                    Some(kind) => {
+                        let output_root_rpc = op_nodes
+                            .first()
+                            .map(|node| node.rpc_url.clone())
+                            .ok_or_else(|| {
+                                eyre!(
+                                    "full-stack devnet has no op-node for the World Chain defender"
+                                )
+                            })?;
+                        let l2_rpc = sequencers
+                            .first()
+                            .map(|sequencer| sequencer.rpc_url.clone())
+                            .ok_or_else(|| {
+                                eyre!("full-stack devnet has no sequencer for the SP1 worker")
+                            })?;
+                        let (service, url) = start_prover_service().await?;
+                        let defender = start_world_chain_defender(
+                            &l1_public_rpc,
+                            &output_root_rpc,
+                            &url,
+                            deployment,
+                        )
+                        .await?;
+                        let worker = start_sp1_worker(
+                            &l1_public_rpc,
+                            &l2_rpc,
+                            &url,
+                            &artifacts.rollup_path,
+                            deployment,
+                            kind,
+                        )
+                        .await?;
+                        (Some(service), Some(worker), Some(defender), Some(url))
+                    }
+                    None => (None, None, None, None),
                 }
-                _ => (None, None, None, None),
+            } else {
+                (None, None, None, None)
             };
 
         let mut metrics_targets = Vec::new();
@@ -907,6 +926,7 @@ l2ContractsLocator = "{}"
 async fn deploy_world_proof_system(
     l1_rpc_url: &str,
     rollup_path: &Path,
+    l1_addresses: &Value,
     workdir: &Path,
 ) -> Result<WorldProofSystemDeployment> {
     let rollup_config = fs::read(rollup_path)
@@ -914,6 +934,10 @@ async fn deploy_world_proof_system(
     let rollup_config_hash = keccak256(&rollup_config);
     let rollup_config_hash_hex = format!("0x{}", hex::encode(rollup_config_hash.as_slice()));
     let contracts_dir = repo_root()?.join("pkg/contracts");
+    let dispute_game_factory = l1_address(l1_addresses, "DisputeGameFactoryProxy")?;
+    let anchor_state_registry = l1_address(l1_addresses, "AnchorStateRegistryProxy")?;
+    let system_config = l1_address(l1_addresses, "SystemConfigProxy")?;
+    let op_chain_proxy_admin = l1_address(l1_addresses, "OpChainProxyAdminImpl")?;
     let deployment_name = workdir
         .file_name()
         .and_then(|name| name.to_str())
@@ -931,6 +955,21 @@ async fn deploy_world_proof_system(
         })?;
     }
 
+    let build_output = Command::new("forge")
+        .current_dir(contracts_dir.join("opstack"))
+        .arg("build")
+        .output()
+        .await
+        .wrap_err("failed to build pinned OP Stack contract artifacts")?;
+    if !build_output.status.success() {
+        bail!(
+            "OP Stack contract build failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+            build_output.status.code(),
+            String::from_utf8_lossy(&build_output.stdout),
+            String::from_utf8_lossy(&build_output.stderr)
+        );
+    }
+
     let mut command = Command::new("forge");
     command
         .current_dir(&contracts_dir)
@@ -945,6 +984,17 @@ async fn deploy_world_proof_system(
         .arg("--evm-version")
         .arg("cancun")
         .env("PRIVATE_KEY", DEVNET_PRIVATE_KEY)
+        .env("DISPUTE_GAME_FACTORY", &dispute_game_factory)
+        .env("ANCHOR_STATE_REGISTRY", &anchor_state_registry)
+        .env("SYSTEM_CONFIG", &system_config)
+        .env("OP_CHAIN_PROXY_ADMIN", &op_chain_proxy_admin)
+        .env(
+            "OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY",
+            L1_PROXY_ADMIN_OWNER_PRIVATE_KEY,
+        )
+        .env("DGF_OWNER_KEY", L1_PROXY_ADMIN_OWNER_PRIVATE_KEY)
+        .env("GUARDIAN_KEY", SUPERCHAIN_GUARDIAN_PRIVATE_KEY)
+        .env("SET_RESPECTED_GAME_TYPE", "true")
         .env(
             "WORLD_CHALLENGER_ADDRESS",
             world_challenger_address()?.to_string(),
@@ -3194,29 +3244,39 @@ fn build_components(
             DevnetComponent::new(
                 "world-chain-proposer",
                 DevnetComponentKind::WorldChainProposer,
-                DevnetComponentStatus::Running,
+                if OP_NATIVE_PROOF_SERVICES_READY {
+                    DevnetComponentStatus::Running
+                } else {
+                    DevnetComponentStatus::Deferred
+                },
             )
             .with_endpoint("factory", deployment.proof_system_factory.clone())
             .with_endpoint("anchor", deployment.anchor_state_registry.clone())
-            .with_note(format!(
-                "native in-process proposer posting OP output roots every {} L2 blocks via WorldChainProofSystemFactory.propose",
-                deployment.block_interval
-            ))
-            .with_note("signs with the dev proposer key staked in the MockStakingRegistry"),
+            .with_note(if OP_NATIVE_PROOF_SERVICES_READY {
+                format!(
+                    "native in-process proposer posting OP output roots every {} L2 blocks",
+                    deployment.block_interval
+                )
+            } else {
+                "awaiting migration to the stock DisputeGameFactory API".to_string()
+            }),
         );
         components.push(
             DevnetComponent::new(
                 "world-chain-challenger",
                 DevnetComponentKind::WorldChainChallenger,
-                DevnetComponentStatus::Running,
+                if OP_NATIVE_PROOF_SERVICES_READY {
+                    DevnetComponentStatus::Running
+                } else {
+                    DevnetComponentStatus::Deferred
+                },
             )
             .with_endpoint("factory", deployment.proof_system_factory.clone())
-            .with_note(
-                "native in-process challenger that disputes invalid WorldChainProofSystemFactory games via WorldChainProofSystemGame.challenge",
-            )
-            .with_note(
-                "signs with a dedicated dev key funded in the L1 genesis and staked in the MockStakingRegistry",
-            ),
+            .with_note(if OP_NATIVE_PROOF_SERVICES_READY {
+                "native in-process challenger for WIP-1006 games"
+            } else {
+                "awaiting migration to the stock DisputeGameFactory API"
+            }),
         );
     }
 
