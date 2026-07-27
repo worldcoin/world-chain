@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {WorldChainProofLib} from "./WorldChainProofLib.sol";
-import {IWorldChainProofSystemGame} from "./interfaces/IWorldChainProofSystemGame.sol";
+import {ProofLib} from "./ProofLib.sol";
 import {IWorldChainProofVerifier} from "./interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainStakingRegistry} from "./interfaces/IWorldChainStakingRegistry.sol";
 
@@ -31,8 +30,7 @@ import {
     NoCreditToClaim,
     ParentGameNotResolved,
     UnexpectedGameType,
-    UnexpectedRootClaim,
-    UnknownChainId
+    UnexpectedRootClaim
 } from "@optimism-bedrock/src/dispute/lib/Errors.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
 import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
@@ -40,17 +38,11 @@ import {IAnchorStateRegistry} from "@optimism-bedrock/interfaces/dispute/IAnchor
 import {IDelayedWETH} from "@optimism-bedrock/interfaces/dispute/IDelayedWETH.sol";
 import {ISemver} from "@optimism-bedrock/interfaces/universal/ISemver.sol";
 
-/// @title WorldChainProofSystemGame
-/// @notice A multi-proof dispute game created through the stock Optimism `DisputeGameFactory`
-///         using the Clone-With-Immutable-Args (CWIA) pattern. Proposals chain parent-to-parent
-///         at a fixed block interval; a challenged proposal finalizes only once enough
-///         independent proof lanes (validity proof, TEE attestation, security council) support
-///         it. Bond custody uses `DelayedWETH` with the two-phase unlock/withdraw claim flow.
-/// @dev Implements the `IDisputeGame` ABI without inheriting the interface: `IDisputeGame`
-///      declares `rootClaimByChainId` (among others) as `pure`, while this implementation
-///      reads a constructor immutable (`view`). `FaultDisputeGame` takes the same approach.
-///      Structure follows `ZKDisputeGame`; challenge/lane semantics are World Chain specific.
-contract WorldChainProofSystemGame is Clone, ISemver {
+/// @title MultiProofGame
+/// @notice A multi-proof meta dispute game over multiple proof types.
+///     Implements the `IDisputeGame` interface, and is created through the standard optimism `DisputeGameFactory`
+/// @author World Contributors
+contract MultiProofGame is Clone, ISemver, IDisputeGame {
     ////////////////////////////////////////////////////////////////
     //                         Structs                            //
     ////////////////////////////////////////////////////////////////
@@ -60,13 +52,12 @@ contract WorldChainProofSystemGame is Clone, ISemver {
     ///      `DisputeGameFactory.setImplementation(gameType, impl)`, so none of this rides in
     ///      the CWIA payload and `extraData` stays minimal.
     struct GameConfig {
-        WorldChainProofLib.Domain domain;
-        GameType gameType;
-        uint64 challengePeriod;
-        uint64 proofPeriod;
         uint256 proposerBond;
         uint256 challengerBond;
-        uint8 proofThreshold;
+        uint64 challengePeriod;
+        uint64 proofPeriod;
+        ProofLib.Domain domain;
+        GameType gameType;
         IWorldChainProofVerifier validityProofVerifier;
         IWorldChainProofVerifier teeVerifier;
         IWorldChainProofVerifier securityCouncil;
@@ -74,6 +65,7 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         IDisputeGameFactory disputeGameFactory;
         IAnchorStateRegistry anchorStateRegistry;
         IDelayedWETH weth;
+        uint8 proofThreshold;
     }
 
     ////////////////////////////////////////////////////////////////
@@ -89,7 +81,7 @@ contract WorldChainProofSystemGame is Clone, ISemver {
     error ChallengePeriodElapsed(uint256 timestamp, uint256 challengeDeadline);
     error ProofPeriodElapsed(uint256 timestamp, uint256 proofDeadline);
     error InvalidLane(uint8 lane);
-    error InvalidProof(WorldChainProofLib.ProofLane lane, bytes32 rootId);
+    error InvalidProof(ProofLib.ProofLane lane, bytes32 rootId);
 
     ////////////////////////////////////////////////////////////////
     //                         Events                             //
@@ -109,13 +101,10 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         address proposer
     );
 
-    /// @notice Emitted when the game is resolved. Matches the `IDisputeGame` event.
-    event Resolved(GameStatus indexed status);
-
     event Challenged(address indexed challenger, uint64 proofDeadline);
-    event ProofLaneSupported(WorldChainProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
+    event ProofLaneSupported(ProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
     event ProofThresholdReached(bytes32 indexed rootId, uint8 proofBitmap);
-    event DuplicateProofLane(WorldChainProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
+    event DuplicateProofLane(ProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
     event GameClosed(BondDistributionMode bondDistributionMode);
 
     ////////////////////////////////////////////////////////////////
@@ -127,7 +116,7 @@ contract WorldChainProofSystemGame is Clone, ISemver {
 
     /// Number of distinct proof lanes required to finalize a challenged root.
     uint8 public immutable PROOF_THRESHOLD;
-    uint8 public constant PROOF_LANE_COUNT = WorldChainProofLib.PROOF_LANE_COUNT;
+    uint8 public constant PROOF_LANE_COUNT = ProofLib.PROOF_LANE_COUNT;
 
     uint256 internal immutable DOMAIN_CHAIN_ID;
     uint256 internal immutable DOMAIN_PROOF_SYSTEM_VERSION;
@@ -175,7 +164,7 @@ contract WorldChainProofSystemGame is Clone, ISemver {
     uint64 public proofDeadline;
     address payable public challenger;
     uint8 public proofBitmap;
-    WorldChainProofLib.InvalidationReason public invalidationReason;
+    ProofLib.InvalidationReason public invalidationReason;
 
     mapping(address recipient => uint256 amount) public normalModeCredit;
     mapping(address recipient => uint256 amount) public refundModeCredit;
@@ -185,9 +174,9 @@ contract WorldChainProofSystemGame is Clone, ISemver {
 
     constructor(GameConfig memory config) {
         if (
-            config.challengePeriod == 0 || config.proofPeriod == 0 || config.domain.chainId == 0
+            config.challengePeriod == 0 || config.proofPeriod <= config.challengePeriod || config.domain.chainId == 0
                 || config.domain.proofSystemVersion == 0 || config.domain.blockInterval == 0
-                || config.proofThreshold == 0 || config.proofThreshold > WorldChainProofLib.PROOF_LANE_COUNT
+                || config.proofThreshold == 0 || config.proofThreshold > ProofLib.PROOF_LANE_COUNT
                 || address(config.disputeGameFactory) == address(0) || address(config.anchorStateRegistry) == address(0)
                 || address(config.weth) == address(0) || address(config.stakingRegistry) == address(0)
         ) {
@@ -198,7 +187,7 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         DOMAIN_PROOF_SYSTEM_VERSION = config.domain.proofSystemVersion;
         DOMAIN_ROLLUP_CONFIG_HASH = config.domain.rollupConfigHash;
         DOMAIN_BLOCK_INTERVAL = config.domain.blockInterval;
-        domainHash = WorldChainProofLib.domainHash(config.domain);
+        domainHash = ProofLib.domainHash(config.domain);
         GAME_TYPE = config.gameType;
         challengePeriod = config.challengePeriod;
         proofPeriod = config.proofPeriod;
@@ -266,8 +255,12 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         gameType_ = GAME_TYPE;
     }
 
-    function rootClaimByChainId(uint256 chainId) external view returns (Claim rootClaim_) {
-        if (chainId != DOMAIN_CHAIN_ID) revert UnknownChainId();
+    /// @notice Getter for the root claim of a given L2 chain ID.
+    /// @dev `IDisputeGame` declares this `pure`, so the chain ID cannot be checked against the
+    ///      `DOMAIN_CHAIN_ID` immutable. The argument is ignored, exactly as `ZKDisputeGame`
+    ///      does: `OptimismPortal2` only consults this getter for super game types, and this
+    ///      game proves a single chain's output root.
+    function rootClaimByChainId(uint256) public pure returns (Claim rootClaim_) {
         rootClaim_ = rootClaim();
     }
 
@@ -282,8 +275,8 @@ contract WorldChainProofSystemGame is Clone, ISemver {
     ////////////////////////////////////////////////////////////////
 
     /// @notice Domain parameters this deployment proves against.
-    function domain() external view returns (WorldChainProofLib.Domain memory) {
-        return WorldChainProofLib.Domain({
+    function domain() external view returns (ProofLib.Domain memory) {
+        return ProofLib.Domain({
             chainId: DOMAIN_CHAIN_ID,
             proofSystemVersion: DOMAIN_PROOF_SYSTEM_VERSION,
             rollupConfigHash: DOMAIN_ROLLUP_CONFIG_HASH,
@@ -291,26 +284,15 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         });
     }
 
-    /// @notice Alias of `l2SequenceNumber` retained for proof-lane and offchain consumers.
-    function l2BlockNumber() external pure returns (uint256) {
-        return l2SequenceNumber();
-    }
-
-    /// @notice Alias of `l1Head` retained for proof-lane and offchain consumers.
-    function l1OriginHash() external pure returns (bytes32) {
-        return Hash.unwrap(l1Head());
-    }
-
     function l1OriginNumber() external view returns (uint256) {
         return _l1OriginNumber;
     }
 
     /// @notice Derived legacy state machine view.
-    function state() public view returns (WorldChainProofLib.RootState) {
-        if (status == GameStatus.DEFENDER_WINS) return WorldChainProofLib.RootState.FINALIZED;
-        if (status == GameStatus.CHALLENGER_WINS) return WorldChainProofLib.RootState.INVALIDATED;
-        return
-            challenger == address(0) ? WorldChainProofLib.RootState.PROPOSED : WorldChainProofLib.RootState.CHALLENGED;
+    function state() public view returns (ProofLib.RootState) {
+        if (status == GameStatus.DEFENDER_WINS) return ProofLib.RootState.FINALIZED;
+        if (status == GameStatus.CHALLENGER_WINS) return ProofLib.RootState.INVALIDATED;
+        return challenger == address(0) ? ProofLib.RootState.PROPOSED : ProofLib.RootState.CHALLENGED;
     }
 
     function finalizedAt() external view returns (uint64) {
@@ -322,7 +304,7 @@ contract WorldChainProofSystemGame is Clone, ISemver {
     }
 
     function proofCount() external view returns (uint8) {
-        return WorldChainProofLib.proofCount(proofBitmap);
+        return ProofLib.proofCount(proofBitmap);
     }
 
     ////////////////////////////////////////////////////////////////
@@ -376,7 +358,7 @@ contract WorldChainProofSystemGame is Clone, ISemver {
             }
             // Guards against chaining onto games from an older implementation with a different
             // domain (e.g. after a proof-system version bump reusing the same game type).
-            if (IWorldChainProofSystemGame(address(parent)).domainHash() != domainHash) revert InvalidParentGame();
+            if (MultiProofGame(address(parent)).domainHash() != domainHash) revert InvalidParentGame();
 
             startingRootClaim = Claim.unwrap(parent.rootClaim());
             startingL2BlockNumber = parent.l2SequenceNumber();
@@ -388,8 +370,9 @@ contract WorldChainProofSystemGame is Clone, ISemver {
             parentRef = address(parent);
         }
 
-        // TODO(PROTO-4907): Confirm whether proposals require an exact block interval or only
-        // a bounded range.
+        // Proposals must land on an exact interval from their parent: the fixed cadence is what
+        // makes a transition's `rootId` reproducible offchain and keeps the chain of proposals
+        // gapless.
         uint256 expectedL2BlockNumber = startingL2BlockNumber + DOMAIN_BLOCK_INTERVAL;
         if (l2SequenceNumber() != expectedL2BlockNumber) {
             revert InvalidL2BlockNumber(expectedL2BlockNumber, l2SequenceNumber());
@@ -406,8 +389,8 @@ contract WorldChainProofSystemGame is Clone, ISemver {
             (IDisputeGame previous,) = disputeGameFactory.games(GAME_TYPE, rootClaim(), previousExtraData);
             if (
                 address(previous) == address(0) || previous.status() != GameStatus.CHALLENGER_WINS
-                    || IWorldChainProofSystemGame(address(previous)).invalidationReason()
-                        != WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT
+                    || MultiProofGame(address(previous)).invalidationReason()
+                        != ProofLib.InvalidationReason.PROOF_TIMEOUT
             ) {
                 revert GameNotRetryable(keccak256(abi.encode(GAME_TYPE, rootClaim(), previousExtraData)));
             }
@@ -416,11 +399,14 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         // `initialize` runs in the same transaction as `DisputeGameFactory.create`, which set
         // `l1Head = blockhash(block.number - 1)`.
         _l1OriginNumber = uint64(block.number - 1);
-        rootId = WorldChainProofLib.rootId(
+        rootId = ProofLib.rootId(
             domainHash, parentRef, Claim.unwrap(rootClaim()), l2SequenceNumber(), Hash.unwrap(l1Head()), _l1OriginNumber
         );
 
         challengeDeadline = uint64(block.timestamp + challengePeriod);
+        // Both windows are creation-relative, so a proposal's worst-case time to resolution is
+        // fixed at creation and a late challenge cannot extend it.
+        proofDeadline = uint64(block.timestamp + proofPeriod);
         createdAt = Timestamp.wrap(uint64(block.timestamp));
         initialized = true;
 
@@ -458,7 +444,6 @@ contract WorldChainProofSystemGame is Clone, ISemver {
 
         challenger = payable(msg.sender);
         challengedAt = uint64(block.timestamp);
-        proofDeadline = uint64(block.timestamp + proofPeriod);
 
         // Custody the challenger bond in DelayedWETH and track the refund-mode credit.
         refundModeCredit[msg.sender] += msg.value;
@@ -477,8 +462,8 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         }
         if (laneId >= PROOF_LANE_COUNT) revert InvalidLane(laneId);
 
-        WorldChainProofLib.ProofLane lane = WorldChainProofLib.ProofLane(laneId);
-        uint8 mask = WorldChainProofLib.laneMask(lane);
+        ProofLib.ProofLane lane = ProofLib.ProofLane(laneId);
+        uint8 mask = ProofLib.laneMask(lane);
         if ((proofBitmap & mask) != 0) {
             emit DuplicateProofLane(lane, rootId, proofBitmap);
             return;
@@ -488,12 +473,12 @@ contract WorldChainProofSystemGame is Clone, ISemver {
             revert InvalidProof(lane, rootId);
         }
 
-        bool thresholdAlreadyReached = WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD);
+        bool thresholdAlreadyReached = ProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD);
         proofBitmap |= mask;
         emit ProofLaneSupported(lane, rootId, proofBitmap);
 
         // Emit only on the transition to settlement-ready so offchain consumers receive a single signal.
-        if (!thresholdAlreadyReached && WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
+        if (!thresholdAlreadyReached && ProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
             emit ProofThresholdReached(rootId, proofBitmap);
         }
     }
@@ -506,7 +491,7 @@ contract WorldChainProofSystemGame is Clone, ISemver {
     function resolutionStatus()
         external
         view
-        returns (bool resolvable, WorldChainProofLib.RootState outcome, WorldChainProofLib.InvalidationReason reason)
+        returns (bool resolvable, ProofLib.RootState outcome, ProofLib.InvalidationReason reason)
     {
         if (status != GameStatus.IN_PROGRESS) {
             return (false, state(), invalidationReason);
@@ -514,25 +499,24 @@ contract WorldChainProofSystemGame is Clone, ISemver {
 
         (GameStatus parentStatus, bool parentBlacklisted) = _parentResolution();
         if (parentBlacklisted || parentStatus == GameStatus.CHALLENGER_WINS) {
-            return
-                (true, WorldChainProofLib.RootState.INVALIDATED, WorldChainProofLib.InvalidationReason.INVALID_PARENT);
+            return (true, ProofLib.RootState.INVALIDATED, ProofLib.InvalidationReason.INVALID_PARENT);
         }
         if (parentStatus == GameStatus.IN_PROGRESS) {
-            return (false, state(), WorldChainProofLib.InvalidationReason.NONE);
+            return (false, state(), ProofLib.InvalidationReason.NONE);
         }
 
         if (challenger == address(0)) {
             return block.timestamp >= challengeDeadline
-                ? (true, WorldChainProofLib.RootState.FINALIZED, WorldChainProofLib.InvalidationReason.NONE)
-                : (false, WorldChainProofLib.RootState.PROPOSED, WorldChainProofLib.InvalidationReason.NONE);
+                ? (true, ProofLib.RootState.FINALIZED, ProofLib.InvalidationReason.NONE)
+                : (false, ProofLib.RootState.PROPOSED, ProofLib.InvalidationReason.NONE);
         }
 
-        if (WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
-            return (true, WorldChainProofLib.RootState.FINALIZED, WorldChainProofLib.InvalidationReason.NONE);
+        if (ProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
+            return (true, ProofLib.RootState.FINALIZED, ProofLib.InvalidationReason.NONE);
         }
         return block.timestamp >= proofDeadline
-            ? (true, WorldChainProofLib.RootState.INVALIDATED, WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT)
-            : (false, WorldChainProofLib.RootState.CHALLENGED, WorldChainProofLib.InvalidationReason.NONE);
+            ? (true, ProofLib.RootState.INVALIDATED, ProofLib.InvalidationReason.PROOF_TIMEOUT)
+            : (false, ProofLib.RootState.CHALLENGED, ProofLib.InvalidationReason.NONE);
     }
 
     /// @notice Resolves the game.
@@ -552,7 +536,7 @@ contract WorldChainProofSystemGame is Clone, ISemver {
             // ZKDisputeGame (which awards the challenger), both bonds are refunded: neither
             // party is at fault for an ancestor's failure.
             status = GameStatus.CHALLENGER_WINS;
-            invalidationReason = WorldChainProofLib.InvalidationReason.INVALID_PARENT;
+            invalidationReason = ProofLib.InvalidationReason.INVALID_PARENT;
             normalModeCredit[gameCreator()] += proposerBond;
             if (challenger != address(0)) normalModeCredit[challenger] += challengerBond;
         } else if (parentStatus == GameStatus.IN_PROGRESS) {
@@ -564,7 +548,7 @@ contract WorldChainProofSystemGame is Clone, ISemver {
             if (block.timestamp < challengeDeadline) revert GameNotOver();
             status = GameStatus.DEFENDER_WINS;
             normalModeCredit[gameCreator()] = totalBonds;
-        } else if (WorldChainProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
+        } else if (ProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
             // A challenged game finalizes as soon as enough independent proof lanes support it.
             // The proposer takes the challenger bond.
             status = GameStatus.DEFENDER_WINS;
@@ -573,7 +557,7 @@ contract WorldChainProofSystemGame is Clone, ISemver {
             // A challenged game below threshold times out once its proof window expires. The
             // challenger takes the proposer bond.
             status = GameStatus.CHALLENGER_WINS;
-            invalidationReason = WorldChainProofLib.InvalidationReason.PROOF_TIMEOUT;
+            invalidationReason = ProofLib.InvalidationReason.PROOF_TIMEOUT;
             normalModeCredit[challenger] = totalBonds;
         } else {
             revert GameNotOver();
@@ -691,9 +675,9 @@ contract WorldChainProofSystemGame is Clone, ISemver {
         }
     }
 
-    function _verifierFor(WorldChainProofLib.ProofLane lane) internal view returns (IWorldChainProofVerifier) {
-        if (lane == WorldChainProofLib.ProofLane.VALIDITY_PROOF) return validityProofVerifier;
-        if (lane == WorldChainProofLib.ProofLane.TEE_ATTESTATION) return teeVerifier;
+    function _verifierFor(ProofLib.ProofLane lane) internal view returns (IWorldChainProofVerifier) {
+        if (lane == ProofLib.ProofLane.VALIDITY_PROOF) return validityProofVerifier;
+        if (lane == ProofLib.ProofLane.TEE_ATTESTATION) return teeVerifier;
         return securityCouncil;
     }
 }

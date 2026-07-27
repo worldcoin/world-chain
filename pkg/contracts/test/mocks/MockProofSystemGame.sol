@@ -2,11 +2,11 @@
 pragma solidity 0.8.28;
 
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
-import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
+import {ProofLib} from "../../src/proofs/ProofLib.sol";
 
 contract MockProofSystemGame {
     struct Context {
-        WorldChainProofLib.Domain domain;
+        ProofLib.Domain domain;
         bytes32 rootId;
         address anchorStateRegistry;
         bytes32 domainHash;
@@ -14,12 +14,12 @@ contract MockProofSystemGame {
         bytes32 startingRootClaim;
         uint256 startingL2BlockNumber;
         bytes32 rootClaim;
-        uint256 l2BlockNumber;
-        bytes32 l1OriginHash;
+        uint256 l2SequenceNumber;
+        bytes32 l1Head;
         uint256 l1OriginNumber;
     }
 
-    WorldChainProofLib.Domain internal _domain;
+    ProofLib.Domain internal _domain;
     bytes32 public rootId;
     address public anchorStateRegistry;
     bytes32 public domainHash;
@@ -27,8 +27,8 @@ contract MockProofSystemGame {
     bytes32 public startingRootClaim;
     uint256 public startingL2BlockNumber;
     bytes32 public rootClaim;
-    uint256 public l2BlockNumber;
-    bytes32 public l1OriginHash;
+    uint256 public l2SequenceNumber;
+    bytes32 public l1Head;
     uint256 public l1OriginNumber;
 
     function setContext(Context memory context) external {
@@ -40,12 +40,12 @@ contract MockProofSystemGame {
         startingRootClaim = context.startingRootClaim;
         startingL2BlockNumber = context.startingL2BlockNumber;
         rootClaim = context.rootClaim;
-        l2BlockNumber = context.l2BlockNumber;
-        l1OriginHash = context.l1OriginHash;
+        l2SequenceNumber = context.l2SequenceNumber;
+        l1Head = context.l1Head;
         l1OriginNumber = context.l1OriginNumber;
     }
 
-    function domain() external view returns (WorldChainProofLib.Domain memory) {
+    function domain() external view returns (ProofLib.Domain memory) {
         return _domain;
     }
 

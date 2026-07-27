@@ -111,8 +111,8 @@ impl WorldContractsDeploymentConfig {
         let mut contracts = Vec::new();
         if self.proof_system {
             contracts.extend([
-                "WorldChainAnchorStateRegistry",
-                "WorldChainProofSystemFactory",
+                "MultiProofGame",
+                "DelayedWETH",
                 "MockRootIdVerifier(VALIDITY_PROOF)",
                 "MockRootIdVerifier(TEE_ATTESTATION)",
                 "MockRootIdVerifier(SECURITY_COUNCIL)",
@@ -593,14 +593,11 @@ mod tests {
         let challenger = OpChallengerConfig::local();
         let args = challenger.args();
 
-        assert!(
-            args.iter()
-                .any(|arg| arg == "--trace-type=permissioned,cannon")
-        );
-        assert!(
-            !args
-                .iter()
-                .any(|arg| arg.starts_with("--game-factory-address"))
-        );
+        assert!(args
+            .iter()
+            .any(|arg| arg == "--trace-type=permissioned,cannon"));
+        assert!(!args
+            .iter()
+            .any(|arg| arg.starts_with("--game-factory-address")));
     }
 }

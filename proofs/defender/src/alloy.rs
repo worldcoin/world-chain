@@ -1,11 +1,17 @@
-use crate::{error::DefenderError, traits::DefenderClient, types::DefenderSubmission};
-use alloy_primitives::{Address, BlockNumber, Bytes, U256};
+use crate::{
+    error::DefenderError,
+    traits::DefenderClient,
+    types::{DefenderSubmission, GameMetadata},
+};
+use alloy_primitives::{Address, Bytes, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
-use world_chain_proofs::{GameCreated, IDisputeGameFactory, IWorldChainProofSystemGame, RootState};
+use world_chain_proofs::{
+    IDisputeGameFactory, IMultiProofGame, PROOF_LANE_COUNT, ResolutionStatus,
+};
 
-/// Alloy-backed implementation of [`DefenderClient`].
+/// Alloy-backed implementation of [`DefenderClient`], wired to the stock `DisputeGameFactory`.
 #[derive(Debug, Clone)]
 pub struct AlloyDefenderClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
@@ -31,47 +37,40 @@ where
         }
     }
 
-    fn game_instance(
-        &self,
-        game: Address,
-    ) -> IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance<P> {
-        IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        )
+    fn game(&self, address: Address) -> IMultiProofGame::IMultiProofGameInstance<P> {
+        IMultiProofGame::IMultiProofGameInstance::new(address, self.provider.clone())
     }
 
-    /// Reads the proposal context of a factory-created game.
-    ///
-    /// Discovery filters the trusted factory's `DisputeGameCreated` event, so every game read
-    /// here is a genuine `WorldChainProofSystemGame`; the rich per-proposal fields live on the
-    /// game itself rather than in the factory event.
-    async fn read_game_created(
+    /// Returns the game implementation registered for the World Chain game type. Period values
+    /// are constructor immutables, so they are read from the implementation rather than from a
+    /// per-proposal clone.
+    async fn game_impl(
         &self,
-        game_address: Address,
-        root_claim: alloy_primitives::B256,
-    ) -> Result<GameCreated, DefenderError> {
-        let game = self.game_instance(game_address);
-        macro_rules! call {
-            ($method:ident) => {
-                game.$method()
-                    .call()
-                    .await
-                    .map_err(|err| DefenderError::Contract(err.to_string()))?
-            };
+    ) -> Result<IMultiProofGame::IMultiProofGameInstance<P>, DefenderError> {
+        let address = self
+            .factory
+            .gameImpls(self.game_type)
+            .call()
+            .await
+            .map_err(|error| DefenderError::Contract(error.to_string()))?;
+        if address.is_zero() {
+            return Err(DefenderError::Contract(format!(
+                "no game implementation registered for game type {}",
+                self.game_type
+            )));
         }
+        Ok(self.game(address))
+    }
 
-        Ok(GameCreated {
-            root_id: call!(rootId),
-            game: game_address,
-            proposer: call!(gameCreator),
-            root_claim,
-            l2_block_number: u256_to_u64(call!(l2BlockNumber), "l2BlockNumber")?,
-            parent_ref: call!(parentRef),
-            l1_origin_hash: call!(l1OriginHash),
-            l1_origin_number: u256_to_u64(call!(l1OriginNumber), "l1OriginNumber")?,
-            attempt: call!(attempt),
-        })
+    async fn game_at_index(&self, index: u64) -> Result<(u32, u64, Address), DefenderError> {
+        let result = self
+            .factory
+            .gameAtIndex(U256::from(index))
+            .block(BlockId::finalized())
+            .call()
+            .await
+            .map_err(|error| DefenderError::Contract(error.to_string()))?;
+        Ok((result.gameType, result.timestamp, result.proxy))
     }
 }
 
@@ -80,78 +79,113 @@ impl<P> DefenderClient for AlloyDefenderClient<P>
 where
     P: Provider + Clone + Send + Sync + 'static,
 {
-    async fn root_state(&self, game: Address) -> Result<RootState, DefenderError> {
-        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        );
-        let root_state_raw = game
-            .state()
-            .call()
-            .await
-            .map_err(|err| DefenderError::Contract(err.to_string()))?;
-        let root_state: RootState = root_state_raw.try_into()?;
-        Ok(root_state)
-    }
-
-    async fn finalized_l1_block_num(&self) -> Result<BlockNumber, DefenderError> {
-        self.provider
-            .get_block(BlockId::finalized())
-            .await
-            .map_err(|err| DefenderError::Rpc(err.to_string()))?
-            .map(|block| block.number())
-            .ok_or(DefenderError::L1FinalizedBlockNotFound)
-    }
-
-    async fn games_created(
-        &self,
-        from: BlockNumber,
-        to: BlockNumber,
-    ) -> Result<Vec<GameCreated>, DefenderError> {
-        let logs = self
+    async fn game_count(&self) -> Result<u64, DefenderError> {
+        let count = self
             .factory
-            .DisputeGameCreated_filter()
-            .topic2(U256::from(self.game_type))
-            .from_block(from)
-            .to_block(to)
-            .query()
-            .await
-            .map_err(|err| DefenderError::Rpc(err.to_string()))?;
-
-        let mut games = Vec::with_capacity(logs.len());
-        for (event, _log) in logs {
-            games.push(
-                self.read_game_created(event.disputeProxy, event.rootClaim)
-                    .await?,
-            );
-        }
-        Ok(games)
-    }
-
-    async fn challenge_deadline(&self, game: Address) -> Result<u64, DefenderError> {
-        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        );
-        let challenge_deadline = game
-            .challengeDeadline()
+            .gameCount()
+            .block(BlockId::finalized())
             .call()
             .await
-            .map_err(|err| DefenderError::Contract(err.to_string()))?;
-        Ok(challenge_deadline)
+            .map_err(|error| DefenderError::Contract(error.to_string()))?;
+        u256_to_u64(count, "gameCount")
     }
 
-    async fn proof_bitmap(&self, game: Address) -> Result<u8, DefenderError> {
-        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        );
-        let proof_bitmap = game
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, DefenderError> {
+        let (game_type, _, proxy) = self.game_at_index(index).await?;
+        Ok((game_type == self.game_type).then_some(proxy))
+    }
+
+    async fn game_created_at(&self, index: u64) -> Result<u64, DefenderError> {
+        let (_, timestamp, _) = self.game_at_index(index).await?;
+        Ok(timestamp)
+    }
+
+    async fn proof_period(&self) -> Result<u64, DefenderError> {
+        self.game_impl()
+            .await?
+            .proofPeriod()
+            .call()
+            .await
+            .map_err(|error| DefenderError::Contract(error.to_string()))
+    }
+
+    async fn game_proposer(&self, address: Address) -> Result<Address, DefenderError> {
+        self.game(address)
+            .gameCreator()
+            .call()
+            .await
+            .map_err(|error| DefenderError::Contract(error.to_string()))
+    }
+
+    async fn game_metadata(&self, address: Address) -> Result<GameMetadata, DefenderError> {
+        let game = self.game(address);
+        let (
+            root_claim,
+            l2_block_number,
+            l1_origin_hash,
+            challenge_deadline,
+            proof_deadline,
+            proof_threshold,
+        ) = self
+            .provider
+            .multicall()
+            .add(game.rootClaim())
+            .add(game.l2SequenceNumber())
+            .add(game.l1Head())
+            .add(game.challengeDeadline())
+            .add(game.proofDeadline())
+            .add(game.PROOF_THRESHOLD())
+            .aggregate()
+            .await
+            .map_err(|error| DefenderError::Contract(error.to_string()))?;
+        if proof_threshold == 0 || proof_threshold > PROOF_LANE_COUNT {
+            return Err(DefenderError::Contract(format!(
+                "invalid proof threshold {proof_threshold} for game {address}"
+            )));
+        }
+
+        Ok(GameMetadata {
+            address,
+            root_claim,
+            l2_block_number: u256_to_u64(l2_block_number, "l2SequenceNumber")?,
+            l1_origin_hash,
+            challenge_deadline,
+            proof_deadline,
+            proof_threshold,
+        })
+    }
+
+    async fn proof_deadline(&self, address: Address) -> Result<u64, DefenderError> {
+        self.game(address)
+            .proofDeadline()
+            .call()
+            .await
+            .map_err(|error| DefenderError::Contract(error.to_string()))
+    }
+
+    async fn resolution_status(&self, address: Address) -> Result<ResolutionStatus, DefenderError> {
+        let result = self
+            .game(address)
+            .resolutionStatus()
+            .call()
+            .await
+            .map_err(|error| DefenderError::Contract(error.to_string()))?;
+        let root_state = result.outcome.try_into()?;
+        let invalidation_reason = result.reason.try_into()?;
+
+        Ok(ResolutionStatus {
+            resolvable: result.resolvable,
+            root_state,
+            invalidation_reason,
+        })
+    }
+
+    async fn proof_bitmap(&self, address: Address) -> Result<u8, DefenderError> {
+        self.game(address)
             .proofBitmap()
             .call()
             .await
-            .map_err(|err| DefenderError::Contract(err.to_string()))?;
-        Ok(proof_bitmap)
+            .map_err(|error| DefenderError::Contract(error.to_string()))
     }
 
     async fn submit_proof(
@@ -160,11 +194,8 @@ where
         lane: u8,
         proof: Bytes,
     ) -> Result<DefenderSubmission, DefenderError> {
-        let game = IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        );
-        let pending = game
+        let pending = self
+            .game(game)
             .submitProofLane(lane, proof)
             .send()
             .await

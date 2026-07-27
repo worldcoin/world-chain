@@ -1,6 +1,6 @@
 //! World Chain proposer primitives.
 //!
-//! The proposer watches L2 output roots and creates `WorldChainProofSystemGame`
+//! The proposer watches L2 output roots and creates `MultiProofGame`
 //! contracts on L1 through the stock `DisputeGameFactory`.
 
 mod alloy;

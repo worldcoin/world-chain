@@ -1,11 +1,12 @@
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, BlockHash, U256};
 use alloy_provider::{Provider, WalletProvider};
 use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
 use world_chain_proofs::{
-    ANCHOR_PARENT_INDEX, IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory,
-    IWorldChainProofSystemGame, InvalidationReasonError, ResolutionStatus, RootStateError,
+    ANCHOR_PARENT_INDEX, IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame,
+    InvalidationReasonError, ResolutionStatus, RootStateError,
 };
+use world_chain_prover_service::ProofData;
 
 use crate::{
     BondManagerClient, ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
@@ -50,26 +51,20 @@ where
         }
     }
 
-    fn game_instance(
-        &self,
-        game: Address,
-    ) -> IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance<P> {
-        IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            game,
-            self.provider.clone(),
-        )
+    fn game_instance(&self, game: Address) -> IMultiProofGame::IMultiProofGameInstance<P> {
+        IMultiProofGame::IMultiProofGameInstance::new(game, self.provider.clone())
     }
 
     /// Reads an L2 block number from a game contract.
     pub async fn game_l2_block_number(&self, game: Address) -> Result<u64, ProposerError> {
         let l2_block_number = self
             .game_instance(game)
-            .l2BlockNumber()
+            .l2SequenceNumber()
             .call()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
 
-        u256_to_u64(l2_block_number, "l2BlockNumber")
+        u256_to_u64(l2_block_number, "l2SequenceNumber")
     }
 
     async fn latest_block_timestamp(&self) -> Result<u64, ProposerError> {
@@ -369,9 +364,21 @@ where
             .map_err(|error| ProposerError::Contract(error.to_string()))
     }
 
+    async fn latest_finalized_l1_block(&self) -> Result<BlockHash, ProposerError> {
+        let block = self
+            .provider
+            .get_block(BlockId::finalized())
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let block = block.ok_or_else(|| ProposerError::FinalizedBlockNotFound)?;
+        let hash = block.hash();
+        Ok(hash)
+    }
+
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
+        _proof: ProofData,
         proposer_bond: U256,
     ) -> Result<ProposalSubmission, ProposerError> {
         let pending = self
@@ -422,7 +429,7 @@ where
 }
 
 async fn send_claim_credit<P>(
-    game: &IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance<P>,
+    game: &IMultiProofGame::IMultiProofGameInstance<P>,
     recipient: Address,
 ) -> Result<alloy_primitives::TxHash, ProposerError>
 where

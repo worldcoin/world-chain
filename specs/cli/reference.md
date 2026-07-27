@@ -231,6 +231,14 @@ Flashblocks:
           
           [env: FLASHBLOCKS_FORCE_RECEIVE_PEERS=]
 
+      --witness.collect
+          Enable live pre-image witness collection for the proof system
+
+      --witness.depth <DEPTH>
+          Ring-buffer depth: the maximum number of recent block witnesses retained in the in-memory cache served over `debug_collectRangeWitness`
+          
+          [default: 1024]
+
       --tx-peers <PEER_ID>
           Comma-separated list of peer IDs to which transactions should be propagated
 

@@ -9,9 +9,7 @@ mod consensus_provider;
 mod types;
 
 // re-exports
-pub use bindings::{
-    IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IWorldChainProofSystemGame,
-};
+pub use bindings::{IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame};
 pub use consensus_provider::{ConsensusError, ConsensusProvider, OptimismConsensusClient};
 pub use types::{
     ANCHOR_PARENT_INDEX, GameCreated, GameStatus, GameStatusError, InvalidationReason,

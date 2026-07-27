@@ -53,9 +53,9 @@ sol! {
         function paused() external view returns (bool);
     }
 
-    /// `WorldChainProofSystemGame` surface (an `IDisputeGame` implementation).
+    /// `MultiProofGame` surface (an `IDisputeGame` implementation).
     #[sol(rpc)]
-    interface IWorldChainProofSystemGame {
+    interface IMultiProofGame {
         /// Rich creation event emitted by the game itself; replaces the deleted factory's
         /// `GameCreated` for offchain indexers.
         event WorldChainGameCreated(
@@ -75,6 +75,7 @@ sol! {
         function gameCreator() external view returns (address);
         function gameType() external view returns (uint32);
         function disputeGameFactory() external view returns (address);
+        function challenger() external view returns (address);
         function anchorStateRegistry() external view returns (address);
         function weth() external view returns (address);
         function domainHash() external view returns (bytes32);
@@ -85,14 +86,18 @@ sol! {
         function startingL2BlockNumber() external view returns (uint256);
         function rootClaim() external view returns (bytes32);
         function l2SequenceNumber() external view returns (uint256);
-        function l2BlockNumber() external view returns (uint256);
-        function l1OriginHash() external view returns (bytes32);
+        function l1Head() external view returns (bytes32);
         function l1OriginNumber() external view returns (uint256);
         function createdAt() external view returns (uint64);
         function resolvedAt() external view returns (uint64);
+        function challengePeriod() external view returns (uint64);
+        function proofPeriod() external view returns (uint64);
         function challengeDeadline() external view returns (uint64);
+        function challengedAt() external view returns (uint64);
         function proofDeadline() external view returns (uint64);
+        function PROOF_THRESHOLD() external view returns (uint8);
         function finalizedAt() external view returns (uint64);
+        function invalidatedAt() external view returns (uint64);
         function status() external view returns (uint8);
         function state() external view returns (uint8);
         function invalidationReason() external view returns (uint8);

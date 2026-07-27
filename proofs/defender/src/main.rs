@@ -1,4 +1,4 @@
-//! `world-chain-defender` binary: watches challenged valid `WorldChainProofSystemFactory`
+//! `world-chain-defender` binary: watches challenged valid `DisputeGameFactory`
 //! games, requests proofs from the prover-service, and submits completed proof lanes on L1.
 //!
 //! Mirrors the in-process defender wired by the devnet harness
@@ -37,7 +37,7 @@ struct Cli {
     #[arg(long, env = "PROVER_SERVICE_URL")]
     prover_service_url: String,
 
-    /// `WorldChainProofSystemFactory` address on L1.
+    /// Stock `DisputeGameFactory` proxy address on L1.
     #[arg(long, env = "FACTORY_ADDRESS")]
     factory_address: Address,
 
@@ -49,6 +49,10 @@ struct Cli {
     #[arg(long, env = "DEFENDER_KEY", hide_env_values = true)]
     defender_key: PrivateKeySigner,
 
+    /// The only proposer address whose games this defender will defend.
+    #[arg(long, env = "ALLOWED_PROPOSER")]
+    allowed_proposer: Address,
+
     /// Seconds between game-factory polls.
     #[arg(long, env = "POLL_INTERVAL_SECONDS", default_value_t = 12)]
     poll_interval_seconds: u64,
@@ -57,7 +61,11 @@ struct Cli {
     #[arg(long, env = "MAX_GAME_CONCURRENCY", default_value_t = 10)]
     max_game_concurrency: usize,
 
-    /// Maximum proof attempts per challenged game before giving up.
+    /// Maximum number of newly created games discovered per defender tick.
+    #[arg(long, env = "MAX_GAMES_PER_TICK", default_value_t = 100)]
+    max_games_per_tick: u64,
+
+    /// Maximum proof attempts per lane before giving up.
     #[arg(long, env = "MAX_PROOF_ATTEMPTS", default_value_t = 3)]
     max_proof_attempts: u32,
 }
@@ -81,8 +89,10 @@ async fn main() -> Result<()> {
     let proof_requester = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
     let config = DefenderConfig {
+        allowed_proposer: cli.allowed_proposer,
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_game_concurrency: cli.max_game_concurrency,
+        max_games_per_tick: cli.max_games_per_tick,
         max_proof_attempts: cli.max_proof_attempts,
     };
     let mut defender = WorldChainDefender::new(config, client, output_roots, proof_requester);
@@ -93,6 +103,8 @@ async fn main() -> Result<()> {
         prover_service = %cli.prover_service_url,
         factory = %cli.factory_address,
         defender = %defender_address,
+        allowed_proposer = %cli.allowed_proposer,
+        max_games_per_tick = cli.max_games_per_tick,
         "starting World Chain proof-system defender"
     );
 

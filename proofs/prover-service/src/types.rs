@@ -52,7 +52,7 @@ impl TryFrom<&str> for ProofBackend {
 pub struct ProofRequest {
     /// The backend that should generate the proof.
     pub backend: ProofBackend,
-    /// The `WorldChainProofSystemGame` contract address the proof defends.
+    /// The `MultiProofGame` contract address the proof defends.
     pub game: Address,
     /// The output root claim to prove.
     pub root_claim: B256,

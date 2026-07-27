@@ -4,8 +4,8 @@ pragma solidity 0.8.28;
 import {Script} from "forge-std/Script.sol";
 import {console2} from "forge-std/console2.sol";
 
-import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
-import {WorldChainProofSystemGame} from "../../src/proofs/WorldChainProofSystemGame.sol";
+import {ProofLib} from "../../src/proofs/ProofLib.sol";
+import {MultiProofGame} from "../../src/proofs/MultiProofGame.sol";
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainStakingRegistry} from "../../src/proofs/interfaces/IWorldChainStakingRegistry.sol";
 import {MockRootIdVerifier} from "../../src/proofs/mocks/MockRootIdVerifier.sol";
@@ -23,7 +23,7 @@ import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 ///         infrastructure deployed by op-deployer.
 ///
 /// Deploys: mock verifiers + staking registry (devnet), a DelayedWETH proxy dedicated to the
-/// World Chain game type, and the `WorldChainProofSystemGame` implementation. Then registers
+/// World Chain game type, and the `MultiProofGame` implementation. Then registers
 /// the implementation on the existing `DisputeGameFactory` (`setImplementation` + `setInitBond`)
 /// and optionally flips the `AnchorStateRegistry`'s respected game type — the withdrawal
 /// cutover switch. `setImplementation(WC_GAME_TYPE, address(0))` is the kill switch: it stops
@@ -44,7 +44,7 @@ contract DeployProofSystem is Script {
         MockStakingRegistry staking;
         IProxyAdmin wethProxyAdmin;
         IDelayedWETH weth;
-        WorldChainProofSystemGame gameImpl;
+        MultiProofGame gameImpl;
     }
 
     struct Config {
@@ -103,7 +103,7 @@ contract DeployProofSystem is Script {
                 abi.encodeCall(IDelayedWETH.initialize, (config.systemConfig))
             );
 
-        deployment.gameImpl = new WorldChainProofSystemGame(_gameConfig(deployment, config));
+        deployment.gameImpl = new MultiProofGame(_gameConfig(deployment, config));
         vm.stopBroadcast();
 
         // 2. Register the game type on the existing DisputeGameFactory (factory owner).
@@ -156,7 +156,7 @@ contract DeployProofSystem is Script {
         config.l2ChainId = vm.envUint("WORLD_CHAIN_L2_CHAIN_ID");
         config.rollupConfigHash = vm.envBytes32("ROLLUP_CONFIG_HASH");
         config.blockInterval = vm.envOr("PROOF_SYSTEM_BLOCK_INTERVAL", uint256(10));
-        config.proofThreshold = uint8(vm.envOr("PROOF_THRESHOLD", uint256(WorldChainProofLib.PROOF_THRESHOLD)));
+        config.proofThreshold = uint8(vm.envOr("PROOF_THRESHOLD", uint256(ProofLib.PROOF_THRESHOLD)));
         config.disputeGameFactory = IDisputeGameFactory(vm.envAddress("DISPUTE_GAME_FACTORY"));
         config.anchorStateRegistry = IAnchorStateRegistry(vm.envAddress("ANCHOR_STATE_REGISTRY"));
         config.systemConfig = ISystemConfig(vm.envAddress("SYSTEM_CONFIG"));
@@ -170,28 +170,28 @@ contract DeployProofSystem is Script {
     function _gameConfig(Deployment memory deployment, Config memory config)
         internal
         pure
-        returns (WorldChainProofSystemGame.GameConfig memory)
+        returns (MultiProofGame.GameConfig memory)
     {
-        return WorldChainProofSystemGame.GameConfig({
-            domain: WorldChainProofLib.Domain({
+        return MultiProofGame.GameConfig({
+            proposerBond: PROPOSER_BOND,
+            challengerBond: CHALLENGER_BOND,
+            challengePeriod: CHALLENGE_PERIOD,
+            proofPeriod: PROOF_PERIOD,
+            domain: ProofLib.Domain({
                 chainId: config.l2ChainId,
                 proofSystemVersion: 1,
                 rollupConfigHash: config.rollupConfigHash,
                 blockInterval: config.blockInterval
             }),
             gameType: config.gameType,
-            challengePeriod: CHALLENGE_PERIOD,
-            proofPeriod: PROOF_PERIOD,
-            proposerBond: PROPOSER_BOND,
-            challengerBond: CHALLENGER_BOND,
-            proofThreshold: config.proofThreshold,
             validityProofVerifier: IWorldChainProofVerifier(address(deployment.validityVerifier)),
             teeVerifier: IWorldChainProofVerifier(address(deployment.teeVerifier)),
             securityCouncil: IWorldChainProofVerifier(address(deployment.councilVerifier)),
             stakingRegistry: IWorldChainStakingRegistry(address(deployment.staking)),
             disputeGameFactory: config.disputeGameFactory,
             anchorStateRegistry: config.anchorStateRegistry,
-            weth: deployment.weth
+            weth: deployment.weth,
+            proofThreshold: config.proofThreshold
         });
     }
 

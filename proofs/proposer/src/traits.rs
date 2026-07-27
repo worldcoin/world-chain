@@ -1,6 +1,7 @@
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, BlockHash, U256};
 use async_trait::async_trait;
 use world_chain_proofs::ResolutionStatus;
+use world_chain_prover_service::ProofData;
 
 use crate::{
     ParentRef, Proposal, ProposalSubmission, ProposerError,
@@ -61,10 +62,14 @@ pub trait ProposerClient: Send + Sync {
     /// Reads the proposer bond for the World Chain game type from the factory.
     async fn proposer_bond(&self) -> Result<U256, ProposerError>;
 
+    /// Gets the latest L1 finalized block hash.
+    async fn latest_finalized_l1_block(&self) -> Result<BlockHash, ProposerError>;
+
     /// Submits a `DisputeGameFactory.create` transaction for the proposal.
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
+        proof: ProofData,
         proposer_bond: U256,
     ) -> Result<ProposalSubmission, ProposerError>;
 }
