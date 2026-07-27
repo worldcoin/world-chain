@@ -41,11 +41,17 @@
   "lib/openzeppelin-contracts-upgradeable": {
     "rev": "fa525310e45f91eb20a6d3baa2644be8e0adba31"
   },
+  "lib/optimism": {
+    "rev": "a7c88c8d636ceb9944ea0edaf7d033da258778ab"
+  },
   "lib/safe-contracts": {
     "rev": "192c7dc67290940fcbc75165522bb86a37187069"
   },
   "lib/safe-modules": {
     "rev": "08282851e9815a53c13621334628ccb7b656f25a"
+  },
+  "lib/sp1-contracts": {
+    "rev": "d3629729c3216eb51bd4859d027a8eb729399fa4"
   },
   "lib/world-id-contracts": {
     "rev": "0187d2fdfa9bdb13b47b0ff1b0fd1c3ad7c5356b"

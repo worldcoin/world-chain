@@ -36,6 +36,10 @@ jobs:
       - name: Run Forge fmt
         run: forge fmt --check
 
+      - name: Build pinned OP Stack artifacts
+        run: forge build
+        working-directory: pkg/contracts/opstack
+
       - name: Run Forge build
         run: forge build --sizes
 
