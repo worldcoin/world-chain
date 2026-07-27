@@ -19148,6 +19148,7 @@ dependencies = [
 name = "world-chain-proposer"
 version = "2.4.0"
 dependencies = [
+ "alloy-eips 2.0.5",
  "alloy-network 2.0.5",
  "alloy-primitives",
  "alloy-provider",
@@ -19165,6 +19166,7 @@ dependencies = [
  "tracing-subscriber 0.3.23",
  "url",
  "world-chain-proofs",
+ "world-chain-prover-service",
 ]
 
 [[package]]

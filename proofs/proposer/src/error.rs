@@ -19,6 +19,8 @@ pub enum ProposerError {
     /// Contract call or transaction failure.
     #[error("contract error: {0}")]
     Contract(String),
+    #[error("L1 finalized block not found")]
+    FinalizedBlockNotFound,
     #[error(transparent)]
     OutputRoot(#[from] ConsensusError),
     #[error("The proposal transaction didn't execute succesfully: {0}")]

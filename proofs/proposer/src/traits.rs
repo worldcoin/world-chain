@@ -1,6 +1,7 @@
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256, BlockHash, U256};
 use async_trait::async_trait;
 use world_chain_proofs::{ProposalCommitment, ResolutionStatus};
+use world_chain_prover_service::ProofData;
 
 use crate::{
     ParentRef, Proposal, ProposalSubmission, ProposerError,
@@ -65,10 +66,14 @@ pub trait ProposerClient: Send + Sync {
     /// Reads the proposer bond from the factory contract.
     async fn proposer_bond(&self) -> Result<U256, ProposerError>;
 
+    /// Gets the latest L1 finalized block hash.
+    async fn latest_finalized_l1_block(&self) -> Result<BlockHash, ProposerError>;
+
     /// Submits a proposal transaction to the factory.
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
+        proof: ProofData,
         proposer_bond: U256,
     ) -> Result<ProposalSubmission, ProposerError>;
 }

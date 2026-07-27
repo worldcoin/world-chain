@@ -1,6 +1,9 @@
-use alloy_primitives::B256;
+use std::collections::HashSet;
+
+use alloy_primitives::{Address, B256};
 use tracing::{info, warn};
 use world_chain_proofs::{ConsensusProvider, InvalidationReason, RootState};
+use world_chain_prover_service::{ProofBackend, ProofRequest, ProofRequestId, ProofRequester};
 
 use crate::{
     ParentRef, Proposal, ProposerClient, ProposerConfig, ProposerError,
@@ -9,19 +12,27 @@ use crate::{
 
 /// World Chain Proposer.
 #[derive(Debug)]
-pub struct WorldChainProposer<E, C> {
+pub struct WorldChainProposer<E, C, P> {
     config: ProposerConfig,
     execution_provider: E,
     consensus_provider: C,
+    proof_requester: P,
+    proof_ids: HashSet<ProofRequestId>
 }
 
-impl<E, C> WorldChainProposer<E, C> {
+impl<E, C, P> WorldChainProposer<E, C, P> {
     /// Creates a proposer from execution and consensus providers.
-    pub fn new(config: ProposerConfig, execution_provider: E, consensus_provider: C) -> Self {
+    pub fn new(
+        config: ProposerConfig,
+        execution_provider: E,
+        consensus_provider: C,
+        proof_requester: P,
+    ) -> Self {
         Self {
             config,
             execution_provider,
             consensus_provider,
+            proof_requester,
         }
     }
 
@@ -32,10 +43,11 @@ impl<E, C> WorldChainProposer<E, C> {
     }
 }
 
-impl<E, C> WorldChainProposer<E, C>
+impl<E, C, P> WorldChainProposer<E, C, P>
 where
     E: ProposerClient,
     C: ConsensusProvider,
+    P: ProofRequester,
 {
     /// Fetches the anchor, reconstructs its canonical descendants, and determines the next action.
     ///
@@ -235,6 +247,21 @@ where
             NextProposalAction::CaughtUp { .. } => return Ok(()),
         };
 
+        self.proof_ids.get(value)
+        let latest_finalized_l1 = self.execution_provider.latest_finalized_l1_block().await?;
+        let proof_request = ProofRequest {
+            backend: ProofBackend::Nitro,
+            game: Address::ZERO, // TODO: think about this
+            root_claim: proposal.root_claim,
+            l2_block_number: proposal.l2_block_number,
+            l1_head: latest_finalized_l1,
+        };
+        // TODO: add error handling
+        let proof_id = self
+            .proof_requester
+            .request_proof(proof_request)
+            .await
+            .unwrap();
         let submission = self
             .execution_provider
             .submit_proposal(proposal, self.config.proposer_bond)
