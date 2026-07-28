@@ -18,7 +18,7 @@ use tracing::level_filters::LevelFilter;
 use world_chain_node::context::WorldChainDefaultContext;
 use world_chain_test_utils::e2e_harness::setup::WorldChainTestBuilder;
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_admin_tracing_directives_apply_and_revert() -> eyre::Result<()> {
     // Install a reloadable tracing subscriber and register the reload handle,
     // exactly as `reth_tracing` does when the CLI enables reload. Each nextest

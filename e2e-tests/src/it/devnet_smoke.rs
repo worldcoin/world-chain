@@ -10,7 +10,7 @@ use world_chain_devnet::{
 use world_chain_test_utils::DEV_CHAIN_ID;
 
 #[ignore = "Does not run in CI"]
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn direct_sequencer_devnet_smoke() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -139,7 +139,7 @@ async fn wait_for_safe_head_progress(
 }
 
 #[ignore = "Does not run in CI"]
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn devnet_run_until_shutdown_uses_continuous_block_driver() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
