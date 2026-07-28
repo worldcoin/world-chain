@@ -5,6 +5,10 @@ on:
     branches:
       - main
       - kit/docs
+    paths:
+      - "specs/**"
+      - "book.toml"
+      - ".github/workflows/book.yml"
   workflow_dispatch:
 
 jobs:

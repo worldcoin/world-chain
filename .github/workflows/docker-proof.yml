@@ -24,6 +24,7 @@ on:
       - "crates/chainspec/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "rust-toolchain.toml"
       - ".cargo/config.toml"
       - "Dockerfile.prover"
       - "scripts/build-eif.sh"
