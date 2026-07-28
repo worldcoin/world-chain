@@ -29,7 +29,24 @@ contract PBHSafe4337ModuleTest is Test {
     uint256 public ownerKey;
 
     address public constant PBH_SIGNATURE_AGGREGATOR = address(0x123);
+    // casting to 'uint40' is safe because `bytes5` is exactly 40 bits wide — no truncation
+    // forge-lint: disable-next-line(unsafe-typecast)
     uint40 public constant PBH_NONCE_KEY = uint40(bytes5("pbhtx"));
+
+    /// @dev Unpacks an ERC-4337 packed `validationData` word into its three bit-fields.
+    ///      Every cast takes a fixed-width field of the word, so narrowing is the intended
+    ///      semantics rather than an unchecked truncation.
+    // forge-lint: disable-start(unsafe-typecast)
+    function _unpackValidationData(uint256 validationData)
+        internal
+        pure
+        returns (address authorizer, uint48 validUntil, uint48 validAfter)
+    {
+        authorizer = address(uint160(validationData));
+        validUntil = uint48(validationData >> 160);
+        validAfter = uint48(validationData >> 208);
+    }
+    // forge-lint: disable-end(unsafe-typecast)
 
     function setUp() public {
         // Create single EOA owner
@@ -123,10 +140,7 @@ contract PBHSafe4337ModuleTest is Test {
 
         uint256 validationData = module.validateSignaturesExternal(userOp);
 
-        // // Extract validation components
-        address authorizer = address(uint160(validationData));
-        uint48 validUntil = uint48(validationData >> 160);
-        uint48 validAfter = uint48(validationData >> 208);
+        (address authorizer, uint48 validUntil, uint48 validAfter) = _unpackValidationData(validationData);
 
         // Verify signature was valid (authorizer should be address(0) for valid non-PBH signature)
         assertEq(authorizer, PBH_SIGNATURE_AGGREGATOR, "PBH Aggregator address not returned");
@@ -175,10 +189,7 @@ contract PBHSafe4337ModuleTest is Test {
 
         uint256 validationData = module.validateSignaturesExternal(userOp);
 
-        // // Extract validation components
-        address authorizer = address(uint160(validationData));
-        uint48 validUntil = uint48(validationData >> 160);
-        uint48 validAfter = uint48(validationData >> 208);
+        (address authorizer, uint48 validUntil, uint48 validAfter) = _unpackValidationData(validationData);
 
         // Verify signature was valid (authorizer should be address(0) for valid non-PBH signature)
         assertEq(authorizer, PBH_SIGNATURE_AGGREGATOR, "PBH Aggregator address not returned");
@@ -225,8 +236,7 @@ contract PBHSafe4337ModuleTest is Test {
 
         uint256 validationData = module.validateSignaturesExternal(userOp);
 
-        // // Extract validation components
-        address authorizer = address(uint160(validationData));
+        (address authorizer,,) = _unpackValidationData(validationData);
 
         // Verify signature was invalid (authorizer should be 1 for invalid signature)
         assertEq(authorizer, address(1), "PBH Aggregator address not returned");

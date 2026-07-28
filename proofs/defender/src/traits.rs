@@ -1,22 +1,27 @@
-use crate::{error::DefenderError, types::DefenderSubmission};
-use alloy_primitives::{Address, BlockNumber, Bytes};
+use crate::{
+    error::DefenderError,
+    types::{DefenderSubmission, GameMetadata},
+};
+use alloy_primitives::{Address, Bytes};
 use async_trait::async_trait;
-use world_chain_proofs::{GameCreated, RootState};
+use world_chain_proofs::ResolutionStatus;
 
 #[async_trait]
-pub trait DefenderClient {
-    /// Reads the root state of the provided game.
-    async fn root_state(&self, game: Address) -> Result<RootState, DefenderError>;
-    /// Get the last finalized L1 block number.
-    async fn finalized_l1_block_num(&self) -> Result<BlockNumber, DefenderError>;
-    /// Get all `GameCreated` events between the provided block numbers.
-    async fn games_created(
-        &self,
-        from: BlockNumber,
-        to: BlockNumber,
-    ) -> Result<Vec<GameCreated>, DefenderError>;
-    /// Get the challenge deadline of the provided game.
-    async fn challenge_deadline(&self, game: Address) -> Result<u64, DefenderError>;
+pub trait DefenderClient: Send + Sync {
+    /// Returns the total number of games indexed by the dispute-game factory, across all
+    /// game types.
+    async fn game_count(&self) -> Result<u64, DefenderError>;
+    /// Returns the WIP-1006 game at the provided factory index, or `None` when that index
+    /// holds a game of a different type.
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, DefenderError>;
+    /// Returns the creation timestamp of any game at the provided factory index.
+    async fn game_created_at(&self, index: u64) -> Result<u64, DefenderError>;
+    /// Reads the account that created the provided game.
+    async fn game_creator(&self, game: Address) -> Result<Address, DefenderError>;
+    /// Reads the immutable game data needed to monitor and defend its root claim.
+    async fn game_metadata(&self, game: Address) -> Result<GameMetadata, DefenderError>;
+    /// Returns the current resolution evaluation for the provided game.
+    async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, DefenderError>;
     /// Get the bitmap of proof lanes already proven for the provided game.
     async fn proof_bitmap(&self, game: Address) -> Result<u8, DefenderError>;
     /// Submit a proof to support a challenged game.

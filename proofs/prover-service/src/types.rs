@@ -65,8 +65,8 @@ pub struct ProofRequest {
 impl ProofRequest {
     /// Compute the deterministic identifier of this request.
     ///
-    /// The id is a commitment to every request field, so requesting the
-    /// same proof twice yields the same id and the duplicate is deduplicated
+    /// The id is a commitment to every request field except for `l1_head`, so requesting
+    /// the same proof twice yields the same id and the duplicate is deduplicated
     /// by the `prover-service`.
     #[must_use]
     pub fn id(&self) -> ProofRequestId {
@@ -75,7 +75,6 @@ impl ProofRequest {
         buf.extend_from_slice(self.game.as_slice());
         buf.extend_from_slice(self.root_claim.as_slice());
         buf.extend_from_slice(&self.l2_block_number.to_be_bytes());
-        buf.extend_from_slice(self.l1_head.as_slice());
         ProofRequestId(keccak256(buf))
     }
 }
@@ -197,6 +196,8 @@ pub enum ProofData {
     Nitro {
         /// Attestation document produced by the enclave.
         attestation: Bytes,
+        /// ABI-encoded transition public values signed by the enclave.
+        public_values: Bytes,
         /// Enclave signature over the proven outputs.
         signature: Bytes,
     },
@@ -216,11 +217,37 @@ impl ProofData {
 /// The response sent by the `prover-service` to
 /// a defender that requests the proof back.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProofResponse {
+pub enum ProofResponse {
+    Succeeded(SucceededProofResponse),
+    Failed(FailedProofResponse),
+    Pending(PendingProofResponse),
+}
+
+/// The succeeded proof response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SucceededProofResponse {
     /// The identifier of the proof request this proof answers.
     pub id: ProofRequestId,
-    /// The generated proof.
+    /// The actual proof.
     pub proof: ProofData,
+}
+
+/// The failed proof response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FailedProofResponse {
+    /// The identifier of the proof request.
+    pub id: ProofRequestId,
+    /// Failure reason.
+    pub reason: String,
+}
+
+/// The pending proof response.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingProofResponse {
+    /// The identifier of the proof request.
+    pub id: ProofRequestId,
+    /// Current proof status.
+    pub status: ProofStatus,
 }
 
 /// External backend request identifier.
@@ -354,3 +381,97 @@ impl TryFrom<&str> for BackendSessionStatus {
         }
     }
 }
+
+/// Response to the `request_proof` method on the prover-service.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RequestProofResponse {
+    /// The proof request id.
+    pub proof_id: ProofRequestId,
+    /// The l1_head block hash stored in the prover-service.
+    pub l1_head: B256,
+}
+
+/// Request to claim the next queued proof job for a worker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetNextProofRequest {
+    /// The backend lane this worker is able to prove.
+    pub backend: ProofBackend,
+    /// Stable id of the worker claiming the job.
+    pub worker_id: String,
+}
+
+/// Response returned after attempting to claim the next proof job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetNextProofResponse {
+    /// The locked job, or `None` when no matching work is available.
+    pub locked_request: Option<LockedProofRequest>,
+}
+
+/// Request to submit a completed proof for a claimed job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubmitProofRequest {
+    /// The generated proof payload.
+    pub proof: SucceededProofResponse,
+    /// Stable id of the worker that owns the lock.
+    pub worker_id: String,
+    /// Token authorizing updates to the locked proof job.
+    pub lock_id: LockId,
+}
+
+/// Response returned after submitting a completed proof.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct SubmitProofResponse {}
+
+/// Request to read the tracked backend session for a proof job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetProofSessionRequest {
+    /// The proof request whose backend session should be read.
+    pub proof_id: ProofRequestId,
+    /// The backend session phase to read.
+    pub session_type: SessionType,
+}
+
+/// Response returned after reading a tracked backend session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetProofSessionResponse {
+    /// The active or completed backend session, if one exists.
+    pub session: Option<BackendSession>,
+}
+
+/// Request to record backend-session progress for a claimed proof job.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordProofSessionRequest {
+    /// The proof request whose backend session should be recorded.
+    pub proof_id: ProofRequestId,
+    /// The backend session phase being recorded.
+    pub session_type: SessionType,
+    /// Stable id of the worker that owns the lock.
+    pub worker_id: String,
+    /// Token authorizing updates to the locked proof job.
+    pub lock_id: LockId,
+    /// Backend-specific session identifier used to resume polling.
+    pub backend_session_id: String,
+    /// Current backend session lifecycle status.
+    pub status: BackendSessionStatus,
+    /// Backend failure details when the session failed.
+    pub failure_reason: Option<String>,
+}
+
+/// Response returned after recording backend-session progress.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RecordProofSessionResponse {}
+
+/// Request to extend a claimed proof job's lock.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeartbeatRequest {
+    /// The proof request whose lock should be extended.
+    pub proof_id: ProofRequestId,
+    /// Stable id of the worker that owns the lock.
+    pub worker_id: String,
+    /// Token authorizing updates to the locked proof job.
+    pub lock_id: LockId,
+}
+
+/// Response returned after extending a claimed proof job's lock.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct HeartbeatResponse {}

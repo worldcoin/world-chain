@@ -65,6 +65,8 @@ contract TestSetup is Test {
     address public constant nullAddress = address(0);
     address public constant MULTICALL3 = 0xcA11bde05977b3631167028862bE2a173976CA11;
 
+    // casting to 'uint40' is safe because `bytes5` is exactly 40 bits wide — no truncation
+    // forge-lint: disable-next-line(unsafe-typecast)
     uint40 public constant PBH_NONCE_KEY = uint40(bytes5("pbhtx"));
 
     uint8 public constant MAX_NUM_PBH_PER_MONTH = 30;

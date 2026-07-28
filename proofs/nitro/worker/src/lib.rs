@@ -13,55 +13,49 @@
 //!  │  build Kona witness over RPC (same path as bin/proof)                               │
 //!  │       │                                                                              │
 //!  │       ▼                                                                              │
-//!  │  NitroProver::prove_range_async  ──────► Nitro Enclave                              │
+//!  │  NitroProver::prove_range  ────────────► Nitro Enclave                              │
 //!  │       │                                  (vsock / PCR-pinned)                       │
 //!  │       ▼                                                                              │
-//!  │  prover_submitProof(Nitro { attestation, signature })                               │
+//!  │  prover_submitProof(Nitro { attestation, public_values, signature })                │
 //!  └──────────────────────────────────────────────────────────────────────────────────────┘
 //! ```
 
 #![cfg(target_os = "linux")]
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
-
-use alloy_primitives::{B256, Bytes};
+use alloy_primitives::Bytes;
+use alloy_sol_types::SolValue;
 use anyhow::{Context, Result, anyhow, bail};
-use clap::Parser;
-use tracing::{info, warn};
-use world_chain_chainspec::WorldChainSpec;
+use tracing::info;
 use world_chain_proof_kona_host_utils::online::{
-    OnlineHostConfig, RangeWitnessRequest, build_online_config, build_range_input,
+    OnlineHostConfig, RangeWitnessRequest, build_range_input,
 };
 use world_chain_proof_nitro::{
     ExpectedPcrs, NitroRangeProofRequest,
     host::{EnclaveEndpoint, NitroProver},
 };
-use world_chain_proof_protocol::WorldHardforkConfig as ProtocolHardforkConfig;
-use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob, ProofWorker, ProofWorkerConfig};
-use world_chain_prover_service::{ProofBackend, ProofData, RpcProverServiceClient};
+use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
+use world_chain_prover_service::{ProofBackend, ProofData};
 
 // ──────────────────────────────────────────────────────────────────────────────────────
 // NitroBackend — ClaimedProofJobHandler implementation for the Nitro TEE lane
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
-struct NitroBackendConfig {
-    block_interval: u64,
-    online: OnlineHostConfig,
-    enclave_cid: u32,
-    enclave_port: u32,
-    expected_pcrs: ExpectedPcrs,
+pub struct NitroBackendConfig {
+    pub block_interval: u64,
+    pub online: OnlineHostConfig,
+    pub enclave_cid: u32,
+    pub enclave_port: u32,
+    pub expected_pcrs: ExpectedPcrs,
 }
 
-struct NitroBackend {
+pub struct NitroBackend {
     config: NitroBackendConfig,
-    /// Handle to the async runtime so we can call async enclave methods from `prove`.
-    rt_handle: tokio::runtime::Handle,
 }
 
 impl NitroBackend {
-    fn new(config: NitroBackendConfig, rt_handle: tokio::runtime::Handle) -> Self {
-        Self { config, rt_handle }
+    pub fn new(config: NitroBackendConfig) -> Self {
+        Self { config }
     }
 }
 
@@ -85,273 +79,112 @@ impl ClaimedProofJobHandler for NitroBackend {
                 )
             })?;
 
+        info!(
+            job_id = %request.id(),
+            game = %request.game,
+            l2_block_number = request.l2_block_number,
+            pre_state_block = start_block,
+            worker_id = %job.worker_id,
+            "nitro worker claimed proof job"
+        );
+
         let endpoint =
             EnclaveEndpoint::with_port(self.config.enclave_cid, self.config.enclave_port);
-        let prover =
-            NitroProver::with_runtime(endpoint, self.config.expected_pcrs, self.rt_handle.clone());
+        let prover = NitroProver::new(endpoint, self.config.expected_pcrs);
 
-        // Witness generation is synchronous and heavy; keep it off the async scheduler.
-        let input = tokio::task::block_in_place(|| {
-            build_range_input(
-                &self.config.online,
-                RangeWitnessRequest {
-                    start_block,
-                    end_block: request.l2_block_number,
-                    l1_head: Some(request.l1_head),
-                    allow_unfinalized: false,
-                },
-            )
-        })
+        info!(
+            start_block,
+            end_block = request.l2_block_number,
+            l1_rpc = %self.config.online.l1_rpc,
+            l2_rpc = %self.config.online.l2_rpc,
+            "collecting witness data for range"
+        );
+        let witness_collection_started_at = std::time::Instant::now();
+        let input = build_range_input(
+            &self.config.online,
+            RangeWitnessRequest {
+                start_block,
+                end_block: request.l2_block_number,
+                l1_head: Some(request.l1_head),
+                allow_unfinalized: false,
+            },
+        )
+        .await
         .context("witness generation failed")?;
 
         let nitro_request = NitroRangeProofRequest::from_witness_data(&input.witness, None)
             .context("witness serialize")?;
 
+        info!(
+            start_block,
+            end_block = request.l2_block_number,
+            duration_secs = witness_collection_started_at.elapsed().as_secs_f64(),
+            witness_bytes = nitro_request.witness_rkyv.len(),
+            "witness data collection complete"
+        );
+
         let artifact = prover
-            .prove_range_async(nitro_request)
+            .prove_range(nitro_request)
             .await
             .context("nitro enclave proving failed")?;
 
-        if artifact.boot_info.l2PostRoot != request.root_claim {
+        if artifact.transition_public_values.l2PostRoot != request.root_claim {
             bail!(
                 "enclave post root {:?} != claimed root {:?}",
-                artifact.boot_info.l2PostRoot,
+                artifact.transition_public_values.l2PostRoot,
                 request.root_claim
             );
         }
-        if artifact.boot_info.l2BlockNumber != request.l2_block_number {
+        if artifact.transition_public_values.l2PostBlockNumber != request.l2_block_number {
             bail!(
                 "enclave block number {} != claimed {}",
-                artifact.boot_info.l2BlockNumber,
+                artifact.transition_public_values.l2PostBlockNumber,
                 request.l2_block_number
             );
         }
-        if artifact.boot_info.l1Head != request.l1_head {
+        if artifact.transition_public_values.l1Head != request.l1_head {
             bail!(
                 "enclave l1 head {:?} != claimed {:?}",
-                artifact.boot_info.l1Head,
+                artifact.transition_public_values.l1Head,
                 request.l1_head
             );
         }
-        if artifact.boot_info.rollupConfigHash != self.config.online.rollup_config_hash {
+        if artifact.transition_public_values.rollupConfigHash
+            != self.config.online.rollup_config_hash
+        {
             bail!(
                 "enclave rollup config hash {:?} != expected {:?}",
-                artifact.boot_info.rollupConfigHash,
+                artifact.transition_public_values.rollupConfigHash,
                 self.config.online.rollup_config_hash
             );
         }
 
         info!(
-            post_root = ?artifact.boot_info.l2PostRoot,
-            block = artifact.boot_info.l2BlockNumber,
-            l1_head = ?artifact.boot_info.l1Head,
-            rollup_config_hash = ?artifact.boot_info.rollupConfigHash,
+            post_root = ?artifact.transition_public_values.l2PostRoot,
+            block = artifact.transition_public_values.l2PostBlockNumber,
+            l1_head = ?artifact.transition_public_values.l1Head,
+            rollup_config_hash = ?artifact.transition_public_values.rollupConfigHash,
             "enclave attested range proof"
         );
 
         Ok(ProofData::Nitro {
             attestation: Bytes::from(artifact.attestation_doc),
+            public_values: artifact.transition_public_values.abi_encode().into(),
             signature: Bytes::from(artifact.signature),
         })
     }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────────────
-// CLI / config
+// PCR helpers (used by the binary to validate CLI inputs)
 // ──────────────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-enum Network {
-    #[value(name = "worldchain")]
-    WorldChain,
-    #[value(name = "worldchain-sepolia")]
-    WorldChainSepolia,
-}
-
-impl Network {
-    fn chain_id(self) -> u64 {
-        match self {
-            Self::WorldChain => 480,
-            Self::WorldChainSepolia => 4801,
-        }
-    }
-
-    fn chain_spec(self) -> Arc<WorldChainSpec> {
-        match self {
-            Self::WorldChain => WorldChainSpec::mainnet(),
-            Self::WorldChainSepolia => WorldChainSpec::sepolia(),
-        }
-    }
-}
-
-#[derive(Debug, Parser)]
-#[command(
-    name = "nitro-worker",
-    about = "World Chain Nitro TEE proving worker: leases jobs from the prover-service, \
-             proves them in a Nitro Enclave, and submits the signed attestations back."
-)]
-struct Cli {
-    /// prover-service JSON-RPC URL.
-    #[arg(long, env = "PROVER_SERVICE_URL")]
-    prover_service_url: String,
-
-    /// World Chain L2 execution RPC URL.
-    #[arg(long, env = "L2_RPC_URL")]
-    l2_rpc: String,
-
-    /// Ethereum L1 execution RPC URL.
-    #[arg(long, env = "L1_RPC_URL")]
-    l1_rpc: String,
-
-    /// Ethereum L1 beacon API URL.
-    #[arg(long, env = "L1_BEACON_RPC_URL")]
-    l1_beacon_rpc: String,
-
-    /// World Chain network.
-    #[arg(long, env = "NETWORK", default_value = "worldchain")]
-    network: Network,
-
-    /// Rollup config JSON file. If omitted, uses the built-in network config.
-    #[arg(long, env = "ROLLUP_CONFIG")]
-    rollup_config: Option<PathBuf>,
-
-    /// Rollup config hash override (required when --rollup-config is not supplied).
-    #[arg(long, env = "ROLLUP_CONFIG_HASH")]
-    rollup_config_hash: Option<B256>,
-
-    /// L2 blocks between a proposal's parent and its claimed block (the proof system's
-    /// `blockInterval` domain constant).
-    #[arg(long, env = "BLOCK_INTERVAL")]
-    block_interval: u64,
-
-    /// vsock CID of the running Nitro Enclave.
-    #[arg(long, env = "ENCLAVE_CID", default_value_t = 16)]
-    enclave_cid: u32,
-
-    /// vsock port the enclave listens on.
-    #[arg(long, env = "ENCLAVE_PORT", default_value_t = world_chain_proof_nitro::protocol::DEFAULT_VSOCK_PORT)]
-    enclave_port: u32,
-
-    /// PCR0 hex (48 bytes). All three PCRs must be provided for production use.
-    #[arg(long, env = "PCR0")]
-    pcr0: Option<String>,
-
-    /// PCR1 hex (48 bytes).
-    #[arg(long, env = "PCR1")]
-    pcr1: Option<String>,
-
-    /// PCR2 hex (48 bytes).
-    #[arg(long, env = "PCR2")]
-    pcr2: Option<String>,
-
-    /// Seconds to sleep between job-queue polls when no work is available.
-    #[arg(long, env = "POLL_INTERVAL_SECONDS", default_value_t = 10)]
-    poll_interval_seconds: u64,
-
-    /// Maximum seconds to spend generating one Kona witness.
-    #[arg(long, default_value_t = 900)]
-    witness_timeout_seconds: u64,
-
-    /// Maximum number of jobs proved concurrently. TEE attestation is cheaper than ZK
-    /// proving, so this can be higher than for SP1 workers.
-    #[arg(long, default_value_t = 1)]
-    max_concurrent_jobs: usize,
-
-    /// The unique worker id.
-    #[arg(long)]
-    worker_id: String,
-}
-
-// ──────────────────────────────────────────────────────────────────────────────────────
-// Entry point
-// ──────────────────────────────────────────────────────────────────────────────────────
-
-pub fn run() -> Result<()> {
-    dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
-
-    let cli = Cli::parse();
-
-    let spec = cli.network.chain_spec();
-    let protocol_cfg = ProtocolHardforkConfig::from_chain_spec(spec.as_ref());
-    let online = build_online_config(
-        cli.rollup_config.clone(),
-        cli.rollup_config_hash,
-        cli.l1_rpc.clone(),
-        cli.l1_beacon_rpc.clone(),
-        cli.l2_rpc.clone(),
-        cli.network.chain_id(),
-        &protocol_cfg,
-        Duration::from_secs(cli.witness_timeout_seconds),
-    )?;
-    let expected_pcrs = build_expected_pcrs(
-        cli.pcr0.as_deref(),
-        cli.pcr1.as_deref(),
-        cli.pcr2.as_deref(),
-    )?;
-
-    info!(
-        prover_service = %cli.prover_service_url,
-        enclave_cid = cli.enclave_cid,
-        block_interval = cli.block_interval,
-        "nitro-worker starting"
-    );
-
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_name("nitro-worker")
-        .worker_threads(2)
-        .max_blocking_threads(4)
-        .build()
-        .context("failed to build tokio runtime")?;
-
-    let backend_config = NitroBackendConfig {
-        block_interval: cli.block_interval,
-        online,
-        enclave_cid: cli.enclave_cid,
-        enclave_port: cli.enclave_port,
-        expected_pcrs,
-    };
-
-    let backend = NitroBackend::new(backend_config, runtime.handle().clone());
-
-    let queue = RpcProverServiceClient::new(&cli.prover_service_url)
-        .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
-
-    let worker_id = format!("{}-nitro-worker", cli.worker_id);
-    let worker = ProofWorker::new(
-        queue,
-        backend,
-        ProofWorkerConfig {
-            worker_id,
-            poll_interval: Duration::from_secs(cli.poll_interval_seconds),
-            max_concurrent_jobs: cli.max_concurrent_jobs,
-        },
-    );
-
-    let token = worker.cancellation_token();
-    runtime.spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            info!("received ctrl-c, shutting down");
-            token.cancel();
-        }
-    });
-
-    runtime.block_on(worker);
-    Ok(())
-}
-
-// ──────────────────────────────────────────────────────────────────────────────────────
-// Config helpers
-// ──────────────────────────────────────────────────────────────────────────────────────
-
-fn build_expected_pcrs(
+pub fn build_expected_pcrs(
     pcr0: Option<&str>,
     pcr1: Option<&str>,
     pcr2: Option<&str>,
 ) -> Result<ExpectedPcrs> {
+    use tracing::warn;
     match (pcr0, pcr1, pcr2) {
         (Some(p0), Some(p1), Some(p2)) => Ok(ExpectedPcrs {
             pcr0: hex_to_pcr(p0)?,
@@ -369,7 +202,7 @@ fn build_expected_pcrs(
     }
 }
 
-fn hex_to_pcr(s: &str) -> Result<[u8; world_chain_proof_nitro::PCR_LEN]> {
+pub fn hex_to_pcr(s: &str) -> Result<[u8; world_chain_proof_nitro::PCR_LEN]> {
     let bytes =
         hex::decode(s.trim_start_matches("0x")).with_context(|| format!("invalid PCR hex: {s}"))?;
     if bytes.len() != world_chain_proof_nitro::PCR_LEN {

@@ -1,17 +1,105 @@
-use alloy_primitives::TxHash;
-use world_chain_proofs::GameCreated;
+use std::{
+    collections::HashSet,
+    sync::{Arc, RwLock},
+};
+
+use alloy_primitives::{Address, B256, TxHash, U256};
+
+/// Minimal immutable game data needed to validate an output-root claim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GameMetadata {
+    pub address: Address,
+    pub root_claim: B256,
+    pub l2_block_number: u64,
+}
 
 /// Result of a submitted challenge transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChallengeSubmission {
     /// Transaction hash for the challenge submission.
     pub tx_hash: TxHash,
+    /// Bond posted with the challenge, read from the game itself.
+    pub bond: U256,
+}
+
+/// Result of a resolve transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolveSubmission {
+    /// Transaction hash for the resolution.
+    pub tx_hash: TxHash,
+}
+
+/// Result of a `claimCredit` transaction.
+///
+/// Bond payout is two-phase: the first call unlocks the credit in `DelayedWETH`, the second
+/// (after the WETH delay) withdraws and transfers it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClaimSubmission {
+    /// Transaction hash for the claim.
+    pub tx_hash: TxHash,
+    /// Amount moved by this phase.
+    pub amount: U256,
+    /// Whether this call finalized the withdrawal and transferred funds.
+    pub withdrawn: bool,
+}
+
+/// A pending `DelayedWETH` withdrawal opened by the first `claimCredit` call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PendingWithdrawal {
+    /// Amount unlocked in `DelayedWETH` and awaiting the withdrawal delay.
+    pub amount: U256,
+    /// Unix timestamp at which the unlocked amount becomes withdrawable.
+    pub unlock_at: u64,
+}
+
+/// Challenger-owned games shared by scanning, resolution, and bond-management loops.
+#[derive(Debug, Clone, Default)]
+pub struct OwnedGames {
+    games: Arc<RwLock<HashSet<Address>>>,
+}
+
+impl OwnedGames {
+    /// Adds a game challenged by the managed challenger.
+    pub fn insert(&self, game: Address) {
+        self.games
+            .write()
+            .expect("owned-games lock poisoned")
+            .insert(game);
+    }
+
+    /// Removes a game that no longer needs lifecycle management.
+    pub fn remove(&self, game: Address) {
+        self.games
+            .write()
+            .expect("owned-games lock poisoned")
+            .remove(&game);
+    }
+
+    /// Returns whether a game is currently tracked.
+    #[must_use]
+    pub fn contains(&self, game: Address) -> bool {
+        self.games
+            .read()
+            .expect("owned-games lock poisoned")
+            .contains(&game)
+    }
+
+    /// Returns a snapshot suitable for asynchronous processing without holding the lock.
+    #[must_use]
+    pub fn snapshot(&self) -> Vec<Address> {
+        self.games
+            .read()
+            .expect("owned-games lock poisoned")
+            .iter()
+            .copied()
+            .collect()
+    }
 }
 
 /// A game queued for retry after a transient scan failure.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RetryGame {
-    pub game_created: GameCreated,
+    pub game: GameMetadata,
     pub challenge_deadline: Option<u64>,
     pub attempts: u32,
 }

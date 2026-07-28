@@ -35,8 +35,8 @@ contract NitroEnclaveKeyRegistryTest is Test {
     function _key(uint8 seed) internal pure returns (bytes memory key) {
         key = new bytes(65);
         key[0] = 0x04;
-        for (uint256 i = 1; i < 65; i++) {
-            key[i] = bytes1(seed + uint8(i));
+        for (uint8 i = 1; i < 65; i++) {
+            key[i] = bytes1(seed + i);
         }
     }
 
@@ -128,8 +128,8 @@ contract NitroEnclaveKeyRegistryTest is Test {
         // this even though the real verifier already enforces 0x04.
         bytes memory badKey = new bytes(65);
         badKey[0] = 0x03;
-        for (uint256 i = 1; i < 65; i++) {
-            badKey[i] = bytes1(uint8(i));
+        for (uint8 i = 1; i < 65; i++) {
+            badKey[i] = bytes1(i);
         }
         attestationVerifier.setExpectation(hex"feedface", SIG, badKey, PCR0, PCR1, PCR2);
         vm.expectRevert(NitroEnclaveKeyRegistry.InvalidPublicKey.selector);

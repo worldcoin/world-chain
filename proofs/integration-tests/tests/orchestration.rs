@@ -1,31 +1,39 @@
 use std::time::Duration;
 
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{B256, Bytes};
+use async_trait::async_trait;
 use testcontainers::{ContainerAsync, runners::AsyncRunner};
 use testcontainers_modules::postgres;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use world_chain_challenger::{ChallengerConfig, WorldChainChallenger};
-use world_chain_defender::{DefenderConfig, WorldChainDefender};
+use world_chain_defender::{DefenderClient, DefenderConfig, WorldChainDefender};
 use world_chain_proof_integration_tests::{
-    BLOCK_INTERVAL, FakeConsensus, FakeExecution, FakeProofBackend, SharedProverService,
+    BLOCK_INTERVAL, FAKE_PROPOSER, FakeConsensus, FakeExecution, FakeProofBackend,
+    SharedProverService,
 };
-use world_chain_proof_worker::{ProofWorker, ProofWorkerConfig};
-use world_chain_proofs::{ProofLane, RootState};
-use world_chain_proposer::{ProposerConfig, WorldChainProposer};
-use world_chain_prover_service::{ProofBackend, ProverServiceConfig};
+use world_chain_proof_worker::{
+    ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
+};
+use world_chain_proofs::{ProofLane, RootState, has_threshold};
+use world_chain_proposer::{
+    CanonicalScan, ProposerClient, ProposerConfig, ProposerError, WorldChainProposer,
+};
+use world_chain_prover_service::{
+    ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
+    ProofResponse, ProofStatus, ProverServiceConfig, RequestProofResponse, SucceededProofResponse,
+};
 
 fn proposer_config() -> ProposerConfig {
     ProposerConfig {
         block_interval: BLOCK_INTERVAL,
-        proposer_bond: U256::from(1),
         poll_interval: Duration::from_secs(1),
+        max_resolutions_per_tick: 1,
     }
 }
 
 fn challenger_config() -> ChallengerConfig {
     ChallengerConfig {
-        challenger_bond: U256::from(1),
         poll_interval: Duration::from_secs(1),
         ..ChallengerConfig::default()
     }
@@ -33,6 +41,7 @@ fn challenger_config() -> ChallengerConfig {
 
 fn defender_config() -> DefenderConfig {
     DefenderConfig {
+        allowed_proposer: FAKE_PROPOSER,
         poll_interval: Duration::from_secs(1),
         max_proof_attempts: 2,
         ..DefenderConfig::default()
@@ -43,6 +52,128 @@ fn assert_defense_lanes(lanes: Vec<ProofLane>) {
     assert_eq!(lanes.len(), 2);
     assert!(lanes.contains(&ProofLane::ValidityProof));
     assert!(lanes.contains(&ProofLane::TeeAttestation));
+}
+
+#[derive(Debug, Clone, Copy)]
+struct InstantProofRequester;
+
+#[async_trait]
+impl ProofRequester for InstantProofRequester {
+    async fn request_proof(
+        &self,
+        request: ProofRequest,
+    ) -> Result<RequestProofResponse, ProofRequestError> {
+        Ok(RequestProofResponse {
+            proof_id: request.id(),
+            l1_head: request.l1_head,
+        })
+    }
+
+    async fn proof_status(
+        &self,
+        _proof_id: ProofRequestId,
+    ) -> Result<ProofStatus, ProofRequestError> {
+        Ok(ProofStatus::Succeeded)
+    }
+
+    async fn get_proof(
+        &self,
+        proof_id: ProofRequestId,
+    ) -> Result<ProofResponse, ProofRequestError> {
+        Ok(ProofResponse::Succeeded(SucceededProofResponse {
+            id: proof_id,
+            proof: ProofData::Nitro {
+                attestation: Bytes::from_static(&[1]),
+                public_values: Bytes::from_static(&[2]),
+                signature: Bytes::from_static(&[3]),
+            },
+        }))
+    }
+}
+
+async fn settle_with_proposer<P>(proposer: &WorldChainProposer<FakeExecution, FakeConsensus, P>)
+where
+    P: ProofRequester,
+{
+    let canonical_scan = proposer
+        .anchor_and_canonical_line()
+        .await
+        .expect("canonical line reconstructed");
+    let finalized_games = proposer
+        .resolve_games(canonical_scan.canonical_line())
+        .await
+        .expect("canonical games resolved");
+    proposer
+        .advance_anchor(finalized_games)
+        .await
+        .expect("anchor advanced");
+}
+
+async fn post_proposal<P>(
+    proposer: &mut WorldChainProposer<FakeExecution, FakeConsensus, P>,
+    scan: &CanonicalScan,
+) -> Result<(), ProposerError>
+where
+    P: ProofRequester,
+{
+    proposer.request_proof(scan).await?;
+    proposer.poll_and_submit().await
+}
+
+#[tokio::test]
+async fn fake_resolution_matches_contract_transition_semantics() {
+    let chain = FakeExecution::new();
+    let canonical_root = B256::repeat_byte(0x20);
+    let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
+    let mut proposer = WorldChainProposer::new(
+        proposer_config(),
+        chain.clone(),
+        consensus,
+        InstantProofRequester,
+    );
+
+    let canonical_scan = proposer
+        .anchor_and_canonical_line()
+        .await
+        .expect("canonical line reconstructed");
+    post_proposal(&mut proposer, &canonical_scan)
+        .await
+        .expect("proposal posted");
+    let game = chain.latest_game().expect("game created").game;
+    chain.challenge_game(game);
+
+    chain
+        .submit_proof(
+            game,
+            ProofLane::ValidityProof as u8,
+            Bytes::from_static(&[1]),
+        )
+        .await
+        .expect("validity proof submitted");
+    chain
+        .submit_proof(
+            game,
+            ProofLane::TeeAttestation as u8,
+            Bytes::from_static(&[1]),
+        )
+        .await
+        .expect("TEE proof submitted");
+
+    let ready = ProposerClient::resolution_status(&chain, game)
+        .await
+        .expect("resolution status available");
+    assert!(ready.resolvable);
+    assert_eq!(ready.root_state, RootState::Finalized);
+    assert_eq!(chain.game_state(game), RootState::Challenged);
+
+    settle_with_proposer(&proposer).await;
+
+    let finalized = ProposerClient::resolution_status(&chain, game)
+        .await
+        .expect("resolution status available");
+    assert!(!finalized.resolvable);
+    assert_eq!(finalized.root_state, RootState::Finalized);
+    assert!(chain.resolve_game(game).await.is_err());
 }
 
 struct ProofStack {
@@ -89,6 +220,7 @@ async fn start_proof_stack_with(
             max_attempts: 2,
             max_retries: 2,
             backend_poll_interval: Duration::from_millis(5),
+            status_poller_interval: Duration::from_millis(5),
         },
     )
     .await
@@ -101,6 +233,8 @@ async fn start_proof_stack_with(
             worker_id: "orchestration-sp1-worker".to_string(),
             poll_interval: Duration::from_millis(5),
             max_concurrent_jobs: 1,
+            retry_config: RetryConfig::default(),
+            heartbeat_config: WorkerHeartbeatConfig::default(),
         },
     );
     let sp1_cancel = sp1_worker.cancellation_token();
@@ -113,6 +247,8 @@ async fn start_proof_stack_with(
             worker_id: "orchestration-nitro-worker".to_string(),
             poll_interval: Duration::from_millis(5),
             max_concurrent_jobs: 1,
+            retry_config: RetryConfig::default(),
+            heartbeat_config: WorkerHeartbeatConfig::default(),
         },
     );
     let nitro_cancel = nitro_worker.cancellation_token();
@@ -145,9 +281,19 @@ async fn invalid_root_is_challenged_by_real_challenger() {
     let honest_consensus =
         FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
 
-    let proposer =
-        WorldChainProposer::new(proposer_config(), chain.clone(), bad_proposer_consensus);
-    proposer.propose_once().await.expect("bad proposal posted");
+    let mut proposer = WorldChainProposer::new(
+        proposer_config(),
+        chain.clone(),
+        bad_proposer_consensus,
+        InstantProofRequester,
+    );
+    let canonical_scan = proposer
+        .anchor_and_canonical_line()
+        .await
+        .expect("canonical line reconstructed");
+    post_proposal(&mut proposer, &canonical_scan)
+        .await
+        .expect("bad proposal posted");
     let game = chain.latest_game().expect("game created").game;
 
     let mut challenger =
@@ -167,8 +313,19 @@ async fn valid_challenged_root_is_defended_through_workers() {
     let canonical_root = B256::repeat_byte(0x20);
     let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
 
-    let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus.clone());
-    proposer.propose_once().await.expect("proposal posted");
+    let mut proposer = WorldChainProposer::new(
+        proposer_config(),
+        chain.clone(),
+        consensus.clone(),
+        InstantProofRequester,
+    );
+    let canonical_scan = proposer
+        .anchor_and_canonical_line()
+        .await
+        .expect("canonical line reconstructed");
+    post_proposal(&mut proposer, &canonical_scan)
+        .await
+        .expect("proposal posted");
     let game = chain.latest_game().expect("game created").game;
     chain.challenge_game(game);
 
@@ -183,15 +340,19 @@ async fn valid_challenged_root_is_defended_through_workers() {
     );
 
     for _ in 0..200 {
-        defender.scan_once().await.expect("defender scan succeeds");
-        if chain.game_state(game) == RootState::Finalized {
+        defender.tick().await.expect("defender scan succeeds");
+        if has_threshold(chain.proof_bitmap(game)) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    assert_eq!(chain.game_state(game), RootState::Finalized);
+    assert_eq!(chain.game_state(game), RootState::Challenged);
     assert_defense_lanes(chain.submitted_lanes(game));
+
+    settle_with_proposer(&proposer).await;
+
+    assert_eq!(chain.game_state(game), RootState::Finalized);
 
     stop_proof_stack(stack).await;
 }
@@ -202,8 +363,19 @@ async fn valid_challenged_root_survives_transient_proof_failure() {
     let canonical_root = B256::repeat_byte(0x20);
     let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
 
-    let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus.clone());
-    proposer.propose_once().await.expect("proposal posted");
+    let mut proposer = WorldChainProposer::new(
+        proposer_config(),
+        chain.clone(),
+        consensus.clone(),
+        InstantProofRequester,
+    );
+    let canonical_scan = proposer
+        .anchor_and_canonical_line()
+        .await
+        .expect("canonical line reconstructed");
+    post_proposal(&mut proposer, &canonical_scan)
+        .await
+        .expect("proposal posted");
     let game = chain.latest_game().expect("game created").game;
     chain.challenge_game(game);
 
@@ -223,15 +395,19 @@ async fn valid_challenged_root_survives_transient_proof_failure() {
     );
 
     for _ in 0..200 {
-        defender.scan_once().await.expect("defender scan succeeds");
-        if chain.game_state(game) == RootState::Finalized {
+        defender.tick().await.expect("defender scan succeeds");
+        if has_threshold(chain.proof_bitmap(game)) {
             break;
         }
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    assert_eq!(chain.game_state(game), RootState::Finalized);
+    assert_eq!(chain.game_state(game), RootState::Challenged);
     assert_defense_lanes(chain.submitted_lanes(game));
+
+    settle_with_proposer(&proposer).await;
+
+    assert_eq!(chain.game_state(game), RootState::Finalized);
 
     stop_proof_stack(stack).await;
 }
@@ -246,9 +422,19 @@ async fn defender_ignores_challenged_invalid_root() {
     let honest_consensus =
         FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
 
-    let proposer =
-        WorldChainProposer::new(proposer_config(), chain.clone(), bad_proposer_consensus);
-    proposer.propose_once().await.expect("bad proposal posted");
+    let mut proposer = WorldChainProposer::new(
+        proposer_config(),
+        chain.clone(),
+        bad_proposer_consensus,
+        InstantProofRequester,
+    );
+    let canonical_scan = proposer
+        .anchor_and_canonical_line()
+        .await
+        .expect("canonical line reconstructed");
+    post_proposal(&mut proposer, &canonical_scan)
+        .await
+        .expect("bad proposal posted");
     let game = chain.latest_game().expect("game created").game;
     chain.challenge_game(game);
 
@@ -263,7 +449,7 @@ async fn defender_ignores_challenged_invalid_root() {
     );
 
     for _ in 0..10 {
-        defender.scan_once().await.expect("defender scan succeeds");
+        defender.tick().await.expect("defender scan succeeds");
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 

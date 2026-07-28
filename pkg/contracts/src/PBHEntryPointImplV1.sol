@@ -375,6 +375,9 @@ contract PBHEntryPointImplV1 is IPBHEntryPoint, Base, ReentrancyGuardTransient {
     function getFirstUnspentNullifierHash(uint256[] calldata hashes) public view virtual returns (int256) {
         for (uint256 i = 0; i < hashes.length; ++i) {
             if (nullifierHashes[hashes[i]] == 0) {
+                // casting to 'int256' is safe because `i` is bounded by `hashes.length`, which
+                // the calldata size limit keeps far below `type(int256).max`
+                // forge-lint: disable-next-line(unsafe-typecast)
                 return int256(i);
             }
         }

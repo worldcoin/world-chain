@@ -10,7 +10,7 @@ use world_chain_proof_nitro::{
     ExpectedPcrs, NitroRangeProofRequest,
     attestation::parse_and_check_pcrs,
     host::{EnclaveEndpoint, NitroProver},
-    protocol::range_user_data,
+    protocol::transition_commitment,
 };
 
 #[cfg(target_os = "linux")]
@@ -53,17 +53,17 @@ async fn main() -> anyhow::Result<()> {
     let prover = NitroProver::new(EnclaveEndpoint::new(cid), expected_pcrs);
 
     tracing::info!(cid, "sending range proof request to enclave");
-    let artifact = prover.prove_range_async(request).await?;
+    let artifact = prover.prove_range(request).await?;
 
     tracing::info!(
-        l2_pre_root  = ?artifact.boot_info.l2PreRoot,
-        l2_post_root = ?artifact.boot_info.l2PostRoot,
-        l2_block     = artifact.boot_info.l2BlockNumber,
+        l2_pre_root  = ?artifact.transition_public_values.l2PreRoot,
+        l2_post_root = ?artifact.transition_public_values.l2PostRoot,
+        l2_block     = artifact.transition_public_values.l2PostBlockNumber,
         doc_bytes    = artifact.attestation_doc.len(),
         "received artifact"
     );
 
-    let expected_user_data = range_user_data(&artifact.boot_info);
+    let expected_user_data = transition_commitment(&artifact.transition_public_values);
     parse_and_check_pcrs(
         &artifact.attestation_doc,
         &expected_pcrs,

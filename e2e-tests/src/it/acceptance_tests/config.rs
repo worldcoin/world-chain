@@ -17,8 +17,6 @@ const DEFAULT_USER_OPERATION_OPS_PER_WALLET: u64 = 3;
 const DEFAULT_USER_OPERATION_OP_CONCURRENCY: usize = 60;
 const DEFAULT_USER_OPERATION_NONCE_CONCURRENCY: usize = 2;
 const DEFAULT_USER_OPERATION_OWNER_START_INDEX: u32 = 1000;
-const DEFAULT_USER_OPERATION_SPONSORSHIP_VALIDITY_SECS: u64 = 60;
-const DEFAULT_USER_OPERATION_SPONSORSHIP_MAX_COST_WEI: &str = "1000000000000000000";
 const DEFAULT_TX_TIMEOUT_SECS: u64 = 60;
 const DEFAULT_TX_POLL_INTERVAL_MS: u64 = 500;
 const DEFAULT_DEPOSIT_TIMEOUT_SECS: u64 = 300;
@@ -74,6 +72,7 @@ pub(super) struct CloudflareAccess {
 #[derive(Clone)]
 pub(super) struct BundlerConfig {
     pub(super) rpc_url: Url,
+    pub(super) chain_rpc_url: Option<Url>,
     pub(super) cloudflare_access: Option<CloudflareAccess>,
     pub(super) entry_point: Address,
     pub(super) module: Address,
@@ -87,8 +86,6 @@ pub(super) struct BundlerConfig {
     pub(super) user_operation_timeout: Duration,
     pub(super) user_operation_reject_timeout: Duration,
     pub(super) user_operation_poll_interval: Duration,
-    pub(super) sponsorship_max_cost: U256,
-    pub(super) sponsorship_validity: Duration,
 }
 
 #[derive(Clone)]
@@ -161,6 +158,10 @@ impl Config {
 impl BundlerConfig {
     pub(super) fn rpc_target(&self) -> String {
         rpc_target(&self.rpc_url)
+    }
+
+    pub(super) fn chain_rpc_target(&self) -> Option<String> {
+        self.chain_rpc_url.as_ref().map(rpc_target)
     }
 }
 
@@ -244,6 +245,9 @@ fn bundler_config_from_env(
         rpc_url: rpc_url
             .parse()
             .wrap_err("failed to parse ERC-4337 bundler RPC URL")?,
+        chain_rpc_url: optional_env("ACCEPTANCE_4337_RPC_URL")
+            .map(|value| value.parse().wrap_err("failed to parse ERC-4337 RPC URL"))
+            .transpose()?,
         cloudflare_access: bundler_cloudflare_access_from_env(chain_cloudflare_access)?,
         entry_point: parse_optional_address(
             "ACCEPTANCE_4337_ENTRY_POINT",
@@ -307,14 +311,6 @@ fn bundler_config_from_env(
         user_operation_poll_interval: Duration::from_millis(parse_optional_value(
             "ACCEPTANCE_USEROP_POLL_INTERVAL_MS",
             DEFAULT_USER_OPERATION_POLL_INTERVAL_MS,
-        )?),
-        sponsorship_max_cost: parse_optional_value_from_str(
-            "ACCEPTANCE_4337_SPONSORSHIP_MAX_COST_WEI",
-            DEFAULT_USER_OPERATION_SPONSORSHIP_MAX_COST_WEI,
-        )?,
-        sponsorship_validity: Duration::from_secs(parse_optional_value(
-            "ACCEPTANCE_4337_SPONSORSHIP_VALIDITY_SECS",
-            DEFAULT_USER_OPERATION_SPONSORSHIP_VALIDITY_SECS,
         )?),
     }))
 }

@@ -1,15 +1,19 @@
 use crate::{
     error::{ProofJobQueueError, ProofRequestError},
     types::{
-        BackendSession, BackendSessionStatus, LockId, LockedProofRequest, ProofBackend,
-        ProofRequest, ProofRequestId, ProofResponse, ProofStatus, SessionType,
+        GetNextProofRequest, GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse,
+        HeartbeatRequest, HeartbeatResponse, ProofRequest, ProofRequestId, ProofResponse,
+        ProofStatus, RecordProofSessionRequest, RecordProofSessionResponse, RequestProofResponse,
+        SubmitProofRequest, SubmitProofResponse,
     },
 };
 use async_trait::async_trait;
+use auto_impl::auto_impl;
 
 /// It contains all methods needed for a defender to request a proof
 /// to the `prover-service`.
 #[async_trait]
+#[auto_impl(Arc)]
 pub trait ProofRequester {
     /// Send a proof request to the `prover-service`.
     ///
@@ -19,7 +23,7 @@ pub trait ProofRequester {
     async fn request_proof(
         &self,
         proof_request: ProofRequest,
-    ) -> Result<ProofRequestId, ProofRequestError>;
+    ) -> Result<RequestProofResponse, ProofRequestError>;
 
     /// Get the current status of a proof request.
     async fn proof_status(
@@ -35,6 +39,7 @@ pub trait ProofRequester {
 /// It contains all methods needed for a prover worker to get
 /// new proof requests and submits proof responses.
 #[async_trait]
+#[auto_impl(Arc)]
 pub trait ProofJobQueue {
     /// Look for a new proof request to start on the given backend.
     ///
@@ -43,31 +48,34 @@ pub trait ProofJobQueue {
     /// is re-queued.
     async fn get_next_proof(
         &self,
-        backend: ProofBackend,
-        worker_id: String,
-    ) -> Result<Option<LockedProofRequest>, ProofJobQueueError>;
+        request: GetNextProofRequest,
+    ) -> Result<GetNextProofResponse, ProofJobQueueError>;
 
     /// Submit a final proof response to the `prover-service`.
     async fn submit_proof(
         &self,
-        proof: ProofResponse,
-        worker_id: String,
-        lock: LockId,
-    ) -> Result<(), ProofJobQueueError>;
+        request: SubmitProofRequest,
+    ) -> Result<SubmitProofResponse, ProofJobQueueError>;
 
+    /// Get a backend session that matches the provided proof_id and
+    /// session_type if it exists.
     async fn get_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-    ) -> Result<Option<BackendSession>, ProofJobQueueError>;
+        request: GetProofSessionRequest,
+    ) -> Result<GetProofSessionResponse, ProofJobQueueError>;
 
+    /// Record a backend session tied to the provided proof_id
+    /// and session_type.
     async fn record_proof_session(
         &self,
-        proof_id: ProofRequestId,
-        session_type: SessionType,
-        worker_id: String,
-        lock_id: LockId,
-        backend_session_id: String,
-        state: BackendSessionStatus,
-    ) -> Result<(), ProofJobQueueError>;
+        request: RecordProofSessionRequest,
+    ) -> Result<RecordProofSessionResponse, ProofJobQueueError>;
+
+    /// Ping the `prover-service` to signal that a proof worker tied
+    /// to the provided `worker_id` and `lock_id` is still working on
+    /// the provided `proof_id` job.
+    async fn heartbeat(
+        &self,
+        request: HeartbeatRequest,
+    ) -> Result<HeartbeatResponse, ProofJobQueueError>;
 }

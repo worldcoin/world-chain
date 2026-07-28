@@ -61,16 +61,23 @@ const CLZ_INIT_CODE: &[u8] = &[
 pub(super) async fn l2_execution_checks(env: &RpcEnv) -> eyre::Result<()> {
     if !env.config().karst_enabled {
         info!("ACCEPTANCE_KARST_ENABLED not set, skipping Karst L2 acceptance tests");
+        eprintln!("karst: ACCEPTANCE_KARST_ENABLED not set, skipping L2 execution checks");
         return Ok(());
     }
     let l2_key = env.config().l2_key.clone();
 
+    eprintln!(
+        "karst: running L2 execution checks: network={}, l2_key_address={}",
+        env.config().network,
+        l2_key.address()
+    );
     info!(
         network = %env.config().network,
         l2_key_address = %l2_key.address(),
         "running Karst L2 execution acceptance tests"
     );
 
+    eprintln!("karst: checking EIP-7910 eth_config");
     check_eip_7910_eth_config(env).await?;
 
     let mut sender = L2TxSender::new(
@@ -81,14 +88,22 @@ pub(super) async fn l2_execution_checks(env: &RpcEnv) -> eyre::Result<()> {
     )
     .await?;
 
+    eprintln!("karst: checking EIP-7823 MODEXP input bound");
     check_eip_7823_modexp_upper_bound(&mut sender).await?;
+    eprintln!("karst: checking EIP-7883 MODEXP gas floor");
     check_eip_7883_modexp_gas_floor_increase(&mut sender).await?;
+    eprintln!("karst: checking EIP-7951 P256VERIFY gas cost");
     check_eip_7951_p256verify_gas_cost(&mut sender).await?;
+    eprintln!("karst: checking bn256 pairing input limit");
     check_karst_bn256_pairing_input_size_reduction(&mut sender).await?;
+    eprintln!("karst: checking EIP-7939 CLZ opcode activation");
     check_eip_7939_clz_opcode_activation(&mut sender).await?;
+    eprintln!("karst: checking EIP-7825 transaction gas cap");
     check_eip_7825_tx_gas_limit_cap(&mut sender).await?;
+    eprintln!("karst: checking EIP-7825 deposit bypass");
     check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env).await?;
 
+    eprintln!("karst: L2 execution checks completed");
     info!("Karst L2 execution acceptance tests completed");
     Ok(())
 }
@@ -314,6 +329,9 @@ async fn check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env: &RpcEnv) -> eyre:
         info!(
             "ACCEPTANCE_KARST_DEPOSIT_ENABLED not set, skipping Karst deposit bypass acceptance test"
         );
+        eprintln!(
+            "karst: ACCEPTANCE_KARST_DEPOSIT_ENABLED not set, skipping EIP-7825 deposit bypass"
+        );
         return Ok(());
     };
     let l1_provider = env
@@ -330,6 +348,13 @@ async fn check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env: &RpcEnv) -> eyre:
         deposit_transaction_request(l1_sender, config.optimism_portal, config.deposit_value);
     // Send-time fee fillers do not run during our explicit eth_estimateGas preflight.
     let request = with_estimated_l1_fees(&l1_provider, request).await?;
+    eprintln!(
+        "karst: preflighting EIP-7825 deposit bypass: l1_rpc={}, l1_sender={}, optimism_portal={}, deposit_gas_limit={}",
+        config.l1_rpc_target(),
+        l1_sender,
+        config.optimism_portal,
+        MAX_TX_GAS + 1
+    );
 
     let estimated_gas = match l1_provider.estimate_gas(request.clone()).await {
         Ok(estimated_gas) if estimated_gas <= config.deposit_max_l1_gas => estimated_gas,
@@ -338,6 +363,10 @@ async fn check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env: &RpcEnv) -> eyre:
                 estimated_gas,
                 max_l1_gas = config.deposit_max_l1_gas,
                 "EIP-7825 deposit bypass preflight exceeded the configured L1 gas limit; skipping environment-dependent check"
+            );
+            eprintln!(
+                "karst: skipping EIP-7825 deposit bypass: estimated_l1_gas={} exceeds max_l1_gas={}",
+                estimated_gas, config.deposit_max_l1_gas
             );
             return Ok(());
         }
@@ -360,11 +389,16 @@ async fn check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env: &RpcEnv) -> eyre:
             .min(config.deposit_max_l1_gas),
     );
 
+    eprintln!(
+        "karst: submitting EIP-7825 deposit bypass L1 tx: estimated_l1_gas={}, max_l1_gas={}",
+        estimated_gas, config.deposit_max_l1_gas
+    );
     let pending_tx = l1_provider
         .send_transaction(request)
         .await
         .context("EIP-7825 deposit bypass: failed to submit L1 deposit transaction")?;
     let l1_hash = *pending_tx.tx_hash();
+    eprintln!("karst: waiting for EIP-7825 deposit bypass L1 receipt: l1_tx={l1_hash:?}");
     let l1_receipt = wait_for_transaction_receipt(
         &l1_provider,
         "EIP-7825 deposit bypass L1 deposit",
@@ -378,6 +412,10 @@ async fn check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env: &RpcEnv) -> eyre:
         "EIP-7825 deposit bypass: L1 deposit tx {l1_hash:?} reverted in block {:?}",
         l1_receipt.block_number
     );
+    eprintln!(
+        "karst: EIP-7825 deposit bypass L1 receipt included: l1_tx={l1_hash:?}, l1_block={:?}",
+        l1_receipt.block_number
+    );
 
     let deposit_tx = deposit_tx_from_receipt(&l1_receipt, config.optimism_portal)?;
     ensure!(
@@ -387,6 +425,7 @@ async fn check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env: &RpcEnv) -> eyre:
         deposit_tx.gas_limit
     );
     let l2_hash = deposit_tx.tx_hash();
+    eprintln!("karst: waiting for EIP-7825 deposit bypass L2 receipt: l2_tx={l2_hash:?}");
     let l2_receipt = wait_for_deposit_receipt(
         env.optimism_provider(),
         "EIP-7825 deposit bypass L2 deposit",
@@ -401,6 +440,10 @@ async fn check_eip_7825_deposit_bypasses_tx_gas_limit_cap(env: &RpcEnv) -> eyre:
         l2_receipt.block_number
     );
 
+    eprintln!(
+        "karst: EIP-7825 deposit bypass included successfully: l1_tx={l1_hash:?}, l1_block={:?}, l2_tx={l2_hash:?}, l2_block={}",
+        l1_receipt.block_number, l2_receipt.block_number
+    );
     info!(
         l1_tx = ?l1_hash,
         l1_block = ?l1_receipt.block_number,

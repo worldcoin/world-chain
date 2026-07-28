@@ -1,8 +1,8 @@
 //! Enclave-side library code.
 //!
 //! This is the worker loop the `world-chain-nitro-enclave` binary runs inside the Nitro
-//! Enclave. It listens on vsock, runs the same OP Succinct Lite range/aggregation logic the
-//! SP1 guest does, and attests the result via the local NSM device.
+//! Enclave. It listens on vsock, runs the same OP Succinct Lite range logic the SP1 guest
+//! does, and attests the result via the local NSM device.
 //!
 //! Gated behind the `enclave` feature so the heavy kona / NSM dependencies are not pulled
 //! into the host build.
@@ -16,13 +16,11 @@
 //! - **Certified**: the public key is embedded in NSM attestation documents via
 //!   [`EnclaveRequest::PublicKey`], binding it to the enclave's PCR measurements.
 //!
-//! Every [`EnclaveResponse::Range`] and [`EnclaveResponse::Aggregation`] includes a 65-byte
-//! recoverable secp256k1 signature over
-//! `keccak256(l2_post_root ‖ l2_block_number_be ‖ rollup_config_hash)`.
+//! Every [`EnclaveResponse::Range`] includes a 65-byte recoverable secp256k1 signature over
+//! `keccak256(abi.encode(TransitionPublicValues))`.
 
 use std::sync::{Arc, OnceLock};
 
-use alloy_consensus::Header;
 use anyhow::{Context, Result, anyhow};
 use aws_nitro_enclaves_nsm_api::{
     api::{Request as NsmRequest, Response as NsmResponse},
@@ -36,9 +34,8 @@ use tokio_vsock::{VsockAddr, VsockListener, VsockStream};
 use tracing::{error, info, warn};
 use world_chain_proof_core::{
     BlobStore,
-    boot::BootInfoStruct,
-    range::{WorldRangeHardforkConfig, WorldRangeProofPublicValues},
-    types::AggregationInputs,
+    boot::TransitionPublicValues,
+    range::WorldRangeHardforkConfig,
     witness::{WitnessData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
 use world_chain_proof_kona_client_utils::{
@@ -149,9 +146,11 @@ fn signing_key() -> &'static SigningKey {
 
 /// Computes the signing commitment and produces a 65-byte recoverable secp256k1 signature.
 ///
-/// Commitment: `keccak256(l2_post_root ‖ l2_block_number_be ‖ rollup_config_hash)`
-fn sign_boot_info(boot_info: &BootInfoStruct) -> Result<Vec<u8>> {
-    let commitment = protocol::signing_commitment(boot_info);
+/// Commitment: `keccak256(abi.encode(TransitionPublicValues))`
+fn sign_transition_public_values(
+    transition_public_values: &TransitionPublicValues,
+) -> Result<Vec<u8>> {
+    let commitment = protocol::transition_commitment(transition_public_values);
 
     let (sig, rec_id) = signing_key()
         .sign_prehash_recoverable(&commitment)
@@ -234,22 +233,14 @@ async fn dispatch(request: EnclaveRequest) -> Result<EnclaveResponse> {
         EnclaveRequest::Range {
             version,
             witness_rkyv,
-            expected_public_values,
+            expected_transition_public_values,
             nonce,
         } => {
             check_version(version)?;
-            handle_range(witness_rkyv, expected_public_values, nonce).await
-        }
-        EnclaveRequest::Aggregation {
-            version,
-            inputs,
-            l1_headers_cbor,
-            nonce,
-        } => {
-            check_version(version)?;
-            handle_aggregation(inputs, l1_headers_cbor, nonce).await
+            handle_range(witness_rkyv, expected_transition_public_values, nonce).await
         }
         EnclaveRequest::PublicKey { nonce } => handle_public_key(nonce),
+        EnclaveRequest::GetAttestation => handle_get_attestation(),
     }
 }
 
@@ -268,7 +259,7 @@ fn check_version(version: u32) -> Result<()> {
 
 async fn handle_range(
     witness_rkyv: Vec<u8>,
-    expected_public_values: Option<WorldRangeProofPublicValues>,
+    expected_transition_public_values: Option<TransitionPublicValues>,
     nonce: [u8; 32],
 ) -> Result<EnclaveResponse> {
     info!(
@@ -286,7 +277,7 @@ async fn handle_range(
         .await
         .map_err(|err| anyhow!("failed to construct oracle/blob provider: {err}"))?;
 
-    let boot_info = run_full_range_program(
+    let transition_public_values = run_full_range_program(
         ETHDAWitnessExecutor::<PreimageStore, BlobStore>::new(),
         oracle,
         beacon,
@@ -294,88 +285,17 @@ async fn handle_range(
     )
     .await?;
 
-    if let Some(expected) = expected_public_values {
-        ensure_boot_info_matches(&expected, &boot_info)?;
+    if let Some(expected) = expected_transition_public_values {
+        ensure_transition_public_values_match(&expected, &transition_public_values)?;
     }
 
-    let signature = sign_boot_info(&boot_info)?;
+    let signature = sign_transition_public_values(&transition_public_values)?;
 
-    let user_data = protocol::range_user_data(&boot_info);
+    let user_data = protocol::transition_commitment(&transition_public_values);
     let attestation_doc = request_attestation_doc(Some(&user_data), &nonce)?;
 
     Ok(EnclaveResponse::Range {
-        boot_info,
-        attestation_doc,
-        signature,
-    })
-}
-
-async fn handle_aggregation(
-    inputs: AggregationInputs,
-    l1_headers_cbor: Vec<u8>,
-    nonce: [u8; 32],
-) -> Result<EnclaveResponse> {
-    let first = inputs
-        .boot_infos
-        .first()
-        .ok_or_else(|| anyhow!("aggregation requires at least one range boot info"))?;
-    let last = inputs.boot_infos.last().expect("checked non-empty above");
-
-    // Verify consecutive range chain (same checks as the SP1 aggregation program).
-    for pair in inputs.boot_infos.windows(2) {
-        let (prev, next) = (&pair[0], &pair[1]);
-        if prev.l2PostRoot != next.l2PreRoot {
-            return Err(anyhow!("range chain broken: l2PostRoot/l2PreRoot mismatch"));
-        }
-        if prev.rollupConfigHash != next.rollupConfigHash {
-            return Err(anyhow!("range chain broken: rollupConfigHash mismatch"));
-        }
-    }
-
-    // Decode and verify the L1 header chain.
-    let headers: Vec<Header> = serde_cbor::from_slice(&l1_headers_cbor)
-        .map_err(|e| anyhow!("failed to decode L1 headers: {e}"))?;
-
-    let mut l1_heads_map: std::collections::HashMap<alloy_primitives::B256, bool> = inputs
-        .boot_infos
-        .iter()
-        .map(|bi| (bi.l1Head, false))
-        .collect();
-
-    let mut current_hash = inputs.latest_l1_checkpoint_head;
-    for header in headers.iter().rev() {
-        if header.hash_slow() != current_hash {
-            return Err(anyhow!("L1 header chain hash mismatch at {current_hash}"));
-        }
-        if let Some(found) = l1_heads_map.get_mut(&current_hash) {
-            *found = true;
-        }
-        current_hash = header.parent_hash;
-    }
-
-    for (l1_head, found) in &l1_heads_map {
-        if !found {
-            return Err(anyhow!(
-                "l1Head {l1_head:?} not found in the provided header chain"
-            ));
-        }
-    }
-
-    let boot_info = BootInfoStruct {
-        l1Head: inputs.latest_l1_checkpoint_head,
-        l2PreRoot: first.l2PreRoot,
-        l2PostRoot: last.l2PostRoot,
-        l2BlockNumber: last.l2BlockNumber,
-        rollupConfigHash: last.rollupConfigHash,
-    };
-
-    let signature = sign_boot_info(&boot_info)?;
-
-    let user_data = protocol::aggregation_user_data(&boot_info, &inputs);
-    let attestation_doc = request_attestation_doc(Some(&user_data), &nonce)?;
-
-    Ok(EnclaveResponse::Aggregation {
-        boot_info,
+        transition_public_values,
         attestation_doc,
         signature,
     })
@@ -410,7 +330,7 @@ async fn run_full_range_program<E>(
     oracle: Arc<PreimageStore>,
     beacon: BlobStore,
     world_schedule: WorldRangeHardforkConfig,
-) -> Result<BootInfoStruct>
+) -> Result<TransitionPublicValues>
 where
     E: WitnessExecutor<
             O = PreimageStore,
@@ -420,7 +340,7 @@ where
         > + Send
         + Sync,
 {
-    let (boot_info, input) = get_inputs_for_pipeline(oracle.clone())
+    let (boot_info, input, l2_pre_block_number) = get_inputs_for_pipeline(oracle.clone())
         .await
         .map_err(|err| anyhow!("get_inputs_for_pipeline: {err}"))?;
     let boot_info = match input {
@@ -455,41 +375,65 @@ where
         None => boot_info,
     };
 
-    Ok(BootInfoStruct::try_from_kona_boot_info(
+    Ok(TransitionPublicValues::try_from_kona_boot_info(
         boot_info,
         &world_schedule,
+        l2_pre_block_number,
     )?)
 }
 
-fn ensure_boot_info_matches(
-    expected: &WorldRangeProofPublicValues,
-    actual: &BootInfoStruct,
+fn ensure_transition_public_values_match(
+    expected: &TransitionPublicValues,
+    actual: &TransitionPublicValues,
 ) -> Result<()> {
     let mismatches = [
-        ("l1Head", expected.boot_info.l1_head == actual.l1Head),
+        ("l1Head", expected.l1Head == actual.l1Head),
+        ("l2PreRoot", expected.l2PreRoot == actual.l2PreRoot),
         (
-            "l2PreRoot",
-            expected.boot_info.l2_pre_root == actual.l2PreRoot,
+            "l2PreBlockNumber",
+            expected.l2PreBlockNumber == actual.l2PreBlockNumber,
         ),
+        ("l2PostRoot", expected.l2PostRoot == actual.l2PostRoot),
         (
-            "l2PostRoot",
-            expected.boot_info.l2_post_root == actual.l2PostRoot,
-        ),
-        (
-            "l2BlockNumber",
-            expected.boot_info.l2_block_number == actual.l2BlockNumber,
+            "l2PostBlockNumber",
+            expected.l2PostBlockNumber == actual.l2PostBlockNumber,
         ),
         (
             "rollupConfigHash",
-            expected.boot_info.rollup_config_hash == actual.rollupConfigHash,
+            expected.rollupConfigHash == actual.rollupConfigHash,
         ),
     ];
     if let Some((field, _)) = mismatches.iter().find(|(_, ok)| !ok) {
         return Err(anyhow!(
-            "enclave-derived boot info disagrees with host expectation on {field}"
+            "enclave-derived transition public values disagree with host expectation on {field}"
         ));
     }
     Ok(())
+}
+
+/// Handles a [`EnclaveRequest::GetAttestation`] request.
+///
+/// Produces a bare attestation document via the NSM device. No proof is run.
+fn handle_get_attestation() -> Result<EnclaveResponse> {
+    let fd = nsm_init();
+    if fd < 0 {
+        return Err(anyhow!("nsm_init returned negative fd: {fd}"));
+    }
+
+    let request = NsmRequest::Attestation {
+        user_data: None,
+        nonce: None,
+        public_key: None,
+    };
+    let response = nsm_process_request(fd, request);
+
+    match response {
+        NsmResponse::Attestation { document } => Ok(EnclaveResponse::BareAttestation {
+            attestation_doc: document,
+        }),
+        NsmResponse::Error(err) => Err(anyhow!("nsm returned error: {err:?}")),
+        other => Err(anyhow!("unexpected nsm response: {other:?}")),
+    }
 }
 
 /// Calls the NSM device to produce an attestation document committing to `user_data`.

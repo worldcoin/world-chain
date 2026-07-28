@@ -5,12 +5,12 @@ use std::{sync::Arc, time::Duration};
 use alloy_primitives::{Address, B256, Bytes};
 use testcontainers::{ContainerAsync, runners::AsyncRunner};
 use testcontainers_modules::postgres;
-use world_chain_proof_worker::ProofJob;
+use world_chain_proof_worker::{ProofJob, WorkerHeartbeatConfig};
 use world_chain_prover_service::{
-    ProofBackend, ProofData, ProofRequest, ProofRequester, ProofStatus, ProverService,
-    ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
+    ProofBackend, ProofData, ProofRequest, ProofRequester, ProofResponse, ProofStatus,
+    ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
 };
-use world_chain_sp1_worker::{ClaimedProofJobHandler, ProofWorker, ProofWorkerConfig};
+use world_chain_sp1_worker::{ClaimedProofJobHandler, ProofWorker, ProofWorkerConfig, RetryConfig};
 
 /// Backend returning a canned SP1 proof for any request, without RPC or a prover.
 struct MockBackend;
@@ -73,11 +73,12 @@ async fn worker_completes_requested_proof_over_rpc() {
         l2_block_number: 1_200,
         l1_head: B256::repeat_byte(0x11),
     };
-    let id = requester
+    let response = requester
         .request_proof(request.clone())
         .await
         .expect("request accepted");
-    assert_eq!(id, request.id());
+    assert_eq!(response.proof_id, request.id());
+    let id = response.proof_id;
 
     let worker = ProofWorker::new(
         queue,
@@ -86,6 +87,8 @@ async fn worker_completes_requested_proof_over_rpc() {
             worker_id: "test-worker".to_string(),
             poll_interval: Duration::from_millis(10),
             max_concurrent_jobs: 1,
+            retry_config: RetryConfig::default(),
+            heartbeat_config: WorkerHeartbeatConfig::default(),
         },
     );
     let worker_handle = tokio::spawn(worker);
@@ -101,6 +104,9 @@ async fn worker_completes_requested_proof_over_rpc() {
     assert_eq!(status, ProofStatus::Succeeded);
 
     let response = requester.get_proof(id).await.expect("proof available");
+    let ProofResponse::Succeeded(response) = response else {
+        panic!("expected succeeded proof response");
+    };
     assert_eq!(response.id, id);
     let ProofData::Sp1 {
         proof,

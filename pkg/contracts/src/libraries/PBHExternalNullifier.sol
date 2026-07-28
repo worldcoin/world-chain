@@ -48,9 +48,11 @@ library PBHExternalNullifier {
         pure
         returns (uint8 version, uint16 pbhNonce, uint8 month, uint16 year)
     {
-        year = uint16(externalNullifier >> 32);
+        year = uint16((externalNullifier >> 32) & 0xFFFF);
         month = uint8((externalNullifier >> 24) & 0xFF);
         pbhNonce = uint16((externalNullifier >> 8) & 0xFFFF);
+        // casting to 'uint8' is safe because the value is masked to its low 8 bits first
+        // forge-lint: disable-next-line(unsafe-typecast)
         version = uint8(externalNullifier & 0xFF);
     }
 

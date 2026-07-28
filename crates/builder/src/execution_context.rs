@@ -271,10 +271,16 @@ where
             let tx_uncompressed_size = tx.encode_2718_len() as u64;
             attempt_metrics.record_transaction_size_bytes(tx_uncompressed_size);
             attempt_metrics.record_transaction_da_size_bytes(tx_da_size);
-            cumulative_uncompressed_bytes += tx_uncompressed_size;
+            // Note: `cumulative_uncompressed_bytes` is only advanced once a transaction is actually
+            // committed to the block (see after `commit_changes` below). It must not be mutated for
+            // transactions that are merely considered, otherwise rejected / skipped transactions
+            // (e.g. a just-mined tx that the pool has not yet dropped and that fails with
+            // nonce-too-low) would permanently inflate the running total and cause otherwise-fitting
+            // transactions to be spuriously rejected against the limit.
             let is_uncompressed_block_full =
                 if let Some(block_uncompressed_size_limit) = self.block_uncompressed_size_limit {
-                    let result = cumulative_uncompressed_bytes > block_uncompressed_size_limit;
+                    let result = cumulative_uncompressed_bytes + tx_uncompressed_size
+                        > block_uncompressed_size_limit;
                     if result {
                         tracing::warn!(
                             "we've reached block uncompressed size limit - rejecting tx: {:?}",
@@ -398,6 +404,9 @@ where
             attempt_metrics.record_transaction_gas_used(gas_used);
             transactions_executed += 1;
             self.commit_changes(info, base_fee, gas_used, evm_gas_used, tx_da_size, tx);
+            // Only count bytes for transactions that made it into the block, mirroring how gas and
+            // DA usage are accumulated in `commit_changes`.
+            cumulative_uncompressed_bytes += tx_uncompressed_size;
         }
 
         if !spent_nullifier_hashes.is_empty() {

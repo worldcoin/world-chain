@@ -1,12 +1,45 @@
+#[cfg(target_os = "linux")]
+mod cmd;
+
+#[cfg(target_os = "linux")]
+use clap::{Parser, Subcommand};
+#[cfg(target_os = "linux")]
+use cmd::{get_attestation::GetAttestationArgs, run::WorkerArgs};
+
+#[cfg(target_os = "linux")]
+#[derive(Parser)]
+#[command(name = "nitro-worker", about = "World Chain Nitro TEE proving worker")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Subcommand)]
+enum Command {
+    /// Start the proving worker.
+    Run(Box<WorkerArgs>),
+    /// Fetch a bare attestation document from the running enclave and print hex to stdout.
+    GetAttestation(GetAttestationArgs),
+}
+
+#[cfg(not(target_os = "linux"))]
 fn main() {
-    #[cfg(not(target_os = "linux"))]
-    {
-        eprintln!("nitro-worker requires Linux (AF_VSOCK)");
-        std::process::exit(1);
+    eprintln!("nitro-worker requires Linux (AF_VSOCK)");
+    std::process::exit(1);
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    dotenvy::dotenv().ok();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
+    match Cli::parse().command {
+        Command::Run(args) => cmd::run::run(*args).await?,
+        Command::GetAttestation(args) => cmd::get_attestation::get_attestation(args).await?,
     }
-    #[cfg(target_os = "linux")]
-    if let Err(e) = world_chain_nitro_worker::run() {
-        eprintln!("error: {e:#}");
-        std::process::exit(1);
-    }
+    Ok(())
 }

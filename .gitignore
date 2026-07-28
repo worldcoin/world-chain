@@ -17,3 +17,6 @@ pkg/contracts/sepolia_load_test.json
 /proofs/succinct/elf/*
 !/proofs/succinct/elf/manifest.toml
 !/proofs/succinct/elf/vkeys.json
+
+# Local proof env overrides
+scripts/proof-envs/*.local.env

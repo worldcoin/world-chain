@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, B256, BlockNumber, U256, keccak256};
+use alloy_primitives::{Address, B256, BlockNumber, Bytes, U256, keccak256};
 use alloy_sol_types::SolValue;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -12,22 +12,28 @@ pub const PROOF_LANE_COUNT: u8 = 3;
 /// Version of the World Chain proof-domain encoding implemented here.
 pub const PROOF_SYSTEM_VERSION: u64 = 1;
 
-/// The `GameCreated` event.
+/// OP Stack dispute-game type allocated to WIP-1006 (`GameTypes.MULTI_PROOF_GAME_TYPE`).
+///
+/// The stock `DisputeGameFactory` indexes every game type in one array, so every
+/// index-based read must filter on this value.
+pub const MULTI_PROOF_GAME_TYPE: u32 = 1006;
+
+/// The `MultiProofGame.WorldChainGameCreated` event.
 #[derive(Debug, Clone, Copy)]
-pub struct GameCreated {
-    pub proposal_key: B256,
+pub struct WorldChainGameCreated {
     pub root_id: B256,
     pub game: Address,
-    pub proposer: Address,
+    pub game_creator: Address,
     pub root_claim: B256,
     pub l2_block_number: BlockNumber,
     pub parent_ref: Address,
     pub l1_origin_hash: B256,
     pub l1_origin_number: BlockNumber,
+    pub attempt: u64,
 }
 
 /// A game root state.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootState {
     None,
     Proposed,
@@ -68,8 +74,6 @@ pub struct ProofDomain {
     pub rollup_config_hash: B256,
     /// Distance in L2 blocks between parent and proposed roots.
     pub block_interval: u64,
-    /// Distance in L2 blocks between intermediate roots.
-    pub intermediate_block_interval: u64,
 }
 
 impl ProofDomain {
@@ -81,9 +85,8 @@ impl ProofDomain {
             U256::from(self.proof_system_version),
             self.rollup_config_hash,
             U256::from(self.block_interval),
-            U256::from(self.intermediate_block_interval),
         )
-            .abi_encode();
+            .abi_encode_params();
         keccak256(encoded)
     }
 }
@@ -97,22 +100,40 @@ pub struct ProposalCommitment {
     pub root_claim: B256,
     /// L2 block number for `root_claim`.
     pub l2_block_number: u64,
-    /// Commitment to ordered intermediate roots, or zero if unused.
-    pub intermediate_roots_hash: B256,
+    /// Retry nonce for this transition. Attempt N is only proposable once attempt N-1
+    /// has been invalidated by a proof timeout.
+    pub attempt: u64,
 }
 
 impl ProposalCommitment {
-    /// Compute the Solidity-compatible proposal key used for factory lookups.
+    /// ABI-encodes the CWIA payload `MultiProofGame` reads from its clone arguments.
+    ///
+    /// Must match `abi.encode(domainHash, l2BlockNumber, parentRef, attempt)` as consumed by
+    /// `MultiProofGame`'s CWIA getters.
     #[must_use]
-    pub fn proposal_key(self, domain_hash: B256) -> B256 {
-        let encoded = (
+    pub fn extra_data(self, domain_hash: B256) -> Bytes {
+        (
             domain_hash,
-            self.parent_ref,
-            self.root_claim,
             U256::from(self.l2_block_number),
-            self.intermediate_roots_hash,
+            self.parent_ref,
+            U256::from(self.attempt),
         )
-            .abi_encode();
+            .abi_encode_params()
+            .into()
+    }
+
+    /// Computes the `DisputeGameFactory` UUID that identifies this proposal's game.
+    ///
+    /// Mirrors `DisputeGameFactory.getGameUUID`, so the proposer can look a game up without
+    /// an extra round trip.
+    #[must_use]
+    pub fn game_uuid(self, domain_hash: B256) -> B256 {
+        let encoded = (
+            MULTI_PROOF_GAME_TYPE,
+            self.root_claim,
+            self.extra_data(domain_hash),
+        )
+            .abi_encode_params();
         keccak256(encoded)
     }
 }
@@ -129,10 +150,10 @@ pub struct RootCommitment {
 }
 
 impl RootCommitment {
-    /// Compute the Solidity-compatible proposal key used for factory lookups.
+    /// Compute the `DisputeGameFactory` UUID for this proposal.
     #[must_use]
-    pub fn proposal_key(self, domain_hash: B256) -> B256 {
-        self.proposal.proposal_key(domain_hash)
+    pub fn game_uuid(self, domain_hash: B256) -> B256 {
+        self.proposal.game_uuid(domain_hash)
     }
 
     /// Compute the Solidity-compatible root id for this proposal.
@@ -143,11 +164,10 @@ impl RootCommitment {
             self.proposal.parent_ref,
             self.proposal.root_claim,
             U256::from(self.proposal.l2_block_number),
-            self.proposal.intermediate_roots_hash,
             self.l1_origin_hash,
             U256::from(self.l1_origin_number),
         )
-            .abi_encode();
+            .abi_encode_params();
         keccak256(encoded)
     }
 }
@@ -192,10 +212,64 @@ pub const fn has_threshold(bitmap: u8) -> bool {
     proof_count(bitmap) >= PROOF_THRESHOLD
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InvalidationReason {
+    None,
+    ProofTimeout,
+    InvalidParent,
+    Blacklisted,
+}
+
+#[derive(Debug, Error)]
+pub enum InvalidationReasonError {
+    #[error("Invalid invalidation reason: {0}")]
+    InvalidReason(u8),
+}
+
+impl TryFrom<u8> for InvalidationReason {
+    type Error = InvalidationReasonError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(InvalidationReason::None),
+            1 => Ok(InvalidationReason::ProofTimeout),
+            2 => Ok(InvalidationReason::InvalidParent),
+            3 => Ok(InvalidationReason::Blacklisted),
+            _ => Err(InvalidationReasonError::InvalidReason(value)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolutionStatus {
+    pub resolvable: bool,
+    pub root_state: RootState,
+    pub invalidation_reason: InvalidationReason,
+}
+
+impl ResolutionStatus {
+    /// Returns true whether this resolution status is positive resolvable:
+    /// - `resolvable` is true AND
+    /// - the expected root state outcome is `Finalized`.
+    pub fn positive_resolvable(&self) -> bool {
+        self.resolvable && self.root_state == RootState::Finalized
+    }
+
+    /// Returns whether the game has already reached a terminal state.
+    ///
+    /// The root state may describe the expected outcome of a game that is currently resolvable,
+    /// so a terminal root state is considered resolved only when `resolvable` is false.
+    pub fn is_resolved(&self) -> bool {
+        !self.resolvable
+            && (self.root_state == RootState::Finalized
+                || self.root_state == RootState::Invalidated)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{address, b256};
+    use alloy_primitives::{address, b256, hex};
 
     #[test]
     fn lane_bitmap_counts_distinct_lanes() {
@@ -215,13 +289,12 @@ mod tests {
                 "1111111111111111111111111111111111111111111111111111111111111111"
             ),
             block_interval: 10,
-            intermediate_block_interval: 5,
         };
         let proposal = ProposalCommitment {
             parent_ref: address!("0000000000000000000000000000000000001006"),
             root_claim: b256!("2222222222222222222222222222222222222222222222222222222222222222"),
             l2_block_number: 10,
-            intermediate_roots_hash: B256::ZERO,
+            attempt: 0,
         };
         let commitment = RootCommitment {
             proposal,
@@ -231,13 +304,62 @@ mod tests {
             l1_origin_number: 1,
         };
 
+        // Reference values from `cast abi-encode` / `cast keccak`, pinning these encodings to
+        // `ProofLib.domainHash` and `ProofLib.rootId`.
+        assert_eq!(
+            domain.hash(),
+            b256!("2eadd7e0cde9ca6f758216655e263e8d197480ebc4d3478403000447fe62f4be")
+        );
         let root_id = commitment.root_id(domain.hash());
-        assert_ne!(B256::ZERO, proposal.proposal_key(domain.hash()));
+        assert_eq!(
+            root_id,
+            b256!("6cccba67d43368ae81da6cf22798e228b82b953c51c1bbce76959b166b888dd3")
+        );
+
+        assert_ne!(B256::ZERO, proposal.game_uuid(domain.hash()));
         let changed = ProofDomain {
             chain_id: 4802,
             ..domain
         };
 
         assert_ne!(root_id, commitment.root_id(changed.hash()));
+    }
+
+    #[test]
+    fn game_uuid_matches_dispute_game_factory_encoding() {
+        let domain_hash = b256!("1111111111111111111111111111111111111111111111111111111111111111");
+        let proposal = ProposalCommitment {
+            parent_ref: address!("0000000000000000000000000000000000001006"),
+            root_claim: b256!("2222222222222222222222222222222222222222222222222222222222222222"),
+            l2_block_number: 100,
+            attempt: 0,
+        };
+
+        // Reference values from `cast abi-encode` / `cast keccak`, pinning this encoding to the
+        // CWIA payload `MultiProofGame` reads at offsets 0x54/0x74/0x94/0xB4 and to
+        // `DisputeGameFactory.getGameUUID(GameType,Claim,bytes)`.
+        assert_eq!(
+            proposal.extra_data(domain_hash),
+            Bytes::from_static(&hex!(
+                "1111111111111111111111111111111111111111111111111111111111111111"
+                "0000000000000000000000000000000000000000000000000000000000000064"
+                "0000000000000000000000000000000000000000000000000000000000001006"
+                "0000000000000000000000000000000000000000000000000000000000000000"
+            ))
+        );
+        assert_eq!(
+            proposal.game_uuid(domain_hash),
+            b256!("97c09945ea02810652360265a6c8f070ce4d6fb10651f7f76126130d6209ee33")
+        );
+
+        // Retries occupy a distinct factory UUID.
+        let retry = ProposalCommitment {
+            attempt: 1,
+            ..proposal
+        };
+        assert_ne!(
+            proposal.game_uuid(domain_hash),
+            retry.game_uuid(domain_hash)
+        );
     }
 }

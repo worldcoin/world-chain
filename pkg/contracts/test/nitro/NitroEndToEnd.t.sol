@@ -6,8 +6,17 @@ import {NitroAttestationVerifier} from "../../src/proofs/nitro/NitroAttestationV
 import {NitroEnclaveKeyRegistry} from "../../src/proofs/nitro/NitroEnclaveKeyRegistry.sol";
 import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol";
 import {INitroAttestationVerifier} from "../../src/proofs/nitro/INitroAttestationVerifier.sol";
-import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
+import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
+import {MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
 import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier.sol";
+
+contract EndToEndParentGame {
+    bytes32 public rootClaim;
+
+    constructor(bytes32 rootClaim_) {
+        rootClaim = rootClaim_;
+    }
+}
 
 /// @title NitroEndToEndTest
 /// @notice Full pipeline integration test wiring:
@@ -18,7 +27,7 @@ import {MockNitroAttestationVerifier} from "./mocks/MockNitroAttestationVerifier
 /// @dev A truly end-to-end test that goes through a real AWS-signed Nitro
 ///      attestation AND a real `NitroProofVerifier` verification would
 ///      require knowing the enclave's private key (so we could sign a fresh
-///      `signing_commitment`). Since we obviously don't have AWS NSM's
+///      `transition_commitment`). Since we obviously don't have AWS NSM's
 ///      private key, the integration test mocks the attestation step but
 ///      otherwise exercises the registry + proof-verifier code paths exactly
 ///      as they run in production. The PCR-allowlist piece of the
@@ -36,25 +45,48 @@ contract NitroEndToEndTest is Test {
     bytes32 constant PCR1 = bytes32(uint256(0xBEEF));
     bytes32 constant PCR2 = bytes32(uint256(0xCAFE));
 
-    bytes32 constant DOMAIN = keccak256("worldchain-integration");
-    address constant PARENT = address(0x1234);
-    bytes32 constant INTER = keccak256("intermediate-roots");
     bytes32 constant L1H = keccak256("l1-origin");
     uint256 constant L1N = 7_777;
     bytes32 constant CFG = keccak256("rollup-cfg");
+    bytes32 constant PRE = keccak256("pre-root");
+    uint64 constant PRE_BLK = 41_999;
     bytes32 constant POST = keccak256("post-root");
     uint64 constant BLK = 42_000;
+    address constant ANCHOR_STATE_REGISTRY = address(0xA11CE);
 
     bytes constant TBS = hex"abcdabcd";
     bytes constant SIG = hex"feedfeed";
 
     Vm.Wallet enclaveWallet;
     bytes enclavePubKey;
+    EndToEndParentGame parent;
+    MockProofSystemGame game;
+    bytes32 domainHash;
 
     function setUp() public {
         attestationVerifier = new MockNitroAttestationVerifier();
         registry = new NitroEnclaveKeyRegistry(attestationVerifier, owner);
+        parent = new EndToEndParentGame(PRE);
         proofVerifier = new NitroProofVerifier(registry);
+        ProofLib.Domain memory domain =
+            ProofLib.Domain({chainId: 480, proofSystemVersion: 1, rollupConfigHash: CFG, blockInterval: BLK - PRE_BLK});
+        domainHash = ProofLib.domainHash(domain);
+        game = new MockProofSystemGame();
+        game.setContext(
+            MockProofSystemGame.Context({
+                domain: domain,
+                rootId: _rootId(POST, BLK),
+                anchorStateRegistry: ANCHOR_STATE_REGISTRY,
+                domainHash: domainHash,
+                parentRef: address(parent),
+                startingRootClaim: PRE,
+                startingL2BlockNumber: PRE_BLK,
+                rootClaim: POST,
+                l2BlockNumber: BLK,
+                l1OriginHash: L1H,
+                l1OriginNumber: L1N
+            })
+        );
 
         enclaveWallet = vm.createWallet("enclave-integration");
         enclavePubKey = _uncompressedKey(enclaveWallet.publicKeyX, enclaveWallet.publicKeyY);
@@ -70,25 +102,59 @@ contract NitroEndToEndTest is Test {
         }
     }
 
-    function _signCommitment(Vm.Wallet memory w, bytes32 postRoot, uint64 blk, bytes32 cfg)
+    function _transition(bytes32 postRoot, uint64 blk, bytes32 cfg)
+        internal
+        pure
+        returns (ProofLib.TransitionPublicValues memory)
+    {
+        return ProofLib.TransitionPublicValues({
+            l1Head: L1H,
+            l2PreRoot: PRE,
+            l2PreBlockNumber: PRE_BLK,
+            l2PostRoot: postRoot,
+            l2PostBlockNumber: blk,
+            rollupConfigHash: cfg
+        });
+    }
+
+    function _signCommitment(Vm.Wallet memory w, ProofLib.TransitionPublicValues memory transition)
         internal
         returns (bytes memory)
     {
-        bytes32 commitment = keccak256(abi.encodePacked(postRoot, blk, cfg));
+        bytes32 commitment = keccak256(abi.encode(transition));
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(w, commitment);
         return abi.encodePacked(r, s, v);
     }
 
-    function _proof(bytes memory sig, bytes memory pub, bytes32 postRoot, uint64 blk, bytes32 cfg)
+    function _signCommitment(Vm.Wallet memory w, bytes32 postRoot, uint64 blk, bytes32 cfg)
         internal
-        pure
         returns (bytes memory)
     {
-        return abi.encode(DOMAIN, PARENT, INTER, L1H, L1N, cfg, postRoot, blk, sig, pub);
+        return _signCommitment(w, _transition(postRoot, blk, cfg));
     }
 
-    function _rootId(bytes32 postRoot, uint64 blk) internal pure returns (bytes32) {
-        return WorldChainProofLib.rootId(DOMAIN, PARENT, postRoot, uint256(blk), INTER, L1H, L1N);
+    function _proof(bytes memory sig, bytes memory pub, ProofLib.TransitionPublicValues memory transition)
+        internal
+        view
+        returns (bytes memory)
+    {
+        return abi.encode(domainHash, address(parent), L1N, transition, sig, pub);
+    }
+
+    function _proof(bytes memory sig, bytes memory pub, bytes32 postRoot, uint64 blk, bytes32 cfg)
+        internal
+        view
+        returns (bytes memory)
+    {
+        return _proof(sig, pub, _transition(postRoot, blk, cfg));
+    }
+
+    function _rootId(bytes32 postRoot, uint64 blk) internal view returns (bytes32) {
+        return ProofLib.rootId(domainHash, address(parent), postRoot, uint256(blk), L1H, L1N);
+    }
+
+    function _verify(bytes32 rootId, bytes memory proof) internal view returns (bool) {
+        return game.verify(address(proofVerifier), rootId, proof);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -112,7 +178,7 @@ contract NitroEndToEndTest is Test {
         //    boot-info. The proposer wraps it up into a NitroProofVerifier
         //    proof tuple and submits it to dispute-game resolution.
         bytes memory sig = _signCommitment(enclaveWallet, POST, BLK, CFG);
-        assertTrue(proofVerifier.verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
+        assertTrue(_verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
     }
 
     function test_E2E_RevokeKeyInvalidatesFutureProofs() public {
@@ -120,7 +186,7 @@ contract NitroEndToEndTest is Test {
         bytes memory sig = _signCommitment(enclaveWallet, POST, BLK, CFG);
 
         // Pre-revoke: proof is valid.
-        assertTrue(proofVerifier.verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
+        assertTrue(_verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
 
         // Owner revokes the key (e.g. on compromise).
         vm.prank(owner);
@@ -129,7 +195,7 @@ contract NitroEndToEndTest is Test {
 
         // Same (previously valid) proof MUST now be rejected — the proof
         // verifier consults the registry on every call.
-        assertFalse(proofVerifier.verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
+        assertFalse(_verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
 
         // And the registry must permanently refuse to re-register the key,
         // even via a fresh attestation.
@@ -152,8 +218,8 @@ contract NitroEndToEndTest is Test {
         bytes memory sigA = _signCommitment(enclaveWallet, POST, BLK, CFG);
         bytes memory sigB = _signCommitment(secondWallet, POST, BLK, CFG);
 
-        assertTrue(proofVerifier.verify(_rootId(POST, BLK), _proof(sigA, enclavePubKey, POST, BLK, CFG)));
-        assertTrue(proofVerifier.verify(_rootId(POST, BLK), _proof(sigB, secondPubKey, POST, BLK, CFG)));
+        assertTrue(_verify(_rootId(POST, BLK), _proof(sigA, enclavePubKey, POST, BLK, CFG)));
+        assertTrue(_verify(_rootId(POST, BLK), _proof(sigB, secondPubKey, POST, BLK, CFG)));
     }
 
     function test_E2E_RevokeOneEnclaveDoesNotAffectPeer() public {
@@ -172,15 +238,15 @@ contract NitroEndToEndTest is Test {
 
         bytes memory sigA = _signCommitment(enclaveWallet, POST, BLK, CFG);
         bytes memory sigB = _signCommitment(secondWallet, POST, BLK, CFG);
-        assertFalse(proofVerifier.verify(_rootId(POST, BLK), _proof(sigA, enclavePubKey, POST, BLK, CFG)));
-        assertTrue(proofVerifier.verify(_rootId(POST, BLK), _proof(sigB, secondPubKey, POST, BLK, CFG)));
+        assertFalse(_verify(_rootId(POST, BLK), _proof(sigA, enclavePubKey, POST, BLK, CFG)));
+        assertTrue(_verify(_rootId(POST, BLK), _proof(sigB, secondPubKey, POST, BLK, CFG)));
     }
 
     function test_E2E_UnregisteredKeyFails() public {
         // Skip registration; the proof verifier MUST refuse even a
         // cryptographically-valid signature from an unknown key.
         bytes memory sig = _signCommitment(enclaveWallet, POST, BLK, CFG);
-        assertFalse(proofVerifier.verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
+        assertFalse(_verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
     }
 
     function test_E2E_ProofMustBindToRequestedRootId() public {
@@ -188,6 +254,6 @@ contract NitroEndToEndTest is Test {
         bytes memory sig = _signCommitment(enclaveWallet, POST, BLK, CFG);
 
         // Honest proof but the dispute game asks about a different rootId.
-        assertFalse(proofVerifier.verify(bytes32(uint256(0xdead)), _proof(sig, enclavePubKey, POST, BLK, CFG)));
+        assertFalse(_verify(bytes32(uint256(0xdead)), _proof(sig, enclavePubKey, POST, BLK, CFG)));
     }
 }

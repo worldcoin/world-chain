@@ -1,5 +1,5 @@
-//! `world-chain-proposer` binary: watches L2 output roots and opens
-//! `WorldChainProofSystemGame` proposals on L1 through the proof-system factory.
+//! `world-chain-proposer` binary: watches L2 output roots and opens WIP-1006
+//! `MultiProofGame` proposals on L1 through the stock OP `DisputeGameFactory`.
 //!
 //! Mirrors the in-process proposer wired by the devnet harness
 //! (`crates/devnet/src/full_stack.rs::start_world_chain_proposer`), reading its
@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use alloy_network::EthereumWallet;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::Address;
 use alloy_provider::ProviderBuilder;
 use alloy_signer_local::PrivateKeySigner;
 use anyhow::{Context, Result};
@@ -16,7 +16,10 @@ use clap::Parser;
 use tracing::info;
 use url::Url;
 use world_chain_proofs::OptimismConsensusClient;
-use world_chain_proposer::{AlloyProofSystemClient, ProposerConfig, WorldChainProposer};
+use world_chain_proposer::{
+    AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerConfig, WorldChainProposer,
+};
+use world_chain_prover_service::RpcProverServiceClient;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -32,11 +35,15 @@ struct Cli {
     #[arg(long, env = "OUTPUT_ROOT_RPC_URL")]
     output_root_rpc: String,
 
-    /// `WorldChainProofSystemFactory` address on L1.
+    /// prover-service JSON-RPC URL.
+    #[arg(long, env = "PROVER_SERVICE_URL")]
+    prover_service_url: String,
+
+    /// OP Stack `DisputeGameFactory` address on L1.
     #[arg(long, env = "FACTORY_ADDRESS")]
     factory_address: Address,
 
-    /// `WorldChainAnchorStateRegistry` address on L1.
+    /// OP Stack `AnchorStateRegistry` address on L1.
     #[arg(long, env = "ANCHOR_REGISTRY_ADDRESS")]
     anchor_registry_address: Address,
 
@@ -48,17 +55,25 @@ struct Cli {
     #[arg(long, env = "BLOCK_INTERVAL")]
     block_interval: u64,
 
-    /// Bond posted with each proposal, in wei (default 1 ETH).
-    #[arg(
-        long,
-        env = "PROPOSER_BOND_WEI",
-        default_value_t = 1_000_000_000_000_000_000
-    )]
-    proposer_bond_wei: u128,
-
     /// Seconds between output-root polls.
     #[arg(long, env = "POLL_INTERVAL_SECONDS", default_value_t = 12)]
     poll_interval_seconds: u64,
+
+    /// Maximum game-resolution transactions submitted during one proposer tick.
+    #[arg(long, env = "MAX_RESOLUTIONS_PER_TICK", default_value_t = 1)]
+    max_resolutions_per_tick: usize,
+
+    /// Seconds between proposer-bond discovery and withdrawal passes.
+    #[arg(
+        long,
+        env = "BOND_MANAGER_POLL_INTERVAL_SECONDS",
+        default_value_t = 300
+    )]
+    bond_manager_poll_interval_seconds: u64,
+
+    /// Number of recent factory games scanned when the bond manager starts.
+    #[arg(long, env = "BOND_MANAGER_INITIAL_SCAN_LIMIT", default_value_t = 1_000)]
+    bond_manager_initial_scan_limit: u64,
 }
 
 #[tokio::main]
@@ -76,27 +91,43 @@ async fn main() -> Result<()> {
         .connect_http(Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?);
 
     let contracts =
-        AlloyProofSystemClient::new(provider, cli.factory_address, cli.anchor_registry_address);
+        AlloyProofSystemClient::new(provider, cli.factory_address, cli.anchor_registry_address)
+            .await
+            .context("failed to bind the World Chain proof system")?;
+    let bond_manager_config = BondManagerConfig {
+        poll_interval: Duration::from_secs(cli.bond_manager_poll_interval_seconds),
+        initial_scan_limit: cli.bond_manager_initial_scan_limit,
+    };
+    let mut bond_manager = BondManager::new(bond_manager_config, contracts.clone());
     let output_roots = OptimismConsensusClient::new(cli.output_root_rpc.clone());
+    let proof_requester = RpcProverServiceClient::new(&cli.prover_service_url)
+        .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
+    let domain_hash = contracts.domain_hash();
     let config = ProposerConfig {
         block_interval: cli.block_interval,
-        proposer_bond: U256::from(cli.proposer_bond_wei),
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
+        max_resolutions_per_tick: cli.max_resolutions_per_tick,
     };
-    let proposer = WorldChainProposer::new(config, contracts, output_roots);
+    let mut proposer = WorldChainProposer::new(config, contracts, output_roots, proof_requester);
 
     info!(
         l1_rpc_url = %cli.l1_rpc,
         output_root_rpc_url = %cli.output_root_rpc,
-        factory = %cli.factory_address,
+        prover_service = %cli.prover_service_url,
+        dispute_game_factory = %cli.factory_address,
         anchor = %cli.anchor_registry_address,
         proposer = %proposer_address,
+        domain_hash = %domain_hash,
         block_interval = cli.block_interval,
+        max_resolutions_per_tick = cli.max_resolutions_per_tick,
+        bond_manager_poll_interval_seconds = cli.bond_manager_poll_interval_seconds,
+        bond_manager_initial_scan_limit = cli.bond_manager_initial_scan_limit,
         "starting World Chain proof-system proposer"
     );
 
     tokio::select! {
         result = proposer.run_forever() => result.context("proposer stopped")?,
+        result = bond_manager.run_forever() => result.context("bond manager stopped")?,
         _ = tokio::signal::ctrl_c() => info!("received ctrl-c, shutting down"),
     }
     Ok(())

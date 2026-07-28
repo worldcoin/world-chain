@@ -63,12 +63,13 @@ jobs:
             binary: world-chain
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Cargo Build Release
         run: cargo build --release --bin ${{ matrix.binary }} --target ${{ matrix.target }}
 
@@ -91,13 +92,13 @@ jobs:
         shell: bash
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
           path: ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz
 
       - name: Upload signature
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz.asc
           path: ${{ env.REPO_NAME }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.target }}.tar.gz.asc
@@ -112,11 +113,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
       - name: Download artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: ${{ env.REPO_NAME }}-${{ env.VERSION }}-*
       - name: Generate full changelog

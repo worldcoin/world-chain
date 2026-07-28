@@ -31,20 +31,19 @@ World Chain is a blockchain designed for humans. It prioritizes scalability and 
 
 | Crate | Description |
 |-------|-------------|
-| [`world-chain-builder`](./crates/builder) | Custom block builder with priority blockspace for humans (PBH). |
-| [`world-chain-chainspec`](./crates/chainspec) | Chain specification and genesis configuration. |
-| [`world-chain-cli`](./crates/cli) | CLI tooling for operating World Chain nodes. |
+| [`world-chain-builder`](./crates/builder) | World Chain Payload Builder components |
+| [`world-chain-chainspec`](./crates/chainspec) | World Chain specification and genesis configuration. |
+| [`world-chain-cli`](./crates/cli) | World Chain CLI |
 | [`world-chain-devnet`](./crates/devnet) | Local devnet setup and tooling. |
 | [`world-chain-evm`](./crates/evm) | Custom EVM configuration and execution logic. |
-| [`world-chain-node`](./crates/node) | World Chain execution node built on reth. |
-| [`world-chain-p2p`](./crates/p2p) | Peer-to-peer networking layer. |
-| [`world-chain-payload`](./crates/payload) | Payload building and attributes. |
+| [`world-chain-node`](./crates/node) | World Chain node components builder |
+| [`world-chain-p2p`](./crates/p2p) | RLPX Satellite Protocol Components |
+| [`world-chain-payload`](./crates/payload) | Payload job lifecycle management, and continuous block building |
 | [`world-chain-pbh`](./crates/pbh) | Priority Blockspace for Humans — verified human transaction prioritization. |
-| [`world-chain-pool`](./crates/pool) | Transaction pool with PBH-aware ordering. |
-| [`world-chain-primitives`](./crates/primitives) | Shared types and primitives. |
-| [`world-chain-rpc`](./crates/rpc) | Custom RPC extensions for World Chain. |
-| [`world-chain-state`](./crates/state) | State management and storage. |
-| [`world-chain-validator`](./crates/validator) | Transaction validation with World ID proof verification. |
+| [`world-chain-pool`](./crates/pool) | Transaction pool with custom ordering. |
+| [`world-chain-primitives`](./crates/primitives) | Project wide primitives |
+| [`world-chain-rpc`](./crates/rpc) | World Chain RPC API Extensions |
+| [`world-chain-validator`](./crates/validator) | World Chain Flashblocks Execution Engine |
 
 ## Proofs
 
@@ -55,7 +54,6 @@ World Chain is a blockchain designed for humans. It prioritizes scalability and 
 | [`world-chain-prover-nitro`](./proofs/prover-nitro) | AWS Nitro TEE host prover CLI. |
 | [`world-chain-proof-core`](./proofs/core) | Shared primitives for SP1 and Nitro TEE fault-proof backends. |
 | [`world-chain-proof-nitro`](./proofs/nitro) | AWS Nitro TEE attestation prover for OP Succinct Lite fault proofs. |
-| [`world-chain-proof-protocol`](./proofs/protocol) | Fault-proof protocol definitions and interfaces. |
 | [`world-chain-proofs`](./proofs/primitives) | Proof primitives and shared types. |
 | [`world-chain-challenger`](./proofs/challenger) | Fault-proof challenger service. |
 | [`world-chain-proposer`](./proofs/proposer) | Output root proposer service. |

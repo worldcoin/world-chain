@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use world_chain_prover_service::{
-    BackendSession, BackendSessionStatus, LockId, ProofBackend, ProofData, ProofJobQueue,
-    ProofJobQueueError, ProofRequest, ProofRequestId, SessionType,
+    BackendSession, BackendSessionStatus, GetProofSessionRequest, LockId, ProofBackend, ProofData,
+    ProofJobQueue, ProofJobQueueError, ProofRequest, ProofRequestId, RecordProofSessionRequest,
+    SessionType,
 };
 
 /// Session bookkeeping handle pre-bound to one claimed job's identifiers.
@@ -45,8 +46,12 @@ impl JobSessions {
         session_type: SessionType,
     ) -> Result<Option<BackendSession>, ProofJobQueueError> {
         self.queue
-            .get_proof_session(self.proof_id, session_type)
+            .get_proof_session(GetProofSessionRequest {
+                proof_id: self.proof_id,
+                session_type,
+            })
             .await
+            .map(|response| response.session)
     }
 
     /// Record (insert or update) a backend session for this job.
@@ -55,17 +60,20 @@ impl JobSessions {
         session_type: SessionType,
         backend_session_id: String,
         status: BackendSessionStatus,
+        failure_reason: Option<String>,
     ) -> Result<(), ProofJobQueueError> {
         self.queue
-            .record_proof_session(
-                self.proof_id,
+            .record_proof_session(RecordProofSessionRequest {
+                proof_id: self.proof_id,
                 session_type,
-                self.worker_id.clone(),
-                self.lock_id,
+                worker_id: self.worker_id.clone(),
+                lock_id: self.lock_id,
                 backend_session_id,
                 status,
-            )
+                failure_reason,
+            })
             .await
+            .map(|_| ())
     }
 }
 

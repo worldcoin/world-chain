@@ -40,9 +40,15 @@ use world_chain_p2p::{
 use world_chain_primitives::p2p::Authorization;
 use world_chain_rpc::eth::FlashblocksEthApiBuilder;
 
+use std::sync::Arc;
+
+use crossbeam_channel::{Receiver, Sender};
 use tracing::info;
 use world_chain_builder::WorldChainPayloadBuilderCtxBuilder;
-use world_chain_evm::{WorldChainEvmConfig, WorldChainExecutorBuilder};
+use world_chain_evm::{
+    BlockExecutionWitness, ExecutionWitnessHandle, WitnessCache, WorldChainEvmConfig,
+    WorldChainExecutorBuilder,
+};
 use world_chain_pool::BasicWorldChainPool;
 use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
 
@@ -171,10 +177,23 @@ where
     }
 }
 
+/// Shared witness-oracle plumbing, created once when `--witness.collect` is set.
+///
+/// The `sender` is handed to the capturing EVM config built in [`components`](WorldChainNodeContext::components),
+/// while the `cache` and `receiver` are carried into the add-ons, where the collector thread is
+/// spawned and the RPC oracle is installed.
+#[derive(Clone, Debug)]
+struct WitnessChannels {
+    cache: ExecutionWitnessHandle,
+    sender: Sender<BlockExecutionWitness>,
+    receiver: Receiver<BlockExecutionWitness>,
+}
+
 #[derive(Clone, Debug)]
 pub struct WorldChainDefaultContext {
     config: WorldChainNodeConfig,
     components_context: Option<FlashblocksComponentsContext>,
+    witness: Option<WitnessChannels>,
 }
 
 impl WorldChainNodePrimitiveTypes for WorldChainDefaultContext {
@@ -225,6 +244,7 @@ where
                     ..
                 },
             components_context,
+            witness,
         } = self.clone();
 
         let RollupArgs {
@@ -278,7 +298,9 @@ where
                 pbh.signature_aggregator,
                 pbh.world_id,
             ))
-            .executor(WorldChainExecutorBuilder)
+            .executor(WorldChainExecutorBuilder::new(
+                witness.as_ref().map(|w| w.sender.clone()),
+            ))
             .payload(FlashblocksPayloadServiceBuilder::new(
                 FlashblocksPayloadBuilderBuilder::new(
                     ctx_builder,
@@ -373,6 +395,9 @@ where
             false,
             1_000_000,
             self.config.args.simulate_enabled,
+            self.witness
+                .as_ref()
+                .map(|w| (w.cache.clone(), w.receiver.clone())),
         )
     }
 
@@ -396,9 +421,23 @@ impl From<WorldChainNodeConfig> for WorldChainDefaultContext {
             .flashblocks
             .as_ref()
             .map(|_flashblocks_args| value.clone().into());
+
+        let witness = value.args.witness.collect.then(|| {
+            let cache = Arc::new(WitnessCache::with_depth(value.args.witness.depth));
+            // Bounded so a slow collector applies backpressure (dropped witnesses) instead of growing
+            // memory without limit; sized to the same retention as the cache.
+            let (sender, receiver) = crossbeam_channel::bounded(value.args.witness.depth);
+            WitnessChannels {
+                cache,
+                sender,
+                receiver,
+            }
+        });
+
         Self {
             config: value,
             components_context,
+            witness,
         }
     }
 }

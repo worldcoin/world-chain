@@ -18,6 +18,17 @@ on:
           - tag
   push:
     branches: [main]
+    paths:
+      - "bin/world-chain/**"
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/config.toml"
+      - "Dockerfile"
+      - "scripts/**"
+      - ".github/workflows/docker.yml"
+      - ".github/actions/docker-build-push-digest/**"
+      - ".github/actions/docker-merge-manifest/**"
 
 env:
   REPO_NAME: ${{ github.event.repository.name }}
@@ -47,7 +58,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.ref }}
       - name: Build and push digest
@@ -65,7 +76,7 @@ jobs:
       - build-and-push
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Merge multi-arch manifest
         uses: ./.github/actions/docker-merge-manifest
         with:
