@@ -135,7 +135,6 @@ jobs:
 
   cargo-docs:
     runs-on: arc-public-8xlarge-amd64-runner
-    environment: dev
     timeout-minutes: 20
     name: docs
     env:
