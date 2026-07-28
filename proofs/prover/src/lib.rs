@@ -13,7 +13,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use world_chain_chainspec::WorldChainSpec;
 use world_chain_proof_core::{
-    hash_rollup_config, range::WorldRangeHardforkConfig, witness::WorldRangeWitnessData,
+    hash_world_rollup_config, range::WorldRangeHardforkConfig, witness::WorldRangeWitnessData,
 };
 use world_chain_proof_kona_host_utils::online::{
     OnlineHostConfig, RangeProofInput, RangeWitnessRequest, build_range_input,
@@ -127,7 +127,7 @@ pub async fn rollup_config_hash_from_args(args: HashRollupConfigArgs) -> Result<
             let value: Value = rpc(&client, &url, "optimism_rollupConfig", json!([]))
                 .await?
                 .context("optimism_rollupConfig returned null")?;
-            Ok(hash_rollup_config(&value)?)
+            Ok(rollup_config_hash_from_value(&value)?.1)
         }
         (None, None) => bail!("provide --rollup-config or --l2-rpc"),
     }
@@ -200,8 +200,24 @@ pub fn proof_config_from_file(path: &Path) -> Result<(WorldRangeHardforkConfig, 
     let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
     let value: Value = serde_json::from_slice(&bytes)
         .with_context(|| format!("failed to parse {}", path.display()))?;
-    let schedule = serde_json::from_value(value.clone())?;
-    let hash = hash_rollup_config(&value)?;
+    rollup_config_hash_from_value(&value)
+}
+
+/// Parses a rollup config JSON `Value` into its World fork schedule and rollup config hash.
+///
+/// The hash MUST be computed from the same parsed [`kona_genesis::RollupConfig`] the
+/// enclave/guest hashes via [`hash_world_rollup_config`], not from the raw JSON text (via
+/// `hash_rollup_config`). Otherwise `just proof-rollup-config-hash` (used to derive the
+/// on-chain `ROLLUP_CONFIG_HASH`) and this CLI's prover path would keep producing a hash that
+/// cannot match the worker/enclave for any `rollup.json` that isn't already in Kona's exact
+/// canonical serialized form (see `OnlineHostConfig::from_rollup_config_value`).
+fn rollup_config_hash_from_value(value: &Value) -> Result<(WorldRangeHardforkConfig, B256)> {
+    let schedule: WorldRangeHardforkConfig =
+        serde_json::from_value(value.clone()).context("failed to parse rollup config hardforks")?;
+    let parsed_rollup_config: kona_genesis::RollupConfig =
+        serde_json::from_value(value.clone()).context("failed to parse rollup config")?;
+    let hash = hash_world_rollup_config(&parsed_rollup_config, &schedule)
+        .context("failed to hash rollup config")?;
     Ok((schedule, hash))
 }
 
@@ -234,4 +250,70 @@ fn sibling_path(base: &Path, suffix: &str) -> PathBuf {
         .and_then(|s| s.to_str())
         .unwrap_or("witness");
     base.with_file_name(format!("{stem}.{suffix}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use world_chain_proof_core::hash_rollup_config;
+
+    /// Regression test ensuring `proof_config_from_file` (and therefore
+    /// `rollup_config_hash_from_args`, used by `just proof-rollup-config-hash` for the on-chain
+    /// `ROLLUP_CONFIG_HASH` and by the CLI prover path) hashes the parsed [`kona_genesis::RollupConfig`]
+    /// via [`hash_world_rollup_config`], not the raw source JSON via `hash_rollup_config`.
+    ///
+    /// Mirrors `world_chain_proof_core::boot`'s regression test for the same bug class: a
+    /// rollup.json missing `granite_channel_timeout` (e.g. one produced by `op-node` instead of
+    /// `kona-node`) must not silently produce a hash that diverges from what the enclave/guest
+    /// actually commits to via [`hash_world_rollup_config`].
+    #[test]
+    fn proof_config_from_file_hashes_parsed_config_not_raw_json() {
+        let raw = serde_json::json!({
+            "genesis": {
+                "l1": { "hash": format!("0x{}", "11".repeat(32)), "number": 1 },
+                "l2": { "hash": format!("0x{}", "22".repeat(32)), "number": 0 },
+                "l2_time": 0,
+                "system_config": null,
+            },
+            "block_time": 2,
+            "max_sequencer_drift": 600,
+            "seq_window_size": 3600,
+            "channel_timeout": 300,
+            "l1_chain_id": 11155111,
+            "l2_chain_id": 5496749,
+            "regolith_time": 0,
+            "canyon_time": 0,
+            "delta_time": 0,
+            "ecotone_time": 0,
+            "fjord_time": 0,
+            "granite_time": 0,
+            "holocene_time": 0,
+            "isthmus_time": 0,
+            "batch_inbox_address": format!("0x{}", "33".repeat(20)),
+            "deposit_contract_address": format!("0x{}", "44".repeat(20)),
+            "l1_system_config_address": format!("0x{}", "55".repeat(20)),
+        });
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollup.json");
+        fs::write(&path, serde_json::to_vec(&raw).unwrap()).unwrap();
+
+        let (_, hash) = proof_config_from_file(&path).unwrap();
+
+        // The old (buggy) behavior hashed the raw JSON text directly.
+        let raw_hash = hash_rollup_config(&raw).unwrap();
+        assert_ne!(
+            hash, raw_hash,
+            "proof_config_from_file must not hash the raw source JSON — it must hash the \
+             parsed RollupConfig (via hash_world_rollup_config), matching the enclave/guest. \
+             This diverges here because granite_channel_timeout is absent from the source JSON \
+             but is filled in with a default when kona_genesis::RollupConfig re-serializes it."
+        );
+
+        // The new (correct) behavior must match hashing the parsed RollupConfig directly.
+        let schedule: WorldRangeHardforkConfig = serde_json::from_value(raw.clone()).unwrap();
+        let parsed: kona_genesis::RollupConfig = serde_json::from_value(raw).unwrap();
+        let expected = hash_world_rollup_config(&parsed, &schedule).unwrap();
+        assert_eq!(hash, expected);
+    }
 }
