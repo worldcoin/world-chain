@@ -68,6 +68,16 @@ where
         Ok((entry.gameType == MULTI_PROOF_GAME_TYPE).then_some(entry.proxy))
     }
 
+    async fn game_created_at(&self, index: u64) -> Result<u64, DefenderError> {
+        self.factory
+            .gameAtIndex(U256::from(index))
+            .block(BlockId::finalized())
+            .call()
+            .await
+            .map(|entry| entry.timestamp)
+            .map_err(|error| DefenderError::Contract(error.to_string()))
+    }
+
     async fn game_creator(&self, address: Address) -> Result<Address, DefenderError> {
         self.game(address)
             .gameCreator()
@@ -112,14 +122,6 @@ where
             proof_deadline,
             proof_threshold,
         })
-    }
-
-    async fn proof_deadline(&self, address: Address) -> Result<u64, DefenderError> {
-        self.game(address)
-            .proofDeadline()
-            .call()
-            .await
-            .map_err(|error| DefenderError::Contract(error.to_string()))
     }
 
     async fn resolution_status(&self, address: Address) -> Result<ResolutionStatus, DefenderError> {

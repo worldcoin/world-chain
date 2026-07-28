@@ -62,6 +62,10 @@ struct Cli {
     #[arg(long, env = "MAX_GAMES_PER_TICK", default_value_t = 100)]
     max_games_per_tick: u64,
 
+    /// Conservative upper bound on the age of a game with an open proof window.
+    #[arg(long, env = "MAX_GAME_AGE_SECONDS", default_value_t = 604_800)]
+    max_game_age_seconds: u64,
+
     /// Maximum proof attempts per lane before giving up.
     #[arg(long, env = "MAX_PROOF_ATTEMPTS", default_value_t = 3)]
     max_proof_attempts: u32,
@@ -90,6 +94,7 @@ async fn main() -> Result<()> {
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_game_concurrency: cli.max_game_concurrency,
         max_games_per_tick: cli.max_games_per_tick,
+        max_game_age: Duration::from_secs(cli.max_game_age_seconds),
         max_proof_attempts: cli.max_proof_attempts,
     };
     let mut defender = WorldChainDefender::new(config, client, output_roots, proof_requester);

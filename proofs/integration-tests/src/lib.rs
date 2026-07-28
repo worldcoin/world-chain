@@ -484,6 +484,16 @@ impl ChallengerClient for FakeExecution {
             .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))
     }
 
+    async fn game_created_at(&self, index: u64) -> Result<u64, ChallengerError> {
+        self.state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .game_order
+            .get(index as usize)
+            .map(|_| u64::MAX)
+            .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))
+    }
+
     async fn game_metadata(
         &self,
         game: Address,
@@ -561,6 +571,16 @@ impl DefenderClient for FakeExecution {
             .ok_or_else(|| DefenderError::Contract(format!("unknown game index {index}")))
     }
 
+    async fn game_created_at(&self, index: u64) -> Result<u64, DefenderError> {
+        self.state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .game_order
+            .get(index as usize)
+            .map(|_| u64::MAX)
+            .ok_or_else(|| DefenderError::Contract(format!("unknown game index {index}")))
+    }
+
     async fn game_creator(&self, game: Address) -> Result<Address, DefenderError> {
         self.state
             .lock()
@@ -586,16 +606,6 @@ impl DefenderClient for FakeExecution {
                 proof_deadline: record.proof_deadline,
                 proof_threshold: PROOF_THRESHOLD,
             })
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
-    }
-
-    async fn proof_deadline(&self, game: Address) -> Result<u64, DefenderError> {
-        self.state
-            .lock()
-            .expect("fake execution mutex poisoned")
-            .games_by_address
-            .get(&game)
-            .map(|record| record.proof_deadline)
             .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
     }
 

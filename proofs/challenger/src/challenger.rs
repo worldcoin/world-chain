@@ -13,9 +13,6 @@ use std::{
 use tracing::{info, warn};
 use world_chain_proofs::{ConsensusProvider, RootState};
 
-/// Maximum number of consecutive non-WIP-1006 factory indices skipped by one cursor probe.
-const FOREIGN_GAME_PROBE_LIMIT: u64 = 64;
-
 /// World Chain output-root challenger.
 #[derive(Debug)]
 pub struct WorldChainChallenger<E, C> {
@@ -89,54 +86,26 @@ where
     E: ChallengerClient,
     C: ConsensusProvider,
 {
-    /// Binary-searches the factory index for the first game whose challenge window is still
-    /// open.
-    ///
-    /// The dispute-game factory interleaves every game type, so a probe can land on an index
-    /// that holds no WIP-1006 game. The search then steps forward a bounded distance to the
-    /// next one; if it finds none it narrows downward, which only ever yields a smaller (more
-    /// conservative) cursor.
-    async fn first_unexpired_game_index(
+    /// Binary-searches the factory's monotonic creation timestamps for the first game that
+    /// can still have an open challenge window.
+    async fn first_recent_game_index(
         &self,
         game_count: u64,
-        now: u64,
+        cutoff: u64,
     ) -> Result<u64, ChallengerError> {
         let mut low = 0;
         let mut high = game_count;
 
         while low < high {
             let middle = low + (high - low) / 2;
-            match self.probe_forward(middle, high).await? {
-                None => high = middle,
-                Some((index, game)) => {
-                    let deadline = self.execution_provider.challenge_deadline(game).await?;
-                    if deadline <= now {
-                        low = index + 1;
-                    } else {
-                        high = middle;
-                    }
-                }
+            if self.execution_provider.game_created_at(middle).await? < cutoff {
+                low = middle + 1;
+            } else {
+                high = middle;
             }
         }
 
         Ok(low)
-    }
-
-    /// Returns the first WIP-1006 game at or after `start` and below `end`, scanning at most
-    /// [`FOREIGN_GAME_PROBE_LIMIT`] indices so a long run of foreign games cannot turn the
-    /// search into an unbounded RPC loop.
-    async fn probe_forward(
-        &self,
-        start: u64,
-        end: u64,
-    ) -> Result<Option<(u64, Address)>, ChallengerError> {
-        let limit = end.min(start.saturating_add(FOREIGN_GAME_PROBE_LIMIT));
-        for index in start..limit {
-            if let Some(game) = self.execution_provider.game_address_at(index).await? {
-                return Ok(Some((index, game)));
-            }
-        }
-        Ok(None)
     }
 
     async fn process_game(
@@ -272,12 +241,13 @@ where
             .next_game_index
             .is_none_or(|next_game_index| next_game_index > game_count)
         {
-            let first_unexpired = self.first_unexpired_game_index(game_count, now).await?;
+            let cutoff = now.saturating_sub(self.config.max_game_age.as_secs());
+            let first_recent = self.first_recent_game_index(game_count, cutoff).await?;
             info!(
-                first_unexpired_game_index = first_unexpired,
-                game_count, "initialized challenger game cursor"
+                first_recent_game_index = first_recent,
+                game_count, cutoff, "initialized challenger game cursor"
             );
-            self.next_game_index = Some(first_unexpired);
+            self.next_game_index = Some(first_recent);
         }
 
         let start = self.next_game_index.unwrap_or(game_count);

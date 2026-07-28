@@ -14,12 +14,12 @@ pub trait DefenderClient: Send + Sync {
     /// Returns the WIP-1006 game at the provided factory index, or `None` when that index
     /// holds a game of a different type.
     async fn game_address_at(&self, index: u64) -> Result<Option<Address>, DefenderError>;
+    /// Returns the creation timestamp of any game at the provided factory index.
+    async fn game_created_at(&self, index: u64) -> Result<u64, DefenderError>;
     /// Reads the account that created the provided game.
     async fn game_creator(&self, game: Address) -> Result<Address, DefenderError>;
     /// Reads the immutable game data needed to monitor and defend its root claim.
     async fn game_metadata(&self, game: Address) -> Result<GameMetadata, DefenderError>;
-    /// Reads the proof deadline used by startup cursor initialization.
-    async fn proof_deadline(&self, game: Address) -> Result<u64, DefenderError>;
     /// Returns the current resolution evaluation for the provided game.
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, DefenderError>;
     /// Get the bitmap of proof lanes already proven for the provided game.

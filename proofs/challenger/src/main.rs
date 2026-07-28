@@ -59,6 +59,10 @@ struct Cli {
     #[arg(long, env = "MAX_GAMES_PER_TICK", default_value_t = 100)]
     max_games_per_tick: u64,
 
+    /// Conservative upper bound on the age of a game with an open challenge window.
+    #[arg(long, env = "MAX_GAME_AGE_SECONDS", default_value_t = 604_800)]
+    max_game_age_seconds: u64,
+
     /// Seconds between challenger-owned game resolution passes.
     #[arg(
         long,
@@ -105,6 +109,7 @@ async fn main() -> Result<()> {
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_game_concurrency: cli.max_game_concurrency,
         max_games_per_tick: cli.max_games_per_tick,
+        max_game_age: Duration::from_secs(cli.max_game_age_seconds),
     };
     let resolution_config = ResolutionManagerConfig {
         poll_interval: Duration::from_secs(cli.resolution_manager_poll_interval_seconds),
