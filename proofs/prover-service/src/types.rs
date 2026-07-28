@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, B256, BlockHash, BlockNumber, Bytes, keccak256};
+use alloy_primitives::{Address, B256, BlockNumber, Bytes, keccak256};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -388,7 +388,7 @@ pub struct RequestProofResponse {
     /// The proof request id.
     pub proof_id: ProofRequestId,
     /// The l1_head block hash stored in the prover-service.
-    pub l1_head: BlockHash,
+    pub l1_head: B256,
 }
 
 /// Request to claim the next queued proof job for a worker.

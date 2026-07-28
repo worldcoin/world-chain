@@ -3,8 +3,8 @@ use crate::{
     types::{
         GetNextProofRequest, GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse,
         HeartbeatRequest, HeartbeatResponse, ProofRequest, ProofRequestId, ProofResponse,
-        ProofStatus, RecordProofSessionRequest, RecordProofSessionResponse, SubmitProofRequest,
-        SubmitProofResponse,
+        ProofStatus, RecordProofSessionRequest, RecordProofSessionResponse, RequestProofResponse,
+        SubmitProofRequest, SubmitProofResponse,
     },
 };
 use async_trait::async_trait;
@@ -23,7 +23,7 @@ pub trait ProofRequester {
     async fn request_proof(
         &self,
         proof_request: ProofRequest,
-    ) -> Result<ProofRequestId, ProofRequestError>;
+    ) -> Result<RequestProofResponse, ProofRequestError>;
 
     /// Get the current status of a proof request.
     async fn proof_status(
