@@ -33,7 +33,7 @@ pub struct WorldChainGameCreated {
 }
 
 /// A game root state.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootState {
     None,
     Proposed,
@@ -212,7 +212,7 @@ pub const fn has_threshold(bitmap: u8) -> bool {
     proof_count(bitmap) >= PROOF_THRESHOLD
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InvalidationReason {
     None,
     ProofTimeout,
@@ -240,7 +240,7 @@ impl TryFrom<u8> for InvalidationReason {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResolutionStatus {
     pub resolvable: bool,
     pub root_state: RootState,

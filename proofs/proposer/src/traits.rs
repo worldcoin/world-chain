@@ -51,14 +51,17 @@ pub trait ProposerClient: Send + Sync {
     /// Reads the current anchor checkpoint from the registry.
     async fn anchor_parent(&self) -> Result<AnchorRef, ProposerError>;
 
-    /// Returns the highest-attempt game registered for the given transition under any of
-    /// `parent_candidates`, if one exists.
-    async fn latest_game_for_transition(
+    /// Returns the highest-attempt game registered for the given transition under each of
+    /// `parent_candidates`, in candidate order. Candidates with no game are omitted.
+    ///
+    /// Every candidate is reported rather than just the first hit: an invalidated game under a
+    /// superseded parent must not hide a live one under the parent that is still acceptable.
+    async fn games_for_transition(
         &self,
         parent_candidates: &[Address],
         root_claim: B256,
         l2_block_number: u64,
-    ) -> Result<Option<TransitionGame>, ProposerError>;
+    ) -> Result<Vec<TransitionGame>, ProposerError>;
 
     /// Returns the resolution status of the provided game, if game exists.
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError>;

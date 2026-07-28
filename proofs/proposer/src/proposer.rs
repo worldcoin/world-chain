@@ -107,14 +107,50 @@ where
                 .output_root_at_block(next_l2_block_number)
                 .await?;
 
-            let Some(existing) = self
+            let existing = self
                 .execution_provider
-                .latest_game_for_transition(&parent_candidates, root_claim, next_l2_block_number)
-                .await?
+                .games_for_transition(&parent_candidates, root_claim, next_l2_block_number)
+                .await?;
+            let mut statuses = Vec::with_capacity(existing.len());
+            for game in &existing {
+                statuses.push(
+                    self.execution_provider
+                        .resolution_status(game.address)
+                        .await?,
+                );
+            }
+
+            // A game that has not been invalidated continues the canonical line, whichever
+            // accepted parent it was created under.
+            if let Some(live) = existing
+                .iter()
+                .zip(&statuses)
+                .find(|(_, status)| status.root_state != RootState::Invalidated)
+                .map(|(game, _)| *game)
+            {
+                let next_game = ParentRef {
+                    address: live.address,
+                    l2_block_number: next_l2_block_number,
+                };
+                canonical_line.push_game(next_game);
+                cursor = next_game;
+                parent_candidates = vec![next_game.address];
+                continue;
+            }
+
+            // Every game at this height is invalidated, so only the one created under the
+            // parent that is still acceptable matters. `MultiProofGame.initialize` rejects a
+            // parent at or below the anchor, so a game whose parent has since been closed into
+            // the anchor can neither be retried under that parent nor chained onto: the
+            // transition rebases onto `cursor.address` at attempt zero instead. This is the
+            // contract's own recovery path for inherited invalidations.
+            let Some((stale, status)) = existing
+                .iter()
+                .zip(&statuses)
+                .find(|(game, _)| game.parent_ref == cursor.address)
             else {
-                // game doesn't exist onchain yet, exit the loop with a
-                // `NextProposalAction::Propose`. The `propose` fn will
-                // later publish this proposal onchain
+                // Nothing occupies this transition under the current parent, either because no
+                // game exists yet or because the only ones that do are stale rebase targets.
                 return Ok(CanonicalScan::new(
                     canonical_line,
                     NextProposalAction::Propose(Proposal {
@@ -126,50 +162,31 @@ where
                 ));
             };
 
-            // game already exists onchain, look at the resolution status now:
-            // - if the root_state becomes `Invalidated`, then immediately return
-            //   because we don't want to keep building on top of an invalid game
-            // - otherwise, add the game to the canonical line and continue the loop
-            let resolution_status = self
-                .execution_provider
-                .resolution_status(existing.address)
-                .await?;
-            if resolution_status.root_state == RootState::Invalidated {
-                let next_action = if resolution_status.resolvable {
-                    NextProposalAction::AwaitNegativeResolution {
-                        game: existing.address,
-                        reason: resolution_status.invalidation_reason,
-                    }
-                } else if resolution_status.invalidation_reason == InvalidationReason::ProofTimeout
-                {
-                    // A retry must reuse the invalidated game's parent reference and root
-                    // claim: `MultiProofGame` only accepts attempt N when attempt N-1 exists
-                    // under the identical `extraData`.
-                    NextProposalAction::RetryTimedOut {
-                        proposal: Proposal {
-                            parent_ref: existing.parent_ref,
-                            root_claim,
-                            l2_block_number: next_l2_block_number,
-                            attempt: existing.attempt.saturating_add(1),
-                        },
-                        invalidated_game: existing.address,
-                    }
-                } else {
-                    NextProposalAction::BlockedByInvalidation {
-                        game: existing.address,
-                        reason: resolution_status.invalidation_reason,
-                    }
-                };
-                return Ok(CanonicalScan::new(canonical_line, next_action));
-            }
-
-            let next_game = ParentRef {
-                address: existing.address,
-                l2_block_number: next_l2_block_number,
+            let next_action = if status.resolvable {
+                NextProposalAction::AwaitNegativeResolution {
+                    game: stale.address,
+                    reason: status.invalidation_reason,
+                }
+            } else if status.invalidation_reason == InvalidationReason::ProofTimeout {
+                // A retry must reuse the invalidated game's parent reference and root claim:
+                // `MultiProofGame` only accepts attempt N when attempt N-1 exists under the
+                // identical `extraData`.
+                NextProposalAction::RetryTimedOut {
+                    proposal: Proposal {
+                        parent_ref: cursor.address,
+                        root_claim,
+                        l2_block_number: next_l2_block_number,
+                        attempt: stale.attempt.saturating_add(1),
+                    },
+                    invalidated_game: stale.address,
+                }
+            } else {
+                NextProposalAction::BlockedByInvalidation {
+                    game: stale.address,
+                    reason: status.invalidation_reason,
+                }
             };
-            canonical_line.push_game(next_game);
-            cursor = next_game;
-            parent_candidates = vec![next_game.address];
+            return Ok(CanonicalScan::new(canonical_line, next_action));
         }
     }
 
