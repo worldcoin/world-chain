@@ -66,24 +66,28 @@ jobs:
     needs: approve-release
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install SP1 toolchain
         run: |
           curl -L https://sp1.succinct.xyz | bash
           ~/.sp1/bin/sp1up --version v6.1.0
           echo "$HOME/.sp1/bin" >> $GITHUB_PATH
-      - uses: taiki-e/install-action@just
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: arduino/setup-protoc@v3
+      - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
+        with:
+          tool: just
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Compute vkeys
         env:
           SP1_BUILD_DOCKER: "false"
         run: just proof-vkeys --output vkeys.json && cat vkeys.json
       - name: Upload vkeys
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: vkeys
           path: vkeys.json
@@ -103,7 +107,7 @@ jobs:
             platform: linux/arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -126,7 +130,7 @@ jobs:
     outputs:
       digest: ${{ steps.merge.outputs.digest }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Merge multi-arch manifest
         id: merge
         uses: ./.github/actions/docker-merge-manifest
@@ -152,7 +156,7 @@ jobs:
             platform: linux/arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -175,7 +179,7 @@ jobs:
     outputs:
       digest: ${{ steps.merge.outputs.digest }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Merge multi-arch manifest
         id: merge
         uses: ./.github/actions/docker-merge-manifest
@@ -208,7 +212,7 @@ jobs:
           - { runner: ubuntu-24.04-arm, platform: linux/arm64 }
     runs-on: ${{ matrix.platform.runner }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -237,7 +241,7 @@ jobs:
           - { suffix: -defender, prefix: digests-defender }
           - { suffix: -prover-service, prefix: digests-prover-service }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Merge multi-arch manifest
         uses: ./.github/actions/docker-merge-manifest
         with:
@@ -257,7 +261,7 @@ jobs:
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -278,7 +282,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Merge multi-arch manifest
         uses: ./.github/actions/docker-merge-manifest
         with:
@@ -299,7 +303,7 @@ jobs:
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Build and push digest
         uses: ./.github/actions/docker-build-push-digest
         with:
@@ -317,7 +321,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Merge multi-arch manifest
         uses: ./.github/actions/docker-merge-manifest
         with:
@@ -341,23 +345,23 @@ jobs:
       digest: ${{ steps.push_eif_image.outputs.digest }}
     steps:
       - name: Check Out Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Download EIF artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: nitro-enclave
           path: target/eif
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Build and push EIF carrier image
         id: push_eif_image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: proofs/nitro/Dockerfile.eif
@@ -382,20 +386,21 @@ jobs:
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install SP1 toolchain
         run: |
           curl -L https://sp1.succinct.xyz | bash
           ~/.sp1/bin/sp1up --version v6.1.0
           echo "$HOME/.sp1/bin" >> $GITHUB_PATH
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
-      - uses: arduino/setup-protoc@v3
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Cargo Build Release
         env:
           SP1_BUILD_DOCKER: "false"
@@ -420,7 +425,7 @@ jobs:
           mv *tar.gz* ..
         shell: bash
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: world-chain-prover-${{ env.VERSION }}-${{ matrix.target }}
           path: world-chain-prover-${{ env.VERSION }}-${{ matrix.target }}.tar.gz*
@@ -431,12 +436,14 @@ jobs:
     needs: approve-release
     runs-on: arc-public-8xlarge-amd64-runner
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: stable
       - name: Build EIF
         run: scripts/build-eif.sh target/eif
       - name: Upload EIF and PCRs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: nitro-enclave
           path: |
@@ -464,11 +471,11 @@ jobs:
       NITRO_PROVER_IMAGE_DIGEST: ${{ needs.merge-nitro-prover-image.outputs.digest }}
       EIF_IMAGE_DIGEST: ${{ needs.build-nitro-worker-enclave-eif-image.outputs.digest }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
       - name: Stage release assets
