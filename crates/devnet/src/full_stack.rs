@@ -11,9 +11,10 @@ use std::{
 use alloy_eips::{BlockNumberOrTag, eip1559::BaseFeeParams};
 use alloy_genesis::Genesis;
 use alloy_network::EthereumWallet;
-use alloy_primitives::{Address, B64, hex, keccak256};
+use alloy_primitives::{Address, B64, hex};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_local::PrivateKeySigner;
+use async_trait::async_trait;
 use base64::prelude::{BASE64_STANDARD, Engine};
 use eyre::eyre::{Context, Result, bail, eyre};
 use flate2::read::GzDecoder;
@@ -46,6 +47,7 @@ use world_chain_challenger::{
     ResolutionManager, ResolutionManagerConfig, WorldChainChallenger,
 };
 use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
+use world_chain_proof_core::{hash_world_rollup_config, range::WorldRangeHardforkConfig};
 use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
 use world_chain_proof_succinct_host_utils::{
     Sp1ProverKind, WorldSuccinctProver,
@@ -54,14 +56,16 @@ use world_chain_proof_succinct_host_utils::{
     network_prover::NetworkSuccinctProver,
 };
 use world_chain_proof_worker::{
-    ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
+    ClaimedProofJobHandler, ProofJob, ProofWorker, ProofWorkerConfig, RetryConfig,
+    WorkerHeartbeatConfig,
 };
 use world_chain_proofs::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
 use world_chain_proposer::{
     AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerConfig, WorldChainProposer,
 };
 use world_chain_prover_service::{
-    ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
+    ProofBackend, ProofData, ProverService, ProverServiceConfig, RpcProverServiceClient,
+    start_rpc_server,
 };
 use world_chain_sp1_worker::{Sp1Backend, Sp1BackendConfig};
 use world_chain_test_utils::DEV_CHAIN_ID;
@@ -79,6 +83,7 @@ const OP_NODE_RPC_PORT: u16 = 9545;
 const OP_NODE_METRICS_PORT: u16 = 7300;
 const OP_NODE_P2P_PORT: u16 = 9222;
 const OP_BATCHER_MAX_CHANNEL_DURATION_L1_BLOCKS: &str = "4";
+const DEVNET_ETH_PROOF_WINDOW: &str = "512";
 const OP_PROPOSER_PERMISSIONED_GAME_TYPE: &str = "1";
 const OP_TXMGR_NETWORK_TIMEOUT: &str = "30s";
 const OP_TXMGR_RESUBMISSION_TIMEOUT: &str = "5m";
@@ -163,6 +168,7 @@ pub struct FullStackWorldDevnet {
     _world_challenger: Option<ChallengerTask>,
     _world_defender: Option<DefenderTask>,
     _prover_service: Option<ProverServiceTask>,
+    _nitro_worker: Option<NitroWorkerTask>,
     _sp1_worker: Option<Sp1WorkerTask>,
     prover_service_url: Option<String>,
     _conductors: Vec<ConductorService>,
@@ -332,6 +338,39 @@ impl Drop for Sp1WorkerTask {
     }
 }
 
+/// In-process devnet Nitro worker task. Aborted on devnet drop.
+#[derive(Debug)]
+struct NitroWorkerTask {
+    handle: JoinHandle<()>,
+}
+
+impl Drop for NitroWorkerTask {
+    fn drop(&mut self) {
+        self.handle.abort();
+    }
+}
+
+#[derive(Debug)]
+struct DevnetNitroBackend;
+
+#[async_trait]
+impl ClaimedProofJobHandler for DevnetNitroBackend {
+    fn lane(&self) -> ProofBackend {
+        ProofBackend::Nitro
+    }
+
+    async fn handle_claimed_job(&self, job: ProofJob) -> anyhow::Result<ProofData> {
+        // The devnet deploys MockRootIdVerifier lanes. The proposer currently uses this
+        // response only as a readiness gate before stock DGF.create, so deterministic bytes
+        // keep the full queue/worker path exercised without requiring Nitro hardware.
+        Ok(ProofData::Nitro {
+            attestation: job.request.l1_head.as_slice().to_vec().into(),
+            public_values: job.request.root_claim.as_slice().to_vec().into(),
+            signature: job.request.root_claim.as_slice().to_vec().into(),
+        })
+    }
+}
+
 #[derive(Debug)]
 struct NativeProcess {
     id: String,
@@ -411,10 +450,12 @@ impl FullStackWorldDevnet {
         };
 
         let sequencer_count = config.sequencer_count.max(1) as usize;
+        let mut sequencer_port_reservations = Vec::new();
         let sequencer_plans = (0..sequencer_count)
-            .map(plan_sequencer)
+            .map(|index| plan_sequencer(index, &mut sequencer_port_reservations))
             .collect::<Result<Vec<_>>>()
             .wrap_err("failed to plan world-chain EL peer mesh")?;
+        drop(sequencer_port_reservations);
         let trusted_peers = sequencer_plans
             .iter()
             .map(|plan| plan.trusted_peer.clone())
@@ -436,13 +477,23 @@ impl FullStackWorldDevnet {
         .await?;
         connect_execution_peers(&sequencers).await?;
 
+        let mut op_service_port_reservations = Vec::new();
         let mut conductor_plans = Vec::with_capacity(sequencer_count);
         for index in 0..sequencer_count {
-            conductor_plans.push(plan_conductor(index, port_mode)?);
+            conductor_plans.push(plan_conductor(
+                index,
+                port_mode,
+                &mut op_service_port_reservations,
+            )?);
         }
 
-        let op_node_plans = plan_op_nodes(sequencer_count, &workdir_path)
-            .wrap_err("failed to plan op-node bootnode peer mesh")?;
+        let op_node_plans = plan_op_nodes(
+            sequencer_count,
+            &workdir_path,
+            &mut op_service_port_reservations,
+        )
+        .wrap_err("failed to plan op-node bootnode peer mesh")?;
+        drop(op_service_port_reservations);
         let op_node_bootnodes: Vec<_> = (0..sequencer_count)
             .map(|index| op_node_bootnodes(&op_node_plans, index))
             .collect();
@@ -566,6 +617,12 @@ impl FullStackWorldDevnet {
             (Some(service), Some(url))
         } else {
             (None, None)
+        };
+
+        let nitro_worker = if let Some(prover_service_url) = prover_service_url.as_deref() {
+            Some(start_devnet_nitro_worker(prover_service_url)?)
+        } else {
+            None
         };
 
         let world_proposer = if let (Some(deployment), Some(prover_service_url)) =
@@ -694,6 +751,7 @@ impl FullStackWorldDevnet {
             _world_challenger: world_challenger,
             _world_defender: world_defender,
             _prover_service: prover_service,
+            _nitro_worker: nitro_worker,
             _sp1_worker: sp1_worker,
             prover_service_url,
             _conductors: conductors,
@@ -714,6 +772,18 @@ impl FullStackWorldDevnet {
 
     pub fn optimism_portal(&self) -> &str {
         &self.optimism_portal
+    }
+
+    pub fn dispute_game_factory(&self) -> Option<&str> {
+        self._proof_system
+            .as_ref()
+            .map(|deployment| deployment.proof_system_factory.as_str())
+    }
+
+    pub fn anchor_state_registry(&self) -> Option<&str> {
+        self._proof_system
+            .as_ref()
+            .map(|deployment| deployment.anchor_state_registry.as_str())
     }
 
     pub fn l2_rpc_url(&self) -> &str {
@@ -939,9 +1009,13 @@ async fn deploy_world_proof_system(
     l1_addresses: &Value,
     workdir: &Path,
 ) -> Result<WorldProofSystemDeployment> {
-    let rollup_config = fs::read(rollup_path)
-        .wrap_err_with(|| format!("failed to read rollup config {}", rollup_path.display()))?;
-    let rollup_config_hash = keccak256(&rollup_config);
+    let rollup_config: Value = read_json(rollup_path)?;
+    let schedule: WorldRangeHardforkConfig = serde_json::from_value(rollup_config.clone())
+        .wrap_err("failed to parse rollup config hardforks")?;
+    let parsed_rollup_config: kona_genesis::RollupConfig =
+        serde_json::from_value(rollup_config).wrap_err("failed to parse rollup config")?;
+    let rollup_config_hash = hash_world_rollup_config(&parsed_rollup_config, &schedule)
+        .wrap_err("failed to hash rollup config")?;
     let rollup_config_hash_hex = format!("0x{}", hex::encode(rollup_config_hash.as_slice()));
     let contracts_dir = repo_root()?.join("pkg/contracts");
     let dispute_game_factory = l1_address(l1_addresses, "DisputeGameFactoryProxy")?;
@@ -1424,15 +1498,15 @@ fn patch_rollup_l1_hash(rollup_path: &Path, hash: &str) -> Result<()> {
         .wrap_err("failed to write rollup config with actual L1 genesis hash")
 }
 
-fn plan_sequencer(_index: usize) -> Result<SequencerPlan> {
+fn plan_sequencer(_index: usize, reservations: &mut Vec<TcpListener>) -> Result<SequencerPlan> {
     let p2p_secret_key = random_p2p_secret_key();
-    let p2p_host_port = reserve_host_port()?;
+    let p2p_host_port = reserve_host_port(reservations)?;
     let trusted_peer = devnet_enode(&p2p_secret_key, p2p_host_port)?;
     Ok(SequencerPlan {
-        rpc_host_port: reserve_host_port()?,
-        ws_host_port: reserve_host_port()?,
-        auth_host_port: reserve_host_port()?,
-        metrics_host_port: reserve_host_port()?,
+        rpc_host_port: reserve_host_port(reservations)?,
+        ws_host_port: reserve_host_port(reservations)?,
+        auth_host_port: reserve_host_port(reservations)?,
+        metrics_host_port: reserve_host_port(reservations)?,
         p2p_host_port,
         p2p_secret_key,
         trusted_peer,
@@ -1518,6 +1592,8 @@ async fn start_world_chain_el(
         "--metrics".to_string(),
         metrics_arg,
         "--disable-discovery".to_string(),
+        "--rpc.eth-proof-window".to_string(),
+        DEVNET_ETH_PROOF_WINDOW.to_string(),
     ];
     if !trusted_peers.is_empty() {
         args.extend(["--trusted-peers".to_string(), trusted_peers.join(",")]);
@@ -1751,22 +1827,26 @@ fn enode_with_host_port(enode: &str, host: &str, port: u16) -> Result<String> {
     Ok(format!("{}{}:{}{}", &enode[..=at], host, port, query))
 }
 
-fn plan_conductor(index: usize, port_mode: DevnetPortMode) -> Result<ConductorPlan> {
+fn plan_conductor(
+    index: usize,
+    port_mode: DevnetPortMode,
+    reservations: &mut Vec<TcpListener>,
+) -> Result<ConductorPlan> {
     let consensus_host_port = match port_mode {
         DevnetPortMode::Stable => 50_050 + index as u16,
-        DevnetPortMode::Dynamic => reserve_host_port()?,
+        DevnetPortMode::Dynamic => reserve_host_port(reservations)?,
     };
     let rpc_host_port = match port_mode {
         DevnetPortMode::Stable => 50_100 + index as u16,
-        DevnetPortMode::Dynamic => reserve_host_port()?,
+        DevnetPortMode::Dynamic => reserve_host_port(reservations)?,
     };
     let ws_host_port = match port_mode {
         DevnetPortMode::Stable => 50_200 + index as u16,
-        DevnetPortMode::Dynamic => reserve_host_port()?,
+        DevnetPortMode::Dynamic => reserve_host_port(reservations)?,
     };
     let metrics_host_port = match port_mode {
         DevnetPortMode::Stable => 50_300 + index as u16,
-        DevnetPortMode::Dynamic => reserve_host_port()?,
+        DevnetPortMode::Dynamic => reserve_host_port(reservations)?,
     };
     let server_id = format!("sequencer-{}", index + 1);
     let consensus_advertised = format!("host.docker.internal:{consensus_host_port}");
@@ -1787,17 +1867,21 @@ fn plan_conductor(index: usize, port_mode: DevnetPortMode) -> Result<ConductorPl
     })
 }
 
-fn plan_op_nodes(count: usize, workdir: &Path) -> Result<Vec<OpNodePlan>> {
+fn plan_op_nodes(
+    count: usize,
+    workdir: &Path,
+    reservations: &mut Vec<TcpListener>,
+) -> Result<Vec<OpNodePlan>> {
     let mut plans = Vec::with_capacity(count);
     for index in 0..count {
         let private_key = random_p2p_secret_key();
-        let p2p_host_port = reserve_host_port()?;
+        let p2p_host_port = reserve_host_port(reservations)?;
         let filename = format!("op-node-{index}-p2p-priv.txt");
         fs::write(workdir.join(&filename), &private_key)
             .wrap_err_with(|| format!("failed to write op-node P2P key {filename}"))?;
         plans.push(OpNodePlan {
             rpc_host_port: 19_545 + index as u16,
-            metrics_host_port: reserve_host_port()?,
+            metrics_host_port: reserve_host_port(reservations)?,
             p2p_host_port,
             bootnode: devnet_trusted_peer(&private_key, "host.docker.internal", p2p_host_port)?,
             private_key_path: format!("/work/{filename}"),
@@ -2482,7 +2566,13 @@ async fn start_world_chain_proposer(
     let contracts = AlloyProofSystemClient::new(provider, factory_address, anchor_address)
         .await
         .wrap_err("failed to bind the World Chain proof system")?;
-    let mut bond_manager = BondManager::new(BondManagerConfig::default(), contracts.clone());
+    let mut bond_manager = BondManager::new(
+        BondManagerConfig {
+            poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
+            ..BondManagerConfig::default()
+        },
+        contracts.clone(),
+    );
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let proof_requester = RpcProverServiceClient::new(prover_service_url)
         .map_err(|error| eyre!("failed to connect proposer to prover-service: {error}"))?;
@@ -2578,8 +2668,14 @@ async fn start_world_chain_challenger(
         client.clone(),
         owned_games.clone(),
     );
-    let mut bond_manager =
-        ChallengerBondManager::new(ChallengerBondManagerConfig::default(), client, owned_games);
+    let mut bond_manager = ChallengerBondManager::new(
+        ChallengerBondManagerConfig {
+            poll_interval: WORLD_CHALLENGER_POLL_INTERVAL,
+            ..ChallengerBondManagerConfig::default()
+        },
+        client,
+        owned_games,
+    );
 
     info!(
         l1_rpc_url,
@@ -2761,6 +2857,25 @@ async fn prover_service_database_url() -> Result<(
         "started temporary prover-service postgres"
     );
     Ok((database_url, Some(container), Some(data_dir)))
+}
+
+fn start_devnet_nitro_worker(prover_service_url: &str) -> Result<NitroWorkerTask> {
+    let queue = RpcProverServiceClient::new(prover_service_url)
+        .map_err(|error| eyre!("failed to connect Nitro worker to prover-service: {error}"))?;
+    let worker = ProofWorker::new(
+        queue,
+        DevnetNitroBackend,
+        ProofWorkerConfig {
+            worker_id: "devnet-nitro-worker".to_string(),
+            poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
+            max_concurrent_jobs: 1,
+            retry_config: RetryConfig::default(),
+            heartbeat_config: WorkerHeartbeatConfig::default(),
+        },
+    );
+    let handle =
+        tokio::spawn(worker.instrument(info_span!("nitro-worker", process = "nitro-worker")));
+    Ok(NitroWorkerTask { handle })
 }
 
 /// Spawns the in-process SP1 proving worker.
@@ -3575,9 +3690,11 @@ fn l1_address(addresses: &Value, name: &str) -> Result<String> {
         .ok_or_else(|| eyre!("op-deployer l1-addresses.json missing {name}"))
 }
 
-fn reserve_host_port() -> Result<u16> {
+fn reserve_host_port(reservations: &mut Vec<TcpListener>) -> Result<u16> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
-    Ok(listener.local_addr()?.port())
+    let port = listener.local_addr()?.port();
+    reservations.push(listener);
+    Ok(port)
 }
 
 fn world_chain_binary() -> Result<PathBuf> {
@@ -3660,6 +3777,18 @@ mod tests {
         assert_eq!(json_rpc_quantity_to_u64(&json!("0x0")).unwrap(), 0);
         assert_eq!(json_rpc_quantity_to_u64(&json!("0x2")).unwrap(), 2);
         assert_eq!(json_rpc_quantity_to_u64(&json!(3)).unwrap(), 3);
+    }
+
+    #[test]
+    fn allocates_unique_dynamic_host_ports() {
+        let mut reservations = Vec::new();
+        let mut ports = (0..32)
+            .map(|_| reserve_host_port(&mut reservations).unwrap())
+            .collect::<Vec<_>>();
+        ports.sort_unstable();
+        ports.dedup();
+
+        assert_eq!(ports.len(), 32);
     }
 
     #[test]

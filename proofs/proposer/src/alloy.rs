@@ -1,4 +1,5 @@
-use alloy_eips::BlockId;
+use alloy_consensus::BlockHeader;
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, B256, BlockHash, U256};
 use alloy_provider::{Provider, WalletProvider};
 use async_trait::async_trait;
@@ -283,6 +284,15 @@ where
     async fn pending_withdrawal(&self, game: Address) -> Result<PendingWithdrawal, ProposerError> {
         self.read_pending_withdrawal(game, self.proposer_address())
             .await
+    }
+
+    async fn latest_l1_timestamp(&self) -> Result<u64, ProposerError> {
+        self.provider
+            .get_block_by_number(BlockNumberOrTag::Latest)
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?
+            .map(|block| block.header.timestamp())
+            .ok_or_else(|| ProposerError::Contract("latest L1 block is unavailable".into()))
     }
 
     async fn claim_credit(&self, game: Address) -> Result<ClaimSubmission, ProposerError> {

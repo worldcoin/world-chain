@@ -80,6 +80,7 @@ struct MockState {
     unlocks: Vec<Address>,
     withdrawals: Vec<Address>,
     fail_claim_once: HashSet<Address>,
+    latest_l1_timestamp: u64,
     /// Factory indices holding a game of a different type.
     foreign_indices: HashSet<u64>,
 }
@@ -278,6 +279,10 @@ impl BondManagerClient for MockClient {
             .get(&game)
             .map(|game| game.pending)
             .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+    }
+
+    async fn latest_l1_timestamp(&self) -> Result<u64, ChallengerError> {
+        Ok(self.state.lock().expect("not poisoned").latest_l1_timestamp)
     }
 
     /// Mirrors `MultiProofGame.claimCredit`: the first call unlocks credit into a pending
@@ -614,6 +619,43 @@ async fn bond_manager_retries_failed_claim() {
         assert!(owned_games.contains(GAME_1));
     }
 
+    manager.withdraw_credits().await.unwrap();
+    assert!(!owned_games.contains(GAME_1));
+    assert_eq!(client.withdrawals(), vec![GAME_1]);
+}
+
+#[tokio::test]
+async fn bond_manager_uses_l1_timestamp_for_delayed_withdrawal() {
+    let mut game = MockGame::proposed(GAME_1, B256::ZERO, L2_BLOCK);
+    game.state = STATE_FINALIZED;
+    game.resolution_outcome = STATE_FINALIZED;
+    game.pending = PendingWithdrawal {
+        amount: U256::from(10),
+        unlock_at: 100,
+    };
+    let client = MockClient::new(vec![game]);
+    client
+        .state
+        .lock()
+        .expect("not poisoned")
+        .latest_l1_timestamp = 99;
+    let owned_games = OwnedGames::default();
+    owned_games.insert(GAME_1);
+    let manager = BondManager::new(
+        BondManagerConfig::default(),
+        client.clone(),
+        owned_games.clone(),
+    );
+
+    manager.withdraw_credits().await.unwrap();
+    assert!(owned_games.contains(GAME_1));
+    assert!(client.withdrawals().is_empty());
+
+    client
+        .state
+        .lock()
+        .expect("not poisoned")
+        .latest_l1_timestamp = 100;
     manager.withdraw_credits().await.unwrap();
     assert!(!owned_games.contains(GAME_1));
     assert_eq!(client.withdrawals(), vec![GAME_1]);

@@ -60,6 +60,8 @@ pub trait BondManagerClient: ResolutionManagerClient {
     /// Returns the managed challenger's pending `DelayedWETH` withdrawal for the game.
     async fn pending_withdrawal(&self, game: Address)
     -> Result<PendingWithdrawal, ChallengerError>;
+    /// Returns the latest L1 block timestamp used by `DelayedWETH`.
+    async fn latest_l1_timestamp(&self) -> Result<u64, ChallengerError>;
     /// Advances the managed challenger's two-phase bond claim on the provided game.
     async fn claim_credit(&self, game: Address) -> Result<ClaimSubmission, ChallengerError>;
 }

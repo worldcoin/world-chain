@@ -5,6 +5,8 @@ use crate::{
         ChallengeSubmission, ClaimSubmission, GameMetadata, PendingWithdrawal, ResolveSubmission,
     },
 };
+use alloy_consensus::BlockHeader;
+use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, U256};
 use alloy_provider::{Provider, WalletProvider};
 use alloy_rpc_types_eth::BlockId;
@@ -320,6 +322,15 @@ where
     ) -> Result<PendingWithdrawal, ChallengerError> {
         self.read_pending_withdrawal(address, self.challenger_address())
             .await
+    }
+
+    async fn latest_l1_timestamp(&self) -> Result<u64, ChallengerError> {
+        self.provider
+            .get_block_by_number(BlockNumberOrTag::Latest)
+            .await
+            .map_err(|error| ChallengerError::Contract(error.to_string()))?
+            .map(|block| block.header.timestamp())
+            .ok_or_else(|| ChallengerError::Contract("latest L1 block is unavailable".into()))
     }
 
     async fn claim_credit(&self, address: Address) -> Result<ClaimSubmission, ChallengerError> {

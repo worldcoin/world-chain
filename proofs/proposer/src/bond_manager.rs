@@ -1,7 +1,4 @@
-use std::{
-    collections::HashSet,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::HashSet;
 
 use alloy_primitives::{Address, U256};
 use tracing::{info, warn};
@@ -92,7 +89,7 @@ where
     /// pending withdrawal is drained. Dropping it after the unlock would strand the bond.
     pub async fn withdraw_credits(&mut self) -> Result<(), ProposerError> {
         let proposed_games: Vec<_> = self.proposed_games.iter().copied().collect();
-        let now = unix_now();
+        let now = self.execution_provider.latest_l1_timestamp().await?;
 
         for game in proposed_games {
             let result: Result<bool, ProposerError> = async {
@@ -173,11 +170,4 @@ where
             }
         }
     }
-}
-
-fn unix_now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_secs()
 }

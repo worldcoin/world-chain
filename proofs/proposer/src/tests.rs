@@ -1,6 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
@@ -224,6 +227,7 @@ struct MockBondClient {
     unfinalized_games: Arc<Mutex<HashSet<Address>>>,
     credit: Arc<Mutex<HashMap<Address, U256>>>,
     pending: Arc<Mutex<HashMap<Address, PendingWithdrawal>>>,
+    latest_l1_timestamp: Arc<AtomicU64>,
     unlocks: Arc<Mutex<Vec<Address>>>,
     withdrawals: Arc<Mutex<Vec<Address>>>,
     fail_game_at_once: Arc<Mutex<Option<u64>>>,
@@ -250,6 +254,7 @@ impl MockBondClient {
             unfinalized_games: Arc::default(),
             credit: Arc::default(),
             pending: Arc::default(),
+            latest_l1_timestamp: Arc::default(),
             unlocks: Arc::default(),
             withdrawals: Arc::default(),
             fail_game_at_once: Arc::default(),
@@ -338,6 +343,10 @@ impl BondManagerClient for MockBondClient {
             .get(&game)
             .copied()
             .unwrap_or_default())
+    }
+
+    async fn latest_l1_timestamp(&self) -> Result<u64, ProposerError> {
+        Ok(self.latest_l1_timestamp.load(Ordering::SeqCst))
     }
 
     async fn claim_credit(&self, game: Address) -> Result<ClaimSubmission, ProposerError> {
@@ -1185,6 +1194,40 @@ async fn bond_manager_skips_foreign_game_types() {
 
     assert!(manager.tracks_game(ours));
     assert_eq!(manager.next_game_index(), Some(3));
+}
+
+#[tokio::test]
+async fn bond_manager_uses_l1_timestamp_for_delayed_withdrawal() {
+    let proposer = Address::repeat_byte(0xa1);
+    let game = game_address(1);
+    let client = MockBondClient::new(proposer, vec![(game, proposer)]);
+    client
+        .resolved_games
+        .lock()
+        .expect("not poisoned")
+        .insert(game);
+    client.pending.lock().expect("not poisoned").insert(
+        game,
+        PendingWithdrawal {
+            amount: U256::from(10),
+            unlock_at: 100,
+        },
+    );
+    client.latest_l1_timestamp.store(99, Ordering::SeqCst);
+
+    let mut manager = BondManager::new(bond_manager_config(100), client.clone());
+    manager.scan_games().await.unwrap();
+    manager.withdraw_credits().await.unwrap();
+    assert!(manager.tracks_game(game));
+    assert!(client.withdrawals.lock().expect("not poisoned").is_empty());
+
+    client.latest_l1_timestamp.store(100, Ordering::SeqCst);
+    manager.withdraw_credits().await.unwrap();
+    assert!(!manager.tracks_game(game));
+    assert_eq!(
+        *client.withdrawals.lock().expect("not poisoned"),
+        vec![game]
+    );
 }
 
 #[tokio::test]

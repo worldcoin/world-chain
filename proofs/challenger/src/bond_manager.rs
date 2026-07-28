@@ -1,5 +1,3 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use alloy_primitives::U256;
 use tracing::{info, warn};
 
@@ -84,7 +82,7 @@ where
     /// pending withdrawal is drained. Dropping it after the unlock would strand the bond.
     pub async fn withdraw_credits(&self) -> Result<(), ChallengerError> {
         let games = self.owned_games.snapshot();
-        let now = unix_now();
+        let now = self.execution_provider.latest_l1_timestamp().await?;
 
         for game in games {
             let result: Result<bool, ChallengerError> = async {
@@ -158,11 +156,4 @@ where
             }
         }
     }
-}
-
-fn unix_now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time before unix epoch")
-        .as_secs()
 }

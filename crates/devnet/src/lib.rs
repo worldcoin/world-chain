@@ -416,6 +416,20 @@ impl WorldDevnet {
             .map(FullStackWorldDevnet::optimism_portal)
     }
 
+    /// L1 DisputeGameFactory proxy address, when the WIP-1006 proof system is enabled.
+    pub fn dispute_game_factory(&self) -> Option<&str> {
+        self.full_stack
+            .as_ref()
+            .and_then(FullStackWorldDevnet::dispute_game_factory)
+    }
+
+    /// L1 AnchorStateRegistry proxy address, when the WIP-1006 proof system is enabled.
+    pub fn anchor_state_registry(&self) -> Option<&str> {
+        self.full_stack
+            .as_ref()
+            .and_then(FullStackWorldDevnet::anchor_state_registry)
+    }
+
     /// Prometheus UI URL, when observability is enabled.
     pub fn prometheus_url(&self) -> Option<&str> {
         self.full_stack

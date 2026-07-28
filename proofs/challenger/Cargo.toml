@@ -19,6 +19,8 @@ workspace = true
 world-chain-proofs.workspace = true
 
 # alloy
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-provider = { workspace = true, features = ["reqwest"] }
