@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use alloy_primitives::{B256, Bytes, U256};
+use alloy_primitives::{B256, Bytes};
 use async_trait::async_trait;
 use testcontainers::{ContainerAsync, runners::AsyncRunner};
 use testcontainers_modules::postgres;
@@ -27,7 +27,6 @@ use world_chain_prover_service::{
 fn proposer_config() -> ProposerConfig {
     ProposerConfig {
         block_interval: BLOCK_INTERVAL,
-        proposer_bond: U256::from(1),
         poll_interval: Duration::from_secs(1),
         max_resolutions_per_tick: 1,
     }
@@ -35,7 +34,6 @@ fn proposer_config() -> ProposerConfig {
 
 fn challenger_config() -> ChallengerConfig {
     ChallengerConfig {
-        challenger_bond: U256::from(1),
         poll_interval: Duration::from_secs(1),
         ..ChallengerConfig::default()
     }

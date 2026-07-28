@@ -13,6 +13,9 @@ use std::{
 use tracing::{info, warn};
 use world_chain_proofs::{ConsensusProvider, RootState};
 
+/// Maximum number of consecutive non-WIP-1006 factory indices skipped by one cursor probe.
+const FOREIGN_GAME_PROBE_LIMIT: u64 = 64;
+
 /// World Chain output-root challenger.
 #[derive(Debug)]
 pub struct WorldChainChallenger<E, C> {
@@ -86,6 +89,13 @@ where
     E: ChallengerClient,
     C: ConsensusProvider,
 {
+    /// Binary-searches the factory index for the first game whose challenge window is still
+    /// open.
+    ///
+    /// The dispute-game factory interleaves every game type, so a probe can land on an index
+    /// that holds no WIP-1006 game. The search then steps forward a bounded distance to the
+    /// next one; if it finds none it narrows downward, which only ever yields a smaller (more
+    /// conservative) cursor.
     async fn first_unexpired_game_index(
         &self,
         game_count: u64,
@@ -96,16 +106,37 @@ where
 
         while low < high {
             let middle = low + (high - low) / 2;
-            let game = self.execution_provider.game_address_at(middle).await?;
-            let deadline = self.execution_provider.challenge_deadline(game).await?;
-            if deadline <= now {
-                low = middle + 1;
-            } else {
-                high = middle;
+            match self.probe_forward(middle, high).await? {
+                None => high = middle,
+                Some((index, game)) => {
+                    let deadline = self.execution_provider.challenge_deadline(game).await?;
+                    if deadline <= now {
+                        low = index + 1;
+                    } else {
+                        high = middle;
+                    }
+                }
             }
         }
 
         Ok(low)
+    }
+
+    /// Returns the first WIP-1006 game at or after `start` and below `end`, scanning at most
+    /// [`FOREIGN_GAME_PROBE_LIMIT`] indices so a long run of foreign games cannot turn the
+    /// search into an unbounded RPC loop.
+    async fn probe_forward(
+        &self,
+        start: u64,
+        end: u64,
+    ) -> Result<Option<(u64, Address)>, ChallengerError> {
+        let limit = end.min(start.saturating_add(FOREIGN_GAME_PROBE_LIMIT));
+        for index in start..limit {
+            if let Some(game) = self.execution_provider.game_address_at(index).await? {
+                return Ok(Some((index, game)));
+            }
+        }
+        Ok(None)
     }
 
     async fn process_game(
@@ -208,17 +239,14 @@ where
 
         challenge_games.sort_by_key(|(_game, challenge_deadline)| *challenge_deadline);
         for (game, challenge_deadline) in challenge_games {
-            match self
-                .execution_provider
-                .submit_challenge(game.address, self.config.challenger_bond)
-                .await
-            {
+            match self.execution_provider.submit_challenge(game.address).await {
                 Ok(submission) => {
                     self.retry_games.remove(&game.address);
                     self.owned_games.insert(game.address);
                     info!(
                         game_address = %game.address,
                         tx_hash = ?submission.tx_hash,
+                        bond = ?submission.bond,
                         "challenged invalid World Chain proof-system game"
                     );
                 }
@@ -258,11 +286,14 @@ where
             .min(game_count);
         let mut new_games = Vec::with_capacity((end - start) as usize);
         for index in start..end {
-            let game = self.execution_provider.game_address_at(index).await?;
-            let metadata = self.execution_provider.game_metadata(game).await?;
-            if !self.retry_games.contains_key(&game) {
-                new_games.push(metadata);
+            // The dispute-game factory indexes every game type; skip the ones that are not ours.
+            let Some(game) = self.execution_provider.game_address_at(index).await? else {
+                continue;
+            };
+            if self.retry_games.contains_key(&game) {
+                continue;
             }
+            new_games.push(self.execution_provider.game_metadata(game).await?);
         }
 
         if new_games.is_empty() && self.retry_games.is_empty() {

@@ -8,13 +8,16 @@ use alloy_provider::Provider;
 use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
 use world_chain_proofs::{
-    IWorldChainProofSystemFactory, IWorldChainProofSystemGame, PROOF_LANE_COUNT, ResolutionStatus,
+    IDisputeGameFactory, IMultiProofGame, MULTI_PROOF_GAME_TYPE, PROOF_LANE_COUNT, ResolutionStatus,
 };
 
 /// Alloy-backed implementation of [`DefenderClient`].
+///
+/// Binds the stock OP Stack `DisputeGameFactory`; WIP-1006 games are one game type among
+/// several on that factory, so every index-based read filters on [`MULTI_PROOF_GAME_TYPE`].
 #[derive(Debug, Clone)]
 pub struct AlloyDefenderClient<P> {
-    factory: IWorldChainProofSystemFactory::IWorldChainProofSystemFactoryInstance<P>,
+    factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
     provider: P,
 }
 
@@ -24,7 +27,7 @@ where
 {
     /// Creates a new Alloy-backed contract client.
     pub fn new(provider: P, factory_address: Address) -> Self {
-        let factory = IWorldChainProofSystemFactory::IWorldChainProofSystemFactoryInstance::new(
+        let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
             provider.clone(),
         );
@@ -32,14 +35,8 @@ where
         Self { factory, provider }
     }
 
-    fn game(
-        &self,
-        address: Address,
-    ) -> IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance<P> {
-        IWorldChainProofSystemGame::IWorldChainProofSystemGameInstance::new(
-            address,
-            self.provider.clone(),
-        )
+    fn game(&self, address: Address) -> IMultiProofGame::IMultiProofGameInstance<P> {
+        IMultiProofGame::IMultiProofGameInstance::new(address, self.provider.clone())
     }
 }
 
@@ -59,18 +56,21 @@ where
         u256_to_u64(count, "gameCount")
     }
 
-    async fn game_address_at(&self, index: u64) -> Result<Address, DefenderError> {
-        self.factory
-            .gameAt(U256::from(index))
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, DefenderError> {
+        let entry = self
+            .factory
+            .gameAtIndex(U256::from(index))
             .block(BlockId::finalized())
             .call()
             .await
-            .map_err(|error| DefenderError::Contract(error.to_string()))
+            .map_err(|error| DefenderError::Contract(error.to_string()))?;
+
+        Ok((entry.gameType == MULTI_PROOF_GAME_TYPE).then_some(entry.proxy))
     }
 
-    async fn game_proposer(&self, address: Address) -> Result<Address, DefenderError> {
+    async fn game_creator(&self, address: Address) -> Result<Address, DefenderError> {
         self.game(address)
-            .proposer()
+            .gameCreator()
             .call()
             .await
             .map_err(|error| DefenderError::Contract(error.to_string()))

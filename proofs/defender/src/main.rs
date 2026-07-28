@@ -1,5 +1,6 @@
-//! `world-chain-defender` binary: watches challenged valid `WorldChainProofSystemFactory`
-//! games, requests proofs from the prover-service, and submits completed proof lanes on L1.
+//! `world-chain-defender` binary: watches challenged valid WIP-1006 games on the OP
+//! `DisputeGameFactory`, requests proofs from the prover-service, and submits completed
+//! proof lanes on L1.
 //!
 //! Mirrors the in-process defender wired by the devnet harness
 //! (`crates/devnet/src/full_stack.rs::start_world_chain_defender`), reading its
@@ -37,7 +38,7 @@ struct Cli {
     #[arg(long, env = "PROVER_SERVICE_URL")]
     prover_service_url: String,
 
-    /// `WorldChainProofSystemFactory` address on L1.
+    /// OP Stack `DisputeGameFactory` address on L1.
     #[arg(long, env = "FACTORY_ADDRESS")]
     factory_address: Address,
 
@@ -97,7 +98,7 @@ async fn main() -> Result<()> {
         l1_rpc_url = %cli.l1_rpc,
         output_root_rpc_url = %cli.output_root_rpc,
         prover_service = %cli.prover_service_url,
-        factory = %cli.factory_address,
+        dispute_game_factory = %cli.factory_address,
         defender = %defender_address,
         allowed_proposer = %cli.allowed_proposer,
         max_games_per_tick = cli.max_games_per_tick,

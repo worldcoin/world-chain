@@ -173,14 +173,14 @@ impl DefenderClient for MockClient {
         Ok(self.games.len() as u64)
     }
 
-    async fn game_address_at(&self, index: u64) -> Result<Address, DefenderError> {
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, DefenderError> {
         self.games
             .get(index as usize)
-            .map(|game| game.address)
+            .map(|game| Some(game.address))
             .ok_or_else(|| DefenderError::Contract(format!("unknown game index {index}")))
     }
 
-    async fn game_proposer(&self, game: Address) -> Result<Address, DefenderError> {
+    async fn game_creator(&self, game: Address) -> Result<Address, DefenderError> {
         self.proposers
             .get(&game)
             .copied()

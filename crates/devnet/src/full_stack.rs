@@ -42,8 +42,8 @@ use url::{Host, Url};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 use world_chain_challenger::{
     AlloyChallengerClient, BondManager as ChallengerBondManager,
-    BondManagerConfig as ChallengerBondManagerConfig, ChallengerClient, ChallengerConfig,
-    OwnedGames, ResolutionManager, ResolutionManagerConfig, WorldChainChallenger,
+    BondManagerConfig as ChallengerBondManagerConfig, ChallengerConfig, OwnedGames,
+    ResolutionManager, ResolutionManagerConfig, WorldChainChallenger,
 };
 use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
 use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
@@ -58,8 +58,7 @@ use world_chain_proof_worker::{
 };
 use world_chain_proofs::{OptimismConsensusClient, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD};
 use world_chain_proposer::{
-    AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerClient, ProposerConfig,
-    WorldChainProposer,
+    AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerConfig, WorldChainProposer,
 };
 use world_chain_prover_service::{
     ProverService, ProverServiceConfig, RpcProverServiceClient, start_rpc_server,
@@ -71,7 +70,7 @@ use crate::{
     DevnetComponent, DevnetComponentKind, DevnetComponentStatus, DevnetPortMode, L1DevChain,
     L1DevChainConfig, MetricsTarget, ObservabilityStack, WorldChainHardforkConfig,
     component::ContainerImage,
-    op_stack::{HaSequencerConfig, HaSequencerTopology, OP_NATIVE_PROOF_SERVICES_READY},
+    op_stack::{HaSequencerConfig, HaSequencerTopology},
     process_logs::{ProcessLogTarget, container_log_consumer, emit_process_log},
 };
 
@@ -558,9 +557,7 @@ impl FullStackWorldDevnet {
             (Some(batcher), Some(proposer), None)
         };
 
-        let proof_services = proof_system
-            .as_ref()
-            .filter(|_| OP_NATIVE_PROOF_SERVICES_READY);
+        let proof_services = proof_system.as_ref();
 
         // The proposer always needs the prover-service for its creation-time Nitro proof.
         // Defender and SP1 worker startup remains optional below.
@@ -2458,7 +2455,7 @@ async fn start_challenger(
 /// The proposer signs with the dev proposer key (Anvil account #1), which
 /// `DeployProofSystem.s.sol` stakes in the `MockStakingRegistry` and funds via
 /// `fundDevAccounts`. Output roots are read from the op-node rollup RPC and
-/// proposals are submitted to `WorldChainProofSystemFactory.propose` on L1.
+/// proposals are created through `DisputeGameFactory.create` on L1.
 async fn start_world_chain_proposer(
     l1_rpc_url: &str,
     output_root_rpc_url: &str,
@@ -2482,18 +2479,16 @@ async fn start_world_chain_proposer(
         .wallet(EthereumWallet::from(signer))
         .connect_http(Url::parse(l1_rpc_url)?);
 
-    let contracts = AlloyProofSystemClient::new(provider, factory_address, anchor_address);
+    let contracts = AlloyProofSystemClient::new(provider, factory_address, anchor_address)
+        .await
+        .wrap_err("failed to bind the World Chain proof system")?;
     let mut bond_manager = BondManager::new(BondManagerConfig::default(), contracts.clone());
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let proof_requester = RpcProverServiceClient::new(prover_service_url)
         .map_err(|error| eyre!("failed to connect proposer to prover-service: {error}"))?;
-    let proposer_bond = contracts
-        .proposer_bond()
-        .await
-        .wrap_err("failed to read proposer bond")?;
+    let domain_hash = contracts.domain_hash();
     let config = ProposerConfig {
         block_interval: deployment.block_interval,
-        proposer_bond,
         poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
         max_resolutions_per_tick: ProposerConfig::default().max_resolutions_per_tick,
     };
@@ -2503,9 +2498,10 @@ async fn start_world_chain_proposer(
         l1_rpc_url,
         output_root_rpc_url,
         prover_service = %prover_service_url,
-        factory = %deployment.proof_system_factory,
+        dispute_game_factory = %deployment.proof_system_factory,
         anchor = %deployment.anchor_state_registry,
         proposer = %proposer_address,
+        domain_hash = %domain_hash,
         block_interval = deployment.block_interval,
         "starting native World Chain proof-system proposer"
     );
@@ -2551,6 +2547,10 @@ async fn start_world_chain_challenger(
         .proof_system_factory
         .parse()
         .wrap_err("invalid proof-system factory address")?;
+    let anchor_address: Address = deployment
+        .anchor_state_registry
+        .parse()
+        .wrap_err("invalid anchor-state-registry address")?;
 
     let signer: PrivateKeySigner = WORLD_CHALLENGER_PRIVATE_KEY
         .parse()
@@ -2560,14 +2560,9 @@ async fn start_world_chain_challenger(
         .wallet(EthereumWallet::from(signer))
         .connect_http(Url::parse(l1_rpc_url)?);
 
-    let client = AlloyChallengerClient::new(provider, factory_address);
+    let client = AlloyChallengerClient::new(provider, factory_address, anchor_address);
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
-    let challenger_bond = client
-        .challenger_bond()
-        .await
-        .wrap_err("failed to read challenger bond")?;
     let config = ChallengerConfig {
-        challenger_bond,
         poll_interval: WORLD_CHALLENGER_POLL_INTERVAL,
         ..ChallengerConfig::default()
     };
@@ -2589,9 +2584,9 @@ async fn start_world_chain_challenger(
     info!(
         l1_rpc_url,
         output_root_rpc_url,
-        factory = %deployment.proof_system_factory,
+        dispute_game_factory = %deployment.proof_system_factory,
+        anchor = %deployment.anchor_state_registry,
         challenger = %challenger_address,
-        challenger_bond = ?challenger_bond,
         "starting native World Chain proof-system challenger"
     );
 
@@ -2628,7 +2623,7 @@ async fn start_world_chain_challenger(
 ///
 /// The defender signs with [`WORLD_DEFENDER_PRIVATE_KEY`], a dedicated dev
 /// account that is funded through the L1 genesis. It watches challenged valid
-/// `WorldChainProofSystemFactory` games, requests proofs from the
+/// WIP-1006 games on the `DisputeGameFactory`, requests proofs from the
 /// prover-service, and submits completed proof lanes on L1.
 async fn start_world_chain_defender(
     l1_rpc_url: &str,
@@ -2668,7 +2663,7 @@ async fn start_world_chain_defender(
         l1_rpc_url,
         output_root_rpc_url,
         prover_service = %prover_service_url,
-        factory = %deployment.proof_system_factory,
+        dispute_game_factory = %deployment.proof_system_factory,
         defender = %defender_address,
         allowed_proposer = %allowed_proposer,
         "starting native World Chain proof-system defender"
@@ -3261,39 +3256,28 @@ fn build_components(
             DevnetComponent::new(
                 "world-chain-proposer",
                 DevnetComponentKind::WorldChainProposer,
-                if OP_NATIVE_PROOF_SERVICES_READY {
-                    DevnetComponentStatus::Running
-                } else {
-                    DevnetComponentStatus::Deferred
-                },
+                DevnetComponentStatus::Running,
             )
-            .with_endpoint("factory", deployment.proof_system_factory.clone())
+            .with_endpoint("dispute-game-factory", deployment.proof_system_factory.clone())
             .with_endpoint("anchor", deployment.anchor_state_registry.clone())
-            .with_note(if OP_NATIVE_PROOF_SERVICES_READY {
-                format!(
-                    "native in-process proposer posting OP output roots every {} L2 blocks",
-                    deployment.block_interval
-                )
-            } else {
-                "awaiting migration to the stock DisputeGameFactory API".to_string()
-            }),
+            .with_note(format!(
+                "native in-process proposer creating WIP-1006 games every {} L2 blocks via DisputeGameFactory.create",
+                deployment.block_interval
+            ))
+            .with_note("signs with the dev proposer key staked in the MockStakingRegistry"),
         );
         components.push(
             DevnetComponent::new(
                 "world-chain-challenger",
                 DevnetComponentKind::WorldChainChallenger,
-                if OP_NATIVE_PROOF_SERVICES_READY {
-                    DevnetComponentStatus::Running
-                } else {
-                    DevnetComponentStatus::Deferred
-                },
+                DevnetComponentStatus::Running,
             )
-            .with_endpoint("factory", deployment.proof_system_factory.clone())
-            .with_note(if OP_NATIVE_PROOF_SERVICES_READY {
-                "native in-process challenger for WIP-1006 games"
-            } else {
-                "awaiting migration to the stock DisputeGameFactory API"
-            }),
+            .with_endpoint("dispute-game-factory", deployment.proof_system_factory.clone())
+            .with_endpoint("anchor", deployment.anchor_state_registry.clone())
+            .with_note("native in-process challenger disputing invalid WIP-1006 games")
+            .with_note(
+                "signs with a dedicated dev key funded in the L1 genesis and staked in the MockStakingRegistry",
+            ),
         );
     }
 

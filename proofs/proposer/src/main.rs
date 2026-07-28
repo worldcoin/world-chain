@@ -1,5 +1,5 @@
-//! `world-chain-proposer` binary: watches L2 output roots and opens
-//! `WorldChainProofSystemGame` proposals on L1 through the proof-system factory.
+//! `world-chain-proposer` binary: watches L2 output roots and opens WIP-1006
+//! `MultiProofGame` proposals on L1 through the stock OP `DisputeGameFactory`.
 //!
 //! Mirrors the in-process proposer wired by the devnet harness
 //! (`crates/devnet/src/full_stack.rs::start_world_chain_proposer`), reading its
@@ -17,8 +17,7 @@ use tracing::info;
 use url::Url;
 use world_chain_proofs::OptimismConsensusClient;
 use world_chain_proposer::{
-    AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerClient, ProposerConfig,
-    WorldChainProposer,
+    AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerConfig, WorldChainProposer,
 };
 use world_chain_prover_service::RpcProverServiceClient;
 
@@ -40,11 +39,11 @@ struct Cli {
     #[arg(long, env = "PROVER_SERVICE_URL")]
     prover_service_url: String,
 
-    /// `WorldChainProofSystemFactory` address on L1.
+    /// OP Stack `DisputeGameFactory` address on L1.
     #[arg(long, env = "FACTORY_ADDRESS")]
     factory_address: Address,
 
-    /// `WorldChainAnchorStateRegistry` address on L1.
+    /// OP Stack `AnchorStateRegistry` address on L1.
     #[arg(long, env = "ANCHOR_REGISTRY_ADDRESS")]
     anchor_registry_address: Address,
 
@@ -92,7 +91,9 @@ async fn main() -> Result<()> {
         .connect_http(Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?);
 
     let contracts =
-        AlloyProofSystemClient::new(provider, cli.factory_address, cli.anchor_registry_address);
+        AlloyProofSystemClient::new(provider, cli.factory_address, cli.anchor_registry_address)
+            .await
+            .context("failed to bind the World Chain proof system")?;
     let bond_manager_config = BondManagerConfig {
         poll_interval: Duration::from_secs(cli.bond_manager_poll_interval_seconds),
         initial_scan_limit: cli.bond_manager_initial_scan_limit,
@@ -101,13 +102,9 @@ async fn main() -> Result<()> {
     let output_roots = OptimismConsensusClient::new(cli.output_root_rpc.clone());
     let proof_requester = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
-    let proposer_bond = contracts
-        .proposer_bond()
-        .await
-        .context("failed to read proposer bond")?;
+    let domain_hash = contracts.domain_hash();
     let config = ProposerConfig {
         block_interval: cli.block_interval,
-        proposer_bond,
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_resolutions_per_tick: cli.max_resolutions_per_tick,
     };
@@ -117,9 +114,10 @@ async fn main() -> Result<()> {
         l1_rpc_url = %cli.l1_rpc,
         output_root_rpc_url = %cli.output_root_rpc,
         prover_service = %cli.prover_service_url,
-        factory = %cli.factory_address,
+        dispute_game_factory = %cli.factory_address,
         anchor = %cli.anchor_registry_address,
         proposer = %proposer_address,
+        domain_hash = %domain_hash,
         block_interval = cli.block_interval,
         max_resolutions_per_tick = cli.max_resolutions_per_tick,
         bond_manager_poll_interval_seconds = cli.bond_manager_poll_interval_seconds,

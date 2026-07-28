@@ -1,11 +1,13 @@
 use alloy_primitives::{Address, B256, BlockHash, U256};
 use async_trait::async_trait;
-use world_chain_proofs::{ProposalCommitment, ResolutionStatus};
+use world_chain_proofs::ResolutionStatus;
 use world_chain_prover_service::ProofData;
 
 use crate::{
-    ParentRef, Proposal, ProposalSubmission, ProposerError,
-    types::{CloseGameSubmission, ResolveSubmission, WithdrawSubmission},
+    AnchorRef, Proposal, ProposalSubmission, ProposerError,
+    types::{
+        ClaimSubmission, CloseGameSubmission, PendingWithdrawal, ResolveSubmission, TransitionGame,
+    },
 };
 
 /// Contract surface needed by the asynchronous bond manager.
@@ -14,39 +16,49 @@ pub trait BondManagerClient: Send + Sync {
     /// Returns the address whose proposal credits are managed.
     fn proposer_address(&self) -> Address;
 
-    /// Returns the number of games created by the factory.
+    /// Returns the total number of games indexed by the dispute-game factory, across all
+    /// game types.
     async fn game_count(&self) -> Result<u64, ProposerError>;
 
-    /// Returns the game at the provided factory creation index.
-    async fn game_at(&self, index: u64) -> Result<Address, ProposerError>;
+    /// Returns the WIP-1006 game at the provided factory index, or `None` when that index
+    /// holds a game of a different type.
+    async fn game_at(&self, index: u64) -> Result<Option<Address>, ProposerError>;
 
-    /// Returns the proposer that created the provided game.
-    async fn game_proposer(&self, game: Address) -> Result<Address, ProposerError>;
+    /// Returns the account that created the provided game.
+    async fn game_creator(&self, game: Address) -> Result<Address, ProposerError>;
 
     /// Returns the resolution status of the provided game.
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError>;
 
-    /// Returns the claimable amount for the managed proposer.
-    async fn claimable(&self, game: Address) -> Result<U256, ProposerError>;
+    /// Returns whether the registry's finality airgap has elapsed for the provided game.
+    ///
+    /// `claimCredit` calls `closeGame`, which reverts until this holds.
+    async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError>;
 
-    /// Withdraws credits for the managed proposer.
-    async fn withdraw(&self, game: Address) -> Result<WithdrawSubmission, ProposerError>;
+    /// Returns the credit the managed proposer can unlock from the provided game.
+    async fn credit(&self, game: Address) -> Result<U256, ProposerError>;
+
+    /// Returns the managed proposer's pending `DelayedWETH` withdrawal for the provided game.
+    async fn pending_withdrawal(&self, game: Address) -> Result<PendingWithdrawal, ProposerError>;
+
+    /// Advances the managed proposer's two-phase bond claim on the provided game.
+    async fn claim_credit(&self, game: Address) -> Result<ClaimSubmission, ProposerError>;
 }
 
 /// Minimal contract surface needed by the proposer.
 #[async_trait]
 pub trait ProposerClient: Send + Sync {
-    /// Reads the parent state from the anchor registry.
-    async fn anchor_parent(&self) -> Result<ParentRef, ProposerError>;
+    /// Reads the current anchor checkpoint from the registry.
+    async fn anchor_parent(&self) -> Result<AnchorRef, ProposerError>;
 
-    /// Computes the deterministic proposal key used by the factory lookup.
-    async fn proposal_key(&self, commitment: ProposalCommitment) -> Result<B256, ProposerError>;
-
-    /// Returns an existing game for `proposal_key`, if one exists.
-    async fn game_for_proposal_key(
+    /// Returns the highest-attempt game registered for the given transition under any of
+    /// `parent_candidates`, if one exists.
+    async fn latest_game_for_transition(
         &self,
-        proposal_key: B256,
-    ) -> Result<Option<Address>, ProposerError>;
+        parent_candidates: &[Address],
+        root_claim: B256,
+        l2_block_number: u64,
+    ) -> Result<Option<TransitionGame>, ProposerError>;
 
     /// Returns the resolution status of the provided game, if game exists.
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError>;
@@ -54,26 +66,19 @@ pub trait ProposerClient: Send + Sync {
     /// Submits a resolve transaction to the provided game.
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError>;
 
+    /// Returns whether the registry's finality airgap has elapsed for the provided game.
+    async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError>;
+
     /// Submits a closeGame transaction to the provided game.
     async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError>;
-
-    /// Returns the claimable amount the proposer can withdraw from the provided game.
-    async fn claimable(&self, game: Address) -> Result<U256, ProposerError>;
-
-    /// Submits a withdraw transaction to the provided game.
-    async fn withdraw(&self, game: Address) -> Result<WithdrawSubmission, ProposerError>;
-
-    /// Reads the proposer bond from the factory contract.
-    async fn proposer_bond(&self) -> Result<U256, ProposerError>;
 
     /// Gets the latest L1 finalized block hash.
     async fn latest_finalized_l1_block(&self) -> Result<BlockHash, ProposerError>;
 
-    /// Submits a proposal transaction to the factory.
+    /// Creates the proposal's game through the dispute-game factory.
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
         proof: ProofData,
-        proposer_bond: U256,
     ) -> Result<ProposalSubmission, ProposerError>;
 }
