@@ -3,7 +3,9 @@ name: Benchmark Regression Check
 on:
   pull_request:
     paths:
-      - 'crates/**'
+      - 'crates/payload/**'
+      - 'crates/validator/**'
+      - 'crates/builder/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'rust-toolchain.toml'
