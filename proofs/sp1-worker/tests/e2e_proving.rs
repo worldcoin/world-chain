@@ -269,10 +269,11 @@ async fn run_worker_proves_real_range_end_to_end_with_prover<P>(
         l2_block_number: claimed_block,
         l1_head,
     };
-    let id = client
+    let response = client
         .request_proof(request)
         .await
         .expect("enqueue proof request");
+    let id = response.proof_id;
     eprintln!(
         "enqueued {id} for block {claimed_block} (interval {block_interval}, {kind} prover); proving may take a while"
     );

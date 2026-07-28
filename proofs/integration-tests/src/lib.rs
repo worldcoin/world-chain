@@ -32,7 +32,7 @@ use world_chain_prover_service::{
     HeartbeatRequest, HeartbeatResponse, ProofBackend, ProofData, ProofJobQueue,
     ProofJobQueueError, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
     ProofResponse, ProofStatus, ProverService, ProverServiceConfig, RecordProofSessionRequest,
-    RecordProofSessionResponse, SubmitProofRequest, SubmitProofResponse,
+    RecordProofSessionResponse, RequestProofResponse, SubmitProofRequest, SubmitProofResponse,
 };
 
 pub const BLOCK_INTERVAL: u64 = 10;
@@ -768,7 +768,7 @@ impl ProofRequester for SharedProverService {
     async fn request_proof(
         &self,
         proof_request: ProofRequest,
-    ) -> Result<ProofRequestId, ProofRequestError> {
+    ) -> Result<RequestProofResponse, ProofRequestError> {
         self.service.request_proof(proof_request).await
     }
 

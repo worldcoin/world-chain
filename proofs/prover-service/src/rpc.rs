@@ -9,8 +9,8 @@ use crate::{
     types::{
         GetNextProofRequest, GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse,
         HeartbeatRequest, HeartbeatResponse, ProofRequest, ProofRequestId, ProofResponse,
-        ProofStatus, RecordProofSessionRequest, RecordProofSessionResponse, SubmitProofRequest,
-        SubmitProofResponse,
+        ProofStatus, RecordProofSessionRequest, RecordProofSessionResponse, RequestProofResponse,
+        SubmitProofRequest, SubmitProofResponse,
     },
 };
 use jsonrpsee::{
@@ -56,9 +56,9 @@ pub mod error_code {
 /// [`ProofRequester`] surface and the worker-facing [`ProofJobQueue`] surface.
 #[rpc(server, client, namespace = "prover")]
 pub trait ProverServiceApi {
-    /// Queue a proof request, returning its deterministic id.
+    /// Queue a proof request, returning its deterministic id and stored L1 head.
     #[method(name = "requestProof")]
-    async fn request_proof(&self, proof_request: ProofRequest) -> RpcResult<ProofRequestId>;
+    async fn request_proof(&self, proof_request: ProofRequest) -> RpcResult<RequestProofResponse>;
 
     /// Get the current status of a proof request.
     #[method(name = "proofStatus")]
@@ -110,9 +110,11 @@ impl From<ProofRequestError> for ErrorObjectOwned {
                 ErrorObject::owned(error_code::TOO_MANY_RETRIES, message, Some(data))
             }
             ProofRequestError::Sqlx(_) => ErrorObject::owned(error_code::SQLX, message, None::<()>),
-            ProofRequestError::UnknownProofStatus(_)
+            ProofRequestError::RequestMismatch(_)
+            | ProofRequestError::UnknownProofStatus(_)
             | ProofRequestError::ProofEncoding(_)
             | ProofRequestError::BlockNumberExceedsI64(_)
+            | ProofRequestError::MalformedB256(_)
             | ProofRequestError::RemoteInternal
             | ProofRequestError::RemoteSqlx
             | ProofRequestError::RpcRequestTimeout
@@ -197,7 +199,7 @@ impl ProverServiceRpc {
 
 #[async_trait]
 impl ProverServiceApiServer for ProverServiceRpc {
-    async fn request_proof(&self, proof_request: ProofRequest) -> RpcResult<ProofRequestId> {
+    async fn request_proof(&self, proof_request: ProofRequest) -> RpcResult<RequestProofResponse> {
         Ok(self.service.request_proof(proof_request).await?)
     }
 
@@ -374,7 +376,7 @@ impl ProofRequester for RpcProverServiceClient {
     async fn request_proof(
         &self,
         proof_request: ProofRequest,
-    ) -> Result<ProofRequestId, ProofRequestError> {
+    ) -> Result<RequestProofResponse, ProofRequestError> {
         let id = proof_request.id();
         ProverServiceApiClient::request_proof(&self.client, proof_request)
             .await
