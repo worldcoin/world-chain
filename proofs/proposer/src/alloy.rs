@@ -163,20 +163,14 @@ where
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
         let weth = IDelayedWETH::IDelayedWETHInstance::new(weth_address, self.provider.clone());
 
-        let (pending, delay) = tokio::try_join!(
-            async {
-                weth.withdrawals(game, recipient)
-                    .call()
-                    .await
-                    .map_err(|error| ProposerError::Contract(error.to_string()))
-            },
-            async {
-                weth.delay()
-                    .call()
-                    .await
-                    .map_err(|error| ProposerError::Contract(error.to_string()))
-            }
-        )?;
+        let (pending, delay) = self
+            .provider
+            .multicall()
+            .add(weth.withdrawals(game, recipient))
+            .add(weth.delay())
+            .aggregate()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
 
         if pending.amount.is_zero() {
             return Ok(PendingWithdrawal::default());

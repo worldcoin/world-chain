@@ -10,9 +10,11 @@ use world_chain_proofs::{InvalidationReason, ProposalCommitment};
 /// looking an existing proposal up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnchorRef {
-    /// `AnchorStateRegistry` address, and the parent reference used for new proposals.
+    /// `AnchorStateRegistry` address. New proposals extending the current anchor use this
+    /// sentinel as `parentRef`, not the game currently represented by the anchor.
     pub registry: Address,
-    /// Game the registry currently anchors on, if it has advanced past its starting root.
+    /// Game currently represented by the anchor, used only to find proposals created before
+    /// the registry advanced onto it.
     pub anchor_game: Option<Address>,
     /// L2 block number of the anchor output root.
     pub l2_block_number: u64,

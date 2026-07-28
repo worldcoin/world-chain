@@ -76,9 +76,9 @@ where
         let mut cursor = anchor.parent_ref();
         let mut canonical_line = CanonicalLine::new(cursor);
 
-        // Parent references an existing game at the next height may carry. At the anchor tip a
-        // game created before the anchor advanced still points at the anchor game, while new
-        // proposals must point at the registry itself.
+        // A game created before the registry advanced onto its parent still references that
+        // now-anchored game. The same transition created after the advance must reference the
+        // registry sentinel because game parents at or below the anchor are rejected.
         let mut parent_candidates = anchor.parent_candidates();
         let latest_finalized_l2_block = self.consensus_provider.latest_l2_finalized_block().await?;
 
