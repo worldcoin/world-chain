@@ -15,7 +15,7 @@ use world_chain_proofs::{
 };
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
-    ProofResponse, ProofStatus, SucceededProofResponse,
+    ProofResponse, ProofStatus, RequestProofResponse, SucceededProofResponse,
 };
 
 use crate::{
@@ -182,10 +182,14 @@ impl ProofRequester for MockProofRequester {
     async fn request_proof(
         &self,
         request: ProofRequest,
-    ) -> Result<ProofRequestId, ProofRequestError> {
+    ) -> Result<RequestProofResponse, ProofRequestError> {
         let id = request.id();
+        let l1_head = request.l1_head;
         self.requests.lock().expect("not poisoned").push(request);
-        Ok(id)
+        Ok(RequestProofResponse {
+            proof_id: id,
+            l1_head,
+        })
     }
 
     async fn proof_status(

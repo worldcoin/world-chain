@@ -343,16 +343,22 @@ where
             .as_ref()
             .expect("pending proposal initialized");
 
-        let returned_id = self
+        let request_proof_response = self
             .proof_requester
             .request_proof(pending.proof_request.clone())
             .await?;
-        if returned_id != pending.proof_id {
+        let request_proof_response_proof_id = request_proof_response.proof_id;
+        if request_proof_response_proof_id != pending.proof_id {
             return Err(ProposerError::InvalidProofResponse(format!(
-                "prover-service returned proof id {returned_id}, expected {}",
+                "prover-service returned proof id {request_proof_response_proof_id}, expected {}",
                 pending.proof_id
             )));
         }
+        self.pending_proposal
+            .as_mut()
+            .expect("pending proposal initialized")
+            .proof_request
+            .l1_head = request_proof_response.l1_head;
         Ok(())
     }
 

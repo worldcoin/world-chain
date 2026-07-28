@@ -89,7 +89,10 @@ where
             .request_proof(proof_request(metadata, backend))
             .await
         {
-            Ok(id) => LaneState::Requested { id, attempts: 1 },
+            Ok(request_proof_response) => LaneState::Requested {
+                id: request_proof_response.proof_id,
+                attempts: 1,
+            },
             Err(error) => {
                 warn!(%game, ?lane, %error, "proof request failed; retrying next tick");
                 LaneState::Pending
@@ -199,18 +202,18 @@ where
             .request_proof(proof_request(metadata, backend))
             .await
         {
-            Ok(id) => {
+            Ok(request_proof_response) => {
                 let next_attempt = attempts + 1;
                 warn!(
                     %game,
                     ?lane,
-                    %id,
+                    %request_proof_response.proof_id,
                     attempts = next_attempt,
                     max_attempts = self.max_proof_attempts,
                     "proof failed; re-requested proof"
                 );
                 LaneState::Requested {
-                    id,
+                    id: request_proof_response.proof_id,
                     attempts: next_attempt,
                 }
             }

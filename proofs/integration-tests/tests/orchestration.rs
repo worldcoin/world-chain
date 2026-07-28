@@ -21,7 +21,7 @@ use world_chain_proposer::{
 };
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
-    ProofResponse, ProofStatus, ProverServiceConfig, SucceededProofResponse,
+    ProofResponse, ProofStatus, ProverServiceConfig, RequestProofResponse, SucceededProofResponse,
 };
 
 fn proposer_config() -> ProposerConfig {
@@ -62,8 +62,11 @@ impl ProofRequester for InstantProofRequester {
     async fn request_proof(
         &self,
         request: ProofRequest,
-    ) -> Result<ProofRequestId, ProofRequestError> {
-        Ok(request.id())
+    ) -> Result<RequestProofResponse, ProofRequestError> {
+        Ok(RequestProofResponse {
+            proof_id: request.id(),
+            l1_head: request.l1_head,
+        })
     }
 
     async fn proof_status(

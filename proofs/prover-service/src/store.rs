@@ -3,16 +3,16 @@ use crate::{
     config::ProverServiceConfig,
     error::{
         BackendMismatchErrorData, BackendSessionAlreadyTerminalErrorData, InvalidConfigError,
-        ProofJobQueueError, ProofJobStatusErrorData, ProofMismatchErrorData, ProofRequestError,
-        ProverServiceInitError, TooManyRetriesErrorData,
+        MalformedB256Error, ProofJobQueueError, ProofJobStatusErrorData, ProofMismatchErrorData,
+        ProofRequestError, ProverServiceInitError, TooManyRetriesErrorData,
     },
     types::{
         BackendSession, BackendSessionStatus, FailedProofResponse, GetNextProofRequest,
         GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse, HeartbeatRequest,
         HeartbeatResponse, LockId, LockedProofRequest, PendingProofResponse, ProofBackend,
         ProofJobStatus, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
-        RecordProofSessionRequest, RecordProofSessionResponse, SubmitProofRequest,
-        SubmitProofResponse, SucceededProofResponse,
+        RecordProofSessionRequest, RecordProofSessionResponse, RequestProofResponse,
+        SubmitProofRequest, SubmitProofResponse, SucceededProofResponse,
     },
 };
 use alloy_primitives::{Address, B256};
@@ -80,7 +80,7 @@ impl ProverServiceStore {
     pub(crate) async fn request_proof(
         &self,
         proof_request: ProofRequest,
-    ) -> Result<ProofRequestId, ProofRequestError> {
+    ) -> Result<RequestProofResponse, ProofRequestError> {
         let id = proof_request.id();
         let backend = proof_request.backend;
         let proof_id = proof_id_bytes(id);
@@ -114,13 +114,18 @@ impl ProverServiceStore {
         if insert_result.rows_affected() > 0 {
             // no conflict
             tx.commit().await?;
-            return Ok(id);
+            let request_proof_response = RequestProofResponse {
+                proof_id: id,
+                l1_head: proof_request.l1_head,
+            };
+            return Ok(request_proof_response);
         }
 
         // conflict path
         let row = sqlx::query(
             r#"
-            SELECT proof_status, retry_count
+            SELECT proof_status, retry_count, backend, game,
+                root_claim, l2_block_number, l1_head
             FROM proof_requests
             WHERE proof_id = $1
             FOR UPDATE
@@ -139,6 +144,11 @@ impl ProverServiceStore {
         let proof_status = ProofStatus::try_from(proof_status_str)
             .map_err(ProofRequestError::UnknownProofStatus)?;
 
+        if !request_matches(&row, &proof_request)? {
+            tx.rollback().await?;
+            return Err(ProofRequestError::RequestMismatch(id));
+        }
+
         if proof_status == ProofStatus::Failed {
             // retry the entire proof job if retry_count is less than the max_retry
             let retry_count: i32 = row.get("retry_count");
@@ -156,6 +166,7 @@ impl ProverServiceStore {
                 SET proof_status = $1,
                     job_status = $2,
                     retry_count = retry_count + 1,
+                    l1_head = $3,
                     failure_reason = NULL,
                     proof_data = NULL,
                     finished_at = NULL,
@@ -163,11 +174,12 @@ impl ProverServiceStore {
                     lock_id = NULL,
                     lock_expires_at = NULL,
                     attempt = 0
-                WHERE proof_id = $3
+                WHERE proof_id = $4
                 "#,
             )
             .bind(ProofStatus::Created.as_str())
             .bind(ProofJobStatus::Pending.as_str())
+            .bind(proof_request.l1_head.as_slice())
             .bind(&proof_id)
             .execute(&mut *tx)
             .await?;
@@ -180,12 +192,21 @@ impl ProverServiceStore {
             );
 
             tx.commit().await?;
-            Ok(id)
+            let request_proof_response = RequestProofResponse {
+                proof_id: id,
+                l1_head: proof_request.l1_head,
+            };
+            Ok(request_proof_response)
         } else {
             // this proof request already exists in the db with a non-failing status.
             // Rollback the db transaction and return the proof id.
             tx.rollback().await?;
-            Ok(id)
+            let stored_l1_head = b256_from_bytes(row.get("l1_head"))?;
+            let request_proof_response = RequestProofResponse {
+                proof_id: id,
+                l1_head: stored_l1_head,
+            };
+            Ok(request_proof_response)
         }
     }
 
@@ -858,9 +879,23 @@ fn proof_id_bytes(id: ProofRequestId) -> Vec<u8> {
     id.0.as_slice().to_vec()
 }
 
-fn b256_from_bytes(bytes: Vec<u8>) -> Result<B256, ProofJobQueueError> {
+/// Returns true if the request matches the stored values with the exception of l1_head
+/// that is not compared because it may change.
+fn request_matches(row: &PgRow, request: &ProofRequest) -> Result<bool, ProofRequestError> {
+    let stored_backend: &str = row.get("backend");
+    let stored_game: &[u8] = row.get("game");
+    let stored_root_claim: &[u8] = row.get("root_claim");
+    let stored_l2_block_number: i64 = row.get("l2_block_number");
+
+    Ok(stored_backend == request.backend.as_str()
+        && stored_game == request.game.as_slice()
+        && stored_root_claim == request.root_claim.as_slice()
+        && stored_l2_block_number == l2_to_i64(request.l2_block_number)?)
+}
+
+fn b256_from_bytes(bytes: Vec<u8>) -> Result<B256, MalformedB256Error> {
     if bytes.len() != 32 {
-        return Err(ProofJobQueueError::MalformedB256(bytes.len()));
+        return Err(MalformedB256Error(bytes.len()));
     }
     Ok(B256::from_slice(&bytes))
 }

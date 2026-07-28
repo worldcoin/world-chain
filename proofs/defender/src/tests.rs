@@ -21,7 +21,7 @@ use world_chain_proofs::{
 };
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
-    ProofResponse, ProofStatus, SucceededProofResponse,
+    ProofResponse, ProofStatus, RequestProofResponse, SucceededProofResponse,
 };
 
 const GAME_1: Address = address!("0000000000000000000000000000000000000001");
@@ -348,8 +348,9 @@ impl ProofRequester for MockProver {
     async fn request_proof(
         &self,
         proof_request: ProofRequest,
-    ) -> Result<ProofRequestId, ProofRequestError> {
+    ) -> Result<RequestProofResponse, ProofRequestError> {
         let id = proof_request.id();
+        let l1_head = proof_request.l1_head;
         self.requests
             .lock()
             .expect("not poisoned")
@@ -358,7 +359,10 @@ impl ProofRequester for MockProver {
             .lock()
             .expect("not poisoned")
             .insert(id, proof_request);
-        Ok(id)
+        Ok(RequestProofResponse {
+            proof_id: id,
+            l1_head,
+        })
     }
 
     async fn proof_status(
