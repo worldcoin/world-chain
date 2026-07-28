@@ -11,9 +11,6 @@ pub const DEFAULT_OP_CONTRACT_ARTIFACTS_LOCATOR: &str = "embedded";
 const DEFAULT_DEVNET_PRIVATE_KEY: &str =
     "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
 
-// TODO: Enable after the proof services use the stock DisputeGameFactory and game credit APIs.
-pub(crate) const OP_NATIVE_PROOF_SERVICES_READY: bool = false;
-
 /// OP Stack container images used by the HA topology.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OpStackImages {
@@ -432,33 +429,17 @@ impl HaSequencerTopology {
                 DevnetComponent::new(
                     "world-chain-proposer",
                     DevnetComponentKind::WorldChainProposer,
-                    if OP_NATIVE_PROOF_SERVICES_READY {
-                        DevnetComponentStatus::Planned
-                    } else {
-                        DevnetComponentStatus::Deferred
-                    },
+                    DevnetComponentStatus::Planned,
                 )
-                .with_note(if OP_NATIVE_PROOF_SERVICES_READY {
-                    "native proposer posting OP output roots to the WIP-1006 proof system"
-                } else {
-                    "awaiting migration to the stock DisputeGameFactory API"
-                }),
+                .with_note("native proposer posting OP output roots to the WIP-1006 proof system"),
             );
             components.push(
                 DevnetComponent::new(
                     "world-chain-challenger",
                     DevnetComponentKind::WorldChainChallenger,
-                    if OP_NATIVE_PROOF_SERVICES_READY {
-                        DevnetComponentStatus::Planned
-                    } else {
-                        DevnetComponentStatus::Deferred
-                    },
+                    DevnetComponentStatus::Planned,
                 )
-                .with_note(if OP_NATIVE_PROOF_SERVICES_READY {
-                    "native challenger disputing invalid WIP-1006 proof-system games"
-                } else {
-                    "awaiting migration to the stock DisputeGameFactory API"
-                }),
+                .with_note("native challenger disputing invalid WIP-1006 proof-system games"),
             );
         }
 

@@ -1,4 +1,4 @@
-//! `world-chain-challenger` binary: scans `WorldChainProofSystemFactory` games and
+//! `world-chain-challenger` binary: scans WIP-1006 games on the OP `DisputeGameFactory` and
 //! challenges any whose claimed output root disagrees with the canonical L2 root.
 //!
 //! Mirrors the in-process challenger wired by the devnet harness
@@ -16,8 +16,8 @@ use clap::Parser;
 use tracing::info;
 use url::Url;
 use world_chain_challenger::{
-    AlloyChallengerClient, BondManager, BondManagerConfig, ChallengerClient, ChallengerConfig,
-    OwnedGames, ResolutionManager, ResolutionManagerConfig, WorldChainChallenger,
+    AlloyChallengerClient, BondManager, BondManagerConfig, ChallengerConfig, OwnedGames,
+    ResolutionManager, ResolutionManagerConfig, WorldChainChallenger,
 };
 use world_chain_proofs::OptimismConsensusClient;
 
@@ -35,9 +35,13 @@ struct Cli {
     #[arg(long, env = "OUTPUT_ROOT_RPC_URL")]
     output_root_rpc: String,
 
-    /// `WorldChainProofSystemFactory` address on L1.
+    /// OP Stack `DisputeGameFactory` address on L1.
     #[arg(long, env = "FACTORY_ADDRESS")]
     factory_address: Address,
+
+    /// OP Stack `AnchorStateRegistry` address on L1.
+    #[arg(long, env = "ANCHOR_REGISTRY_ADDRESS")]
+    anchor_registry_address: Address,
 
     /// Hex-encoded private key the challenger signs L1 transactions with.
     #[arg(long, env = "CHALLENGER_KEY", hide_env_values = true)]
@@ -94,14 +98,10 @@ async fn main() -> Result<()> {
         .wallet(EthereumWallet::from(cli.challenger_key))
         .connect_http(Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?);
 
-    let client = AlloyChallengerClient::new(provider, cli.factory_address);
+    let client =
+        AlloyChallengerClient::new(provider, cli.factory_address, cli.anchor_registry_address);
     let output_roots = OptimismConsensusClient::new(cli.output_root_rpc.clone());
-    let challenger_bond = client
-        .challenger_bond()
-        .await
-        .context("failed to read challenger bond")?;
     let config = ChallengerConfig {
-        challenger_bond,
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_game_concurrency: cli.max_game_concurrency,
         max_games_per_tick: cli.max_games_per_tick,
@@ -128,9 +128,9 @@ async fn main() -> Result<()> {
     info!(
         l1_rpc_url = %cli.l1_rpc,
         output_root_rpc_url = %cli.output_root_rpc,
-        factory = %cli.factory_address,
+        dispute_game_factory = %cli.factory_address,
+        anchor = %cli.anchor_registry_address,
         challenger = %challenger_address,
-        challenger_bond = ?challenger_bond,
         max_games_per_tick = cli.max_games_per_tick,
         resolution_manager_poll_interval_seconds =
             cli.resolution_manager_poll_interval_seconds,

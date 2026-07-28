@@ -1,6 +1,8 @@
 use crate::{
     ChallengerError,
-    types::{ChallengeSubmission, GameMetadata, ResolveSubmission, WithdrawSubmission},
+    types::{
+        ChallengeSubmission, ClaimSubmission, GameMetadata, PendingWithdrawal, ResolveSubmission,
+    },
 };
 use alloy_primitives::{Address, U256};
 use async_trait::async_trait;
@@ -9,24 +11,22 @@ use world_chain_proofs::{ResolutionStatus, RootState};
 /// Contract surface needed by the output-root challenger.
 #[async_trait]
 pub trait ChallengerClient: Send + Sync {
-    /// Reads the challenge bond configured by the factory.
-    async fn challenger_bond(&self) -> Result<U256, ChallengerError>;
-    /// Returns the number of games created by the factory.
+    /// Returns the total number of games indexed by the dispute-game factory, across all
+    /// game types.
     async fn game_count(&self) -> Result<u64, ChallengerError>;
-    /// Returns the game address at a factory creation index.
-    async fn game_address_at(&self, index: u64) -> Result<Address, ChallengerError>;
+    /// Returns the WIP-1006 game at the provided factory index, or `None` when that index
+    /// holds a game of a different type.
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, ChallengerError>;
     /// Reads the immutable game data needed to validate its root claim.
     async fn game_metadata(&self, game: Address) -> Result<GameMetadata, ChallengerError>;
     /// Reads the root state of the provided game.
     async fn root_state(&self, game: Address) -> Result<RootState, ChallengerError>;
     /// Reads the challenge deadline of the provided game.
     async fn challenge_deadline(&self, game: Address) -> Result<u64, ChallengerError>;
-    /// Submits a challenge against an invalid game.
-    async fn submit_challenge(
-        &self,
-        game: Address,
-        challenger_bond: U256,
-    ) -> Result<ChallengeSubmission, ChallengerError>;
+    /// Submits a challenge against an invalid game, bonded with that game's own
+    /// `challengerBond`.
+    async fn submit_challenge(&self, game: Address)
+    -> Result<ChallengeSubmission, ChallengerError>;
 }
 
 /// Contract surface needed to resolve challenger-owned games.
@@ -43,14 +43,23 @@ pub trait ResolutionManagerClient: Send + Sync {
 pub trait BondManagerClient: ResolutionManagerClient {
     /// Returns the address whose challenge bonds are managed.
     fn challenger_address(&self) -> Address;
-    /// Returns the number of games created by the factory.
+    /// Returns the total number of games indexed by the dispute-game factory, across all
+    /// game types.
     async fn game_count(&self) -> Result<u64, ChallengerError>;
-    /// Returns the game address at a factory creation index.
-    async fn game_address_at(&self, index: u64) -> Result<Address, ChallengerError>;
+    /// Returns the WIP-1006 game at the provided factory index, or `None` when that index
+    /// holds a game of a different type.
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, ChallengerError>;
     /// Returns the challenger recorded by the provided game.
     async fn game_challenger(&self, game: Address) -> Result<Address, ChallengerError>;
-    /// Returns the amount claimable by the managed challenger.
-    async fn claimable(&self, game: Address) -> Result<U256, ChallengerError>;
-    /// Withdraws credits for the managed challenger.
-    async fn withdraw(&self, game: Address) -> Result<WithdrawSubmission, ChallengerError>;
+    /// Returns whether the registry's finality airgap has elapsed for the provided game.
+    ///
+    /// `claimCredit` calls `closeGame`, which reverts until this holds.
+    async fn is_game_finalized(&self, game: Address) -> Result<bool, ChallengerError>;
+    /// Returns the credit the managed challenger can unlock from the provided game.
+    async fn credit(&self, game: Address) -> Result<U256, ChallengerError>;
+    /// Returns the managed challenger's pending `DelayedWETH` withdrawal for the game.
+    async fn pending_withdrawal(&self, game: Address)
+    -> Result<PendingWithdrawal, ChallengerError>;
+    /// Advances the managed challenger's two-phase bond claim on the provided game.
+    async fn claim_credit(&self, game: Address) -> Result<ClaimSubmission, ChallengerError>;
 }

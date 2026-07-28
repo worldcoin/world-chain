@@ -1,5 +1,4 @@
 use crate::error::ChallengerError;
-use alloy_primitives::U256;
 use std::time::Duration;
 
 /// Default number of games processed concurrently.
@@ -16,10 +15,12 @@ pub const DEFAULT_BOND_MANAGER_POLL_INTERVAL: Duration = Duration::from_secs(5 *
 pub const DEFAULT_BOND_MANAGER_INITIAL_SCAN_LIMIT: u64 = 1_000;
 
 /// Configuration for the challenger.
+///
+/// The challenge bond is deliberately absent: it is an immutable of whichever implementation
+/// each game was cloned from, so it is read per game rather than captured at startup where a
+/// re-registered implementation would make every challenge revert.
 #[derive(Debug, Clone)]
 pub struct ChallengerConfig {
-    /// Bond read from the factory and sent with `WorldChainProofSystemGame.challenge`.
-    pub challenger_bond: U256,
     /// Delay between periodic scan attempts.
     pub poll_interval: Duration,
     /// Maximum number of games to process concurrently.
@@ -52,7 +53,6 @@ impl ChallengerConfig {
 impl Default for ChallengerConfig {
     fn default() -> Self {
         Self {
-            challenger_bond: U256::ZERO,
             poll_interval: Duration::from_mins(1),
             max_game_concurrency: DEFAULT_MAX_GAME_CONCURRENCY,
             max_games_per_tick: DEFAULT_MAX_GAMES_PER_TICK,

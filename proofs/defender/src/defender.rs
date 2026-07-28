@@ -16,6 +16,9 @@ use tracing::{error, info, warn};
 use world_chain_proofs::{ConsensusProvider, InvalidationReason};
 use world_chain_prover_service::ProofRequester;
 
+/// Maximum number of consecutive non-WIP-1006 factory indices skipped by one cursor probe.
+const FOREIGN_GAME_PROBE_LIMIT: u64 = 64;
+
 /// An active defense of a challenged game with a valid root.
 #[derive(Debug, Clone, Copy)]
 struct ActiveDefense {
@@ -112,6 +115,12 @@ where
     C: ConsensusProvider,
     P: ProofRequester + Sync,
 {
+    /// Binary-searches the factory index for the first game whose proof window is still open.
+    ///
+    /// The dispute-game factory interleaves every game type, so a probe can land on an index
+    /// that holds no WIP-1006 game. The search then steps forward a bounded distance to the
+    /// next one; if it finds none it narrows downward, which only ever yields a smaller (more
+    /// conservative) cursor.
     async fn first_unexpired_game_index(
         &self,
         game_count: u64,
@@ -122,16 +131,37 @@ where
 
         while low < high {
             let middle = low + (high - low) / 2;
-            let game = self.execution_provider.game_address_at(middle).await?;
-            let deadline = self.execution_provider.proof_deadline(game).await?;
-            if deadline <= now {
-                low = middle + 1;
-            } else {
-                high = middle;
+            match self.probe_forward(middle, high).await? {
+                None => high = middle,
+                Some((index, game)) => {
+                    let deadline = self.execution_provider.proof_deadline(game).await?;
+                    if deadline <= now {
+                        low = index + 1;
+                    } else {
+                        high = middle;
+                    }
+                }
             }
         }
 
         Ok(low)
+    }
+
+    /// Returns the first WIP-1006 game at or after `start` and below `end`, scanning at most
+    /// [`FOREIGN_GAME_PROBE_LIMIT`] indices so a long run of foreign games cannot turn the
+    /// search into an unbounded RPC loop.
+    async fn probe_forward(
+        &self,
+        start: u64,
+        end: u64,
+    ) -> Result<Option<(u64, Address)>, DefenderError> {
+        let limit = end.min(start.saturating_add(FOREIGN_GAME_PROBE_LIMIT));
+        for index in start..limit {
+            if let Some(game) = self.execution_provider.game_address_at(index).await? {
+                return Ok(Some((index, game)));
+            }
+        }
+        Ok(None)
     }
 
     async fn evaluate_discovered_games(
@@ -355,13 +385,16 @@ where
             .min(game_count);
         let mut new_games = Vec::with_capacity((end - start) as usize);
         for index in start..end {
-            let game = self.execution_provider.game_address_at(index).await?;
+            // The dispute-game factory indexes every game type; skip the ones that are not ours.
+            let Some(game) = self.execution_provider.game_address_at(index).await? else {
+                continue;
+            };
             if self.watched_games.contains_key(&game) || self.active_defenses.contains_key(&game) {
                 continue;
             }
 
-            let proposer = self.execution_provider.game_proposer(game).await?;
-            if proposer != self.config.allowed_proposer {
+            let game_creator = self.execution_provider.game_creator(game).await?;
+            if game_creator != self.config.allowed_proposer {
                 continue;
             }
             new_games.push(self.execution_provider.game_metadata(game).await?);
