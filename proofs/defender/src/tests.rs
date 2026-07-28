@@ -43,6 +43,7 @@ const STATE_INVALIDATED: u8 = 4;
 #[derive(Debug, Clone)]
 struct MockClient {
     games: Vec<GameMetadata>,
+    created_at: Vec<u64>,
     proposers: HashMap<Address, Address>,
     states: Arc<Mutex<HashMap<Address, u8>>>,
     bitmaps: Arc<Mutex<HashMap<Address, u8>>>,
@@ -71,6 +72,7 @@ impl MockClient {
             .map(|game| (game.address, ALLOWED_PROPOSER))
             .collect();
         Self {
+            created_at: vec![u64::MAX; games.len()],
             games,
             proposers,
             states: Arc::new(Mutex::new(states)),
@@ -84,6 +86,15 @@ impl MockClient {
 
     fn set_proposer(&mut self, game: Address, proposer: Address) {
         self.proposers.insert(game, proposer);
+    }
+
+    fn set_created_at(&mut self, game: Address, created_at: u64) {
+        let index = self
+            .games
+            .iter()
+            .position(|metadata| metadata.address == game)
+            .expect("game exists");
+        self.created_at[index] = created_at;
     }
 
     fn set_deadlines(&mut self, game: Address, challenge_deadline: u64, proof_deadline: u64) {
@@ -173,14 +184,21 @@ impl DefenderClient for MockClient {
         Ok(self.games.len() as u64)
     }
 
-    async fn game_address_at(&self, index: u64) -> Result<Address, DefenderError> {
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, DefenderError> {
         self.games
             .get(index as usize)
-            .map(|game| game.address)
+            .map(|game| Some(game.address))
             .ok_or_else(|| DefenderError::Contract(format!("unknown game index {index}")))
     }
 
-    async fn game_proposer(&self, game: Address) -> Result<Address, DefenderError> {
+    async fn game_created_at(&self, index: u64) -> Result<u64, DefenderError> {
+        self.created_at
+            .get(index as usize)
+            .copied()
+            .ok_or_else(|| DefenderError::Contract(format!("unknown game index {index}")))
+    }
+
+    async fn game_creator(&self, game: Address) -> Result<Address, DefenderError> {
         self.proposers
             .get(&game)
             .copied()
@@ -192,14 +210,6 @@ impl DefenderClient for MockClient {
             .iter()
             .find(|metadata| metadata.address == game)
             .copied()
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
-    }
-
-    async fn proof_deadline(&self, game: Address) -> Result<u64, DefenderError> {
-        self.games
-            .iter()
-            .find(|metadata| metadata.address == game)
-            .map(|metadata| metadata.proof_deadline)
             .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
     }
 
@@ -231,7 +241,13 @@ impl DefenderClient for MockClient {
                     invalidation_reason: InvalidationReason::None,
                 });
             }
-            if self.proof_deadline(game).await? == 0 {
+            let proof_deadline = self
+                .games
+                .iter()
+                .find(|metadata| metadata.address == game)
+                .expect("game exists")
+                .proof_deadline;
+            if proof_deadline == 0 {
                 return Ok(ResolutionStatus {
                     resolvable: true,
                     root_state: RootState::Invalidated,
@@ -413,7 +429,30 @@ async fn tick_requires_an_allowed_proposer() {
 }
 
 #[tokio::test]
-async fn tick_binary_searches_for_first_unexpired_proof_deadline() {
+async fn tick_scans_older_live_game_when_deadlines_are_not_monotonic() {
+    let canonical_root = B256::repeat_byte(0x20);
+    let mut client = MockClient::new(
+        vec![
+            (GAME_1, canonical_root, L2_BLOCK),
+            (GAME_2, canonical_root, L2_BLOCK),
+        ],
+        HashMap::from([(GAME_1, STATE_CHALLENGED), (GAME_2, STATE_CHALLENGED)]),
+    );
+    client.set_deadlines(GAME_2, 0, 0);
+    let (output_roots, _finalized_l2_block) =
+        mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
+    let mut defender =
+        WorldChainDefender::new(config(), client, output_roots, MockProver::default());
+
+    defender.tick().await.unwrap();
+    defender.tick().await.unwrap();
+
+    assert_eq!(defender.next_game_index(), Some(2));
+    assert_eq!(defender.active_defenses(), [GAME_1]);
+}
+
+#[tokio::test]
+async fn tick_binary_searches_by_factory_creation_time() {
     let canonical_root = B256::repeat_byte(0x20);
     let mut client = MockClient::new(
         vec![
@@ -422,7 +461,7 @@ async fn tick_binary_searches_for_first_unexpired_proof_deadline() {
         ],
         HashMap::new(),
     );
-    client.set_deadlines(GAME_1, 0, 0);
+    client.set_created_at(GAME_1, 0);
     let (output_roots, _finalized_l2_block) =
         mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
     let mut defender =

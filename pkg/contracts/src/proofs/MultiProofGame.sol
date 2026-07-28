@@ -336,8 +336,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             if (startingL2BlockNumber <= anchorL2BlockNumber) revert InvalidParentGame();
         }
 
-        // TODO(PROTO-4907): Confirm whether proposals require an exact block interval or only
-        // a bounded range.
         uint256 expectedL2BlockNumber = startingL2BlockNumber + DOMAIN_BLOCK_INTERVAL;
         if (l2SequenceNumber() != expectedL2BlockNumber) {
             revert InvalidL2BlockNumber(expectedL2BlockNumber, l2SequenceNumber());

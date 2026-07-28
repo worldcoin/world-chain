@@ -112,19 +112,19 @@ where
     C: ConsensusProvider,
     P: ProofRequester + Sync,
 {
-    async fn first_unexpired_game_index(
+    /// Binary-searches the factory's monotonic creation timestamps for the first game that
+    /// can still have an open proof window.
+    async fn first_recent_game_index(
         &self,
         game_count: u64,
-        now: u64,
+        cutoff: u64,
     ) -> Result<u64, DefenderError> {
         let mut low = 0;
         let mut high = game_count;
 
         while low < high {
             let middle = low + (high - low) / 2;
-            let game = self.execution_provider.game_address_at(middle).await?;
-            let deadline = self.execution_provider.proof_deadline(game).await?;
-            if deadline <= now {
+            if self.execution_provider.game_created_at(middle).await? < cutoff {
                 low = middle + 1;
             } else {
                 high = middle;
@@ -341,12 +341,13 @@ where
             .next_game_index
             .is_none_or(|next_game_index| next_game_index > game_count)
         {
-            let first_unexpired = self.first_unexpired_game_index(game_count, now).await?;
+            let cutoff = now.saturating_sub(self.config.max_game_age.as_secs());
+            let first_recent = self.first_recent_game_index(game_count, cutoff).await?;
             info!(
-                first_unexpired_game_index = first_unexpired,
-                game_count, "initialized defender game cursor"
+                first_recent_game_index = first_recent,
+                game_count, cutoff, "initialized defender game cursor"
             );
-            self.next_game_index = Some(first_unexpired);
+            self.next_game_index = Some(first_recent);
         }
 
         let start = self.next_game_index.unwrap_or(game_count);
@@ -355,13 +356,16 @@ where
             .min(game_count);
         let mut new_games = Vec::with_capacity((end - start) as usize);
         for index in start..end {
-            let game = self.execution_provider.game_address_at(index).await?;
+            // The dispute-game factory indexes every game type; skip the ones that are not ours.
+            let Some(game) = self.execution_provider.game_address_at(index).await? else {
+                continue;
+            };
             if self.watched_games.contains_key(&game) || self.active_defenses.contains_key(&game) {
                 continue;
             }
 
-            let proposer = self.execution_provider.game_proposer(game).await?;
-            if proposer != self.config.allowed_proposer {
+            let game_creator = self.execution_provider.game_creator(game).await?;
+            if game_creator != self.config.allowed_proposer {
                 continue;
             }
             new_games.push(self.execution_provider.game_metadata(game).await?);

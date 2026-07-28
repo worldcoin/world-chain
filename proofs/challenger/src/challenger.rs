@@ -86,19 +86,19 @@ where
     E: ChallengerClient,
     C: ConsensusProvider,
 {
-    async fn first_unexpired_game_index(
+    /// Binary-searches the factory's monotonic creation timestamps for the first game that
+    /// can still have an open challenge window.
+    async fn first_recent_game_index(
         &self,
         game_count: u64,
-        now: u64,
+        cutoff: u64,
     ) -> Result<u64, ChallengerError> {
         let mut low = 0;
         let mut high = game_count;
 
         while low < high {
             let middle = low + (high - low) / 2;
-            let game = self.execution_provider.game_address_at(middle).await?;
-            let deadline = self.execution_provider.challenge_deadline(game).await?;
-            if deadline <= now {
+            if self.execution_provider.game_created_at(middle).await? < cutoff {
                 low = middle + 1;
             } else {
                 high = middle;
@@ -208,17 +208,14 @@ where
 
         challenge_games.sort_by_key(|(_game, challenge_deadline)| *challenge_deadline);
         for (game, challenge_deadline) in challenge_games {
-            match self
-                .execution_provider
-                .submit_challenge(game.address, self.config.challenger_bond)
-                .await
-            {
+            match self.execution_provider.submit_challenge(game.address).await {
                 Ok(submission) => {
                     self.retry_games.remove(&game.address);
                     self.owned_games.insert(game.address);
                     info!(
                         game_address = %game.address,
                         tx_hash = ?submission.tx_hash,
+                        bond = ?submission.bond,
                         "challenged invalid World Chain proof-system game"
                     );
                 }
@@ -244,12 +241,13 @@ where
             .next_game_index
             .is_none_or(|next_game_index| next_game_index > game_count)
         {
-            let first_unexpired = self.first_unexpired_game_index(game_count, now).await?;
+            let cutoff = now.saturating_sub(self.config.max_game_age.as_secs());
+            let first_recent = self.first_recent_game_index(game_count, cutoff).await?;
             info!(
-                first_unexpired_game_index = first_unexpired,
-                game_count, "initialized challenger game cursor"
+                first_recent_game_index = first_recent,
+                game_count, cutoff, "initialized challenger game cursor"
             );
-            self.next_game_index = Some(first_unexpired);
+            self.next_game_index = Some(first_recent);
         }
 
         let start = self.next_game_index.unwrap_or(game_count);
@@ -258,11 +256,14 @@ where
             .min(game_count);
         let mut new_games = Vec::with_capacity((end - start) as usize);
         for index in start..end {
-            let game = self.execution_provider.game_address_at(index).await?;
-            let metadata = self.execution_provider.game_metadata(game).await?;
-            if !self.retry_games.contains_key(&game) {
-                new_games.push(metadata);
+            // The dispute-game factory indexes every game type; skip the ones that are not ours.
+            let Some(game) = self.execution_provider.game_address_at(index).await? else {
+                continue;
+            };
+            if self.retry_games.contains_key(&game) {
+                continue;
             }
+            new_games.push(self.execution_provider.game_metadata(game).await?);
         }
 
         if new_games.is_empty() && self.retry_games.is_empty() {

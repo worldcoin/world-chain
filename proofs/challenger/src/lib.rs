@@ -22,7 +22,8 @@ pub use error::ChallengerError;
 pub use resolution_manager::ResolutionManager;
 pub use traits::{BondManagerClient, ChallengerClient, ResolutionManagerClient};
 pub use types::{
-    ChallengeSubmission, GameMetadata, OwnedGames, ResolveSubmission, WithdrawSubmission,
+    ChallengeSubmission, ClaimSubmission, GameMetadata, OwnedGames, PendingWithdrawal,
+    ResolveSubmission,
 };
 
 #[cfg(test)]

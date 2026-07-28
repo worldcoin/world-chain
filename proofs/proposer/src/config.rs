@@ -1,7 +1,5 @@
 use std::time::Duration;
 
-use alloy_primitives::U256;
-
 use crate::ProposerError;
 
 /// Default delay between bond-manager scans.
@@ -45,12 +43,14 @@ impl Default for BondManagerConfig {
 }
 
 /// Configuration for the proposer loop.
+///
+/// The proposal bond is deliberately absent: `DisputeGameFactory.create` reverts unless
+/// `msg.value` matches `initBonds(gameType)` exactly, so it is read per submission rather than
+/// captured at startup where an owner update would silently break every proposal.
 #[derive(Debug, Clone)]
 pub struct ProposerConfig {
     /// Number of L2 blocks between proposals.
     pub block_interval: u64,
-    /// Bond sent with `WorldChainProofSystemFactory.propose`.
-    pub proposer_bond: U256,
     /// Delay between periodic proposal attempts.
     pub poll_interval: Duration,
     /// Maximum number of game-resolution transactions submitted per proposer tick.
@@ -82,7 +82,6 @@ impl Default for ProposerConfig {
     fn default() -> Self {
         Self {
             block_interval: 6,
-            proposer_bond: U256::ZERO,
             poll_interval: Duration::from_secs(12),
             max_resolutions_per_tick: 1,
         }

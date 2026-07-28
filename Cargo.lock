@@ -659,6 +659,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-pubsub",
  "alloy-rpc-client",
+ "alloy-rpc-types-anvil",
  "alloy-rpc-types-debug",
  "alloy-rpc-types-eth 2.0.5",
  "alloy-rpc-types-trace",
@@ -18534,6 +18535,8 @@ dependencies = [
 name = "world-chain-challenger"
 version = "2.4.0"
 dependencies = [
+ "alloy-consensus 2.0.5",
+ "alloy-eips 2.0.5",
  "alloy-network 2.0.5",
  "alloy-primitives",
  "alloy-provider",
@@ -18624,12 +18627,15 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider",
  "alloy-signer-local 2.0.5",
+ "anyhow",
+ "async-trait",
  "base64 0.22.1",
  "color-eyre",
  "ed25519-dalek",
  "flate2",
  "futures",
  "jsonrpsee",
+ "kona-genesis",
  "op-alloy-consensus",
  "rand 0.9.4",
  "reqwest 0.12.28",
@@ -18654,6 +18660,7 @@ dependencies = [
  "world-chain-defender",
  "world-chain-node",
  "world-chain-primitives",
+ "world-chain-proof-core",
  "world-chain-proof-kona-host-utils",
  "world-chain-proof-succinct-host-utils",
  "world-chain-proof-worker",
@@ -19149,6 +19156,7 @@ dependencies = [
 name = "world-chain-proposer"
 version = "2.4.0"
 dependencies = [
+ "alloy-consensus 2.0.5",
  "alloy-eips 2.0.5",
  "alloy-network 2.0.5",
  "alloy-primitives",
@@ -19440,6 +19448,7 @@ name = "world-chain-tests"
 version = "2.4.0"
 dependencies = [
  "alloy-consensus 2.0.5",
+ "alloy-contract",
  "alloy-eips 2.0.5",
  "alloy-network 2.0.5",
  "alloy-primitives",
@@ -19494,6 +19503,7 @@ dependencies = [
  "world-chain-node",
  "world-chain-p2p",
  "world-chain-primitives",
+ "world-chain-proofs",
  "world-chain-test-utils",
  "world-chain-validator",
 ]

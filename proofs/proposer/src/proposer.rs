@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, B256};
+use alloy_primitives::Address;
 use tracing::{info, warn};
 use world_chain_proofs::{ConsensusProvider, InvalidationReason, RootState};
 use world_chain_prover_service::{
@@ -72,10 +72,14 @@ where
     pub async fn anchor_and_canonical_line(&self) -> Result<CanonicalScan, ProposerError> {
         self.config.validate()?;
 
-        let anchor_parent = self.execution_provider.anchor_parent().await?;
-        let mut canonical_line = CanonicalLine::new(anchor_parent);
+        let anchor = self.execution_provider.anchor_parent().await?;
+        let mut cursor = anchor.parent_ref();
+        let mut canonical_line = CanonicalLine::new(cursor);
 
-        let mut cursor = anchor_parent;
+        // A game created before the registry advanced onto its parent still references that
+        // now-anchored game. The same transition created after the advance must reference the
+        // registry sentinel because game parents at or below the anchor are rejected.
+        let mut parent_candidates = anchor.parent_candidates();
         let latest_finalized_l2_block = self.consensus_provider.latest_l2_finalized_block().await?;
 
         // loop to the next canonical game until it reaches the last one
@@ -102,67 +106,87 @@ where
                 .consensus_provider
                 .output_root_at_block(next_l2_block_number)
                 .await?;
-            let mut proposal = Proposal {
-                parent_ref: cursor.address,
-                root_claim,
-                l2_block_number: next_l2_block_number,
-                proposal_key: B256::ZERO,
-            };
-            proposal.proposal_key = self
+
+            let existing = self
                 .execution_provider
-                .proposal_key(proposal.commitment())
+                .games_for_transition(&parent_candidates, root_claim, next_l2_block_number)
                 .await?;
+            let mut statuses = Vec::with_capacity(existing.len());
+            for game in &existing {
+                statuses.push(
+                    self.execution_provider
+                        .resolution_status(game.address)
+                        .await?,
+                );
+            }
 
-            if let Some(next_game_addr) = self
-                .execution_provider
-                .game_for_proposal_key(proposal.proposal_key)
-                .await?
+            // A game that has not been invalidated continues the canonical line, whichever
+            // accepted parent it was created under.
+            if let Some(live) = existing
+                .iter()
+                .zip(&statuses)
+                .find(|(_, status)| status.root_state != RootState::Invalidated)
+                .map(|(game, _)| *game)
             {
-                // game already exists onchain, look at the resolution status now:
-                // - if the root_state becomes `Invalidated`, then immediately return
-                //   because we don't want to keep building on top of an invalid game
-                // - otherwise, add the game to the canonical line and continue the loop
-                let resolution_status = self
-                    .execution_provider
-                    .resolution_status(next_game_addr)
-                    .await?;
-                if resolution_status.root_state == RootState::Invalidated {
-                    let next_action = if resolution_status.resolvable {
-                        NextProposalAction::AwaitNegativeResolution {
-                            game: next_game_addr,
-                            reason: resolution_status.invalidation_reason,
-                        }
-                    } else if resolution_status.invalidation_reason
-                        == InvalidationReason::ProofTimeout
-                    {
-                        NextProposalAction::RetryTimedOut {
-                            proposal,
-                            invalidated_game: next_game_addr,
-                        }
-                    } else {
-                        NextProposalAction::BlockedByInvalidation {
-                            game: next_game_addr,
-                            reason: resolution_status.invalidation_reason,
-                        }
-                    };
-                    return Ok(CanonicalScan::new(canonical_line, next_action));
-                }
-
                 let next_game = ParentRef {
-                    address: next_game_addr,
+                    address: live.address,
                     l2_block_number: next_l2_block_number,
                 };
                 canonical_line.push_game(next_game);
                 cursor = next_game;
-            } else {
-                // game doesn't exist onchain yet, exit the loop with a
-                // `NextProposalAction::Propose`. The `propose` fn will
-                // later publish this proposal onchain
+                parent_candidates = vec![next_game.address];
+                continue;
+            }
+
+            // Every game at this height is invalidated, so only the one created under the
+            // parent that is still acceptable matters. `MultiProofGame.initialize` rejects a
+            // parent at or below the anchor, so a game whose parent has since been closed into
+            // the anchor can neither be retried under that parent nor chained onto: the
+            // transition rebases onto `cursor.address` at attempt zero instead. This is the
+            // contract's own recovery path for inherited invalidations.
+            let Some((stale, status)) = existing
+                .iter()
+                .zip(&statuses)
+                .find(|(game, _)| game.parent_ref == cursor.address)
+            else {
+                // Nothing occupies this transition under the current parent, either because no
+                // game exists yet or because the only ones that do are stale rebase targets.
                 return Ok(CanonicalScan::new(
                     canonical_line,
-                    NextProposalAction::Propose(proposal),
+                    NextProposalAction::Propose(Proposal {
+                        parent_ref: cursor.address,
+                        root_claim,
+                        l2_block_number: next_l2_block_number,
+                        attempt: 0,
+                    }),
                 ));
-            }
+            };
+
+            let next_action = if status.resolvable {
+                NextProposalAction::AwaitNegativeResolution {
+                    game: stale.address,
+                    reason: status.invalidation_reason,
+                }
+            } else if status.invalidation_reason == InvalidationReason::ProofTimeout {
+                // A retry must reuse the invalidated game's parent reference and root claim:
+                // `MultiProofGame` only accepts attempt N when attempt N-1 exists under the
+                // identical `extraData`.
+                NextProposalAction::RetryTimedOut {
+                    proposal: Proposal {
+                        parent_ref: cursor.address,
+                        root_claim,
+                        l2_block_number: next_l2_block_number,
+                        attempt: stale.attempt.saturating_add(1),
+                    },
+                    invalidated_game: stale.address,
+                }
+            } else {
+                NextProposalAction::BlockedByInvalidation {
+                    game: stale.address,
+                    reason: status.invalidation_reason,
+                }
+            };
+            return Ok(CanonicalScan::new(canonical_line, next_action));
         }
     }
 
@@ -218,6 +242,21 @@ where
         // means taking the one with the highest l2 block number
         let maybe_highest_finalized_game = finalized_games.last();
         if let Some(highest_finalized_game) = maybe_highest_finalized_game {
+            // `closeGame` reverts until the registry's finality airgap has elapsed. Gate on it
+            // so the routine wait is not reported as a failed tick every poll interval.
+            if !self
+                .execution_provider
+                .is_game_finalized(highest_finalized_game.address)
+                .await?
+            {
+                info!(
+                    game_address = %highest_finalized_game.address,
+                    l2_block_number = highest_finalized_game.l2_block_number,
+                    "waiting for dispute-game finality delay before closing game"
+                );
+                return Ok(());
+            }
+
             let close_game_submission = self
                 .execution_provider
                 .close_game(highest_finalized_game.address)
@@ -267,15 +306,15 @@ where
         if self
             .pending_proposal
             .as_ref()
-            .is_some_and(|pending| pending.proposal.proposal_key != proposal.proposal_key)
+            .is_some_and(|pending| pending.proposal != proposal)
         {
             let pending = self
                 .pending_proposal
                 .take()
                 .expect("pending proposal exists");
             warn!(
-                old_proposal_key = ?pending.proposal.proposal_key,
-                new_proposal_key = ?proposal.proposal_key,
+                old_proposal = ?pending.proposal,
+                new_proposal = ?proposal,
                 "canonical proposal changed; discarding stale pending proof"
             );
         }
@@ -336,7 +375,7 @@ where
             ProofStatus::Failed => {
                 warn!(
                     proof_id = %pending.proof_id,
-                    proposal_key = ?pending.proposal.proposal_key,
+                    proposal = ?pending.proposal,
                     "proposal proof failed; retrying the same request next tick"
                 );
                 return Ok(());
@@ -379,14 +418,14 @@ where
 
         let submission = self
             .execution_provider
-            .submit_proposal(&pending.proposal, proof, self.config.proposer_bond)
+            .submit_proposal(&pending.proposal, proof)
             .await?;
         info!(
             tx_hash = ?submission.tx_hash,
             game_address = %submission.game_address,
             l2_block_number = pending.proposal.l2_block_number,
             parent_ref = %pending.proposal.parent_ref,
-            proposal_key = ?pending.proposal.proposal_key,
+            attempt = pending.proposal.attempt,
             retry_of = ?pending.retry_of,
             "submitted World Chain proof-system game"
         );

@@ -1,7 +1,7 @@
 //! World Chain proposer primitives.
 //!
-//! The proposer watches L2 output roots and creates `WorldChainProofSystemGame`
-//! contracts on L1 through `WorldChainProofSystemFactory`.
+//! The proposer watches L2 output roots and creates WIP-1006 `MultiProofGame`
+//! contracts on L1 through the stock OP Stack `DisputeGameFactory`.
 
 mod alloy;
 mod bond_manager;
@@ -22,8 +22,9 @@ pub use error::ProposerError;
 pub use proposer::WorldChainProposer;
 pub use traits::{BondManagerClient, ProposerClient};
 pub use types::{
-    CanonicalLine, CanonicalScan, CloseGameSubmission, FinalizedGames, NextProposalAction,
-    ParentRef, Proposal, ProposalSubmission, ResolveSubmission, WithdrawSubmission,
+    AnchorRef, CanonicalLine, CanonicalScan, ClaimSubmission, CloseGameSubmission, FinalizedGames,
+    NextProposalAction, ParentRef, PendingWithdrawal, Proposal, ProposalSubmission,
+    ResolveSubmission, TransitionGame,
 };
 
 #[cfg(test)]

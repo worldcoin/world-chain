@@ -19,13 +19,13 @@ use world_chain_defender::{
 };
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_proofs::{
-    ConsensusError, ConsensusProvider, GameCreated, InvalidationReason, PROOF_SYSTEM_VERSION,
-    PROOF_THRESHOLD, ProofDomain, ProofLane, ResolutionStatus, RootCommitment, RootState,
-    has_threshold,
+    ConsensusError, ConsensusProvider, InvalidationReason, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD,
+    ProofDomain, ProofLane, ProposalCommitment, ResolutionStatus, RootCommitment, RootState,
+    WorldChainGameCreated, has_threshold,
 };
 use world_chain_proposer::{
-    CloseGameSubmission, ParentRef, Proposal, ProposalSubmission, ProposerClient, ProposerError,
-    ResolveSubmission, WithdrawSubmission,
+    AnchorRef, CloseGameSubmission, Proposal, ProposalSubmission, ProposerClient, ProposerError,
+    ResolveSubmission, TransitionGame,
 };
 use world_chain_prover_service::{
     GetNextProofRequest, GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse,
@@ -129,7 +129,7 @@ pub struct FakeExecution {
 #[derive(Debug)]
 struct FakeExecutionState {
     domain_hash: B256,
-    anchor: ParentRef,
+    anchor: AnchorRef,
     finalized_l1_block: BlockNumber,
     next_game_nonce: u8,
     games_by_key: HashMap<B256, Address>,
@@ -139,7 +139,7 @@ struct FakeExecutionState {
 
 #[derive(Debug, Clone)]
 struct GameRecord {
-    event: GameCreated,
+    event: WorldChainGameCreated,
     state: u8,
     challenge_deadline: u64,
     proof_deadline: u64,
@@ -160,8 +160,9 @@ impl FakeExecution {
         Self {
             state: Arc::new(Mutex::new(FakeExecutionState {
                 domain_hash: test_domain().hash(),
-                anchor: ParentRef {
-                    address: ANCHOR,
+                anchor: AnchorRef {
+                    registry: ANCHOR,
+                    anchor_game: None,
                     l2_block_number: 0,
                 },
                 finalized_l1_block: 10_000,
@@ -174,7 +175,7 @@ impl FakeExecution {
     }
 
     #[must_use]
-    pub fn latest_game(&self) -> Option<GameCreated> {
+    pub fn latest_game(&self) -> Option<WorldChainGameCreated> {
         let state = self.state.lock().expect("fake execution mutex poisoned");
         state
             .game_order
@@ -230,7 +231,7 @@ impl FakeExecution {
         challenge_record(state.games_by_address.get_mut(&game).expect("game exists"));
     }
 
-    fn create_game(state: &mut FakeExecutionState, proposal: &Proposal) -> GameCreated {
+    fn create_game(state: &mut FakeExecutionState, proposal: &Proposal) -> WorldChainGameCreated {
         let game = Address::with_last_byte(state.next_game_nonce);
         state.next_game_nonce = state.next_game_nonce.saturating_add(1);
 
@@ -241,19 +242,21 @@ impl FakeExecution {
             l1_origin_hash,
             l1_origin_number,
         };
-        let event = GameCreated {
-            proposal_key: proposal.proposal_key,
+        let event = WorldChainGameCreated {
             root_id: root.root_id(state.domain_hash),
             game,
-            proposer: FAKE_PROPOSER,
+            game_creator: FAKE_PROPOSER,
             root_claim: proposal.root_claim,
             l2_block_number: proposal.l2_block_number,
             parent_ref: proposal.parent_ref,
             l1_origin_hash,
             l1_origin_number,
+            attempt: proposal.attempt,
         };
 
-        state.games_by_key.insert(proposal.proposal_key, game);
+        state
+            .games_by_key
+            .insert(proposal.commitment().game_uuid(state.domain_hash), game);
         state.game_order.push(game);
         state.games_by_address.insert(
             game,
@@ -287,6 +290,9 @@ fn proof_lane(lane: u8) -> Option<ProofLane> {
     }
 }
 
+/// Mirrors the attempt walk in the real Alloy clients.
+const MAX_ATTEMPT_SCAN: u64 = 4;
+
 fn parent_is_unresolved(state: &FakeExecutionState, record: &GameRecord) -> bool {
     if record.event.parent_ref == ANCHOR {
         return false;
@@ -299,7 +305,7 @@ fn parent_is_unresolved(state: &FakeExecutionState, record: &GameRecord) -> bool
 
 #[async_trait]
 impl ProposerClient for FakeExecution {
-    async fn anchor_parent(&self) -> Result<ParentRef, ProposerError> {
+    async fn anchor_parent(&self) -> Result<AnchorRef, ProposerError> {
         Ok(self
             .state
             .lock()
@@ -307,29 +313,41 @@ impl ProposerClient for FakeExecution {
             .anchor)
     }
 
-    async fn proposal_key(
+    async fn games_for_transition(
         &self,
-        commitment: world_chain_proofs::ProposalCommitment,
-    ) -> Result<B256, ProposerError> {
-        Ok(commitment.proposal_key(
-            self.state
-                .lock()
-                .expect("fake execution mutex poisoned")
-                .domain_hash,
-        ))
+        parent_candidates: &[Address],
+        root_claim: B256,
+        l2_block_number: u64,
+    ) -> Result<Vec<TransitionGame>, ProposerError> {
+        let state = self.state.lock().expect("fake execution mutex poisoned");
+        let mut found = Vec::with_capacity(parent_candidates.len());
+        for parent_ref in parent_candidates {
+            let mut latest = None;
+            for attempt in 0..MAX_ATTEMPT_SCAN {
+                let uuid = ProposalCommitment {
+                    parent_ref: *parent_ref,
+                    root_claim,
+                    l2_block_number,
+                    attempt,
+                }
+                .game_uuid(state.domain_hash);
+                let Some(address) = state.games_by_key.get(&uuid).copied() else {
+                    break;
+                };
+                latest = Some(TransitionGame {
+                    address,
+                    parent_ref: *parent_ref,
+                    attempt,
+                });
+            }
+            found.extend(latest);
+        }
+        Ok(found)
     }
 
-    async fn game_for_proposal_key(
-        &self,
-        proposal_key: B256,
-    ) -> Result<Option<Address>, ProposerError> {
-        Ok(self
-            .state
-            .lock()
-            .expect("fake execution mutex poisoned")
-            .games_by_key
-            .get(&proposal_key)
-            .copied())
+    /// The fake has no registry finality airgap: a resolved game is immediately closeable.
+    async fn is_game_finalized(&self, _game: Address) -> Result<bool, ProposerError> {
+        Ok(true)
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
@@ -410,28 +428,14 @@ impl ProposerClient for FakeExecution {
             )));
         }
         let l2_block_number = record.event.l2_block_number;
-        state.anchor = ParentRef {
-            address: game,
+        state.anchor = AnchorRef {
+            registry: ANCHOR,
+            anchor_game: Some(game),
             l2_block_number,
         };
         Ok(CloseGameSubmission {
             tx_hash: B256::with_last_byte(game.as_slice()[19]),
         })
-    }
-
-    async fn claimable(&self, _game: Address) -> Result<U256, ProposerError> {
-        Ok(U256::ZERO)
-    }
-
-    async fn withdraw(&self, game: Address) -> Result<WithdrawSubmission, ProposerError> {
-        Ok(WithdrawSubmission {
-            tx_hash: B256::with_last_byte(game.as_slice()[19]),
-            amount: U256::ZERO,
-        })
-    }
-
-    async fn proposer_bond(&self) -> Result<U256, ProposerError> {
-        Ok(U256::from(1))
     }
 
     async fn latest_finalized_l1_block(&self) -> Result<B256, ProposerError> {
@@ -442,13 +446,12 @@ impl ProposerClient for FakeExecution {
         &self,
         proposal: &Proposal,
         _proof: ProofData,
-        _proposer_bond: U256,
     ) -> Result<ProposalSubmission, ProposerError> {
         let mut state = self.state.lock().expect("fake execution mutex poisoned");
-        if let Some(existing) = state.games_by_key.get(&proposal.proposal_key) {
+        let uuid = proposal.commitment().game_uuid(state.domain_hash);
+        if let Some(existing) = state.games_by_key.get(&uuid) {
             return Err(ProposerError::Contract(format!(
-                "game already exists for proposal key {} at {existing}",
-                proposal.proposal_key
+                "game already exists for factory uuid {uuid} at {existing}"
             )));
         }
         let event = Self::create_game(&mut state, proposal);
@@ -461,10 +464,6 @@ impl ProposerClient for FakeExecution {
 
 #[async_trait]
 impl ChallengerClient for FakeExecution {
-    async fn challenger_bond(&self) -> Result<U256, ChallengerError> {
-        Ok(U256::from(1))
-    }
-
     async fn game_count(&self) -> Result<u64, ChallengerError> {
         Ok(self
             .state
@@ -474,13 +473,24 @@ impl ChallengerClient for FakeExecution {
             .len() as u64)
     }
 
-    async fn game_address_at(&self, index: u64) -> Result<Address, ChallengerError> {
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, ChallengerError> {
         self.state
             .lock()
             .expect("fake execution mutex poisoned")
             .game_order
             .get(index as usize)
             .copied()
+            .map(Some)
+            .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))
+    }
+
+    async fn game_created_at(&self, index: u64) -> Result<u64, ChallengerError> {
+        self.state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .game_order
+            .get(index as usize)
+            .map(|_| u64::MAX)
             .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))
     }
 
@@ -525,7 +535,6 @@ impl ChallengerClient for FakeExecution {
     async fn submit_challenge(
         &self,
         game: Address,
-        _challenger_bond: U256,
     ) -> Result<ChallengeSubmission, ChallengerError> {
         let mut state = self.state.lock().expect("fake execution mutex poisoned");
         let record = state
@@ -535,6 +544,7 @@ impl ChallengerClient for FakeExecution {
         challenge_record(record);
         Ok(ChallengeSubmission {
             tx_hash: B256::with_last_byte(record.challenge_count as u8),
+            bond: U256::from(1),
         })
     }
 }
@@ -550,23 +560,34 @@ impl DefenderClient for FakeExecution {
             .len() as u64)
     }
 
-    async fn game_address_at(&self, index: u64) -> Result<Address, DefenderError> {
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, DefenderError> {
         self.state
             .lock()
             .expect("fake execution mutex poisoned")
             .game_order
             .get(index as usize)
             .copied()
+            .map(Some)
             .ok_or_else(|| DefenderError::Contract(format!("unknown game index {index}")))
     }
 
-    async fn game_proposer(&self, game: Address) -> Result<Address, DefenderError> {
+    async fn game_created_at(&self, index: u64) -> Result<u64, DefenderError> {
+        self.state
+            .lock()
+            .expect("fake execution mutex poisoned")
+            .game_order
+            .get(index as usize)
+            .map(|_| u64::MAX)
+            .ok_or_else(|| DefenderError::Contract(format!("unknown game index {index}")))
+    }
+
+    async fn game_creator(&self, game: Address) -> Result<Address, DefenderError> {
         self.state
             .lock()
             .expect("fake execution mutex poisoned")
             .games_by_address
             .get(&game)
-            .map(|record| record.event.proposer)
+            .map(|record| record.event.game_creator)
             .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
     }
 
@@ -585,16 +606,6 @@ impl DefenderClient for FakeExecution {
                 proof_deadline: record.proof_deadline,
                 proof_threshold: PROOF_THRESHOLD,
             })
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
-    }
-
-    async fn proof_deadline(&self, game: Address) -> Result<u64, DefenderError> {
-        self.state
-            .lock()
-            .expect("fake execution mutex poisoned")
-            .games_by_address
-            .get(&game)
-            .map(|record| record.proof_deadline)
             .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
     }
 

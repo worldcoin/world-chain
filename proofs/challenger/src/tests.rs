@@ -1,8 +1,8 @@
 use crate::{
     BondManager, BondManagerClient, BondManagerConfig, ChallengeSubmission, ChallengerClient,
-    ChallengerConfig, ChallengerError, GameMetadata, OwnedGames, ResolutionManager,
-    ResolutionManagerClient, ResolutionManagerConfig, ResolveSubmission, WithdrawSubmission,
-    challenger::WorldChainChallenger,
+    ChallengerConfig, ChallengerError, ClaimSubmission, GameMetadata, OwnedGames,
+    PendingWithdrawal, ResolutionManager, ResolutionManagerClient, ResolutionManagerConfig,
+    ResolveSubmission, challenger::WorldChainChallenger,
 };
 use alloy_primitives::{Address, B256, BlockNumber, U256, address};
 use async_trait::async_trait;
@@ -34,13 +34,17 @@ const REASON_PROOF_TIMEOUT: u8 = 1;
 #[derive(Debug, Clone, Copy)]
 struct MockGame {
     metadata: GameMetadata,
+    created_at: u64,
     state: u8,
     challenge_deadline: u64,
     challenger: Address,
     resolvable: bool,
     resolution_outcome: u8,
     resolution_reason: u8,
-    claimable: U256,
+    credit: U256,
+    pending: PendingWithdrawal,
+    /// Whether the registry's finality airgap has elapsed for this game.
+    finalized: bool,
 }
 
 impl MockGame {
@@ -51,13 +55,19 @@ impl MockGame {
                 root_claim,
                 l2_block_number,
             },
+            created_at: u64::MAX,
             state: STATE_PROPOSED,
             challenge_deadline: u64::MAX,
             challenger: Address::ZERO,
             resolvable: false,
             resolution_outcome: STATE_PROPOSED,
             resolution_reason: REASON_NONE,
-            claimable: U256::ZERO,
+            credit: U256::ZERO,
+            pending: PendingWithdrawal {
+                amount: U256::ZERO,
+                unlock_at: 0,
+            },
+            finalized: true,
         }
     }
 }
@@ -69,8 +79,12 @@ struct MockState {
     requested_indices: Vec<u64>,
     challenges: Vec<Address>,
     resolutions: Vec<Address>,
+    unlocks: Vec<Address>,
     withdrawals: Vec<Address>,
-    fail_withdraw_once: HashSet<Address>,
+    fail_claim_once: HashSet<Address>,
+    latest_l1_timestamp: u64,
+    /// Factory indices holding a game of a different type.
+    foreign_indices: HashSet<u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -109,22 +123,38 @@ impl MockClient {
 
 #[async_trait]
 impl ChallengerClient for MockClient {
-    async fn challenger_bond(&self) -> Result<U256, ChallengerError> {
-        Ok(U256::from(1))
-    }
-
     async fn game_count(&self) -> Result<u64, ChallengerError> {
         Ok(self.state.lock().expect("not poisoned").order.len() as u64)
     }
 
-    async fn game_address_at(&self, index: u64) -> Result<Address, ChallengerError> {
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, ChallengerError> {
         let mut state = self.state.lock().expect("not poisoned");
         state.requested_indices.push(index);
+        if state.foreign_indices.contains(&index) {
+            return Ok(None);
+        }
         state
             .order
             .get(index as usize)
             .copied()
+            .map(Some)
             .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))
+    }
+
+    async fn game_created_at(&self, index: u64) -> Result<u64, ChallengerError> {
+        let state = self.state.lock().expect("not poisoned");
+        if state.foreign_indices.contains(&index) {
+            return Ok(u64::MAX);
+        }
+        let address = state
+            .order
+            .get(index as usize)
+            .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))?;
+        state
+            .games
+            .get(address)
+            .map(|game| game.created_at)
+            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {address}")))
     }
 
     async fn game_metadata(&self, game: Address) -> Result<GameMetadata, ChallengerError> {
@@ -161,7 +191,6 @@ impl ChallengerClient for MockClient {
     async fn submit_challenge(
         &self,
         game: Address,
-        _challenger_bond: U256,
     ) -> Result<ChallengeSubmission, ChallengerError> {
         let mut state = self.state.lock().expect("not poisoned");
         let record = state
@@ -174,6 +203,7 @@ impl ChallengerClient for MockClient {
         state.challenges.push(game);
         Ok(ChallengeSubmission {
             tx_hash: B256::with_last_byte(state.challenges.len() as u8),
+            bond: U256::from(1),
         })
     }
 }
@@ -222,7 +252,7 @@ impl BondManagerClient for MockClient {
         ChallengerClient::game_count(self).await
     }
 
-    async fn game_address_at(&self, index: u64) -> Result<Address, ChallengerError> {
+    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, ChallengerError> {
         ChallengerClient::game_address_at(self, index).await
     }
 
@@ -236,33 +266,77 @@ impl BondManagerClient for MockClient {
             .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
     }
 
-    async fn claimable(&self, game: Address) -> Result<U256, ChallengerError> {
+    async fn is_game_finalized(&self, game: Address) -> Result<bool, ChallengerError> {
         self.state
             .lock()
             .expect("not poisoned")
             .games
             .get(&game)
-            .map(|game| game.claimable)
+            .map(|game| game.finalized)
             .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
     }
 
-    async fn withdraw(&self, game: Address) -> Result<WithdrawSubmission, ChallengerError> {
+    async fn credit(&self, game: Address) -> Result<U256, ChallengerError> {
+        self.state
+            .lock()
+            .expect("not poisoned")
+            .games
+            .get(&game)
+            .map(|game| game.credit)
+            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+    }
+
+    async fn pending_withdrawal(
+        &self,
+        game: Address,
+    ) -> Result<PendingWithdrawal, ChallengerError> {
+        self.state
+            .lock()
+            .expect("not poisoned")
+            .games
+            .get(&game)
+            .map(|game| game.pending)
+            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+    }
+
+    async fn latest_l1_timestamp(&self) -> Result<u64, ChallengerError> {
+        Ok(self.state.lock().expect("not poisoned").latest_l1_timestamp)
+    }
+
+    /// Mirrors `MultiProofGame.claimCredit`: the first call unlocks credit into a pending
+    /// `DelayedWETH` withdrawal, the second drains it.
+    async fn claim_credit(&self, game: Address) -> Result<ClaimSubmission, ChallengerError> {
         let mut state = self.state.lock().expect("not poisoned");
-        if state.fail_withdraw_once.remove(&game) {
-            return Err(ChallengerError::Contract(
-                "injected withdrawal failure".into(),
-            ));
+        if state.fail_claim_once.remove(&game) {
+            return Err(ChallengerError::Contract("injected claim failure".into()));
         }
         let record = state
             .games
             .get_mut(&game)
             .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))?;
-        let amount = record.claimable;
-        record.claimable = U256::ZERO;
+
+        if record.credit > U256::ZERO {
+            let amount = record.credit;
+            record.credit = U256::ZERO;
+            record.pending = PendingWithdrawal {
+                amount,
+                unlock_at: 0,
+            };
+            state.unlocks.push(game);
+            return Ok(ClaimSubmission {
+                tx_hash: B256::with_last_byte(state.unlocks.len() as u8),
+                amount,
+                withdrawn: false,
+            });
+        }
+
+        let amount = record.pending.amount;
+        record.pending = PendingWithdrawal::default();
         state.withdrawals.push(game);
-        Ok(WithdrawSubmission {
+        Ok(ClaimSubmission {
             tx_hash: B256::with_last_byte(state.withdrawals.len() as u8),
             amount,
+            withdrawn: true,
         })
     }
 }
@@ -303,10 +377,10 @@ fn mock_output_roots(
 
 fn config() -> ChallengerConfig {
     ChallengerConfig {
-        challenger_bond: U256::from(1),
         poll_interval: Duration::from_secs(1),
         max_game_concurrency: 10,
         max_games_per_tick: 100,
+        max_game_age: Duration::from_secs(7 * 24 * 60 * 60),
     }
 }
 
@@ -333,13 +407,31 @@ async fn scan_once_challenges_invalid_root_and_tracks_game() {
 }
 
 #[tokio::test]
-async fn startup_binary_search_skips_expired_games() {
+async fn startup_scans_older_live_game_when_deadlines_are_not_monotonic() {
     let proposed_root = B256::repeat_byte(0x10);
     let canonical_root = B256::repeat_byte(0x20);
-    let mut expired = MockGame::proposed(GAME_1, proposed_root, L2_BLOCK);
+    let active = MockGame::proposed(GAME_1, proposed_root, L2_BLOCK);
+    let mut expired = MockGame::proposed(GAME_2, proposed_root, L2_BLOCK);
     expired.challenge_deadline = 0;
-    let active = MockGame::proposed(GAME_2, proposed_root, L2_BLOCK);
-    let client = MockClient::new(vec![expired, active]);
+    let client = MockClient::new(vec![active, expired]);
+    let (output_roots, _) =
+        mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
+    let mut challenger = WorldChainChallenger::new(config(), client.clone(), output_roots);
+
+    challenger.scan_once().await.unwrap();
+
+    assert_eq!(client.challenges(), vec![GAME_1]);
+    assert_eq!(challenger.next_game_index(), Some(2));
+}
+
+#[tokio::test]
+async fn startup_binary_search_skips_games_older_than_max_age() {
+    let proposed_root = B256::repeat_byte(0x10);
+    let canonical_root = B256::repeat_byte(0x20);
+    let mut old = MockGame::proposed(GAME_1, proposed_root, L2_BLOCK);
+    old.created_at = 0;
+    let recent = MockGame::proposed(GAME_2, proposed_root, L2_BLOCK);
+    let client = MockClient::new(vec![old, recent]);
     let (output_roots, _) =
         mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
     let mut challenger = WorldChainChallenger::new(config(), client.clone(), output_roots);
@@ -489,46 +581,101 @@ async fn bond_manager_scans_games_appended_after_recovery() {
 }
 
 #[tokio::test]
-async fn bond_manager_withdraws_and_prunes_terminal_games() {
-    let mut withdrawable = MockGame::proposed(GAME_1, B256::ZERO, L2_BLOCK);
-    withdrawable.state = STATE_INVALIDATED;
-    withdrawable.resolution_outcome = STATE_INVALIDATED;
-    withdrawable.resolution_reason = REASON_PROOF_TIMEOUT;
-    withdrawable.claimable = U256::from(10);
+async fn bond_manager_completes_two_phase_claim_and_prunes_terminal_games() {
+    let mut claimable = MockGame::proposed(GAME_1, B256::ZERO, L2_BLOCK);
+    claimable.state = STATE_INVALIDATED;
+    claimable.resolution_outcome = STATE_INVALIDATED;
+    claimable.resolution_reason = REASON_PROOF_TIMEOUT;
+    claimable.credit = U256::from(10);
     let mut zero_credit = MockGame::proposed(GAME_2, B256::ZERO, L2_BLOCK);
     zero_credit.state = STATE_FINALIZED;
     zero_credit.resolution_outcome = STATE_FINALIZED;
-    let client = MockClient::new(vec![withdrawable, zero_credit]);
+    // Resolved but still inside the registry's finality airgap: `closeGame` would revert.
+    let mut awaiting_airgap = MockGame::proposed(GAME_3, B256::ZERO, L2_BLOCK);
+    awaiting_airgap.state = STATE_FINALIZED;
+    awaiting_airgap.resolution_outcome = STATE_FINALIZED;
+    awaiting_airgap.credit = U256::from(5);
+    awaiting_airgap.finalized = false;
+    let client = MockClient::new(vec![claimable, zero_credit, awaiting_airgap]);
     let owned_games = OwnedGames::default();
     owned_games.insert(GAME_1);
     owned_games.insert(GAME_2);
+    owned_games.insert(GAME_3);
     let manager = BondManager::new(
         BondManagerConfig::default(),
         client.clone(),
         owned_games.clone(),
     );
 
+    // Pass 1 unlocks the credit in DelayedWETH; the bond is not paid out yet.
+    manager.withdraw_credits().await.unwrap();
+
+    assert!(client.withdrawals().is_empty());
+    assert!(
+        owned_games.contains(GAME_1),
+        "an unlocked bond must stay owned until it is withdrawn"
+    );
+    assert!(!owned_games.contains(GAME_2));
+    assert!(
+        owned_games.contains(GAME_3),
+        "a game inside the finality airgap must stay owned"
+    );
+
+    // Pass 2 drains the pending withdrawal and drops the game.
     manager.withdraw_credits().await.unwrap();
 
     assert_eq!(client.withdrawals(), vec![GAME_1]);
     assert!(!owned_games.contains(GAME_1));
-    assert!(!owned_games.contains(GAME_2));
 }
 
 #[tokio::test]
-async fn bond_manager_retries_failed_withdrawal() {
+async fn bond_manager_retries_failed_claim() {
     let mut game = MockGame::proposed(GAME_1, B256::ZERO, L2_BLOCK);
     game.state = STATE_INVALIDATED;
     game.resolution_outcome = STATE_INVALIDATED;
     game.resolution_reason = REASON_PROOF_TIMEOUT;
-    game.claimable = U256::from(10);
+    game.credit = U256::from(10);
     let client = MockClient::new(vec![game]);
     client
         .state
         .lock()
         .expect("not poisoned")
-        .fail_withdraw_once
+        .fail_claim_once
         .insert(GAME_1);
+    let owned_games = OwnedGames::default();
+    owned_games.insert(GAME_1);
+    let manager = BondManager::new(
+        BondManagerConfig::default(),
+        client.clone(),
+        owned_games.clone(),
+    );
+
+    // Injected failure on the unlock, then unlock, then withdraw.
+    for _ in 0..2 {
+        manager.withdraw_credits().await.unwrap();
+        assert!(owned_games.contains(GAME_1));
+    }
+
+    manager.withdraw_credits().await.unwrap();
+    assert!(!owned_games.contains(GAME_1));
+    assert_eq!(client.withdrawals(), vec![GAME_1]);
+}
+
+#[tokio::test]
+async fn bond_manager_uses_l1_timestamp_for_delayed_withdrawal() {
+    let mut game = MockGame::proposed(GAME_1, B256::ZERO, L2_BLOCK);
+    game.state = STATE_FINALIZED;
+    game.resolution_outcome = STATE_FINALIZED;
+    game.pending = PendingWithdrawal {
+        amount: U256::from(10),
+        unlock_at: 100,
+    };
+    let client = MockClient::new(vec![game]);
+    client
+        .state
+        .lock()
+        .expect("not poisoned")
+        .latest_l1_timestamp = 99;
     let owned_games = OwnedGames::default();
     owned_games.insert(GAME_1);
     let manager = BondManager::new(
@@ -539,8 +686,34 @@ async fn bond_manager_retries_failed_withdrawal() {
 
     manager.withdraw_credits().await.unwrap();
     assert!(owned_games.contains(GAME_1));
+    assert!(client.withdrawals().is_empty());
 
+    client
+        .state
+        .lock()
+        .expect("not poisoned")
+        .latest_l1_timestamp = 100;
     manager.withdraw_credits().await.unwrap();
     assert!(!owned_games.contains(GAME_1));
     assert_eq!(client.withdrawals(), vec![GAME_1]);
+}
+
+#[tokio::test]
+async fn scan_once_skips_foreign_game_types() {
+    let proposed_root = B256::repeat_byte(0x10);
+    let canonical_root = B256::repeat_byte(0x20);
+    let client = MockClient::new(vec![MockGame::proposed(GAME_1, proposed_root, L2_BLOCK)]);
+    // Index 0 belongs to another game type; the WIP-1006 game sits behind it.
+    {
+        let mut state = client.state.lock().expect("not poisoned");
+        state.order.insert(0, Address::ZERO);
+        state.foreign_indices.insert(0);
+    }
+    let (output_roots, _) =
+        mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
+    let mut challenger = WorldChainChallenger::new(config(), client.clone(), output_roots);
+
+    challenger.scan_once().await.unwrap();
+
+    assert_eq!(client.challenges(), vec![GAME_1]);
 }

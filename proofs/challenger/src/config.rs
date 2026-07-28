@@ -1,11 +1,12 @@
 use crate::error::ChallengerError;
-use alloy_primitives::U256;
 use std::time::Duration;
 
 /// Default number of games processed concurrently.
 pub const DEFAULT_MAX_GAME_CONCURRENCY: usize = 10;
 /// Default maximum number of new factory games discovered per challenger tick.
 pub const DEFAULT_MAX_GAMES_PER_TICK: u64 = 100;
+/// Default upper bound on the age of a game with an open challenge window.
+pub const DEFAULT_MAX_GAME_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// Default delay between challenger-owned game resolution passes.
 pub const DEFAULT_RESOLUTION_POLL_INTERVAL: Duration = Duration::from_secs(30);
 /// Default maximum number of resolution transactions submitted per pass.
@@ -16,16 +17,20 @@ pub const DEFAULT_BOND_MANAGER_POLL_INTERVAL: Duration = Duration::from_secs(5 *
 pub const DEFAULT_BOND_MANAGER_INITIAL_SCAN_LIMIT: u64 = 1_000;
 
 /// Configuration for the challenger.
+///
+/// The challenge bond is deliberately absent: it is an immutable of whichever implementation
+/// each game was cloned from, so it is read per game rather than captured at startup where a
+/// re-registered implementation would make every challenge revert.
 #[derive(Debug, Clone)]
 pub struct ChallengerConfig {
-    /// Bond read from the factory and sent with `WorldChainProofSystemGame.challenge`.
-    pub challenger_bond: U256,
     /// Delay between periodic scan attempts.
     pub poll_interval: Duration,
     /// Maximum number of games to process concurrently.
     pub max_game_concurrency: usize,
     /// Maximum number of newly created games discovered during one tick.
     pub max_games_per_tick: u64,
+    /// Upper bound on the age of any game whose challenge window can remain open.
+    pub max_game_age: Duration,
 }
 
 impl ChallengerConfig {
@@ -45,6 +50,11 @@ impl ChallengerConfig {
                 "max_games_per_tick must be greater than zero",
             ));
         }
+        if self.max_game_age.is_zero() {
+            return Err(ChallengerError::InvalidConfig(
+                "max_game_age must be greater than zero",
+            ));
+        }
         Ok(())
     }
 }
@@ -52,10 +62,10 @@ impl ChallengerConfig {
 impl Default for ChallengerConfig {
     fn default() -> Self {
         Self {
-            challenger_bond: U256::ZERO,
             poll_interval: Duration::from_mins(1),
             max_game_concurrency: DEFAULT_MAX_GAME_CONCURRENCY,
             max_games_per_tick: DEFAULT_MAX_GAMES_PER_TICK,
+            max_game_age: DEFAULT_MAX_GAME_AGE,
         }
     }
 }
