@@ -92,7 +92,7 @@ impl ProofDomain {
 }
 
 /// Per-proposal commitment fields used to compute a canonical root id.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ProposalCommitment {
     /// Parent `AnchorStateRegistry` or parent game address.
     pub parent_ref: Address,
@@ -108,33 +108,73 @@ pub struct ProposalCommitment {
 impl ProposalCommitment {
     /// ABI-encodes the CWIA payload `MultiProofGame` reads from its clone arguments.
     ///
-    /// Must match `abi.encode(domainHash, l2BlockNumber, parentRef, attempt)` as consumed by
-    /// `MultiProofGame`'s CWIA getters.
+    /// Must match the dynamic `extraData` consumed by `MultiProofGame`.
     #[must_use]
-    pub fn extra_data(self, domain_hash: B256) -> Bytes {
+    pub fn extra_data(
+        self,
+        domain_hash: B256,
+        retry_of: Address,
+        l1_origin_hash: B256,
+        l1_origin_number: u64,
+        creation_proof: Bytes,
+    ) -> Bytes {
         (
             domain_hash,
             U256::from(self.l2_block_number),
             self.parent_ref,
             U256::from(self.attempt),
+            retry_of,
+            l1_origin_hash,
+            U256::from(l1_origin_number),
+            creation_proof,
         )
             .abi_encode_params()
             .into()
     }
+}
 
-    /// Computes the `DisputeGameFactory` UUID that identifies this proposal's game.
-    ///
-    /// Mirrors `DisputeGameFactory.getGameUUID`, so the proposer can look a game up without
-    /// an extra round trip.
-    #[must_use]
-    pub fn game_uuid(self, domain_hash: B256) -> B256 {
-        let encoded = (
-            MULTI_PROOF_GAME_TYPE,
-            self.root_claim,
-            self.extra_data(domain_hash),
-        )
-            .abi_encode_params();
-        keccak256(encoded)
+/// Proposal fields decoded from a WIP-1006 game's factory `extraData`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposalExtraData {
+    pub domain_hash: B256,
+    pub l2_block_number: u64,
+    pub parent_ref: Address,
+    pub attempt: u64,
+    pub retry_of: Address,
+    pub l1_origin_hash: B256,
+    pub l1_origin_number: u64,
+    pub creation_proof: Bytes,
+}
+
+impl ProposalExtraData {
+    /// Decodes the canonical proof-backed proposal payload.
+    pub fn decode(data: &[u8]) -> Result<Self, String> {
+        let decoded =
+            <(B256, U256, Address, U256, Address, B256, U256, Bytes)>::abi_decode_params(data)
+                .map_err(|error| error.to_string())?;
+        let canonical = decoded.clone().abi_encode_params();
+        if canonical != data {
+            return Err("non-canonical proposal extraData".to_string());
+        }
+        Ok(Self {
+            domain_hash: decoded.0,
+            l2_block_number: decoded
+                .1
+                .try_into()
+                .map_err(|_| "l2 block number exceeds u64".to_string())?,
+            parent_ref: decoded.2,
+            attempt: decoded
+                .3
+                .try_into()
+                .map_err(|_| "attempt exceeds u64".to_string())?,
+            retry_of: decoded.4,
+            l1_origin_hash: decoded.5,
+            l1_origin_number: decoded
+                .6
+                .try_into()
+                .map_err(|_| "l1 origin number exceeds u64".to_string())?,
+            creation_proof: decoded.7,
+        })
     }
 }
 
@@ -143,19 +183,13 @@ impl ProposalCommitment {
 pub struct RootCommitment {
     /// Proposal fields supplied by the proposer.
     pub proposal: ProposalCommitment,
-    /// L1 origin hash pinned by the proposal factory.
+    /// Proposer-selected L1 origin hash verified by the game at creation.
     pub l1_origin_hash: B256,
     /// L1 origin block number paired with `l1_origin_hash`.
     pub l1_origin_number: u64,
 }
 
 impl RootCommitment {
-    /// Compute the `DisputeGameFactory` UUID for this proposal.
-    #[must_use]
-    pub fn game_uuid(self, domain_hash: B256) -> B256 {
-        self.proposal.game_uuid(domain_hash)
-    }
-
     /// Compute the Solidity-compatible root id for this proposal.
     #[must_use]
     pub fn root_id(self, domain_hash: B256) -> B256 {
@@ -316,7 +350,6 @@ mod tests {
             b256!("6cccba67d43368ae81da6cf22798e228b82b953c51c1bbce76959b166b888dd3")
         );
 
-        assert_ne!(B256::ZERO, proposal.game_uuid(domain.hash()));
         let changed = ProofDomain {
             chain_id: 4802,
             ..domain
@@ -326,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn game_uuid_matches_dispute_game_factory_encoding() {
+    fn proposal_extra_data_round_trips() {
         let domain_hash = b256!("1111111111111111111111111111111111111111111111111111111111111111");
         let proposal = ProposalCommitment {
             parent_ref: address!("0000000000000000000000000000000000001006"),
@@ -335,31 +368,28 @@ mod tests {
             attempt: 0,
         };
 
-        // Reference values from `cast abi-encode` / `cast keccak`, pinning this encoding to the
-        // CWIA payload `MultiProofGame` reads at offsets 0x54/0x74/0x94/0xB4 and to
-        // `DisputeGameFactory.getGameUUID(GameType,Claim,bytes)`.
-        assert_eq!(
-            proposal.extra_data(domain_hash),
-            Bytes::from_static(&hex!(
-                "1111111111111111111111111111111111111111111111111111111111111111"
-                "0000000000000000000000000000000000000000000000000000000000000064"
-                "0000000000000000000000000000000000000000000000000000000000001006"
-                "0000000000000000000000000000000000000000000000000000000000000000"
-            ))
+        let l1_origin_hash =
+            b256!("3333333333333333333333333333333333333333333333333333333333333333");
+        let proof = Bytes::from_static(&hex!("deadbeef"));
+        let encoded = proposal.extra_data(
+            domain_hash,
+            Address::ZERO,
+            l1_origin_hash,
+            42,
+            proof.clone(),
         );
         assert_eq!(
-            proposal.game_uuid(domain_hash),
-            b256!("97c09945ea02810652360265a6c8f070ce4d6fb10651f7f76126130d6209ee33")
-        );
-
-        // Retries occupy a distinct factory UUID.
-        let retry = ProposalCommitment {
-            attempt: 1,
-            ..proposal
-        };
-        assert_ne!(
-            proposal.game_uuid(domain_hash),
-            retry.game_uuid(domain_hash)
+            ProposalExtraData::decode(&encoded).unwrap(),
+            ProposalExtraData {
+                domain_hash,
+                l2_block_number: proposal.l2_block_number,
+                parent_ref: proposal.parent_ref,
+                attempt: proposal.attempt,
+                retry_of: Address::ZERO,
+                l1_origin_hash,
+                l1_origin_number: 42,
+                creation_proof: proof,
+            }
         );
     }
 }

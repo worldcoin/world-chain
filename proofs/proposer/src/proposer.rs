@@ -109,7 +109,12 @@ where
 
             let existing = self
                 .execution_provider
-                .games_for_transition(&parent_candidates, root_claim, next_l2_block_number)
+                .games_for_transition(
+                    anchor.anchor_game,
+                    &parent_candidates,
+                    root_claim,
+                    next_l2_block_number,
+                )
                 .await?;
             let mut statuses = Vec::with_capacity(existing.len());
             for game in &existing {
@@ -144,11 +149,12 @@ where
             // the anchor can neither be retried under that parent nor chained onto: the
             // transition rebases onto `cursor.address` at attempt zero instead. This is the
             // contract's own recovery path for inherited invalidations.
-            let Some((stale, status)) = existing
+            let current_parent_games: Vec<_> = existing
                 .iter()
                 .zip(&statuses)
-                .find(|(game, _)| game.parent_ref == cursor.address)
-            else {
+                .filter(|(game, _)| game.parent_ref == cursor.address)
+                .collect();
+            if current_parent_games.is_empty() {
                 // Nothing occupies this transition under the current parent, either because no
                 // game exists yet or because the only ones that do are stale rebase targets.
                 return Ok(CanonicalScan::new(
@@ -160,27 +166,35 @@ where
                         attempt: 0,
                     }),
                 ));
-            };
+            }
 
-            let next_action = if status.resolvable {
-                NextProposalAction::AwaitNegativeResolution {
-                    game: stale.address,
-                    reason: status.invalidation_reason,
-                }
-            } else if status.invalidation_reason == InvalidationReason::ProofTimeout {
-                // A retry must reuse the invalidated game's parent reference and root claim:
-                // `MultiProofGame` only accepts attempt N when attempt N-1 exists under the
-                // identical `extraData`.
+            let next_action = if let Some((stale, _)) =
+                current_parent_games.iter().copied().find(|(_, status)| {
+                    !status.resolvable
+                        && status.invalidation_reason == InvalidationReason::ProofTimeout
+                }) {
                 NextProposalAction::RetryTimedOut {
                     proposal: Proposal {
                         parent_ref: cursor.address,
                         root_claim,
                         l2_block_number: next_l2_block_number,
-                        attempt: stale.attempt.saturating_add(1),
+                        attempt: stale.attempt.checked_add(1).ok_or_else(|| {
+                            ProposerError::Contract("proposal attempt overflows u64".into())
+                        })?,
                     },
                     invalidated_game: stale.address,
                 }
+            } else if let Some((stale, status)) = current_parent_games
+                .iter()
+                .copied()
+                .find(|(_, status)| status.resolvable)
+            {
+                NextProposalAction::AwaitNegativeResolution {
+                    game: stale.address,
+                    reason: status.invalidation_reason,
+                }
             } else {
+                let (stale, status) = current_parent_games[0];
                 NextProposalAction::BlockedByInvalidation {
                     game: stale.address,
                     reason: status.invalidation_reason,
@@ -416,10 +430,29 @@ where
             )));
         }
 
-        let submission = self
+        let submission = match self
             .execution_provider
-            .submit_proposal(&pending.proposal, proof)
-            .await?;
+            .submit_proposal(&pending.proposal, pending.retry_of, proof)
+            .await
+        {
+            Ok(submission) => submission,
+            Err(
+                error @ ProposerError::StaleCreationProof {
+                    l1_origin_number,
+                    latest_l1_block,
+                },
+            ) => {
+                warn!(
+                    %error,
+                    l1_origin_number,
+                    latest_l1_block,
+                    "discarding stale creation proof"
+                );
+                self.pending_proposal = None;
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
         info!(
             tx_hash = ?submission.tx_hash,
             game_address = %submission.game_address,

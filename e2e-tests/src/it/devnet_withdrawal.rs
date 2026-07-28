@@ -20,6 +20,7 @@ use world_chain_proofs::{
 const DEVNET_SIGNER_KEY: &str =
     "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a";
 const L2_TO_L1_MESSAGE_PASSER: Address = address!("4200000000000000000000000000000000000016");
+const HISTORY_STORAGE: Address = address!("0000F90827F1C53a10cb7A02335B175320002935");
 const GAME_WAIT_TIMEOUT: Duration = Duration::from_secs(300);
 const GAME_IN_PROGRESS: u8 = 0;
 const GAME_DEFENDER_WINS: u8 = 2;
@@ -149,6 +150,10 @@ async fn op_native_wip_1006_portal_withdrawal_and_bond_claim() -> eyre::Result<(
         anchor.respectedGameType().call().await? == MULTI_PROOF_GAME_TYPE,
         "WIP-1006 is not the AnchorStateRegistry's respected game type"
     );
+    ensure!(
+        !l1_provider.get_code_at(HISTORY_STORAGE).await?.is_empty(),
+        "L1 devnet is missing the EIP-2935 history contract"
+    );
 
     let withdrawal = initiate_withdrawal(l2_provider.clone(), withdrawal_sender).await?;
     let (game_index, game_address, game_l2_block) =
@@ -162,9 +167,31 @@ async fn op_native_wip_1006_portal_withdrawal_and_bond_claim() -> eyre::Result<(
         anchor.isGameProper(game_address).call().await?,
         "covering WIP-1006 game is not proper"
     );
+    ensure!(
+        !game.creationProof().call().await?.is_empty(),
+        "covering WIP-1006 game has no creation proof"
+    );
+    ensure!(
+        game.proofCount().call().await? == 1,
+        "creation proof did not seed exactly one proof lane"
+    );
+    let l1_origin_number: u64 = game.l1OriginNumber().call().await?.try_into()?;
+    let selected_l1_origin = l1_provider
+        .get_block_by_number(BlockNumberOrTag::Number(l1_origin_number))
+        .await?
+        .ok_or_eyre("selected WIP-1006 L1 origin is unavailable")?;
+    ensure!(
+        game.l1Head().call().await? == selected_l1_origin.header.hash,
+        "game L1 head does not match the proposer-selected L1 block"
+    );
 
     let (output_root_proof, withdrawal_proof) =
         build_withdrawal_proof(l2_provider, game_l2_block, withdrawal.hash).await?;
+    let game_created_at = game.createdAt().call().await?;
+    let current_timestamp = latest_timestamp(&l1_provider).await?;
+    if current_timestamp <= game_created_at {
+        advance_to_timestamp(&l1_provider, game_created_at.saturating_add(1)).await?;
+    }
     ensure!(
         portal
             .proveWithdrawalTransaction(

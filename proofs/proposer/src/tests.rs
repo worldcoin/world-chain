@@ -7,11 +7,11 @@ use std::{
     time::Duration,
 };
 
-use alloy_primitives::{Address, B256, BlockNumber, Bytes, U256, address, b256};
+use alloy_primitives::{Address, B256, BlockNumber, Bytes, U256, address, b256, keccak256};
+use alloy_sol_types::SolValue;
 use async_trait::async_trait;
 use world_chain_proofs::{
-    ConsensusError, ConsensusProvider, InvalidationReason, ProposalCommitment, ResolutionStatus,
-    RootState,
+    ConsensusError, ConsensusProvider, InvalidationReason, ResolutionStatus, RootState,
 };
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
@@ -39,7 +39,7 @@ const MAX_TEST_ATTEMPT: u64 = 4;
 struct MockContracts {
     anchor: AnchorRef,
     /// Games keyed by their `DisputeGameFactory` UUID.
-    games: HashMap<B256, Address>,
+    games: HashMap<B256, Vec<Address>>,
     submissions: Arc<Mutex<Vec<(Proposal, ProofData)>>>,
     resolution_statuses: Arc<Mutex<HashMap<Address, ResolutionStatus>>>,
     resolutions: Arc<Mutex<Vec<Address>>>,
@@ -57,23 +57,27 @@ impl ProposerClient for MockContracts {
 
     async fn games_for_transition(
         &self,
+        _anchor_game: Option<Address>,
         parent_candidates: &[Address],
         root_claim: B256,
         l2_block_number: u64,
     ) -> Result<Vec<TransitionGame>, ProposerError> {
         let mut found = Vec::with_capacity(parent_candidates.len());
         for parent_ref in parent_candidates {
-            let mut latest = None;
+            let mut latest = Vec::new();
             for attempt in 0..MAX_TEST_ATTEMPT {
-                let uuid = game_uuid(*parent_ref, root_claim, l2_block_number, attempt);
-                let Some(address) = self.games.get(&uuid).copied() else {
+                let uuid = transition_key(*parent_ref, root_claim, l2_block_number, attempt);
+                let Some(addresses) = self.games.get(&uuid) else {
                     break;
                 };
-                latest = Some(TransitionGame {
-                    address,
-                    parent_ref: *parent_ref,
-                    attempt,
-                });
+                latest = addresses
+                    .iter()
+                    .map(|address| TransitionGame {
+                        address: *address,
+                        parent_ref: *parent_ref,
+                        attempt,
+                    })
+                    .collect();
             }
             found.extend(latest);
         }
@@ -122,9 +126,17 @@ impl ProposerClient for MockContracts {
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
+        _retry_of: Option<Address>,
         proof: ProofData,
     ) -> Result<ProposalSubmission, ProposerError> {
         let mut failures = self.submission_failures.lock().expect("not poisoned");
+        if *failures == usize::MAX {
+            *failures = 0;
+            return Err(ProposerError::StaleCreationProof {
+                l1_origin_number: 1,
+                latest_l1_block: 8_002,
+            });
+        }
         if *failures > 0 {
             *failures -= 1;
             return Err(ProposerError::Contract(
@@ -214,6 +226,7 @@ impl ProofRequester for MockProofRequester {
                 attestation: Bytes::from_static(&[1]),
                 public_values: Bytes::from_static(&[2]),
                 signature: Bytes::from_static(&[3]),
+                public_key: Bytes::from_static(&[4]),
             },
         }))
     }
@@ -472,14 +485,22 @@ fn timed_out_status() -> ResolutionStatus {
     }
 }
 
-fn game_uuid(parent_ref: Address, root_claim: B256, l2_block_number: u64, attempt: u64) -> B256 {
-    ProposalCommitment {
-        parent_ref,
-        root_claim,
-        l2_block_number,
-        attempt,
-    }
-    .game_uuid(DOMAIN_HASH)
+fn transition_key(
+    parent_ref: Address,
+    root_claim: B256,
+    l2_block_number: u64,
+    attempt: u64,
+) -> B256 {
+    keccak256(
+        (
+            DOMAIN_HASH,
+            parent_ref,
+            root_claim,
+            U256::from(l2_block_number),
+            U256::from(attempt),
+        )
+            .abi_encode_params(),
+    )
 }
 
 fn game_address(index: u64) -> Address {
@@ -500,7 +521,7 @@ async fn anchor_and_canonical_line_walks_existing_games_until_gap() {
     let root_10 = B256::repeat_byte(0x10);
     let root_20 = B256::repeat_byte(0x20);
     let mut games = HashMap::new();
-    games.insert(game_uuid(ANCHOR, root_10, 10, 0), GAME_1);
+    games.insert(transition_key(ANCHOR, root_10, 10, 0), vec![GAME_1]);
 
     let contracts = MockContracts {
         anchor: anchor_at(0),
@@ -724,6 +745,45 @@ async fn propose_retries_submission_with_same_completed_proof() {
     let requests = proof_requester.requests.lock().expect("not poisoned");
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[0], requests[1]);
+    assert_eq!(submissions.lock().expect("not poisoned").len(), 1);
+}
+
+#[tokio::test]
+async fn propose_discards_stale_creation_proof_before_retrying() {
+    let submissions = Arc::default();
+    let contracts = MockContracts {
+        anchor: anchor_at(0),
+        games: HashMap::new(),
+        submissions: Arc::clone(&submissions),
+        resolution_statuses: Arc::default(),
+        resolutions: Arc::default(),
+        closures: Arc::default(),
+        submission_failures: Arc::new(Mutex::new(usize::MAX)),
+        unfinalized_games: Arc::default(),
+    };
+    let output_roots = MockOutputRoots {
+        roots: HashMap::from([(10, B256::repeat_byte(0x10))]),
+        finalized_l2_block: 10,
+    };
+    let proof_requester = MockProofRequester::default();
+    let mut proposer =
+        WorldChainProposer::new(config(), contracts, output_roots, proof_requester.clone());
+    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
+
+    advance_proposal(&mut proposer, &canonical_scan)
+        .await
+        .unwrap();
+    assert!(!proposer.has_pending_proposal());
+    assert!(submissions.lock().expect("not poisoned").is_empty());
+
+    advance_proposal(&mut proposer, &canonical_scan)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        proof_requester.requests.lock().expect("not poisoned").len(),
+        2
+    );
     assert_eq!(submissions.lock().expect("not poisoned").len(), 1);
 }
 
@@ -1244,7 +1304,7 @@ async fn timed_out_game_rebases_onto_registry_after_its_parent_became_the_anchor
     let root_20 = B256::repeat_byte(0x20);
     let contracts = MockContracts {
         anchor: anchor_advanced_onto(parent, 10),
-        games: HashMap::from([(game_uuid(parent, root_20, 20, 0), timed_out)]),
+        games: HashMap::from([(transition_key(parent, root_20, 20, 0), vec![timed_out])]),
         submissions: Arc::default(),
         resolution_statuses: Arc::new(Mutex::new(HashMap::from([(timed_out, timed_out_status())]))),
         resolutions: Arc::default(),
@@ -1277,7 +1337,7 @@ async fn timed_out_game_rebases_onto_registry_after_its_parent_became_the_anchor
 }
 
 #[tokio::test]
-async fn invalidated_legacy_game_does_not_hide_a_live_registry_parented_rebase() {
+async fn invalidated_stale_parent_game_does_not_hide_a_live_registry_parented_rebase() {
     let parent = game_address(1);
     let timed_out = game_address(2);
     let rebased = game_address(3);
@@ -1285,8 +1345,8 @@ async fn invalidated_legacy_game_does_not_hide_a_live_registry_parented_rebase()
     let contracts = MockContracts {
         anchor: anchor_advanced_onto(parent, 10),
         games: HashMap::from([
-            (game_uuid(parent, root_20, 20, 0), timed_out),
-            (game_uuid(ANCHOR, root_20, 20, 0), rebased),
+            (transition_key(parent, root_20, 20, 0), vec![timed_out]),
+            (transition_key(ANCHOR, root_20, 20, 0), vec![rebased]),
         ]),
         submissions: Arc::default(),
         resolution_statuses: Arc::new(Mutex::new(HashMap::from([(timed_out, timed_out_status())]))),
@@ -1307,7 +1367,7 @@ async fn invalidated_legacy_game_does_not_hide_a_live_registry_parented_rebase()
 
     let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
 
-    // The live rebase continues the line even though the dead legacy game is scanned first.
+    // The live rebase continues the line even though the dead stale-parent game is scanned first.
     assert_eq!(
         canonical_scan.canonical_line().games(),
         &[ParentRef {
@@ -1323,7 +1383,7 @@ async fn timed_out_game_bumps_attempt_while_its_parent_is_still_acceptable() {
     let root_20 = B256::repeat_byte(0x20);
     let contracts = MockContracts {
         anchor: anchor_at(10),
-        games: HashMap::from([(game_uuid(ANCHOR, root_20, 20, 0), timed_out)]),
+        games: HashMap::from([(transition_key(ANCHOR, root_20, 20, 0), vec![timed_out])]),
         submissions: Arc::default(),
         resolution_statuses: Arc::new(Mutex::new(HashMap::from([(timed_out, timed_out_status())]))),
         resolutions: Arc::default(),
@@ -1354,5 +1414,44 @@ async fn timed_out_game_bumps_attempt_while_its_parent_is_still_acceptable() {
             },
             invalidated_game: timed_out,
         }
+    );
+}
+
+#[tokio::test]
+async fn timed_out_lineage_does_not_hide_a_parallel_live_game() {
+    let timed_out = game_address(2);
+    let live = game_address(3);
+    let root_20 = B256::repeat_byte(0x20);
+    let contracts = MockContracts {
+        anchor: anchor_at(10),
+        games: HashMap::from([(
+            transition_key(ANCHOR, root_20, 20, 0),
+            vec![timed_out, live],
+        )]),
+        submissions: Arc::default(),
+        resolution_statuses: Arc::new(Mutex::new(HashMap::from([(timed_out, timed_out_status())]))),
+        resolutions: Arc::default(),
+        closures: Arc::default(),
+        submission_failures: Arc::default(),
+        unfinalized_games: Arc::default(),
+    };
+    let proposer = WorldChainProposer::new(
+        config(),
+        contracts,
+        MockOutputRoots {
+            roots: HashMap::from([(20, root_20)]),
+            finalized_l2_block: 20,
+        },
+        MockProofRequester::default(),
+    );
+
+    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
+
+    assert_eq!(
+        canonical_scan.canonical_line().games(),
+        &[ParentRef {
+            address: live,
+            l2_block_number: 20,
+        }]
     );
 }

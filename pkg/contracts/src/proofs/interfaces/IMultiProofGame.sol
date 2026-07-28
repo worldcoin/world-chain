@@ -53,6 +53,7 @@ interface IMultiProofGame is IDisputeGame {
     error InvalidLane(uint8 lane);
     error InvalidProof(ProofLib.ProofLane lane, bytes32 rootId);
     error InvalidDomainHash(bytes32 expected, bytes32 actual);
+    error InvalidL1Head(bytes32 l1OriginHash, uint256 l1OriginNumber);
     error InconsistentSystemConfiguration();
 
     ////////////////////////////////////////////////////////////////
@@ -150,6 +151,12 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Retry nonce for this transition. Attempt N requires attempt N-1 to have timed
     ///         out on proofs or to have been created before this game type became respected.
     function attempt() external view returns (uint256);
+
+    /// @notice Previous attempt for this transition, or the zero address for attempt zero.
+    function retryOf() external view returns (address);
+
+    /// @notice TEE proof verified when the proposal was created.
+    function creationProof() external view returns (bytes memory);
 
     /// @notice Parent game, or the anchor registry when the proposal starts from its current root.
     function parentRef() external view returns (address);

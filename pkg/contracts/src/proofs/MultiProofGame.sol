@@ -48,6 +48,9 @@ import {ISemver} from "@optimism-bedrock/interfaces/universal/ISemver.sol";
 ///         it. Bond custody uses `DelayedWETH` with the two-phase unlock/withdraw claim flow.
 /// @dev Structure follows `ZKDisputeGame`; challenge/lane semantics are World Chain specific.
 contract MultiProofGame is Clone, ISemver, IMultiProofGame {
+    /// @dev EIP-2935 history contract, retaining the latest 8,191 block hashes.
+    address internal constant HISTORY_STORAGE = 0x0000F90827F1C53a10cb7A02335B175320002935;
+
     ////////////////////////////////////////////////////////////////
     //                       Immutables                           //
     ////////////////////////////////////////////////////////////////
@@ -155,8 +158,11 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     // CWIA layout appended by `DisputeGameFactory.create` (no implementation args):
     //   [0x00, 0x14) creator address
     //   [0x14, 0x34) root claim
-    //   [0x34, 0x54) l1 head (parent block hash at creation)
-    //   [0x54, 0xD4) extraData = abi.encode(domainHash, l2BlockNumber, parentRef, attempt)
+    //   [0x34, 0x54) factory-captured parent block hash (unused by this game)
+    //   [0x54, ...) extraData = abi.encode(
+    //       domainHash, l2BlockNumber, parentRef, attempt, retryOf,
+    //       l1OriginHash, l1OriginNumber, creationProof
+    //   )
 
     function gameCreator() public pure returns (address creator_) {
         creator_ = _getArgAddress(0x00);
@@ -167,7 +173,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     function l1Head() public pure returns (Hash l1Head_) {
-        l1Head_ = Hash.wrap(_getArgBytes32(0x34));
+        l1Head_ = Hash.wrap(_getArgBytes32(0xF4));
     }
 
     /// @inheritdoc IMultiProofGame
@@ -194,8 +200,24 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         attempt_ = _getArgUint256(0xB4);
     }
 
+    /// @inheritdoc IMultiProofGame
+    function retryOf() public pure returns (address retryOf_) {
+        uint256 rawRetryOf = _getArgUint256(0xD4);
+        if (rawRetryOf > type(uint160).max) revert BadExtraData();
+        // forge-lint: disable-next-line(unsafe-typecast)
+        retryOf_ = address(uint160(rawRetryOf));
+    }
+
+    /// @inheritdoc IMultiProofGame
+    function creationProof() public pure returns (bytes memory proof_) {
+        bytes memory data = extraData();
+        (,,,,,,, proof_) = abi.decode(data, (bytes32, uint256, address, uint256, address, bytes32, uint256, bytes));
+    }
+
     function extraData() public pure returns (bytes memory extraData_) {
-        extraData_ = _getArgBytes(0x54, 0x80);
+        bytes memory args = _getArgBytes();
+        if (args.length < 0x54) revert BadExtraData();
+        extraData_ = _getArgBytes(0x54, args.length - 0x54);
     }
 
     ////////////////////////////////////////////////////////////////
@@ -279,19 +301,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     function initialize() external payable {
         if (initialized) revert AlreadyInitialized();
 
-        // Reject any calldata whose length differs from the exact CWIA payload. This prevents
-        // extraData padding games that would mint distinct factory UUIDs for the same proposal,
-        // and blocks direct `initialize` calls on clones with malformed payloads.
-        //
-        // Expected length: 0xDA
-        // - 0x04 selector
-        // - 0x14 creator address
-        // - 0x20 root claim
-        // - 0x20 l1 head
-        // - 0x80 extraData (domainHash, l2BlockNumber, parentRef, attempt)
-        // - 0x02 CWIA length suffix
-        if (msg.data.length != 0xDA) revert BadExtraData();
-
         // Only the configured factory may initialize; this also rules out direct initialization
         // of the implementation contract itself.
         if (msg.sender != address(disputeGameFactory)) revert NotDisputeGameFactory(msg.sender);
@@ -299,12 +308,42 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // Defense-in-depth against `setInitBond` drifting from the configured proposer bond.
         if (msg.value != proposerBond) revert IncorrectBondAmount();
 
+        bytes memory proposalExtraData = extraData();
+        if (proposalExtraData.length < 0x140) revert BadExtraData();
+        (
+            bytes32 proposalDomainHash_,
+            uint256 l2BlockNumber_,
+            address parentRef_,
+            uint256 attempt_,
+            address retryOf_,
+            bytes32 l1OriginHash_,
+            uint256 l1OriginNumber_,
+            bytes memory creationProof_
+        ) = abi.decode(proposalExtraData, (bytes32, uint256, address, uint256, address, bytes32, uint256, bytes));
+        if (
+            creationProof_.length == 0
+                || keccak256(proposalExtraData)
+                    != keccak256(
+                        abi.encode(
+                            proposalDomainHash_,
+                            l2BlockNumber_,
+                            parentRef_,
+                            attempt_,
+                            retryOf_,
+                            l1OriginHash_,
+                            l1OriginNumber_,
+                            creationProof_
+                        )
+                    )
+        ) {
+            revert BadExtraData();
+        }
+
         // Preserves the former propose-time registry pause gate.
         if (anchorStateRegistry.paused()) revert GamePaused();
-        if (proposalDomainHash() != domainHash) revert InvalidDomainHash(domainHash, proposalDomainHash());
+        if (proposalDomainHash_ != domainHash) revert InvalidDomainHash(domainHash, proposalDomainHash_);
 
         (Hash anchorRoot, uint256 anchorL2BlockNumber) = anchorStateRegistry.getAnchorRoot();
-        address parentRef_ = parentRef();
 
         if (parentRef_ == address(anchorStateRegistry)) {
             // The proposal extends the accepted anchor; the registry acts as the parent sentinel.
@@ -337,46 +376,49 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         }
 
         uint256 expectedL2BlockNumber = startingL2BlockNumber + DOMAIN_BLOCK_INTERVAL;
-        if (l2SequenceNumber() != expectedL2BlockNumber) {
-            revert InvalidL2BlockNumber(expectedL2BlockNumber, l2SequenceNumber());
+        if (l2BlockNumber_ != expectedL2BlockNumber) {
+            revert InvalidL2BlockNumber(expectedL2BlockNumber, l2BlockNumber_);
         }
         // Per spec, the sequence number must fit within a uint64.
-        if (l2SequenceNumber() > type(uint64).max) revert UnexpectedRootClaim(rootClaim());
+        if (l2BlockNumber_ > type(uint64).max) revert UnexpectedRootClaim(rootClaim());
 
-        // Retries: attempt N is only proposable when attempt N-1 for the identical transition
-        // timed out on proofs or was created before WIP-1006 became respected. The latter
-        // prevents a pre-cutover game from permanently occupying the factory UUID. Inherited
-        // invalidations must rebase onto a replacement parent, which changes `parentRef` and
-        // therefore starts back at attempt zero. Duplicate attempts are impossible: the factory
-        // UUID covers (gameType, rootClaim, extraData).
-        if (attempt() > 0) {
-            bytes memory previousExtraData = abi.encode(domainHash, l2SequenceNumber(), parentRef_, attempt() - 1);
-            (IDisputeGame previous,) =
-                disputeGameFactory.games(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim(), previousExtraData);
+        // Retries explicitly reference the previous concrete game because its selected L1 head
+        // and creation proof make its factory UUID impossible to reconstruct from the transition.
+        if (attempt_ == 0) {
+            if (retryOf_ != address(0)) revert BadExtraData();
+        } else {
+            if (retryOf_.code.length == 0) revert GameNotRetryable(keccak256(abi.encode(retryOf_)));
+            IMultiProofGame previous = IMultiProofGame(retryOf_);
+            (GameType previousType, Claim previousClaim, bytes memory previousExtraData) = previous.gameData();
+            (IDisputeGame registeredPrevious,) =
+                disputeGameFactory.games(previousType, previousClaim, previousExtraData);
             if (
-                address(previous) == address(0)
+                address(registeredPrevious) != retryOf_ || previousType.raw() != GameTypes.MULTI_PROOF_GAME_TYPE.raw()
+                    || previous.proposalDomainHash() != domainHash || previous.parentRef() != parentRef_
+                    || Claim.unwrap(previousClaim) != Claim.unwrap(rootClaim())
+                    || previous.l2SequenceNumber() != l2BlockNumber_ || previous.attempt() != attempt_ - 1
                     || (previous.wasRespectedGameTypeWhenCreated()
                         && (previous.status() != GameStatus.CHALLENGER_WINS
-                            || IMultiProofGame(address(previous)).invalidationReason()
-                                != ProofLib.InvalidationReason.PROOF_TIMEOUT))
+                            || previous.invalidationReason() != ProofLib.InvalidationReason.PROOF_TIMEOUT))
             ) {
-                revert GameNotRetryable(keccak256(
-                        abi.encode(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim(), previousExtraData)
-                    ));
+                revert GameNotRetryable(keccak256(abi.encode(retryOf_)));
             }
         }
 
-        // `initialize` runs in the same transaction as `DisputeGameFactory.create`, which set
-        // `l1Head = blockhash(block.number - 1)`.
-        _l1OriginNumber = uint64(block.number - 1);
+        if (
+            l1OriginNumber_ > type(uint64).max || l1OriginHash_ == bytes32(0)
+                || _historicalBlockHash(l1OriginNumber_) != l1OriginHash_
+        ) {
+            revert InvalidL1Head(l1OriginHash_, l1OriginNumber_);
+        }
+        _l1OriginNumber = uint64(l1OriginNumber_);
         rootId = ProofLib.rootId(
-            domainHash,
-            parentRef_,
-            Claim.unwrap(rootClaim()),
-            l2SequenceNumber(),
-            Hash.unwrap(l1Head()),
-            _l1OriginNumber
+            domainHash, parentRef_, Claim.unwrap(rootClaim()), l2BlockNumber_, l1OriginHash_, _l1OriginNumber
         );
+        if (!teeVerifier.verify(rootId, creationProof_)) {
+            revert InvalidProof(ProofLib.ProofLane.TEE_ATTESTATION, rootId);
+        }
+        proofBitmap = ProofLib.laneMask(ProofLib.ProofLane.TEE_ATTESTATION);
 
         challengeDeadline = uint64(block.timestamp + challengePeriod);
         proofDeadline = uint64(block.timestamp + proofPeriod);
@@ -395,12 +437,25 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             rootId,
             parentRef_,
             Claim.unwrap(rootClaim()),
-            l2SequenceNumber(),
-            Hash.unwrap(l1Head()),
+            l2BlockNumber_,
+            l1OriginHash_,
             _l1OriginNumber,
-            attempt(),
+            attempt_,
             gameCreator()
         );
+        emit ProofLaneSupported(ProofLib.ProofLane.TEE_ATTESTATION, rootId, proofBitmap);
+        if (ProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
+            emit ProofThresholdReached(rootId, proofBitmap);
+        }
+    }
+
+    /// @dev `BLOCKHASH` retains 256 blocks; EIP-2935 extends contract access to 8,191.
+    function _historicalBlockHash(uint256 blockNumber_) internal view returns (bytes32 hash_) {
+        if (blockNumber_ >= block.number) return bytes32(0);
+        if (block.number - blockNumber_ <= 256) return blockhash(blockNumber_);
+
+        (bool success, bytes memory result) = HISTORY_STORAGE.staticcall(abi.encode(blockNumber_));
+        if (success && result.length == 32) hash_ = abi.decode(result, (bytes32));
     }
 
     ////////////////////////////////////////////////////////////////

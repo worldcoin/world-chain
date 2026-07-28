@@ -42,6 +42,8 @@ abstract contract OPStackFixtures is Test {
 
     bytes32 internal constant STARTING_ANCHOR_ROOT = keccak256("starting-anchor-root");
     uint256 internal constant STARTING_ANCHOR_BLOCK = 1_000;
+    bytes32 internal constant L1_ORIGIN_HASH = keccak256("finalized-l1-origin");
+    uint256 internal constant L1_ORIGIN_NUMBER = 999;
 
     address internal guardian = makeAddr("guardian");
     address internal proposer = makeAddr("proposer");
@@ -102,12 +104,15 @@ abstract contract OPStackFixtures is Test {
         stakingRegistry = new MockStakingRegistry();
         stakingRegistry.setStaked(challengerAccount, true);
         validityVerifier = new MockRootIdVerifier(false);
-        teeVerifier = new MockRootIdVerifier(false);
+        teeVerifier = new MockRootIdVerifier(true);
         councilVerifier = new MockRootIdVerifier(false);
 
         gameImpl = new MultiProofGame(_gameConfig());
         dgf.setImplementation(WC_GAME_TYPE, IDisputeGame(address(gameImpl)), hex"");
         dgf.setInitBond(WC_GAME_TYPE, PROPOSER_BOND);
+
+        vm.roll(L1_ORIGIN_NUMBER + 1);
+        vm.setBlockhash(L1_ORIGIN_NUMBER, L1_ORIGIN_HASH);
 
         // The registry retires every game created at or before its initialization timestamp.
         vm.warp(block.timestamp + 1);
@@ -168,10 +173,27 @@ abstract contract OPStackFixtures is Test {
 
     function _extraDataForParent(uint256 l2BlockNumber, address parent, uint256 attempt)
         internal
-        pure
+        view
         returns (bytes memory)
     {
-        return abi.encode(ProofLib.domainHash(_domain()), l2BlockNumber, parent, attempt);
+        address retryOf;
+        if (attempt > 0) {
+            uint256 gameCount = dgf.gameCount();
+            if (gameCount > 0) {
+                (,, IDisputeGame previous) = dgf.gameAtIndex(gameCount - 1);
+                retryOf = address(previous);
+            }
+        }
+        return abi.encode(
+            ProofLib.domainHash(_domain()),
+            l2BlockNumber,
+            parent,
+            attempt,
+            retryOf,
+            L1_ORIGIN_HASH,
+            L1_ORIGIN_NUMBER,
+            hex"01"
+        );
     }
 
     function _rootClaimFor(uint256 l2BlockNumber) internal pure returns (bytes32) {

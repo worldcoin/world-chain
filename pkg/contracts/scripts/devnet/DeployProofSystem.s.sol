@@ -81,7 +81,7 @@ contract DeployProofSystem is Script {
         vm.startBroadcast(config.privateKey);
         deployment.staking = new MockStakingRegistry();
         deployment.validityVerifier = new MockRootIdVerifier(false);
-        deployment.teeVerifier = new MockRootIdVerifier(false);
+        deployment.teeVerifier = new MockRootIdVerifier(true);
         deployment.councilVerifier = new MockRootIdVerifier(false);
         deployment.staking.setStaked(vm.addr(config.privateKey), true);
         if (config.challenger != address(0)) {
