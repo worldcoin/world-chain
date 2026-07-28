@@ -51,6 +51,9 @@ exclude = ["proofs/succinct/programs"]
 
 default-members = ["bin/world-chain"]
 
+[profile.dev.package."*"]
+opt-level = 2
+
 [profile.maxperf]
 codegen-units = 1
 inherits = "release"
@@ -66,9 +69,6 @@ inherits = "dev"
 
 
 [workspace.lints.rust]
-# eyre 0.6's `bail!` macro ends with a trailing semicolon, which nightly Rust
-# now warns about when the macro is used in expression position (match arms, etc.).
-# This is a known upstream issue; suppress until eyre is updated or we migrate.
 semicolon_in_expressions_from_macros = "allow"
 
 

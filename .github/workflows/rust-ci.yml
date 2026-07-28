@@ -76,7 +76,7 @@ jobs:
           restore-keys: cargo-test-
       - uses: taiki-e/install-action@nextest
       - name: tests
-        run: just test
+        run: just test --profile ci
 
   cargo-clippy:
     runs-on: arc-public-8xlarge-amd64-runner

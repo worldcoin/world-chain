@@ -81,7 +81,7 @@ struct InitiatedWithdrawal {
 }
 
 #[ignore = "requires Docker, Foundry, and the full local OP Stack"]
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn op_native_wip_1006_portal_withdrawal_and_bond_claim() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
