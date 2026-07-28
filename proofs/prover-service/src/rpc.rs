@@ -110,7 +110,8 @@ impl From<ProofRequestError> for ErrorObjectOwned {
                 ErrorObject::owned(error_code::TOO_MANY_RETRIES, message, Some(data))
             }
             ProofRequestError::Sqlx(_) => ErrorObject::owned(error_code::SQLX, message, None::<()>),
-            ProofRequestError::UnknownProofStatus(_)
+            ProofRequestError::RequestMismatch(_)
+            | ProofRequestError::UnknownProofStatus(_)
             | ProofRequestError::ProofEncoding(_)
             | ProofRequestError::BlockNumberExceedsI64(_)
             | ProofRequestError::RemoteInternal

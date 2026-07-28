@@ -1,4 +1,4 @@
-use alloy_primitives::{Address, B256, BlockNumber, Bytes, keccak256};
+use alloy_primitives::{Address, B256, BlockHash, BlockNumber, Bytes, keccak256};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -65,8 +65,8 @@ pub struct ProofRequest {
 impl ProofRequest {
     /// Compute the deterministic identifier of this request.
     ///
-    /// The id is a commitment to every request field, so requesting the
-    /// same proof twice yields the same id and the duplicate is deduplicated
+    /// The id is a commitment to every request field except for `l1_head`, so requesting
+    /// the same proof twice yields the same id and the duplicate is deduplicated
     /// by the `prover-service`.
     #[must_use]
     pub fn id(&self) -> ProofRequestId {
@@ -75,7 +75,6 @@ impl ProofRequest {
         buf.extend_from_slice(self.game.as_slice());
         buf.extend_from_slice(self.root_claim.as_slice());
         buf.extend_from_slice(&self.l2_block_number.to_be_bytes());
-        buf.extend_from_slice(self.l1_head.as_slice());
         ProofRequestId(keccak256(buf))
     }
 }
@@ -381,6 +380,15 @@ impl TryFrom<&str> for BackendSessionStatus {
             other => Err(format!("Unknown session status: {other}")),
         }
     }
+}
+
+/// Response to the `request_proof` method on the prover-service.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RequestProofResponse {
+    /// The proof request id.
+    pub proof_id: ProofRequestId,
+    /// The l1_head block hash stored in the prover-service.
+    pub l1_head: BlockHash,
 }
 
 /// Request to claim the next queued proof job for a worker.

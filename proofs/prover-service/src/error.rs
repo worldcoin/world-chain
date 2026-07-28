@@ -34,6 +34,8 @@ pub enum ProofRequestError {
     Sqlx(#[from] sqlx::Error),
     #[error("proof id {0}: proof request row missing after insert conflict. Retry request_proof.")]
     RowMissingAfterConflict(ProofRequestId),
+    #[error("proof id {0}: stored proof request does not match the submitted request.")]
+    RequestMismatch(ProofRequestId),
     #[error("{0}")]
     UnknownProofStatus(String),
     #[error("{0}")]

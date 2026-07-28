@@ -120,7 +120,8 @@ impl ProverServiceStore {
         // conflict path
         let row = sqlx::query(
             r#"
-            SELECT proof_status, retry_count
+            SELECT proof_status, retry_count, backend, game,
+                root_claim, l2_block_number, l1_head
             FROM proof_requests
             WHERE proof_id = $1
             FOR UPDATE
@@ -139,6 +140,11 @@ impl ProverServiceStore {
         let proof_status = ProofStatus::try_from(proof_status_str)
             .map_err(ProofRequestError::UnknownProofStatus)?;
 
+        if !request_matches(&row, &proof_request, proof_status)? {
+            tx.rollback().await?;
+            return Err(ProofRequestError::RequestMismatch(id));
+        }
+
         if proof_status == ProofStatus::Failed {
             // retry the entire proof job if retry_count is less than the max_retry
             let retry_count: i32 = row.get("retry_count");
@@ -156,6 +162,7 @@ impl ProverServiceStore {
                 SET proof_status = $1,
                     job_status = $2,
                     retry_count = retry_count + 1,
+                    l1_head = $3,
                     failure_reason = NULL,
                     proof_data = NULL,
                     finished_at = NULL,
@@ -163,11 +170,12 @@ impl ProverServiceStore {
                     lock_id = NULL,
                     lock_expires_at = NULL,
                     attempt = 0
-                WHERE proof_id = $3
+                WHERE proof_id = $4
                 "#,
             )
             .bind(ProofStatus::Created.as_str())
             .bind(ProofJobStatus::Pending.as_str())
+            .bind(proof_request.l1_head.as_slice())
             .bind(&proof_id)
             .execute(&mut *tx)
             .await?;
@@ -856,6 +864,24 @@ impl ProverServiceStore {
 
 fn proof_id_bytes(id: ProofRequestId) -> Vec<u8> {
     id.0.as_slice().to_vec()
+}
+
+fn request_matches(
+    row: &PgRow,
+    request: &ProofRequest,
+    status: ProofStatus,
+) -> Result<bool, ProofRequestError> {
+    let stored_backend: &str = row.get("backend");
+    let stored_game: &[u8] = row.get("game");
+    let stored_root_claim: &[u8] = row.get("root_claim");
+    let stored_l2_block_number: i64 = row.get("l2_block_number");
+    let stored_l1_head: &[u8] = row.get("l1_head");
+
+    Ok(stored_backend == request.backend.as_str()
+        && stored_game == request.game.as_slice()
+        && stored_root_claim == request.root_claim.as_slice()
+        && stored_l2_block_number == l2_to_i64(request.l2_block_number)?
+        && (status == ProofStatus::Failed || stored_l1_head == request.l1_head.as_slice()))
 }
 
 fn b256_from_bytes(bytes: Vec<u8>) -> Result<B256, ProofJobQueueError> {
