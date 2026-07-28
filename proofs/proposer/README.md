@@ -34,10 +34,12 @@ l1OriginNumber, creationProof)`.
   a game, that game is no longer a valid parent — `MultiProofGame.initialize` rejects a parent at or
   below the anchor — so new proposals extending the anchor always point at the registry.
 - compute L2 output root for block equal to `parent_ref`'s `l2_block_number` + `BLOCK_INTERVAL`
-- page backward through `DisputeGameFactory.findLatestGames` until the current anchor game, then
-  group games by transition and follow their explicit retry lineage. At the anchor tip both the
-  registry and the current anchor game are candidate parents, because a game created before the
-  anchor advanced still references the anchor game.
+- take one paginated `DisputeGameFactory.findLatestGames` snapshot back to the current anchor game,
+  cache it for the observed factory count, then group games by transition and follow their explicit
+  retry lineage in memory. At the anchor tip both the registry and the current anchor game are
+  candidate parents, because a game created before the anchor advanced still references the anchor
+  game. Games from re-registered implementations with another domain or `extraData` layout are
+  ignored.
 - if a game exists, it becomes the `parent_ref` and we continue this loop
 - if it doesn't exist - i.e. the address is `0x00..00`, then the current `parent_ref` is returned
 
@@ -48,6 +50,20 @@ l1OriginNumber, creationProof)`.
 ### `l2_block_number`
 
 - `parent_ref`'s `l2_block_number` field + `BLOCK_INTERVAL`
+
+### Creation proof and L1 origin
+
+- request a Nitro proof against a finalized L1 head;
+- encode its transition values, signature, and registered enclave public key in `creation_proof`;
+- reject and re-request a proof once its L1 origin is more than 8,000 blocks old, leaving
+  transaction-inclusion headroom inside EIP-2935's 8,191-block history window.
+
+## Devnet coverage
+
+The ignored full-stack E2E covers proof-backed game creation, the stock Portal prove/finalize
+withdrawal flow, anchor advancement, and both DelayedWETH bond-claim phases. The devnet uses a
+`MockRootIdVerifier` for the creation lane, so production Nitro key registration and verification
+remain separate integration coverage.
 
 ## Bond settlement
 

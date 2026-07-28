@@ -1,4 +1,7 @@
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex},
+};
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
@@ -27,29 +30,42 @@ const GAME_SCAN_PAGE_SIZE: u64 = 64;
 /// Leaves 191 blocks of transaction-inclusion headroom inside EIP-2935's 8,191-block window.
 const MAX_CREATION_PROOF_AGE: u64 = 8_000;
 
-type ScannedTransitionGame = (u64, Address, ProposalExtraData);
+#[derive(Debug, Clone)]
+struct ScannedTransitionGame {
+    factory_index: u64,
+    address: Address,
+    root_claim: B256,
+    data: ProposalExtraData,
+}
+
+#[derive(Debug, Clone)]
+struct GameScanCache {
+    anchor_game: Option<Address>,
+    game_count: u64,
+    games: Arc<Vec<ScannedTransitionGame>>,
+}
 
 fn select_transition_tips(
     mut candidates: Vec<ScannedTransitionGame>,
     parent_candidates: &[Address],
 ) -> Vec<TransitionGame> {
-    candidates.sort_by_key(|(index, _, _)| *index);
+    candidates.sort_by_key(|game| game.factory_index);
     let referenced: HashSet<_> = candidates
         .iter()
-        .filter_map(|(_, _, data)| (data.retry_of != Address::ZERO).then_some(data.retry_of))
+        .filter_map(|game| (game.data.retry_of != Address::ZERO).then_some(game.data.retry_of))
         .collect();
     let mut found = Vec::new();
     for parent_ref in parent_candidates {
         found.extend(
             candidates
                 .iter()
-                .filter(|(_, address, data)| {
-                    data.parent_ref == *parent_ref && !referenced.contains(address)
+                .filter(|game| {
+                    game.data.parent_ref == *parent_ref && !referenced.contains(&game.address)
                 })
-                .map(|(_, address, data)| TransitionGame {
-                    address: *address,
+                .map(|game| TransitionGame {
+                    address: game.address,
                     parent_ref: *parent_ref,
-                    attempt: data.attempt,
+                    attempt: game.data.attempt,
                 }),
         );
     }
@@ -67,6 +83,7 @@ pub struct AlloyProofSystemClient<P> {
     anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
     /// Domain hash of the registered game implementation, read once at construction.
     domain_hash: B256,
+    game_scan_cache: Arc<Mutex<Option<GameScanCache>>>,
     provider: P,
 }
 
@@ -114,6 +131,7 @@ where
             factory,
             anchor,
             domain_hash,
+            game_scan_cache: Arc::new(Mutex::new(None)),
             provider,
         })
     }
@@ -126,6 +144,102 @@ where
 
     fn game(&self, address: Address) -> IMultiProofGame::IMultiProofGameInstance<P> {
         IMultiProofGame::IMultiProofGameInstance::new(address, self.provider.clone())
+    }
+
+    async fn scan_transition_games(
+        &self,
+        anchor_game: Option<Address>,
+        game_count: u64,
+    ) -> Result<Vec<ScannedTransitionGame>, ProposerError> {
+        let anchor_created_at = if let Some(anchor_game) = anchor_game {
+            Some(
+                self.game(anchor_game)
+                    .createdAt()
+                    .call()
+                    .await
+                    .map_err(|error| ProposerError::Contract(error.to_string()))?,
+            )
+        } else {
+            None
+        };
+        let mut start = game_count - 1;
+        let mut games = Vec::new();
+        loop {
+            let page = self
+                .factory
+                .findLatestGames(
+                    MULTI_PROOF_GAME_TYPE,
+                    U256::from(start),
+                    U256::from(GAME_SCAN_PAGE_SIZE),
+                )
+                .call()
+                .await
+                .map_err(|error| ProposerError::Contract(error.to_string()))?;
+            if page.is_empty() {
+                break;
+            }
+
+            let mut oldest_index = start;
+            let mut crossed_anchor = false;
+            for entry in page {
+                let index = u256_to_u64(entry.index, "findLatestGames index")?;
+                oldest_index = oldest_index.min(index);
+                if anchor_created_at.is_some_and(|created_at| entry.timestamp < created_at) {
+                    crossed_anchor = true;
+                    break;
+                }
+                let Ok(data) = ProposalExtraData::decode(&entry.extraData) else {
+                    // A re-registered game type may have older implementations with another
+                    // extraData layout. They cannot belong to this implementation's domain.
+                    continue;
+                };
+                if data.domain_hash != self.domain_hash {
+                    continue;
+                }
+                games.push(ScannedTransitionGame {
+                    factory_index: index,
+                    address: Address::from_slice(&entry.metadata.as_slice()[12..]),
+                    root_claim: entry.rootClaim,
+                    data,
+                });
+            }
+
+            if crossed_anchor || oldest_index == 0 {
+                break;
+            }
+            start = oldest_index - 1;
+        }
+        Ok(games)
+    }
+
+    async fn transition_game_snapshot(
+        &self,
+        anchor_game: Option<Address>,
+        game_count: u64,
+    ) -> Result<Arc<Vec<ScannedTransitionGame>>, ProposerError> {
+        let cached = self
+            .game_scan_cache
+            .lock()
+            .map_err(|_| ProposerError::Contract("game scan cache lock poisoned".into()))?
+            .clone();
+        if let Some(cached) = cached
+            && cached.anchor_game == anchor_game
+            && cached.game_count == game_count
+        {
+            return Ok(cached.games);
+        }
+
+        let games = Arc::new(self.scan_transition_games(anchor_game, game_count).await?);
+        *self
+            .game_scan_cache
+            .lock()
+            .map_err(|_| ProposerError::Contract("game scan cache lock poisoned".into()))? =
+            Some(GameScanCache {
+                anchor_game,
+                game_count,
+                games: Arc::clone(&games),
+            });
+        Ok(games)
     }
 
     /// Resolves the WIP-1006 game at a factory index, skipping other game types.
@@ -376,65 +490,17 @@ where
             return Ok(Vec::new());
         }
 
-        let anchor_created_at = if let Some(anchor_game) = anchor_game {
-            Some(
-                self.game(anchor_game)
-                    .createdAt()
-                    .call()
-                    .await
-                    .map_err(|error| ProposerError::Contract(error.to_string()))?,
-            )
-        } else {
-            None
-        };
-        let mut start = game_count - 1;
-        let mut candidates = Vec::new();
-        loop {
-            let page = self
-                .factory
-                .findLatestGames(
-                    MULTI_PROOF_GAME_TYPE,
-                    U256::from(start),
-                    U256::from(GAME_SCAN_PAGE_SIZE),
-                )
-                .call()
-                .await
-                .map_err(|error| ProposerError::Contract(error.to_string()))?;
-            if page.is_empty() {
-                break;
-            }
-
-            let mut oldest_index = start;
-            let mut crossed_anchor = false;
-            for entry in page {
-                let index = u256_to_u64(entry.index, "findLatestGames index")?;
-                oldest_index = oldest_index.min(index);
-                if anchor_created_at.is_some_and(|created_at| entry.timestamp < created_at) {
-                    crossed_anchor = true;
-                    break;
-                }
-                let proxy = Address::from_slice(&entry.metadata.as_slice()[12..]);
-                if entry.rootClaim != root_claim {
-                    continue;
-                }
-                let data = ProposalExtraData::decode(&entry.extraData).map_err(|error| {
-                    ProposerError::Contract(format!(
-                        "invalid WIP-1006 extraData at factory index {index}: {error}"
-                    ))
-                })?;
-                if data.domain_hash == self.domain_hash
-                    && data.l2_block_number == l2_block_number
-                    && parent_candidates.contains(&data.parent_ref)
-                {
-                    candidates.push((index, proxy, data));
-                }
-            }
-
-            if crossed_anchor || oldest_index == 0 {
-                break;
-            }
-            start = oldest_index - 1;
-        }
+        let candidates = self
+            .transition_game_snapshot(anchor_game, game_count)
+            .await?
+            .iter()
+            .filter(|game| {
+                game.root_claim == root_claim
+                    && game.data.l2_block_number == l2_block_number
+                    && parent_candidates.contains(&game.data.parent_ref)
+            })
+            .cloned()
+            .collect();
 
         Ok(select_transition_tips(candidates, parent_candidates))
     }
@@ -644,10 +710,11 @@ mod tests {
         attempt: u64,
         retry_of: Address,
     ) -> ScannedTransitionGame {
-        (
-            index,
+        ScannedTransitionGame {
+            factory_index: index,
             address,
-            ProposalExtraData {
+            root_claim: B256::ZERO,
+            data: ProposalExtraData {
                 domain_hash: B256::ZERO,
                 l2_block_number: 1,
                 parent_ref,
@@ -657,7 +724,7 @@ mod tests {
                 l1_origin_number: 0,
                 creation_proof: Bytes::from_static(&[1]),
             },
-        )
+        }
     }
 
     #[test]
