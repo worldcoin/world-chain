@@ -313,15 +313,16 @@ impl ProposerClient for FakeExecution {
             .anchor)
     }
 
-    async fn latest_game_for_transition(
+    async fn games_for_transition(
         &self,
         parent_candidates: &[Address],
         root_claim: B256,
         l2_block_number: u64,
-    ) -> Result<Option<TransitionGame>, ProposerError> {
+    ) -> Result<Vec<TransitionGame>, ProposerError> {
         let state = self.state.lock().expect("fake execution mutex poisoned");
+        let mut found = Vec::with_capacity(parent_candidates.len());
         for parent_ref in parent_candidates {
-            let mut found = None;
+            let mut latest = None;
             for attempt in 0..MAX_ATTEMPT_SCAN {
                 let uuid = ProposalCommitment {
                     parent_ref: *parent_ref,
@@ -333,17 +334,15 @@ impl ProposerClient for FakeExecution {
                 let Some(address) = state.games_by_key.get(&uuid).copied() else {
                     break;
                 };
-                found = Some(TransitionGame {
+                latest = Some(TransitionGame {
                     address,
                     parent_ref: *parent_ref,
                     attempt,
                 });
             }
-            if found.is_some() {
-                return Ok(found);
-            }
+            found.extend(latest);
         }
-        Ok(None)
+        Ok(found)
     }
 
     /// The fake has no registry finality airgap: a resolved game is immediately closeable.

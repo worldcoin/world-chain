@@ -52,30 +52,29 @@ impl ProposerClient for MockContracts {
         Ok(self.anchor)
     }
 
-    async fn latest_game_for_transition(
+    async fn games_for_transition(
         &self,
         parent_candidates: &[Address],
         root_claim: B256,
         l2_block_number: u64,
-    ) -> Result<Option<TransitionGame>, ProposerError> {
+    ) -> Result<Vec<TransitionGame>, ProposerError> {
+        let mut found = Vec::with_capacity(parent_candidates.len());
         for parent_ref in parent_candidates {
-            let mut found = None;
+            let mut latest = None;
             for attempt in 0..MAX_TEST_ATTEMPT {
                 let uuid = game_uuid(*parent_ref, root_claim, l2_block_number, attempt);
                 let Some(address) = self.games.get(&uuid).copied() else {
                     break;
                 };
-                found = Some(TransitionGame {
+                latest = Some(TransitionGame {
                     address,
                     parent_ref: *parent_ref,
                     attempt,
                 });
             }
-            if found.is_some() {
-                return Ok(found);
-            }
+            found.extend(latest);
         }
-        Ok(None)
+        Ok(found)
     }
 
     async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError> {
@@ -439,6 +438,24 @@ fn anchor_at(l2_block_number: u64) -> AnchorRef {
         registry: ANCHOR,
         anchor_game: None,
         l2_block_number,
+    }
+}
+
+/// The anchor after it has been advanced onto `anchor_game`, which is therefore no longer an
+/// acceptable parent for new proposals.
+fn anchor_advanced_onto(anchor_game: Address, l2_block_number: u64) -> AnchorRef {
+    AnchorRef {
+        registry: ANCHOR,
+        anchor_game: Some(anchor_game),
+        l2_block_number,
+    }
+}
+
+fn timed_out_status() -> ResolutionStatus {
+    ResolutionStatus {
+        resolvable: false,
+        root_state: RootState::Invalidated,
+        invalidation_reason: InvalidationReason::ProofTimeout,
     }
 }
 
@@ -1168,4 +1185,127 @@ async fn bond_manager_skips_foreign_game_types() {
 
     assert!(manager.tracks_game(ours));
     assert_eq!(manager.next_game_index(), Some(3));
+}
+
+#[tokio::test]
+async fn timed_out_game_rebases_onto_registry_after_its_parent_became_the_anchor() {
+    // Anchor advanced onto P, so P is no longer an acceptable parent: `initialize` rejects any
+    // parent at or below the anchor. The timed-out game under P therefore cannot be retried in
+    // place; the transition must start over under the registry sentinel at attempt zero.
+    let parent = game_address(1);
+    let timed_out = game_address(2);
+    let root_20 = B256::repeat_byte(0x20);
+    let contracts = MockContracts {
+        anchor: anchor_advanced_onto(parent, 10),
+        games: HashMap::from([(game_uuid(parent, root_20, 20, 0), timed_out)]),
+        submissions: Arc::default(),
+        resolution_statuses: Arc::new(Mutex::new(HashMap::from([(timed_out, timed_out_status())]))),
+        resolutions: Arc::default(),
+        closures: Arc::default(),
+        submission_failures: Arc::default(),
+        unfinalized_games: Arc::default(),
+    };
+    let proposer = WorldChainProposer::new(
+        config(),
+        contracts,
+        MockOutputRoots {
+            roots: HashMap::from([(20, root_20)]),
+            finalized_l2_block: 20,
+        },
+        MockProofRequester::default(),
+    );
+
+    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
+
+    assert!(canonical_scan.canonical_line().games().is_empty());
+    assert_eq!(
+        canonical_scan.next_action(),
+        &NextProposalAction::Propose(Proposal {
+            parent_ref: ANCHOR,
+            root_claim: root_20,
+            l2_block_number: 20,
+            attempt: 0,
+        })
+    );
+}
+
+#[tokio::test]
+async fn invalidated_legacy_game_does_not_hide_a_live_registry_parented_rebase() {
+    let parent = game_address(1);
+    let timed_out = game_address(2);
+    let rebased = game_address(3);
+    let root_20 = B256::repeat_byte(0x20);
+    let contracts = MockContracts {
+        anchor: anchor_advanced_onto(parent, 10),
+        games: HashMap::from([
+            (game_uuid(parent, root_20, 20, 0), timed_out),
+            (game_uuid(ANCHOR, root_20, 20, 0), rebased),
+        ]),
+        submissions: Arc::default(),
+        resolution_statuses: Arc::new(Mutex::new(HashMap::from([(timed_out, timed_out_status())]))),
+        resolutions: Arc::default(),
+        closures: Arc::default(),
+        submission_failures: Arc::default(),
+        unfinalized_games: Arc::default(),
+    };
+    let proposer = WorldChainProposer::new(
+        config(),
+        contracts,
+        MockOutputRoots {
+            roots: HashMap::from([(20, root_20)]),
+            finalized_l2_block: 20,
+        },
+        MockProofRequester::default(),
+    );
+
+    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
+
+    // The live rebase continues the line even though the dead legacy game is scanned first.
+    assert_eq!(
+        canonical_scan.canonical_line().games(),
+        &[ParentRef {
+            address: rebased,
+            l2_block_number: 20,
+        }]
+    );
+}
+
+#[tokio::test]
+async fn timed_out_game_bumps_attempt_while_its_parent_is_still_acceptable() {
+    let timed_out = game_address(2);
+    let root_20 = B256::repeat_byte(0x20);
+    let contracts = MockContracts {
+        anchor: anchor_at(10),
+        games: HashMap::from([(game_uuid(ANCHOR, root_20, 20, 0), timed_out)]),
+        submissions: Arc::default(),
+        resolution_statuses: Arc::new(Mutex::new(HashMap::from([(timed_out, timed_out_status())]))),
+        resolutions: Arc::default(),
+        closures: Arc::default(),
+        submission_failures: Arc::default(),
+        unfinalized_games: Arc::default(),
+    };
+    let proposer = WorldChainProposer::new(
+        config(),
+        contracts,
+        MockOutputRoots {
+            roots: HashMap::from([(20, root_20)]),
+            finalized_l2_block: 20,
+        },
+        MockProofRequester::default(),
+    );
+
+    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
+
+    assert_eq!(
+        canonical_scan.next_action(),
+        &NextProposalAction::RetryTimedOut {
+            proposal: Proposal {
+                parent_ref: ANCHOR,
+                root_claim: root_20,
+                l2_block_number: 20,
+                attempt: 1,
+            },
+            invalidated_game: timed_out,
+        }
+    );
 }

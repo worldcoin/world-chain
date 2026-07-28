@@ -320,14 +320,15 @@ where
         })
     }
 
-    async fn latest_game_for_transition(
+    async fn games_for_transition(
         &self,
         parent_candidates: &[Address],
         root_claim: B256,
         l2_block_number: u64,
-    ) -> Result<Option<TransitionGame>, ProposerError> {
+    ) -> Result<Vec<TransitionGame>, ProposerError> {
+        let mut found = Vec::with_capacity(parent_candidates.len());
         for parent_ref in parent_candidates {
-            let mut found: Option<TransitionGame> = None;
+            let mut latest: Option<TransitionGame> = None;
             // Attempts are strictly sequential: attempt N can only be created once attempt N-1
             // exists, so the walk stops at the first gap.
             for attempt in 0..MAX_ATTEMPT_SCAN {
@@ -350,17 +351,15 @@ where
                 if entry.proxy == Address::ZERO {
                     break;
                 }
-                found = Some(TransitionGame {
+                latest = Some(TransitionGame {
                     address: entry.proxy,
                     parent_ref: *parent_ref,
                     attempt,
                 });
             }
-            if found.is_some() {
-                return Ok(found);
-            }
+            found.extend(latest);
         }
-        Ok(None)
+        Ok(found)
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
