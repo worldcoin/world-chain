@@ -144,7 +144,7 @@ impl ProverServiceStore {
         let proof_status = ProofStatus::try_from(proof_status_str)
             .map_err(ProofRequestError::UnknownProofStatus)?;
 
-        if !request_matches(&row, &proof_request, proof_status)? {
+        if !request_matches(&row, &proof_request)? {
             tx.rollback().await?;
             return Err(ProofRequestError::RequestMismatch(id));
         }
@@ -879,22 +879,18 @@ fn proof_id_bytes(id: ProofRequestId) -> Vec<u8> {
     id.0.as_slice().to_vec()
 }
 
-fn request_matches(
-    row: &PgRow,
-    request: &ProofRequest,
-    status: ProofStatus,
-) -> Result<bool, ProofRequestError> {
+/// Returns true if the request matches the stored values with the exception of l1_head
+/// that is not compared because it may change.
+fn request_matches(row: &PgRow, request: &ProofRequest) -> Result<bool, ProofRequestError> {
     let stored_backend: &str = row.get("backend");
     let stored_game: &[u8] = row.get("game");
     let stored_root_claim: &[u8] = row.get("root_claim");
     let stored_l2_block_number: i64 = row.get("l2_block_number");
-    let stored_l1_head: &[u8] = row.get("l1_head");
 
     Ok(stored_backend == request.backend.as_str()
         && stored_game == request.game.as_slice()
         && stored_root_claim == request.root_claim.as_slice()
-        && stored_l2_block_number == l2_to_i64(request.l2_block_number)?
-        && (status == ProofStatus::Failed || stored_l1_head == request.l1_head.as_slice()))
+        && stored_l2_block_number == l2_to_i64(request.l2_block_number)?)
 }
 
 fn b256_from_bytes(bytes: Vec<u8>) -> Result<B256, MalformedB256Error> {
