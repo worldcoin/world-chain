@@ -300,22 +300,14 @@ where
     P: Provider + WalletProvider + Clone + Send + Sync + 'static,
 {
     async fn anchor_parent(&self) -> Result<AnchorRef, ProposerError> {
-        let (anchor_root, anchor_game) = tokio::try_join!(
-            async {
-                self.anchor
-                    .getAnchorRoot()
-                    .call()
-                    .await
-                    .map_err(|error| ProposerError::Contract(error.to_string()))
-            },
-            async {
-                self.anchor
-                    .anchorGame()
-                    .call()
-                    .await
-                    .map_err(|error| ProposerError::Contract(error.to_string()))
-            }
-        )?;
+        let (anchor_root, anchor_game) = self
+            .provider
+            .multicall()
+            .add(self.anchor.getAnchorRoot())
+            .add(self.anchor.anchorGame())
+            .aggregate()
+            .await
+            .map_err(|err| ProposerError::Contract(err.to_string()))?;
 
         Ok(AnchorRef {
             registry: *self.anchor.address(),
