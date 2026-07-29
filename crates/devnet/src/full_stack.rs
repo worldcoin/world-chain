@@ -46,7 +46,10 @@ use world_chain_challenger::{
     BondManagerConfig as ChallengerBondManagerConfig, ChallengerConfig, OwnedGames,
     ResolutionManager, ResolutionManagerConfig, WorldChainChallenger,
 };
-use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
+use world_chain_defender::{
+    AlloyDefenderClient, DEFAULT_L1_TX_CONFIRMATIONS as DEFAULT_DEFENDER_L1_TX_CONFIRMATIONS,
+    DefenderConfig, WorldChainDefender,
+};
 use world_chain_proof_core::{hash_world_rollup_config, range::WorldRangeHardforkConfig};
 use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
 use world_chain_proof_succinct_host_utils::{
@@ -2746,7 +2749,11 @@ async fn start_world_chain_defender(
         .wallet(EthereumWallet::from(signer))
         .connect_http(Url::parse(l1_rpc_url)?);
 
-    let client = AlloyDefenderClient::new(provider, factory_address);
+    let client = AlloyDefenderClient::new(
+        provider,
+        factory_address,
+        DEFAULT_DEFENDER_L1_TX_CONFIRMATIONS,
+    );
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let proof_requester = RpcProverServiceClient::new(prover_service_url)
         .map_err(|error| eyre!("failed to connect defender to prover-service: {error}"))?;

@@ -5,8 +5,14 @@ use std::time::Duration;
 /// Default number of games processed concurrently.
 pub const DEFAULT_MAX_GAME_CONCURRENCY: usize = 10;
 
+/// Default number of L1 confirmations required for defender transactions.
+pub const DEFAULT_L1_TX_CONFIRMATIONS: u64 = 5;
+
 /// Default maximum number of new factory games discovered per defender tick.
 pub const DEFAULT_MAX_GAMES_PER_TICK: u64 = 100;
+
+/// Default number of previously scanned games reconsidered per defender tick.
+pub const DEFAULT_GAME_SCAN_LOOKBACK: u64 = 100;
 
 /// Default upper bound on the age of a game with an open proof window.
 pub const DEFAULT_MAX_GAME_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -25,6 +31,8 @@ pub struct DefenderConfig {
     pub max_game_concurrency: usize,
     /// Maximum number of newly created games discovered during one tick.
     pub max_games_per_tick: u64,
+    /// Number of previously scanned games reconsidered to tolerate mutable-state L1 reorgs.
+    pub game_scan_lookback: u64,
     /// Upper bound on the age of any game whose proof window can remain open.
     pub max_game_age: Duration,
     /// Maximum number of proving attempts per lane before abandoning it.
@@ -74,6 +82,7 @@ impl Default for DefenderConfig {
             poll_interval: Duration::from_mins(1),
             max_game_concurrency: DEFAULT_MAX_GAME_CONCURRENCY,
             max_games_per_tick: DEFAULT_MAX_GAMES_PER_TICK,
+            game_scan_lookback: DEFAULT_GAME_SCAN_LOOKBACK,
             max_game_age: DEFAULT_MAX_GAME_AGE,
             max_proof_attempts: DEFAULT_MAX_PROOF_ATTEMPTS,
         }

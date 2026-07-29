@@ -26,6 +26,7 @@ use world_chain_prover_service::{
 
 const GAME_1: Address = address!("0000000000000000000000000000000000000001");
 const GAME_2: Address = address!("0000000000000000000000000000000000000002");
+const GAME_3: Address = address!("0000000000000000000000000000000000000003");
 const ALLOWED_PROPOSER: Address = address!("00000000000000000000000000000000000000a1");
 const OTHER_PROPOSER: Address = address!("00000000000000000000000000000000000000b2");
 const L2_BLOCK: u64 = 100;
@@ -409,6 +410,7 @@ fn config() -> DefenderConfig {
     DefenderConfig {
         allowed_proposer: ALLOWED_PROPOSER,
         poll_interval: Duration::from_secs(1),
+        game_scan_lookback: 0,
         ..DefenderConfig::default()
     }
 }
@@ -500,6 +502,46 @@ async fn tick_respects_factory_scan_budget() {
     assert_eq!(watched.len(), 2);
     assert!(watched.contains(&GAME_1));
     assert!(watched.contains(&GAME_2));
+}
+
+#[tokio::test]
+async fn tick_rechecks_lookback_without_reducing_forward_progress() {
+    let canonical_root = B256::repeat_byte(0x20);
+    let client = MockClient::new(
+        vec![
+            (GAME_1, canonical_root, L2_BLOCK),
+            (GAME_2, canonical_root, L2_BLOCK),
+            (GAME_3, canonical_root, L2_BLOCK),
+        ],
+        HashMap::from([(GAME_2, STATE_FINALIZED)]),
+    );
+    let (output_roots, _finalized_l2_block) =
+        mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
+    let mut defender_config = config();
+    defender_config.max_game_concurrency = 1;
+    defender_config.max_games_per_tick = 2;
+    defender_config.game_scan_lookback = 1;
+    let mut defender = WorldChainDefender::new(
+        defender_config,
+        client.clone(),
+        output_roots,
+        MockProver::default(),
+    );
+
+    defender.tick().await.unwrap();
+    assert_eq!(defender.next_game_index(), Some(2));
+    assert_eq!(defender.watched_games(), [GAME_1]);
+
+    // Simulate a shallow reorg restoring a game that was transiently observed as finalized.
+    client.set_state(GAME_2, STATE_PROPOSED);
+    defender.tick().await.unwrap();
+
+    assert_eq!(defender.next_game_index(), Some(3));
+    let watched = defender.watched_games();
+    assert_eq!(watched.len(), 3);
+    assert!(watched.contains(&GAME_1));
+    assert!(watched.contains(&GAME_2));
+    assert!(watched.contains(&GAME_3));
 }
 
 #[tokio::test]
