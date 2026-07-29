@@ -22,6 +22,7 @@ use world_chain_proofs::{
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
     ProofResponse, ProofStatus, RequestProofResponse, SucceededProofResponse,
+    TooManyRetriesErrorData,
 };
 
 const GAME_1: Address = address!("0000000000000000000000000000000000000001");
@@ -327,14 +328,17 @@ fn mock_output_roots(
 struct MockProver {
     /// When true, every requested proof reports [`ProofStatus::Failed`].
     fail: bool,
+    max_requests_per_proof: Option<u32>,
     requests: Arc<Mutex<Vec<ProofRequest>>>,
+    request_counts: Arc<Mutex<HashMap<ProofRequestId, u32>>>,
     by_id: Arc<Mutex<HashMap<ProofRequestId, ProofRequest>>>,
 }
 
 impl MockProver {
-    fn failing() -> Self {
+    fn failing(max_requests_per_proof: u32) -> Self {
         Self {
             fail: true,
+            max_requests_per_proof: Some(max_requests_per_proof),
             ..Self::default()
         }
     }
@@ -356,6 +360,17 @@ impl ProofRequester for MockProver {
             .lock()
             .expect("not poisoned")
             .push(proof_request.clone());
+        if let Some(max_requests_per_proof) = self.max_requests_per_proof {
+            let mut request_counts = self.request_counts.lock().expect("not poisoned");
+            let request_count = request_counts.entry(id).or_default();
+            if *request_count >= max_requests_per_proof {
+                return Err(ProofRequestError::TooManyRetries(TooManyRetriesErrorData {
+                    proof_id: id,
+                    max_retries: max_requests_per_proof.saturating_sub(1),
+                }));
+            }
+            *request_count += 1;
+        }
         self.by_id
             .lock()
             .expect("not poisoned")
@@ -933,7 +948,7 @@ async fn tick_skips_lane_already_proven() {
 }
 
 #[tokio::test]
-async fn failed_proofs_are_rerequested_up_to_the_attempt_bound() {
+async fn exhausted_prover_retries_are_not_restarted_by_lookback() {
     let canonical_root = B256::repeat_byte(0x20);
 
     let client = MockClient::new(
@@ -942,29 +957,28 @@ async fn failed_proofs_are_rerequested_up_to_the_attempt_bound() {
     );
     let (output_roots, _finalized_l2_block) =
         mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
-    let prover = MockProver::failing();
+    let prover = MockProver::failing(2);
+    let mut defender_config = config();
+    defender_config.game_scan_lookback = 1;
     let mut defender = WorldChainDefender::new(
-        DefenderConfig {
-            max_proof_attempts: 2,
-            ..config()
-        },
+        defender_config,
         client.clone(),
         output_roots,
         prover.clone(),
     );
 
     // Tick 1 discovers the game and tick 2 promotes it. Tick 3 makes the first
-    // request per lane; tick 4 re-requests each failed proof; tick 5 exhausts
-    // the attempts.
-    defender.tick().await.unwrap();
-    defender.tick().await.unwrap();
-    defender.tick().await.unwrap();
-    defender.tick().await.unwrap();
-    defender.tick().await.unwrap();
+    // request per lane; tick 4 re-requests each failed proof; tick 5 observes
+    // the prover-service retry limit and abandons the defense. Further lookback
+    // scans must not restart it.
+    for _ in 0..8 {
+        defender.tick().await.unwrap();
+    }
 
-    assert_eq!(prover.requests().len(), 4);
+    assert_eq!(prover.requests().len(), 6);
     assert!(client.submissions().is_empty());
     assert!(defender.active_defenses().is_empty());
+    assert_eq!(defender.abandoned_defenses(), [GAME_1]);
 }
 
 #[tokio::test]

@@ -85,10 +85,6 @@ struct Cli {
     /// Conservative upper bound on the age of a game with an open proof window.
     #[arg(long, env = "MAX_GAME_AGE_SECONDS", default_value_t = 604_800)]
     max_game_age_seconds: u64,
-
-    /// Maximum proof attempts per lane before giving up.
-    #[arg(long, env = "MAX_PROOF_ATTEMPTS", default_value_t = 3)]
-    max_proof_attempts: u32,
 }
 
 #[tokio::main]
@@ -116,7 +112,6 @@ async fn main() -> Result<()> {
         max_games_per_tick: cli.max_games_per_tick,
         game_scan_lookback: cli.game_scan_lookback,
         max_game_age: Duration::from_secs(cli.max_game_age_seconds),
-        max_proof_attempts: cli.max_proof_attempts,
     };
     let mut defender = WorldChainDefender::new(config, client, output_roots, proof_requester);
 

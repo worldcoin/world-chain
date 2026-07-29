@@ -17,9 +17,6 @@ pub const DEFAULT_GAME_SCAN_LOOKBACK: u64 = 100;
 /// Default upper bound on the age of a game with an open proof window.
 pub const DEFAULT_MAX_GAME_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
-/// Default number of proving attempts per lane before abandoning it.
-pub const DEFAULT_MAX_PROOF_ATTEMPTS: u32 = 3;
-
 /// Configuration for the defender.
 #[derive(Debug, Clone)]
 pub struct DefenderConfig {
@@ -35,8 +32,6 @@ pub struct DefenderConfig {
     pub game_scan_lookback: u64,
     /// Upper bound on the age of any game whose proof window can remain open.
     pub max_game_age: Duration,
-    /// Maximum number of proving attempts per lane before abandoning it.
-    pub max_proof_attempts: u32,
 }
 
 impl DefenderConfig {
@@ -66,11 +61,6 @@ impl DefenderConfig {
                 "max_game_age must be greater than zero",
             ));
         }
-        if self.max_proof_attempts == 0 {
-            return Err(DefenderError::InvalidConfig(
-                "max_proof_attempts must be greater than zero",
-            ));
-        }
         Ok(())
     }
 }
@@ -84,7 +74,6 @@ impl Default for DefenderConfig {
             max_games_per_tick: DEFAULT_MAX_GAMES_PER_TICK,
             game_scan_lookback: DEFAULT_GAME_SCAN_LOOKBACK,
             max_game_age: DEFAULT_MAX_GAME_AGE,
-            max_proof_attempts: DEFAULT_MAX_PROOF_ATTEMPTS,
         }
     }
 }
