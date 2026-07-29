@@ -74,6 +74,10 @@ struct Cli {
     /// Number of recent factory games scanned when the bond manager starts.
     #[arg(long, env = "BOND_MANAGER_INITIAL_SCAN_LIMIT", default_value_t = 1_000)]
     bond_manager_initial_scan_limit: u64,
+
+    /// Number of confirmations to require after sending a tx onchain.
+    #[arg(long, env = "CONFIRMATIONS", default_value_t = 5)]
+    confirmations: u64,
 }
 
 #[tokio::main]
@@ -90,10 +94,14 @@ async fn main() -> Result<()> {
         .wallet(EthereumWallet::from(cli.proposer_key))
         .connect_http(Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?);
 
-    let contracts =
-        AlloyProofSystemClient::new(provider, cli.factory_address, cli.anchor_registry_address)
-            .await
-            .context("failed to bind the World Chain proof system")?;
+    let contracts = AlloyProofSystemClient::new(
+        provider,
+        cli.factory_address,
+        cli.anchor_registry_address,
+        cli.confirmations,
+    )
+    .await
+    .context("failed to bind the World Chain proof system")?;
     let bond_manager_config = BondManagerConfig {
         poll_interval: Duration::from_secs(cli.bond_manager_poll_interval_seconds),
         initial_scan_limit: cli.bond_manager_initial_scan_limit,

@@ -33,6 +33,8 @@ pub struct AlloyProofSystemClient<P> {
     anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
     /// Domain hash of the registered game implementation, read once at construction.
     domain_hash: B256,
+    /// Number of confirmations to require after sending a tx onchain.
+    confirmations: u64,
     provider: P,
 }
 
@@ -49,6 +51,7 @@ where
         provider: P,
         factory_address: Address,
         anchor_address: Address,
+        confirmations: u64,
     ) -> Result<Self, ProposerError> {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
@@ -80,6 +83,7 @@ where
             factory,
             anchor,
             domain_hash,
+            confirmations,
             provider,
         })
     }
@@ -209,6 +213,7 @@ where
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
         let tx_hash = *pending_tx.tx_hash();
         let receipt = pending_tx
+            .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
@@ -300,22 +305,14 @@ where
     P: Provider + WalletProvider + Clone + Send + Sync + 'static,
 {
     async fn anchor_parent(&self) -> Result<AnchorRef, ProposerError> {
-        let (anchor_root, anchor_game) = tokio::try_join!(
-            async {
-                self.anchor
-                    .getAnchorRoot()
-                    .call()
-                    .await
-                    .map_err(|error| ProposerError::Contract(error.to_string()))
-            },
-            async {
-                self.anchor
-                    .anchorGame()
-                    .call()
-                    .await
-                    .map_err(|error| ProposerError::Contract(error.to_string()))
-            }
-        )?;
+        let (anchor_root, anchor_game) = self
+            .provider
+            .multicall()
+            .add(self.anchor.getAnchorRoot())
+            .add(self.anchor.anchorGame())
+            .aggregate()
+            .await
+            .map_err(|err| ProposerError::Contract(err.to_string()))?;
 
         Ok(AnchorRef {
             registry: *self.anchor.address(),
@@ -380,6 +377,7 @@ where
 
         let tx_hash = *pending.tx_hash();
         let receipt = pending
+            .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
@@ -404,6 +402,7 @@ where
 
         let tx_hash = *pending.tx_hash();
         let receipt = pending
+            .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
@@ -450,6 +449,7 @@ where
 
         let tx_hash = *pending.tx_hash();
         let receipt = pending
+            .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;

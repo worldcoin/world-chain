@@ -2563,9 +2563,15 @@ async fn start_world_chain_proposer(
         .wallet(EthereumWallet::from(signer))
         .connect_http(Url::parse(l1_rpc_url)?);
 
-    let contracts = AlloyProofSystemClient::new(provider, factory_address, anchor_address)
-        .await
-        .wrap_err("failed to bind the World Chain proof system")?;
+    let required_confirmations = 1;
+    let contracts = AlloyProofSystemClient::new(
+        provider,
+        factory_address,
+        anchor_address,
+        required_confirmations,
+    )
+    .await
+    .wrap_err("failed to bind the World Chain proof system")?;
     let mut bond_manager = BondManager::new(
         BondManagerConfig {
             poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
