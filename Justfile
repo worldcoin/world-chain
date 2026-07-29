@@ -144,6 +144,7 @@ install *args='':
 #   Phase 2   proof-deploy-system         – Deploy proof system contracts
 #   Phase 3a  proof-certmanager-prewarm   – Pre-warm CertManager with CA certs
 #   Phase 3b  proof-approve-pcrs          – Approve PCR set on verifier
+#   Phase 4   proof-register-key          – Register the enclave's generated key on-chain
 #   Combined  proof-setup                 – Run all phases in sequence
 #
 # Required env vars (varies by target):
@@ -471,6 +472,65 @@ proof-approve-pcrs env="alphanet":
             --rpc-url "$L1_RPC_URL" --private-key "$OWNER_KEY"
     fi
     echo "PCR set approved."
+
+# Phase 4 – Register the enclave's generated signing key on-chain.
+#            Execs into the running nitro-worker pod (which has vsock access to the
+#            enclave) and runs `nitro-worker register`, which fetches a public-key
+#            attestation, builds the registerKey calldata (with P-384 hints) and submits
+#            it to NitroEnclaveKeyRegistry. Idempotent: a no-op if already registered.
+#            `registerKey` is NOT owner-gated, so any funded key works.
+#
+# Required: L1_RPC_URL, and a funding key via REGISTER_PRIVATE_KEY or PRIVATE_KEY.
+# Optional: NITRO_ENCLAVE_KEY_REGISTRY (else read from the {{env}}-nitro.json deployment),
+#           PCR0/PCR1/PCR2 (else host-side attestation checks are skipped; the on-chain
+#           verifier still enforces the approved PCR allowlist).
+proof-register-key env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f "scripts/proof-envs/{{env}}.env" ]; then
+        echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
+        exit 1
+    fi
+    source scripts/proof-envs/{{env}}.env
+    if [ -f "scripts/proof-envs/{{env}}.local.env" ]; then
+        source scripts/proof-envs/{{env}}.local.env
+    fi
+    # Resolve the registry address from the env or the deployment file.
+    DEPLOYMENTS_FILE="pkg/contracts/deployments/{{env}}-nitro.json"
+    if [ -z "${NITRO_ENCLAVE_KEY_REGISTRY:-}" ] && [ -f "$DEPLOYMENTS_FILE" ]; then
+        NITRO_ENCLAVE_KEY_REGISTRY=$(jq -r '.nitroEnclaveKeyRegistry' "$DEPLOYMENTS_FILE")
+    fi
+    : "${NITRO_ENCLAVE_KEY_REGISTRY:?NITRO_ENCLAVE_KEY_REGISTRY is required (set it or run proof-deploy-nitro first)}"
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    REGISTER_KEY="${REGISTER_PRIVATE_KEY:-${PRIVATE_KEY:-}}"
+    : "${REGISTER_KEY:?set REGISTER_PRIVATE_KEY or PRIVATE_KEY (any funded key — registerKey is not owner-gated)}"
+    NITRO_POD=$(kubectl --context="$KUBECONTEXT" get pod \
+        -n "$PROOF_NAMESPACE" \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    if [ -z "$NITRO_POD" ]; then
+        echo "Error: no running pod found in namespace $PROOF_NAMESPACE" >&2
+        exit 1
+    fi
+    CONTAINER=$(kubectl --context="$KUBECONTEXT" get pod "$NITRO_POD" \
+        -n "$PROOF_NAMESPACE" \
+        -o jsonpath='{.spec.containers[0].name}')
+    ENCLAVE_CID=$(kubectl --context="$KUBECONTEXT" exec \
+        -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" \
+        -- cat /run/nitro-shared/enclave-cid 2>/dev/null || echo "16")
+    echo "Pod: $NITRO_POD  Container: $CONTAINER  CID: $ENCLAVE_CID  Registry: $NITRO_ENCLAVE_KEY_REGISTRY" >&2
+    # Forward optional PCRs so the worker verifies the attestation host-side when available.
+    PCR_ENV=""
+    [ -n "${PCR0:-}" ] && PCR_ENV="$PCR_ENV PCR0=$PCR0"
+    [ -n "${PCR1:-}" ] && PCR_ENV="$PCR_ENV PCR1=$PCR1"
+    [ -n "${PCR2:-}" ] && PCR_ENV="$PCR_ENV PCR2=$PCR2"
+    kubectl --context="$KUBECONTEXT" exec \
+        -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" \
+        -- sh -c "ENCLAVE_CID=$ENCLAVE_CID \
+            NITRO_ENCLAVE_KEY_REGISTRY=$NITRO_ENCLAVE_KEY_REGISTRY \
+            L1_RPC_URL=$L1_RPC_URL \
+            REGISTER_PRIVATE_KEY=$REGISTER_KEY \
+            $PCR_ENV \
+            nitro-worker register"
 
 # Combined – Run all proof system deployment phases in sequence.
 # Automatically wires contract addresses between steps. PCR0/1/2 are

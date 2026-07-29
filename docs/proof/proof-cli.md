@@ -22,6 +22,7 @@ Commands:
   witness              Build and serialize a witness to a file
   prove                Generate witness and send it to a Nitro enclave
   get-attestation      Fetch a bare attestation from a running enclave
+  register             Register the enclave's generated key on-chain
 ```
 
 ## Building
@@ -384,6 +385,7 @@ Commands:
   witness              Build and serialize a witness to a file
   prove                Generate witness and send to a Nitro enclave for attested proving
   get-attestation      Fetch a bare attestation from a running enclave
+  register             Register the enclave's generated key on-chain
 ```
 
 ### `prove`
@@ -465,6 +467,58 @@ This subcommand takes no flags.
 
 ```bash
 cargo run -p world-chain-prover-nitro -- get-attestation > /tmp/attestation.hex
+```
+
+### `register`
+
+Registers the enclave's **generated** secp256k1 signing key on-chain so that
+`NitroProofVerifier` will accept the proofs this enclave produces. This automates what was
+previously a manual `cast` sequence:
+
+1. Fetch a `public_key`-embedding attestation from the running enclave over vsock (the
+   enclave's `PublicKey` request — **not** the bare `get-attestation`).
+2. Decode it into the `attestationTbs` + P-384 `signature` (same bytes as the on-chain
+   `NitroValidator.decodeAttestationTbs`) and compute the P-384 attestation hints (reusing
+   the `p384-hints` library).
+3. Submit `registerKey(attestationTbs, signature, attestationSigHints)` to
+   `NitroEnclaveKeyRegistry` and confirm `isKeyRegistered` afterwards.
+
+The command is **idempotent**: if the key is already registered it logs and exits 0. It is
+also available on the long-running worker as `nitro-worker register` and as a startup hook
+(`nitro-worker run --auto-register`); the `just proof-register-key <env>` recipe wraps the
+in-pod invocation.
+
+> **Prerequisites:** CertManager must be pre-warmed and the enclave PCR set approved on
+> `NitroAttestationVerifier` (see the `just proof-setup` / `just proof-*` recipes). `registerKey`
+> is **not** owner-gated — any funded L1 key can call it; authorization is enforced
+> cryptographically via the attestation + the owner-approved PCR allowlist.
+
+**Requires:** Linux host with AF_VSOCK support and a running Nitro enclave.
+
+```
+world-chain-prover-nitro register \
+  --registry <NitroEnclaveKeyRegistry address> \
+  --l1-rpc <L1 RPC URL> \
+  [--private-key <hex>] [--cid <N>] [--port <N>] [--pcr0/1/2 <HEX>]
+```
+
+| Flag | Env | Default | Description |
+|---|---|---|---|
+| `--registry <ADDR>` | `NITRO_ENCLAVE_KEY_REGISTRY` | required | `NitroEnclaveKeyRegistry` address on L1 |
+| `--l1-rpc <URL>` | `L1_RPC_URL` | required | L1 execution RPC to submit `registerKey` to |
+| `--private-key <HEX>` | `REGISTER_PRIVATE_KEY` | falls back to `PRIVATE_KEY` | Funding key for the tx (not owner-gated) |
+| `--cid <N>` | `ENCLAVE_CID` | `16` | vsock CID of the Nitro enclave |
+| `--port <N>` | `ENCLAVE_PORT` | `5005` | vsock port the enclave listens on |
+| `--pcr0/1/2 <HEX>` | `PCR0`/`PCR1`/`PCR2` | — | Optional; when all three are set the attestation is verified host-side before submission |
+
+**Example**
+
+```bash
+world-chain-prover-nitro register \
+  --registry  0x<NitroEnclaveKeyRegistry> \
+  --l1-rpc    $L1_RPC_URL \
+  --private-key $REGISTER_PRIVATE_KEY
+# enclave key registered on-chain (tx 0x...)
 ```
 
 ---
