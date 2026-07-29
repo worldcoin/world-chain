@@ -12,6 +12,11 @@ book.toml
 .gitmodules
 CODEOWNERS
 .github/
+!.github/
+.github/*
+!.github/scripts/
+.github/scripts/*
+!.github/scripts/install_llvm_ubuntu.sh
 .claude/
 pkg/
 

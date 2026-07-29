@@ -4,7 +4,15 @@
 //! World Chain EVM configuration.
 
 use alloy_consensus::Header;
+#[cfg(feature = "jit")]
+use alloy_eips::eip2718::Decodable2718;
 use alloy_eips::eip2718::Encodable2718;
+#[cfg(feature = "jit")]
+use alloy_op_evm::post_exec::PostExecEvmFactoryAdapter;
+#[cfg(feature = "jit")]
+use alloy_primitives::Bytes;
+#[cfg(feature = "jit")]
+use core::any::Any;
 use reth_evm::{
     Evm,
     block::{BlockExecutionError, BlockExecutor},
@@ -13,9 +21,9 @@ use reth_evm::{
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{BuilderContext, components::ExecutorBuilder};
 pub use reth_optimism_evm::{
-    L1BlockInfoError, OpBlockAssembler, OpBlockExecutionCtx, OpBlockExecutionError, OpEvm,
-    OpEvmConfig, OpEvmFactory, OpNextBlockEnvAttributes, OpRethReceiptBuilder, OpTx, revm_spec,
-    revm_spec_by_timestamp_after_bedrock,
+    L1BlockInfoError, OpBlockAssembler, OpBlockExecutionCtx, OpBlockExecutionError,
+    OpBlockExecutorFactory, OpEvm, OpEvmConfig, OpEvmFactory, OpNextBlockEnvAttributes,
+    OpRethReceiptBuilder, OpTx, revm_spec, revm_spec_by_timestamp_after_bedrock,
 };
 use reth_optimism_primitives::OpPrimitives;
 use reth_provider::{BlockReader, HeaderProvider, StateProvider, StateProviderFactory};
@@ -26,11 +34,15 @@ mod cache;
 mod collector;
 pub mod execution;
 pub mod factory;
+#[cfg(feature = "jit")]
+mod jit;
 pub mod metrics;
 pub mod utils;
 
 pub use cache::{DEFAULT_WITNESS_CAP, WitnessCache};
 pub use collector::spawn_witness_collector;
+#[cfg(feature = "jit")]
+pub use jit::maybe_run_jit_helper;
 pub use metrics::{FlashblockExecutionMetrics, PayloadBuildStage};
 
 use std::sync::Arc;
@@ -45,7 +57,11 @@ use reth_evm::{
 use reth_optimism_evm::{ConfigurePostExecEvm, PostExecExecutorExt, PostExecMode};
 use reth_optimism_payload_builder::OpExecData;
 use reth_primitives_traits::{Block, BlockBody, NodePrimitives, SealedBlock, SealedHeader};
+#[cfg(feature = "jit")]
+use reth_primitives_traits::{SignedTransaction, TxTy, WithEncoded};
 use reth_revm::{State, witness::ExecutionWitnessRecord};
+#[cfg(feature = "jit")]
+use reth_storage_errors::any::AnyError;
 
 use crate::factory::WorldChainBlockExecutorFactory;
 
@@ -86,8 +102,16 @@ pub struct BlockExecutionWitness {
 
 /// The underlying OP EVM configuration that [`WorldChainEvmConfig`] defaults to, fixed to World
 /// Chain's production primitives.
+#[cfg(not(feature = "jit"))]
 pub(crate) type OpConfig =
     OpEvmConfig<WorldChainSpec, OpPrimitives, OpRethReceiptBuilder, OpEvmFactory<OpTx>>;
+#[cfg(feature = "jit")]
+pub(crate) type OpConfig = OpEvmConfig<
+    WorldChainSpec,
+    OpPrimitives,
+    OpRethReceiptBuilder,
+    PostExecEvmFactoryAdapter<jit::OpJitEvmFactory<OpTx>>,
+>;
 
 /// The bounds an inner EVM config `E` must satisfy to be wrapped by [`WorldChainEvmConfig`].
 ///
@@ -148,7 +172,32 @@ impl WorldChainEvmConfig<OpConfig> {
     ///
     /// Witness capture is disabled; arm it with [`with_witness_sender`](Self::with_witness_sender).
     pub fn new(chain_spec: Arc<WorldChainSpec>, receipt_builder: OpRethReceiptBuilder) -> Self {
+        #[cfg(not(feature = "jit"))]
         let inner = OpConfig::new(chain_spec, receipt_builder);
+        #[cfg(feature = "jit")]
+        let inner = OpConfig::new_with_evm_factory(
+            chain_spec,
+            receipt_builder,
+            PostExecEvmFactoryAdapter::new(jit::OpJitEvmFactory::disabled()),
+        );
+        let factory = WorldChainBlockExecutorFactory::<OpConfig>::new(
+            inner.block_executor_factory().clone(),
+            None,
+        );
+        Self { inner, factory }
+    }
+
+    #[cfg(feature = "jit")]
+    fn new_with_jit_factory(
+        chain_spec: Arc<WorldChainSpec>,
+        receipt_builder: OpRethReceiptBuilder,
+        jit_factory: jit::OpJitEvmFactory<OpTx>,
+    ) -> Self {
+        let inner = OpConfig::new_with_evm_factory(
+            chain_spec,
+            receipt_builder,
+            PostExecEvmFactoryAdapter::new(jit_factory),
+        );
         let factory = WorldChainBlockExecutorFactory::<OpConfig>::new(
             inner.block_executor_factory().clone(),
             None,
@@ -196,6 +245,45 @@ impl<E: EvmBounds> ConfigureEvm for WorldChainEvmConfig<E> {
         self.inner.block_assembler()
     }
 
+    fn with_jit_support_enabled(self, enabled: bool) -> Self
+    where
+        Self: Sized,
+    {
+        #[cfg(feature = "jit")]
+        {
+            let mut this = self;
+            if let Some(inner) = (&mut this.inner as &mut dyn Any).downcast_mut::<OpConfig>() {
+                let mut evm_factory = inner.executor_factory.evm_factory().clone().into_inner();
+                evm_factory.set_jit_support(enabled);
+                inner.executor_factory = OpBlockExecutorFactory::new(
+                    *inner.executor_factory.receipt_builder(),
+                    inner.executor_factory.spec().clone(),
+                    PostExecEvmFactoryAdapter::new(evm_factory),
+                );
+                this.factory = WorldChainBlockExecutorFactory::new(
+                    this.inner.block_executor_factory().clone(),
+                    this.factory.sender.clone(),
+                );
+            }
+            this
+        }
+
+        #[cfg(not(feature = "jit"))]
+        {
+            let _ = enabled;
+            self
+        }
+    }
+
+    fn jit_backend(&self) -> Option<&dyn reth_evm::JitBackend> {
+        #[cfg(feature = "jit")]
+        if let Some(inner) = (&self.inner as &dyn Any).downcast_ref::<OpConfig>() {
+            return Some(inner.executor_factory.evm_factory().inner());
+        }
+
+        None
+    }
+
     fn evm_env(
         &self,
         header: &<Self::Primitives as NodePrimitives>::BlockHeader,
@@ -228,6 +316,8 @@ impl<E: EvmBounds> ConfigureEvm for WorldChainEvmConfig<E> {
 }
 
 impl<E: EvmBounds + ConfigurePostExecEvm> ConfigurePostExecEvm for WorldChainEvmConfig<E> {
+    type Snapshot = E::Snapshot;
+
     fn post_exec_executor_for_block<'a, DB: Database>(
         &'a self,
         db: &'a mut State<DB>,
@@ -237,7 +327,7 @@ impl<E: EvmBounds + ConfigurePostExecEvm> ConfigurePostExecEvm for WorldChainEvm
         impl BlockExecutor<
             Transaction = <Self::Primitives as NodePrimitives>::SignedTx,
             Receipt = <Self::Primitives as NodePrimitives>::Receipt,
-        > + PostExecExecutorExt
+        > + PostExecExecutorExt<Snapshot = Self::Snapshot>
         + 'a,
         Self::Error,
     > {
@@ -254,7 +344,7 @@ impl<E: EvmBounds + ConfigurePostExecEvm> ConfigurePostExecEvm for WorldChainEvm
     ) -> Result<
         impl BlockBuilder<
             Primitives = Self::Primitives,
-            Executor: PostExecExecutorExt
+            Executor: PostExecExecutorExt<Snapshot = Self::Snapshot>
                           + BlockExecutor<
                 Evm: Evm<DB: core::ops::DerefMut<Target = State<DB>>>,
                 Result: reth_optimism_evm::PreRefundGasUsed,
@@ -267,6 +357,7 @@ impl<E: EvmBounds + ConfigurePostExecEvm> ConfigurePostExecEvm for WorldChainEvm
     }
 }
 
+#[cfg(not(feature = "jit"))]
 impl<E: EvmBounds + ConfigureEngineEvm<OpExecData>> ConfigureEngineEvm<OpExecData>
     for WorldChainEvmConfig<E>
 {
@@ -286,6 +377,45 @@ impl<E: EvmBounds + ConfigureEngineEvm<OpExecData>> ConfigureEngineEvm<OpExecDat
         payload: &OpExecData,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
         self.inner.tx_iterator_for_payload(payload)
+    }
+}
+
+#[cfg(feature = "jit")]
+impl ConfigureEngineEvm<OpExecData> for WorldChainEvmConfig<OpConfig> {
+    fn evm_env_for_payload(&self, payload: &OpExecData) -> Result<EvmEnvFor<Self>, Self::Error> {
+        let delegate = OpEvmConfig::<WorldChainSpec, OpPrimitives, OpRethReceiptBuilder>::new(
+            self.chain_spec().clone(),
+            *self.inner.executor_factory.receipt_builder(),
+        );
+        delegate.evm_env_for_payload(payload)
+    }
+
+    fn context_for_payload<'a>(
+        &self,
+        payload: &'a OpExecData,
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
+        let delegate = OpEvmConfig::<WorldChainSpec, OpPrimitives, OpRethReceiptBuilder>::new(
+            self.chain_spec().clone(),
+            *self.inner.executor_factory.receipt_builder(),
+        );
+        delegate.context_for_payload(payload)
+    }
+
+    fn tx_iterator_for_payload(
+        &self,
+        payload: &OpExecData,
+    ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
+        // op-reth's engine-payload implementation is currently limited to its default EVM
+        // factory, so reproduce its transaction conversion for the JIT-backed factory.
+        let transactions = payload.payload.transactions().clone();
+        let convert = |encoded: Bytes| {
+            let tx =
+                TxTy::<OpPrimitives>::decode_2718_exact(encoded.as_ref()).map_err(AnyError::new)?;
+            let signer = tx.try_recover().map_err(AnyError::new)?;
+            Ok::<_, AnyError>(WithEncoded::new(encoded, tx.with_signer(signer)))
+        };
+
+        Ok((transactions, convert))
     }
 }
 
@@ -323,10 +453,51 @@ where
     type EVM = WorldChainEvmConfig;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        Ok(
-            WorldChainEvmConfig::new(ctx.chain_spec(), OpRethReceiptBuilder::default())
-                .with_witness_sender(self.0),
-        )
+        #[cfg(feature = "jit")]
+        {
+            let jit = &ctx.config().jit;
+            let dump_dir = jit
+                .debug
+                .then(|| ctx.config().datadir().data_dir().join("jit"));
+            let (jit_factory, revmc_metrics) = jit::build_jit_factory(jit, dump_dir)?;
+            let metrics_backend = jit_factory.backend().clone();
+            let evm_config = WorldChainEvmConfig::new_with_jit_factory(
+                ctx.chain_spec(),
+                OpRethReceiptBuilder::default(),
+                jit_factory,
+            )
+            .with_witness_sender(self.0);
+
+            if let Some(revmc_metrics) = revmc_metrics {
+                ctx.task_executor()
+                    .spawn_with_graceful_shutdown_signal(|shutdown| async move {
+                        let mut shutdown = std::pin::pin!(shutdown);
+                        loop {
+                            tokio::select! {
+                                _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
+                                    revmc_metrics.record(&metrics_backend.stats());
+                                }
+                                _ = &mut shutdown => break,
+                            }
+                        }
+                    });
+            }
+
+            Ok(evm_config)
+        }
+
+        #[cfg(not(feature = "jit"))]
+        {
+            if ctx.config().jit.enabled {
+                return Err(eyre::Report::msg(
+                    "JIT compilation was requested but this binary was compiled without the `jit` feature",
+                ));
+            }
+            Ok(
+                WorldChainEvmConfig::new(ctx.chain_spec(), OpRethReceiptBuilder::default())
+                    .with_witness_sender(self.0),
+            )
+        }
     }
 }
 
@@ -350,5 +521,39 @@ mod tests {
         let evm_config = WorldChainEvmConfig::optimism(chain_spec.clone());
 
         assert!(std::sync::Arc::ptr_eq(evm_config.chain_spec(), &chain_spec));
+    }
+
+    #[cfg(feature = "jit")]
+    #[test]
+    fn jit_support_is_local_to_the_selected_config_clone() {
+        let source = WorldChainEvmConfig::optimism(WorldChainSpec::dev());
+        assert!(source.jit_backend().is_some());
+        assert!(
+            !source
+                .inner
+                .executor_factory
+                .evm_factory()
+                .inner()
+                .jit_support_enabled()
+        );
+
+        let enabled = source.clone().with_jit_support();
+        assert!(
+            enabled
+                .inner
+                .executor_factory
+                .evm_factory()
+                .inner()
+                .jit_support_enabled()
+        );
+        assert!(
+            !source
+                .inner
+                .executor_factory
+                .evm_factory()
+                .inner()
+                .jit_support_enabled(),
+            "enabling JIT on a validation clone must not mutate the shared source config"
+        );
     }
 }

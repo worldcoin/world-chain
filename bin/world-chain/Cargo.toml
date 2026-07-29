@@ -37,6 +37,7 @@ eyre.workspace = true
 tikv-jemallocator = { workspace = true, optional = true }
 
 [features]
-default = ["jemalloc"]
+default = ["jemalloc", "jit"]
 
 jemalloc = ["tikv-jemallocator"]
+jit = ["world-chain-evm/jit"]

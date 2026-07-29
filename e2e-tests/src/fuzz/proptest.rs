@@ -14,7 +14,7 @@ use world_chain_validator::{
 };
 
 use super::fixtures::{
-    BLOCK_EXECUTION_CTX, CHAIN_SPEC, EVM_ENV, SEALED_HEADER, create_test_state_provider,
+    BLOCK_EXECUTION_CTX, CHAIN_SPEC, EVM_CONFIG, EVM_ENV, SEALED_HEADER, create_test_state_provider,
 };
 
 /// Execute transactions in parallel using FlashblocksBalExecutionStrategy
@@ -33,6 +33,7 @@ pub fn validate(
         ValidationCtx {
             parent: &SEALED_HEADER,
             attempt_metrics: &mut attempt_metrics,
+            evm_config: EVM_CONFIG.clone(),
             chain_spec: CHAIN_SPEC.clone(),
             evm_env: EVM_ENV.clone(),
             execution_context: BLOCK_EXECUTION_CTX.clone(),

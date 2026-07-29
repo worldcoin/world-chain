@@ -126,6 +126,7 @@ pub fn test_config_with_peers_and_gossip(
             witness: Default::default(),
             tx_peers,
             disable_bootnodes: true,
+            jit_enabled_alias: false,
             simulate_enabled: false,
         },
         builder_config: FlashblocksPayloadBuilderConfig {

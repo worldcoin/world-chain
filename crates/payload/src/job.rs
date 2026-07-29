@@ -20,7 +20,7 @@ use reth_payload_primitives::{BuiltPayload, PayloadBuilderError, PayloadKind};
 use reth_primitives_traits::BlockBody;
 use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_tasks::Runtime;
-use reth_trie_parallel::state_root_task::StateRootHandle;
+use reth_trie_parallel::state_root_task::PayloadStateRootHandle;
 use tokio::{
     sync::oneshot,
     time::{Interval, Sleep},
@@ -239,7 +239,7 @@ pub struct FlashblocksPayloadJob<Builder: PayloadBuilder> {
     /// Optional execution cache shared with the engine.
     pub(crate) execution_cache: Option<SavedCache>,
     /// Optional state root task handle, shared with the engine.
-    pub(crate) trie_handle: Option<StateRootHandle>,
+    pub(crate) state_root_handle: Option<PayloadStateRootHandle>,
     /// The type responsible for building payloads.
     ///
     /// See [`PayloadBuilder`]
@@ -289,7 +289,7 @@ where
 
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let execution_cache = self.execution_cache.clone();
-        let trie_handle = self.trie_handle.take();
+        let state_root_handle = self.state_root_handle.take();
         let builder = self.builder.clone();
 
         self.executor.spawn_blocking_task(Box::pin(async move {
@@ -300,7 +300,7 @@ where
                 cancel,
                 best_payload,
                 execution_cache,
-                trie_handle,
+                state_root_handle,
             };
 
             trace!(
@@ -683,7 +683,7 @@ where
                 cancel: CancelOnDrop::default(),
                 best_payload: None,
                 execution_cache: self.execution_cache.clone(),
-                trie_handle: None,
+                state_root_handle: None,
             };
 
             match self.builder.on_missing_payload(args) {

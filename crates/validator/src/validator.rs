@@ -11,7 +11,8 @@ use alloy_primitives::Bytes;
 use alloy_op_evm::OpBlockExecutionCtx;
 use alloy_rpc_types_engine::PayloadId;
 use eyre::eyre::bail;
-use reth_chain_state::{DeferredTrieData, ExecutedBlock};
+use reth_chain_state::ExecutedBlock;
+use reth_trie_common::ComputedTrieData;
 use world_chain_primitives::primitives::ExecutionPayloadFlashblockDeltaV1;
 
 use reth_evm::{ConfigureEvm, EvmEnvFor};
@@ -38,11 +39,31 @@ use world_chain_evm::{
 pub fn into_executed_payload(
     payload: BuiltPayloadExecutedBlock<OpPrimitives>,
 ) -> ExecutedBlock<OpPrimitives> {
-    let trie_data = DeferredTrieData::sort(payload.hashed_state, payload.trie_updates);
-    ExecutedBlock::new(payload.recovered_block, payload.execution_output, trie_data)
+    let BuiltPayloadExecutedBlock {
+        recovered_block,
+        execution_output,
+        hashed_state,
+        trie_updates,
+        changed_paths,
+    } = payload;
+    let hashed_state = Arc::try_unwrap(hashed_state).map_or_else(
+        |shared| shared.clone_into_sorted(),
+        |owned| owned.into_sorted(),
+    );
+    let trie_updates = Arc::try_unwrap(trie_updates).map_or_else(
+        |shared| shared.clone_into_sorted(),
+        |owned| owned.into_sorted(),
+    );
+    let trie_data = ComputedTrieData::new_with_changed_paths(
+        Arc::new(hashed_state),
+        Arc::new(trie_updates),
+        changed_paths,
+    );
+    ExecutedBlock::new(recovered_block, execution_output, trie_data)
 }
 
 pub struct FlashblocksBlockValidator<Evm: ConfigureEvm, T: FlashblockTypes<Evm>> {
+    pub evm_config: Evm,
     pub chain_spec: Arc<WorldChainSpec>,
     pub evm_env: EvmEnvFor<Evm>,
     pub execution_context: OpBlockExecutionCtx,
@@ -53,6 +74,7 @@ pub struct FlashblocksBlockValidator<Evm: ConfigureEvm, T: FlashblockTypes<Evm>>
 
 impl<Evm: ConfigureEvm + Clone, T: FlashblockTypes<Evm>> FlashblocksBlockValidator<Evm, T> {
     pub fn new(
+        evm_config: Evm,
         chain_spec: Arc<WorldChainSpec>,
         evm_env: EvmEnvFor<Evm>,
         execution_context: OpBlockExecutionCtx,
@@ -60,6 +82,7 @@ impl<Evm: ConfigureEvm + Clone, T: FlashblockTypes<Evm>> FlashblocksBlockValidat
         execution_strategy: T::Execution,
     ) -> Self {
         Self {
+            evm_config,
             chain_spec,
             evm_env,
             execution_context,
@@ -100,6 +123,7 @@ impl<Evm: ConfigureEvm + Clone, T: FlashblockTypes<Evm>> FlashblocksBlockValidat
                         ValidationCtx {
                             parent,
                             attempt_metrics: &mut attempt_metrics,
+                            evm_config: self.evm_config.clone(),
                             chain_spec: self.chain_spec.clone(),
                             evm_env: self.evm_env.clone(),
                             execution_context: self.execution_context.clone(),

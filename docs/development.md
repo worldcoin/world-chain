@@ -33,6 +33,23 @@ cargo xtask launch-node --nodes 2 --spam --flashblocks
 
 Starts N nodes via P2P, drives block production with `EngineDriver`, optionally runs `TxSpammer`. Prints RPC URLs for `cast` interaction.
 
+## LLVM 22
+
+The `world-chain` binary enables revmc JIT support by default. Building it requires LLVM 22 and
+the prefix expected by the `llvm-sys` 22.1 bindings.
+
+On Debian or Ubuntu, install the same toolchain used by CI and the release container:
+
+```bash
+sudo .github/scripts/install_llvm_ubuntu.sh 22
+export LLVM_SYS_221_PREFIX=/usr/lib/llvm-22
+cargo build --bin world-chain
+```
+
+Add the export to your shell profile if you build World Chain regularly. On other supported
+platforms, install LLVM 22 using the platform package manager and set `LLVM_SYS_221_PREFIX` to
+the directory reported by `llvm-config-22 --prefix`.
+
 ## Metrics
 
 Custom metrics are exposed via the standard reth metrics endpoint (`/metrics`). Key namespaces:

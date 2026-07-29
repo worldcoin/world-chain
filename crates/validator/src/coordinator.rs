@@ -50,6 +50,28 @@ use world_chain_primitives::flashblocks::{Flashblock, Flashblocks};
 static SEMAPHORE_TASK_PERMIT: LazyLock<Arc<Semaphore>> =
     LazyLock::new(|| Arc::new(Semaphore::const_new(1)));
 
+/// Pauses background JIT compilation while latency-sensitive flashblock validation runs.
+///
+/// Resident compiled code remains available and queued work resumes when this guard is dropped.
+struct JitPauseGuard<Evm: ConfigureEvm>(Evm);
+
+impl<Evm: ConfigureEvm> JitPauseGuard<Evm> {
+    fn new(evm_config: &Evm) -> Self {
+        if let Some(jit_backend) = evm_config.jit_backend() {
+            jit_backend.pause();
+        }
+        Self(evm_config.clone())
+    }
+}
+
+impl<Evm: ConfigureEvm> Drop for JitPauseGuard<Evm> {
+    fn drop(&mut self) {
+        if let Some(jit_backend) = self.0.jit_backend() {
+            jit_backend.resume();
+        }
+    }
+}
+
 /// The current state of all known pre confirmations received over the P2P layer
 /// or generated from the payload building job of this node.
 ///
@@ -480,9 +502,12 @@ where
     let sealed_header = Arc::new(sealed_header);
 
     let has_bal = diff.access_list_data.is_some();
+    let _jit_pause = JitPauseGuard::new(&evm_config);
+    let validation_evm = evm_config.clone().with_jit_support();
 
     let next_payload = if has_bal {
         FlashblocksBlockValidator::<_, BalFlashblockTypes>::new(
+            validation_evm,
             chain_spec.clone(),
             evm_env.clone(),
             execution_context.clone(),
@@ -498,6 +523,7 @@ where
         )?
     } else {
         FlashblocksBlockValidator::<_, LegacyFlashblockTypes>::new(
+            validation_evm,
             chain_spec.clone(),
             evm_env.clone(),
             execution_context.clone(),

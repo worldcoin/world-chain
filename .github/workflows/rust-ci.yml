@@ -13,6 +13,7 @@ on:
       - "clippy.toml"
       - "rustfmt.toml"
       - "Justfile"
+      - ".github/scripts/install_llvm_ubuntu.sh"
       - ".github/workflows/rust-ci.yml"
   merge_group:
   pull_request:
@@ -26,6 +27,7 @@ on:
       - "clippy.toml"
       - "rustfmt.toml"
       - "Justfile"
+      - ".github/scripts/install_llvm_ubuntu.sh"
       - ".github/workflows/rust-ci.yml"
   workflow_dispatch:
 
@@ -50,6 +52,7 @@ jobs:
     runs-on: arc-public-8xlarge-amd64-runner
     environment: dev
     env:
+      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
       RUSTC_WRAPPER: sccache
       SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
       SCCACHE_REGION: us-east-1
@@ -59,6 +62,8 @@ jobs:
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: nightly-2026-07-01
+      - name: Install LLVM 22
+        run: sudo bash .github/scripts/install_llvm_ubuntu.sh 22
       - uses: taiki-e/install-action@18b1216eba7f8039b0f8d131d5473787f0edce68 # v2.85.3
         with:
           tool: just
@@ -93,9 +98,10 @@ jobs:
   cargo-clippy:
     runs-on: arc-public-8xlarge-amd64-runner
     environment: dev
-    timeout-minutes: 20
+    timeout-minutes: 30
     name: clippy
     env:
+      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
       RUSTC_WRAPPER: sccache
       SCCACHE_BUCKET: crypto-dev-us-east-1-workflow-build-cache
       SCCACHE_REGION: us-east-1
@@ -108,6 +114,8 @@ jobs:
         with:
           toolchain: nightly-2026-07-01
           components: rustfmt, clippy
+      - name: Install LLVM 22
+        run: sudo bash .github/scripts/install_llvm_ubuntu.sh 22
       - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
