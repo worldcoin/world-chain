@@ -45,6 +45,10 @@ struct GameScanCache {
     games: Arc<Vec<ScannedTransitionGame>>,
 }
 
+/// Returns the leaf of every explicit `retryOf` lineage in deterministic factory order.
+///
+/// Proof-backed `extraData` permits several UUIDs for the same logical attempt, so parallel
+/// lineages are retained for the proposer to evaluate rather than collapsed by attempt number.
 fn select_transition_tips(
     mut candidates: Vec<ScannedTransitionGame>,
     parent_candidates: &[Address],
@@ -229,6 +233,8 @@ where
             return Ok(cached.games);
         }
 
+        // TODO: If full rebuilds become a bottleneck, extend an unchanged anchor's snapshot
+        // from its cached factory index. Incremental reuse must also invalidate on L1 reorgs.
         let games = Arc::new(self.scan_transition_games(anchor_game, game_count).await?);
         *self
             .game_scan_cache

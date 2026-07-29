@@ -155,14 +155,21 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     //                       CWIA getters                         //
     ////////////////////////////////////////////////////////////////
 
-    // CWIA layout appended by `DisputeGameFactory.create` (no implementation args):
-    //   [0x00, 0x14) creator address
-    //   [0x14, 0x34) root claim
-    //   [0x34, 0x54) factory-captured parent block hash (unused by this game)
-    //   [0x54, ...) extraData = abi.encode(
-    //       domainHash, l2BlockNumber, parentRef, attempt, retryOf,
-    //       l1OriginHash, l1OriginNumber, creationProof
-    //   )
+    // CWIA layout appended by `DisputeGameFactory.create` (no implementation args).
+    // Addresses in ABI words are right-aligned:
+    //   [0x000, 0x014) creator address                    (factory prefix)
+    //   [0x014, 0x034) root claim                         (factory prefix)
+    //   [0x034, 0x054) factory-captured parent block hash (unused by this game)
+    //   [0x054, 0x074) domainHash                         (extraData word 0)
+    //   [0x074, 0x094) l2BlockNumber                      (extraData word 1)
+    //   [0x094, 0x0B4) parentRef                          (extraData word 2)
+    //   [0x0B4, 0x0D4) attempt                            (extraData word 3)
+    //   [0x0D4, 0x0F4) retryOf                            (extraData word 4)
+    //   [0x0F4, 0x114) l1OriginHash                       (extraData word 5)
+    //   [0x114, 0x134) l1OriginNumber                     (extraData word 6)
+    //   [0x134, 0x154) creationProof offset (= 0x100)     (extraData word 7)
+    //   [0x154, 0x174) creationProof length               (dynamic tail)
+    //   [0x174, ...) creationProof bytes, padded to 32 bytes
 
     function gameCreator() public pure returns (address creator_) {
         creator_ = _getArgAddress(0x00);
@@ -214,6 +221,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         (,,,,,,, proof_) = abi.decode(data, (bytes32, uint256, address, uint256, address, bytes32, uint256, bytes));
     }
 
+    /// @notice Returns the ABI-encoded proposal data supplied to `DisputeGameFactory.create`.
+    /// @dev Excludes the 0x54-byte CWIA prefix containing the creator, root claim, and factory-captured L1 block hash.
     function extraData() public pure returns (bytes memory extraData_) {
         bytes memory args = _getArgBytes();
         if (args.length < 0x54) revert BadExtraData();

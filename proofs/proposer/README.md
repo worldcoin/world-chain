@@ -43,6 +43,19 @@ l1OriginNumber, creationProof)`.
 - if a game exists, it becomes the `parent_ref` and we continue this loop
 - if it doesn't exist - i.e. the address is `0x00..00`, then the current `parent_ref` is returned
 
+### Parallel games and retries
+
+The factory UUID identifies one exact `(gameType, rootClaim, extraData)` payload. Since `extraData`
+contains the creation proof, selected L1 origin, and `retry_of`, multiple bonded games can represent
+the same logical `(parent_ref, root_claim, l2_block_number, attempt)` with different UUIDs.
+`attempt` is consequently local to the lineage linked by `retry_of`, rather than a globally unique
+transition nonce.
+
+The proposer removes games referenced as retry predecessors and considers the remaining lineage
+tips in factory-index order. It follows the first non-invalidated matching tip and then searches
+only for children of that concrete game address. Other correct sibling games do not block this
+lineage; their permissionless resolution and bond settlement remain independent.
+
 ### `root_claim`
 
 - rpc request to a consensus client - i.e. `optimism_outputAtBlock`
