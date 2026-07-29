@@ -4,7 +4,7 @@ mod cmd;
 #[cfg(target_os = "linux")]
 use clap::{Parser, Subcommand};
 #[cfg(target_os = "linux")]
-use cmd::{get_attestation::GetAttestationArgs, run::WorkerArgs};
+use cmd::{get_attestation::GetAttestationArgs, register::RegisterArgs, run::WorkerArgs};
 
 #[cfg(target_os = "linux")]
 #[derive(Parser)]
@@ -21,6 +21,8 @@ enum Command {
     Run(Box<WorkerArgs>),
     /// Fetch a bare attestation document from the running enclave and print hex to stdout.
     GetAttestation(GetAttestationArgs),
+    /// Register the enclave's generated signing key on-chain via `registerKey`.
+    Register(RegisterArgs),
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -40,6 +42,7 @@ async fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
         Command::Run(args) => cmd::run::run(*args).await?,
         Command::GetAttestation(args) => cmd::get_attestation::get_attestation(args).await?,
+        Command::Register(args) => cmd::register::register(args).await?,
     }
     Ok(())
 }

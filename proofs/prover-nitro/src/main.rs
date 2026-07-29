@@ -33,6 +33,56 @@ enum Command {
     /// Useful for CertManager pre-warm workflows. Connects to CID 16 on the default
     /// vsock port. Pipe the output directly into hinted_attestation_calls.js.
     GetAttestation,
+    /// Register the enclave's generated signing key on-chain.
+    ///
+    /// Fetches a public-key-embedding attestation from the running enclave over vsock,
+    /// builds the `registerKey(attestationTbs, signature, attestationSigHints)` calldata
+    /// (reusing the p384-hints library), and submits it to `NitroEnclaveKeyRegistry` on L1.
+    /// Idempotent: if the key is already registered it logs and exits successfully.
+    ///
+    /// Prerequisites: CertManager must be pre-warmed and the enclave's PCR set approved on
+    /// `NitroAttestationVerifier` (see `just proof-setup`). `registerKey` is not owner-gated,
+    /// so any funded key works.
+    Register(RegisterArgs),
+}
+
+#[derive(Debug, Args)]
+struct RegisterArgs {
+    /// vsock CID of the running Nitro enclave.
+    #[arg(long, env = "ENCLAVE_CID", default_value_t = 16)]
+    cid: u32,
+
+    /// vsock port the enclave is listening on.
+    #[arg(long, env = "ENCLAVE_PORT", default_value_t = 5005)]
+    port: u32,
+
+    /// `NitroEnclaveKeyRegistry` contract address on L1.
+    #[arg(long, env = "NITRO_ENCLAVE_KEY_REGISTRY")]
+    registry: String,
+
+    /// L1 execution RPC URL to submit `registerKey` to.
+    #[arg(long, env = "L1_RPC_URL")]
+    l1_rpc: String,
+
+    /// Hex-encoded private key used to sign and pay for the `registerKey` transaction.
+    /// Falls back to `PRIVATE_KEY` when `--private-key` / `REGISTER_PRIVATE_KEY` is unset.
+    /// `registerKey` is not owner-gated, so any funded key works.
+    #[arg(long, env = "REGISTER_PRIVATE_KEY", hide_env_values = true)]
+    private_key: Option<String>,
+
+    /// PCR0 hex (48 bytes). Optional: when all three PCRs are set the attestation is
+    /// verified host-side before submission; otherwise host-side checks are skipped (the
+    /// on-chain verifier still enforces the approved PCR allowlist).
+    #[arg(long, env = "PCR0")]
+    pcr0: Option<String>,
+
+    /// PCR1 hex (48 bytes).
+    #[arg(long, env = "PCR1")]
+    pcr1: Option<String>,
+
+    /// PCR2 hex (48 bytes).
+    #[arg(long, env = "PCR2")]
+    pcr2: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -74,6 +124,7 @@ async fn main() -> Result<()> {
         Command::Witness(args) => write_witness(args).await?,
         Command::Prove(args) => nitro_prove(args).await?,
         Command::GetAttestation => get_attestation().await?,
+        Command::Register(args) => register(args).await?,
     }
 
     Ok(())
@@ -207,4 +258,61 @@ fn hex_to_pcr(hex: &str) -> Result<[u8; 48]> {
     bytes
         .try_into()
         .map_err(|_| anyhow::anyhow!("PCR must be 48 bytes"))
+}
+
+#[cfg(target_os = "linux")]
+async fn register(args: RegisterArgs) -> Result<()> {
+    use world_chain_proof_nitro::{
+        ExpectedPcrs,
+        register::{RegisterParams, RegistrationOutcome, register_enclave_key},
+    };
+
+    // Initialise logging so the registration flow's progress logs are visible. `info` by
+    // default; override with `RUST_LOG`.
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .try_init();
+
+    let expected_pcrs = match (args.pcr0.as_deref(), args.pcr1.as_deref(), args.pcr2.as_deref()) {
+        (Some(p0), Some(p1), Some(p2)) => ExpectedPcrs {
+            pcr0: hex_to_pcr(p0)?,
+            pcr1: hex_to_pcr(p1)?,
+            pcr2: hex_to_pcr(p2)?,
+        },
+        (None, None, None) => ExpectedPcrs::PLACEHOLDER,
+        _ => bail!("provide all three of --pcr0/--pcr1/--pcr2, or none"),
+    };
+
+    let private_key = args
+        .private_key
+        .or_else(|| std::env::var("PRIVATE_KEY").ok())
+        .context("no registration key: set --private-key, REGISTER_PRIVATE_KEY, or PRIVATE_KEY")?;
+
+    let outcome = register_enclave_key(RegisterParams {
+        enclave_cid: args.cid,
+        enclave_port: args.port,
+        expected_pcrs,
+        l1_rpc_url: args.l1_rpc,
+        registry: args.registry,
+        private_key,
+    })
+    .await?;
+
+    match outcome {
+        RegistrationOutcome::AlreadyRegistered => {
+            println!("enclave key already registered on-chain");
+        }
+        RegistrationOutcome::Registered { tx_hash } => {
+            println!("enclave key registered on-chain (tx {tx_hash})");
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn register(_args: RegisterArgs) -> Result<()> {
+    bail!("register requires Linux with AF_VSOCK support")
 }
