@@ -25,9 +25,9 @@ pub use builder::*;
 pub use p2p::*;
 pub use pbh::*;
 
-pub const DEFAULT_FLASHBLOCKS_BOOTNODES: &str = "enode://78ca7daeb63956cbc3985853d5699a6404d976a2612575563f46876968fdca2383a195ee7db40de348757b2256195996933708f351169ca3f3fe93ab2a774608@16.62.98.53:30303,enode://c96dcadf4cdea4c39ec3fd775637d9e67d455b856b1514cfcf55b72f873a34b96d69e47ccea9fc797a446d4e6948aa80f6b9d479a1727ca166758a900b08f422@16.63.14.166:30303,enode://15688a7b281c32a4da633252dcc5019d60f037ee9eb46d05093dd3023bdd688b9b207d10a39e054a5ed87db666b2cb75696f6537de74d1e1f8dcabc53dc8d2ab@16.63.123.160:30303";
+pub const DEFAULT_FLASHBLOCKS_SENTRIES: &str = "enode://78ca7daeb63956cbc3985853d5699a6404d976a2612575563f46876968fdca2383a195ee7db40de348757b2256195996933708f351169ca3f3fe93ab2a774608@16.62.98.53:30303,enode://c96dcadf4cdea4c39ec3fd775637d9e67d455b856b1514cfcf55b72f873a34b96d69e47ccea9fc797a446d4e6948aa80f6b9d479a1727ca166758a900b08f422@16.63.14.166:30303,enode://15688a7b281c32a4da633252dcc5019d60f037ee9eb46d05093dd3023bdd688b9b207d10a39e054a5ed87db666b2cb75696f6537de74d1e1f8dcabc53dc8d2ab@16.63.123.160:30303";
 
-pub const DEFAULT_FLASHBLOCKS_BOOTNODES_SEPOLIA: &str = "enode://08f6bec85b85908cc0bf09fb26fba7e5c53c4e924aae795784aa002a18afd7d1e0be5f9bb8c71fbad9b86c00b27fd45b654e234ef4b7eff2432acd6cddc256d3@51.34.157.154:30303,enode://444a4af7a46f668f8f1abf3863caa72cbe773e6830083a493cc43e9996b4e3017013605bfddb779b2494a3f9cf75961b70ad35a347bc055969a3744e1738de6d@16.18.61.93:30303,enode://ae8e652ad611d0276427ecc751c5effacdb6a9dcf8080b9380f24db7a0770ff657ded924d45805fb3eef21159f7294316b0e6dc51101f92b86c955509a3e8cc0@51.96.83.177:30303";
+pub const DEFAULT_FLASHBLOCKS_SENTRIES_SEPOLIA: &str = "enode://08f6bec85b85908cc0bf09fb26fba7e5c53c4e924aae795784aa002a18afd7d1e0be5f9bb8c71fbad9b86c00b27fd45b654e234ef4b7eff2432acd6cddc256d3@51.34.157.154:30303,enode://444a4af7a46f668f8f1abf3863caa72cbe773e6830083a493cc43e9996b4e3017013605bfddb779b2494a3f9cf75961b70ad35a347bc055969a3744e1738de6d@16.18.61.93:30303,enode://ae8e652ad611d0276427ecc751c5effacdb6a9dcf8080b9380f24db7a0770ff657ded924d45805fb3eef21159f7294316b0e6dc51101f92b86c955509a3e8cc0@51.96.83.177:30303";
 
 use crate::config::WorldChainNodeConfig;
 
@@ -186,7 +186,7 @@ pub struct WorldChainArgs {
     #[arg(long = "tx-peers", value_delimiter = ',', value_name = "PEER_ID")]
     pub tx_peers: Option<Vec<PeerId>>,
 
-    /// Disable the default World Chain bootnodes.
+    /// Disable the default World Chain flashblocks sentries.
     #[arg(
         long = "worldchain.disable-bootnodes",
         value_name = "WORLDCHAIN_DISABLE_BOOTNODES",
@@ -252,11 +252,16 @@ impl WorldChainArgs {
                     )?);
                 }
 
-                if self.flashblocks.is_some() && !self.disable_bootnodes {
-                    let bootnodes = parse_trusted_peer(DEFAULT_FLASHBLOCKS_BOOTNODES)?;
-                    debug!(target: "world_chain::network", ?bootnodes, "Setting default flashblocks bootnodes");
-                    // dedup happens later
-                    config.network.trusted_peers.extend(bootnodes);
+                if let Some(flashblocks) = &mut self.flashblocks
+                    && flashblocks.sentry_peers.is_empty()
+                    && !self.disable_bootnodes
+                {
+                    flashblocks.sentry_peers = parse_trusted_peer(DEFAULT_FLASHBLOCKS_SENTRIES)?;
+                    debug!(
+                        target: "world_chain::network",
+                        sentries = ?flashblocks.sentry_peers,
+                        "Setting default flashblocks sentries"
+                    );
                 }
 
                 if self.pbh.entrypoint == Address::default() {
@@ -291,11 +296,17 @@ impl WorldChainArgs {
                     )?);
                 }
 
-                if self.flashblocks.is_some() && !self.disable_bootnodes {
-                    let bootnodes = parse_trusted_peer(DEFAULT_FLASHBLOCKS_BOOTNODES_SEPOLIA)?;
-                    debug!(target: "world_chain::network", ?bootnodes, "Setting default flashblocks bootnodes");
-                    // dedup happens later
-                    config.network.trusted_peers.extend(bootnodes);
+                if let Some(flashblocks) = &mut self.flashblocks
+                    && flashblocks.sentry_peers.is_empty()
+                    && !self.disable_bootnodes
+                {
+                    flashblocks.sentry_peers =
+                        parse_trusted_peer(DEFAULT_FLASHBLOCKS_SENTRIES_SEPOLIA)?;
+                    debug!(
+                        target: "world_chain::network",
+                        sentries = ?flashblocks.sentry_peers,
+                        "Setting default flashblocks sentry pool"
+                    );
                 }
 
                 if self.pbh.entrypoint == Address::default() {
@@ -337,6 +348,15 @@ impl WorldChainArgs {
                 }
                 if self.pbh.signature_aggregator == Address::default() {
                     warn!("missing `--builder.signature_aggregator`, using default")
+                }
+            }
+        }
+
+        if let Some(flashblocks) = &self.flashblocks {
+            let bootnodes = config.network.bootnodes.get_or_insert_default();
+            for sentry in &flashblocks.sentry_peers {
+                if !bootnodes.iter().any(|bootnode| bootnode.id == sentry.id) {
+                    bootnodes.push(sentry.clone());
                 }
             }
         }
@@ -521,6 +541,34 @@ mod tests {
         assert!(
             args.flashblocks.expect("just asserted").enabled,
             "expected parsed flashblocks args to have enabled=true"
+        );
+    }
+
+    #[test]
+    fn flashblocks_uses_default_mainnet_sentry_limit() {
+        let args = CommandParser::parse_from(["bin", "--flashblocks.enabled"]).world;
+        let mut node_config = NodeConfig::new(WorldChainSpec::mainnet());
+
+        let config = args.into_config(&mut node_config).unwrap();
+        let flashblocks = config.args.flashblocks.expect("flashblocks enabled");
+
+        assert_eq!(
+            flashblocks.max_sentry_connections,
+            DEFAULT_MAX_SENTRY_CONNECTIONS
+        );
+        assert_eq!(flashblocks.sentry_peers.len(), 3);
+        assert_eq!(
+            node_config
+                .network
+                .bootnodes
+                .as_ref()
+                .expect("sentries are discovery bootnodes")
+                .len(),
+            3
+        );
+        assert!(
+            node_config.network.trusted_peers.is_empty(),
+            "sentry selection must happen after the local PeerId is known"
         );
     }
 

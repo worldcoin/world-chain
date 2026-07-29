@@ -106,6 +106,8 @@ pub fn test_config_with_peers_and_gossip(
             access_list,
             store: false,
             store_path: None,
+            sentry_peers: Vec::new(),
+            max_sentry_connections: world_chain_cli::cli::builder::DEFAULT_MAX_SENTRY_CONNECTIONS,
             fanout: FanoutArgs::default(),
         })
     } else {
