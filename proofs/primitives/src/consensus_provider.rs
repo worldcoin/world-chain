@@ -30,7 +30,6 @@ pub enum ConsensusError {
 pub struct OptimismConsensusClient {
     client: reqwest::Client,
     rpc_url: String,
-    use_safe_head: bool,
 }
 
 impl OptimismConsensusClient {
@@ -39,17 +38,7 @@ impl OptimismConsensusClient {
         Self {
             client: reqwest::Client::new(),
             rpc_url: rpc_url.into(),
-            use_safe_head: false,
         }
-    }
-
-    /// Uses the safe L2 head as the proposal ceiling.
-    ///
-    /// This is intended for local devnets whose L1 does not advance the finalized block tag.
-    #[must_use]
-    pub const fn with_safe_head(mut self) -> Self {
-        self.use_safe_head = true;
-        self
     }
 }
 
@@ -122,11 +111,7 @@ impl ConsensusProvider for OptimismConsensusClient {
             .result
             .ok_or(ConsensusError::FinalizedBlockNotFound)?;
 
-        Ok(if self.use_safe_head {
-            sync_status_response.safe_l2.number
-        } else {
-            sync_status_response.finalized_l2.number
-        })
+        Ok(sync_status_response.finalized_l2.number)
     }
 }
 
@@ -151,7 +136,6 @@ struct OutputAtBlockResponse {
 #[derive(Debug, Deserialize)]
 struct SyncStatusResponse {
     finalized_l2: L2BlockRef,
-    safe_l2: L2BlockRef,
 }
 
 #[derive(Debug, Deserialize)]

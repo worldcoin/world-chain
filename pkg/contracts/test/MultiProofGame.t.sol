@@ -34,8 +34,9 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(game.retryOf(), address(0));
         assertEq(Hash.unwrap(game.l1Head()), L1_ORIGIN_HASH);
         assertEq(game.l1OriginNumber(), L1_ORIGIN_NUMBER);
+        assertEq(uint8(game.creationProofLane()), uint8(ProofLib.ProofLane.TEE_ATTESTATION));
         assertEq(game.creationProof(), hex"01");
-        assertEq(game.proofCount(), 1);
+        assertEq(game.proofBitmap(), ProofLib.laneMask(ProofLib.ProofLane.TEE_ATTESTATION));
         assertEq(GameType.unwrap(game.gameType()), GameType.unwrap(WC_GAME_TYPE));
         assertTrue(game.wasRespectedGameTypeWhenCreated());
 
@@ -92,6 +93,7 @@ contract MultiProofGameTest is OPStackFixtures {
             address(0),
             L1_ORIGIN_HASH,
             L1_ORIGIN_NUMBER,
+            uint8(ProofLib.ProofLane.TEE_ATTESTATION),
             bytes("")
         );
         vm.prank(proposer);
@@ -108,6 +110,61 @@ contract MultiProofGameTest is OPStackFixtures {
             abi.encodeWithSelector(IMultiProofGame.InvalidL1Head.selector, wrongL1Head, uint256(L1_ORIGIN_NUMBER))
         );
         dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(rootClaim), wrongL1HeadExtraData);
+
+        uint256 invalidBlockNumber = block.number;
+        bytes memory futureL1HeadExtraData = abi.encode(
+            gameImpl.domainHash(),
+            target,
+            address(asr),
+            uint256(0),
+            address(0),
+            keccak256("future-l1-head"),
+            invalidBlockNumber,
+            uint8(ProofLib.ProofLane.TEE_ATTESTATION),
+            hex"01"
+        );
+        vm.prank(proposer);
+        vm.expectRevert(abi.encodeWithSelector(IMultiProofGame.InvalidBlockNumber.selector, invalidBlockNumber));
+        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(rootClaim), futureL1HeadExtraData);
+    }
+
+    function test_Create_RejectsInconsistentRetryReference() public {
+        uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
+        bytes32 rootClaim = _rootClaimFor(target);
+        address unexpectedRetry = makeAddr("unexpected-retry");
+        bytes memory unexpectedRetryExtraData = abi.encode(
+            gameImpl.domainHash(),
+            target,
+            address(asr),
+            uint256(0),
+            unexpectedRetry,
+            L1_ORIGIN_HASH,
+            L1_ORIGIN_NUMBER,
+            uint8(ProofLib.ProofLane.TEE_ATTESTATION),
+            hex"01"
+        );
+
+        vm.prank(proposer);
+        vm.expectRevert(
+            abi.encodeWithSelector(IMultiProofGame.InvalidRetryReference.selector, uint256(0), unexpectedRetry)
+        );
+        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(rootClaim), unexpectedRetryExtraData);
+
+        bytes memory missingRetryExtraData = abi.encode(
+            gameImpl.domainHash(),
+            target,
+            address(asr),
+            uint256(1),
+            address(0),
+            L1_ORIGIN_HASH,
+            L1_ORIGIN_NUMBER,
+            uint8(ProofLib.ProofLane.TEE_ATTESTATION),
+            hex"01"
+        );
+
+        vm.prank(proposer);
+        vm.expectRevert(abi.encodeWithSelector(IMultiProofGame.InvalidRetryReference.selector, uint256(1), address(0)));
+        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(rootClaim), missingRetryExtraData);
     }
 
     function test_Create_AcceptsL1HeadFromEIP2935History() public {
@@ -119,6 +176,41 @@ contract MultiProofGameTest is OPStackFixtures {
 
         assertEq(Hash.unwrap(game.l1Head()), L1_ORIGIN_HASH);
         assertEq(game.l1OriginNumber(), L1_ORIGIN_NUMBER);
+    }
+
+    function test_Create_AcceptsAnyConfiguredProofLane() public {
+        uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
+        bytes32 rootClaim = _rootClaimFor(target);
+
+        teeVerifier.setAcceptAny(false);
+        for (uint8 laneId; laneId < gameImpl.PROOF_LANE_COUNT(); laneId++) {
+            if (laneId == uint8(ProofLib.ProofLane.VALIDITY_PROOF)) validityVerifier.setAcceptAny(true);
+            if (laneId == uint8(ProofLib.ProofLane.TEE_ATTESTATION)) teeVerifier.setAcceptAny(true);
+            if (laneId == uint8(ProofLib.ProofLane.SECURITY_COUNCIL)) councilVerifier.setAcceptAny(true);
+
+            bytes memory extraData = _extraDataForParentWithLane(target, address(asr), 0, laneId);
+            vm.prank(proposer);
+            MultiProofGame game = MultiProofGame(
+                address(dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(rootClaim), extraData))
+            );
+
+            assertEq(uint8(game.creationProofLane()), laneId);
+            assertEq(game.proofBitmap(), uint8(1) << laneId);
+
+            validityVerifier.setAcceptAny(false);
+            teeVerifier.setAcceptAny(false);
+            councilVerifier.setAcceptAny(false);
+        }
+    }
+
+    function test_Create_RejectsInvalidCreationProofLane() public {
+        uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
+        uint8 invalidLane = gameImpl.PROOF_LANE_COUNT();
+        bytes memory extraData = _extraDataForParentWithLane(target, address(asr), 0, invalidLane);
+
+        vm.prank(proposer);
+        vm.expectRevert(abi.encodeWithSelector(IMultiProofGame.InvalidLane.selector, invalidLane));
+        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);
     }
 
     function test_Create_RejectsWrongDomainAndInterval() public {

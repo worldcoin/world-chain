@@ -20,11 +20,12 @@ Stack `DisputeGameFactory.create(gameType, rootClaim, extraData)`.
 - `attempt`: retry nonce, non-zero only when replacing a game invalidated by a proof timeout.
 - `retry_of`: concrete previous game for a non-zero attempt.
 - `l1_origin_hash` and `l1_origin_number`: recent L1 block selected by the proposer.
-- `creation_proof`: Nitro proof verified by the game during creation.
+- `creation_proof_lane`: lane used to verify the creation proof. The proposer uses `TEE_ATTESTATION`.
+- `creation_proof`: proof verified by the selected lane during creation.
 
 These fields determine the factory call:
 `extraData = abi.encode(domainHash, l2BlockNumber, parentRef, attempt, retryOf, l1OriginHash,
-l1OriginNumber, creationProof)`.
+l1OriginNumber, creationProofLane, creationProof)`.
 
 ## How to get these items
 

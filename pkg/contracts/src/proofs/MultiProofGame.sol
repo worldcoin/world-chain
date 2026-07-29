@@ -31,8 +31,7 @@ import {
     InvalidParentGame,
     NoCreditToClaim,
     ParentGameNotResolved,
-    UnexpectedGameType,
-    UnexpectedRootClaim
+    UnexpectedGameType
 } from "@optimism-bedrock/src/dispute/lib/Errors.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
 import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
@@ -167,9 +166,10 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     //   [0x0D4, 0x0F4) retryOf                            (extraData word 4)
     //   [0x0F4, 0x114) l1OriginHash                       (extraData word 5)
     //   [0x114, 0x134) l1OriginNumber                     (extraData word 6)
-    //   [0x134, 0x154) creationProof offset (= 0x100)     (extraData word 7)
-    //   [0x154, 0x174) creationProof length               (dynamic tail)
-    //   [0x174, ...) creationProof bytes, padded to 32 bytes
+    //   [0x134, 0x154) creationProofLane                   (extraData word 7)
+    //   [0x154, 0x174) creationProof offset (= 0x120)     (extraData word 8)
+    //   [0x174, 0x194) creationProof length               (dynamic tail)
+    //   [0x194, ...) creationProof bytes, padded to 32 bytes
 
     function gameCreator() public pure returns (address creator_) {
         creator_ = _getArgAddress(0x00);
@@ -218,7 +218,17 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @inheritdoc IMultiProofGame
     function creationProof() public pure returns (bytes memory proof_) {
         bytes memory data = extraData();
-        (,,,,,,, proof_) = abi.decode(data, (bytes32, uint256, address, uint256, address, bytes32, uint256, bytes));
+        (,,,,,,,, proof_) =
+            abi.decode(data, (bytes32, uint256, address, uint256, address, bytes32, uint256, uint8, bytes));
+    }
+
+    /// @inheritdoc IMultiProofGame
+    function creationProofLane() public pure returns (ProofLib.ProofLane lane_) {
+        bytes memory data = extraData();
+        (,,,,,,, uint8 laneId,) =
+            abi.decode(data, (bytes32, uint256, address, uint256, address, bytes32, uint256, uint8, bytes));
+        if (laneId >= PROOF_LANE_COUNT) revert InvalidLane(laneId);
+        lane_ = ProofLib.ProofLane(laneId);
     }
 
     /// @notice Returns the ABI-encoded proposal data supplied to `DisputeGameFactory.create`.
@@ -318,7 +328,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         if (msg.value != proposerBond) revert IncorrectBondAmount();
 
         bytes memory proposalExtraData = extraData();
-        if (proposalExtraData.length < 0x140) revert BadExtraData();
+        if (proposalExtraData.length < 0x160) revert BadExtraData();
         (
             bytes32 proposalDomainHash_,
             uint256 l2BlockNumber_,
@@ -327,8 +337,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             address retryOf_,
             bytes32 l1OriginHash_,
             uint256 l1OriginNumber_,
+            uint8 creationProofLaneId_,
             bytes memory creationProof_
-        ) = abi.decode(proposalExtraData, (bytes32, uint256, address, uint256, address, bytes32, uint256, bytes));
+        ) = abi.decode(proposalExtraData, (bytes32, uint256, address, uint256, address, bytes32, uint256, uint8, bytes));
         if (
             creationProof_.length == 0
                 || keccak256(proposalExtraData)
@@ -341,12 +352,14 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
                             retryOf_,
                             l1OriginHash_,
                             l1OriginNumber_,
+                            creationProofLaneId_,
                             creationProof_
                         )
                     )
         ) {
             revert BadExtraData();
         }
+        if (creationProofLaneId_ >= PROOF_LANE_COUNT) revert InvalidLane(creationProofLaneId_);
 
         // Preserves the former propose-time registry pause gate.
         if (anchorStateRegistry.paused()) revert GamePaused();
@@ -388,14 +401,13 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         if (l2BlockNumber_ != expectedL2BlockNumber) {
             revert InvalidL2BlockNumber(expectedL2BlockNumber, l2BlockNumber_);
         }
-        // Per spec, the sequence number must fit within a uint64.
-        if (l2BlockNumber_ > type(uint64).max) revert UnexpectedRootClaim(rootClaim());
 
         // Retries explicitly reference the previous concrete game because its selected L1 head
         // and creation proof make its factory UUID impossible to reconstruct from the transition.
-        if (attempt_ == 0) {
-            if (retryOf_ != address(0)) revert BadExtraData();
-        } else {
+        if ((attempt_ == 0) != (retryOf_ == address(0))) {
+            revert InvalidRetryReference(attempt_, retryOf_);
+        }
+        if (attempt_ != 0) {
             if (retryOf_.code.length == 0) revert GameNotRetryable(keccak256(abi.encode(retryOf_)));
             IMultiProofGame previous = IMultiProofGame(retryOf_);
             (GameType previousType, Claim previousClaim, bytes memory previousExtraData) = previous.gameData();
@@ -424,10 +436,11 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         rootId = ProofLib.rootId(
             domainHash, parentRef_, Claim.unwrap(rootClaim()), l2BlockNumber_, l1OriginHash_, _l1OriginNumber
         );
-        if (!teeVerifier.verify(rootId, creationProof_)) {
-            revert InvalidProof(ProofLib.ProofLane.TEE_ATTESTATION, rootId);
+        ProofLib.ProofLane creationProofLane_ = creationProofLane();
+        if (!_verifierFor(creationProofLane_).verify(rootId, creationProof_)) {
+            revert InvalidProof(creationProofLane_, rootId);
         }
-        proofBitmap = ProofLib.laneMask(ProofLib.ProofLane.TEE_ATTESTATION);
+        proofBitmap = ProofLib.laneMask(creationProofLane_);
 
         challengeDeadline = uint64(block.timestamp + challengePeriod);
         proofDeadline = uint64(block.timestamp + proofPeriod);
@@ -442,29 +455,33 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         wasRespectedGameTypeWhenCreated =
             anchorStateRegistry.respectedGameType().raw() == GameTypes.MULTI_PROOF_GAME_TYPE.raw();
 
-        emit WorldChainGameCreated(
-            rootId,
-            parentRef_,
-            Claim.unwrap(rootClaim()),
-            l2BlockNumber_,
-            l1OriginHash_,
-            _l1OriginNumber,
-            attempt_,
-            gameCreator()
-        );
-        emit ProofLaneSupported(ProofLib.ProofLane.TEE_ATTESTATION, rootId, proofBitmap);
-        if (ProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
-            emit ProofThresholdReached(rootId, proofBitmap);
-        }
+        _emitCreationEvents(creationProofLane_);
     }
 
     /// @dev `BLOCKHASH` retains 256 blocks; EIP-2935 extends contract access to 8,191.
     function _historicalBlockHash(uint256 blockNumber_) internal view returns (bytes32 hash_) {
-        if (blockNumber_ >= block.number) return bytes32(0);
+        if (blockNumber_ >= block.number) revert InvalidBlockNumber(blockNumber_);
         if (block.number - blockNumber_ <= 256) return blockhash(blockNumber_);
 
         (bool success, bytes memory result) = HISTORY_STORAGE.staticcall(abi.encode(blockNumber_));
         if (success && result.length == 32) hash_ = abi.decode(result, (bytes32));
+    }
+
+    function _emitCreationEvents(ProofLib.ProofLane creationProofLane_) internal {
+        emit WorldChainGameCreated(
+            rootId,
+            parentRef(),
+            Claim.unwrap(rootClaim()),
+            l2SequenceNumber(),
+            Hash.unwrap(l1Head()),
+            _l1OriginNumber,
+            attempt(),
+            gameCreator()
+        );
+        emit ProofLaneSupported(creationProofLane_, rootId, proofBitmap);
+        if (ProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
+            emit ProofThresholdReached(rootId, proofBitmap);
+        }
     }
 
     ////////////////////////////////////////////////////////////////

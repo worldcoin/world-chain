@@ -14,7 +14,8 @@ use world_chain_devnet::{
     is_docker_unavailable,
 };
 use world_chain_proofs::{
-    IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame, MULTI_PROOF_GAME_TYPE,
+    IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame,
+    MULTI_PROOF_GAME_TYPE, ProofLane,
 };
 
 const DEVNET_SIGNER_KEY: &str =
@@ -170,6 +171,10 @@ async fn op_native_wip_1006_portal_withdrawal_and_bond_claim() -> eyre::Result<(
     ensure!(
         !game.creationProof().call().await?.is_empty(),
         "covering WIP-1006 game has no creation proof"
+    );
+    ensure!(
+        game.creationProofLane().call().await? == ProofLane::TeeAttestation as u8,
+        "covering WIP-1006 game was not created with a TEE proof"
     );
     ensure!(
         game.proofCount().call().await? == 1,

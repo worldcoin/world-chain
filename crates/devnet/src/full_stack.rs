@@ -2584,8 +2584,7 @@ async fn start_world_chain_proposer(
         },
         contracts.clone(),
     );
-    let output_roots =
-        OptimismConsensusClient::new(output_root_rpc_url.to_string()).with_safe_head();
+    let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let proof_requester = RpcProverServiceClient::new(prover_service_url)
         .map_err(|error| eyre!("failed to connect proposer to prover-service: {error}"))?;
     let domain_hash = contracts.domain_hash();
@@ -2663,8 +2662,7 @@ async fn start_world_chain_challenger(
         .connect_http(Url::parse(l1_rpc_url)?);
 
     let client = AlloyChallengerClient::new(provider, factory_address, anchor_address);
-    let output_roots =
-        OptimismConsensusClient::new(output_root_rpc_url.to_string()).with_safe_head();
+    let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let config = ChallengerConfig {
         poll_interval: WORLD_CHALLENGER_POLL_INTERVAL,
         ..ChallengerConfig::default()
@@ -2754,8 +2752,7 @@ async fn start_world_chain_defender(
         .connect_http(Url::parse(l1_rpc_url)?);
 
     let client = AlloyDefenderClient::new(provider, factory_address);
-    let output_roots =
-        OptimismConsensusClient::new(output_root_rpc_url.to_string()).with_safe_head();
+    let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let proof_requester = RpcProverServiceClient::new(prover_service_url)
         .map_err(|error| eyre!("failed to connect defender to prover-service: {error}"))?;
     let allowed_proposer = DEVNET_PRIVATE_KEY

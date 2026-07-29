@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, B256, BlockNumber, Bytes, U256, keccak256};
-use alloy_sol_types::SolValue;
+use alloy_sol_types::{SolValue, sol};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -17,6 +17,20 @@ pub const PROOF_SYSTEM_VERSION: u64 = 1;
 /// The stock `DisputeGameFactory` indexes every game type in one array, so every
 /// index-based read must filter on this value.
 pub const MULTI_PROOF_GAME_TYPE: u32 = 1006;
+
+sol! {
+    struct ProposalExtraDataWire {
+        bytes32 domainHash;
+        uint256 l2BlockNumber;
+        address parentRef;
+        uint256 attempt;
+        address retryOf;
+        bytes32 l1OriginHash;
+        uint256 l1OriginNumber;
+        uint8 creationProofLane;
+        bytes creationProof;
+    }
+}
 
 /// The `MultiProofGame.WorldChainGameCreated` event.
 #[derive(Debug, Clone, Copy)]
@@ -116,20 +130,22 @@ impl ProposalCommitment {
         retry_of: Address,
         l1_origin_hash: B256,
         l1_origin_number: u64,
+        creation_proof_lane: ProofLane,
         creation_proof: Bytes,
     ) -> Bytes {
-        (
-            domain_hash,
-            U256::from(self.l2_block_number),
-            self.parent_ref,
-            U256::from(self.attempt),
-            retry_of,
-            l1_origin_hash,
-            U256::from(l1_origin_number),
-            creation_proof,
-        )
-            .abi_encode_params()
-            .into()
+        ProposalExtraDataWire {
+            domainHash: domain_hash,
+            l2BlockNumber: U256::from(self.l2_block_number),
+            parentRef: self.parent_ref,
+            attempt: U256::from(self.attempt),
+            retryOf: retry_of,
+            l1OriginHash: l1_origin_hash,
+            l1OriginNumber: U256::from(l1_origin_number),
+            creationProofLane: creation_proof_lane as u8,
+            creationProof: creation_proof,
+        }
+        .abi_encode_params()
+        .into()
     }
 }
 
@@ -143,6 +159,7 @@ pub struct ProposalExtraData {
     pub retry_of: Address,
     pub l1_origin_hash: B256,
     pub l1_origin_number: u64,
+    pub creation_proof_lane: ProofLane,
     pub creation_proof: Bytes,
 }
 
@@ -150,30 +167,32 @@ impl ProposalExtraData {
     /// Decodes the canonical proof-backed proposal payload.
     pub fn decode(data: &[u8]) -> Result<Self, String> {
         let decoded =
-            <(B256, U256, Address, U256, Address, B256, U256, Bytes)>::abi_decode_params(data)
-                .map_err(|error| error.to_string())?;
+            ProposalExtraDataWire::abi_decode_params(data).map_err(|error| error.to_string())?;
         let canonical = decoded.clone().abi_encode_params();
         if canonical != data {
             return Err("non-canonical proposal extraData".to_string());
         }
         Ok(Self {
-            domain_hash: decoded.0,
+            domain_hash: decoded.domainHash,
             l2_block_number: decoded
-                .1
+                .l2BlockNumber
                 .try_into()
                 .map_err(|_| "l2 block number exceeds u64".to_string())?,
-            parent_ref: decoded.2,
+            parent_ref: decoded.parentRef,
             attempt: decoded
-                .3
+                .attempt
                 .try_into()
                 .map_err(|_| "attempt exceeds u64".to_string())?,
-            retry_of: decoded.4,
-            l1_origin_hash: decoded.5,
+            retry_of: decoded.retryOf,
+            l1_origin_hash: decoded.l1OriginHash,
             l1_origin_number: decoded
-                .6
+                .l1OriginNumber
                 .try_into()
                 .map_err(|_| "l1 origin number exceeds u64".to_string())?,
-            creation_proof: decoded.7,
+            creation_proof_lane: ProofLane::from_u8(decoded.creationProofLane).ok_or_else(
+                || format!("invalid creation proof lane {}", decoded.creationProofLane),
+            )?,
+            creation_proof: decoded.creationProof,
         })
     }
 }
@@ -219,6 +238,17 @@ pub enum ProofLane {
 }
 
 impl ProofLane {
+    /// Returns the proof lane represented by its protocol identifier.
+    #[must_use]
+    pub const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::ValidityProof),
+            1 => Some(Self::TeeAttestation),
+            2 => Some(Self::SecurityCouncil),
+            _ => None,
+        }
+    }
+
     /// Bit assigned to this lane in the per-root proof bitmap.
     #[must_use]
     pub const fn mask(self) -> u8 {
@@ -376,6 +406,7 @@ mod tests {
             Address::ZERO,
             l1_origin_hash,
             42,
+            ProofLane::TeeAttestation,
             proof.clone(),
         );
         assert_eq!(
@@ -388,6 +419,7 @@ mod tests {
                 retry_of: Address::ZERO,
                 l1_origin_hash,
                 l1_origin_number: 42,
+                creation_proof_lane: ProofLane::TeeAttestation,
                 creation_proof: proof,
             }
         );

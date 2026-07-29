@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use world_chain_proof_core::boot::TransitionPublicValues;
 use world_chain_proofs::{
     IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame,
-    InvalidationReasonError, MULTI_PROOF_GAME_TYPE, ProposalExtraData, ResolutionStatus,
+    InvalidationReasonError, MULTI_PROOF_GAME_TYPE, ProofLane, ProposalExtraData, ResolutionStatus,
     RootStateError,
 };
 use world_chain_prover_service::ProofData;
@@ -637,6 +637,7 @@ where
             retry_of.unwrap_or(Address::ZERO),
             l1_origin_hash,
             l1_origin_number,
+            ProofLane::TeeAttestation,
             creation_proof,
         );
         let pending = self
@@ -728,6 +729,7 @@ mod tests {
                 retry_of,
                 l1_origin_hash: B256::ZERO,
                 l1_origin_number: 0,
+                creation_proof_lane: ProofLane::TeeAttestation,
                 creation_proof: Bytes::from_static(&[1]),
             },
         }

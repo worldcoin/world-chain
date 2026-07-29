@@ -79,6 +79,7 @@ sol! {
         function proposalDomainHash() external view returns (bytes32);
         function attempt() external view returns (uint256);
         function retryOf() external view returns (address);
+        function creationProofLane() external view returns (uint8);
         function creationProof() external view returns (bytes memory);
         function parentRef() external view returns (address);
         function startingRootClaim() external view returns (bytes32);

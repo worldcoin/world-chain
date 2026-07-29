@@ -176,6 +176,15 @@ abstract contract OPStackFixtures is Test {
         view
         returns (bytes memory)
     {
+        return _extraDataForParentWithLane(l2BlockNumber, parent, attempt, uint8(ProofLib.ProofLane.TEE_ATTESTATION));
+    }
+
+    function _extraDataForParentWithLane(
+        uint256 l2BlockNumber,
+        address parent,
+        uint256 attempt,
+        uint8 creationProofLane
+    ) internal view returns (bytes memory) {
         address retryOf;
         if (attempt > 0) {
             uint256 gameCount = dgf.gameCount();
@@ -192,6 +201,7 @@ abstract contract OPStackFixtures is Test {
             retryOf,
             L1_ORIGIN_HASH,
             L1_ORIGIN_NUMBER,
+            creationProofLane,
             hex"01"
         );
     }
