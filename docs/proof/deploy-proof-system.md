@@ -79,7 +79,7 @@ To override any value locally without editing the committed file, create
 |----------|---------|
 | `PRIVATE_KEY` | deploy-nitro, deploy-system, certmanager-prewarm |
 | `OWNER` | deploy-nitro (owner of the verifier + key registry) |
-| `OWNER_KEY` | approve-pcrs, and Phase 4 registration |
+| `OWNER_KEY` | approve-pcrs (owner-only). **Not** required for Phase 4 — `registerKey` is not owner-gated (see Phase 4). |
 | `L1_RPC_URL` | all on-chain phases |
 | `WORLD_CHAIN_L2_CHAIN_ID` | deploy-system (auto-fetched if unset) |
 | `ROLLUP_CONFIG_HASH` | deploy-system (auto-computed by `proof-setup`) |
@@ -210,6 +210,19 @@ NSM hardware entropy on every boot (see `init_signing_key` in
 approved PCR set on-chain so that `NitroProofVerifier.verify` will accept `ecrecover`
 signatures produced by this enclave.
 
+> **Access control — `registerKey` is NOT owner-gated.**
+> `NitroEnclaveKeyRegistry.registerKey(bytes,bytes,bytes)` is a plain `external`
+> function with **no `onlyOwner` modifier** — anyone can call it, and it only needs a
+> funded L1 key to pay for gas (it does **not** require `OWNER`/`OWNER_KEY`).
+> Authorization is **purely cryptographic**: the call reverts unless
+> `NitroAttestationVerifier.verifyAttestation` succeeds, which requires a genuine
+> AWS-signed COSE_Sign1 attestation, a valid P-384 certificate chain up to the
+> hardcoded AWS Nitro Root CA, **and** a PCR triple that is already in the
+> owner-approved allowlist (`approvePCRSet`, Phase 3b). In other words the owner gates
+> _which enclave images_ may register (at the PCR/image level via `approvePCRSet`),
+> not each individual `registerKey` transaction. Only `revokeKey` (registry) and
+> `approvePCRSet`/`revokePCRSet` (verifier) are `onlyOwner`.
+
 > **Tooling gap (as of this writing):** there is no `just` recipe or CLI subcommand
 > that performs Phase 4 end-to-end. The bare `nitro-worker get-attestation` /
 > `just proof-get-attestation` used in Phase 3a returns an attestation **without** the
@@ -269,10 +282,11 @@ ATTEST_HINTS=$(cargo run -p world-chain-proof-nitro --bin p384-hints -- attestat
 ### Step 4.4 — Call `registerKey`
 
 ```bash
+# Any funded L1 key works here — registerKey is not owner-gated (see note above).
 cast send "$REG" \
   "registerKey(bytes,bytes,bytes)" \
   "$TBS" "$SIG" "$ATTEST_HINTS" \
-  --rpc-url "$L1_RPC_URL" --private-key "$OWNER_KEY"
+  --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY"
 ```
 
 `registerKey` re-verifies the attestation on-chain (COSE_Sign1, P-384 signature, cert
@@ -300,6 +314,33 @@ cargo run -p prover-cli -- \
   --prover-service-url  "$PROVER_SERVICE_URL" \
   --poll
 ```
+
+---
+
+## Known gap / follow-up: automated self-registration
+
+Because `registerKey` is not owner-gated and is authorized purely by attestation +
+the owner-approved PCR allowlist (see Phase 4), the worker could in principle
+**register itself on boot** — fetch its own `public_key`-embedding attestation from the
+enclave, compute the P-384 hints, and submit `registerKey` on L1 — with no human or
+owner signature required. This is fully compatible with the trust model: the owner
+still controls _which enclave images_ may register via `approvePCRSet`.
+
+This automation is **not implemented today**:
+
+- `NitroProver::get_public_key_async` exists in `proofs/nitro/src/host.rs` but has
+  **no callers** — nothing wires it into worker startup.
+- The worker's `run` command (`proofs/nitro/worker/src/cmd/run.rs`) only leases jobs,
+  proves them in the enclave, and submits the signed attestations back to the
+  prover-service. It never fetches its pubkey attestation or calls `registerKey`.
+- There is no `just` recipe, CLI subcommand, startup hook, or `crypto-apps` sidecar
+  that performs registration. The only exposed enclave-attestation tooling is the
+  bare `get-attestation` subcommand, which omits `public_key` and is used solely for
+  CertManager pre-warm (Phase 3a).
+
+Until a self-registration path is built, Phase 4 must be driven manually as described
+above. Suggested follow-up: a `just proof-register-key <env>` recipe, or (better) a
+worker startup hook that self-registers using `get_public_key_async`.
 
 ---
 
