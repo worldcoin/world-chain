@@ -85,8 +85,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     ////////////////////////////////////////////////////////////////
 
     /// @notice Semantic version.
-    /// @custom:semver 2.0.0
-    string public constant version = "2.0.0";
+    /// @custom:semver 1.0.0
+    string public constant version = "1.0.0";
 
     Timestamp public createdAt;
     Timestamp public resolvedAt;
