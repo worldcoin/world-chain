@@ -102,18 +102,6 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
             bytes memory expectedPublicKey
         ) = abi.decode(proof, (bytes32, address, uint256, ProofLib.TransitionPublicValues, bytes, bytes));
 
-        // `abi.decode` accepts trailing bytes. Reject non-canonical encodings so one decoded
-        // creation proof cannot produce multiple DisputeGameFactory UUIDs by changing bytes
-        // that the verifier would otherwise ignore.
-        if (
-            keccak256(proof)
-                != keccak256(
-                    abi.encode(domainHash, parentRef, l1OriginNumber, transition, signature, expectedPublicKey)
-                )
-        ) {
-            return false;
-        }
-
         // 1. Bind the proof identity and transition fields to the calling game's immutable snapshot.
         bool matchesGame =
             ProofVerificationLib.matchesGame(gameAddress, rootId, domainHash, parentRef, l1OriginNumber, transition);

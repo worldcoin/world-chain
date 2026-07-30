@@ -86,7 +86,6 @@ impl ProofRequester for InstantProofRequester {
                 attestation: Bytes::from_static(&[1]),
                 public_values: Bytes::from_static(&[2]),
                 signature: Bytes::from_static(&[3]),
-                public_key: Bytes::from_static(&[4]),
             },
         }))
     }

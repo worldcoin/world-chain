@@ -87,7 +87,6 @@ fn proof_for(req: &ProofRequest) -> SucceededProofResponse {
             attestation: Bytes::from(vec![0xcc]),
             public_values: Bytes::from(vec![0xee]),
             signature: Bytes::from(vec![0xdd]),
-            public_key: Bytes::from(vec![0x04]),
         },
     };
     SucceededProofResponse {
@@ -308,7 +307,6 @@ async fn submit_proof_with_wrong_backend_is_rejected() {
             attestation: Bytes::from(vec![0xcc]),
             public_values: Bytes::from(vec![0xee]),
             signature: Bytes::from(vec![0xdd]),
-            public_key: Bytes::from(vec![0x04]),
         },
     };
     assert!(matches!(

@@ -14,6 +14,6 @@ pub use consensus_provider::{ConsensusError, ConsensusProvider, OptimismConsensu
 pub use types::{
     InvalidationReason, InvalidationReasonError, MULTI_PROOF_GAME_TYPE, PROOF_LANE_COUNT,
     PROOF_SYSTEM_VERSION, PROOF_THRESHOLD, ProofDomain, ProofLane, ProposalCommitment,
-    ProposalExtraData, ResolutionStatus, RootCommitment, RootState, RootStateError,
-    WorldChainGameCreated, has_threshold, proof_count,
+    ResolutionStatus, RootCommitment, RootState, RootStateError, WorldChainGameCreated,
+    has_threshold, proof_count,
 };

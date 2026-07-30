@@ -11,10 +11,9 @@ use std::{
 use alloy_eips::{BlockNumberOrTag, eip1559::BaseFeeParams};
 use alloy_genesis::Genesis;
 use alloy_network::EthereumWallet;
-use alloy_primitives::{Address, B64, B256, hex};
+use alloy_primitives::{Address, B64, hex};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_local::PrivateKeySigner;
-use alloy_sol_types::SolValue;
 use async_trait::async_trait;
 use base64::prelude::{BASE64_STANDARD, Engine};
 use eyre::eyre::{Context, Result, bail, eyre};
@@ -49,9 +48,7 @@ use world_chain_challenger::{
     WorldChainChallenger,
 };
 use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
-use world_chain_proof_core::{
-    boot::TransitionPublicValues, hash_world_rollup_config, range::WorldRangeHardforkConfig,
-};
+use world_chain_proof_core::{hash_world_rollup_config, range::WorldRangeHardforkConfig};
 use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
 use world_chain_proof_succinct_host_utils::{
     Sp1ProverKind, WorldSuccinctProver,
@@ -364,21 +361,13 @@ impl ClaimedProofJobHandler for DevnetNitroBackend {
     }
 
     async fn handle_claimed_job(&self, job: ProofJob) -> anyhow::Result<ProofData> {
-        let public_values = TransitionPublicValues {
-            l1Head: job.request.l1_head,
-            l2PreRoot: B256::ZERO,
-            l2PreBlockNumber: job.request.l2_block_number.saturating_sub(1),
-            l2PostRoot: job.request.root_claim,
-            l2PostBlockNumber: job.request.l2_block_number,
-            rollupConfigHash: B256::ZERO,
-        };
-        let mut public_key = vec![0; 65];
-        public_key[0] = 0x04;
+        // The devnet deploys MockRootIdVerifier lanes. The proposer currently uses this
+        // response only as a readiness gate before stock DGF.create, so deterministic bytes
+        // keep the full queue/worker path exercised without requiring Nitro hardware.
         Ok(ProofData::Nitro {
             attestation: job.request.l1_head.as_slice().to_vec().into(),
-            public_values: public_values.abi_encode().into(),
+            public_values: job.request.root_claim.as_slice().to_vec().into(),
             signature: job.request.root_claim.as_slice().to_vec().into(),
-            public_key: public_key.into(),
         })
     }
 }
