@@ -387,7 +387,7 @@ impl WorldChainArgs {
 mod tests {
     use super::*;
     use alloy_genesis::Genesis;
-    use clap::{CommandFactory, Parser};
+    use clap::Parser;
     use reth_node_builder::NodeConfig;
     use std::sync::Arc;
 

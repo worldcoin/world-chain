@@ -353,6 +353,13 @@ async fn signed_gas_burner(
         gas_limit,
     );
     tx_request.value = Some(U256::from(1));
+    // The shared `tx` helper prices transactions at 200 gwei, which against the over-provisioned
+    // `gas_limit`s fuzzed here (up to ~7.5M gas) puts the maximum possible fee above the pool's
+    // 1 ETH transaction fee cap — `eth_sendRawTransaction` submits with `TransactionOrigin::Local`,
+    // which is where that cap is enforced. 20 gwei keeps the worst case at ~0.15 ETH while staying
+    // far above the base fee, so the pool accepts every fuzzed transaction.
+    tx_request.max_fee_per_gas = Some(20e9 as u128);
+    tx_request.max_priority_fee_per_gas = Some(20e9 as u128);
 
     let wallet = EthereumWallet::from(signer(signer_index));
     let signed =
