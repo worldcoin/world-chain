@@ -62,8 +62,8 @@ critcmp nojit jit
 ```
 
 The `JIT vs interpreter` job in `.github/workflows/benchmarks.yml` runs the same pair on one
-runner, on `workflow_dispatch` or on a PR labeled `bench-jit`. Only this bench dispatches the
-out-of-process JIT helper, so it is the only one to run with `--features jit`.
+runner, on `workflow_dispatch` and on any pull request touching the benchmarked crates. Only this
+bench dispatches the out-of-process JIT helper, so it is the only one to run with `--features jit`.
 
 ## Metrics
 

@@ -241,11 +241,10 @@ jobs:
   # Cross-references revmc JIT against the interpreter on the same machine. Informational only:
   # it never fails the build, since a JIT slowdown on a bytecode-light fixture is expected.
   #
-  # Runs on workflow_dispatch, or on a PR carrying the `bench-jit` label. Labeling an open PR does
-  # not itself start a run - push or re-run the workflow after adding it.
+  # Runs alongside `benchmark` on every event that trips this workflow, i.e. workflow_dispatch and
+  # any pull request touching the benchmarked crates.
   jit-comparison:
     name: JIT vs interpreter
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'bench-jit')
     runs-on: arc-public-8xlarge-amd64-runner
     timeout-minutes: 90
     env:
