@@ -43,11 +43,13 @@ test/
   ChainlinkWldEthOracle.fork.t.sol # optional: live World Chain feeds (needs WORLDCHAIN_RPC_URL)
   E2E.fork.t.sol                   # optional: full loop vs live EntryPoint/WLD/router/pool
   Deploy.fork.t.sol                # optional: runs the deploy script, asserts it can sponsor
+  Unwind.fork.t.sol                # optional: asserts teardown recovers every wei and token
   UniswapV3TwapOracle.t.sol        # TWAP conversion via a mock V3 pool
   mocks/Mocks.sol                  # ERC20 / WETH / oracle / aggregator / router / pool mocks
 script/
   Deploy.s.sol                     # deploy + configure + fund + assert ready-to-sponsor
   CheckReady.s.sol                 # read-only: can a deployed paymaster sponsor right now?
+  Unwind.s.sol                     # teardown: recover deposit + stake + WLD for redeploy
 ```
 
 ## Build & test
@@ -66,7 +68,7 @@ WORLDCHAIN_RPC_URL=https://worldchain-mainnet.g.alchemy.com/public \
   forge test --match-path 'test/*.fork.t.sol' -vv
 ```
 
-Expected: **40 passing unit tests**, plus **11 fork tests** that are skipped unless
+Expected: **40 passing unit tests**, plus **19 fork tests** that are skipped unless
 `WORLDCHAIN_RPC_URL` is set. The fork suite is what catches integration breakage
 the mocks cannot — `E2E.fork.t.sol` runs charge → reconcile → swap → re-deposit
 against the real EntryPoint, WLD, SwapRouter02 and WLD/WETH pool.
@@ -156,6 +158,35 @@ PAYMASTER=0x... MAX_COST=10000000000000 USER=0x... \
 [ok]   max WLD per batch: 500000000000000000000
 => READY to sponsor.
 ```
+
+## Teardown / redeploy
+
+`script/Unwind.s.sol` recovers every asset so the funds can be reused on a new
+deployment. Two phases, because the EntryPoint enforces the unstake delay:
+
+```bash
+# phase 1: swap booked WLD -> deposit, sweep stray WLD, withdraw deposit, unlock stake
+PAYMASTER=0x... RECIPIENT=0x... forge script script/Unwind.s.sol:Unwind \
+  --rpc-url "$WORLDCHAIN_RPC_URL" --private-key "$PK" --broadcast
+
+# phase 2: ~1 day later
+PAYMASTER=0x... RECIPIENT=0x... ACTION=claim-stake \
+  forge script script/Unwind.s.sol:Unwind \
+  --rpc-url "$WORLDCHAIN_RPC_URL" --private-key "$PK" --broadcast
+```
+
+Owner-only. `SKIP_SWAP=true` skips the batch swap in phase 1.
+
+`sweepExcessWld` deliberately cannot touch `accumulatedWld` — WLD booked for
+settlement only exits via `triggerBatchSwap`, which needs the batch window open
+and enough pool depth to clear the slippage bound. If phase 1 reports WLD still
+booked, re-run it after the window opens; the script is idempotent.
+
+**Set `RECIPIENT` to an address other than the broadcasting EOA when testing on
+anvil.** With `RECIPIENT` equal to the sender, anvil reports a bogus sender
+balance (a constant 179168 wei regardless of starting funds, unrelated to receipt
+gas — every state transition is still correct). With a distinct recipient, anvil
+reconciles exactly. `test/Unwind.fork.t.sol` asserts the accounting to the wei.
 
 ## How much ETH does it need?
 
