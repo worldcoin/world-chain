@@ -62,6 +62,8 @@ pub struct WorldChainDefender<E, C, P> {
     next_game_index: Option<u64>,
     watched_games: HashMap<Address, GameMetadata>,
     active_defenses: HashMap<Address, ActiveDefense>,
+    /// Games whose proof retries were exhausted, mapped to their proof deadline.
+    abandoned_defenses: HashMap<Address, u64>,
 }
 
 impl<E, C, P> WorldChainDefender<E, C, P> {
@@ -80,6 +82,7 @@ impl<E, C, P> WorldChainDefender<E, C, P> {
             next_game_index: None,
             watched_games: HashMap::default(),
             active_defenses: HashMap::default(),
+            abandoned_defenses: HashMap::default(),
         }
     }
 
@@ -103,6 +106,11 @@ impl<E, C, P> WorldChainDefender<E, C, P> {
     #[cfg(test)]
     pub(crate) fn active_defenses(&self) -> Vec<Address> {
         self.active_defenses.keys().copied().collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn abandoned_defenses(&self) -> Vec<Address> {
+        self.abandoned_defenses.keys().copied().collect()
     }
 }
 
@@ -257,11 +265,7 @@ where
         }
 
         let mut lanes = defense.lanes;
-        let lane_driver = LaneDriver::new(
-            &self.execution_provider,
-            &self.proof_requester,
-            self.config.max_proof_attempts,
-        );
+        let lane_driver = LaneDriver::new(&self.execution_provider, &self.proof_requester);
         for (slot, (proof_lane, backend)) in DEFENDED_LANES.into_iter().enumerate() {
             // skip lanes already proven on-chain, by us or by anyone else
             if proof_bitmap & proof_lane.mask() != 0 {
@@ -318,6 +322,8 @@ where
                         self.active_defenses.remove(&game);
                     } else if lanes.iter().all(|lane| lane.is_terminal()) {
                         error!(%game, "defense abandoned without proving all lanes");
+                        self.abandoned_defenses
+                            .insert(game, defense.game.proof_deadline);
                         self.active_defenses.remove(&game);
                     } else if let Some(defense) = self.active_defenses.get_mut(&game) {
                         defense.lanes = lanes;
@@ -337,10 +343,10 @@ where
 
     async fn discover_games(&mut self, now: u64) -> Result<(), DefenderError> {
         let game_count = self.execution_provider.game_count().await?;
-        if self
+        let initialize_cursor = self
             .next_game_index
-            .is_none_or(|next_game_index| next_game_index > game_count)
-        {
+            .is_none_or(|next_game_index| next_game_index > game_count);
+        if initialize_cursor {
             let cutoff = now.saturating_sub(self.config.max_game_age.as_secs());
             let first_recent = self.first_recent_game_index(game_count, cutoff).await?;
             info!(
@@ -350,8 +356,16 @@ where
             self.next_game_index = Some(first_recent);
         }
 
-        let start = self.next_game_index.unwrap_or(game_count);
-        let end = start
+        let cursor = self.next_game_index.unwrap_or(game_count);
+        // Factory entries are read at the finalized block, but mutable game state is read at
+        // latest. Reconsider a bounded overlap so a shallow reorg of that state cannot make a
+        // transient Drop outcome permanent. The overlap does not consume the new-game budget.
+        let start = if initialize_cursor {
+            cursor
+        } else {
+            cursor.saturating_sub(self.config.game_scan_lookback)
+        };
+        let end = cursor
             .saturating_add(self.config.max_games_per_tick)
             .min(game_count);
         let mut new_games = Vec::with_capacity((end - start) as usize);
@@ -360,7 +374,10 @@ where
             let Some(game) = self.execution_provider.game_address_at(index).await? else {
                 continue;
             };
-            if self.watched_games.contains_key(&game) || self.active_defenses.contains_key(&game) {
+            if self.watched_games.contains_key(&game)
+                || self.active_defenses.contains_key(&game)
+                || self.abandoned_defenses.contains_key(&game)
+            {
                 continue;
             }
 
@@ -393,6 +410,8 @@ where
 
     pub(crate) async fn tick_at(&mut self, now: u64) -> Result<(), DefenderError> {
         self.config.validate()?;
+        self.abandoned_defenses
+            .retain(|_, proof_deadline| now < *proof_deadline);
 
         self.advance_active_defenses(now).await;
         self.advance_tracked_games(now).await?;

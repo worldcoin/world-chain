@@ -18,6 +18,7 @@ use world_chain_proofs::{
 #[derive(Debug, Clone)]
 pub struct AlloyDefenderClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
+    confirmations: u64,
     provider: P,
 }
 
@@ -26,13 +27,17 @@ where
     P: Provider + Clone,
 {
     /// Creates a new Alloy-backed contract client.
-    pub fn new(provider: P, factory_address: Address) -> Self {
+    pub fn new(provider: P, factory_address: Address, confirmations: u64) -> Self {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
             provider.clone(),
         );
 
-        Self { factory, provider }
+        Self {
+            factory,
+            confirmations,
+            provider,
+        }
     }
 
     fn game(&self, address: Address) -> IMultiProofGame::IMultiProofGameInstance<P> {
@@ -163,6 +168,7 @@ where
             .map_err(|err| DefenderError::Contract(err.to_string()))?;
         let tx_hash = *pending.tx_hash();
         let receipt = pending
+            .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await
             .map_err(|err| DefenderError::Contract(err.to_string()))?;
