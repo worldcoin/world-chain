@@ -23,7 +23,9 @@ env:
 jobs:
   benchmark:
     runs-on: arc-public-8xlarge-amd64-runner
-    timeout-minutes: 60
+    timeout-minutes: 120
+    env:
+      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -32,6 +34,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
         with:
           toolchain: stable
+
+      # Required by the revmc JIT backend that the `jit` baseline builds.
+      - name: Install LLVM 22
+        run: sudo bash .github/scripts/install_llvm_ubuntu.sh 22
 
       - name: Cache
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
@@ -95,15 +101,30 @@ jobs:
             exit 1
           fi
           echo "Running ${BENCH_NAME} from ${BENCH_PACKAGE}"
-          cargo bench --package "$BENCH_PACKAGE" --bench "$BENCH_NAME"
+          cargo bench --package "$BENCH_PACKAGE" --bench "$BENCH_NAME" -- --save-baseline pr
+
+      # Third baseline on the same runner and the same revision as `pr`: only the `jit` feature
+      # differs, which swaps `EVM_CONFIG` for one backed by the revmc JIT backend. `pr` doubles as
+      # the interpreter side of the comparison, so no separate `nojit` run is needed.
+      #
+      # Hardcoded to world-chain-validator because that is the crate carrying the `jit` feature, and
+      # `flashblock_validation_synthetic` is the only bench that dispatches the out-of-process JIT
+      # helper.
+      - name: Run JIT benchmarks
+        run: |
+          cargo bench --package world-chain-validator --features jit --bench "$BENCH_NAME" \
+            -- --save-baseline jit
 
       # Compare against main baseline if available
       - name: Check for regressions
         if: github.event_name == 'pull_request'
         run: |
           echo "=== Full Benchmark Comparison ==="
-          critcmp base pr
+          critcmp base pr jit
 
+          # The gate deliberately compares base against pr only. The `jit` baseline is
+          # informational: a JIT slowdown on a bytecode-light fixture is expected and must not
+          # fail the build.
           echo ""
           echo "=== Checking for >10% regressions ==="
           filtered=$(critcmp base pr --threshold 10 2>&1 || true)
@@ -136,55 +157,82 @@ jobs:
             const { execSync } = require('child_process');
             const threshold = Number(process.env.THRESHOLD);
 
-            // Parse critcmp's column output into structured rows. Each data row
-            // holds a benchmark name followed by, per baseline, a ratio (the
-            // fastest baseline is 1.00) and an estimate token containing "±".
-            // We anchor on the "±" tokens so any optional throughput columns
-            // are skipped reliably.
+            // Parse critcmp's column output into structured rows. Each data row holds a benchmark
+            // name followed by, per baseline, a ratio (the fastest baseline is 1.00) and an
+            // estimate token containing "±". We anchor on the "±" tokens so any optional
+            // throughput columns are skipped reliably.
+            //
+            // Baselines are keyed by the names in critcmp's `group <name>...` header rather than by
+            // column position, so the mapping cannot silently swap if critcmp reorders columns.
             function parse(output) {
               const rows = [];
+              let order = [];
               for (const line of output.split('\n')) {
                 const tokens = line.trim().split(/\s+/).filter(Boolean);
+                if (tokens[0] === 'group') {
+                  order = tokens.slice(1);
+                  continue;
+                }
                 const timeIdx = tokens.flatMap((t, i) => (t.includes('±') ? [i] : []));
-                if (timeIdx.length !== 2) continue; // header/separator/blank
-                const [bi, pi] = timeIdx;
-                const name = tokens.slice(0, bi - 1).join(' ');
+                // Require one cell per known baseline; a partial row would misalign the mapping.
+                if (!order.length || timeIdx.length !== order.length) continue;
+                const name = tokens.slice(0, timeIdx[0] - 1).join(' ');
                 if (!name) continue;
-                rows.push({
-                  name,
-                  baseRatio: Number(tokens[bi - 1]),
-                  baseTime: tokens[bi],
-                  prRatio: Number(tokens[pi - 1]),
-                  prTime: tokens[pi],
+                const cells = {};
+                timeIdx.forEach((idx, i) => {
+                  cells[order[i]] = {
+                    ratio: Number(tokens[idx - 1]),
+                    time: tokens[idx],
+                  };
                 });
+                rows.push({ name, cells });
               }
               return rows;
             }
 
+            // Ratios are relative to the fastest baseline, so a ratio quotient is the real delta.
+            function delta(from, to) {
+              if (!from || !to) return NaN;
+              if (!Number.isFinite(from.ratio) || from.ratio <= 0) return NaN;
+              if (!Number.isFinite(to.ratio)) return NaN;
+              return (to.ratio / from.ratio - 1) * 100;
+            }
+
+            // `gated` columns can go red, since a regression there fails the build. The JIT column
+            // never fails the build, so it tops out at 🟡 to avoid reading as a failure.
+            function pctCell(pct, gated) {
+              if (!Number.isFinite(pct)) return 'n/a';
+              const sign = pct >= 0 ? '+' : '';
+              let icon = '🟢'; // faster
+              if (gated && pct > threshold) icon = '🔴';
+              else if (pct > 0) icon = '🟡';
+              return `${icon} ${sign}${pct.toFixed(2)}%`;
+            }
+
             function render(rows) {
-              const header =
-                '| Benchmark | Base | PR | Change |\n| --- | --- | --- | --- |';
+              const header = [
+                '| Benchmark | Base | PR | Change | PR + JIT | JIT vs PR |',
+                '| :--- | ---: | ---: | :--- | ---: | :--- |',
+              ].join('\n');
               const lines = rows.map((r) => {
-                // Ratios are relative to the fastest baseline; PR vs base delta.
-                const pct =
-                  Number.isFinite(r.baseRatio) && r.baseRatio > 0
-                    ? (r.prRatio / r.baseRatio - 1) * 100
-                    : NaN;
-                let change = 'n/a';
-                if (Number.isFinite(pct)) {
-                  const sign = pct >= 0 ? '+' : '';
-                  let icon = '🟢'; // faster
-                  if (pct > threshold) icon = '🔴';
-                  else if (pct > 0) icon = '🟡';
-                  change = `${icon} ${sign}${pct.toFixed(2)}%`;
-                }
-                return `| \`${r.name}\` | ${r.baseTime} | ${r.prTime} | ${change} |`;
+                const base = r.cells.base;
+                const pr = r.cells.pr;
+                const jit = r.cells.jit;
+                const cols = [
+                  `\`${r.name}\``,
+                  base ? base.time : 'n/a',
+                  pr ? pr.time : 'n/a',
+                  pctCell(delta(base, pr), true),
+                  jit ? jit.time : 'n/a',
+                  pctCell(delta(pr, jit), false),
+                ];
+                return `| ${cols.join(' | ')} |`;
               });
               return [header, ...lines].join('\n');
             }
 
             try {
-              const output = execSync('critcmp base pr --color never', {
+              const output = execSync('critcmp base pr jit --color never', {
                 encoding: 'utf-8',
               });
               const rows = parse(output);
@@ -195,11 +243,15 @@ jobs:
               const body = [
                 '## Benchmark Results',
                 '',
-                'Base and PR measured on the same runner in the same workflow run.',
+                'All three baselines measured on the same runner in the same workflow run.',
+                '`Base` and `PR` are the interpreter at each revision; `PR + JIT` is the PR revision',
+                'built with the revmc JIT backend (`--features jit`).',
                 '',
                 table,
                 '',
-                `> 🔴 regression > ${threshold}% &nbsp;·&nbsp; 🟡 slower &nbsp;·&nbsp; 🟢 faster. A regression > ${threshold}% fails the check.`,
+                `> **Change** (Base → PR): 🔴 regression > ${threshold}% &nbsp;·&nbsp; 🟡 slower &nbsp;·&nbsp; 🟢 faster. A regression > ${threshold}% fails the check.`,
+                '>',
+                '> **JIT vs PR** (interpreter → JIT, same revision): 🟡 slower &nbsp;·&nbsp; 🟢 faster. Informational only — never fails the check, since fixtures without heavy bytecode are not expected to gain from JIT.',
                 '',
                 '<details><summary>Raw <code>critcmp</code> output</summary>',
                 '',
@@ -236,101 +288,4 @@ jobs:
               }
             } catch (e) {
               console.log('Could not post benchmark comment:', e.message);
-            }
-
-  # Cross-references revmc JIT against the interpreter on the same machine. Informational only:
-  # it never fails the build, since a JIT slowdown on a bytecode-light fixture is expected.
-  #
-  # Runs alongside `benchmark` on every event that trips this workflow, i.e. workflow_dispatch and
-  # any pull request touching the benchmarked crates.
-  jit-comparison:
-    name: JIT vs interpreter
-    runs-on: arc-public-8xlarge-amd64-runner
-    timeout-minutes: 90
-    env:
-      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
-        with:
-          toolchain: nightly-2026-07-01
-
-      - name: Install LLVM 22
-        run: sudo bash .github/scripts/install_llvm_ubuntu.sh 22
-
-      - name: Cache
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        continue-on-error: false
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: cargo-bench-jit-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: cargo-bench-jit-
-
-      - name: Install critcmp
-        run: cargo install critcmp --locked
-
-      # Both runs execute the same bench on the same runner; only the `jit` feature differs, which
-      # swaps `EVM_CONFIG` for one backed by the revmc JIT backend.
-      - name: Run interpreter benchmarks
-        run: |
-          cargo bench --package world-chain-validator --bench "$BENCH_NAME" \
-            -- --save-baseline nojit
-
-      - name: Run JIT benchmarks
-        run: |
-          cargo bench --package world-chain-validator --features jit --bench "$BENCH_NAME" \
-            -- --save-baseline jit
-
-      - name: Compare JIT against interpreter
-        run: |
-          {
-            echo "## JIT vs interpreter (\`${BENCH_NAME}\`)"
-            echo ""
-            echo '```'
-            critcmp nojit jit --color never
-            echo '```'
-          } | tee jit-comparison.txt >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Post JIT comparison
-        if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        with:
-          script: |
-            const fs = require('fs');
-            let body;
-            try {
-              body = fs.readFileSync('jit-comparison.txt', 'utf-8');
-            } catch (e) {
-              console.log('No comparison output to post:', e.message);
-              return;
-            }
-            body += '\n_Informational: the faster baseline is normalized to 1.00. ' +
-              'Fixtures without heavy bytecode are not expected to gain from JIT._';
-
-            const { data: comments } = await github.rest.issues.listComments({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-            });
-            const existing = comments.find((c) =>
-              c.body.startsWith('## JIT vs interpreter')
-            );
-            if (existing) {
-              await github.rest.issues.updateComment({
-                comment_id: existing.id,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body,
-              });
             }

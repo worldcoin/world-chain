@@ -16,10 +16,7 @@ use alloy_op_evm::{
 use alloy_primitives::{Address, Bytes};
 use core::{fmt::Debug, marker::PhantomData};
 use op_revm::{
-    L1BlockInfo, OpBuilder, OpHaltReason, OpSpecId, OpTransaction,
-    constants::{BASE_FEE_RECIPIENT, L1_FEE_RECIPIENT, OPERATOR_FEE_RECIPIENT},
-    handler::OpHandler,
-    precompiles::OpPrecompiles,
+    L1BlockInfo, OpBuilder, OpHaltReason, OpSpecId, OpTransaction, OpTransactionError, constants::{BASE_FEE_RECIPIENT, L1_FEE_RECIPIENT, OPERATOR_FEE_RECIPIENT}, handler::OpHandler, precompiles::OpPrecompiles,
 };
 use reth_evm_ethereum::factory::{JitMode, RevmcMetrics, RuntimeConfig, RuntimeTuning};
 use reth_node_core::args::JitArgs;
@@ -39,7 +36,7 @@ use std::{path::PathBuf, sync::Arc};
 
 pub use reth_evm_ethereum::factory::maybe_run_jit_helper;
 
-type RawOpEvm<DB, I, R> = op_revm::OpEvm<
+type OpEvm<DB, I, R> = op_revm::OpEvm<
     OpEvmContext<DB>,
     PostExecCompositeInspector<I, R>,
     EthInstructions<EthInterpreter, OpEvmContext<DB>>,
@@ -51,8 +48,8 @@ type RawOpEvm<DB, I, R> = op_revm::OpEvm<
 /// Inspector execution and SDM post-exec production intentionally stay on the interpreter because
 /// revmc's compiled path does not emit the per-opcode callbacks those modes require.
 #[allow(missing_debug_implementations)]
-pub struct OpJitEvm<DB: Database, I, Tx = OpTx, R = SDMWarmingInspector> {
-    inner: RevmcJitEvm<RawOpEvm<DB, I, R>>,
+pub struct WorldChainJitEvm<DB: Database, I, Tx = OpTx, R = SDMWarmingInspector> {
+    inner: RevmcJitEvm<OpEvm<DB, I, R>>,
     enabled_backend: JitBackend,
     inspect: bool,
     post_exec_tracking_active: bool,
@@ -60,7 +57,7 @@ pub struct OpJitEvm<DB: Database, I, Tx = OpTx, R = SDMWarmingInspector> {
     _tx: PhantomData<Tx>,
 }
 
-impl<DB: Database, I, Tx, R: Default> OpJitEvm<DB, I, Tx, R> {
+impl<DB: Database, I, Tx, R: Default> WorldChainJitEvm<DB, I, Tx, R> {
     fn from_env(
         db: DB,
         input: EvmEnv<OpSpecId, BlockEnv>,
@@ -97,7 +94,7 @@ impl<DB: Database, I, Tx, R: Default> OpJitEvm<DB, I, Tx, R> {
     }
 }
 
-impl<DB: Database, I, Tx, R> OpJitEvm<DB, I, Tx, R> {
+impl<DB: Database, I, Tx, R> WorldChainJitEvm<DB, I, Tx, R> {
     fn refresh_backend(&mut self) {
         let backend = if self.inspect || self.post_exec_tracking_active {
             JitBackend::disabled()
@@ -108,7 +105,7 @@ impl<DB: Database, I, Tx, R> OpJitEvm<DB, I, Tx, R> {
     }
 }
 
-impl<DB: Database, I, Tx, R> OpJitEvm<DB, I, Tx, R>
+impl<DB: Database, I, Tx, R> WorldChainJitEvm<DB, I, Tx, R>
 where
     R: PostExecRefundInspector,
 {
@@ -135,7 +132,7 @@ where
     }
 }
 
-impl<DB, I, Tx, R> Evm for OpJitEvm<DB, I, Tx, R>
+impl<DB, I, Tx, R> Evm for WorldChainJitEvm<DB, I, Tx, R>
 where
     DB: Database,
     I: Inspector<OpEvmContext<DB>>,
@@ -174,14 +171,14 @@ where
         let output = if self.inspect || track_post_exec {
             let mut handler = OpHandler::<
                 _,
-                EVMError<DB::Error, op_revm::OpTransactionError>,
+                EVMError<DB::Error, OpTransactionError>,
                 EthFrame<EthInterpreter>,
             >::new();
             handler.inspect_run(&mut self.inner)
         } else {
             let mut handler = OpHandler::<
                 _,
-                EVMError<DB::Error, op_revm::OpTransactionError>,
+                EVMError<DB::Error, OpTransactionError>,
                 EthFrame<EthInterpreter>,
             >::new();
             handler.run(&mut self.inner)
@@ -391,7 +388,7 @@ impl<Tx> EvmFactory for OpJitEvmFactory<Tx>
 where
     Tx: IntoTxEnv<Tx> + Into<OpTransaction<TxEnv>> + Default + Clone + Debug,
 {
-    type Evm<DB: Database, I: Inspector<OpEvmContext<DB>>> = OpJitEvm<DB, I, Tx>;
+    type Evm<DB: Database, I: Inspector<OpEvmContext<DB>>> = WorldChainJitEvm<DB, I, Tx>;
     type Context<DB: Database> = OpEvmContext<DB>;
     type Tx = Tx;
     type Error<DBError: DBErrorMarker> = EVMError<DBError, OpTxError>;
@@ -405,7 +402,7 @@ where
         db: DB,
         input: EvmEnv<OpSpecId, BlockEnv>,
     ) -> Self::Evm<DB, NoOpInspector> {
-        OpJitEvm::from_env(db, input, NoOpInspector {}, false, self.selected_backend())
+        WorldChainJitEvm::from_env(db, input, NoOpInspector {}, false, self.selected_backend())
     }
 
     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>>>(
@@ -414,7 +411,7 @@ where
         input: EvmEnv<OpSpecId, BlockEnv>,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        OpJitEvm::from_env(db, input, inspector, true, self.selected_backend())
+        WorldChainJitEvm::from_env(db, input, inspector, true, self.selected_backend())
     }
 }
 

@@ -61,9 +61,14 @@ cargo bench -p world-chain-validator --features jit --bench flashblock_validatio
 critcmp nojit jit
 ```
 
-The `JIT vs interpreter` job in `.github/workflows/benchmarks.yml` runs the same pair on one
-runner, on `workflow_dispatch` and on any pull request touching the benchmarked crates. Only this
-bench dispatches the out-of-process JIT helper, so it is the only one to run with `--features jit`.
+The single `benchmark` job in `.github/workflows/benchmarks.yml` measures three baselines on one
+runner in one run — `base` (interpreter at the merge base), `pr` (interpreter at the PR revision)
+and `jit` (PR revision with `--features jit`) — and posts them as one table on the PR. `pr` doubles
+as the interpreter side of the JIT comparison, so there is no separate `nojit` run. Only this bench
+dispatches the out-of-process JIT helper, so it is the only one to run with `--features jit`.
+
+Only `base` → `pr` gates the build. The JIT column is informational: a slowdown on a
+bytecode-light fixture is expected.
 
 ## Metrics
 
