@@ -1,48 +1,26 @@
-use alloy_primitives::Address;
 use tracing::{info, warn};
 use world_chain_proofs::{ConsensusProvider, InvalidationReason, RootState};
-use world_chain_prover_service::{
-    ProofBackend, ProofRequest, ProofRequestId, ProofRequester, ProofResponse, ProofStatus,
-};
 
 use crate::{
     ParentRef, Proposal, ProposerClient, ProposerConfig, ProposerError,
     types::{CanonicalLine, CanonicalScan, FinalizedGames, NextProposalAction},
 };
 
-/// Proposal and exact Nitro request retained while proof generation is in flight.
-#[derive(Debug, Clone)]
-struct PendingProposal {
-    proposal: Proposal,
-    retry_of: Option<Address>,
-    proof_request: ProofRequest,
-    proof_id: ProofRequestId,
-}
-
 /// World Chain Proposer.
 #[derive(Debug)]
-pub struct WorldChainProposer<E, C, P> {
+pub struct WorldChainProposer<E, C> {
     config: ProposerConfig,
     execution_provider: E,
     consensus_provider: C,
-    proof_requester: P,
-    pending_proposal: Option<PendingProposal>,
 }
 
-impl<E, C, P> WorldChainProposer<E, C, P> {
-    /// Creates a proposer from execution, consensus, and proof-requester providers.
-    pub fn new(
-        config: ProposerConfig,
-        execution_provider: E,
-        consensus_provider: C,
-        proof_requester: P,
-    ) -> Self {
+impl<E, C> WorldChainProposer<E, C> {
+    /// Creates a proposer from execution and consensus providers.
+    pub const fn new(config: ProposerConfig, execution_provider: E, consensus_provider: C) -> Self {
         Self {
             config,
             execution_provider,
             consensus_provider,
-            proof_requester,
-            pending_proposal: None,
         }
     }
 
@@ -51,19 +29,12 @@ impl<E, C, P> WorldChainProposer<E, C, P> {
     pub const fn config(&self) -> &ProposerConfig {
         &self.config
     }
-
-    /// Returns whether a proposal is waiting for its Nitro proof or L1 submission.
-    #[must_use]
-    pub const fn has_pending_proposal(&self) -> bool {
-        self.pending_proposal.is_some()
-    }
 }
 
-impl<E, C, P> WorldChainProposer<E, C, P>
+impl<E, C> WorldChainProposer<E, C>
 where
     E: ProposerClient,
     C: ConsensusProvider,
-    P: ProofRequester,
 {
     /// Fetches the anchor, reconstructs its canonical descendants, and determines the next action.
     ///
@@ -76,10 +47,6 @@ where
         let mut cursor = anchor.parent_ref();
         let mut canonical_line = CanonicalLine::new(cursor);
 
-        // A game created before the registry advanced onto its parent still references that
-        // now-anchored game. The same transition created after the advance must reference the
-        // registry sentinel because game parents at or below the anchor are rejected.
-        let mut parent_candidates = anchor.parent_candidates();
         let latest_finalized_l2_block = self.consensus_provider.latest_l2_finalized_block().await?;
 
         // loop to the next canonical game until it reaches the last one
@@ -109,48 +76,9 @@ where
 
             let existing = self
                 .execution_provider
-                .games_for_transition(&parent_candidates, root_claim, next_l2_block_number)
+                .game_for_transition(cursor.address, root_claim, next_l2_block_number)
                 .await?;
-            let mut statuses = Vec::with_capacity(existing.len());
-            for game in &existing {
-                statuses.push(
-                    self.execution_provider
-                        .resolution_status(game.address)
-                        .await?,
-                );
-            }
-
-            // A game that has not been invalidated continues the canonical line, whichever
-            // accepted parent it was created under.
-            if let Some(live) = existing
-                .iter()
-                .zip(&statuses)
-                .find(|(_, status)| status.root_state != RootState::Invalidated)
-                .map(|(game, _)| *game)
-            {
-                let next_game = ParentRef {
-                    address: live.address,
-                    l2_block_number: next_l2_block_number,
-                };
-                canonical_line.push_game(next_game);
-                cursor = next_game;
-                parent_candidates = vec![next_game.address];
-                continue;
-            }
-
-            // Every game at this height is invalidated, so only the one created under the
-            // parent that is still acceptable matters. `MultiProofGame.initialize` rejects a
-            // parent at or below the anchor, so a game whose parent has since been closed into
-            // the anchor can neither be retried under that parent nor chained onto: the
-            // transition rebases onto `cursor.address` at attempt zero instead. This is the
-            // contract's own recovery path for inherited invalidations.
-            let Some((stale, status)) = existing
-                .iter()
-                .zip(&statuses)
-                .find(|(game, _)| game.parent_ref == cursor.address)
-            else {
-                // Nothing occupies this transition under the current parent, either because no
-                // game exists yet or because the only ones that do are stale rebase targets.
+            let Some(game) = existing else {
                 return Ok(CanonicalScan::new(
                     canonical_line,
                     NextProposalAction::Propose(Proposal {
@@ -161,10 +89,24 @@ where
                     }),
                 ));
             };
+            let status = self
+                .execution_provider
+                .resolution_status(game.address)
+                .await?;
+
+            if status.root_state != RootState::Invalidated {
+                let next_game = ParentRef {
+                    address: game.address,
+                    l2_block_number: next_l2_block_number,
+                };
+                canonical_line.push_game(next_game);
+                cursor = next_game;
+                continue;
+            }
 
             let next_action = if status.resolvable {
                 NextProposalAction::AwaitNegativeResolution {
-                    game: stale.address,
+                    game: game.address,
                     reason: status.invalidation_reason,
                 }
             } else if status.invalidation_reason == InvalidationReason::ProofTimeout {
@@ -176,13 +118,15 @@ where
                         parent_ref: cursor.address,
                         root_claim,
                         l2_block_number: next_l2_block_number,
-                        attempt: stale.attempt.saturating_add(1),
+                        attempt: game.attempt.checked_add(1).ok_or_else(|| {
+                            ProposerError::Contract("proposal attempt overflows u64".into())
+                        })?,
                     },
-                    invalidated_game: stale.address,
+                    invalidated_game: game.address,
                 }
             } else {
                 NextProposalAction::BlockedByInvalidation {
-                    game: stale.address,
+                    game: game.address,
                     reason: status.invalidation_reason,
                 }
             };
@@ -271,8 +215,8 @@ where
         Ok(())
     }
 
-    /// Reconciles and requests the proof for the next canonical proposal action.
-    pub async fn request_proof(&mut self, scan: &CanonicalScan) -> Result<(), ProposerError> {
+    /// Creates the next canonical game, or waits while its predecessor is unresolved.
+    pub async fn submit_next_proposal(&self, scan: &CanonicalScan) -> Result<(), ProposerError> {
         let (proposal, retry_of) = match scan.next_action() {
             NextProposalAction::Propose(proposal) => (*proposal, None),
             NextProposalAction::RetryTimedOut {
@@ -283,9 +227,8 @@ where
                 warn!(
                     game_address = %game,
                     invalidation_reason = ?reason,
-                    "waiting for challenger to resolve game with negative outcome"
+                    "waiting for game to be resolved with its negative outcome"
                 );
-                self.pending_proposal = None;
                 return Ok(());
             }
             NextProposalAction::BlockedByInvalidation { game, reason } => {
@@ -294,142 +237,21 @@ where
                     invalidation_reason = ?reason,
                     "invalidated transition is not automatically retryable; governance intervention required"
                 );
-                self.pending_proposal = None;
                 return Ok(());
             }
-            NextProposalAction::CaughtUp { .. } => {
-                self.pending_proposal = None;
-                return Ok(());
-            }
+            NextProposalAction::CaughtUp { .. } => return Ok(()),
         };
 
-        if self
-            .pending_proposal
-            .as_ref()
-            .is_some_and(|pending| pending.proposal != proposal)
-        {
-            let pending = self
-                .pending_proposal
-                .take()
-                .expect("pending proposal exists");
-            warn!(
-                old_proposal = ?pending.proposal,
-                new_proposal = ?proposal,
-                "canonical proposal changed; discarding stale pending proof"
-            );
-        }
-
-        if self.pending_proposal.is_none() {
-            let latest_finalized_l1 = self.execution_provider.latest_finalized_l1_block().await?;
-            let proof_request = ProofRequest {
-                backend: ProofBackend::Nitro,
-                // No game exists until the proof-backed proposal transaction is submitted.
-                game: Address::ZERO,
-                root_claim: proposal.root_claim,
-                l2_block_number: proposal.l2_block_number,
-                l1_head: latest_finalized_l1,
-            };
-            let proof_id = proof_request.id();
-            self.pending_proposal = Some(PendingProposal {
-                proposal,
-                retry_of,
-                proof_request,
-                proof_id,
-            });
-        }
-
-        let pending = self
-            .pending_proposal
-            .as_ref()
-            .expect("pending proposal initialized");
-
-        let request_proof_response = self
-            .proof_requester
-            .request_proof(pending.proof_request.clone())
-            .await?;
-        let request_proof_response_proof_id = request_proof_response.proof_id;
-        if request_proof_response_proof_id != pending.proof_id {
-            return Err(ProposerError::InvalidProofResponse(format!(
-                "prover-service returned proof id {request_proof_response_proof_id}, expected {}",
-                pending.proof_id
-            )));
-        }
-        self.pending_proposal
-            .as_mut()
-            .expect("pending proposal initialized")
-            .proof_request
-            .l1_head = request_proof_response.l1_head;
-        Ok(())
-    }
-
-    /// Polls the pending Nitro proof and submits its proposal once the proof is ready.
-    ///
-    /// Pending and failed proofs remain queued for a later tick. Proof retrieval and proposal
-    /// submission errors retain the pending state so the same completed proof can be retried.
-    pub async fn poll_and_submit(&mut self) -> Result<(), ProposerError> {
-        let Some(pending) = self.pending_proposal.as_ref() else {
-            return Ok(());
-        };
-        match self.proof_requester.proof_status(pending.proof_id).await? {
-            ProofStatus::Created | ProofStatus::Running => return Ok(()),
-            ProofStatus::Failed => {
-                warn!(
-                    proof_id = %pending.proof_id,
-                    proposal = ?pending.proposal,
-                    "proposal proof failed; retrying the same request next tick"
-                );
-                return Ok(());
-            }
-            ProofStatus::Succeeded => {}
-        }
-
-        let proof = match self.proof_requester.get_proof(pending.proof_id).await? {
-            ProofResponse::Succeeded(response) if response.id == pending.proof_id => response.proof,
-            ProofResponse::Succeeded(response) => {
-                return Err(ProposerError::InvalidProofResponse(format!(
-                    "proof response id {} does not match requested id {}",
-                    response.id, pending.proof_id
-                )));
-            }
-            ProofResponse::Pending(response) => {
-                warn!(
-                    proof_id = %pending.proof_id,
-                    status = %response.status,
-                    "proof status succeeded but proof response is pending; retrying next tick"
-                );
-                return Ok(());
-            }
-            ProofResponse::Failed(response) => {
-                warn!(
-                    proof_id = %pending.proof_id,
-                    reason = %response.reason,
-                    "proof status succeeded but proof response failed; retrying next tick"
-                );
-                return Ok(());
-            }
-        };
-        if proof.backend() != ProofBackend::Nitro {
-            return Err(ProposerError::InvalidProofResponse(format!(
-                "proof {} was produced by {}, expected nitro",
-                pending.proof_id,
-                proof.backend()
-            )));
-        }
-
-        let submission = self
-            .execution_provider
-            .submit_proposal(&pending.proposal, proof)
-            .await?;
+        let submission = self.execution_provider.submit_proposal(&proposal).await?;
         info!(
             tx_hash = ?submission.tx_hash,
             game_address = %submission.game_address,
-            l2_block_number = pending.proposal.l2_block_number,
-            parent_ref = %pending.proposal.parent_ref,
-            attempt = pending.proposal.attempt,
-            retry_of = ?pending.retry_of,
+            l2_block_number = proposal.l2_block_number,
+            parent_ref = %proposal.parent_ref,
+            attempt = proposal.attempt,
+            retry_of = ?retry_of,
             "submitted World Chain proof-system game"
         );
-        self.pending_proposal = None;
         Ok(())
     }
 
@@ -447,10 +269,8 @@ where
                 let finalized_games = self.resolve_games(canonical_scan.canonical_line()).await?;
                 // 3. advance the anchor to the highest finalized canonical game
                 self.advance_anchor(finalized_games).await?;
-                // 4. request the proof for a new canonical proposal or retry
-                self.request_proof(&canonical_scan).await?;
-                // 5. submit the proposal once its proof is ready
-                self.poll_and_submit().await?;
+                // 4. submit a new canonical proposal or retry
+                self.submit_next_proposal(&canonical_scan).await?;
                 Ok(())
             }
             .await;

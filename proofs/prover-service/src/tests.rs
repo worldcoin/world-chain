@@ -87,6 +87,7 @@ fn proof_for(req: &ProofRequest) -> SucceededProofResponse {
             attestation: Bytes::from(vec![0xcc]),
             public_values: Bytes::from(vec![0xee]),
             signature: Bytes::from(vec![0xdd]),
+            public_key: Bytes::from(vec![0xff]),
         },
     };
     SucceededProofResponse {
@@ -153,6 +154,10 @@ fn request_id_is_deterministic() {
     assert_eq!(sp1.id(), request(ProofBackend::Sp1, 1).id());
     assert_ne!(sp1.id(), request(ProofBackend::Nitro, 1).id());
     assert_ne!(sp1.id(), request(ProofBackend::Sp1, 2).id());
+
+    let mut different_l1_head = sp1.clone();
+    different_l1_head.l1_head = B256::with_last_byte(0xff);
+    assert_ne!(sp1.id(), different_l1_head.id());
 }
 
 #[tokio::test]
@@ -307,6 +312,7 @@ async fn submit_proof_with_wrong_backend_is_rejected() {
             attestation: Bytes::from(vec![0xcc]),
             public_values: Bytes::from(vec![0xee]),
             signature: Bytes::from(vec![0xdd]),
+            public_key: Bytes::from(vec![0xff]),
         },
     };
     assert!(matches!(

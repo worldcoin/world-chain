@@ -14,6 +14,7 @@ use alloy_network::EthereumWallet;
 use alloy_primitives::{Address, B64, hex};
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_local::PrivateKeySigner;
+use alloy_sol_types::SolValue;
 use async_trait::async_trait;
 use base64::prelude::{BASE64_STANDARD, Engine};
 use eyre::eyre::{Context, Result, bail, eyre};
@@ -51,7 +52,9 @@ use world_chain_defender::{
     AlloyDefenderClient, DEFAULT_L1_TX_CONFIRMATIONS as DEFAULT_DEFENDER_L1_TX_CONFIRMATIONS,
     DefenderConfig, WorldChainDefender,
 };
-use world_chain_proof_core::{hash_world_rollup_config, range::WorldRangeHardforkConfig};
+use world_chain_proof_core::{
+    boot::TransitionPublicValues, hash_world_rollup_config, range::WorldRangeHardforkConfig,
+};
 use world_chain_proof_kona_host_utils::online::OnlineHostConfig;
 use world_chain_proof_succinct_host_utils::{
     Sp1ProverKind, WorldSuccinctProver,
@@ -103,8 +106,7 @@ const PROVER_SERVICE_POSTGRES_PORT: u16 = 5432;
 const PROOF_SYSTEM_BLOCK_INTERVAL: u64 = 10;
 /// Poll interval for the in-process SP1 worker leasing jobs from the prover-service.
 const SP1_WORKER_POLL_INTERVAL: Duration = Duration::from_secs(5);
-/// Env var enabling the in-process defender, prover-service, and SP1 worker. Off by default:
-/// real proving needs the SP1 ELFs. Set a prover backend to turn it on.
+/// Env var enabling the optional SP1 worker used for challenged-game escalation.
 const SP1_WORKER_PROVER_ENV: &str = "DEVNET_SP1_WORKER_PROVER";
 /// SP1 network private key. Required when `DEVNET_SP1_WORKER_PROVER=network`.
 const SP1_PRIVATE_KEY_ENV: &str = "SP1_PRIVATE_KEY";
@@ -364,13 +366,21 @@ impl ClaimedProofJobHandler for DevnetNitroBackend {
     }
 
     async fn handle_claimed_job(&self, job: ProofJob) -> anyhow::Result<ProofData> {
-        // The devnet deploys MockRootIdVerifier lanes. The proposer currently uses this
-        // response only as a readiness gate before stock DGF.create, so deterministic bytes
-        // keep the full queue/worker path exercised without requiring Nitro hardware.
+        let transition = TransitionPublicValues {
+            l1Head: job.request.l1_head,
+            l2PreRoot: Default::default(),
+            l2PreBlockNumber: 0,
+            l2PostRoot: job.request.root_claim,
+            l2PostBlockNumber: job.request.l2_block_number,
+            rollupConfigHash: Default::default(),
+        };
+        // Devnet verifiers accept any ABI-valid payload; deterministic values exercise the
+        // queue, worker, defender encoding, and on-chain submission without Nitro hardware.
         Ok(ProofData::Nitro {
             attestation: job.request.l1_head.as_slice().to_vec().into(),
-            public_values: job.request.root_claim.as_slice().to_vec().into(),
+            public_values: transition.abi_encode().into(),
             signature: job.request.root_claim.as_slice().to_vec().into(),
+            public_key: vec![0x04; 65].into(),
         })
     }
 }
@@ -614,8 +624,7 @@ impl FullStackWorldDevnet {
 
         let proof_services = proof_system.as_ref();
 
-        // The proposer always needs the prover-service for its creation-time Nitro proof.
-        // Defender and SP1 worker startup remains optional below.
+        // Proof workers and the defender share one prover-service.
         let (prover_service, prover_service_url) = if proof_services.is_some() {
             let (service, url) = start_prover_service().await?;
             (Some(service), Some(url))
@@ -629,24 +638,14 @@ impl FullStackWorldDevnet {
             None
         };
 
-        let world_proposer = if let (Some(deployment), Some(prover_service_url)) =
-            (proof_services, prover_service_url.as_deref())
-        {
+        let world_proposer = if let Some(deployment) = proof_services {
             let output_root_rpc = op_nodes
                 .first()
                 .map(|node| node.rpc_url.clone())
                 .ok_or_else(|| {
                     eyre!("full-stack devnet has no op-node for the World Chain proposer")
                 })?;
-            Some(
-                start_world_chain_proposer(
-                    &l1_public_rpc,
-                    &output_root_rpc,
-                    prover_service_url,
-                    deployment,
-                )
-                .await?,
-            )
+            Some(start_world_chain_proposer(&l1_public_rpc, &output_root_rpc, deployment).await?)
         } else {
             None
         };
@@ -663,45 +662,54 @@ impl FullStackWorldDevnet {
             None
         };
 
-        // Optional defender proving loop: an in-process defender and SP1 worker, enabled by
-        // `DEVNET_SP1_WORKER_PROVER`. They share the prover-service started for the proposer.
-        let (sp1_worker, world_defender) = match (
-            proof_services,
-            sp1_worker_prover_kind()?,
-            prover_service_url.as_deref(),
-        ) {
-            (Some(deployment), Some(kind), Some(prover_service_url)) => {
+        // The defender always supplies the initial TEE proof. SP1 proving remains optional
+        // until a challenged game needs a second independent lane.
+        let world_defender = match (proof_services, prover_service_url.as_deref()) {
+            (Some(deployment), Some(prover_service_url)) => {
                 let output_root_rpc = op_nodes
                     .first()
                     .map(|node| node.rpc_url.clone())
                     .ok_or_else(|| {
                         eyre!("full-stack devnet has no op-node for the World Chain defender")
                     })?;
+                Some(
+                    start_world_chain_defender(
+                        &l1_public_rpc,
+                        &output_root_rpc,
+                        prover_service_url,
+                        deployment,
+                    )
+                    .await?,
+                )
+            }
+            _ => None,
+        };
+
+        let sp1_worker = match (
+            proof_services,
+            sp1_worker_prover_kind()?,
+            prover_service_url.as_deref(),
+        ) {
+            (Some(deployment), Some(kind), Some(prover_service_url)) => {
                 let l2_rpc = sequencers
                     .first()
                     .map(|sequencer| sequencer.rpc_url.clone())
                     .ok_or_else(|| {
                         eyre!("full-stack devnet has no sequencer for the SP1 worker")
                     })?;
-                let defender = start_world_chain_defender(
-                    &l1_public_rpc,
-                    &output_root_rpc,
-                    prover_service_url,
-                    deployment,
+                Some(
+                    start_sp1_worker(
+                        &l1_public_rpc,
+                        &l2_rpc,
+                        prover_service_url,
+                        &artifacts.rollup_path,
+                        deployment,
+                        kind,
+                    )
+                    .await?,
                 )
-                .await?;
-                let worker = start_sp1_worker(
-                    &l1_public_rpc,
-                    &l2_rpc,
-                    prover_service_url,
-                    &artifacts.rollup_path,
-                    deployment,
-                    kind,
-                )
-                .await?;
-                (Some(worker), Some(defender))
             }
-            _ => (None, None),
+            _ => None,
         };
 
         let mut metrics_targets = Vec::new();
@@ -2547,7 +2555,6 @@ async fn start_challenger(
 async fn start_world_chain_proposer(
     l1_rpc_url: &str,
     output_root_rpc_url: &str,
-    prover_service_url: &str,
     deployment: &WorldProofSystemDeployment,
 ) -> Result<ProposerTask> {
     let factory_address: Address = deployment
@@ -2584,20 +2591,17 @@ async fn start_world_chain_proposer(
         contracts.clone(),
     );
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
-    let proof_requester = RpcProverServiceClient::new(prover_service_url)
-        .map_err(|error| eyre!("failed to connect proposer to prover-service: {error}"))?;
     let domain_hash = contracts.domain_hash();
     let config = ProposerConfig {
         block_interval: deployment.block_interval,
         poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
         max_resolutions_per_tick: ProposerConfig::default().max_resolutions_per_tick,
     };
-    let mut proposer = WorldChainProposer::new(config, contracts, output_roots, proof_requester);
+    let mut proposer = WorldChainProposer::new(config, contracts, output_roots);
 
     info!(
         l1_rpc_url,
         output_root_rpc_url,
-        prover_service = %prover_service_url,
         dispute_game_factory = %deployment.proof_system_factory,
         anchor = %deployment.anchor_state_registry,
         proposer = %proposer_address,
@@ -2733,9 +2737,9 @@ async fn start_world_chain_challenger(
 /// Spawns the in-process World Chain proof-system defender.
 ///
 /// The defender signs with [`WORLD_DEFENDER_PRIVATE_KEY`], a dedicated dev
-/// account that is funded through the L1 genesis. It watches challenged valid
-/// WIP-1006 games on the `DisputeGameFactory`, requests proofs from the
-/// prover-service, and submits completed proof lanes on L1.
+/// account that is funded through the L1 genesis. It supplies the initial TEE
+/// proof for valid WIP-1006 games, escalates challenged games to the configured
+/// threshold, and resolves negative outcomes.
 async fn start_world_chain_defender(
     l1_rpc_url: &str,
     output_root_rpc_url: &str,
@@ -2799,8 +2803,8 @@ async fn start_world_chain_defender(
     Ok(DefenderTask { handle })
 }
 
-/// Reads the SP1 worker prover backend from [`SP1_WORKER_PROVER_ENV`], or `None` when the
-/// defender proving loop is disabled.
+/// Reads the SP1 worker prover backend from [`SP1_WORKER_PROVER_ENV`], or `None` when
+/// challenged-game SP1 escalation is disabled.
 fn sp1_worker_prover_kind() -> Result<Option<Sp1ProverKind>> {
     match std::env::var(SP1_WORKER_PROVER_ENV) {
         Ok(value) => value.parse().map(Some).map_err(|error| eyre!("{error}")),

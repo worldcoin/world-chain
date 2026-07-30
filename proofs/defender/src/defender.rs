@@ -13,10 +13,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::{error, info, warn};
-use world_chain_proofs::{ConsensusProvider, InvalidationReason};
+use world_chain_proofs::{ConsensusProvider, InvalidationReason, ProofLane, RootState};
 use world_chain_prover_service::ProofRequester;
 
-/// An active defense of a challenged game with a valid root.
+/// An active proof-support workflow for a game with a valid root.
 #[derive(Debug, Clone, Copy)]
 struct ActiveDefense {
     game: GameMetadata,
@@ -49,10 +49,9 @@ enum DefenseProgress {
 /// World Chain Defender.
 ///
 /// Discovers allowlisted games through the factory index and watches them until
-/// they no longer need defense. When a game is challenged and its root claim
-/// matches the canonical output root, the defender requests one proof per
-/// defended lane from the `prover-service` and submits each completed proof
-/// on-chain via `submitProofLane`.
+/// resolution. It submits a TEE proof to valid proofless proposals, escalates
+/// challenged games to the configured independent-lane threshold, and resolves
+/// negatively determined games so timed-out proposals can be retried.
 #[derive(Debug)]
 pub struct WorldChainDefender<E, C, P> {
     config: DefenderConfig,
@@ -170,7 +169,10 @@ where
                 Ok(GameOutcome::Track) => {
                     self.watched_games.insert(game.address, game);
                 }
-                Ok(GameOutcome::Defend) => self.start_defense(game),
+                Ok(GameOutcome::Defend) => {
+                    self.watched_games.insert(game.address, game);
+                    self.start_defense(game);
+                }
                 Ok(GameOutcome::Drop) => {}
                 Err(error) => {
                     warn!(
@@ -226,10 +228,10 @@ where
 
     fn start_defense(&mut self, metadata: GameMetadata) {
         let game = metadata.address;
-        info!(%game, "challenged game has a valid root; starting defense");
-        self.watched_games.remove(&game);
+        info!(%game, "game needs proof support and has a valid root; starting proof workflow");
         self.active_defenses
-            .insert(game, ActiveDefense::new(metadata));
+            .entry(game)
+            .or_insert_with(|| ActiveDefense::new(metadata));
     }
 
     async fn advance_defense(
@@ -239,13 +241,22 @@ where
     ) -> Result<DefenseProgress, DefenderError> {
         let metadata = &defense.game;
         let evaluator = GameEvaluator::new(&self.execution_provider, &self.consensus_provider);
-        let proof_bitmap = match evaluator.observe(metadata).await? {
+        let (proof_bitmap, deadline, initial_proof) = match evaluator.observe(metadata).await? {
             GameObservation::Finalized => return Ok(DefenseProgress::Complete),
-            GameObservation::Invalidated(reason) => {
+            GameObservation::Invalidated { reason, .. } => {
                 if reason == InvalidationReason::ProofTimeout {
                     return Ok(DefenseProgress::DeadlineElapsed);
                 }
                 return Ok(DefenseProgress::Closed);
+            }
+            GameObservation::Proposed {
+                proof_bitmap,
+                has_initial_support,
+            } => {
+                if has_initial_support {
+                    return Ok(DefenseProgress::Complete);
+                }
+                (proof_bitmap, metadata.challenge_deadline, true)
             }
             GameObservation::Challenged {
                 proof_bitmap,
@@ -254,19 +265,20 @@ where
                 if has_required_support {
                     return Ok(DefenseProgress::Complete);
                 }
-                proof_bitmap
+                (proof_bitmap, metadata.proof_deadline, false)
             }
-            GameObservation::Unset | GameObservation::Proposed => {
-                return Ok(DefenseProgress::Closed);
-            }
+            GameObservation::Unset => return Ok(DefenseProgress::Closed),
         };
-        if now >= metadata.proof_deadline {
+        if now >= deadline {
             return Ok(DefenseProgress::DeadlineElapsed);
         }
 
         let mut lanes = defense.lanes;
         let lane_driver = LaneDriver::new(&self.execution_provider, &self.proof_requester);
         for (slot, (proof_lane, backend)) in DEFENDED_LANES.into_iter().enumerate() {
+            if initial_proof && proof_lane != ProofLane::TeeAttestation {
+                continue;
+            }
             // skip lanes already proven on-chain, by us or by anyone else
             if proof_bitmap & proof_lane.mask() != 0 {
                 lanes[slot] = LaneState::Proven;
@@ -311,8 +323,9 @@ where
                 Ok(DefenseProgress::DeadlineElapsed) => {
                     error!(
                         %game,
+                        challenge_deadline = defense.game.challenge_deadline,
                         proof_deadline = defense.game.proof_deadline,
-                        "challenged game proof deadline elapsed before defense completed"
+                        "game proof deadline elapsed before proof support completed"
                     );
                     self.active_defenses.remove(&game);
                 }
@@ -339,6 +352,54 @@ where
     async fn advance_active_defenses(&mut self, now: u64) {
         let defense_results = self.scan_active_defenses(now).await;
         self.handle_defense_progress(defense_results);
+    }
+
+    async fn resolve_negative_games(&self) {
+        let mut games = self.watched_games.values().copied().collect::<Vec<_>>();
+        games.sort_unstable_by_key(|game| game.l2_block_number);
+
+        let mut submitted = 0;
+        for metadata in games {
+            if submitted >= self.config.max_resolutions_per_tick {
+                break;
+            }
+            let status = match self
+                .execution_provider
+                .resolution_status(metadata.address)
+                .await
+            {
+                Ok(status) => status,
+                Err(error) => {
+                    warn!(
+                        game = %metadata.address,
+                        %error,
+                        "failed to evaluate game for negative resolution"
+                    );
+                    continue;
+                }
+            };
+            if !status.resolvable || status.root_state != RootState::Invalidated {
+                continue;
+            }
+            match self.execution_provider.resolve_game(metadata.address).await {
+                Ok(resolution) => {
+                    info!(
+                        game = %metadata.address,
+                        tx_hash = %resolution.tx_hash,
+                        reason = ?status.invalidation_reason,
+                        "resolved game with negative outcome"
+                    );
+                    submitted += 1;
+                }
+                Err(error) => {
+                    warn!(
+                        game = %metadata.address,
+                        %error,
+                        "negative game resolution failed; retrying next tick"
+                    );
+                }
+            }
+        }
     }
 
     async fn discover_games(&mut self, now: u64) -> Result<(), DefenderError> {
@@ -381,6 +442,11 @@ where
                 continue;
             }
 
+            // TODO: The proposer adopts an existing canonical transition regardless of who
+            // created it, so an exact-UUID front-run is followed but currently receives no proof
+            // support here. Reconcile the policies by defending the game selected by the
+            // proposer's canonical-line rules; accepting every foreign game with a valid root
+            // would let parallel branches amplify proof-generation work.
             let game_creator = self.execution_provider.game_creator(game).await?;
             if game_creator != self.config.allowed_proposer {
                 continue;
@@ -413,6 +479,7 @@ where
         self.abandoned_defenses
             .retain(|_, proof_deadline| now < *proof_deadline);
 
+        self.resolve_negative_games().await;
         self.advance_active_defenses(now).await;
         self.advance_tracked_games(now).await?;
         self.discover_games(now).await?;

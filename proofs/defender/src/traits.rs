@@ -1,6 +1,6 @@
 use crate::{
     error::DefenderError,
-    types::{DefenderSubmission, GameMetadata},
+    types::{DefenderSubmission, GameMetadata, ResolveSubmission},
 };
 use alloy_primitives::{Address, Bytes};
 use async_trait::async_trait;
@@ -24,7 +24,9 @@ pub trait DefenderClient: Send + Sync {
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, DefenderError>;
     /// Get the bitmap of proof lanes already proven for the provided game.
     async fn proof_bitmap(&self, game: Address) -> Result<u8, DefenderError>;
-    /// Submit a proof to support a challenged game.
+    /// Resolves a game whose outcome is already determined.
+    async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, DefenderError>;
+    /// Submits a proof to support a proposed or challenged game.
     async fn submit_proof(
         &self,
         game: Address,

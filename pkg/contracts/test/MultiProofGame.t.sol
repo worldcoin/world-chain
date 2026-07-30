@@ -38,6 +38,7 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(address(registered), address(game));
         assertTrue(asr.isGameRegistered(IDisputeGame(address(game))));
         assertEq(weth.balanceOf(address(game)), PROPOSER_BOND);
+        assertEq(game.proofBitmap(), 0);
     }
 
     function test_Create_RejectsMalformedExtraData() public {
@@ -157,9 +158,56 @@ contract MultiProofGameTest is OPStackFixtures {
         new MultiProofGame(config);
 
         config = _gameConfig();
+        config.proofTimeoutRecipient = address(0);
+        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
+        new MultiProofGame(config);
+
+        config = _gameConfig();
         config.domain.chainId = CHAIN_ID + 1;
         vm.expectRevert(IMultiProofGame.InconsistentSystemConfiguration.selector);
         new MultiProofGame(config);
+    }
+
+    function test_UnchallengedFlow_AnyProofLaneCanFinalize() public {
+        for (uint8 lane; lane < ProofLib.PROOF_LANE_COUNT; lane++) {
+            (, uint256 anchorBlock) = asr.getAnchorRoot();
+            uint256 target = anchorBlock + BLOCK_INTERVAL;
+            bytes32 rootClaim = keccak256(abi.encode("lane", lane));
+            MultiProofGame game = _propose(type(uint256).max, rootClaim, target, 0);
+
+            game.submitProofLane(lane, abi.encodePacked(game.rootId()));
+            vm.warp(game.challengeDeadline());
+            game.resolve();
+
+            assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
+            assertEq(game.credit(proposer), PROPOSER_BOND);
+        }
+    }
+
+    function test_UnchallengedFlow_ProoflessProposalLosesBondAndCanRetry() public {
+        MultiProofGame first = _proposeAtAnchor();
+        vm.warp(first.challengeDeadline());
+
+        (bool resolvable, ProofLib.RootState rootState, ProofLib.InvalidationReason reason) = first.resolutionStatus();
+        assertTrue(resolvable);
+        assertEq(uint8(rootState), uint8(ProofLib.RootState.INVALIDATED));
+        assertEq(uint8(reason), uint8(ProofLib.InvalidationReason.PROOF_TIMEOUT));
+
+        first.resolve();
+        assertEq(uint8(first.status()), uint8(GameStatus.CHALLENGER_WINS));
+        assertEq(uint8(first.invalidationReason()), uint8(ProofLib.InvalidationReason.PROOF_TIMEOUT));
+        assertEq(first.credit(proofTimeoutRecipient), PROPOSER_BOND);
+
+        _passAirgap(first);
+        uint256 timeoutRecipientBalance = proofTimeoutRecipient.balance;
+        first.claimCredit(proofTimeoutRecipient);
+        vm.warp(block.timestamp + WETH_DELAY_SECONDS);
+        first.claimCredit(proofTimeoutRecipient);
+        assertEq(proofTimeoutRecipient.balance, timeoutRecipientBalance + PROPOSER_BOND);
+
+        MultiProofGame retry =
+            _propose(type(uint256).max, Claim.unwrap(first.rootClaim()), first.l2SequenceNumber(), first.attempt() + 1);
+        assertEq(retry.attempt(), 1);
     }
 
     function test_UnchallengedFlow_AnchorsAndPaysProposer() public {
@@ -249,6 +297,19 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(game.credit(proposer), PROPOSER_BOND + CHALLENGER_BOND);
     }
 
+    function test_Challenge_AfterInitialProofStillRequiresThreshold() public {
+        MultiProofGame game = _proposeAtAnchor();
+        game.submitProofLane(1, abi.encodePacked(game.rootId()));
+        _challenge(game);
+
+        (bool resolvable,,) = game.resolutionStatus();
+        assertFalse(resolvable);
+
+        game.submitProofLane(0, abi.encodePacked(game.rootId()));
+        game.resolve();
+        assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
+    }
+
     function test_ProofLane_RejectsInvalidProofAndExpiredSubmission() public {
         MultiProofGame game = _proposeAtAnchor();
         _challenge(game);
@@ -259,6 +320,16 @@ contract MultiProofGameTest is OPStackFixtures {
         vm.warp(game.proofDeadline());
         bytes memory proof = abi.encodePacked(game.rootId());
         vm.expectRevert();
+        game.submitProofLane(0, proof);
+    }
+
+    function test_ProofLane_RejectsInitialProofAtChallengeDeadline() public {
+        MultiProofGame game = _proposeAtAnchor();
+        uint64 deadline = game.challengeDeadline();
+        bytes memory proof = abi.encodePacked(game.rootId());
+        vm.warp(deadline);
+
+        vm.expectRevert(abi.encodeWithSelector(IMultiProofGame.ProofPeriodElapsed.selector, block.timestamp, deadline));
         game.submitProofLane(0, proof);
     }
 

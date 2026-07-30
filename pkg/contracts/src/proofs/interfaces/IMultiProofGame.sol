@@ -28,6 +28,7 @@ interface IMultiProofGame is IDisputeGame {
         uint64 proofPeriod;
         uint256 proposerBond;
         uint256 challengerBond;
+        address proofTimeoutRecipient;
         uint8 proofThreshold;
         IWorldChainProofVerifier validityProofVerifier;
         IWorldChainProofVerifier teeVerifier;
@@ -104,6 +105,8 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Hash of the deployment's domain parameters.
     function domainHash() external view returns (bytes32);
 
+    /// @notice Parent reference required for a proposal that directly extends the current anchor.
+
     /// @notice Seconds a proposal may be challenged after creation.
     function challengePeriod() external view returns (uint64);
 
@@ -115,6 +118,9 @@ interface IMultiProofGame is IDisputeGame {
 
     /// @notice Bond required to challenge a proposal.
     function challengerBond() external view returns (uint256);
+
+    /// @notice Recipient of the proposer bond when an unchallenged game expires without proof.
+    function proofTimeoutRecipient() external view returns (address);
 
     /// @notice Verifier backing the validity-proof lane.
     function validityProofVerifier() external view returns (IWorldChainProofVerifier);
@@ -151,7 +157,7 @@ interface IMultiProofGame is IDisputeGame {
     ///         out on proofs or to have been created before this game type became respected.
     function attempt() external view returns (uint256);
 
-    /// @notice Parent game, or the anchor registry when the proposal starts from its current root.
+    /// @notice Parent game, or the anchor registry when no compatible anchor game exists.
     function parentRef() external view returns (address);
 
     /// @notice Output root this proposal starts from.
@@ -217,7 +223,9 @@ interface IMultiProofGame is IDisputeGame {
     ///         exactly `challengerBond`.
     function challenge() external payable;
 
-    /// @notice Submits `proof` for `laneId`. No-ops when the lane already counts.
+    /// @notice Submits `proof` for `laneId`. Before a challenge, any accepted lane satisfies the
+    ///         initial proof requirement; after a challenge, distinct lanes count toward the
+    ///         configured threshold. No-ops when the lane already counts.
     function submitProofLane(uint8 laneId, bytes calldata proof) external;
 
     ////////////////////////////////////////////////////////////////

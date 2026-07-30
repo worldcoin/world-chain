@@ -7,15 +7,11 @@ use std::{
     time::Duration,
 };
 
-use alloy_primitives::{Address, B256, BlockNumber, Bytes, U256, address, b256};
+use alloy_primitives::{Address, B256, BlockNumber, U256, address, b256};
 use async_trait::async_trait;
 use world_chain_proofs::{
     ConsensusError, ConsensusProvider, InvalidationReason, ProposalCommitment, ResolutionStatus,
     RootState,
-};
-use world_chain_prover_service::{
-    ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
-    ProofResponse, ProofStatus, RequestProofResponse, SucceededProofResponse,
 };
 
 use crate::{
@@ -40,7 +36,7 @@ struct MockContracts {
     anchor: AnchorRef,
     /// Games keyed by their `DisputeGameFactory` UUID.
     games: HashMap<B256, Address>,
-    submissions: Arc<Mutex<Vec<(Proposal, ProofData)>>>,
+    submissions: Arc<Mutex<Vec<Proposal>>>,
     resolution_statuses: Arc<Mutex<HashMap<Address, ResolutionStatus>>>,
     resolutions: Arc<Mutex<Vec<Address>>>,
     closures: Arc<Mutex<Vec<Address>>>,
@@ -55,29 +51,21 @@ impl ProposerClient for MockContracts {
         Ok(self.anchor)
     }
 
-    async fn games_for_transition(
+    async fn game_for_transition(
         &self,
-        parent_candidates: &[Address],
+        parent_ref: Address,
         root_claim: B256,
         l2_block_number: u64,
-    ) -> Result<Vec<TransitionGame>, ProposerError> {
-        let mut found = Vec::with_capacity(parent_candidates.len());
-        for parent_ref in parent_candidates {
-            let mut latest = None;
-            for attempt in 0..MAX_TEST_ATTEMPT {
-                let uuid = game_uuid(*parent_ref, root_claim, l2_block_number, attempt);
-                let Some(address) = self.games.get(&uuid).copied() else {
-                    break;
-                };
-                latest = Some(TransitionGame {
-                    address,
-                    parent_ref: *parent_ref,
-                    attempt,
-                });
-            }
-            found.extend(latest);
+    ) -> Result<Option<TransitionGame>, ProposerError> {
+        let mut latest = None;
+        for attempt in 0..MAX_TEST_ATTEMPT {
+            let uuid = game_uuid(parent_ref, root_claim, l2_block_number, attempt);
+            let Some(address) = self.games.get(&uuid).copied() else {
+                break;
+            };
+            latest = Some(TransitionGame { address, attempt });
         }
-        Ok(found)
+        Ok(latest)
     }
 
     async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError> {
@@ -115,14 +103,9 @@ impl ProposerClient for MockContracts {
         })
     }
 
-    async fn latest_finalized_l1_block(&self) -> Result<B256, ProposerError> {
-        Ok(B256::repeat_byte(0xf1))
-    }
-
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
-        proof: ProofData,
     ) -> Result<ProposalSubmission, ProposerError> {
         let mut failures = self.submission_failures.lock().expect("not poisoned");
         if *failures > 0 {
@@ -135,87 +118,11 @@ impl ProposerClient for MockContracts {
         self.submissions
             .lock()
             .expect("not poisoned")
-            .push((*proposal, proof));
+            .push(*proposal);
         Ok(ProposalSubmission {
             tx_hash: B256::repeat_byte(0xaa),
             game_address: Address::repeat_byte(0xaa),
         })
-    }
-}
-
-#[derive(Debug, Clone)]
-struct MockProofRequester {
-    requests: Arc<Mutex<Vec<ProofRequest>>>,
-    status: Arc<Mutex<ProofStatus>>,
-    fail_status_once: Arc<Mutex<bool>>,
-}
-
-impl Default for MockProofRequester {
-    fn default() -> Self {
-        Self {
-            requests: Arc::default(),
-            status: Arc::new(Mutex::new(ProofStatus::Succeeded)),
-            fail_status_once: Arc::default(),
-        }
-    }
-}
-
-impl MockProofRequester {
-    fn with_status(status: ProofStatus) -> Self {
-        Self {
-            status: Arc::new(Mutex::new(status)),
-            ..Self::default()
-        }
-    }
-
-    fn set_status(&self, status: ProofStatus) {
-        *self.status.lock().expect("not poisoned") = status;
-    }
-
-    fn fail_next_status(&self) {
-        *self.fail_status_once.lock().expect("not poisoned") = true;
-    }
-}
-
-#[async_trait]
-impl ProofRequester for MockProofRequester {
-    async fn request_proof(
-        &self,
-        request: ProofRequest,
-    ) -> Result<RequestProofResponse, ProofRequestError> {
-        let id = request.id();
-        let l1_head = request.l1_head;
-        self.requests.lock().expect("not poisoned").push(request);
-        Ok(RequestProofResponse {
-            proof_id: id,
-            l1_head,
-        })
-    }
-
-    async fn proof_status(
-        &self,
-        _proof_id: ProofRequestId,
-    ) -> Result<ProofStatus, ProofRequestError> {
-        let mut fail_once = self.fail_status_once.lock().expect("not poisoned");
-        if *fail_once {
-            *fail_once = false;
-            return Err(ProofRequestError::RemoteInternal);
-        }
-        Ok(*self.status.lock().expect("not poisoned"))
-    }
-
-    async fn get_proof(
-        &self,
-        proof_id: ProofRequestId,
-    ) -> Result<ProofResponse, ProofRequestError> {
-        Ok(ProofResponse::Succeeded(SucceededProofResponse {
-            id: proof_id,
-            proof: ProofData::Nitro {
-                attestation: Bytes::from_static(&[1]),
-                public_values: Bytes::from_static(&[2]),
-                signature: Bytes::from_static(&[3]),
-            },
-        }))
     }
 }
 
@@ -431,11 +338,10 @@ fn config() -> ProposerConfig {
 }
 
 async fn advance_proposal(
-    proposer: &mut WorldChainProposer<MockContracts, MockOutputRoots, MockProofRequester>,
+    proposer: &WorldChainProposer<MockContracts, MockOutputRoots>,
     scan: &CanonicalScan,
 ) -> Result<(), ProposerError> {
-    proposer.request_proof(scan).await?;
-    proposer.poll_and_submit().await
+    proposer.submit_next_proposal(scan).await
 }
 
 fn positive_ready_status() -> ResolutionStatus {
@@ -448,18 +354,14 @@ fn positive_ready_status() -> ResolutionStatus {
 
 fn anchor_at(l2_block_number: u64) -> AnchorRef {
     AnchorRef {
-        registry: ANCHOR,
-        anchor_game: None,
+        address: ANCHOR,
         l2_block_number,
     }
 }
 
-/// The anchor after it has been advanced onto `anchor_game`, which is therefore no longer an
-/// acceptable parent for new proposals.
 fn anchor_advanced_onto(anchor_game: Address, l2_block_number: u64) -> AnchorRef {
     AnchorRef {
-        registry: ANCHOR,
-        anchor_game: Some(anchor_game),
+        address: anchor_game,
         l2_block_number,
     }
 }
@@ -516,12 +418,7 @@ async fn anchor_and_canonical_line_walks_existing_games_until_gap() {
         roots: HashMap::from([(10, root_10), (20, root_20)]),
         finalized_l2_block: 20,
     };
-    let proposer = WorldChainProposer::new(
-        config(),
-        contracts,
-        output_roots,
-        MockProofRequester::default(),
-    );
+    let proposer = WorldChainProposer::new(config(), contracts, output_roots);
 
     let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
 
@@ -551,19 +448,12 @@ async fn propose_submits_proposal_after_last_canonical_game() {
         roots: HashMap::from([(10, B256::repeat_byte(0x10))]),
         finalized_l2_block: 10,
     };
-    let mut proposer = WorldChainProposer::new(
-        config(),
-        contracts,
-        output_roots,
-        MockProofRequester::default(),
-    );
+    let proposer = WorldChainProposer::new(config(), contracts, output_roots);
     let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
 
-    advance_proposal(&mut proposer, &canonical_scan)
-        .await
-        .unwrap();
+    advance_proposal(&proposer, &canonical_scan).await.unwrap();
 
-    let proposal = submissions.lock().expect("not poisoned")[0].0;
+    let proposal = submissions.lock().expect("not poisoned")[0];
     assert_eq!(proposal.parent_ref, ANCHOR);
     assert_eq!(proposal.root_claim, B256::repeat_byte(0x10));
     assert_eq!(proposal.l2_block_number, 10);
@@ -571,125 +461,7 @@ async fn propose_submits_proposal_after_last_canonical_game() {
 }
 
 #[tokio::test]
-async fn propose_waits_for_pending_proof_and_reuses_exact_request() {
-    let submissions = Arc::default();
-    let contracts = MockContracts {
-        anchor: anchor_at(0),
-        games: HashMap::new(),
-        submissions: Arc::clone(&submissions),
-        resolution_statuses: Arc::default(),
-        resolutions: Arc::default(),
-        closures: Arc::default(),
-        submission_failures: Arc::default(),
-        unfinalized_games: Arc::default(),
-    };
-    let output_roots = MockOutputRoots {
-        roots: HashMap::from([(10, B256::repeat_byte(0x10))]),
-        finalized_l2_block: 10,
-    };
-    let proof_requester = MockProofRequester::with_status(ProofStatus::Running);
-    let mut proposer =
-        WorldChainProposer::new(config(), contracts, output_roots, proof_requester.clone());
-    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
-
-    advance_proposal(&mut proposer, &canonical_scan)
-        .await
-        .unwrap();
-
-    assert!(submissions.lock().expect("not poisoned").is_empty());
-    let first_request = proof_requester.requests.lock().expect("not poisoned")[0].clone();
-    assert_eq!(first_request.backend, ProofBackend::Nitro);
-    assert_eq!(first_request.game, Address::ZERO);
-    assert_eq!(first_request.l1_head, B256::repeat_byte(0xf1));
-
-    proof_requester.set_status(ProofStatus::Succeeded);
-    advance_proposal(&mut proposer, &canonical_scan)
-        .await
-        .unwrap();
-
-    let requests = proof_requester.requests.lock().expect("not poisoned");
-    assert_eq!(requests.as_slice(), &[first_request.clone(), first_request]);
-    assert_eq!(submissions.lock().expect("not poisoned").len(), 1);
-}
-
-#[tokio::test]
-async fn propose_rerequests_failed_proof_without_submitting() {
-    let submissions = Arc::default();
-    let contracts = MockContracts {
-        anchor: anchor_at(0),
-        games: HashMap::new(),
-        submissions: Arc::clone(&submissions),
-        resolution_statuses: Arc::default(),
-        resolutions: Arc::default(),
-        closures: Arc::default(),
-        submission_failures: Arc::default(),
-        unfinalized_games: Arc::default(),
-    };
-    let output_roots = MockOutputRoots {
-        roots: HashMap::from([(10, B256::repeat_byte(0x10))]),
-        finalized_l2_block: 10,
-    };
-    let proof_requester = MockProofRequester::with_status(ProofStatus::Failed);
-    let mut proposer =
-        WorldChainProposer::new(config(), contracts, output_roots, proof_requester.clone());
-    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
-
-    advance_proposal(&mut proposer, &canonical_scan)
-        .await
-        .unwrap();
-    advance_proposal(&mut proposer, &canonical_scan)
-        .await
-        .unwrap();
-
-    let requests = proof_requester.requests.lock().expect("not poisoned");
-    assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0], requests[1]);
-    assert!(submissions.lock().expect("not poisoned").is_empty());
-}
-
-#[tokio::test]
-async fn propose_retains_request_after_transient_status_error() {
-    let submissions = Arc::default();
-    let contracts = MockContracts {
-        anchor: anchor_at(0),
-        games: HashMap::new(),
-        submissions: Arc::clone(&submissions),
-        resolution_statuses: Arc::default(),
-        resolutions: Arc::default(),
-        closures: Arc::default(),
-        submission_failures: Arc::default(),
-        unfinalized_games: Arc::default(),
-    };
-    let output_roots = MockOutputRoots {
-        roots: HashMap::from([(10, B256::repeat_byte(0x10))]),
-        finalized_l2_block: 10,
-    };
-    let proof_requester = MockProofRequester::default();
-    proof_requester.fail_next_status();
-    let mut proposer =
-        WorldChainProposer::new(config(), contracts, output_roots, proof_requester.clone());
-    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
-
-    assert!(matches!(
-        advance_proposal(&mut proposer, &canonical_scan).await,
-        Err(ProposerError::ProofRequest(
-            ProofRequestError::RemoteInternal
-        ))
-    ));
-    assert!(submissions.lock().expect("not poisoned").is_empty());
-
-    advance_proposal(&mut proposer, &canonical_scan)
-        .await
-        .unwrap();
-
-    let requests = proof_requester.requests.lock().expect("not poisoned");
-    assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0], requests[1]);
-    assert_eq!(submissions.lock().expect("not poisoned").len(), 1);
-}
-
-#[tokio::test]
-async fn propose_retries_submission_with_same_completed_proof() {
+async fn propose_can_retry_a_failed_submission() {
     let submissions = Arc::default();
     let submission_failures = Arc::new(Mutex::new(1));
     let contracts = MockContracts {
@@ -706,97 +478,18 @@ async fn propose_retries_submission_with_same_completed_proof() {
         roots: HashMap::from([(10, B256::repeat_byte(0x10))]),
         finalized_l2_block: 10,
     };
-    let proof_requester = MockProofRequester::default();
-    let mut proposer =
-        WorldChainProposer::new(config(), contracts, output_roots, proof_requester.clone());
+    let proposer = WorldChainProposer::new(config(), contracts, output_roots);
     let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
 
     assert!(matches!(
-        advance_proposal(&mut proposer, &canonical_scan).await,
+        advance_proposal(&proposer, &canonical_scan).await,
         Err(ProposerError::Contract(_))
     ));
     assert!(submissions.lock().expect("not poisoned").is_empty());
 
-    advance_proposal(&mut proposer, &canonical_scan)
-        .await
-        .unwrap();
+    advance_proposal(&proposer, &canonical_scan).await.unwrap();
 
-    let requests = proof_requester.requests.lock().expect("not poisoned");
-    assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0], requests[1]);
     assert_eq!(submissions.lock().expect("not poisoned").len(), 1);
-}
-
-#[tokio::test]
-async fn propose_replaces_pending_request_when_canonical_candidate_changes() {
-    let contracts = MockContracts {
-        anchor: anchor_at(0),
-        games: HashMap::new(),
-        submissions: Arc::default(),
-        resolution_statuses: Arc::default(),
-        resolutions: Arc::default(),
-        closures: Arc::default(),
-        submission_failures: Arc::default(),
-        unfinalized_games: Arc::default(),
-    };
-    let proof_requester = MockProofRequester::with_status(ProofStatus::Running);
-    let mut proposer = WorldChainProposer::new(
-        config(),
-        contracts,
-        MockOutputRoots {
-            roots: HashMap::new(),
-            finalized_l2_block: 0,
-        },
-        proof_requester.clone(),
-    );
-    let canonical_line = CanonicalLine::new(ParentRef {
-        address: ANCHOR,
-        l2_block_number: 0,
-    });
-    let first = CanonicalScan::new(
-        canonical_line,
-        NextProposalAction::Propose(Proposal {
-            parent_ref: ANCHOR,
-            root_claim: B256::repeat_byte(0x10),
-            l2_block_number: 10,
-            attempt: 0,
-        }),
-    );
-    advance_proposal(&mut proposer, &first).await.unwrap();
-
-    let second = CanonicalScan::new(
-        CanonicalLine::new(ParentRef {
-            address: ANCHOR,
-            l2_block_number: 0,
-        }),
-        NextProposalAction::Propose(Proposal {
-            parent_ref: ANCHOR,
-            root_claim: B256::repeat_byte(0x20),
-            l2_block_number: 10,
-            attempt: 0,
-        }),
-    );
-    advance_proposal(&mut proposer, &second).await.unwrap();
-
-    {
-        let requests = proof_requester.requests.lock().expect("not poisoned");
-        assert_eq!(requests.len(), 2);
-        assert_eq!(requests[0].root_claim, B256::repeat_byte(0x10));
-        assert_eq!(requests[1].root_claim, B256::repeat_byte(0x20));
-    }
-
-    let caught_up = CanonicalScan::new(
-        CanonicalLine::new(ParentRef {
-            address: ANCHOR,
-            l2_block_number: 10,
-        }),
-        NextProposalAction::CaughtUp {
-            target_block: 20,
-            finalized_block: 10,
-        },
-    );
-    advance_proposal(&mut proposer, &caught_up).await.unwrap();
-    assert!(!proposer.has_pending_proposal());
 }
 
 #[tokio::test]
@@ -821,7 +514,6 @@ async fn zero_block_interval_is_rejected() {
             roots: HashMap::new(),
             finalized_l2_block: 0,
         },
-        MockProofRequester::default(),
     );
 
     assert!(matches!(
@@ -846,12 +538,7 @@ async fn anchor_and_canonical_line_stops_at_finalized_l2_block() {
         roots: HashMap::from([(10, B256::repeat_byte(0x10))]),
         finalized_l2_block: 9,
     };
-    let proposer = WorldChainProposer::new(
-        config(),
-        contracts,
-        output_roots,
-        MockProofRequester::default(),
-    );
+    let proposer = WorldChainProposer::new(config(), contracts, output_roots);
 
     let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
 
@@ -902,7 +589,6 @@ async fn resolve_games_caps_submissions_and_keeps_scanning_finalized_games() {
             roots: HashMap::new(),
             finalized_l2_block: 0,
         },
-        MockProofRequester::default(),
     );
     let mut canonical_line = CanonicalLine::new(ParentRef {
         address: ANCHOR,
@@ -971,7 +657,6 @@ async fn finalized_games_do_not_consume_resolution_budget() {
             roots: HashMap::new(),
             finalized_l2_block: 0,
         },
-        MockProofRequester::default(),
     );
     let mut canonical_line = CanonicalLine::new(ParentRef {
         address: ANCHOR,
@@ -1018,7 +703,6 @@ async fn zero_resolution_budget_is_rejected() {
             roots: HashMap::new(),
             finalized_l2_block: 0,
         },
-        MockProofRequester::default(),
     );
 
     assert!(matches!(
@@ -1235,10 +919,7 @@ async fn bond_manager_uses_l1_timestamp_for_delayed_withdrawal() {
 }
 
 #[tokio::test]
-async fn timed_out_game_rebases_onto_registry_after_its_parent_became_the_anchor() {
-    // Anchor advanced onto P, so P is no longer an acceptable parent: `initialize` rejects any
-    // parent at or below the anchor. The timed-out game under P therefore cannot be retried in
-    // place; the transition must start over under the registry sentinel at attempt zero.
+async fn timed_out_game_retries_after_its_parent_becomes_the_anchor() {
     let parent = game_address(1);
     let timed_out = game_address(2);
     let root_20 = B256::repeat_byte(0x20);
@@ -1259,7 +940,6 @@ async fn timed_out_game_rebases_onto_registry_after_its_parent_became_the_anchor
             roots: HashMap::from([(20, root_20)]),
             finalized_l2_block: 20,
         },
-        MockProofRequester::default(),
     );
 
     let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
@@ -1267,53 +947,15 @@ async fn timed_out_game_rebases_onto_registry_after_its_parent_became_the_anchor
     assert!(canonical_scan.canonical_line().games().is_empty());
     assert_eq!(
         canonical_scan.next_action(),
-        &NextProposalAction::Propose(Proposal {
-            parent_ref: ANCHOR,
-            root_claim: root_20,
-            l2_block_number: 20,
-            attempt: 0,
-        })
-    );
-}
-
-#[tokio::test]
-async fn invalidated_legacy_game_does_not_hide_a_live_registry_parented_rebase() {
-    let parent = game_address(1);
-    let timed_out = game_address(2);
-    let rebased = game_address(3);
-    let root_20 = B256::repeat_byte(0x20);
-    let contracts = MockContracts {
-        anchor: anchor_advanced_onto(parent, 10),
-        games: HashMap::from([
-            (game_uuid(parent, root_20, 20, 0), timed_out),
-            (game_uuid(ANCHOR, root_20, 20, 0), rebased),
-        ]),
-        submissions: Arc::default(),
-        resolution_statuses: Arc::new(Mutex::new(HashMap::from([(timed_out, timed_out_status())]))),
-        resolutions: Arc::default(),
-        closures: Arc::default(),
-        submission_failures: Arc::default(),
-        unfinalized_games: Arc::default(),
-    };
-    let proposer = WorldChainProposer::new(
-        config(),
-        contracts,
-        MockOutputRoots {
-            roots: HashMap::from([(20, root_20)]),
-            finalized_l2_block: 20,
-        },
-        MockProofRequester::default(),
-    );
-
-    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
-
-    // The live rebase continues the line even though the dead legacy game is scanned first.
-    assert_eq!(
-        canonical_scan.canonical_line().games(),
-        &[ParentRef {
-            address: rebased,
-            l2_block_number: 20,
-        }]
+        &NextProposalAction::RetryTimedOut {
+            proposal: Proposal {
+                parent_ref: parent,
+                root_claim: root_20,
+                l2_block_number: 20,
+                attempt: 1,
+            },
+            invalidated_game: timed_out,
+        }
     );
 }
 
@@ -1338,7 +980,6 @@ async fn timed_out_game_bumps_attempt_while_its_parent_is_still_acceptable() {
             roots: HashMap::from([(20, root_20)]),
             finalized_l2_block: 20,
         },
-        MockProofRequester::default(),
     );
 
     let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();

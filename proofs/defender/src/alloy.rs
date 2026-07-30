@@ -1,7 +1,7 @@
 use crate::{
     error::DefenderError,
     traits::DefenderClient,
-    types::{DefenderSubmission, GameMetadata},
+    types::{DefenderSubmission, GameMetadata, ResolveSubmission},
 };
 use alloy_primitives::{Address, Bytes, U256};
 use alloy_provider::Provider;
@@ -94,18 +94,24 @@ where
     async fn game_metadata(&self, address: Address) -> Result<GameMetadata, DefenderError> {
         let game = self.game(address);
         let (
+            domain_hash,
+            parent_ref,
             root_claim,
             l2_block_number,
             l1_origin_hash,
+            l1_origin_number,
             challenge_deadline,
             proof_deadline,
             proof_threshold,
         ) = self
             .provider
             .multicall()
+            .add(game.proposalDomainHash())
+            .add(game.parentRef())
             .add(game.rootClaim())
             .add(game.l2BlockNumber())
             .add(game.l1OriginHash())
+            .add(game.l1OriginNumber())
             .add(game.challengeDeadline())
             .add(game.proofDeadline())
             .add(game.PROOF_THRESHOLD())
@@ -120,9 +126,12 @@ where
 
         Ok(GameMetadata {
             address,
+            domain_hash,
+            parent_ref,
             root_claim,
             l2_block_number: u256_to_u64(l2_block_number, "l2BlockNumber")?,
             l1_origin_hash,
+            l1_origin_number: u256_to_u64(l1_origin_number, "l1OriginNumber")?,
             challenge_deadline,
             proof_deadline,
             proof_threshold,
@@ -152,6 +161,24 @@ where
             .call()
             .await
             .map_err(|error| DefenderError::Contract(error.to_string()))
+    }
+
+    async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, DefenderError> {
+        let pending = self
+            .game(game)
+            .resolve()
+            .send()
+            .await
+            .map_err(|err| DefenderError::Contract(err.to_string()))?;
+        let tx_hash = *pending.tx_hash();
+        let receipt = pending
+            .get_receipt()
+            .await
+            .map_err(|err| DefenderError::Contract(err.to_string()))?;
+        if !receipt.status() {
+            return Err(DefenderError::Revert(tx_hash));
+        }
+        Ok(ResolveSubmission { tx_hash })
     }
 
     async fn submit_proof(

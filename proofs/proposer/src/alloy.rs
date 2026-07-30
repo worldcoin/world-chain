@@ -1,13 +1,12 @@
 use alloy_consensus::BlockHeader;
-use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::{Address, B256, BlockHash, U256};
+use alloy_eips::BlockNumberOrTag;
+use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{Provider, WalletProvider};
 use async_trait::async_trait;
 use world_chain_proofs::{
     IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame,
     InvalidationReasonError, MULTI_PROOF_GAME_TYPE, ResolutionStatus, RootStateError,
 };
-use world_chain_prover_service::ProofData;
 
 use crate::{
     AnchorRef, BondManagerClient, Proposal, ProposalSubmission, ProposerClient, ProposerError,
@@ -31,6 +30,7 @@ const MAX_ATTEMPT_SCAN: u64 = 64;
 pub struct AlloyProofSystemClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
     anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
+    game_implementation: IMultiProofGame::IMultiProofGameInstance<P>,
     /// Domain hash of the registered game implementation, read once at construction.
     domain_hash: B256,
     /// Number of confirmations to require after sending a tx onchain.
@@ -72,16 +72,18 @@ where
                 "dispute-game factory {factory_address} has no implementation for game type {MULTI_PROOF_GAME_TYPE}"
             )));
         }
-        let domain_hash =
-            IMultiProofGame::IMultiProofGameInstance::new(game_impl, provider.clone())
-                .domainHash()
-                .call()
-                .await
-                .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let game_implementation =
+            IMultiProofGame::IMultiProofGameInstance::new(game_impl, provider.clone());
+        let domain_hash = game_implementation
+            .domainHash()
+            .call()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
 
         Ok(Self {
             factory,
             anchor,
+            game_implementation,
             domain_hash,
             confirmations,
             provider,
@@ -305,62 +307,56 @@ where
     P: Provider + WalletProvider + Clone + Send + Sync + 'static,
 {
     async fn anchor_parent(&self) -> Result<AnchorRef, ProposerError> {
-        let (anchor_root, anchor_game) = self
+        let (anchor_root, canonical_parent) = self
             .provider
             .multicall()
             .add(self.anchor.getAnchorRoot())
-            .add(self.anchor.anchorGame())
+            .add(self.game_implementation.canonicalAnchorParent())
             .aggregate()
             .await
             .map_err(|err| ProposerError::Contract(err.to_string()))?;
 
         Ok(AnchorRef {
-            registry: *self.anchor.address(),
-            anchor_game: (anchor_game != Address::ZERO).then_some(anchor_game),
+            address: canonical_parent,
             l2_block_number: u256_to_u64(anchor_root.l2SequenceNumber, "getAnchorRoot")?,
         })
     }
 
-    async fn games_for_transition(
+    async fn game_for_transition(
         &self,
-        parent_candidates: &[Address],
+        parent_ref: Address,
         root_claim: B256,
         l2_block_number: u64,
-    ) -> Result<Vec<TransitionGame>, ProposerError> {
-        let mut found = Vec::with_capacity(parent_candidates.len());
-        for parent_ref in parent_candidates {
-            let mut latest: Option<TransitionGame> = None;
-            // Attempts are strictly sequential: attempt N can only be created once attempt N-1
-            // exists, so the walk stops at the first gap.
-            for attempt in 0..MAX_ATTEMPT_SCAN {
-                let commitment = world_chain_proofs::ProposalCommitment {
-                    parent_ref: *parent_ref,
+    ) -> Result<Option<TransitionGame>, ProposerError> {
+        let mut latest: Option<TransitionGame> = None;
+        // Attempts are strictly sequential: attempt N can only be created once attempt N-1
+        // exists, so the walk stops at the first gap.
+        for attempt in 0..MAX_ATTEMPT_SCAN {
+            let commitment = world_chain_proofs::ProposalCommitment {
+                parent_ref,
+                root_claim,
+                l2_block_number,
+                attempt,
+            };
+            let entry = self
+                .factory
+                .games(
+                    MULTI_PROOF_GAME_TYPE,
                     root_claim,
-                    l2_block_number,
-                    attempt,
-                };
-                let entry = self
-                    .factory
-                    .games(
-                        MULTI_PROOF_GAME_TYPE,
-                        root_claim,
-                        commitment.extra_data(self.domain_hash),
-                    )
-                    .call()
-                    .await
-                    .map_err(|error| ProposerError::Contract(error.to_string()))?;
-                if entry.proxy == Address::ZERO {
-                    break;
-                }
-                latest = Some(TransitionGame {
-                    address: entry.proxy,
-                    parent_ref: *parent_ref,
-                    attempt,
-                });
+                    commitment.extra_data(self.domain_hash),
+                )
+                .call()
+                .await
+                .map_err(|error| ProposerError::Contract(error.to_string()))?;
+            if entry.proxy == Address::ZERO {
+                break;
             }
-            found.extend(latest);
+            latest = Some(TransitionGame {
+                address: entry.proxy,
+                attempt,
+            });
         }
-        Ok(found)
+        Ok(latest)
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
@@ -413,21 +409,9 @@ where
         Ok(CloseGameSubmission { tx_hash })
     }
 
-    async fn latest_finalized_l1_block(&self) -> Result<BlockHash, ProposerError> {
-        let block = self
-            .provider
-            .get_block(BlockId::finalized())
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
-        let block = block.ok_or_else(|| ProposerError::FinalizedBlockNotFound)?;
-        let hash = block.hash();
-        Ok(hash)
-    }
-
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
-        _proof: ProofData,
     ) -> Result<ProposalSubmission, ProposerError> {
         // `DisputeGameFactory.create` reverts unless `msg.value` matches the configured init
         // bond exactly, so it is read per submission rather than cached in configuration.

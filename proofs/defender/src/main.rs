@@ -1,6 +1,5 @@
-//! `world-chain-defender` binary: watches challenged valid WIP-1006 games on the OP
-//! `DisputeGameFactory`, requests proofs from the prover-service, and submits completed
-//! proof lanes on L1.
+//! `world-chain-defender` binary: supplies initial proof support for valid WIP-1006 games,
+//! escalates challenged games to the proof threshold, and resolves negative outcomes.
 //!
 //! Mirrors the in-process defender wired by the devnet harness
 //! (`crates/devnet/src/full_stack.rs::start_world_chain_defender`), reading its
@@ -26,7 +25,7 @@ use world_chain_prover_service::RpcProverServiceClient;
 #[derive(Debug, Parser)]
 #[command(
     name = "world-chain-defender",
-    about = "World Chain proof-system defender: proves and submits lanes for challenged games"
+    about = "World Chain proof-system defender: proves, escalates, and resolves games"
 )]
 struct Cli {
     /// Ethereum L1 execution RPC URL.
@@ -82,6 +81,10 @@ struct Cli {
     )]
     l1_tx_confirmations: u64,
 
+    /// Maximum number of negatively resolvable games settled per defender tick.
+    #[arg(long, env = "MAX_RESOLUTIONS_PER_TICK", default_value_t = 10)]
+    max_resolutions_per_tick: usize,
+
     /// Conservative upper bound on the age of a game with an open proof window.
     #[arg(long, env = "MAX_GAME_AGE_SECONDS", default_value_t = 604_800)]
     max_game_age_seconds: u64,
@@ -111,6 +114,7 @@ async fn main() -> Result<()> {
         max_game_concurrency: cli.max_game_concurrency,
         max_games_per_tick: cli.max_games_per_tick,
         game_scan_lookback: cli.game_scan_lookback,
+        max_resolutions_per_tick: cli.max_resolutions_per_tick,
         max_game_age: Duration::from_secs(cli.max_game_age_seconds),
     };
     let mut defender = WorldChainDefender::new(config, client, output_roots, proof_requester);
@@ -125,6 +129,7 @@ async fn main() -> Result<()> {
         max_games_per_tick = cli.max_games_per_tick,
         game_scan_lookback = cli.game_scan_lookback,
         l1_tx_confirmations = cli.l1_tx_confirmations,
+        max_resolutions_per_tick = cli.max_resolutions_per_tick,
         "starting World Chain proof-system defender"
     );
 

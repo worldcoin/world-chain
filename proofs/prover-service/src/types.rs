@@ -65,9 +65,8 @@ pub struct ProofRequest {
 impl ProofRequest {
     /// Compute the deterministic identifier of this request.
     ///
-    /// The id is a commitment to every request field except for `l1_head`, so requesting
-    /// the same proof twice yields the same id and the duplicate is deduplicated
-    /// by the `prover-service`.
+    /// The id commits to every request field, so exact duplicates are deduplicated without
+    /// allowing a proof pinned to a different L1 head to satisfy this request.
     #[must_use]
     pub fn id(&self) -> ProofRequestId {
         let mut buf = Vec::with_capacity(1 + 20 + 32 + 8 + 32);
@@ -75,6 +74,7 @@ impl ProofRequest {
         buf.extend_from_slice(self.game.as_slice());
         buf.extend_from_slice(self.root_claim.as_slice());
         buf.extend_from_slice(&self.l2_block_number.to_be_bytes());
+        buf.extend_from_slice(self.l1_head.as_slice());
         ProofRequestId(keccak256(buf))
     }
 }
@@ -200,6 +200,8 @@ pub enum ProofData {
         public_values: Bytes,
         /// Enclave signature over the proven outputs.
         signature: Bytes,
+        /// SEC1-uncompressed public key certified by the attestation document.
+        public_key: Bytes,
     },
 }
 

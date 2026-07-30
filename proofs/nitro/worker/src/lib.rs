@@ -16,7 +16,7 @@
 //!  │  NitroProver::prove_range  ────────────► Nitro Enclave                              │
 //!  │       │                                  (vsock / PCR-pinned)                       │
 //!  │       ▼                                                                              │
-//!  │  prover_submitProof(Nitro { attestation, public_values, signature })                │
+//!  │  prover_submitProof(Nitro { attestation, public_values, signature, public_key })    │
 //!  └──────────────────────────────────────────────────────────────────────────────────────┘
 //! ```
 
@@ -168,6 +168,10 @@ impl ClaimedProofJobHandler for NitroBackend {
         );
 
         Ok(ProofData::Nitro {
+            public_key: world_chain_proof_nitro::attestation::extract_nsm_public_key(
+                &artifact.attestation_doc,
+            )?
+            .into(),
             attestation: Bytes::from(artifact.attestation_doc),
             public_values: artifact.transition_public_values.abi_encode().into(),
             signature: Bytes::from(artifact.signature),

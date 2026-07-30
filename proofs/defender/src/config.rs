@@ -14,6 +14,9 @@ pub const DEFAULT_MAX_GAMES_PER_TICK: u64 = 100;
 /// Default number of previously scanned games reconsidered per defender tick.
 pub const DEFAULT_GAME_SCAN_LOOKBACK: u64 = 100;
 
+/// Default maximum number of game resolutions submitted per defender tick.
+pub const DEFAULT_MAX_RESOLUTIONS_PER_TICK: usize = 10;
+
 /// Default upper bound on the age of a game with an open proof window.
 pub const DEFAULT_MAX_GAME_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
@@ -30,6 +33,8 @@ pub struct DefenderConfig {
     pub max_games_per_tick: u64,
     /// Number of previously scanned games reconsidered to tolerate mutable-state L1 reorgs.
     pub game_scan_lookback: u64,
+    /// Maximum number of negatively resolvable games settled during one tick.
+    pub max_resolutions_per_tick: usize,
     /// Upper bound on the age of any game whose proof window can remain open.
     pub max_game_age: Duration,
 }
@@ -56,6 +61,11 @@ impl DefenderConfig {
                 "max_games_per_tick must be greater than zero",
             ));
         }
+        if self.max_resolutions_per_tick == 0 {
+            return Err(DefenderError::InvalidConfig(
+                "max_resolutions_per_tick must be greater than zero",
+            ));
+        }
         if self.max_game_age.is_zero() {
             return Err(DefenderError::InvalidConfig(
                 "max_game_age must be greater than zero",
@@ -73,6 +83,7 @@ impl Default for DefenderConfig {
             max_game_concurrency: DEFAULT_MAX_GAME_CONCURRENCY,
             max_games_per_tick: DEFAULT_MAX_GAMES_PER_TICK,
             game_scan_lookback: DEFAULT_GAME_SCAN_LOOKBACK,
+            max_resolutions_per_tick: DEFAULT_MAX_RESOLUTIONS_PER_TICK,
             max_game_age: DEFAULT_MAX_GAME_AGE,
         }
     }

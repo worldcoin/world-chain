@@ -11,6 +11,9 @@ pub enum DefenderError {
     /// Contract call or transaction failure.
     #[error("contract error: {0}")]
     Contract(String),
+    /// Prover response could not be encoded for its on-chain verifier.
+    #[error("invalid proof payload: {0}")]
+    ProofEncoding(String),
     #[error(transparent)]
     InvalidRootState(#[from] RootStateError),
     #[error(transparent)]

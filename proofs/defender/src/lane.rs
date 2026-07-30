@@ -1,6 +1,8 @@
-use crate::{traits::DefenderClient, types::GameMetadata};
-use alloy_primitives::Bytes;
+use crate::{error::DefenderError, traits::DefenderClient, types::GameMetadata};
+use alloy_primitives::{Bytes, U256};
+use alloy_sol_types::SolValue;
 use tracing::{error, info, warn};
+use world_chain_proof_core::boot::TransitionPublicValues;
 use world_chain_proofs::ProofLane;
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
@@ -159,7 +161,17 @@ where
 
         match self
             .execution_client
-            .submit_proof(game, lane as u8, encode_proof(&response.proof))
+            .submit_proof(
+                game,
+                lane as u8,
+                match encode_proof(metadata, &response.proof) {
+                    Ok(proof) => proof,
+                    Err(error) => {
+                        error!(%game, ?lane, %error, "prover returned an invalid proof payload");
+                        return LaneState::Abandoned;
+                    }
+                },
+            )
             .await
         {
             Ok(submission) => {
@@ -226,30 +238,40 @@ fn proof_request(game: &GameMetadata, backend: ProofBackend) -> ProofRequest {
     }
 }
 
-/// Encode a proof payload into the `bytes` argument of `submitProofLane`.
-///
-/// TODO: encode proofs for their concrete on-chain verifiers. SP1 proofs must
-/// match `SP1ValidityVerifier`'s ABI tuple:
-/// `(domainHash, parentRef, l1OriginNumber, publicValues, proofBytes)`.
-/// That requires proposal context in addition to `ProofData`, so this helper
-/// should move closer to the game/lane submission path before real SP1 lanes
-/// are enabled.
-fn encode_proof(proof: &ProofData) -> Bytes {
+/// Encodes the verifier-specific payload passed to `submitProofLane`.
+fn encode_proof(metadata: &GameMetadata, proof: &ProofData) -> Result<Bytes, DefenderError> {
+    let l1_origin_number = U256::from(metadata.l1_origin_number);
     match proof {
         ProofData::Sp1 {
             proof,
             public_values,
-        } => [public_values.as_ref(), proof.as_ref()].concat().into(),
+        } => Ok((
+            metadata.domain_hash,
+            metadata.parent_ref,
+            l1_origin_number,
+            public_values.clone(),
+            proof.clone(),
+        )
+            .abi_encode()
+            .into()),
         ProofData::Nitro {
-            attestation,
+            attestation: _,
             public_values,
             signature,
-        } => [
-            public_values.as_ref(),
-            attestation.as_ref(),
-            signature.as_ref(),
-        ]
-        .concat()
-        .into(),
+            public_key,
+        } => {
+            let transition = <TransitionPublicValues as SolValue>::abi_decode(public_values)
+                .map_err(|error| DefenderError::ProofEncoding(error.to_string()))?;
+            Ok((
+                metadata.domain_hash,
+                metadata.parent_ref,
+                l1_origin_number,
+                transition,
+                signature.clone(),
+                public_key.clone(),
+            )
+                .abi_encode()
+                .into())
+        }
     }
 }

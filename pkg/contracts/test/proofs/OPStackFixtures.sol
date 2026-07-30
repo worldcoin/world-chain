@@ -46,6 +46,7 @@ abstract contract OPStackFixtures is Test {
     address internal guardian = makeAddr("guardian");
     address internal proposer = makeAddr("proposer");
     address internal challengerAccount = makeAddr("challenger");
+    address internal proofTimeoutRecipient = makeAddr("proof-timeout-recipient");
 
     MockSystemConfig internal systemConfig;
     IProxyAdmin internal proxyAdmin;
@@ -133,6 +134,7 @@ abstract contract OPStackFixtures is Test {
             proofPeriod: PROOF_PERIOD,
             proposerBond: PROPOSER_BOND,
             challengerBond: CHALLENGER_BOND,
+            proofTimeoutRecipient: proofTimeoutRecipient,
             proofThreshold: PROOF_THRESHOLD,
             validityProofVerifier: IWorldChainProofVerifier(address(validityVerifier)),
             teeVerifier: IWorldChainProofVerifier(address(teeVerifier)),
@@ -193,7 +195,11 @@ abstract contract OPStackFixtures is Test {
     function _proposeAtAnchor() internal returns (MultiProofGame) {
         (, uint256 anchorBlock) = asr.getAnchorRoot();
         uint256 target = anchorBlock + BLOCK_INTERVAL;
-        return _propose(type(uint256).max, _rootClaimFor(target), target, 0);
+        bytes memory extraData = _extraDataForParent(target, gameImpl.canonicalAnchorParent(), 0);
+        vm.prank(proposer);
+        IDisputeGame proxy =
+            dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);
+        return MultiProofGame(address(proxy));
     }
 
     /// @dev Creates a child chained onto the game at factory index `parentIndex`.
@@ -218,6 +224,9 @@ abstract contract OPStackFixtures is Test {
 
     /// @dev Warps past the challenge window and resolves (unchallenged path).
     function _resolveUnchallenged(MultiProofGame game) internal {
+        if (game.proofBitmap() == 0) {
+            game.submitProofLane(uint8(ProofLib.ProofLane.TEE_ATTESTATION), abi.encodePacked(game.rootId()));
+        }
         if (block.timestamp < game.challengeDeadline()) {
             vm.warp(game.challengeDeadline());
         }

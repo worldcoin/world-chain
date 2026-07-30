@@ -15,7 +15,7 @@ pub use config::{DEFAULT_GAME_SCAN_LOOKBACK, DEFAULT_L1_TX_CONFIRMATIONS, Defend
 pub use defender::WorldChainDefender;
 pub use error::DefenderError;
 pub use traits::DefenderClient;
-pub use types::{DefenderSubmission, GameMetadata};
+pub use types::{DefenderSubmission, GameMetadata, ResolveSubmission};
 
 #[cfg(test)]
 mod tests;

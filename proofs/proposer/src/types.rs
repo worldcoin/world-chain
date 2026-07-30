@@ -1,21 +1,11 @@
 use alloy_primitives::{Address, B256, TxHash, U256};
 use world_chain_proofs::{InvalidationReason, ProposalCommitment};
 
-/// The anchor checkpoint the canonical line is rooted at.
-///
-/// `MultiProofGame.initialize` only accepts the registry itself as the parent reference for a
-/// proposal that extends the anchor: once the anchor advances onto a game, that game's L2 block
-/// number is no longer above the anchor and it is rejected as a parent. Games created before the
-/// anchor advanced still reference the anchor game, so both addresses are candidate parents when
-/// looking an existing proposal up.
+/// The canonical parent checkpoint selected by the registered game implementation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnchorRef {
-    /// `AnchorStateRegistry` address. New proposals extending the current anchor use this
-    /// sentinel as `parentRef`, not the game currently represented by the anchor.
-    pub registry: Address,
-    /// Game currently represented by the anchor, used only to find proposals created before
-    /// the registry advanced onto it.
-    pub anchor_game: Option<Address>,
+    /// Compatible anchor game, or the registry sentinel for an initial or incompatible anchor.
+    pub address: Address,
     /// L2 block number of the anchor output root.
     pub l2_block_number: u64,
 }
@@ -25,19 +15,9 @@ impl AnchorRef {
     #[must_use]
     pub const fn parent_ref(self) -> ParentRef {
         ParentRef {
-            address: self.registry,
+            address: self.address,
             l2_block_number: self.l2_block_number,
         }
-    }
-
-    /// Returns the parent references an existing proposal at the anchor tip may carry,
-    /// oldest-creation first.
-    #[must_use]
-    pub fn parent_candidates(self) -> Vec<Address> {
-        self.anchor_game
-            .into_iter()
-            .chain(std::iter::once(self.registry))
-            .collect()
     }
 }
 
@@ -46,8 +26,6 @@ impl AnchorRef {
 pub struct TransitionGame {
     /// Address of the game clone.
     pub address: Address,
-    /// Parent reference the game was created with.
-    pub parent_ref: Address,
     /// Retry nonce the game was created with.
     pub attempt: u64,
 }

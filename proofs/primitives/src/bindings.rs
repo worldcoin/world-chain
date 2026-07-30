@@ -54,10 +54,12 @@ sol! {
         function PROOF_THRESHOLD() external view returns (uint8);
         function PROOF_LANE_COUNT() external view returns (uint8);
         function domainHash() external view returns (bytes32);
+        function canonicalAnchorParent() external view returns (address);
         function challengePeriod() external view returns (uint64);
         function proofPeriod() external view returns (uint64);
         function proposerBond() external view returns (uint256);
         function challengerBond() external view returns (uint256);
+        function proofTimeoutRecipient() external view returns (address);
         function disputeGameFactory() external view returns (address);
         function anchorStateRegistry() external view returns (address);
         function weth() external view returns (address);

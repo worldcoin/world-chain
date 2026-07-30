@@ -6,6 +6,7 @@
 //! depending on a live chain or expensive proof generation.
 
 use alloy_primitives::{Address, B256, BlockNumber, Bytes, U256, address};
+use alloy_sol_types::SolValue;
 use async_trait::async_trait;
 use std::{
     collections::HashMap,
@@ -16,7 +17,9 @@ use world_chain_challenger::{
 };
 use world_chain_defender::{
     DefenderClient, DefenderError, DefenderSubmission, GameMetadata as DefenderGameMetadata,
+    ResolveSubmission as DefenderResolveSubmission,
 };
+use world_chain_proof_core::boot::TransitionPublicValues;
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_proofs::{
     ConsensusError, ConsensusProvider, InvalidationReason, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD,
@@ -44,6 +47,7 @@ const STATE_NONE: u8 = 0;
 const STATE_PROPOSED: u8 = 1;
 const STATE_CHALLENGED: u8 = 2;
 const STATE_FINALIZED: u8 = 3;
+const STATE_INVALIDATED: u8 = 4;
 
 /// Domain used by the fake proof-system factory.
 #[must_use]
@@ -161,8 +165,7 @@ impl FakeExecution {
             state: Arc::new(Mutex::new(FakeExecutionState {
                 domain_hash: test_domain().hash(),
                 anchor: AnchorRef {
-                    registry: ANCHOR,
-                    anchor_game: None,
+                    address: ANCHOR,
                     l2_block_number: 0,
                 },
                 finalized_l1_block: 10_000,
@@ -313,36 +316,28 @@ impl ProposerClient for FakeExecution {
             .anchor)
     }
 
-    async fn games_for_transition(
+    async fn game_for_transition(
         &self,
-        parent_candidates: &[Address],
+        parent_ref: Address,
         root_claim: B256,
         l2_block_number: u64,
-    ) -> Result<Vec<TransitionGame>, ProposerError> {
+    ) -> Result<Option<TransitionGame>, ProposerError> {
         let state = self.state.lock().expect("fake execution mutex poisoned");
-        let mut found = Vec::with_capacity(parent_candidates.len());
-        for parent_ref in parent_candidates {
-            let mut latest = None;
-            for attempt in 0..MAX_ATTEMPT_SCAN {
-                let uuid = ProposalCommitment {
-                    parent_ref: *parent_ref,
-                    root_claim,
-                    l2_block_number,
-                    attempt,
-                }
-                .game_uuid(state.domain_hash);
-                let Some(address) = state.games_by_key.get(&uuid).copied() else {
-                    break;
-                };
-                latest = Some(TransitionGame {
-                    address,
-                    parent_ref: *parent_ref,
-                    attempt,
-                });
+        let mut latest = None;
+        for attempt in 0..MAX_ATTEMPT_SCAN {
+            let uuid = ProposalCommitment {
+                parent_ref,
+                root_claim,
+                l2_block_number,
+                attempt,
             }
-            found.extend(latest);
+            .game_uuid(state.domain_hash);
+            let Some(address) = state.games_by_key.get(&uuid).copied() else {
+                break;
+            };
+            latest = Some(TransitionGame { address, attempt });
         }
-        Ok(found)
+        Ok(latest)
     }
 
     /// The fake has no registry finality airgap: a resolved game is immediately closeable.
@@ -429,8 +424,7 @@ impl ProposerClient for FakeExecution {
         }
         let l2_block_number = record.event.l2_block_number;
         state.anchor = AnchorRef {
-            registry: ANCHOR,
-            anchor_game: Some(game),
+            address: game,
             l2_block_number,
         };
         Ok(CloseGameSubmission {
@@ -438,14 +432,9 @@ impl ProposerClient for FakeExecution {
         })
     }
 
-    async fn latest_finalized_l1_block(&self) -> Result<B256, ProposerError> {
-        Ok(B256::repeat_byte(0xf1))
-    }
-
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
-        _proof: ProofData,
     ) -> Result<ProposalSubmission, ProposerError> {
         let mut state = self.state.lock().expect("fake execution mutex poisoned");
         let uuid = proposal.commitment().game_uuid(state.domain_hash);
@@ -592,16 +581,18 @@ impl DefenderClient for FakeExecution {
     }
 
     async fn game_metadata(&self, game: Address) -> Result<DefenderGameMetadata, DefenderError> {
-        self.state
-            .lock()
-            .expect("fake execution mutex poisoned")
+        let state = self.state.lock().expect("fake execution mutex poisoned");
+        state
             .games_by_address
             .get(&game)
             .map(|record| DefenderGameMetadata {
                 address: game,
+                domain_hash: state.domain_hash,
+                parent_ref: record.event.parent_ref,
                 root_claim: record.event.root_claim,
                 l2_block_number: record.event.l2_block_number,
                 l1_origin_hash: record.event.l1_origin_hash,
+                l1_origin_number: record.event.l1_origin_number,
                 challenge_deadline: record.challenge_deadline,
                 proof_deadline: record.proof_deadline,
                 proof_threshold: PROOF_THRESHOLD,
@@ -645,6 +636,21 @@ impl DefenderClient for FakeExecution {
                 invalidation_reason: InvalidationReason::ProofTimeout,
             });
         }
+        if current_state == RootState::Proposed && record.challenge_deadline == 0 {
+            return Ok(ResolutionStatus {
+                resolvable: true,
+                root_state: if record.proof_bitmap == 0 {
+                    RootState::Invalidated
+                } else {
+                    RootState::Finalized
+                },
+                invalidation_reason: if record.proof_bitmap == 0 {
+                    InvalidationReason::ProofTimeout
+                } else {
+                    InvalidationReason::None
+                },
+            });
+        }
 
         Ok(ResolutionStatus {
             resolvable: false,
@@ -661,6 +667,35 @@ impl DefenderClient for FakeExecution {
             .get(&game)
             .map(|record| record.proof_bitmap)
             .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
+    }
+
+    async fn resolve_game(
+        &self,
+        game: Address,
+    ) -> Result<DefenderResolveSubmission, DefenderError> {
+        let status = DefenderClient::resolution_status(self, game).await?;
+        if !status.resolvable {
+            return Err(DefenderError::Contract(format!(
+                "game {game} is not resolvable"
+            )));
+        }
+        let mut state = self.state.lock().expect("fake execution mutex poisoned");
+        let record = state
+            .games_by_address
+            .get_mut(&game)
+            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))?;
+        record.state = match status.root_state {
+            RootState::Finalized => STATE_FINALIZED,
+            RootState::Invalidated => STATE_INVALIDATED,
+            _ => {
+                return Err(DefenderError::Contract(format!(
+                    "game {game} has no terminal outcome"
+                )));
+            }
+        };
+        Ok(DefenderResolveSubmission {
+            tx_hash: B256::with_last_byte(game.as_slice()[19]),
+        })
     }
 
     async fn submit_proof(
@@ -680,9 +715,9 @@ impl DefenderClient for FakeExecution {
             .games_by_address
             .get_mut(&game)
             .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))?;
-        if record.state != STATE_CHALLENGED {
+        if record.state != STATE_PROPOSED && record.state != STATE_CHALLENGED {
             return Err(DefenderError::Contract(format!(
-                "game {game} is not challenged"
+                "game {game} is not open for proofs"
             )));
         }
 
@@ -751,8 +786,18 @@ impl ClaimedProofJobHandler for FakeProofBackend {
             },
             ProofBackend::Nitro => ProofData::Nitro {
                 attestation: request.l1_head.as_slice().to_vec().into(),
-                public_values: request.root_claim.as_slice().to_vec().into(),
+                public_values: TransitionPublicValues {
+                    l1Head: request.l1_head,
+                    l2PreRoot: B256::ZERO,
+                    l2PreBlockNumber: 0,
+                    l2PostRoot: request.root_claim,
+                    l2PostBlockNumber: request.l2_block_number,
+                    rollupConfigHash: B256::ZERO,
+                }
+                .abi_encode()
+                .into(),
                 signature: vec![0x7e, request.l2_block_number as u8].into(), // mock signature
+                public_key: Bytes::from_static(b"public key"),
             },
         })
     }

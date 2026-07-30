@@ -1,7 +1,6 @@
-use alloy_primitives::{Address, B256, BlockHash, U256};
+use alloy_primitives::{Address, B256, U256};
 use async_trait::async_trait;
 use world_chain_proofs::ResolutionStatus;
-use world_chain_prover_service::ProofData;
 
 use crate::{
     AnchorRef, Proposal, ProposalSubmission, ProposerError,
@@ -54,17 +53,13 @@ pub trait ProposerClient: Send + Sync {
     /// Reads the current anchor checkpoint from the registry.
     async fn anchor_parent(&self) -> Result<AnchorRef, ProposerError>;
 
-    /// Returns the highest-attempt game registered for the given transition under each of
-    /// `parent_candidates`, in candidate order. Candidates with no game are omitted.
-    ///
-    /// Every candidate is reported rather than just the first hit: an invalidated game under a
-    /// superseded parent must not hide a live one under the parent that is still acceptable.
-    async fn games_for_transition(
+    /// Returns the highest-attempt game registered for the transition under `parent_ref`.
+    async fn game_for_transition(
         &self,
-        parent_candidates: &[Address],
+        parent_ref: Address,
         root_claim: B256,
         l2_block_number: u64,
-    ) -> Result<Vec<TransitionGame>, ProposerError>;
+    ) -> Result<Option<TransitionGame>, ProposerError>;
 
     /// Returns the resolution status of the provided game, if game exists.
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError>;
@@ -78,13 +73,9 @@ pub trait ProposerClient: Send + Sync {
     /// Submits a closeGame transaction to the provided game.
     async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError>;
 
-    /// Gets the latest L1 finalized block hash.
-    async fn latest_finalized_l1_block(&self) -> Result<BlockHash, ProposerError>;
-
     /// Creates the proposal's game through the dispute-game factory.
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
-        proof: ProofData,
     ) -> Result<ProposalSubmission, ProposerError>;
 }

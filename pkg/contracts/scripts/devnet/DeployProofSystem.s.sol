@@ -55,6 +55,7 @@ contract DeployProofSystem is Script {
         bytes32 rollupConfigHash;
         uint256 blockInterval;
         uint8 proofThreshold;
+        address proofTimeoutRecipient;
         IDisputeGameFactory disputeGameFactory;
         IAnchorStateRegistry anchorStateRegistry;
         ISystemConfig systemConfig;
@@ -80,9 +81,9 @@ contract DeployProofSystem is Script {
         // 1. Periphery + DelayedWETH + game implementation, from the deployer key.
         vm.startBroadcast(config.privateKey);
         deployment.staking = new MockStakingRegistry();
-        deployment.validityVerifier = new MockRootIdVerifier(false);
-        deployment.teeVerifier = new MockRootIdVerifier(false);
-        deployment.councilVerifier = new MockRootIdVerifier(false);
+        deployment.validityVerifier = new MockRootIdVerifier(true);
+        deployment.teeVerifier = new MockRootIdVerifier(true);
+        deployment.councilVerifier = new MockRootIdVerifier(true);
         deployment.staking.setStaked(vm.addr(config.privateKey), true);
         if (config.challenger != address(0)) {
             deployment.staking.setStaked(config.challenger, true);
@@ -153,6 +154,7 @@ contract DeployProofSystem is Script {
         config.rollupConfigHash = vm.envBytes32("ROLLUP_CONFIG_HASH");
         config.blockInterval = vm.envOr("PROOF_SYSTEM_BLOCK_INTERVAL", uint256(10));
         config.proofThreshold = uint8(vm.envOr("PROOF_THRESHOLD", uint256(ProofLib.PROOF_THRESHOLD)));
+        config.proofTimeoutRecipient = vm.envOr("PROOF_TIMEOUT_RECIPIENT", config.challenger);
         config.disputeGameFactory = IDisputeGameFactory(vm.envAddress("DISPUTE_GAME_FACTORY"));
         config.anchorStateRegistry = IAnchorStateRegistry(vm.envAddress("ANCHOR_STATE_REGISTRY"));
         config.systemConfig = ISystemConfig(vm.envAddress("SYSTEM_CONFIG"));
@@ -176,6 +178,7 @@ contract DeployProofSystem is Script {
         require(config.systemConfig.l2ChainId() == config.l2ChainId, "DeployProofSystem: L2 chain ID mismatch");
         require(config.dgfOwnerKey != 0, "DeployProofSystem: DGF owner key required");
         require(config.proxyAdminOwnerKey != 0, "DeployProofSystem: ProxyAdmin owner key required");
+        require(config.proofTimeoutRecipient != address(0), "DeployProofSystem: proof timeout recipient required");
         if (config.setRespectedGameType) {
             require(config.guardianKey != 0, "DeployProofSystem: guardian key required for cutover");
         }
@@ -197,6 +200,7 @@ contract DeployProofSystem is Script {
             proofPeriod: PROOF_PERIOD,
             proposerBond: PROPOSER_BOND,
             challengerBond: CHALLENGER_BOND,
+            proofTimeoutRecipient: config.proofTimeoutRecipient,
             proofThreshold: config.proofThreshold,
             validityProofVerifier: IWorldChainProofVerifier(address(deployment.validityVerifier)),
             teeVerifier: IWorldChainProofVerifier(address(deployment.teeVerifier)),
@@ -221,6 +225,7 @@ contract DeployProofSystem is Script {
         vm.serializeAddress(root, "teeVerifier", address(deployment.teeVerifier));
         vm.serializeAddress(root, "securityCouncil", address(deployment.councilVerifier));
         vm.serializeAddress(root, "stakingRegistry", address(deployment.staking));
+        vm.serializeAddress(root, "proofTimeoutRecipient", config.proofTimeoutRecipient);
         vm.serializeAddress(root, "gameImplementation", address(deployment.gameImpl));
         vm.serializeAddress(root, "delayedWeth", address(deployment.weth));
         vm.serializeAddress(root, "delayedWethProxyAdmin", address(deployment.wethProxyAdmin));

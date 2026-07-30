@@ -13,8 +13,9 @@ Stack `DisputeGameFactory.create(gameType, rootClaim, extraData)`.
 
 ## Items needed to propose a new L2 output root
 
-- `parent_ref`: address of the parent game, or the `AnchorStateRegistry` contract address when the
-  proposal extends the current anchor.
+- `parent_ref`: address of the canonical parent selected by the registered game implementation.
+  This is normally the current compatible anchor game or a descendant game. The
+  `AnchorStateRegistry` address is used as a sentinel when no compatible anchor game exists.
 - `root_claim`: OP stack output root.
 - `l2_block_number`: L2 block number for the root claim.
 - `attempt`: retry nonce, non-zero only when replacing a game invalidated by a proof timeout.
@@ -27,14 +28,14 @@ parentRef, attempt)` and the game's factory UUID is
 
 ### `parent_ref`
 
-- start with `parent_ref` equal to the `AnchorStateRegistry` address. Once the anchor advances onto
-  a game, that game is no longer a valid parent — `MultiProofGame.initialize` rejects a parent at or
-  below the anchor — so new proposals extending the anchor always point at the registry.
+- read `canonicalAnchorParent()` from the registered `MultiProofGame` implementation. It returns
+  the current anchor game when that game remains an eligible WIP-1006 parent in the same proof
+  domain. It returns the `AnchorStateRegistry` sentinel for the initial anchor, an incompatible
+  proof domain or game type, or an ineligible anchor game.
 - compute L2 output root for block equal to `parent_ref`'s `l2_block_number` + `BLOCK_INTERVAL`
 - look the game up with `DisputeGameFactory.games(gameType, rootClaim, extraData)`, walking
-  `attempt` upward until the first gap. At the anchor tip both the registry and the current anchor
-  game are candidate parents, because a game created before the anchor advanced still references
-  the anchor game.
+  `attempt` upward until the first gap. There is exactly one canonical parent to query: anchor
+  advancement does not change the parent reference or factory UUID of an existing transition.
 - if a game exists, it becomes the `parent_ref` and we continue this loop
 - if it doesn't exist - i.e. the address is `0x00..00`, then the current `parent_ref` is returned
 
