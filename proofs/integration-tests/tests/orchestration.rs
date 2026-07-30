@@ -43,7 +43,6 @@ fn defender_config() -> DefenderConfig {
     DefenderConfig {
         allowed_proposer: FAKE_PROPOSER,
         poll_interval: Duration::from_secs(1),
-        max_proof_attempts: 2,
         ..DefenderConfig::default()
     }
 }
