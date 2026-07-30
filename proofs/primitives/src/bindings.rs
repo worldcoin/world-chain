@@ -6,6 +6,14 @@ sol! {
     /// must filter on `MULTI_PROOF_GAME_TYPE`.
     #[sol(rpc)]
     interface IDisputeGameFactory {
+        struct GameSearchResult {
+            uint256 index;
+            bytes32 metadata;
+            uint64 timestamp;
+            bytes32 rootClaim;
+            bytes extraData;
+        }
+
         event DisputeGameCreated(address indexed disputeProxy, uint32 indexed gameType, bytes32 indexed rootClaim);
 
         function create(uint32 gameType, bytes32 rootClaim, bytes calldata extraData)
@@ -21,6 +29,10 @@ sol! {
             view
             returns (uint32 gameType, uint64 timestamp, address proxy);
         function gameCount() external view returns (uint256 gameCount);
+        function findLatestGames(uint32 gameType, uint256 start, uint256 count)
+            external
+            view
+            returns (GameSearchResult[] memory games);
         function gameImpls(uint32 gameType) external view returns (address impl);
         function initBonds(uint32 gameType) external view returns (uint256 bond);
         function getGameUUID(uint32 gameType, bytes32 rootClaim, bytes calldata extraData)
@@ -66,11 +78,15 @@ sol! {
         function rootId() external view returns (bytes32);
         function proposalDomainHash() external view returns (bytes32);
         function attempt() external view returns (uint256);
+        function retryOf() external view returns (address);
+        function creationProofLane() external view returns (uint8);
+        function creationProof() external view returns (bytes memory);
         function parentRef() external view returns (address);
         function startingRootClaim() external view returns (bytes32);
         function startingL2BlockNumber() external view returns (uint256);
         function l2BlockNumber() external view returns (uint256);
         function l2SequenceNumber() external view returns (uint256);
+        function l1Head() external view returns (bytes32);
         function l1OriginHash() external view returns (bytes32);
         function l1OriginNumber() external view returns (uint256);
         function rootClaim() external view returns (bytes32);

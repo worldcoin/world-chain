@@ -79,6 +79,9 @@ impl L1DevChain {
             config.chain_id.to_string(),
             "--block-time".to_string(),
             config.block_time_secs.to_string(),
+            // Proof-system services consume finalized L2 blocks, so keep Anvil finality fast.
+            "--slots-in-an-epoch".to_string(),
+            "1".to_string(),
         ];
 
         if let Some(genesis_file) = &config.genesis_file {

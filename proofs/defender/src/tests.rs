@@ -396,6 +396,7 @@ impl ProofRequester for MockProver {
                 attestation: Bytes::from_static(b"attestation"),
                 public_values: Bytes::from_static(b"public values"),
                 signature: Bytes::from_static(b"signature"),
+                public_key: Bytes::from_static(b"public key"),
             },
         };
         Ok(ProofResponse::Succeeded(SucceededProofResponse {

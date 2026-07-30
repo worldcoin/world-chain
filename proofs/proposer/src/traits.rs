@@ -61,6 +61,7 @@ pub trait ProposerClient: Send + Sync {
     /// superseded parent must not hide a live one under the parent that is still acceptable.
     async fn games_for_transition(
         &self,
+        anchor_game: Option<Address>,
         parent_candidates: &[Address],
         root_claim: B256,
         l2_block_number: u64,
@@ -85,6 +86,7 @@ pub trait ProposerClient: Send + Sync {
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
+        retry_of: Option<Address>,
         proof: ProofData,
     ) -> Result<ProposalSubmission, ProposerError>;
 }

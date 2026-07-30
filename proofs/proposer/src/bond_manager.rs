@@ -94,6 +94,9 @@ where
         for game in proposed_games {
             let result: Result<bool, ProposerError> = async {
                 let resolution_status = self.execution_provider.resolution_status(game).await?;
+                // TODO: Resolve proposer-owned games here when they are resolvable. The
+                // canonical-line resolver never visits abandoned siblings or descendants,
+                // which otherwise leaves their proposer bonds locked.
                 if !resolution_status.is_resolved() {
                     return Ok(false);
                 }
