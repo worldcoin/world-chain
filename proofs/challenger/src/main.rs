@@ -16,8 +16,9 @@ use clap::Parser;
 use tracing::info;
 use url::Url;
 use world_chain_challenger::{
-    AlloyChallengerClient, BondManager, BondManagerConfig, ChallengerConfig, OwnedGames,
-    ResolutionManager, ResolutionManagerConfig, WorldChainChallenger,
+    AlloyChallengerClient, BondManager, BondManagerConfig, ChallengerConfig,
+    DEFAULT_GAME_SCAN_LOOKBACK, DEFAULT_L1_TX_CONFIRMATIONS, OwnedGames, ResolutionManager,
+    ResolutionManagerConfig, WorldChainChallenger,
 };
 use world_chain_proofs::OptimismConsensusClient;
 
@@ -58,6 +59,23 @@ struct Cli {
     /// Maximum number of newly created games discovered per challenger tick.
     #[arg(long, env = "MAX_GAMES_PER_TICK", default_value_t = 100)]
     max_games_per_tick: u64,
+
+    /// Number of previously scanned games reconsidered per challenger tick.
+    #[arg(
+        long,
+        env = "GAME_SCAN_LOOKBACK",
+        default_value_t = DEFAULT_GAME_SCAN_LOOKBACK
+    )]
+    game_scan_lookback: u64,
+
+    /// Number of L1 confirmations required before a transaction is accepted.
+    #[arg(
+        long,
+        env = "L1_TX_CONFIRMATIONS",
+        default_value_t = DEFAULT_L1_TX_CONFIRMATIONS,
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    l1_tx_confirmations: u64,
 
     /// Conservative upper bound on the age of a game with an open challenge window.
     #[arg(long, env = "MAX_GAME_AGE_SECONDS", default_value_t = 604_800)]
@@ -102,13 +120,18 @@ async fn main() -> Result<()> {
         .wallet(EthereumWallet::from(cli.challenger_key))
         .connect_http(Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?);
 
-    let client =
-        AlloyChallengerClient::new(provider, cli.factory_address, cli.anchor_registry_address);
+    let client = AlloyChallengerClient::new(
+        provider,
+        cli.factory_address,
+        cli.anchor_registry_address,
+        cli.l1_tx_confirmations,
+    );
     let output_roots = OptimismConsensusClient::new(cli.output_root_rpc.clone());
     let config = ChallengerConfig {
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_game_concurrency: cli.max_game_concurrency,
         max_games_per_tick: cli.max_games_per_tick,
+        game_scan_lookback: cli.game_scan_lookback,
         max_game_age: Duration::from_secs(cli.max_game_age_seconds),
     };
     let resolution_config = ResolutionManagerConfig {
@@ -137,6 +160,8 @@ async fn main() -> Result<()> {
         anchor = %cli.anchor_registry_address,
         challenger = %challenger_address,
         max_games_per_tick = cli.max_games_per_tick,
+        game_scan_lookback = cli.game_scan_lookback,
+        l1_tx_confirmations = cli.l1_tx_confirmations,
         resolution_manager_poll_interval_seconds =
             cli.resolution_manager_poll_interval_seconds,
         max_resolutions_per_tick = cli.max_resolutions_per_tick,

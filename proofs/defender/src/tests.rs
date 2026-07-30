@@ -22,10 +22,12 @@ use world_chain_proofs::{
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
     ProofResponse, ProofStatus, RequestProofResponse, SucceededProofResponse,
+    TooManyRetriesErrorData,
 };
 
 const GAME_1: Address = address!("0000000000000000000000000000000000000001");
 const GAME_2: Address = address!("0000000000000000000000000000000000000002");
+const GAME_3: Address = address!("0000000000000000000000000000000000000003");
 const ALLOWED_PROPOSER: Address = address!("00000000000000000000000000000000000000a1");
 const OTHER_PROPOSER: Address = address!("00000000000000000000000000000000000000b2");
 const L2_BLOCK: u64 = 100;
@@ -326,14 +328,17 @@ fn mock_output_roots(
 struct MockProver {
     /// When true, every requested proof reports [`ProofStatus::Failed`].
     fail: bool,
+    max_requests_per_proof: Option<u32>,
     requests: Arc<Mutex<Vec<ProofRequest>>>,
+    request_counts: Arc<Mutex<HashMap<ProofRequestId, u32>>>,
     by_id: Arc<Mutex<HashMap<ProofRequestId, ProofRequest>>>,
 }
 
 impl MockProver {
-    fn failing() -> Self {
+    fn failing(max_requests_per_proof: u32) -> Self {
         Self {
             fail: true,
+            max_requests_per_proof: Some(max_requests_per_proof),
             ..Self::default()
         }
     }
@@ -355,6 +360,17 @@ impl ProofRequester for MockProver {
             .lock()
             .expect("not poisoned")
             .push(proof_request.clone());
+        if let Some(max_requests_per_proof) = self.max_requests_per_proof {
+            let mut request_counts = self.request_counts.lock().expect("not poisoned");
+            let request_count = request_counts.entry(id).or_default();
+            if *request_count >= max_requests_per_proof {
+                return Err(ProofRequestError::TooManyRetries(TooManyRetriesErrorData {
+                    proof_id: id,
+                    max_retries: max_requests_per_proof.saturating_sub(1),
+                }));
+            }
+            *request_count += 1;
+        }
         self.by_id
             .lock()
             .expect("not poisoned")
@@ -409,6 +425,7 @@ fn config() -> DefenderConfig {
     DefenderConfig {
         allowed_proposer: ALLOWED_PROPOSER,
         poll_interval: Duration::from_secs(1),
+        game_scan_lookback: 0,
         ..DefenderConfig::default()
     }
 }
@@ -500,6 +517,46 @@ async fn tick_respects_factory_scan_budget() {
     assert_eq!(watched.len(), 2);
     assert!(watched.contains(&GAME_1));
     assert!(watched.contains(&GAME_2));
+}
+
+#[tokio::test]
+async fn tick_rechecks_lookback_without_reducing_forward_progress() {
+    let canonical_root = B256::repeat_byte(0x20);
+    let client = MockClient::new(
+        vec![
+            (GAME_1, canonical_root, L2_BLOCK),
+            (GAME_2, canonical_root, L2_BLOCK),
+            (GAME_3, canonical_root, L2_BLOCK),
+        ],
+        HashMap::from([(GAME_2, STATE_FINALIZED)]),
+    );
+    let (output_roots, _finalized_l2_block) =
+        mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
+    let mut defender_config = config();
+    defender_config.max_game_concurrency = 1;
+    defender_config.max_games_per_tick = 2;
+    defender_config.game_scan_lookback = 1;
+    let mut defender = WorldChainDefender::new(
+        defender_config,
+        client.clone(),
+        output_roots,
+        MockProver::default(),
+    );
+
+    defender.tick().await.unwrap();
+    assert_eq!(defender.next_game_index(), Some(2));
+    assert_eq!(defender.watched_games(), [GAME_1]);
+
+    // Simulate a shallow reorg restoring a game that was transiently observed as finalized.
+    client.set_state(GAME_2, STATE_PROPOSED);
+    defender.tick().await.unwrap();
+
+    assert_eq!(defender.next_game_index(), Some(3));
+    let watched = defender.watched_games();
+    assert_eq!(watched.len(), 3);
+    assert!(watched.contains(&GAME_1));
+    assert!(watched.contains(&GAME_2));
+    assert!(watched.contains(&GAME_3));
 }
 
 #[tokio::test]
@@ -891,7 +948,7 @@ async fn tick_skips_lane_already_proven() {
 }
 
 #[tokio::test]
-async fn failed_proofs_are_rerequested_up_to_the_attempt_bound() {
+async fn exhausted_prover_retries_are_not_restarted_by_lookback() {
     let canonical_root = B256::repeat_byte(0x20);
 
     let client = MockClient::new(
@@ -900,29 +957,28 @@ async fn failed_proofs_are_rerequested_up_to_the_attempt_bound() {
     );
     let (output_roots, _finalized_l2_block) =
         mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
-    let prover = MockProver::failing();
+    let prover = MockProver::failing(2);
+    let mut defender_config = config();
+    defender_config.game_scan_lookback = 1;
     let mut defender = WorldChainDefender::new(
-        DefenderConfig {
-            max_proof_attempts: 2,
-            ..config()
-        },
+        defender_config,
         client.clone(),
         output_roots,
         prover.clone(),
     );
 
     // Tick 1 discovers the game and tick 2 promotes it. Tick 3 makes the first
-    // request per lane; tick 4 re-requests each failed proof; tick 5 exhausts
-    // the attempts.
-    defender.tick().await.unwrap();
-    defender.tick().await.unwrap();
-    defender.tick().await.unwrap();
-    defender.tick().await.unwrap();
-    defender.tick().await.unwrap();
+    // request per lane; tick 4 re-requests each failed proof; tick 5 observes
+    // the prover-service retry limit and abandons the defense. Further lookback
+    // scans must not restart it.
+    for _ in 0..8 {
+        defender.tick().await.unwrap();
+    }
 
-    assert_eq!(prover.requests().len(), 4);
+    assert_eq!(prover.requests().len(), 6);
     assert!(client.submissions().is_empty());
     assert!(defender.active_defenses().is_empty());
+    assert_eq!(defender.abandoned_defenses(), [GAME_1]);
 }
 
 #[tokio::test]

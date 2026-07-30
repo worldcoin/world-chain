@@ -380,6 +380,7 @@ fn config() -> ChallengerConfig {
         poll_interval: Duration::from_secs(1),
         max_game_concurrency: 10,
         max_games_per_tick: 100,
+        game_scan_lookback: 100,
         max_game_age: Duration::from_secs(7 * 24 * 60 * 60),
     }
 }
@@ -463,6 +464,39 @@ async fn scan_once_respects_new_game_tick_budget() {
 
     challenger.scan_once().await.unwrap();
     assert_eq!(client.challenges(), vec![GAME_1, GAME_2, GAME_3]);
+    assert_eq!(challenger.next_game_index(), Some(3));
+}
+
+#[tokio::test]
+async fn scan_once_rechecks_lookback_without_reducing_forward_progress() {
+    let proposed_root = B256::repeat_byte(0x10);
+    let canonical_root = B256::repeat_byte(0x20);
+    let client = MockClient::new(vec![
+        MockGame::proposed(GAME_1, proposed_root, L2_BLOCK),
+        MockGame::proposed(GAME_2, proposed_root, L2_BLOCK),
+        MockGame::proposed(GAME_3, proposed_root, L2_BLOCK),
+    ]);
+    let (output_roots, _) =
+        mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
+    let mut challenger_config = config();
+    challenger_config.max_game_concurrency = 1;
+    challenger_config.max_games_per_tick = 2;
+    challenger_config.game_scan_lookback = 1;
+    let mut challenger = WorldChainChallenger::new(challenger_config, client.clone(), output_roots);
+
+    challenger.scan_once().await.unwrap();
+    client
+        .state
+        .lock()
+        .expect("not poisoned")
+        .games
+        .get_mut(&GAME_2)
+        .expect("game exists")
+        .state = STATE_PROPOSED;
+
+    challenger.scan_once().await.unwrap();
+
+    assert_eq!(client.challenges(), vec![GAME_1, GAME_2, GAME_2, GAME_3]);
     assert_eq!(challenger.next_game_index(), Some(3));
 }
 

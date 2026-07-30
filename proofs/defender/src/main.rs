@@ -16,7 +16,10 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use tracing::info;
 use url::Url;
-use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
+use world_chain_defender::{
+    AlloyDefenderClient, DEFAULT_GAME_SCAN_LOOKBACK, DEFAULT_L1_TX_CONFIRMATIONS, DefenderConfig,
+    WorldChainDefender,
+};
 use world_chain_proofs::OptimismConsensusClient;
 use world_chain_prover_service::RpcProverServiceClient;
 
@@ -62,13 +65,26 @@ struct Cli {
     #[arg(long, env = "MAX_GAMES_PER_TICK", default_value_t = 100)]
     max_games_per_tick: u64,
 
+    /// Number of previously scanned games reconsidered per defender tick.
+    #[arg(
+        long,
+        env = "GAME_SCAN_LOOKBACK",
+        default_value_t = DEFAULT_GAME_SCAN_LOOKBACK
+    )]
+    game_scan_lookback: u64,
+
+    /// Number of L1 confirmations required before a proof submission is accepted.
+    #[arg(
+        long,
+        env = "L1_TX_CONFIRMATIONS",
+        default_value_t = DEFAULT_L1_TX_CONFIRMATIONS,
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    l1_tx_confirmations: u64,
+
     /// Conservative upper bound on the age of a game with an open proof window.
     #[arg(long, env = "MAX_GAME_AGE_SECONDS", default_value_t = 604_800)]
     max_game_age_seconds: u64,
-
-    /// Maximum proof attempts per lane before giving up.
-    #[arg(long, env = "MAX_PROOF_ATTEMPTS", default_value_t = 3)]
-    max_proof_attempts: u32,
 }
 
 #[tokio::main]
@@ -85,7 +101,7 @@ async fn main() -> Result<()> {
         .wallet(EthereumWallet::from(cli.defender_key))
         .connect_http(Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?);
 
-    let client = AlloyDefenderClient::new(provider, cli.factory_address);
+    let client = AlloyDefenderClient::new(provider, cli.factory_address, cli.l1_tx_confirmations);
     let output_roots = OptimismConsensusClient::new(cli.output_root_rpc.clone());
     let proof_requester = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
@@ -94,8 +110,8 @@ async fn main() -> Result<()> {
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_game_concurrency: cli.max_game_concurrency,
         max_games_per_tick: cli.max_games_per_tick,
+        game_scan_lookback: cli.game_scan_lookback,
         max_game_age: Duration::from_secs(cli.max_game_age_seconds),
-        max_proof_attempts: cli.max_proof_attempts,
     };
     let mut defender = WorldChainDefender::new(config, client, output_roots, proof_requester);
 
@@ -107,6 +123,8 @@ async fn main() -> Result<()> {
         defender = %defender_address,
         allowed_proposer = %cli.allowed_proposer,
         max_games_per_tick = cli.max_games_per_tick,
+        game_scan_lookback = cli.game_scan_lookback,
+        l1_tx_confirmations = cli.l1_tx_confirmations,
         "starting World Chain proof-system defender"
     );
 
