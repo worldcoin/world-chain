@@ -154,7 +154,15 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
 
         // Keep a safety buffer in the EntryPoint so a burst of ops can't drain
         // the deposit below the floor mid-batch.
-        if (getDeposit() < maxCost + minEntryPointDeposit) revert DepositFloorBreached();
+        //
+        // `getDeposit()` is already NET of this op: EntryPoint v0.7 does
+        // `paymasterInfo.deposit -= requiredPreFund` *before* calling us (see
+        // EntryPoint._validatePaymasterPrepayment). So the remaining balance is
+        // exactly what would be left after sponsoring, and `maxCost` must NOT be
+        // subtracted again — doing so demanded ~`2 * maxCost + floor` and rejected
+        // ops that left the floor fully intact. Covered by
+        // test/EntryPointIntegration.t.sol, which drives real `handleOps`.
+        if (getDeposit() < minEntryPointDeposit) revert DepositFloorBreached();
 
         uint256 maxWldCharge = _wldCharge(maxCost);
 

@@ -149,13 +149,24 @@ contract WLDPaymasterTest is Test {
         paymaster.validatePaymasterUserOp(_userOp(user), bytes32(0), MAX_COST);
     }
 
+    /// @dev `getDeposit()` is already net of this op's prefund when the real
+    ///      EntryPoint calls validation, so the floor check compares the remaining
+    ///      balance against the floor directly. These direct-prank tests skip that
+    ///      deduction, so the floor is exercised by raising it above the deposit.
+    ///      The ordering-faithful version lives in test/EntryPointIntegration.t.sol.
     function test_RevertWhen_DepositFloorBreached() public {
-        // Ask for a maxCost that leaves the deposit below the floor.
-        uint256 deposit = paymaster.getDeposit();
-        uint256 tooBig = deposit - paymaster.minEntryPointDeposit() + 1;
+        paymaster.setMinEntryPointDeposit(paymaster.getDeposit() + 1);
         vm.prank(address(entryPoint));
         vm.expectRevert(WLDPaymaster.DepositFloorBreached.selector);
-        paymaster.validatePaymasterUserOp(_userOp(user), bytes32(0), tooBig);
+        paymaster.validatePaymasterUserOp(_userOp(user), bytes32(0), MAX_COST);
+    }
+
+    /// @dev A deposit exactly at the floor is acceptable: the floor is a minimum to
+    ///      retain, not a strict inequality against the remaining balance.
+    function test_DepositExactlyAtFloorIsAccepted() public {
+        paymaster.setMinEntryPointDeposit(paymaster.getDeposit());
+        vm.prank(address(entryPoint));
+        paymaster.validatePaymasterUserOp(_userOp(user), bytes32(0), MAX_COST);
     }
 
     function test_RevertWhen_OnlyEntryPointCanValidate() public {

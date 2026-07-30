@@ -284,6 +284,15 @@ griefing/MEV surface. Chainlink Automation remains available as a drop-in later
   decorrelates these.
 - **Deposit runs low.** The floor check rejects new ops before the deposit is
   exhausted; ops are simply un-sponsored until a batch (or the owner) replenishes.
+- **EntryPoint deducts the prefund *before* validation.** `getDeposit()` inside
+  `validatePaymasterUserOp` is already net of this op's `maxCost` — v0.7 does
+  `paymasterInfo.deposit -= requiredPreFund` and *then* calls the paymaster
+  (`EntryPoint._validatePaymasterPrepayment`). The floor check therefore compares
+  the remaining balance against `minEntryPointDeposit` directly; subtracting
+  `maxCost` again would demand roughly `2 * maxCost + floor` and reject ops that
+  left the floor fully intact. Tests that prank the EntryPoint and call validation
+  directly do not reproduce this ordering — `test/EntryPointIntegration.t.sol`
+  drives real `handleOps` for exactly that reason.
 - **Front-running / MEV on the batch trigger.** The swap direction and size are
   public once WLD accumulates. A searcher could sandwich the batch swap. The
   oracle-based `amountOutMinimum` bounds the damage; further hardening could

@@ -5,6 +5,8 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IWldEthOracle} from "../../src/interfaces/IWldEthOracle.sol";
 import {IAggregatorV3} from "../../src/interfaces/IAggregatorV3.sol";
+import {IAccount} from "@account-abstraction/interfaces/IAccount.sol";
+import {PackedUserOperation} from "@account-abstraction/interfaces/PackedUserOperation.sol";
 import {ISwapRouter, IWETH9} from "../../src/interfaces/ISwapRouter.sol";
 
 /// @notice Simple mintable ERC20 used for WLD in tests.
@@ -189,3 +191,25 @@ contract MockAggregatorV3 is IAggregatorV3 {
         return (_roundId, answer, updatedAt, updatedAt, _roundId);
     }
 }
+
+    /**
+     * @notice Minimal ERC-4337 account that always validates.
+     * @dev Lets tests drive real `EntryPoint.handleOps` so ordering-sensitive behaviour
+     *      is exercised — notably that the EntryPoint deducts the paymaster's prefund
+     *      *before* calling `validatePaymasterUserOp`. Implements {IAccount} rather than
+     *      a hand-rolled signature so the selector actually matches what the EntryPoint
+     *      calls (a `bytes` param instead of the struct silently hits `fallback`).
+     */
+    contract MockAccount is IAccount {
+        function validateUserOp(PackedUserOperation calldata, bytes32, uint256)
+            external
+            pure
+            override
+            returns (uint256)
+        {
+            return 0; // valid, no time range
+        }
+
+        fallback() external payable {}
+        receive() external payable {}
+    }

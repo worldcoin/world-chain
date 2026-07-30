@@ -41,6 +41,7 @@ test/
   WLDPaymaster.t.sol               # validate/postOp, premium math, batching, edge cases
   ChainlinkWldEthOracle.t.sol      # cross math, decimal normalisation, stale/invalid feeds
   ChainlinkWldEthOracle.fork.t.sol # optional: live World Chain feeds (needs WORLDCHAIN_RPC_URL)
+  EntryPointIntegration.t.sol      # real EntryPoint.handleOps: prefund ordering, floor, refunds
   E2E.fork.t.sol                   # optional: full loop vs live EntryPoint/WLD/router/pool
   Deploy.fork.t.sol                # optional: runs the deploy script, asserts it can sponsor
   Unwind.fork.t.sol                # optional: asserts teardown recovers every wei and token
@@ -68,7 +69,7 @@ WORLDCHAIN_RPC_URL=https://worldchain-mainnet.g.alchemy.com/public \
   forge test --match-path 'test/*.fork.t.sol' -vv
 ```
 
-Expected: **40 passing unit tests**, plus **19 fork tests** that are skipped unless
+Expected: **47 passing unit tests**, plus **19 fork tests** that are skipped unless
 `WORLDCHAIN_RPC_URL` is set. The fork suite is what catches integration breakage
 the mocks cannot — `E2E.fork.t.sol` runs charge → reconcile → swap → re-deposit
 against the real EntryPoint, WLD, SwapRouter02 and WLD/WETH pool.
@@ -113,7 +114,7 @@ exposing `AggregatorV3Interface`) and report **18 decimals**, not mainnet's 8 �
 | `premiumBps` | 2000 (+20%) | Premium over oracle price |
 | `blocksPerBatch` (X) | 300 | Min blocks between batch swaps |
 | `maxSwapSlippageBps` | 300 (3%) | Oracle-bounded min-out on the batch swap |
-| `minEntryPointDeposit` | 0.05 ETH | Deposit floor preserved after each op |
+| `minEntryPointDeposit` | 0.05 ETH | Deposit floor that must remain after each op (compared against the post-prefund balance) |
 | `postOpGasOverhead` | 40000 | Gas assumed for postOp, folded into the charge |
 | `keeperRewardBps` | 0 | Optional reward paid to the batch-swap caller |
 | `maxWldPerBatch` | 500 WLD | Max WLD sold per batch; bounds price impact (0 = unlimited) |
