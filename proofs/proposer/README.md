@@ -18,14 +18,10 @@ Stack `DisputeGameFactory.create(gameType, rootClaim, extraData)`.
 - `root_claim`: OP stack output root.
 - `l2_block_number`: L2 block number for the root claim.
 - `attempt`: retry nonce, non-zero only when replacing a game invalidated by a proof timeout.
-- `retry_of`: concrete previous game for a non-zero attempt.
-- `l1_origin_hash` and `l1_origin_number`: recent L1 block selected by the proposer.
-- `creation_proof_lane`: lane used to verify the creation proof. The proposer uses `TEE_ATTESTATION`.
-- `creation_proof`: proof verified by the selected lane during creation.
 
-These fields determine the factory call:
-`extraData = abi.encode(domainHash, l2BlockNumber, parentRef, attempt, retryOf, l1OriginHash,
-l1OriginNumber, creationProofLane, creationProof)`.
+These four fields determine the factory call: `extraData = abi.encode(domainHash, l2BlockNumber,
+parentRef, attempt)` and the game's factory UUID is
+`keccak256(abi.encode(gameType, rootClaim, extraData))`.
 
 ## How to get these items
 
@@ -35,30 +31,12 @@ l1OriginNumber, creationProofLane, creationProof)`.
   a game, that game is no longer a valid parent — `MultiProofGame.initialize` rejects a parent at or
   below the anchor — so new proposals extending the anchor always point at the registry.
 - compute L2 output root for block equal to `parent_ref`'s `l2_block_number` + `BLOCK_INTERVAL`
-- take one paginated `DisputeGameFactory.findLatestGames` snapshot back to the current anchor game
-  and cache it for the observed `(anchor_game, game_count)`;
-- ignore games from re-registered implementations with another domain or `extraData` layout;
-- for each interval, filter that in-memory snapshot by the expected parent, output root, and L2
-  block number, then retain the leaf of every explicit `retry_of` lineage;
-- follow the earliest non-invalidated leaf and repeat with that concrete game as the only parent;
-- if no matching game exists, propose the expected transition under the current parent.
-
-At the anchor tip both the registry and the current anchor game are candidate parents. A game
-created before the anchor advanced still references the anchor game, whereas one created after the
-advance must reference the registry sentinel.
-
-### Parallel games and retries
-
-The factory UUID identifies one exact `(gameType, rootClaim, extraData)` payload. Since `extraData`
-contains the creation proof, selected L1 origin, and `retry_of`, multiple bonded games can represent
-the same logical `(parent_ref, root_claim, l2_block_number, attempt)` with different UUIDs.
-`attempt` is consequently local to the lineage linked by `retry_of`, rather than a globally unique
-transition nonce.
-
-The proposer removes games referenced as retry predecessors and considers the remaining lineage
-tips in factory-index order. It follows the first non-invalidated matching tip and then searches
-only for children of that concrete game address. Other correct sibling games do not block this
-lineage; their permissionless resolution and bond settlement remain independent.
+- look the game up with `DisputeGameFactory.games(gameType, rootClaim, extraData)`, walking
+  `attempt` upward until the first gap. At the anchor tip both the registry and the current anchor
+  game are candidate parents, because a game created before the anchor advanced still references
+  the anchor game.
+- if a game exists, it becomes the `parent_ref` and we continue this loop
+- if it doesn't exist - i.e. the address is `0x00..00`, then the current `parent_ref` is returned
 
 ### `root_claim`
 
@@ -67,20 +45,6 @@ lineage; their permissionless resolution and bond settlement remain independent.
 ### `l2_block_number`
 
 - `parent_ref`'s `l2_block_number` field + `BLOCK_INTERVAL`
-
-### Creation proof and L1 origin
-
-- request a Nitro proof against a finalized L1 head;
-- encode its transition values, signature, and registered enclave public key in `creation_proof`;
-- reject and re-request a proof once its L1 origin is more than 8,000 blocks old, leaving
-  transaction-inclusion headroom inside EIP-2935's 8,191-block history window.
-
-## Devnet coverage
-
-The ignored full-stack E2E covers proof-backed game creation, the stock Portal prove/finalize
-withdrawal flow, anchor advancement, and both DelayedWETH bond-claim phases. The devnet uses a
-`MockRootIdVerifier` for the creation lane, so production Nitro key registration and verification
-remain separate integration coverage.
 
 ## Bond settlement
 

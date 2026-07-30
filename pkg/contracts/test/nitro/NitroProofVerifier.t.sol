@@ -353,13 +353,6 @@ contract NitroProofVerifierTest is Test {
         assertFalse(_verify(_expectedRootId(), hex"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"));
     }
 
-    function test_Verify_FalseForTrailingBytes() public {
-        bytes memory sig = _sign(_commitment());
-        bytes memory proof = bytes.concat(_proofBytes(sig, enclavePubKey), hex"01");
-
-        assertFalse(_verify(_expectedRootId(), proof));
-    }
-
     function test_Verify_AcceptsZeroL2BlockNumber() public {
         // Boundary: l2BlockNumber = 0 must work, since the rootId is
         // recomputed deterministically and the commitment is signed over

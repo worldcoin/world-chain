@@ -28,7 +28,6 @@ world-chain-sp1-worker = { workspace = true, default-features = false }
 world-chain-test-utils.workspace = true
 
 alloy-provider.workspace = true
-alloy-sol-types.workspace = true
 alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-hardforks.workspace = true

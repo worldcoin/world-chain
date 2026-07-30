@@ -18627,7 +18627,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider",
  "alloy-signer-local 2.0.5",
- "alloy-sol-types",
  "anyhow",
  "async-trait",
  "base64 0.22.1",
@@ -19163,7 +19162,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-provider",
  "alloy-signer-local 2.0.5",
- "alloy-sol-types",
  "anyhow",
  "async-trait",
  "clap",
@@ -19176,7 +19174,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber 0.3.23",
  "url",
- "world-chain-proof-core",
  "world-chain-proofs",
  "world-chain-prover-service",
 ]

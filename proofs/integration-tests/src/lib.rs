@@ -132,7 +132,7 @@ struct FakeExecutionState {
     anchor: AnchorRef,
     finalized_l1_block: BlockNumber,
     next_game_nonce: u8,
-    games_by_key: HashMap<ProposalCommitment, Address>,
+    games_by_key: HashMap<B256, Address>,
     games_by_address: HashMap<Address, GameRecord>,
     game_order: Vec<Address>,
 }
@@ -254,7 +254,9 @@ impl FakeExecution {
             attempt: proposal.attempt,
         };
 
-        state.games_by_key.insert(proposal.commitment(), game);
+        state
+            .games_by_key
+            .insert(proposal.commitment().game_uuid(state.domain_hash), game);
         state.game_order.push(game);
         state.games_by_address.insert(
             game,
@@ -313,7 +315,6 @@ impl ProposerClient for FakeExecution {
 
     async fn games_for_transition(
         &self,
-        _anchor_game: Option<Address>,
         parent_candidates: &[Address],
         root_claim: B256,
         l2_block_number: u64,
@@ -323,13 +324,14 @@ impl ProposerClient for FakeExecution {
         for parent_ref in parent_candidates {
             let mut latest = None;
             for attempt in 0..MAX_ATTEMPT_SCAN {
-                let key = ProposalCommitment {
+                let uuid = ProposalCommitment {
                     parent_ref: *parent_ref,
                     root_claim,
                     l2_block_number,
                     attempt,
-                };
-                let Some(address) = state.games_by_key.get(&key).copied() else {
+                }
+                .game_uuid(state.domain_hash);
+                let Some(address) = state.games_by_key.get(&uuid).copied() else {
                     break;
                 };
                 latest = Some(TransitionGame {
@@ -443,14 +445,13 @@ impl ProposerClient for FakeExecution {
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
-        _retry_of: Option<Address>,
         _proof: ProofData,
     ) -> Result<ProposalSubmission, ProposerError> {
         let mut state = self.state.lock().expect("fake execution mutex poisoned");
-        let key = proposal.commitment();
-        if let Some(existing) = state.games_by_key.get(&key) {
+        let uuid = proposal.commitment().game_uuid(state.domain_hash);
+        if let Some(existing) = state.games_by_key.get(&uuid) {
             return Err(ProposerError::Contract(format!(
-                "game already exists for proposal {key:?} at {existing}"
+                "game already exists for factory uuid {uuid} at {existing}"
             )));
         }
         let event = Self::create_game(&mut state, proposal);
@@ -752,7 +753,6 @@ impl ClaimedProofJobHandler for FakeProofBackend {
                 attestation: request.l1_head.as_slice().to_vec().into(),
                 public_values: request.root_claim.as_slice().to_vec().into(),
                 signature: vec![0x7e, request.l2_block_number as u8].into(), // mock signature
-                public_key: vec![0x04; 65].into(),
             },
         })
     }

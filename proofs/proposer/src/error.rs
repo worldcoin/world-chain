@@ -28,14 +28,6 @@ pub enum ProposerError {
     /// Prover-service returned data inconsistent with the requested proof.
     #[error("invalid proof response: {0}")]
     InvalidProofResponse(String),
-    /// The proof's L1 origin is too old for reliable EIP-2935 inclusion.
-    #[error(
-        "creation proof L1 origin {l1_origin_number} is stale at latest L1 block {latest_l1_block}"
-    )]
-    StaleCreationProof {
-        l1_origin_number: u64,
-        latest_l1_block: u64,
-    },
     #[error(transparent)]
     OutputRoot(#[from] ConsensusError),
     #[error("The proposal transaction didn't execute succesfully: {0}")]

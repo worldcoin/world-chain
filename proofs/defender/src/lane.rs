@@ -256,7 +256,6 @@ fn encode_proof(proof: &ProofData) -> Bytes {
             attestation,
             public_values,
             signature,
-            public_key: _,
         } => [
             public_values.as_ref(),
             attestation.as_ref(),

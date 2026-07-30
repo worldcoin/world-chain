@@ -200,8 +200,6 @@ pub enum ProofData {
         public_values: Bytes,
         /// Enclave signature over the proven outputs.
         signature: Bytes,
-        /// SEC1-uncompressed public key certified by the attestation document.
-        public_key: Bytes,
     },
 }
 
