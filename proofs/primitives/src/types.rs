@@ -10,7 +10,10 @@ pub const PROOF_THRESHOLD: u8 = 2;
 pub const PROOF_LANE_COUNT: u8 = 3;
 
 /// Version of the World Chain proof-domain encoding implemented here.
-pub const PROOF_SYSTEM_VERSION: u64 = 1;
+///
+/// Bumped to 2 when `rootId` gained the explicit pre-state commitment; proofs produced against
+/// version 1 do not carry over.
+pub const PROOF_SYSTEM_VERSION: u64 = 2;
 
 /// OP Stack dispute-game type allocated to WIP-1006 (`GameTypes.MULTI_PROOF_GAME_TYPE`).
 ///
@@ -183,6 +186,10 @@ impl ProposalExtraData {
 pub struct RootCommitment {
     /// Proposal fields supplied by the proposer.
     pub proposal: ProposalCommitment,
+    /// Output root the transition starts from, as snapshotted by the game at creation.
+    pub starting_root_claim: B256,
+    /// L2 block number the transition starts from.
+    pub starting_l2_block_number: u64,
     /// Proposer-selected L1 origin hash verified by the game at creation.
     pub l1_origin_hash: B256,
     /// L1 origin block number paired with `l1_origin_hash`.
@@ -191,11 +198,17 @@ pub struct RootCommitment {
 
 impl RootCommitment {
     /// Compute the Solidity-compatible root id for this proposal.
+    ///
+    /// Must match `ProofLib.rootId`. The pre-state is committed explicitly because `parent_ref`
+    /// alone does not pin it: for the anchor-registry sentinel the address is fixed while the
+    /// anchor value moves.
     #[must_use]
     pub fn root_id(self, domain_hash: B256) -> B256 {
         let encoded = (
             domain_hash,
             self.proposal.parent_ref,
+            self.starting_root_claim,
+            U256::from(self.starting_l2_block_number),
             self.proposal.root_claim,
             U256::from(self.proposal.l2_block_number),
             self.l1_origin_hash,
@@ -332,6 +345,10 @@ mod tests {
         };
         let commitment = RootCommitment {
             proposal,
+            starting_root_claim: b256!(
+                "1111111111111111111111111111111111111111111111111111111111111111"
+            ),
+            starting_l2_block_number: 0,
             l1_origin_hash: b256!(
                 "3333333333333333333333333333333333333333333333333333333333333333"
             ),
@@ -342,12 +359,12 @@ mod tests {
         // `ProofLib.domainHash` and `ProofLib.rootId`.
         assert_eq!(
             domain.hash(),
-            b256!("2eadd7e0cde9ca6f758216655e263e8d197480ebc4d3478403000447fe62f4be")
+            b256!("b0b28d77aae793918b08a343f71435e5abbaeceaab90a99e98f32a2563ec6386")
         );
         let root_id = commitment.root_id(domain.hash());
         assert_eq!(
             root_id,
-            b256!("6cccba67d43368ae81da6cf22798e228b82b953c51c1bbce76959b166b888dd3")
+            b256!("a6af84008c0ba6b09b25c6a1b944e6d995223057eda1a0fbc79dcff9a7ba140a")
         );
 
         let changed = ProofDomain {

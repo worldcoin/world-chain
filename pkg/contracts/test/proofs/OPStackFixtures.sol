@@ -9,8 +9,8 @@ import {GameTypes} from "../../src/proofs/GameTypes.sol";
 import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainStakingRegistry} from "../../src/proofs/interfaces/IWorldChainStakingRegistry.sol";
-import {MockRootIdVerifier} from "../../src/proofs/mocks/MockRootIdVerifier.sol";
-import {MockStakingRegistry} from "../../src/proofs/mocks/MockStakingRegistry.sol";
+import {MockRootIdVerifier} from "../mocks/MockRootIdVerifier.sol";
+import {MockStakingRegistry} from "../mocks/MockStakingRegistry.sol";
 import {MockSystemConfig} from "../mocks/MockSystemConfig.sol";
 
 import {Claim, GameStatus, GameType, Hash, Proposal} from "@optimism-bedrock/src/dispute/lib/Types.sol";
@@ -20,6 +20,7 @@ import {IAnchorStateRegistry} from "@optimism-bedrock/interfaces/dispute/IAnchor
 import {IDelayedWETH} from "@optimism-bedrock/interfaces/dispute/IDelayedWETH.sol";
 import {IProxyAdmin} from "@optimism-bedrock/interfaces/universal/IProxyAdmin.sol";
 import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
+import {Preinstalls} from "@optimism-bedrock/src/libraries/Preinstalls.sol";
 
 /// @dev Test harness deploying the real (pinned) OP `DisputeGameFactory`,
 ///      `AnchorStateRegistry`, and `DelayedWETH` from the `opstack/` sub-project artifacts,
@@ -31,12 +32,16 @@ abstract contract OPStackFixtures is Test {
     uint256 internal constant WETH_DELAY_SECONDS = 7 days;
     uint64 internal constant CHALLENGE_PERIOD = 1 days;
     uint64 internal constant PROOF_PERIOD = 7 days;
+    /// @dev ~6h at 12s blocks. Bounds how much L1 deposit history a proposal may omit while
+    ///      leaving ample room for proof generation.
+    uint64 internal constant MAX_L1_ORIGIN_AGE = 1800;
     uint256 internal constant PROPOSER_BOND = 1 ether;
     uint256 internal constant CHALLENGER_BOND = 0.1 ether;
     uint8 internal constant PROOF_THRESHOLD = 2;
 
     uint256 internal constant CHAIN_ID = 480;
-    uint256 internal constant PROOF_SYSTEM_VERSION = 1;
+    /// @dev Bumped to 2 with the rootId preimage change (pre-state now committed explicitly).
+    uint256 internal constant PROOF_SYSTEM_VERSION = 2;
     bytes32 internal constant ROLLUP_CONFIG_HASH = keccak256("world-chain-rollup-config");
     uint256 internal constant BLOCK_INTERVAL = 100;
 
@@ -136,6 +141,7 @@ abstract contract OPStackFixtures is Test {
             domain: _domain(),
             challengePeriod: CHALLENGE_PERIOD,
             proofPeriod: PROOF_PERIOD,
+            maxL1OriginAge: MAX_L1_ORIGIN_AGE,
             proposerBond: PROPOSER_BOND,
             challengerBond: CHALLENGER_BOND,
             proofThreshold: PROOF_THRESHOLD,
@@ -208,7 +214,7 @@ abstract contract OPStackFixtures is Test {
         bytes memory extraData = _extraData(l2BlockNumber, parentIndex, attempt);
         vm.prank(proposer);
         IDisputeGame proxy = dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(rootClaim), extraData);
-        return MultiProofGame(address(proxy));
+        return MultiProofGame(payable(address(proxy)));
     }
 
     /// @dev Creates the first game, parented on the current anchor.
@@ -256,5 +262,12 @@ abstract contract OPStackFixtures is Test {
         game.claimCredit(recipient);
         vm.warp(block.timestamp + WETH_DELAY_SECONDS);
         game.claimCredit(recipient);
+    }
+
+    /// @dev Installs the EIP-2935 history contract and seeds `blockNumber`, so origins older than
+    ///      the 256-block `BLOCKHASH` window resolve instead of reporting `L1HistoryUnavailable`.
+    function _seedL1History(uint256 blockNumber, bytes32 blockHash) internal {
+        vm.etch(Preinstalls.HistoryStorage, Preinstalls.HistoryStorageCode);
+        vm.store(Preinstalls.HistoryStorage, bytes32(blockNumber % 8191), blockHash);
     }
 }

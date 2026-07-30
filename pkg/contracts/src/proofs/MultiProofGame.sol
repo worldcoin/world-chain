@@ -51,6 +51,10 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @dev EIP-2935 history contract, retaining the latest 8,191 block hashes.
     address internal constant HISTORY_STORAGE = 0x0000F90827F1C53a10cb7A02335B175320002935;
 
+    /// @dev Number of ancestor block hashes EIP-2935 serves. An origin older than this cannot be
+    ///      validated at creation regardless of the configured `maxL1OriginAge`.
+    uint64 internal constant HISTORY_SERVE_WINDOW = 8191;
+
     ////////////////////////////////////////////////////////////////
     //                       Immutables                           //
     ////////////////////////////////////////////////////////////////
@@ -69,6 +73,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
     uint64 public immutable challengePeriod;
     uint64 public immutable proofPeriod;
+    /// @inheritdoc IMultiProofGame
+    uint64 public immutable maxL1OriginAge;
     uint256 public immutable proposerBond;
     uint256 public immutable challengerBond;
 
@@ -117,12 +123,29 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             config.challengePeriod == 0 || config.proofPeriod <= config.challengePeriod || config.domain.chainId == 0
                 || config.domain.proofSystemVersion == 0 || config.domain.blockInterval == 0
                 || config.proofThreshold == 0 || config.proofThreshold > ProofLib.PROOF_LANE_COUNT
+                // A zero bond removes the economic cost of the role it secures: free proposals make
+                // invalid-root spam costless, and free challenges let an attacker stall the whole
+                // descendant chain into the slow path at no charge.
+                || config.proposerBond == 0 || config.challengerBond == 0
+                // An L1 origin older than the EIP-2935 window can never be validated at creation, so
+                // any larger bound is silently unreachable.
+                || config.maxL1OriginAge == 0 || config.maxL1OriginAge > HISTORY_SERVE_WINDOW
                 || address(config.disputeGameFactory) == address(0) || address(config.anchorStateRegistry) == address(0)
                 || address(config.weth) == address(0) || address(config.stakingRegistry) == address(0)
                 || address(config.validityProofVerifier) == address(0) || address(config.teeVerifier) == address(0)
                 || address(config.securityCouncil) == address(0)
         ) {
             revert InvalidActivationParameters();
+        }
+        // Two lanes sharing a verifier collapses the 2-of-3 threshold to 1-of-2 without any
+        // outward sign. This cannot detect shared signing keys or shared operator control behind
+        // distinct addresses, which remain a deployment-review responsibility (WIP-1006
+        // "Disputed-path safety depends on lane independence").
+        if (
+            config.validityProofVerifier == config.teeVerifier || config.validityProofVerifier == config.securityCouncil
+                || config.teeVerifier == config.securityCouncil
+        ) {
+            revert DuplicateProofLaneVerifier();
         }
         if (
             address(config.anchorStateRegistry.disputeGameFactory()) != address(config.disputeGameFactory)
@@ -139,6 +162,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         domainHash = ProofLib.domainHash(config.domain);
         challengePeriod = config.challengePeriod;
         proofPeriod = config.proofPeriod;
+        maxL1OriginAge = config.maxL1OriginAge;
         proposerBond = config.proposerBond;
         challengerBond = config.challengerBond;
         PROOF_THRESHOLD = config.proofThreshold;
@@ -405,18 +429,36 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             }
         }
 
-        if (
-            l1OriginNumber_ > type(uint64).max || l1OriginHash_ == bytes32(0)
-                || _historicalBlockHash(l1OriginNumber_) != l1OriginHash_
-        ) {
+        // The proposer picks the L1 origin, so it must be bounded on-chain and not merely by the
+        // off-chain proposer. An origin far in the past is provable while omitting every L1 deposit
+        // posted after it: the transition is valid against that head precisely because the later
+        // deposits are outside its derivation window. Note this is not the factory-captured
+        // `blockhash(block.number - 1)` at CWIA offset 0x34, which the proposer cannot choose.
+        if (l1OriginNumber_ > type(uint64).max || l1OriginNumber_ >= block.number || l1OriginHash_ == bytes32(0)) {
             revert InvalidL1Head(l1OriginHash_, l1OriginNumber_);
         }
+        if (block.number - l1OriginNumber_ > maxL1OriginAge) {
+            revert L1OriginTooOld(l1OriginNumber_, block.number, maxL1OriginAge);
+        }
+        if (_historicalBlockHash(l1OriginNumber_) != l1OriginHash_) {
+            revert InvalidL1Head(l1OriginHash_, l1OriginNumber_);
+        }
+        // Safe: `l1OriginNumber_ < block.number` and the age bound above keep this within uint64.
+        // forge-lint: disable-next-line(unsafe-typecast)
         _l1OriginNumber = uint64(l1OriginNumber_);
         rootId = ProofLib.rootId(
-            domainHash, parentRef_, Claim.unwrap(rootClaim()), l2BlockNumber_, l1OriginHash_, _l1OriginNumber
+            domainHash,
+            parentRef_,
+            startingRootClaim,
+            startingL2BlockNumber,
+            Claim.unwrap(rootClaim()),
+            l2BlockNumber_,
+            l1OriginHash_,
+            _l1OriginNumber
         );
-        if (!teeVerifier.verify(rootId, creationProof_)) {
-            revert InvalidProof(ProofLib.ProofLane.TEE_ATTESTATION, rootId);
+        ProofLib.VerificationStatus creationStatus = teeVerifier.verify(rootId, creationProof_);
+        if (creationStatus != ProofLib.VerificationStatus.VALID) {
+            revert InvalidProof(ProofLib.ProofLane.TEE_ATTESTATION, rootId, creationStatus);
         }
         proofBitmap = ProofLib.laneMask(ProofLib.ProofLane.TEE_ATTESTATION);
 
@@ -450,12 +492,17 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     /// @dev `BLOCKHASH` retains 256 blocks; EIP-2935 extends contract access to 8,191.
+    ///      A failed history lookup reverts with its own error rather than returning zero. Folding
+    ///      it into a generic `InvalidL1Head` would report "the chain cannot answer" as "you
+    ///      supplied the wrong hash", which points an operator at the wrong fix entirely.
+    /// @dev Callers MUST establish `blockNumber_ < block.number` first; the subtraction below
+    ///      otherwise panics on underflow. `initialize` checks it before calling.
     function _historicalBlockHash(uint256 blockNumber_) internal view returns (bytes32 hash_) {
-        if (blockNumber_ >= block.number) return bytes32(0);
         if (block.number - blockNumber_ <= 256) return blockhash(blockNumber_);
 
         (bool success, bytes memory result) = HISTORY_STORAGE.staticcall(abi.encode(blockNumber_));
-        if (success && result.length == 32) hash_ = abi.decode(result, (bytes32));
+        if (!success || result.length != 32) revert L1HistoryUnavailable(blockNumber_);
+        hash_ = abi.decode(result, (bytes32));
     }
 
     ////////////////////////////////////////////////////////////////
@@ -469,6 +516,11 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         if (block.timestamp >= challengeDeadline) {
             revert ChallengePeriodElapsed(block.timestamp, challengeDeadline);
         }
+        // A game has one challenger slot, and the proposer wins both bonds whichever way its own
+        // game resolves — so self-challenging is costless and would let a proposer occupy the slot
+        // an honest watcher needs. It also keeps `challenger != address(0)` meaningful as an
+        // adversarial signal for offchain alerting.
+        if (msg.sender == gameCreator()) revert SelfChallenge();
         if (!stakingRegistry.isStaked(msg.sender)) revert UnstakedChallenger(msg.sender);
         if (msg.value != challengerBond) revert IncorrectBondAmount();
 
@@ -485,9 +537,14 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
     /// @inheritdoc IMultiProofGame
     function submitProofLane(uint8 laneId, bytes calldata proof) external {
-        if (status != GameStatus.IN_PROGRESS || challenger == address(0)) {
-            revert ClaimAlreadyResolved();
-        }
+        if (status != GameStatus.IN_PROGRESS) revert ClaimAlreadyResolved();
+        // Lanes only accrue on the disputed path; an unchallenged game is not resolved, so
+        // reporting it as such would misdirect the caller.
+        if (challenger == address(0)) revert GameNotChallenged();
+        // A lane submission is what carries a challenged root to threshold, so it is the one
+        // finalization trigger the guardian's pause must be able to stop. `resolve` and the proof
+        // clock stay ungated to match `FaultDisputeGame`, which only gates `closeGame`.
+        if (anchorStateRegistry.paused()) revert GamePaused();
         if (block.timestamp >= proofDeadline) {
             revert ProofPeriodElapsed(block.timestamp, proofDeadline);
         }
@@ -500,8 +557,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             return;
         }
 
-        if (!_verifierFor(lane).verify(rootId, proof)) {
-            revert InvalidProof(lane, rootId);
+        ProofLib.VerificationStatus verification = _verifierFor(lane).verify(rootId, proof);
+        if (verification != ProofLib.VerificationStatus.VALID) {
+            revert InvalidProof(lane, rootId, verification);
         }
 
         bool thresholdAlreadyReached = ProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD);
@@ -596,6 +654,10 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         resolvedAt = Timestamp.wrap(uint64(block.timestamp));
         emit Resolved(status);
+        // The stock `Resolved` carries only `GameStatus`, but retry eligibility turns on *why* a
+        // game was invalidated: `PROOF_TIMEOUT` is retryable, `INVALID_PARENT` is not. Without this
+        // an indexer cannot decide from logs alone and must poll every game it sees resolve.
+        emit WorldChainResolved(rootId, status, invalidationReason, proofBitmap);
 
         return status;
     }
@@ -690,8 +752,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         weth.withdraw(recipient, amount);
 
-        // solady's CWIA proxy implements `receive()`, so the WETH98 2300-gas transfer above
-        // succeeds without a `receive()` on this implementation.
+        // The `withdraw` above lands ETH on this clone via a 2300-gas `transfer`; see `receive()`
+        // for why that succeeds. Forwarding to the recipient is a full-gas call.
         (bool success,) = recipient.call{value: amount}(hex"");
         if (!success) revert BondTransferFailed();
     }
@@ -716,4 +778,15 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         if (lane == ProofLib.ProofLane.TEE_ATTESTATION) return teeVerifier;
         return securityCouncil;
     }
+
+    /// @notice Accepts the bond returned by `DelayedWETH.withdraw` in `claimCredit`.
+    /// @dev `WETH98.withdraw` uses `transfer`, forwarding only the 2300-gas stipend. The solady
+    ///      CWIA proxy in use short-circuits empty calldata (it emits `ReceiveETH` and stops
+    ///      without delegatecalling), so this body is never reached today — but that behaviour was
+    ///      removed in later solady versions, where the transfer would delegatecall into this
+    ///      implementation instead. Without a payable receiver that call reverts, `claimCredit`
+    ///      reverts permanently, and every bond in the game is stranded behind the
+    ///      proxy-admin-only `DelayedWETH.recover`. Empty and cheap, so it costs nothing to
+    ///      survive a dependency bump.
+    receive() external payable {}
 }

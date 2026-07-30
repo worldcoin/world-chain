@@ -5,7 +5,7 @@ import {ProofLib} from "../lib/ProofLib.sol";
 import {IWorldChainProofVerifier} from "./IWorldChainProofVerifier.sol";
 import {IWorldChainStakingRegistry} from "./IWorldChainStakingRegistry.sol";
 
-import {BondDistributionMode} from "@optimism-bedrock/src/dispute/lib/Types.sol";
+import {BondDistributionMode, GameStatus} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
 import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
 import {IAnchorStateRegistry} from "@optimism-bedrock/interfaces/dispute/IAnchorStateRegistry.sol";
@@ -26,6 +26,7 @@ interface IMultiProofGame is IDisputeGame {
         ProofLib.Domain domain;
         uint64 challengePeriod;
         uint64 proofPeriod;
+        uint64 maxL1OriginAge;
         uint256 proposerBond;
         uint256 challengerBond;
         uint8 proofThreshold;
@@ -51,10 +52,24 @@ interface IMultiProofGame is IDisputeGame {
     error ChallengePeriodElapsed(uint256 timestamp, uint256 challengeDeadline);
     error ProofPeriodElapsed(uint256 timestamp, uint256 proofDeadline);
     error InvalidLane(uint8 lane);
-    error InvalidProof(ProofLib.ProofLane lane, bytes32 rootId);
+    /// @notice A lane submission was not accepted. `status` carries the failure class so a caller
+    ///         can tell an unusable proof from a verifier that never reached a judgement.
+    error InvalidProof(ProofLib.ProofLane lane, bytes32 rootId, ProofLib.VerificationStatus status);
     error InvalidDomainHash(bytes32 expected, bytes32 actual);
     error InvalidL1Head(bytes32 l1OriginHash, uint256 l1OriginNumber);
     error InconsistentSystemConfiguration();
+    /// @notice Two or more proof lanes were configured with the same verifier, which would
+    ///         collapse the threshold below `PROOF_THRESHOLD` distinct lanes.
+    error DuplicateProofLaneVerifier();
+    /// @notice The proposer-selected L1 origin is older than `maxL1OriginAge`.
+    error L1OriginTooOld(uint256 l1OriginNumber, uint256 currentBlock, uint64 maxL1OriginAge);
+    /// @notice The EIP-2935 history contract could not answer for `blockNumber`. Distinct from
+    ///         `InvalidL1Head`: the origin is unjudged rather than known-wrong.
+    error L1HistoryUnavailable(uint256 blockNumber);
+    /// @notice Proof lanes only accrue after a challenge.
+    error GameNotChallenged();
+    /// @notice The proposer may not occupy the game's single challenger slot.
+    error SelfChallenge();
 
     ////////////////////////////////////////////////////////////////
     //                         Events                             //
@@ -89,6 +104,13 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Emitted when the bond distribution mode is locked in.
     event GameClosed(BondDistributionMode bondDistributionMode);
 
+    /// @notice Emitted alongside the stock `Resolved`, carrying the World Chain resolution
+    ///         context. `Resolved` alone reports only `GameStatus`, which cannot distinguish a
+    ///         retryable `PROOF_TIMEOUT` from a terminal `INVALID_PARENT`.
+    event WorldChainResolved(
+        bytes32 indexed rootId, GameStatus status, ProofLib.InvalidationReason reason, uint8 proofBitmap
+    );
+
     ////////////////////////////////////////////////////////////////
     //                   Deployment parameters                    //
     ////////////////////////////////////////////////////////////////
@@ -110,6 +132,10 @@ interface IMultiProofGame is IDisputeGame {
 
     /// @notice Seconds a challenged proposal has to reach the proof threshold.
     function proofPeriod() external view returns (uint64);
+
+    /// @notice Maximum age, in L1 blocks, of the proposer-selected L1 origin at creation. Bounds
+    ///         how much L1 deposit history a proposal may legitimately omit.
+    function maxL1OriginAge() external view returns (uint64);
 
     /// @notice Bond required to create a proposal.
     function proposerBond() external view returns (uint256);

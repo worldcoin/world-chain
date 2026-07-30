@@ -76,10 +76,25 @@ contract MultiProofGameTest is OPStackFixtures {
 
         teeVerifier.setAcceptAny(false);
         vm.prank(proposer);
-        bytes32 rootId =
-            ProofLib.rootId(gameImpl.domainHash(), address(asr), rootClaim, target, L1_ORIGIN_HASH, L1_ORIGIN_NUMBER);
+        bytes32 rootId = ProofLib.rootId(
+            gameImpl.domainHash(),
+            address(asr),
+            STARTING_ANCHOR_ROOT,
+            STARTING_ANCHOR_BLOCK,
+            rootClaim,
+            target,
+            L1_ORIGIN_HASH,
+            L1_ORIGIN_NUMBER
+        );
         vm.expectRevert(
-            abi.encodeWithSelector(IMultiProofGame.InvalidProof.selector, ProofLib.ProofLane.TEE_ATTESTATION, rootId)
+            abi.encodeWithSelector(
+                IMultiProofGame.InvalidProof.selector,
+                ProofLib.ProofLane.TEE_ATTESTATION,
+                rootId,
+                // The fixture's creation proof is the 1-byte `hex"01"`, which the mock cannot
+                // decode as a rootId — a malformed payload, not a mismatched binding.
+                ProofLib.VerificationStatus.MALFORMED
+            )
         );
         dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(rootClaim), _extraData(target, type(uint256).max, 0));
         teeVerifier.setAcceptAny(true);
@@ -177,7 +192,9 @@ contract MultiProofGameTest is OPStackFixtures {
         uint256 childTarget = target + BLOCK_INTERVAL;
         bytes memory childExtraData = _extraData(childTarget, 0, 0);
         vm.prank(proposer);
-        vm.expectRevert();
+        // The factory lookup uses the parent's own game type, so an off-type parent fails
+        // registration before the `UnexpectedGameType` check is ever reached.
+        vm.expectRevert(InvalidParentGame.selector);
         dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(childTarget)), childExtraData);
     }
 
@@ -306,12 +323,22 @@ contract MultiProofGameTest is OPStackFixtures {
         MultiProofGame game = _proposeAtAnchor();
         _challenge(game);
 
-        vm.expectRevert();
+        bytes memory proof = abi.encodePacked(game.rootId());
+        uint64 deadline = game.proofDeadline();
+        bytes32 rootId = game.rootId();
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMultiProofGame.InvalidProof.selector,
+                ProofLib.ProofLane.VALIDITY_PROOF,
+                rootId,
+                ProofLib.VerificationStatus.BINDING_MISMATCH
+            )
+        );
         game.submitProofLane(0, abi.encodePacked(keccak256("wrong-root")));
 
-        vm.warp(game.proofDeadline());
-        bytes memory proof = abi.encodePacked(game.rootId());
-        vm.expectRevert();
+        vm.warp(deadline);
+        vm.expectRevert(abi.encodeWithSelector(IMultiProofGame.ProofPeriodElapsed.selector, block.timestamp, deadline));
         game.submitProofLane(0, proof);
     }
 
@@ -337,7 +364,9 @@ contract MultiProofGameTest is OPStackFixtures {
         uint256 l2BlockNumber = first.l2SequenceNumber();
         bytes memory retryExtraData = _extraData(l2BlockNumber, type(uint256).max, 1);
         vm.prank(proposer);
-        vm.expectRevert();
+        vm.expectRevert(
+            abi.encodeWithSelector(IMultiProofGame.GameNotRetryable.selector, keccak256(abi.encode(address(first))))
+        );
         dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, claim, retryExtraData);
     }
 

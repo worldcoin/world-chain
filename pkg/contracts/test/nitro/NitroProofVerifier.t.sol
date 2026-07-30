@@ -106,10 +106,16 @@ contract NitroProofVerifierTest is Test {
     }
 
     function _expectedRootId() internal view returns (bytes32) {
-        return
-            ProofLib.rootId(
-                domainHash, address(parent), L2_POST_ROOT, uint256(L2_BLOCK), L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
-            );
+        return ProofLib.rootId(
+            domainHash,
+            address(parent),
+            L2_PRE_ROOT,
+            uint256(L2_PRE_BLOCK),
+            L2_POST_ROOT,
+            uint256(L2_BLOCK),
+            L1_ORIGIN_HASH,
+            L1_ORIGIN_NUMBER
+        );
     }
 
     function _proofBytes(bytes memory sig, bytes memory pub) internal view returns (bytes memory) {
@@ -120,6 +126,8 @@ contract NitroProofVerifierTest is Test {
         bytes32 rootId = ProofLib.rootId(
             domainHash,
             address(parent),
+            transition.l2PreRoot,
+            uint256(transition.l2PreBlockNumber),
             transition.l2PostRoot,
             uint256(transition.l2PostBlockNumber),
             transition.l1Head,
@@ -143,6 +151,10 @@ contract NitroProofVerifierTest is Test {
     }
 
     function _verify(bytes32 rootId, bytes memory proof) internal view returns (bool) {
+        return _status(rootId, proof) == ProofLib.VerificationStatus.VALID;
+    }
+
+    function _status(bytes32 rootId, bytes memory proof) internal view returns (ProofLib.VerificationStatus) {
         return game.verify(address(proofVerifier), rootId, proof);
     }
 
@@ -173,6 +185,8 @@ contract NitroProofVerifierTest is Test {
         bytes32 wrongRootId = ProofLib.rootId(
             domainHash,
             address(parent),
+            L2_PRE_ROOT,
+            uint256(L2_PRE_BLOCK),
             L2_POST_ROOT,
             uint256(wrongTransition.l2PostBlockNumber),
             L1_ORIGIN_HASH,
@@ -359,7 +373,16 @@ contract NitroProofVerifierTest is Test {
         // exactly that value.
         ProofLib.TransitionPublicValues memory transition = _transition();
         transition.l2PostBlockNumber = 0;
-        bytes32 rootId = ProofLib.rootId(domainHash, address(parent), L2_POST_ROOT, 0, L1_ORIGIN_HASH, L1_ORIGIN_NUMBER);
+        bytes32 rootId = ProofLib.rootId(
+            domainHash,
+            address(parent),
+            L2_PRE_ROOT,
+            uint256(L2_PRE_BLOCK),
+            L2_POST_ROOT,
+            0,
+            L1_ORIGIN_HASH,
+            L1_ORIGIN_NUMBER
+        );
         bytes32 commitment = keccak256(abi.encode(transition));
         bytes memory sig = _sign(commitment);
         bytes memory proof = abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, transition, sig, enclavePubKey);
@@ -394,8 +417,8 @@ contract NitroProofVerifierTest is Test {
                           INTERNAL ENTRY POINT
     //////////////////////////////////////////////////////////////*/
 
-    function test_DecodeAndVerify_NotCallableExternally() public {
+    function test_DecodeAndBind_NotCallableExternally() public {
         vm.expectRevert(bytes("internal"));
-        proofVerifier._decodeAndVerify(address(game), bytes32(0), hex"00");
+        proofVerifier._decodeAndBind(address(game), bytes32(0), hex"00");
     }
 }

@@ -18,10 +18,13 @@ workspace = true
 # workspace
 world-chain-proofs.workspace = true
 world-chain-prover-service.workspace = true
+# for `TransitionPublicValues`, the struct each lane verifier decodes inline
+world-chain-proof-core.workspace = true
 
 # alloy
 alloy-network.workspace = true
 alloy-primitives.workspace = true
+alloy-sol-types.workspace = true
 alloy-provider = { workspace = true, features = ["reqwest"] }
 alloy-rpc-types-eth.workspace = true
 alloy-signer-local.workspace = true

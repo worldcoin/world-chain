@@ -130,6 +130,9 @@ pub struct FakeExecution {
 struct FakeExecutionState {
     domain_hash: B256,
     anchor: AnchorRef,
+    /// Output root at `anchor.l2_block_number`. `AnchorRef` carries only the block number, but
+    /// `rootId` now commits to the pre-state, so the fake has to track the root too.
+    anchor_root: B256,
     finalized_l1_block: BlockNumber,
     next_game_nonce: u8,
     games_by_key: HashMap<ProposalCommitment, Address>,
@@ -165,6 +168,7 @@ impl FakeExecution {
                     anchor_game: None,
                     l2_block_number: 0,
                 },
+                anchor_root: B256::ZERO,
                 finalized_l1_block: 10_000,
                 next_game_nonce: 1,
                 games_by_key: HashMap::new(),
@@ -237,8 +241,17 @@ impl FakeExecution {
 
         let l1_origin_number = state.finalized_l1_block.saturating_sub(1);
         let l1_origin_hash = B256::with_last_byte(l1_origin_number as u8);
+        // Mirrors `MultiProofGame.initialize`: the pre-state comes from the parent game, or from
+        // the registry when the proposal extends the anchor via the sentinel.
+        let (starting_root_claim, starting_l2_block_number) =
+            state.games_by_address.get(&proposal.parent_ref).map_or(
+                (state.anchor_root, state.anchor.l2_block_number),
+                |parent| (parent.event.root_claim, parent.event.l2_block_number),
+            );
         let root = RootCommitment {
             proposal: proposal.commitment(),
+            starting_root_claim,
+            starting_l2_block_number,
             l1_origin_hash,
             l1_origin_number,
         };
@@ -591,9 +604,9 @@ impl DefenderClient for FakeExecution {
     }
 
     async fn game_metadata(&self, game: Address) -> Result<DefenderGameMetadata, DefenderError> {
-        self.state
-            .lock()
-            .expect("fake execution mutex poisoned")
+        let state = self.state.lock().expect("fake execution mutex poisoned");
+        let domain_hash = state.domain_hash;
+        state
             .games_by_address
             .get(&game)
             .map(|record| DefenderGameMetadata {
@@ -604,6 +617,9 @@ impl DefenderClient for FakeExecution {
                 challenge_deadline: record.challenge_deadline,
                 proof_deadline: record.proof_deadline,
                 proof_threshold: PROOF_THRESHOLD,
+                domain_hash,
+                parent_ref: record.event.parent_ref,
+                l1_origin_number: record.event.l1_origin_number,
             })
             .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
     }

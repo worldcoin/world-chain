@@ -1,6 +1,8 @@
-use crate::{traits::DefenderClient, types::GameMetadata};
-use alloy_primitives::Bytes;
+use crate::{error::DefenderError, traits::DefenderClient, types::GameMetadata};
+use alloy_primitives::{Bytes, U256};
+use alloy_sol_types::SolValue;
 use tracing::{error, info, warn};
+use world_chain_proof_core::boot::TransitionPublicValues;
 use world_chain_proofs::ProofLane;
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestId, ProofRequester, ProofResponse,
@@ -164,9 +166,20 @@ where
             }
         };
 
+        let payload = match encode_proof(metadata, &response.proof) {
+            Ok(payload) => payload,
+            Err(error) => {
+                // The prover returned something the lane verifier could never decode. Retrying
+                // the same proof cannot help, so surface it loudly rather than burning the
+                // remaining proof window on it.
+                error!(%game, ?lane, %id, %error, "proof could not be encoded for its lane verifier");
+                return LaneState::Abandoned;
+            }
+        };
+
         match self
             .execution_client
-            .submit_proof(game, lane as u8, encode_proof(&response.proof))
+            .submit_proof(game, lane as u8, payload)
             .await
         {
             Ok(submission) => {
@@ -240,29 +253,154 @@ fn proof_request(game: &GameMetadata, backend: ProofBackend) -> ProofRequest {
 
 /// Encode a proof payload into the `bytes` argument of `submitProofLane`.
 ///
-/// TODO: encode proofs for their concrete on-chain verifiers. SP1 proofs must
-/// match `SP1ValidityVerifier`'s ABI tuple:
-/// `(domainHash, parentRef, l1OriginNumber, publicValues, proofBytes)`.
-/// That requires proposal context in addition to `ProofData`, so this helper
-/// should move closer to the game/lane submission path before real SP1 lanes
-/// are enabled.
-fn encode_proof(proof: &ProofData) -> Bytes {
+/// Each lane verifier ABI-decodes a specific tuple, so a bare concatenation of the prover's
+/// outputs is rejected as `MALFORMED`. The layouts mirror `SP1ValidityVerifier._decodeAndBind`
+/// and `NitroProofVerifier._decodeAndBind`, and match how the proposer builds the creation proof
+/// in `world-chain-proposer`'s `submit_proposal`.
+fn encode_proof(game: &GameMetadata, proof: &ProofData) -> Result<Bytes, DefenderError> {
+    let domain_hash = game.domain_hash;
+    let parent_ref = game.parent_ref;
+    let l1_origin_number = U256::from(game.l1_origin_number);
+
     match proof {
+        // `(bytes32 domainHash, address parentRef, uint256 l1OriginNumber, bytes publicValues,
+        //   bytes proofBytes)` — both tails stay opaque to the defender.
         ProofData::Sp1 {
             proof,
             public_values,
-        } => [public_values.as_ref(), proof.as_ref()].concat().into(),
+        } => Ok((
+            domain_hash,
+            parent_ref,
+            l1_origin_number,
+            public_values.clone(),
+            proof.clone(),
+        )
+            .abi_encode_params()
+            .into()),
+        // `(bytes32 domainHash, address parentRef, uint256 l1OriginNumber,
+        //   TransitionPublicValues transition, bytes signature, bytes expectedPublicKey)`.
+        // The transition is a static struct encoded inline, so the prover's pre-encoded
+        // `public_values` are decoded and re-encoded in position rather than appended. The
+        // attestation document is not part of the payload: the verifier consults the enclave key
+        // registry, which the attestation was already used to populate at registration time.
         ProofData::Nitro {
-            attestation,
+            attestation: _,
             public_values,
             signature,
-            public_key: _,
-        } => [
-            public_values.as_ref(),
-            attestation.as_ref(),
-            signature.as_ref(),
-        ]
-        .concat()
-        .into(),
+            public_key,
+        } => {
+            let transition = TransitionPublicValues::abi_decode(public_values).map_err(|error| {
+                DefenderError::Contract(format!(
+                    "nitro proof for game {} carries undecodable transition public values: {error}",
+                    game.address
+                ))
+            })?;
+            Ok((
+                domain_hash,
+                parent_ref,
+                l1_origin_number,
+                transition,
+                signature.clone(),
+                public_key.clone(),
+            )
+                .abi_encode_params()
+                .into())
+        }
+    }
+}
+
+#[cfg(test)]
+mod encode_proof_tests {
+    use super::*;
+    use alloy_primitives::{Address, B256, address, b256};
+    use alloy_sol_types::SolValue;
+
+    fn metadata() -> GameMetadata {
+        GameMetadata {
+            address: address!("0000000000000000000000000000000000000001"),
+            root_claim: b256!("2222222222222222222222222222222222222222222222222222222222222222"),
+            l2_block_number: 100,
+            l1_origin_hash: B256::repeat_byte(0x42),
+            challenge_deadline: u64::MAX,
+            proof_deadline: u64::MAX,
+            proof_threshold: 2,
+            domain_hash: B256::repeat_byte(0xd0),
+            parent_ref: address!("0000000000000000000000000000000000001006"),
+            l1_origin_number: 999,
+        }
+    }
+
+    fn transition() -> TransitionPublicValues {
+        TransitionPublicValues {
+            l1Head: B256::repeat_byte(0x42),
+            l2PreRoot: B256::repeat_byte(0x11),
+            l2PreBlockNumber: 90,
+            l2PostRoot: B256::repeat_byte(0x22),
+            l2PostBlockNumber: 100,
+            rollupConfigHash: B256::repeat_byte(0x33),
+        }
+    }
+
+    /// Pins the payload `SP1ValidityVerifier._decodeAndBind` ABI-decodes. A bare concatenation of
+    /// the prover's outputs — which this used to emit — fails to decode and is rejected onchain.
+    #[test]
+    fn sp1_payload_matches_verifier_tuple() {
+        let game = metadata();
+        let proof = ProofData::Sp1 {
+            proof: Bytes::from_static(b"proof-bytes"),
+            public_values: Bytes::from_static(b"public-values"),
+        };
+
+        let encoded = encode_proof(&game, &proof).expect("sp1 payload encodes");
+        let (domain_hash, parent_ref, l1_origin_number, public_values, proof_bytes) =
+            <(B256, Address, U256, Bytes, Bytes)>::abi_decode_params(&encoded)
+                .expect("payload decodes as the verifier tuple");
+
+        assert_eq!(domain_hash, game.domain_hash);
+        assert_eq!(parent_ref, game.parent_ref);
+        assert_eq!(l1_origin_number, U256::from(game.l1_origin_number));
+        assert_eq!(public_values, Bytes::from_static(b"public-values"));
+        assert_eq!(proof_bytes, Bytes::from_static(b"proof-bytes"));
+    }
+
+    /// Pins the payload `NitroProofVerifier._decodeAndBind` ABI-decodes. The transition is a
+    /// static struct encoded inline, not an appended blob.
+    #[test]
+    fn nitro_payload_matches_verifier_tuple() {
+        let game = metadata();
+        let proof = ProofData::Nitro {
+            attestation: Bytes::from_static(b"attestation"),
+            public_values: transition().abi_encode().into(),
+            signature: Bytes::from_static(b"signature"),
+            public_key: Bytes::from_static(b"public-key"),
+        };
+
+        let encoded = encode_proof(&game, &proof).expect("nitro payload encodes");
+        let (domain_hash, parent_ref, l1_origin_number, decoded, signature, public_key) =
+            <(B256, Address, U256, TransitionPublicValues, Bytes, Bytes)>::abi_decode_params(
+                &encoded,
+            )
+            .expect("payload decodes as the verifier tuple");
+
+        assert_eq!(domain_hash, game.domain_hash);
+        assert_eq!(parent_ref, game.parent_ref);
+        assert_eq!(l1_origin_number, U256::from(game.l1_origin_number));
+        assert_eq!(decoded, transition());
+        assert_eq!(signature, Bytes::from_static(b"signature"));
+        assert_eq!(public_key, Bytes::from_static(b"public-key"));
+    }
+
+    /// A transition the verifier could never decode must fail loudly at encode time rather than
+    /// burning a lane submission on a payload that is guaranteed to be rejected.
+    #[test]
+    fn nitro_payload_rejects_undecodable_public_values() {
+        let proof = ProofData::Nitro {
+            attestation: Bytes::new(),
+            public_values: Bytes::from_static(b"not a transition"),
+            signature: Bytes::new(),
+            public_key: Bytes::new(),
+        };
+
+        assert!(encode_proof(&metadata(), &proof).is_err());
     }
 }

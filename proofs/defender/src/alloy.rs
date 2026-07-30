@@ -95,6 +95,9 @@ where
             challenge_deadline,
             proof_deadline,
             proof_threshold,
+            domain_hash,
+            parent_ref,
+            l1_origin_number,
         ) = self
             .provider
             .multicall()
@@ -104,6 +107,9 @@ where
             .add(game.challengeDeadline())
             .add(game.proofDeadline())
             .add(game.PROOF_THRESHOLD())
+            .add(game.domainHash())
+            .add(game.parentRef())
+            .add(game.l1OriginNumber())
             .aggregate()
             .await
             .map_err(|error| DefenderError::Contract(error.to_string()))?;
@@ -121,6 +127,9 @@ where
             challenge_deadline,
             proof_deadline,
             proof_threshold,
+            domain_hash,
+            parent_ref,
+            l1_origin_number: u256_to_u64(l1_origin_number, "l1OriginNumber")?,
         })
     }
 

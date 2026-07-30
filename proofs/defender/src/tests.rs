@@ -6,6 +6,7 @@ use crate::{
     types::{DefenderSubmission, GameMetadata},
 };
 use alloy_primitives::{Address, B256, BlockNumber, Bytes, address};
+use alloy_sol_types::SolValue;
 use async_trait::async_trait;
 use std::{
     collections::{HashMap, HashSet},
@@ -15,6 +16,7 @@ use std::{
     },
     time::Duration,
 };
+use world_chain_proof_core::boot::TransitionPublicValues;
 use world_chain_proofs::{
     ConsensusError, ConsensusProvider, InvalidationReason, PROOF_THRESHOLD, ProofLane,
     ResolutionStatus, RootState, proof_count,
@@ -65,6 +67,9 @@ impl MockClient {
                 challenge_deadline: u64::MAX,
                 proof_deadline: u64::MAX,
                 proof_threshold: PROOF_THRESHOLD,
+                domain_hash: B256::repeat_byte(0xd0),
+                parent_ref: Address::repeat_byte(0xab),
+                l1_origin_number: 999,
             })
             .collect();
         let proposers = games
@@ -392,9 +397,21 @@ impl ProofRequester for MockProver {
                 proof: Bytes::from_static(b"proof"),
                 public_values: Bytes::from_static(b"public values"),
             },
+            // The Nitro lane payload embeds the transition as a static struct, so the encoder
+            // decodes these bytes rather than passing them through. They must be a real
+            // `TransitionPublicValues` encoding or the lane is abandoned as unencodable.
             ProofBackend::Nitro => ProofData::Nitro {
                 attestation: Bytes::from_static(b"attestation"),
-                public_values: Bytes::from_static(b"public values"),
+                public_values: TransitionPublicValues {
+                    l1Head: L1_ORIGIN_HASH,
+                    l2PreRoot: B256::repeat_byte(0x11),
+                    l2PreBlockNumber: 0,
+                    l2PostRoot: B256::repeat_byte(0x22),
+                    l2PostBlockNumber: 100,
+                    rollupConfigHash: B256::repeat_byte(0x33),
+                }
+                .abi_encode()
+                .into(),
                 signature: Bytes::from_static(b"signature"),
                 public_key: Bytes::from_static(b"public key"),
             },

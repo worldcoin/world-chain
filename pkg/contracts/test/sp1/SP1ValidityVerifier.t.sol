@@ -137,7 +137,14 @@ contract SP1ValidityVerifierTest is Test {
 
     function _rootId(address parentRef) internal view returns (bytes32) {
         return ProofLib.rootId(
-            domainHash, parentRef, L2_POST_ROOT, uint256(L2_BLOCK_NUMBER), L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
+            domainHash,
+            parentRef,
+            L2_PRE_ROOT,
+            uint256(L2_PRE_BLOCK_NUMBER),
+            L2_POST_ROOT,
+            uint256(L2_BLOCK_NUMBER),
+            L1_ORIGIN_HASH,
+            L1_ORIGIN_NUMBER
         );
     }
 
@@ -164,6 +171,10 @@ contract SP1ValidityVerifierTest is Test {
     }
 
     function _verify(bytes32 rootId, bytes memory proof) internal view returns (bool) {
+        return _status(rootId, proof) == ProofLib.VerificationStatus.VALID;
+    }
+
+    function _status(bytes32 rootId, bytes memory proof) internal view returns (ProofLib.VerificationStatus) {
         return game.verify(address(verifier), rootId, proof);
     }
 

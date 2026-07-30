@@ -9,8 +9,10 @@ import {MultiProofGame} from "../../src/proofs/MultiProofGame.sol";
 import {IMultiProofGame} from "../../src/proofs/interfaces/IMultiProofGame.sol";
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainStakingRegistry} from "../../src/proofs/interfaces/IWorldChainStakingRegistry.sol";
-import {MockRootIdVerifier} from "../../src/proofs/mocks/MockRootIdVerifier.sol";
-import {MockStakingRegistry} from "../../src/proofs/mocks/MockStakingRegistry.sol";
+// Deliberately imported from `test/`: these are test doubles with unauthenticated mutators and no
+// cryptography. They are not production artifacts and MUST NOT be wired into a mainnet GameConfig.
+import {MockRootIdVerifier} from "../../test/mocks/MockRootIdVerifier.sol";
+import {MockStakingRegistry} from "../../test/mocks/MockStakingRegistry.sol";
 
 import {GameType} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
@@ -70,6 +72,12 @@ contract DeployProofSystem is Script {
     uint64 internal constant PROOF_PERIOD = 7 days;
     uint256 internal constant PROPOSER_BOND = 1 ether;
     uint256 internal constant CHALLENGER_BOND = 0.1 ether;
+    /// @dev ~6h at 12s blocks. Caps how much L1 deposit history a proposal may omit via a stale
+    ///      L1 origin, while leaving ample headroom for proof generation. Retune per deployment.
+    uint64 internal constant MAX_L1_ORIGIN_AGE = 1800;
+    /// @dev Version of the proof-domain encoding. Bumped to 2 when the `rootId` preimage gained
+    ///      the explicit pre-state commitment; proofs against version 1 do not carry over.
+    uint256 internal constant PROOF_SYSTEM_VERSION = 2;
 
     function run() external returns (Deployment memory deployment) {
         Config memory config = _readConfig();
@@ -189,12 +197,13 @@ contract DeployProofSystem is Script {
         return IMultiProofGame.GameConfig({
             domain: ProofLib.Domain({
                 chainId: config.l2ChainId,
-                proofSystemVersion: 1,
+                proofSystemVersion: PROOF_SYSTEM_VERSION,
                 rollupConfigHash: config.rollupConfigHash,
                 blockInterval: config.blockInterval
             }),
             challengePeriod: CHALLENGE_PERIOD,
             proofPeriod: PROOF_PERIOD,
+            maxL1OriginAge: MAX_L1_ORIGIN_AGE,
             proposerBond: PROPOSER_BOND,
             challengerBond: CHALLENGER_BOND,
             proofThreshold: config.proofThreshold,

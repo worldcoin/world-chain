@@ -6,7 +6,9 @@ import {ProofLib} from "./ProofLib.sol";
 import {Claim, Hash} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 
 library ProofVerificationLib {
-    /// @dev Validates the proof against the game's root, domain, and creation-time transition snapshot.
+    /// @dev Validates the proof against the game's root, domain, and creation-time transition
+    ///      snapshot. Returns `VALID` or `BINDING_MISMATCH`; cryptographic verification is the
+    ///      caller's job.
     function matchesGame(
         address gameAddress,
         bytes32 rootId,
@@ -14,17 +16,24 @@ library ProofVerificationLib {
         address proofParentRef,
         uint256 proofL1OriginNumber,
         ProofLib.TransitionPublicValues memory transition
-    ) internal view returns (bool) {
+    ) internal view returns (ProofLib.VerificationStatus) {
         IMultiProofGame game = IMultiProofGame(gameAddress);
         if (!_matchesRoot(game, rootId, proofDomainHash, proofParentRef, proofL1OriginNumber, transition)) {
-            return false;
+            return ProofLib.VerificationStatus.BINDING_MISMATCH;
         }
 
-        if (!_matchesDomain(game, proofDomainHash, transition.rollupConfigHash, game.domain())) return false;
+        if (!_matchesDomain(game, proofDomainHash, transition.rollupConfigHash, game.domain())) {
+            return ProofLib.VerificationStatus.BINDING_MISMATCH;
+        }
 
-        return _matchesTransition(game, proofL1OriginNumber, transition);
+        return _matchesTransition(game, proofL1OriginNumber, transition)
+            ? ProofLib.VerificationStatus.VALID
+            : ProofLib.VerificationStatus.BINDING_MISMATCH;
     }
 
+    /// @dev The reconstructed rootId now commits to the pre-state, so this check alone pins the
+    ///      full transition. `_matchesTransition` remains as defence in depth against a game whose
+    ///      stored snapshot disagrees with the rootId it reports.
     function _matchesRoot(
         IMultiProofGame game,
         bytes32 rootId,
@@ -36,6 +45,8 @@ library ProofVerificationLib {
         bytes32 reconstructedRootId = ProofLib.rootId(
             proofDomainHash,
             proofParentRef,
+            transition.l2PreRoot,
+            uint256(transition.l2PreBlockNumber),
             transition.l2PostRoot,
             uint256(transition.l2PostBlockNumber),
             transition.l1Head,

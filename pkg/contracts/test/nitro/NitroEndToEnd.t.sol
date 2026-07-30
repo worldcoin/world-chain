@@ -150,11 +150,11 @@ contract NitroEndToEndTest is Test {
     }
 
     function _rootId(bytes32 postRoot, uint64 blk) internal view returns (bytes32) {
-        return ProofLib.rootId(domainHash, address(parent), postRoot, uint256(blk), L1H, L1N);
+        return ProofLib.rootId(domainHash, address(parent), PRE, uint256(PRE_BLK), postRoot, uint256(blk), L1H, L1N);
     }
 
     function _verify(bytes32 rootId, bytes memory proof) internal view returns (bool) {
-        return game.verify(address(proofVerifier), rootId, proof);
+        return game.verify(address(proofVerifier), rootId, proof) == ProofLib.VerificationStatus.VALID;
     }
 
     /*//////////////////////////////////////////////////////////////

@@ -32,19 +32,6 @@ import {NitroEnclaveKeyRegistry} from "./NitroEnclaveKeyRegistry.sol";
 ///      `IWorldChainProofVerifier`.
 contract NitroProofVerifier is IWorldChainProofVerifier {
     /*//////////////////////////////////////////////////////////////
-                                 ERRORS
-    //////////////////////////////////////////////////////////////*/
-
-    /// @dev Thrown when the proof's signature bytes are not exactly 65 bytes.
-    ///      Surfaced as `false` via `verify`'s try/catch.
-    error InvalidSignatureLength();
-
-    /// @dev Thrown when the proof's expected public key is not a 65-byte
-    ///      SEC1-uncompressed secp256k1 key (`0x04 || X || Y`). The World
-    ///      Nitro enclave always emits this form.
-    error InvalidPublicKey();
-
-    /*//////////////////////////////////////////////////////////////
                                 STORAGE
     //////////////////////////////////////////////////////////////*/
 
@@ -76,40 +63,76 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     ///            bytes   expectedPublicKey
     ///        )
     ///
-    ///      Decoding plus `_verifyDecoded` live behind an external `this.`
-    ///      call so the try/catch in `verify` traps every revert path —
-    ///      including a malformed ABI payload — and surfaces it as `false`.
-    function verify(bytes32 rootId, bytes calldata proof) external view returns (bool) {
-        try this._decodeAndVerify(msg.sender, rootId, proof) returns (bool ok) {
-            return ok;
+    ///      Decoding and binding live behind an external `this.` call, so a
+    ///      revert there is unambiguously a malformed payload. The key-registry
+    ///      lookup is then made separately, so a registry outage reports
+    ///      `UNAVAILABLE` instead of masquerading as an unregistered signer.
+    function verify(bytes32 rootId, bytes calldata proof) external view returns (ProofLib.VerificationStatus) {
+        ProofLib.VerificationStatus binding;
+        ProofLib.TransitionPublicValues memory transition;
+        bytes memory signature;
+        bytes memory expectedPublicKey;
+        try this._decodeAndBind(msg.sender, rootId, proof) returns (
+            ProofLib.VerificationStatus binding_,
+            ProofLib.TransitionPublicValues memory transition_,
+            bytes memory signature_,
+            bytes memory expectedPublicKey_
+        ) {
+            binding = binding_;
+            transition = transition_;
+            signature = signature_;
+            expectedPublicKey = expectedPublicKey_;
         } catch {
-            return false;
+            return ProofLib.VerificationStatus.MALFORMED;
         }
+        if (binding != ProofLib.VerificationStatus.VALID) return binding;
+
+        // A structurally wrong key is the submitter's error; the registry never sees it.
+        if (expectedPublicKey.length != 65 || expectedPublicKey[0] != 0x04) {
+            return ProofLib.VerificationStatus.MALFORMED;
+        }
+        if (signature.length != 65) return ProofLib.VerificationStatus.MALFORMED;
+
+        // The registry is a live dependency. If it cannot answer, the signature is unjudged.
+        if (address(registry).code.length == 0) return ProofLib.VerificationStatus.UNAVAILABLE;
+        bool registered;
+        try registry.isKeyRegistered(expectedPublicKey) returns (bool registered_) {
+            registered = registered_;
+        } catch {
+            return ProofLib.VerificationStatus.UNAVAILABLE;
+        }
+        if (!registered) return ProofLib.VerificationStatus.REJECTED;
+
+        bytes32 commitment = _signingCommitment(transition);
+        return _verifyEnclaveSignature(commitment, signature, expectedPublicKey)
+            ? ProofLib.VerificationStatus.VALID
+            : ProofLib.VerificationStatus.REJECTED;
     }
 
     /// @notice External helper used only by `verify`; MUST NOT be called
     ///         directly.
-    /// @dev External so that `verify` can invoke it via `this.` and trap
-    ///      reverts (including the ABI decode revert) in a try/catch.
-    function _decodeAndVerify(address gameAddress, bytes32 rootId, bytes calldata proof) external view returns (bool) {
-        require(msg.sender == address(this), "internal");
-        (
-            bytes32 domainHash,
-            address parentRef,
-            uint256 l1OriginNumber,
+    /// @dev External so that `verify` can invoke it via `this.` and trap the
+    ///      ABI decode revert. Performs no cryptography and touches no
+    ///      external dependency — it only decodes and binds to the game.
+    function _decodeAndBind(address gameAddress, bytes32 rootId, bytes calldata proof)
+        external
+        view
+        returns (
+            ProofLib.VerificationStatus status,
             ProofLib.TransitionPublicValues memory transition,
             bytes memory signature,
             bytes memory expectedPublicKey
-        ) = abi.decode(proof, (bytes32, address, uint256, ProofLib.TransitionPublicValues, bytes, bytes));
+        )
+    {
+        require(msg.sender == address(this), "internal");
+        bytes32 domainHash;
+        address parentRef;
+        uint256 l1OriginNumber;
+        (domainHash, parentRef, l1OriginNumber, transition, signature, expectedPublicKey) =
+            abi.decode(proof, (bytes32, address, uint256, ProofLib.TransitionPublicValues, bytes, bytes));
 
-        // 1. Bind the proof identity and transition fields to the calling game's immutable snapshot.
-        bool matchesGame =
+        status =
             ProofVerificationLib.matchesGame(gameAddress, rootId, domainHash, parentRef, l1OriginNumber, transition);
-        if (!matchesGame) return false;
-
-        // 2. Verify the enclave signature over all transition public values.
-        bytes32 commitment = _signingCommitment(transition);
-        return _verifyEnclaveSignature(commitment, signature, expectedPublicKey);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -125,22 +148,15 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     }
 
     /// @dev Checks that `signature` over `commitment` recovers to the address
-    ///      derived from `expectedPublicKey`, and that the key is registered.
-    ///      Returns `false` on logical mismatch (unregistered key, wrong
-    ///      signer, malleable s, etc.); reverts on structural errors
-    ///      (`InvalidSignatureLength`, `InvalidPublicKey`) which `verify`
-    ///      catches and turns into `false`.
+    ///      derived from `expectedPublicKey`. Purely cryptographic: `verify`
+    ///      has already established that the key and signature are structurally
+    ///      well-formed and that the key is registered, so every `false` here
+    ///      is a genuine signature rejection.
     function _verifyEnclaveSignature(bytes32 commitment, bytes memory signature, bytes memory expectedPublicKey)
         internal
-        view
+        pure
         returns (bool)
     {
-        if (expectedPublicKey.length != 65 || expectedPublicKey[0] != 0x04) revert InvalidPublicKey();
-
-        if (!_isKeyRegistered(expectedPublicKey)) return false;
-
-        if (signature.length != 65) revert InvalidSignatureLength();
-
         bytes32 r;
         bytes32 s;
         uint8 v;
@@ -174,11 +190,5 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
             keyHash := keccak256(add(expectedPublicKey, 33), 64)
         }
         return recovered == address(uint160(uint256(keyHash)));
-    }
-
-    /// @dev Memory-bytes wrapper around the calldata-only `isKeyRegistered`
-    ///      view on the registry.
-    function _isKeyRegistered(bytes memory publicKey) internal view returns (bool) {
-        return registry.isKeyRegistered(publicKey);
     }
 }

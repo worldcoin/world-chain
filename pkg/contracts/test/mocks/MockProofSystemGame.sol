@@ -57,7 +57,11 @@ contract MockProofSystemGame {
         return l2BlockNumber;
     }
 
-    function verify(address verifier, bytes32 rootId_, bytes calldata proof) external view returns (bool) {
+    function verify(address verifier, bytes32 rootId_, bytes calldata proof)
+        external
+        view
+        returns (ProofLib.VerificationStatus)
+    {
         return IWorldChainProofVerifier(verifier).verify(rootId_, proof);
     }
 }

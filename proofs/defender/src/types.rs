@@ -10,6 +10,12 @@ pub struct GameMetadata {
     pub challenge_deadline: u64,
     pub proof_deadline: u64,
     pub proof_threshold: u8,
+    /// Domain hash the game was created against. Part of every lane verifier's proof payload.
+    pub domain_hash: B256,
+    /// Parent game, or the anchor registry sentinel. Part of every lane verifier's payload.
+    pub parent_ref: Address,
+    /// L1 block number paired with `l1_origin_hash`. Part of every lane verifier's payload.
+    pub l1_origin_number: u64,
 }
 
 /// Result of a submitted `submitProofLane` transaction.

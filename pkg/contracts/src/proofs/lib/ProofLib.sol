@@ -9,6 +9,9 @@ library ProofLib {
     uint8 internal constant PROOF_LANE_COUNT = 3;
 
     enum RootState {
+        /// @dev Never returned by `MultiProofGame.state()`; a clone always exists in one of the
+        ///      states below. Retained so the zero value is not a meaningful state, and so the
+        ///      ordinals match `world_chain_proofs::RootState`.
         NONE,
         PROPOSED,
         CHALLENGED,
@@ -19,7 +22,13 @@ library ProofLib {
     enum InvalidationReason {
         NONE,
         PROOF_TIMEOUT,
+        /// @dev Also covers a blacklisted parent: blacklisting an ancestor invalidates its
+        ///      descendants through the same cascade, so they report `INVALID_PARENT`.
         INVALID_PARENT,
+        /// @dev Never set by `MultiProofGame`. Blacklisting a game does not change its own
+        ///      `GameStatus`; it makes the game improper, which the registry enforces and which
+        ///      the game reflects by settling bonds in `REFUND` mode. Retained so the ordinals
+        ///      match `world_chain_proofs::InvalidationReason`.
         BLACKLISTED
     }
 
@@ -27,6 +36,23 @@ library ProofLib {
         VALIDITY_PROOF,
         TEE_ATTESTATION,
         SECURITY_COUNCIL
+    }
+
+    /// Outcome of a lane verification, carrying the failure class so callers can distinguish a
+    /// submitter error from a dependency outage. A bare boolean collapses "this proof is wrong"
+    /// into "the verifier gateway is down", which are opposite operational responses during a
+    /// live proof window.
+    enum VerificationStatus {
+        /// The proof verified against the game's transition.
+        VALID,
+        /// The proof payload could not be ABI-decoded into the lane's expected layout.
+        MALFORMED,
+        /// The payload decoded but does not bind to this game's rootId, domain, or transition.
+        BINDING_MISMATCH,
+        /// The proof bound correctly but failed its cryptographic check.
+        REJECTED,
+        /// A dependency (key registry, verifier gateway) failed. The proof is unjudged; retry.
+        UNAVAILABLE
     }
 
     struct Domain {
@@ -54,15 +80,33 @@ library ProofLib {
             );
     }
 
+    /// @dev `parentRef` alone does not pin the pre-state. For a concrete parent game the address
+    ///      transitively determines its root, but for the anchor-registry sentinel the address is
+    ///      fixed while the anchor value moves, so two proposals reading different anchor roots
+    ///      would otherwise share a rootId. The pre-state is therefore committed explicitly, and
+    ///      every lane binds to it without having to read the game back.
     function rootId(
         bytes32 domainHash_,
         address parentRef,
+        bytes32 startingRootClaim,
+        uint256 startingL2BlockNumber,
         bytes32 rootClaim,
         uint256 l2BlockNumber,
         bytes32 l1OriginHash,
         uint256 l1OriginNumber
     ) internal pure returns (bytes32) {
-        return keccak256(abi.encode(domainHash_, parentRef, rootClaim, l2BlockNumber, l1OriginHash, l1OriginNumber));
+        return keccak256(
+            abi.encode(
+                domainHash_,
+                parentRef,
+                startingRootClaim,
+                startingL2BlockNumber,
+                rootClaim,
+                l2BlockNumber,
+                l1OriginHash,
+                l1OriginNumber
+            )
+        );
     }
 
     function laneMask(ProofLane lane) internal pure returns (uint8) {
