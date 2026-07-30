@@ -4,6 +4,7 @@ pragma solidity ^0.8.23;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IWldEthOracle} from "../../src/interfaces/IWldEthOracle.sol";
+import {IAggregatorV3} from "../../src/interfaces/IAggregatorV3.sol";
 import {ISwapRouter, IWETH9} from "../../src/interfaces/ISwapRouter.sol";
 
 /// @notice Simple mintable ERC20 used for WLD in tests.
@@ -94,12 +95,7 @@ contract MockSwapRouter is ISwapRouter {
 
     receive() external payable {}
 
-    function exactInputSingle(ExactInputSingleParams calldata p)
-        external
-        payable
-        override
-        returns (uint256 amountOut)
-    {
+    function exactInputSingle(ExactInputSingleParams calldata p) external payable override returns (uint256 amountOut) {
         IERC20(p.tokenIn).transferFrom(msg.sender, address(this), p.amountIn);
         // ETH out = amountIn * den / num  (since num/den is WLD-per-ETH)
         uint256 ideal = (p.amountIn * den) / num;
@@ -143,5 +139,53 @@ contract MockUniswapV3Pool {
         // cumulative(now) - cumulative(window ago) = tick * window
         tickCumulatives[0] = 0;
         tickCumulatives[1] = int56(tick) * int56(uint56(window));
+    }
+}
+
+/**
+ * @notice Mock Chainlink AggregatorV3 feed.
+ * @dev Mirrors the World Chain `ChainlinkPriceFeed` read surface: configurable
+ *      `decimals`, plus setters to simulate stale, non-positive, and unset rounds.
+ */
+contract MockAggregatorV3 is IAggregatorV3 {
+    uint8 public immutable override decimals;
+    string public override description;
+    uint256 public constant override version = 1;
+
+    int256 public answer;
+    uint256 public updatedAt;
+    uint80 public roundId = 1;
+    /// @dev When true, `latestRoundData` reverts (feed contract itself failing).
+    bool public reverting;
+
+    constructor(string memory _description, uint8 _decimals, int256 _answer) {
+        description = _description;
+        decimals = _decimals;
+        answer = _answer;
+        updatedAt = block.timestamp;
+    }
+
+    function setAnswer(int256 _answer) external {
+        answer = _answer;
+        updatedAt = block.timestamp;
+        roundId += 1;
+    }
+
+    function setUpdatedAt(uint256 _updatedAt) external {
+        updatedAt = _updatedAt;
+    }
+
+    function setReverting(bool _v) external {
+        reverting = _v;
+    }
+
+    function latestRoundData() external view override returns (uint80, int256, uint256, uint256, uint80) {
+        require(!reverting, "feed down");
+        return (roundId, answer, updatedAt, updatedAt, roundId);
+    }
+
+    function getRoundData(uint80 _roundId) external view override returns (uint80, int256, uint256, uint256, uint80) {
+        require(!reverting, "feed down");
+        return (_roundId, answer, updatedAt, updatedAt, _roundId);
     }
 }

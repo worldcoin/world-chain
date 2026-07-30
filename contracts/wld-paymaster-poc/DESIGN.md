@@ -16,8 +16,9 @@ off-chain backend**. Concretely, per leadership's design:
 3. It does **not** swap WLD→ETH per UserOp. It accumulates WLD and performs a
    **batched** swap every `X` blocks, then re-deposits the resulting ETH into
    the EntryPoint — self-sustaining after the initial funding.
-4. It reads WLD/ETH from an **on-chain oracle** (Uniswap V3 TWAP), abstracted
-   behind an interface so it can later be swapped for Chainlink.
+4. It reads WLD/ETH from **Chainlink** (WLD/USD × ETH/USD cross) behind an
+   `IWldEthOracle` interface; a Uniswap V3 TWAP implementation is retained as a
+   swappable fallback.
 
 This document describes the "backend-less / fully on-chain" variant. It is an
 alternative to the ERC-7677 off-chain paymaster-service approach (where a server
@@ -40,7 +41,7 @@ signs each UserOp and keeps the deposit topped up).
                  │                                     │  - accumulatedWld   │  │
                  │   ┌─────────────────┐   reads       └─────────┬──────────┘  │
                  │   │ IWldEthOracle   │ ◄──────────────────────┘             │
-                 │   │ (UniV3 TWAP)    │           triggerBatchSwap(minOut)    │
+                 │   │ (Chainlink x2)  │           triggerBatchSwap(minOut)    │
                  │   └────────┬────────┘        (permissionless, every X blk)  │
                  │            │ observe()                     │                │
                  │   ┌────────▼────────┐   WLD→WETH   ┌───────▼────────┐       │
@@ -88,7 +89,34 @@ interface IWldEthOracle {
 }
 ```
 
-**MVP implementation — `UniswapV3TwapOracle`:** reads a time-weighted average
+**Default implementation — `ChainlinkWldEthOracle`:** reads two
+`AggregatorV3Interface` feeds live on World Chain and crosses them:
+
+| Feed | Address | Decimals |
+|---|---|---|
+| WLD/USD | `0x8Bb2943AB030E3eE05a58d9832525B4f60A97FA0` | 18 |
+| ETH/USD | `0xe1d72a719171DceAB9499757EB9d5AEb9e8D64A6` | 18 |
+
+```
+WLD per ETH = ethUsd / wldUsd          (both answers normalised to 1e18)
+```
+
+Both are `ChainlinkPriceFeed` contracts — Chainlink Data Streams verifier
+wrappers exposing the standard `latestRoundData()` read surface (interface
+transcribed from the verified ABI in `src/interfaces/IAggregatorV3.sol`). They
+report **18 decimals**, not the 8 typical on Ethereum mainnet, so the oracle
+reads `decimals()` per feed at construction and normalises rather than assuming.
+WLD and ETH both have 18 token decimals, so no token-decimal adjustment applies.
+
+The oracle is **fail-closed**: a non-positive answer, an unset `updatedAt`, an
+answer older than `maxStaleness` (default 1 hour), or a reverting feed all revert.
+That propagates out of `validatePaymasterUserOp` and rejects the UserOperation
+rather than sponsoring gas at an unknown price, and makes `triggerBatchSwap`
+refuse to swap without a trustworthy min-out bound. `maxStaleness` must sit
+comfortably above the feeds' push heartbeat, or ops get rejected whenever the
+feed is merely quiet — this is the main new operational knob.
+
+**Fallback implementation — `UniswapV3TwapOracle`:** reads a time-weighted average
 tick over `twapWindow` seconds from the WLD/WETH V3 pool via `pool.observe()`,
 and converts amounts with the standard `OracleLibrary.getQuoteAtTick`
 (vendored to solc ^0.8 in `src/vendor/`). Using a TWAP (not spot) is the primary
@@ -100,13 +128,13 @@ price in `validate`. Because the up-front charge already includes the premium
 and `postOp` scales it linearly, the effective charge is always
 `1.2 × (WLD-equivalent of actual gas)`.
 
-**Chainlink note.** The interface is deliberately implementation-agnostic so a
-Chainlink adapter can replace the TWAP oracle via `setOracle(...)` with zero
-paymaster changes. **Assumption (not verified):** at time of writing we assume
-there is *no* canonical Chainlink WLD/ETH price feed live on World Chain, so the
-Uniswap V3 TWAP is the default. If/when a Chainlink WLD/ETH (or WLD/USD + ETH/USD)
-feed exists, wrap it behind `IWldEthOracle` and switch. Chainlink would remove
-in-protocol TWAP manipulation surface but adds a trust/liveness dependency.
+**Choosing between them.** Chainlink is the default: it removes in-protocol
+(pool) manipulation surface and decouples the price source from the swap venue.
+Its cost is a liveness/trust dependency on the feeds' push cadence, bounded by
+`maxStaleness`. The TWAP has no external liveness dependency but is manipulable
+by moving the pool — and the pool is also where the batch swap executes. Either
+can be installed via `setOracle(...)` with zero paymaster changes; the swap is
+oracle-bounded in both cases.
 
 ## 3. Collecting WLD from the user
 
@@ -186,11 +214,19 @@ griefing/MEV surface. Chainlink Automation remains available as a drop-in later
 | `minEntryPointDeposit` | 0.05 ETH | Deposit floor preserved after each op |
 | `postOpGasOverhead` | 40000 | Gas assumed for postOp, folded into the charge |
 | `keeperRewardBps` | 0 | Optional reward to the batch-swap caller |
-| `oracle` | ctor arg | Swappable `IWldEthOracle` (TWAP → Chainlink later) |
+| `oracle` | ctor arg | Swappable `IWldEthOracle` (Chainlink default, TWAP fallback) |
+| `maxStaleness` | 1 hour | Oracle ctor: max Chainlink answer age before ops are rejected |
 
 ## 7. Risks & edge cases
 
-- **TWAP manipulation.** Short windows are cheaper to manipulate. Mitigations:
+- **Chainlink feed liveness (default oracle).** If either feed stops updating
+  past `maxStaleness`, the oracle reverts and *all* sponsored ops are rejected
+  until it recovers — un-sponsored ops, not mispriced ones, but a full outage of
+  the WLD-gas path. Set `maxStaleness` above the feeds' heartbeat with headroom,
+  alert on feed `updatedAt` age, and keep `setOracle(...)` as the break-glass
+  (swap to the TWAP oracle) path. The two-feed cross also means either feed can
+  take the path down.
+- **TWAP manipulation (fallback oracle).** Short windows are cheaper to manipulate. Mitigations:
   use a sufficiently long `twapWindow`, prefer a deep-liquidity fee tier, keep
   the +20% premium as a buffer, and cap per-op exposure via `minEntryPointDeposit`.
   A determined attacker who sustains an off-market price for the whole window
@@ -201,9 +237,10 @@ griefing/MEV surface. Chainlink Automation remains available as a drop-in later
   assumption:** a WLD/WETH V3 pool with enough depth exists on World Chain's
   Uniswap; batch size should stay within what that pool can absorb inside the
   slippage bound (tune `blocksPerBatch` so batches don't grow too large).
-- **Oracle == swap venue.** Both the price and the swap use Uniswap; an attacker
-  who moves the pool moves both. A Chainlink price oracle (independent of the
-  swap venue) would decorrelate these and is the recommended production upgrade.
+- **Oracle == swap venue (fallback oracle only).** With the TWAP oracle, both
+  the price and the swap use Uniswap, so an attacker who moves the pool moves
+  both. The default Chainlink oracle is independent of the swap venue and
+  decorrelates these.
 - **Deposit runs low.** The floor check rejects new ops before the deposit is
   exhausted; ops are simply un-sponsored until a batch (or the owner) replenishes.
 - **Front-running / MEV on the batch trigger.** The swap direction and size are
@@ -238,5 +275,6 @@ requirement, not the funding requirement.
 ## 9. Out of scope for the MVP
 
 Audited-grade hardening, permit/Permit2 collection path, multi-hop swap routing,
-per-user rate limiting, pausability/circuit breakers, upgradeability, and a
-production oracle (Chainlink) integration. These are the recommended follow-ups.
+per-user rate limiting, pausability/circuit breakers, upgradeability, and
+feed-staleness alerting/dashboards for the Chainlink oracle. These are the
+recommended follow-ups.
