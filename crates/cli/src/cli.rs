@@ -352,15 +352,6 @@ impl WorldChainArgs {
             }
         }
 
-        if let Some(flashblocks) = &self.flashblocks {
-            let bootnodes = config.network.bootnodes.get_or_insert_default();
-            for sentry in &flashblocks.sentry_peers {
-                if !bootnodes.iter().any(|bootnode| bootnode.id == sentry.id) {
-                    bootnodes.push(sentry.clone());
-                }
-            }
-        }
-
         let bal_enabled = self.flashblocks.as_ref().is_some_and(|fb| fb.access_list);
 
         info!(
@@ -557,14 +548,9 @@ mod tests {
             DEFAULT_MAX_SENTRY_CONNECTIONS
         );
         assert_eq!(flashblocks.sentry_peers.len(), 3);
-        assert_eq!(
-            node_config
-                .network
-                .bootnodes
-                .as_ref()
-                .expect("sentries are discovery bootnodes")
-                .len(),
-            3
+        assert!(
+            node_config.network.bootnodes.is_none(),
+            "preserve the chain-specific bootnode fallback until network configuration is resolved"
         );
         assert!(
             node_config.network.trusted_peers.is_empty(),

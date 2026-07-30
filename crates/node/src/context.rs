@@ -136,6 +136,15 @@ fn rank_flashblock_sentries(local_peer_id: PeerId, sentries: &[TrustedPeer]) -> 
     ranked.into_iter().map(|(_, peer_id)| peer_id).collect()
 }
 
+/// Adds flashblocks sentries to the already-resolved discovery bootnodes.
+fn add_flashblock_sentry_bootnodes(bootnodes: &mut HashSet<TrustedPeer>, sentries: &[TrustedPeer]) {
+    for sentry in sentries {
+        if !bootnodes.iter().any(|bootnode| bootnode.id == sentry.id) {
+            bootnodes.insert(sentry.clone());
+        }
+    }
+}
+
 /// Adds only the selected sentries to the trusted set and prevents RLPx connections to the rest.
 ///
 /// The peer-manager ban list is intentionally separate from the discovery ban lists, so an
@@ -217,6 +226,7 @@ where
         } = self;
 
         let mut network_config = op_network_builder.network_config(ctx)?;
+        add_flashblock_sentry_bootnodes(&mut network_config.boot_nodes, &flashblock_sentries);
         let local_peer_id = network_config.hello_message.id;
         network_config
             .peers_config
@@ -638,6 +648,22 @@ mod sentry_policy_tests {
 
         assert_eq!(selected, rank_flashblock_sentries(local_peer_id, &reversed));
         assert_eq!(selected.len(), sentries.len());
+    }
+
+    #[test]
+    fn sentries_are_added_without_replacing_chain_bootnodes() {
+        let sentries = sentries();
+        let mut chain_bootnode = sentries[0].clone();
+        chain_bootnode.id = PeerId::random();
+        let mut bootnodes = HashSet::from([chain_bootnode.clone()]);
+
+        add_flashblock_sentry_bootnodes(&mut bootnodes, &sentries);
+
+        assert!(bootnodes.contains(&chain_bootnode));
+        assert_eq!(bootnodes.len(), sentries.len() + 1);
+        for sentry in sentries {
+            assert!(bootnodes.contains(&sentry));
+        }
     }
 
     #[test]
