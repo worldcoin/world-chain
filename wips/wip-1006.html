@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-ecf32b6a.js";
+            window.path_to_searchindex_js = "../searchindex-a02d8384.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-87388434.js"></script>
@@ -177,15 +177,15 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h2 id="abstract"><a class="header" href="#abstract">Abstract</a></h2>
-<p>We outline an OP Stack dispute game in which every proposed output root carries a TEE proof at creation. The proof counts as one lane but does not finalize the root: if no staked participant challenges it within one day, the game may resolve in favor of the proposer; if challenged, the proposer has seven days from game creation to add an independent lane and reach the 2-of-3 threshold. A challenge submits no proof of invalidity. Failure to reach the threshold resolves the game in favor of the challenger. The stock <code>DisputeGameFactory</code>, <code>AnchorStateRegistry</code>, <code>OptimismPortal2</code>, and <code>DelayedWETH</code> remain responsible for game creation, claim validity, withdrawals, and bond custody.</p>
+<p>We outline an OP Stack dispute game in which a proposer posts an output root optimistically without a proof. If no staked participant challenges the root within one day, the game may resolve in favor of the proposer. A challenge submits no proof of invalidity; it shifts the burden to the proposer, who has seven days from game creation to assemble a threshold of independent validity signals. Failure to reach the threshold resolves the game in favor of the challenger. The stock <code>DisputeGameFactory</code>, <code>AnchorStateRegistry</code>, <code>OptimismPortal2</code>, and <code>DelayedWETH</code> remain responsible for game creation, claim validity, withdrawals, and bond custody.</p>
 <h2 id="motivation"><a class="header" href="#motivation">Motivation</a></h2>
-<p>The vanilla OP Stack fault-proof system inherits a multi-day challenge window for every proposal and routes every dispute through a single interactive fault-proof lane. Base’s Azul proof system reduces that window when two heterogeneous proofs agree, but final resolution still rests on at most two lanes.</p>
+<p>The vanilla OP Stack fault-proof system inherits a multi-day challenge window for every proposal and routes every dispute through a single interactive fault-proof lane. Base’s Azul proof system reduces that window when two heterogeneous proofs (TEE and ZK) agree, but still requires a proof on the common path and still rests final resolution on at most two lanes.</p>
 <p>World Chain targets two properties that neither model provides together:</p>
 <ul>
-<li><strong>A proof-backed optimistic path.</strong> Every proposal starts with one TEE-attested transition, remains challengeable, and can finalize after the challenge window without producing another proof.</li>
-<li><strong>A diversified disputed path.</strong> When a root is challenged, its creation-time TEE lane is insufficient: the proposer must add an independent validity or council lane before the deadline.</li>
+<li><strong>A cheap common path.</strong> No proof is paid for or produced when no staked participant objects to a root.</li>
+<li><strong>A diversified disputed path.</strong> When a root is challenged, the proposer must defend it, and no single prover, TEE vendor, or council action can finalize that defense. At least two independent lanes must agree.</li>
 </ul>
-<p>The result is one-lane assurance plus watcher oversight in the common case and 2-of-3 threshold security in the disputed case.</p>
+<p>The result is fast finality in the common case and <code>n / m</code> threshold security in the dispute case.</p>
 <h2 id="specification"><a class="header" href="#specification">Specification</a></h2>
 <p>The key words “MUST”, “MUST NOT”, “REQUIRED”, “SHALL”, “SHALL NOT”, “SHOULD”, “SHOULD NOT”, “RECOMMENDED”, “NOT RECOMMENDED”, “MAY”, and “OPTIONAL” in this document are to be interpreted as described in <a href="https://www.rfc-editor.org/rfc/rfc2119">RFC 2119</a> and <a href="https://www.rfc-editor.org/rfc/rfc8174">RFC 8174</a>.</p>
 <h3 id="constants"><a class="header" href="#constants">Constants</a></h3>
@@ -245,26 +245,13 @@
 <tr><td><code>l2BlockNumber</code></td><td>Proposer</td><td>L2 block number for <code>rootClaim</code>, matching the <a href="https://specs.optimism.io/protocol/proposals.html"><code>l2BlockNumber</code> field of an OP Stack L2 output proposal</a>.</td></tr>
 <tr><td><code>parentRef</code></td><td>Proposer</td><td>Address of the parent — the <code>AnchorStateRegistry</code> for the first proposal, otherwise the parent proposal. Same convention as the OP Stack <a href="https://specs.optimism.io/fault-proof/stage-one/dispute-game-interface.html">Fault Dispute Game <code>extraData</code> parent reference</a> and the parent reference encoded in Base Azul’s <code>AggregateVerifier</code> extra-data layout (see <a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts">Base Azul proof system</a>). The parent’s <code>rootClaim</code> and <code>l2BlockNumber</code> are read from this reference rather than re-supplied.</td></tr>
 <tr><td><code>attempt</code></td><td>Proposer</td><td>Retry nonce for the same transition. Attempt zero is the initial game; later attempts are permitted only after an eligible predecessor fails or is made obsolete by activation.</td></tr>
-<tr><td><code>retryOf</code></td><td>Proposer</td><td>Previous concrete game for a non-zero attempt. It MUST represent the same transition and be eligible for retry.</td></tr>
-<tr><td><code>l1OriginHash</code></td><td>Proposer</td><td>Recent L1 block selected by the proposer and verified against <code>blockhash(l1OriginNumber)</code> or <a href="https://eips.ethereum.org/EIPS/eip-2935">EIP-2935</a> history during creation.</td></tr>
-<tr><td><code>l1OriginNumber</code></td><td>Proposer</td><td>L1 block number paired with <code>l1OriginHash</code>.</td></tr>
-<tr><td><code>creationProofLane</code></td><td>Proposer</td><td>Proof lane used to verify <code>creationProof</code>.</td></tr>
-<tr><td><code>creationProof</code></td><td>Proposer</td><td>Proof verified during game initialization and counted as the initial <code>creationProofLane</code>.</td></tr>
+<tr><td><code>l1OriginHash</code></td><td>Factory</td><td>L1 origin hash captured at proposal creation. The proposer does not pass it as calldata; it is read via <code>blockhash()</code> or <a href="https://eips.ethereum.org/EIPS/eip-2935">EIP-2935</a> history and pinned by the factory, mirroring the OP Stack <a href="https://specs.optimism.io/fault-proof/stage-one/dispute-game-interface.html"><code>l1Head</code> snapshot at clone creation</a> that Base Azul inherits.</td></tr>
+<tr><td><code>l1OriginNumber</code></td><td>Game</td><td>L1 block number paired with the factory-captured <code>l1OriginHash</code>.</td></tr>
 </tbody>
 </table>
 </div>
 <p>The proposer calls <code>DisputeGameFactory.create(gameType, rootClaim, extraData)</code>, where:</p>
-<pre><code class="language-text">extraData = abi.encode(
-    domainHash,
-    l2BlockNumber,
-    parentRef,
-    attempt,
-    retryOf,
-    l1OriginHash,
-    l1OriginNumber,
-    creationProofLane,
-    creationProof
-)
+<pre><code class="language-text">extraData = abi.encode(domainHash, l2BlockNumber, parentRef, attempt)
 </code></pre>
 <h4 id="domain-verifier-immutable"><a class="header" href="#domain-verifier-immutable">Domain (verifier-immutable)</a></h4>
 <div class="table-wrapper">
@@ -284,8 +271,8 @@
 <h4 id="canonical-identifiers"><a class="header" href="#canonical-identifiers">Canonical identifiers</a></h4>
 <p>The contracts use two related identifiers:</p>
 <ul>
-<li><code>gameUUID</code> is the stock <code>DisputeGameFactory</code> lookup key. It commits to <code>gameType</code>, <code>rootClaim</code>, and the complete proof-backed <code>extraData</code>.</li>
-<li><code>rootId</code> is the proof-bound transition commitment. It includes the proposer-selected L1 origin and is the value every proof lane MUST bind to.</li>
+<li><code>gameUUID</code> is the stock <code>DisputeGameFactory</code> lookup key. It commits to <code>gameType</code>, <code>rootClaim</code>, and the complete <code>extraData</code>, but excludes the factory-captured L1 origin.</li>
+<li><code>rootId</code> is the proof-bound commitment. It includes the factory-captured L1 origin and is the value every proof lane MUST bind to.</li>
 </ul>
 <p>The contract computes:</p>
 <pre><code class="language-text">domainHash = keccak256(abi.encode(
@@ -299,15 +286,10 @@ extraData = abi.encode(
     domainHash,
     l2BlockNumber,
     parentRef,
-    attempt,
-    retryOf,
-    l1OriginHash,
-    l1OriginNumber,
-    creationProofLane,
-    creationProof
+    attempt
 )
 
-gameUUID = keccak256(abi.encode(
+gameUUID = keccak256(abi.encodePacked(
     gameType,
     rootClaim,
     extraData
@@ -322,16 +304,7 @@ rootId = keccak256(abi.encode(
     l1OriginNumber
 ))
 </code></pre>
-<p>The factory MUST reject duplicate games with the same <code>gameUUID</code>. This guarantees uniqueness only
-for one exact creation payload. Because the creation proof, selected L1 origin, and retry
-predecessor are part of <code>extraData</code>, multiple bonded games MAY have different <code>gameUUID</code> values
-while sharing the same <code>(domainHash, parentRef, rootClaim, l2BlockNumber, attempt)</code>. Attempts are
-therefore local to the explicit lineage formed by <code>retryOf</code>, not a global nonce for the logical
-transition. Offchain participants MUST tolerate parallel lineages: challengers evaluate every game
-independently, while proposers MAY deterministically follow one non-invalidated lineage. An
-unselected game does not block another lineage or anchor advancement and remains independently
-resolvable and closable through the permissionless game lifecycle.</p>
-<p>All proofs and attestations MUST bind to <code>rootId</code>. A proof or attestation that binds to a different domain, parent, root, block range, or L1 origin MUST NOT be accepted for <code>rootId</code>.</p>
+<p>The factory MUST reject duplicate games with the same <code>gameUUID</code>. All proofs and attestations MUST bind to <code>rootId</code>. A proof or attestation that binds to a different domain, parent, root, block range, or L1 origin MUST NOT be accepted for <code>rootId</code>.</p>
 <h3 id="state-machine"><a class="header" href="#state-machine">State Machine</a></h3>
 <p>The OP Stack lifecycle uses <code>GameStatus</code> for externally consumed resolution. The WIP-facing root states map onto it as follows:</p>
 <pre class="mermaid">stateDiagram-v2
@@ -351,19 +324,13 @@ resolvable and closable through the permissionless game lifecycle.</p>
 <p>A root enters the system in the <code>PROPOSED</code> state.</p>
 <ol>
 <li>The proposer calls the stock <code>DisputeGameFactory.create</code> with the WIP-1006 game type, <code>rootClaim</code>, and canonical <code>extraData</code>, supplying the configured initialization bond.</li>
-<li>The factory creates a clone of the registered WIP-1006 implementation and calls <code>initialize</code>.</li>
-<li>The game validates the domain, parent registration and eligibility, exact L2 block interval, retry predecessor, selected L1 head, creation proof, and bond.</li>
+<li>The factory creates a clone of the registered WIP-1006 implementation, captures the creator and L1 head, and calls <code>initialize</code>.</li>
+<li>The game validates the domain, parent registration and eligibility, exact L2 block interval, retry predecessor, and bond.</li>
 <li>The game records <code>createdAt = block.timestamp</code>, <code>challengeDeadline = createdAt + CHALLENGE_PERIOD</code>, and <code>proofDeadline = createdAt + PROOF_PERIOD</code>.</li>
-<li>The game records the creation proof as support from the <code>TEE_ATTESTATION</code> lane.</li>
 <li>The proposer bond is deposited into <code>DelayedWETH</code>, and the root remains open to challenge until <code>challengeDeadline</code>.</li>
 </ol>
-<p>The proposer MUST attach a valid TEE proof at creation. Additional proof-lane material is submitted
-only after a challenge.</p>
-<p>An initial <code>attempt = 0</code> identifies the first game in a retry lineage. A later attempt MUST identify
-its exact predecessor and MUST be accepted only for a protocol-defined recovery case, such as a
-proof timeout or a game created before WIP-1006 became respected. Another game MAY start a parallel
-lineage at the same attempt when its complete proof-backed creation payload produces a distinct
-<code>gameUUID</code>.</p>
+<p>The proposer MUST NOT be required or permitted to submit proof-lane material before a challenge.</p>
+<p>An initial <code>attempt = 0</code> identifies the first game for a transition. A later attempt MUST identify its exact predecessor and MUST be accepted only for a protocol-defined recovery case, such as a proof timeout or a game created before WIP-1006 became respected.</p>
 <h3 id="challenge-lifecycle"><a class="header" href="#challenge-lifecycle">Challenge Lifecycle</a></h3>
 <p>Any staked participant MAY challenge a proposed root before <code>challengeDeadline</code>. A challenge goes through optimistically: the challenger is not asked to prove that the root is invalid, and the challenge succeeds by default unless the proposer defends the root. The challenge merely shifts the burden of proof onto the proposer, who must then establish the root’s validity per <a href="#proposer-defense-and-challenged-finality">Proposer Defense and Challenged Finality</a>.</p>
 <p>The challenge transaction:</p>
@@ -385,7 +352,7 @@ lineage at the same attempt when its complete proof-backed creation payload prod
 <li>the parent is the anchor sentinel or has resolved with <code>DEFENDER_WINS</code>; and</li>
 <li>the parent is not blacklisted.</li>
 </ul>
-<p>An unchallenged game resolves without additional proof-lane submissions. A self-blacklisted, retired, unrespected, or otherwise improper game may still have <code>DEFENDER_WINS</code> status, but the registry MUST reject its claim and the game MUST use refund-mode bond settlement.</p>
+<p>An unchallenged game resolves without proof-lane submissions. A self-blacklisted, retired, unrespected, or otherwise improper game may still have <code>DEFENDER_WINS</code> status, but the registry MUST reject its claim and the game MUST use refund-mode bond settlement.</p>
 <h3 id="proposer-defense-and-challenged-finality"><a class="header" href="#proposer-defense-and-challenged-finality">Proposer Defense and Challenged Finality</a></h3>
 <p>Once a root is challenged, the burden of proof rests with the <strong>proposer</strong>, who MUST defend the root by establishing its validity. A challenged root MUST NOT finalize merely because time has elapsed. It finalizes only when the proposer’s defense assembles support from at least <code>PROOF_THRESHOLD</code> distinct proof lanes for the root, and only if the threshold is met before <code>proofDeadline</code>.</p>
 <p>Defending the root is the proposer’s responsibility because the proposer’s <code>PROPOSER_BOND</code> is forfeited if the root fails to reach the threshold. Lane submission itself remains permissionless — any party MAY relay a valid lane submission, and a proposer MAY coordinate independent provers, TEE signers, and the Security Council to do so — but the protocol assigns the economic responsibility for the defense to the proposer and to no other party.</p>
@@ -440,7 +407,7 @@ lineage at the same attempt when its complete proof-backed creation payload prod
 <tr><th>Interface</th><th>Role</th><th>Reference</th></tr>
 </thead>
 <tbody>
-<tr><td><code>IDisputeGameFactory</code></td><td>Stock OP factory; registers the WIP-1006 implementation, creates clones, and indexes games by UUID and list index.</td><td><a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts#disputegamefactory"><code>DisputeGameFactory</code></a></td></tr>
+<tr><td><code>IDisputeGameFactory</code></td><td>Stock OP factory; registers the WIP-1006 implementation, creates clones, indexes games by UUID and list index, and captures <code>l1Head</code>.</td><td><a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts#disputegamefactory"><code>DisputeGameFactory</code></a></td></tr>
 <tr><td><code>IDisputeGame</code> / <code>IMultiProofGame</code></td><td>Per-proposal game; exposes the Portal-facing lifecycle and World Chain proof-lane extensions.</td><td><a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts#aggregateverifier"><code>AggregateVerifier</code></a></td></tr>
 <tr><td><code>IAnchorStateRegistry</code></td><td>Stock OP registry; evaluates registration, respect, blacklist, retirement, finality, claim validity, and the current anchor.</td><td><a href="https://docs.base.org/base-chain/specs/protocol/proofs/contracts#anchorstateregistry"><code>AnchorStateRegistry</code></a></td></tr>
 <tr><td><code>IDelayedWETH</code></td><td>Holds proposer and challenger bonds and enforces delayed two-phase credit withdrawal.</td><td>OP Stack <code>DelayedWETH</code>.</td></tr>
@@ -459,9 +426,9 @@ lineage at the same attempt when its complete proof-backed creation payload prod
 <li><code>rootClaim</code> follows the <a href="https://specs.optimism.io/protocol/proposals.html#l2-output-commitment-construction">OP Stack output-root V1 encoding</a>.</li>
 <li><code>l2BlockNumber</code> matches the <a href="https://specs.optimism.io/protocol/proposals.html"><code>l2BlockNumber</code> field of an L2 output proposal</a>.</li>
 <li><code>parentRef</code> follows the <a href="https://specs.optimism.io/fault-proof/stage-one/dispute-game-interface.html">Fault Dispute Game <code>extraData</code> parent reference convention</a> — the <code>AnchorStateRegistry</code> for the first proposal, otherwise the parent proposal address.</li>
-<li><code>l1OriginHash</code> is selected by the proposer and checked against recent L1 block history at creation.</li>
+<li><code>l1OriginHash</code> is factory-captured at proposal creation, matching the L1 head snapshot taken by <code>DisputeGameFactory</code> at clone creation.</li>
 <li>factory identity uses the canonical <code>(gameType, rootClaim, extraData)</code> UUID;</li>
-<li>all per-proposal context, including the creation proof, is encoded canonically in <code>extraData</code>.</li>
+<li><code>domainHash</code>, <code>l2BlockNumber</code>, <code>parentRef</code>, and <code>attempt</code> are encoded in <code>extraData</code>.</li>
 </ul>
 <p>Offchain proposers, challengers, and defenders MUST use the stock factory indexing and creation APIs plus the WIP-1006 game extensions. They do not require a custom factory or anchor registry.</p>
 <h2 id="test-cases"><a class="header" href="#test-cases">Test Cases</a></h2>
@@ -469,7 +436,6 @@ lineage at the same attempt when its complete proof-backed creation payload prod
 <ul>
 <li>an unchallenged root finalizes after exactly <code>CHALLENGE_PERIOD</code>;</li>
 <li>factory creation rejects an incorrect domain hash or malformed <code>extraData</code>;</li>
-<li>factory creation rejects an invalid proof or mismatched L1 origin;</li>
 <li>factory UUID lookup and <code>findLatestGames</code> preserve the complete WIP-1006 <code>extraData</code>;</li>
 <li>an unstaked account cannot challenge;</li>
 <li>a staked account can challenge without proof before the deadline;</li>
@@ -488,14 +454,12 @@ lineage at the same attempt when its complete proof-backed creation payload prod
 <li>Portal withdrawal proof and finalization accept a claim-valid WIP-1006 game and reject blacklisted, retired, unrespected, challenger-winning, or insufficiently mature games.</li>
 </ul>
 <h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
-<p><strong>Unchallenged-path safety combines the TEE lane and honest watchers.</strong> Every root has a verified TEE lane at creation, but an invalid root can still finalize if that lane is compromised and no honest staked participant challenges it within <code>CHALLENGE_PERIOD</code>. Watchers therefore remain an independent safety backstop on the common path.</p>
+<p><strong>Unchallenged-path liveness depends on honest watchers.</strong> Safety in the common case relies on at least one honest staked participant challenging an invalid root within <code>CHALLENGE_PERIOD</code>. The architecture does not protect against a root that no one watches.</p>
 <p><strong>Disputed-path safety depends on lane independence.</strong> A false challenged finality requires two lanes to accept the same invalid root. Implementations MUST avoid shared signing keys, shared verifier keys, shared operator control, and shared offchain infrastructure across lanes, because any such sharing collapses the effective threshold below two.</p>
 <p><strong>TEE trust assumptions live in one lane.</strong> The TEE lane rests on the hardware vendor, the enclave image measurement, the registrar that admits signers, and the revocation process. Each of these is a potential single point of failure for that lane. The TEE lane is therefore counted exactly once in the threshold and MUST NOT be used as the sole finality mechanism. A compromised registrar, stale signer set, or weakened image-measurement policy can turn this lane unsafe without affecting the other two.</p>
 <p><strong>Security Council is a safety valve, not a finality mechanism.</strong> Council signing keys, quorum rules, and action domains MUST be isolated from unrelated governance actions. A council attestation alone MUST NOT finalize a challenged root.</p>
 <p><strong><code>rootId</code> domain separation is critical.</strong> Every lane MUST bind to the same <code>rootId</code>, and <code>rootId</code> itself MUST commit to <code>chainId</code>, <code>proofSystemVersion</code>, <code>rollupConfigHash</code>, and the parent/child block range. Missing domain separation allows replay across chains, hardfork schedules, game types, proof-system versions, or block ranges.</p>
-<p><strong><code>gameUUID</code> is not a proof target.</strong> It exists for duplicate prevention of one concrete
-proof-backed game. Proofs and attestations MUST bind to <code>rootId</code>, while offchain discovery groups
-the proof-specific UUIDs by their decoded transition fields.</p>
+<p><strong><code>gameUUID</code> is not a proof target.</strong> It exists for factory duplicate prevention and discovery. Proofs and attestations MUST bind to <code>rootId</code>, because the factory UUID does not include the L1 origin captured at game creation.</p>
 <p><strong>Bond and stake calibration are security-critical.</strong> If <code>CHALLENGER_BOND</code> is too cheap, attackers can grief honest roots into the slow path. If <code>CHALLENGER_BOND</code> is too expensive, honest watchers may fail to challenge invalid roots. If <code>PROPOSER_BOND</code> is too cheap, invalid-proposal spam is cheap and forces honest watchers to lock capital per challenge; if <code>PROPOSER_BOND</code> is too expensive, only well-capitalized actors can propose, which centralizes the role. Exact economic parameters are out of scope for this WIP but MUST be tuned before mainnet deployment.</p>
 <h2 id="copyright"><a class="header" href="#copyright">Copyright</a></h2>
 <p>Copyright and related rights waived via <a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0</a>.</p>
