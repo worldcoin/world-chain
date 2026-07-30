@@ -3,8 +3,8 @@ use alloy_primitives::Bytes;
 use tracing::{error, info, warn};
 use world_chain_proofs::ProofLane;
 use world_chain_prover_service::{
-    ProofBackend, ProofData, ProofRequest, ProofRequestId, ProofRequester, ProofResponse,
-    ProofStatus,
+    ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
+    ProofResponse, ProofStatus,
 };
 
 /// Number of proof lanes the defender drives.
@@ -23,7 +23,7 @@ pub(crate) enum LaneState {
     /// The proof has not been requested yet.
     Pending,
     /// The proof was requested from the prover-service.
-    Requested { id: ProofRequestId, attempts: u32 },
+    Requested { id: ProofRequestId },
     /// The lane is proven on-chain.
     Proven,
     /// Proving permanently failed after exhausting all attempts.
@@ -40,7 +40,6 @@ impl LaneState {
 pub(crate) struct LaneDriver<'a, E, P> {
     execution_client: &'a E,
     proof_requester: &'a P,
-    max_proof_attempts: u32,
 }
 
 impl<'a, E, P> LaneDriver<'a, E, P>
@@ -48,15 +47,10 @@ where
     E: DefenderClient,
     P: ProofRequester + Sync,
 {
-    pub(crate) const fn new(
-        execution_client: &'a E,
-        proof_requester: &'a P,
-        max_proof_attempts: u32,
-    ) -> Self {
+    pub(crate) const fn new(execution_client: &'a E, proof_requester: &'a P) -> Self {
         Self {
             execution_client,
             proof_requester,
-            max_proof_attempts,
         }
     }
 
@@ -70,8 +64,8 @@ where
         match state {
             LaneState::Proven | LaneState::Abandoned => state,
             LaneState::Pending => self.request_pending_lane(metadata, lane, backend).await,
-            LaneState::Requested { id, attempts } => {
-                self.advance_requested_lane(metadata, lane, backend, id, attempts)
+            LaneState::Requested { id } => {
+                self.advance_requested_lane(metadata, lane, backend, id)
                     .await
             }
         }
@@ -89,7 +83,13 @@ where
             .request_proof(proof_request(metadata, backend))
             .await
         {
-            Ok(id) => LaneState::Requested { id, attempts: 1 },
+            Ok(request_proof_response) => LaneState::Requested {
+                id: request_proof_response.proof_id,
+            },
+            Err(ProofRequestError::TooManyRetries(error)) => {
+                error!(%game, ?lane, %error, "prover-service exhausted retries; abandoning lane");
+                LaneState::Abandoned
+            }
             Err(error) => {
                 warn!(%game, ?lane, %error, "proof request failed; retrying next tick");
                 LaneState::Pending
@@ -103,10 +103,9 @@ where
         lane: ProofLane,
         backend: ProofBackend,
         id: ProofRequestId,
-        attempts: u32,
     ) -> LaneState {
         let game = metadata.address;
-        let state = LaneState::Requested { id, attempts };
+        let state = LaneState::Requested { id };
         let status = match self.proof_requester.proof_status(id).await {
             Ok(status) => status,
             Err(error) => {
@@ -118,10 +117,7 @@ where
         match status {
             ProofStatus::Created | ProofStatus::Running => state,
             ProofStatus::Succeeded => self.submit_succeeded_lane(metadata, lane, id, state).await,
-            ProofStatus::Failed => {
-                self.retry_failed_lane(metadata, lane, backend, attempts, state)
-                    .await
-            }
+            ProofStatus::Failed => self.retry_failed_lane(metadata, lane, backend, state).await,
         }
     }
 
@@ -184,35 +180,30 @@ where
         metadata: &GameMetadata,
         lane: ProofLane,
         backend: ProofBackend,
-        attempts: u32,
         state: LaneState,
     ) -> LaneState {
         let game = metadata.address;
-        if attempts >= self.max_proof_attempts {
-            error!(%game, ?lane, attempts, "proving permanently failed; abandoning lane");
-            return LaneState::Abandoned;
-        }
-
-        // re-requesting a failed proof re-queues it
+        // Re-requesting a failed proof re-queues the same deterministic proof id. The
+        // prover-service owns the durable retry counter and rejects exhausted requests.
         match self
             .proof_requester
             .request_proof(proof_request(metadata, backend))
             .await
         {
-            Ok(id) => {
-                let next_attempt = attempts + 1;
+            Ok(request_proof_response) => {
                 warn!(
                     %game,
                     ?lane,
-                    %id,
-                    attempts = next_attempt,
-                    max_attempts = self.max_proof_attempts,
+                    %request_proof_response.proof_id,
                     "proof failed; re-requested proof"
                 );
                 LaneState::Requested {
-                    id,
-                    attempts: next_attempt,
+                    id: request_proof_response.proof_id,
                 }
+            }
+            Err(ProofRequestError::TooManyRetries(error)) => {
+                error!(%game, ?lane, %error, "prover-service exhausted retries; abandoning lane");
+                LaneState::Abandoned
             }
             Err(error) => {
                 warn!(%game, ?lane, %error, "proof re-request failed; retrying next tick");

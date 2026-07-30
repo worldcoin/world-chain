@@ -163,7 +163,8 @@ async fn full_lifecycle_succeeds() {
     let service = ctx.service;
     let req = request(ProofBackend::Nitro, 1);
 
-    let id = service.request_proof(req.clone()).await.unwrap();
+    let response = service.request_proof(req.clone()).await.unwrap();
+    let id = response.proof_id;
     assert_eq!(
         service.proof_status(id).await.unwrap(),
         ProofStatus::Created
@@ -217,9 +218,9 @@ async fn duplicate_request_is_deduplicated() {
     let first = service.request_proof(req.clone()).await.unwrap();
     let second = service.request_proof(req.clone()).await.unwrap();
     assert_eq!(first, second);
-    assert_eq!(first, req.id());
+    assert_eq!(first.proof_id, req.id());
     assert_eq!(
-        service.proof_status(first).await.unwrap(),
+        service.proof_status(first.proof_id).await.unwrap(),
         ProofStatus::Created
     );
 }
@@ -247,7 +248,7 @@ async fn stale_lock_is_rejected_and_reclaim_succeeds() {
     };
     let service = ctx.service;
     let req = request(ProofBackend::Sp1, 3);
-    let id = service.request_proof(req.clone()).await.unwrap();
+    let id = service.request_proof(req.clone()).await.unwrap().proof_id;
 
     let first = service
         .get_next_proof(get_next_proof_request(ProofBackend::Sp1))
@@ -292,7 +293,7 @@ async fn submit_proof_with_wrong_backend_is_rejected() {
     };
     let service = ctx.service;
     let req = request(ProofBackend::Sp1, 4);
-    let id = service.request_proof(req.clone()).await.unwrap();
+    let id = service.request_proof(req.clone()).await.unwrap().proof_id;
     let locked = service
         .get_next_proof(get_next_proof_request(ProofBackend::Sp1))
         .await
@@ -330,7 +331,7 @@ async fn status_poller_marks_expired_exhausted_jobs_failed() {
     };
     let service = ctx.service;
     let req = request(ProofBackend::Sp1, 5);
-    let id = service.request_proof(req).await.unwrap();
+    let id = service.request_proof(req).await.unwrap().proof_id;
 
     let first = service
         .get_next_proof(get_next_proof_request(ProofBackend::Sp1))
@@ -426,7 +427,7 @@ async fn record_and_get_proof_session_round_trips() {
     };
     let service = ctx.service;
     let req = request(ProofBackend::Sp1, 5);
-    let id = service.request_proof(req.clone()).await.unwrap();
+    let id = service.request_proof(req.clone()).await.unwrap().proof_id;
     let locked = service
         .get_next_proof(get_next_proof_request(ProofBackend::Sp1))
         .await
@@ -477,7 +478,7 @@ async fn rpc_end_to_end() {
     let client = RpcProverServiceClient::new(format!("http://{addr}")).unwrap();
 
     let req = request(ProofBackend::Sp1, 6);
-    let id = client.request_proof(req.clone()).await.unwrap();
+    let id = client.request_proof(req.clone()).await.unwrap().proof_id;
     assert_eq!(client.proof_status(id).await.unwrap(), ProofStatus::Created);
 
     let locked = client

@@ -21,7 +21,7 @@ async fn run_acceptance_tests() -> eyre::Result<()> {
     erc4337::sponsored_user_operations(&env).await
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_network() -> eyre::Result<()> {
     run_acceptance_tests().await
 }

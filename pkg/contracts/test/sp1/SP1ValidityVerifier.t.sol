@@ -5,8 +5,8 @@ import {Test} from "forge-std/Test.sol";
 
 import {ISP1Verifier} from "@sp1-contracts/src/ISP1Verifier.sol";
 import {AggregationPublicValues, SP1ValidityVerifier} from "../../src/proofs/sp1/SP1ValidityVerifier.sol";
-import {WorldChainProofLib} from "../../src/proofs/WorldChainProofLib.sol";
-import {MockProofSystemFactory, MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
+import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
+import {MockProofSystemGame} from "../mocks/MockProofSystemGame.sol";
 
 contract StubSP1Verifier is ISP1Verifier {
     bool public reject;
@@ -62,7 +62,7 @@ contract SP1ValidityVerifierTest is Test {
     StubParentGame internal parent;
     SP1ValidityVerifier internal verifier;
     MockProofSystemGame internal game;
-    MockProofSystemFactory internal proofSystemFactory;
+    ProofLib.Domain internal domain;
     bytes32 internal domainHash;
 
     bytes32 internal constant AGGREGATION_VKEY = bytes32(uint256(0xA66));
@@ -83,14 +83,13 @@ contract SP1ValidityVerifierTest is Test {
         sp1 = new StubSP1Verifier();
         anchor = new StubAnchorStateRegistry(L2_PRE_ROOT);
         parent = new StubParentGame(L2_PRE_ROOT);
-        WorldChainProofLib.Domain memory domain = WorldChainProofLib.Domain({
+        domain = ProofLib.Domain({
             chainId: 480,
             proofSystemVersion: 1,
             rollupConfigHash: ROLLUP_CONFIG_HASH,
             blockInterval: L2_BLOCK_NUMBER - L2_PRE_BLOCK_NUMBER
         });
-        proofSystemFactory = new MockProofSystemFactory(domain);
-        domainHash = WorldChainProofLib.domainHash(domain);
+        domainHash = ProofLib.domainHash(domain);
         verifier = new SP1ValidityVerifier(ISP1Verifier(address(sp1)), AGGREGATION_VKEY, RANGE_VKEY_COMMITMENT);
         game = new MockProofSystemGame();
         _setGameContext(address(parent));
@@ -102,7 +101,7 @@ contract SP1ValidityVerifierTest is Test {
 
     function _publicValuesStruct() internal pure returns (AggregationPublicValues memory) {
         return AggregationPublicValues({
-            transitionPublicValues: WorldChainProofLib.TransitionPublicValues({
+            transitionPublicValues: ProofLib.TransitionPublicValues({
                 l1Head: L1_ORIGIN_HASH,
                 l2PreRoot: L2_PRE_ROOT,
                 l2PreBlockNumber: L2_PRE_BLOCK_NUMBER,
@@ -137,7 +136,7 @@ contract SP1ValidityVerifierTest is Test {
     }
 
     function _rootId(address parentRef) internal view returns (bytes32) {
-        return WorldChainProofLib.rootId(
+        return ProofLib.rootId(
             domainHash, parentRef, L2_POST_ROOT, uint256(L2_BLOCK_NUMBER), L1_ORIGIN_HASH, L1_ORIGIN_NUMBER
         );
     }
@@ -149,7 +148,7 @@ contract SP1ValidityVerifierTest is Test {
     function _setGameContext(address parentRef) internal {
         game.setContext(
             MockProofSystemGame.Context({
-                factory: address(proofSystemFactory),
+                domain: domain,
                 rootId: _rootId(parentRef),
                 anchorStateRegistry: address(anchor),
                 domainHash: domainHash,

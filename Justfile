@@ -19,6 +19,16 @@ devnet-up: build
 deploy-contracts:
     @just ./pkg/contracts/deploy-contracts
 
+# Build the pinned Optimism implementation contracts in the isolated opstack/ sub-project.
+build-opstack:
+    @just ./pkg/contracts/build-opstack
+
+build-contracts *args='':
+    @just ./pkg/contracts/build-contracts $@
+
+test-contracts *args='':
+    @just ./pkg/contracts/test-contracts $@
+
 test *args='':
     RUST_LOG="info" cargo nextest run --workspace $@
 
@@ -355,10 +365,19 @@ proof-deploy-system env="alphanet":
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
     : "${WORLD_CHAIN_L2_CHAIN_ID:?WORLD_CHAIN_L2_CHAIN_ID is required}"
     : "${ROLLUP_CONFIG_HASH:?ROLLUP_CONFIG_HASH is required}"
+    : "${DISPUTE_GAME_FACTORY:?DISPUTE_GAME_FACTORY is required (op-deployer DisputeGameFactoryProxy)}"
+    : "${ANCHOR_STATE_REGISTRY:?ANCHOR_STATE_REGISTRY is required (op-deployer AnchorStateRegistryProxy)}"
+    : "${SYSTEM_CONFIG:?SYSTEM_CONFIG is required (op-deployer SystemConfigProxy)}"
+    : "${OP_CHAIN_PROXY_ADMIN:?OP_CHAIN_PROXY_ADMIN is required (op-deployer ProxyAdmin)}"
+    : "${OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY:?OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY is required}"
+    : "${DGF_OWNER_KEY:?DGF_OWNER_KEY is required}"
+    : "${GUARDIAN_KEY:?GUARDIAN_KEY is required}"
     export PROOF_SYSTEM_BLOCK_INTERVAL="${PROOF_SYSTEM_BLOCK_INTERVAL:-10}"
     export PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL="${PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL:-5}"
     export PROOF_THRESHOLD="${PROOF_THRESHOLD:-2}"
     export WORLD_CHALLENGER_ADDRESS="${WORLD_CHALLENGER_ADDRESS:-}"
+    export DELAYED_WETH_DELAY="${DELAYED_WETH_DELAY:-300}"
+    export SET_RESPECTED_GAME_TYPE="${SET_RESPECTED_GAME_TYPE:-true}"
     export PROOF_SYSTEM_DEPLOYMENT_OUT="deployments/{{env}}-proof-system.json"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then

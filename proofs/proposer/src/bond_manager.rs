@@ -63,8 +63,11 @@ where
         let proposer = self.execution_provider.proposer_address();
 
         for index in start..game_count {
-            let game = self.execution_provider.game_at(index).await?;
-            if self.execution_provider.game_proposer(game).await? == proposer {
+            // The dispute-game factory indexes every game type; skip the ones that are not ours.
+            let Some(game) = self.execution_provider.game_at(index).await? else {
+                continue;
+            };
+            if self.execution_provider.game_creator(game).await? == proposer {
                 self.proposed_games.insert(game);
             }
         }
@@ -79,9 +82,14 @@ where
         Ok(())
     }
 
-    /// Withdraws available credits and prunes games that have reached a terminal state.
+    /// Advances the two-phase bond claim on tracked games and prunes fully settled ones.
+    ///
+    /// `MultiProofGame.claimCredit` first unlocks the credit in `DelayedWETH` and only
+    /// transfers it on a second call after the WETH delay, so a game stays tracked until its
+    /// pending withdrawal is drained. Dropping it after the unlock would strand the bond.
     pub async fn withdraw_credits(&mut self) -> Result<(), ProposerError> {
         let proposed_games: Vec<_> = self.proposed_games.iter().copied().collect();
+        let now = self.execution_provider.latest_l1_timestamp().await?;
 
         for game in proposed_games {
             let result: Result<bool, ProposerError> = async {
@@ -89,18 +97,41 @@ where
                 if !resolution_status.is_resolved() {
                     return Ok(false);
                 }
-
-                let claimable_amount = self.execution_provider.claimable(game).await?;
-                if claimable_amount > U256::ZERO {
-                    let withdraw_submission = self.execution_provider.withdraw(game).await?;
-                    info!(
-                        tx_hash = ?withdraw_submission.tx_hash,
-                        amount = ?withdraw_submission.amount,
-                        game_address = %game,
-                        "withdrew claimable credits"
-                    );
+                // `claimCredit` calls `closeGame`, which reverts until the registry's finality
+                // airgap has elapsed.
+                if !self.execution_provider.is_game_finalized(game).await? {
+                    return Ok(false);
                 }
 
+                let credit = self.execution_provider.credit(game).await?;
+                if credit > U256::ZERO {
+                    let submission = self.execution_provider.claim_credit(game).await?;
+                    info!(
+                        tx_hash = ?submission.tx_hash,
+                        amount = ?submission.amount,
+                        game_address = %game,
+                        "unlocked proposer bond credits in DelayedWETH"
+                    );
+                    // Keep tracking: the unlocked amount still needs the second claim.
+                    return Ok(false);
+                }
+
+                let pending = self.execution_provider.pending_withdrawal(game).await?;
+                if pending.amount.is_zero() {
+                    // Nothing owed on this game; stop tracking it.
+                    return Ok(true);
+                }
+                if now < pending.unlock_at {
+                    return Ok(false);
+                }
+
+                let submission = self.execution_provider.claim_credit(game).await?;
+                info!(
+                    tx_hash = ?submission.tx_hash,
+                    amount = ?submission.amount,
+                    game_address = %game,
+                    "withdrew proposer bond credits"
+                );
                 Ok(true)
             }
             .await;

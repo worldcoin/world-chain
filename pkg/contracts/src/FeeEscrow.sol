@@ -221,7 +221,7 @@ contract FeeEscrow is ReentrancyGuardTransient, Ownable {
     /// @param to Recipient address
     /// @param amount Amount to withdraw
     function withdraw(address token, address to, uint256 amount) external onlyOwner {
-        IERC20(token).transfer(to, amount);
+        IERC20(token).safeTransfer(to, amount);
     }
 
     /// @notice Sets the WLD/USD oracle address

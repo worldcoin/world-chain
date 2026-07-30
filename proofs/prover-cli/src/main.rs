@@ -193,10 +193,11 @@ async fn run(cli: Cli) -> Result<()> {
     let client = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
 
-    let id = client
+    let response = client
         .request_proof(request)
         .await
         .context("submit proof request")?;
+    let id = response.proof_id;
     println!("submitted proof request {id} for L2 block {l2_block_number}");
 
     if !cli.poll {

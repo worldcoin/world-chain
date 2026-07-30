@@ -1,6 +1,15 @@
 [profile.default]
 failure-output = "immediate-final"
 success-output = "never"
+slow-timeout = { period = "120s", terminate-after = 3 }
+
+[[profile.default.overrides]]
+filter = 'package(world-chain-tests)'
+threads-required = 4
+
+[[profile.default.overrides]]
+filter = 'test(/acceptance_tests::/)'
+slow-timeout = { period = "300s", terminate-after = 6 }
 
 [profile.default.junit]
 path = "target/nextest/junit.xml"
@@ -10,3 +19,7 @@ store-success-output = false
 [profile.ci]
 fail-fast = false
 failure-output = "immediate-final"
+
+[[profile.ci.overrides]]
+filter = 'package(world-chain-tests) - test(/acceptance_tests::/)'
+retries = { backoff = "exponential", count = 2, delay = "2s", jitter = true }

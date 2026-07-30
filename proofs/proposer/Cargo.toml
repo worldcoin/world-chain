@@ -20,6 +20,7 @@ world-chain-proofs.workspace = true
 world-chain-prover-service.workspace = true
 
 # alloy
+alloy-consensus.workspace = true
 alloy-network.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true

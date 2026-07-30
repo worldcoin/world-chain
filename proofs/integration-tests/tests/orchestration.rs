@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use alloy_primitives::{B256, Bytes, U256};
+use alloy_primitives::{B256, Bytes};
 use async_trait::async_trait;
 use testcontainers::{ContainerAsync, runners::AsyncRunner};
 use testcontainers_modules::postgres;
@@ -21,13 +21,12 @@ use world_chain_proposer::{
 };
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
-    ProofResponse, ProofStatus, ProverServiceConfig, SucceededProofResponse,
+    ProofResponse, ProofStatus, ProverServiceConfig, RequestProofResponse, SucceededProofResponse,
 };
 
 fn proposer_config() -> ProposerConfig {
     ProposerConfig {
         block_interval: BLOCK_INTERVAL,
-        proposer_bond: U256::from(1),
         poll_interval: Duration::from_secs(1),
         max_resolutions_per_tick: 1,
     }
@@ -35,7 +34,6 @@ fn proposer_config() -> ProposerConfig {
 
 fn challenger_config() -> ChallengerConfig {
     ChallengerConfig {
-        challenger_bond: U256::from(1),
         poll_interval: Duration::from_secs(1),
         ..ChallengerConfig::default()
     }
@@ -45,7 +43,6 @@ fn defender_config() -> DefenderConfig {
     DefenderConfig {
         allowed_proposer: FAKE_PROPOSER,
         poll_interval: Duration::from_secs(1),
-        max_proof_attempts: 2,
         ..DefenderConfig::default()
     }
 }
@@ -64,8 +61,11 @@ impl ProofRequester for InstantProofRequester {
     async fn request_proof(
         &self,
         request: ProofRequest,
-    ) -> Result<ProofRequestId, ProofRequestError> {
-        Ok(request.id())
+    ) -> Result<RequestProofResponse, ProofRequestError> {
+        Ok(RequestProofResponse {
+            proof_id: request.id(),
+            l1_head: request.l1_head,
+        })
     }
 
     async fn proof_status(

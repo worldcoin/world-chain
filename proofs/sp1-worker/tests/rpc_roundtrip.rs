@@ -73,11 +73,12 @@ async fn worker_completes_requested_proof_over_rpc() {
         l2_block_number: 1_200,
         l1_head: B256::repeat_byte(0x11),
     };
-    let id = requester
+    let response = requester
         .request_proof(request.clone())
         .await
         .expect("request accepted");
-    assert_eq!(id, request.id());
+    assert_eq!(response.proof_id, request.id());
+    let id = response.proof_id;
 
     let worker = ProofWorker::new(
         queue,

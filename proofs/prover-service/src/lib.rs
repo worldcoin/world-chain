@@ -98,8 +98,8 @@ pub use types::{
     GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse, HeartbeatRequest,
     HeartbeatResponse, LockId, LockedProofRequest, PendingProofResponse, ProofBackend, ProofData,
     ProofJobStatus, ProofRequest, ProofRequestId, ProofResponse, ProofStatus,
-    RecordProofSessionRequest, RecordProofSessionResponse, SessionType, SubmitProofRequest,
-    SubmitProofResponse, SucceededProofResponse,
+    RecordProofSessionRequest, RecordProofSessionResponse, RequestProofResponse, SessionType,
+    SubmitProofRequest, SubmitProofResponse, SucceededProofResponse,
 };
 
 #[cfg(test)]

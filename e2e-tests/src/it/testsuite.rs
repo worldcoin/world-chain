@@ -96,7 +96,7 @@ async fn create_priority_transaction(
     Ok((signed.encoded_2718().into(), *signed.tx_hash()))
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_can_build_pbh_payload() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (signers, mut nodes, _tasks, _, _) = WorldChainTestBuilder::builder()
@@ -130,7 +130,7 @@ async fn test_can_build_pbh_payload() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -182,7 +182,7 @@ async fn test_transaction_pool_ordering() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_enforces_block_uncompressed_size_limit() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -279,7 +279,7 @@ async fn test_enforces_block_uncompressed_size_limit() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_without_block_uncompressed_size_limit_includes_all_transactions() -> eyre::Result<()>
 {
     reth_tracing::init_test_tracing();
@@ -386,7 +386,7 @@ async fn signed_gas_burner(
 /// 3. **The gate actually engaged** – the load spills across multiple blocks and at least one block
 ///    fills close to the limit, proving the overflow path was exercised rather than trivially fitting.
 /// 4. **No transaction is wrongly dropped** – deferred transactions drain over subsequent blocks.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_payload_builder_fuzzed_gas_limits_flashblocks() -> eyre::Result<()> {
     use std::sync::Mutex;
 
@@ -568,7 +568,7 @@ async fn test_payload_builder_fuzzed_gas_limits_flashblocks() -> eyre::Result<()
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     let (_signers, mut nodes, _tasks, _, _) = WorldChainTestBuilder::builder()
@@ -586,7 +586,7 @@ async fn test_invalidate_dup_tx_and_nullifier() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_dup_pbh_nonce() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -617,7 +617,7 @@ async fn test_dup_pbh_nonce() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_flashblocks() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -746,7 +746,7 @@ async fn test_flashblocks() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_eth_api_receipt() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -842,7 +842,7 @@ async fn test_eth_api_receipt() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_eth_api_call() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -925,7 +925,7 @@ async fn test_eth_api_call() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_op_api_supported_capabilities_call() -> eyre::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -949,7 +949,7 @@ async fn test_op_api_supported_capabilities_call() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -1041,7 +1041,7 @@ async fn test_eth_block_by_hash_pending() -> eyre::Result<()> {
 ///
 /// Verifies that without tx_peers configuration, transactions propagate to ALL connected peers
 /// using Reth's default TransactionPropagationKind::All policy.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_default_propagation_policy() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -1120,7 +1120,7 @@ async fn test_default_propagation_policy() -> eyre::Result<()> {
 /// Test Part 2:
 /// - Inject tx into Node 2 -> should propagate to both Node 0 and Node 1
 /// - Verifies multi-peer whitelist works correctly
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_selective_propagation_policy() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -1284,7 +1284,7 @@ async fn test_selective_propagation_policy() -> eyre::Result<()> {
 /// - Inject tx into Node 0 -> should NOT propagate to any node
 /// - Inject tx into Node 1 -> should NOT propagate to any node (even though Node 0 is whitelisted)
 /// - Verifies that disable_txpool_gossip takes precedence over tx_peers
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_gossip_disabled_no_propagation() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -1357,7 +1357,7 @@ async fn test_gossip_disabled_no_propagation() -> eyre::Result<()> {
 /// 3. Flashblock indices are monotonically increasing within an epoch
 /// 4. The P2P state's flushed cursor tracks the latest yielded flashblock
 /// 5. Stale flashblocks (from old epochs) are never yielded
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_event_stream_invariants() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 
@@ -1523,7 +1523,7 @@ async fn test_event_stream_invariants() -> eyre::Result<()> {
 /// End-to-end test: uses [`EngineDriver`] to build multiple blocks while
 /// querying the pending block, logs, transactions, and receipts via the
 /// Eth JSON-RPC API at each block boundary.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
     use alloy_eips::BlockNumberOrTag;
     use reth_rpc_api::EthApiClient;
@@ -1724,7 +1724,7 @@ async fn test_engine_driver_pending_block_queries() -> eyre::Result<()> {
 /// Large block production loop using [`EngineDriver`] that sanity-checks
 /// all helper macros in the `on_block` hook: `provider!`, `fetch_block!`,
 /// `fetch_tx!`, `fetch_receipt!`, `eth_call!`, `fetch_logs!`.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_eth_api_assertions() -> eyre::Result<()> {
     use alloy_provider::Provider;
     use alloy_rpc_types::Filter;
@@ -1963,7 +1963,7 @@ async fn test_eth_api_assertions() -> eyre::Result<()> {
 /// - For each block, expect: Canon(N), then Pending(0, is_base=true), then
 ///   at least one more Pending with increasing indices
 /// - After all blocks, verify all assertions passed
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_assertion_driven_event_stream() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -2900,6 +2900,8 @@ fn test_flashblocks_args(authorizer_sk: &SigningKey, builder_sk: &SigningKey) ->
         access_list: true,
         store: false,
         store_path: None,
+        sentry_peers: Vec::new(),
+        max_sentry_connections: world_chain_cli::cli::builder::DEFAULT_MAX_SENTRY_CONNECTIONS,
         fanout: Default::default(),
     }
 }
@@ -3150,7 +3152,7 @@ async fn p2p_wait_for_pending_block(
 /// 2. Follower processes flashblocks through the coordinator (`validate_flashblock_with_state`)
 /// 3. After mining, the builder's `get_payload_v4` result and the follower's coordinator
 ///    pending block should agree on block_hash, state_root, receipts_root, and gas_used.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_coordinator_payload_matches_builder() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 

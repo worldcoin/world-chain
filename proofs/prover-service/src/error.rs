@@ -34,6 +34,8 @@ pub enum ProofRequestError {
     Sqlx(#[from] sqlx::Error),
     #[error("proof id {0}: proof request row missing after insert conflict. Retry request_proof.")]
     RowMissingAfterConflict(ProofRequestId),
+    #[error("proof id {0}: stored proof request does not match the submitted request.")]
+    RequestMismatch(ProofRequestId),
     #[error("{0}")]
     UnknownProofStatus(String),
     #[error("{0}")]
@@ -44,6 +46,8 @@ pub enum ProofRequestError {
     ProofEncoding(#[from] serde_json::Error),
     #[error("The block number {0} exceeds i64 max value.")]
     BlockNumberExceedsI64(BlockNumber),
+    #[error("The provided value has {0} bytes, expected 32.")]
+    MalformedB256(usize),
     #[error("remote prover-service internal error.")]
     RemoteInternal,
     #[error("remote prover-service storage error.")]
@@ -58,6 +62,21 @@ pub enum ProofRequestError {
     RpcServiceDisconnected,
     #[error("RPC client error: {0}.")]
     RpcClient(#[source] JsonRpseeError),
+}
+
+#[derive(Debug)]
+pub struct MalformedB256Error(pub usize);
+
+impl From<MalformedB256Error> for ProofRequestError {
+    fn from(error: MalformedB256Error) -> Self {
+        Self::MalformedB256(error.0)
+    }
+}
+
+impl From<MalformedB256Error> for ProofJobQueueError {
+    fn from(error: MalformedB256Error) -> Self {
+        Self::MalformedB256(error.0)
+    }
 }
 
 /// Data describing a proof request that exceeded retry limits.

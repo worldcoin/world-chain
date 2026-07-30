@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use alloy_consensus::{BlockHeader, Sealable};
 use alloy_primitives::{Address, U256};
@@ -27,12 +27,10 @@ where
     world_id: Address,
     /// The client used to aquire account state from the database.
     client: Client,
-    /// A map of valid roots indexed by block timestamp.
-    valid_roots: BTreeMap<u64, Field>,
+    /// A map of valid roots to the timestamp when they were last observed.
+    valid_roots: HashMap<Field, u64>,
     /// The timestamp of the latest valid root.
     latest_valid_timestamp: u64,
-    /// The latest root
-    latest_root: Field,
 }
 
 /// TODO: Think through reorg scenarios
@@ -49,9 +47,8 @@ where
         let mut this = Self {
             client,
             world_id,
-            valid_roots: BTreeMap::new(),
+            valid_roots: HashMap::new(),
             latest_valid_timestamp: 0,
-            latest_root: Field::ZERO,
         };
 
         // If we have a state provider, we can try to load the latest root from the state.
@@ -61,9 +58,9 @@ where
                 && let Ok(state) = this.client.state_by_block_hash(block.header().hash_slow())
                 && let Ok(Some(latest_root)) = state.storage(this.world_id, LATEST_ROOT_SLOT.into())
             {
-                this.latest_root = latest_root;
-                this.valid_roots
-                    .insert(block.header().timestamp(), latest_root);
+                let timestamp = block.header().timestamp();
+                this.latest_valid_timestamp = timestamp;
+                this.valid_roots.insert(latest_root, timestamp);
             }
         }
         Ok(this)
@@ -90,7 +87,7 @@ where
             .map_err(WorldChainTransactionPoolError::Provider)?;
         self.latest_valid_timestamp = block.timestamp();
         if let Some(root) = root {
-            self.valid_roots.insert(block.timestamp(), root);
+            self.valid_roots.insert(root, block.timestamp());
         }
 
         self.prune_invalid();
@@ -101,10 +98,9 @@ where
     /// Prunes all roots from the cache that are not within the expiration window.
     fn prune_invalid(&mut self) {
         if self.latest_valid_timestamp > ROOT_EXPIRATION_WINDOW {
-            self.valid_roots.retain(|timestamp, root| {
-                *timestamp >= self.latest_valid_timestamp - ROOT_EXPIRATION_WINDOW
-                    || *root == self.latest_root // Always keep the latest root
-            });
+            let oldest_valid_timestamp = self.latest_valid_timestamp - ROOT_EXPIRATION_WINDOW;
+            self.valid_roots
+                .retain(|_, last_observed| *last_observed >= oldest_valid_timestamp);
         };
     }
 
@@ -113,9 +109,13 @@ where
     /// # Returns
     ///
     /// A `Vec<Field>` containing all valid roots.
-    // TODO: can this be a slice instead?
     fn roots(&self) -> Vec<Field> {
-        self.valid_roots.values().cloned().collect()
+        self.valid_roots.keys().copied().collect()
+    }
+
+    /// Returns whether a root is currently valid.
+    fn contains(&self, root: &Field) -> bool {
+        self.valid_roots.contains_key(root)
     }
 }
 
@@ -156,7 +156,7 @@ where
     ///
     /// A boolean indicating whether the root is valid.
     pub fn validate_root(&self, root: Field) -> bool {
-        self.cache.read().roots().contains(&root)
+        self.cache.read().contains(&root)
     }
 
     /// Commits a new block to the validator.
@@ -239,6 +239,31 @@ mod tests {
         assert!(validator.validate_root(root_3));
         assert!(validator.validate_root(root_2));
         assert!(!validator.validate_root(root_1));
+        Ok(())
+    }
+
+    #[test]
+    fn test_repeated_root_is_stored_once_and_refreshes_expiration() -> eyre::Result<()> {
+        let validator = world_chain_root_validator()?;
+        let root_1 = Field::from(1u64);
+        let root_2 = Field::from(2u64);
+        let timestamp = 1000000000;
+
+        add_block_with_root_with_timestamp(&validator, timestamp, root_1);
+        add_block_with_root_with_timestamp(&validator, timestamp + ROOT_EXPIRATION_WINDOW, root_1);
+
+        assert_eq!(validator.roots().len(), 1);
+
+        add_block_with_root_with_timestamp(
+            &validator,
+            timestamp + ROOT_EXPIRATION_WINDOW + 1,
+            root_2,
+        );
+
+        assert!(validator.validate_root(root_1));
+        assert!(validator.validate_root(root_2));
+        assert_eq!(validator.roots().len(), 2);
+
         Ok(())
     }
 
