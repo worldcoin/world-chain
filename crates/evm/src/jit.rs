@@ -16,7 +16,10 @@ use alloy_op_evm::{
 use alloy_primitives::{Address, Bytes};
 use core::{fmt::Debug, marker::PhantomData};
 use op_revm::{
-    L1BlockInfo, OpBuilder, OpHaltReason, OpSpecId, OpTransaction, OpTransactionError, constants::{BASE_FEE_RECIPIENT, L1_FEE_RECIPIENT, OPERATOR_FEE_RECIPIENT}, handler::OpHandler, precompiles::OpPrecompiles,
+    L1BlockInfo, OpBuilder, OpHaltReason, OpSpecId, OpTransaction, OpTransactionError,
+    constants::{BASE_FEE_RECIPIENT, L1_FEE_RECIPIENT, OPERATOR_FEE_RECIPIENT},
+    handler::OpHandler,
+    precompiles::OpPrecompiles,
 };
 use reth_evm_ethereum::factory::{JitMode, RevmcMetrics, RuntimeConfig, RuntimeTuning};
 use reth_node_core::args::JitArgs;
