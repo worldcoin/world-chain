@@ -14,8 +14,9 @@ off-chain backend**. Concretely, per leadership's design:
 2. It charges users a **+20% premium** over the current WLD/ETH price to absorb
    price drift, swap fees/slippage, and provide a buffer.
 3. It does **not** swap WLD→ETH per UserOp. It accumulates WLD and performs a
-   **batched** swap every `X` blocks, then re-deposits the resulting ETH into
-   the EntryPoint — self-sustaining after the initial funding.
+   **batched** swap of up to `maxWldPerBatch` every `X` blocks, then re-deposits
+   the resulting ETH into the EntryPoint — self-sustaining after the initial
+   funding.
 4. It reads WLD/ETH from **Chainlink** (WLD/USD × ETH/USD cross) behind an
    `IWldEthOracle` interface; a Uniswap V3 TWAP implementation is retained as a
    swappable fallback.
@@ -214,10 +215,21 @@ griefing/MEV surface. Chainlink Automation remains available as a drop-in later
 | `minEntryPointDeposit` | 0.05 ETH | Deposit floor preserved after each op |
 | `postOpGasOverhead` | 40000 | Gas assumed for postOp, folded into the charge |
 | `keeperRewardBps` | 0 | Optional reward to the batch-swap caller |
+| `maxWldPerBatch` | 500e18 | Max WLD sold per batch swap (0 = unlimited) |
 | `oracle` | ctor arg | Swappable `IWldEthOracle` (Chainlink default, TWAP fallback) |
 | `maxStaleness` | 1 hour | Oracle ctor: max Chainlink answer age before ops are rejected |
 
 ## 7. Risks & edge cases
+
+- **Owner is fully trusted.** `Ownable` (owner = deployer) can `withdrawTo` the
+  entire EntryPoint deposit, `setOracle` to an arbitrary contract (which sets the
+  WLD charge per op, bounded only by each user's allowance and balance),
+  `setMaxSwapSlippageBps` up to 99.99% (letting a batch swap be sandwiched for
+  nearly the whole balance), and `setSwapPoolFee` to an empty tier. There is no
+  timelock, pause, guardian, or upgrade guard, and `renounceOwnership` would strand
+  the deposit permanently. Before production: multisig or timelock the owner, tighten
+  the setter bounds, and add a pause. `triggerBatchSwap` is intentionally *not*
+  owner-gated.
 
 - **Chainlink feed liveness (default oracle).** If either feed stops updating
   past `maxStaleness`, the oracle reverts and *all* sponsored ops are rejected
@@ -233,10 +245,39 @@ griefing/MEV surface. Chainlink Automation remains available as a drop-in later
   could under-pay for gas; the premium and batch slippage bound limit the bleed.
 - **Batch-swap slippage / thin liquidity.** `amountOutMinimum` is set from the
   oracle price minus `maxSwapSlippageBps`; if the pool can't fill at that price
-  the swap reverts (WLD stays accumulated, retried next window). **Liquidity
-  assumption:** a WLD/WETH V3 pool with enough depth exists on World Chain's
-  Uniswap; batch size should stay within what that pool can absorb inside the
-  slippage bound (tune `blocksPerBatch` so batches don't grow too large).
+  the swap reverts (WLD stays accumulated, retried next window). **Measured
+  liquidity:** the only WLD/WETH pool with real depth is the 0.3% tier
+  (`0x494D68e3cAb640fa50F4c1B3E2499698D1a173A0`, ~313k WLD / ~9.6 WETH) — shallow
+  on the WETH side. Without a size cap a growing backlog would exceed the
+  slippage bound on *every* attempt and stall settlement permanently, so
+  `triggerBatchSwap` sells at most `maxWldPerBatch` (default 500 WLD, measured at
+  ~0.7% impact on-chain) and leaves the remainder accumulated to drain over
+  subsequent batches. Tune it against live depth; `blocksPerBatch` alone cannot
+  bound batch size because throughput is not controlled by the paymaster.
+- **Router variant.** World Chain has **only SwapRouter02**, whose
+  `exactInputSingle` params struct omits `deadline` (selector `0x04e45aaf`). The
+  legacy v3-periphery `SwapRouter` (`0x414bf389`) is not deployed, so the deadline
+  variant reverts with no matching function on every swap. `ISwapRouter.sol`
+  declares the SwapRouter02 shape deliberately; `E2E.fork.t.sol` locks it in.
+- **Bundler storage rules / staking.** `validatePaymasterUserOp` writes the
+  paymaster's own associated storage in the WLD contract (its balance slot), which
+  ERC-7562 allows only for a **staked** entity. The paymaster MUST `addStake(...)`
+  on the EntryPoint; sidecar whitelisting addresses reputation, not these rules.
+  Alternative if staking is undesirable: only check balance/allowance in validate
+  and pull the WLD in `postOp` (weaker — the pull can fail after gas is spent).
+- **`paymasterPostOpGasLimit` must be non-zero.** EntryPoint v0.7 skips `postOp`
+  entirely when the client encodes a zero postOp gas limit in `paymasterAndData`.
+  The user would then be charged the full `maxCost`-based WLD amount with no
+  pro-rata refund, and nothing would be booked into `accumulatedWld`. This is a
+  client-side requirement the paymaster cannot enforce.
+- **`postOpGasOverhead` accuracy.** Set to 40k by default. If `postOp` costs more
+  than that, the paymaster silently eats the difference (absorbed by the +20%
+  premium); the `maxCost` cap keeps an over-estimate from over-charging. Measure
+  against a real bundler run and tune.
+- **A reverting `postOp` leaves WLD in the contract.** Validation already pulled
+  the max charge, and a `postOp` revert rolls back only the `accumulatedWld` write
+  (v0.7 still charges the paymaster for gas). The stranded WLD is recoverable via
+  `sweepExcessWld`, but the user is not auto-refunded.
 - **Oracle == swap venue (fallback oracle only).** With the TWAP oracle, both
   the price and the swap use Uniswap, so an attacker who moves the pool moves
   both. The default Chainlink oracle is independent of the swap venue and

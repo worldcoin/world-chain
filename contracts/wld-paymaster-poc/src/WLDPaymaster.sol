@@ -18,21 +18,28 @@ import {ISwapRouter, IWETH9} from "./interfaces/ISwapRouter.sol";
  *
  * @dev High-level flow (see DESIGN.md for the full write-up):
  *
- *  1. `validatePaymasterUserOp`: prices the op's max ETH cost in WLD via an
- *     {IWldEthOracle} TWAP, adds a `premiumBps` premium (default 20%), and pulls
- *     that maximum WLD charge from the user with `transferFrom`. State writes in
- *     validation are acceptable here because this paymaster is *whitelisted* on
- *     the World Chain Rundler proxy sidecar (see design doc), so it is exempt
- *     from ERC-4337 storage-rule reputation checks.
+ *  1. `validatePaymasterUserOp`: prices the op's max ETH cost in WLD via
+ *     {IWldEthOracle} (Chainlink WLD/USD x ETH/USD by default), adds a
+ *     `premiumBps` premium (default 20%), and pulls that maximum WLD charge from
+ *     the user with `transferFrom`.
+ *
+ *     Writing token state during validation touches the paymaster's *own*
+ *     associated storage in the WLD contract, which ERC-7562 only permits for a
+ *     **staked** entity. This paymaster therefore MUST call `addStake(...)` on the
+ *     EntryPoint before any bundler will accept its ops (whitelisting on the World
+ *     Chain Rundler sidecar covers reputation, not the storage rules). A deployment
+ *     that can neither stake nor be whitelisted must instead only *check*
+ *     balance/allowance here and pull in postOp.
  *
  *  2. `postOp`: computes the actual WLD charge pro-rata to actual gas used,
  *     refunds the difference to the user, and books the charge into
  *     `accumulatedWld`.
  *
  *  3. `triggerBatchSwap`: permissionless; once `blocksPerBatch` blocks have
- *     elapsed, swaps the accumulated WLD to ETH via Uniswap V3 (with oracle-
- *     bounded slippage protection), unwraps WETH, and re-deposits the ETH into
- *     the EntryPoint — making the paymaster self-sustaining after initial funding.
+ *     elapsed, swaps up to `maxWldPerBatch` of the accumulated WLD to ETH via
+ *     Uniswap V3 SwapRouter02 (with oracle-bounded slippage protection), unwraps
+ *     WETH, and re-deposits the ETH into the EntryPoint — making the paymaster
+ *     self-sustaining after initial funding.
  *
  * SECURITY: This is a POC/MVP. It has NOT been audited. Paymasters custody funds
  * and are high-value targets — do not deploy to production without review.
@@ -48,7 +55,7 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
     ISwapRouter public immutable swapRouter;
 
     // --- owner-configurable config ---
-    /// @notice Price oracle (WLD/ETH). Swappable (TWAP now, Chainlink later).
+    /// @notice Price oracle (WLD/ETH). Swappable: Chainlink default, TWAP fallback.
     IWldEthOracle public oracle;
     /// @notice Premium charged over oracle price, in bps (2000 = +20%).
     uint256 public premiumBps;
@@ -64,6 +71,8 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
     uint256 public postOpGasOverhead;
     /// @notice Optional reward paid to `triggerBatchSwap` caller, in bps of ETH proceeds.
     uint256 public keeperRewardBps;
+    /// @notice Max WLD swapped per batch (0 = unlimited). Bounds price impact.
+    uint256 public maxWldPerBatch;
 
     // --- batch accounting ---
     /// @notice WLD collected from users, awaiting the next batch swap.
@@ -116,6 +125,10 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
         minEntryPointDeposit = 0.05 ether;
         postOpGasOverhead = 40_000;
         keeperRewardBps = 0;
+        // Conservative default: the World Chain WLD/WETH 0.3% pool is shallow on
+        // the WETH side, so keep single-batch price impact well inside
+        // `maxSwapSlippageBps`. Tune with `setMaxWldPerBatch` against live depth.
+        maxWldPerBatch = 500e18;
         lastBatchBlock = block.number;
     }
 
@@ -193,6 +206,13 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
     //                          Batched settlement
     // =========================================================================
 
+    /// @notice WLD that the next `triggerBatchSwap` would sell (batch cap applied).
+    function nextBatchAmount() public view returns (uint256) {
+        uint256 amount = accumulatedWld;
+        if (maxWldPerBatch != 0 && amount > maxWldPerBatch) amount = maxWldPerBatch;
+        return amount;
+    }
+
     /// @notice True once enough blocks have elapsed and there is WLD to swap.
     function batchReady() public view returns (bool) {
         return block.number >= lastBatchBlock + blocksPerBatch && accumulatedWld > 0;
@@ -212,9 +232,14 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
 
         uint256 amountIn = accumulatedWld;
         if (amountIn == 0) revert NothingToSwap();
+        // Cap the batch so a large backlog can't exceed what the pool absorbs
+        // inside `maxSwapSlippageBps` — otherwise the swap would revert on every
+        // attempt and settlement would stall permanently. The remainder stays
+        // accumulated and drains over subsequent batches.
+        if (maxWldPerBatch != 0 && amountIn > maxWldPerBatch) amountIn = maxWldPerBatch;
 
         // checks-effects-interactions: reset accounting before external calls
-        accumulatedWld = 0;
+        accumulatedWld -= amountIn;
         lastBatchBlock = block.number;
 
         // Oracle-bounded minimum out (slippage protection).
@@ -230,7 +255,6 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
                 tokenOut: address(weth),
                 fee: swapPoolFee,
                 recipient: address(this),
-                deadline: block.timestamp,
                 amountIn: amountIn,
                 amountOutMinimum: floor,
                 sqrtPriceLimitX96: 0
@@ -298,6 +322,12 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
 
     function setPostOpGasOverhead(uint256 _overhead) external onlyOwner {
         postOpGasOverhead = _overhead;
+        emit ConfigUpdated();
+    }
+
+    /// @param _max Max WLD per batch swap; 0 disables the cap (not recommended).
+    function setMaxWldPerBatch(uint256 _max) external onlyOwner {
+        maxWldPerBatch = _max;
         emit ConfigUpdated();
     }
 

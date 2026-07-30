@@ -263,5 +263,60 @@ contract WLDPaymasterTest is Test {
         paymaster.setPremiumBps(10_001);
     }
 
+    // =====================================================================
+    //                       Batch size cap
+    // =====================================================================
+
+    function test_NextBatchAmount_AppliesCap() public {
+        uint256 charged = _accumulate();
+        assertEq(paymaster.nextBatchAmount(), charged, "uncapped below the limit");
+
+        paymaster.setMaxWldPerBatch(charged / 4);
+        assertEq(paymaster.nextBatchAmount(), charged / 4, "capped");
+
+        paymaster.setMaxWldPerBatch(0);
+        assertEq(paymaster.nextBatchAmount(), charged, "0 = unlimited");
+    }
+
+    /// @dev A backlog larger than the cap must swap a slice and keep the rest,
+    ///      not revert forever on price impact.
+    function test_BatchSwap_SwapsOnlyUpToCap() public {
+        uint256 charged = _accumulate();
+        uint256 cap = charged / 4;
+        paymaster.setMaxWldPerBatch(cap);
+
+        vm.roll(block.number + paymaster.blocksPerBatch());
+        uint256 ethOut = paymaster.triggerBatchSwap(0);
+
+        assertEq(ethOut, cap * DEN / NUM, "only the capped slice was sold");
+        assertEq(paymaster.accumulatedWld(), charged - cap, "remainder still accumulated");
+    }
+
+    function test_BatchSwap_DrainsBacklogOverBatches() public {
+        uint256 charged = _accumulate();
+        paymaster.setMaxWldPerBatch(charged / 2 + 1);
+
+        vm.roll(block.number + paymaster.blocksPerBatch());
+        paymaster.triggerBatchSwap(0);
+        assertGt(paymaster.accumulatedWld(), 0, "one batch is not enough");
+
+        vm.roll(block.number + paymaster.blocksPerBatch());
+        paymaster.triggerBatchSwap(0);
+        assertEq(paymaster.accumulatedWld(), 0, "drained on the second batch");
+    }
+
+    /// @dev The cap must not leak WLD: everything sold or still accumulated.
+    function test_BatchSwap_CapConservesWld() public {
+        uint256 charged = _accumulate();
+        paymaster.setMaxWldPerBatch(charged / 3);
+        uint256 balBefore = wld.balanceOf(address(paymaster));
+
+        vm.roll(block.number + paymaster.blocksPerBatch());
+        paymaster.triggerBatchSwap(0);
+
+        uint256 sold = balBefore - wld.balanceOf(address(paymaster));
+        assertEq(sold + paymaster.accumulatedWld(), charged, "no WLD unaccounted for");
+    }
+
     receive() external payable {}
 }
