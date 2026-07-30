@@ -8,6 +8,9 @@ use std::path::PathBuf;
 use crate::cli::p2p::FanoutArgs;
 
 /// Default number of flashblocks sentries a client maintains as trusted RLPx peers.
+///
+/// In non critical scenarios, relying on a single sentry to supply flashblocks
+/// should be adequate. Users running critical infrastructure may want 2.
 pub const DEFAULT_MAX_SENTRY_CONNECTIONS: usize = 1;
 
 /// Parameters for pbh builder configuration
