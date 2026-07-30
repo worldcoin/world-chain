@@ -11,6 +11,7 @@ import {
     BadExtraData,
     ClaimAlreadyChallenged,
     GameNotFinalized,
+    GameNotOver,
     GamePaused,
     IncorrectBondAmount,
     InvalidParentGame,
@@ -182,6 +183,29 @@ contract MultiProofGameTest is OPStackFixtures {
             assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
             assertEq(game.credit(proposer), PROPOSER_BOND);
         }
+    }
+
+    function test_UnchallengedFlow_ThresholdProvidesFastFinality() public {
+        MultiProofGame game = _proposeAtAnchor();
+        game.submitProofLane(0, abi.encodePacked(game.rootId()));
+
+        (bool resolvable,,) = game.resolutionStatus();
+        assertFalse(resolvable);
+        vm.expectRevert(GameNotOver.selector);
+        game.resolve();
+
+        game.submitProofLane(1, abi.encodePacked(game.rootId()));
+        ProofLib.RootState rootState;
+        ProofLib.InvalidationReason reason;
+        (resolvable, rootState, reason) = game.resolutionStatus();
+        assertTrue(resolvable);
+        assertEq(uint8(rootState), uint8(ProofLib.RootState.FINALIZED));
+        assertEq(uint8(reason), uint8(ProofLib.InvalidationReason.NONE));
+
+        game.resolve();
+        assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
+        assertEq(game.credit(proposer), PROPOSER_BOND);
+        assertLt(block.timestamp, game.challengeDeadline());
     }
 
     function test_UnchallengedFlow_ProoflessProposalLosesBondAndCanRetry() public {

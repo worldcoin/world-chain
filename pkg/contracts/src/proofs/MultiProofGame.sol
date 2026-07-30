@@ -477,11 +477,10 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             return (false, state(), ProofLib.InvalidationReason.NONE);
         }
 
-        // TODO: Decide whether reaching PROOF_THRESHOLD should make an unchallenged game
-        // immediately resolvable too. The current WIP guarantees the full challenge window even
-        // with threshold support, while challenged games resolve as soon as they reach the same
-        // threshold; update the WIP together with this branch if threshold support is intended
-        // to provide fast finality in both states.
+        if (ProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
+            return (true, ProofLib.RootState.FINALIZED, ProofLib.InvalidationReason.NONE);
+        }
+
         if (challenger == address(0)) {
             if (block.timestamp < challengeDeadline) {
                 return (false, ProofLib.RootState.PROPOSED, ProofLib.InvalidationReason.NONE);
@@ -491,9 +490,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
                 : (true, ProofLib.RootState.INVALIDATED, ProofLib.InvalidationReason.PROOF_TIMEOUT);
         }
 
-        if (ProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
-            return (true, ProofLib.RootState.FINALIZED, ProofLib.InvalidationReason.NONE);
-        }
         return block.timestamp >= proofDeadline
             ? (true, ProofLib.RootState.INVALIDATED, ProofLib.InvalidationReason.PROOF_TIMEOUT)
             : (false, ProofLib.RootState.CHALLENGED, ProofLib.InvalidationReason.NONE);
@@ -522,6 +518,10 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         } else if (parentStatus == GameStatus.IN_PROGRESS) {
             // A proposed or challenged parent must resolve before its descendant.
             revert ParentGameNotResolved();
+        } else if (ProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
+            // Threshold support provides fast finality whether or not the game was challenged.
+            status = GameStatus.DEFENDER_WINS;
+            normalModeCredit[gameCreator()] = totalBonds;
         } else if (challenger == address(0) && proofBitmap != 0) {
             // Any configured proof lane may support the optimistic path. The offchain defender
             // uses TEE attestations by policy, but the protocol does not privilege a lane.
@@ -534,11 +534,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             status = GameStatus.CHALLENGER_WINS;
             invalidationReason = ProofLib.InvalidationReason.PROOF_TIMEOUT;
             normalModeCredit[proofTimeoutRecipient] = totalBonds;
-        } else if (ProofLib.hasThreshold(proofBitmap, PROOF_THRESHOLD)) {
-            // A challenged game finalizes as soon as enough independent proof lanes support it.
-            // The proposer takes the challenger bond.
-            status = GameStatus.DEFENDER_WINS;
-            normalModeCredit[gameCreator()] = totalBonds;
         } else if (block.timestamp >= proofDeadline) {
             // A challenged game below threshold times out once its proof window expires. The
             // challenger takes the proposer bond.

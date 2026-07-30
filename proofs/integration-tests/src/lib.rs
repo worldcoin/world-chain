@@ -368,7 +368,9 @@ impl ProposerClient for FakeExecution {
                 invalidation_reason: InvalidationReason::None,
             });
         }
-        if record.state == STATE_CHALLENGED && has_threshold(record.proof_bitmap) {
+        if matches!(record.state, STATE_PROPOSED | STATE_CHALLENGED)
+            && has_threshold(record.proof_bitmap)
+        {
             return Ok(ResolutionStatus {
                 resolvable: true,
                 root_state: RootState::Finalized,
@@ -397,7 +399,7 @@ impl ProposerClient for FakeExecution {
             .get_mut(&game)
             .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
         if parent_unresolved
-            || record.state != STATE_CHALLENGED
+            || !matches!(record.state, STATE_PROPOSED | STATE_CHALLENGED)
             || !has_threshold(record.proof_bitmap)
         {
             return Err(ProposerError::Contract(format!(
@@ -622,7 +624,9 @@ impl DefenderClient for FakeExecution {
                 invalidation_reason: InvalidationReason::None,
             });
         }
-        if current_state == RootState::Challenged && has_threshold(record.proof_bitmap) {
+        if matches!(current_state, RootState::Proposed | RootState::Challenged)
+            && has_threshold(record.proof_bitmap)
+        {
             return Ok(ResolutionStatus {
                 resolvable: true,
                 root_state: RootState::Finalized,
