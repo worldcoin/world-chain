@@ -87,7 +87,10 @@ pub struct AlloyProofSystemClient<P> {
     anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
     /// Domain hash of the registered game implementation, read once at construction.
     domain_hash: B256,
+    /// Snapshot shared by every transition lookup during canonical-line reconstruction.
     game_scan_cache: Arc<Mutex<Option<GameScanCache>>>,
+    /// Number of confirmations to require after sending a tx onchain.
+    confirmations: u64,
     provider: P,
 }
 
@@ -104,6 +107,7 @@ where
         provider: P,
         factory_address: Address,
         anchor_address: Address,
+        confirmations: u64,
     ) -> Result<Self, ProposerError> {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
@@ -136,6 +140,7 @@ where
             anchor,
             domain_hash,
             game_scan_cache: Arc::new(Mutex::new(None)),
+            confirmations,
             provider,
         })
     }
@@ -150,6 +155,12 @@ where
         IMultiProofGame::IMultiProofGameInstance::new(address, self.provider.clone())
     }
 
+    /// Builds the candidate set used to reconstruct descendants of the current anchor.
+    ///
+    /// A logical transition no longer has one derivable factory UUID because its `extraData`
+    /// contains the selected L1 origin and creation proof. We therefore page backwards through
+    /// WIP-1006 games, stopping once entries predate the anchor game, and retain only games whose
+    /// layout and domain belong to the currently registered implementation.
     async fn scan_transition_games(
         &self,
         anchor_game: Option<Address>,
@@ -216,6 +227,10 @@ where
         Ok(games)
     }
 
+    /// Reuses one factory scan across every height inspected while rebuilding the canonical line.
+    ///
+    /// An anchor change moves the scan boundary, while a factory-count change may introduce a
+    /// sibling, retry, or descendant, so either change invalidates the snapshot.
     async fn transition_game_snapshot(
         &self,
         anchor_game: Option<Address>,
@@ -363,6 +378,7 @@ where
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
         let tx_hash = *pending_tx.tx_hash();
         let receipt = pending_tx
+            .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
@@ -454,22 +470,14 @@ where
     P: Provider + WalletProvider + Clone + Send + Sync + 'static,
 {
     async fn anchor_parent(&self) -> Result<AnchorRef, ProposerError> {
-        let (anchor_root, anchor_game) = tokio::try_join!(
-            async {
-                self.anchor
-                    .getAnchorRoot()
-                    .call()
-                    .await
-                    .map_err(|error| ProposerError::Contract(error.to_string()))
-            },
-            async {
-                self.anchor
-                    .anchorGame()
-                    .call()
-                    .await
-                    .map_err(|error| ProposerError::Contract(error.to_string()))
-            }
-        )?;
+        let (anchor_root, anchor_game) = self
+            .provider
+            .multicall()
+            .add(self.anchor.getAnchorRoot())
+            .add(self.anchor.anchorGame())
+            .aggregate()
+            .await
+            .map_err(|err| ProposerError::Contract(err.to_string()))?;
 
         Ok(AnchorRef {
             registry: *self.anchor.address(),
@@ -496,6 +504,10 @@ where
             return Ok(Vec::new());
         }
 
+        // The snapshot contains all current-domain games since the anchor. Narrow it to the
+        // logical transition requested by the canonical-line walker, then return only the leaf
+        // of each explicit retry lineage. Factory-index ordering is preserved so the walker can
+        // choose the earliest non-invalidated sibling deterministically.
         let candidates = self
             .transition_game_snapshot(anchor_game, game_count)
             .await?
@@ -525,6 +537,7 @@ where
 
         let tx_hash = *pending.tx_hash();
         let receipt = pending
+            .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
@@ -549,6 +562,7 @@ where
 
         let tx_hash = *pending.tx_hash();
         let receipt = pending
+            .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
@@ -650,6 +664,7 @@ where
 
         let tx_hash = *pending.tx_hash();
         let receipt = pending
+            .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;

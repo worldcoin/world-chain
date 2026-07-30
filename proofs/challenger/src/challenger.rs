@@ -237,10 +237,10 @@ where
 
         let now = unix_now();
         let game_count = self.execution_provider.game_count().await?;
-        if self
+        let initialize_cursor = self
             .next_game_index
-            .is_none_or(|next_game_index| next_game_index > game_count)
-        {
+            .is_none_or(|next_game_index| next_game_index > game_count);
+        if initialize_cursor {
             let cutoff = now.saturating_sub(self.config.max_game_age.as_secs());
             let first_recent = self.first_recent_game_index(game_count, cutoff).await?;
             info!(
@@ -250,8 +250,16 @@ where
             self.next_game_index = Some(first_recent);
         }
 
-        let start = self.next_game_index.unwrap_or(game_count);
-        let end = start
+        let cursor = self.next_game_index.unwrap_or(game_count);
+        // Factory entries are read at the finalized block, but mutable game state is read at
+        // latest. Reconsider a bounded overlap so a shallow reorg of that state cannot make a
+        // transient Skip outcome permanent. The overlap does not consume the new-game budget.
+        let start = if initialize_cursor {
+            cursor
+        } else {
+            cursor.saturating_sub(self.config.game_scan_lookback)
+        };
+        let end = cursor
             .saturating_add(self.config.max_games_per_tick)
             .min(game_count);
         let mut new_games = Vec::with_capacity((end - start) as usize);

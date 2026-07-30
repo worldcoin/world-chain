@@ -125,8 +125,10 @@ where
                 );
             }
 
-            // A game that has not been invalidated continues the canonical line, whichever
-            // accepted parent it was created under.
+            // `games_for_transition` returns lineage tips in factory-index order. Following the
+            // first non-invalidated tip gives every proposer restart the same deterministic
+            // branch. Descendants of later siblings are intentionally outside that branch and
+            // may need to be proposed again under the selected concrete parent.
             if let Some(live) = existing
                 .iter()
                 .zip(&statuses)

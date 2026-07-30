@@ -25,6 +25,7 @@ use world_chain_proofs::{
 pub struct AlloyChallengerClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
     anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
+    confirmations: u64,
     provider: P,
 }
 
@@ -33,7 +34,12 @@ where
     P: Provider + Clone,
 {
     /// Creates an Alloy-backed contract client.
-    pub fn new(provider: P, factory_address: Address, anchor_address: Address) -> Self {
+    pub fn new(
+        provider: P,
+        factory_address: Address,
+        anchor_address: Address,
+        confirmations: u64,
+    ) -> Self {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
             provider.clone(),
@@ -46,6 +52,7 @@ where
         Self {
             factory,
             anchor,
+            confirmations,
             provider,
         }
     }
@@ -248,6 +255,7 @@ where
             .map_err(|error| ChallengerError::Contract(error.to_string()))?;
         let tx_hash = *pending.tx_hash();
         let receipt = pending
+            .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await
             .map_err(|error| ChallengerError::Contract(error.to_string()))?;
@@ -279,6 +287,7 @@ where
             .map_err(|error| ChallengerError::Contract(error.to_string()))?;
         let tx_hash = *pending.tx_hash();
         let receipt = pending
+            .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await
             .map_err(|error| ChallengerError::Contract(error.to_string()))?;
@@ -362,6 +371,7 @@ where
             .map_err(|error| ChallengerError::Contract(error.to_string()))?;
         let tx_hash = *pending_tx.tx_hash();
         let receipt = pending_tx
+            .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await
             .map_err(|error| ChallengerError::Contract(error.to_string()))?;

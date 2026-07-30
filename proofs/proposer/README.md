@@ -35,14 +35,17 @@ l1OriginNumber, creationProofLane, creationProof)`.
   a game, that game is no longer a valid parent — `MultiProofGame.initialize` rejects a parent at or
   below the anchor — so new proposals extending the anchor always point at the registry.
 - compute L2 output root for block equal to `parent_ref`'s `l2_block_number` + `BLOCK_INTERVAL`
-- take one paginated `DisputeGameFactory.findLatestGames` snapshot back to the current anchor game,
-  cache it for the observed factory count, then group games by transition and follow their explicit
-  retry lineage in memory. At the anchor tip both the registry and the current anchor game are
-  candidate parents, because a game created before the anchor advanced still references the anchor
-  game. Games from re-registered implementations with another domain or `extraData` layout are
-  ignored.
-- if a game exists, it becomes the `parent_ref` and we continue this loop
-- if it doesn't exist - i.e. the address is `0x00..00`, then the current `parent_ref` is returned
+- take one paginated `DisputeGameFactory.findLatestGames` snapshot back to the current anchor game
+  and cache it for the observed `(anchor_game, game_count)`;
+- ignore games from re-registered implementations with another domain or `extraData` layout;
+- for each interval, filter that in-memory snapshot by the expected parent, output root, and L2
+  block number, then retain the leaf of every explicit `retry_of` lineage;
+- follow the earliest non-invalidated leaf and repeat with that concrete game as the only parent;
+- if no matching game exists, propose the expected transition under the current parent.
+
+At the anchor tip both the registry and the current anchor game are candidate parents. A game
+created before the anchor advanced still references the anchor game, whereas one created after the
+advance must reference the registry sentinel.
 
 ### Parallel games and retries
 

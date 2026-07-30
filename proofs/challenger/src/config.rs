@@ -3,8 +3,12 @@ use std::time::Duration;
 
 /// Default number of games processed concurrently.
 pub const DEFAULT_MAX_GAME_CONCURRENCY: usize = 10;
+/// Default number of L1 confirmations required for challenger transactions.
+pub const DEFAULT_L1_TX_CONFIRMATIONS: u64 = 5;
 /// Default maximum number of new factory games discovered per challenger tick.
 pub const DEFAULT_MAX_GAMES_PER_TICK: u64 = 100;
+/// Default number of previously scanned games reconsidered per challenger tick.
+pub const DEFAULT_GAME_SCAN_LOOKBACK: u64 = 100;
 /// Default upper bound on the age of a game with an open challenge window.
 pub const DEFAULT_MAX_GAME_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// Default delay between challenger-owned game resolution passes.
@@ -29,6 +33,8 @@ pub struct ChallengerConfig {
     pub max_game_concurrency: usize,
     /// Maximum number of newly created games discovered during one tick.
     pub max_games_per_tick: u64,
+    /// Number of previously scanned games reconsidered to tolerate mutable-state L1 reorgs.
+    pub game_scan_lookback: u64,
     /// Upper bound on the age of any game whose challenge window can remain open.
     pub max_game_age: Duration,
 }
@@ -65,6 +71,7 @@ impl Default for ChallengerConfig {
             poll_interval: Duration::from_mins(1),
             max_game_concurrency: DEFAULT_MAX_GAME_CONCURRENCY,
             max_games_per_tick: DEFAULT_MAX_GAMES_PER_TICK,
+            game_scan_lookback: DEFAULT_GAME_SCAN_LOOKBACK,
             max_game_age: DEFAULT_MAX_GAME_AGE,
         }
     }

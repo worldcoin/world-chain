@@ -44,8 +44,9 @@ use url::{Host, Url};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainSpec};
 use world_chain_challenger::{
     AlloyChallengerClient, BondManager as ChallengerBondManager,
-    BondManagerConfig as ChallengerBondManagerConfig, ChallengerConfig, OwnedGames,
-    ResolutionManager, ResolutionManagerConfig, WorldChainChallenger,
+    BondManagerConfig as ChallengerBondManagerConfig, ChallengerConfig,
+    DEFAULT_L1_TX_CONFIRMATIONS, OwnedGames, ResolutionManager, ResolutionManagerConfig,
+    WorldChainChallenger,
 };
 use world_chain_defender::{AlloyDefenderClient, DefenderConfig, WorldChainDefender};
 use world_chain_proof_core::{
@@ -2574,9 +2575,15 @@ async fn start_world_chain_proposer(
         .wallet(EthereumWallet::from(signer))
         .connect_http(Url::parse(l1_rpc_url)?);
 
-    let contracts = AlloyProofSystemClient::new(provider, factory_address, anchor_address)
-        .await
-        .wrap_err("failed to bind the World Chain proof system")?;
+    let required_confirmations = 1;
+    let contracts = AlloyProofSystemClient::new(
+        provider,
+        factory_address,
+        anchor_address,
+        required_confirmations,
+    )
+    .await
+    .wrap_err("failed to bind the World Chain proof system")?;
     let mut bond_manager = BondManager::new(
         BondManagerConfig {
             poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
@@ -2661,7 +2668,12 @@ async fn start_world_chain_challenger(
         .wallet(EthereumWallet::from(signer))
         .connect_http(Url::parse(l1_rpc_url)?);
 
-    let client = AlloyChallengerClient::new(provider, factory_address, anchor_address);
+    let client = AlloyChallengerClient::new(
+        provider,
+        factory_address,
+        anchor_address,
+        DEFAULT_L1_TX_CONFIRMATIONS,
+    );
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let config = ChallengerConfig {
         poll_interval: WORLD_CHALLENGER_POLL_INTERVAL,
