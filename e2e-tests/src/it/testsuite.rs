@@ -2594,7 +2594,6 @@ async fn test_peer_monitoring() -> eyre::Result<()> {
             witness: Default::default(),
             tx_peers: None,
             disable_bootnodes: true,
-            jit_enabled_alias: false,
             simulate_enabled: false,
         };
 

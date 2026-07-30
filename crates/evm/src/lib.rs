@@ -205,6 +205,30 @@ impl WorldChainEvmConfig<OpConfig> {
         Self { inner, factory }
     }
 
+    /// Creates a configuration with the revmc JIT backend started and production default tuning.
+    ///
+    /// For benchmarks and tests that need the JIT execution path without a full node; the node
+    /// itself builds its config from [`JitArgs`](reth_node_core::args::JitArgs) in
+    /// [`WorldChainExecutorBuilder`]. The backend compiles out of process by re-executing the
+    /// current binary, so the caller's `main` must dispatch [`maybe_run_jit_helper`] before doing
+    /// anything else.
+    #[cfg(feature = "jit")]
+    pub fn jit_enabled(
+        chain_spec: Arc<WorldChainSpec>,
+        receipt_builder: OpRethReceiptBuilder,
+    ) -> eyre::Result<Self> {
+        let jit = reth_node_core::args::JitArgs {
+            enabled: true,
+            ..Default::default()
+        };
+        let (jit_factory, _metrics) = jit::build_jit_factory(&jit, None)?;
+        Ok(Self::new_with_jit_factory(
+            chain_spec,
+            receipt_builder,
+            jit_factory,
+        ))
+    }
+
     /// Creates a new configuration for OP chains with the default receipt builder.
     ///
     /// Witness capture is disabled; arm it with [`with_witness_sender`](Self::with_witness_sender).

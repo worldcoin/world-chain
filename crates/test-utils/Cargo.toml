@@ -99,3 +99,10 @@ parking_lot.workspace = true
 test-case.workspace = true
 reth-tracing.workspace = true
 reth-optimism-node = { workspace = true, features = ["test-utils"] }
+
+[features]
+default = []
+# Builds `EVM_CONFIG` with the revmc JIT backend enabled. Only for bench binaries that dispatch
+# `world_chain_evm::maybe_run_jit_helper()` first in `main` — the backend compiles out of process by
+# re-executing the current binary.
+jit = ["world-chain-evm/jit"]

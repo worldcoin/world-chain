@@ -194,10 +194,6 @@ pub struct WorldChainArgs {
     )]
     pub disable_bootnodes: bool,
 
-    /// Backwards-compatible alias for Reth's `--jit` flag.
-    #[arg(long = "jit.enabled", default_value_t = false, hide = true)]
-    pub jit_enabled_alias: bool,
-
     /// Whether the `simulate_unsignedUserOp` RPC endpoint should be served on
     /// HTTP. Derived from `--http.api`: enabled when the selection contains
     /// the `simulate` namespace.
@@ -217,8 +213,6 @@ impl WorldChainArgs {
     ) -> eyre::Result<WorldChainNodeConfig> {
         // Perform arg validation here for things clap can't do.
         let spec = &config.chain;
-
-        config.jit.enabled |= self.jit_enabled_alias;
 
         // Require an explicit `Selection` containing `simulate` — `RpcModuleSelection::All`
         // (i.e. `--http.api=all`) returns `true` from `contains` unconditionally, which
@@ -419,14 +413,6 @@ mod tests {
         world: WorldChainArgs,
     }
 
-    #[derive(Debug, Parser)]
-    struct CommandParserWithJit {
-        #[command(flatten)]
-        jit: reth_node_core::args::JitArgs,
-        #[command(flatten)]
-        world: WorldChainArgs,
-    }
-
     fn into_world_config(parsed: CommandParserWithRpc) -> WorldChainNodeConfig {
         let spec = WorldChainSpec::from_genesis(Genesis::default());
         let mut node_config = NodeConfig::new(Arc::new(spec));
@@ -526,43 +512,6 @@ mod tests {
     }
 
     #[test]
-    fn upstream_jit_flag_enables_jit() {
-        let parsed = CommandParserWithJit::parse_from(["bin", "--jit"]);
-        assert!(parsed.jit.enabled);
-        assert!(!parsed.world.jit_enabled_alias);
-
-        let spec = WorldChainSpec::from_genesis(Genesis::default());
-        let mut node_config = NodeConfig::new(Arc::new(spec));
-        node_config.jit = parsed.jit;
-        parsed.world.into_config(&mut node_config).unwrap();
-
-        assert!(node_config.jit.enabled);
-    }
-
-    #[test]
-    fn jit_enabled_alias_enables_jit() {
-        let parsed = CommandParserWithJit::parse_from(["bin", "--jit.enabled"]);
-        assert!(!parsed.jit.enabled);
-        assert!(parsed.world.jit_enabled_alias);
-
-        let spec = WorldChainSpec::from_genesis(Genesis::default());
-        let mut node_config = NodeConfig::new(Arc::new(spec));
-        node_config.jit = parsed.jit;
-        parsed.world.into_config(&mut node_config).unwrap();
-
-        assert!(node_config.jit.enabled);
-    }
-
-    #[test]
-    fn jit_enabled_alias_is_hidden() {
-        let help = CommandParserWithJit::command()
-            .render_long_help()
-            .to_string();
-        assert!(help.contains("--jit"));
-        assert!(!help.contains("--jit.enabled"));
-    }
-
-    #[test]
     fn flashblocks_enabled_should_materialize_flashblocks_args() {
         let args = CommandParser::parse_from(["bin", "--flashblocks.enabled"]).world;
         assert!(
@@ -645,7 +594,6 @@ mod tests {
             witness: WitnessArgs::default(),
             tx_peers: Some(vec![peer_id.parse().unwrap()]),
             disable_bootnodes: true,
-            jit_enabled_alias: false,
             simulate_enabled: false,
         };
 

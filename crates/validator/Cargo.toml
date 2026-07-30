@@ -67,6 +67,13 @@ reth-db.workspace = true
 reth-db-api.workspace = true
 reth-node-core.workspace = true
 
+[features]
+default = []
+# Runs the benches against the revmc JIT-enabled EVM config so JIT and interpreter throughput can
+# be cross-referenced on the same machine. Only `flashblock_validation_synthetic` dispatches the
+# out-of-process JIT helper, so it is the only bench safe to run with this feature.
+jit = ["world-chain-evm/jit", "world-chain-test-utils/jit"]
+
 [[bench]]
 name = "flashblock_validation_synthetic"
 harness = false

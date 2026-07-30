@@ -8,6 +8,7 @@ on:
       - 'crates/payload/**'
       - 'crates/validator/**'
       - 'crates/builder/**'
+      - 'crates/evm/**'
       - '.github/workflows/benchmarks.yml'
   workflow_dispatch:
 
@@ -235,4 +236,102 @@ jobs:
               }
             } catch (e) {
               console.log('Could not post benchmark comment:', e.message);
+            }
+
+  # Cross-references revmc JIT against the interpreter on the same machine. Informational only:
+  # it never fails the build, since a JIT slowdown on a bytecode-light fixture is expected.
+  #
+  # Runs on workflow_dispatch, or on a PR carrying the `bench-jit` label. Labeling an open PR does
+  # not itself start a run - push or re-run the workflow after adding it.
+  jit-comparison:
+    name: JIT vs interpreter
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'bench-jit')
+    runs-on: arc-public-8xlarge-amd64-runner
+    timeout-minutes: 90
+    env:
+      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: nightly-2026-07-01
+
+      - name: Install LLVM 22
+        run: sudo bash .github/scripts/install_llvm_ubuntu.sh 22
+
+      - name: Cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-bench-jit-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-bench-jit-
+
+      - name: Install critcmp
+        run: cargo install critcmp --locked
+
+      # Both runs execute the same bench on the same runner; only the `jit` feature differs, which
+      # swaps `EVM_CONFIG` for one backed by the revmc JIT backend.
+      - name: Run interpreter benchmarks
+        run: |
+          cargo bench --package world-chain-validator --bench "$BENCH_NAME" \
+            -- --save-baseline nojit
+
+      - name: Run JIT benchmarks
+        run: |
+          cargo bench --package world-chain-validator --features jit --bench "$BENCH_NAME" \
+            -- --save-baseline jit
+
+      - name: Compare JIT against interpreter
+        run: |
+          {
+            echo "## JIT vs interpreter (\`${BENCH_NAME}\`)"
+            echo ""
+            echo '```'
+            critcmp nojit jit --color never
+            echo '```'
+          } | tee jit-comparison.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post JIT comparison
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body;
+            try {
+              body = fs.readFileSync('jit-comparison.txt', 'utf-8');
+            } catch (e) {
+              console.log('No comparison output to post:', e.message);
+              return;
+            }
+            body += '\n_Informational: the faster baseline is normalized to 1.00. ' +
+              'Fixtures without heavy bytecode are not expected to gain from JIT._';
+
+            const { data: comments } = await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            const existing = comments.find((c) =>
+              c.body.startsWith('## JIT vs interpreter')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                comment_id: existing.id,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body,
+              });
             }
