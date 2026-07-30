@@ -42,9 +42,12 @@ test/
   ChainlinkWldEthOracle.t.sol      # cross math, decimal normalisation, stale/invalid feeds
   ChainlinkWldEthOracle.fork.t.sol # optional: live World Chain feeds (needs WORLDCHAIN_RPC_URL)
   E2E.fork.t.sol                   # optional: full loop vs live EntryPoint/WLD/router/pool
+  Deploy.fork.t.sol                # optional: runs the deploy script, asserts it can sponsor
   UniswapV3TwapOracle.t.sol        # TWAP conversion via a mock V3 pool
   mocks/Mocks.sol                  # ERC20 / WETH / oracle / aggregator / router / pool mocks
-script/Deploy.s.sol               # example deployment wiring
+script/
+  Deploy.s.sol                     # deploy + configure + fund + assert ready-to-sponsor
+  CheckReady.s.sol                 # read-only: can a deployed paymaster sponsor right now?
 ```
 
 ## Build & test
@@ -63,7 +66,7 @@ WORLDCHAIN_RPC_URL=https://worldchain-mainnet.g.alchemy.com/public \
   forge test --match-path 'test/*.fork.t.sol' -vv
 ```
 
-Expected: **40 passing unit tests**, plus **4 fork tests** that are skipped unless
+Expected: **40 passing unit tests**, plus **11 fork tests** that are skipped unless
 `WORLDCHAIN_RPC_URL` is set. The fork suite is what catches integration breakage
 the mocks cannot — `E2E.fork.t.sol` runs charge → reconcile → swap → re-deposit
 against the real EntryPoint, WLD, SwapRouter02 and WLD/WETH pool.
@@ -115,31 +118,76 @@ exposing `AggregatorV3Interface`) and report **18 decimals**, not mainnet's 8 �
 | `oracle` | ctor | Swappable `IWldEthOracle` (Chainlink default) |
 | `maxStaleness` | 1 hour (oracle ctor) | Max feed answer age before ops are rejected |
 
-## Deployment notes
+## Deploy & configure
 
-1. Deploy `ChainlinkWldEthOracle(wldUsdFeed, ethUsdFeed, maxStaleness)` — or set
-   `ORACLE_KIND=twap` in `script/Deploy.s.sol` to use `UniswapV3TwapOracle`
-   against the WLD/WETH V3 pool instead.
-2. Deploy `WLDPaymaster(entryPoint, wld, weth, swapRouter, oracle, poolFee)`.
-3. `deposit{value: ...}()` once to seed the EntryPoint balance.
-4. **`addStake(...)` — required, not optional.** `validatePaymasterUserOp` writes
-   the paymaster's own associated storage in the WLD contract, which ERC-7562
-   permits only for a **staked** entity. An unstaked paymaster has its ops
-   rejected by standards-compliant bundlers no matter what is whitelisted. Pass
-   `STAKE=<wei>` to the deploy script; it warns when you don't.
-5. **Whitelist** the paymaster on World Chain's Rundler proxy sidecar (and,
-   temporarily, on Alchemy/Pimlico) — that covers reputation, *not* the storage
-   rules. See DESIGN.md §8.
-6. Tune `maxWldPerBatch` against live pool depth, and confirm the client sets a
-   non-zero `paymasterPostOpGasLimit` in `paymasterAndData` — EntryPoint v0.7
-   skips `postOp` (so no refund, and no WLD booked for batching) if it is 0.
-
-One-liner (World Chain mainnet defaults, dry run — drop `--broadcast` off/on):
+`script/Deploy.s.sol` does the whole thing: deploys the oracle and paymaster,
+applies every config knob, deposits, stakes, optionally hands ownership to a
+multisig, and then **asserts the result can actually sponsor** before returning.
+It aborts on any unmet precondition rather than leaving a half-configured
+paymaster on-chain.
 
 ```bash
-INITIAL_DEPOSIT=100000000000000000 STAKE=10000000000000000 \
-  forge script script/Deploy.s.sol:Deploy --rpc-url "$WORLDCHAIN_RPC_URL" -vvv
+export WORLDCHAIN_RPC_URL=https://worldchain-mainnet.g.alchemy.com/public
+
+# dry run (no --broadcast): pre-flight + full report, nothing sent
+forge script script/Deploy.s.sol:Deploy --rpc-url "$WORLDCHAIN_RPC_URL" -vvv
+
+# for real
+OWNER=<multisig> forge script script/Deploy.s.sol:Deploy \
+  --rpc-url "$WORLDCHAIN_RPC_URL" --private-key "$PK" --broadcast
 ```
+
+Every address and parameter has a working World Chain default; override via env
+(`DEPOSIT`, `STAKE`, `UNSTAKE_DELAY`, `PREMIUM_BPS`, `MAX_WLD_PER_BATCH`,
+`MIN_ENTRYPOINT_DEPOSIT`, `OWNER`, …). See the script header for the full list.
+
+Verify a live deployment at any time — read-only, sends nothing:
+
+```bash
+PAYMASTER=0x... MAX_COST=10000000000000 USER=0x... \
+  forge script script/CheckReady.s.sol:CheckReady --rpc-url "$WORLDCHAIN_RPC_URL"
+```
+
+```
+[ok]   oracle live; WLD charge for maxCost: 74558353089106522
+       deposit: 20000000000000000  floor: 2000000000000000
+[ok]   deposit covers maxCost + floor; ops sponsorable: 1800
+[ok]   staked: 50000000000000000  unstake delay: 86400
+[ok]   max WLD per batch: 500000000000000000000
+=> READY to sponsor.
+```
+
+## How much ETH does it need?
+
+**The EntryPoint enforces no minimum deposit and no minimum stake.** Its only
+hard rule is per-op: validation fails (`AA31 paymaster deposit too low`) unless
+the deposit covers that op's `maxCost`. The real minimums come from three places:
+
+| Requirement | Amount | Enforced by |
+|---|---|---|
+| Deposit ≥ op `maxCost` | ~1e-5 ETH per op | EntryPoint, per op |
+| Deposit ≥ `maxCost` + `minEntryPointDeposit` | floor is **reserved**, never spent | this paymaster |
+| Stake > 0, unstake delay ≥ 86400s | see below | bundler, not the chain |
+
+**Deposit.** World Chain gas is cheap — base fee measured at ~0.0005 gwei, so a
+typical ERC-4337 op's `maxCost` lands around **1e-5 ETH** (dominated by the L1
+data fee inside `preVerificationGas`, not L2 execution). The script defaults to
+**0.02 ETH deposit above a 0.002 ETH floor**, i.e. ~1,800 sponsored ops of
+headroom, and it is self-replenishing: `triggerBatchSwap` converts collected WLD
+back into deposit. Note the floor is reserved, not spendable — a deposit at or
+below `minEntryPointDeposit` sponsors **nothing**, so the script refuses it.
+
+**Stake.** The EntryPoint accepts any non-zero amount, but bundlers reject
+under-staked paymasters, and that threshold is *their* config, not the chain's.
+The ERC-4337 canonical mempool references ~1 ETH-equivalent with an 86400s (1 day)
+unstake delay; private/whitelisted mempools like World Chain's Rundler sidecar are
+usually configured lower. The script defaults to **0.05 ETH with a 1-day delay**
+and enforces the 1-day minimum — **confirm the actual `min_stake_value` with
+whoever runs the bundler before going live**, since too little stake means every
+op is rejected with no on-chain error to look at.
+
+Deploying costs ~3.3M gas ≈ **0.0000036 ETH** at current World Chain prices, so
+the deposit and stake dominate. Budget **~0.07 ETH** total for the default setup.
 
 ## Status of the deliverable
 
@@ -150,8 +198,10 @@ INITIAL_DEPOSIT=100000000000000000 STAKE=10000000000000000 \
   ETH/USD feeds.
 - ✅ Full charge → reconcile → swap → re-deposit loop fork-tested against the
   live EntryPoint v0.7, WLD, SwapRouter02 and WLD/WETH pool.
-- ⬜ Not run through a real bundler/smart account yet (no staked deployment, no
-  `paymasterAndData` client path).
+- ✅ Deploy script fork-tested: it deploys, configures, funds, stakes, and the
+  result is proven able to sponsor a UserOp.
+- ⬜ Not run through a real bundler/smart account yet (no `paymasterAndData`
+  client path); bundler stake minimum unconfirmed.
 - ⬜ **Owner is fully trusted** — no timelock, pause, or guardian; see DESIGN.md §7.
 - ⬜ Not audited; no
   permit/Permit2 path yet. See DESIGN.md §7 & §9 for open risks/follow-ups.
