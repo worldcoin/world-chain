@@ -1,0 +1,267 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.23;
+
+import {Test} from "forge-std/Test.sol";
+import {EntryPoint} from "@account-abstraction/core/EntryPoint.sol";
+import {IEntryPoint} from "@account-abstraction/interfaces/IEntryPoint.sol";
+import {PackedUserOperation} from "@account-abstraction/interfaces/PackedUserOperation.sol";
+import {IPaymaster} from "@account-abstraction/interfaces/IPaymaster.sol";
+
+import {WLDPaymaster} from "../src/WLDPaymaster.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IWETH9, ISwapRouter} from "../src/interfaces/ISwapRouter.sol";
+import {IWldEthOracle} from "../src/interfaces/IWldEthOracle.sol";
+import {MockERC20, MockWETH, MockOracle, MockSwapRouter} from "./mocks/Mocks.sol";
+
+contract WLDPaymasterTest is Test {
+    // 1 ETH = 1000 WLD
+    uint256 constant NUM = 1000;
+    uint256 constant DEN = 1;
+
+    EntryPoint entryPoint;
+    MockERC20 wld;
+    MockWETH weth;
+    MockOracle oracle;
+    MockSwapRouter router;
+    WLDPaymaster paymaster;
+
+    address owner = address(this);
+    address user = makeAddr("user");
+
+    uint256 constant MAX_COST = 0.001 ether; // 1e15 wei
+
+    function setUp() public {
+        entryPoint = new EntryPoint();
+        wld = new MockERC20("Worldcoin", "WLD");
+        weth = new MockWETH();
+        oracle = new MockOracle(NUM, DEN);
+        router = new MockSwapRouter(weth, NUM, DEN);
+
+        paymaster = new WLDPaymaster(
+            IEntryPoint(address(entryPoint)),
+            IERC20(address(wld)),
+            IWETH9(address(weth)),
+            ISwapRouter(address(router)),
+            IWldEthOracle(address(oracle)),
+            3000
+        );
+
+        // Fund the paymaster's EntryPoint deposit once.
+        paymaster.deposit{value: 1 ether}();
+
+        // Fund the router with ETH so it can back WETH minting.
+        vm.deal(address(router), 100 ether);
+
+        // Give the user WLD and approve the paymaster.
+        wld.mint(user, 1_000 ether);
+        vm.prank(user);
+        wld.approve(address(paymaster), type(uint256).max);
+    }
+
+    // --- helpers ---
+
+    function _userOp(address sender) internal pure returns (PackedUserOperation memory op) {
+        op.sender = sender;
+    }
+
+    function _validate(uint256 maxCost) internal returns (bytes memory context) {
+        vm.prank(address(entryPoint));
+        (context,) = paymaster.validatePaymasterUserOp(_userOp(user), bytes32(0), maxCost);
+    }
+
+    function _postOp(bytes memory context, uint256 actualGasCost, uint256 feePerGas) internal {
+        vm.prank(address(entryPoint));
+        paymaster.postOp(IPaymaster.PostOpMode.opSucceeded, context, actualGasCost, feePerGas);
+    }
+
+    // =====================================================================
+    //                          Premium math
+    // =====================================================================
+
+    function test_QuoteAppliesPremium() public view {
+        // base = MAX_COST * 1000 = 1e18 ; +20% => 1.2e18
+        uint256 expectedBase = MAX_COST * NUM / DEN;
+        assertEq(expectedBase, 1e18);
+        assertEq(paymaster.quoteWldCharge(MAX_COST), 1.2e18);
+    }
+
+    // =====================================================================
+    //                    validate + postOp charge flow
+    // =====================================================================
+
+    function test_Validate_PullsMaxWld() public {
+        uint256 before = wld.balanceOf(address(paymaster));
+        _validate(MAX_COST);
+        uint256 pulled = wld.balanceOf(address(paymaster)) - before;
+        assertEq(pulled, 1.2e18, "should pull max charge incl premium");
+    }
+
+    function test_PostOp_RefundsProRata() public {
+        bytes memory ctx = _validate(MAX_COST);
+
+        uint256 userBalAfterValidate = wld.balanceOf(user);
+
+        uint256 actualGasCost = 0.0004 ether; // 4e14
+        uint256 feePerGas = 1 gwei; // 1e9
+        _postOp(ctx, actualGasCost, feePerGas);
+
+        // costWithPostOp = 4e14 + 40000*1e9 = 4.4e14 ; charge = 1.2e18 * 4.4e14/1e15
+        uint256 expectedCharge = 1.2e18 * (actualGasCost + paymaster.postOpGasOverhead() * feePerGas) / MAX_COST;
+        assertEq(paymaster.accumulatedWld(), expectedCharge, "accumulated == actual charge");
+
+        uint256 refund = 1.2e18 - expectedCharge;
+        assertEq(wld.balanceOf(user) - userBalAfterValidate, refund, "user refunded the difference");
+    }
+
+    function test_PostOp_CapsAtMaxCost() public {
+        bytes memory ctx = _validate(MAX_COST);
+        // actualGasCost already == maxCost; overhead pushes above -> capped
+        _postOp(ctx, MAX_COST, 1 gwei);
+        assertEq(paymaster.accumulatedWld(), 1.2e18, "charge capped at max WLD");
+        assertEq(wld.balanceOf(address(paymaster)), 1.2e18);
+    }
+
+    // =====================================================================
+    //                          Revert / edge cases
+    // =====================================================================
+
+    function test_RevertWhen_InsufficientWldBalance() public {
+        address poor = makeAddr("poor");
+        vm.prank(poor);
+        wld.approve(address(paymaster), type(uint256).max);
+        vm.prank(address(entryPoint));
+        vm.expectRevert(WLDPaymaster.InsufficientWldBalance.selector);
+        paymaster.validatePaymasterUserOp(_userOp(poor), bytes32(0), MAX_COST);
+    }
+
+    function test_RevertWhen_InsufficientAllowance() public {
+        vm.prank(user);
+        wld.approve(address(paymaster), 0);
+        vm.prank(address(entryPoint));
+        vm.expectRevert(WLDPaymaster.InsufficientWldAllowance.selector);
+        paymaster.validatePaymasterUserOp(_userOp(user), bytes32(0), MAX_COST);
+    }
+
+    function test_RevertWhen_StaleOracle() public {
+        oracle.setStale(true);
+        vm.prank(address(entryPoint));
+        vm.expectRevert(bytes("OLD"));
+        paymaster.validatePaymasterUserOp(_userOp(user), bytes32(0), MAX_COST);
+    }
+
+    function test_RevertWhen_DepositFloorBreached() public {
+        // Ask for a maxCost that leaves the deposit below the floor.
+        uint256 deposit = paymaster.getDeposit();
+        uint256 tooBig = deposit - paymaster.minEntryPointDeposit() + 1;
+        vm.prank(address(entryPoint));
+        vm.expectRevert(WLDPaymaster.DepositFloorBreached.selector);
+        paymaster.validatePaymasterUserOp(_userOp(user), bytes32(0), tooBig);
+    }
+
+    function test_RevertWhen_OnlyEntryPointCanValidate() public {
+        vm.expectRevert(bytes("Sender not EntryPoint"));
+        paymaster.validatePaymasterUserOp(_userOp(user), bytes32(0), MAX_COST);
+    }
+
+    function test_RevertWhen_OnlyEntryPointCanPostOp() public {
+        vm.expectRevert(bytes("Sender not EntryPoint"));
+        paymaster.postOp(IPaymaster.PostOpMode.opSucceeded, "", 0, 0);
+    }
+
+    // =====================================================================
+    //                          Batch swap
+    // =====================================================================
+
+    function _accumulate() internal returns (uint256 charged) {
+        bytes memory ctx = _validate(MAX_COST);
+        _postOp(ctx, 0.0004 ether, 1 gwei);
+        charged = paymaster.accumulatedWld();
+    }
+
+    function test_RevertWhen_BatchTooEarly() public {
+        _accumulate();
+        vm.expectRevert(WLDPaymaster.BatchTooEarly.selector);
+        paymaster.triggerBatchSwap(0);
+    }
+
+    function test_RevertWhen_NothingToSwap() public {
+        vm.roll(block.number + paymaster.blocksPerBatch());
+        vm.expectRevert(WLDPaymaster.NothingToSwap.selector);
+        paymaster.triggerBatchSwap(0);
+    }
+
+    function test_BatchSwap_ReplenishesEntryPoint() public {
+        uint256 charged = _accumulate();
+        assertGt(charged, 0);
+
+        uint256 depositBefore = paymaster.getDeposit();
+
+        vm.roll(block.number + paymaster.blocksPerBatch());
+        uint256 ethOut = paymaster.triggerBatchSwap(0);
+
+        // ETH out = charged WLD / 1000 (no router slippage)
+        assertEq(ethOut, charged * DEN / NUM, "eth out at oracle price");
+        assertEq(paymaster.accumulatedWld(), 0, "accumulator reset");
+        assertEq(paymaster.lastBatchBlock(), block.number, "batch block updated");
+        assertEq(paymaster.getDeposit(), depositBefore + ethOut, "deposit replenished");
+    }
+
+    function test_BatchSwap_SlippageProtection() public {
+        _accumulate();
+        // Router executes 5% worse than oracle; slippage tolerance is 3% -> revert.
+        router.setSlippageBps(500);
+        vm.roll(block.number + paymaster.blocksPerBatch());
+        vm.expectRevert(bytes("Too little received"));
+        paymaster.triggerBatchSwap(0);
+    }
+
+    function test_BatchSwap_KeeperReward() public {
+        paymaster.setKeeperRewardBps(100); // 1%
+        uint256 charged = _accumulate();
+
+        address keeper = makeAddr("keeper");
+        uint256 keeperEthBefore = keeper.balance;
+
+        vm.roll(block.number + paymaster.blocksPerBatch());
+        vm.prank(keeper);
+        uint256 ethOut = paymaster.triggerBatchSwap(0);
+
+        uint256 expectedReward = ethOut * 100 / 10_000;
+        assertEq(keeper.balance - keeperEthBefore, expectedReward, "keeper paid reward");
+        assertEq(ethOut, charged * DEN / NUM);
+    }
+
+    function test_BatchReadyView() public {
+        assertFalse(paymaster.batchReady());
+        _accumulate();
+        assertFalse(paymaster.batchReady(), "not enough blocks yet");
+        vm.roll(block.number + paymaster.blocksPerBatch());
+        assertTrue(paymaster.batchReady());
+    }
+
+    // =====================================================================
+    //                          Owner config
+    // =====================================================================
+
+    function test_OwnerCanConfigure() public {
+        paymaster.setPremiumBps(1000);
+        assertEq(paymaster.premiumBps(), 1000);
+        paymaster.setBlocksPerBatch(10);
+        assertEq(paymaster.blocksPerBatch(), 10);
+        paymaster.setMaxSwapSlippageBps(150);
+        assertEq(paymaster.maxSwapSlippageBps(), 150);
+    }
+
+    function test_RevertWhen_NonOwnerConfigures() public {
+        vm.prank(user);
+        vm.expectRevert();
+        paymaster.setPremiumBps(1000);
+    }
+
+    function test_RevertWhen_PremiumTooHigh() public {
+        vm.expectRevert(WLDPaymaster.InvalidConfig.selector);
+        paymaster.setPremiumBps(10_001);
+    }
+
+    receive() external payable {}
+}
