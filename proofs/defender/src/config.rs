@@ -7,18 +7,6 @@ pub const DEFAULT_MAX_GAME_CONCURRENCY: usize = 10;
 /// Default number of L1 confirmations required for defender transactions.
 pub const DEFAULT_L1_TX_CONFIRMATIONS: u64 = 5;
 
-/// Default maximum number of new factory games discovered per defender tick.
-pub const DEFAULT_MAX_GAMES_PER_TICK: u64 = 100;
-
-/// Default number of previously scanned games reconsidered per defender tick.
-pub const DEFAULT_GAME_SCAN_LOOKBACK: u64 = 100;
-
-/// Default maximum number of game resolutions submitted per defender tick.
-pub const DEFAULT_MAX_RESOLUTIONS_PER_TICK: usize = 10;
-
-/// Default upper bound on the age of a game with an open proof window.
-pub const DEFAULT_MAX_GAME_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
-
 /// Configuration for the defender.
 #[derive(Debug, Clone)]
 pub struct DefenderConfig {
@@ -26,14 +14,6 @@ pub struct DefenderConfig {
     pub poll_interval: Duration,
     /// Maximum number of games to process concurrently.
     pub max_game_concurrency: usize,
-    /// Maximum number of newly created games discovered during one tick.
-    pub max_games_per_tick: u64,
-    /// Number of previously scanned games reconsidered to tolerate mutable-state L1 reorgs.
-    pub game_scan_lookback: u64,
-    /// Maximum number of negatively resolvable games settled during one tick.
-    pub max_resolutions_per_tick: usize,
-    /// Upper bound on the age of any game whose proof window can remain open.
-    pub max_game_age: Duration,
 }
 
 impl DefenderConfig {
@@ -48,21 +28,6 @@ impl DefenderConfig {
                 "max_game_concurrency must be greater than zero",
             ));
         }
-        if self.max_games_per_tick == 0 {
-            return Err(DefenderError::InvalidConfig(
-                "max_games_per_tick must be greater than zero",
-            ));
-        }
-        if self.max_resolutions_per_tick == 0 {
-            return Err(DefenderError::InvalidConfig(
-                "max_resolutions_per_tick must be greater than zero",
-            ));
-        }
-        if self.max_game_age.is_zero() {
-            return Err(DefenderError::InvalidConfig(
-                "max_game_age must be greater than zero",
-            ));
-        }
         Ok(())
     }
 }
@@ -72,10 +37,6 @@ impl Default for DefenderConfig {
         Self {
             poll_interval: Duration::from_mins(1),
             max_game_concurrency: DEFAULT_MAX_GAME_CONCURRENCY,
-            max_games_per_tick: DEFAULT_MAX_GAMES_PER_TICK,
-            game_scan_lookback: DEFAULT_GAME_SCAN_LOOKBACK,
-            max_resolutions_per_tick: DEFAULT_MAX_RESOLUTIONS_PER_TICK,
-            max_game_age: DEFAULT_MAX_GAME_AGE,
         }
     }
 }

@@ -1,9 +1,12 @@
-use tracing::{info, warn};
-use world_chain_proofs::{ConsensusProvider, InvalidationReason, RootState};
+use tracing::{error, info, warn};
+use world_chain_proofs::{
+    ConsensusProvider, InvalidationReason, LineageStop, RootState, SelectedLineageGame,
+    select_lineage,
+};
 
 use crate::{
-    ParentRef, Proposal, ProposerClient, ProposerConfig, ProposerError,
-    types::{CanonicalLine, CanonicalScan, FinalizedGames, NextProposalAction},
+    Proposal, ProposerClient, ProposerConfig, ProposerError,
+    types::{NextProposalAction, ProposerScan},
 };
 
 /// World Chain Proposer.
@@ -40,162 +43,118 @@ where
     ///
     /// A game is considered canonical if it's built on top of a valid game and its root_claim
     /// is correct - i.e. it matches the one computed by the proposer itself.
-    pub async fn anchor_and_canonical_line(&self) -> Result<CanonicalScan, ProposerError> {
+    pub async fn scan_selected_lineage(&self) -> Result<ProposerScan, ProposerError> {
         self.config.validate()?;
 
-        let anchor = self.execution_provider.anchor_parent().await?;
-        let mut cursor = anchor.parent_ref();
-        let mut canonical_line = CanonicalLine::new(cursor);
-
-        let latest_finalized_l2_block = self.consensus_provider.latest_l2_finalized_block().await?;
-
-        // loop to the next canonical game until it reaches the last one
-        loop {
-            let next_l2_block_number = cursor
-                .l2_block_number
-                .checked_add(self.config.block_interval)
-                .ok_or(ProposerError::BlockNumberOverflow {
-                    parent_block: cursor.l2_block_number,
-                    block_interval: self.config.block_interval,
-                })?;
-
-            if next_l2_block_number > latest_finalized_l2_block {
-                return Ok(CanonicalScan::new(
-                    canonical_line,
-                    NextProposalAction::CaughtUp {
-                        target_block: next_l2_block_number,
-                        finalized_block: latest_finalized_l2_block,
-                    },
-                ));
+        let lineage = select_lineage(&self.execution_provider, &self.consensus_provider).await?;
+        let next_action = match lineage.stop() {
+            LineageStop::CaughtUp {
+                target_block,
+                finalized_block,
+            } => NextProposalAction::CaughtUp {
+                target_block,
+                finalized_block,
+            },
+            LineageStop::Missing(transition) => NextProposalAction::Propose(Proposal {
+                parent_ref: transition.parent_ref,
+                root_claim: transition.root_claim,
+                l2_block_number: transition.l2_block_number,
+                attempt: 0,
+            }),
+            LineageStop::Invalidated {
+                transition,
+                game,
+                status,
+            } => {
+                if status.resolvable {
+                    NextProposalAction::ResolveNegative {
+                        game: game.address,
+                        reason: status.invalidation_reason,
+                    }
+                } else if status.invalidation_reason == InvalidationReason::ProofTimeout {
+                    // A retry must reuse the invalidated game's transition commitment.
+                    NextProposalAction::RetryTimedOut {
+                        proposal: Proposal {
+                            parent_ref: transition.parent_ref,
+                            root_claim: transition.root_claim,
+                            l2_block_number: transition.l2_block_number,
+                            attempt: game.attempt.checked_add(1).ok_or_else(|| {
+                                ProposerError::Contract("proposal attempt overflows u64".into())
+                            })?,
+                        },
+                        invalidated_game: game.address,
+                    }
+                } else {
+                    NextProposalAction::BlockedByInvalidation {
+                        game: game.address,
+                        reason: status.invalidation_reason,
+                    }
+                }
             }
+        };
 
-            let root_claim = self
-                .consensus_provider
-                .output_root_at_block(next_l2_block_number)
-                .await?;
-
-            let existing = self
-                .execution_provider
-                .game_for_transition(cursor.address, root_claim, next_l2_block_number)
-                .await?;
-            let Some(game) = existing else {
-                return Ok(CanonicalScan::new(
-                    canonical_line,
-                    NextProposalAction::Propose(Proposal {
-                        parent_ref: cursor.address,
-                        root_claim,
-                        l2_block_number: next_l2_block_number,
-                        attempt: 0,
-                    }),
-                ));
-            };
-            let status = self
-                .execution_provider
-                .resolution_status(game.address)
-                .await?;
-
-            if status.root_state != RootState::Invalidated {
-                let next_game = ParentRef {
-                    address: game.address,
-                    l2_block_number: next_l2_block_number,
-                };
-                canonical_line.push_game(next_game);
-                cursor = next_game;
-                continue;
-            }
-
-            let next_action = if status.resolvable {
-                NextProposalAction::AwaitNegativeResolution {
-                    game: game.address,
-                    reason: status.invalidation_reason,
-                }
-            } else if status.invalidation_reason == InvalidationReason::ProofTimeout {
-                // A retry must reuse the invalidated game's parent reference and root claim:
-                // `MultiProofGame` only accepts attempt N when attempt N-1 exists under the
-                // identical `extraData`.
-                NextProposalAction::RetryTimedOut {
-                    proposal: Proposal {
-                        parent_ref: cursor.address,
-                        root_claim,
-                        l2_block_number: next_l2_block_number,
-                        attempt: game.attempt.checked_add(1).ok_or_else(|| {
-                            ProposerError::Contract("proposal attempt overflows u64".into())
-                        })?,
-                    },
-                    invalidated_game: game.address,
-                }
-            } else {
-                NextProposalAction::BlockedByInvalidation {
-                    game: game.address,
-                    reason: status.invalidation_reason,
-                }
-            };
-            return Ok(CanonicalScan::new(canonical_line, next_action));
-        }
+        Ok(ProposerScan::new(lineage, next_action))
     }
 
-    /// Resolves positively resolvable games parent-first and returns all finalized games.
+    /// Resolves positively resolvable games parent-first and returns the highest finalized game.
     ///
     /// Games finalized by an earlier iteration or another keeper are included so anchor
     /// advancement can be retried.
     pub async fn resolve_games(
         &self,
-        canonical_line: &CanonicalLine,
-    ) -> Result<FinalizedGames, ProposerError> {
-        let mut finalized_games = FinalizedGames::default();
+        games: &[SelectedLineageGame],
+    ) -> Result<Option<SelectedLineageGame>, ProposerError> {
+        let mut highest_finalized_game = None;
         let mut resolutions_submitted = 0;
-        for game in canonical_line.games() {
+        for selected in games {
+            let game = selected.game;
             let resolution_status = self
                 .execution_provider
-                .resolution_status(game.address)
+                .lineage_resolution_status(game.address)
                 .await?;
             if resolution_status.positive_resolvable() {
                 if resolutions_submitted >= self.config.max_resolutions_per_tick {
                     info!(
                         game_address = %game.address,
-                        l2_block_number = game.l2_block_number,
+                        l2_block_number = selected.transition.l2_block_number,
                         max_resolutions_per_tick = self.config.max_resolutions_per_tick,
                         "skipping game resolution because proposer tick budget is exhausted"
                     );
                     continue;
                 }
-                // resolve the game
                 let resolve_submission = self.execution_provider.resolve_game(game.address).await?;
                 info!(
                     game_address = %game.address,
-                    l2_block_number = game.l2_block_number,
+                    l2_block_number = selected.transition.l2_block_number,
                     tx_hash = ?resolve_submission.tx_hash,
                     "resolved World Chain proof-system game"
                 );
-                finalized_games.push(*game);
+                highest_finalized_game = Some(*selected);
                 resolutions_submitted += 1;
             } else if resolution_status.root_state == RootState::Finalized {
                 // the game was finalized in an earlier iteration or by another keeper
-                finalized_games.push(*game);
+                highest_finalized_game = Some(*selected);
             }
         }
-        Ok(finalized_games)
+        Ok(highest_finalized_game)
     }
 
     /// Advances the anchor to the highest finalized game, if one is available.
     pub async fn advance_anchor(
         &self,
-        finalized_games: FinalizedGames,
+        highest_finalized_game: Option<SelectedLineageGame>,
     ) -> Result<(), ProposerError> {
-        // games are ordered by l2 block number, therefore taking the last one
-        // means taking the one with the highest l2 block number
-        let maybe_highest_finalized_game = finalized_games.last();
-        if let Some(highest_finalized_game) = maybe_highest_finalized_game {
+        if let Some(highest_finalized_game) = highest_finalized_game {
             // `closeGame` reverts until the registry's finality airgap has elapsed. Gate on it
             // so the routine wait is not reported as a failed tick every poll interval.
             if !self
                 .execution_provider
-                .is_game_finalized(highest_finalized_game.address)
+                .is_game_finalized(highest_finalized_game.game.address)
                 .await?
             {
                 info!(
-                    game_address = %highest_finalized_game.address,
-                    l2_block_number = highest_finalized_game.l2_block_number,
+                    game_address = %highest_finalized_game.game.address,
+                    l2_block_number = highest_finalized_game.transition.l2_block_number,
                     "waiting for dispute-game finality delay before closing game"
                 );
                 return Ok(());
@@ -203,11 +162,11 @@ where
 
             let close_game_submission = self
                 .execution_provider
-                .close_game(highest_finalized_game.address)
+                .close_game(highest_finalized_game.game.address)
                 .await?;
             info!(
-                game_address = %highest_finalized_game.address,
-                l2_block_number = highest_finalized_game.l2_block_number,
+                game_address = %highest_finalized_game.game.address,
+                l2_block_number = highest_finalized_game.transition.l2_block_number,
                 tx_hash = ?close_game_submission.tx_hash,
                 "closed World Chain proof-system game"
             );
@@ -215,19 +174,31 @@ where
         Ok(())
     }
 
-    /// Creates the next canonical game, or waits while its predecessor is unresolved.
-    pub async fn submit_next_proposal(&self, scan: &CanonicalScan) -> Result<(), ProposerError> {
+    /// Resolves a negative tip or creates the next selected game or retry.
+    pub async fn submit_next_proposal(&self, scan: &ProposerScan) -> Result<(), ProposerError> {
         let (proposal, retry_of) = match scan.next_action() {
             NextProposalAction::Propose(proposal) => (*proposal, None),
             NextProposalAction::RetryTimedOut {
                 proposal,
                 invalidated_game,
-            } => (*proposal, Some(*invalidated_game)),
-            NextProposalAction::AwaitNegativeResolution { game, reason } => {
-                warn!(
+            } => {
+                error!(
+                    invalidated_game = %invalidated_game,
+                    parent_ref = %proposal.parent_ref,
+                    root_claim = %proposal.root_claim,
+                    l2_block_number = proposal.l2_block_number,
+                    attempt = proposal.attempt,
+                    "creating a retry; the abandoned lineage requires manual resolution and bond recovery"
+                );
+                (*proposal, Some(*invalidated_game))
+            }
+            NextProposalAction::ResolveNegative { game, reason } => {
+                let submission = self.execution_provider.resolve_game(*game).await?;
+                info!(
                     game_address = %game,
                     invalidation_reason = ?reason,
-                    "waiting for game to be resolved with its negative outcome"
+                    tx_hash = ?submission.tx_hash,
+                    "resolved selected game with its negative outcome"
                 );
                 return Ok(());
             }
@@ -256,7 +227,7 @@ where
     }
 
     /// Runs the proposer forever, logging transient failures and retrying on each tick.
-    pub async fn run_forever(&mut self) -> Result<(), ProposerError> {
+    pub async fn run_forever(&self) -> Result<(), ProposerError> {
         self.config.validate()?;
 
         let mut interval = tokio::time::interval(self.config.poll_interval);
@@ -264,13 +235,13 @@ where
             interval.tick().await;
             let iteration: Result<(), ProposerError> = async {
                 // 1. refresh the anchor and canonical line
-                let canonical_scan = self.anchor_and_canonical_line().await?;
+                let scan = self.scan_selected_lineage().await?;
                 // 2. resolve positive-ready games parent-first
-                let finalized_games = self.resolve_games(canonical_scan.canonical_line()).await?;
+                let highest_finalized_game = self.resolve_games(scan.lineage().games()).await?;
                 // 3. advance the anchor to the highest finalized canonical game
-                self.advance_anchor(finalized_games).await?;
-                // 4. submit a new canonical proposal or retry
-                self.submit_next_proposal(&canonical_scan).await?;
+                self.advance_anchor(highest_finalized_game).await?;
+                // 4. resolve a negative tip, or submit a new proposal or retry
+                self.submit_next_proposal(&scan).await?;
                 Ok(())
             }
             .await;

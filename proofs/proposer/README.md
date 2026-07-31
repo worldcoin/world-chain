@@ -29,11 +29,24 @@ parentRef, attempt)` and the game's factory UUID is
 
 - read the current anchor game from `AnchorStateRegistry`. Use it as `parent_ref` when present;
   otherwise use the registry address as the initial sentinel.
-- compute L2 output root for block equal to `parent_ref`'s `l2_block_number` + `BLOCK_INTERVAL`
+- read the block interval from the registered game's proof domain and compute the L2 output root
+  for `parent_ref`'s `l2_block_number` plus that interval
 - look the game up with `DisputeGameFactory.games(gameType, rootClaim, extraData)`, walking
   `attempt` upward until the first gap.
 - if a game exists, it becomes the `parent_ref` and we continue this loop
 - if it doesn't exist - i.e. the address is `0x00..00`, then the current `parent_ref` is returned
+
+The proposer resolves every determined game on this selected lineage. A positive resolution may
+advance the anchor after the registry finality delay; a proof-timeout resolution permits the next
+attempt to be created.
+
+## Retry operations
+
+The automated services assume proof-timeout retries are exceptional. The proposer creates the next
+attempt and the defender follows that replacement, but games descending from the abandoned attempt
+are not automatically recovered. Operators must resolve that stale lineage parent-first and claim
+any resulting bond credits. Retry creation is logged at error level so it can trigger an incident
+response; a follow-up can include the complete stale lineage in that alert.
 
 ### `root_claim`
 
@@ -41,7 +54,7 @@ parentRef, attempt)` and the game's factory UUID is
 
 ### `l2_block_number`
 
-- `parent_ref`'s `l2_block_number` field + `BLOCK_INTERVAL`
+- `parent_ref`'s `l2_block_number` plus the registered proof domain's block interval
 
 ## Bond settlement
 

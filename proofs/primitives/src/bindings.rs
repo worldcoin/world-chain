@@ -1,6 +1,13 @@
 use alloy_sol_types::sol;
 
 sol! {
+    struct ProofDomainData {
+        uint256 chainId;
+        uint256 proofSystemVersion;
+        bytes32 rollupConfigHash;
+        uint256 blockInterval;
+    }
+
     /// Stock OP Stack `DisputeGameFactory`. WIP-1006 games are created and indexed here
     /// alongside every other game type registered on the chain, so every index-based read
     /// must filter on `MULTI_PROOF_GAME_TYPE`.
@@ -53,6 +60,7 @@ sol! {
         // Deployment parameters (immutables on the implementation).
         function PROOF_THRESHOLD() external view returns (uint8);
         function PROOF_LANE_COUNT() external view returns (uint8);
+        function domain() external view returns (ProofDomainData memory);
         function domainHash() external view returns (bytes32);
         function challengePeriod() external view returns (uint64);
         function proofPeriod() external view returns (uint64);

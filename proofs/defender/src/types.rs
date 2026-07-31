@@ -21,9 +21,3 @@ pub struct DefenderSubmission {
     /// Transaction hash for the proof submission.
     pub tx_hash: TxHash,
 }
-
-/// Result of a submitted `resolve` transaction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ResolveSubmission {
-    pub tx_hash: TxHash,
-}

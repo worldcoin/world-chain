@@ -1,12 +1,10 @@
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, U256};
 use async_trait::async_trait;
-use world_chain_proofs::ResolutionStatus;
+use world_chain_proofs::{LineageProvider, ResolutionStatus};
 
 use crate::{
-    AnchorRef, Proposal, ProposalSubmission, ProposerError,
-    types::{
-        ClaimSubmission, CloseGameSubmission, PendingWithdrawal, ResolveSubmission, TransitionGame,
-    },
+    Proposal, ProposalSubmission, ProposerError,
+    types::{ClaimSubmission, CloseGameSubmission, PendingWithdrawal, ResolveSubmission},
 };
 
 /// Contract surface needed by the asynchronous bond manager.
@@ -49,21 +47,7 @@ pub trait BondManagerClient: Send + Sync {
 
 /// Minimal contract surface needed by the proposer.
 #[async_trait]
-pub trait ProposerClient: Send + Sync {
-    /// Reads the current anchor checkpoint from the registry.
-    async fn anchor_parent(&self) -> Result<AnchorRef, ProposerError>;
-
-    /// Returns the highest-attempt game registered for the transition under `parent_ref`.
-    async fn game_for_transition(
-        &self,
-        parent_ref: Address,
-        root_claim: B256,
-        l2_block_number: u64,
-    ) -> Result<Option<TransitionGame>, ProposerError>;
-
-    /// Returns the resolution status of the provided game, if game exists.
-    async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError>;
-
+pub trait ProposerClient: LineageProvider {
     /// Submits a resolve transaction to the provided game.
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError>;
 

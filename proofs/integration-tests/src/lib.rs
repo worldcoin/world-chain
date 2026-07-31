@@ -17,18 +17,18 @@ use world_chain_challenger::{
 };
 use world_chain_defender::{
     DefenderClient, DefenderError, DefenderSubmission, GameMetadata as DefenderGameMetadata,
-    ResolveSubmission as DefenderResolveSubmission,
 };
 use world_chain_proof_core::boot::TransitionPublicValues;
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_proofs::{
-    ConsensusError, ConsensusProvider, InvalidationReason, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD,
-    ProofDomain, ProofLane, ProposalCommitment, ResolutionStatus, RootCommitment, RootState,
-    WorldChainGameCreated, has_threshold,
+    ConsensusError, ConsensusProvider, InvalidationReason, LineageAnchor, LineageError,
+    LineageGame, LineageProvider, LineageTransition, MAX_ATTEMPT_SCAN, PROOF_SYSTEM_VERSION,
+    PROOF_THRESHOLD, ProofDomain, ProofLane, ProposalCommitment, ResolutionStatus, RootCommitment,
+    RootState, WorldChainGameCreated, has_threshold,
 };
 use world_chain_proposer::{
-    AnchorRef, CloseGameSubmission, Proposal, ProposalSubmission, ProposerClient, ProposerError,
-    ResolveSubmission, TransitionGame,
+    CloseGameSubmission, Proposal, ProposalSubmission, ProposerClient, ProposerError,
+    ResolveSubmission,
 };
 use world_chain_prover_service::{
     GetNextProofRequest, GetNextProofResponse, GetProofSessionRequest, GetProofSessionResponse,
@@ -133,7 +133,7 @@ pub struct FakeExecution {
 #[derive(Debug)]
 struct FakeExecutionState {
     domain_hash: B256,
-    anchor: AnchorRef,
+    anchor: LineageAnchor,
     finalized_l1_block: BlockNumber,
     next_game_nonce: u8,
     games_by_key: HashMap<B256, Address>,
@@ -164,7 +164,7 @@ impl FakeExecution {
         Self {
             state: Arc::new(Mutex::new(FakeExecutionState {
                 domain_hash: test_domain().hash(),
-                anchor: AnchorRef {
+                anchor: LineageAnchor {
                     address: ANCHOR,
                     l2_block_number: 0,
                 },
@@ -293,9 +293,6 @@ fn proof_lane(lane: u8) -> Option<ProofLane> {
     }
 }
 
-/// Mirrors the attempt walk in the real Alloy clients.
-const MAX_ATTEMPT_SCAN: u64 = 4;
-
 fn parent_is_unresolved(state: &FakeExecutionState, record: &GameRecord) -> bool {
     if record.event.parent_ref == ANCHOR {
         return false;
@@ -307,8 +304,12 @@ fn parent_is_unresolved(state: &FakeExecutionState, record: &GameRecord) -> bool
 }
 
 #[async_trait]
-impl ProposerClient for FakeExecution {
-    async fn anchor_parent(&self) -> Result<AnchorRef, ProposerError> {
+impl LineageProvider for FakeExecution {
+    fn lineage_block_interval(&self) -> u64 {
+        BLOCK_INTERVAL
+    }
+
+    async fn lineage_anchor(&self) -> Result<LineageAnchor, LineageError> {
         Ok(self
             .state
             .lock()
@@ -318,42 +319,37 @@ impl ProposerClient for FakeExecution {
 
     async fn game_for_transition(
         &self,
-        parent_ref: Address,
-        root_claim: B256,
-        l2_block_number: u64,
-    ) -> Result<Option<TransitionGame>, ProposerError> {
+        transition: LineageTransition,
+    ) -> Result<Option<LineageGame>, LineageError> {
         let state = self.state.lock().expect("fake execution mutex poisoned");
         let mut latest = None;
         for attempt in 0..MAX_ATTEMPT_SCAN {
             let uuid = ProposalCommitment {
-                parent_ref,
-                root_claim,
-                l2_block_number,
+                parent_ref: transition.parent_ref,
+                root_claim: transition.root_claim,
+                l2_block_number: transition.l2_block_number,
                 attempt,
             }
             .game_uuid(state.domain_hash);
             let Some(address) = state.games_by_key.get(&uuid).copied() else {
                 break;
             };
-            latest = Some(TransitionGame { address, attempt });
+            latest = Some(LineageGame { address, attempt });
         }
         Ok(latest)
     }
 
-    /// The fake has no registry finality airgap: a resolved game is immediately closeable.
-    async fn is_game_finalized(&self, _game: Address) -> Result<bool, ProposerError> {
-        Ok(true)
-    }
-
-    async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
+    async fn lineage_resolution_status(
+        &self,
+        game: Address,
+    ) -> Result<ResolutionStatus, LineageError> {
         let state = self.state.lock().expect("fake execution mutex poisoned");
         let record = state
             .games_by_address
             .get(&game)
-            .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
+            .ok_or_else(|| LineageError::Contract(format!("unknown game {game}")))?;
 
-        let root_state = RootState::try_from(record.state)
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let root_state = RootState::try_from(record.state)?;
         if root_state == RootState::Finalized {
             return Ok(ResolutionStatus {
                 resolvable: false,
@@ -377,6 +373,28 @@ impl ProposerClient for FakeExecution {
                 invalidation_reason: InvalidationReason::None,
             });
         }
+        if root_state == RootState::Challenged && record.proof_deadline == 0 {
+            return Ok(ResolutionStatus {
+                resolvable: true,
+                root_state: RootState::Invalidated,
+                invalidation_reason: InvalidationReason::ProofTimeout,
+            });
+        }
+        if root_state == RootState::Proposed && record.challenge_deadline == 0 {
+            return Ok(ResolutionStatus {
+                resolvable: true,
+                root_state: if record.proof_bitmap == 0 {
+                    RootState::Invalidated
+                } else {
+                    RootState::Finalized
+                },
+                invalidation_reason: if record.proof_bitmap == 0 {
+                    InvalidationReason::ProofTimeout
+                } else {
+                    InvalidationReason::None
+                },
+            });
+        }
 
         Ok(ResolutionStatus {
             resolvable: false,
@@ -384,29 +402,36 @@ impl ProposerClient for FakeExecution {
             invalidation_reason: InvalidationReason::None,
         })
     }
+}
+
+#[async_trait]
+impl ProposerClient for FakeExecution {
+    /// The fake has no registry finality airgap: a resolved game is immediately closeable.
+    async fn is_game_finalized(&self, _game: Address) -> Result<bool, ProposerError> {
+        Ok(true)
+    }
 
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
+        let status = self.lineage_resolution_status(game).await?;
+        if !status.resolvable {
+            return Err(ProposerError::Contract(format!(
+                "game {game} is not resolvable"
+            )));
+        }
         let mut state = self.state.lock().expect("fake execution mutex poisoned");
-        let parent_unresolved = {
-            let record = state
-                .games_by_address
-                .get(&game)
-                .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
-            parent_is_unresolved(&state, record)
-        };
         let record = state
             .games_by_address
             .get_mut(&game)
             .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
-        if parent_unresolved
-            || !matches!(record.state, STATE_PROPOSED | STATE_CHALLENGED)
-            || !has_threshold(record.proof_bitmap)
-        {
-            return Err(ProposerError::Contract(format!(
-                "game {game} is not positively resolvable"
-            )));
-        }
-        record.state = STATE_FINALIZED;
+        record.state = match status.root_state {
+            RootState::Finalized => STATE_FINALIZED,
+            RootState::Invalidated => STATE_INVALIDATED,
+            _ => {
+                return Err(ProposerError::Contract(format!(
+                    "game {game} has no terminal outcome"
+                )));
+            }
+        };
 
         Ok(ResolveSubmission {
             tx_hash: B256::with_last_byte(game.as_slice()[19]),
@@ -425,7 +450,7 @@ impl ProposerClient for FakeExecution {
             )));
         }
         let l2_block_number = record.event.l2_block_number;
-        state.anchor = AnchorRef {
+        state.anchor = LineageAnchor {
             address: game,
             l2_block_number,
         };
@@ -542,36 +567,6 @@ impl ChallengerClient for FakeExecution {
 
 #[async_trait]
 impl DefenderClient for FakeExecution {
-    async fn game_count(&self) -> Result<u64, DefenderError> {
-        Ok(self
-            .state
-            .lock()
-            .expect("fake execution mutex poisoned")
-            .game_order
-            .len() as u64)
-    }
-
-    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, DefenderError> {
-        self.state
-            .lock()
-            .expect("fake execution mutex poisoned")
-            .game_order
-            .get(index as usize)
-            .copied()
-            .map(Some)
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game index {index}")))
-    }
-
-    async fn game_created_at(&self, index: u64) -> Result<u64, DefenderError> {
-        self.state
-            .lock()
-            .expect("fake execution mutex poisoned")
-            .game_order
-            .get(index as usize)
-            .map(|_| u64::MAX)
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game index {index}")))
-    }
-
     async fn game_metadata(&self, game: Address) -> Result<DefenderGameMetadata, DefenderError> {
         let state = self.state.lock().expect("fake execution mutex poisoned");
         state
@@ -592,67 +587,6 @@ impl DefenderClient for FakeExecution {
             .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
     }
 
-    async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, DefenderError> {
-        let state = self.state.lock().expect("fake execution mutex poisoned");
-        let record = state
-            .games_by_address
-            .get(&game)
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))?;
-        let current_state = RootState::try_from(record.state)?;
-
-        if current_state == RootState::Finalized {
-            return Ok(ResolutionStatus {
-                resolvable: false,
-                root_state: current_state,
-                invalidation_reason: InvalidationReason::None,
-            });
-        }
-        if parent_is_unresolved(&state, record) {
-            return Ok(ResolutionStatus {
-                resolvable: false,
-                root_state: current_state,
-                invalidation_reason: InvalidationReason::None,
-            });
-        }
-        if matches!(current_state, RootState::Proposed | RootState::Challenged)
-            && has_threshold(record.proof_bitmap)
-        {
-            return Ok(ResolutionStatus {
-                resolvable: true,
-                root_state: RootState::Finalized,
-                invalidation_reason: InvalidationReason::None,
-            });
-        }
-        if current_state == RootState::Challenged && record.proof_deadline == 0 {
-            return Ok(ResolutionStatus {
-                resolvable: true,
-                root_state: RootState::Invalidated,
-                invalidation_reason: InvalidationReason::ProofTimeout,
-            });
-        }
-        if current_state == RootState::Proposed && record.challenge_deadline == 0 {
-            return Ok(ResolutionStatus {
-                resolvable: true,
-                root_state: if record.proof_bitmap == 0 {
-                    RootState::Invalidated
-                } else {
-                    RootState::Finalized
-                },
-                invalidation_reason: if record.proof_bitmap == 0 {
-                    InvalidationReason::ProofTimeout
-                } else {
-                    InvalidationReason::None
-                },
-            });
-        }
-
-        Ok(ResolutionStatus {
-            resolvable: false,
-            root_state: current_state,
-            invalidation_reason: InvalidationReason::None,
-        })
-    }
-
     async fn proof_bitmap(&self, game: Address) -> Result<u8, DefenderError> {
         self.state
             .lock()
@@ -661,35 +595,6 @@ impl DefenderClient for FakeExecution {
             .get(&game)
             .map(|record| record.proof_bitmap)
             .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
-    }
-
-    async fn resolve_game(
-        &self,
-        game: Address,
-    ) -> Result<DefenderResolveSubmission, DefenderError> {
-        let status = DefenderClient::resolution_status(self, game).await?;
-        if !status.resolvable {
-            return Err(DefenderError::Contract(format!(
-                "game {game} is not resolvable"
-            )));
-        }
-        let mut state = self.state.lock().expect("fake execution mutex poisoned");
-        let record = state
-            .games_by_address
-            .get_mut(&game)
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))?;
-        record.state = match status.root_state {
-            RootState::Finalized => STATE_FINALIZED,
-            RootState::Invalidated => STATE_INVALIDATED,
-            _ => {
-                return Err(DefenderError::Contract(format!(
-                    "game {game} has no terminal outcome"
-                )));
-            }
-        };
-        Ok(DefenderResolveSubmission {
-            tx_hash: B256::with_last_byte(game.as_slice()[19]),
-        })
     }
 
     async fn submit_proof(

@@ -1,23 +1,27 @@
 use crate::{
     error::DefenderError,
     traits::DefenderClient,
-    types::{DefenderSubmission, GameMetadata, ResolveSubmission},
+    types::{DefenderSubmission, GameMetadata},
 };
 use alloy_primitives::{Address, Bytes, U256};
 use alloy_provider::Provider;
-use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
 use world_chain_proofs::{
-    IDisputeGameFactory, IMultiProofGame, MULTI_PROOF_GAME_TYPE, PROOF_LANE_COUNT, ResolutionStatus,
+    IAnchorStateRegistry, IDisputeGameFactory, IMultiProofGame, LineageAnchor, LineageError,
+    LineageGame, LineageProvider, LineageTransition, PROOF_LANE_COUNT, RegisteredLineageConfig,
+    ResolutionStatus, read_game_for_transition, read_lineage_anchor,
+    read_lineage_resolution_status, read_registered_lineage_config,
 };
 
 /// Alloy-backed implementation of [`DefenderClient`].
 ///
-/// Binds the stock OP Stack `DisputeGameFactory`; WIP-1006 games are one game type among
-/// several on that factory, so every index-based read filters on [`MULTI_PROOF_GAME_TYPE`].
+/// Binds the stock OP Stack `DisputeGameFactory` and the anchor registry configured by its
+/// registered WIP-1006 implementation.
 #[derive(Debug, Clone)]
 pub struct AlloyDefenderClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
+    anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
+    registered: RegisteredLineageConfig,
     confirmations: u64,
     provider: P,
 }
@@ -26,18 +30,29 @@ impl<P> AlloyDefenderClient<P>
 where
     P: Provider + Clone,
 {
-    /// Creates a new Alloy-backed contract client.
-    pub fn new(provider: P, factory_address: Address, confirmations: u64) -> Self {
+    /// Connects to the registered WIP-1006 implementation and its anchor registry.
+    pub async fn new(
+        provider: P,
+        factory_address: Address,
+        confirmations: u64,
+    ) -> Result<Self, DefenderError> {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
             provider.clone(),
         );
+        let registered = read_registered_lineage_config(&provider, &factory).await?;
+        let anchor = IAnchorStateRegistry::IAnchorStateRegistryInstance::new(
+            registered.anchor_registry,
+            provider.clone(),
+        );
 
-        Self {
+        Ok(Self {
             factory,
+            anchor,
+            registered,
             confirmations,
             provider,
-        }
+        })
     }
 
     fn game(&self, address: Address) -> IMultiProofGame::IMultiProofGameInstance<P> {
@@ -46,43 +61,38 @@ where
 }
 
 #[async_trait]
+impl<P> LineageProvider for AlloyDefenderClient<P>
+where
+    P: Provider + Clone + Send + Sync + 'static,
+{
+    fn lineage_block_interval(&self) -> u64 {
+        self.registered.block_interval
+    }
+
+    async fn lineage_anchor(&self) -> Result<LineageAnchor, LineageError> {
+        read_lineage_anchor(&self.provider, &self.anchor).await
+    }
+
+    async fn game_for_transition(
+        &self,
+        transition: LineageTransition,
+    ) -> Result<Option<LineageGame>, LineageError> {
+        read_game_for_transition(&self.factory, self.registered.domain_hash, transition).await
+    }
+
+    async fn lineage_resolution_status(
+        &self,
+        game: Address,
+    ) -> Result<ResolutionStatus, LineageError> {
+        read_lineage_resolution_status(&self.game(game)).await
+    }
+}
+
+#[async_trait]
 impl<P> DefenderClient for AlloyDefenderClient<P>
 where
     P: Provider + Clone + Send + Sync + 'static,
 {
-    async fn game_count(&self) -> Result<u64, DefenderError> {
-        let count = self
-            .factory
-            .gameCount()
-            .block(BlockId::finalized())
-            .call()
-            .await
-            .map_err(|error| DefenderError::Contract(error.to_string()))?;
-        u256_to_u64(count, "gameCount")
-    }
-
-    async fn game_address_at(&self, index: u64) -> Result<Option<Address>, DefenderError> {
-        let entry = self
-            .factory
-            .gameAtIndex(U256::from(index))
-            .block(BlockId::finalized())
-            .call()
-            .await
-            .map_err(|error| DefenderError::Contract(error.to_string()))?;
-
-        Ok((entry.gameType == MULTI_PROOF_GAME_TYPE).then_some(entry.proxy))
-    }
-
-    async fn game_created_at(&self, index: u64) -> Result<u64, DefenderError> {
-        self.factory
-            .gameAtIndex(U256::from(index))
-            .block(BlockId::finalized())
-            .call()
-            .await
-            .map(|entry| entry.timestamp)
-            .map_err(|error| DefenderError::Contract(error.to_string()))
-    }
-
     async fn game_metadata(&self, address: Address) -> Result<GameMetadata, DefenderError> {
         let game = self.game(address);
         let (
@@ -130,47 +140,12 @@ where
         })
     }
 
-    async fn resolution_status(&self, address: Address) -> Result<ResolutionStatus, DefenderError> {
-        let result = self
-            .game(address)
-            .resolutionStatus()
-            .call()
-            .await
-            .map_err(|error| DefenderError::Contract(error.to_string()))?;
-        let root_state = result.outcome.try_into()?;
-        let invalidation_reason = result.reason.try_into()?;
-
-        Ok(ResolutionStatus {
-            resolvable: result.resolvable,
-            root_state,
-            invalidation_reason,
-        })
-    }
-
     async fn proof_bitmap(&self, address: Address) -> Result<u8, DefenderError> {
         self.game(address)
             .proofBitmap()
             .call()
             .await
             .map_err(|error| DefenderError::Contract(error.to_string()))
-    }
-
-    async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, DefenderError> {
-        let pending = self
-            .game(game)
-            .resolve()
-            .send()
-            .await
-            .map_err(|err| DefenderError::Contract(err.to_string()))?;
-        let tx_hash = *pending.tx_hash();
-        let receipt = pending
-            .get_receipt()
-            .await
-            .map_err(|err| DefenderError::Contract(err.to_string()))?;
-        if !receipt.status() {
-            return Err(DefenderError::Revert(tx_hash));
-        }
-        Ok(ResolveSubmission { tx_hash })
     }
 
     async fn submit_proof(

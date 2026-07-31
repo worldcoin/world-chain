@@ -13,15 +13,14 @@ use world_chain_proof_integration_tests::{
 use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
 };
-use world_chain_proofs::{ProofLane, RootState, has_threshold};
+use world_chain_proofs::{LineageProvider, ProofLane, RootState, has_threshold};
 use world_chain_proposer::{
-    CanonicalScan, ProposerClient, ProposerConfig, ProposerError, WorldChainProposer,
+    ProposerClient, ProposerConfig, ProposerError, ProposerScan, WorldChainProposer,
 };
 use world_chain_prover_service::{ProofBackend, ProverServiceConfig};
 
 fn proposer_config() -> ProposerConfig {
     ProposerConfig {
-        block_interval: BLOCK_INTERVAL,
         poll_interval: Duration::from_secs(1),
         max_resolutions_per_tick: 1,
     }
@@ -48,23 +47,23 @@ fn assert_defense_lanes(lanes: Vec<ProofLane>) {
 }
 
 async fn settle_with_proposer(proposer: &WorldChainProposer<FakeExecution, FakeConsensus>) {
-    let canonical_scan = proposer
-        .anchor_and_canonical_line()
+    let scan = proposer
+        .scan_selected_lineage()
         .await
-        .expect("canonical line reconstructed");
-    let finalized_games = proposer
-        .resolve_games(canonical_scan.canonical_line())
+        .expect("selected lineage reconstructed");
+    let highest_finalized_game = proposer
+        .resolve_games(scan.lineage().games())
         .await
         .expect("canonical games resolved");
     proposer
-        .advance_anchor(finalized_games)
+        .advance_anchor(highest_finalized_game)
         .await
         .expect("anchor advanced");
 }
 
 async fn post_proposal(
     proposer: &WorldChainProposer<FakeExecution, FakeConsensus>,
-    scan: &CanonicalScan,
+    scan: &ProposerScan,
 ) -> Result<(), ProposerError> {
     proposer.submit_next_proposal(scan).await
 }
@@ -76,11 +75,11 @@ async fn fake_resolution_matches_contract_transition_semantics() {
     let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
     let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus);
 
-    let canonical_scan = proposer
-        .anchor_and_canonical_line()
+    let scan = proposer
+        .scan_selected_lineage()
         .await
-        .expect("canonical line reconstructed");
-    post_proposal(&proposer, &canonical_scan)
+        .expect("selected lineage reconstructed");
+    post_proposal(&proposer, &scan)
         .await
         .expect("proposal posted");
     let game = chain.latest_game().expect("game created").game;
@@ -103,7 +102,7 @@ async fn fake_resolution_matches_contract_transition_semantics() {
         .await
         .expect("TEE proof submitted");
 
-    let ready = ProposerClient::resolution_status(&chain, game)
+    let ready = LineageProvider::lineage_resolution_status(&chain, game)
         .await
         .expect("resolution status available");
     assert!(ready.resolvable);
@@ -112,7 +111,7 @@ async fn fake_resolution_matches_contract_transition_semantics() {
 
     settle_with_proposer(&proposer).await;
 
-    let finalized = ProposerClient::resolution_status(&chain, game)
+    let finalized = LineageProvider::lineage_resolution_status(&chain, game)
         .await
         .expect("resolution status available");
     assert!(!finalized.resolvable);
@@ -227,11 +226,11 @@ async fn invalid_root_is_challenged_by_real_challenger() {
 
     let proposer =
         WorldChainProposer::new(proposer_config(), chain.clone(), bad_proposer_consensus);
-    let canonical_scan = proposer
-        .anchor_and_canonical_line()
+    let scan = proposer
+        .scan_selected_lineage()
         .await
-        .expect("canonical line reconstructed");
-    post_proposal(&proposer, &canonical_scan)
+        .expect("selected lineage reconstructed");
+    post_proposal(&proposer, &scan)
         .await
         .expect("bad proposal posted");
     let game = chain.latest_game().expect("game created").game;
@@ -253,11 +252,11 @@ async fn valid_proposal_receives_initial_tee_proof_through_worker() {
     let canonical_root = B256::repeat_byte(0x20);
     let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
     let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus.clone());
-    let canonical_scan = proposer
-        .anchor_and_canonical_line()
+    let scan = proposer
+        .scan_selected_lineage()
         .await
-        .expect("canonical line reconstructed");
-    post_proposal(&proposer, &canonical_scan)
+        .expect("selected lineage reconstructed");
+    post_proposal(&proposer, &scan)
         .await
         .expect("proposal posted");
     let game = chain.latest_game().expect("game created").game;
@@ -293,11 +292,11 @@ async fn valid_challenged_root_is_defended_through_workers() {
     let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
 
     let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus.clone());
-    let canonical_scan = proposer
-        .anchor_and_canonical_line()
+    let scan = proposer
+        .scan_selected_lineage()
         .await
-        .expect("canonical line reconstructed");
-    post_proposal(&proposer, &canonical_scan)
+        .expect("selected lineage reconstructed");
+    post_proposal(&proposer, &scan)
         .await
         .expect("proposal posted");
     let game = chain.latest_game().expect("game created").game;
@@ -338,11 +337,11 @@ async fn valid_challenged_root_survives_transient_proof_failure() {
     let consensus = FakeConsensus::new(BLOCK_INTERVAL).with_root(BLOCK_INTERVAL, canonical_root);
 
     let proposer = WorldChainProposer::new(proposer_config(), chain.clone(), consensus.clone());
-    let canonical_scan = proposer
-        .anchor_and_canonical_line()
+    let scan = proposer
+        .scan_selected_lineage()
         .await
-        .expect("canonical line reconstructed");
-    post_proposal(&proposer, &canonical_scan)
+        .expect("selected lineage reconstructed");
+    post_proposal(&proposer, &scan)
         .await
         .expect("proposal posted");
     let game = chain.latest_game().expect("game created").game;
@@ -393,11 +392,11 @@ async fn defender_ignores_challenged_invalid_root() {
 
     let proposer =
         WorldChainProposer::new(proposer_config(), chain.clone(), bad_proposer_consensus);
-    let canonical_scan = proposer
-        .anchor_and_canonical_line()
+    let scan = proposer
+        .scan_selected_lineage()
         .await
-        .expect("canonical line reconstructed");
-    post_proposal(&proposer, &canonical_scan)
+        .expect("selected lineage reconstructed");
+    post_proposal(&proposer, &scan)
         .await
         .expect("bad proposal posted");
     let game = chain.latest_game().expect("game created").game;

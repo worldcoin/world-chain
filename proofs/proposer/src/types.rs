@@ -1,34 +1,5 @@
 use alloy_primitives::{Address, B256, TxHash, U256};
-use world_chain_proofs::{InvalidationReason, ProposalCommitment};
-
-/// The parent checkpoint selected from the anchor registry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AnchorRef {
-    /// Current anchor game, or the registry sentinel before the first game is anchored.
-    pub address: Address,
-    /// L2 block number of the anchor output root.
-    pub l2_block_number: u64,
-}
-
-impl AnchorRef {
-    /// Returns the parent reference new proposals extending the anchor must use.
-    #[must_use]
-    pub const fn parent_ref(self) -> ParentRef {
-        ParentRef {
-            address: self.address,
-            l2_block_number: self.l2_block_number,
-        }
-    }
-}
-
-/// A game already registered on the factory for a transition the proposer is scanning.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TransitionGame {
-    /// Address of the game clone.
-    pub address: Address,
-    /// Retry nonce the game was created with.
-    pub attempt: u64,
-}
+use world_chain_proofs::{InvalidationReason, ProposalCommitment, SelectedLineage};
 
 /// A pending `DelayedWETH` withdrawal opened by the first `claimCredit` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -39,28 +10,25 @@ pub struct PendingWithdrawal {
     pub unlock_at: u64,
 }
 
-/// The canonical lineage discovered by the proposer and the action available at its tip.
+/// The selected lineage discovered by the proposer and the action available at its tip.
 #[derive(Debug)]
-pub struct CanonicalScan {
-    canonical_line: CanonicalLine,
+pub struct ProposerScan {
+    lineage: SelectedLineage,
     next_action: NextProposalAction,
 }
 
-impl CanonicalScan {
-    pub(crate) const fn new(
-        canonical_line: CanonicalLine,
-        next_action: NextProposalAction,
-    ) -> Self {
+impl ProposerScan {
+    pub(crate) const fn new(lineage: SelectedLineage, next_action: NextProposalAction) -> Self {
         Self {
-            canonical_line,
+            lineage,
             next_action,
         }
     }
 
-    /// Returns the valid canonical lineage found by the scan.
+    /// Returns the valid selected lineage found by the scan.
     #[must_use]
-    pub const fn canonical_line(&self) -> &CanonicalLine {
-        &self.canonical_line
+    pub const fn lineage(&self) -> &SelectedLineage {
+        &self.lineage
     }
 
     /// Returns the action available at the tip of the canonical lineage.
@@ -82,8 +50,8 @@ pub enum NextProposalAction {
         /// Invalidated game that this proposal replaces.
         invalidated_game: Address,
     },
-    /// Wait for the challenger to resolve a game whose outcome is negative.
-    AwaitNegativeResolution {
+    /// Resolve the selected game with its determined negative outcome.
+    ResolveNegative {
         /// Game that is ready to resolve negatively.
         game: Address,
         /// Negative outcome reported by the game.
@@ -103,76 +71,6 @@ pub enum NextProposalAction {
         /// Current finalized L2 block reported by the consensus client.
         finalized_block: u64,
     },
-}
-
-/// The current anchor checkpoint and the canonical games built on top of it.
-#[derive(Debug)]
-pub struct CanonicalLine {
-    anchor: ParentRef,
-    games: Vec<ParentRef>,
-}
-
-impl CanonicalLine {
-    /// Creates an empty canonical line rooted at `anchor`.
-    #[must_use]
-    pub const fn new(anchor: ParentRef) -> Self {
-        Self {
-            anchor,
-            games: Vec::new(),
-        }
-    }
-
-    /// Returns the checkpoint this canonical line is rooted at.
-    #[must_use]
-    pub const fn anchor(&self) -> ParentRef {
-        self.anchor
-    }
-
-    /// Appends a canonical game built on the current tip.
-    pub fn push_game(&mut self, game: ParentRef) {
-        self.games.push(game);
-    }
-
-    /// Returns the canonical games built on top of the anchor.
-    #[must_use]
-    pub fn games(&self) -> &[ParentRef] {
-        &self.games
-    }
-
-    /// Returns the last canonical game, or the anchor when no game exists yet.
-    #[must_use]
-    pub fn tip(&self) -> ParentRef {
-        self.games.last().copied().unwrap_or(self.anchor)
-    }
-}
-
-/// Canonical games that have reached the finalized state and may advance the anchor.
-#[derive(Debug, Default)]
-pub struct FinalizedGames {
-    /// Finalized games ordered by increasing L2 block number.
-    pub games: Vec<ParentRef>,
-}
-
-impl FinalizedGames {
-    /// Appends a finalized game to the ordered collection.
-    pub fn push(&mut self, game: ParentRef) {
-        self.games.push(game);
-    }
-
-    /// Returns the finalized game with the highest L2 block number, if any.
-    #[must_use]
-    pub fn last(&self) -> Option<ParentRef> {
-        self.games.last().copied()
-    }
-}
-
-/// A parent reference that the next proposal should build on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ParentRef {
-    /// Address of the anchor registry or parent game.
-    pub address: Address,
-    /// L2 block number of the parent output root.
-    pub l2_block_number: u64,
 }
 
 /// Candidate proposal data supplied to the dispute-game factory.

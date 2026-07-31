@@ -2561,11 +2561,6 @@ async fn start_world_chain_proposer(
         .proof_system_factory
         .parse()
         .wrap_err("invalid proof-system factory address")?;
-    let anchor_address: Address = deployment
-        .anchor_state_registry
-        .parse()
-        .wrap_err("invalid anchor-state-registry address")?;
-
     let signer: PrivateKeySigner = DEVNET_PRIVATE_KEY
         .parse()
         .wrap_err("invalid World Chain proposer signing key")?;
@@ -2575,14 +2570,9 @@ async fn start_world_chain_proposer(
         .connect_http(Url::parse(l1_rpc_url)?);
 
     let required_confirmations = 1;
-    let contracts = AlloyProofSystemClient::new(
-        provider,
-        factory_address,
-        anchor_address,
-        required_confirmations,
-    )
-    .await
-    .wrap_err("failed to bind the World Chain proof system")?;
+    let contracts = AlloyProofSystemClient::new(provider, factory_address, required_confirmations)
+        .await
+        .wrap_err("failed to bind the World Chain proof system")?;
     let mut bond_manager = BondManager::new(
         BondManagerConfig {
             poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
@@ -2591,22 +2581,21 @@ async fn start_world_chain_proposer(
         contracts.clone(),
     );
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
-    let domain_hash = contracts.domain_hash();
+    let registered = contracts.registered_lineage_config();
     let config = ProposerConfig {
-        block_interval: deployment.block_interval,
         poll_interval: WORLD_PROPOSER_POLL_INTERVAL,
         max_resolutions_per_tick: ProposerConfig::default().max_resolutions_per_tick,
     };
-    let mut proposer = WorldChainProposer::new(config, contracts, output_roots);
+    let proposer = WorldChainProposer::new(config, contracts, output_roots);
 
     info!(
         l1_rpc_url,
         output_root_rpc_url,
         dispute_game_factory = %deployment.proof_system_factory,
-        anchor = %deployment.anchor_state_registry,
+        anchor = %registered.anchor_registry,
         proposer = %proposer_address,
-        domain_hash = %domain_hash,
-        block_interval = deployment.block_interval,
+        domain_hash = %registered.domain_hash,
+        block_interval = registered.block_interval,
         "starting native World Chain proof-system proposer"
     );
 
@@ -2739,7 +2728,7 @@ async fn start_world_chain_challenger(
 /// The defender signs with [`WORLD_DEFENDER_PRIVATE_KEY`], a dedicated dev
 /// account that is funded through the L1 genesis. It supplies the initial TEE
 /// proof for valid WIP-1006 games, escalates challenged games to the configured
-/// threshold, and resolves negative outcomes.
+/// threshold, and follows the lineage selected from the current anchor.
 async fn start_world_chain_defender(
     l1_rpc_url: &str,
     output_root_rpc_url: &str,
@@ -2763,7 +2752,9 @@ async fn start_world_chain_defender(
         provider,
         factory_address,
         DEFAULT_DEFENDER_L1_TX_CONFIRMATIONS,
-    );
+    )
+    .await
+    .map_err(|error| eyre!("failed to connect defender to proof system: {error}"))?;
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let proof_requester = RpcProverServiceClient::new(prover_service_url)
         .map_err(|error| eyre!("failed to connect defender to prover-service: {error}"))?;

@@ -10,17 +10,17 @@ use std::{
 use alloy_primitives::{Address, B256, BlockNumber, U256, address, b256};
 use async_trait::async_trait;
 use world_chain_proofs::{
-    ConsensusError, ConsensusProvider, InvalidationReason, ProposalCommitment, ResolutionStatus,
-    RootState,
+    ConsensusError, ConsensusProvider, InvalidationReason, LineageAnchor, LineageError,
+    LineageGame, LineageProvider, LineageTransition, ProposalCommitment, ResolutionStatus,
+    RootState, SelectedLineageGame,
 };
 
 use crate::{
-    AnchorRef, BondManager, BondManagerClient, BondManagerConfig, CanonicalLine, ParentRef,
-    Proposal, ProposalSubmission, ProposerClient, ProposerConfig, ProposerError,
-    WorldChainProposer,
+    BondManager, BondManagerClient, BondManagerConfig, Proposal, ProposalSubmission,
+    ProposerClient, ProposerConfig, ProposerError, ProposerScan, WorldChainProposer,
     types::{
-        CanonicalScan, ClaimSubmission, CloseGameSubmission, NextProposalAction, PendingWithdrawal,
-        ResolveSubmission, TransitionGame,
+        ClaimSubmission, CloseGameSubmission, NextProposalAction, PendingWithdrawal,
+        ResolveSubmission,
     },
 };
 
@@ -33,7 +33,7 @@ const MAX_TEST_ATTEMPT: u64 = 4;
 
 #[derive(Debug, Clone)]
 struct MockContracts {
-    anchor: AnchorRef,
+    anchor: LineageAnchor,
     /// Games keyed by their `DisputeGameFactory` UUID.
     games: HashMap<B256, Address>,
     submissions: Arc<Mutex<Vec<Proposal>>>,
@@ -46,37 +46,39 @@ struct MockContracts {
 }
 
 #[async_trait]
-impl ProposerClient for MockContracts {
-    async fn anchor_parent(&self) -> Result<AnchorRef, ProposerError> {
+impl LineageProvider for MockContracts {
+    fn lineage_block_interval(&self) -> u64 {
+        10
+    }
+
+    async fn lineage_anchor(&self) -> Result<LineageAnchor, LineageError> {
         Ok(self.anchor)
     }
 
     async fn game_for_transition(
         &self,
-        parent_ref: Address,
-        root_claim: B256,
-        l2_block_number: u64,
-    ) -> Result<Option<TransitionGame>, ProposerError> {
+        transition: LineageTransition,
+    ) -> Result<Option<LineageGame>, LineageError> {
         let mut latest = None;
         for attempt in 0..MAX_TEST_ATTEMPT {
-            let uuid = game_uuid(parent_ref, root_claim, l2_block_number, attempt);
+            let uuid = game_uuid(
+                transition.parent_ref,
+                transition.root_claim,
+                transition.l2_block_number,
+                attempt,
+            );
             let Some(address) = self.games.get(&uuid).copied() else {
                 break;
             };
-            latest = Some(TransitionGame { address, attempt });
+            latest = Some(LineageGame { address, attempt });
         }
         Ok(latest)
     }
 
-    async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError> {
-        Ok(!self
-            .unfinalized_games
-            .lock()
-            .expect("not poisoned")
-            .contains(&game))
-    }
-
-    async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
+    async fn lineage_resolution_status(
+        &self,
+        game: Address,
+    ) -> Result<ResolutionStatus, LineageError> {
         Ok(self
             .resolution_statuses
             .lock()
@@ -87,6 +89,17 @@ impl ProposerClient for MockContracts {
                 root_state: RootState::Proposed,
                 invalidation_reason: InvalidationReason::None,
             }))
+    }
+}
+
+#[async_trait]
+impl ProposerClient for MockContracts {
+    async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError> {
+        Ok(!self
+            .unfinalized_games
+            .lock()
+            .expect("not poisoned")
+            .contains(&game))
     }
 
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
@@ -331,7 +344,6 @@ impl ConsensusProvider for MockOutputRoots {
 
 fn config() -> ProposerConfig {
     ProposerConfig {
-        block_interval: 10,
         poll_interval: Duration::from_secs(1),
         max_resolutions_per_tick: 1,
     }
@@ -339,7 +351,7 @@ fn config() -> ProposerConfig {
 
 async fn advance_proposal(
     proposer: &WorldChainProposer<MockContracts, MockOutputRoots>,
-    scan: &CanonicalScan,
+    scan: &ProposerScan,
 ) -> Result<(), ProposerError> {
     proposer.submit_next_proposal(scan).await
 }
@@ -352,15 +364,15 @@ fn positive_ready_status() -> ResolutionStatus {
     }
 }
 
-fn anchor_at(l2_block_number: u64) -> AnchorRef {
-    AnchorRef {
+fn anchor_at(l2_block_number: u64) -> LineageAnchor {
+    LineageAnchor {
         address: ANCHOR,
         l2_block_number,
     }
 }
 
-fn anchor_advanced_onto(anchor_game: Address, l2_block_number: u64) -> AnchorRef {
-    AnchorRef {
+fn anchor_advanced_onto(anchor_game: Address, l2_block_number: u64) -> LineageAnchor {
+    LineageAnchor {
         address: anchor_game,
         l2_block_number,
     }
@@ -369,6 +381,14 @@ fn anchor_advanced_onto(anchor_game: Address, l2_block_number: u64) -> AnchorRef
 fn timed_out_status() -> ResolutionStatus {
     ResolutionStatus {
         resolvable: false,
+        root_state: RootState::Invalidated,
+        invalidation_reason: InvalidationReason::ProofTimeout,
+    }
+}
+
+fn negatively_resolvable_timeout() -> ResolutionStatus {
+    ResolutionStatus {
+        resolvable: true,
         root_state: RootState::Invalidated,
         invalidation_reason: InvalidationReason::ProofTimeout,
     }
@@ -390,6 +410,20 @@ fn game_address(index: u64) -> Address {
     Address::from(bytes)
 }
 
+fn selected_game(address: Address, l2_block_number: u64) -> SelectedLineageGame {
+    SelectedLineageGame {
+        transition: LineageTransition {
+            parent_ref: ANCHOR,
+            root_claim: B256::ZERO,
+            l2_block_number,
+        },
+        game: LineageGame {
+            address,
+            attempt: 0,
+        },
+    }
+}
+
 fn bond_manager_config(initial_scan_limit: u64) -> BondManagerConfig {
     BondManagerConfig {
         poll_interval: Duration::from_secs(1),
@@ -398,7 +432,7 @@ fn bond_manager_config(initial_scan_limit: u64) -> BondManagerConfig {
 }
 
 #[tokio::test]
-async fn anchor_and_canonical_line_walks_existing_games_until_gap() {
+async fn scan_selected_lineage_walks_existing_games_until_gap() {
     let root_10 = B256::repeat_byte(0x10);
     let root_20 = B256::repeat_byte(0x20);
     let mut games = HashMap::new();
@@ -420,15 +454,11 @@ async fn anchor_and_canonical_line_walks_existing_games_until_gap() {
     };
     let proposer = WorldChainProposer::new(config(), contracts, output_roots);
 
-    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
+    let scan = proposer.scan_selected_lineage().await.unwrap();
 
-    assert_eq!(
-        canonical_scan.canonical_line().games(),
-        &[ParentRef {
-            address: GAME_1,
-            l2_block_number: 10,
-        }]
-    );
+    assert_eq!(scan.lineage().games().len(), 1);
+    assert_eq!(scan.lineage().games()[0].game.address, GAME_1);
+    assert_eq!(scan.lineage().games()[0].transition.l2_block_number, 10);
 }
 
 #[tokio::test]
@@ -449,9 +479,9 @@ async fn propose_submits_proposal_after_last_canonical_game() {
         finalized_l2_block: 10,
     };
     let proposer = WorldChainProposer::new(config(), contracts, output_roots);
-    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
+    let scan = proposer.scan_selected_lineage().await.unwrap();
 
-    advance_proposal(&proposer, &canonical_scan).await.unwrap();
+    advance_proposal(&proposer, &scan).await.unwrap();
 
     let proposal = submissions.lock().expect("not poisoned")[0];
     assert_eq!(proposal.parent_ref, ANCHOR);
@@ -479,51 +509,60 @@ async fn propose_can_retry_a_failed_submission() {
         finalized_l2_block: 10,
     };
     let proposer = WorldChainProposer::new(config(), contracts, output_roots);
-    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
+    let scan = proposer.scan_selected_lineage().await.unwrap();
 
     assert!(matches!(
-        advance_proposal(&proposer, &canonical_scan).await,
+        advance_proposal(&proposer, &scan).await,
         Err(ProposerError::Contract(_))
     ));
     assert!(submissions.lock().expect("not poisoned").is_empty());
 
-    advance_proposal(&proposer, &canonical_scan).await.unwrap();
+    advance_proposal(&proposer, &scan).await.unwrap();
 
     assert_eq!(submissions.lock().expect("not poisoned").len(), 1);
 }
 
 #[tokio::test]
-async fn zero_block_interval_is_rejected() {
+async fn proposer_resolves_the_selected_negative_game() {
+    let root = B256::repeat_byte(0x10);
+    let resolutions = Arc::default();
     let contracts = MockContracts {
         anchor: anchor_at(0),
-        games: HashMap::new(),
+        games: HashMap::from([(game_uuid(ANCHOR, root, 10, 0), GAME_1)]),
         submissions: Arc::default(),
-        resolution_statuses: Arc::default(),
-        resolutions: Arc::default(),
+        resolution_statuses: Arc::new(Mutex::new(HashMap::from([(
+            GAME_1,
+            negatively_resolvable_timeout(),
+        )]))),
+        resolutions: Arc::clone(&resolutions),
         closures: Arc::default(),
         submission_failures: Arc::default(),
         unfinalized_games: Arc::default(),
     };
     let proposer = WorldChainProposer::new(
-        ProposerConfig {
-            block_interval: 0,
-            ..config()
-        },
+        config(),
         contracts,
         MockOutputRoots {
-            roots: HashMap::new(),
-            finalized_l2_block: 0,
+            roots: HashMap::from([(10, root)]),
+            finalized_l2_block: 10,
         },
     );
 
-    assert!(matches!(
-        proposer.anchor_and_canonical_line().await,
-        Err(ProposerError::InvalidConfig(_))
-    ));
+    let scan = proposer.scan_selected_lineage().await.unwrap();
+    assert_eq!(
+        scan.next_action(),
+        &NextProposalAction::ResolveNegative {
+            game: GAME_1,
+            reason: InvalidationReason::ProofTimeout,
+        }
+    );
+
+    proposer.submit_next_proposal(&scan).await.unwrap();
+    assert_eq!(*resolutions.lock().expect("not poisoned"), vec![GAME_1]);
 }
 
 #[tokio::test]
-async fn anchor_and_canonical_line_stops_at_finalized_l2_block() {
+async fn scan_selected_lineage_stops_at_finalized_l2_block() {
     let contracts = MockContracts {
         anchor: anchor_at(0),
         games: HashMap::new(),
@@ -540,16 +579,10 @@ async fn anchor_and_canonical_line_stops_at_finalized_l2_block() {
     };
     let proposer = WorldChainProposer::new(config(), contracts, output_roots);
 
-    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
+    let scan = proposer.scan_selected_lineage().await.unwrap();
 
-    assert!(canonical_scan.canonical_line().games().is_empty());
-    assert_eq!(
-        canonical_scan.canonical_line().anchor(),
-        ParentRef {
-            address: ANCHOR,
-            l2_block_number: 0,
-        }
-    );
+    assert!(scan.lineage().games().is_empty());
+    assert_eq!(scan.lineage().anchor(), anchor_at(0));
 }
 
 #[tokio::test]
@@ -590,37 +623,23 @@ async fn resolve_games_caps_submissions_and_keeps_scanning_finalized_games() {
             finalized_l2_block: 0,
         },
     );
-    let mut canonical_line = CanonicalLine::new(ParentRef {
-        address: ANCHOR,
-        l2_block_number: 0,
-    });
-    canonical_line.push_game(ParentRef {
-        address: GAME_1,
-        l2_block_number: 10,
-    });
-    canonical_line.push_game(ParentRef {
-        address: game_2,
-        l2_block_number: 20,
-    });
-    canonical_line.push_game(ParentRef {
-        address: game_3,
-        l2_block_number: 30,
-    });
+    let games = [
+        selected_game(GAME_1, 10),
+        selected_game(game_2, 20),
+        selected_game(game_3, 30),
+    ];
 
-    let finalized_games = proposer.resolve_games(&canonical_line).await.unwrap();
+    let highest_finalized_game = proposer.resolve_games(&games).await.unwrap();
     assert_eq!(
         *resolutions.lock().expect("not poisoned"),
         vec![GAME_1, game_2]
     );
-    assert_eq!(
-        finalized_games.last(),
-        Some(ParentRef {
-            address: game_3,
-            l2_block_number: 30,
-        })
-    );
+    assert_eq!(highest_finalized_game, Some(selected_game(game_3, 30)));
 
-    proposer.advance_anchor(finalized_games).await.unwrap();
+    proposer
+        .advance_anchor(highest_finalized_game)
+        .await
+        .unwrap();
     assert_eq!(*closures.lock().expect("not poisoned"), vec![game_3]);
 }
 
@@ -658,27 +677,16 @@ async fn finalized_games_do_not_consume_resolution_budget() {
             finalized_l2_block: 0,
         },
     );
-    let mut canonical_line = CanonicalLine::new(ParentRef {
-        address: ANCHOR,
-        l2_block_number: 0,
-    });
-    for (address, l2_block_number) in [(GAME_1, 10), (game_2, 20), (game_3, 30)] {
-        canonical_line.push_game(ParentRef {
-            address,
-            l2_block_number,
-        });
-    }
+    let games = [
+        selected_game(GAME_1, 10),
+        selected_game(game_2, 20),
+        selected_game(game_3, 30),
+    ];
 
-    let finalized_games = proposer.resolve_games(&canonical_line).await.unwrap();
+    let highest_finalized_game = proposer.resolve_games(&games).await.unwrap();
 
     assert_eq!(*resolutions.lock().expect("not poisoned"), vec![game_2]);
-    assert_eq!(
-        finalized_games.last(),
-        Some(ParentRef {
-            address: game_2,
-            l2_block_number: 20,
-        })
-    );
+    assert_eq!(highest_finalized_game, Some(selected_game(game_2, 20)));
 }
 
 #[tokio::test]
@@ -706,7 +714,7 @@ async fn zero_resolution_budget_is_rejected() {
     );
 
     assert!(matches!(
-        proposer.anchor_and_canonical_line().await,
+        proposer.scan_selected_lineage().await,
         Err(ProposerError::InvalidConfig(_))
     ));
 }
@@ -942,11 +950,11 @@ async fn timed_out_game_retries_after_its_parent_becomes_the_anchor() {
         },
     );
 
-    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
+    let scan = proposer.scan_selected_lineage().await.unwrap();
 
-    assert!(canonical_scan.canonical_line().games().is_empty());
+    assert!(scan.lineage().games().is_empty());
     assert_eq!(
-        canonical_scan.next_action(),
+        scan.next_action(),
         &NextProposalAction::RetryTimedOut {
             proposal: Proposal {
                 parent_ref: parent,
@@ -982,10 +990,10 @@ async fn timed_out_game_bumps_attempt_while_its_parent_is_still_acceptable() {
         },
     );
 
-    let canonical_scan = proposer.anchor_and_canonical_line().await.unwrap();
+    let scan = proposer.scan_selected_lineage().await.unwrap();
 
     assert_eq!(
-        canonical_scan.next_action(),
+        scan.next_action(),
         &NextProposalAction::RetryTimedOut {
             proposal: Proposal {
                 parent_ref: ANCHOR,

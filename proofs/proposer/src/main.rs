@@ -38,17 +38,9 @@ struct Cli {
     #[arg(long, env = "FACTORY_ADDRESS")]
     factory_address: Address,
 
-    /// OP Stack `AnchorStateRegistry` address on L1.
-    #[arg(long, env = "ANCHOR_REGISTRY_ADDRESS")]
-    anchor_registry_address: Address,
-
     /// Hex-encoded private key the proposer signs L1 transactions with.
     #[arg(long, env = "PROPOSER_KEY", hide_env_values = true)]
     proposer_key: PrivateKeySigner,
-
-    /// L2 blocks between a proposal's parent and its claimed block.
-    #[arg(long, env = "BLOCK_INTERVAL")]
-    block_interval: u64,
 
     /// Seconds between output-root polls.
     #[arg(long, env = "POLL_INTERVAL_SECONDS", default_value_t = 12)]
@@ -89,36 +81,30 @@ async fn main() -> Result<()> {
         .wallet(EthereumWallet::from(cli.proposer_key))
         .connect_http(Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?);
 
-    let contracts = AlloyProofSystemClient::new(
-        provider,
-        cli.factory_address,
-        cli.anchor_registry_address,
-        cli.confirmations,
-    )
-    .await
-    .context("failed to bind the World Chain proof system")?;
+    let contracts = AlloyProofSystemClient::new(provider, cli.factory_address, cli.confirmations)
+        .await
+        .context("failed to bind the World Chain proof system")?;
     let bond_manager_config = BondManagerConfig {
         poll_interval: Duration::from_secs(cli.bond_manager_poll_interval_seconds),
         initial_scan_limit: cli.bond_manager_initial_scan_limit,
     };
     let mut bond_manager = BondManager::new(bond_manager_config, contracts.clone());
     let output_roots = OptimismConsensusClient::new(cli.output_root_rpc.clone());
-    let domain_hash = contracts.domain_hash();
+    let registered = contracts.registered_lineage_config();
     let config = ProposerConfig {
-        block_interval: cli.block_interval,
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_resolutions_per_tick: cli.max_resolutions_per_tick,
     };
-    let mut proposer = WorldChainProposer::new(config, contracts, output_roots);
+    let proposer = WorldChainProposer::new(config, contracts, output_roots);
 
     info!(
         l1_rpc_url = %cli.l1_rpc,
         output_root_rpc_url = %cli.output_root_rpc,
         dispute_game_factory = %cli.factory_address,
-        anchor = %cli.anchor_registry_address,
+        anchor = %registered.anchor_registry,
         proposer = %proposer_address,
-        domain_hash = %domain_hash,
-        block_interval = cli.block_interval,
+        domain_hash = %registered.domain_hash,
+        block_interval = registered.block_interval,
         max_resolutions_per_tick = cli.max_resolutions_per_tick,
         bond_manager_poll_interval_seconds = cli.bond_manager_poll_interval_seconds,
         bond_manager_initial_scan_limit = cli.bond_manager_initial_scan_limit,
