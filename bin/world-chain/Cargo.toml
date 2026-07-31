@@ -40,3 +40,4 @@ tikv-jemallocator = { workspace = true, optional = true }
 default = ["jemalloc"]
 
 jemalloc = ["tikv-jemallocator"]
+jit = ["world-chain-evm/jit"]

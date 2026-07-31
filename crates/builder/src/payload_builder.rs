@@ -12,7 +12,7 @@ use alloy_eips::Encodable2718;
 use alloy_primitives::TxHash;
 use op_revm::OpSpecId;
 use reth_evm::{
-    Evm, EvmFactory,
+    Evm,
     block::{BlockExecutor, BlockExecutorFactory},
 };
 use world_chain_evm::{
@@ -27,7 +27,7 @@ use world_chain_evm::{
 use alloy_consensus::{BlockHeader, Header};
 
 use alloy_op_evm::{
-    OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvm, OpEvmFactory,
+    OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory,
     block::receipt_builder::OpReceiptBuilder,
 };
 use op_alloy_consensus::OpTxEnvelope;
@@ -36,10 +36,7 @@ use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, BuildOutcomeKind, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig,
 };
-use reth_evm::{
-    ConfigureEvm, Database, EvmEnv, RecoveredTx, execute::BlockBuilderOutcome,
-    precompiles::PrecompilesMap,
-};
+use reth_evm::{ConfigureEvm, Database, EvmEnv, EvmFor, RecoveredTx, execute::BlockBuilderOutcome};
 use reth_node_api::{BuiltPayloadExecutedBlock, NodePrimitives, PayloadBuilderError};
 use reth_payload_primitives::BuildNextEnv;
 use reth_revm::database::StateProviderDatabase;
@@ -60,7 +57,7 @@ use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, ProviderError, StateProviderFactory};
 
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::{context::BlockEnv, inspector::NoOpInspector};
+use revm::context::BlockEnv;
 use std::{fmt::Debug, sync::Arc, time::Instant};
 use tracing::span;
 use world_chain_chainspec::WorldChainSpec;
@@ -123,7 +120,7 @@ where
             cancel,
             best_payload,
             execution_cache: _,
-            trie_handle: _,
+            state_root_handle: _,
         } = args;
         self.metrics.increment_attempts();
         let build_started = Instant::now();
@@ -131,7 +128,7 @@ where
 
         let ctx = self.ctx_builder.build(
             self.client.clone(),
-            self.evm_config.clone(),
+            self.evm_config.clone().with_jit_support(),
             self.builder_config.clone(),
             config,
             &cancel,
@@ -222,7 +219,7 @@ where
             cancel: Default::default(),
             best_payload: None,
             execution_cache: None,
-            trie_handle: None,
+            state_root_handle: None,
         };
         let converted_args = convert_build_args(args)?;
         self.build_payload(
@@ -291,7 +288,7 @@ fn convert_build_args(
         config,
         cached_reads,
         execution_cache,
-        trie_handle,
+        state_root_handle,
         cancel,
         best_payload,
     } = args;
@@ -309,7 +306,7 @@ fn convert_build_args(
         },
         cached_reads,
         execution_cache,
-        trie_handle,
+        state_root_handle,
         cancel,
         best_payload,
     })
@@ -634,6 +631,7 @@ where
         execution_output: Arc::new(execution_outcome.clone()),
         hashed_state: Arc::new(hashed_state),
         trie_updates: Arc::new(trie_updates),
+        changed_paths: None,
     };
 
     let payload = OpBuiltPayload::new(
@@ -668,7 +666,7 @@ pub fn bal_block_builder<'a, Ctx, DB, R, N, Tx>(
     ctx: &'a Ctx,
     tx: crossbeam_channel::Sender<FlashblockAccessList>,
 ) -> Result<
-    BalBlockBuilder<'a, R, N, OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>>,
+    BalBlockBuilder<'a, R, N, EvmFor<WorldChainEvmConfig, &'a mut State<DB>>>,
     PayloadBuilderError,
 >
 where
@@ -683,10 +681,14 @@ where
     R: OpReceiptBuilder<Transaction = OpTransactionSigned, Receipt = OpReceipt> + Default,
     Ctx: PayloadBuilderCtx<Evm = WorldChainEvmConfig, Transaction = Tx, ChainSpec = WorldChainSpec>,
 {
-    let evm = OpEvmFactory::default().create_evm(state, evm_env);
+    let evm = ctx
+        .evm_config()
+        .clone()
+        .with_jit_support()
+        .evm_with_env(state, evm_env);
 
     let mut executor = OpBlockExecutor::<
-        OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>,
+        EvmFor<WorldChainEvmConfig, &'a mut State<DB>>,
         R,
         Arc<WorldChainSpec>,
     >::new(
@@ -724,7 +726,7 @@ pub fn flashblocks_block_builder<'a, Ctx, DB, Tx>(
     impl BlockBuilderExt<
         Primitives = OpPrimitives,
         Executor = OpBlockExecutor<
-            OpEvm<&'a mut State<DB>, NoOpInspector, PrecompilesMap>,
+            EvmFor<WorldChainEvmConfig, &'a mut State<DB>>,
             OpRethReceiptBuilder,
             WorldChainSpec,
         >,
@@ -738,7 +740,11 @@ where
     DB: reth_evm::Database<Error: Send + Sync + 'a> + 'a,
     Ctx: PayloadBuilderCtx<Evm = WorldChainEvmConfig, Transaction = Tx, ChainSpec = WorldChainSpec>,
 {
-    let evm = OpEvmFactory::default().create_evm(state, evm_env);
+    let evm = ctx
+        .evm_config()
+        .clone()
+        .with_jit_support()
+        .evm_with_env(state, evm_env);
 
     let mut executor = OpBlockExecutor::new(
         evm,

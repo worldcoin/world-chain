@@ -2,14 +2,12 @@ use std::{io::Error, sync::Arc, time::Instant};
 
 use alloy_consensus::{Header, Transaction};
 use alloy_eip7928::BlockAccessIndex;
-use alloy_op_evm::{
-    OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory, OpEvmFactory, OpTx,
-};
+use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpBlockExecutorFactory};
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_engine::PayloadId;
 use rayon::prelude::*;
 use reth_evm::{
-    ConfigureEvm, Evm, EvmEnvFor, EvmFactory,
+    ConfigureEvm, Evm, EvmEnvFor,
     block::{BlockExecutionError, CommitChanges},
     execute::{BlockAssemblerInput, BlockBuilder, BlockExecutor, BlockExecutorFactory},
 };
@@ -61,6 +59,7 @@ pub struct StateRootResult {
 pub struct ValidationCtx<'a, Evm: ConfigureEvm, S: StateRootStrategy> {
     pub parent: &'a SealedHeader<Header>,
     pub attempt_metrics: &'a mut FlashblockValidationAttemptMetrics,
+    pub evm_config: Evm,
     pub chain_spec: Arc<WorldChainSpec>,
     pub evm_env: EvmEnvFor<Evm>,
     pub execution_context: OpBlockExecutionCtx,
@@ -109,16 +108,6 @@ struct BalBlockValidator<'a, S: StateRootStrategy> {
 impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
     fn new(ctx: ValidationCtx<'a, WorldChainEvmConfig, S>) -> Self {
         Self { ctx }
-    }
-
-    fn executor_factory(
-        &self,
-    ) -> OpBlockExecutorFactory<OpRethReceiptBuilder, Arc<WorldChainSpec>> {
-        OpBlockExecutorFactory::new(
-            OpRethReceiptBuilder::default(),
-            self.ctx.chain_spec.clone(),
-            OpEvmFactory::<OpTx>::default(),
-        )
     }
 
     fn validate_min_tx_index(
@@ -187,6 +176,7 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
         let spec = self.ctx.chain_spec.clone();
         let execution_context = self.ctx.execution_context.clone();
         let evm_env = self.ctx.evm_env.clone();
+        let evm_config = self.ctx.evm_config.clone();
         let fallback_bundle_state = Arc::new(committed_bundle.clone());
 
         let txs_execution_started = Instant::now();
@@ -210,16 +200,13 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
                         .build();
                     worker_state.set_bal_index(BlockAccessIndex::new(index));
 
-                    let executor_factory = OpBlockExecutorFactory::new(
-                        OpRethReceiptBuilder::default(),
+                    let evm = evm_config.evm_with_env(&mut worker_state, evm_env.clone());
+                    let mut worker_executor = OpBlockExecutor::new(
+                        evm,
+                        execution_context.clone(),
                         spec.clone(),
-                        OpEvmFactory::<OpTx>::default(),
+                        OpRethReceiptBuilder::default(),
                     );
-                    let evm = executor_factory
-                        .evm_factory()
-                        .create_evm(&mut worker_state, evm_env.clone());
-                    let mut worker_executor =
-                        executor_factory.create_executor(evm, execution_context.clone());
 
                     let result = worker_executor
                         .execute_transaction_without_commit(tx.clone())
@@ -304,12 +291,16 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
             .build();
         db.set_bal_index(BlockAccessIndex::new(min_tx_index));
 
-        let executor_factory = self.executor_factory();
-        let evm = executor_factory
-            .evm_factory()
-            .create_evm(&mut db, self.ctx.evm_env.clone());
-        let mut canonical_executor =
-            executor_factory.create_executor(evm, self.ctx.execution_context.clone());
+        let evm = self
+            .ctx
+            .evm_config
+            .evm_with_env(&mut db, self.ctx.evm_env.clone());
+        let mut canonical_executor = OpBlockExecutor::new(
+            evm,
+            self.ctx.execution_context.clone(),
+            self.ctx.chain_spec.clone(),
+            OpRethReceiptBuilder::default(),
+        );
 
         canonical_executor.gas_used = committed_state.gas_used;
         canonical_executor.evm_gas_used = committed_state.evm_gas_used;
@@ -515,6 +506,7 @@ impl<'a, S: StateRootStrategy> BalBlockValidator<'a, S> {
             execution_output: Arc::new(execution_output),
             hashed_state: Arc::new(hashed_state),
             trie_updates: Arc::new(trie_updates),
+            changed_paths: None,
         };
 
         Ok(OpBuiltPayload::new(
@@ -551,7 +543,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             .with_bundle_update()
             .build();
 
-        let evm = OpEvmFactory::<OpTx>::default().create_evm(&mut db, ctx.evm_env.clone());
+        let evm = ctx.evm_config.evm_with_env(&mut db, ctx.evm_env.clone());
 
         let mut executor = OpBlockExecutor::new(
             evm,
@@ -689,6 +681,7 @@ impl<S: StateRootStrategy> ExecutionStrategy<WorldChainEvmConfig, S>
             execution_output: Arc::new(execution_output),
             hashed_state: Arc::new(hashed_state),
             trie_updates: Arc::new(trie_updates),
+            changed_paths: None,
         };
 
         Ok(OpBuiltPayload::new(

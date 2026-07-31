@@ -6,11 +6,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
   cargo install --locked sccache --version ^0.9 \
   && cargo install --locked cargo-chef --version ^0.1
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends clang libclang-dev gcc curl \
+COPY .github/scripts/install_llvm_ubuntu.sh /tmp/install_llvm_ubuntu.sh
+RUN bash /tmp/install_llvm_ubuntu.sh 22 \
+  && apt-get install -y --no-install-recommends libclang-dev gcc curl \
+  && rm /tmp/install_llvm_ubuntu.sh \
   && rm -rf /var/lib/apt/lists/*
 
 ENV CARGO_HOME=/usr/local/cargo \
+    LLVM_SYS_221_PREFIX=/usr/lib/llvm-22 \
     RUSTC_WRAPPER=sccache \
     SCCACHE_DIR=/sccache
 

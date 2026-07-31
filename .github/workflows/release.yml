@@ -86,6 +86,8 @@ jobs:
   build-binaries:
     name: build binaries
     needs: [extract-version]
+    env:
+      LLVM_SYS_221_PREFIX: /usr/lib/llvm-22
     strategy:
       fail-fast: false
       matrix:
@@ -108,6 +110,8 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
+      - name: Install LLVM 22
+        run: sudo bash .github/scripts/install_llvm_ubuntu.sh 22
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Cargo Build Release
         run: cargo build --release --bin ${{ matrix.binary }} --target ${{ matrix.target }}

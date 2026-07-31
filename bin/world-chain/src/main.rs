@@ -16,6 +16,18 @@ use world_chain_node::{context::WorldChainDefaultContext, node::WorldChainNode};
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 fn main() {
+    #[cfg(feature = "jit")]
+    {
+        match world_chain_evm::maybe_run_jit_helper() {
+            Ok(std::ops::ControlFlow::Break(())) => return,
+            Ok(std::ops::ControlFlow::Continue(())) => {}
+            Err(err) => {
+                eprintln!("Error: {err:?}");
+                std::process::exit(1);
+            }
+        }
+    }
+
     dotenvy::dotenv().ok();
 
     reth_cli_util::sigsegv_handler::install();

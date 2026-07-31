@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group};
 use futures::StreamExt;
 use reth_chain_state::ExecutedBlock;
 use reth_optimism_primitives::OpPrimitives;
@@ -291,4 +291,19 @@ criterion_group!(
     bench_launch_flashblock_sequence_world_id_like_bn254,
     bench_launch_flashblock_sequence_world_id_like_bn254_with_bal,
 );
-criterion_main!(benches);
+
+/// Hand-rolled `criterion_main` so the JIT build can serve compile jobs.
+///
+/// The revmc backend compiles out of process by re-executing this binary with `REVMC_JIT_HELPER`
+/// set; without dispatching the helper first, that child would run the whole benchmark suite.
+fn main() {
+    #[cfg(feature = "jit")]
+    match world_chain_evm::maybe_run_jit_helper() {
+        Ok(std::ops::ControlFlow::Break(())) => return,
+        Ok(std::ops::ControlFlow::Continue(())) => {}
+        Err(err) => panic!("failed to run the revmc JIT helper: {err:?}"),
+    }
+
+    benches();
+    Criterion::default().configure_from_args().final_summary();
+}

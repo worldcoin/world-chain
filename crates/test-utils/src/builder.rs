@@ -240,8 +240,10 @@ lazy_static::lazy_static! {
     );
 
     /// EVM configuration for tests
-    pub static ref EVM_CONFIG: WorldChainEvmConfig =
-        WorldChainEvmConfig::new(CHAIN_SPEC.clone(), OpRethReceiptBuilder::default());
+    ///
+    /// With the `jit` feature the revmc JIT backend is started, so the same benches measure the
+    /// JIT execution path. See [`evm_config`] for the constraint that puts on the binary.
+    pub static ref EVM_CONFIG: WorldChainEvmConfig = evm_config();
 
     pub static ref BLOCK_EXECUTION_CTX: OpBlockExecutionCtx = OpBlockExecutionCtx {
         parent_beacon_block_root: Some(FixedBytes::ZERO),
@@ -264,6 +266,24 @@ lazy_static::lazy_static! {
     pub static ref EVM_ENV: EvmEnv<OpSpecId> = EVM_CONFIG
         .next_evm_env(SEALED_HEADER.header(), &NEXT_BLOCK_ENV_ATTRS)
         .unwrap();
+}
+
+/// Builds the EVM configuration backing [`EVM_CONFIG`].
+///
+/// Without the `jit` feature this is the plain interpreter config. With it, the revmc JIT backend
+/// is started with production default tuning, which compiles out of process by re-executing the
+/// current binary: any binary built with the feature must dispatch
+/// [`world_chain_evm::maybe_run_jit_helper`] at the top of `main`, or the spawned helper will run
+/// the binary's own workload instead of serving compile jobs.
+#[cfg(not(feature = "jit"))]
+fn evm_config() -> WorldChainEvmConfig {
+    WorldChainEvmConfig::new(CHAIN_SPEC.clone(), OpRethReceiptBuilder::default())
+}
+
+#[cfg(feature = "jit")]
+fn evm_config() -> WorldChainEvmConfig {
+    WorldChainEvmConfig::jit_enabled(CHAIN_SPEC.clone(), OpRethReceiptBuilder::default())
+        .expect("failed to start the revmc JIT backend")
 }
 
 fn u256_from_hex(value: &str) -> U256 {

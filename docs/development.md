@@ -33,6 +33,43 @@ cargo xtask launch-node --nodes 2 --spam --flashblocks
 
 Starts N nodes via P2P, drives block production with `EngineDriver`, optionally runs `TxSpammer`. Prints RPC URLs for `cast` interaction.
 
+## LLVM 22
+
+The `world-chain` binary enables revmc JIT support by default. Building it requires LLVM 22 and
+the prefix expected by the `llvm-sys` 22.1 bindings.
+
+On Debian or Ubuntu, install the same toolchain used by CI and the release container:
+
+```bash
+sudo .github/scripts/install_llvm_ubuntu.sh 22
+export LLVM_SYS_221_PREFIX=/usr/lib/llvm-22
+cargo build --bin world-chain
+```
+
+Add the export to your shell profile if you build World Chain regularly. On other supported
+platforms, install LLVM 22 using the platform package manager and set `LLVM_SYS_221_PREFIX` to
+the directory reported by `llvm-config-22 --prefix`.
+
+### JIT vs interpreter benchmarks
+
+The `jit` feature of `world-chain-validator` swaps the bench EVM config for one backed by the
+revmc JIT backend, so `flashblock_validation_synthetic` measures either path:
+
+```bash
+cargo bench -p world-chain-validator --bench flashblock_validation_synthetic -- --save-baseline nojit
+cargo bench -p world-chain-validator --features jit --bench flashblock_validation_synthetic -- --save-baseline jit
+critcmp nojit jit
+```
+
+The single `benchmark` job in `.github/workflows/benchmarks.yml` measures three baselines on one
+runner in one run — `base` (interpreter at the merge base), `pr` (interpreter at the PR revision)
+and `jit` (PR revision with `--features jit`) — and posts them as one table on the PR. `pr` doubles
+as the interpreter side of the JIT comparison, so there is no separate `nojit` run. Only this bench
+dispatches the out-of-process JIT helper, so it is the only one to run with `--features jit`.
+
+Only `base` → `pr` gates the build. The JIT column is informational: a slowdown on a
+bytecode-light fixture is expected.
+
 ## Metrics
 
 Custom metrics are exposed via the standard reth metrics endpoint (`/metrics`). Key namespaces:
