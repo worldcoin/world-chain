@@ -133,20 +133,16 @@ contract NitroEndToEndTest is Test {
         return _signCommitment(w, _transition(postRoot, blk, cfg));
     }
 
-    function _proof(bytes memory sig, bytes memory pub, ProofLib.TransitionPublicValues memory transition)
+    function _proof(bytes memory sig, ProofLib.TransitionPublicValues memory transition)
         internal
         view
         returns (bytes memory)
     {
-        return abi.encode(domainHash, address(parent), L1N, transition, sig, pub);
+        return abi.encode(domainHash, address(parent), L1N, transition, sig);
     }
 
-    function _proof(bytes memory sig, bytes memory pub, bytes32 postRoot, uint64 blk, bytes32 cfg)
-        internal
-        view
-        returns (bytes memory)
-    {
-        return _proof(sig, pub, _transition(postRoot, blk, cfg));
+    function _proof(bytes memory sig, bytes32 postRoot, uint64 blk, bytes32 cfg) internal view returns (bytes memory) {
+        return _proof(sig, _transition(postRoot, blk, cfg));
     }
 
     function _rootId(bytes32 postRoot, uint64 blk) internal view returns (bytes32) {
@@ -167,39 +163,39 @@ contract NitroEndToEndTest is Test {
         //    See NitroAttestationVerifierTest for the real-fixture coverage.
         //
         // 2. Anyone calls registry.registerKey(tbs, sig). The verifier
-        //    surfaces the enclave key + PCRs; the registry stores them.
-        vm.expectEmit(false, false, false, true);
-        emit NitroEnclaveKeyRegistry.KeyRegistered(enclavePubKey, PCR0, PCR1, PCR2);
+        //    surfaces the enclave key + PCRs; the registry stores its signer address.
+        vm.expectEmit(true, false, false, true);
+        emit NitroEnclaveKeyRegistry.SignerRegistered(enclaveWallet.addr, PCR0, PCR1, PCR2);
         registry.registerKey(TBS, SIG, "");
-        assertTrue(registry.isKeyRegistered(enclavePubKey));
-        assertEq(uint8(registry.keyStatus(enclavePubKey)), uint8(NitroEnclaveKeyRegistry.KeyStatus.Active));
+        assertTrue(registry.isSignerRegistered(enclaveWallet.addr));
+        assertEq(uint8(registry.signerStatus(enclaveWallet.addr)), uint8(NitroEnclaveKeyRegistry.SignerStatus.Active));
 
         // 3. The (live) enclave signs a signing-commitment for some rollup
         //    boot-info. The proposer wraps it up into a NitroProofVerifier
         //    proof tuple and submits it to dispute-game resolution.
         bytes memory sig = _signCommitment(enclaveWallet, POST, BLK, CFG);
-        assertTrue(_verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
+        assertTrue(_verify(_rootId(POST, BLK), _proof(sig, POST, BLK, CFG)));
     }
 
-    function test_E2E_RevokeKeyInvalidatesFutureProofs() public {
+    function test_E2E_RevokeSignerInvalidatesFutureProofs() public {
         registry.registerKey(TBS, SIG, "");
         bytes memory sig = _signCommitment(enclaveWallet, POST, BLK, CFG);
 
         // Pre-revoke: proof is valid.
-        assertTrue(_verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
+        assertTrue(_verify(_rootId(POST, BLK), _proof(sig, POST, BLK, CFG)));
 
         // Owner revokes the key (e.g. on compromise).
         vm.prank(owner);
-        registry.revokeKey(enclavePubKey);
-        assertTrue(registry.isKeyRevoked(enclavePubKey));
+        registry.revokeSigner(enclaveWallet.addr);
+        assertTrue(registry.isSignerRevoked(enclaveWallet.addr));
 
         // Same (previously valid) proof MUST now be rejected — the proof
         // verifier consults the registry on every call.
-        assertFalse(_verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
+        assertFalse(_verify(_rootId(POST, BLK), _proof(sig, POST, BLK, CFG)));
 
         // And the registry must permanently refuse to re-register the key,
         // even via a fresh attestation.
-        vm.expectRevert(NitroEnclaveKeyRegistry.KeyRevokedPermanently.selector);
+        vm.expectRevert(NitroEnclaveKeyRegistry.SignerRevokedPermanently.selector);
         registry.registerKey(TBS, SIG, "");
     }
 
@@ -218,8 +214,8 @@ contract NitroEndToEndTest is Test {
         bytes memory sigA = _signCommitment(enclaveWallet, POST, BLK, CFG);
         bytes memory sigB = _signCommitment(secondWallet, POST, BLK, CFG);
 
-        assertTrue(_verify(_rootId(POST, BLK), _proof(sigA, enclavePubKey, POST, BLK, CFG)));
-        assertTrue(_verify(_rootId(POST, BLK), _proof(sigB, secondPubKey, POST, BLK, CFG)));
+        assertTrue(_verify(_rootId(POST, BLK), _proof(sigA, POST, BLK, CFG)));
+        assertTrue(_verify(_rootId(POST, BLK), _proof(sigB, POST, BLK, CFG)));
     }
 
     function test_E2E_RevokeOneEnclaveDoesNotAffectPeer() public {
@@ -234,19 +230,19 @@ contract NitroEndToEndTest is Test {
         registry.registerKey(tbs2, SIG, "");
 
         vm.prank(owner);
-        registry.revokeKey(enclavePubKey);
+        registry.revokeSigner(enclaveWallet.addr);
 
         bytes memory sigA = _signCommitment(enclaveWallet, POST, BLK, CFG);
         bytes memory sigB = _signCommitment(secondWallet, POST, BLK, CFG);
-        assertFalse(_verify(_rootId(POST, BLK), _proof(sigA, enclavePubKey, POST, BLK, CFG)));
-        assertTrue(_verify(_rootId(POST, BLK), _proof(sigB, secondPubKey, POST, BLK, CFG)));
+        assertFalse(_verify(_rootId(POST, BLK), _proof(sigA, POST, BLK, CFG)));
+        assertTrue(_verify(_rootId(POST, BLK), _proof(sigB, POST, BLK, CFG)));
     }
 
-    function test_E2E_UnregisteredKeyFails() public {
+    function test_E2E_UnregisteredSignerFails() public {
         // Skip registration; the proof verifier MUST refuse even a
         // cryptographically-valid signature from an unknown key.
         bytes memory sig = _signCommitment(enclaveWallet, POST, BLK, CFG);
-        assertFalse(_verify(_rootId(POST, BLK), _proof(sig, enclavePubKey, POST, BLK, CFG)));
+        assertFalse(_verify(_rootId(POST, BLK), _proof(sig, POST, BLK, CFG)));
     }
 
     function test_E2E_ProofMustBindToRequestedRootId() public {
@@ -254,6 +250,6 @@ contract NitroEndToEndTest is Test {
         bytes memory sig = _signCommitment(enclaveWallet, POST, BLK, CFG);
 
         // Honest proof but the dispute game asks about a different rootId.
-        assertFalse(_verify(bytes32(uint256(0xdead)), _proof(sig, enclavePubKey, POST, BLK, CFG)));
+        assertFalse(_verify(bytes32(uint256(0xdead)), _proof(sig, POST, BLK, CFG)));
     }
 }
