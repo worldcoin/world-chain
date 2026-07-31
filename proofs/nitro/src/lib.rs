@@ -53,6 +53,7 @@ pub mod cose;
 pub mod p384_hints;
 
 /// On-chain enclave key registration (calldata builder + self-registration flow).
+#[cfg(all(feature = "enclave", target_os = "linux"))]
 pub mod register;
 
 #[cfg(all(feature = "enclave", target_os = "linux"))]
