@@ -199,7 +199,7 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
     }
 
     // 4. Build calldata and submit registerKey.
-    let calldata = super::build_registration_calldata(&attestation_doc)?;
+    let calldata = build_registration_calldata(&attestation_doc)?;
     info!(
         target: "world_chain::nitro",
         registry = %registry_address,
