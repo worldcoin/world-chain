@@ -260,6 +260,9 @@ fn encode_proof(metadata: &GameMetadata, proof: &ProofData) -> Result<Bytes, Def
             signature,
             public_key,
         } => {
+            // The prover API transports public values as bytes, but NitroProofVerifier embeds
+            // TransitionPublicValues as a static tuple. Encoding the bytes directly would add a
+            // dynamic ABI offset and produce a payload the verifier cannot decode.
             let transition = <TransitionPublicValues as SolValue>::abi_decode(public_values)
                 .map_err(|error| DefenderError::ProofEncoding(error.to_string()))?;
             Ok((
