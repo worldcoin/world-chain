@@ -51,8 +51,11 @@ pub struct RegisterArgs {
 }
 
 pub async fn register(args: RegisterArgs) -> Result<()> {
-    let expected_pcrs =
-        build_expected_pcrs(args.pcr0.as_deref(), args.pcr1.as_deref(), args.pcr2.as_deref())?;
+    let expected_pcrs = build_expected_pcrs(
+        args.pcr0.as_deref(),
+        args.pcr1.as_deref(),
+        args.pcr2.as_deref(),
+    )?;
 
     let private_key = args
         .private_key

@@ -276,7 +276,11 @@ async fn register(args: RegisterArgs) -> Result<()> {
         )
         .try_init();
 
-    let expected_pcrs = match (args.pcr0.as_deref(), args.pcr1.as_deref(), args.pcr2.as_deref()) {
+    let expected_pcrs = match (
+        args.pcr0.as_deref(),
+        args.pcr1.as_deref(),
+        args.pcr2.as_deref(),
+    ) {
         (Some(p0), Some(p1), Some(p2)) => ExpectedPcrs {
             pcr0: hex_to_pcr(p0)?,
             pcr1: hex_to_pcr(p1)?,
