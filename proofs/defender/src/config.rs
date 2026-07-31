@@ -1,5 +1,4 @@
 use crate::error::DefenderError;
-use alloy_primitives::Address;
 use std::time::Duration;
 
 /// Default number of games processed concurrently.
@@ -23,8 +22,6 @@ pub const DEFAULT_MAX_GAME_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60)
 /// Configuration for the defender.
 #[derive(Debug, Clone)]
 pub struct DefenderConfig {
-    /// The only proposer whose games this defender is allowed to defend.
-    pub allowed_proposer: Address,
     /// Delay between periodic scan attempts.
     pub poll_interval: Duration,
     /// Maximum number of games to process concurrently.
@@ -41,11 +38,6 @@ pub struct DefenderConfig {
 
 impl DefenderConfig {
     pub(crate) fn validate(&self) -> Result<(), DefenderError> {
-        if self.allowed_proposer.is_zero() {
-            return Err(DefenderError::InvalidConfig(
-                "allowed_proposer must not be the zero address",
-            ));
-        }
         if self.poll_interval.is_zero() {
             return Err(DefenderError::InvalidConfig(
                 "poll_interval must be greater than zero",
@@ -78,7 +70,6 @@ impl DefenderConfig {
 impl Default for DefenderConfig {
     fn default() -> Self {
         Self {
-            allowed_proposer: Address::ZERO,
             poll_interval: Duration::from_mins(1),
             max_game_concurrency: DEFAULT_MAX_GAME_CONCURRENCY,
             max_games_per_tick: DEFAULT_MAX_GAMES_PER_TICK,

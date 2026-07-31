@@ -48,10 +48,6 @@ struct Cli {
     #[arg(long, env = "DEFENDER_KEY", hide_env_values = true)]
     defender_key: PrivateKeySigner,
 
-    /// The only proposer address whose games this defender will defend.
-    #[arg(long, env = "ALLOWED_PROPOSER")]
-    allowed_proposer: Address,
-
     /// Seconds between game-factory polls.
     #[arg(long, env = "POLL_INTERVAL_SECONDS", default_value_t = 12)]
     poll_interval_seconds: u64,
@@ -109,7 +105,6 @@ async fn main() -> Result<()> {
     let proof_requester = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
     let config = DefenderConfig {
-        allowed_proposer: cli.allowed_proposer,
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_game_concurrency: cli.max_game_concurrency,
         max_games_per_tick: cli.max_games_per_tick,
@@ -125,7 +120,6 @@ async fn main() -> Result<()> {
         prover_service = %cli.prover_service_url,
         dispute_game_factory = %cli.factory_address,
         defender = %defender_address,
-        allowed_proposer = %cli.allowed_proposer,
         max_games_per_tick = cli.max_games_per_tick,
         game_scan_lookback = cli.game_scan_lookback,
         l1_tx_confirmations = cli.l1_tx_confirmations,

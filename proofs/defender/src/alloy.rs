@@ -83,14 +83,6 @@ where
             .map_err(|error| DefenderError::Contract(error.to_string()))
     }
 
-    async fn game_creator(&self, address: Address) -> Result<Address, DefenderError> {
-        self.game(address)
-            .gameCreator()
-            .call()
-            .await
-            .map_err(|error| DefenderError::Contract(error.to_string()))
-    }
-
     async fn game_metadata(&self, address: Address) -> Result<GameMetadata, DefenderError> {
         let game = self.game(address);
         let (

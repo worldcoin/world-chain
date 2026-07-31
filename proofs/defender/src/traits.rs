@@ -16,8 +16,6 @@ pub trait DefenderClient: Send + Sync {
     async fn game_address_at(&self, index: u64) -> Result<Option<Address>, DefenderError>;
     /// Returns the creation timestamp of any game at the provided factory index.
     async fn game_created_at(&self, index: u64) -> Result<u64, DefenderError>;
-    /// Reads the account that created the provided game.
-    async fn game_creator(&self, game: Address) -> Result<Address, DefenderError>;
     /// Reads the immutable game data needed to monitor and defend its root claim.
     async fn game_metadata(&self, game: Address) -> Result<GameMetadata, DefenderError>;
     /// Returns the current resolution evaluation for the provided game.

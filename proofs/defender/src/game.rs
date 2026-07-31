@@ -243,7 +243,7 @@ where
                 claimed_root = %game.root_claim,
                 canonical_root = %root,
                 challenged,
-                "allowlisted proposer published a non-canonical root; refusing proof support"
+                "game claims a non-canonical root; refusing proof support"
             );
             Ok(GameOutcome::Track)
         }

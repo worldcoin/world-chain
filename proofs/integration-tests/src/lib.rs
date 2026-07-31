@@ -572,16 +572,6 @@ impl DefenderClient for FakeExecution {
             .ok_or_else(|| DefenderError::Contract(format!("unknown game index {index}")))
     }
 
-    async fn game_creator(&self, game: Address) -> Result<Address, DefenderError> {
-        self.state
-            .lock()
-            .expect("fake execution mutex poisoned")
-            .games_by_address
-            .get(&game)
-            .map(|record| record.event.game_creator)
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
-    }
-
     async fn game_metadata(&self, game: Address) -> Result<DefenderGameMetadata, DefenderError> {
         let state = self.state.lock().expect("fake execution mutex poisoned");
         state

@@ -8,8 +8,7 @@ use tokio_util::sync::CancellationToken;
 use world_chain_challenger::{ChallengerConfig, WorldChainChallenger};
 use world_chain_defender::{DefenderClient, DefenderConfig, WorldChainDefender};
 use world_chain_proof_integration_tests::{
-    BLOCK_INTERVAL, FAKE_PROPOSER, FakeConsensus, FakeExecution, FakeProofBackend,
-    SharedProverService,
+    BLOCK_INTERVAL, FakeConsensus, FakeExecution, FakeProofBackend, SharedProverService,
 };
 use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
@@ -37,7 +36,6 @@ fn challenger_config() -> ChallengerConfig {
 
 fn defender_config() -> DefenderConfig {
     DefenderConfig {
-        allowed_proposer: FAKE_PROPOSER,
         poll_interval: Duration::from_secs(1),
         ..DefenderConfig::default()
     }

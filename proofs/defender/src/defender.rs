@@ -48,7 +48,7 @@ enum DefenseProgress {
 
 /// World Chain Defender.
 ///
-/// Discovers allowlisted games through the factory index and watches them until
+/// Discovers proof-system games through the factory index and watches them until
 /// resolution. It submits a TEE proof to valid proofless proposals, escalates
 /// challenged games to the configured independent-lane threshold, and resolves
 /// negatively determined games so timed-out proposals can be retried.
@@ -228,6 +228,9 @@ where
 
     fn start_defense(&mut self, metadata: GameMetadata) {
         let game = metadata.address;
+        if self.abandoned_defenses.contains_key(&game) {
+            return;
+        }
         info!(%game, "game needs proof support and has a valid root; starting proof workflow");
         self.active_defenses
             .entry(game)
@@ -442,15 +445,6 @@ where
                 continue;
             }
 
-            // TODO: The proposer adopts an existing canonical transition regardless of who
-            // created it, so an exact-UUID front-run is followed but currently receives no proof
-            // support here. Reconcile the policies by defending the game selected by the
-            // proposer's canonical-line rules; accepting every foreign game with a valid root
-            // would let parallel branches amplify proof-generation work.
-            let game_creator = self.execution_provider.game_creator(game).await?;
-            if game_creator != self.config.allowed_proposer {
-                continue;
-            }
             new_games.push(self.execution_provider.game_metadata(game).await?);
         }
 

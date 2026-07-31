@@ -30,8 +30,6 @@ use world_chain_prover_service::{
 const GAME_1: Address = address!("0000000000000000000000000000000000000001");
 const GAME_2: Address = address!("0000000000000000000000000000000000000002");
 const GAME_3: Address = address!("0000000000000000000000000000000000000003");
-const ALLOWED_PROPOSER: Address = address!("00000000000000000000000000000000000000a1");
-const OTHER_PROPOSER: Address = address!("00000000000000000000000000000000000000b2");
 const L2_BLOCK: u64 = 100;
 const L1_ORIGIN_HASH: B256 = B256::repeat_byte(0x42);
 const DOMAIN_HASH: B256 = B256::repeat_byte(0x43);
@@ -50,7 +48,6 @@ const STATE_INVALIDATED: u8 = 4;
 struct MockClient {
     games: Vec<GameMetadata>,
     created_at: Vec<u64>,
-    proposers: HashMap<Address, Address>,
     states: Arc<Mutex<HashMap<Address, u8>>>,
     bitmaps: Arc<Mutex<HashMap<Address, u8>>>,
     parent_unresolved: Arc<Mutex<HashSet<Address>>>,
@@ -77,14 +74,9 @@ impl MockClient {
                 proof_threshold: PROOF_THRESHOLD,
             })
             .collect();
-        let proposers = games
-            .iter()
-            .map(|game| (game.address, ALLOWED_PROPOSER))
-            .collect();
         Self {
             created_at: vec![u64::MAX; games.len()],
             games,
-            proposers,
             states: Arc::new(Mutex::new(states)),
             bitmaps: Arc::default(),
             parent_unresolved: Arc::default(),
@@ -93,10 +85,6 @@ impl MockClient {
             submissions: Arc::default(),
             resolutions: Arc::default(),
         }
-    }
-
-    fn set_proposer(&mut self, game: Address, proposer: Address) {
-        self.proposers.insert(game, proposer);
     }
 
     fn set_created_at(&mut self, game: Address, created_at: u64) {
@@ -218,13 +206,6 @@ impl DefenderClient for MockClient {
             .get(index as usize)
             .copied()
             .ok_or_else(|| DefenderError::Contract(format!("unknown game index {index}")))
-    }
-
-    async fn game_creator(&self, game: Address) -> Result<Address, DefenderError> {
-        self.proposers
-            .get(&game)
-            .copied()
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
     }
 
     async fn game_metadata(&self, game: Address) -> Result<GameMetadata, DefenderError> {
@@ -500,26 +481,10 @@ impl ProofRequester for MockProver {
 
 fn config() -> DefenderConfig {
     DefenderConfig {
-        allowed_proposer: ALLOWED_PROPOSER,
         poll_interval: Duration::from_secs(1),
         game_scan_lookback: 0,
         ..DefenderConfig::default()
     }
-}
-
-#[tokio::test]
-async fn tick_requires_an_allowed_proposer() {
-    let client = MockClient::new(Vec::new(), HashMap::new());
-    let (output_roots, _finalized_l2_block) = mock_output_roots(HashMap::new(), 0);
-    let mut defender = WorldChainDefender::new(
-        DefenderConfig::default(),
-        client,
-        output_roots,
-        MockProver::default(),
-    );
-
-    let error = defender.tick().await.unwrap_err();
-    assert!(matches!(error, DefenderError::InvalidConfig(_)));
 }
 
 #[tokio::test]
@@ -634,27 +599,6 @@ async fn tick_rechecks_lookback_without_reducing_forward_progress() {
     assert!(watched.contains(&GAME_1));
     assert!(watched.contains(&GAME_2));
     assert!(watched.contains(&GAME_3));
-}
-
-#[tokio::test]
-async fn tick_ignores_games_from_other_proposers() {
-    let canonical_root = B256::repeat_byte(0x20);
-    let mut client = MockClient::new(
-        vec![(GAME_1, canonical_root, L2_BLOCK)],
-        HashMap::from([(GAME_1, STATE_CHALLENGED)]),
-    );
-    client.set_proposer(GAME_1, OTHER_PROPOSER);
-    let (output_roots, _finalized_l2_block) =
-        mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
-    let prover = MockProver::default();
-    let mut defender = WorldChainDefender::new(config(), client, output_roots, prover.clone());
-
-    defender.tick().await.unwrap();
-
-    assert_eq!(defender.next_game_index(), Some(1));
-    assert!(prover.requests().is_empty());
-    assert!(defender.watched_games().is_empty());
-    assert!(defender.active_defenses().is_empty());
 }
 
 #[tokio::test]
