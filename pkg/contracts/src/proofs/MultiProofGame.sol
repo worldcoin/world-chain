@@ -14,7 +14,8 @@ import {
     GameStatus,
     GameType,
     Hash,
-    Timestamp
+    Timestamp,
+    Proposal
 } from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {
     AlreadyInitialized,
@@ -303,37 +304,21 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         if (anchorStateRegistry.paused()) revert GamePaused();
         if (proposalDomainHash() != domainHash) revert InvalidDomainHash(domainHash, proposalDomainHash());
 
-        (Hash anchorRoot, uint256 anchorL2BlockNumber) = anchorStateRegistry.getAnchorRoot();
         address parentRef_ = parentRef();
 
         if (parentRef_ == address(anchorStateRegistry)) {
-            // The proposal extends the accepted anchor; the registry acts as the parent sentinel.
-            if (Hash.unwrap(anchorRoot) == bytes32(0)) revert AnchorRootNotFound();
-            startingRootClaim = Hash.unwrap(anchorRoot);
-            startingL2BlockNumber = anchorL2BlockNumber;
+            Proposal memory startingOutputRoot = anchorStateRegistry.getStartingAnchorRoot();
+            startingRootClaim = startingOutputRoot.root.raw();
+            startingL2BlockNumber = startingOutputRoot.l2SequenceNumber;
         } else {
-            if (parentRef_.code.length == 0) revert InvalidParentGame();
             IDisputeGame parent = IDisputeGame(parentRef_);
-            (GameType parentType, Claim parentClaim, bytes memory parentExtraData) = parent.gameData();
-            (IDisputeGame registeredParent,) = disputeGameFactory.games(parentType, parentClaim, parentExtraData);
 
-            if (address(registeredParent) != parentRef_) revert InvalidParentGame();
-            if (parentType.raw() != GameTypes.MULTI_PROOF_GAME_TYPE.raw()) revert UnexpectedGameType();
-            if (parent.status() == GameStatus.CHALLENGER_WINS) revert InvalidParentGame();
-            if (anchorStateRegistry.isGameBlacklisted(parent) || anchorStateRegistry.isGameRetired(parent)) {
+            if (!_isValidGame(parent)) {
                 revert InvalidParentGame();
             }
-            if (!parent.wasRespectedGameTypeWhenCreated()) revert InvalidParentGame();
-            // Guards against chaining onto games from an older implementation with a different
-            // domain (e.g. after a proof-system version bump reusing the same game type).
-            if (IMultiProofGame(address(parent)).domainHash() != domainHash) revert InvalidParentGame();
 
             startingRootClaim = Claim.unwrap(parent.rootClaim());
             startingL2BlockNumber = parent.l2SequenceNumber();
-
-            // A parent at or below the anchor is stale: proposals extending the anchor state
-            // must use the anchor sentinel instead so their starting root is registry-attested.
-            if (startingL2BlockNumber <= anchorL2BlockNumber) revert InvalidParentGame();
         }
 
         uint256 expectedL2BlockNumber = startingL2BlockNumber + DOMAIN_BLOCK_INTERVAL;
@@ -401,6 +386,14 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             attempt(),
             gameCreator()
         );
+    }
+
+    /// @notice Checks if the game is registered, respected, not blacklisted, not retired, and not challenged.
+    /// @param game The game to check.
+    function _isValidGame(IDisputeGame game) internal view returns (bool) {
+        return anchorStateRegistry.isGameRegistered(game) && anchorStateRegistry.isGameRespected(game)
+            && !anchorStateRegistry.isGameBlacklisted(game) && !anchorStateRegistry.isGameRetired(game)
+            && (game.status() != GameStatus.CHALLENGER_WINS);
     }
 
     ////////////////////////////////////////////////////////////////
