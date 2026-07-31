@@ -2,10 +2,11 @@ use std::collections::HashSet;
 
 use alloy_primitives::{Address, U256};
 use tracing::{info, warn};
+use world_chain_proofs::{InvalidationReason, RootState};
 
 use crate::{BondManagerClient, BondManagerConfig, ProposerError};
 
-/// Discovers games created by the proposer and asynchronously withdraws resolved bond credits.
+/// Discovers proposer-owned games, resolves invalid-parent descendants, and recovers bond credits.
 #[derive(Debug)]
 pub struct BondManager<E> {
     config: BondManagerConfig,
@@ -82,12 +83,12 @@ where
         Ok(())
     }
 
-    /// Advances the two-phase bond claim on tracked games and prunes fully settled ones.
+    /// Resolves invalid-parent games, advances bond claims, and prunes fully settled games.
     ///
     /// `MultiProofGame.claimCredit` first unlocks the credit in `DelayedWETH` and only
     /// transfers it on a second call after the WETH delay, so a game stays tracked until its
     /// pending withdrawal is drained. Dropping it after the unlock would strand the bond.
-    pub async fn withdraw_credits(&mut self) -> Result<(), ProposerError> {
+    pub async fn settle_games(&mut self) -> Result<(), ProposerError> {
         let proposed_games: Vec<_> = self.proposed_games.iter().copied().collect();
         let now = self.execution_provider.latest_l1_timestamp().await?;
 
@@ -95,6 +96,18 @@ where
             let result: Result<bool, ProposerError> = async {
                 let resolution_status = self.execution_provider.resolution_status(game).await?;
                 if !resolution_status.is_resolved() {
+                    if resolution_status.resolvable
+                        && resolution_status.root_state == RootState::Invalidated
+                        && resolution_status.invalidation_reason
+                            == InvalidationReason::InvalidParent
+                    {
+                        let submission = self.execution_provider.resolve_game(game).await?;
+                        info!(
+                            tx_hash = ?submission.tx_hash,
+                            game_address = %game,
+                            "resolved proposer-owned game invalidated by its parent"
+                        );
+                    }
                     return Ok(false);
                 }
                 // `claimCredit` calls `closeGame`, which reverts until the registry's finality
@@ -154,7 +167,7 @@ where
         Ok(())
     }
 
-    /// Runs game discovery and withdrawals forever on an interval independent of proposals.
+    /// Runs game discovery and bond settlement forever on an interval independent of proposals.
     pub async fn run_forever(&mut self) -> Result<(), ProposerError> {
         self.config.validate()?;
 
@@ -165,8 +178,8 @@ where
             if let Err(error) = self.scan_games().await {
                 warn!(%error, "bond-manager game scan failed; retrying on next tick");
             }
-            if let Err(error) = self.withdraw_credits().await {
-                warn!(%error, "bond-manager withdrawal pass failed; retrying on next tick");
+            if let Err(error) = self.settle_games().await {
+                warn!(%error, "bond-manager settlement pass failed; retrying on next tick");
             }
         }
     }

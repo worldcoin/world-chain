@@ -102,6 +102,27 @@ where
             .map_err(|error| ProposerError::Contract(error.to_string()))
     }
 
+    async fn send_resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
+        let pending = self
+            .game(game)
+            .resolve()
+            .send()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+
+        let tx_hash = *pending.tx_hash();
+        let receipt = pending
+            .with_required_confirmations(self.confirmations)
+            .get_receipt()
+            .await
+            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        if !receipt.status() {
+            return Err(ProposerError::Revert(tx_hash));
+        }
+
+        Ok(ResolveSubmission { tx_hash })
+    }
+
     /// Reads the credit `recipient` can unlock from `game`.
     async fn read_credit(&self, game: Address, recipient: Address) -> Result<U256, ProposerError> {
         self.game(game)
@@ -230,6 +251,10 @@ where
         self.read_resolution_status(game).await
     }
 
+    async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
+        self.send_resolve_game(game).await
+    }
+
     async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError> {
         self.read_is_game_finalized(game).await
     }
@@ -291,24 +316,7 @@ where
     P: Provider + WalletProvider + Clone + Send + Sync + 'static,
 {
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
-        let pending = self
-            .game(game)
-            .resolve()
-            .send()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
-
-        let tx_hash = *pending.tx_hash();
-        let receipt = pending
-            .with_required_confirmations(self.confirmations)
-            .get_receipt()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
-        if !receipt.status() {
-            return Err(ProposerError::Revert(tx_hash));
-        }
-
-        Ok(ResolveSubmission { tx_hash })
+        self.send_resolve_game(game).await
     }
 
     async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError> {

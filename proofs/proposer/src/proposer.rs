@@ -188,7 +188,7 @@ where
                     root_claim = %proposal.root_claim,
                     l2_block_number = proposal.l2_block_number,
                     attempt = proposal.attempt,
-                    "creating a retry; the abandoned lineage requires manual resolution and bond recovery"
+                    "creating a retry; bond manager will recover proposer-owned descendants invalidated by the old attempt"
                 );
                 (*proposal, Some(*invalidated_game))
             }
