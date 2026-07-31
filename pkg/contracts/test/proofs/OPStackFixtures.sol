@@ -195,7 +195,9 @@ abstract contract OPStackFixtures is Test {
     function _proposeAtAnchor() internal returns (MultiProofGame) {
         (, uint256 anchorBlock) = asr.getAnchorRoot();
         uint256 target = anchorBlock + BLOCK_INTERVAL;
-        bytes memory extraData = _extraDataForParent(target, gameImpl.canonicalAnchorParent(), 0);
+        IDisputeGame anchorGame = asr.anchorGame();
+        address parent = address(anchorGame) == address(0) ? address(asr) : address(anchorGame);
+        bytes memory extraData = _extraDataForParent(target, parent, 0);
         vm.prank(proposer);
         IDisputeGame proxy =
             dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);

@@ -1,10 +1,10 @@
 use alloy_primitives::{Address, B256, TxHash, U256};
 use world_chain_proofs::{InvalidationReason, ProposalCommitment};
 
-/// The canonical parent checkpoint selected by the registered game implementation.
+/// The parent checkpoint selected from the anchor registry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnchorRef {
-    /// Compatible anchor game, or the registry sentinel for an initial or incompatible anchor.
+    /// Current anchor game, or the registry sentinel before the first game is anchored.
     pub address: Address,
     /// L2 block number of the anchor output root.
     pub l2_block_number: u64,

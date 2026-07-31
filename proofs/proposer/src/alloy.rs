@@ -30,7 +30,6 @@ const MAX_ATTEMPT_SCAN: u64 = 64;
 pub struct AlloyProofSystemClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
     anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
-    game_implementation: IMultiProofGame::IMultiProofGameInstance<P>,
     /// Domain hash of the registered game implementation, read once at construction.
     domain_hash: B256,
     /// Number of confirmations to require after sending a tx onchain.
@@ -83,7 +82,6 @@ where
         Ok(Self {
             factory,
             anchor,
-            game_implementation,
             domain_hash,
             confirmations,
             provider,
@@ -307,17 +305,21 @@ where
     P: Provider + WalletProvider + Clone + Send + Sync + 'static,
 {
     async fn anchor_parent(&self) -> Result<AnchorRef, ProposerError> {
-        let (anchor_root, canonical_parent) = self
+        let (anchor_root, anchor_game) = self
             .provider
             .multicall()
             .add(self.anchor.getAnchorRoot())
-            .add(self.game_implementation.canonicalAnchorParent())
+            .add(self.anchor.anchorGame())
             .aggregate()
             .await
             .map_err(|err| ProposerError::Contract(err.to_string()))?;
 
         Ok(AnchorRef {
-            address: canonical_parent,
+            address: if anchor_game == Address::ZERO {
+                *self.anchor.address()
+            } else {
+                anchor_game
+            },
             l2_block_number: u256_to_u64(anchor_root.l2SequenceNumber, "getAnchorRoot")?,
         })
     }

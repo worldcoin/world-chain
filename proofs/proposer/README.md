@@ -13,9 +13,8 @@ Stack `DisputeGameFactory.create(gameType, rootClaim, extraData)`.
 
 ## Items needed to propose a new L2 output root
 
-- `parent_ref`: address of the canonical parent selected by the registered game implementation.
-  This is normally the current compatible anchor game or a descendant game. The
-  `AnchorStateRegistry` address is used as a sentinel when no compatible anchor game exists.
+- `parent_ref`: address of the current anchor game or a descendant game. The
+  `AnchorStateRegistry` address is used only before the first game is anchored.
 - `root_claim`: OP stack output root.
 - `l2_block_number`: L2 block number for the root claim.
 - `attempt`: retry nonce, non-zero only when replacing a game invalidated by a proof timeout.
@@ -28,14 +27,11 @@ parentRef, attempt)` and the game's factory UUID is
 
 ### `parent_ref`
 
-- read `canonicalAnchorParent()` from the registered `MultiProofGame` implementation. It returns
-  the current anchor game when that game remains an eligible WIP-1006 parent in the same proof
-  domain. It returns the `AnchorStateRegistry` sentinel for the initial anchor, an incompatible
-  proof domain or game type, or an ineligible anchor game.
+- read the current anchor game from `AnchorStateRegistry`. Use it as `parent_ref` when present;
+  otherwise use the registry address as the initial sentinel.
 - compute L2 output root for block equal to `parent_ref`'s `l2_block_number` + `BLOCK_INTERVAL`
 - look the game up with `DisputeGameFactory.games(gameType, rootClaim, extraData)`, walking
-  `attempt` upward until the first gap. There is exactly one canonical parent to query: anchor
-  advancement does not change the parent reference or factory UUID of an existing transition.
+  `attempt` upward until the first gap.
 - if a game exists, it becomes the `parent_ref` and we continue this loop
 - if it doesn't exist - i.e. the address is `0x00..00`, then the current `parent_ref` is returned
 
