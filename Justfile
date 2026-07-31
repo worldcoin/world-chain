@@ -518,19 +518,22 @@ proof-register-key env="alphanet":
         -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" \
         -- cat /run/nitro-shared/enclave-cid 2>/dev/null || echo "16")
     echo "Pod: $NITRO_POD  Container: $CONTAINER  CID: $ENCLAVE_CID  Registry: $NITRO_ENCLAVE_KEY_REGISTRY" >&2
-    # Forward optional PCRs so the worker verifies the attestation host-side when available.
-    PCR_ENV=""
-    [ -n "${PCR0:-}" ] && PCR_ENV="$PCR_ENV PCR0=$PCR0"
-    [ -n "${PCR1:-}" ] && PCR_ENV="$PCR_ENV PCR1=$PCR1"
-    [ -n "${PCR2:-}" ] && PCR_ENV="$PCR_ENV PCR2=$PCR2"
-    kubectl --context="$KUBECONTEXT" exec \
-        -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" \
-        -- sh -c "ENCLAVE_CID=$ENCLAVE_CID \
-            NITRO_ENCLAVE_KEY_REGISTRY=$NITRO_ENCLAVE_KEY_REGISTRY \
-            L1_RPC_URL=$L1_RPC_URL \
-            REGISTER_PRIVATE_KEY=$REGISTER_KEY \
-            $PCR_ENV \
-            nitro-worker register"
+    # Pass everything (including the funding key) over STDIN rather than as `sh -c`
+    # arguments, so secrets never appear in the container argv / kubectl audit logs, and
+    # shell metacharacters in any value can't break out. Each value is single-quoted with
+    # embedded single quotes escaped.
+    shq() { printf "'%s'" "$(printf '%s' "${1:-}" | sed "s/'/'\\\\''/g")"; }
+    {
+        printf 'export ENCLAVE_CID=%s\n' "$(shq "$ENCLAVE_CID")"
+        printf 'export NITRO_ENCLAVE_KEY_REGISTRY=%s\n' "$(shq "$NITRO_ENCLAVE_KEY_REGISTRY")"
+        printf 'export L1_RPC_URL=%s\n' "$(shq "$L1_RPC_URL")"
+        printf 'export REGISTER_PRIVATE_KEY=%s\n' "$(shq "$REGISTER_KEY")"
+        if [ -n "${PCR0:-}" ]; then printf 'export PCR0=%s\n' "$(shq "$PCR0")"; fi
+        if [ -n "${PCR1:-}" ]; then printf 'export PCR1=%s\n' "$(shq "$PCR1")"; fi
+        if [ -n "${PCR2:-}" ]; then printf 'export PCR2=%s\n' "$(shq "$PCR2")"; fi
+        printf 'exec nitro-worker register\n'
+    } | kubectl --context="$KUBECONTEXT" exec -i \
+        -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" -- sh -s
 
 # Combined – Run all proof system deployment phases in sequence.
 # Automatically wires contract addresses between steps. PCR0/1/2 are

@@ -11,6 +11,9 @@ use world_chain_nitro_worker::{NitroBackend, NitroBackendConfig, build_expected_
 use world_chain_proof_kona_host_utils::online::{
     build_online_config, hardfork_config_from_chain_spec,
 };
+use world_chain_proof_nitro::register::{
+    RegisterParams, RegistrationOutcome, register_enclave_key,
+};
 use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
 };
@@ -202,10 +205,6 @@ pub async fn run(args: WorkerArgs) -> Result<()> {
     // Optionally self-register the enclave's generated signing key on-chain before leasing
     // any jobs. Without a registered key the proofs this worker submits would not verify.
     if args.auto_register {
-        use world_chain_proof_nitro::register::{
-            RegisterParams, RegistrationOutcome, register_enclave_key,
-        };
-
         let registry = args
             .registry
             .clone()

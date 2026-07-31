@@ -78,10 +78,27 @@ mod submit {
         host::{EnclaveEndpoint, NitroProver},
     };
 
+    /// Trims `value` and errors if it is empty, so a blank flag/env var produces a precise
+    /// message instead of a downstream parse error.
+    fn non_empty<'a>(value: &'a str, field: &str) -> Result<&'a str> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            bail!("{field} is required (got an empty value)");
+        }
+        Ok(trimmed)
+    }
+
     sol! {
         /// Minimal on-chain surface of `NitroEnclaveKeyRegistry` needed for self-registration.
         #[sol(rpc)]
         interface INitroEnclaveKeyRegistry {
+            /// Reverted by `registerKey` when the key is already `Active`.
+            error KeyAlreadyRegistered();
+            /// Reverted by `registerKey` when the key was permanently revoked.
+            error KeyRevokedPermanently();
+            /// Reverted by `registerKey` when the attestation's public key is malformed.
+            error InvalidPublicKey();
+
             function registerKey(bytes attestationTbs, bytes signature, bytes attestationSigHints)
                 external
                 returns (bytes publicKey, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2);
@@ -134,6 +151,13 @@ mod submit {
     /// (e.g. PCR set not approved, CertManager not pre-warmed), or the key is still not
     /// registered after a confirmed transaction.
     pub async fn register_enclave_key(params: RegisterParams) -> Result<RegistrationOutcome> {
+        // 0. Validate the string inputs up front with clear messages. `.parse()` below
+        //    would also reject these, but an explicit empty-string check gives operators a
+        //    precise error instead of a generic "invalid address/URL/key".
+        let l1_rpc_url = non_empty(&params.l1_rpc_url, "L1 RPC URL")?;
+        let registry = non_empty(&params.registry, "NitroEnclaveKeyRegistry address")?;
+        let private_key = non_empty(&params.private_key, "registration private key")?;
+
         // 1. Fetch a public-key-embedding attestation from the running enclave.
         let endpoint = EnclaveEndpoint::with_port(params.enclave_cid, params.enclave_port);
         let prover = NitroProver::new(endpoint, params.expected_pcrs);
@@ -149,15 +173,11 @@ mod submit {
         );
 
         // 2. Build the provider + registry binding.
-        let url = Url::parse(&params.l1_rpc_url).context("invalid L1 RPC URL")?;
-        let registry_address: Address = params
-            .registry
-            .trim()
+        let url = Url::parse(l1_rpc_url).context("invalid L1 RPC URL")?;
+        let registry_address: Address = registry
             .parse()
             .context("invalid NitroEnclaveKeyRegistry address")?;
-        let signer: PrivateKeySigner = params
-            .private_key
-            .trim()
+        let signer: PrivateKeySigner = private_key
             .parse()
             .context("invalid registration private key")?;
         let signer_address = signer.address();
@@ -204,11 +224,22 @@ mod submit {
         {
             Ok(pending) => pending,
             Err(err) => {
-                // A concurrent registration may have landed between our pre-check and send.
-                if err.to_string().contains("KeyAlreadyRegistered") {
+                // A concurrent registration may have landed between our pre-check and the
+                // send (e.g. another worker/enclave with the same key registered first).
+                // Re-query the registry — this is decode-independent, so it reliably
+                // distinguishes that race (key now Active) from a genuine failure such as
+                // an unapproved PCR set or an un-pre-warmed CertManager. The custom errors
+                // are also declared on the sol! interface above so alloy can decode the
+                // revert into a readable reason in the propagated error.
+                if registry
+                    .isKeyRegistered(public_key.clone())
+                    .call()
+                    .await
+                    .unwrap_or(false)
+                {
                     warn!(
                         target: "world_chain::nitro",
-                        "registerKey reverted with KeyAlreadyRegistered; treating as success"
+                        "registerKey failed but the key is already registered; treating as success"
                     );
                     return Ok(RegistrationOutcome::AlreadyRegistered);
                 }
