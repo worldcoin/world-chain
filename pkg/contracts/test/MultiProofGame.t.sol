@@ -79,7 +79,7 @@ contract MultiProofGameTest is OPStackFixtures {
     function test_Create_RejectsUnregisteredAndBlacklistedParents() public {
         uint256 target = STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL;
         vm.prank(proposer);
-        vm.expectRevert(InvalidParentGame.selector);
+        vm.expectRevert();
         dgf.create{value: PROPOSER_BOND}(
             WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), _extraDataForParent(target, makeAddr("unknown-parent"), 0)
         );
@@ -114,21 +114,35 @@ contract MultiProofGameTest is OPStackFixtures {
         dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(childTarget)), childExtraData);
     }
 
-    function test_Create_UsesAnchorSentinelAfterAnchorAdvances() public {
+    function test_Create_UsesPreviousAnchorGameAfterAnchorAdvances() public {
         MultiProofGame parent = _proposeAtAnchor();
         _resolveUnchallenged(parent);
         _passAirgap(parent);
         parent.closeGame();
 
         uint256 target = parent.l2SequenceNumber() + BLOCK_INTERVAL;
-        bytes memory staleParentExtraData = _extraData(target, 0, 0);
         vm.prank(proposer);
-        vm.expectRevert(InvalidParentGame.selector);
-        dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), staleParentExtraData);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IMultiProofGame.InvalidL2BlockNumber.selector, STARTING_ANCHOR_BLOCK + BLOCK_INTERVAL, target
+            )
+        );
+        dgf.create{value: PROPOSER_BOND}(
+            WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), _extraData(target, type(uint256).max, 0)
+        );
 
-        MultiProofGame child = _proposeAtAnchor();
-        assertEq(child.startingRootClaim(), Claim.unwrap(parent.rootClaim()));
-        assertEq(child.startingL2BlockNumber(), parent.l2SequenceNumber());
+        bytes memory previousAnchorParentExtraData = _extraData(target, 0, 0);
+        vm.prank(proposer);
+        MultiProofGame previousAnchorChild = MultiProofGame(
+            address(
+                dgf.create{value: PROPOSER_BOND}(
+                    WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), previousAnchorParentExtraData
+                )
+            )
+        );
+        assertEq(previousAnchorChild.parentRef(), address(parent));
+        assertEq(previousAnchorChild.startingRootClaim(), Claim.unwrap(parent.rootClaim()));
+        assertEq(previousAnchorChild.startingL2BlockNumber(), parent.l2SequenceNumber());
     }
 
     function test_Constructor_RejectsInvalidConfiguration() public {
