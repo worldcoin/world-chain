@@ -1,22 +1,22 @@
 use crate::{
     config::DefenderConfig,
     error::DefenderError,
-    game::{GameEvaluator, GameObservation, GameOutcome},
+    game::{GameEvaluator, GameObservation},
     lane::{DEFENDED_LANE_COUNT, DEFENDED_LANES, LaneDriver, LaneState},
     traits::DefenderClient,
     types::GameMetadata,
 };
-use alloy_primitives::{Address, BlockNumber};
+use alloy_primitives::Address;
 use futures_util::{StreamExt, stream};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::{error, info, warn};
-use world_chain_proofs::{ConsensusProvider, InvalidationReason};
+use world_chain_proofs::{ConsensusProvider, InvalidationReason, ProofLane, select_lineage};
 use world_chain_prover_service::ProofRequester;
 
-/// An active defense of a challenged game with a valid root.
+/// An active proof-support workflow for a selected game.
 #[derive(Debug, Clone, Copy)]
 struct ActiveDefense {
     game: GameMetadata,
@@ -36,33 +36,21 @@ impl ActiveDefense {
 /// Result of advancing a single defense for one tick.
 #[derive(Debug, Clone, Copy)]
 enum DefenseProgress {
-    /// The game left the `Challenged` state on-chain.
     Closed,
-    /// The game already has enough proof support to complete the defense.
     Complete,
-    /// The proof deadline elapsed before the defense completed.
     DeadlineElapsed,
-    /// Lane progress after this tick.
     Lanes([LaneState; DEFENDED_LANE_COUNT]),
 }
 
-/// World Chain Defender.
-///
-/// Discovers allowlisted games through the factory index and watches them until
-/// they no longer need defense. When a game is challenged and its root claim
-/// matches the canonical output root, the defender requests one proof per
-/// defended lane from the `prover-service` and submits each completed proof
-/// on-chain via `submitProofLane`.
+/// Supplies proof support for every valid game on the proposer-selected lineage.
 #[derive(Debug)]
 pub struct WorldChainDefender<E, C, P> {
     config: DefenderConfig,
     execution_provider: E,
     consensus_provider: C,
     proof_requester: P,
-    next_game_index: Option<u64>,
-    watched_games: HashMap<Address, GameMetadata>,
     active_defenses: HashMap<Address, ActiveDefense>,
-    /// Games whose proof retries were exhausted, mapped to their proof deadline.
+    /// Selected games whose prover retries were exhausted, mapped to their proof deadline.
     abandoned_defenses: HashMap<Address, u64>,
 }
 
@@ -79,8 +67,6 @@ impl<E, C, P> WorldChainDefender<E, C, P> {
             execution_provider,
             consensus_provider,
             proof_requester,
-            next_game_index: None,
-            watched_games: HashMap::default(),
             active_defenses: HashMap::default(),
             abandoned_defenses: HashMap::default(),
         }
@@ -90,17 +76,6 @@ impl<E, C, P> WorldChainDefender<E, C, P> {
     #[must_use]
     pub const fn config(&self) -> &DefenderConfig {
         &self.config
-    }
-
-    /// Returns the next factory game index to scan, once initialized.
-    #[must_use]
-    pub const fn next_game_index(&self) -> Option<u64> {
-        self.next_game_index
-    }
-
-    #[cfg(test)]
-    pub(crate) fn watched_games(&self) -> Vec<Address> {
-        self.watched_games.keys().copied().collect()
     }
 
     #[cfg(test)]
@@ -120,116 +95,61 @@ where
     C: ConsensusProvider,
     P: ProofRequester + Sync,
 {
-    /// Binary-searches the factory's monotonic creation timestamps for the first game that
-    /// can still have an open proof window.
-    async fn first_recent_game_index(
-        &self,
-        game_count: u64,
-        cutoff: u64,
-    ) -> Result<u64, DefenderError> {
-        let mut low = 0;
-        let mut high = game_count;
+    /// Reconstructs the valid lineage selected by the same transition rule as the proposer.
+    async fn selected_lineage(&self) -> Result<Vec<GameMetadata>, DefenderError> {
+        let lineage = select_lineage(&self.execution_provider, &self.consensus_provider).await?;
+        let mut games = Vec::with_capacity(lineage.games().len());
 
-        while low < high {
-            let middle = low + (high - low) / 2;
-            if self.execution_provider.game_created_at(middle).await? < cutoff {
-                low = middle + 1;
-            } else {
-                high = middle;
+        for selected in lineage.games() {
+            let metadata = self
+                .execution_provider
+                .game_metadata(selected.game.address)
+                .await?;
+            if metadata.parent_ref != selected.transition.parent_ref
+                || metadata.root_claim != selected.transition.root_claim
+                || metadata.l2_block_number != selected.transition.l2_block_number
+            {
+                return Err(DefenderError::Contract(format!(
+                    "selected game {} does not match its transition commitment",
+                    selected.game.address
+                )));
             }
+            games.push(metadata);
         }
 
-        Ok(low)
+        Ok(games)
     }
 
-    async fn evaluate_discovered_games(
-        &self,
-        games: impl IntoIterator<Item = GameMetadata>,
-        now: u64,
-    ) -> Vec<(GameMetadata, Result<GameOutcome, DefenderError>)> {
-        let evaluator = GameEvaluator::new(&self.execution_provider, &self.consensus_provider);
-        stream::iter(games)
-            .map(move |game| {
-                let evaluator = evaluator;
-                async move {
-                    let result = evaluator.evaluate_discovered(&game, now).await;
-                    (game, result)
-                }
-            })
-            .buffer_unordered(self.config.max_game_concurrency)
-            .collect()
-            .await
-    }
-
-    fn handle_discovered_game_outcomes(
+    async fn sync_defenses_with_selected_lineage(
         &mut self,
-        outcomes: Vec<(GameMetadata, Result<GameOutcome, DefenderError>)>,
-    ) {
-        for (game, outcome) in outcomes {
-            match outcome {
-                Ok(GameOutcome::Track) => {
-                    self.watched_games.insert(game.address, game);
-                }
-                Ok(GameOutcome::Defend) => self.start_defense(game),
-                Ok(GameOutcome::Drop) => {}
-                Err(error) => {
-                    warn!(
-                        game = %game.address,
-                        %error,
-                        "game scan failed; retaining for monitoring"
-                    );
-                    self.watched_games.insert(game.address, game);
-                }
-            }
-        }
-    }
-
-    async fn evaluate_tracked_games(
-        &self,
-        latest_finalized_l2_block: BlockNumber,
+        selected: Vec<GameMetadata>,
         now: u64,
-    ) -> Vec<(GameMetadata, Result<GameOutcome, DefenderError>)> {
-        let evaluator = GameEvaluator::new(&self.execution_provider, &self.consensus_provider);
-        stream::iter(self.watched_games.values().copied().collect::<Vec<_>>())
-            .map(move |game| {
-                let evaluator = evaluator;
-                async move {
-                    let result = evaluator
-                        .evaluate_tracked(&game, latest_finalized_l2_block, now)
-                        .await;
-                    (game, result)
-                }
-            })
-            .buffer_unordered(self.config.max_game_concurrency)
-            .collect()
-            .await
-    }
+    ) -> Result<(), DefenderError> {
+        let selected_addresses: HashSet<_> = selected.iter().map(|game| game.address).collect();
+        self.active_defenses.retain(|game, _| {
+            let keep = selected_addresses.contains(game);
+            if !keep {
+                warn!(%game, "stopping proof support because game left the selected lineage");
+            }
+            keep
+        });
+        self.abandoned_defenses
+            .retain(|game, deadline| selected_addresses.contains(game) && now < *deadline);
 
-    fn handle_tracked_game_outcomes(
-        &mut self,
-        outcomes: Vec<(GameMetadata, Result<GameOutcome, DefenderError>)>,
-    ) {
-        for (metadata, outcome) in outcomes {
-            let game = metadata.address;
-            match outcome {
-                Ok(GameOutcome::Defend) => self.start_defense(metadata),
-                Ok(GameOutcome::Drop) => {
-                    self.watched_games.remove(&game);
-                }
-                Ok(GameOutcome::Track) => {}
-                Err(err) => {
-                    warn!(game = %game, error = %err, "game watch failed; retrying next tick");
-                }
+        let evaluator = GameEvaluator::new(&self.execution_provider);
+        for game in selected {
+            if self.active_defenses.contains_key(&game.address)
+                || self.abandoned_defenses.contains_key(&game.address)
+            {
+                continue;
+            }
+            if evaluator.needs_defense(&game, now).await? {
+                info!(game = %game.address, "selected game needs proof support; starting proof workflow");
+                self.active_defenses
+                    .insert(game.address, ActiveDefense::new(game));
             }
         }
-    }
-
-    fn start_defense(&mut self, metadata: GameMetadata) {
-        let game = metadata.address;
-        info!(%game, "challenged game has a valid root; starting defense");
-        self.watched_games.remove(&game);
-        self.active_defenses
-            .insert(game, ActiveDefense::new(metadata));
+        Ok(())
     }
 
     async fn advance_defense(
@@ -238,14 +158,23 @@ where
         now: u64,
     ) -> Result<DefenseProgress, DefenderError> {
         let metadata = &defense.game;
-        let evaluator = GameEvaluator::new(&self.execution_provider, &self.consensus_provider);
-        let proof_bitmap = match evaluator.observe(metadata).await? {
+        let evaluator = GameEvaluator::new(&self.execution_provider);
+        let (proof_bitmap, deadline, tee_only) = match evaluator.observe(metadata).await? {
             GameObservation::Finalized => return Ok(DefenseProgress::Complete),
-            GameObservation::Invalidated(reason) => {
+            GameObservation::Invalidated { reason } => {
                 if reason == InvalidationReason::ProofTimeout {
                     return Ok(DefenseProgress::DeadlineElapsed);
                 }
                 return Ok(DefenseProgress::Closed);
+            }
+            GameObservation::Proposed {
+                proof_bitmap,
+                has_initial_support,
+            } => {
+                if has_initial_support {
+                    return Ok(DefenseProgress::Complete);
+                }
+                (proof_bitmap, metadata.challenge_deadline, true)
             }
             GameObservation::Challenged {
                 proof_bitmap,
@@ -254,20 +183,20 @@ where
                 if has_required_support {
                     return Ok(DefenseProgress::Complete);
                 }
-                proof_bitmap
+                (proof_bitmap, metadata.proof_deadline, false)
             }
-            GameObservation::Unset | GameObservation::Proposed => {
-                return Ok(DefenseProgress::Closed);
-            }
+            GameObservation::Unset => return Ok(DefenseProgress::Closed),
         };
-        if now >= metadata.proof_deadline {
+        if now >= deadline {
             return Ok(DefenseProgress::DeadlineElapsed);
         }
 
         let mut lanes = defense.lanes;
         let lane_driver = LaneDriver::new(&self.execution_provider, &self.proof_requester);
         for (slot, (proof_lane, backend)) in DEFENDED_LANES.into_iter().enumerate() {
-            // skip lanes already proven on-chain, by us or by anyone else
+            if tee_only && proof_lane != ProofLane::TeeAttestation {
+                continue;
+            }
             if proof_bitmap & proof_lane.mask() != 0 {
                 lanes[slot] = LaneState::Proven;
                 continue;
@@ -311,8 +240,9 @@ where
                 Ok(DefenseProgress::DeadlineElapsed) => {
                     error!(
                         %game,
+                        challenge_deadline = defense.game.challenge_deadline,
                         proof_deadline = defense.game.proof_deadline,
-                        "challenged game proof deadline elapsed before defense completed"
+                        "game proof deadline elapsed before proof support completed"
                     );
                     self.active_defenses.remove(&game);
                 }
@@ -336,86 +266,13 @@ where
         }
     }
 
-    async fn advance_active_defenses(&mut self, now: u64) {
-        let defense_results = self.scan_active_defenses(now).await;
-        self.handle_defense_progress(defense_results);
-    }
-
-    async fn discover_games(&mut self, now: u64) -> Result<(), DefenderError> {
-        let game_count = self.execution_provider.game_count().await?;
-        let initialize_cursor = self
-            .next_game_index
-            .is_none_or(|next_game_index| next_game_index > game_count);
-        if initialize_cursor {
-            let cutoff = now.saturating_sub(self.config.max_game_age.as_secs());
-            let first_recent = self.first_recent_game_index(game_count, cutoff).await?;
-            info!(
-                first_recent_game_index = first_recent,
-                game_count, cutoff, "initialized defender game cursor"
-            );
-            self.next_game_index = Some(first_recent);
-        }
-
-        let cursor = self.next_game_index.unwrap_or(game_count);
-        // Factory entries are read at the finalized block, but mutable game state is read at
-        // latest. Reconsider a bounded overlap so a shallow reorg of that state cannot make a
-        // transient Drop outcome permanent. The overlap does not consume the new-game budget.
-        let start = if initialize_cursor {
-            cursor
-        } else {
-            cursor.saturating_sub(self.config.game_scan_lookback)
-        };
-        let end = cursor
-            .saturating_add(self.config.max_games_per_tick)
-            .min(game_count);
-        let mut new_games = Vec::with_capacity((end - start) as usize);
-        for index in start..end {
-            // The dispute-game factory indexes every game type; skip the ones that are not ours.
-            let Some(game) = self.execution_provider.game_address_at(index).await? else {
-                continue;
-            };
-            if self.watched_games.contains_key(&game)
-                || self.active_defenses.contains_key(&game)
-                || self.abandoned_defenses.contains_key(&game)
-            {
-                continue;
-            }
-
-            let game_creator = self.execution_provider.game_creator(game).await?;
-            if game_creator != self.config.allowed_proposer {
-                continue;
-            }
-            new_games.push(self.execution_provider.game_metadata(game).await?);
-        }
-
-        let outcomes = self.evaluate_discovered_games(new_games, now).await;
-        self.handle_discovered_game_outcomes(outcomes);
-        self.next_game_index = Some(end);
-        Ok(())
-    }
-
-    async fn advance_tracked_games(&mut self, now: u64) -> Result<(), DefenderError> {
-        if self.watched_games.is_empty() {
-            return Ok(());
-        }
-
-        let latest_finalized_l2_block = self.consensus_provider.latest_l2_finalized_block().await?;
-
-        let outcomes = self
-            .evaluate_tracked_games(latest_finalized_l2_block, now)
-            .await;
-        self.handle_tracked_game_outcomes(outcomes);
-        Ok(())
-    }
-
     pub(crate) async fn tick_at(&mut self, now: u64) -> Result<(), DefenderError> {
         self.config.validate()?;
-        self.abandoned_defenses
-            .retain(|_, proof_deadline| now < *proof_deadline);
-
-        self.advance_active_defenses(now).await;
-        self.advance_tracked_games(now).await?;
-        self.discover_games(now).await?;
+        let selected = self.selected_lineage().await?;
+        self.sync_defenses_with_selected_lineage(selected, now)
+            .await?;
+        let progress = self.scan_active_defenses(now).await;
+        self.handle_defense_progress(progress);
         Ok(())
     }
 
@@ -432,7 +289,7 @@ where
         loop {
             interval.tick().await;
             if let Err(e) = self.tick().await {
-                warn!(%e, "scan attempt failed");
+                warn!(%e, "defender iteration failed; retrying on next tick");
             }
         }
     }

@@ -17,7 +17,6 @@ workspace = true
 [dependencies]
 # workspace
 world-chain-proofs.workspace = true
-world-chain-prover-service.workspace = true
 
 # alloy
 alloy-consensus.workspace = true

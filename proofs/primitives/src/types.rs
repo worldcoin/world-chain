@@ -18,6 +18,9 @@ pub const PROOF_SYSTEM_VERSION: u64 = 1;
 /// index-based read must filter on this value.
 pub const MULTI_PROOF_GAME_TYPE: u32 = 1006;
 
+/// Maximum number of sequential retry attempts probed for one transition.
+pub const MAX_ATTEMPT_SCAN: u64 = 64;
+
 /// The `MultiProofGame.WorldChainGameCreated` event.
 #[derive(Debug, Clone, Copy)]
 pub struct WorldChainGameCreated {

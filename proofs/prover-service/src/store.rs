@@ -881,24 +881,19 @@ fn proof_id_bytes(id: ProofRequestId) -> Vec<u8> {
 
 /// Returns true if the request matches the stored values.
 ///
-/// Nitro requests may replace their L1 head after a failed attempt because the proposer
-/// deliberately retries against a newer finalized head. SP1 requests are pinned to the L1
-/// origin in immutable game metadata, so accepting a different head could make a completed
-/// backend session from the previous attempt unusable while still eligible for resumption.
+/// The L1 head is immutable game metadata. A mismatch must create a different request rather
+/// than resuming a backend session whose proof cannot satisfy the game verifier.
 fn request_matches(row: &PgRow, request: &ProofRequest) -> Result<bool, ProofRequestError> {
     let stored_backend: &str = row.get("backend");
     let stored_game: &[u8] = row.get("game");
     let stored_root_claim: &[u8] = row.get("root_claim");
     let stored_l2_block_number: i64 = row.get("l2_block_number");
     let stored_l1_head = b256_from_bytes(row.get("l1_head"))?;
-    let l1_head_matches =
-        request.backend == ProofBackend::Nitro || stored_l1_head == request.l1_head;
-
     Ok(stored_backend == request.backend.as_str()
         && stored_game == request.game.as_slice()
         && stored_root_claim == request.root_claim.as_slice()
         && stored_l2_block_number == l2_to_i64(request.l2_block_number)?
-        && l1_head_matches)
+        && stored_l1_head == request.l1_head)
 }
 
 fn b256_from_bytes(bytes: Vec<u8>) -> Result<B256, MalformedB256Error> {

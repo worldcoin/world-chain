@@ -162,6 +162,7 @@ async fn op_native_wip_1006_portal_withdrawal_and_bond_claim() -> eyre::Result<(
         anchor.isGameProper(game_address).call().await?,
         "covering WIP-1006 game is not proper"
     );
+    wait_for_initial_proof(l1_provider.clone(), game_address).await?;
 
     let (output_root_proof, withdrawal_proof) =
         build_withdrawal_proof(l2_provider, game_l2_block, withdrawal.hash).await?;
@@ -354,6 +355,29 @@ where
         },
         storage_proof.proof.clone(),
     ))
+}
+
+async fn wait_for_initial_proof<P>(provider: P, game_address: Address) -> eyre::Result<()>
+where
+    P: Provider,
+{
+    let game = IMultiProofGame::IMultiProofGameInstance::new(game_address, provider);
+    let started = Instant::now();
+
+    loop {
+        if game.proofBitmap().call().await? != 0 {
+            return Ok(());
+        }
+        if game.status().call().await? != GAME_IN_PROGRESS {
+            bail!("game {game_address} resolved before receiving its initial proof");
+        }
+        if started.elapsed() >= GAME_WAIT_TIMEOUT {
+            bail!(
+                "timed out waiting for defender to submit an initial proof to game {game_address}"
+            );
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }
 
 async fn wait_for_defender_win<P>(provider: P, game_address: Address) -> eyre::Result<()>

@@ -1,26 +1,19 @@
 use alloy_consensus::BlockHeader;
-use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::{Address, B256, BlockHash, U256};
+use alloy_eips::BlockNumberOrTag;
+use alloy_primitives::{Address, U256};
 use alloy_provider::{Provider, WalletProvider};
 use async_trait::async_trait;
 use world_chain_proofs::{
-    IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame,
-    InvalidationReasonError, MULTI_PROOF_GAME_TYPE, ResolutionStatus, RootStateError,
+    IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame, LineageAnchor,
+    LineageError, LineageGame, LineageProvider, LineageTransition, MULTI_PROOF_GAME_TYPE,
+    RegisteredLineageConfig, ResolutionStatus, read_game_for_transition, read_lineage_anchor,
+    read_lineage_resolution_status, read_registered_lineage_config,
 };
-use world_chain_prover_service::ProofData;
 
 use crate::{
-    AnchorRef, BondManagerClient, Proposal, ProposalSubmission, ProposerClient, ProposerError,
-    types::{
-        ClaimSubmission, CloseGameSubmission, PendingWithdrawal, ResolveSubmission, TransitionGame,
-    },
+    BondManagerClient, Proposal, ProposalSubmission, ProposerClient, ProposerError,
+    types::{ClaimSubmission, CloseGameSubmission, PendingWithdrawal, ResolveSubmission},
 };
-
-/// Highest retry nonce probed when locating the live game for a transition.
-///
-/// Bounds the attempt walk so a corrupt or adversarial factory state cannot turn a single
-/// canonical-line hop into an unbounded RPC loop.
-const MAX_ATTEMPT_SCAN: u64 = 64;
 
 /// Alloy-backed implementation of the proposer contract clients.
 ///
@@ -31,8 +24,7 @@ const MAX_ATTEMPT_SCAN: u64 = 64;
 pub struct AlloyProofSystemClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
     anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
-    /// Domain hash of the registered game implementation, read once at construction.
-    domain_hash: B256,
+    registered: RegisteredLineageConfig,
     /// Number of confirmations to require after sending a tx onchain.
     confirmations: u64,
     provider: P,
@@ -50,48 +42,31 @@ where
     pub async fn new(
         provider: P,
         factory_address: Address,
-        anchor_address: Address,
         confirmations: u64,
     ) -> Result<Self, ProposerError> {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
             provider.clone(),
         );
+        let registered = read_registered_lineage_config(&provider, &factory).await?;
         let anchor = IAnchorStateRegistry::IAnchorStateRegistryInstance::new(
-            anchor_address,
+            registered.anchor_registry,
             provider.clone(),
         );
-
-        let game_impl = factory
-            .gameImpls(MULTI_PROOF_GAME_TYPE)
-            .call()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
-        if game_impl == Address::ZERO {
-            return Err(ProposerError::Contract(format!(
-                "dispute-game factory {factory_address} has no implementation for game type {MULTI_PROOF_GAME_TYPE}"
-            )));
-        }
-        let domain_hash =
-            IMultiProofGame::IMultiProofGameInstance::new(game_impl, provider.clone())
-                .domainHash()
-                .call()
-                .await
-                .map_err(|error| ProposerError::Contract(error.to_string()))?;
 
         Ok(Self {
             factory,
             anchor,
-            domain_hash,
+            registered,
             confirmations,
             provider,
         })
     }
 
-    /// Returns the domain hash of the registered game implementation.
+    /// Returns the immutable configuration of the registered game implementation.
     #[must_use]
-    pub const fn domain_hash(&self) -> B256 {
-        self.domain_hash
+    pub const fn registered_lineage_config(&self) -> RegisteredLineageConfig {
+        self.registered
     }
 
     fn game(&self, address: Address) -> IMultiProofGame::IMultiProofGameInstance<P> {
@@ -114,26 +89,9 @@ where
         &self,
         game: Address,
     ) -> Result<ResolutionStatus, ProposerError> {
-        let result = self
-            .game(game)
-            .resolutionStatus()
-            .call()
+        read_lineage_resolution_status(&self.game(game))
             .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
-        let root_state = result
-            .outcome
-            .try_into()
-            .map_err(|error: RootStateError| ProposerError::Contract(error.to_string()))?;
-        let invalidation_reason = result
-            .reason
-            .try_into()
-            .map_err(|error: InvalidationReasonError| ProposerError::Contract(error.to_string()))?;
-
-        Ok(ResolutionStatus {
-            resolvable: result.resolvable,
-            root_state,
-            invalidation_reason,
-        })
+            .map_err(Into::into)
     }
 
     async fn read_is_game_finalized(&self, game: Address) -> Result<bool, ProposerError> {
@@ -300,73 +258,38 @@ where
 }
 
 #[async_trait]
+impl<P> LineageProvider for AlloyProofSystemClient<P>
+where
+    P: Provider + WalletProvider + Clone + Send + Sync + 'static,
+{
+    fn lineage_block_interval(&self) -> u64 {
+        self.registered.block_interval
+    }
+
+    async fn lineage_anchor(&self) -> Result<LineageAnchor, LineageError> {
+        read_lineage_anchor(&self.provider, &self.anchor).await
+    }
+
+    async fn game_for_transition(
+        &self,
+        transition: LineageTransition,
+    ) -> Result<Option<LineageGame>, LineageError> {
+        read_game_for_transition(&self.factory, self.registered.domain_hash, transition).await
+    }
+
+    async fn lineage_resolution_status(
+        &self,
+        game: Address,
+    ) -> Result<ResolutionStatus, LineageError> {
+        read_lineage_resolution_status(&self.game(game)).await
+    }
+}
+
+#[async_trait]
 impl<P> ProposerClient for AlloyProofSystemClient<P>
 where
     P: Provider + WalletProvider + Clone + Send + Sync + 'static,
 {
-    async fn anchor_parent(&self) -> Result<AnchorRef, ProposerError> {
-        let (anchor_root, anchor_game) = self
-            .provider
-            .multicall()
-            .add(self.anchor.getAnchorRoot())
-            .add(self.anchor.anchorGame())
-            .aggregate()
-            .await
-            .map_err(|err| ProposerError::Contract(err.to_string()))?;
-
-        Ok(AnchorRef {
-            registry: *self.anchor.address(),
-            anchor_game: (anchor_game != Address::ZERO).then_some(anchor_game),
-            l2_block_number: u256_to_u64(anchor_root.l2SequenceNumber, "getAnchorRoot")?,
-        })
-    }
-
-    async fn games_for_transition(
-        &self,
-        parent_candidates: &[Address],
-        root_claim: B256,
-        l2_block_number: u64,
-    ) -> Result<Vec<TransitionGame>, ProposerError> {
-        let mut found = Vec::with_capacity(parent_candidates.len());
-        for parent_ref in parent_candidates {
-            let mut latest: Option<TransitionGame> = None;
-            // Attempts are strictly sequential: attempt N can only be created once attempt N-1
-            // exists, so the walk stops at the first gap.
-            for attempt in 0..MAX_ATTEMPT_SCAN {
-                let commitment = world_chain_proofs::ProposalCommitment {
-                    parent_ref: *parent_ref,
-                    root_claim,
-                    l2_block_number,
-                    attempt,
-                };
-                let entry = self
-                    .factory
-                    .games(
-                        MULTI_PROOF_GAME_TYPE,
-                        root_claim,
-                        commitment.extra_data(self.domain_hash),
-                    )
-                    .call()
-                    .await
-                    .map_err(|error| ProposerError::Contract(error.to_string()))?;
-                if entry.proxy == Address::ZERO {
-                    break;
-                }
-                latest = Some(TransitionGame {
-                    address: entry.proxy,
-                    parent_ref: *parent_ref,
-                    attempt,
-                });
-            }
-            found.extend(latest);
-        }
-        Ok(found)
-    }
-
-    async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
-        self.read_resolution_status(game).await
-    }
-
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
         let pending = self
             .game(game)
@@ -413,21 +336,9 @@ where
         Ok(CloseGameSubmission { tx_hash })
     }
 
-    async fn latest_finalized_l1_block(&self) -> Result<BlockHash, ProposerError> {
-        let block = self
-            .provider
-            .get_block(BlockId::finalized())
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
-        let block = block.ok_or_else(|| ProposerError::FinalizedBlockNotFound)?;
-        let hash = block.hash();
-        Ok(hash)
-    }
-
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
-        _proof: ProofData,
     ) -> Result<ProposalSubmission, ProposerError> {
         // `DisputeGameFactory.create` reverts unless `msg.value` matches the configured init
         // bond exactly, so it is read per submission rather than cached in configuration.
@@ -438,7 +349,9 @@ where
             .await
             .map_err(|error| ProposerError::Contract(error.to_string()))?;
 
-        let extra_data = proposal.commitment().extra_data(self.domain_hash);
+        let extra_data = proposal
+            .commitment()
+            .extra_data(self.registered.domain_hash);
         let pending = self
             .factory
             .create(MULTI_PROOF_GAME_TYPE, proposal.root_claim, extra_data)

@@ -285,7 +285,7 @@ Here is the full journey from "job available" to "proof accepted":
     document with:
     - `user_data` = `keccak256(abi.encode(TransitionPublicValues))`
     - `nonce` = the caller-supplied nonce
-    - `public_key` = the ephemeral secp256k1 public key (33-byte compressed)
+    - `public_key` = the ephemeral secp256k1 public key (65-byte SEC1-uncompressed)
 
 12. **Response returned.** The enclave sends back `TransitionPublicValues`, the raw attestation
     document bytes, and the secp256k1 signature.
@@ -305,7 +305,7 @@ Here is the full journey from "job available" to "proof accepted":
     the job's expected `root_claim`, `l2_block_number`, `l1_head`, and `rollup_config_hash`.
 
 15. **Proof submitted.** The worker posts
-    `ProofData::Nitro { attestation, public_values, signature }`
+    `ProofData::Nitro { attestation, public_values, signature, public_key }`
     back to the `prover-service`.
 
 ---
