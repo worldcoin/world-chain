@@ -45,7 +45,7 @@ attempt to be created.
 The automated services assume proof-timeout retries are exceptional. The proposer creates the next
 attempt and the defender follows that replacement, but games descending from the abandoned attempt
 are not automatically recovered. Operators must resolve that stale lineage parent-first and claim
-any resulting bond credits. Retry creation is logged at error level so it can trigger an incident
+any resulting bond credits. Retry creation is logged at warn level so it can trigger an incident
 response; a follow-up can include the complete stale lineage in that alert.
 
 ### `root_claim`
