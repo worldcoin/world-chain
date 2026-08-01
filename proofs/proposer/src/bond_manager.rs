@@ -96,6 +96,9 @@ where
             let result: Result<bool, ProposerError> = async {
                 let resolution_status = self.execution_provider.resolution_status(game).await?;
                 if !resolution_status.is_resolved() {
+                    // Retried lineages no longer expose their stale descendants to the canonical
+                    // proposer loop, so the bond manager resolves those descendants for recovery.
+                    // Leave direct proof timeouts to the proposer to avoid racing retry creation.
                     if resolution_status.resolvable
                         && resolution_status.root_state == RootState::Invalidated
                         && resolution_status.invalidation_reason
