@@ -696,7 +696,6 @@ impl ClaimedProofJobHandler for FakeProofBackend {
                 .abi_encode()
                 .into(),
                 signature: vec![0x7e, request.l2_block_number as u8].into(), // mock signature
-                public_key: Bytes::from_static(b"public key"),
             },
         })
     }

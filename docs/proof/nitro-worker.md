@@ -305,7 +305,7 @@ Here is the full journey from "job available" to "proof accepted":
     the job's expected `root_claim`, `l2_block_number`, `l1_head`, and `rollup_config_hash`.
 
 15. **Proof submitted.** The worker posts
-    `ProofData::Nitro { attestation, public_values, signature, public_key }`
+    `ProofData::Nitro { attestation, public_values, signature }`
     back to the `prover-service`.
 
 ---
@@ -349,9 +349,9 @@ The two layers are linked through the **key registration** step:
    secp256k1 key belongs to which enclave (with specific PCRs).
 2. `NitroAttestationVerifier` verifies the full attestation (P-384 sig, cert chain,
    PCRs) and extracts the public key.
-3. `NitroEnclaveKeyRegistry` stores the key as `Active`.
+3. `NitroEnclaveKeyRegistry` derives the Ethereum signer address and stores it as `Active`.
 4. During proof verification, `NitroProofVerifier` uses `ecrecover` on the secp256k1
-   signature and checks that the recovered key is registered.
+   signature and checks that the recovered signer address is registered.
 
 This design separates the **expensive operation** (P-384 attestation verification +
 cert chain validation, done once at key registration) from the **cheap operation**
