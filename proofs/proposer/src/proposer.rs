@@ -1,4 +1,4 @@
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 use world_chain_proofs::{
     ConsensusProvider, InvalidationReason, LineageStop, RootState, SelectedLineageGame,
     select_lineage,
@@ -182,7 +182,7 @@ where
                 proposal,
                 invalidated_game,
             } => {
-                error!(
+                warn!(
                     invalidated_game = %invalidated_game,
                     parent_ref = %proposal.parent_ref,
                     root_claim = %proposal.root_claim,
