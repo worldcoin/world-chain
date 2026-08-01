@@ -46,7 +46,7 @@ The automated services assume proof-timeout retries are exceptional. The propose
 attempt and the defender follows that replacement. Games descending from the abandoned attempt
 become resolvable as `INVALID_PARENT`; the bond manager keeps proposer-owned games tracked, resolves
 those descendants as their parents settle, and claims the refunded bonds. Retry creation remains
-logged at error level for operator visibility.
+logged at warn level for operator visibility.
 
 ### `root_claim`
 
