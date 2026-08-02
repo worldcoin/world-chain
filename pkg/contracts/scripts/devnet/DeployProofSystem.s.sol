@@ -55,7 +55,8 @@ contract DeployProofSystem is Script {
         bytes32 rollupConfigHash;
         uint256 blockInterval;
         uint8 proofThreshold;
-        address proofTimeoutRecipient;
+        address protocolFeeRecipient;
+        uint256 challengeFee;
         IDisputeGameFactory disputeGameFactory;
         IAnchorStateRegistry anchorStateRegistry;
         ISystemConfig systemConfig;
@@ -71,6 +72,7 @@ contract DeployProofSystem is Script {
     uint64 internal constant PROOF_PERIOD = 7 days;
     uint256 internal constant PROPOSER_BOND = 1 ether;
     uint256 internal constant CHALLENGER_BOND = 0.1 ether;
+    uint256 internal constant DEFAULT_CHALLENGE_FEE = 0.01 ether;
 
     function run() external returns (Deployment memory deployment) {
         Config memory config = _readConfig();
@@ -154,7 +156,8 @@ contract DeployProofSystem is Script {
         config.rollupConfigHash = vm.envBytes32("ROLLUP_CONFIG_HASH");
         config.blockInterval = vm.envOr("PROOF_SYSTEM_BLOCK_INTERVAL", uint256(10));
         config.proofThreshold = uint8(vm.envOr("PROOF_THRESHOLD", uint256(ProofLib.PROOF_THRESHOLD)));
-        config.proofTimeoutRecipient = vm.envOr("PROOF_TIMEOUT_RECIPIENT", config.challenger);
+        config.protocolFeeRecipient = vm.envOr("PROTOCOL_FEE_RECIPIENT", config.challenger);
+        config.challengeFee = vm.envOr("CHALLENGE_FEE", DEFAULT_CHALLENGE_FEE);
         config.disputeGameFactory = IDisputeGameFactory(vm.envAddress("DISPUTE_GAME_FACTORY"));
         config.anchorStateRegistry = IAnchorStateRegistry(vm.envAddress("ANCHOR_STATE_REGISTRY"));
         config.systemConfig = ISystemConfig(vm.envAddress("SYSTEM_CONFIG"));
@@ -178,7 +181,10 @@ contract DeployProofSystem is Script {
         require(config.systemConfig.l2ChainId() == config.l2ChainId, "DeployProofSystem: L2 chain ID mismatch");
         require(config.dgfOwnerKey != 0, "DeployProofSystem: DGF owner key required");
         require(config.proxyAdminOwnerKey != 0, "DeployProofSystem: ProxyAdmin owner key required");
-        require(config.proofTimeoutRecipient != address(0), "DeployProofSystem: proof timeout recipient required");
+        require(config.protocolFeeRecipient != address(0), "DeployProofSystem: protocol fee recipient required");
+        require(config.challengeFee > 0, "DeployProofSystem: challenge fee required");
+        require(config.challengeFee <= CHALLENGER_BOND, "DeployProofSystem: challenge fee exceeds bond");
+        require(config.challengeFee < PROPOSER_BOND, "DeployProofSystem: proposer bond must exceed challenge fee");
         if (config.setRespectedGameType) {
             require(config.guardianKey != 0, "DeployProofSystem: guardian key required for cutover");
         }
@@ -200,7 +206,8 @@ contract DeployProofSystem is Script {
             proofPeriod: PROOF_PERIOD,
             proposerBond: PROPOSER_BOND,
             challengerBond: CHALLENGER_BOND,
-            proofTimeoutRecipient: config.proofTimeoutRecipient,
+            protocolFeeRecipient: config.protocolFeeRecipient,
+            challengeFee: config.challengeFee,
             proofThreshold: config.proofThreshold,
             validityProofVerifier: IWorldChainProofVerifier(address(deployment.validityVerifier)),
             teeVerifier: IWorldChainProofVerifier(address(deployment.teeVerifier)),
@@ -225,7 +232,7 @@ contract DeployProofSystem is Script {
         vm.serializeAddress(root, "teeVerifier", address(deployment.teeVerifier));
         vm.serializeAddress(root, "securityCouncil", address(deployment.councilVerifier));
         vm.serializeAddress(root, "stakingRegistry", address(deployment.staking));
-        vm.serializeAddress(root, "proofTimeoutRecipient", config.proofTimeoutRecipient);
+        vm.serializeAddress(root, "protocolFeeRecipient", config.protocolFeeRecipient);
         vm.serializeAddress(root, "gameImplementation", address(deployment.gameImpl));
         vm.serializeAddress(root, "delayedWeth", address(deployment.weth));
         vm.serializeAddress(root, "delayedWethProxyAdmin", address(deployment.wethProxyAdmin));
@@ -234,6 +241,7 @@ contract DeployProofSystem is Script {
         vm.serializeUint(root, "l2ChainId", config.l2ChainId);
         vm.serializeUint(root, "proofSystemVersion", 1);
         vm.serializeUint(root, "blockInterval", config.blockInterval);
+        vm.serializeUint(root, "challengeFee", config.challengeFee);
         string memory json = vm.serializeUint(root, "proofThreshold", config.proofThreshold);
         vm.writeJson(json, out);
     }

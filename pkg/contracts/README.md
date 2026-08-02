@@ -14,6 +14,8 @@ This repository contains smart contracts for World Chain, including PBH (Priorit
 
 `credit(recipient)` returns the amount assigned to `recipient`. `claimCredit(recipient)` is permissionless and always pays `recipient`: its first call unlocks the credit in `DelayedWETH`, and a call after the withdrawal delay transfers the funds. Automation must retain resolved games until both phases complete.
 
+Every accepted challenge deducts the implementation's immutable `challengeFee` from the challenger bond and credits it to the immutable `protocolFeeRecipient`. The fee remains charged in both normal and refund settlement modes, preventing a proposer and challenger under common control from recycling the full bond while forcing an additional proof. The proposer bond must exceed the challenge fee, making a successful challenge gross-profitable before transaction costs.
+
 ## OP Stack Withdrawal Boundary
 
 The compatibility target is `OptimismPortal2` 5.6.1 shipped by the devnet's version-tagged `op-deployer:v0.7.1` image. Solidity imports are pinned separately to [`op-contracts/v7.0.0` at `a7c88c8`](https://github.com/ethereum-optimism/optimism/tree/a7c88c8d636ceb9944ea0edaf7d033da258778ab/packages/contracts-bedrock), which exposes the same Portal version and the stock dispute interfaces compiled by this repository. `MultiProofGame` implements the Portal-facing `IDisputeGame` ABI and adds the WIP-1006 proof-lane API. The withdrawal E2E runs these compiled game contracts against the Portal, factory, and registry deployed from the pinned `op-deployer` image.

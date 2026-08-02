@@ -28,7 +28,8 @@ interface IMultiProofGame is IDisputeGame {
         uint64 proofPeriod;
         uint256 proposerBond;
         uint256 challengerBond;
-        address proofTimeoutRecipient;
+        address protocolFeeRecipient;
+        uint256 challengeFee;
         uint8 proofThreshold;
         IWorldChainProofVerifier validityProofVerifier;
         IWorldChainProofVerifier teeVerifier;
@@ -77,6 +78,9 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Emitted when a staked challenger disputes the proposal.
     event Challenged(address indexed challenger, uint64 proofDeadline);
 
+    /// @notice Emitted when a challenge assigns its non-refundable fee to the protocol.
+    event ChallengeFeeCharged(address indexed recipient, uint256 amount);
+
     /// @notice Emitted when a proof lane is accepted for the first time.
     event ProofLaneSupported(ProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
 
@@ -119,8 +123,11 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Bond required to challenge a proposal.
     function challengerBond() external view returns (uint256);
 
-    /// @notice Recipient of the proposer bond when an unchallenged game expires without proof.
-    function proofTimeoutRecipient() external view returns (address);
+    /// @notice Protocol-controlled recipient of proof-timeout forfeitures and challenge fees.
+    function protocolFeeRecipient() external view returns (address);
+
+    /// @notice Non-refundable portion of the challenger bond charged whenever a game is challenged.
+    function challengeFee() external view returns (uint256);
 
     /// @notice Verifier backing the validity-proof lane.
     function validityProofVerifier() external view returns (IWorldChainProofVerifier);
