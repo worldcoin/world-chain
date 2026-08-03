@@ -166,6 +166,7 @@ where
             .get_receipt()
             .await
             .map_err(|err| DefenderError::Contract(err.to_string()))?;
+        crate::metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
         if !receipt.status() {
             return Err(DefenderError::Revert(tx_hash));
         }

@@ -6,6 +6,7 @@ mod defender;
 mod error;
 mod game;
 mod lane;
+pub mod metrics;
 mod traits;
 mod types;
 

@@ -111,6 +111,7 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     let _telemetry_guard = telemetry_batteries::init()
         .map_err(|error| anyhow::anyhow!("failed to initialize telemetry: {error:#}"))?;
+    world_chain_challenger::metrics::describe_metrics();
 
     let cli = Cli::parse();
 
@@ -118,6 +119,7 @@ async fn main() -> Result<()> {
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(cli.challenger_key))
         .connect_http(Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?);
+    world_chain_challenger::metrics::refresh_wallet_balance(&provider, challenger_address).await;
 
     let client = AlloyChallengerClient::new(
         provider,
