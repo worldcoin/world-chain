@@ -36,6 +36,16 @@ const REGISTER_MAX_ATTEMPTS: u32 = 5;
 /// Base backoff between `registerKey` attempts (scaled by the attempt number).
 const REGISTER_RETRY_BASE_DELAY: Duration = Duration::from_secs(2);
 
+/// Classifies a `registerKey` attempt failure so the retry loop can tell a deterministic
+/// revert (fail fast) apart from a transient nonce/RPC error (retry).
+enum AttemptError {
+    /// Deterministic on-chain revert (unapproved PCRs, revoked signer, cold CertManager,
+    /// bad hints) surfaced at estimation — retrying can't help.
+    Permanent(anyhow::Error),
+    /// Transient failure (funding-account nonce race, RPC hiccup, dropped tx) — retryable.
+    Transient(anyhow::Error),
+}
+
 use crate::{
     ExpectedPcrs,
     host::{EnclaveEndpoint, NitroProver},
@@ -254,9 +264,10 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
             "submitting registerKey"
         );
 
-        // One submit attempt: send, then await the receipt. Any send/receipt failure
-        // (e.g. a nonce collision with a peer replica) becomes a retryable error.
-        let attempt_result: Result<(TxHash, bool)> = async {
+        // One submit attempt: send, then await the receipt. Send/receipt failures are
+        // classified so a deterministic revert (bad PCRs, cold CertManager, revoked signer,
+        // bad hints) fails fast, while nonce races / transient RPC errors are retried.
+        let attempt_result: std::result::Result<(TxHash, bool), AttemptError> = async {
             let pending = registry
                 .registerKey(
                     Bytes::from(calldata.attestation_tbs.clone()),
@@ -265,12 +276,23 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
                 )
                 .send()
                 .await
-                .map_err(|err| anyhow!("registerKey send failed: {err}"))?;
+                .map_err(|err| {
+                    // A revert surfaced at estimation/simulation carries revert data and is
+                    // deterministic; a transport/nonce error does not and is retryable.
+                    if err.as_revert_data().is_some() {
+                        AttemptError::Permanent(anyhow!(
+                            "registerKey reverted at estimation: {err}"
+                        ))
+                    } else {
+                        AttemptError::Transient(anyhow!("registerKey send failed: {err}"))
+                    }
+                })?;
             let tx_hash = *pending.tx_hash();
-            let receipt = pending
-                .get_receipt()
-                .await
-                .with_context(|| format!("awaiting registerKey receipt (tx {tx_hash})"))?;
+            let receipt = pending.get_receipt().await.map_err(|err| {
+                AttemptError::Transient(anyhow!(
+                    "awaiting registerKey receipt (tx {tx_hash}): {err}"
+                ))
+            })?;
             Ok((tx_hash, receipt.status()))
         }
         .await;
@@ -325,7 +347,26 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
                     }
                 }
             }
-            Err(err) => {
+            Err(AttemptError::Permanent(err)) => {
+                // Deterministic revert at estimation (unapproved PCR set, revoked signer,
+                // cold CertManager, bad hints). If a peer registered our signer in the
+                // meantime that's success; otherwise fail fast — resubmitting can't help.
+                if matches!(
+                    registry.isSignerRegistered(enclave_signer).call().await,
+                    Ok(true)
+                ) {
+                    warn!(
+                        target: "world_chain::nitro",
+                        "registerKey reverted but the signer is already registered; treating as success"
+                    );
+                    return Ok(RegistrationOutcome::AlreadyRegistered);
+                }
+                return Err(err).context(
+                    "registerKey reverted deterministically (check the approved PCR set, \
+                     CertManager pre-warm and attestation hints, and that the signer is not revoked)",
+                );
+            }
+            Err(AttemptError::Transient(err)) => {
                 // The tx never made it on-chain (e.g. a funding-account nonce race or a
                 // transient RPC error). If the signer is registered anyway (a peer won the
                 // race), we're done; otherwise this is retryable.
