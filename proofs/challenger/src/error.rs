@@ -37,8 +37,6 @@ pub enum ChallengerError {
     Overflow,
     #[error(transparent)]
     AlloyJsonRpc(#[from] RpcError<TransportErrorKind>),
-    #[error("RPC error: {0}")]
-    Rpc(String),
     #[error("Latest L1 finalized block not found")]
     L1FinalizedBlockNotFound,
     #[error(
@@ -52,6 +50,16 @@ pub enum ChallengerError {
         /// Block number included in the game.
         given_block: u64,
     },
+}
+
+impl ChallengerError {
+    /// Builds an [`AlloyJsonRpc`](Self::AlloyJsonRpc) error from a free-form message.
+    ///
+    /// Intended for test fakes that need an ad-hoc failure without constructing a full transport
+    /// error by hand.
+    pub fn message(message: impl AsRef<str>) -> Self {
+        Self::AlloyJsonRpc(TransportErrorKind::custom_str(message.as_ref()))
+    }
 }
 
 /// Error returned while processing a single game.

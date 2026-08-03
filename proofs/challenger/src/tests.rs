@@ -136,7 +136,7 @@ impl ChallengerClient for MockClient {
             .get(index as usize)
             .copied()
             .map(Some)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game index {index}")))
     }
 
     async fn game_metadata(&self, game: Address) -> Result<GameMetadata, ChallengerError> {
@@ -146,7 +146,7 @@ impl ChallengerClient for MockClient {
             .games
             .get(&game)
             .map(|game| game.metadata)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
     async fn root_state(&self, game: Address) -> Result<RootState, ChallengerError> {
@@ -167,7 +167,7 @@ impl ChallengerClient for MockClient {
             .games
             .get(&game)
             .map(|game| game.challenge_deadline)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
     async fn submit_challenge(
@@ -178,7 +178,7 @@ impl ChallengerClient for MockClient {
         let record = state
             .games
             .get_mut(&game)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))?;
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))?;
         record.state = STATE_CHALLENGED;
         record.challenger = CHALLENGER;
         record.resolution_outcome = STATE_CHALLENGED;
@@ -200,12 +200,11 @@ impl ResolutionManagerClient for MockClient {
             .games
             .get(&game)
             .copied()
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))?;
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))?;
         Ok(ResolutionStatus {
             resolvable: record.resolvable,
             root_state: RootState::try_from(record.resolution_outcome)?,
-            invalidation_reason: InvalidationReason::try_from(record.resolution_reason)
-                .map_err(|error| ChallengerError::Contract(error.to_string()))?,
+            invalidation_reason: InvalidationReason::try_from(record.resolution_reason)?,
         })
     }
 
@@ -214,7 +213,7 @@ impl ResolutionManagerClient for MockClient {
         let record = state
             .games
             .get_mut(&game)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))?;
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))?;
         record.state = record.resolution_outcome;
         record.resolvable = false;
         state.resolutions.push(game);
@@ -245,7 +244,7 @@ impl BondManagerClient for MockClient {
             .games
             .get(&game)
             .map(|game| game.challenger)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
     async fn is_game_finalized(&self, game: Address) -> Result<bool, ChallengerError> {
@@ -255,7 +254,7 @@ impl BondManagerClient for MockClient {
             .games
             .get(&game)
             .map(|game| game.finalized)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
     async fn credit(&self, game: Address) -> Result<U256, ChallengerError> {
@@ -265,7 +264,7 @@ impl BondManagerClient for MockClient {
             .games
             .get(&game)
             .map(|game| game.credit)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
     async fn pending_withdrawal(
@@ -278,7 +277,7 @@ impl BondManagerClient for MockClient {
             .games
             .get(&game)
             .map(|game| game.pending)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
     async fn latest_l1_timestamp(&self) -> Result<u64, ChallengerError> {
@@ -290,12 +289,12 @@ impl BondManagerClient for MockClient {
     async fn claim_credit(&self, game: Address) -> Result<ClaimSubmission, ChallengerError> {
         let mut state = self.state.lock().expect("not poisoned");
         if state.fail_claim_once.remove(&game) {
-            return Err(ChallengerError::Contract("injected claim failure".into()));
+            return Err(ChallengerError::message("injected claim failure"));
         }
         let record = state
             .games
             .get_mut(&game)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))?;
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))?;
 
         if record.credit > U256::ZERO {
             let amount = record.credit;
