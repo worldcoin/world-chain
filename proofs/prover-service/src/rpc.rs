@@ -22,7 +22,6 @@ use jsonrpsee::{
 };
 use std::{net::SocketAddr, sync::Arc};
 use tracing::info;
-use world_chain_proof_metrics::{RPC_TARGET_PROVER_SERVICE, observe_rpc};
 
 /// JSON-RPC error codes returned by the `prover-service`.
 pub mod error_code {
@@ -379,36 +378,27 @@ impl ProofRequester for RpcProverServiceClient {
         proof_request: ProofRequest,
     ) -> Result<RequestProofResponse, ProofRequestError> {
         let id = proof_request.id();
-        observe_rpc(RPC_TARGET_PROVER_SERVICE, "prover_requestProof", async {
-            ProverServiceApiClient::request_proof(&self.client, proof_request)
-                .await
-                .map_err(|err| map_request_error(err, id))
-        })
-        .await
+        ProverServiceApiClient::request_proof(&self.client, proof_request)
+            .await
+            .map_err(|err| map_request_error(err, id))
     }
 
     async fn proof_status(
         &self,
         proof_id: ProofRequestId,
     ) -> Result<ProofStatus, ProofRequestError> {
-        observe_rpc(RPC_TARGET_PROVER_SERVICE, "prover_proofStatus", async {
-            ProverServiceApiClient::proof_status(&self.client, proof_id)
-                .await
-                .map_err(|err| map_request_error(err, proof_id))
-        })
-        .await
+        ProverServiceApiClient::proof_status(&self.client, proof_id)
+            .await
+            .map_err(|err| map_request_error(err, proof_id))
     }
 
     async fn get_proof(
         &self,
         proof_id: ProofRequestId,
     ) -> Result<ProofResponse, ProofRequestError> {
-        observe_rpc(RPC_TARGET_PROVER_SERVICE, "prover_getProof", async {
-            ProverServiceApiClient::get_proof(&self.client, proof_id)
-                .await
-                .map_err(|err| map_request_error(err, proof_id))
-        })
-        .await
+        ProverServiceApiClient::get_proof(&self.client, proof_id)
+            .await
+            .map_err(|err| map_request_error(err, proof_id))
     }
 }
 
@@ -418,12 +408,9 @@ impl ProofJobQueue for RpcProverServiceClient {
         &self,
         request: GetNextProofRequest,
     ) -> Result<GetNextProofResponse, ProofJobQueueError> {
-        observe_rpc(RPC_TARGET_PROVER_SERVICE, "prover_getNextProof", async {
-            ProverServiceApiClient::get_next_proof(&self.client, request)
-                .await
-                .map_err(|err| map_job_error(err, ProofRequestId(Default::default())))
-        })
-        .await
+        ProverServiceApiClient::get_next_proof(&self.client, request)
+            .await
+            .map_err(|err| map_job_error(err, ProofRequestId(Default::default())))
     }
 
     async fn submit_proof(
@@ -431,12 +418,9 @@ impl ProofJobQueue for RpcProverServiceClient {
         request: SubmitProofRequest,
     ) -> Result<SubmitProofResponse, ProofJobQueueError> {
         let id = request.proof.id;
-        observe_rpc(RPC_TARGET_PROVER_SERVICE, "prover_submitProof", async {
-            ProverServiceApiClient::submit_proof(&self.client, request)
-                .await
-                .map_err(|err| map_job_error(err, id))
-        })
-        .await
+        ProverServiceApiClient::submit_proof(&self.client, request)
+            .await
+            .map_err(|err| map_job_error(err, id))
     }
 
     async fn get_proof_session(
@@ -444,12 +428,9 @@ impl ProofJobQueue for RpcProverServiceClient {
         request: GetProofSessionRequest,
     ) -> Result<GetProofSessionResponse, ProofJobQueueError> {
         let proof_id = request.proof_id;
-        observe_rpc(RPC_TARGET_PROVER_SERVICE, "prover_getProofSession", async {
-            ProverServiceApiClient::get_proof_session(&self.client, request)
-                .await
-                .map_err(|err| map_job_error(err, proof_id))
-        })
-        .await
+        ProverServiceApiClient::get_proof_session(&self.client, request)
+            .await
+            .map_err(|err| map_job_error(err, proof_id))
     }
 
     async fn record_proof_session(
@@ -457,16 +438,9 @@ impl ProofJobQueue for RpcProverServiceClient {
         request: RecordProofSessionRequest,
     ) -> Result<RecordProofSessionResponse, ProofJobQueueError> {
         let proof_id = request.proof_id;
-        observe_rpc(
-            RPC_TARGET_PROVER_SERVICE,
-            "prover_recordProofSession",
-            async {
-                ProverServiceApiClient::record_proof_session(&self.client, request)
-                    .await
-                    .map_err(|err| map_job_error(err, proof_id))
-            },
-        )
-        .await
+        ProverServiceApiClient::record_proof_session(&self.client, request)
+            .await
+            .map_err(|err| map_job_error(err, proof_id))
     }
 
     async fn heartbeat(
@@ -474,11 +448,8 @@ impl ProofJobQueue for RpcProverServiceClient {
         request: HeartbeatRequest,
     ) -> Result<HeartbeatResponse, ProofJobQueueError> {
         let proof_id = request.proof_id;
-        observe_rpc(RPC_TARGET_PROVER_SERVICE, "prover_heartbeat", async {
-            ProverServiceApiClient::heartbeat(&self.client, request)
-                .await
-                .map_err(|err| map_job_error(err, proof_id))
-        })
-        .await
+        ProverServiceApiClient::heartbeat(&self.client, request)
+            .await
+            .map_err(|err| map_job_error(err, proof_id))
     }
 }

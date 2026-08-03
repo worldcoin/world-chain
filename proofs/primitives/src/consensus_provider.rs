@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::Value;
 use thiserror::Error;
-use world_chain_proof_metrics::{RPC_TARGET_L2_CONSENSUS, observe_rpc};
+use world_chain_proof_metrics::{RPC_TARGET_L2_CONSENSUS, record_rpc_request};
 
 /// Source for all consensus clients requests.
 #[async_trait]
@@ -52,35 +52,46 @@ impl OptimismConsensusClient {
     where
         T: DeserializeOwned,
     {
-        observe_rpc(RPC_TARGET_L2_CONSENSUS, method, async {
-            let request = serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": method,
-                "params": params,
-            });
-            let response = self
-                .client
-                .post(&self.rpc_url)
-                .json(&request)
-                .send()
-                .await
-                .map_err(|error| ConsensusError::Rpc(error.to_string()))?
-                .error_for_status()
-                .map_err(|error| ConsensusError::Rpc(error.to_string()))?
-                .json::<JsonRpcResponse<T>>()
-                .await
-                .map_err(|error| ConsensusError::Rpc(error.to_string()))?;
+        let result = self.request_inner(method, params, missing_result).await;
+        record_rpc_request(RPC_TARGET_L2_CONSENSUS, method, result.is_ok());
+        result
+    }
 
-            if let Some(error) = response.error {
-                return Err(ConsensusError::Rpc(format!(
-                    "json-rpc error {}: {}",
-                    error.code, error.message
-                )));
-            }
-            response.result.ok_or(missing_result)
-        })
-        .await
+    async fn request_inner<T>(
+        &self,
+        method: &'static str,
+        params: Value,
+        missing_result: ConsensusError,
+    ) -> Result<T, ConsensusError>
+    where
+        T: DeserializeOwned,
+    {
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": method,
+            "params": params,
+        });
+        let response = self
+            .client
+            .post(&self.rpc_url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|error| ConsensusError::Rpc(error.to_string()))?
+            .error_for_status()
+            .map_err(|error| ConsensusError::Rpc(error.to_string()))?
+            .json::<JsonRpcResponse<T>>()
+            .await
+            .map_err(|error| ConsensusError::Rpc(error.to_string()))?;
+
+        if let Some(error) = response.error {
+            return Err(ConsensusError::Rpc(format!(
+                "json-rpc error {}: {}",
+                error.code, error.message
+            )));
+        }
+        response.result.ok_or(missing_result)
     }
 }
 

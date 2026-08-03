@@ -1,9 +1,6 @@
 //! Shared metrics for proof services.
 
-use std::{
-    future::Future,
-    task::{Context, Poll},
-};
+use std::task::{Context, Poll};
 
 use alloy_json_rpc::{RequestPacket, ResponsePacket};
 use alloy_primitives::{Address, utils::format_ether};
@@ -19,8 +16,6 @@ use url::Url;
 pub const RPC_TARGET_L1_EXECUTION: &str = "l1_execution";
 /// OP consensus-client RPC target label.
 pub const RPC_TARGET_L2_CONSENSUS: &str = "l2_consensus";
-/// Prover-service RPC target label.
-pub const RPC_TARGET_PROVER_SERVICE: &str = "prover_service";
 
 /// Current transaction-sending wallet balance in ETH.
 pub const METRICS_WALLET_BALANCE_ETH: &str = "wallet.balance_eth";
@@ -61,20 +56,6 @@ pub fn metered_http_client(url: Url, target: &'static str) -> RpcClient {
     ClientBuilder::default()
         .layer(RpcMetricsLayer { target })
         .http(url)
-}
-
-/// Counts the outcome of a non-Alloy RPC future.
-pub async fn observe_rpc<F, T, E>(
-    target: &'static str,
-    method: &'static str,
-    request: F,
-) -> Result<T, E>
-where
-    F: Future<Output = Result<T, E>>,
-{
-    let result = request.await;
-    record_rpc_request(target, method, result.is_ok());
-    result
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -132,7 +113,8 @@ where
     }
 }
 
-fn record_rpc_request(
+/// Records the outcome of a completed chain RPC request.
+pub fn record_rpc_request(
     target: &'static str,
     method: impl Into<metrics::SharedString>,
     success: bool,

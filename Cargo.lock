@@ -19381,7 +19381,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
- "world-chain-proof-metrics",
 ]
 
 [[package]]
