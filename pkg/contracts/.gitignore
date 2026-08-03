@@ -15,3 +15,6 @@ docs/
 .env
 
 scratch.md
+# Dry-run deployment records are simulated addresses, never deployed — see the
+# PROOF_SYSTEM_DEPLOYMENT_OUT / NITRO_DEPLOYMENT_OUT split in the Justfile.
+deployments/*.dryrun.json

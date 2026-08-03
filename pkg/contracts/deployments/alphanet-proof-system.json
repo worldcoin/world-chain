@@ -2,9 +2,9 @@
   "anchorStateRegistry": "0x595DfA7a33584725e23Cb14f0c77DbA69C124563",
   "blockInterval": 10,
   "challengeFee": 10000000000000000,
-  "delayedWeth": "0x762DFA3D0365F6721953A741F6FbdfEdA47Ce8C3",
+  "delayedWeth": "0xA749C98259eaFa45B9a2dcFe318dD2fF9378a8bB",
   "delayedWethProxyAdmin": "0x72b5AC46bE91cE94A576bC4bBcEfd1Ba2774f4Bf",
-  "gameImplementation": "0x29F92b5fdeF164Af6ddDb0ce72c9749bbB0ecd9F",
+  "gameImplementation": "0x2463c2dCfdCe7effb98c543F19675b517EB802e8",
   "gameType": 1006,
   "l2ChainId": 5496749,
   "proofSystemFactory": "0x58D916Df59ffc6b3AC40a7fA1D6b8Fe6d859889c",
@@ -14,6 +14,6 @@
   "rollupConfigHash": "0xf6cee197b3a64ceb8ccbedf2199e53f51615f806f6aa18ed178558fd80881008",
   "securityCouncil": "0xF9B686b5EF6dAcd53b5fb3770C5939EED126B239",
   "stakingRegistry": "0x6439b8992B260baef40026713158b22780bDbd89",
-  "teeVerifier": "0xBA4906B70Bf284d290EaE3e615304C06F5da9b11",
+  "teeVerifier": "0xaF6dbf1e90C47A4eDE64EF948b75800633Eb8839",
   "validityProofVerifier": "0x95E983e4BC31A5643e8CAc1fbe6a048C5B20B201"
 }
