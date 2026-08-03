@@ -37,7 +37,7 @@
             const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "../searchindex-c22fb635.js";
+            window.path_to_searchindex_js = "../searchindex-9277d9ce.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="../toc-87388434.js"></script>
@@ -383,7 +383,7 @@ Otherwise, if no valid challenge has been submitted by <code>challengeDeadline</
 <h4 id="validity-proof"><a class="header" href="#validity-proof">Validity Proof</a></h4>
 <p>The validity proof lane verifies that the transition from <code>parentRoot</code> at <code>parentL2BlockNumber</code> to <code>rootClaim</code> at <code>l2BlockNumber</code> is valid under <code>rollupConfigHash</code>. The verifier MAY be implemented with a zkVM, a SNARK, or another cryptographic proof system. The proof MUST bind to <code>rootId</code> and MUST be verified onchain or by an onchain verifier gateway.</p>
 <h4 id="tee-attestation"><a class="header" href="#tee-attestation">TEE Attestation</a></h4>
-<p>The TEE lane accepts an attestation from a registered TEE signer over <code>rootId</code>. The verifier MUST check that the signer is registered, that the signer is valid for the active TEE image or measurement, that the attestation binds to <code>rootId</code>, and that the attestation has not expired or been revoked.</p>
+<p>The TEE lane accepts a signature from a registered TEE signer over transition data bound to <code>rootId</code>. Signer admission MUST verify the hardware attestation, approved image measurements, and attestation freshness before deriving and activating the signer’s identity. For each proof, the lane verifier MUST check the transition binding, recover the signer from the signature, and require that signer to remain active in the registry. Revocation MUST prevent all subsequent proofs from that signer.</p>
 <h4 id="security-council-attestation"><a class="header" href="#security-council-attestation">Security Council Attestation</a></h4>
 <p>The Security Council lane accepts a threshold signature, multisig transaction, or equivalent onchain action from the configured council. The attestation MUST bind to <code>rootId</code> and MUST be domain-separated from other council actions. A council attestation counts as one lane and MUST NOT finalize a challenged root by itself.</p>
 <h3 id="anchor-updates"><a class="header" href="#anchor-updates">Anchor Updates</a></h3>
