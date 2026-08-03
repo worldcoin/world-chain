@@ -19056,7 +19056,11 @@ dependencies = [
 name = "world-chain-proof-nitro"
 version = "2.4.0"
 dependencies = [
+ "alloy-contract",
+ "alloy-network 2.0.5",
  "alloy-primitives",
+ "alloy-provider",
+ "alloy-signer-local 2.0.5",
  "alloy-sol-types",
  "anyhow",
  "aws-nitro-enclaves-nsm-api",
@@ -19080,6 +19084,7 @@ dependencies = [
  "tokio-vsock",
  "tracing",
  "tracing-subscriber 0.3.23",
+ "url",
  "world-chain-proof-core",
  "world-chain-proof-kona-client-utils",
  "x509-parser",
@@ -19226,6 +19231,7 @@ dependencies = [
  "hex",
  "serde_json",
  "tokio",
+ "tracing-subscriber 0.3.23",
  "world-chain-proof-nitro",
  "world-chain-prover",
 ]
