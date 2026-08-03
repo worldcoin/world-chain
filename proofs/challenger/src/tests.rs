@@ -363,7 +363,6 @@ fn config() -> ChallengerConfig {
         max_game_concurrency: 10,
         max_games_per_tick: 100,
         game_scan_lookback: 100,
-        max_game_age: Duration::from_secs(7 * 24 * 60 * 60),
     }
 }
 
