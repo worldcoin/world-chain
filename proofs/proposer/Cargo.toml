@@ -24,7 +24,7 @@ alloy-consensus.workspace = true
 alloy-network.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
-alloy-provider = { workspace = true, features = ["reqwest"] }
+alloy-provider = { workspace = true, features = ["reqwest", "reqwest-rustls-tls"] }
 alloy-signer-local.workspace = true
 
 # misc

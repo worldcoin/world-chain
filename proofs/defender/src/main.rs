@@ -107,8 +107,8 @@ async fn main() -> Result<()> {
     let mut defender = WorldChainDefender::new(config, client, output_roots, proof_requester);
 
     info!(
-        l1_rpc_url = %cli.l1_rpc,
-        output_root_rpc_url = %cli.output_root_rpc,
+        l1_rpc_url = world_chain_proof_metrics::redact_endpoint(&cli.l1_rpc),
+        output_root_rpc_url = world_chain_proof_metrics::redact_endpoint(&cli.output_root_rpc),
         verifying_output_root_rpc_configured = cli.verifying_output_root_rpc.is_some(),
         prover_service = %cli.prover_service_url,
         dispute_game_factory = %cli.factory_address,

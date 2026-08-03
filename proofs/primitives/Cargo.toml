@@ -25,7 +25,7 @@ async-trait.workspace = true
 futures-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-reqwest = { workspace = true, features = ["json"] }
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
 thiserror.workspace = true
 
 [dev-dependencies]

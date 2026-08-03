@@ -155,6 +155,26 @@ pub fn metered_http_client(url: Url, target: &'static str) -> RpcClient {
         .http(url)
 }
 
+/// Renders an RPC endpoint for logs with any embedded credential removed.
+///
+/// Provider API keys are routinely carried in the URL path (Alchemy, Infura) or in userinfo,
+/// so logging an endpoint verbatim ships the credential to the log backend. Keep the scheme,
+/// host and port — enough to tell endpoints apart when triaging — and drop everything that
+/// could be a secret. Unparseable input degrades to the scheme only rather than echoing it
+/// back, since a URL we cannot parse is a URL whose secret we cannot locate.
+pub fn redact_endpoint(url: &str) -> String {
+    match Url::parse(url) {
+        Ok(parsed) => match parsed.host_str() {
+            Some(host) => match parsed.port() {
+                Some(port) => format!("{}://{host}:{port}", parsed.scheme()),
+                None => format!("{}://{host}", parsed.scheme()),
+            },
+            None => format!("{}://<no-host>", parsed.scheme()),
+        },
+        Err(_) => "<unparseable-url>".to_string(),
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct RpcMetricsLayer {
     target: &'static str,
@@ -223,4 +243,40 @@ pub fn record_rpc_request(
         "outcome" => if success { "success" } else { "error" },
     )
     .increment(1);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::redact_endpoint;
+
+    #[test]
+    fn redacts_path_embedded_api_keys() {
+        assert_eq!(
+            redact_endpoint("https://eth-sepolia.g.alchemy.com/v2/Ux-X_RqdTZesXUQidgBqZ"),
+            "https://eth-sepolia.g.alchemy.com"
+        );
+    }
+
+    #[test]
+    fn redacts_userinfo_and_query_credentials() {
+        assert_eq!(
+            redact_endpoint("https://user:pass@rpc.example.com/path?apikey=secret"),
+            "https://rpc.example.com"
+        );
+    }
+
+    #[test]
+    fn keeps_port_so_in_cluster_endpoints_stay_distinguishable() {
+        assert_eq!(
+            redact_endpoint("http://op-node-0.alphanet-world-chain-node.svc.cluster.local:9545"),
+            "http://op-node-0.alphanet-world-chain-node.svc.cluster.local:9545"
+        );
+    }
+
+    #[test]
+    fn unparseable_input_does_not_echo_back() {
+        let redacted = redact_endpoint("not a url with a secret=hunter2 in it");
+        assert_eq!(redacted, "<unparseable-url>");
+        assert!(!redacted.contains("hunter2"));
+    }
 }

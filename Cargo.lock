@@ -19169,6 +19169,7 @@ dependencies = [
  "alloy-provider",
  "alloy-rpc-client",
  "alloy-transport",
+ "alloy-transport-http",
  "telemetry-batteries",
  "tower 0.5.3",
  "tracing",
