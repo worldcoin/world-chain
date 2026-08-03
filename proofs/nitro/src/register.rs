@@ -270,7 +270,7 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
 
         match attempt_result {
             Ok((tx_hash, true)) => {
-                // Confirm the write actually took effect before declaring success.
+                // Mined successfully. Confirm the write actually took effect.
                 if registry
                     .isSignerRegistered(enclave_signer)
                     .call()
@@ -287,12 +287,14 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
                     );
                     return Ok(RegistrationOutcome::Registered { tx_hash });
                 }
-                last_err = Some(anyhow!(
-                    "registerKey tx {tx_hash} confirmed but signer not registered"
-                ));
+                // A confirmed tx that didn't register is not a transient condition.
+                bail!("registerKey tx {tx_hash} confirmed but signer is still not registered");
             }
             Ok((tx_hash, false)) => {
-                // Reverted. If a peer landed our signer first, that's success for us.
+                // The tx was mined and reverted. If a peer landed our signer first, that's
+                // success for us. Otherwise this is a *deterministic* revert (unapproved PCR
+                // set, permanently-revoked signer, un-pre-warmed CertManager, or bad hints)
+                // that resubmitting would only repeat, so fail fast instead of retrying.
                 if registry
                     .isSignerRegistered(enclave_signer)
                     .call()
@@ -306,13 +308,16 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
                     );
                     return Ok(RegistrationOutcome::AlreadyRegistered);
                 }
-                last_err = Some(anyhow!(
-                    "registerKey tx {tx_hash} reverted and the signer is not registered"
-                ));
+                bail!(
+                    "registerKey tx {tx_hash} reverted on-chain and the signer is not registered \
+                     (check the approved PCR set, CertManager pre-warm and attestation hints, \
+                     and that the signer is not revoked)"
+                );
             }
             Err(err) => {
-                // Send/receipt error (commonly a funding-account nonce race). If the signer
-                // got registered meanwhile (by us or a peer), we're done; else retry.
+                // The tx never made it on-chain (e.g. a funding-account nonce race or a
+                // transient RPC error). If the signer got registered meanwhile (by us or a
+                // peer), we're done; otherwise this is retryable.
                 if registry
                     .isSignerRegistered(enclave_signer)
                     .call()

@@ -502,7 +502,9 @@ proof-register-key env="alphanet":
     # Resolve the registry address from the env or the deployment file.
     DEPLOYMENTS_FILE="pkg/contracts/deployments/{{env}}-nitro.json"
     if [ -z "${NITRO_ENCLAVE_KEY_REGISTRY:-}" ] && [ -f "$DEPLOYMENTS_FILE" ]; then
-        NITRO_ENCLAVE_KEY_REGISTRY=$(jq -r '.nitroEnclaveKeyRegistry' "$DEPLOYMENTS_FILE")
+        # `// empty` so a missing/null key yields "" (not the literal "null"), which the
+        # required-var check below then rejects with a clear message.
+        NITRO_ENCLAVE_KEY_REGISTRY=$(jq -r '.nitroEnclaveKeyRegistry // empty' "$DEPLOYMENTS_FILE")
     fi
     : "${NITRO_ENCLAVE_KEY_REGISTRY:?NITRO_ENCLAVE_KEY_REGISTRY is required (set it or run proof-deploy-nitro first)}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
