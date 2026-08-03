@@ -258,7 +258,6 @@ fn encode_proof(metadata: &GameMetadata, proof: &ProofData) -> Result<Bytes, Def
             attestation: _,
             public_values,
             signature,
-            public_key,
         } => {
             // The prover API transports public values as bytes, but NitroProofVerifier embeds
             // TransitionPublicValues as a static tuple. Encoding the bytes directly would add a
@@ -271,10 +270,57 @@ fn encode_proof(metadata: &GameMetadata, proof: &ProofData) -> Result<Bytes, Def
                 l1_origin_number,
                 transition,
                 signature.clone(),
-                public_key.clone(),
             )
                 .abi_encode()
                 .into())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, B256};
+
+    #[test]
+    fn nitro_encoding_matches_verifier_payload() {
+        let transition = TransitionPublicValues {
+            l1Head: B256::repeat_byte(0x11),
+            l2PreRoot: B256::repeat_byte(0x22),
+            l2PreBlockNumber: 10,
+            l2PostRoot: B256::repeat_byte(0x33),
+            l2PostBlockNumber: 20,
+            rollupConfigHash: B256::repeat_byte(0x44),
+        };
+        let metadata = GameMetadata {
+            address: Address::repeat_byte(0x55),
+            domain_hash: B256::repeat_byte(0x66),
+            parent_ref: Address::repeat_byte(0x77),
+            root_claim: transition.l2PostRoot,
+            l2_block_number: transition.l2PostBlockNumber,
+            l1_origin_hash: transition.l1Head,
+            l1_origin_number: 42,
+            challenge_deadline: 100,
+            proof_deadline: 200,
+            proof_threshold: 2,
+        };
+        let signature = Bytes::from(vec![0x88; 65]);
+        let proof = ProofData::Nitro {
+            attestation: Bytes::from_static(b"attestation"),
+            public_values: transition.abi_encode().into(),
+            signature: signature.clone(),
+        };
+
+        let encoded = encode_proof(&metadata, &proof).expect("valid Nitro proof payload");
+        let expected = (
+            metadata.domain_hash,
+            metadata.parent_ref,
+            U256::from(metadata.l1_origin_number),
+            transition,
+            signature,
+        )
+            .abi_encode();
+
+        assert_eq!(encoded.as_ref(), expected);
     }
 }

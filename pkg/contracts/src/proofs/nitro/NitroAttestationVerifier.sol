@@ -202,9 +202,9 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
     ///
     ///      ## Important: revocation is NOT retroactive
     ///      Revoking a PCR triple only blocks **new** key registrations for
-    ///      that image. Keys that were already registered from this image
-    ///      remain `NitroEnclaveKeyRegistry.KeyStatus.Active` until they are
-    ///      individually revoked via `NitroEnclaveKeyRegistry.revokeKey`.
+    ///      that image. Signers that were already registered from this image
+    ///      remain `NitroEnclaveKeyRegistry.SignerStatus.Active` until they are
+    ///      individually revoked via `NitroEnclaveKeyRegistry.revokeSigner`.
     ///
     ///      This is intentional. Nitro enclave signing keys are ephemeral:
     ///      they are generated in-memory at enclave startup, never persisted,
@@ -215,8 +215,8 @@ contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, 
     ///           can re-register.
     ///      Operators who want belt-and-suspenders may listen for
     ///      `PCRSetRevoked` events off-chain and call
-    ///      `NitroEnclaveKeyRegistry.revokeKey` for each affected key (the
-    ///      `KeyRegistered` event carries the bound PCR triple). See
+    ///      `NitroEnclaveKeyRegistry.revokeSigner` for each affected signer (the
+    ///      `SignerRegistered` event carries the bound PCR triple). See
     ///      `NitroEnclaveKeyRegistry` for the full rationale on why an
     ///      on-chain cascade is deliberately not implemented.
     function revokePCRSet(bytes32 pcr0, bytes32 pcr1, bytes32 pcr2) external onlyOwner {
