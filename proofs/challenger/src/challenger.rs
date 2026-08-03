@@ -86,8 +86,8 @@ where
     E: ChallengerClient,
     C: ConsensusProvider,
 {
-    /// Binary-searches the factory's monotonic creation timestamps for the first game that
-    /// can still have an open challenge window.
+    /// Binary-searches the factory's monotonic challenge deadline for the oldest game
+    /// that is still challengeable.
     async fn first_recent_game_index(
         &self,
         game_count: u64,
