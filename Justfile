@@ -353,10 +353,16 @@ proof-deploy-nitro env="alphanet":
     : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
     : "${OWNER:?OWNER is required}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
-    export NITRO_DEPLOYMENT_OUT="deployments/{{env}}-nitro.json"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
+    fi
+    # A dry run must not overwrite the record of the live Nitro stack: the simulated addresses
+    # are never deployed, and this file is what proof-approve-pcrs and proof-register-key read.
+    if [ -n "$BROADCAST_FLAG" ]; then
+        export NITRO_DEPLOYMENT_OUT="deployments/{{env}}-nitro.json"
+    else
+        export NITRO_DEPLOYMENT_OUT="deployments/{{env}}-nitro.dryrun.json"
     fi
     echo "Deploying Nitro contracts (deployment → $NITRO_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployNitro.s.sol:DeployNitro \
