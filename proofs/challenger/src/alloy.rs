@@ -249,7 +249,7 @@ where
             .get_receipt()
             .await
             .map_err(|error| ChallengerError::Contract(error.to_string()))?;
-        crate::metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
+        world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
         if !receipt.status() {
             return Err(ChallengerError::Revert(tx_hash));
         }
@@ -282,7 +282,7 @@ where
             .get_receipt()
             .await
             .map_err(|error| ChallengerError::Contract(error.to_string()))?;
-        crate::metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
+        world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
         if !receipt.status() {
             return Err(ChallengerError::Revert(tx_hash));
         }
@@ -367,7 +367,7 @@ where
             .get_receipt()
             .await
             .map_err(|error| ChallengerError::Contract(error.to_string()))?;
-        crate::metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
+        world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
         if !receipt.status() {
             return Err(ChallengerError::Revert(tx_hash));
         }

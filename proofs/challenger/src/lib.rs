@@ -5,7 +5,6 @@ mod bond_manager;
 mod challenger;
 mod config;
 mod error;
-pub mod metrics;
 mod resolution_manager;
 mod traits;
 mod types;

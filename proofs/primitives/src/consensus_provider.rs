@@ -1,7 +1,9 @@
 use alloy_primitives::{B256, BlockNumber};
 use async_trait::async_trait;
-use serde::Deserialize;
+use serde::{Deserialize, de::DeserializeOwned};
+use serde_json::Value;
 use thiserror::Error;
+use world_chain_proof_metrics::{RPC_TARGET_L2_CONSENSUS, observe_rpc};
 
 /// Source for all consensus clients requests.
 #[async_trait]
@@ -40,40 +42,58 @@ impl OptimismConsensusClient {
             rpc_url: rpc_url.into(),
         }
     }
+
+    async fn request<T>(
+        &self,
+        method: &'static str,
+        params: Value,
+        missing_result: ConsensusError,
+    ) -> Result<T, ConsensusError>
+    where
+        T: DeserializeOwned,
+    {
+        observe_rpc(RPC_TARGET_L2_CONSENSUS, method, async {
+            let request = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": method,
+                "params": params,
+            });
+            let response = self
+                .client
+                .post(&self.rpc_url)
+                .json(&request)
+                .send()
+                .await
+                .map_err(|error| ConsensusError::Rpc(error.to_string()))?
+                .error_for_status()
+                .map_err(|error| ConsensusError::Rpc(error.to_string()))?
+                .json::<JsonRpcResponse<T>>()
+                .await
+                .map_err(|error| ConsensusError::Rpc(error.to_string()))?;
+
+            if let Some(error) = response.error {
+                return Err(ConsensusError::Rpc(format!(
+                    "json-rpc error {}: {}",
+                    error.code, error.message
+                )));
+            }
+            response.result.ok_or(missing_result)
+        })
+        .await
+    }
 }
 
 #[async_trait]
 impl ConsensusProvider for OptimismConsensusClient {
     async fn output_root_at_block(&self, l2_block_number: u64) -> Result<B256, ConsensusError> {
-        let block = format!("0x{l2_block_number:x}");
-        let request = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "optimism_outputAtBlock",
-            "params": [block],
-        });
-
-        let response = self
-            .client
-            .post(&self.rpc_url)
-            .json(&request)
-            .send()
-            .await
-            .map_err(|error| ConsensusError::Rpc(error.to_string()))?
-            .error_for_status()
-            .map_err(|error| ConsensusError::Rpc(error.to_string()))?
-            .json::<JsonRpcResponse<OutputAtBlockResponse>>()
-            .await
-            .map_err(|error| ConsensusError::Rpc(error.to_string()))?;
-
-        if let Some(error) = response.error {
-            return Err(ConsensusError::Rpc(format!(
-                "json-rpc error {}: {}",
-                error.code, error.message
-            )));
-        }
-
-        let output = response.result.ok_or(ConsensusError::MissingOutputRoot)?;
+        let output: OutputAtBlockResponse = self
+            .request(
+                "optimism_outputAtBlock",
+                serde_json::json!([format!("0x{l2_block_number:x}")]),
+                ConsensusError::MissingOutputRoot,
+            )
+            .await?;
         output
             .output_root
             .parse()
@@ -81,37 +101,14 @@ impl ConsensusProvider for OptimismConsensusClient {
     }
 
     async fn latest_l2_finalized_block(&self) -> Result<BlockNumber, ConsensusError> {
-        let request = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "optimism_syncStatus",
-            "params": [],
-        });
-
-        let response = self
-            .client
-            .post(&self.rpc_url)
-            .json(&request)
-            .send()
-            .await
-            .map_err(|error| ConsensusError::Rpc(error.to_string()))?
-            .error_for_status()
-            .map_err(|error| ConsensusError::Rpc(error.to_string()))?
-            .json::<JsonRpcResponse<SyncStatusResponse>>()
-            .await
-            .map_err(|error| ConsensusError::Rpc(error.to_string()))?;
-
-        if let Some(error) = response.error {
-            return Err(ConsensusError::Rpc(format!(
-                "json-rpc error {}: {}",
-                error.code, error.message
-            )));
-        }
-        let sync_status_response = response
-            .result
-            .ok_or(ConsensusError::FinalizedBlockNotFound)?;
-
-        Ok(sync_status_response.finalized_l2.number)
+        let sync_status: SyncStatusResponse = self
+            .request(
+                "optimism_syncStatus",
+                serde_json::json!([]),
+                ConsensusError::FinalizedBlockNotFound,
+            )
+            .await?;
+        Ok(sync_status.finalized_l2.number)
     }
 }
 
