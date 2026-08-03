@@ -2,7 +2,6 @@ use std::collections::HashSet;
 
 use alloy_primitives::{Address, U256};
 use tracing::{info, warn};
-use world_chain_proofs::{InvalidationReason, RootState};
 
 use crate::{BondManagerClient, BondManagerConfig, ProposerError};
 
@@ -99,11 +98,7 @@ where
                     // Retried lineages no longer expose their stale descendants to the canonical
                     // proposer loop, so the bond manager resolves those descendants for recovery.
                     // Leave direct proof timeouts to the proposer to avoid racing retry creation.
-                    if resolution_status.resolvable
-                        && resolution_status.root_state == RootState::Invalidated
-                        && resolution_status.invalidation_reason
-                            == InvalidationReason::InvalidParent
-                    {
+                    if resolution_status.invalid_parent_resolvable() {
                         let submission = self.execution_provider.resolve_game(game).await?;
                         info!(
                             tx_hash = ?submission.tx_hash,
