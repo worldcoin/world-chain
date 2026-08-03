@@ -362,7 +362,36 @@ proof-deploy-nitro env="alphanet":
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployNitro.s.sol:DeployNitro \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
-# Phase 2 – Deploy the proof system contracts.
+# Writes deployments/<env>-proof-mocks.json for proof-deploy-system to consume.
+# MockRootIdVerifier accepts every proof: never run this against a chain whose
+# withdrawals matter.
+# Phase 1b (devnet only) – Deploy the proof-lane test doubles (MOCKS, accept any proof).
+proof-deploy-mocks env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    export WORLD_CHALLENGER_ADDRESS="${WORLD_CHALLENGER_ADDRESS:-}"
+    BROADCAST_FLAG=""
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    fi
+    # Same reasoning as proof-deploy-system: a dry run must not clobber a real record.
+    if [ -n "$BROADCAST_FLAG" ]; then
+        export PROOF_MOCKS_DEPLOYMENT_OUT="deployments/{{env}}-proof-mocks.json"
+    else
+        export PROOF_MOCKS_DEPLOYMENT_OUT="deployments/{{env}}-proof-mocks.dryrun.json"
+    fi
+    echo "WARNING: deploying MOCK proof verifiers (accept any proof) for '{{env}}'." >&2
+    echo "Deploying proof mocks (deployment → $PROOF_MOCKS_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
+    cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofMocks.s.sol:DeployProofMocks \
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
+
+# The three proof-lane verifiers and the staking registry are required inputs — this
+# script never deploys them, and rejects addresses that hold no code or that repeat
+# across lanes. Point them at real contracts; for a devnet, run `proof-deploy-mocks`
+# first and read the four addresses out of deployments/<env>-proof-mocks.json.
+# Phase 2 – Deploy the proof system contracts and register game type 1006.
 proof-deploy-system env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -377,16 +406,27 @@ proof-deploy-system env="alphanet":
     : "${OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY:?OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY is required}"
     : "${DGF_OWNER_KEY:?DGF_OWNER_KEY is required}"
     : "${GUARDIAN_KEY:?GUARDIAN_KEY is required}"
+    : "${PROTOCOL_FEE_RECIPIENT:?PROTOCOL_FEE_RECIPIENT is required (challenge-fee proceeds)}"
+    : "${VALIDITY_PROOF_VERIFIER:?VALIDITY_PROOF_VERIFIER is required (e.g. SP1ValidityVerifier; devnet: proof-deploy-mocks)}"
+    : "${TEE_VERIFIER:?TEE_VERIFIER is required (e.g. NitroProofVerifier from proof-deploy-nitro)}"
+    : "${SECURITY_COUNCIL_VERIFIER:?SECURITY_COUNCIL_VERIFIER is required (council attestation verifier)}"
+    : "${STAKING_REGISTRY:?STAKING_REGISTRY is required (IWorldChainStakingRegistry implementation)}"
     export PROOF_SYSTEM_BLOCK_INTERVAL="${PROOF_SYSTEM_BLOCK_INTERVAL:-10}"
     export PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL="${PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL:-5}"
     export PROOF_THRESHOLD="${PROOF_THRESHOLD:-2}"
-    export WORLD_CHALLENGER_ADDRESS="${WORLD_CHALLENGER_ADDRESS:-}"
     export DELAYED_WETH_DELAY="${DELAYED_WETH_DELAY:-300}"
     export SET_RESPECTED_GAME_TYPE="${SET_RESPECTED_GAME_TYPE:-true}"
-    export PROOF_SYSTEM_DEPLOYMENT_OUT="deployments/{{env}}-proof-system.json"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
+    fi
+    # A dry run must never overwrite the record of a live deployment: the simulated game and
+    # WETH addresses are never deployed, so writing them to the real path silently replaces a
+    # true record with fictional addresses.
+    if [ -n "$BROADCAST_FLAG" ]; then
+        export PROOF_SYSTEM_DEPLOYMENT_OUT="deployments/{{env}}-proof-system.json"
+    else
+        export PROOF_SYSTEM_DEPLOYMENT_OUT="deployments/{{env}}-proof-system.dryrun.json"
     fi
     echo "Deploying proof system contracts (deployment → $PROOF_SYSTEM_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
@@ -580,6 +620,30 @@ proof-setup env="alphanet":
     export CERT_MANAGER_ADDRESS NITRO_ATTESTATION_VERIFIER
     echo "CERT_MANAGER_ADDRESS=$CERT_MANAGER_ADDRESS" >&2
     echo "NITRO_ATTESTATION_VERIFIER=$NITRO_ATTESTATION_VERIFIER" >&2
+
+    # The TEE lane uses the real Nitro verifier deployed in Step 1.
+    : "${TEE_VERIFIER:=$(jq -r '.nitroProofVerifier // empty' "$NITRO_DEPLOYMENTS")}"
+    export TEE_VERIFIER
+    : "${TEE_VERIFIER:?could not resolve nitroProofVerifier from $NITRO_DEPLOYMENTS}"
+    echo "TEE_VERIFIER=$TEE_VERIFIER (real Nitro verifier)" >&2
+
+    # Any lane without a real verifier falls back to a test double, deployed explicitly
+    # here rather than silently inside proof-deploy-system. Each unset lane is named so a
+    # mocked deployment is obvious in the log.
+    if [ -z "${VALIDITY_PROOF_VERIFIER:-}" ] || [ -z "${SECURITY_COUNCIL_VERIFIER:-}" ] \
+       || [ -z "${STAKING_REGISTRY:-}" ]; then
+        echo "=== Step 1b: Deploying test doubles for unset lanes ===" >&2
+        for v in VALIDITY_PROOF_VERIFIER SECURITY_COUNCIL_VERIFIER STAKING_REGISTRY; do
+            eval "val=\${$v:-}"
+            [ -z "$val" ] && echo "  MOCKED: $v" >&2
+        done
+        just dry_run={{dry_run}} proof-deploy-mocks {{env}}
+        MOCKS="pkg/contracts/deployments/{{env}}-proof-mocks.json"
+        : "${VALIDITY_PROOF_VERIFIER:=$(jq -r '.validityProofVerifier' "$MOCKS")}"
+        : "${SECURITY_COUNCIL_VERIFIER:=$(jq -r '.securityCouncil' "$MOCKS")}"
+        : "${STAKING_REGISTRY:=$(jq -r '.stakingRegistry' "$MOCKS")}"
+    fi
+    export VALIDITY_PROOF_VERIFIER SECURITY_COUNCIL_VERIFIER STAKING_REGISTRY
 
     echo "=== Step 2: Deploying proof system contracts ===" >&2
     just dry_run={{dry_run}} proof-deploy-system {{env}}

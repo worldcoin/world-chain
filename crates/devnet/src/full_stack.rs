@@ -267,6 +267,19 @@ struct ContainerService {
     _container: ContainerAsync<GenericImage>,
 }
 
+/// Addresses of the proof-lane test doubles written by `DeployProofMocks.s.sol`.
+///
+/// `DeployProofSystem.s.sol` deliberately refuses to deploy verifiers of its own, so the
+/// devnet deploys these explicitly and passes them in. They accept every proof — devnet only.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WorldProofMocksDeployment {
+    validity_proof_verifier: String,
+    tee_verifier: String,
+    security_council: String,
+    staking_registry: String,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WorldProofSystemDeployment {
@@ -1014,6 +1027,96 @@ l2ContractsLocator = "{}"
     )
 }
 
+/// Deploys the proof-lane test doubles (`DeployProofMocks.s.sol`) for the local devnet and
+/// returns their addresses for `DeployProofSystem` to consume.
+///
+/// The devnet has no SP1 gateway, no Nitro enclave and no council multisig, so the lanes are
+/// backed by `MockRootIdVerifier(acceptAny=true)`. Deploying them from here — rather than from
+/// inside `DeployProofSystem` — keeps "this chain runs on mocks" visible at the call site.
+async fn deploy_world_proof_mocks(
+    l1_rpc_url: &str,
+    contracts_dir: &Path,
+    deployment_name: &str,
+) -> Result<WorldProofMocksDeployment> {
+    let deployment_rel_path = PathBuf::from("out")
+        .join("devnet")
+        .join(format!("{deployment_name}-proof-mocks-deployment.json"));
+    let deployment_path = contracts_dir.join(&deployment_rel_path);
+    if let Some(parent) = deployment_path.parent() {
+        fs::create_dir_all(parent).wrap_err_with(|| {
+            format!(
+                "failed to create proof-mocks deployment output directory {}",
+                parent.display()
+            )
+        })?;
+    }
+
+    let output = Command::new("forge")
+        .current_dir(contracts_dir)
+        .arg("script")
+        .arg("scripts/devnet/DeployProofMocks.s.sol:DeployProofMocks")
+        .arg("--broadcast")
+        .arg("--rpc-url")
+        .arg(l1_rpc_url)
+        .arg("--private-key")
+        .arg(DEVNET_PRIVATE_KEY)
+        .arg("--slow")
+        .arg("--evm-version")
+        .arg("cancun")
+        .env("PRIVATE_KEY", DEVNET_PRIVATE_KEY)
+        .env(
+            "WORLD_CHALLENGER_ADDRESS",
+            world_challenger_address()?.to_string(),
+        )
+        .env("PROOF_MOCKS_DEPLOYMENT_OUT", &deployment_rel_path)
+        .output()
+        .await
+        .wrap_err("failed to spawn forge proof-mocks deployment")?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stdout.trim().is_empty() {
+        emit_command_logs(
+            "world-proof-mocks deploy",
+            ProcessLogTarget::OpDeployer,
+            &stdout,
+        );
+    }
+    if !stderr.trim().is_empty() {
+        emit_command_logs(
+            "world-proof-mocks deploy",
+            ProcessLogTarget::OpDeployer,
+            &stderr,
+        );
+    }
+    if !output.status.success() {
+        bail!(
+            "forge proof-mocks deployment failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+            output.status.code(),
+            stdout,
+            stderr
+        );
+    }
+
+    let mocks: WorldProofMocksDeployment = serde_json::from_value(read_json(&deployment_path)?)
+        .wrap_err_with(|| {
+            format!(
+                "invalid World Chain proof-mocks deployment JSON at {}",
+                deployment_path.display()
+            )
+        })?;
+
+    info!(
+        validity = %mocks.validity_proof_verifier,
+        tee = %mocks.tee_verifier,
+        council = %mocks.security_council,
+        staking = %mocks.staking_registry,
+        "World Chain proof-lane test doubles deployed (accept any proof — devnet only)"
+    );
+
+    Ok(mocks)
+}
+
 async fn deploy_world_proof_system(
     l1_rpc_url: &str,
     rollup_path: &Path,
@@ -1065,6 +1168,11 @@ async fn deploy_world_proof_system(
         );
     }
 
+    // `DeployProofSystem` treats the proof-lane verifiers and the staking registry as required
+    // inputs and never deploys them, so a real chain can't end up with fabricated verifiers.
+    // The devnet has no real verifiers, so deploy the test doubles explicitly and pass them in.
+    let mocks = deploy_world_proof_mocks(l1_rpc_url, &contracts_dir, deployment_name).await?;
+
     let mut command = Command::new("forge");
     command
         .current_dir(&contracts_dir)
@@ -1094,6 +1202,15 @@ async fn deploy_world_proof_system(
             "WORLD_CHALLENGER_ADDRESS",
             world_challenger_address()?.to_string(),
         )
+        // Previously defaulted to WORLD_CHALLENGER_ADDRESS inside the script; now explicit.
+        .env(
+            "PROTOCOL_FEE_RECIPIENT",
+            world_challenger_address()?.to_string(),
+        )
+        .env("VALIDITY_PROOF_VERIFIER", &mocks.validity_proof_verifier)
+        .env("TEE_VERIFIER", &mocks.tee_verifier)
+        .env("SECURITY_COUNCIL_VERIFIER", &mocks.security_council)
+        .env("STAKING_REGISTRY", &mocks.staking_registry)
         .env("WORLD_CHAIN_L2_CHAIN_ID", DEV_CHAIN_ID.to_string())
         .env("ROLLUP_CONFIG_HASH", &rollup_config_hash_hex)
         .env(
