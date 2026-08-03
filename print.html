@@ -38,7 +38,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-9277d9ce.js";
+            window.path_to_searchindex_js = "searchindex-f93779d3.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-87388434.js"></script>
@@ -3713,9 +3713,10 @@ contract EscalationGame {
 <tbody>
 <tr><td><code>CHALLENGE_PERIOD</code></td><td><code>1 day</code></td><td>Duration after proposal creation during which a staked participant MAY challenge a root and any party MAY submit the initial proof. Per-proposal <code>challengeDeadline = createdAt + CHALLENGE_PERIOD</code>.</td></tr>
 <tr><td><code>PROOF_PERIOD</code></td><td><code>7 days</code></td><td>Duration after proposal creation during which the proposer MAY defend a challenged root by accumulating lane submissions toward <code>PROOF_THRESHOLD</code>. Per-proposal <code>proofDeadline = createdAt + PROOF_PERIOD</code>. <code>PROOF_PERIOD</code> MUST be greater than <code>CHALLENGE_PERIOD</code>. A challenged root that the proposer has not defended to <code>PROOF_THRESHOLD</code> by <code>proofDeadline</code> MUST be invalidated.</td></tr>
-<tr><td><code>PROPOSER_BOND</code></td><td>TBD</td><td>ETH bond supplied to <code>DisputeGameFactory.create</code> and held as <code>DelayedWETH</code> credit by the game. Paid to the proposer after <code>DEFENDER_WINS</code>, to the challenger after a challenged proof timeout, to the configured protocol recipient after an unchallenged proof timeout, or refunded if the registry invalidates the game.</td></tr>
-<tr><td><code>CHALLENGER_BOND</code></td><td>TBD</td><td>ETH bond supplied by the challenger and held as <code>DelayedWETH</code> credit by the game. Paid to the proposer after a successful defense, to the challenger after proof timeout, or refunded if the registry invalidates the game.</td></tr>
-<tr><td><code>PROOF_TIMEOUT_RECIPIENT</code></td><td>TBD</td><td>Nonzero protocol-controlled recipient credited with the proposer bond when an unchallenged proposal expires without any valid proof lane.</td></tr>
+<tr><td><code>PROPOSER_BOND</code></td><td>TBD</td><td>ETH bond supplied to <code>DisputeGameFactory.create</code> and held as <code>DelayedWETH</code> credit by the game. Paid to the proposer after <code>DEFENDER_WINS</code>, to the challenger after a challenged proof timeout, to the configured protocol recipient after an unchallenged proof timeout, or refunded if the registry invalidates the game. It MUST exceed <code>CHALLENGE_FEE</code>, so successfully challenging an invalid root has a positive gross reward before transaction costs.</td></tr>
+<tr><td><code>CHALLENGER_BOND</code></td><td>TBD</td><td>ETH bond supplied by the challenger and held as <code>DelayedWETH</code> credit by the game. The non-refundable <code>CHALLENGE_FEE</code> is deducted whenever a challenge is accepted; the remainder is paid to the proposer after a successful defense, to the challenger after proof timeout, or refunded if the registry invalidates the game.</td></tr>
+<tr><td><code>PROTOCOL_FEE_RECIPIENT</code></td><td>TBD</td><td>Nonzero protocol-controlled recipient credited with the proposer bond when an unchallenged proposal expires without any valid proof lane and with <code>CHALLENGE_FEE</code> whenever a challenge is accepted.</td></tr>
+<tr><td><code>CHALLENGE_FEE</code></td><td>TBD</td><td>Nonzero flat amount deducted from <code>CHALLENGER_BOND</code> whenever a challenge is accepted. It MUST NOT exceed <code>CHALLENGER_BOND</code> and MUST remain charged under both normal and refund settlement.</td></tr>
 </tbody>
 </table>
 </div>
@@ -3843,10 +3844,11 @@ rootId = keccak256(abi.encode(
 <li>MUST verify that the caller is currently staked according to the configured staking registry.</li>
 <li>MUST NOT require the caller to submit proof material.</li>
 <li>MUST require the caller to supply <code>CHALLENGER_BOND</code> as ETH and deposit it into the game’s <code>DelayedWETH</code>;</li>
+<li>MUST irrevocably assign <code>CHALLENGE_FEE</code> of that bond to <code>PROTOCOL_FEE_RECIPIENT</code> in both normal and refund settlement modes;</li>
 <li>MUST mark the root as <code>CHALLENGED</code>.</li>
 <li>MUST record <code>challengedAt = block.timestamp</code> on the root the first time it transitions to <code>CHALLENGED</code>. The challenge MUST NOT change the <code>proofDeadline</code> recorded at proposal creation.</li>
 </ul>
-<p>If the challenged root resolves in favor of the proposer, the proposer receives both bonds. If it times out below threshold, the challenger receives both bonds. A game accepts only one challenger.</p>
+<p>If the challenged root resolves in favor of the proposer, the proposer receives the proposer bond plus the challenger bond remainder. If it times out below threshold, the challenger receives the proposer bond plus its challenger bond remainder. The protocol receives <code>CHALLENGE_FEE</code> in either case. A game accepts only one challenger.</p>
 <p>A challenge submitted at or after <code>challengeDeadline</code> MUST revert.</p>
 <h3 id="unchallenged-finality"><a class="header" href="#unchallenged-finality">Unchallenged Finality</a></h3>
 <p>An unchallenged root that reaches <code>PROOF_THRESHOLD</code> MAY resolve immediately with <code>DEFENDER_WINS</code>.
@@ -3875,9 +3877,9 @@ Otherwise, if no valid challenge has been submitted by <code>challengeDeadline</
 <li>Emit a threshold-reached signal when the bitmap first contains at least <code>PROOF_THRESHOLD</code> distinct lanes.</li>
 </ol>
 <p>A lane submission at or after its applicable deadline MUST revert. Once threshold is met, anyone MAY call <code>resolve()</code>, which MUST resolve the game with <code>DEFENDER_WINS</code> whether or not it was challenged.</p>
-<p>If <code>block.timestamp &gt;= proofDeadline</code> and the proof bitmap contains fewer than <code>PROOF_THRESHOLD</code> distinct lanes, anyone MAY call <code>resolve()</code>. The game MUST resolve with <code>CHALLENGER_WINS</code>, record proof timeout as the invalidation reason, and credit both bonds to the challenger.</p>
+<p>If <code>block.timestamp &gt;= proofDeadline</code> and the proof bitmap contains fewer than <code>PROOF_THRESHOLD</code> distinct lanes, anyone MAY call <code>resolve()</code>. The game MUST resolve with <code>CHALLENGER_WINS</code>, record proof timeout as the invalidation reason, and credit the proposer bond plus the challenger bond remainder to the challenger.</p>
 <h3 id="invalidity-and-conflicts"><a class="header" href="#invalidity-and-conflicts">Invalidity and Conflicts</a></h3>
-<p>Invalidation occurs either when a challenged root times out below threshold or when its parent is blacklisted or resolves with <code>CHALLENGER_WINS</code>. Parent invalidation MUST cascade before a descendant can resolve successfully. Because neither participant caused an ancestor failure, descendant proposer and challenger bonds MUST be refunded.</p>
+<p>Invalidation occurs either when a challenged root times out below threshold or when its parent is blacklisted or resolves with <code>CHALLENGER_WINS</code>. Parent invalidation MUST cascade before a descendant can resolve successfully. Because neither participant caused an ancestor failure, the descendant proposer bond and challenger bond remainder MUST be refunded. The challenge fee remains charged.</p>
 <p>An invalidated root MUST NOT become claim-valid or update the anchor.</p>
 <p>If invalidity of a finalized root is discovered after the fact — for example, via an offchain proof exhibiting a conflicting <code>(parent, l2BlockNumber) → rootId'</code> — the protocol MUST NOT silently roll back finalized state. The configured safety process MUST be triggered: pausing the proof game type, blacklisting the game, or routing the incident to governance.</p>
 <h3 id="lane-specific-requirements"><a class="header" href="#lane-specific-requirements">Lane-Specific Requirements</a></h3>
@@ -3905,6 +3907,7 @@ Otherwise, if no valid challenge has been submitted by <code>challengeDeadline</
 <li><code>REFUND</code> when the game has been blacklisted, retired, or otherwise made improper.</li>
 </ul>
 <p>Closing SHOULD attempt to advance the anchor but MUST treat an ineligible or stale anchor update as non-fatal. Credit claims MUST use the two-phase <code>DelayedWETH</code> flow: first unlock the recipient’s credit, then withdraw it after the configured delay. Claiming MAY be permissionless, but funds MUST only be transferred to the credited recipient.</p>
+<p>For every challenged game, <code>CHALLENGE_FEE</code> MUST be credited to <code>PROTOCOL_FEE_RECIPIENT</code> in both distribution modes. Blacklisting, retirement, invalid-parent resolution, and any other refund-mode outcome MUST NOT return that fee to the challenger.</p>
 <h3 id="portal-withdrawals"><a class="header" href="#portal-withdrawals">Portal Withdrawals</a></h3>
 <p><code>OptimismPortal2.proveWithdrawalTransaction</code> selects a game by its stock factory index. The Portal MUST require the game to be proper and respected and MUST verify the output-root proof against the game’s <code>rootClaim</code>. Withdrawal finalization occurs only after the proof-maturity delay and <code>AnchorStateRegistry.isGameClaimValid(game)</code> returns true. A game does not need to be the current anchor to support a withdrawal.</p>
 <h3 id="contract-interfaces"><a class="header" href="#contract-interfaces">Contract Interfaces</a></h3>
@@ -3951,6 +3954,8 @@ Otherwise, if no valid challenge has been submitted by <code>challengeDeadline</
 <li>an unstaked account cannot challenge;</li>
 <li>a staked account can challenge without proof before the deadline;</li>
 <li>a staked account can challenge after an initial proof, and the game then requires <code>PROOF_THRESHOLD</code> lanes;</li>
+<li>a proposer that challenges its own valid game recovers at most both bonds minus <code>CHALLENGE_FEE</code>;</li>
+<li>normal-mode and refund-mode settlement both credit <code>CHALLENGE_FEE</code> to the protocol recipient;</li>
 <li>a challenge at or after the deadline reverts;</li>
 <li>a configuration where <code>proofDeadline &lt;= challengeDeadline</code> is rejected;</li>
 <li>a challenged root with one supporting lane does not finalize;</li>
@@ -3972,7 +3977,8 @@ Otherwise, if no valid challenge has been submitted by <code>challengeDeadline</
 <p><strong>Security Council is a safety valve, not a finality mechanism.</strong> Council signing keys, quorum rules, and action domains MUST be isolated from unrelated governance actions. A council attestation alone MUST NOT finalize a challenged root.</p>
 <p><strong><code>rootId</code> domain separation is critical.</strong> Every lane MUST bind to the same <code>rootId</code>, and <code>rootId</code> itself MUST commit to <code>chainId</code>, <code>proofSystemVersion</code>, <code>rollupConfigHash</code>, and the parent/child block range. Missing domain separation allows replay across chains, hardfork schedules, game types, proof-system versions, or block ranges.</p>
 <p><strong><code>gameUUID</code> is not a proof target.</strong> It exists for factory duplicate prevention and discovery. Proofs and attestations MUST bind to <code>rootId</code>, because the factory UUID does not include the L1 origin captured at game creation.</p>
-<p><strong>Bond and stake calibration are security-critical.</strong> If <code>CHALLENGER_BOND</code> is too cheap, attackers can grief honest roots into the slow path. If <code>CHALLENGER_BOND</code> is too expensive, honest watchers may fail to challenge invalid roots. If <code>PROPOSER_BOND</code> is too cheap, invalid-proposal spam is cheap and forces honest watchers to lock capital per challenge; if <code>PROPOSER_BOND</code> is too expensive, only well-capitalized actors can propose, which centralizes the role. Exact economic parameters are out of scope for this WIP but MUST be tuned before mainnet deployment.</p>
+<p><strong>Self-challenge bond recycling creates proof-amplification griefing.</strong> A malicious proposer can create a consensus-valid game and challenge it through the same economic owner. Without a non-refundable charge, the owner recovers the nominal losing bond through the winning account while forcing third-party defenders to produce an additional proof lane. <code>CHALLENGE_FEE</code> makes that externalized proof burden carry a linear, unavoidable cost even if proposer and challenger collude. The fee deters but does not cryptographically prevent the attack, so its value MUST be calibrated against the marginal cost of the additional proof.</p>
+<p><strong>Bond, fee, and stake calibration are security-critical.</strong> If <code>CHALLENGER_BOND</code> or <code>CHALLENGE_FEE</code> is too cheap, attackers can grief honest roots into the slow path or force repeated proof work. If either is too expensive, honest watchers may fail to challenge invalid roots. A successful challenger earns <code>PROPOSER_BOND - CHALLENGE_FEE</code> before transaction costs, so <code>PROPOSER_BOND</code> MUST exceed the fee and SHOULD cover the challenger’s expected execution costs with a meaningful safety margin. If <code>PROPOSER_BOND</code> is too cheap, invalid-proposal spam is cheap and honest challenges become uneconomical; if it is too expensive, only well-capitalized actors can propose, which centralizes the role. Exact economic parameters are out of scope for this WIP but MUST be tuned before mainnet deployment.</p>
 <h2 id="copyright"><a class="header" href="#copyright">Copyright</a></h2>
 <p>Copyright and related rights waived via <a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0</a>.</p>
 <div style="break-before: page; page-break-before: always;"></div>
