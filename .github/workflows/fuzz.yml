@@ -11,9 +11,6 @@ on:
     paths:
       - "proofs/nitro/**"
       - ".github/workflows/fuzz.yml"
-  schedule:
-    # 03:17 UTC daily — off the hour to avoid the Actions queue spike.
-    - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
       max_total_time:
