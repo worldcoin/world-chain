@@ -43,10 +43,10 @@ attempt to be created.
 ## Retry operations
 
 The automated services assume proof-timeout retries are exceptional. The proposer creates the next
-attempt and the defender follows that replacement, but games descending from the abandoned attempt
-are not automatically recovered. Operators must resolve that stale lineage parent-first and claim
-any resulting bond credits. Retry creation is logged at warn level so it can trigger an incident
-response; a follow-up can include the complete stale lineage in that alert.
+attempt and the defender follows that replacement. Games descending from the abandoned attempt
+become resolvable as `INVALID_PARENT`; the bond manager keeps proposer-owned games tracked, resolves
+those descendants as their parents settle, and claims the refunded bonds. Retry creation remains
+logged at warn level for operator visibility.
 
 ### `root_claim`
 
@@ -61,5 +61,5 @@ response; a follow-up can include the complete stale lineage in that alert.
 Bonds are custodied in `DelayedWETH` and paid out in two phases. The first `claimCredit(recipient)`
 call unlocks the credit; the second, after the WETH delay, withdraws and transfers it. Both are
 gated on `AnchorStateRegistry.isGameFinalized`, since `claimCredit` calls `closeGame`, which reverts
-until the registry's finality airgap has elapsed. The bond manager keeps a game tracked until its
-pending withdrawal is drained.
+until the registry's finality airgap has elapsed. The bond manager keeps every discovered
+proposer-owned game tracked until it is resolved and its pending withdrawal is drained.

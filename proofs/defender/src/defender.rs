@@ -105,15 +105,6 @@ where
                 .execution_provider
                 .game_metadata(selected.game.address)
                 .await?;
-            if metadata.parent_ref != selected.transition.parent_ref
-                || metadata.root_claim != selected.transition.root_claim
-                || metadata.l2_block_number != selected.transition.l2_block_number
-            {
-                return Err(DefenderError::Contract(format!(
-                    "selected game {} does not match its transition commitment",
-                    selected.game.address
-                )));
-            }
             games.push(metadata);
         }
 
