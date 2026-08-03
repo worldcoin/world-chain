@@ -380,7 +380,6 @@ impl ClaimedProofJobHandler for DevnetNitroBackend {
             attestation: job.request.l1_head.as_slice().to_vec().into(),
             public_values: transition.abi_encode().into(),
             signature: job.request.root_claim.as_slice().to_vec().into(),
-            public_key: vec![0x04; 65].into(),
         })
     }
 }

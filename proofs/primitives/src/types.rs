@@ -258,6 +258,13 @@ impl ResolutionStatus {
         self.resolvable && self.root_state == RootState::Finalized
     }
 
+    /// Returns whether the game can be resolved as invalid because its parent is invalid.
+    pub fn invalid_parent_resolvable(&self) -> bool {
+        self.resolvable
+            && self.root_state == RootState::Invalidated
+            && self.invalidation_reason == InvalidationReason::InvalidParent
+    }
+
     /// Returns whether the game has already reached a terminal state.
     ///
     /// The root state may describe the expected outcome of a game that is currently resolvable,

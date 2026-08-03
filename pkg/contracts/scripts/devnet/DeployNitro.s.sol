@@ -61,8 +61,8 @@ import {NitroProofVerifier} from "../../src/proofs/nitro/NitroProofVerifier.sol"
 ///           accepts both old- and new-image attestations during overlap.
 ///        4. After migration, `verifier.revokePCRSet(oldPcr0, oldPcr1,
 ///           oldPcr2)` to stop accepting new registrations for the retired
-///           image. Already-registered keys remain in the registry until
-///           individually revoked via `registry.revokeKey(pubkey)`.
+///           image. Already-registered signers remain in the registry until
+///           individually revoked via `registry.revokeSigner(signer)`.
 contract DeployNitro is Script {
     function run() external {
         address owner = vm.envAddress("OWNER");

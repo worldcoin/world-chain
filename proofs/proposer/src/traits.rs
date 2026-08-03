@@ -27,6 +27,9 @@ pub trait BondManagerClient: Send + Sync {
     /// Returns the resolution status of the provided game.
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError>;
 
+    /// Resolves a proposer-owned game invalidated by its parent.
+    async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError>;
+
     /// Returns whether the registry's finality airgap has elapsed for the provided game.
     ///
     /// `claimCredit` calls `closeGame`, which reverts until this holds.

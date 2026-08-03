@@ -11,5 +11,5 @@ resolution, retry creation, and anchor advancement.
 
 Only asynchronous proof progress is retained between ticks. Each tick reconstructs the lineage and
 drops proof workflows for games that are no longer selected. A proof-timeout retry therefore moves
-the defender to the replacement attempt; resolving and recovering the abandoned lineage is a manual
-operator responsibility.
+the defender to the replacement attempt. Descendants of the invalidated attempt need no further
+proof support: the proposer bond manager resolves them as `INVALID_PARENT` and claims their refunds.
