@@ -567,33 +567,17 @@ fn check_cert_validity(
     Ok(())
 }
 
-/// Verifies the complete certificate chain from the leaf certificate to the AWS Nitro
-/// root CA.
+/// Verifies the chain from `leaf_der` up to the AWS Nitro root CA.
 ///
-/// The Nitro attestation layout is:
-/// - `cabundle[0]` — root CA (must match [`AWS_NITRO_ROOT_CA_PEM`] byte-for-byte).
-/// - `cabundle[1..n-1]` — intermediate CAs, each issued by the preceding element.
-/// - `cabundle[n-1]` — intermediate CA that issued `leaf_der`.
-/// - `leaf_der` — end-entity certificate whose public key signs the COSE_Sign1 envelope.
-///
-/// This function:
-/// 1. Anchors the root by comparing `cabundle[0]` to the hardcoded constant.
-/// 2. Verifies that each `cabundle[i]`'s signature validates under `cabundle[i - 1]`'s
-///    public key, walking away from the self-signed root.
-/// 3. Verifies that the leaf's signature validates under the last element's public key.
+/// `cabundle` runs root-first: `cabundle[0]` is the root, the last element issued `leaf_der`.
 ///
 /// See: [AWS Nitro Enclaves NSM API — attestation process](https://github.com/aws/aws-nitro-enclaves-nsm-api/blob/main/docs/attestation_process.md)
 fn verify_cert_chain(leaf_der: &[u8], cabundle: &[Vec<u8>]) -> Result<(), AttestationError> {
     use x509_parser::prelude::{FromDer as _, X509Certificate};
 
-    // 1. Root anchor check.
     verify_root_ca(cabundle)?;
 
-    // cabundle is guaranteed non-empty by verify_root_ca.
-
-    // 2. Verify each intermediate is signed by the element before it and is currently valid.
-    //    The root (index 0) is self-signed and anchored by verify_root_ca above — no need to
-    //    re-verify its signature, but it is still the issuer of cabundle[1].
+    // Skip index 0: the root is self-signed and already anchored above.
     for i in 1..cabundle.len() {
         let (_, cert) = X509Certificate::from_der(&cabundle[i])
             .map_err(|e| AttestationError::CertChain(format!("cabundle[{i}] parse: {e}")))?;
@@ -609,7 +593,6 @@ fn verify_cert_chain(leaf_der: &[u8], cabundle: &[Vec<u8>]) -> Result<(), Attest
             })?;
     }
 
-    // 3. Verify the leaf certificate is signed by the deepest CA and is currently valid.
     let (_, leaf) = X509Certificate::from_der(leaf_der)
         .map_err(|e| AttestationError::CertChain(format!("leaf cert parse: {e}")))?;
     check_cert_validity(&leaf, "leaf")?;
@@ -946,38 +929,24 @@ mod tests {
         );
     }
 
-    /// The AWS Nitro attestation spec orders `cabundle` from the root CA to the
-    /// intermediate closest to the leaf, so the root is the **first** element.
-    ///
-    /// Regression guard: this previously read `cabundle.last()`, which picks the deepest
-    /// intermediate instead. Every real attestation therefore failed the root anchor check
-    /// with a misleading "root CA does not match" error, even though the presented root was
-    /// byte-identical to the pinned one. That broke enclave signing-key registration.
     #[test]
     fn anchors_root_at_first_cabundle_element() {
         let root = aws_root_ca_der().unwrap();
         let intermediate = vec![0xAAu8; 64];
 
-        // Real ordering: root first.
-        verify_root_ca(&[root.clone(), intermediate.clone()])
-            .expect("root as cabundle[0] must be accepted");
+        verify_root_ca(&[root.clone(), intermediate.clone()]).unwrap();
+        verify_root_ca(&[root.clone()]).unwrap();
 
-        // The pre-fix ordering must not be accepted, or the bug can silently return.
-        let err = verify_root_ca(&[intermediate.clone(), root.clone()])
-            .expect_err("root as the last element must be rejected");
+        let err = verify_root_ca(&[intermediate, root]).unwrap_err();
         assert!(
             matches!(err, AttestationError::CertChain(_)),
             "got: {err:?}"
         );
-
-        // A single-element cabundle holding just the root still anchors.
-        verify_root_ca(&[root]).expect("lone root must be accepted");
     }
 
     #[test]
     fn rejects_cabundle_without_the_pinned_root() {
-        let err = verify_root_ca(&[vec![0xAAu8; 64], vec![0xBBu8; 64]])
-            .expect_err("a chain with no pinned root must be rejected");
+        let err = verify_root_ca(&[vec![0xAAu8; 64], vec![0xBBu8; 64]]).unwrap_err();
         assert!(
             matches!(err, AttestationError::CertChain(_)),
             "got: {err:?}"
@@ -986,7 +955,7 @@ mod tests {
 
     #[test]
     fn rejects_empty_cabundle() {
-        let err = verify_root_ca(&[]).expect_err("an empty cabundle must be rejected");
+        let err = verify_root_ca(&[]).unwrap_err();
         match err {
             AttestationError::CertChain(msg) => assert!(msg.contains("empty"), "got: {msg}"),
             other => panic!("expected CertChain, got: {other:?}"),
