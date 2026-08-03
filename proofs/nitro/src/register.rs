@@ -220,20 +220,27 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
     let mut last_err: Option<anyhow::Error> = None;
 
     for attempt in 1..=REGISTER_MAX_ATTEMPTS {
-        // Idempotency guard: stop as soon as the signer is registered.
-        if registry
-            .isSignerRegistered(enclave_signer)
-            .call()
-            .await
-            .context("isSignerRegistered check")?
-        {
-            info!(
-                target: "world_chain::nitro",
-                signer = %enclave_signer,
-                registry = %registry_address,
-                "enclave signer already registered on-chain; nothing to do"
-            );
-            return Ok(RegistrationOutcome::AlreadyRegistered);
+        // Idempotency guard: stop as soon as the signer is registered. A transient RPC error
+        // on this check is not fatal — fall through and let the attempt (and its post-receipt
+        // check) sort it out rather than aborting worker startup.
+        match registry.isSignerRegistered(enclave_signer).call().await {
+            Ok(true) => {
+                info!(
+                    target: "world_chain::nitro",
+                    signer = %enclave_signer,
+                    registry = %registry_address,
+                    "enclave signer already registered on-chain; nothing to do"
+                );
+                return Ok(RegistrationOutcome::AlreadyRegistered);
+            }
+            Ok(false) => {}
+            Err(err) => {
+                warn!(
+                    target: "world_chain::nitro",
+                    error = %err,
+                    "isSignerRegistered pre-check failed; attempting registration anyway"
+                );
+            }
         }
 
         info!(
@@ -269,61 +276,63 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
         .await;
 
         match attempt_result {
-            Ok((tx_hash, true)) => {
-                // Mined successfully. Confirm the write actually took effect.
-                if registry
-                    .isSignerRegistered(enclave_signer)
-                    .call()
-                    .await
-                    .unwrap_or(false)
-                {
-                    info!(
-                        target: "world_chain::nitro",
-                        %tx_hash,
-                        pubkey = %hex::encode(&public_key),
-                        enclave_signer = %enclave_signer,
-                        tx_signer = %signer_address,
-                        "enclave signer registered on-chain"
-                    );
-                    return Ok(RegistrationOutcome::Registered { tx_hash });
+            Ok((tx_hash, mined_ok)) => {
+                // The tx was mined. Whether the signer is now registered decides the
+                // outcome. A transient RPC error on THIS check is retryable (the tx may well
+                // have succeeded), so we never turn it into a hard failure.
+                match registry.isSignerRegistered(enclave_signer).call().await {
+                    Ok(true) => {
+                        if mined_ok {
+                            info!(
+                                target: "world_chain::nitro",
+                                %tx_hash,
+                                pubkey = %hex::encode(&public_key),
+                                enclave_signer = %enclave_signer,
+                                tx_signer = %signer_address,
+                                "enclave signer registered on-chain"
+                            );
+                            return Ok(RegistrationOutcome::Registered { tx_hash });
+                        }
+                        warn!(
+                            target: "world_chain::nitro",
+                            %tx_hash,
+                            "registerKey tx reverted but the signer is already registered; treating as success"
+                        );
+                        return Ok(RegistrationOutcome::AlreadyRegistered);
+                    }
+                    Ok(false) => {
+                        // Mined but the signer is definitively not registered. Resubmitting
+                        // won't help — either a confirmed-but-absent write, or a deterministic
+                        // revert (unapproved PCR set, permanently-revoked signer, un-pre-warmed
+                        // CertManager, or bad hints) — so fail fast instead of retrying.
+                        if mined_ok {
+                            bail!(
+                                "registerKey tx {tx_hash} confirmed but signer is still not registered"
+                            );
+                        }
+                        bail!(
+                            "registerKey tx {tx_hash} reverted on-chain and the signer is not registered \
+                             (check the approved PCR set, CertManager pre-warm and attestation hints, \
+                             and that the signer is not revoked)"
+                        );
+                    }
+                    Err(check_err) => {
+                        // Could not verify the outcome due to a transient RPC error — retry
+                        // rather than hard-fail, since the registration may have succeeded.
+                        last_err = Some(anyhow!(
+                            "verifying registration after tx {tx_hash} failed: {check_err}"
+                        ));
+                    }
                 }
-                // A confirmed tx that didn't register is not a transient condition.
-                bail!("registerKey tx {tx_hash} confirmed but signer is still not registered");
-            }
-            Ok((tx_hash, false)) => {
-                // The tx was mined and reverted. If a peer landed our signer first, that's
-                // success for us. Otherwise this is a *deterministic* revert (unapproved PCR
-                // set, permanently-revoked signer, un-pre-warmed CertManager, or bad hints)
-                // that resubmitting would only repeat, so fail fast instead of retrying.
-                if registry
-                    .isSignerRegistered(enclave_signer)
-                    .call()
-                    .await
-                    .unwrap_or(false)
-                {
-                    warn!(
-                        target: "world_chain::nitro",
-                        %tx_hash,
-                        "registerKey tx reverted but the signer is already registered; treating as success"
-                    );
-                    return Ok(RegistrationOutcome::AlreadyRegistered);
-                }
-                bail!(
-                    "registerKey tx {tx_hash} reverted on-chain and the signer is not registered \
-                     (check the approved PCR set, CertManager pre-warm and attestation hints, \
-                     and that the signer is not revoked)"
-                );
             }
             Err(err) => {
                 // The tx never made it on-chain (e.g. a funding-account nonce race or a
-                // transient RPC error). If the signer got registered meanwhile (by us or a
-                // peer), we're done; otherwise this is retryable.
-                if registry
-                    .isSignerRegistered(enclave_signer)
-                    .call()
-                    .await
-                    .unwrap_or(false)
-                {
+                // transient RPC error). If the signer is registered anyway (a peer won the
+                // race), we're done; otherwise this is retryable.
+                if matches!(
+                    registry.isSignerRegistered(enclave_signer).call().await,
+                    Ok(true)
+                ) {
                     warn!(
                         target: "world_chain::nitro",
                         "registerKey failed but the signer is already registered; treating as success"
