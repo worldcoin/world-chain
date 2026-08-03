@@ -80,6 +80,7 @@ async fn main() -> Result<()> {
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(cli.proposer_key))
         .connect_http(Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?);
+    world_chain_proposer::metrics::refresh_wallet_balance(&provider, proposer_address).await;
 
     let contracts = AlloyProofSystemClient::new(provider, cli.factory_address, cli.confirmations)
         .await
