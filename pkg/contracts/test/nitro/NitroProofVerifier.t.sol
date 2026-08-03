@@ -112,8 +112,8 @@ contract NitroProofVerifierTest is Test {
             );
     }
 
-    function _proofBytes(bytes memory sig, bytes memory pub) internal view returns (bytes memory) {
-        return abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, _transition(), sig, pub);
+    function _proofBytes(bytes memory sig) internal view returns (bytes memory) {
+        return abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, _transition(), sig);
     }
 
     function _setGameContext(ProofLib.TransitionPublicValues memory transition) internal {
@@ -152,7 +152,7 @@ contract NitroProofVerifierTest is Test {
 
     function test_Verify_HappyPath() public {
         bytes memory sig = _sign(_commitment());
-        assertTrue(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertTrue(_verify(_expectedRootId(), _proofBytes(sig)));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -163,7 +163,7 @@ contract NitroProofVerifierTest is Test {
         // Honest signature + transition public values, but the game asks about a different
         // rootId — the verifier must NOT validate.
         bytes memory sig = _sign(_commitment());
-        assertFalse(_verify(bytes32(uint256(0xdead)), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(bytes32(uint256(0xdead)), _proofBytes(sig)));
     }
 
     function test_Verify_FalseForWrongBootInfo() public {
@@ -178,8 +178,7 @@ contract NitroProofVerifierTest is Test {
             L1_ORIGIN_HASH,
             L1_ORIGIN_NUMBER
         );
-        bytes memory proof =
-            abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
+        bytes memory proof = abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig);
         assertFalse(_verify(wrongRootId, proof));
     }
 
@@ -187,8 +186,7 @@ contract NitroProofVerifierTest is Test {
         ProofLib.TransitionPublicValues memory wrongTransition = _transition();
         wrongTransition.l2PreRoot = keccak256("wrong-pre-root");
         bytes memory sig = _sign(keccak256(abi.encode(wrongTransition)));
-        bytes memory proof =
-            abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
+        bytes memory proof = abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig);
         assertFalse(_verify(_expectedRootId(), proof));
     }
 
@@ -196,8 +194,7 @@ contract NitroProofVerifierTest is Test {
         ProofLib.TransitionPublicValues memory wrongTransition = _transition();
         wrongTransition.l2PreBlockNumber += 1;
         bytes memory sig = _sign(keccak256(abi.encode(wrongTransition)));
-        bytes memory proof =
-            abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
+        bytes memory proof = abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig);
 
         assertFalse(_verify(_expectedRootId(), proof));
     }
@@ -206,20 +203,19 @@ contract NitroProofVerifierTest is Test {
                             REGISTRY GATES
     //////////////////////////////////////////////////////////////*/
 
-    function test_Verify_FalseForUnregisteredKey() public {
+    function test_Verify_FalseForUnregisteredSigner() public {
         Vm.Wallet memory rogue = vm.createWallet("rogue");
-        bytes memory roguePub = _uncompressedKey(rogue.publicKeyX, rogue.publicKeyY);
         bytes memory sig = _sign(rogue, _commitment());
-        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, roguePub)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig)));
     }
 
-    function test_Verify_FalseForRevokedKey() public {
+    function test_Verify_FalseForRevokedSigner() public {
         bytes memory sig = _sign(_commitment());
 
         vm.prank(owner);
-        registry.revokeKey(enclavePubKey);
+        registry.revokeSigner(enclaveWallet.addr);
 
-        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig)));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -227,27 +223,26 @@ contract NitroProofVerifierTest is Test {
     //////////////////////////////////////////////////////////////*/
 
     function test_Verify_FalseForDifferentSigner() public {
-        // Sign with a different key while passing the registered enclave key.
         Vm.Wallet memory rogue = vm.createWallet("rogue");
         bytes memory sig = _sign(rogue, _commitment());
-        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig)));
     }
 
-    function test_Verify_FalseForBadSignatureLength() public {
+    function test_Verify_FalseForBadSignatureLength() public view {
         bytes memory sig = hex"1234";
-        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig)));
     }
 
-    function test_Verify_FalseForSignatureLength64() public {
+    function test_Verify_FalseForSignatureLength64() public view {
         // EIP-2098 "compact" 64-byte signatures are NOT accepted; the
         // contract is strict about 65-byte (r || s || v) tuples.
         bytes memory sig = new bytes(64);
-        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig)));
     }
 
-    function test_Verify_FalseForEmptySignature() public {
+    function test_Verify_FalseForEmptySignature() public view {
         bytes memory sig = "";
-        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig)));
     }
 
     function test_Verify_FalseForHighSSignature() public {
@@ -269,9 +264,9 @@ contract NitroProofVerifierTest is Test {
         uint8 vFlipped = v == 27 ? 28 : 27;
         bytes memory malleable = abi.encodePacked(r, sHigh, vFlipped);
         // Original signature still validates...
-        assertTrue(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertTrue(_verify(_expectedRootId(), _proofBytes(sig)));
         // ...but the malleable high-s twin must NOT.
-        assertFalse(_verify(_expectedRootId(), _proofBytes(malleable, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(malleable)));
     }
 
     function test_Verify_FalseForInvalidV() public {
@@ -281,57 +276,24 @@ contract NitroProofVerifierTest is Test {
         assembly {
             mstore8(add(add(sig, 32), 64), 29)
         }
-        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig)));
         // Also v = 0 (legacy unsigned).
         assembly {
             mstore8(add(add(sig, 32), 64), 0)
         }
-        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig)));
         // Also v = 26.
         assembly {
             mstore8(add(add(sig, 32), 64), 26)
         }
-        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig)));
     }
 
-    function test_Verify_FalseForAllZeroSignature() public {
+    function test_Verify_FalseForAllZeroSignature() public view {
         // r = s = 0, v = 27. ecrecover returns address(0) → false.
         bytes memory sig = new bytes(65);
         sig[64] = bytes1(uint8(27));
-        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, enclavePubKey)));
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                              KEY GATES
-    //////////////////////////////////////////////////////////////*/
-
-    function test_Verify_FalseForCompressedKey() public {
-        bytes memory compressed = new bytes(33);
-        compressed[0] = 0x02;
-        bytes memory sig = _sign(_commitment());
-        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, compressed)));
-    }
-
-    function test_Verify_FalseForBadKey() public view {
-        // 7-byte key cannot be SEC1-decoded → _verifyEnclaveSignature
-        // reverts with InvalidPublicKey → verify() catches and returns false.
-        bytes memory badKey = hex"01020304050607";
-        assertFalse(_verify(_expectedRootId(), _proofBytes(hex"00", badKey)));
-    }
-
-    function test_Verify_FalseForEmptyPublicKey() public view {
-        bytes memory emptyKey = "";
-        assertFalse(_verify(_expectedRootId(), _proofBytes(hex"00", emptyKey)));
-    }
-
-    function test_Verify_FalseForKeyWithLength65AndWrongPrefix() public {
-        // 65-byte length passes the length gate but the prefix check
-        // (`publicKey[0] != 0x04`) must still reject it.
-        bytes memory key = new bytes(65);
-        key[0] = 0x03;
-        // Use a real signature so we fail on the prefix check, not earlier.
-        bytes memory sig = _sign(_commitment());
-        assertFalse(_verify(_expectedRootId(), _proofBytes(sig, key)));
+        assertFalse(_verify(_expectedRootId(), _proofBytes(sig)));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -362,7 +324,7 @@ contract NitroProofVerifierTest is Test {
         bytes32 rootId = ProofLib.rootId(domainHash, address(parent), L2_POST_ROOT, 0, L1_ORIGIN_HASH, L1_ORIGIN_NUMBER);
         bytes32 commitment = keccak256(abi.encode(transition));
         bytes memory sig = _sign(commitment);
-        bytes memory proof = abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, transition, sig, enclavePubKey);
+        bytes memory proof = abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, transition, sig);
         _setGameContext(transition);
         assertTrue(_verify(rootId, proof));
     }
@@ -375,8 +337,7 @@ contract NitroProofVerifierTest is Test {
         wrongTransition.rollupConfigHash = wrongCfg;
         bytes32 commitment = keccak256(abi.encode(wrongTransition));
         bytes memory sig = _sign(commitment);
-        bytes memory proof =
-            abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig, enclavePubKey);
+        bytes memory proof = abi.encode(domainHash, address(parent), L1_ORIGIN_NUMBER, wrongTransition, sig);
         assertFalse(_verify(_expectedRootId(), proof));
     }
 
@@ -384,7 +345,7 @@ contract NitroProofVerifierTest is Test {
         // verify() is view: calling it twice must return the same result
         // and not record any state change.
         bytes memory sig = _sign(_commitment());
-        bytes memory proof = _proofBytes(sig, enclavePubKey);
+        bytes memory proof = _proofBytes(sig);
         bytes32 root = _expectedRootId();
         assertTrue(_verify(root, proof));
         assertTrue(_verify(root, proof));

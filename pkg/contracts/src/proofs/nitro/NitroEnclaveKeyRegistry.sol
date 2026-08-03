@@ -6,7 +6,7 @@ import {INitroAttestationVerifier} from "./INitroAttestationVerifier.sol";
 
 /// @title NitroEnclaveKeyRegistry
 /// @author Worldcoin
-/// @notice Registry of attested AWS Nitro enclave secp256k1 public keys.
+/// @notice Registry of attested AWS Nitro enclave secp256k1 signers.
 /// @dev Registration goes through a fully on-chain `INitroAttestationVerifier`
 ///      which:
 ///        - validates the COSE_Sign1 P-384 signature;
@@ -17,35 +17,33 @@ import {INitroAttestationVerifier} from "./INitroAttestationVerifier.sol";
 ///        - returns the embedded SEC1-uncompressed secp256k1 public key together
 ///          with the PCR triple it was bound to.
 ///
-///      The registry records the returned key in a per-key `keccak256(publicKey)`
-///      flag and emits `KeyRegistered` with the bound PCR triple, which is the
-///      authoritative off-chain index from PCRs to keys. The registry
+///      The registry derives the key's Ethereum address and records lifecycle
+///      state by signer. `SignerRegistered` is the authoritative off-chain
+///      index from PCRs to signers. The registry
 ///      deliberately does NOT maintain an on-chain `PCRs → key` lookup:
 ///      multiple validator instances run the same enclave image simultaneously,
 ///      so the relationship is one-to-many and any 1:1 map would silently
 ///      overwrite peers' entries.
 ///
-///      The registry owner can revoke any key at any time (e.g. on enclave
-///      compromise); revocation is permanent — a revoked key cannot be
+///      The registry owner can revoke any signer at any time (e.g. on enclave
+///      compromise); revocation is permanent — a revoked signer cannot be
 ///      re-registered even if a valid attestation document for it is replayed.
 contract NitroEnclaveKeyRegistry is Ownable {
     /*//////////////////////////////////////////////////////////////
                                  ERRORS
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Thrown when `revokeKey` is called for a key that is not
-    ///         currently registered as `KeyStatus.Active`.
-    error KeyNotRegistered();
+    /// @notice Thrown when `revokeSigner` is called for an address that is not active.
+    error SignerNotRegistered();
 
-    /// @notice Thrown when `registerKey` is called for a key that is already
-    ///         `KeyStatus.Active`.
-    error KeyAlreadyRegistered();
+    /// @notice Thrown when `registerKey` derives a signer that is already active.
+    error SignerAlreadyRegistered();
 
     /// @notice Thrown when `registerKey` is called for a key that was
     ///         previously revoked. Revocation is permanent — a compromised
     ///         enclave key must not be silently restored by re-submitting
     ///         its attestation document.
-    error KeyRevokedPermanently();
+    error SignerRevokedPermanently();
 
     /// @notice Thrown when the verifier returns a malformed public key.
     error InvalidPublicKey();
@@ -54,21 +52,21 @@ contract NitroEnclaveKeyRegistry is Ownable {
                                  EVENTS
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Emitted when an enclave public key is registered against a PCR triple.
-    event KeyRegistered(bytes publicKey, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2);
+    /// @notice Emitted when an enclave signer is registered against a PCR triple.
+    event SignerRegistered(address indexed signer, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2);
 
-    /// @notice Emitted when a previously registered key is revoked by the owner.
-    event KeyRevoked(bytes publicKey);
+    /// @notice Emitted when a previously registered signer is revoked by the owner.
+    event SignerRevoked(address indexed signer);
 
     /*//////////////////////////////////////////////////////////////
                                   TYPES
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Lifecycle state of a registered key.
-    /// @dev The default zero value (`Unknown`) denotes a key that has never
+    /// @notice Lifecycle state of a registered signer.
+    /// @dev The default zero value (`Unknown`) denotes a signer that has never
     ///      been registered. Transitions are strictly
     ///      `Unknown → Active → Revoked`; there is no path back.
-    enum KeyStatus {
+    enum SignerStatus {
         Unknown,
         Active,
         Revoked
@@ -81,8 +79,8 @@ contract NitroEnclaveKeyRegistry is Ownable {
     /// @notice On-chain Nitro attestation verifier.
     INitroAttestationVerifier public immutable verifier;
 
-    /// @notice `keccak256(publicKey) → lifecycle status`.
-    mapping(bytes32 keyHash => KeyStatus status) private _keyStatus;
+    /// @notice Enclave signer address to lifecycle status.
+    mapping(address signer => SignerStatus status) private _signerStatus;
 
     /*//////////////////////////////////////////////////////////////
                               CONSTRUCTOR
@@ -117,34 +115,36 @@ contract NitroEnclaveKeyRegistry is Ownable {
     ///                       `tools/p384_hints.js attestation ...`.
     function registerKey(bytes calldata attestationTbs, bytes calldata signature, bytes calldata attestationSigHints)
         external
-        returns (bytes memory publicKey, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2)
+        returns (address signer, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2)
     {
+        bytes memory publicKey;
         (publicKey, pcr0, pcr1, pcr2) = verifier.verifyAttestation(attestationTbs, signature, attestationSigHints);
         if (publicKey.length != 65 || publicKey[0] != 0x04) revert InvalidPublicKey();
 
-        bytes32 keyHash = keccak256(publicKey);
-        KeyStatus status = _keyStatus[keyHash];
-        if (status == KeyStatus.Revoked) revert KeyRevokedPermanently();
-        if (status == KeyStatus.Active) revert KeyAlreadyRegistered();
-        _keyStatus[keyHash] = KeyStatus.Active;
+        signer = _signerAddress(publicKey);
+        if (signer == address(0)) revert InvalidPublicKey();
+        SignerStatus status = _signerStatus[signer];
+        if (status == SignerStatus.Revoked) revert SignerRevokedPermanently();
+        if (status == SignerStatus.Active) revert SignerAlreadyRegistered();
+        _signerStatus[signer] = SignerStatus.Active;
 
-        emit KeyRegistered(publicKey, pcr0, pcr1, pcr2);
+        emit SignerRegistered(signer, pcr0, pcr1, pcr2);
     }
 
     /*//////////////////////////////////////////////////////////////
                                REVOCATION
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Revoke a previously registered enclave key.
+    /// @notice Revoke a previously registered enclave signer.
     /// @dev Only callable by the owner. Revocation is permanent — see
-    ///      `isKeyRevoked` — so a compromised key cannot be silently restored
+    ///      `isSignerRevoked` — so a compromised signer cannot be silently restored
     ///      by replaying its attestation document.
     ///
     ///      ## Relationship to `NitroAttestationVerifier.revokePCRSet`
     ///      Revoking a PCR set on the verifier (i.e. retiring an enclave
-    ///      image) does **not** automatically transition the keys that were
-    ///      registered under that image to `KeyStatus.Revoked` here. Each key
-    ///      remains `KeyStatus.Active` until `revokeKey` is called for it
+    ///      image) does **not** automatically transition signers registered
+    ///      under that image to `SignerStatus.Revoked` here. Each signer
+    ///      remains `SignerStatus.Active` until `revokeSigner` is called
     ///      individually.
     ///
     ///      This is intentional. Nitro enclave signing keys are ephemeral:
@@ -160,42 +160,50 @@ contract NitroEnclaveKeyRegistry is Ownable {
     ///
     ///      Belt-and-suspenders operators can still observe
     ///      `NitroAttestationVerifier.PCRSetRevoked` events off-chain and
-    ///      call `revokeKey` for every affected key. The `KeyRegistered`
+    ///      call `revokeSigner` for every affected signer. The `SignerRegistered`
     ///      event carries the bound PCR triple specifically to make this
     ///      easy.
     ///
     ///      ## Why no on-chain cascade?
     ///      An automatic on-chain cascade was considered and rejected:
-    ///        - Storing `pcrSetHash → keyHash[]` to enumerate affected keys
+    ///        - Storing `pcrSetHash → signer[]` to enumerate affected signers
     ///          requires an unbounded array per image, with O(N) gas on
     ///          `registerKey` and on the cascade itself.
-    ///        - Doing the lookup lazily in `isKeyRegistered` would add an
+    ///        - Doing the lookup lazily in `isSignerRegistered` would add an
     ///          extra SLOAD on every proof-verification call (the hot path),
     ///          for no security gain given Nitro's hardware key-destruction
     ///          guarantee.
-    function revokeKey(bytes calldata publicKey) external onlyOwner {
-        bytes32 keyHash = keccak256(publicKey);
-        if (_keyStatus[keyHash] != KeyStatus.Active) revert KeyNotRegistered();
-        _keyStatus[keyHash] = KeyStatus.Revoked;
-        emit KeyRevoked(publicKey);
+    function revokeSigner(address signer) external onlyOwner {
+        if (_signerStatus[signer] != SignerStatus.Active) revert SignerNotRegistered();
+        _signerStatus[signer] = SignerStatus.Revoked;
+        emit SignerRevoked(signer);
     }
 
     /*//////////////////////////////////////////////////////////////
                                  VIEWS
     //////////////////////////////////////////////////////////////*/
 
-    /// @notice Returns the lifecycle status of `publicKey`.
-    function keyStatus(bytes calldata publicKey) external view returns (KeyStatus) {
-        return _keyStatus[keccak256(publicKey)];
+    /// @notice Returns the lifecycle status of `signer`.
+    function signerStatus(address signer) external view returns (SignerStatus) {
+        return _signerStatus[signer];
     }
 
-    /// @notice Returns whether `publicKey` is currently registered (and not revoked).
-    function isKeyRegistered(bytes calldata publicKey) external view returns (bool) {
-        return _keyStatus[keccak256(publicKey)] == KeyStatus.Active;
+    /// @notice Returns whether `signer` is currently registered and not revoked.
+    function isSignerRegistered(address signer) external view returns (bool) {
+        return _signerStatus[signer] == SignerStatus.Active;
     }
 
-    /// @notice Returns whether `publicKey` has been permanently revoked.
-    function isKeyRevoked(bytes calldata publicKey) external view returns (bool) {
-        return _keyStatus[keccak256(publicKey)] == KeyStatus.Revoked;
+    /// @notice Returns whether `signer` has been permanently revoked.
+    function isSignerRevoked(address signer) external view returns (bool) {
+        return _signerStatus[signer] == SignerStatus.Revoked;
+    }
+
+    /// @dev Ethereum addresses hash the 64-byte X/Y coordinates, excluding the 0x04 SEC1 prefix.
+    function _signerAddress(bytes memory publicKey) internal pure returns (address signer) {
+        bytes32 keyHash;
+        assembly ("memory-safe") {
+            keyHash := keccak256(add(publicKey, 33), 64)
+        }
+        signer = address(uint160(uint256(keyHash)));
     }
 }

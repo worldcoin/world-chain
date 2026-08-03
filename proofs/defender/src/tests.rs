@@ -372,7 +372,6 @@ impl ProofRequester for MockProver {
                 .abi_encode()
                 .into(),
                 signature: Bytes::from_static(b"signature"),
-                public_key: Bytes::from_static(b"public key"),
             },
         };
         Ok(ProofResponse::Succeeded(SucceededProofResponse {
