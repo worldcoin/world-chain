@@ -68,8 +68,8 @@ where
             .block(BlockId::finalized())
             .call()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
-        u256_to_u64(count, "gameCount")
+            .map_err(|error| ChallengerError::Contract(error))?;
+        u256_to_u64(count)
     }
 
     /// Resolves the WIP-1006 game at a factory index, skipping other game types.
@@ -80,7 +80,7 @@ where
             .block(BlockId::finalized())
             .call()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+            .map_err(|error| ChallengerError::Contract(error))?;
 
         Ok((entry.gameType == MULTI_PROOF_GAME_TYPE).then_some(entry.proxy))
     }
@@ -94,17 +94,17 @@ where
             .resolutionStatus()
             .call()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+            .map_err(|error| ChallengerError::Contract(error))?;
         let root_state = result
             .outcome
             .try_into()
-            .map_err(|error: RootStateError| ChallengerError::Contract(error.to_string()))?;
+            .map_err(|error: RootStateError| ChallengerError::InvalidRootState(error))?;
         let invalidation_reason =
             result
                 .reason
                 .try_into()
                 .map_err(|error: InvalidationReasonError| {
-                    ChallengerError::Contract(error.to_string())
+                    ChallengerError::NotExistingInvalidReason(error)
                 })?;
 
         Ok(ResolutionStatus {
@@ -123,7 +123,7 @@ where
             .credit(recipient)
             .call()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))
+            .map_err(|error| ChallengerError::Contract(error))
     }
 
     async fn read_pending_withdrawal(
@@ -136,7 +136,7 @@ where
             .weth()
             .call()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+            .map_err(|error| ChallengerError::Contract(error))?;
         let weth = IDelayedWETH::IDelayedWETHInstance::new(weth_address, self.provider.clone());
 
         let (pending, delay) = tokio::try_join!(
@@ -144,26 +144,27 @@ where
                 weth.withdrawals(address, recipient)
                     .call()
                     .await
-                    .map_err(|error| ChallengerError::Contract(error.to_string()))
+                    .map_err(|error| ChallengerError::Contract(error))
             },
             async {
                 weth.delay()
                     .call()
                     .await
-                    .map_err(|error| ChallengerError::Contract(error.to_string()))
+                    .map_err(|error| ChallengerError::Contract(error))
             }
         )?;
 
         if pending.amount.is_zero() {
             return Ok(PendingWithdrawal::default());
         }
-        let unlock_at = pending.timestamp.checked_add(delay).ok_or_else(|| {
-            ChallengerError::Contract("DelayedWETH unlock time overflows".to_string())
-        })?;
+        let unlock_at = pending
+            .timestamp
+            .checked_add(delay)
+            .ok_or_else(|| ChallengerError::Overflow)?;
 
         Ok(PendingWithdrawal {
             amount: pending.amount,
-            unlock_at: u256_to_u64(unlock_at, "DelayedWETH unlock time")?,
+            unlock_at: u256_to_u64(unlock_at)?,
         })
     }
 }
@@ -188,20 +189,20 @@ where
                 game.rootClaim()
                     .call()
                     .await
-                    .map_err(|error| ChallengerError::Contract(error.to_string()))
+                    .map_err(|error| ChallengerError::Contract(error))
             },
             async {
                 game.l2BlockNumber()
                     .call()
                     .await
-                    .map_err(|error| ChallengerError::Contract(error.to_string()))
+                    .map_err(|error| ChallengerError::Contract(error))
             }
         )?;
 
         Ok(GameMetadata {
             address,
             root_claim,
-            l2_block_number: u256_to_u64(l2_block_number, "l2BlockNumber")?,
+            l2_block_number: u256_to_u64(l2_block_number)?,
         })
     }
 
@@ -211,7 +212,7 @@ where
             .state()
             .call()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+            .map_err(|error| ChallengerError::Contract(error))?;
         raw.try_into().map_err(Into::into)
     }
 
@@ -220,7 +221,7 @@ where
             .challengeDeadline()
             .call()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))
+            .map_err(|error| ChallengerError::Contract(error))
     }
 
     async fn submit_challenge(
@@ -235,20 +236,20 @@ where
             .challengerBond()
             .call()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+            .map_err(|error| ChallengerError::Contract(error))?;
 
         let pending = game
             .challenge()
             .value(challenger_bond)
             .send()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+            .map_err(|error| ChallengerError::Contract(error))?;
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+            .map_err(|error| ChallengerError::PendingTransaction(error))?;
         if !receipt.status() {
             return Err(ChallengerError::Revert(tx_hash));
         }
@@ -274,13 +275,13 @@ where
             .resolve()
             .send()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+            .map_err(|error| ChallengerError::Contract(error))?;
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+            .map_err(|error| ChallengerError::PendingTransaction(error))?;
         if !receipt.status() {
             return Err(ChallengerError::Revert(tx_hash));
         }
@@ -310,7 +311,7 @@ where
             .challenger()
             .call()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))
+            .map_err(|error| ChallengerError::Contract(error))
     }
 
     async fn is_game_finalized(&self, address: Address) -> Result<bool, ChallengerError> {
@@ -318,7 +319,7 @@ where
             .isGameFinalized(address)
             .call()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))
+            .map_err(|error| ChallengerError::Contract(error))
     }
 
     async fn credit(&self, address: Address) -> Result<U256, ChallengerError> {
@@ -337,9 +338,9 @@ where
         self.provider
             .get_block_by_number(BlockNumberOrTag::Latest)
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?
+            .map_err(|error| ChallengerError::AlloyJsonRpc(error))?
             .map(|block| block.header.timestamp())
-            .ok_or_else(|| ChallengerError::Contract("latest L1 block is unavailable".into()))
+            .ok_or_else(|| ChallengerError::UnavailableLatestL1Block)
     }
 
     async fn claim_credit(&self, address: Address) -> Result<ClaimSubmission, ChallengerError> {
@@ -358,13 +359,13 @@ where
             .claimCredit(recipient)
             .send()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+            .map_err(|error| ChallengerError::Contract(error))?;
         let tx_hash = *pending_tx.tx_hash();
         let receipt = pending_tx
             .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+            .map_err(|error| ChallengerError::PendingTransaction(error))?;
         if !receipt.status() {
             return Err(ChallengerError::Revert(tx_hash));
         }
@@ -385,8 +386,6 @@ where
     }
 }
 
-fn u256_to_u64(value: U256, field: &'static str) -> Result<u64, ChallengerError> {
-    value
-        .try_into()
-        .map_err(|_| ChallengerError::Contract(format!("{field} overflows u64")))
+fn u256_to_u64(value: U256) -> Result<u64, ChallengerError> {
+    value.try_into().map_err(|_| ChallengerError::Overflow)
 }

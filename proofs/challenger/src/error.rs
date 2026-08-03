@@ -1,6 +1,8 @@
 use alloy_primitives::{Address, TxHash};
+use alloy_provider::{PendingTransactionError, transport::RpcError};
+use alloy_transport::TransportErrorKind;
 use thiserror::Error;
-use world_chain_proofs::{ConsensusError, RootStateError};
+use world_chain_proofs::{ConsensusError, InvalidationReasonError, RootStateError};
 
 /// Errors returned by the challenger and its lifecycle managers.
 #[derive(Debug, Error)]
@@ -17,14 +19,24 @@ pub enum ChallengerError {
         block_interval: u64,
     },
     /// Contract call or transaction failure.
-    #[error("contract error: {0}")]
-    Contract(String),
+    #[error(transparent)]
+    Contract(#[from] alloy_contract::Error),
     #[error(transparent)]
     OutputRoot(#[from] ConsensusError),
     #[error("The challenge transaction didn't execute succesfully: {0}")]
     Revert(TxHash),
     #[error(transparent)]
     InvalidRootState(#[from] RootStateError),
+    #[error(transparent)]
+    NotExistingInvalidReason(#[from] InvalidationReasonError),
+    #[error(transparent)]
+    PendingTransaction(#[from] PendingTransactionError),
+    #[error("Latest L1 block is unavailable.")]
+    UnavailableLatestL1Block,
+    #[error("Overflow error.")]
+    Overflow,
+    #[error(transparent)]
+    AlloyJsonRpc(#[from] RpcError<TransportErrorKind>),
     #[error("RPC error: {0}")]
     Rpc(String),
     #[error("Latest L1 finalized block not found")]
