@@ -248,16 +248,28 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
         .get_receipt()
         .await
         .with_context(|| format!("awaiting registerKey receipt (tx {tx_hash})"))?;
-    if !receipt.status() {
-        bail!("registerKey transaction {tx_hash} reverted");
-    }
 
-    // 5. Confirm the key is now registered.
+    // 5. Confirm the key ended up registered. We check this even when the receipt shows a
+    //    revert: a concurrent registration can land our key on-chain and make *our* tx
+    //    revert with `KeyAlreadyRegistered`, which is still success from our perspective.
     let registered = registry
         .isKeyRegistered(public_key.clone())
         .call()
         .await
         .context("isKeyRegistered post-check")?;
+
+    if !receipt.status() {
+        if registered {
+            warn!(
+                target: "world_chain::nitro",
+                %tx_hash,
+                "registerKey tx reverted but the key is already registered; treating as success"
+            );
+            return Ok(RegistrationOutcome::AlreadyRegistered);
+        }
+        bail!("registerKey transaction {tx_hash} reverted and the key is not registered");
+    }
+
     if !registered {
         bail!("registerKey tx {tx_hash} confirmed but key is still not registered");
     }
