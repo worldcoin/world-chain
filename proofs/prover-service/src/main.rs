@@ -55,6 +55,7 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     let _telemetry_guard = telemetry_batteries::init()
         .map_err(|error| anyhow::anyhow!("failed to initialize telemetry: {error:#}"))?;
+    world_chain_proof_metrics::describe_metrics();
 
     let cli = Cli::parse();
 

@@ -19264,6 +19264,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "world-chain-proof-metrics",
  "world-chain-prover-service",
 ]
 
@@ -19383,6 +19384,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "world-chain-proof-metrics",
 ]
 
 [[package]]

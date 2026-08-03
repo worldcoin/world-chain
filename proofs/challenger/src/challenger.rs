@@ -206,7 +206,7 @@ where
                     self.retry_games.remove(&game.address);
                 }
                 Err(error) => {
-                    warn!(game = %game.address, error = %error.error, "{failure_message}");
+                    warn!(game_address = %game.address, error = %error.error, "{failure_message}");
                     self.queue_retry_game(game, error.challenge_deadline);
                 }
             }
@@ -218,7 +218,9 @@ where
                 Ok(submission) => {
                     self.retry_games.remove(&game.address);
                     self.owned_games.insert(game.address);
+                    world_chain_proof_metrics::increment_challenges_submitted();
                     info!(
+                        lifecycle_event = "challenge_submitted",
                         game_address = %game.address,
                         tx_hash = ?submission.tx_hash,
                         bond = ?submission.bond,
@@ -227,7 +229,7 @@ where
                 }
                 Err(error) => {
                     warn!(
-                        game = %game.address,
+                        game_address = %game.address,
                         %error,
                         "challenge submission failed; adding to retry list"
                     );
@@ -292,7 +294,7 @@ where
                 .challenge_deadline
                 .is_some_and(|challenge_deadline| now >= challenge_deadline)
             {
-                warn!(game = %retry_game.game.address, "dropping retry game after challenge deadline");
+                warn!(game_address = %retry_game.game.address, "dropping retry game after challenge deadline");
                 self.retry_games.remove(&retry_game.game.address);
                 return false;
             }

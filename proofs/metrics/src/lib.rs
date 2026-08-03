@@ -1,6 +1,9 @@
 //! Shared metrics for proof services.
 
-use std::task::{Context, Poll};
+use std::{
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use alloy_json_rpc::{RequestPacket, ResponsePacket};
 use alloy_primitives::{Address, utils::format_ether};
@@ -19,8 +22,22 @@ pub const RPC_TARGET_L2_CONSENSUS: &str = "l2_consensus";
 
 /// Current transaction-sending wallet balance in ETH.
 pub const METRICS_WALLET_BALANCE_ETH: &str = "wallet.balance_eth";
+/// Latest finalized L2 block reported by the OP consensus client.
+pub const METRICS_L2_FINALIZED_BLOCK_NUMBER: &str = "l2.finalized_block_number";
 /// Completed outbound RPC requests.
 pub const METRICS_RPC_CLIENT_REQUESTS: &str = "rpc.client.requests";
+/// Confirmed challenge transactions.
+pub const METRICS_CHALLENGES_SUBMITTED: &str = "challenges.submitted";
+/// Confirmed on-chain proof-lane submissions.
+pub const METRICS_PROOF_LANES_SUBMITTED: &str = "proof_lanes.submitted";
+/// Newly created durable proof requests.
+pub const METRICS_PROOF_REQUESTS_CREATED: &str = "proof_requests.created";
+/// Proof jobs claimed by workers.
+pub const METRICS_PROOF_JOBS_CLAIMED: &str = "proof_jobs.claimed";
+/// Completed worker proof-job attempts.
+pub const METRICS_PROOF_JOBS_COMPLETED: &str = "proof_jobs.completed";
+/// End-to-end worker proof-job attempt duration.
+pub const METRICS_PROOF_JOB_DURATION_SECONDS: &str = "proof_job.duration_seconds";
 
 /// Registers shared metric descriptions.
 pub fn describe_metrics() {
@@ -29,11 +46,91 @@ pub fn describe_metrics() {
         metrics::Unit::Count,
         "Current L1 transaction-sending wallet balance in ETH."
     );
+    metrics::describe_gauge!(
+        METRICS_L2_FINALIZED_BLOCK_NUMBER,
+        metrics::Unit::Count,
+        "Latest finalized L2 block reported by the OP consensus client."
+    );
     metrics::describe_counter!(
         METRICS_RPC_CLIENT_REQUESTS,
         metrics::Unit::Count,
         "Completed outbound RPC requests by target, method, and outcome."
     );
+    metrics::describe_counter!(
+        METRICS_CHALLENGES_SUBMITTED,
+        metrics::Unit::Count,
+        "Number of challenge transactions successfully confirmed on L1."
+    );
+    metrics::describe_counter!(
+        METRICS_PROOF_LANES_SUBMITTED,
+        metrics::Unit::Count,
+        "Number of proof-lane transactions successfully confirmed on L1."
+    );
+    metrics::describe_counter!(
+        METRICS_PROOF_REQUESTS_CREATED,
+        metrics::Unit::Count,
+        "Number of newly created durable proof requests by backend."
+    );
+    metrics::describe_counter!(
+        METRICS_PROOF_JOBS_CLAIMED,
+        metrics::Unit::Count,
+        "Number of proof jobs claimed by workers by backend."
+    );
+    metrics::describe_counter!(
+        METRICS_PROOF_JOBS_COMPLETED,
+        metrics::Unit::Count,
+        "Number of completed worker proof-job attempts by backend and outcome."
+    );
+    metrics::describe_histogram!(
+        METRICS_PROOF_JOB_DURATION_SECONDS,
+        metrics::Unit::Seconds,
+        "End-to-end worker proof-job attempt duration by backend and outcome."
+    );
+}
+
+/// Updates the latest finalized L2 block gauge.
+pub fn record_l2_finalized_block(block_number: u64) {
+    metrics::gauge!(METRICS_L2_FINALIZED_BLOCK_NUMBER).set(block_number as f64);
+}
+
+/// Records a successfully confirmed challenge transaction.
+pub fn increment_challenges_submitted() {
+    metrics::counter!(METRICS_CHALLENGES_SUBMITTED).increment(1);
+}
+
+/// Records a successfully confirmed proof-lane transaction.
+pub fn increment_proof_lanes_submitted(lane: &'static str) {
+    metrics::counter!(METRICS_PROOF_LANES_SUBMITTED, "lane" => lane).increment(1);
+}
+
+/// Records a newly created durable proof request.
+pub fn increment_proof_requests_created(backend: &'static str) {
+    metrics::counter!(METRICS_PROOF_REQUESTS_CREATED, "backend" => backend).increment(1);
+}
+
+/// Records a proof job claimed by a worker.
+pub fn increment_proof_jobs_claimed(backend: &'static str) {
+    metrics::counter!(METRICS_PROOF_JOBS_CLAIMED, "backend" => backend).increment(1);
+}
+
+/// Records a completed worker proof-job attempt and its duration.
+pub fn record_proof_job_completed(
+    backend: &'static str,
+    outcome: &'static str,
+    duration: Duration,
+) {
+    metrics::counter!(
+        METRICS_PROOF_JOBS_COMPLETED,
+        "backend" => backend,
+        "outcome" => outcome,
+    )
+    .increment(1);
+    metrics::histogram!(
+        METRICS_PROOF_JOB_DURATION_SECONDS,
+        "backend" => backend,
+        "outcome" => outcome,
+    )
+    .record(duration.as_secs_f64());
 }
 
 /// Refreshes a transaction-sending wallet's balance gauge.

@@ -188,6 +188,16 @@ pub enum ProofLane {
 }
 
 impl ProofLane {
+    /// Stable telemetry representation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ValidityProof => "validity_proof",
+            Self::TeeAttestation => "tee_attestation",
+            Self::SecurityCouncil => "security_council",
+        }
+    }
+
     /// Bit assigned to this lane in the per-root proof bitmap.
     #[must_use]
     pub const fn mask(self) -> u8 {

@@ -35,7 +35,7 @@ const MAX_TEST_ATTEMPT: u64 = 4;
 struct MockContracts {
     anchor: LineageAnchor,
     /// Games keyed by their `DisputeGameFactory` UUID.
-    games: HashMap<B256, Address>,
+    games: Arc<Mutex<HashMap<B256, Address>>>,
     submissions: Arc<Mutex<Vec<Proposal>>>,
     resolution_statuses: Arc<Mutex<HashMap<Address, ResolutionStatus>>>,
     resolutions: Arc<Mutex<Vec<Address>>>,
@@ -59,6 +59,7 @@ impl LineageProvider for MockContracts {
         &self,
         transition: LineageTransition,
     ) -> Result<Option<LineageGame>, LineageError> {
+        let games = self.games.lock().expect("not poisoned");
         let mut latest = None;
         for attempt in 0..MAX_TEST_ATTEMPT {
             let uuid = game_uuid(
@@ -67,7 +68,7 @@ impl LineageProvider for MockContracts {
                 transition.l2_block_number,
                 attempt,
             );
-            let Some(address) = self.games.get(&uuid).copied() else {
+            let Some(address) = games.get(&uuid).copied() else {
                 break;
             };
             latest = Some(LineageGame { address, attempt });
@@ -128,13 +129,21 @@ impl ProposerClient for MockContracts {
             ));
         }
         drop(failures);
-        self.submissions
-            .lock()
-            .expect("not poisoned")
-            .push(*proposal);
+        let mut submissions = self.submissions.lock().expect("not poisoned");
+        submissions.push(*proposal);
+        let game_address = game_address(submissions.len() as u64);
+        self.games.lock().expect("not poisoned").insert(
+            game_uuid(
+                proposal.parent_ref,
+                proposal.root_claim,
+                proposal.l2_block_number,
+                proposal.attempt,
+            ),
+            game_address,
+        );
         Ok(ProposalSubmission {
             tx_hash: B256::repeat_byte(0xaa),
-            game_address: Address::repeat_byte(0xaa),
+            game_address,
         })
     }
 }
@@ -470,7 +479,7 @@ async fn scan_selected_lineage_walks_existing_games_until_gap() {
 
     let contracts = MockContracts {
         anchor: anchor_at(0),
-        games,
+        games: Arc::new(Mutex::new(games)),
         submissions: Arc::default(),
         resolution_statuses: Arc::default(),
         resolutions: Arc::default(),
@@ -496,7 +505,7 @@ async fn propose_submits_proposal_after_last_canonical_game() {
     let submissions = Arc::default();
     let contracts = MockContracts {
         anchor: anchor_at(0),
-        games: HashMap::new(),
+        games: Arc::new(Mutex::new(HashMap::new())),
         submissions: Arc::clone(&submissions),
         resolution_statuses: Arc::default(),
         resolutions: Arc::default(),
@@ -521,12 +530,64 @@ async fn propose_submits_proposal_after_last_canonical_game() {
 }
 
 #[tokio::test]
+async fn proposer_catches_up_one_missing_interval_per_tick() {
+    let submissions = Arc::default();
+    let contracts = MockContracts {
+        anchor: anchor_at(0),
+        games: Arc::new(Mutex::new(HashMap::new())),
+        submissions: Arc::clone(&submissions),
+        resolution_statuses: Arc::default(),
+        resolutions: Arc::default(),
+        closures: Arc::default(),
+        submission_failures: Arc::default(),
+        unfinalized_games: Arc::default(),
+    };
+    let output_roots = MockOutputRoots {
+        roots: HashMap::from([
+            (10, B256::repeat_byte(0x10)),
+            (20, B256::repeat_byte(0x20)),
+            (30, B256::repeat_byte(0x30)),
+        ]),
+        finalized_l2_block: 30,
+    };
+    let proposer = WorldChainProposer::new(config(), contracts, output_roots);
+
+    for expected_block in [10, 20, 30] {
+        let scan = proposer.scan_selected_lineage().await.unwrap();
+        assert!(matches!(
+            scan.next_action(),
+            NextProposalAction::Propose(proposal)
+                if proposal.l2_block_number == expected_block
+        ));
+        advance_proposal(&proposer, &scan).await.unwrap();
+    }
+
+    let caught_up = proposer.scan_selected_lineage().await.unwrap();
+    assert_eq!(
+        caught_up.next_action(),
+        &NextProposalAction::CaughtUp {
+            target_block: 40,
+            finalized_block: 30,
+        }
+    );
+    assert_eq!(
+        submissions
+            .lock()
+            .expect("not poisoned")
+            .iter()
+            .map(|proposal| proposal.l2_block_number)
+            .collect::<Vec<_>>(),
+        vec![10, 20, 30]
+    );
+}
+
+#[tokio::test]
 async fn propose_can_retry_a_failed_submission() {
     let submissions = Arc::default();
     let submission_failures = Arc::new(Mutex::new(1));
     let contracts = MockContracts {
         anchor: anchor_at(0),
-        games: HashMap::new(),
+        games: Arc::new(Mutex::new(HashMap::new())),
         submissions: Arc::clone(&submissions),
         resolution_statuses: Arc::default(),
         resolutions: Arc::default(),
@@ -558,7 +619,10 @@ async fn proposer_resolves_the_selected_negative_game() {
     let resolutions = Arc::default();
     let contracts = MockContracts {
         anchor: anchor_at(0),
-        games: HashMap::from([(game_uuid(ANCHOR, root, 10, 0), GAME_1)]),
+        games: Arc::new(Mutex::new(HashMap::from([(
+            game_uuid(ANCHOR, root, 10, 0),
+            GAME_1,
+        )]))),
         submissions: Arc::default(),
         resolution_statuses: Arc::new(Mutex::new(HashMap::from([(
             GAME_1,
@@ -595,7 +659,7 @@ async fn proposer_resolves_the_selected_negative_game() {
 async fn scan_selected_lineage_stops_at_finalized_l2_block() {
     let contracts = MockContracts {
         anchor: anchor_at(0),
-        games: HashMap::new(),
+        games: Arc::new(Mutex::new(HashMap::new())),
         submissions: Arc::default(),
         resolution_statuses: Arc::default(),
         resolutions: Arc::default(),
@@ -623,7 +687,7 @@ async fn resolve_games_caps_submissions_and_keeps_scanning_finalized_games() {
     let closures = Arc::default();
     let contracts = MockContracts {
         anchor: anchor_at(0),
-        games: HashMap::new(),
+        games: Arc::new(Mutex::new(HashMap::new())),
         submissions: Arc::default(),
         resolution_statuses: Arc::new(Mutex::new(HashMap::from([
             (GAME_1, positive_ready_status()),
@@ -680,7 +744,7 @@ async fn finalized_games_do_not_consume_resolution_budget() {
     let resolutions = Arc::default();
     let contracts = MockContracts {
         anchor: anchor_at(0),
-        games: HashMap::new(),
+        games: Arc::new(Mutex::new(HashMap::new())),
         submissions: Arc::default(),
         resolution_statuses: Arc::new(Mutex::new(HashMap::from([
             (
@@ -723,7 +787,7 @@ async fn finalized_games_do_not_consume_resolution_budget() {
 async fn zero_resolution_budget_is_rejected() {
     let contracts = MockContracts {
         anchor: anchor_at(0),
-        games: HashMap::new(),
+        games: Arc::new(Mutex::new(HashMap::new())),
         submissions: Arc::default(),
         resolution_statuses: Arc::default(),
         resolutions: Arc::default(),
@@ -1034,7 +1098,10 @@ async fn timed_out_game_retries_after_its_parent_becomes_the_anchor() {
     let root_20 = B256::repeat_byte(0x20);
     let contracts = MockContracts {
         anchor: anchor_advanced_onto(parent, 10),
-        games: HashMap::from([(game_uuid(parent, root_20, 20, 0), timed_out)]),
+        games: Arc::new(Mutex::new(HashMap::from([(
+            game_uuid(parent, root_20, 20, 0),
+            timed_out,
+        )]))),
         submissions: Arc::default(),
         resolution_statuses: Arc::new(Mutex::new(HashMap::from([(timed_out, timed_out_status())]))),
         resolutions: Arc::default(),
@@ -1074,7 +1141,10 @@ async fn timed_out_game_bumps_attempt_while_its_parent_is_still_acceptable() {
     let root_20 = B256::repeat_byte(0x20);
     let contracts = MockContracts {
         anchor: anchor_at(10),
-        games: HashMap::from([(game_uuid(ANCHOR, root_20, 20, 0), timed_out)]),
+        games: Arc::new(Mutex::new(HashMap::from([(
+            game_uuid(ANCHOR, root_20, 20, 0),
+            timed_out,
+        )]))),
         submissions: Arc::default(),
         resolution_statuses: Arc::new(Mutex::new(HashMap::from([(timed_out, timed_out_status())]))),
         resolutions: Arc::default(),

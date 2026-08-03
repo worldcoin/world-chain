@@ -3,7 +3,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::Value;
 use thiserror::Error;
-use world_chain_proof_metrics::{RPC_TARGET_L2_CONSENSUS, record_rpc_request};
+use world_chain_proof_metrics::{
+    RPC_TARGET_L2_CONSENSUS, record_l2_finalized_block, record_rpc_request,
+};
 
 /// Source for all consensus clients requests.
 #[async_trait]
@@ -144,7 +146,9 @@ impl ConsensusProvider for OptimismConsensusClient {
                 ConsensusError::FinalizedBlockNotFound,
             )
             .await?;
-        Ok(sync_status.finalized_l2.number)
+        let block_number = sync_status.finalized_l2.number;
+        record_l2_finalized_block(block_number);
+        Ok(block_number)
     }
 }
 

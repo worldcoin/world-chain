@@ -47,6 +47,13 @@ where
         self.config.validate()?;
 
         let lineage = select_lineage(&self.execution_provider, &self.consensus_provider).await?;
+        let selected_l2_block_number = lineage
+            .games()
+            .last()
+            .map_or(lineage.anchor().l2_block_number, |selected| {
+                selected.transition.l2_block_number
+            });
+        crate::metrics::set_selected_lineage_l2_block_number(selected_l2_block_number);
         let next_action = match lineage.stop() {
             LineageStop::CaughtUp {
                 target_block,
@@ -124,6 +131,8 @@ where
                 }
                 let resolve_submission = self.execution_provider.resolve_game(game.address).await?;
                 info!(
+                    lifecycle_event = "game_resolved",
+                    outcome = "positive",
                     game_address = %game.address,
                     l2_block_number = selected.transition.l2_block_number,
                     tx_hash = ?resolve_submission.tx_hash,
@@ -195,6 +204,8 @@ where
             NextProposalAction::ResolveNegative { game, reason } => {
                 let submission = self.execution_provider.resolve_game(*game).await?;
                 info!(
+                    lifecycle_event = "game_resolved",
+                    outcome = "negative",
                     game_address = %game,
                     invalidation_reason = ?reason,
                     tx_hash = ?submission.tx_hash,
@@ -214,8 +225,15 @@ where
         };
 
         let submission = self.execution_provider.submit_proposal(&proposal).await?;
-        crate::metrics::increment_proposals_submitted();
+        crate::metrics::set_selected_lineage_l2_block_number(proposal.l2_block_number);
+        crate::metrics::increment_proposals_submitted(if retry_of.is_some() {
+            "retry"
+        } else {
+            "new"
+        });
         info!(
+            lifecycle_event = "proposal_submitted",
+            proposal_kind = if retry_of.is_some() { "retry" } else { "new" },
             tx_hash = ?submission.tx_hash,
             game_address = %submission.game_address,
             l2_block_number = proposal.l2_block_number,

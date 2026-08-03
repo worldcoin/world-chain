@@ -120,7 +120,12 @@ where
         self.active_defenses.retain(|game, _| {
             let keep = selected_addresses.contains(game);
             if !keep {
-                warn!(%game, "stopping proof support because game left the selected lineage");
+                warn!(
+                    lifecycle_event = "defense_stopped",
+                    outcome = "lineage_changed",
+                    game_address = %game,
+                    "stopping proof support because game left the selected lineage"
+                );
             }
             keep
         });
@@ -135,7 +140,14 @@ where
                 continue;
             }
             if evaluator.needs_defense(&game, now).await? {
-                info!(game = %game.address, "selected game needs proof support; starting proof workflow");
+                info!(
+                    lifecycle_event = "defense_started",
+                    game_address = %game.address,
+                    l2_block_number = game.l2_block_number,
+                    challenge_deadline = game.challenge_deadline,
+                    proof_deadline = game.proof_deadline,
+                    "selected game needs proof support; starting proof workflow"
+                );
                 self.active_defenses
                     .insert(game.address, ActiveDefense::new(game));
             }
@@ -221,16 +233,28 @@ where
             let game = defense.game.address;
             match result {
                 Ok(DefenseProgress::Closed) => {
-                    info!(%game, "game no longer needs proof support; defense closed");
+                    info!(
+                        lifecycle_event = "defense_stopped",
+                        outcome = "game_closed",
+                        game_address = %game,
+                        "game no longer needs proof support; defense closed"
+                    );
                     self.active_defenses.remove(&game);
                 }
                 Ok(DefenseProgress::Complete) => {
-                    info!(%game, "game has sufficient proof support; defense completed");
+                    info!(
+                        lifecycle_event = "defense_completed",
+                        outcome = "sufficient_support",
+                        game_address = %game,
+                        "game has sufficient proof support; defense completed"
+                    );
                     self.active_defenses.remove(&game);
                 }
                 Ok(DefenseProgress::DeadlineElapsed) => {
                     error!(
-                        %game,
+                        lifecycle_event = "defense_failed",
+                        outcome = "deadline_elapsed",
+                        game_address = %game,
                         challenge_deadline = defense.game.challenge_deadline,
                         proof_deadline = defense.game.proof_deadline,
                         "game proof deadline elapsed before proof support completed"
@@ -239,10 +263,20 @@ where
                 }
                 Ok(DefenseProgress::Lanes(lanes)) => {
                     if lanes.iter().all(|lane| *lane == LaneState::Proven) {
-                        info!(%game, "all proof lanes submitted; defense completed");
+                        info!(
+                            lifecycle_event = "defense_completed",
+                            outcome = "all_lanes_submitted",
+                            game_address = %game,
+                            "all proof lanes submitted; defense completed"
+                        );
                         self.active_defenses.remove(&game);
                     } else if lanes.iter().all(|lane| lane.is_terminal()) {
-                        error!(%game, "defense abandoned without proving all lanes");
+                        error!(
+                            lifecycle_event = "defense_failed",
+                            outcome = "lanes_abandoned",
+                            game_address = %game,
+                            "defense abandoned without proving all lanes"
+                        );
                         self.abandoned_defenses
                             .insert(game, defense.game.proof_deadline);
                         self.active_defenses.remove(&game);
@@ -251,7 +285,7 @@ where
                     }
                 }
                 Err(err) => {
-                    warn!(game = %game, error = %err, "defense scan failed; retrying next tick");
+                    warn!(game_address = %game, error = %err, "defense scan failed; retrying next tick");
                 }
             }
         }
