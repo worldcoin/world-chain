@@ -18639,12 +18639,14 @@ name = "world-chain-challenger"
 version = "2.4.0"
 dependencies = [
  "alloy-consensus 2.0.5",
+ "alloy-contract",
  "alloy-eips 2.0.5",
  "alloy-network 2.0.5",
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-types-eth 2.0.5",
  "alloy-signer-local 2.0.5",
+ "alloy-transport",
  "anyhow",
  "async-trait",
  "clap",

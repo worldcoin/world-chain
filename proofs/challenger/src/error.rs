@@ -1,6 +1,8 @@
 use alloy_primitives::{Address, TxHash};
+use alloy_provider::{PendingTransactionError, transport::RpcError};
+use alloy_transport::TransportErrorKind;
 use thiserror::Error;
-use world_chain_proofs::{ConsensusError, RootStateError};
+use world_chain_proofs::{ConsensusError, InvalidationReasonError, RootStateError};
 
 /// Errors returned by the challenger and its lifecycle managers.
 #[derive(Debug, Error)]
@@ -17,16 +19,24 @@ pub enum ChallengerError {
         block_interval: u64,
     },
     /// Contract call or transaction failure.
-    #[error("contract error: {0}")]
-    Contract(String),
+    #[error(transparent)]
+    Contract(#[from] alloy_contract::Error),
     #[error(transparent)]
     OutputRoot(#[from] ConsensusError),
     #[error("The challenge transaction didn't execute succesfully: {0}")]
     Revert(TxHash),
     #[error(transparent)]
     InvalidRootState(#[from] RootStateError),
-    #[error("RPC error: {0}")]
-    Rpc(String),
+    #[error(transparent)]
+    NotExistingInvalidReason(#[from] InvalidationReasonError),
+    #[error(transparent)]
+    PendingTransaction(#[from] PendingTransactionError),
+    #[error("Latest L1 block is unavailable.")]
+    UnavailableLatestL1Block,
+    #[error("Overflow error.")]
+    Overflow,
+    #[error(transparent)]
+    AlloyJsonRpc(#[from] RpcError<TransportErrorKind>),
     #[error("Latest L1 finalized block not found")]
     L1FinalizedBlockNotFound,
     #[error(
@@ -40,6 +50,16 @@ pub enum ChallengerError {
         /// Block number included in the game.
         given_block: u64,
     },
+}
+
+impl ChallengerError {
+    /// Builds an [`AlloyJsonRpc`](Self::AlloyJsonRpc) error from a free-form message.
+    ///
+    /// Intended for test fakes that need an ad-hoc failure without constructing a full transport
+    /// error by hand.
+    pub fn message(message: impl AsRef<str>) -> Self {
+        Self::AlloyJsonRpc(TransportErrorKind::custom_str(message.as_ref()))
+    }
 }
 
 /// Error returned while processing a single game.

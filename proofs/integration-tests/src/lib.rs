@@ -497,7 +497,7 @@ impl ChallengerClient for FakeExecution {
             .get(index as usize)
             .copied()
             .map(Some)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game index {index}")))
     }
 
     async fn game_metadata(
@@ -514,7 +514,7 @@ impl ChallengerClient for FakeExecution {
                 root_claim: record.event.root_claim,
                 l2_block_number: record.event.l2_block_number,
             })
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
     async fn root_state(&self, game: Address) -> Result<RootState, ChallengerError> {
@@ -535,7 +535,7 @@ impl ChallengerClient for FakeExecution {
             .games_by_address
             .get(&game)
             .map(|record| record.challenge_deadline)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
     async fn submit_challenge(
@@ -546,7 +546,7 @@ impl ChallengerClient for FakeExecution {
         let record = state
             .games_by_address
             .get_mut(&game)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))?;
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))?;
         challenge_record(record);
         Ok(ChallengeSubmission {
             tx_hash: B256::with_last_byte(record.challenge_count as u8),
