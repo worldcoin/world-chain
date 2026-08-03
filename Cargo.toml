@@ -48,7 +48,7 @@ members = [
     "e2e-tests",
     "xtask",
 ]
-exclude = ["proofs/succinct/programs"]
+exclude = ["proofs/succinct/programs", "proofs/nitro/fuzz"]
 
 default-members = ["bin/world-chain"]
 
