@@ -489,6 +489,44 @@ fn extract_p384_key(cert_der: &[u8]) -> Result<p384::ecdsa::VerifyingKey, Attest
         .map_err(|e| AttestationError::CertChain(format!("P-384 key decode: {e}")))
 }
 
+/// Extracts the leaf certificate's P-384 public key as the uncompressed `x || y`
+/// coordinate pair (96 bytes, without the SEC1 `0x04` prefix).
+///
+/// This is the form the [`crate::p384_hints::collect_hints`] generator expects for the
+/// `leaf_pubkey` argument when producing hints for the final attestation signature. The
+/// leaf certificate is the one that signs the COSE_Sign1 document, so its public key is
+/// what verifies the attestation signature.
+///
+/// # Errors
+///
+/// Returns [`AttestationError::Malformed`] if the document carries no leaf certificate,
+/// and [`AttestationError::CertChain`] if the certificate or its key cannot be parsed.
+pub fn leaf_cert_pubkey_xy(doc: &[u8]) -> Result<[u8; 96], AttestationError> {
+    let parsed = parse_attestation_doc(doc)?;
+    let cert_der = parsed.certificate.ok_or_else(|| {
+        AttestationError::Malformed(
+            "attestation document missing required `certificate` field".into(),
+        )
+    })?;
+
+    let verifying_key = extract_p384_key(&cert_der)?;
+    let point = verifying_key.to_encoded_point(false);
+    let bytes = point.as_bytes();
+
+    // Uncompressed SEC1 encoding is `0x04 || X (48) || Y (48)` = 97 bytes.
+    if bytes.len() != 97 || bytes[0] != 0x04 {
+        return Err(AttestationError::CertChain(format!(
+            "unexpected leaf public key encoding ({} bytes, prefix 0x{:02x})",
+            bytes.len(),
+            bytes.first().copied().unwrap_or(0)
+        )));
+    }
+
+    let mut out = [0u8; 96];
+    out.copy_from_slice(&bytes[1..]);
+    Ok(out)
+}
+
 /// Verifies that the last certificate in `cabundle` is the hardcoded AWS Nitro root CA.
 ///
 /// AWS NSM attestation documents always include the root CA as the final element of
