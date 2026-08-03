@@ -98,7 +98,13 @@ where
 
         while low < high {
             let middle = low + (high - low) / 2;
-            if self.execution_provider.game_created_at(middle).await? < cutoff {
+            let Some(game) = self.execution_provider.game_address_at(middle).await? else {
+                // the game at this index is not a wip1006 game, which means it's an old game, advance iterator
+                low = middle + 1;
+                continue;
+            };
+            let deadline = self.execution_provider.challenge_deadline(game).await?;
+            if deadline < cutoff {
                 low = middle + 1;
             } else {
                 high = middle;

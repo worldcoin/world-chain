@@ -141,22 +141,6 @@ impl ChallengerClient for MockClient {
             .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))
     }
 
-    async fn game_created_at(&self, index: u64) -> Result<u64, ChallengerError> {
-        let state = self.state.lock().expect("not poisoned");
-        if state.foreign_indices.contains(&index) {
-            return Ok(u64::MAX);
-        }
-        let address = state
-            .order
-            .get(index as usize)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))?;
-        state
-            .games
-            .get(address)
-            .map(|game| game.created_at)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {address}")))
-    }
-
     async fn game_metadata(&self, game: Address) -> Result<GameMetadata, ChallengerError> {
         self.state
             .lock()
