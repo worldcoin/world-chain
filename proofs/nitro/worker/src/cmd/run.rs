@@ -171,11 +171,6 @@ pub struct WorkerArgs {
     #[arg(long, env = "NITRO_ENCLAVE_KEY_REGISTRY")]
     registry: Option<String>,
 
-    /// L1 execution RPC URL used to submit the `registerKey` transaction. Defaults to
-    /// `--l1-rpc` when unset.
-    #[arg(long, env = "REGISTER_L1_RPC_URL")]
-    register_l1_rpc: Option<String>,
-
     /// Hex-encoded private key used to sign and pay for the `registerKey` transaction when
     /// `--auto-register` is set. Falls back to `PRIVATE_KEY` when unset. `registerKey` is
     /// not owner-gated, so any funded key works.
@@ -209,10 +204,8 @@ pub async fn run(args: WorkerArgs) -> Result<()> {
             .registry
             .clone()
             .context("--auto-register requires --registry / NITRO_ENCLAVE_KEY_REGISTRY")?;
-        let l1_rpc_url = args
-            .register_l1_rpc
-            .clone()
-            .unwrap_or_else(|| args.l1_rpc.clone());
+        // Registration reuses the same L1 endpoint as witness building (`--l1-rpc`).
+        let l1_rpc_url = args.l1_rpc.clone();
         let private_key = args
             .register_private_key
             .clone()

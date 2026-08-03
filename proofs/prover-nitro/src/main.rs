@@ -254,7 +254,8 @@ async fn nitro_prove(_args: NitroArgs) -> Result<()> {
 
 #[cfg(target_os = "linux")]
 fn hex_to_pcr(hex: &str) -> Result<[u8; 48]> {
-    let bytes = hex::decode(hex).context("invalid PCR hex")?;
+    // Accept an optional `0x` prefix, matching the worker's `build_expected_pcrs`.
+    let bytes = hex::decode(hex.strip_prefix("0x").unwrap_or(hex)).context("invalid PCR hex")?;
     bytes
         .try_into()
         .map_err(|_| anyhow::anyhow!("PCR must be 48 bytes"))

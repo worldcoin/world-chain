@@ -17,6 +17,8 @@
 //!   to L1, and confirm registration. Used by both the `world-chain-prover-nitro register`
 //!   subcommand and the worker's `--auto-register` startup hook.
 
+use std::time::Duration;
+
 use alloy_network::EthereumWallet;
 use alloy_primitives::{Address, Bytes, TxHash, keccak256};
 use alloy_provider::ProviderBuilder;
@@ -26,6 +28,13 @@ use anyhow::{Context, Result, anyhow, bail};
 use sha2::{Digest, Sha384};
 use tracing::{info, warn};
 use url::Url;
+
+/// Max attempts for the `registerKey` submission. Retries let the flow survive transient
+/// RPC errors and funding-account nonce contention when several worker replicas share the
+/// same `REGISTER_PRIVATE_KEY`/`PRIVATE_KEY` and self-register simultaneously.
+const REGISTER_MAX_ATTEMPTS: u32 = 5;
+/// Base backoff between `registerKey` attempts (scaled by the attempt number).
+const REGISTER_RETRY_BASE_DELAY: Duration = Duration::from_secs(2);
 
 use crate::{
     ExpectedPcrs,
@@ -202,107 +211,140 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
         .connect_http(url);
     let registry = INitroEnclaveKeyRegistry::new(registry_address, provider);
 
-    // 3. Short-circuit if the signer is already registered.
-    if registry
-        .isSignerRegistered(enclave_signer)
-        .call()
-        .await
-        .context("isSignerRegistered pre-check")?
-    {
-        info!(
-            target: "world_chain::nitro",
-            signer = %enclave_signer,
-            registry = %registry_address,
-            "enclave signer already registered on-chain; nothing to do"
-        );
-        return Ok(RegistrationOutcome::AlreadyRegistered);
-    }
-
-    // 4. Build calldata and submit registerKey.
+    // 3-5. Submit registerKey with bounded retries. Each enclave registers its OWN distinct
+    //      signer, so retries exist to survive transient RPC failures and funding-account
+    //      nonce contention when several worker replicas share REGISTER_PRIVATE_KEY and
+    //      register at the same time. Every attempt first re-checks isSignerRegistered so we
+    //      never resubmit once the signer is Active (by us or a peer).
     let calldata = build_registration_calldata(&attestation_doc)?;
-    info!(
-        target: "world_chain::nitro",
-        registry = %registry_address,
-        tx_signer = %signer_address,
-        tbs_bytes = calldata.attestation_tbs.len(),
-        hint_bytes = calldata.attestation_sig_hints.len(),
-        "submitting registerKey"
-    );
+    let mut last_err: Option<anyhow::Error> = None;
 
-    let pending = match registry
-        .registerKey(
-            Bytes::from(calldata.attestation_tbs),
-            Bytes::from(calldata.signature),
-            Bytes::from(calldata.attestation_sig_hints),
-        )
-        .send()
-        .await
-    {
-        Ok(pending) => pending,
-        Err(err) => {
-            // A concurrent registration may have landed between our pre-check and the
-            // send (e.g. another worker/enclave with the same key registered first).
-            // Re-query the registry — this is decode-independent, so it reliably
-            // distinguishes that race (signer now Active) from a genuine failure such as
-            // an unapproved PCR set or an un-pre-warmed CertManager. The custom errors
-            // are also declared on the sol! interface above so alloy can decode the
-            // revert into a readable reason in the propagated error.
-            if registry
-                .isSignerRegistered(enclave_signer)
-                .call()
-                .await
-                .unwrap_or(false)
-            {
-                warn!(
-                    target: "world_chain::nitro",
-                    "registerKey failed but the signer is already registered; treating as success"
-                );
-                return Ok(RegistrationOutcome::AlreadyRegistered);
-            }
-            return Err(anyhow!("registerKey send failed: {err}"));
-        }
-    };
-
-    let tx_hash = *pending.tx_hash();
-    let receipt = pending
-        .get_receipt()
-        .await
-        .with_context(|| format!("awaiting registerKey receipt (tx {tx_hash})"))?;
-
-    // 5. Confirm the signer ended up registered. We check this even when the receipt shows
-    //    a revert: a concurrent registration can land our signer on-chain and make *our* tx
-    //    revert with `SignerAlreadyRegistered`, which is still success from our perspective.
-    let registered = registry
-        .isSignerRegistered(enclave_signer)
-        .call()
-        .await
-        .context("isSignerRegistered post-check")?;
-
-    if !receipt.status() {
-        if registered {
-            warn!(
+    for attempt in 1..=REGISTER_MAX_ATTEMPTS {
+        // Idempotency guard: stop as soon as the signer is registered.
+        if registry
+            .isSignerRegistered(enclave_signer)
+            .call()
+            .await
+            .context("isSignerRegistered check")?
+        {
+            info!(
                 target: "world_chain::nitro",
-                %tx_hash,
-                "registerKey tx reverted but the signer is already registered; treating as success"
+                signer = %enclave_signer,
+                registry = %registry_address,
+                "enclave signer already registered on-chain; nothing to do"
             );
             return Ok(RegistrationOutcome::AlreadyRegistered);
         }
-        bail!("registerKey transaction {tx_hash} reverted and the signer is not registered");
+
+        info!(
+            target: "world_chain::nitro",
+            registry = %registry_address,
+            tx_signer = %signer_address,
+            attempt,
+            max_attempts = REGISTER_MAX_ATTEMPTS,
+            tbs_bytes = calldata.attestation_tbs.len(),
+            hint_bytes = calldata.attestation_sig_hints.len(),
+            "submitting registerKey"
+        );
+
+        // One submit attempt: send, then await the receipt. Any send/receipt failure
+        // (e.g. a nonce collision with a peer replica) becomes a retryable error.
+        let attempt_result: Result<(TxHash, bool)> = async {
+            let pending = registry
+                .registerKey(
+                    Bytes::from(calldata.attestation_tbs.clone()),
+                    Bytes::from(calldata.signature.clone()),
+                    Bytes::from(calldata.attestation_sig_hints.clone()),
+                )
+                .send()
+                .await
+                .map_err(|err| anyhow!("registerKey send failed: {err}"))?;
+            let tx_hash = *pending.tx_hash();
+            let receipt = pending
+                .get_receipt()
+                .await
+                .with_context(|| format!("awaiting registerKey receipt (tx {tx_hash})"))?;
+            Ok((tx_hash, receipt.status()))
+        }
+        .await;
+
+        match attempt_result {
+            Ok((tx_hash, true)) => {
+                // Confirm the write actually took effect before declaring success.
+                if registry
+                    .isSignerRegistered(enclave_signer)
+                    .call()
+                    .await
+                    .unwrap_or(false)
+                {
+                    info!(
+                        target: "world_chain::nitro",
+                        %tx_hash,
+                        pubkey = %hex::encode(&public_key),
+                        enclave_signer = %enclave_signer,
+                        tx_signer = %signer_address,
+                        "enclave signer registered on-chain"
+                    );
+                    return Ok(RegistrationOutcome::Registered { tx_hash });
+                }
+                last_err = Some(anyhow!(
+                    "registerKey tx {tx_hash} confirmed but signer not registered"
+                ));
+            }
+            Ok((tx_hash, false)) => {
+                // Reverted. If a peer landed our signer first, that's success for us.
+                if registry
+                    .isSignerRegistered(enclave_signer)
+                    .call()
+                    .await
+                    .unwrap_or(false)
+                {
+                    warn!(
+                        target: "world_chain::nitro",
+                        %tx_hash,
+                        "registerKey tx reverted but the signer is already registered; treating as success"
+                    );
+                    return Ok(RegistrationOutcome::AlreadyRegistered);
+                }
+                last_err = Some(anyhow!(
+                    "registerKey tx {tx_hash} reverted and the signer is not registered"
+                ));
+            }
+            Err(err) => {
+                // Send/receipt error (commonly a funding-account nonce race). If the signer
+                // got registered meanwhile (by us or a peer), we're done; else retry.
+                if registry
+                    .isSignerRegistered(enclave_signer)
+                    .call()
+                    .await
+                    .unwrap_or(false)
+                {
+                    warn!(
+                        target: "world_chain::nitro",
+                        "registerKey failed but the signer is already registered; treating as success"
+                    );
+                    return Ok(RegistrationOutcome::AlreadyRegistered);
+                }
+                last_err = Some(err);
+            }
+        }
+
+        if attempt < REGISTER_MAX_ATTEMPTS {
+            let delay = REGISTER_RETRY_BASE_DELAY * attempt;
+            warn!(
+                target: "world_chain::nitro",
+                attempt,
+                delay_secs = delay.as_secs(),
+                error = ?last_err,
+                "registerKey attempt failed; retrying"
+            );
+            tokio::time::sleep(delay).await;
+        }
     }
 
-    if !registered {
-        bail!("registerKey tx {tx_hash} confirmed but signer is still not registered");
-    }
-
-    info!(
-        target: "world_chain::nitro",
-        %tx_hash,
-        pubkey = %hex::encode(&public_key),
-        enclave_signer = %enclave_signer,
-        tx_signer = %signer_address,
-        "enclave signer registered on-chain"
-    );
-    Ok(RegistrationOutcome::Registered { tx_hash })
+    Err(last_err.unwrap_or_else(|| anyhow!("registerKey did not succeed"))).with_context(|| {
+        format!("registerKey did not succeed after {REGISTER_MAX_ATTEMPTS} attempts")
+    })
 }
 
 #[cfg(test)]

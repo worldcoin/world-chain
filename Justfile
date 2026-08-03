@@ -145,7 +145,11 @@ install *args='':
 #   Phase 3a  proof-certmanager-prewarm   – Pre-warm CertManager with CA certs
 #   Phase 3b  proof-approve-pcrs          – Approve PCR set on verifier
 #   Phase 4   proof-register-key          – Register the enclave's generated key on-chain
-#   Combined  proof-setup                 – Run all phases in sequence
+#                                            (run separately; NOT part of proof-setup)
+#   Combined  proof-setup                 – Run deploy phases 0a–3b in sequence (does NOT
+#                                            run Phase 4 — register the key afterwards with
+#                                            proof-register-key, or let the worker
+#                                            self-register via `nitro-worker run --auto-register`)
 #
 # Required env vars (varies by target):
 #   PRIVATE_KEY, OWNER, OWNER_KEY, L1_RPC_URL,
@@ -514,6 +518,15 @@ proof-register-key env="alphanet":
     CONTAINER=$(kubectl --context="$KUBECONTEXT" get pod "$NITRO_POD" \
         -n "$PROOF_NAMESPACE" \
         -o jsonpath='{.spec.containers[0].name}')
+    # Check the container is actually Running before we exec (and pipe the funding key) in.
+    CONTAINER_STATE=$(kubectl --context="$KUBECONTEXT" get pod "$NITRO_POD" \
+        -n "$PROOF_NAMESPACE" \
+        -o jsonpath="{.status.containerStatuses[?(@.name==\"$CONTAINER\")].state.running}")
+    if [ -z "$CONTAINER_STATE" ]; then
+        echo "Error: container '$CONTAINER' in pod '$NITRO_POD' is not in Running state" >&2
+        kubectl --context="$KUBECONTEXT" get pod "$NITRO_POD" -n "$PROOF_NAMESPACE" >&2
+        exit 1
+    fi
     ENCLAVE_CID=$(kubectl --context="$KUBECONTEXT" exec \
         -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" \
         -- cat /run/nitro-shared/enclave-cid 2>/dev/null || echo "16")
@@ -579,3 +592,7 @@ proof-setup env="alphanet":
 
     echo "=== Step 3b: Approving PCR set ===" >&2
     just dry_run={{dry_run}} proof-approve-pcrs {{env}}
+
+    echo "=== Deploy phases 0a-3b complete. ===" >&2
+    echo "Next: register the enclave signing key (Phase 4) with 'just proof-register-key {{env}}'," >&2
+    echo "      or run the worker with '--auto-register' so it self-registers on startup." >&2
