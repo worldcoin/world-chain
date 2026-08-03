@@ -141,8 +141,7 @@ pub struct ParsedAttestationDoc {
     pub digest: Option<String>,
     /// DER-encoded leaf certificate used to sign the COSE_Sign1 structure.
     pub certificate: Option<Vec<u8>>,
-    /// DER-encoded CA bundle (intermediate certs, ordered from intermediate closest to
-    /// leaf toward the root, inclusive of the root CA).
+    /// DER-encoded CA bundle, root first. The last element issued `certificate`.
     pub cabundle: Vec<Vec<u8>>,
     /// Optional `public_key` field. Present when the enclave called `NsmRequest::Attestation`
     /// with `public_key: Some(bytes)` — i.e., for [`EnclaveRequest::PublicKey`] responses.
@@ -527,7 +526,7 @@ pub fn leaf_cert_pubkey_xy(doc: &[u8]) -> Result<[u8; 96], AttestationError> {
     Ok(out)
 }
 
-/// Verifies that the **first** certificate in `cabundle` is the hardcoded AWS Nitro root CA.
+/// Verifies that the _first_ certificate in `cabundle` is the hardcoded AWS Nitro root CA.
 ///
 /// See: [AWS Nitro Enclaves NSM API — attestation process](https://github.com/aws/aws-nitro-enclaves-nsm-api/blob/main/docs/attestation_process.md)
 fn verify_root_ca(cabundle: &[Vec<u8>]) -> Result<(), AttestationError> {
@@ -568,8 +567,6 @@ fn check_cert_validity(
 }
 
 /// Verifies the chain from `leaf_der` up to the AWS Nitro root CA.
-///
-/// `cabundle` runs root-first: `cabundle[0]` is the root, the last element issued `leaf_der`.
 ///
 /// See: [AWS Nitro Enclaves NSM API — attestation process](https://github.com/aws/aws-nitro-enclaves-nsm-api/blob/main/docs/attestation_process.md)
 fn verify_cert_chain(leaf_der: &[u8], cabundle: &[Vec<u8>]) -> Result<(), AttestationError> {
