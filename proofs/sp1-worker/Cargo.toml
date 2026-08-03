@@ -39,7 +39,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "signal", "time"] }
 tracing.workspace = true
-tracing-subscriber.workspace = true
+telemetry-batteries.workspace = true
 
 [dev-dependencies]
 testcontainers.workspace = true

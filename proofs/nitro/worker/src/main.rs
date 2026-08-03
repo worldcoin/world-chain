@@ -5,7 +5,6 @@ mod cmd;
 use clap::{Parser, Subcommand};
 #[cfg(target_os = "linux")]
 use cmd::{get_attestation::GetAttestationArgs, register::RegisterArgs, run::WorkerArgs};
-
 #[cfg(target_os = "linux")]
 #[derive(Parser)]
 #[command(name = "nitro-worker", about = "World Chain Nitro TEE proving worker")]
@@ -35,9 +34,8 @@ fn main() {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    let _telemetry_guard = telemetry_batteries::init()
+        .map_err(|error| anyhow::anyhow!("failed to initialize telemetry: {error:#}"))?;
 
     match Cli::parse().command {
         Command::Run(args) => cmd::run::run(*args).await?,
