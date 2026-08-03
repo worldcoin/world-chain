@@ -183,6 +183,7 @@ where
             .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await?;
+        world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
         if !receipt.status() {
             return Err(ChallengerError::Revert(tx_hash));
         }
@@ -209,6 +210,8 @@ where
             .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await?;
+        world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
+
         if !receipt.status() {
             return Err(ChallengerError::Revert(tx_hash));
         }
@@ -278,6 +281,8 @@ where
             .with_required_confirmations(self.confirmations)
             .get_receipt()
             .await?;
+        world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
+
         if !receipt.status() {
             return Err(ChallengerError::Revert(tx_hash));
         }

@@ -114,6 +114,15 @@ impl ProverServiceStore {
         if insert_result.rows_affected() > 0 {
             // no conflict
             tx.commit().await?;
+            world_chain_proof_metrics::increment_proof_requests_created(backend.as_str());
+            info!(
+                lifecycle_event = "proof_request_created",
+                proof_id = %id,
+                game_address = %proof_request.game,
+                %backend,
+                l2_block_number = proof_request.l2_block_number,
+                "created proof request"
+            );
             let request_proof_response = RequestProofResponse {
                 proof_id: id,
                 l1_head: proof_request.l1_head,
@@ -184,14 +193,18 @@ impl ProverServiceStore {
             .execute(&mut *tx)
             .await?;
 
+            tx.commit().await?;
             info!(
+                lifecycle_event = "proof_request_requeued",
                 proof_id = %id,
+                game_address = %proof_request.game,
+                %backend,
+                l2_block_number = proof_request.l2_block_number,
                 retry_count = retry_count + 1,
                 max_retries = self.config.max_retries,
                 "re-queued failed proof request"
             );
 
-            tx.commit().await?;
             let request_proof_response = RequestProofResponse {
                 proof_id: id,
                 l1_head: proof_request.l1_head,
@@ -350,7 +363,7 @@ impl ProverServiceStore {
             "#,
         )
         .bind(ProofStatus::Running.as_str())
-        .bind(worker_id)
+        .bind(&worker_id)
         .bind(lock_id.0)
         .bind(ProofJobStatus::Claimed.as_str())
         .bind(lock_expires_at)
@@ -365,6 +378,15 @@ impl ProverServiceStore {
 
         if let Some(row) = query {
             let request = request_from_row(&row)?;
+            info!(
+                lifecycle_event = "proof_job_claimed",
+                proof_id = %request.id(),
+                game_address = %request.game,
+                %backend,
+                %worker_id,
+                l2_block_number = request.l2_block_number,
+                "claimed proof job"
+            );
             Ok(GetNextProofResponse {
                 locked_request: Some(LockedProofRequest { request, lock_id }),
             })
@@ -692,6 +714,16 @@ impl ProverServiceStore {
 
         if let Some(_row) = row {
             // db is updated, return successfully
+            info!(
+                lifecycle_event = "proof_result_stored",
+                outcome = "success",
+                proof_id = %proof.id,
+                game_address = %stored_proof_request.game,
+                backend = %stored_proof_request.backend,
+                %worker_id,
+                l2_block_number = stored_proof_request.l2_block_number,
+                "stored completed proof"
+            );
             Ok(SubmitProofResponse {})
         } else {
             // re-read the row to anaylize the error or return success if the proof

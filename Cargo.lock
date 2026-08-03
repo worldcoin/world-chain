@@ -18660,6 +18660,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "world-chain-proof-metrics",
  "world-chain-proofs",
 ]
 
@@ -18718,6 +18719,7 @@ dependencies = [
  "tracing",
  "url",
  "world-chain-proof-core",
+ "world-chain-proof-metrics",
  "world-chain-proofs",
  "world-chain-prover-service",
 ]
@@ -18835,6 +18837,7 @@ dependencies = [
  "tracing",
  "world-chain-chainspec",
  "world-chain-proof-kona-host-utils",
+ "world-chain-proof-metrics",
  "world-chain-proof-nitro",
  "world-chain-proof-worker",
  "world-chain-prover-service",
@@ -19158,6 +19161,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-proof-metrics"
+version = "2.4.0"
+dependencies = [
+ "alloy-json-rpc 2.0.5",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-client",
+ "alloy-transport",
+ "telemetry-batteries",
+ "tower 0.5.3",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "world-chain-proof-nitro"
 version = "2.4.0"
 dependencies = [
@@ -19248,6 +19266,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "world-chain-proof-metrics",
  "world-chain-prover-service",
 ]
 
@@ -19265,6 +19284,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "world-chain-proof-metrics",
  "tokio",
 ]
 
@@ -19290,6 +19310,7 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+ "world-chain-proof-metrics",
  "world-chain-proofs",
 ]
 
@@ -19365,6 +19386,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "world-chain-proof-metrics",
 ]
 
 [[package]]
@@ -19468,6 +19490,7 @@ dependencies = [
  "world-chain-chainspec",
  "world-chain-proof-core",
  "world-chain-proof-kona-host-utils",
+ "world-chain-proof-metrics",
  "world-chain-proof-succinct-host-utils",
  "world-chain-proof-succinct-utils",
  "world-chain-proof-worker",

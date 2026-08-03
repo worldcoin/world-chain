@@ -74,13 +74,20 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     let _telemetry_guard = telemetry_batteries::init()
         .map_err(|error| anyhow::anyhow!("failed to initialize telemetry: {error:#}"))?;
+    world_chain_proof_metrics::describe_metrics();
 
     let cli = Cli::parse();
 
     let defender_address = cli.defender_key.address();
+    let l1_rpc_url = Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?;
+    let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
+        l1_rpc_url,
+        world_chain_proof_metrics::RPC_TARGET_L1_EXECUTION,
+    );
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(cli.defender_key))
-        .connect_http(Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?);
+        .connect_client(l1_rpc_client);
+    world_chain_proof_metrics::refresh_wallet_balance(&provider, defender_address).await;
 
     let client = AlloyDefenderClient::new(provider, cli.factory_address, cli.l1_tx_confirmations)
         .await

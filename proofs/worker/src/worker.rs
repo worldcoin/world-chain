@@ -239,12 +239,19 @@ fn spawn_job<Q, B>(
 {
     let LockedProofRequest { request, lock_id } = locked;
     let proof_id = request.id();
-    let lane = request.backend;
-    let span = info_span!("proof_job", id = %proof_id, lane = %lane);
+    let backend_kind = request.backend;
+    world_chain_proof_metrics::increment_proof_jobs_claimed(backend_kind.as_str());
+    let span = info_span!(
+        "proof_job",
+        proof_id = %proof_id,
+        game_address = %request.game,
+        backend = %backend_kind,
+        worker_id,
+        l2_block_number = request.l2_block_number,
+    );
     span.in_scope(|| {
         info!(
-            game = %request.game,
-            l2_block_number = request.l2_block_number,
+            lifecycle_event = "proof_job_started",
             "handling claimed proof job"
         );
     });
@@ -257,6 +264,7 @@ fn spawn_job<Q, B>(
     jobs.spawn(
         async move {
             let _permit = permit;
+            let started_at = std::time::Instant::now();
             let sessions = JobSessions::new(session_queue, proof_id, worker_id.clone(), lock_id);
             let job = ProofJob {
                 request,
@@ -279,7 +287,17 @@ fn spawn_job<Q, B>(
                 biased;
                 result = backend.handle_claimed_job(job) => result,
                 lease_lost = &mut heartbeat => {
-                    warn!(%lease_lost, "heartbeat failed, cancelling proof job");
+                    warn!(
+                        lifecycle_event = "proof_job_completed",
+                        outcome = "lease_lost",
+                        %lease_lost,
+                        "heartbeat failed, cancelling proof job"
+                    );
+                    world_chain_proof_metrics::record_proof_job_completed(
+                        backend_kind.as_str(),
+                        "lease_lost",
+                        started_at.elapsed(),
+                    );
                     return;
                 }
             };
@@ -289,8 +307,15 @@ fn spawn_job<Q, B>(
                 // `{:#}` renders the full anyhow context chain into the failure reason.
                 Err(error) => {
                     warn!(
+                        lifecycle_event = "proof_job_completed",
+                        outcome = "proving_error",
                         reason = %format!("{error:#}"),
                         "proving failed, lease will expire and re-queue"
+                    );
+                    world_chain_proof_metrics::record_proof_job_completed(
+                        backend_kind.as_str(),
+                        "proving_error",
+                        started_at.elapsed(),
                     );
                     return;
                 }
@@ -345,18 +370,48 @@ fn spawn_job<Q, B>(
                         })
                         .await
                     } else {
-                        warn!(%lease_lost, "heartbeat failed, cancelling proof job");
+                        warn!(
+                            lifecycle_event = "proof_job_completed",
+                            outcome = "lease_lost",
+                            %lease_lost,
+                            "heartbeat failed, cancelling proof job"
+                        );
+                        world_chain_proof_metrics::record_proof_job_completed(
+                            backend_kind.as_str(),
+                            "lease_lost",
+                            started_at.elapsed(),
+                        );
                         return;
                     }
                 }
             };
 
             match submit_result {
-                Ok(_) => info!("proof submitted"),
-                Err(error) => warn!(
-                    %error,
-                    "failed to submit proof after retries, lease will expire and re-queue"
-                ),
+                Ok(_) => {
+                    world_chain_proof_metrics::record_proof_job_completed(
+                        backend_kind.as_str(),
+                        "success",
+                        started_at.elapsed(),
+                    );
+                    info!(
+                        lifecycle_event = "proof_job_completed",
+                        outcome = "success",
+                        "proof submitted"
+                    );
+                }
+                Err(error) => {
+                    world_chain_proof_metrics::record_proof_job_completed(
+                        backend_kind.as_str(),
+                        "submission_error",
+                        started_at.elapsed(),
+                    );
+                    warn!(
+                        lifecycle_event = "proof_job_completed",
+                        outcome = "submission_error",
+                        %error,
+                        "failed to submit proof after retries, lease will expire and re-queue"
+                    );
+                }
             }
         }
         .instrument(span),

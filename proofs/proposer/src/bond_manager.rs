@@ -101,6 +101,8 @@ where
                     if resolution_status.invalid_parent_resolvable() {
                         let submission = self.execution_provider.resolve_game(game).await?;
                         info!(
+                            lifecycle_event = "game_resolved",
+                            outcome = "negative_invalid_parent",
                             tx_hash = ?submission.tx_hash,
                             game_address = %game,
                             "resolved proposer-owned game invalidated by its parent"
