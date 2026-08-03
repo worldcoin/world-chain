@@ -86,19 +86,25 @@ where
     E: ChallengerClient,
     C: ConsensusProvider,
 {
-    /// Binary-searches the factory's monotonic creation timestamps for the first game that
-    /// can still have an open challenge window.
+    /// Binary-searches the factory's monotonic challenge deadline for the oldest game
+    /// that is still challengeable.
     async fn first_recent_game_index(
         &self,
         game_count: u64,
-        cutoff: u64,
+        now: u64,
     ) -> Result<u64, ChallengerError> {
         let mut low = 0;
         let mut high = game_count;
 
         while low < high {
             let middle = low + (high - low) / 2;
-            if self.execution_provider.game_created_at(middle).await? < cutoff {
+            let Some(game) = self.execution_provider.game_address_at(middle).await? else {
+                // the game at this index is not a wip1006 game, which means it's an old game, advance iterator
+                low = middle + 1;
+                continue;
+            };
+            let deadline = self.execution_provider.challenge_deadline(game).await?;
+            if deadline < now {
                 low = middle + 1;
             } else {
                 high = middle;
@@ -241,11 +247,10 @@ where
             .next_game_index
             .is_none_or(|next_game_index| next_game_index > game_count);
         if initialize_cursor {
-            let cutoff = now.saturating_sub(self.config.max_game_age.as_secs());
-            let first_recent = self.first_recent_game_index(game_count, cutoff).await?;
+            let first_recent = self.first_recent_game_index(game_count, now).await?;
             info!(
                 first_recent_game_index = first_recent,
-                game_count, cutoff, "initialized challenger game cursor"
+                game_count, now, "initialized challenger game cursor"
             );
             self.next_game_index = Some(first_recent);
         }

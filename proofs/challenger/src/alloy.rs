@@ -181,16 +181,6 @@ where
         self.read_game_address(index).await
     }
 
-    async fn game_created_at(&self, index: u64) -> Result<u64, ChallengerError> {
-        self.factory
-            .gameAtIndex(U256::from(index))
-            .block(BlockId::finalized())
-            .call()
-            .await
-            .map(|entry| entry.timestamp)
-            .map_err(|error| ChallengerError::Contract(error.to_string()))
-    }
-
     async fn game_metadata(&self, address: Address) -> Result<GameMetadata, ChallengerError> {
         let game = self.game(address);
         let (root_claim, l2_block_number) = tokio::try_join!(

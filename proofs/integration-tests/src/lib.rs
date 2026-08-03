@@ -500,16 +500,6 @@ impl ChallengerClient for FakeExecution {
             .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))
     }
 
-    async fn game_created_at(&self, index: u64) -> Result<u64, ChallengerError> {
-        self.state
-            .lock()
-            .expect("fake execution mutex poisoned")
-            .game_order
-            .get(index as usize)
-            .map(|_| u64::MAX)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))
-    }
-
     async fn game_metadata(
         &self,
         game: Address,
