@@ -34,11 +34,13 @@ fn main() {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
-    let _telemetry_guard = telemetry_batteries::init()
-        .map_err(|error| anyhow::anyhow!("failed to initialize telemetry: {error:#}"))?;
 
     match Cli::parse().command {
-        Command::Run(args) => cmd::run::run(*args).await?,
+        Command::Run(args) => {
+            let _telemetry_guard = telemetry_batteries::init()
+                .map_err(|error| anyhow::anyhow!("failed to initialize telemetry: {error:#}"))?;
+            cmd::run::run(*args).await?;
+        }
         Command::GetAttestation(args) => cmd::get_attestation::get_attestation(args).await?,
         Command::Register(args) => cmd::register::register(args).await?,
     }
