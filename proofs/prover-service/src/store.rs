@@ -114,6 +114,15 @@ impl ProverServiceStore {
         if insert_result.rows_affected() > 0 {
             // no conflict
             tx.commit().await?;
+            world_chain_proof_metrics::increment_proof_requests_created(backend.as_str());
+            info!(
+                lifecycle_event = "proof_request_created",
+                proof_id = %id,
+                game_address = %proof_request.game,
+                %backend,
+                l2_block_number = proof_request.l2_block_number,
+                "created proof request"
+            );
             let request_proof_response = RequestProofResponse {
                 proof_id: id,
                 l1_head: proof_request.l1_head,
@@ -184,14 +193,18 @@ impl ProverServiceStore {
             .execute(&mut *tx)
             .await?;
 
+            tx.commit().await?;
             info!(
+                lifecycle_event = "proof_request_requeued",
                 proof_id = %id,
+                game_address = %proof_request.game,
+                %backend,
+                l2_block_number = proof_request.l2_block_number,
                 retry_count = retry_count + 1,
                 max_retries = self.config.max_retries,
                 "re-queued failed proof request"
             );
 
-            tx.commit().await?;
             let request_proof_response = RequestProofResponse {
                 proof_id: id,
                 l1_head: proof_request.l1_head,
@@ -350,7 +363,7 @@ impl ProverServiceStore {
             "#,
         )
         .bind(ProofStatus::Running.as_str())
-        .bind(worker_id)
+        .bind(&worker_id)
         .bind(lock_id.0)
         .bind(ProofJobStatus::Claimed.as_str())
         .bind(lock_expires_at)
@@ -365,6 +378,15 @@ impl ProverServiceStore {
 
         if let Some(row) = query {
             let request = request_from_row(&row)?;
+            info!(
+                lifecycle_event = "proof_job_claimed",
+                proof_id = %request.id(),
+                game_address = %request.game,
+                %backend,
+                %worker_id,
+                l2_block_number = request.l2_block_number,
+                "claimed proof job"
+            );
             Ok(GetNextProofResponse {
                 locked_request: Some(LockedProofRequest { request, lock_id }),
             })
@@ -692,6 +714,16 @@ impl ProverServiceStore {
 
         if let Some(_row) = row {
             // db is updated, return successfully
+            info!(
+                lifecycle_event = "proof_result_stored",
+                outcome = "success",
+                proof_id = %proof.id,
+                game_address = %stored_proof_request.game,
+                backend = %stored_proof_request.backend,
+                %worker_id,
+                l2_block_number = stored_proof_request.l2_block_number,
+                "stored completed proof"
+            );
             Ok(SubmitProofResponse {})
         } else {
             // re-read the row to anaylize the error or return success if the proof
@@ -881,24 +913,19 @@ fn proof_id_bytes(id: ProofRequestId) -> Vec<u8> {
 
 /// Returns true if the request matches the stored values.
 ///
-/// Nitro requests may replace their L1 head after a failed attempt because the proposer
-/// deliberately retries against a newer finalized head. SP1 requests are pinned to the L1
-/// origin in immutable game metadata, so accepting a different head could make a completed
-/// backend session from the previous attempt unusable while still eligible for resumption.
+/// The L1 head is immutable game metadata. A mismatch must create a different request rather
+/// than resuming a backend session whose proof cannot satisfy the game verifier.
 fn request_matches(row: &PgRow, request: &ProofRequest) -> Result<bool, ProofRequestError> {
     let stored_backend: &str = row.get("backend");
     let stored_game: &[u8] = row.get("game");
     let stored_root_claim: &[u8] = row.get("root_claim");
     let stored_l2_block_number: i64 = row.get("l2_block_number");
     let stored_l1_head = b256_from_bytes(row.get("l1_head"))?;
-    let l1_head_matches =
-        request.backend == ProofBackend::Nitro || stored_l1_head == request.l1_head;
-
     Ok(stored_backend == request.backend.as_str()
         && stored_game == request.game.as_slice()
         && stored_root_claim == request.root_claim.as_slice()
         && stored_l2_block_number == l2_to_i64(request.l2_block_number)?
-        && l1_head_matches)
+        && stored_l1_head == request.l1_head)
 }
 
 fn b256_from_bytes(bytes: Vec<u8>) -> Result<B256, MalformedB256Error> {

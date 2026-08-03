@@ -36,6 +36,7 @@ members = [
     "crates/devnet",
     "crates/test-utils",
     "proofs/primitives",
+    "proofs/metrics",
     "proofs/proposer",
     "proofs/challenger",
     "proofs/prover-service",
@@ -85,6 +86,7 @@ world-chain-payload = { path = "crates/payload", default-features = false }
 world-chain-node = { path = "crates/node", default-features = false }
 world-chain-pbh = { path = "crates/pbh", default-features = false }
 world-chain-proofs = { path = "proofs/primitives", default-features = false }
+world-chain-proof-metrics = { path = "proofs/metrics", default-features = false }
 world-chain-rpc = { path = "crates/rpc", default-features = false }
 world-chain-pool = { path = "crates/pool", default-features = false }
 world-chain-evm = { path = "crates/evm", default-features = false }
@@ -270,6 +272,7 @@ jsonrpsee-types = "0.26.0"
 # metrics
 metrics = "0.24.6"
 metrics-derive = "0.1"
+telemetry-batteries = "0.3"
 
 tokio = { version = "1.52.3", features = ["full"] }
 tokio-util = "0.7.15"

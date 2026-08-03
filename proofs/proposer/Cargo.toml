@@ -17,7 +17,7 @@ workspace = true
 [dependencies]
 # workspace
 world-chain-proofs.workspace = true
-world-chain-prover-service.workspace = true
+world-chain-proof-metrics.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
@@ -38,5 +38,5 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time"] }
 tracing.workspace = true
-tracing-subscriber.workspace = true
+telemetry-batteries.workspace = true
 url.workspace = true

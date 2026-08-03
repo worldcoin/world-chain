@@ -20,7 +20,7 @@ use world_chain_challenger::{
     DEFAULT_GAME_SCAN_LOOKBACK, DEFAULT_L1_TX_CONFIRMATIONS, OwnedGames, ResolutionManager,
     ResolutionManagerConfig, WorldChainChallenger,
 };
-use world_chain_proofs::OptimismConsensusClient;
+use world_chain_proofs::{OptimismConsensusClient, VerifyingConsensusProvider};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -35,6 +35,10 @@ struct Cli {
     /// op-node rollup RPC URL used to read canonical L2 output roots.
     #[arg(long, env = "OUTPUT_ROOT_RPC_URL")]
     output_root_rpc: String,
+
+    /// Optional verifying op-node rollup RPC URL. Every result must match the primary endpoint.
+    #[arg(long, env = "VERIFYING_OUTPUT_ROOT_RPC_URL")]
+    verifying_output_root_rpc: Option<String>,
 
     /// OP Stack `DisputeGameFactory` address on L1.
     #[arg(long, env = "FACTORY_ADDRESS")]
@@ -77,10 +81,6 @@ struct Cli {
     )]
     l1_tx_confirmations: u64,
 
-    /// Conservative upper bound on the age of a game with an open challenge window.
-    #[arg(long, env = "MAX_GAME_AGE_SECONDS", default_value_t = 604_800)]
-    max_game_age_seconds: u64,
-
     /// Seconds between challenger-owned game resolution passes.
     #[arg(
         long,
@@ -109,16 +109,22 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    let _telemetry_guard = telemetry_batteries::init()
+        .map_err(|error| anyhow::anyhow!("failed to initialize telemetry: {error:#}"))?;
+    world_chain_proof_metrics::describe_metrics();
 
     let cli = Cli::parse();
 
     let challenger_address = cli.challenger_key.address();
+    let l1_rpc_url = Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?;
+    let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
+        l1_rpc_url,
+        world_chain_proof_metrics::RPC_TARGET_L1_EXECUTION,
+    );
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(cli.challenger_key))
-        .connect_http(Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?);
+        .connect_client(l1_rpc_client);
+    world_chain_proof_metrics::refresh_wallet_balance(&provider, challenger_address).await;
 
     let client = AlloyChallengerClient::new(
         provider,
@@ -126,13 +132,17 @@ async fn main() -> Result<()> {
         cli.anchor_registry_address,
         cli.l1_tx_confirmations,
     );
-    let output_roots = OptimismConsensusClient::new(cli.output_root_rpc.clone());
+    let output_roots = VerifyingConsensusProvider::new(
+        OptimismConsensusClient::new(cli.output_root_rpc.clone()),
+        cli.verifying_output_root_rpc
+            .clone()
+            .map(OptimismConsensusClient::new),
+    );
     let config = ChallengerConfig {
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_game_concurrency: cli.max_game_concurrency,
         max_games_per_tick: cli.max_games_per_tick,
         game_scan_lookback: cli.game_scan_lookback,
-        max_game_age: Duration::from_secs(cli.max_game_age_seconds),
     };
     let resolution_config = ResolutionManagerConfig {
         poll_interval: Duration::from_secs(cli.resolution_manager_poll_interval_seconds),
@@ -156,6 +166,7 @@ async fn main() -> Result<()> {
     info!(
         l1_rpc_url = %cli.l1_rpc,
         output_root_rpc_url = %cli.output_root_rpc,
+        verifying_output_root_rpc_configured = cli.verifying_output_root_rpc.is_some(),
         dispute_game_factory = %cli.factory_address,
         anchor = %cli.anchor_registry_address,
         challenger = %challenger_address,

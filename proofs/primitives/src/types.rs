@@ -18,6 +18,9 @@ pub const PROOF_SYSTEM_VERSION: u64 = 1;
 /// index-based read must filter on this value.
 pub const MULTI_PROOF_GAME_TYPE: u32 = 1006;
 
+/// Maximum number of sequential retry attempts probed for one transition.
+pub const MAX_ATTEMPT_SCAN: u64 = 64;
+
 /// The `MultiProofGame.WorldChainGameCreated` event.
 #[derive(Debug, Clone, Copy)]
 pub struct WorldChainGameCreated {
@@ -185,6 +188,16 @@ pub enum ProofLane {
 }
 
 impl ProofLane {
+    /// Stable telemetry representation.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ValidityProof => "validity_proof",
+            Self::TeeAttestation => "tee_attestation",
+            Self::SecurityCouncil => "security_council",
+        }
+    }
+
     /// Bit assigned to this lane in the per-root proof bitmap.
     #[must_use]
     pub const fn mask(self) -> u8 {
@@ -253,6 +266,13 @@ impl ResolutionStatus {
     /// - the expected root state outcome is `Finalized`.
     pub fn positive_resolvable(&self) -> bool {
         self.resolvable && self.root_state == RootState::Finalized
+    }
+
+    /// Returns whether the game can be resolved as invalid because its parent is invalid.
+    pub fn invalid_parent_resolvable(&self) -> bool {
+        self.resolvable
+            && self.root_state == RootState::Invalidated
+            && self.invalidation_reason == InvalidationReason::InvalidParent
     }
 
     /// Returns whether the game has already reached a terminal state.

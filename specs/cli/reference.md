@@ -200,6 +200,21 @@ Flashblocks:
           
           [env: FLASHBLOCKS_STORE_PATH=]
 
+      --flashblocks.sentry-peers <ENODE>
+          Candidate flashblocks sentries and discovery bootnodes.
+          
+          By default, clients deterministically select `--flashblocks.max-sentry-connections` peers from this pool. The selection is stable for a persisted P2P identity and evenly distributes clients across the pool. Every candidate is retained as a UDP discovery bootnode, including sentries that are not selected for RLPx.
+          
+          [env: FLASHBLOCKS_SENTRY_PEERS=]
+
+      --flashblocks.max-sentry-connections <MAX_SENTRY_CONNECTIONS>
+          Maximum number of candidate flashblocks sentries maintained as trusted RLPx peers.
+          
+          Set this to at least the sentry pool size for builders that must connect to every sentry.
+          
+          [env: FLASHBLOCKS_MAX_SENTRY_CONNECTIONS=]
+          [default: 1]
+
       --flashblocks.max-send-peers <MAX_SEND_PEERS>
           Override the flashblocks send-set size
           
@@ -243,6 +258,6 @@ Flashblocks:
           Comma-separated list of peer IDs to which transactions should be propagated
 
       --worldchain.disable-bootnodes
-          Disable the default World Chain bootnodes
+          Disable the default World Chain flashblocks sentries
 
 ```

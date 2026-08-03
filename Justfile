@@ -144,7 +144,12 @@ install *args='':
 #   Phase 2   proof-deploy-system         – Deploy proof system contracts
 #   Phase 3a  proof-certmanager-prewarm   – Pre-warm CertManager with CA certs
 #   Phase 3b  proof-approve-pcrs          – Approve PCR set on verifier
-#   Combined  proof-setup                 – Run all phases in sequence
+#   Phase 4   proof-register-key          – Register the enclave's generated key on-chain
+#                                            (run separately; NOT part of proof-setup)
+#   Combined  proof-setup                 – Run deploy phases 0a–3b in sequence (does NOT
+#                                            run Phase 4 — register the key afterwards with
+#                                            proof-register-key, or let the worker
+#                                            self-register via `nitro-worker run --auto-register`)
 #
 # Required env vars (varies by target):
 #   PRIVATE_KEY, OWNER, OWNER_KEY, L1_RPC_URL,
@@ -472,6 +477,79 @@ proof-approve-pcrs env="alphanet":
     fi
     echo "PCR set approved."
 
+# Phase 4 – Register the enclave's generated signing key on-chain.
+#            Execs into the running nitro-worker pod (which has vsock access to the
+#            enclave) and runs `nitro-worker register`, which fetches a public-key
+#            attestation, builds the registerKey calldata (with P-384 hints) and submits
+#            it to NitroEnclaveKeyRegistry. Idempotent: a no-op if already registered.
+#            `registerKey` is NOT owner-gated, so any funded key works.
+#
+# Required: L1_RPC_URL, and a funding key via REGISTER_PRIVATE_KEY or PRIVATE_KEY.
+# Optional: NITRO_ENCLAVE_KEY_REGISTRY (else read from the {{env}}-nitro.json deployment),
+#           PCR0/PCR1/PCR2 (else host-side attestation checks are skipped; the on-chain
+#           verifier still enforces the approved PCR allowlist).
+proof-register-key env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f "scripts/proof-envs/{{env}}.env" ]; then
+        echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
+        exit 1
+    fi
+    source scripts/proof-envs/{{env}}.env
+    if [ -f "scripts/proof-envs/{{env}}.local.env" ]; then
+        source scripts/proof-envs/{{env}}.local.env
+    fi
+    # Resolve the registry address from the env or the deployment file.
+    DEPLOYMENTS_FILE="pkg/contracts/deployments/{{env}}-nitro.json"
+    if [ -z "${NITRO_ENCLAVE_KEY_REGISTRY:-}" ] && [ -f "$DEPLOYMENTS_FILE" ]; then
+        # `// empty` so a missing/null key yields "" (not the literal "null"), which the
+        # required-var check below then rejects with a clear message.
+        NITRO_ENCLAVE_KEY_REGISTRY=$(jq -r '.nitroEnclaveKeyRegistry // empty' "$DEPLOYMENTS_FILE")
+    fi
+    : "${NITRO_ENCLAVE_KEY_REGISTRY:?NITRO_ENCLAVE_KEY_REGISTRY is required (set it or run proof-deploy-nitro first)}"
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    REGISTER_KEY="${REGISTER_PRIVATE_KEY:-${PRIVATE_KEY:-}}"
+    : "${REGISTER_KEY:?set REGISTER_PRIVATE_KEY or PRIVATE_KEY (any funded key — registerKey is not owner-gated)}"
+    NITRO_POD=$(kubectl --context="$KUBECONTEXT" get pod \
+        -n "$PROOF_NAMESPACE" \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    if [ -z "$NITRO_POD" ]; then
+        echo "Error: no running pod found in namespace $PROOF_NAMESPACE" >&2
+        exit 1
+    fi
+    CONTAINER=$(kubectl --context="$KUBECONTEXT" get pod "$NITRO_POD" \
+        -n "$PROOF_NAMESPACE" \
+        -o jsonpath='{.spec.containers[0].name}')
+    # Check the container is actually Running before we exec (and pipe the funding key) in.
+    CONTAINER_STATE=$(kubectl --context="$KUBECONTEXT" get pod "$NITRO_POD" \
+        -n "$PROOF_NAMESPACE" \
+        -o jsonpath="{.status.containerStatuses[?(@.name==\"$CONTAINER\")].state.running}")
+    if [ -z "$CONTAINER_STATE" ]; then
+        echo "Error: container '$CONTAINER' in pod '$NITRO_POD' is not in Running state" >&2
+        kubectl --context="$KUBECONTEXT" get pod "$NITRO_POD" -n "$PROOF_NAMESPACE" >&2
+        exit 1
+    fi
+    ENCLAVE_CID=$(kubectl --context="$KUBECONTEXT" exec \
+        -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" \
+        -- cat /run/nitro-shared/enclave-cid 2>/dev/null || echo "16")
+    echo "Pod: $NITRO_POD  Container: $CONTAINER  CID: $ENCLAVE_CID  Registry: $NITRO_ENCLAVE_KEY_REGISTRY" >&2
+    # Pass everything (including the funding key) over STDIN rather than as `sh -c`
+    # arguments, so secrets never appear in the container argv / kubectl audit logs, and
+    # shell metacharacters in any value can't break out. Each value is single-quoted with
+    # embedded single quotes escaped.
+    shq() { printf "'%s'" "$(printf '%s' "${1:-}" | sed "s/'/'\\\\''/g")"; }
+    {
+        printf 'export ENCLAVE_CID=%s\n' "$(shq "$ENCLAVE_CID")"
+        printf 'export NITRO_ENCLAVE_KEY_REGISTRY=%s\n' "$(shq "$NITRO_ENCLAVE_KEY_REGISTRY")"
+        printf 'export L1_RPC_URL=%s\n' "$(shq "$L1_RPC_URL")"
+        printf 'export REGISTER_PRIVATE_KEY=%s\n' "$(shq "$REGISTER_KEY")"
+        if [ -n "${PCR0:-}" ]; then printf 'export PCR0=%s\n' "$(shq "$PCR0")"; fi
+        if [ -n "${PCR1:-}" ]; then printf 'export PCR1=%s\n' "$(shq "$PCR1")"; fi
+        if [ -n "${PCR2:-}" ]; then printf 'export PCR2=%s\n' "$(shq "$PCR2")"; fi
+        printf 'exec nitro-worker register\n'
+    } | kubectl --context="$KUBECONTEXT" exec -i \
+        -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" -- sh -s
+
 # Combined – Run all proof system deployment phases in sequence.
 # Automatically wires contract addresses between steps. PCR0/1/2 are
 # auto-fetched from the running enclave if not pre-set.
@@ -516,3 +594,7 @@ proof-setup env="alphanet":
 
     echo "=== Step 3b: Approving PCR set ===" >&2
     just dry_run={{dry_run}} proof-approve-pcrs {{env}}
+
+    echo "=== Deploy phases 0a-3b complete. ===" >&2
+    echo "Next: register the enclave signing key (Phase 4) with 'just proof-register-key {{env}}'," >&2
+    echo "      or run the worker with '--auto-register' so it self-registers on startup." >&2

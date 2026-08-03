@@ -7,6 +7,7 @@ mod alloy;
 mod bond_manager;
 mod config;
 mod error;
+pub mod metrics;
 mod proposer;
 mod traits;
 mod types;
@@ -22,9 +23,8 @@ pub use error::ProposerError;
 pub use proposer::WorldChainProposer;
 pub use traits::{BondManagerClient, ProposerClient};
 pub use types::{
-    AnchorRef, CanonicalLine, CanonicalScan, ClaimSubmission, CloseGameSubmission, FinalizedGames,
-    NextProposalAction, ParentRef, PendingWithdrawal, Proposal, ProposalSubmission,
-    ResolveSubmission, TransitionGame,
+    ClaimSubmission, CloseGameSubmission, NextProposalAction, PendingWithdrawal, Proposal,
+    ProposalSubmission, ProposerScan, ResolveSubmission,
 };
 
 #[cfg(test)]

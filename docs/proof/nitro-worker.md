@@ -66,11 +66,11 @@ The `nitro-worker` Kubernetes pod contains two containers:
 
 ```
 NitroProofVerifier           ← World Chain addition: dispute game lane hook
-  │  ecrecover signature → check key is registered
+  │  ecrecover signature → check signer is registered
   ▼
-NitroEnclaveKeyRegistry      ← World Chain addition: 3-state key lifecycle
-  │  registerKey() / revokeKey() / isKeyRegistered()
-  │  key lifecycle: Unknown → Active → Revoked
+NitroEnclaveKeyRegistry      ← World Chain addition: 3-state signer lifecycle
+  │  registerKey() / revokeSigner() / isSignerRegistered()
+  │  signer lifecycle: Unknown → Active → Revoked
   ▼
 NitroAttestationVerifier     ← World Chain addition: PCR triple allowlist + timestamps
   │  parse COSE_Sign1, verify P-384 sig, check PCR0+PCR1+PCR2
@@ -285,7 +285,7 @@ Here is the full journey from "job available" to "proof accepted":
     document with:
     - `user_data` = `keccak256(abi.encode(TransitionPublicValues))`
     - `nonce` = the caller-supplied nonce
-    - `public_key` = the ephemeral secp256k1 public key (33-byte compressed)
+    - `public_key` = the ephemeral secp256k1 public key (65-byte SEC1-uncompressed)
 
 12. **Response returned.** The enclave sends back `TransitionPublicValues`, the raw attestation
     document bytes, and the secp256k1 signature.
@@ -349,9 +349,9 @@ The two layers are linked through the **key registration** step:
    secp256k1 key belongs to which enclave (with specific PCRs).
 2. `NitroAttestationVerifier` verifies the full attestation (P-384 sig, cert chain,
    PCRs) and extracts the public key.
-3. `NitroEnclaveKeyRegistry` stores the key as `Active`.
+3. `NitroEnclaveKeyRegistry` derives the Ethereum signer address and stores it as `Active`.
 4. During proof verification, `NitroProofVerifier` uses `ecrecover` on the secp256k1
-   signature and checks that the recovered key is registered.
+   signature and checks that the recovered signer address is registered.
 
 This design separates the **expensive operation** (P-384 attestation verification +
 cert chain validation, done once at key registration) from the **cheap operation**
@@ -449,7 +449,7 @@ NitroAttestationVerifier.verifyAttestation(attestationTbs, signature)
         └─ 6. Extract and return the secp256k1 public key from public_key field
                     │
                     ▼
-        NitroEnclaveKeyRegistry stores keccak256(publicKey) as Active
+        NitroEnclaveKeyRegistry derives and stores the signer address as Active
 ```
 
 ### Proof Verification (Every Proof)
@@ -462,26 +462,23 @@ NitroProofVerifier
         │
         ├─ 1. ABI-decode proof:
         │      (domainHash, parentRef, l1OriginNumber,
-        │       transitionPublicValues, signature, expectedPublicKey)
+        │       transitionPublicValues, signature)
         │
         ├─ 2. Reconstruct rootId from proof fields
         │      └─ Assert reconstructed == supplied rootId
         │
         ├─ 3. Check l2PreRoot matches parentRef's root claim
         │
-        ├─ 4. Check expectedPublicKey is registered in NitroEnclaveKeyRegistry
-        │      └─ isKeyRegistered(expectedPublicKey) must return true
-        │
-        ├─ 5. Compute signing commitment:
+        ├─ 4. Compute signing commitment:
         │      keccak256(abi.encode(transitionPublicValues))
         │
-        ├─ 6. ecrecover(commitment, signature) → recovered address
+        ├─ 5. ecrecover(commitment, signature) → recovered signer
         │      └─ EIP-2 low-s check: reject if s > secp256k1n/2
         │
-        ├─ 7. Compare recovered address with keccak256(expectedPublicKey[1:65])[12:]
-        │      └─ Must match
+        ├─ 6. Check recovered signer in NitroEnclaveKeyRegistry
+        │      └─ isSignerRegistered(recovered) must return true
         │
-        └─ 8. Return true (or false on any failure — never reverts)
+        └─ 7. Return true (or false on any failure — never reverts)
 ```
 
 > **Base comparison:** Base's `SystemConfigGlobal.registerSigner()` performs the same
@@ -492,10 +489,9 @@ NitroProofVerifier
 > enclaveAddress = address(uint160(publicKeyHash))
 > validSigners[enclaveAddress] = true
 > ```
-> World Chain takes the same approach but stores `keccak256(fullPublicKey)` →
-> `KeyStatus` in `NitroEnclaveKeyRegistry` instead of `address → bool` in a flat map,
-> enabling the 3-state lifecycle and making the full uncompressed key available for
-> verification. The on-chain `ecrecover` check is identical in both systems.
+> World Chain also stores lifecycle state by signer address, but uses a three-state
+> `SignerStatus` rather than a boolean so revocation remains permanent. The on-chain
+> `ecrecover` check is identical in both systems.
 
 ---
 
@@ -540,7 +536,8 @@ ephemeral public key in the `public_key` field.
 The operator calls `NitroEnclaveKeyRegistry.registerKey(attestationTbs, signature)`:
 - `NitroAttestationVerifier` verifies the attestation (P-384 sig, cert chain, PCRs)
 - Extracts the secp256k1 public key
-- Key state transitions from `Unknown` → `Active`
+- Derives its Ethereum signer address as `keccak256(publicKey[1:65])[12:]`
+- Signer state transitions from `Unknown` → `Active`
 
 ### 6. Prove
 
@@ -549,17 +546,17 @@ by `NitroProofVerifier`, because the signing key is registered.
 
 ### 7. Revoke (If Needed)
 
-The owner can call `NitroEnclaveKeyRegistry.revokeKey(publicKey)`:
-- Key state transitions from `Active` → `Revoked`
-- **Revocation is permanent** — the same key cannot be re-registered
+The owner can call `NitroEnclaveKeyRegistry.revokeSigner(signer)`:
+- Signer state transitions from `Active` → `Revoked`
+- **Revocation is permanent** — the same signer cannot be re-registered
 - Subsequent proofs signed by this key will fail verification
 
 Revocation is necessary when an enclave is decommissioned or compromised.
 
 > **Base comparison:** Base's `SystemConfigGlobal` uses a simple `mapping(address =>
 > bool) validSigners`. Deregistration is `delete validSigners[addr]` — the address
-> can be re-added later with a new attestation. World Chain's `KeyStatus.Revoked` is
-> permanent; a revoked key hash can never be reactivated. This closes the replay
+> can be re-added later with a new attestation. World Chain's `SignerStatus.Revoked` is
+> permanent; a revoked signer can never be reactivated. This closes the replay
 > attack window (a captured attestation could re-register a deleted Base key, but not
 > a World Chain `Revoked` one).
 
@@ -796,12 +793,12 @@ via `approvePCRSet` / `revokePCRSet`. No PCRs are baked into the contract constr
 This allows the owner to approve new enclave images and retire old ones without
 redeploying the verifier contract.
 
-### Q: Why store revoked keys in `NitroEnclaveKeyRegistry` instead of just deleting them?
+### Q: Why store revoked signers in `NitroEnclaveKeyRegistry` instead of just deleting them?
 
 **A:** To prevent replay attacks. If a key were simply deleted on revocation, an
 attacker who captured that key's original attestation document could re-submit it to
-`registerKey` and restore the key. The `Revoked` state is permanent — once revoked, a
-key can never be re-registered regardless of whether a valid attestation document for
+`registerKey` and restore the signer. The `Revoked` state is permanent — once revoked, a
+signer can never be re-registered regardless of whether a valid attestation document for
 it is available. The lifecycle is strictly `Unknown → Active → Revoked` with no path
 back.
 
@@ -817,11 +814,11 @@ to a 2-value one — both fit in a single storage slot byte.
 
 **A:** This was explicitly considered and decided against. Revoking a PCR set is a
 **forward-looking** operation — it prevents *new* keys from registering under that
-image. Existing registered keys were individually verified at registration time and are
-tracked separately. Mass-revoking all keys on PCR revocation would require either an
-on-chain `PCR → [keys]` mapping (which conflicts with multi-instance support) or an
-O(n) loop over all keys. The security posture is: if you need to revoke all keys from
-a compromised image, call `revokeKey` for each individually. This is noted as a
+image. Existing registered signers were individually verified at registration time and are
+tracked separately. Mass-revoking all signers on PCR revocation would require either an
+on-chain `PCR → [signers]` mapping (which conflicts with multi-instance support) or an
+O(n) loop over all signers. The security posture is: if you need to revoke all signers from
+a compromised image, call `revokeSigner` for each individually. This is noted as a
 security consideration in the contract's NatSpec.
 
 ### Q: Can you build an EIF on a regular machine, or do you need a Nitro-capable EC2 host?

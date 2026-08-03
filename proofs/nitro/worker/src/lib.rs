@@ -80,8 +80,8 @@ impl ClaimedProofJobHandler for NitroBackend {
             })?;
 
         info!(
-            job_id = %request.id(),
-            game = %request.game,
+            proof_id = %request.id(),
+            game_address = %request.game,
             l2_block_number = request.l2_block_number,
             pre_state_block = start_block,
             worker_id = %job.worker_id,

@@ -34,7 +34,6 @@ const REASON_PROOF_TIMEOUT: u8 = 1;
 #[derive(Debug, Clone, Copy)]
 struct MockGame {
     metadata: GameMetadata,
-    created_at: u64,
     state: u8,
     challenge_deadline: u64,
     challenger: Address,
@@ -55,7 +54,6 @@ impl MockGame {
                 root_claim,
                 l2_block_number,
             },
-            created_at: u64::MAX,
             state: STATE_PROPOSED,
             challenge_deadline: u64::MAX,
             challenger: Address::ZERO,
@@ -138,23 +136,7 @@ impl ChallengerClient for MockClient {
             .get(index as usize)
             .copied()
             .map(Some)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))
-    }
-
-    async fn game_created_at(&self, index: u64) -> Result<u64, ChallengerError> {
-        let state = self.state.lock().expect("not poisoned");
-        if state.foreign_indices.contains(&index) {
-            return Ok(u64::MAX);
-        }
-        let address = state
-            .order
-            .get(index as usize)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game index {index}")))?;
-        state
-            .games
-            .get(address)
-            .map(|game| game.created_at)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {address}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game index {index}")))
     }
 
     async fn game_metadata(&self, game: Address) -> Result<GameMetadata, ChallengerError> {
@@ -164,7 +146,7 @@ impl ChallengerClient for MockClient {
             .games
             .get(&game)
             .map(|game| game.metadata)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
     async fn root_state(&self, game: Address) -> Result<RootState, ChallengerError> {
@@ -185,7 +167,7 @@ impl ChallengerClient for MockClient {
             .games
             .get(&game)
             .map(|game| game.challenge_deadline)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
     async fn submit_challenge(
@@ -196,7 +178,7 @@ impl ChallengerClient for MockClient {
         let record = state
             .games
             .get_mut(&game)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))?;
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))?;
         record.state = STATE_CHALLENGED;
         record.challenger = CHALLENGER;
         record.resolution_outcome = STATE_CHALLENGED;
@@ -218,12 +200,11 @@ impl ResolutionManagerClient for MockClient {
             .games
             .get(&game)
             .copied()
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))?;
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))?;
         Ok(ResolutionStatus {
             resolvable: record.resolvable,
             root_state: RootState::try_from(record.resolution_outcome)?,
-            invalidation_reason: InvalidationReason::try_from(record.resolution_reason)
-                .map_err(|error| ChallengerError::Contract(error.to_string()))?,
+            invalidation_reason: InvalidationReason::try_from(record.resolution_reason)?,
         })
     }
 
@@ -232,7 +213,7 @@ impl ResolutionManagerClient for MockClient {
         let record = state
             .games
             .get_mut(&game)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))?;
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))?;
         record.state = record.resolution_outcome;
         record.resolvable = false;
         state.resolutions.push(game);
@@ -263,7 +244,7 @@ impl BondManagerClient for MockClient {
             .games
             .get(&game)
             .map(|game| game.challenger)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
     async fn is_game_finalized(&self, game: Address) -> Result<bool, ChallengerError> {
@@ -273,7 +254,7 @@ impl BondManagerClient for MockClient {
             .games
             .get(&game)
             .map(|game| game.finalized)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
     async fn credit(&self, game: Address) -> Result<U256, ChallengerError> {
@@ -283,7 +264,7 @@ impl BondManagerClient for MockClient {
             .games
             .get(&game)
             .map(|game| game.credit)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
     async fn pending_withdrawal(
@@ -296,7 +277,7 @@ impl BondManagerClient for MockClient {
             .games
             .get(&game)
             .map(|game| game.pending)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
     async fn latest_l1_timestamp(&self) -> Result<u64, ChallengerError> {
@@ -308,12 +289,12 @@ impl BondManagerClient for MockClient {
     async fn claim_credit(&self, game: Address) -> Result<ClaimSubmission, ChallengerError> {
         let mut state = self.state.lock().expect("not poisoned");
         if state.fail_claim_once.remove(&game) {
-            return Err(ChallengerError::Contract("injected claim failure".into()));
+            return Err(ChallengerError::message("injected claim failure"));
         }
         let record = state
             .games
             .get_mut(&game)
-            .ok_or_else(|| ChallengerError::Contract(format!("unknown game {game}")))?;
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))?;
 
         if record.credit > U256::ZERO {
             let amount = record.credit;
@@ -381,7 +362,6 @@ fn config() -> ChallengerConfig {
         max_game_concurrency: 10,
         max_games_per_tick: 100,
         game_scan_lookback: 100,
-        max_game_age: Duration::from_secs(7 * 24 * 60 * 60),
     }
 }
 
@@ -408,20 +388,20 @@ async fn scan_once_challenges_invalid_root_and_tracks_game() {
 }
 
 #[tokio::test]
-async fn startup_scans_older_live_game_when_deadlines_are_not_monotonic() {
+async fn startup_binary_search_finds_first_live_game_by_deadline() {
     let proposed_root = B256::repeat_byte(0x10);
     let canonical_root = B256::repeat_byte(0x20);
-    let active = MockGame::proposed(GAME_1, proposed_root, L2_BLOCK);
-    let mut expired = MockGame::proposed(GAME_2, proposed_root, L2_BLOCK);
+    let mut expired = MockGame::proposed(GAME_1, proposed_root, L2_BLOCK);
     expired.challenge_deadline = 0;
-    let client = MockClient::new(vec![active, expired]);
+    let active = MockGame::proposed(GAME_2, proposed_root, L2_BLOCK);
+    let client = MockClient::new(vec![expired, active]);
     let (output_roots, _) =
         mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
     let mut challenger = WorldChainChallenger::new(config(), client.clone(), output_roots);
 
     challenger.scan_once().await.unwrap();
 
-    assert_eq!(client.challenges(), vec![GAME_1]);
+    assert_eq!(client.challenges(), vec![GAME_2]);
     assert_eq!(challenger.next_game_index(), Some(2));
 }
 
@@ -430,7 +410,7 @@ async fn startup_binary_search_skips_games_older_than_max_age() {
     let proposed_root = B256::repeat_byte(0x10);
     let canonical_root = B256::repeat_byte(0x20);
     let mut old = MockGame::proposed(GAME_1, proposed_root, L2_BLOCK);
-    old.created_at = 0;
+    old.challenge_deadline = 0;
     let recent = MockGame::proposed(GAME_2, proposed_root, L2_BLOCK);
     let client = MockClient::new(vec![old, recent]);
     let (output_roots, _) =

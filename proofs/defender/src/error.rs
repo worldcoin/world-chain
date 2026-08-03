@@ -1,6 +1,6 @@
 use alloy_primitives::TxHash;
 use thiserror::Error;
-use world_chain_proofs::{ConsensusError, InvalidationReasonError, RootStateError};
+use world_chain_proofs::LineageError;
 
 /// Errors returned by the defender.
 #[derive(Debug, Error)]
@@ -11,12 +11,11 @@ pub enum DefenderError {
     /// Contract call or transaction failure.
     #[error("contract error: {0}")]
     Contract(String),
+    /// Prover response could not be encoded for its on-chain verifier.
+    #[error("invalid proof payload: {0}")]
+    ProofEncoding(String),
     #[error(transparent)]
-    InvalidRootState(#[from] RootStateError),
-    #[error(transparent)]
-    InvalidInvalidationReason(#[from] InvalidationReasonError),
-    #[error(transparent)]
-    OutputRoot(#[from] ConsensusError),
+    Lineage(#[from] LineageError),
     #[error("The submitProofLane transaction didn't execute succesfully: {0}")]
     Revert(TxHash),
 }

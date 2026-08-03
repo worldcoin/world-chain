@@ -2900,6 +2900,8 @@ fn test_flashblocks_args(authorizer_sk: &SigningKey, builder_sk: &SigningKey) ->
         access_list: true,
         store: false,
         store_path: None,
+        sentry_peers: Vec::new(),
+        max_sentry_connections: world_chain_cli::cli::builder::DEFAULT_MAX_SENTRY_CONNECTIONS,
         fanout: Default::default(),
     }
 }

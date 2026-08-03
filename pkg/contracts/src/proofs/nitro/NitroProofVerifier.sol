@@ -21,11 +21,9 @@ import {NitroEnclaveKeyRegistry} from "./NitroEnclaveKeyRegistry.sol";
 ///           equals the `rootId` the game is asking about. This binds the
 ///           Nitro signature to the *specific* proposal under dispute.
 ///        2. Binds the proposal transition fields to the calling game's immutable snapshot.
-///        3. Checks that `expectedPublicKey` is currently registered in
+///        3. Recomputes the signing commitment from all transition public values.
+///        4. Recovers the signer via `ecrecover` and checks that address against
 ///           `NitroEnclaveKeyRegistry`.
-///        4. Recomputes the signing commitment from all transition public values.
-///        5. Recovers the signer via `ecrecover` and matches it against the
-///           Ethereum address derived from `expectedPublicKey`.
 ///
 ///      Any decode or verification failure is surfaced as `false` (never
 ///      a revert) to honour the boolean-predicate contract of
@@ -38,11 +36,6 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     /// @dev Thrown when the proof's signature bytes are not exactly 65 bytes.
     ///      Surfaced as `false` via `verify`'s try/catch.
     error InvalidSignatureLength();
-
-    /// @dev Thrown when the proof's expected public key is not a 65-byte
-    ///      SEC1-uncompressed secp256k1 key (`0x04 || X || Y`). The World
-    ///      Nitro enclave always emits this form.
-    error InvalidPublicKey();
 
     /*//////////////////////////////////////////////////////////////
                                 STORAGE
@@ -72,8 +65,7 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
     ///            address parentRef,
     ///            uint256 l1OriginNumber,
     ///            TransitionPublicValues transitionPublicValues,
-    ///            bytes   signature,
-    ///            bytes   expectedPublicKey
+    ///            bytes   signature
     ///        )
     ///
     ///      Decoding plus `_verifyDecoded` live behind an external `this.`
@@ -98,9 +90,8 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
             address parentRef,
             uint256 l1OriginNumber,
             ProofLib.TransitionPublicValues memory transition,
-            bytes memory signature,
-            bytes memory expectedPublicKey
-        ) = abi.decode(proof, (bytes32, address, uint256, ProofLib.TransitionPublicValues, bytes, bytes));
+            bytes memory signature
+        ) = abi.decode(proof, (bytes32, address, uint256, ProofLib.TransitionPublicValues, bytes));
 
         // 1. Bind the proof identity and transition fields to the calling game's immutable snapshot.
         bool matchesGame =
@@ -109,7 +100,7 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
 
         // 2. Verify the enclave signature over all transition public values.
         bytes32 commitment = _signingCommitment(transition);
-        return _verifyEnclaveSignature(commitment, signature, expectedPublicKey);
+        return _verifyEnclaveSignature(commitment, signature);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -124,21 +115,11 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
         return keccak256(abi.encode(transition));
     }
 
-    /// @dev Checks that `signature` over `commitment` recovers to the address
-    ///      derived from `expectedPublicKey`, and that the key is registered.
-    ///      Returns `false` on logical mismatch (unregistered key, wrong
-    ///      signer, malleable s, etc.); reverts on structural errors
-    ///      (`InvalidSignatureLength`, `InvalidPublicKey`) which `verify`
-    ///      catches and turns into `false`.
-    function _verifyEnclaveSignature(bytes32 commitment, bytes memory signature, bytes memory expectedPublicKey)
-        internal
-        view
-        returns (bool)
-    {
-        if (expectedPublicKey.length != 65 || expectedPublicKey[0] != 0x04) revert InvalidPublicKey();
-
-        if (!_isKeyRegistered(expectedPublicKey)) return false;
-
+    /// @dev Checks that `signature` over `commitment` recovers to a registered signer.
+    ///      Returns `false` on logical mismatch (unregistered signer, malleable s,
+    ///      etc.); reverts on a structurally invalid signature length, which
+    ///      `verify` catches and turns into `false`.
+    function _verifyEnclaveSignature(bytes32 commitment, bytes memory signature) internal view returns (bool) {
         if (signature.length != 65) revert InvalidSignatureLength();
 
         bytes32 r;
@@ -159,26 +140,8 @@ contract NitroProofVerifier is IWorldChainProofVerifier {
         if (v != 27 && v != 28) return false;
 
         address recovered = ecrecover(commitment, v, r, s);
-        // ecrecover returns address(0) for malformed (r, s, v) tuples that
-        // it cannot decode. Reject explicitly: matching against an
-        // expectedPublicKey that derives to address(0) is cryptographically
-        // impossible, but a defensive check here keeps the failure mode
-        // explicit and audit-friendly.
+        // ecrecover returns address(0) for malformed (r, s, v) tuples.
         if (recovered == address(0)) return false;
-
-        // Ethereum address = last 20 bytes of keccak256(X || Y), i.e. of the
-        // 64-byte tail after the `0x04` prefix.
-        bytes32 keyHash;
-        assembly ("memory-safe") {
-            // expectedPublicKey[1:65] is 64 bytes starting at +33 (length word + prefix).
-            keyHash := keccak256(add(expectedPublicKey, 33), 64)
-        }
-        return recovered == address(uint160(uint256(keyHash)));
-    }
-
-    /// @dev Memory-bytes wrapper around the calldata-only `isKeyRegistered`
-    ///      view on the registry.
-    function _isKeyRegistered(bytes memory publicKey) internal view returns (bool) {
-        return registry.isKeyRegistered(publicKey);
+        return registry.isSignerRegistered(recovered);
     }
 }

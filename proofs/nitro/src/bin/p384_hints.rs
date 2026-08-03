@@ -159,59 +159,13 @@ fn pad_to_48(bytes: &[u8]) -> Result<Vec<u8>> {
 ///
 /// The attestation TBS is the CBOR-encoded `["Signature1", protected, b"", payload]`
 /// structure.  The hash is SHA-384 of the TBS bytes; the signature is r || s.
+///
+/// Delegates the CBOR decoding to [`world_chain_proof_nitro::cose::decode_attestation_tbs`]
+/// so the binary and the on-chain `registerKey` calldata builder share one implementation.
 fn parse_attestation_signature(raw: &[u8]) -> Result<(Vec<u8>, Vec<u8>)> {
-    use ciborium::value::Value;
     use sha2::{Digest, Sha384};
 
-    // The raw document is a COSE_Sign1 CBOR tag (18) containing an array.
-    let value: Value =
-        ciborium::de::from_reader(raw).map_err(|e| anyhow::anyhow!("CBOR decode error: {e:?}"))?;
-
-    // Unwrap optional tag
-    let array = match value {
-        Value::Tag(_, inner) => match *inner {
-            Value::Array(a) => a,
-            _ => bail!("expected CBOR array inside tag"),
-        },
-        Value::Array(a) => a,
-        _ => bail!("expected CBOR array or tag at root"),
-    };
-
-    if array.len() < 4 {
-        bail!("COSE_Sign1 must have 4 elements, got {}", array.len());
-    }
-
-    let protected = match &array[0] {
-        Value::Bytes(b) => b.clone(),
-        _ => bail!("protected header must be bytes"),
-    };
-    let payload = match &array[2] {
-        Value::Bytes(b) => b.clone(),
-        _ => bail!("payload must be bytes"),
-    };
-    let sig_bytes = match &array[3] {
-        Value::Bytes(b) => b.clone(),
-        _ => bail!("signature must be bytes"),
-    };
-
-    if sig_bytes.len() != 96 {
-        bail!(
-            "attestation signature must be 96 bytes, got {}",
-            sig_bytes.len()
-        );
-    }
-
-    // Reconstruct the TBS structure: ["Signature1", protected, b"", payload]
-    let tbs: Value = Value::Array(vec![
-        Value::Text("Signature1".to_string()),
-        Value::Bytes(protected),
-        Value::Bytes(vec![]),
-        Value::Bytes(payload),
-    ]);
-    let mut tbs_bytes = Vec::new();
-    ciborium::ser::into_writer(&tbs, &mut tbs_bytes)
-        .map_err(|e| anyhow::anyhow!("CBOR encode error: {e:?}"))?;
-
+    let (tbs_bytes, sig_bytes) = world_chain_proof_nitro::cose::decode_attestation_tbs(raw)?;
     let hash = Sha384::digest(&tbs_bytes).to_vec();
     Ok((hash, sig_bytes))
 }

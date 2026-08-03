@@ -4,8 +4,7 @@ mod cmd;
 #[cfg(target_os = "linux")]
 use clap::{Parser, Subcommand};
 #[cfg(target_os = "linux")]
-use cmd::{get_attestation::GetAttestationArgs, run::WorkerArgs};
-
+use cmd::{get_attestation::GetAttestationArgs, register::RegisterArgs, run::WorkerArgs};
 #[cfg(target_os = "linux")]
 #[derive(Parser)]
 #[command(name = "nitro-worker", about = "World Chain Nitro TEE proving worker")]
@@ -21,6 +20,8 @@ enum Command {
     Run(Box<WorkerArgs>),
     /// Fetch a bare attestation document from the running enclave and print hex to stdout.
     GetAttestation(GetAttestationArgs),
+    /// Register the enclave's generated signing key on-chain via `registerKey`.
+    Register(RegisterArgs),
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -33,13 +34,16 @@ fn main() {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
 
     match Cli::parse().command {
-        Command::Run(args) => cmd::run::run(*args).await?,
+        Command::Run(args) => {
+            let _telemetry_guard = telemetry_batteries::init()
+                .map_err(|error| anyhow::anyhow!("failed to initialize telemetry: {error:#}"))?;
+            world_chain_proof_metrics::describe_metrics();
+            cmd::run::run(*args).await?;
+        }
         Command::GetAttestation(args) => cmd::get_attestation::get_attestation(args).await?,
+        Command::Register(args) => cmd::register::register(args).await?,
     }
     Ok(())
 }

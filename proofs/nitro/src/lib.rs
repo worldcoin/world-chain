@@ -45,9 +45,16 @@ use tracing_subscriber as _;
 
 pub mod attestation;
 
+/// COSE_Sign1 attestation decoding (TBS reconstruction + signature extraction).
+pub mod cose;
+
 /// P-384 modular-inverse hint generator for on-chain hinted ECDSA384 verification.
 /// See [`p384_hints::collect_hints`] for the primary entry point.
 pub mod p384_hints;
+
+/// On-chain enclave key registration (calldata builder + self-registration flow).
+#[cfg(all(feature = "enclave", target_os = "linux"))]
+pub mod register;
 
 #[cfg(all(feature = "enclave", target_os = "linux"))]
 pub mod host;

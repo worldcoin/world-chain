@@ -34,6 +34,7 @@ alloy-hardforks.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-signer-local.workspace = true
+alloy-sol-types.workspace = true
 
 async-trait.workspace = true
 anyhow.workspace = true
