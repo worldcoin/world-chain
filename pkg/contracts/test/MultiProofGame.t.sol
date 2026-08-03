@@ -159,7 +159,22 @@ contract MultiProofGameTest is OPStackFixtures {
         new MultiProofGame(config);
 
         config = _gameConfig();
-        config.proofTimeoutRecipient = address(0);
+        config.protocolFeeRecipient = address(0);
+        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
+        new MultiProofGame(config);
+
+        config = _gameConfig();
+        config.challengeFee = 0;
+        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
+        new MultiProofGame(config);
+
+        config = _gameConfig();
+        config.challengeFee = CHALLENGER_BOND + 1;
+        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
+        new MultiProofGame(config);
+
+        config = _gameConfig();
+        config.proposerBond = CHALLENGE_FEE;
         vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
         new MultiProofGame(config);
 
@@ -220,14 +235,14 @@ contract MultiProofGameTest is OPStackFixtures {
         first.resolve();
         assertEq(uint8(first.status()), uint8(GameStatus.CHALLENGER_WINS));
         assertEq(uint8(first.invalidationReason()), uint8(ProofLib.InvalidationReason.PROOF_TIMEOUT));
-        assertEq(first.credit(proofTimeoutRecipient), PROPOSER_BOND);
+        assertEq(first.credit(protocolFeeRecipient), PROPOSER_BOND);
 
         _passAirgap(first);
-        uint256 timeoutRecipientBalance = proofTimeoutRecipient.balance;
-        first.claimCredit(proofTimeoutRecipient);
+        uint256 timeoutRecipientBalance = protocolFeeRecipient.balance;
+        first.claimCredit(protocolFeeRecipient);
         vm.warp(block.timestamp + WETH_DELAY_SECONDS);
-        first.claimCredit(proofTimeoutRecipient);
-        assertEq(proofTimeoutRecipient.balance, timeoutRecipientBalance + PROPOSER_BOND);
+        first.claimCredit(protocolFeeRecipient);
+        assertEq(protocolFeeRecipient.balance, timeoutRecipientBalance + PROPOSER_BOND);
 
         MultiProofGame retry =
             _propose(type(uint256).max, Claim.unwrap(first.rootClaim()), first.l2SequenceNumber(), first.attempt() + 1);
@@ -291,6 +306,11 @@ contract MultiProofGameTest is OPStackFixtures {
         game.challenge{value: CHALLENGER_BOND - 1}();
 
         _challenge(game);
+        assertEq(game.refundModeCredit(challengerAccount), CHALLENGER_BOND - CHALLENGE_FEE);
+        assertEq(game.refundModeCredit(protocolFeeRecipient), CHALLENGE_FEE);
+        assertEq(game.normalModeCredit(protocolFeeRecipient), CHALLENGE_FEE);
+        assertEq(weth.balanceOf(address(game)), PROPOSER_BOND + CHALLENGER_BOND);
+
         vm.prank(challengerAccount);
         vm.expectRevert(ClaimAlreadyChallenged.selector);
         game.challenge{value: CHALLENGER_BOND}();
@@ -318,7 +338,50 @@ contract MultiProofGameTest is OPStackFixtures {
         game.submitProofLane(1, abi.encodePacked(game.rootId()));
         game.resolve();
         assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
-        assertEq(game.credit(proposer), PROPOSER_BOND + CHALLENGER_BOND);
+        assertEq(game.credit(proposer), PROPOSER_BOND + CHALLENGER_BOND - CHALLENGE_FEE);
+        assertEq(game.credit(protocolFeeRecipient), CHALLENGE_FEE);
+    }
+
+    function test_SelfChallenge_CannotRecycleChallengeFee() public {
+        stakingRegistry.setStaked(proposer, true);
+        MultiProofGame game = _proposeAtAnchor();
+
+        vm.prank(proposer);
+        game.challenge{value: CHALLENGER_BOND}();
+        _submitLanes(game, 2);
+        game.resolve();
+
+        assertEq(game.credit(proposer), PROPOSER_BOND + CHALLENGER_BOND - CHALLENGE_FEE);
+        assertEq(game.credit(protocolFeeRecipient), CHALLENGE_FEE);
+        assertEq(game.credit(proposer) + game.credit(protocolFeeRecipient), game.totalBonds());
+    }
+
+    function test_ProtocolFeeRecipientOverlapWithProposer_PreservesAllCredit() public {
+        IMultiProofGame.GameConfig memory config = _gameConfig();
+        config.protocolFeeRecipient = proposer;
+        MultiProofGame overlappingImpl = new MultiProofGame(config);
+        dgf.setImplementation(WC_GAME_TYPE, IDisputeGame(address(overlappingImpl)), hex"");
+
+        MultiProofGame game = _proposeAtAnchor();
+        _challenge(game);
+        _submitLanes(game, 2);
+        game.resolve();
+
+        assertEq(game.credit(proposer), game.totalBonds());
+    }
+
+    function test_ProtocolFeeRecipientOverlapWithChallenger_PreservesAllCredit() public {
+        IMultiProofGame.GameConfig memory config = _gameConfig();
+        config.protocolFeeRecipient = challengerAccount;
+        MultiProofGame overlappingImpl = new MultiProofGame(config);
+        dgf.setImplementation(WC_GAME_TYPE, IDisputeGame(address(overlappingImpl)), hex"");
+
+        MultiProofGame game = _proposeAtAnchor();
+        _challenge(game);
+        vm.warp(game.proofDeadline());
+        game.resolve();
+
+        assertEq(game.credit(challengerAccount), game.totalBonds());
     }
 
     function test_Challenge_AfterInitialProofStillRequiresThreshold() public {
@@ -365,7 +428,8 @@ contract MultiProofGameTest is OPStackFixtures {
 
         assertEq(uint8(first.status()), uint8(GameStatus.CHALLENGER_WINS));
         assertEq(uint8(first.invalidationReason()), uint8(ProofLib.InvalidationReason.PROOF_TIMEOUT));
-        assertEq(first.credit(challengerAccount), PROPOSER_BOND + CHALLENGER_BOND);
+        assertEq(first.credit(challengerAccount), PROPOSER_BOND + CHALLENGER_BOND - CHALLENGE_FEE);
+        assertEq(first.credit(protocolFeeRecipient), CHALLENGE_FEE);
 
         MultiProofGame retry = _propose(type(uint256).max, Claim.unwrap(first.rootClaim()), first.l2SequenceNumber(), 1);
         assertEq(retry.attempt(), 1);
@@ -409,7 +473,8 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(uint8(child.status()), uint8(GameStatus.CHALLENGER_WINS));
         assertEq(uint8(child.invalidationReason()), uint8(ProofLib.InvalidationReason.INVALID_PARENT));
         assertEq(child.credit(proposer), PROPOSER_BOND);
-        assertEq(child.credit(challengerAccount), CHALLENGER_BOND);
+        assertEq(child.credit(challengerAccount), CHALLENGER_BOND - CHALLENGE_FEE);
+        assertEq(child.credit(protocolFeeRecipient), CHALLENGE_FEE);
     }
 
     function test_BlacklistedParent_CascadesBeforeParentResolution() public {
@@ -456,7 +521,8 @@ contract MultiProofGameTest is OPStackFixtures {
 
         assertEq(uint8(game.bondDistributionMode()), uint8(BondDistributionMode.REFUND));
         assertEq(game.credit(proposer), PROPOSER_BOND);
-        assertEq(game.credit(challengerAccount), CHALLENGER_BOND);
+        assertEq(game.credit(challengerAccount), CHALLENGER_BOND - CHALLENGE_FEE);
+        assertEq(game.credit(protocolFeeRecipient), CHALLENGE_FEE);
         (, uint256 anchorBlock) = asr.getAnchorRoot();
         assertEq(anchorBlock, STARTING_ANCHOR_BLOCK);
     }
@@ -474,7 +540,8 @@ contract MultiProofGameTest is OPStackFixtures {
 
         assertEq(uint8(game.bondDistributionMode()), uint8(BondDistributionMode.REFUND));
         assertEq(game.credit(proposer), PROPOSER_BOND);
-        assertEq(game.credit(challengerAccount), CHALLENGER_BOND);
+        assertEq(game.credit(challengerAccount), CHALLENGER_BOND - CHALLENGE_FEE);
+        assertEq(game.credit(protocolFeeRecipient), CHALLENGE_FEE);
     }
 
     function test_IDisputeGameSurfaceAndProofDomain() public {

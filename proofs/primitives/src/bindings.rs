@@ -51,6 +51,7 @@ sol! {
             address gameCreator
         );
         event Challenged(address indexed challenger, uint64 proofDeadline);
+        event ChallengeFeeCharged(address indexed recipient, uint256 amount);
         event ProofLaneSupported(uint8 indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
         event ProofThresholdReached(bytes32 indexed rootId, uint8 proofBitmap);
         event DuplicateProofLane(uint8 indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
@@ -66,7 +67,8 @@ sol! {
         function proofPeriod() external view returns (uint64);
         function proposerBond() external view returns (uint256);
         function challengerBond() external view returns (uint256);
-        function proofTimeoutRecipient() external view returns (address);
+        function protocolFeeRecipient() external view returns (address);
+        function challengeFee() external view returns (uint256);
         function disputeGameFactory() external view returns (address);
         function anchorStateRegistry() external view returns (address);
         function weth() external view returns (address);

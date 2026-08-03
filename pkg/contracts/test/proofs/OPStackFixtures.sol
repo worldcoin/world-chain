@@ -33,6 +33,7 @@ abstract contract OPStackFixtures is Test {
     uint64 internal constant PROOF_PERIOD = 7 days;
     uint256 internal constant PROPOSER_BOND = 1 ether;
     uint256 internal constant CHALLENGER_BOND = 0.1 ether;
+    uint256 internal constant CHALLENGE_FEE = 0.01 ether;
     uint8 internal constant PROOF_THRESHOLD = 2;
 
     uint256 internal constant CHAIN_ID = 480;
@@ -46,7 +47,7 @@ abstract contract OPStackFixtures is Test {
     address internal guardian = makeAddr("guardian");
     address internal proposer = makeAddr("proposer");
     address internal challengerAccount = makeAddr("challenger");
-    address internal proofTimeoutRecipient = makeAddr("proof-timeout-recipient");
+    address internal protocolFeeRecipient = makeAddr("protocol-fee-recipient");
 
     MockSystemConfig internal systemConfig;
     IProxyAdmin internal proxyAdmin;
@@ -134,7 +135,8 @@ abstract contract OPStackFixtures is Test {
             proofPeriod: PROOF_PERIOD,
             proposerBond: PROPOSER_BOND,
             challengerBond: CHALLENGER_BOND,
-            proofTimeoutRecipient: proofTimeoutRecipient,
+            protocolFeeRecipient: protocolFeeRecipient,
+            challengeFee: CHALLENGE_FEE,
             proofThreshold: PROOF_THRESHOLD,
             validityProofVerifier: IWorldChainProofVerifier(address(validityVerifier)),
             teeVerifier: IWorldChainProofVerifier(address(teeVerifier)),
