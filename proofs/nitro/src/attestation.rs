@@ -630,13 +630,7 @@ fn verify_cert_chain_against(
     check_cert_validity(&leaf, "leaf", now_secs)?;
     check_signature_algorithm(&leaf, "leaf")?;
     // A CA presented as the leaf would let any intermediate stand in for an enclave.
-    if let Ok(Some(bc)) = leaf.basic_constraints()
-        && bc.value.ca
-    {
-        return Err(AttestationError::CertChain(
-            "leaf cert asserts basicConstraints CA:TRUE".into(),
-        ));
-    }
+    check_end_entity(&leaf, "leaf")?;
     let last = cabundle.len() - 1;
     let (_, leaf_issuer) = X509Certificate::from_der(&cabundle[last])
         .map_err(|e| AttestationError::CertChain(format!("cabundle[{last}] parse: {e}")))?;
@@ -686,11 +680,52 @@ fn check_is_ca(
             "{label}: basicConstraints CA is not TRUE"
         )));
     }
-    if let Ok(Some(ku)) = cert.key_usage()
-        && !ku.value.key_cert_sign()
-    {
+
+    // Required, not optional: a CA with no keyUsage at all would otherwise pass.
+    let ku = cert
+        .key_usage()
+        .map_err(|e| AttestationError::CertChain(format!("{label}: keyUsage parse: {e}")))?
+        .ok_or_else(|| AttestationError::CertChain(format!("{label}: missing keyUsage")))?;
+    if !ku.value.key_cert_sign() {
         return Err(AttestationError::CertChain(format!(
             "{label}: keyUsage does not permit keyCertSign"
+        )));
+    }
+    Ok(())
+}
+
+/// Checks the end-entity ("target") certificate: `digitalSignature` asserted, and no
+/// `pathLenConstraint`, which only belongs on a CA.
+///
+/// AWS marks `keyUsage` critical on every CA in the chain but *not* on the leaf, so
+/// criticality is deliberately not required here.
+///
+/// See: [AWS Nitro Enclaves NSM API — attestation process §3.2.3.3](https://github.com/aws/aws-nitro-enclaves-nsm-api/blob/main/docs/attestation_process.md)
+/// See: [RFC 5280 §4.2.1.3 — Key Usage](https://datatracker.ietf.org/doc/html/rfc5280#section-4.2.1.3)
+fn check_end_entity(
+    cert: &x509_parser::prelude::X509Certificate<'_>,
+    label: &str,
+) -> Result<(), AttestationError> {
+    if let Ok(Some(bc)) = cert.basic_constraints() {
+        if bc.value.ca {
+            return Err(AttestationError::CertChain(format!(
+                "{label}: end-entity cert asserts basicConstraints CA:TRUE"
+            )));
+        }
+        if bc.value.path_len_constraint.is_some() {
+            return Err(AttestationError::CertChain(format!(
+                "{label}: end-entity cert carries a pathLenConstraint"
+            )));
+        }
+    }
+
+    let ku = cert
+        .key_usage()
+        .map_err(|e| AttestationError::CertChain(format!("{label}: keyUsage parse: {e}")))?
+        .ok_or_else(|| AttestationError::CertChain(format!("{label}: missing keyUsage")))?;
+    if !ku.value.digital_signature() {
+        return Err(AttestationError::CertChain(format!(
+            "{label}: keyUsage does not assert digitalSignature"
         )));
     }
     Ok(())
@@ -1342,6 +1377,105 @@ mod tests {
         match err {
             AttestationError::CertChain(msg) => {
                 assert!(msg.contains("issuer does not match"), "got: {msg}")
+            }
+            other => panic!("expected CertChain, got: {other:?}"),
+        }
+    }
+
+    /// AWS §3.2.3.3: the target certificate must assert `digitalSignature`.
+    #[test]
+    fn rejects_leaf_without_digital_signature() {
+        let root = gen_cert("test root", Some(BasicConstraints::Unconstrained), None);
+        let inter = gen_cert(
+            "test intermediate",
+            Some(BasicConstraints::Constrained(0)),
+            Some(&root),
+        );
+
+        let key = KeyPair::generate_for(&PKCS_ECDSA_P384_SHA384).unwrap();
+        let mut params = CertificateParams::new(Vec::<String>::new()).unwrap();
+        params
+            .distinguished_name
+            .push(DnType::CommonName, "no digitalSignature");
+        params.is_ca = IsCa::ExplicitNoCa;
+        params.key_usages = vec![KeyUsagePurpose::KeyEncipherment];
+        let iss = Issuer::from_params(&inter.params, &inter.key);
+        let leaf = params.signed_by(&key, &iss).unwrap().der().to_vec();
+
+        let err =
+            verify_cert_chain_against(&leaf, &[root.der.clone(), inter.der], &root.der, gen_now())
+                .unwrap_err();
+        match err {
+            AttestationError::CertChain(msg) => {
+                assert!(msg.contains("digitalSignature"), "got: {msg}")
+            }
+            other => panic!("expected CertChain, got: {other:?}"),
+        }
+    }
+
+    /// AWS §3.2.3.3: the target certificate must carry no `pathLenConstraint`.
+    ///
+    /// rcgen ties `pathLenConstraint` to `IsCa::Ca`, so the only chain it can build here also
+    /// asserts CA:TRUE and trips that check first. The `pathLenConstraint` branch of
+    /// `check_end_entity` is therefore not reachable from a generated chain — asserting the
+    /// CA rejection is what this can honestly cover.
+    #[test]
+    fn rejects_leaf_asserting_ca() {
+        let root = gen_cert("test root", Some(BasicConstraints::Unconstrained), None);
+        let inter = gen_cert(
+            "test intermediate",
+            Some(BasicConstraints::Constrained(0)),
+            Some(&root),
+        );
+        let ca_leaf = gen_cert(
+            "ca as leaf",
+            Some(BasicConstraints::Constrained(0)),
+            Some(&inter),
+        );
+
+        let err = verify_cert_chain_against(
+            &ca_leaf.der,
+            &[root.der.clone(), inter.der],
+            &root.der,
+            gen_now(),
+        )
+        .unwrap_err();
+        match err {
+            AttestationError::CertChain(msg) => assert!(msg.contains("CA:TRUE"), "got: {msg}"),
+            other => panic!("expected CertChain, got: {other:?}"),
+        }
+    }
+
+    /// AWS §3.2.3.3: every CA must assert `keyCertSign`, so a CA with no keyUsage at all is
+    /// rejected rather than waved through.
+    #[test]
+    fn rejects_ca_without_key_usage() {
+        let root = gen_cert("test root", Some(BasicConstraints::Unconstrained), None);
+        let mut inter = gen_cert(
+            "no keyUsage",
+            Some(BasicConstraints::Constrained(0)),
+            Some(&root),
+        );
+        inter.params.key_usages = vec![];
+        let iss = Issuer::from_params(&root.params, &root.key);
+        inter.der = inter
+            .params
+            .signed_by(&inter.key, &iss)
+            .unwrap()
+            .der()
+            .to_vec();
+        let leaf = gen_cert("test leaf", None, Some(&inter));
+
+        let err = verify_cert_chain_against(
+            &leaf.der,
+            &[root.der.clone(), inter.der],
+            &root.der,
+            gen_now(),
+        )
+        .unwrap_err();
+        match err {
+            AttestationError::CertChain(msg) => {
+                assert!(msg.contains("missing keyUsage"), "got: {msg}")
             }
             other => panic!("expected CertChain, got: {other:?}"),
         }
