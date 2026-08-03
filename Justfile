@@ -520,6 +520,17 @@ proof-approve-pcrs env="alphanet":
             "approvePCRSet(bytes32,bytes32,bytes32)" \
             "$(cast keccak "$PCR0")" "$(cast keccak "$PCR1")" "$(cast keccak "$PCR2")" \
             --rpc-url "$L1_RPC_URL" --private-key "$OWNER_KEY"
+        # Record which measurements are actually approved on this verifier. DeployNitro only
+        # writes addresses, so without this the deployment file cannot tell an approved
+        # allowlist from an empty one — and an unprovisioned verifier rejects every
+        # attestation with PCRSetNotApproved long after the deploy looks finished.
+        if [ -f "$DEPLOYMENTS_FILE" ]; then
+            TMP_DEPLOYMENTS="$(mktemp)"
+            jq --arg v "$NITRO_ATTESTATION_VERIFIER" --arg p0 "$PCR0" --arg p1 "$PCR1" --arg p2 "$PCR2" \
+                '.approvedPCRSets = ((.approvedPCRSets // []) + [{verifier: $v, pcr0: $p0, pcr1: $p1, pcr2: $p2}] | unique)' \
+                "$DEPLOYMENTS_FILE" > "$TMP_DEPLOYMENTS" && mv "$TMP_DEPLOYMENTS" "$DEPLOYMENTS_FILE"
+            echo "Recorded approved PCR set in $DEPLOYMENTS_FILE"
+        fi
     fi
     echo "PCR set approved."
 
