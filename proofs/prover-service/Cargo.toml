@@ -33,7 +33,7 @@ sqlx.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time"] }
 tracing.workspace = true
-tracing-subscriber.workspace = true
+telemetry-batteries.workspace = true
 uuid.workspace = true
 auto_impl.workspace = true
 

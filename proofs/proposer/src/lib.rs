@@ -7,6 +7,7 @@ mod alloy;
 mod bond_manager;
 mod config;
 mod error;
+pub mod metrics;
 mod proposer;
 mod traits;
 mod types;

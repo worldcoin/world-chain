@@ -40,7 +40,7 @@ tokio = { workspace = true, features = ["full", "signal"] }
 anyhow.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
+telemetry-batteries.workspace = true
 
 # Config
 clap.workspace = true

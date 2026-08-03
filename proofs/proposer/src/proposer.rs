@@ -214,6 +214,7 @@ where
         };
 
         let submission = self.execution_provider.submit_proposal(&proposal).await?;
+        crate::metrics::increment_proposals_submitted();
         info!(
             tx_hash = ?submission.tx_hash,
             game_address = %submission.game_address,
