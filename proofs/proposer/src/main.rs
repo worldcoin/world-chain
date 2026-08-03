@@ -15,7 +15,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use tracing::info;
 use url::Url;
-use world_chain_proofs::OptimismConsensusClient;
+use world_chain_proofs::{OptimismConsensusClient, VerifyingConsensusProvider};
 use world_chain_proposer::{
     AlloyProofSystemClient, BondManager, BondManagerConfig, ProposerConfig, WorldChainProposer,
 };
@@ -33,6 +33,10 @@ struct Cli {
     /// op-node rollup RPC URL used to read canonical L2 output roots.
     #[arg(long, env = "OUTPUT_ROOT_RPC_URL")]
     output_root_rpc: String,
+
+    /// Optional verifying op-node rollup RPC URL. Every result must match the primary endpoint.
+    #[arg(long, env = "VERIFYING_OUTPUT_ROOT_RPC_URL")]
+    verifying_output_root_rpc: Option<String>,
 
     /// OP Stack `DisputeGameFactory` address on L1.
     #[arg(long, env = "FACTORY_ADDRESS")]
@@ -95,7 +99,12 @@ async fn main() -> Result<()> {
         initial_scan_limit: cli.bond_manager_initial_scan_limit,
     };
     let mut bond_manager = BondManager::new(bond_manager_config, contracts.clone());
-    let output_roots = OptimismConsensusClient::new(cli.output_root_rpc.clone());
+    let output_roots = VerifyingConsensusProvider::new(
+        OptimismConsensusClient::new(cli.output_root_rpc.clone()),
+        cli.verifying_output_root_rpc
+            .clone()
+            .map(OptimismConsensusClient::new),
+    );
     let registered = contracts.registered_lineage_config();
     let config = ProposerConfig {
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
@@ -106,6 +115,7 @@ async fn main() -> Result<()> {
     info!(
         l1_rpc_url = %cli.l1_rpc,
         output_root_rpc_url = %cli.output_root_rpc,
+        verifying_output_root_rpc_configured = cli.verifying_output_root_rpc.is_some(),
         dispute_game_factory = %cli.factory_address,
         anchor = %registered.anchor_registry,
         proposer = %proposer_address,

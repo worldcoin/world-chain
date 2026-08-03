@@ -18,7 +18,7 @@ use url::Url;
 use world_chain_defender::{
     AlloyDefenderClient, DEFAULT_L1_TX_CONFIRMATIONS, DefenderConfig, WorldChainDefender,
 };
-use world_chain_proofs::OptimismConsensusClient;
+use world_chain_proofs::{OptimismConsensusClient, VerifyingConsensusProvider};
 use world_chain_prover_service::RpcProverServiceClient;
 
 #[derive(Debug, Parser)]
@@ -34,6 +34,10 @@ struct Cli {
     /// op-node rollup RPC URL used to read canonical L2 output roots.
     #[arg(long, env = "OUTPUT_ROOT_RPC_URL")]
     output_root_rpc: String,
+
+    /// Optional verifying op-node rollup RPC URL. Every result must match the primary endpoint.
+    #[arg(long, env = "VERIFYING_OUTPUT_ROOT_RPC_URL")]
+    verifying_output_root_rpc: Option<String>,
 
     /// prover-service JSON-RPC URL.
     #[arg(long, env = "PROVER_SERVICE_URL")]
@@ -88,7 +92,12 @@ async fn main() -> Result<()> {
     let client = AlloyDefenderClient::new(provider, cli.factory_address, cli.l1_tx_confirmations)
         .await
         .context("failed to connect defender to the registered proof system")?;
-    let output_roots = OptimismConsensusClient::new(cli.output_root_rpc.clone());
+    let output_roots = VerifyingConsensusProvider::new(
+        OptimismConsensusClient::new(cli.output_root_rpc.clone()),
+        cli.verifying_output_root_rpc
+            .clone()
+            .map(OptimismConsensusClient::new),
+    );
     let proof_requester = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
     let config = DefenderConfig {
@@ -100,6 +109,7 @@ async fn main() -> Result<()> {
     info!(
         l1_rpc_url = %cli.l1_rpc,
         output_root_rpc_url = %cli.output_root_rpc,
+        verifying_output_root_rpc_configured = cli.verifying_output_root_rpc.is_some(),
         prover_service = %cli.prover_service_url,
         dispute_game_factory = %cli.factory_address,
         defender = %defender_address,

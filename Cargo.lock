@@ -19276,11 +19276,13 @@ dependencies = [
  "alloy-provider",
  "alloy-sol-types",
  "async-trait",
+ "futures-util",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "world-chain-proof-metrics",
+ "tokio",
 ]
 
 [[package]]
