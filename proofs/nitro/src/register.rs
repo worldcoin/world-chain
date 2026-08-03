@@ -18,7 +18,7 @@
 //!   subcommand and the worker's `--auto-register` startup hook.
 
 use alloy_network::EthereumWallet;
-use alloy_primitives::{Address, Bytes, TxHash};
+use alloy_primitives::{Address, Bytes, TxHash, keccak256};
 use alloy_provider::ProviderBuilder;
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::sol;
@@ -84,21 +84,37 @@ fn non_empty<'a>(value: &'a str, field: &str) -> Result<&'a str> {
     Ok(trimmed)
 }
 
+/// Derives the on-chain signer address from the enclave's uncompressed secp256k1 public key
+/// (`0x04 || X || Y`, 65 bytes). This mirrors `NitroEnclaveKeyRegistry._signerAddress`:
+/// `address(uint160(uint256(keccak256(pubkey[1..65]))))`.
+fn enclave_signer_address(public_key: &[u8]) -> Result<Address> {
+    if public_key.len() != 65 || public_key[0] != 0x04 {
+        bail!(
+            "unexpected enclave public key encoding ({} bytes, prefix {:#04x})",
+            public_key.len(),
+            public_key.first().copied().unwrap_or(0)
+        );
+    }
+    // keccak256 over the 64-byte X||Y coordinates, address = last 20 bytes.
+    let hash = keccak256(&public_key[1..65]);
+    Ok(Address::from_slice(&hash[12..]))
+}
+
 sol! {
     /// Minimal on-chain surface of `NitroEnclaveKeyRegistry` needed for self-registration.
     #[sol(rpc)]
     interface INitroEnclaveKeyRegistry {
-        /// Reverted by `registerKey` when the key is already `Active`.
-        error KeyAlreadyRegistered();
-        /// Reverted by `registerKey` when the key was permanently revoked.
-        error KeyRevokedPermanently();
+        /// Reverted by `registerKey` when the signer is already `Active`.
+        error SignerAlreadyRegistered();
+        /// Reverted by `registerKey` when the signer was permanently revoked.
+        error SignerRevokedPermanently();
         /// Reverted by `registerKey` when the attestation's public key is malformed.
         error InvalidPublicKey();
 
         function registerKey(bytes attestationTbs, bytes signature, bytes attestationSigHints)
             external
-            returns (bytes publicKey, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2);
-        function isKeyRegistered(bytes publicKey) external view returns (bool);
+            returns (address signer, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2);
+        function isSignerRegistered(address signer) external view returns (bool);
     }
 }
 
@@ -136,14 +152,14 @@ pub enum RegistrationOutcome {
 
 /// Fetches the enclave's public-key attestation over vsock and registers the key on-chain.
 ///
-/// The flow is idempotent: if the key is already `Active` in the registry (or a concurrent
-/// registration wins the race and the tx reverts with `KeyAlreadyRegistered`) this returns
+/// The flow is idempotent: if the signer is already `Active` in the registry (or a concurrent
+/// registration wins the race and the tx reverts with `SignerAlreadyRegistered`) this returns
 /// [`RegistrationOutcome::AlreadyRegistered`] instead of erroring.
 ///
 /// # Errors
 ///
 /// Returns an error if the enclave is unreachable, the RPC/key are invalid, the
-/// `registerKey` transaction reverts for a reason other than `KeyAlreadyRegistered`
+/// `registerKey` transaction reverts for a reason other than `SignerAlreadyRegistered`
 /// (e.g. PCR set not approved, CertManager not pre-warmed), or the key is still not
 /// registered after a confirmed transaction.
 pub async fn register_enclave_key(params: RegisterParams) -> Result<RegistrationOutcome> {
@@ -162,9 +178,13 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
         .await
         .map_err(|e| anyhow!("failed to fetch enclave public-key attestation: {e}"))?;
     let public_key = Bytes::from(public_key);
+    // The registry keys registrations on the Ethereum address derived from the enclave's
+    // uncompressed secp256k1 public key (keccak256(pubkey[1..65])[12..]).
+    let enclave_signer = enclave_signer_address(public_key.as_ref())?;
     info!(
         target: "world_chain::nitro",
         pubkey = %hex::encode(&public_key),
+        signer = %enclave_signer,
         "fetched enclave public-key attestation"
     );
 
@@ -182,18 +202,18 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
         .connect_http(url);
     let registry = INitroEnclaveKeyRegistry::new(registry_address, provider);
 
-    // 3. Short-circuit if the key is already registered.
+    // 3. Short-circuit if the signer is already registered.
     if registry
-        .isKeyRegistered(public_key.clone())
+        .isSignerRegistered(enclave_signer)
         .call()
         .await
-        .context("isKeyRegistered pre-check")?
+        .context("isSignerRegistered pre-check")?
     {
         info!(
             target: "world_chain::nitro",
-            pubkey = %hex::encode(&public_key),
+            signer = %enclave_signer,
             registry = %registry_address,
-            "enclave key already registered on-chain; nothing to do"
+            "enclave signer already registered on-chain; nothing to do"
         );
         return Ok(RegistrationOutcome::AlreadyRegistered);
     }
@@ -203,7 +223,7 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
     info!(
         target: "world_chain::nitro",
         registry = %registry_address,
-        signer = %signer_address,
+        tx_signer = %signer_address,
         tbs_bytes = calldata.attestation_tbs.len(),
         hint_bytes = calldata.attestation_sig_hints.len(),
         "submitting registerKey"
@@ -223,19 +243,19 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
             // A concurrent registration may have landed between our pre-check and the
             // send (e.g. another worker/enclave with the same key registered first).
             // Re-query the registry — this is decode-independent, so it reliably
-            // distinguishes that race (key now Active) from a genuine failure such as
+            // distinguishes that race (signer now Active) from a genuine failure such as
             // an unapproved PCR set or an un-pre-warmed CertManager. The custom errors
             // are also declared on the sol! interface above so alloy can decode the
             // revert into a readable reason in the propagated error.
             if registry
-                .isKeyRegistered(public_key.clone())
+                .isSignerRegistered(enclave_signer)
                 .call()
                 .await
                 .unwrap_or(false)
             {
                 warn!(
                     target: "world_chain::nitro",
-                    "registerKey failed but the key is already registered; treating as success"
+                    "registerKey failed but the signer is already registered; treating as success"
                 );
                 return Ok(RegistrationOutcome::AlreadyRegistered);
             }
@@ -249,37 +269,38 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
         .await
         .with_context(|| format!("awaiting registerKey receipt (tx {tx_hash})"))?;
 
-    // 5. Confirm the key ended up registered. We check this even when the receipt shows a
-    //    revert: a concurrent registration can land our key on-chain and make *our* tx
-    //    revert with `KeyAlreadyRegistered`, which is still success from our perspective.
+    // 5. Confirm the signer ended up registered. We check this even when the receipt shows
+    //    a revert: a concurrent registration can land our signer on-chain and make *our* tx
+    //    revert with `SignerAlreadyRegistered`, which is still success from our perspective.
     let registered = registry
-        .isKeyRegistered(public_key.clone())
+        .isSignerRegistered(enclave_signer)
         .call()
         .await
-        .context("isKeyRegistered post-check")?;
+        .context("isSignerRegistered post-check")?;
 
     if !receipt.status() {
         if registered {
             warn!(
                 target: "world_chain::nitro",
                 %tx_hash,
-                "registerKey tx reverted but the key is already registered; treating as success"
+                "registerKey tx reverted but the signer is already registered; treating as success"
             );
             return Ok(RegistrationOutcome::AlreadyRegistered);
         }
-        bail!("registerKey transaction {tx_hash} reverted and the key is not registered");
+        bail!("registerKey transaction {tx_hash} reverted and the signer is not registered");
     }
 
     if !registered {
-        bail!("registerKey tx {tx_hash} confirmed but key is still not registered");
+        bail!("registerKey tx {tx_hash} confirmed but signer is still not registered");
     }
 
     info!(
         target: "world_chain::nitro",
         %tx_hash,
         pubkey = %hex::encode(&public_key),
-        signer = %signer_address,
-        "enclave key registered on-chain"
+        enclave_signer = %enclave_signer,
+        tx_signer = %signer_address,
+        "enclave signer registered on-chain"
     );
     Ok(RegistrationOutcome::Registered { tx_hash })
 }
@@ -318,5 +339,29 @@ mod tests {
             err.to_string().contains("leaf certificate") || err.to_string().contains("certificate"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn derives_signer_address_matching_contract() {
+        // secp256k1 private key = 1 → well-known uncompressed public key and address.
+        // Must match `NitroEnclaveKeyRegistry._signerAddress` = keccak256(pubkey[1..65])[12..].
+        let pubkey = hex::decode(
+            "0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798\
+             483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8",
+        )
+        .unwrap();
+        let addr = enclave_signer_address(&pubkey).unwrap();
+        assert_eq!(
+            addr,
+            "0x7E5F4552091A69125d5DfCb7b8C2659029395Bdf"
+                .parse()
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_public_key() {
+        assert!(enclave_signer_address(&[0u8; 33]).is_err()); // wrong length
+        assert!(enclave_signer_address(&[0x02; 65]).is_err()); // wrong SEC1 prefix
     }
 }

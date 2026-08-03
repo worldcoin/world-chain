@@ -481,7 +481,7 @@ previously a manual `cast` sequence:
    `NitroValidator.decodeAttestationTbs`) and compute the P-384 attestation hints (reusing
    the `p384-hints` library).
 3. Submit `registerKey(attestationTbs, signature, attestationSigHints)` to
-   `NitroEnclaveKeyRegistry` and confirm `isKeyRegistered` afterwards.
+   `NitroEnclaveKeyRegistry` and confirm `isSignerRegistered` afterwards.
 
 The command is **idempotent**: if the key is already registered it logs and exits 0. It is
 also available on the long-running worker as `nitro-worker register` and as a startup hook
