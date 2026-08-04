@@ -1,6 +1,13 @@
 use alloy_sol_types::sol;
 
 sol! {
+    struct ProofDomainData {
+        uint256 chainId;
+        uint256 proofSystemVersion;
+        bytes32 rollupConfigHash;
+        uint256 blockInterval;
+    }
+
     /// Stock OP Stack `DisputeGameFactory`. WIP-1006 games are created and indexed here
     /// alongside every other game type registered on the chain, so every index-based read
     /// must filter on `MULTI_PROOF_GAME_TYPE`.
@@ -44,6 +51,7 @@ sol! {
             address gameCreator
         );
         event Challenged(address indexed challenger, uint64 proofDeadline);
+        event ChallengeFeeCharged(address indexed recipient, uint256 amount);
         event ProofLaneSupported(uint8 indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
         event ProofThresholdReached(bytes32 indexed rootId, uint8 proofBitmap);
         event DuplicateProofLane(uint8 indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
@@ -53,11 +61,14 @@ sol! {
         // Deployment parameters (immutables on the implementation).
         function PROOF_THRESHOLD() external view returns (uint8);
         function PROOF_LANE_COUNT() external view returns (uint8);
+        function domain() external view returns (ProofDomainData memory);
         function domainHash() external view returns (bytes32);
         function challengePeriod() external view returns (uint64);
         function proofPeriod() external view returns (uint64);
         function proposerBond() external view returns (uint256);
         function challengerBond() external view returns (uint256);
+        function protocolFeeRecipient() external view returns (address);
+        function challengeFee() external view returns (uint256);
         function disputeGameFactory() external view returns (address);
         function anchorStateRegistry() external view returns (address);
         function weth() external view returns (address);

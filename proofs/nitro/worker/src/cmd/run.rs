@@ -11,6 +11,9 @@ use world_chain_nitro_worker::{NitroBackend, NitroBackendConfig, build_expected_
 use world_chain_proof_kona_host_utils::online::{
     build_online_config, hardfork_config_from_chain_spec,
 };
+use world_chain_proof_nitro::register::{
+    RegisterParams, RegistrationOutcome, register_enclave_key,
+};
 use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
 };
@@ -157,6 +160,22 @@ pub struct WorkerArgs {
     /// Maximum consecutive retryable heartbeat failures before aborting proof generation.
     #[arg(long, default_value_t = DEFAULT_WORKER_MAX_CONSECUTIVE_HEARTBEAT_FAILURES)]
     heartbeat_max_consecutive_failures: u32,
+
+    /// Register the enclave's generated signing key on-chain at startup before leasing
+    /// jobs. Idempotent: if the key is already registered the worker continues normally.
+    #[arg(long, env = "AUTO_REGISTER", default_value_t = false)]
+    auto_register: bool,
+
+    /// `NitroEnclaveKeyRegistry` contract address on L1. Required when `--auto-register`
+    /// is set.
+    #[arg(long, env = "NITRO_ENCLAVE_KEY_REGISTRY")]
+    registry: Option<String>,
+
+    /// Hex-encoded private key used to sign and pay for the `registerKey` transaction when
+    /// `--auto-register` is set. Falls back to `PRIVATE_KEY` when unset. `registerKey` is
+    /// not owner-gated, so any funded key works.
+    #[arg(long, env = "REGISTER_PRIVATE_KEY", hide_env_values = true)]
+    register_private_key: Option<String>,
 }
 
 pub async fn run(args: WorkerArgs) -> Result<()> {
@@ -177,6 +196,49 @@ pub async fn run(args: WorkerArgs) -> Result<()> {
         args.pcr1.as_deref(),
         args.pcr2.as_deref(),
     )?;
+
+    // Optionally self-register the enclave's generated signing key on-chain before leasing
+    // any jobs. Without a registered key the proofs this worker submits would not verify.
+    if args.auto_register {
+        let registry = args
+            .registry
+            .clone()
+            .context("--auto-register requires --registry / NITRO_ENCLAVE_KEY_REGISTRY")?;
+        // Registration reuses the same L1 endpoint as witness building (`--l1-rpc`).
+        let l1_rpc_url = args.l1_rpc.clone();
+        let private_key = args
+            .register_private_key
+            .clone()
+            .or_else(|| std::env::var("PRIVATE_KEY").ok())
+            .context(
+                "--auto-register requires a key: set --register-private-key, \
+                 REGISTER_PRIVATE_KEY, or PRIVATE_KEY",
+            )?;
+
+        info!(
+            registry = %registry,
+            enclave_cid = args.enclave_cid,
+            "auto-register enabled; registering enclave key on-chain before starting"
+        );
+        let outcome = register_enclave_key(RegisterParams {
+            enclave_cid: args.enclave_cid,
+            enclave_port: args.enclave_port,
+            expected_pcrs,
+            l1_rpc_url,
+            registry,
+            private_key,
+        })
+        .await
+        .context("auto-registration failed")?;
+        match outcome {
+            RegistrationOutcome::AlreadyRegistered => {
+                info!("enclave key already registered on-chain");
+            }
+            RegistrationOutcome::Registered { tx_hash } => {
+                info!(%tx_hash, "enclave key registered on-chain");
+            }
+        }
+    }
 
     info!(
         prover_service = %args.prover_service_url,

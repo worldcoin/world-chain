@@ -49,8 +49,6 @@ impl Default for BondManagerConfig {
 /// captured at startup where an owner update would silently break every proposal.
 #[derive(Debug, Clone)]
 pub struct ProposerConfig {
-    /// Number of L2 blocks between proposals.
-    pub block_interval: u64,
     /// Delay between periodic proposal attempts.
     pub poll_interval: Duration,
     /// Maximum number of game-resolution transactions submitted per proposer tick.
@@ -59,11 +57,6 @@ pub struct ProposerConfig {
 
 impl ProposerConfig {
     pub(crate) fn validate(&self) -> Result<(), ProposerError> {
-        if self.block_interval == 0 {
-            return Err(ProposerError::InvalidConfig(
-                "block_interval must be greater than zero",
-            ));
-        }
         if self.poll_interval.is_zero() {
             return Err(ProposerError::InvalidConfig(
                 "poll_interval must be greater than zero",
@@ -81,7 +74,6 @@ impl ProposerConfig {
 impl Default for ProposerConfig {
     fn default() -> Self {
         Self {
-            block_interval: 6,
             poll_interval: Duration::from_secs(12),
             max_resolutions_per_tick: 1,
         }

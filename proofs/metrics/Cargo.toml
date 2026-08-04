@@ -1,0 +1,27 @@
+[package]
+name = "world-chain-proof-metrics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Shared metrics for World Chain proof services."
+
+[lints]
+workspace = true
+
+[dependencies]
+alloy-json-rpc.workspace = true
+alloy-primitives.workspace = true
+alloy-provider.workspace = true
+alloy-rpc-client = { workspace = true, features = ["reqwest"] }
+alloy-transport.workspace = true
+alloy-transport-http = { workspace = true, features = [
+    "reqwest",
+    "reqwest-rustls-tls",
+] }
+telemetry-batteries.workspace = true
+tower.workspace = true
+tracing.workspace = true
+url.workspace = true

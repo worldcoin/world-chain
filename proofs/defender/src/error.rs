@@ -1,6 +1,8 @@
-use alloy_primitives::TxHash;
+use alloy_primitives::{Address, TxHash};
+use alloy_provider::{MulticallError, PendingTransactionError, transport::RpcError};
+use alloy_transport::TransportErrorKind;
 use thiserror::Error;
-use world_chain_proofs::{ConsensusError, InvalidationReasonError, RootStateError};
+use world_chain_proofs::LineageError;
 
 /// Errors returned by the defender.
 #[derive(Debug, Error)]
@@ -9,14 +11,36 @@ pub enum DefenderError {
     #[error("invalid defender config: {0}")]
     InvalidConfig(&'static str),
     /// Contract call or transaction failure.
-    #[error("contract error: {0}")]
-    Contract(String),
     #[error(transparent)]
-    InvalidRootState(#[from] RootStateError),
+    Contract(#[from] alloy_contract::Error),
+    /// A transaction failed while waiting for its receipt.
     #[error(transparent)]
-    InvalidInvalidationReason(#[from] InvalidationReasonError),
+    PendingTransaction(#[from] PendingTransactionError),
+    /// A multicall request failed.
     #[error(transparent)]
-    OutputRoot(#[from] ConsensusError),
+    Multicall(#[from] MulticallError),
+    /// An Alloy JSON-RPC request failed.
+    #[error(transparent)]
+    AlloyJsonRpc(#[from] RpcError<TransportErrorKind>),
+    /// Prover response could not be encoded for its on-chain verifier.
+    #[error("invalid proof payload: {0}")]
+    ProofEncoding(String),
+    #[error(transparent)]
+    Lineage(#[from] LineageError),
     #[error("The submitProofLane transaction didn't execute succesfully: {0}")]
     Revert(TxHash),
+    #[error("Overflow error.")]
+    Overflow,
+    #[error("Invalid proof threshold {proof_threshold} for game {game}")]
+    InvalidProofThreshold { proof_threshold: u8, game: Address },
+}
+
+impl DefenderError {
+    /// Builds an [`AlloyJsonRpc`](Self::AlloyJsonRpc) error from a free-form message.
+    ///
+    /// Intended for test fakes that need an ad-hoc failure without constructing a full transport
+    /// error by hand.
+    pub fn message(message: impl AsRef<str>) -> Self {
+        Self::AlloyJsonRpc(TransportErrorKind::custom_str(message.as_ref()))
+    }
 }

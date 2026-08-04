@@ -40,6 +40,12 @@ enclave = [
     "dep:tokio-vsock",
     "dep:tracing-subscriber",
     "dep:world-chain-proof-kona-client-utils",
+    # On-chain registration (register::submit) — host-side L1 client.
+    "dep:alloy-network",
+    "dep:alloy-contract",
+    "dep:alloy-provider",
+    "dep:alloy-signer-local",
+    "dep:url",
 ]
 
 [dependencies]
@@ -87,11 +93,24 @@ world-chain-proof-kona-client-utils = { workspace = true, optional = true }
 # available to both the enclave-side signing code and the host-side
 # verification code in host.rs.)
 
+# On-chain registration (register module `submit` flow). Only used on Linux with the
+# `enclave` feature; optional + kept in the target table so non-Linux / non-enclave builds
+# don't pull them in.
+alloy-network = { workspace = true, optional = true }
+alloy-contract = { workspace = true, optional = true }
+alloy-provider = { workspace = true, features = [
+    "reqwest",
+    "reqwest-rustls-tls",
+], optional = true }
+alloy-signer-local = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+
 # Feature-gated bin support -------------------------------------------------
 tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
 rand = "0.8"
+rcgen = { version = "0.14.8", default-features = false, features = ["ring", "crypto"] }
 serde_json = { workspace = true }
 
 [[bin]]

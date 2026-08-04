@@ -13,18 +13,16 @@ use alloy_rpc_types_eth::BlockId;
 use async_trait::async_trait;
 use world_chain_proofs::{
     IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame,
-    InvalidationReasonError, MULTI_PROOF_GAME_TYPE, ResolutionStatus, RootState, RootStateError,
+    MULTI_PROOF_GAME_TYPE, ResolutionStatus, RootState,
 };
 
 /// Alloy-backed implementation of the challenger contract clients.
 ///
-/// Binds the stock OP Stack `DisputeGameFactory` and `AnchorStateRegistry`; WIP-1006 games are
-/// one game type among several on that factory, so every index-based read filters on
-/// [`MULTI_PROOF_GAME_TYPE`].
+/// Binds the stock OP Stack `DisputeGameFactory`. Since WIP-1006 is one of several game types,
+/// index-based reads filter on [`MULTI_PROOF_GAME_TYPE`].
 #[derive(Debug, Clone)]
 pub struct AlloyChallengerClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
-    anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
     confirmations: u64,
     provider: P,
 }
@@ -34,24 +32,14 @@ where
     P: Provider + Clone,
 {
     /// Creates an Alloy-backed contract client.
-    pub fn new(
-        provider: P,
-        factory_address: Address,
-        anchor_address: Address,
-        confirmations: u64,
-    ) -> Self {
+    pub fn new(provider: P, factory_address: Address, confirmations: u64) -> Self {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
-            provider.clone(),
-        );
-        let anchor = IAnchorStateRegistry::IAnchorStateRegistryInstance::new(
-            anchor_address,
             provider.clone(),
         );
 
         Self {
             factory,
-            anchor,
             confirmations,
             provider,
         }
@@ -67,9 +55,8 @@ where
             .gameCount()
             .block(BlockId::finalized())
             .call()
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
-        u256_to_u64(count, "gameCount")
+            .await?;
+        u256_to_u64(count)
     }
 
     /// Resolves the WIP-1006 game at a factory index, skipping other game types.
@@ -79,8 +66,7 @@ where
             .gameAtIndex(U256::from(index))
             .block(BlockId::finalized())
             .call()
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+            .await?;
 
         Ok((entry.gameType == MULTI_PROOF_GAME_TYPE).then_some(entry.proxy))
     }
@@ -89,28 +75,11 @@ where
         &self,
         address: Address,
     ) -> Result<ResolutionStatus, ChallengerError> {
-        let result = self
-            .game(address)
-            .resolutionStatus()
-            .call()
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
-        let root_state = result
-            .outcome
-            .try_into()
-            .map_err(|error: RootStateError| ChallengerError::Contract(error.to_string()))?;
-        let invalidation_reason =
-            result
-                .reason
-                .try_into()
-                .map_err(|error: InvalidationReasonError| {
-                    ChallengerError::Contract(error.to_string())
-                })?;
-
+        let result = self.game(address).resolutionStatus().call().await?;
         Ok(ResolutionStatus {
             resolvable: result.resolvable,
-            root_state,
-            invalidation_reason,
+            root_state: result.outcome.try_into()?,
+            invalidation_reason: result.reason.try_into()?,
         })
     }
 
@@ -119,11 +88,7 @@ where
         address: Address,
         recipient: Address,
     ) -> Result<U256, ChallengerError> {
-        self.game(address)
-            .credit(recipient)
-            .call()
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))
+        Ok(self.game(address).credit(recipient).call().await?)
     }
 
     async fn read_pending_withdrawal(
@@ -131,39 +96,25 @@ where
         address: Address,
         recipient: Address,
     ) -> Result<PendingWithdrawal, ChallengerError> {
-        let weth_address = self
-            .game(address)
-            .weth()
-            .call()
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+        let weth_address = self.game(address).weth().call().await?;
         let weth = IDelayedWETH::IDelayedWETHInstance::new(weth_address, self.provider.clone());
 
         let (pending, delay) = tokio::try_join!(
-            async {
-                weth.withdrawals(address, recipient)
-                    .call()
-                    .await
-                    .map_err(|error| ChallengerError::Contract(error.to_string()))
-            },
-            async {
-                weth.delay()
-                    .call()
-                    .await
-                    .map_err(|error| ChallengerError::Contract(error.to_string()))
-            }
+            async { weth.withdrawals(address, recipient).call().await },
+            async { weth.delay().call().await },
         )?;
 
         if pending.amount.is_zero() {
             return Ok(PendingWithdrawal::default());
         }
-        let unlock_at = pending.timestamp.checked_add(delay).ok_or_else(|| {
-            ChallengerError::Contract("DelayedWETH unlock time overflows".to_string())
-        })?;
+        let unlock_at = pending
+            .timestamp
+            .checked_add(delay)
+            .ok_or(ChallengerError::Overflow)?;
 
         Ok(PendingWithdrawal {
             amount: pending.amount,
-            unlock_at: u256_to_u64(unlock_at, "DelayedWETH unlock time")?,
+            unlock_at: u256_to_u64(unlock_at)?,
         })
     }
 }
@@ -181,56 +132,27 @@ where
         self.read_game_address(index).await
     }
 
-    async fn game_created_at(&self, index: u64) -> Result<u64, ChallengerError> {
-        self.factory
-            .gameAtIndex(U256::from(index))
-            .block(BlockId::finalized())
-            .call()
-            .await
-            .map(|entry| entry.timestamp)
-            .map_err(|error| ChallengerError::Contract(error.to_string()))
-    }
-
     async fn game_metadata(&self, address: Address) -> Result<GameMetadata, ChallengerError> {
         let game = self.game(address);
-        let (root_claim, l2_block_number) = tokio::try_join!(
-            async {
-                game.rootClaim()
-                    .call()
-                    .await
-                    .map_err(|error| ChallengerError::Contract(error.to_string()))
-            },
-            async {
-                game.l2BlockNumber()
-                    .call()
-                    .await
-                    .map_err(|error| ChallengerError::Contract(error.to_string()))
-            }
-        )?;
+        let (root_claim, l2_block_number) =
+            tokio::try_join!(async { game.rootClaim().call().await }, async {
+                game.l2BlockNumber().call().await
+            },)?;
 
         Ok(GameMetadata {
             address,
             root_claim,
-            l2_block_number: u256_to_u64(l2_block_number, "l2BlockNumber")?,
+            l2_block_number: u256_to_u64(l2_block_number)?,
         })
     }
 
     async fn root_state(&self, address: Address) -> Result<RootState, ChallengerError> {
-        let raw = self
-            .game(address)
-            .state()
-            .call()
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+        let raw = self.game(address).state().call().await?;
         raw.try_into().map_err(Into::into)
     }
 
     async fn challenge_deadline(&self, address: Address) -> Result<u64, ChallengerError> {
-        self.game(address)
-            .challengeDeadline()
-            .call()
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))
+        Ok(self.game(address).challengeDeadline().call().await?)
     }
 
     async fn submit_challenge(
@@ -241,24 +163,15 @@ where
         // it is read per game: a re-registered implementation would otherwise make every
         // challenge revert with `IncorrectBondAmount`.
         let game = self.game(address);
-        let challenger_bond = game
-            .challengerBond()
-            .call()
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+        let challenger_bond = game.challengerBond().call().await?;
 
-        let pending = game
-            .challenge()
-            .value(challenger_bond)
-            .send()
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+        let pending = game.challenge().value(challenger_bond).send().await?;
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
             .get_receipt()
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+            .await?;
+        world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
         if !receipt.status() {
             return Err(ChallengerError::Revert(tx_hash));
         }
@@ -279,18 +192,14 @@ where
     }
 
     async fn resolve(&self, address: Address) -> Result<ResolveSubmission, ChallengerError> {
-        let pending = self
-            .game(address)
-            .resolve()
-            .send()
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+        let pending = self.game(address).resolve().send().await?;
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
             .get_receipt()
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+            .await?;
+        world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
+
         if !receipt.status() {
             return Err(ChallengerError::Revert(tx_hash));
         }
@@ -316,19 +225,16 @@ where
     }
 
     async fn game_challenger(&self, address: Address) -> Result<Address, ChallengerError> {
-        self.game(address)
-            .challenger()
-            .call()
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))
+        Ok(self.game(address).challenger().call().await?)
     }
 
     async fn is_game_finalized(&self, address: Address) -> Result<bool, ChallengerError> {
-        self.anchor
-            .isGameFinalized(address)
-            .call()
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))
+        let anchor_address = self.game(address).anchorStateRegistry().call().await?;
+        let anchor = IAnchorStateRegistry::IAnchorStateRegistryInstance::new(
+            anchor_address,
+            self.provider.clone(),
+        );
+        Ok(anchor.isGameFinalized(address).call().await?)
     }
 
     async fn credit(&self, address: Address) -> Result<U256, ChallengerError> {
@@ -346,10 +252,9 @@ where
     async fn latest_l1_timestamp(&self) -> Result<u64, ChallengerError> {
         self.provider
             .get_block_by_number(BlockNumberOrTag::Latest)
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?
+            .await?
             .map(|block| block.header.timestamp())
-            .ok_or_else(|| ChallengerError::Contract("latest L1 block is unavailable".into()))
+            .ok_or(ChallengerError::UnavailableLatestL1Block)
     }
 
     async fn claim_credit(&self, address: Address) -> Result<ClaimSubmission, ChallengerError> {
@@ -363,18 +268,14 @@ where
             PendingWithdrawal::default()
         };
 
-        let pending_tx = self
-            .game(address)
-            .claimCredit(recipient)
-            .send()
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+        let pending_tx = self.game(address).claimCredit(recipient).send().await?;
         let tx_hash = *pending_tx.tx_hash();
         let receipt = pending_tx
             .with_required_confirmations(self.confirmations)
             .get_receipt()
-            .await
-            .map_err(|error| ChallengerError::Contract(error.to_string()))?;
+            .await?;
+        world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
+
         if !receipt.status() {
             return Err(ChallengerError::Revert(tx_hash));
         }
@@ -395,8 +296,6 @@ where
     }
 }
 
-fn u256_to_u64(value: U256, field: &'static str) -> Result<u64, ChallengerError> {
-    value
-        .try_into()
-        .map_err(|_| ChallengerError::Contract(format!("{field} overflows u64")))
+fn u256_to_u64(value: U256) -> Result<u64, ChallengerError> {
+    value.try_into().map_err(|_| ChallengerError::Overflow)
 }

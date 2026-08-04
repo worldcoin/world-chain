@@ -1,7 +1,8 @@
 use alloy_primitives::TxHash;
+use alloy_provider::{MulticallError, PendingTransactionError, transport::RpcError};
+use alloy_transport::TransportErrorKind;
 use thiserror::Error;
-use world_chain_proofs::ConsensusError;
-use world_chain_prover_service::ProofRequestError;
+use world_chain_proofs::LineageError;
 
 /// Errors returned by the proposer.
 #[derive(Debug, Error)]
@@ -9,27 +10,36 @@ pub enum ProposerError {
     /// Invalid proposer configuration.
     #[error("invalid proposer config: {0}")]
     InvalidConfig(&'static str),
-    /// Adding `block_interval` overflowed `u64`.
-    #[error("l2 block number overflow: parent {parent_block} + interval {block_interval}")]
-    BlockNumberOverflow {
-        /// Parent L2 block number.
-        parent_block: u64,
-        /// Configured block interval.
-        block_interval: u64,
-    },
     /// Contract call or transaction failure.
-    #[error("contract error: {0}")]
-    Contract(String),
-    #[error("L1 finalized block not found")]
-    FinalizedBlockNotFound,
-    /// Prover-service request failure.
     #[error(transparent)]
-    ProofRequest(#[from] ProofRequestError),
-    /// Prover-service returned data inconsistent with the requested proof.
-    #[error("invalid proof response: {0}")]
-    InvalidProofResponse(String),
+    Contract(#[from] alloy_contract::Error),
+    /// A transaction failed while waiting for its receipt.
     #[error(transparent)]
-    OutputRoot(#[from] ConsensusError),
+    PendingTransaction(#[from] PendingTransactionError),
+    /// A multicall request failed.
+    #[error(transparent)]
+    Multicall(#[from] MulticallError),
+    /// An Alloy JSON-RPC request failed.
+    #[error(transparent)]
+    AlloyJsonRpc(#[from] RpcError<TransportErrorKind>),
+    #[error(transparent)]
+    Lineage(#[from] LineageError),
     #[error("The proposal transaction didn't execute succesfully: {0}")]
     Revert(TxHash),
+    #[error("Overflow error.")]
+    Overflow,
+    #[error("Latest L1 block is unavailable.")]
+    UnavailableLatestL1Block,
+    #[error("DisputeGameCreated event missing from proposal transaction {0}")]
+    MissingProposalEvent(TxHash),
+}
+
+impl ProposerError {
+    /// Builds an [`AlloyJsonRpc`](Self::AlloyJsonRpc) error from a free-form message.
+    ///
+    /// Intended for test fakes that need an ad-hoc failure without constructing a full transport
+    /// error by hand.
+    pub fn message(message: impl AsRef<str>) -> Self {
+        Self::AlloyJsonRpc(TransportErrorKind::custom_str(message.as_ref()))
+    }
 }

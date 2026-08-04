@@ -11,7 +11,7 @@ mod types;
 
 // re-exports
 pub use alloy::AlloyDefenderClient;
-pub use config::{DEFAULT_GAME_SCAN_LOOKBACK, DEFAULT_L1_TX_CONFIRMATIONS, DefenderConfig};
+pub use config::{DEFAULT_L1_TX_CONFIRMATIONS, DefenderConfig};
 pub use defender::WorldChainDefender;
 pub use error::DefenderError;
 pub use traits::DefenderClient;

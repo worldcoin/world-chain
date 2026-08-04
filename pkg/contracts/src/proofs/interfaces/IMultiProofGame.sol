@@ -28,6 +28,8 @@ interface IMultiProofGame is IDisputeGame {
         uint64 proofPeriod;
         uint256 proposerBond;
         uint256 challengerBond;
+        address protocolFeeRecipient;
+        uint256 challengeFee;
         uint8 proofThreshold;
         IWorldChainProofVerifier validityProofVerifier;
         IWorldChainProofVerifier teeVerifier;
@@ -76,6 +78,9 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Emitted when a staked challenger disputes the proposal.
     event Challenged(address indexed challenger, uint64 proofDeadline);
 
+    /// @notice Emitted when a challenge assigns its non-refundable fee to the protocol.
+    event ChallengeFeeCharged(address indexed recipient, uint256 amount);
+
     /// @notice Emitted when a proof lane is accepted for the first time.
     event ProofLaneSupported(ProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
 
@@ -104,6 +109,8 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Hash of the deployment's domain parameters.
     function domainHash() external view returns (bytes32);
 
+    /// @notice Parent reference required for a proposal that directly extends the current anchor.
+
     /// @notice Seconds a proposal may be challenged after creation.
     function challengePeriod() external view returns (uint64);
 
@@ -115,6 +122,12 @@ interface IMultiProofGame is IDisputeGame {
 
     /// @notice Bond required to challenge a proposal.
     function challengerBond() external view returns (uint256);
+
+    /// @notice Protocol-controlled recipient of proof-timeout forfeitures and challenge fees.
+    function protocolFeeRecipient() external view returns (address);
+
+    /// @notice Non-refundable portion of the challenger bond charged whenever a game is challenged.
+    function challengeFee() external view returns (uint256);
 
     /// @notice Verifier backing the validity-proof lane.
     function validityProofVerifier() external view returns (IWorldChainProofVerifier);
@@ -151,7 +164,7 @@ interface IMultiProofGame is IDisputeGame {
     ///         out on proofs or to have been created before this game type became respected.
     function attempt() external view returns (uint256);
 
-    /// @notice Parent game, or the anchor registry when the proposal starts from its current root.
+    /// @notice Parent game, or the anchor registry when no compatible anchor game exists.
     function parentRef() external view returns (address);
 
     /// @notice Output root this proposal starts from.
@@ -217,7 +230,9 @@ interface IMultiProofGame is IDisputeGame {
     ///         exactly `challengerBond`.
     function challenge() external payable;
 
-    /// @notice Submits `proof` for `laneId`. No-ops when the lane already counts.
+    /// @notice Submits `proof` for `laneId`. Before a challenge, any accepted lane satisfies the
+    ///         initial proof requirement; after a challenge, distinct lanes count toward the
+    ///         configured threshold. No-ops when the lane already counts.
     function submitProofLane(uint8 laneId, bytes calldata proof) external;
 
     ////////////////////////////////////////////////////////////////

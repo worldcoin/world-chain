@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {Script} from "forge-std/Script.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import {GameTypes} from "../../src/proofs/GameTypes.sol";
 import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
@@ -9,8 +10,6 @@ import {MultiProofGame} from "../../src/proofs/MultiProofGame.sol";
 import {IMultiProofGame} from "../../src/proofs/interfaces/IMultiProofGame.sol";
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
 import {IWorldChainStakingRegistry} from "../../src/proofs/interfaces/IWorldChainStakingRegistry.sol";
-import {MockRootIdVerifier} from "../../src/proofs/mocks/MockRootIdVerifier.sol";
-import {MockStakingRegistry} from "../../src/proofs/mocks/MockStakingRegistry.sol";
 
 import {GameType} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
@@ -23,26 +22,36 @@ import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 /// @notice Registers the World Chain proof-system game on the stock OP Stack dispute
 ///         infrastructure deployed by op-deployer.
 ///
-/// Deploys: mock verifiers + staking registry (devnet), a DelayedWETH proxy dedicated to the
-/// World Chain game type, and the `MultiProofGame` implementation. Then registers
-/// the implementation on the existing `DisputeGameFactory` (`setImplementation` + `setInitBond`)
-/// and optionally flips the `AnchorStateRegistry`'s respected game type — the withdrawal
-/// cutover switch. `setImplementation(WC_GAME_TYPE, address(0))` is the kill switch: it stops
-/// new game creation without touching in-flight games.
+/// Deploys a DelayedWETH proxy dedicated to the World Chain game type and the
+/// `MultiProofGame` implementation, then registers that implementation on the existing
+/// `DisputeGameFactory` (`setImplementation` + `setInitBond`). Activation is deliberately
+/// separate: run `ActivateProofSystem.s.sol` after deployment records and offchain inputs are
+/// ready. This script never changes the respected game type or retirement timestamp.
+/// `setImplementation(WC_GAME_TYPE, address(0))` is the kill switch: it stops new game
+/// creation without touching in-flight games.
+///
+/// The three proof-lane verifiers and the staking registry are **inputs**, not outputs: this
+/// script never deploys them. Every one is a required env address and must already hold code.
+/// That is deliberate — a script that can mint its own verifiers can silently register a game
+/// type that accepts any proof. Supply real contracts:
+///
+///   `VALIDITY_PROOF_VERIFIER`   — e.g. `SP1ValidityVerifier`
+///   `TEE_VERIFIER`              — e.g. `NitroProofVerifier` (see `DeployNitro.s.sol`)
+///   `SECURITY_COUNCIL_VERIFIER` — council-controlled attestation verifier
+///   `STAKING_REGISTRY`          — `IWorldChainStakingRegistry` implementation
+///
+/// For a local devnet, deploy the test doubles with `DeployProofMocks.s.sol` first and pass
+/// its output addresses in. That keeps the choice to run against mocks explicit and auditable
+/// at the call site instead of hidden inside this script.
 ///
 /// Requires `just build-opstack` first: the 0.8.15 OP implementations (DelayedWETH,
 /// Proxy, ProxyAdmin) deploy from the `opstack/out` artifacts via `deployCode`.
-///
-/// @dev This script is devnet-only: it deliberately deploys mock proof verifiers and must not
-///      be used to activate a production withdrawal game type.
 contract DeployProofSystem is Script {
+    using SafeCast for uint256;
+
     struct Deployment {
         IDisputeGameFactory disputeGameFactory;
         IAnchorStateRegistry anchorStateRegistry;
-        MockRootIdVerifier validityVerifier;
-        MockRootIdVerifier teeVerifier;
-        MockRootIdVerifier councilVerifier;
-        MockStakingRegistry staking;
         IProxyAdmin wethProxyAdmin;
         IDelayedWETH weth;
         MultiProofGame gameImpl;
@@ -50,11 +59,20 @@ contract DeployProofSystem is Script {
 
     struct Config {
         uint256 privateKey;
-        address challenger;
         uint256 l2ChainId;
         bytes32 rollupConfigHash;
         uint256 blockInterval;
+        uint64 challengePeriod;
+        uint64 proofPeriod;
+        uint256 proposerBond;
+        uint256 challengerBond;
         uint8 proofThreshold;
+        address protocolFeeRecipient;
+        uint256 challengeFee;
+        IWorldChainProofVerifier validityProofVerifier;
+        IWorldChainProofVerifier teeVerifier;
+        IWorldChainProofVerifier securityCouncil;
+        IWorldChainStakingRegistry stakingRegistry;
         IDisputeGameFactory disputeGameFactory;
         IAnchorStateRegistry anchorStateRegistry;
         ISystemConfig systemConfig;
@@ -62,14 +80,14 @@ contract DeployProofSystem is Script {
         uint256 delayedWethDelay;
         uint256 proxyAdminOwnerKey;
         uint256 dgfOwnerKey;
-        uint256 guardianKey;
-        bool setRespectedGameType;
     }
 
-    uint64 internal constant CHALLENGE_PERIOD = 1 days;
-    uint64 internal constant PROOF_PERIOD = 7 days;
-    uint256 internal constant PROPOSER_BOND = 1 ether;
-    uint256 internal constant CHALLENGER_BOND = 0.1 ether;
+    uint64 internal constant DEFAULT_CHALLENGE_PERIOD = 1 days;
+    uint64 internal constant DEFAULT_PROOF_PERIOD = 7 days;
+    uint256 internal constant DEFAULT_BLOCK_INTERVAL = 450;
+    uint256 internal constant DEFAULT_PROPOSER_BOND = 0.01 ether;
+    uint256 internal constant DEFAULT_CHALLENGER_BOND = 0.001 ether;
+    uint256 internal constant DEFAULT_CHALLENGE_FEE = 0.0001 ether;
 
     function run() external returns (Deployment memory deployment) {
         Config memory config = _readConfig();
@@ -77,16 +95,9 @@ contract DeployProofSystem is Script {
         deployment.disputeGameFactory = config.disputeGameFactory;
         deployment.anchorStateRegistry = config.anchorStateRegistry;
 
-        // 1. Periphery + DelayedWETH + game implementation, from the deployer key.
+        // 1. DelayedWETH + game implementation, from the deployer key. Verifiers and the
+        // staking registry are pre-existing inputs validated in `_validateConfig`.
         vm.startBroadcast(config.privateKey);
-        deployment.staking = new MockStakingRegistry();
-        deployment.validityVerifier = new MockRootIdVerifier(false);
-        deployment.teeVerifier = new MockRootIdVerifier(false);
-        deployment.councilVerifier = new MockRootIdVerifier(false);
-        deployment.staking.setStaked(vm.addr(config.privateKey), true);
-        if (config.challenger != address(0)) {
-            deployment.staking.setStaked(config.challenger, true);
-        }
 
         // The dedicated DelayedWETH proxy is administered by the chain's existing ProxyAdmin.
         deployment.wethProxyAdmin = config.proxyAdmin;
@@ -115,7 +126,7 @@ contract DeployProofSystem is Script {
         vm.startBroadcast(config.dgfOwnerKey);
         config.disputeGameFactory
             .setImplementation(GameTypes.MULTI_PROOF_GAME_TYPE, IDisputeGame(address(deployment.gameImpl)), hex"");
-        config.disputeGameFactory.setInitBond(GameTypes.MULTI_PROOF_GAME_TYPE, PROPOSER_BOND);
+        config.disputeGameFactory.setInitBond(GameTypes.MULTI_PROOF_GAME_TYPE, config.proposerBond);
         vm.stopBroadcast();
 
         require(
@@ -132,27 +143,27 @@ contract DeployProofSystem is Script {
             "DeployProofSystem: init bond does not match proposer bond"
         );
 
-        // 3. Optional cutover: make the WC game type the respected game type (guardian).
-        if (config.setRespectedGameType) {
-            vm.startBroadcast(config.guardianKey);
-            config.anchorStateRegistry.setRespectedGameType(GameTypes.MULTI_PROOF_GAME_TYPE);
-            vm.stopBroadcast();
-            require(
-                config.anchorStateRegistry.respectedGameType().raw() == GameTypes.MULTI_PROOF_GAME_TYPE.raw(),
-                "DeployProofSystem: respected game type not activated"
-            );
-        }
-
         _writeDeployment(deployment, config);
     }
 
     function _readConfig() internal view returns (Config memory config) {
         config.privateKey = vm.envUint("PRIVATE_KEY");
-        config.challenger = vm.envOr("WORLD_CHALLENGER_ADDRESS", address(0));
         config.l2ChainId = vm.envUint("WORLD_CHAIN_L2_CHAIN_ID");
         config.rollupConfigHash = vm.envBytes32("ROLLUP_CONFIG_HASH");
-        config.blockInterval = vm.envOr("PROOF_SYSTEM_BLOCK_INTERVAL", uint256(10));
-        config.proofThreshold = uint8(vm.envOr("PROOF_THRESHOLD", uint256(ProofLib.PROOF_THRESHOLD)));
+        config.blockInterval = vm.envOr("PROOF_SYSTEM_BLOCK_INTERVAL", DEFAULT_BLOCK_INTERVAL);
+        config.challengePeriod = vm.envOr("CHALLENGE_PERIOD", uint256(DEFAULT_CHALLENGE_PERIOD)).toUint64();
+        config.proofPeriod = vm.envOr("PROOF_PERIOD", uint256(DEFAULT_PROOF_PERIOD)).toUint64();
+        config.proposerBond = vm.envOr("PROPOSER_BOND", DEFAULT_PROPOSER_BOND);
+        config.challengerBond = vm.envOr("CHALLENGER_BOND", DEFAULT_CHALLENGER_BOND);
+        config.proofThreshold = vm.envOr("PROOF_THRESHOLD", uint256(ProofLib.PROOF_THRESHOLD)).toUint8();
+        // Required: there is no sane default owner for challenge-fee proceeds.
+        config.protocolFeeRecipient = vm.envAddress("PROTOCOL_FEE_RECIPIENT");
+        config.challengeFee = vm.envOr("CHALLENGE_FEE", DEFAULT_CHALLENGE_FEE);
+        // Proof lanes and staking: required inputs, never deployed here.
+        config.validityProofVerifier = IWorldChainProofVerifier(vm.envAddress("VALIDITY_PROOF_VERIFIER"));
+        config.teeVerifier = IWorldChainProofVerifier(vm.envAddress("TEE_VERIFIER"));
+        config.securityCouncil = IWorldChainProofVerifier(vm.envAddress("SECURITY_COUNCIL_VERIFIER"));
+        config.stakingRegistry = IWorldChainStakingRegistry(vm.envAddress("STAKING_REGISTRY"));
         config.disputeGameFactory = IDisputeGameFactory(vm.envAddress("DISPUTE_GAME_FACTORY"));
         config.anchorStateRegistry = IAnchorStateRegistry(vm.envAddress("ANCHOR_STATE_REGISTRY"));
         config.systemConfig = ISystemConfig(vm.envAddress("SYSTEM_CONFIG"));
@@ -160,11 +171,31 @@ contract DeployProofSystem is Script {
         config.delayedWethDelay = vm.envOr("DELAYED_WETH_DELAY", uint256(300));
         config.proxyAdminOwnerKey = vm.envUint("OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY");
         config.dgfOwnerKey = vm.envUint("DGF_OWNER_KEY");
-        config.guardianKey = vm.envUint("GUARDIAN_KEY");
-        config.setRespectedGameType = vm.envOr("SET_RESPECTED_GAME_TYPE", false);
+    }
+
+    /// @dev A zero or codeless verifier would make the whole lane unverifiable, and
+    ///      `MultiProofGame` only rejects the zero address — so check for code here, where the
+    ///      failure is a clear deploy-time revert rather than a game that can never resolve.
+    function _requireContract(address target, string memory label) internal view {
+        require(target != address(0), string.concat("DeployProofSystem: ", label, " required"));
+        require(target.code.length > 0, string.concat("DeployProofSystem: ", label, " has no code"));
     }
 
     function _validateConfig(Config memory config) internal view {
+        _requireContract(address(config.validityProofVerifier), "VALIDITY_PROOF_VERIFIER");
+        _requireContract(address(config.teeVerifier), "TEE_VERIFIER");
+        _requireContract(address(config.securityCouncil), "SECURITY_COUNCIL_VERIFIER");
+        _requireContract(address(config.stakingRegistry), "STAKING_REGISTRY");
+
+        // The 2-of-3 threshold only means anything if the lanes are independent: pointing two
+        // lanes at one verifier lets a single party satisfy both and resolve on its own.
+        require(
+            address(config.validityProofVerifier) != address(config.teeVerifier)
+                && address(config.validityProofVerifier) != address(config.securityCouncil)
+                && address(config.teeVerifier) != address(config.securityCouncil),
+            "DeployProofSystem: proof lane verifiers must be distinct"
+        );
+
         require(
             address(config.anchorStateRegistry.disputeGameFactory()) == address(config.disputeGameFactory),
             "DeployProofSystem: ASR factory mismatch"
@@ -176,9 +207,23 @@ contract DeployProofSystem is Script {
         require(config.systemConfig.l2ChainId() == config.l2ChainId, "DeployProofSystem: L2 chain ID mismatch");
         require(config.dgfOwnerKey != 0, "DeployProofSystem: DGF owner key required");
         require(config.proxyAdminOwnerKey != 0, "DeployProofSystem: ProxyAdmin owner key required");
-        if (config.setRespectedGameType) {
-            require(config.guardianKey != 0, "DeployProofSystem: guardian key required for cutover");
-        }
+        require(
+            vm.addr(config.dgfOwnerKey) == config.disputeGameFactory.owner(),
+            "DeployProofSystem: DGF owner key mismatch"
+        );
+        require(
+            vm.addr(config.proxyAdminOwnerKey) == config.proxyAdmin.owner(),
+            "DeployProofSystem: ProxyAdmin owner key mismatch"
+        );
+        require(config.protocolFeeRecipient != address(0), "DeployProofSystem: protocol fee recipient required");
+        require(config.blockInterval > 0, "DeployProofSystem: block interval required");
+        require(config.challengePeriod > 0, "DeployProofSystem: challenge period required");
+        require(config.proofPeriod > config.challengePeriod, "DeployProofSystem: proof period must exceed challenge");
+        require(config.proposerBond > 0, "DeployProofSystem: proposer bond required");
+        require(config.challengerBond > 0, "DeployProofSystem: challenger bond required");
+        require(config.challengeFee > 0, "DeployProofSystem: challenge fee required");
+        require(config.challengeFee <= config.challengerBond, "DeployProofSystem: challenge fee exceeds bond");
+        require(config.challengeFee < config.proposerBond, "DeployProofSystem: proposer bond must exceed challenge fee");
     }
 
     function _gameConfig(Deployment memory deployment, Config memory config)
@@ -193,15 +238,17 @@ contract DeployProofSystem is Script {
                 rollupConfigHash: config.rollupConfigHash,
                 blockInterval: config.blockInterval
             }),
-            challengePeriod: CHALLENGE_PERIOD,
-            proofPeriod: PROOF_PERIOD,
-            proposerBond: PROPOSER_BOND,
-            challengerBond: CHALLENGER_BOND,
+            challengePeriod: config.challengePeriod,
+            proofPeriod: config.proofPeriod,
+            proposerBond: config.proposerBond,
+            challengerBond: config.challengerBond,
+            protocolFeeRecipient: config.protocolFeeRecipient,
+            challengeFee: config.challengeFee,
             proofThreshold: config.proofThreshold,
-            validityProofVerifier: IWorldChainProofVerifier(address(deployment.validityVerifier)),
-            teeVerifier: IWorldChainProofVerifier(address(deployment.teeVerifier)),
-            securityCouncil: IWorldChainProofVerifier(address(deployment.councilVerifier)),
-            stakingRegistry: IWorldChainStakingRegistry(address(deployment.staking)),
+            validityProofVerifier: config.validityProofVerifier,
+            teeVerifier: config.teeVerifier,
+            securityCouncil: config.securityCouncil,
+            stakingRegistry: config.stakingRegistry,
             disputeGameFactory: config.disputeGameFactory,
             anchorStateRegistry: config.anchorStateRegistry,
             weth: deployment.weth
@@ -216,11 +263,15 @@ contract DeployProofSystem is Script {
         // Legacy key names retained for offchain consumers: the "factory" is now the stock
         // DisputeGameFactory and the registry is the stock AnchorStateRegistry.
         vm.serializeAddress(root, "proofSystemFactory", address(deployment.disputeGameFactory));
+        vm.serializeAddress(root, "disputeGameFactory", address(deployment.disputeGameFactory));
         vm.serializeAddress(root, "anchorStateRegistry", address(deployment.anchorStateRegistry));
-        vm.serializeAddress(root, "validityProofVerifier", address(deployment.validityVerifier));
-        vm.serializeAddress(root, "teeVerifier", address(deployment.teeVerifier));
-        vm.serializeAddress(root, "securityCouncil", address(deployment.councilVerifier));
-        vm.serializeAddress(root, "stakingRegistry", address(deployment.staking));
+        vm.serializeAddress(root, "systemConfig", address(config.systemConfig));
+        vm.serializeAddress(root, "opChainProxyAdmin", address(config.proxyAdmin));
+        vm.serializeAddress(root, "validityProofVerifier", address(config.validityProofVerifier));
+        vm.serializeAddress(root, "teeVerifier", address(config.teeVerifier));
+        vm.serializeAddress(root, "securityCouncil", address(config.securityCouncil));
+        vm.serializeAddress(root, "stakingRegistry", address(config.stakingRegistry));
+        vm.serializeAddress(root, "protocolFeeRecipient", config.protocolFeeRecipient);
         vm.serializeAddress(root, "gameImplementation", address(deployment.gameImpl));
         vm.serializeAddress(root, "delayedWeth", address(deployment.weth));
         vm.serializeAddress(root, "delayedWethProxyAdmin", address(deployment.wethProxyAdmin));
@@ -229,6 +280,14 @@ contract DeployProofSystem is Script {
         vm.serializeUint(root, "l2ChainId", config.l2ChainId);
         vm.serializeUint(root, "proofSystemVersion", 1);
         vm.serializeUint(root, "blockInterval", config.blockInterval);
+        vm.serializeUint(root, "challengePeriod", config.challengePeriod);
+        vm.serializeUint(root, "proofPeriod", config.proofPeriod);
+        vm.serializeUint(root, "proposerBond", config.proposerBond);
+        vm.serializeUint(root, "challengerBond", config.challengerBond);
+        vm.serializeUint(root, "challengeFee", config.challengeFee);
+        vm.serializeUint(root, "delayedWethDelay", config.delayedWethDelay);
+        vm.serializeUint(root, "retirementTimestampAtDeployment", config.anchorStateRegistry.retirementTimestamp());
+        vm.serializeAddress(root, "anchorGameAtDeployment", address(config.anchorStateRegistry.anchorGame()));
         string memory json = vm.serializeUint(root, "proofThreshold", config.proofThreshold);
         vm.writeJson(json, out);
     }

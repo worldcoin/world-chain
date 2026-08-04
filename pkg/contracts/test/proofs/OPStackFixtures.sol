@@ -33,6 +33,7 @@ abstract contract OPStackFixtures is Test {
     uint64 internal constant PROOF_PERIOD = 7 days;
     uint256 internal constant PROPOSER_BOND = 1 ether;
     uint256 internal constant CHALLENGER_BOND = 0.1 ether;
+    uint256 internal constant CHALLENGE_FEE = 0.01 ether;
     uint8 internal constant PROOF_THRESHOLD = 2;
 
     uint256 internal constant CHAIN_ID = 480;
@@ -46,6 +47,7 @@ abstract contract OPStackFixtures is Test {
     address internal guardian = makeAddr("guardian");
     address internal proposer = makeAddr("proposer");
     address internal challengerAccount = makeAddr("challenger");
+    address internal protocolFeeRecipient = makeAddr("protocol-fee-recipient");
 
     MockSystemConfig internal systemConfig;
     IProxyAdmin internal proxyAdmin;
@@ -133,6 +135,8 @@ abstract contract OPStackFixtures is Test {
             proofPeriod: PROOF_PERIOD,
             proposerBond: PROPOSER_BOND,
             challengerBond: CHALLENGER_BOND,
+            protocolFeeRecipient: protocolFeeRecipient,
+            challengeFee: CHALLENGE_FEE,
             proofThreshold: PROOF_THRESHOLD,
             validityProofVerifier: IWorldChainProofVerifier(address(validityVerifier)),
             teeVerifier: IWorldChainProofVerifier(address(teeVerifier)),
@@ -193,7 +197,13 @@ abstract contract OPStackFixtures is Test {
     function _proposeAtAnchor() internal returns (MultiProofGame) {
         (, uint256 anchorBlock) = asr.getAnchorRoot();
         uint256 target = anchorBlock + BLOCK_INTERVAL;
-        return _propose(type(uint256).max, _rootClaimFor(target), target, 0);
+        IDisputeGame anchorGame = asr.anchorGame();
+        address parent = address(anchorGame) == address(0) ? address(asr) : address(anchorGame);
+        bytes memory extraData = _extraDataForParent(target, parent, 0);
+        vm.prank(proposer);
+        IDisputeGame proxy =
+            dgf.create{value: PROPOSER_BOND}(WC_GAME_TYPE, Claim.wrap(_rootClaimFor(target)), extraData);
+        return MultiProofGame(address(proxy));
     }
 
     /// @dev Creates a child chained onto the game at factory index `parentIndex`.
@@ -218,6 +228,9 @@ abstract contract OPStackFixtures is Test {
 
     /// @dev Warps past the challenge window and resolves (unchallenged path).
     function _resolveUnchallenged(MultiProofGame game) internal {
+        if (game.proofBitmap() == 0) {
+            game.submitProofLane(uint8(ProofLib.ProofLane.TEE_ATTESTATION), abi.encodePacked(game.rootId()));
+        }
         if (block.timestamp < game.challengeDeadline()) {
             vm.warp(game.challengeDeadline());
         }

@@ -153,6 +153,10 @@ fn request_id_is_deterministic() {
     assert_eq!(sp1.id(), request(ProofBackend::Sp1, 1).id());
     assert_ne!(sp1.id(), request(ProofBackend::Nitro, 1).id());
     assert_ne!(sp1.id(), request(ProofBackend::Sp1, 2).id());
+
+    let mut different_l1_head = sp1.clone();
+    different_l1_head.l1_head = B256::with_last_byte(0xff);
+    assert_ne!(sp1.id(), different_l1_head.id());
 }
 
 #[tokio::test]

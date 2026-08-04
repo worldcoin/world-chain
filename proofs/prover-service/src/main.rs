@@ -1,5 +1,5 @@
 //! `world-chain-prover-service` binary: hosts the proof-request JSON-RPC queue that sits
-//! between the defender (which requests proofs) and the SP1 workers (which lease and prove
+//! between the defender (which requests proofs) and the proof workers (which lease and prove
 //! them).
 //!
 //! Mirrors the in-process prover-service wired by the devnet harness
@@ -53,9 +53,9 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    let _telemetry_guard = telemetry_batteries::init()
+        .map_err(|error| anyhow::anyhow!("failed to initialize telemetry: {error:#}"))?;
+    world_chain_proof_metrics::describe_metrics();
 
     let cli = Cli::parse();
 

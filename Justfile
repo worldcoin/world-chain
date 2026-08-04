@@ -144,7 +144,12 @@ install *args='':
 #   Phase 2   proof-deploy-system         – Deploy proof system contracts
 #   Phase 3a  proof-certmanager-prewarm   – Pre-warm CertManager with CA certs
 #   Phase 3b  proof-approve-pcrs          – Approve PCR set on verifier
-#   Combined  proof-setup                 – Run all phases in sequence
+#   Phase 4   proof-register-key          – Register the enclave's generated key on-chain
+#                                            (run separately; NOT part of proof-setup)
+#   Combined  proof-setup                 – Run deploy phases 0a–3b in sequence (does NOT
+#                                            run Phase 4 — register the key afterwards with
+#                                            proof-register-key, or let the worker
+#                                            self-register via `nitro-worker run --auto-register`)
 #
 # Required env vars (varies by target):
 #   PRIVATE_KEY, OWNER, OWNER_KEY, L1_RPC_URL,
@@ -184,14 +189,14 @@ proof-rollup-config-hash env="alphanet":
     fi
     if [ -n "${L2_RPC_URL:-}" ]; then
         echo "Fetching rollup config from op-node at $L2_RPC_URL…" >&2
-        cargo run -p world-chain-prover-sp1 -- hash-rollup-config --l2-rpc "$L2_RPC_URL"
+        cargo run -p world-chain-prover-nitro -- hash-rollup-config --l2-rpc "$L2_RPC_URL"
     elif [ -n "${ROLLUP_CONFIG_URL:-}" ]; then
         echo "Downloading rollup config from $ROLLUP_CONFIG_URL…" >&2
         curl -sfSL "$ROLLUP_CONFIG_URL" -o /tmp/rollup.json
-        cargo run -p world-chain-prover-sp1 -- hash-rollup-config --rollup-config /tmp/rollup.json
+        cargo run -p world-chain-prover-nitro -- hash-rollup-config --rollup-config /tmp/rollup.json
     elif [ -n "${ROLLUP_CONFIG:-}" ]; then
         echo "Using local rollup config: $ROLLUP_CONFIG" >&2
-        cargo run -p world-chain-prover-sp1 -- hash-rollup-config --rollup-config "$ROLLUP_CONFIG"
+        cargo run -p world-chain-prover-nitro -- hash-rollup-config --rollup-config "$ROLLUP_CONFIG"
     else
         LOCAL_PORT=19545
         echo "Port-forwarding to $OP_NODE_POD in $OP_NODE_NAMESPACE (context: $KUBECONTEXT)…" >&2
@@ -217,7 +222,7 @@ proof-rollup-config-hash env="alphanet":
             echo "Error: port-forward to localhost:$LOCAL_PORT not ready after 10s" >&2
             exit 1
         fi
-        cargo run -p world-chain-prover-sp1 -- hash-rollup-config \
+        cargo run -p world-chain-prover-nitro -- hash-rollup-config \
             --l2-rpc "http://localhost:$LOCAL_PORT"
     fi
 
@@ -348,16 +353,51 @@ proof-deploy-nitro env="alphanet":
     : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
     : "${OWNER:?OWNER is required}"
     : "${L1_RPC_URL:?L1_RPC_URL is required}"
-    export NITRO_DEPLOYMENT_OUT="deployments/{{env}}-nitro.json"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
+    fi
+    # A dry run must not overwrite the record of the live Nitro stack: the simulated addresses
+    # are never deployed, and this file is what proof-approve-pcrs and proof-register-key read.
+    if [ -n "$BROADCAST_FLAG" ]; then
+        export NITRO_DEPLOYMENT_OUT="deployments/{{env}}-nitro.json"
+    else
+        export NITRO_DEPLOYMENT_OUT="deployments/{{env}}-nitro.dryrun.json"
     fi
     echo "Deploying Nitro contracts (deployment → $NITRO_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployNitro.s.sol:DeployNitro \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
 
-# Phase 2 – Deploy the proof system contracts.
+# Writes deployments/<env>-proof-mocks.json for proof-deploy-system to consume.
+# MockRootIdVerifier accepts every proof: never run this against a chain whose
+# withdrawals matter.
+# Phase 1b (devnet only) – Deploy the proof-lane test doubles (MOCKS, accept any proof).
+proof-deploy-mocks env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${PRIVATE_KEY:?PRIVATE_KEY is required}"
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    export WORLD_CHALLENGER_ADDRESS="${WORLD_CHALLENGER_ADDRESS:-}"
+    BROADCAST_FLAG=""
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    fi
+    # Same reasoning as proof-deploy-system: a dry run must not clobber a real record.
+    if [ -n "$BROADCAST_FLAG" ]; then
+        export PROOF_MOCKS_DEPLOYMENT_OUT="deployments/{{env}}-proof-mocks.json"
+    else
+        export PROOF_MOCKS_DEPLOYMENT_OUT="deployments/{{env}}-proof-mocks.dryrun.json"
+    fi
+    echo "WARNING: deploying MOCK proof verifiers (accept any proof) for '{{env}}'." >&2
+    echo "Deploying proof mocks (deployment → $PROOF_MOCKS_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
+    cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofMocks.s.sol:DeployProofMocks \
+        --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
+
+# The three proof-lane verifiers and the staking registry are required inputs — this
+# script never deploys them, and rejects addresses that hold no code or that repeat
+# across lanes. Point them at real contracts; for a devnet, run `proof-deploy-mocks`
+# first and read the four addresses out of deployments/<env>-proof-mocks.json.
+# Phase 2 – Deploy the proof system contracts and register game type 1006.
 proof-deploy-system env="alphanet":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -371,21 +411,60 @@ proof-deploy-system env="alphanet":
     : "${OP_CHAIN_PROXY_ADMIN:?OP_CHAIN_PROXY_ADMIN is required (op-deployer ProxyAdmin)}"
     : "${OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY:?OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY is required}"
     : "${DGF_OWNER_KEY:?DGF_OWNER_KEY is required}"
-    : "${GUARDIAN_KEY:?GUARDIAN_KEY is required}"
+    : "${PROTOCOL_FEE_RECIPIENT:?PROTOCOL_FEE_RECIPIENT is required (challenge-fee proceeds)}"
+    : "${VALIDITY_PROOF_VERIFIER:?VALIDITY_PROOF_VERIFIER is required (e.g. SP1ValidityVerifier; devnet: proof-deploy-mocks)}"
+    : "${TEE_VERIFIER:?TEE_VERIFIER is required (e.g. NitroProofVerifier from proof-deploy-nitro)}"
+    : "${SECURITY_COUNCIL_VERIFIER:?SECURITY_COUNCIL_VERIFIER is required (council attestation verifier)}"
+    : "${STAKING_REGISTRY:?STAKING_REGISTRY is required (IWorldChainStakingRegistry implementation)}"
     export PROOF_SYSTEM_BLOCK_INTERVAL="${PROOF_SYSTEM_BLOCK_INTERVAL:-10}"
     export PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL="${PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL:-5}"
+    export CHALLENGE_PERIOD="${CHALLENGE_PERIOD:-86400}"
+    export PROOF_PERIOD="${PROOF_PERIOD:-604800}"
+    export PROPOSER_BOND="${PROPOSER_BOND:-10000000000000000}"
+    export CHALLENGER_BOND="${CHALLENGER_BOND:-1000000000000000}"
+    export CHALLENGE_FEE="${CHALLENGE_FEE:-100000000000000}"
     export PROOF_THRESHOLD="${PROOF_THRESHOLD:-2}"
-    export WORLD_CHALLENGER_ADDRESS="${WORLD_CHALLENGER_ADDRESS:-}"
     export DELAYED_WETH_DELAY="${DELAYED_WETH_DELAY:-300}"
-    export SET_RESPECTED_GAME_TYPE="${SET_RESPECTED_GAME_TYPE:-true}"
-    export PROOF_SYSTEM_DEPLOYMENT_OUT="deployments/{{env}}-proof-system.json"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
     fi
+    echo "Proof-system parameters:" >&2
+    echo "  challenge period: $CHALLENGE_PERIOD seconds" >&2
+    echo "  proof period: $PROOF_PERIOD seconds" >&2
+    echo "  proposer bond: $PROPOSER_BOND wei" >&2
+    echo "  challenger bond: $CHALLENGER_BOND wei" >&2
+    echo "  challenge fee: $CHALLENGE_FEE wei" >&2
+    # A dry run must never overwrite the record of a live deployment: the simulated game and
+    # WETH addresses are never deployed, so writing them to the real path silently replaces a
+    # true record with fictional addresses.
+    if [ -n "$BROADCAST_FLAG" ]; then
+        export PROOF_SYSTEM_DEPLOYMENT_OUT="deployments/{{env}}-proof-system.json"
+    else
+        export PROOF_SYSTEM_DEPLOYMENT_OUT="deployments/{{env}}-proof-system.dryrun.json"
+    fi
     echo "Deploying proof system contracts (deployment → $PROOF_SYSTEM_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
+
+# Activate the registered WIP-1006 implementation after validating its wiring and current anchor.
+# Set REQUIRE_FRESH_ANCHOR=true during a clean chain bootstrap.
+proof-activate-system env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    : "${DISPUTE_GAME_FACTORY:?DISPUTE_GAME_FACTORY is required}"
+    : "${ANCHOR_STATE_REGISTRY:?ANCHOR_STATE_REGISTRY is required}"
+    : "${SYSTEM_CONFIG:?SYSTEM_CONFIG is required}"
+    : "${GUARDIAN_KEY:?GUARDIAN_KEY is required}"
+    export REQUIRE_FRESH_ANCHOR="${REQUIRE_FRESH_ANCHOR:-false}"
+    BROADCAST_FLAG=""
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    fi
+    echo "Activating WIP-1006 (require fresh anchor: $REQUIRE_FRESH_ANCHOR)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…" >&2
+    cd pkg/contracts && forge script scripts/devnet/ActivateProofSystem.s.sol:ActivateProofSystem \
+        --rpc-url "$L1_RPC_URL" --private-key "$GUARDIAN_KEY" $BROADCAST_FLAG --slow
 
 # Phase 3a – Pre-warm CertManager with the AWS Nitro CA cert chain.
 proof-certmanager-prewarm env="alphanet":
@@ -469,8 +548,92 @@ proof-approve-pcrs env="alphanet":
             "approvePCRSet(bytes32,bytes32,bytes32)" \
             "$(cast keccak "$PCR0")" "$(cast keccak "$PCR1")" "$(cast keccak "$PCR2")" \
             --rpc-url "$L1_RPC_URL" --private-key "$OWNER_KEY"
+        # Record which measurements are actually approved on this verifier. DeployNitro only
+        # writes addresses, so without this the deployment file cannot tell an approved
+        # allowlist from an empty one — and an unprovisioned verifier rejects every
+        # attestation with PCRSetNotApproved long after the deploy looks finished.
+        if [ -f "$DEPLOYMENTS_FILE" ]; then
+            TMP_DEPLOYMENTS="$(mktemp)"
+            jq --arg v "$NITRO_ATTESTATION_VERIFIER" --arg p0 "$PCR0" --arg p1 "$PCR1" --arg p2 "$PCR2" \
+                '.approvedPCRSets = ((.approvedPCRSets // []) + [{verifier: $v, pcr0: $p0, pcr1: $p1, pcr2: $p2}] | unique)' \
+                "$DEPLOYMENTS_FILE" > "$TMP_DEPLOYMENTS" && mv "$TMP_DEPLOYMENTS" "$DEPLOYMENTS_FILE"
+            echo "Recorded approved PCR set in $DEPLOYMENTS_FILE"
+        fi
     fi
     echo "PCR set approved."
+
+# Phase 4 – Register the enclave's generated signing key on-chain.
+#            Execs into the running nitro-worker pod (which has vsock access to the
+#            enclave) and runs `nitro-worker register`, which fetches a public-key
+#            attestation, builds the registerKey calldata (with P-384 hints) and submits
+#            it to NitroEnclaveKeyRegistry. Idempotent: a no-op if already registered.
+#            `registerKey` is NOT owner-gated, so any funded key works.
+#
+# Required: L1_RPC_URL, and a funding key via REGISTER_PRIVATE_KEY or PRIVATE_KEY.
+# Optional: NITRO_ENCLAVE_KEY_REGISTRY (else read from the {{env}}-nitro.json deployment),
+#           PCR0/PCR1/PCR2 (else host-side attestation checks are skipped; the on-chain
+#           verifier still enforces the approved PCR allowlist).
+proof-register-key env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f "scripts/proof-envs/{{env}}.env" ]; then
+        echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
+        exit 1
+    fi
+    source scripts/proof-envs/{{env}}.env
+    if [ -f "scripts/proof-envs/{{env}}.local.env" ]; then
+        source scripts/proof-envs/{{env}}.local.env
+    fi
+    # Resolve the registry address from the env or the deployment file.
+    DEPLOYMENTS_FILE="pkg/contracts/deployments/{{env}}-nitro.json"
+    if [ -z "${NITRO_ENCLAVE_KEY_REGISTRY:-}" ] && [ -f "$DEPLOYMENTS_FILE" ]; then
+        # `// empty` so a missing/null key yields "" (not the literal "null"), which the
+        # required-var check below then rejects with a clear message.
+        NITRO_ENCLAVE_KEY_REGISTRY=$(jq -r '.nitroEnclaveKeyRegistry // empty' "$DEPLOYMENTS_FILE")
+    fi
+    : "${NITRO_ENCLAVE_KEY_REGISTRY:?NITRO_ENCLAVE_KEY_REGISTRY is required (set it or run proof-deploy-nitro first)}"
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    REGISTER_KEY="${REGISTER_PRIVATE_KEY:-${PRIVATE_KEY:-}}"
+    : "${REGISTER_KEY:?set REGISTER_PRIVATE_KEY or PRIVATE_KEY (any funded key — registerKey is not owner-gated)}"
+    NITRO_POD=$(kubectl --context="$KUBECONTEXT" get pod \
+        -n "$PROOF_NAMESPACE" \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    if [ -z "$NITRO_POD" ]; then
+        echo "Error: no running pod found in namespace $PROOF_NAMESPACE" >&2
+        exit 1
+    fi
+    CONTAINER=$(kubectl --context="$KUBECONTEXT" get pod "$NITRO_POD" \
+        -n "$PROOF_NAMESPACE" \
+        -o jsonpath='{.spec.containers[0].name}')
+    # Check the container is actually Running before we exec (and pipe the funding key) in.
+    CONTAINER_STATE=$(kubectl --context="$KUBECONTEXT" get pod "$NITRO_POD" \
+        -n "$PROOF_NAMESPACE" \
+        -o jsonpath="{.status.containerStatuses[?(@.name==\"$CONTAINER\")].state.running}")
+    if [ -z "$CONTAINER_STATE" ]; then
+        echo "Error: container '$CONTAINER' in pod '$NITRO_POD' is not in Running state" >&2
+        kubectl --context="$KUBECONTEXT" get pod "$NITRO_POD" -n "$PROOF_NAMESPACE" >&2
+        exit 1
+    fi
+    ENCLAVE_CID=$(kubectl --context="$KUBECONTEXT" exec \
+        -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" \
+        -- cat /run/nitro-shared/enclave-cid 2>/dev/null || echo "16")
+    echo "Pod: $NITRO_POD  Container: $CONTAINER  CID: $ENCLAVE_CID  Registry: $NITRO_ENCLAVE_KEY_REGISTRY" >&2
+    # Pass everything (including the funding key) over STDIN rather than as `sh -c`
+    # arguments, so secrets never appear in the container argv / kubectl audit logs, and
+    # shell metacharacters in any value can't break out. Each value is single-quoted with
+    # embedded single quotes escaped.
+    shq() { printf "'%s'" "$(printf '%s' "${1:-}" | sed "s/'/'\\\\''/g")"; }
+    {
+        printf 'export ENCLAVE_CID=%s\n' "$(shq "$ENCLAVE_CID")"
+        printf 'export NITRO_ENCLAVE_KEY_REGISTRY=%s\n' "$(shq "$NITRO_ENCLAVE_KEY_REGISTRY")"
+        printf 'export L1_RPC_URL=%s\n' "$(shq "$L1_RPC_URL")"
+        printf 'export REGISTER_PRIVATE_KEY=%s\n' "$(shq "$REGISTER_KEY")"
+        if [ -n "${PCR0:-}" ]; then printf 'export PCR0=%s\n' "$(shq "$PCR0")"; fi
+        if [ -n "${PCR1:-}" ]; then printf 'export PCR1=%s\n' "$(shq "$PCR1")"; fi
+        if [ -n "${PCR2:-}" ]; then printf 'export PCR2=%s\n' "$(shq "$PCR2")"; fi
+        printf 'exec nitro-worker register\n'
+    } | kubectl --context="$KUBECONTEXT" exec -i \
+        -n "$PROOF_NAMESPACE" "$NITRO_POD" -c "$CONTAINER" -- sh -s
 
 # Combined – Run all proof system deployment phases in sequence.
 # Automatically wires contract addresses between steps. PCR0/1/2 are
@@ -503,6 +666,30 @@ proof-setup env="alphanet":
     echo "CERT_MANAGER_ADDRESS=$CERT_MANAGER_ADDRESS" >&2
     echo "NITRO_ATTESTATION_VERIFIER=$NITRO_ATTESTATION_VERIFIER" >&2
 
+    # The TEE lane uses the real Nitro verifier deployed in Step 1.
+    : "${TEE_VERIFIER:=$(jq -r '.nitroProofVerifier // empty' "$NITRO_DEPLOYMENTS")}"
+    export TEE_VERIFIER
+    : "${TEE_VERIFIER:?could not resolve nitroProofVerifier from $NITRO_DEPLOYMENTS}"
+    echo "TEE_VERIFIER=$TEE_VERIFIER (real Nitro verifier)" >&2
+
+    # Any lane without a real verifier falls back to a test double, deployed explicitly
+    # here rather than silently inside proof-deploy-system. Each unset lane is named so a
+    # mocked deployment is obvious in the log.
+    if [ -z "${VALIDITY_PROOF_VERIFIER:-}" ] || [ -z "${SECURITY_COUNCIL_VERIFIER:-}" ] \
+       || [ -z "${STAKING_REGISTRY:-}" ]; then
+        echo "=== Step 1b: Deploying test doubles for unset lanes ===" >&2
+        for v in VALIDITY_PROOF_VERIFIER SECURITY_COUNCIL_VERIFIER STAKING_REGISTRY; do
+            eval "val=\${$v:-}"
+            [ -z "$val" ] && echo "  MOCKED: $v" >&2
+        done
+        just dry_run={{dry_run}} proof-deploy-mocks {{env}}
+        MOCKS="pkg/contracts/deployments/{{env}}-proof-mocks.json"
+        : "${VALIDITY_PROOF_VERIFIER:=$(jq -r '.validityProofVerifier' "$MOCKS")}"
+        : "${SECURITY_COUNCIL_VERIFIER:=$(jq -r '.securityCouncil' "$MOCKS")}"
+        : "${STAKING_REGISTRY:=$(jq -r '.stakingRegistry' "$MOCKS")}"
+    fi
+    export VALIDITY_PROOF_VERIFIER SECURITY_COUNCIL_VERIFIER STAKING_REGISTRY
+
     echo "=== Step 2: Deploying proof system contracts ===" >&2
     just dry_run={{dry_run}} proof-deploy-system {{env}}
 
@@ -516,3 +703,8 @@ proof-setup env="alphanet":
 
     echo "=== Step 3b: Approving PCR set ===" >&2
     just dry_run={{dry_run}} proof-approve-pcrs {{env}}
+
+    echo "=== Deploy phases 0a-3b complete. ===" >&2
+    echo "The game is registered but not activated; run 'just proof-activate-system {{env}}' after readiness checks." >&2
+    echo "Next: register the enclave signing key (Phase 4) with 'just proof-register-key {{env}}'," >&2
+    echo "      or run the worker with '--auto-register' so it self-registers on startup." >&2

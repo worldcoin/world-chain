@@ -1,6 +1,5 @@
-//! `world-chain-defender` binary: watches challenged valid WIP-1006 games on the OP
-//! `DisputeGameFactory`, requests proofs from the prover-service, and submits completed
-//! proof lanes on L1.
+//! `world-chain-defender` binary: supplies proof support for the valid WIP-1006 games selected
+//! from the current anchor and escalates challenged games to the proof threshold.
 //!
 //! Mirrors the in-process defender wired by the devnet harness
 //! (`crates/devnet/src/full_stack.rs::start_world_chain_defender`), reading its
@@ -17,16 +16,15 @@ use clap::Parser;
 use tracing::info;
 use url::Url;
 use world_chain_defender::{
-    AlloyDefenderClient, DEFAULT_GAME_SCAN_LOOKBACK, DEFAULT_L1_TX_CONFIRMATIONS, DefenderConfig,
-    WorldChainDefender,
+    AlloyDefenderClient, DEFAULT_L1_TX_CONFIRMATIONS, DefenderConfig, WorldChainDefender,
 };
-use world_chain_proofs::OptimismConsensusClient;
+use world_chain_proofs::{OptimismConsensusClient, VerifyingConsensusProvider};
 use world_chain_prover_service::RpcProverServiceClient;
 
 #[derive(Debug, Parser)]
 #[command(
     name = "world-chain-defender",
-    about = "World Chain proof-system defender: proves and submits lanes for challenged games"
+    about = "World Chain proof-system defender: proves the lineage selected from the anchor"
 )]
 struct Cli {
     /// Ethereum L1 execution RPC URL.
@@ -36,6 +34,10 @@ struct Cli {
     /// op-node rollup RPC URL used to read canonical L2 output roots.
     #[arg(long, env = "OUTPUT_ROOT_RPC_URL")]
     output_root_rpc: String,
+
+    /// Optional verifying op-node rollup RPC URL. Every result must match the primary endpoint.
+    #[arg(long, env = "VERIFYING_OUTPUT_ROOT_RPC_URL")]
+    verifying_output_root_rpc: Option<String>,
 
     /// prover-service JSON-RPC URL.
     #[arg(long, env = "PROVER_SERVICE_URL")]
@@ -49,29 +51,13 @@ struct Cli {
     #[arg(long, env = "DEFENDER_KEY", hide_env_values = true)]
     defender_key: PrivateKeySigner,
 
-    /// The only proposer address whose games this defender will defend.
-    #[arg(long, env = "ALLOWED_PROPOSER")]
-    allowed_proposer: Address,
-
-    /// Seconds between game-factory polls.
+    /// Seconds between selected-lineage scans.
     #[arg(long, env = "POLL_INTERVAL_SECONDS", default_value_t = 12)]
     poll_interval_seconds: u64,
 
     /// Maximum number of games processed concurrently.
     #[arg(long, env = "MAX_GAME_CONCURRENCY", default_value_t = 10)]
     max_game_concurrency: usize,
-
-    /// Maximum number of newly created games discovered per defender tick.
-    #[arg(long, env = "MAX_GAMES_PER_TICK", default_value_t = 100)]
-    max_games_per_tick: u64,
-
-    /// Number of previously scanned games reconsidered per defender tick.
-    #[arg(
-        long,
-        env = "GAME_SCAN_LOOKBACK",
-        default_value_t = DEFAULT_GAME_SCAN_LOOKBACK
-    )]
-    game_scan_lookback: u64,
 
     /// Number of L1 confirmations required before a proof submission is accepted.
     #[arg(
@@ -82,49 +68,64 @@ struct Cli {
     )]
     l1_tx_confirmations: u64,
 
-    /// Conservative upper bound on the age of a game with an open proof window.
-    #[arg(long, env = "MAX_GAME_AGE_SECONDS", default_value_t = 604_800)]
-    max_game_age_seconds: u64,
+    /// Per-request timeout applied to every L1 RPC call, in seconds.
+    #[arg(
+        long,
+        env = "L1_RPC_TIMEOUT_SECONDS",
+        default_value_t = world_chain_proof_metrics::DEFAULT_RPC_REQUEST_TIMEOUT_SECONDS,
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    l1_rpc_timeout_seconds: u64,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    let _telemetry_guard = telemetry_batteries::init()
+        .map_err(|error| anyhow::anyhow!("failed to initialize telemetry: {error:#}"))?;
+    world_chain_proof_metrics::describe_metrics();
 
     let cli = Cli::parse();
 
     let defender_address = cli.defender_key.address();
+    let l1_rpc_url = Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?;
+    let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
+        l1_rpc_url,
+        world_chain_proof_metrics::RPC_TARGET_L1_EXECUTION,
+        Duration::from_secs(cli.l1_rpc_timeout_seconds),
+    )
+    .context("failed to build the L1 RPC client")?;
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(cli.defender_key))
-        .connect_http(Url::parse(&cli.l1_rpc).context("invalid L1 RPC URL")?);
+        .connect_client(l1_rpc_client);
+    world_chain_proof_metrics::refresh_wallet_balance(&provider, defender_address).await;
 
-    let client = AlloyDefenderClient::new(provider, cli.factory_address, cli.l1_tx_confirmations);
-    let output_roots = OptimismConsensusClient::new(cli.output_root_rpc.clone());
+    let client = AlloyDefenderClient::new(provider, cli.factory_address, cli.l1_tx_confirmations)
+        .await
+        .context("failed to connect defender to the registered proof system")?;
+    let output_roots = VerifyingConsensusProvider::new(
+        OptimismConsensusClient::new(cli.output_root_rpc.clone()),
+        cli.verifying_output_root_rpc
+            .clone()
+            .map(OptimismConsensusClient::new),
+    );
     let proof_requester = RpcProverServiceClient::new(&cli.prover_service_url)
         .with_context(|| format!("failed to connect to {}", cli.prover_service_url))?;
     let config = DefenderConfig {
-        allowed_proposer: cli.allowed_proposer,
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_game_concurrency: cli.max_game_concurrency,
-        max_games_per_tick: cli.max_games_per_tick,
-        game_scan_lookback: cli.game_scan_lookback,
-        max_game_age: Duration::from_secs(cli.max_game_age_seconds),
     };
     let mut defender = WorldChainDefender::new(config, client, output_roots, proof_requester);
 
     info!(
-        l1_rpc_url = %cli.l1_rpc,
-        output_root_rpc_url = %cli.output_root_rpc,
+        l1_rpc_url = world_chain_proof_metrics::redact_endpoint(&cli.l1_rpc),
+        output_root_rpc_url = world_chain_proof_metrics::redact_endpoint(&cli.output_root_rpc),
+        verifying_output_root_rpc_configured = cli.verifying_output_root_rpc.is_some(),
         prover_service = %cli.prover_service_url,
         dispute_game_factory = %cli.factory_address,
         defender = %defender_address,
-        allowed_proposer = %cli.allowed_proposer,
-        max_games_per_tick = cli.max_games_per_tick,
-        game_scan_lookback = cli.game_scan_lookback,
         l1_tx_confirmations = cli.l1_tx_confirmations,
+        l1_rpc_timeout_seconds = cli.l1_rpc_timeout_seconds,
         "starting World Chain proof-system defender"
     );
 

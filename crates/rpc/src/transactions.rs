@@ -5,7 +5,10 @@ use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_rpc_eth_api::{AsEthApiError, FromEthApiError};
 use reth_rpc_eth_types::{EthApiError, utils::recover_raw_transaction};
-use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionOrigin, TransactionPool};
+use reth_transaction_pool::{
+    PoolPooledTx, PoolTransaction, TransactionOrigin, TransactionPool,
+    error::{PoolError, PoolErrorKind},
+};
 use revm_primitives::{B256, Bytes};
 
 use crate::{core::WorldChainEthApiExt, sequencer::SequencerClient};
@@ -36,6 +39,16 @@ where
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         let recovered = recover_raw_transaction::<PoolPooledTx<Pool>>(&tx)?;
         let pool_transaction = Pool::Transaction::from_pooled(recovered);
+        let tx_hash = *pool_transaction.hash();
+
+        // Avoid expensive validation for transactions already present in the pool. The pool's
+        // insertion-time duplicate check remains authoritative for concurrent submissions.
+        if self.pool().contains(&tx_hash) {
+            return Err(Self::Error::from_eth_err(PoolError::new(
+                tx_hash,
+                PoolErrorKind::AlreadyImported,
+            )));
+        }
 
         // submit the transaction to the pool with a `Local` origin
         let outcome = self

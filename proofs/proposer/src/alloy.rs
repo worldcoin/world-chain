@@ -1,26 +1,19 @@
 use alloy_consensus::BlockHeader;
-use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::{Address, B256, BlockHash, U256};
+use alloy_eips::BlockNumberOrTag;
+use alloy_primitives::{Address, U256};
 use alloy_provider::{Provider, WalletProvider};
 use async_trait::async_trait;
 use world_chain_proofs::{
-    IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame,
-    InvalidationReasonError, MULTI_PROOF_GAME_TYPE, ResolutionStatus, RootStateError,
+    IAnchorStateRegistry, IDelayedWETH, IDisputeGameFactory, IMultiProofGame, LineageAnchor,
+    LineageError, LineageGame, LineageProvider, LineageTransition, MULTI_PROOF_GAME_TYPE,
+    RegisteredLineageConfig, ResolutionStatus, read_game_for_transition, read_lineage_anchor,
+    read_lineage_resolution_status, read_registered_lineage_config,
 };
-use world_chain_prover_service::ProofData;
 
 use crate::{
-    AnchorRef, BondManagerClient, Proposal, ProposalSubmission, ProposerClient, ProposerError,
-    types::{
-        ClaimSubmission, CloseGameSubmission, PendingWithdrawal, ResolveSubmission, TransitionGame,
-    },
+    BondManagerClient, Proposal, ProposalSubmission, ProposerClient, ProposerError,
+    types::{ClaimSubmission, CloseGameSubmission, PendingWithdrawal, ResolveSubmission},
 };
-
-/// Highest retry nonce probed when locating the live game for a transition.
-///
-/// Bounds the attempt walk so a corrupt or adversarial factory state cannot turn a single
-/// canonical-line hop into an unbounded RPC loop.
-const MAX_ATTEMPT_SCAN: u64 = 64;
 
 /// Alloy-backed implementation of the proposer contract clients.
 ///
@@ -31,8 +24,7 @@ const MAX_ATTEMPT_SCAN: u64 = 64;
 pub struct AlloyProofSystemClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
     anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
-    /// Domain hash of the registered game implementation, read once at construction.
-    domain_hash: B256,
+    registered: RegisteredLineageConfig,
     /// Number of confirmations to require after sending a tx onchain.
     confirmations: u64,
     provider: P,
@@ -50,48 +42,31 @@ where
     pub async fn new(
         provider: P,
         factory_address: Address,
-        anchor_address: Address,
         confirmations: u64,
     ) -> Result<Self, ProposerError> {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
             provider.clone(),
         );
+        let registered = read_registered_lineage_config(&provider, &factory).await?;
         let anchor = IAnchorStateRegistry::IAnchorStateRegistryInstance::new(
-            anchor_address,
+            registered.anchor_registry,
             provider.clone(),
         );
-
-        let game_impl = factory
-            .gameImpls(MULTI_PROOF_GAME_TYPE)
-            .call()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
-        if game_impl == Address::ZERO {
-            return Err(ProposerError::Contract(format!(
-                "dispute-game factory {factory_address} has no implementation for game type {MULTI_PROOF_GAME_TYPE}"
-            )));
-        }
-        let domain_hash =
-            IMultiProofGame::IMultiProofGameInstance::new(game_impl, provider.clone())
-                .domainHash()
-                .call()
-                .await
-                .map_err(|error| ProposerError::Contract(error.to_string()))?;
 
         Ok(Self {
             factory,
             anchor,
-            domain_hash,
+            registered,
             confirmations,
             provider,
         })
     }
 
-    /// Returns the domain hash of the registered game implementation.
+    /// Returns the immutable configuration of the registered game implementation.
     #[must_use]
-    pub const fn domain_hash(&self) -> B256 {
-        self.domain_hash
+    pub const fn registered_lineage_config(&self) -> RegisteredLineageConfig {
+        self.registered
     }
 
     fn game(&self, address: Address) -> IMultiProofGame::IMultiProofGameInstance<P> {
@@ -100,12 +75,7 @@ where
 
     /// Resolves the WIP-1006 game at a factory index, skipping other game types.
     async fn wip_1006_game_at(&self, index: u64) -> Result<Option<Address>, ProposerError> {
-        let entry = self
-            .factory
-            .gameAtIndex(U256::from(index))
-            .call()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let entry = self.factory.gameAtIndex(U256::from(index)).call().await?;
 
         Ok((entry.gameType == MULTI_PROOF_GAME_TYPE).then_some(entry.proxy))
     }
@@ -114,26 +84,9 @@ where
         &self,
         game: Address,
     ) -> Result<ResolutionStatus, ProposerError> {
-        let result = self
-            .game(game)
-            .resolutionStatus()
-            .call()
+        read_lineage_resolution_status(&self.game(game))
             .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
-        let root_state = result
-            .outcome
-            .try_into()
-            .map_err(|error: RootStateError| ProposerError::Contract(error.to_string()))?;
-        let invalidation_reason = result
-            .reason
-            .try_into()
-            .map_err(|error: InvalidationReasonError| ProposerError::Contract(error.to_string()))?;
-
-        Ok(ResolutionStatus {
-            resolvable: result.resolvable,
-            root_state,
-            invalidation_reason,
-        })
+            .map_err(Into::into)
     }
 
     async fn read_is_game_finalized(&self, game: Address) -> Result<bool, ProposerError> {
@@ -141,7 +94,23 @@ where
             .isGameFinalized(game)
             .call()
             .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))
+            .map_err(Into::into)
+    }
+
+    async fn send_resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
+        let pending = self.game(game).resolve().send().await?;
+
+        let tx_hash = *pending.tx_hash();
+        let receipt = pending
+            .with_required_confirmations(self.confirmations)
+            .get_receipt()
+            .await?;
+        world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
+        if !receipt.status() {
+            return Err(ProposerError::Revert(tx_hash));
+        }
+
+        Ok(ResolveSubmission { tx_hash })
     }
 
     /// Reads the credit `recipient` can unlock from `game`.
@@ -150,7 +119,7 @@ where
             .credit(recipient)
             .call()
             .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))
+            .map_err(Into::into)
     }
 
     /// Reads `recipient`'s pending `DelayedWETH` withdrawal for `game`.
@@ -159,12 +128,7 @@ where
         game: Address,
         recipient: Address,
     ) -> Result<PendingWithdrawal, ProposerError> {
-        let weth_address = self
-            .game(game)
-            .weth()
-            .call()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let weth_address = self.game(game).weth().call().await?;
         let weth = IDelayedWETH::IDelayedWETHInstance::new(weth_address, self.provider.clone());
 
         let (pending, delay) = self
@@ -173,8 +137,7 @@ where
             .add(weth.withdrawals(game, recipient))
             .add(weth.delay())
             .aggregate()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+            .await?;
 
         if pending.amount.is_zero() {
             return Ok(PendingWithdrawal::default());
@@ -182,11 +145,11 @@ where
         let unlock_at = pending
             .timestamp
             .checked_add(delay)
-            .ok_or_else(|| ProposerError::Contract("DelayedWETH unlock time overflows".into()))?;
+            .ok_or(ProposerError::Overflow)?;
 
         Ok(PendingWithdrawal {
             amount: pending.amount,
-            unlock_at: u256_to_u64(unlock_at, "DelayedWETH unlock time")?,
+            unlock_at: u256_to_u64(unlock_at)?,
         })
     }
 
@@ -205,18 +168,13 @@ where
             PendingWithdrawal::default()
         };
 
-        let pending_tx = self
-            .game(game)
-            .claimCredit(recipient)
-            .send()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let pending_tx = self.game(game).claimCredit(recipient).send().await?;
         let tx_hash = *pending_tx.tx_hash();
         let receipt = pending_tx
             .with_required_confirmations(self.confirmations)
             .get_receipt()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+            .await?;
+        world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
         if !receipt.status() {
             return Err(ProposerError::Revert(tx_hash));
         }
@@ -247,13 +205,8 @@ where
     }
 
     async fn game_count(&self) -> Result<u64, ProposerError> {
-        let count = self
-            .factory
-            .gameCount()
-            .call()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
-        u256_to_u64(count, "gameCount")
+        let count = self.factory.gameCount().call().await?;
+        u256_to_u64(count)
     }
 
     async fn game_at(&self, index: u64) -> Result<Option<Address>, ProposerError> {
@@ -265,11 +218,15 @@ where
             .gameCreator()
             .call()
             .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))
+            .map_err(Into::into)
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
         self.read_resolution_status(game).await
+    }
+
+    async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
+        self.send_resolve_game(game).await
     }
 
     async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError> {
@@ -288,10 +245,9 @@ where
     async fn latest_l1_timestamp(&self) -> Result<u64, ProposerError> {
         self.provider
             .get_block_by_number(BlockNumberOrTag::Latest)
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?
+            .await?
             .map(|block| block.header.timestamp())
-            .ok_or_else(|| ProposerError::Contract("latest L1 block is unavailable".into()))
+            .ok_or(ProposerError::UnavailableLatestL1Block)
     }
 
     async fn claim_credit(&self, game: Address) -> Result<ClaimSubmission, ProposerError> {
@@ -300,92 +256,40 @@ where
 }
 
 #[async_trait]
+impl<P> LineageProvider for AlloyProofSystemClient<P>
+where
+    P: Provider + WalletProvider + Clone + Send + Sync + 'static,
+{
+    fn lineage_block_interval(&self) -> u64 {
+        self.registered.block_interval
+    }
+
+    async fn lineage_anchor(&self) -> Result<LineageAnchor, LineageError> {
+        read_lineage_anchor(&self.provider, &self.anchor).await
+    }
+
+    async fn game_for_transition(
+        &self,
+        transition: LineageTransition,
+    ) -> Result<Option<LineageGame>, LineageError> {
+        read_game_for_transition(&self.factory, self.registered.domain_hash, transition).await
+    }
+
+    async fn lineage_resolution_status(
+        &self,
+        game: Address,
+    ) -> Result<ResolutionStatus, LineageError> {
+        read_lineage_resolution_status(&self.game(game)).await
+    }
+}
+
+#[async_trait]
 impl<P> ProposerClient for AlloyProofSystemClient<P>
 where
     P: Provider + WalletProvider + Clone + Send + Sync + 'static,
 {
-    async fn anchor_parent(&self) -> Result<AnchorRef, ProposerError> {
-        let (anchor_root, anchor_game) = self
-            .provider
-            .multicall()
-            .add(self.anchor.getAnchorRoot())
-            .add(self.anchor.anchorGame())
-            .aggregate()
-            .await
-            .map_err(|err| ProposerError::Contract(err.to_string()))?;
-
-        Ok(AnchorRef {
-            registry: *self.anchor.address(),
-            anchor_game: (anchor_game != Address::ZERO).then_some(anchor_game),
-            l2_block_number: u256_to_u64(anchor_root.l2SequenceNumber, "getAnchorRoot")?,
-        })
-    }
-
-    async fn games_for_transition(
-        &self,
-        parent_candidates: &[Address],
-        root_claim: B256,
-        l2_block_number: u64,
-    ) -> Result<Vec<TransitionGame>, ProposerError> {
-        let mut found = Vec::with_capacity(parent_candidates.len());
-        for parent_ref in parent_candidates {
-            let mut latest: Option<TransitionGame> = None;
-            // Attempts are strictly sequential: attempt N can only be created once attempt N-1
-            // exists, so the walk stops at the first gap.
-            for attempt in 0..MAX_ATTEMPT_SCAN {
-                let commitment = world_chain_proofs::ProposalCommitment {
-                    parent_ref: *parent_ref,
-                    root_claim,
-                    l2_block_number,
-                    attempt,
-                };
-                let entry = self
-                    .factory
-                    .games(
-                        MULTI_PROOF_GAME_TYPE,
-                        root_claim,
-                        commitment.extra_data(self.domain_hash),
-                    )
-                    .call()
-                    .await
-                    .map_err(|error| ProposerError::Contract(error.to_string()))?;
-                if entry.proxy == Address::ZERO {
-                    break;
-                }
-                latest = Some(TransitionGame {
-                    address: entry.proxy,
-                    parent_ref: *parent_ref,
-                    attempt,
-                });
-            }
-            found.extend(latest);
-        }
-        Ok(found)
-    }
-
-    async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
-        self.read_resolution_status(game).await
-    }
-
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
-        let pending = self
-            .game(game)
-            .resolve()
-            .send()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
-
-        let tx_hash = *pending.tx_hash();
-        let receipt = pending
-            .with_required_confirmations(self.confirmations)
-            .get_receipt()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
-        if !receipt.status() {
-            return Err(ProposerError::Revert(tx_hash));
-        }
-
-        Ok(ResolveSubmission { tx_hash })
+        self.send_resolve_game(game).await
     }
 
     async fn is_game_finalized(&self, game: Address) -> Result<bool, ProposerError> {
@@ -393,19 +297,14 @@ where
     }
 
     async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError> {
-        let pending = self
-            .game(game)
-            .closeGame()
-            .send()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let pending = self.game(game).closeGame().send().await?;
 
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
             .get_receipt()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+            .await?;
+        world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
         if !receipt.status() {
             return Err(ProposerError::Revert(tx_hash));
         }
@@ -413,46 +312,30 @@ where
         Ok(CloseGameSubmission { tx_hash })
     }
 
-    async fn latest_finalized_l1_block(&self) -> Result<BlockHash, ProposerError> {
-        let block = self
-            .provider
-            .get_block(BlockId::finalized())
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
-        let block = block.ok_or_else(|| ProposerError::FinalizedBlockNotFound)?;
-        let hash = block.hash();
-        Ok(hash)
-    }
-
     async fn submit_proposal(
         &self,
         proposal: &Proposal,
-        _proof: ProofData,
     ) -> Result<ProposalSubmission, ProposerError> {
         // `DisputeGameFactory.create` reverts unless `msg.value` matches the configured init
         // bond exactly, so it is read per submission rather than cached in configuration.
-        let init_bond = self
-            .factory
-            .initBonds(MULTI_PROOF_GAME_TYPE)
-            .call()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let init_bond = self.factory.initBonds(MULTI_PROOF_GAME_TYPE).call().await?;
 
-        let extra_data = proposal.commitment().extra_data(self.domain_hash);
+        let extra_data = proposal
+            .commitment()
+            .extra_data(self.registered.domain_hash);
         let pending = self
             .factory
             .create(MULTI_PROOF_GAME_TYPE, proposal.root_claim, extra_data)
             .value(init_bond)
             .send()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+            .await?;
 
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
             .get_receipt()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+            .await?;
+        world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
         if !receipt.status() {
             return Err(ProposerError::Revert(tx_hash));
         }
@@ -470,11 +353,7 @@ where
                 event.gameType == MULTI_PROOF_GAME_TYPE && event.rootClaim == proposal.root_claim
             })
             .map(|event| event.disputeProxy)
-            .ok_or_else(|| {
-                ProposerError::Contract(format!(
-                    "DisputeGameCreated event missing from proposal transaction {tx_hash}"
-                ))
-            })?;
+            .ok_or(ProposerError::MissingProposalEvent(tx_hash))?;
 
         Ok(ProposalSubmission {
             tx_hash,
@@ -489,19 +368,12 @@ where
 {
     /// Reads an L2 block number from a game contract.
     pub async fn game_l2_block_number(&self, game: Address) -> Result<u64, ProposerError> {
-        let l2_block_number = self
-            .game(game)
-            .l2BlockNumber()
-            .call()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let l2_block_number = self.game(game).l2BlockNumber().call().await?;
 
-        u256_to_u64(l2_block_number, "l2BlockNumber")
+        u256_to_u64(l2_block_number)
     }
 }
 
-fn u256_to_u64(value: U256, field: &'static str) -> Result<u64, ProposerError> {
-    value
-        .try_into()
-        .map_err(|_| ProposerError::Contract(format!("{field} overflows u64")))
+fn u256_to_u64(value: U256) -> Result<u64, ProposerError> {
+    value.try_into().map_err(|_| ProposerError::Overflow)
 }

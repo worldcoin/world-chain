@@ -1,6 +1,6 @@
 // Module defining World Chain Node Preset contexts for components & add-ons.
 
-use std::time::Duration;
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use crate::{
     add_ons::WorldChainAddOns,
@@ -13,6 +13,7 @@ use crate::{
     payload_service::FlashblocksPayloadServiceBuilder,
     pool::WorldChainPoolBuilder,
 };
+use alloy_primitives::keccak256;
 use ed25519_dalek::VerifyingKey;
 use hex::ToHex;
 use reth_network::protocol::IntoRlpxSubProtocol;
@@ -40,10 +41,8 @@ use world_chain_p2p::{
 use world_chain_primitives::p2p::Authorization;
 use world_chain_rpc::eth::FlashblocksEthApiBuilder;
 
-use std::sync::Arc;
-
 use crossbeam_channel::{Receiver, Sender};
-use tracing::info;
+use tracing::{debug, info};
 use world_chain_builder::WorldChainPayloadBuilderCtxBuilder;
 use world_chain_evm::{
     BlockExecutionWitness, ExecutionWitnessHandle, WitnessCache, WorldChainEvmConfig,
@@ -54,7 +53,7 @@ use world_chain_validator::coordinator::FlashblocksExecutionCoordinator;
 
 use crate::tx_propagation::WorldChainTransactionPropagationPolicy;
 use reth_network::PeersInfo;
-use reth_network_peers::PeerId;
+use reth_network_peers::{PeerId, TrustedPeer};
 use reth_node_builder::{BuilderContext, components::NetworkBuilder};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -69,6 +68,8 @@ pub struct WorldChainNetworkBuilder {
     op_network_builder: OpNetworkBuilder,
     tx_peers: Option<Vec<PeerId>>,
     p2p_handle: Option<FlashblocksHandle>,
+    flashblock_sentries: Vec<TrustedPeer>,
+    max_sentry_connections: usize,
 }
 
 impl WorldChainNetworkBuilder {
@@ -87,8 +88,119 @@ impl WorldChainNetworkBuilder {
             op_network_builder,
             tx_peers,
             p2p_handle,
+            flashblock_sentries: Vec::new(),
+            max_sentry_connections: 0,
         }
     }
+
+    /// Configures the candidate flashblocks sentry pool and the number of sentries this node
+    /// should maintain as trusted RLPx peers.
+    pub fn with_flashblock_sentries(
+        mut self,
+        sentries: Vec<TrustedPeer>,
+        max_connections: usize,
+    ) -> Self {
+        self.flashblock_sentries = sentries;
+        self.max_sentry_connections = max_connections;
+        self
+    }
+}
+
+const FLASHBLOCKS_SENTRY_SELECTION_DOMAIN: &[u8] = b"worldchain-flashblocks-sentry-v1";
+
+/// Ranks sentries using highest-random-weight (rendezvous) hashing.
+///
+/// A persisted local P2P identity produces a stable selection. Adding or removing a sentry only
+/// remaps clients whose highest-ranked set changes.
+fn rank_flashblock_sentries(local_peer_id: PeerId, sentries: &[TrustedPeer]) -> Vec<PeerId> {
+    let mut ranked = sentries
+        .iter()
+        .filter(|sentry| sentry.id != local_peer_id)
+        .map(|sentry| {
+            let mut input = Vec::with_capacity(
+                FLASHBLOCKS_SENTRY_SELECTION_DOMAIN.len() + local_peer_id.len() + sentry.id.len(),
+            );
+            input.extend_from_slice(FLASHBLOCKS_SENTRY_SELECTION_DOMAIN);
+            input.extend_from_slice(local_peer_id.as_slice());
+            input.extend_from_slice(sentry.id.as_slice());
+            (keccak256(input), sentry.id)
+        })
+        .collect::<Vec<_>>();
+
+    ranked.sort_unstable_by(|(left_score, left_id), (right_score, right_id)| {
+        right_score
+            .cmp(left_score)
+            .then_with(|| left_id.cmp(right_id))
+    });
+    ranked.dedup_by_key(|(_, peer_id)| *peer_id);
+    ranked.into_iter().map(|(_, peer_id)| peer_id).collect()
+}
+
+/// Adds flashblocks sentries to the already-resolved discovery bootnodes.
+fn add_flashblock_sentry_bootnodes(bootnodes: &mut HashSet<TrustedPeer>, sentries: &[TrustedPeer]) {
+    for sentry in sentries {
+        if !bootnodes.iter().any(|bootnode| bootnode.id == sentry.id) {
+            bootnodes.insert(sentry.clone());
+        }
+    }
+}
+
+/// Adds only the selected sentries to the trusted set and prevents RLPx connections to the rest.
+///
+/// The peer-manager ban list is intentionally separate from the discovery ban lists, so an
+/// excluded combined bootnode/sentry can still be used for UDP discovery.
+fn apply_flashblock_sentry_policy(
+    peers_config: &mut reth_network::PeersConfig,
+    local_peer_id: PeerId,
+    sentries: &[TrustedPeer],
+    max_connections: usize,
+) -> Vec<PeerId> {
+    let ranked = rank_flashblock_sentries(local_peer_id, sentries);
+    let selected = ranked
+        .iter()
+        .copied()
+        .take(max_connections)
+        .collect::<Vec<_>>();
+    let selected_set = selected.iter().copied().collect::<HashSet<_>>();
+    let all_sentry_ids = sentries
+        .iter()
+        .map(|sentry| sentry.id)
+        .collect::<HashSet<_>>();
+
+    // Preserve unrelated operator-supplied trusted peers, while enforcing the selection for every
+    // peer that belongs to the configured sentry pool.
+    peers_config
+        .trusted_nodes
+        .retain(|peer| !all_sentry_ids.contains(&peer.id) || selected_set.contains(&peer.id));
+
+    // A sentry may have been restored from the persisted peers file or supplied as a basic node.
+    // Remove every candidate from those sets so selected sentries are re-added only as trusted
+    // peers and excluded sentries cannot bypass the peer-manager ban during outbound slot refill.
+    peers_config
+        .basic_nodes
+        .retain(|peer| !all_sentry_ids.contains(&peer.id));
+    peers_config
+        .persisted_peers
+        .retain(|peer| !all_sentry_ids.contains(&peer.record.id));
+
+    let mut trusted_ids = peers_config
+        .trusted_nodes
+        .iter()
+        .map(|peer| peer.id)
+        .collect::<HashSet<_>>();
+    for sentry in sentries {
+        if selected_set.contains(&sentry.id) && trusted_ids.insert(sentry.id) {
+            peers_config.trusted_nodes.push(sentry.clone());
+        }
+    }
+
+    for peer_id in all_sentry_ids.difference(&selected_set) {
+        if *peer_id != local_peer_id {
+            peers_config.ban_list.ban_peer(*peer_id);
+        }
+    }
+
+    selected
 }
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for WorldChainNetworkBuilder
@@ -109,22 +221,40 @@ where
             op_network_builder,
             tx_peers,
             p2p_handle,
+            flashblock_sentries,
+            max_sentry_connections,
         } = self;
 
         let mut network_config = op_network_builder.network_config(ctx)?;
+        add_flashblock_sentry_bootnodes(&mut network_config.boot_nodes, &flashblock_sentries);
         let local_peer_id = network_config.hello_message.id;
         network_config
             .peers_config
             .trusted_nodes
             .retain(|peer| peer.id != local_peer_id);
 
-        let mut trusted_peer_ids: Vec<_> = network_config
+        let selected_sentries = apply_flashblock_sentry_policy(
+            &mut network_config.peers_config,
+            local_peer_id,
+            &flashblock_sentries,
+            max_sentry_connections,
+        );
+        if !flashblock_sentries.is_empty() {
+            debug!(
+                target: "world_chain::network",
+                sentries = ?selected_sentries,
+                "connecting to flashblocks sentries"
+            );
+        }
+
+        let trusted_peer_ids: Vec<_> = network_config
             .peers_config
             .trusted_nodes
             .iter()
             .map(|peer| peer.id)
+            .collect::<HashSet<_>>()
+            .into_iter()
             .collect();
-        trusted_peer_ids.dedup();
 
         let mut network = reth_network::NetworkManager::builder(network_config).await?;
 
@@ -237,6 +367,7 @@ where
                             rollup,
                             builder,
                             pbh,
+                            flashblocks,
                             tx_peers,
                             ..
                         },
@@ -254,7 +385,7 @@ where
             ..
         } = rollup;
 
-        let wc_network_builder = WorldChainNetworkBuilder::new(
+        let mut wc_network_builder = WorldChainNetworkBuilder::new(
             disable_txpool_gossip,
             !discovery_v4,
             tx_peers,
@@ -264,6 +395,12 @@ where
                     flashblocks_components_ctx.flashblocks_handle.clone()
                 }),
         );
+        if let Some(flashblocks) = flashblocks {
+            wc_network_builder = wc_network_builder.with_flashblock_sentries(
+                flashblocks.sentry_peers,
+                flashblocks.max_sentry_connections,
+            );
+        }
 
         let (
             flashblocks_interval,
@@ -484,6 +621,114 @@ impl From<WorldChainNodeConfig> for FlashblocksComponentsContext {
             flashblocks_handle,
             to_jobs_generator,
             authorizer_vk,
+        }
+    }
+}
+
+#[cfg(test)]
+mod sentry_policy_tests {
+    use super::*;
+    use world_chain_cli::cli::DEFAULT_FLASHBLOCKS_SENTRIES;
+
+    fn sentries() -> Vec<TrustedPeer> {
+        DEFAULT_FLASHBLOCKS_SENTRIES
+            .split(',')
+            .map(|sentry| sentry.parse().expect("valid default sentry"))
+            .collect()
+    }
+
+    #[test]
+    fn rendezvous_selection_is_stable_and_order_independent() {
+        let local_peer_id = PeerId::random();
+        let sentries = sentries();
+        let selected = rank_flashblock_sentries(local_peer_id, &sentries);
+
+        let mut reversed = sentries.clone();
+        reversed.reverse();
+
+        assert_eq!(selected, rank_flashblock_sentries(local_peer_id, &reversed));
+        assert_eq!(selected.len(), sentries.len());
+    }
+
+    #[test]
+    fn sentries_are_added_without_replacing_chain_bootnodes() {
+        let sentries = sentries();
+        let mut chain_bootnode = sentries[0].clone();
+        chain_bootnode.id = PeerId::random();
+        let mut bootnodes = HashSet::from([chain_bootnode.clone()]);
+
+        add_flashblock_sentry_bootnodes(&mut bootnodes, &sentries);
+
+        assert!(bootnodes.contains(&chain_bootnode));
+        assert_eq!(bootnodes.len(), sentries.len() + 1);
+        for sentry in sentries {
+            assert!(bootnodes.contains(&sentry));
+        }
+    }
+
+    #[test]
+    fn policy_trusts_two_and_bans_other_sentries() {
+        let local_peer_id = PeerId::random();
+        let sentries = sentries();
+        let mut unrelated_peer = sentries[0].clone();
+        unrelated_peer.id = PeerId::random();
+        let mut peers_config = reth_network::PeersConfig::default();
+        peers_config.trusted_nodes.push(unrelated_peer.clone());
+
+        for sentry in &sentries {
+            let record = sentry.resolve_blocking().expect("resolvable sentry");
+            peers_config.basic_nodes.insert(record);
+            peers_config.persisted_peers.push(
+                reth_network::types::PersistedPeerInfo::from_node_record(record),
+            );
+        }
+
+        let selected =
+            apply_flashblock_sentry_policy(&mut peers_config, local_peer_id, &sentries, 2);
+        let selected_set = selected.iter().copied().collect::<HashSet<_>>();
+
+        assert_eq!(selected.len(), 2);
+        assert!(peers_config.trusted_nodes.contains(&unrelated_peer));
+        assert!(peers_config.basic_nodes.is_empty());
+        assert!(peers_config.persisted_peers.is_empty());
+        assert_eq!(
+            peers_config
+                .trusted_nodes
+                .iter()
+                .filter(|peer| selected_set.contains(&peer.id))
+                .count(),
+            2
+        );
+
+        let excluded = sentries
+            .iter()
+            .find(|sentry| !selected_set.contains(&sentry.id))
+            .expect("one sentry should be excluded");
+        assert!(peers_config.ban_list.is_banned_peer(&excluded.id));
+    }
+
+    #[test]
+    fn max_at_least_pool_size_trusts_every_sentry() {
+        let local_peer_id = PeerId::random();
+        let sentries = sentries();
+        let mut peers_config = reth_network::PeersConfig::default();
+
+        let selected = apply_flashblock_sentry_policy(
+            &mut peers_config,
+            local_peer_id,
+            &sentries,
+            sentries.len(),
+        );
+
+        assert_eq!(selected.len(), sentries.len());
+        for sentry in sentries {
+            assert!(
+                peers_config
+                    .trusted_nodes
+                    .iter()
+                    .any(|trusted| trusted.id == sentry.id)
+            );
+            assert!(!peers_config.ban_list.is_banned_peer(&sentry.id));
         }
     }
 }

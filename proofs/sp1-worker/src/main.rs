@@ -173,10 +173,9 @@ struct Cli {
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
-
+    let _telemetry_guard = telemetry_batteries::init()
+        .map_err(|error| anyhow::anyhow!("failed to initialize telemetry: {error:#}"))?;
+    world_chain_proof_metrics::describe_metrics();
     let cli = Cli::parse();
 
     let spec = cli.network.chain_spec();
