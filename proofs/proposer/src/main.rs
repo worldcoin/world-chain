@@ -85,7 +85,8 @@ async fn main() -> Result<()> {
     let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
         l1_rpc_url,
         world_chain_proof_metrics::RPC_TARGET_L1_EXECUTION,
-    );
+    )
+    .context("failed to build the L1 RPC client")?;
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(cli.proposer_key))
         .connect_client(l1_rpc_client);

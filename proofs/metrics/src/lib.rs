@@ -148,11 +148,24 @@ where
     }
 }
 
+/// Per-request timeout applied to every outbound RPC call.
+///
+/// Bounds each request so a hung connection cannot stall a service's poll loop indefinitely.
+const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+
 /// Builds an Alloy HTTP client that counts completed RPC outcomes.
-pub fn metered_http_client(url: Url, target: &'static str) -> RpcClient {
-    ClientBuilder::default()
+///
+/// Every request is bounded by [`RPC_REQUEST_TIMEOUT`].
+pub fn metered_http_client(
+    url: Url,
+    target: &'static str,
+) -> Result<RpcClient, alloy_transport_http::reqwest::Error> {
+    let client = alloy_transport_http::reqwest::Client::builder()
+        .timeout(RPC_REQUEST_TIMEOUT)
+        .build()?;
+    Ok(ClientBuilder::default()
         .layer(RpcMetricsLayer { target })
-        .http(url)
+        .http_with_client(client, url))
 }
 
 /// Renders an RPC endpoint for logs with any embedded credential removed.
