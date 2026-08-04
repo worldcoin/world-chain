@@ -189,14 +189,14 @@ proof-rollup-config-hash env="alphanet":
     fi
     if [ -n "${L2_RPC_URL:-}" ]; then
         echo "Fetching rollup config from op-node at $L2_RPC_URL…" >&2
-        cargo run -p world-chain-prover-sp1 -- hash-rollup-config --l2-rpc "$L2_RPC_URL"
+        cargo run -p world-chain-prover-nitro -- hash-rollup-config --l2-rpc "$L2_RPC_URL"
     elif [ -n "${ROLLUP_CONFIG_URL:-}" ]; then
         echo "Downloading rollup config from $ROLLUP_CONFIG_URL…" >&2
         curl -sfSL "$ROLLUP_CONFIG_URL" -o /tmp/rollup.json
-        cargo run -p world-chain-prover-sp1 -- hash-rollup-config --rollup-config /tmp/rollup.json
+        cargo run -p world-chain-prover-nitro -- hash-rollup-config --rollup-config /tmp/rollup.json
     elif [ -n "${ROLLUP_CONFIG:-}" ]; then
         echo "Using local rollup config: $ROLLUP_CONFIG" >&2
-        cargo run -p world-chain-prover-sp1 -- hash-rollup-config --rollup-config "$ROLLUP_CONFIG"
+        cargo run -p world-chain-prover-nitro -- hash-rollup-config --rollup-config "$ROLLUP_CONFIG"
     else
         LOCAL_PORT=19545
         echo "Port-forwarding to $OP_NODE_POD in $OP_NODE_NAMESPACE (context: $KUBECONTEXT)…" >&2
@@ -222,7 +222,7 @@ proof-rollup-config-hash env="alphanet":
             echo "Error: port-forward to localhost:$LOCAL_PORT not ready after 10s" >&2
             exit 1
         fi
-        cargo run -p world-chain-prover-sp1 -- hash-rollup-config \
+        cargo run -p world-chain-prover-nitro -- hash-rollup-config \
             --l2-rpc "http://localhost:$LOCAL_PORT"
     fi
 
