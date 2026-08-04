@@ -49,13 +49,7 @@ fn registration_backoff() -> ExponentialBuilder {
 ///
 /// This deliberately never aborts the process. Every way registration can fail — PCR set not
 /// yet approved on-chain, registration key unfunded, L1 unreachable, certificate chain not yet
-/// verifiable — is a condition an operator resolves *while the worker is running*. Exiting
-/// turns all of them into `CrashLoopBackOff`, which additionally destroys the `kubectl exec`
-/// path needed to diagnose and fix them: the tooling that inspects the enclave and drives
-/// registration by hand all requires a container in `Running` state.
-///
-/// The worker stays up, keeps serving metrics, and simply does not lease proof jobs until the
-/// key is registered — so an unregistered worker is visible and inert rather than absent.
+/// verifiable — is a condition an operator resolves *while the worker is running*.
 async fn register_with_retry(params: RegisterParams) -> bool {
     let attempt = || {
         let params = params.clone();
