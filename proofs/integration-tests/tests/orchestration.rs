@@ -238,7 +238,7 @@ async fn invalid_root_is_challenged_by_real_challenger() {
     let mut challenger =
         WorldChainChallenger::new(challenger_config(), chain.clone(), honest_consensus);
     challenger
-        .scan_once()
+        .tick_at(1)
         .await
         .expect("challenger scan succeeds");
 
