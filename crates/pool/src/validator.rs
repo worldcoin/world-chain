@@ -8,7 +8,7 @@ use crate::{
 use alloy_eips::BlockId;
 use alloy_primitives::Address;
 use alloy_sol_types::{SolCall, SolValue};
-use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_evm::ConfigureEvm;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_node::txpool::OpTransactionValidator;
@@ -185,14 +185,40 @@ where
                     .to_outcome(tx);
             }
 
-            let payloads: Vec<PbhPayload> = match pbh_payloads
-                .into_par_iter()
+            // Decode and reject duplicate nullifiers before performing expensive proof
+            // verification. This prevents a bundle from amplifying one valid proof by repeating
+            // the same (UserOp, payload) pair many times.
+            let payload_ops = match pbh_payloads
+                .into_iter()
                 .zip(aggregated_ops.userOps)
                 .map(|(payload, op)| {
+                    PbhPayload::try_from(payload)
+                        .map(|payload| (payload, op))
+                        .map_err(|_| {
+                            WorldChainPoolTransactionError::from(
+                                PBHValidationError::InvalidCalldata,
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, WorldChainPoolTransactionError>>()
+            {
+                Ok(payload_ops) => payload_ops,
+                Err(err) => return err.to_outcome(tx),
+            };
+
+            for (payload, _) in &payload_ops {
+                if !seen_nullifier_hashes.insert(payload.nullifier_hash) {
+                    return WorldChainPoolTransactionError::from(
+                        PBHValidationError::DuplicateNullifierHash,
+                    )
+                    .to_outcome(tx);
+                }
+            }
+
+            let payloads: Vec<PbhPayload> = match payload_ops
+                .into_par_iter()
+                .map(|(payload, op)| {
                     let signal = crate::eip4337::hash_user_op(&op);
-                    let Ok(payload) = PbhPayload::try_from(payload) else {
-                        return Err(PBHValidationError::InvalidCalldata.into());
-                    };
                     payload.validate(
                         signal,
                         &valid_roots,
@@ -205,16 +231,6 @@ where
                 Ok(payloads) => payloads,
                 Err(err) => return err.to_outcome(tx),
             };
-
-            // Now check for duplicate nullifier_hashes
-            for payload in &payloads {
-                if !seen_nullifier_hashes.insert(payload.nullifier_hash) {
-                    return WorldChainPoolTransactionError::from(
-                        PBHValidationError::DuplicateNullifierHash,
-                    )
-                    .to_outcome(tx);
-                }
-            }
 
             aggregated_payloads.extend(payloads);
         }
@@ -553,13 +569,13 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn validate_pbh_bundle_duplicate_nullifier_hash() {
+    async fn reject_duplicate_nullifier_before_proof_validation() {
         const BUNDLER_ACCOUNT: u32 = 9;
         const USER_ACCOUNT: u32 = 0;
 
         let pool = setup().await;
 
-        let (user_op, proof) = user_op()
+        let (user_op, mut proof) = user_op()
             .acc(USER_ACCOUNT)
             .external_nullifier(ExternalNullifier::with_date_marker(
                 DateMarker::from(chrono::Utc::now()),
@@ -567,7 +583,10 @@ pub mod tests {
             ))
             .call();
 
-        // Lets add two of the same userOp in the bundle so the nullifier hash is the same and we should expect an error
+        // Make the proof invalid so this test also verifies that duplicate detection happens before
+        // cryptographic proof validation.
+        proof.proof = Default::default();
+
         let bundle = pbh_bundle(
             vec![user_op.clone(), user_op],
             vec![proof.clone().into(), proof.into()],
