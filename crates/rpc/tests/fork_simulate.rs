@@ -33,9 +33,10 @@ use revm_primitives::TxKind;
 use std::str::FromStr;
 
 use world_chain_rpc::simulate::{
-    AssetType, ContractManagementType, SimulationInspector, assemble_contract_management,
-    decode_revert_reason, parse_asset_changes, parse_contract_management_events,
-    parse_exposure_changes, relax_cfg_for_simulation, selector_to_name,
+    AssetType, ContractManagementType, SimulationInspector, TraceKind, TraceOutcome,
+    assemble_contract_management, decode_revert_reason, parse_asset_changes,
+    parse_contract_management_events, parse_exposure_changes, relax_cfg_for_simulation,
+    selector_to_name,
 };
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -901,9 +902,16 @@ async fn test_trace_captures_calls() {
     assert!(matches!(result.result, ExecutionResult::Success { .. }));
 
     let (_, inspector, _) = evm.components_mut();
-    let trace = inspector.take_trace_entries();
+    let trace = inspector
+        .take_trace_entries()
+        .expect("completed simulation should produce a complete trace");
     for entry in &trace {
-        assert!(entry.selector.starts_with("0x"));
+        assert!(
+            entry
+                .selector
+                .as_deref()
+                .is_some_and(|selector| selector.starts_with("0x"))
+        );
     }
 }
 
@@ -1044,11 +1052,13 @@ async fn test_trace_detects_malicious_safe_call() {
     ];
 
     let (_, inspector, _) = evm.components_mut();
-    let trace = inspector.take_trace_entries();
+    let trace = inspector
+        .take_trace_entries()
+        .expect("completed simulation should produce a complete trace");
     // Log what the trace captured (informational)
     for entry in &trace {
         println!(
-            "trace: to={} method={:?} selector={}",
+            "trace: to={:?} method={:?} selector={:?}",
             entry.to, entry.method, entry.selector
         );
         // If any trace entry matches a forbidden method, flag it
@@ -1546,6 +1556,18 @@ async fn test_inspector_captures_create_via_call_frame() {
     let (deployer, deployed) = creations[0];
     assert_eq!(deployer, trampoline, "deployer is the trampoline contract");
     assert_ne!(deployed, Address::ZERO, "deployed address populated");
+
+    let trace = inspector
+        .take_trace_entries()
+        .expect("completed simulation should produce a complete trace");
+    let create = trace
+        .iter()
+        .find(|entry| entry.kind == TraceKind::Create)
+        .expect("CREATE should appear in trace");
+    assert_eq!(create.depth, 1);
+    assert_eq!(create.outcome, TraceOutcome::Success);
+    assert_eq!(create.to, Some(deployed));
+    assert_eq!(create.revert_reason, None);
 }
 
 /// CREATE inside a frame that subsequently REVERTs is rolled back: the

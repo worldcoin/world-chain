@@ -26,7 +26,7 @@ use revm::{
 use revm_database::{CacheDB, EmptyDB};
 use revm_primitives::TxKind;
 
-use world_chain_rpc::simulate::SimulationInspector;
+use world_chain_rpc::simulate::{SimulationInspector, TraceKind, TraceOutcome};
 
 const CHAIN_ID: u64 = 480;
 
@@ -143,15 +143,18 @@ async fn shared_buffer_call_resolves_selector() {
     }
 
     let (_, inspector, _) = evm.components_mut();
-    let trace = inspector.take_trace_entries();
+    let trace = inspector
+        .take_trace_entries()
+        .expect("completed simulation should produce a complete trace");
 
     let inner = trace
         .iter()
-        .find(|t| t.from == forwarder && t.to == target)
+        .find(|t| t.from == forwarder && t.to == Some(target))
         .expect("inner forwarder->target call should appear in trace");
 
     assert_eq!(
-        inner.selector, "0x0d582f13",
+        inner.selector.as_deref(),
+        Some("0x0d582f13"),
         "selector for SharedBuffer call must match the bytes written to memory"
     );
     assert_eq!(
@@ -159,4 +162,8 @@ async fn shared_buffer_call_resolves_selector() {
         Some("addOwnerWithThreshold"),
         "decoded method must surface so backend forbidden-method checks can detect it"
     );
+    assert_eq!(inner.kind, TraceKind::Call);
+    assert_eq!(inner.depth, 1);
+    assert_eq!(inner.outcome, TraceOutcome::Success);
+    assert_eq!(inner.revert_reason, None);
 }
