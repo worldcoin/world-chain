@@ -22,10 +22,11 @@ use kona_proof::{CachingOracle, l1::OracleBlobProvider};
 use reqwest::Client;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
+use tracing::warn;
 use world_chain_chainspec::{WorldChainHardfork, WorldChainHardforks};
 use world_chain_proof_core::{
     hash_world_rollup_config,
-    range::{WorldRangeHardforkConfig, WorldRangeSpecId},
+    range::{WorldRangeHardfork, WorldRangeHardforkConfig, WorldRangeSpecId},
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
 use world_chain_proof_kona_client_utils::{
@@ -34,6 +35,12 @@ use world_chain_proof_kona_client_utils::{
 
 const L1_BLOCK_PREDEPLOY: Address = address!("0x4200000000000000000000000000000000000015");
 const L2_TO_L1_MESSAGE_PASSER: Address = address!("0x4200000000000000000000000000000000000016");
+
+/// Per-request timeout for every RPC call made while assembling a witness.
+///
+/// Generous enough for the pre-Isthmus `eth_getProof` fallback, which rebuilds historical state on
+/// the serving node, but bounded so a hung endpoint fails the job instead of stalling the worker.
+const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 type DefaultOracleBase = CachingOracle<OracleReader<NativeChannel>, HintWriter<NativeChannel>>;
 type WorldPreimageCollector = PreimageWitnessCollector<DefaultOracleBase>;
@@ -58,7 +65,7 @@ pub struct OnlineHostConfig {
     pub l2_chain_id: Option<u64>,
     /// Rollup config JSON file consumed by the kona host, for chains kona does not bundle.
     pub rollup_config_path: Option<PathBuf>,
-    /// Maximum time to spend generating one witness.
+    /// Maximum time for one witness, covering both the RPC prologue and the Kona host.
     pub witness_timeout: Duration,
 }
 
@@ -223,6 +230,10 @@ struct RpcBlock {
     hash: B256,
     state_root: B256,
     timestamp: HexU64,
+    /// Post-Isthmus this is the `L2ToL1MessagePasser` storage root; pre-Isthmus it is the empty
+    /// withdrawals root (Canyon) or absent, and must not be used for the output root.
+    #[serde(default)]
+    withdrawals_root: Option<B256>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -282,45 +293,38 @@ pub async fn build_range_input(
         );
     }
 
-    let client = Client::new();
-    let finalized_l2_head = finalized_l2_head(&client, &config.l2_rpc).await?;
-    if !request.allow_unfinalized && finalized_l2_head.is_some_and(|head| request.end_block > head)
-    {
-        bail!(
-            "end_block {} is newer than finalized L2 head {}; witness data may be reorged",
-            request.end_block,
-            finalized_l2_head.unwrap_or_default(),
-        );
-    }
+    let client = Client::builder()
+        .timeout(RPC_REQUEST_TIMEOUT)
+        .build()
+        .context("failed to build the witness RPC client")?;
 
-    let pre_block = get_block(
-        &client,
-        &config.l2_rpc,
-        BlockTag::Number(request.start_block),
-    )
-    .await?;
-    let post_block =
-        get_block(&client, &config.l2_rpc, BlockTag::Number(request.end_block)).await?;
-    let pre_state =
-        output_root_witness(&client, &config.l2_rpc, request.start_block, &pre_block).await?;
-    let post_state =
-        output_root_witness(&client, &config.l2_rpc, request.end_block, &post_block).await?;
-    let pre_root = pre_state.output_root();
-    let post_root = post_state.output_root();
-
-    let l1_head = match request.l1_head {
-        Some(hash) => hash,
-        None => resolve_l1_head(&client, &config.l2_rpc, &config.l1_rpc, request.end_block).await?,
-    };
+    // Every phase shares one budget so a stuck RPC endpoint cannot extend the job past it.
+    let deadline = tokio::time::Instant::now() + config.witness_timeout;
+    let inputs = tokio::time::timeout_at(deadline, resolve_host_inputs(&client, config, request))
+        .await
+        .map_err(|_| {
+            anyhow!(
+                "resolving Kona host inputs over RPC timed out after {} seconds",
+                config.witness_timeout.as_secs()
+            )
+        })??;
+    let HostInputs {
+        finalized_l2_head,
+        agreed_l2_head_hash,
+        claimed_l2_timestamp,
+        l1_head,
+        pre_root,
+        post_root,
+    } = inputs;
 
     let active_fork = config
         .schedule
-        .active_fork_at(request.end_block, post_block.timestamp.0);
+        .active_fork_at(request.end_block, claimed_l2_timestamp);
     let world_spec_id = WorldRangeSpecId::from_hardfork(active_fork);
 
     let host = SingleChainHost {
         l1_head,
-        agreed_l2_head_hash: pre_block.hash,
+        agreed_l2_head_hash,
         agreed_l2_output_root: pre_root,
         claimed_l2_output_root: post_root,
         claimed_l2_block_number: request.end_block,
@@ -340,8 +344,12 @@ pub async fn build_range_input(
         l1_config_path: None,
     };
 
-    let witness =
-        collect_world_range_witness(host, config.schedule.clone(), config.witness_timeout).await?;
+    let witness = collect_world_range_witness(
+        host,
+        config.schedule.clone(),
+        deadline.saturating_duration_since(tokio::time::Instant::now()),
+    )
+    .await?;
 
     Ok(RangeProofInput {
         metadata: RangeMetadata {
@@ -356,6 +364,70 @@ pub async fn build_range_input(
             world_spec_id: <&'static str>::from(world_spec_id).to_string(),
         },
         witness,
+    })
+}
+
+/// Everything resolved over RPC before the Kona host starts.
+struct HostInputs {
+    finalized_l2_head: Option<u64>,
+    agreed_l2_head_hash: B256,
+    claimed_l2_timestamp: u64,
+    l1_head: B256,
+    pre_root: B256,
+    post_root: B256,
+}
+
+async fn resolve_host_inputs(
+    client: &Client,
+    config: &OnlineHostConfig,
+    request: RangeWitnessRequest,
+) -> anyhow::Result<HostInputs> {
+    let finalized_l2_head = finalized_l2_head(client, &config.l2_rpc).await?;
+    if !request.allow_unfinalized && finalized_l2_head.is_some_and(|head| request.end_block > head)
+    {
+        bail!(
+            "end_block {} is newer than finalized L2 head {}; witness data may be reorged",
+            request.end_block,
+            finalized_l2_head.unwrap_or_default(),
+        );
+    }
+
+    let pre_block = get_block(
+        client,
+        &config.l2_rpc,
+        BlockTag::Number(request.start_block),
+    )
+    .await?;
+    let post_block = get_block(client, &config.l2_rpc, BlockTag::Number(request.end_block)).await?;
+    let pre_state = output_root_witness(
+        client,
+        &config.l2_rpc,
+        &config.schedule,
+        request.start_block,
+        &pre_block,
+    )
+    .await?;
+    let post_state = output_root_witness(
+        client,
+        &config.l2_rpc,
+        &config.schedule,
+        request.end_block,
+        &post_block,
+    )
+    .await?;
+
+    let l1_head = match request.l1_head {
+        Some(hash) => hash,
+        None => resolve_l1_head(client, &config.l2_rpc, &config.l1_rpc, request.end_block).await?,
+    };
+
+    Ok(HostInputs {
+        finalized_l2_head,
+        agreed_l2_head_hash: pre_block.hash,
+        claimed_l2_timestamp: post_block.timestamp.0,
+        l1_head,
+        pre_root: pre_state.output_root(),
+        post_root: post_state.output_root(),
     })
 }
 
@@ -488,12 +560,21 @@ async fn get_block(client: &Client, rpc_url: &str, tag: BlockTag) -> anyhow::Res
     .with_context(|| format!("eth_getBlockByNumber returned null for {}", tag.display()))
 }
 
+/// Builds the output-root witness for one L2 block, from the header when Isthmus is active.
+///
+/// The `eth_getProof` fallback asks the L2 node to rebuild historical state for a block that is
+/// typically hundreds behind the head, which is what the header path exists to avoid.
 async fn output_root_witness(
     client: &Client,
     rpc_url: &str,
+    schedule: &WorldRangeHardforkConfig,
     block_number: u64,
     block: &RpcBlock,
 ) -> anyhow::Result<OutputRootWitness> {
+    if let Some(witness) = output_root_witness_from_header(schedule, block) {
+        return Ok(witness);
+    }
+
     let proof = match rpc::<AccountProof>(
         client,
         rpc_url,
@@ -518,6 +599,40 @@ async fn output_root_witness(
     Ok(OutputRootWitness {
         state_root: block.state_root,
         message_passer_storage_root: proof.storage_hash,
+        block_hash: block.hash,
+    })
+}
+
+/// Derives the output-root witness from the block header alone, when that is provably valid.
+///
+/// Post-Isthmus the header's `withdrawalsRoot` *is* the `L2ToL1MessagePasser` storage root
+/// (<https://specs.optimism.io/protocol/isthmus/exec-engine.html#l2tol1messagepasser-storage-root-in-header>),
+/// so no proof is needed. Returns `None` — deferring to the proof-based path — for any block where
+/// that does not hold: pre-Isthmus `withdrawalsRoot` is the *empty withdrawals* root under Canyon
+/// and absent before it, so trusting it there would silently produce a wrong output root.
+fn output_root_witness_from_header(
+    schedule: &WorldRangeHardforkConfig,
+    block: &RpcBlock,
+) -> Option<OutputRootWitness> {
+    if !schedule.is_active(
+        WorldRangeHardfork::Isthmus,
+        block.number.0,
+        block.timestamp.0,
+    ) {
+        return None;
+    }
+
+    let Some(message_passer_storage_root) = block.withdrawals_root else {
+        warn!(
+            block_number = block.number.0,
+            "post-Isthmus header has no withdrawalsRoot; falling back to historical eth_getProof"
+        );
+        return None;
+    };
+
+    Some(OutputRootWitness {
+        state_root: block.state_root,
+        message_passer_storage_root,
         block_hash: block.hash,
     })
 }
@@ -668,5 +783,133 @@ impl BlockTag {
 
     fn display(self) -> String {
         self.to_rpc_value()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::b256;
+
+    /// World Chain mainnet Isthmus activation, observed as the first header carrying a
+    /// message-passer `withdrawalsRoot` (block 22368181); block 22368180 is the last pre-fork one.
+    const MAINNET_ISTHMUS_TIME: u64 = 1_764_072_001;
+
+    /// Empty trie root, i.e. the `withdrawalsRoot` every post-Canyon pre-Isthmus header carries.
+    const EMPTY_WITHDRAWALS_ROOT: B256 =
+        b256!("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421");
+
+    /// World Chain mainnet block 22368181: first post-Isthmus block.
+    fn post_isthmus_block() -> RpcBlock {
+        RpcBlock {
+            number: HexU64(22_368_181),
+            hash: b256!("0x1d4ddb8a89e37696618d768f3e02508b8d6916d191052d419e775a2401302efb"),
+            state_root: b256!("0x273a648437dc061c21a87248298be4d9693109e0f06643dc02cbe64a61357089"),
+            timestamp: HexU64(1_764_072_001),
+            withdrawals_root: Some(b256!(
+                "0x689214f9c279bcf419dc24a176286f70505a63c0e1fbe206511ef7c89c5f5aa2"
+            )),
+        }
+    }
+
+    /// World Chain mainnet block 22368180: last pre-Isthmus block, empty `withdrawalsRoot`.
+    fn pre_isthmus_block() -> RpcBlock {
+        RpcBlock {
+            number: HexU64(22_368_180),
+            hash: b256!("0xc2198f4973ca7c74035e8f1aafc8634666c6be4b1def1d7ccd77ab871297a9ff"),
+            state_root: b256!("0x6f43f8da745ccd8ed511754a625c36764dfec9cbe95c9da0ccb391b3be8192dc"),
+            timestamp: HexU64(1_764_071_999),
+            withdrawals_root: Some(EMPTY_WITHDRAWALS_ROOT),
+        }
+    }
+
+    fn schedule(isthmus_time: Option<u64>) -> WorldRangeHardforkConfig {
+        WorldRangeHardforkConfig {
+            isthmus_time,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn derives_witness_from_header_post_isthmus() {
+        let block = post_isthmus_block();
+        let witness =
+            output_root_witness_from_header(&schedule(Some(MAINNET_ISTHMUS_TIME)), &block)
+                .expect("post-Isthmus header is sufficient");
+
+        assert_eq!(witness.state_root, block.state_root);
+        assert_eq!(witness.block_hash, block.hash);
+        assert_eq!(
+            Some(witness.message_passer_storage_root),
+            block.withdrawals_root
+        );
+    }
+
+    #[test]
+    fn falls_back_on_the_last_pre_isthmus_block() {
+        // The header carries an empty `withdrawalsRoot` here, so using it would commit to a wrong
+        // output root rather than merely lose the optimization.
+        assert!(
+            output_root_witness_from_header(
+                &schedule(Some(MAINNET_ISTHMUS_TIME)),
+                &pre_isthmus_block()
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn isthmus_activation_is_inclusive_of_the_activation_timestamp() {
+        let block = post_isthmus_block();
+        let activation = block.timestamp.0;
+
+        assert!(output_root_witness_from_header(&schedule(Some(activation)), &block).is_some());
+        assert!(output_root_witness_from_header(&schedule(Some(activation + 1)), &block).is_none());
+    }
+
+    #[test]
+    fn falls_back_when_isthmus_is_unscheduled() {
+        assert!(output_root_witness_from_header(&schedule(None), &post_isthmus_block()).is_none());
+    }
+
+    #[test]
+    fn falls_back_when_post_isthmus_header_omits_withdrawals_root() {
+        let block = RpcBlock {
+            withdrawals_root: None,
+            ..post_isthmus_block()
+        };
+
+        assert!(
+            output_root_witness_from_header(&schedule(Some(MAINNET_ISTHMUS_TIME)), &block)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn deserializes_withdrawals_root_from_an_rpc_header() {
+        let with_root: RpcBlock = serde_json::from_value(json!({
+            "number": "0x1554fb5",
+            "hash": "0x1d4ddb8a89e37696618d768f3e02508b8d6916d191052d419e775a2401302efb",
+            "stateRoot": "0x273a648437dc061c21a87248298be4d9693109e0f06643dc02cbe64a61357089",
+            "timestamp": "0x69259a41",
+            "withdrawalsRoot": "0x689214f9c279bcf419dc24a176286f70505a63c0e1fbe206511ef7c89c5f5aa2",
+            "gasUsed": "0x0",
+        }))
+        .expect("header decodes");
+        assert_eq!(with_root.number.0, 22_368_181);
+        assert_eq!(with_root.timestamp.0, 1_764_072_001);
+        assert_eq!(
+            with_root.withdrawals_root,
+            post_isthmus_block().withdrawals_root
+        );
+
+        let without_root: RpcBlock = serde_json::from_value(json!({
+            "number": "0x1",
+            "hash": B256::ZERO,
+            "stateRoot": B256::ZERO,
+            "timestamp": "0x1",
+        }))
+        .expect("pre-Canyon header decodes");
+        assert!(without_root.withdrawals_root.is_none());
     }
 }
