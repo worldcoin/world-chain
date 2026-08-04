@@ -85,9 +85,7 @@ where
                             parent_ref: transition.parent_ref,
                             root_claim: transition.root_claim,
                             l2_block_number: transition.l2_block_number,
-                            attempt: game.attempt.checked_add(1).ok_or_else(|| {
-                                ProposerError::Contract("proposal attempt overflows u64".into())
-                            })?,
+                            attempt: game.attempt.checked_add(1).ok_or(ProposerError::Overflow)?,
                         },
                         invalidated_game: game.address,
                     }

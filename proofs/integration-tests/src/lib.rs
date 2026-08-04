@@ -414,7 +414,7 @@ impl ProposerClient for FakeExecution {
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
         let status = self.lineage_resolution_status(game).await?;
         if !status.resolvable {
-            return Err(ProposerError::Contract(format!(
+            return Err(ProposerError::message(format!(
                 "game {game} is not resolvable"
             )));
         }
@@ -422,12 +422,12 @@ impl ProposerClient for FakeExecution {
         let record = state
             .games_by_address
             .get_mut(&game)
-            .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
+            .ok_or_else(|| ProposerError::message(format!("unknown game {game}")))?;
         record.state = match status.root_state {
             RootState::Finalized => STATE_FINALIZED,
             RootState::Invalidated => STATE_INVALIDATED,
             _ => {
-                return Err(ProposerError::Contract(format!(
+                return Err(ProposerError::message(format!(
                     "game {game} has no terminal outcome"
                 )));
             }
@@ -443,9 +443,9 @@ impl ProposerClient for FakeExecution {
         let record = state
             .games_by_address
             .get(&game)
-            .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
+            .ok_or_else(|| ProposerError::message(format!("unknown game {game}")))?;
         if record.state != STATE_FINALIZED {
-            return Err(ProposerError::Contract(format!(
+            return Err(ProposerError::message(format!(
                 "game {game} is not finalized"
             )));
         }
@@ -466,7 +466,7 @@ impl ProposerClient for FakeExecution {
         let mut state = self.state.lock().expect("fake execution mutex poisoned");
         let uuid = proposal.commitment().game_uuid(state.domain_hash);
         if let Some(existing) = state.games_by_key.get(&uuid) {
-            return Err(ProposerError::Contract(format!(
+            return Err(ProposerError::message(format!(
                 "game already exists for factory uuid {uuid} at {existing}"
             )));
         }
