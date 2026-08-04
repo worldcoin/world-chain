@@ -63,12 +63,8 @@ pub struct WorkerArgs {
     #[arg(long, env = "L2_RPC_URL")]
     l2_rpc: String,
 
-    /// World Chain L2 consensus (op-node / rollup) RPC URL, serving `optimism_outputAtBlock`.
-    ///
-    /// Used only when `eth_getProof` against `--l2-rpc` fails. This must be the op-node RPC,
-    /// not the execution RPC: an execution client answers `optimism_outputAtBlock` with
-    /// `-32601 Method not found`, which masks the underlying `eth_getProof` error. When unset
-    /// the fallback is skipped and the `eth_getProof` failure is reported directly.
+    /// op-node RPC serving `optimism_outputAtBlock`, used only as the `eth_getProof` fallback.
+    /// Must not be the execution RPC.
     #[arg(long, env = "L2_CONSENSUS_RPC_URL")]
     l2_consensus_rpc: Option<String>,
 
