@@ -49,7 +49,7 @@ pub struct OnlineHostConfig {
     pub l1_beacon_rpc: String,
     /// World Chain L2 execution RPC URL.
     pub l2_rpc: String,
-    /// op-node RPC serving `optimism_outputAtBlock`, used only as the `eth_getProof`
+    /// L2 consensus RPC serving `optimism_outputAtBlock`, used only as the `eth_getProof`
     /// fallback. Must not be the execution RPC. `None` disables the fallback.
     pub l2_consensus_rpc: Option<String>,
     /// World hardfork schedule baked into the witness.
@@ -536,7 +536,7 @@ async fn output_root_witness(
                 return Err(proof_err).context(
                     "eth_getProof failed and no L2 consensus RPC is configured for the \
                      optimism_outputAtBlock fallback (set --l2-consensus-rpc / \
-                     L2_CONSENSUS_RPC_URL to the op-node RPC)",
+                     L2_CONSENSUS_RPC_URL to the L2 consensus RPC)",
                 );
             };
             return output_root_witness_from_op_node(

@@ -66,8 +66,8 @@ struct Cli {
     #[arg(long, env = "L2_RPC_URL")]
     l2_rpc: String,
 
-    /// op-node RPC serving `optimism_outputAtBlock`, used only as the `eth_getProof` fallback.
-    /// Must not be the execution RPC.
+    /// L2 consensus RPC serving `optimism_outputAtBlock`, used only as the `eth_getProof`
+    /// fallback. Must not be the execution RPC.
     #[arg(long, env = "L2_CONSENSUS_RPC_URL")]
     l2_consensus_rpc: Option<String>,
 
