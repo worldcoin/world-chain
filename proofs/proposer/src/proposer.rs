@@ -243,6 +243,18 @@ where
         Ok(())
     }
 
+    pub async fn tick(&self) -> Result<(), ProposerError> {
+        // 1. refresh the anchor and canonical line
+        let scan = self.scan_selected_lineage().await?;
+        // 2. resolve positive-ready games parent-first
+        let highest_finalized_game = self.resolve_games(scan.lineage().games()).await?;
+        // 3. advance the anchor to the highest finalized canonical game
+        self.advance_anchor(highest_finalized_game).await?;
+        // 4. resolve a negative tip, or submit a new proposal or retry
+        self.submit_next_proposal(&scan).await?;
+        Ok(())
+    }
+
     /// Runs the proposer forever, logging transient failures and retrying on each tick.
     pub async fn run_forever(&self) -> Result<(), ProposerError> {
         self.config.validate()?;
@@ -250,20 +262,7 @@ where
         let mut interval = tokio::time::interval(self.config.poll_interval);
         loop {
             interval.tick().await;
-            let iteration: Result<(), ProposerError> = async {
-                // 1. refresh the anchor and canonical line
-                let scan = self.scan_selected_lineage().await?;
-                // 2. resolve positive-ready games parent-first
-                let highest_finalized_game = self.resolve_games(scan.lineage().games()).await?;
-                // 3. advance the anchor to the highest finalized canonical game
-                self.advance_anchor(highest_finalized_game).await?;
-                // 4. resolve a negative tip, or submit a new proposal or retry
-                self.submit_next_proposal(&scan).await?;
-                Ok(())
-            }
-            .await;
-
-            if let Err(error) = iteration {
+            if let Err(error) = self.tick().await {
                 warn!(%error, "proposer iteration failed; retrying on next tick");
             }
         }
