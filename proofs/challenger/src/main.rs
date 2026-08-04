@@ -44,10 +44,6 @@ struct Cli {
     #[arg(long, env = "FACTORY_ADDRESS")]
     factory_address: Address,
 
-    /// OP Stack `AnchorStateRegistry` address on L1.
-    #[arg(long, env = "ANCHOR_REGISTRY_ADDRESS")]
-    anchor_registry_address: Address,
-
     /// Hex-encoded private key the challenger signs L1 transactions with.
     #[arg(long, env = "CHALLENGER_KEY", hide_env_values = true)]
     challenger_key: PrivateKeySigner,
@@ -126,18 +122,10 @@ async fn main() -> Result<()> {
         .connect_client(l1_rpc_client);
     world_chain_proof_metrics::refresh_wallet_balance(&provider, challenger_address).await;
 
-    let client = AlloyChallengerClient::new(
-        provider,
-        cli.factory_address,
-        cli.anchor_registry_address,
-        cli.l1_tx_confirmations,
-    );
+    let client = AlloyChallengerClient::new(provider, cli.factory_address, cli.l1_tx_confirmations);
 
-    // Preflight the factory before entering the scan loop. `AlloyChallengerClient::new` is
-    // infallible, so without this a challenger that cannot reach L1 — or that is pointed at an
-    // address with no factory behind it — starts up, reports itself alive, and then warns on
-    // every tick forever while protecting nothing. Crash instead: the chart declares no
-    // readiness probe, so a running pod is otherwise indistinguishable from a working one.
+    // Preflight the factory index before entering the scan loop. Crash instead of reporting the
+    // process alive while every scan tick fails.
     let game_count = ChallengerClient::game_count(&client)
         .await
         .with_context(|| {
@@ -186,7 +174,6 @@ async fn main() -> Result<()> {
         verifying_output_root_rpc_configured = cli.verifying_output_root_rpc.is_some(),
         dispute_game_factory = %cli.factory_address,
         factory_game_count = game_count,
-        anchor = %cli.anchor_registry_address,
         challenger = %challenger_address,
         max_games_per_tick = cli.max_games_per_tick,
         game_scan_lookback = cli.game_scan_lookback,
