@@ -113,8 +113,8 @@ async fn main() -> Result<()> {
     let proposer = WorldChainProposer::new(config, contracts, output_roots);
 
     info!(
-        l1_rpc_url = %cli.l1_rpc,
-        output_root_rpc_url = %cli.output_root_rpc,
+        l1_rpc_url = world_chain_proof_metrics::redact_endpoint(&cli.l1_rpc),
+        output_root_rpc_url = world_chain_proof_metrics::redact_endpoint(&cli.output_root_rpc),
         verifying_output_root_rpc_configured = cli.verifying_output_root_rpc.is_some(),
         dispute_game_factory = %cli.factory_address,
         anchor = %registered.anchor_registry,

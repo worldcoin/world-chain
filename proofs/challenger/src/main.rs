@@ -16,7 +16,7 @@ use clap::Parser;
 use tracing::info;
 use url::Url;
 use world_chain_challenger::{
-    AlloyChallengerClient, BondManager, BondManagerConfig, ChallengerConfig,
+    AlloyChallengerClient, BondManager, BondManagerConfig, ChallengerClient, ChallengerConfig,
     DEFAULT_GAME_SCAN_LOOKBACK, DEFAULT_L1_TX_CONFIRMATIONS, OwnedGames, ResolutionManager,
     ResolutionManagerConfig, WorldChainChallenger,
 };
@@ -132,6 +132,23 @@ async fn main() -> Result<()> {
         cli.anchor_registry_address,
         cli.l1_tx_confirmations,
     );
+
+    // Preflight the factory before entering the scan loop. `AlloyChallengerClient::new` is
+    // infallible, so without this a challenger that cannot reach L1 — or that is pointed at an
+    // address with no factory behind it — starts up, reports itself alive, and then warns on
+    // every tick forever while protecting nothing. Crash instead: the chart declares no
+    // readiness probe, so a running pod is otherwise indistinguishable from a working one.
+    let game_count = ChallengerClient::game_count(&client)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to read gameCount() from the dispute game factory at {} over {} — \
+                 check the factory address and the L1 RPC endpoint",
+                cli.factory_address,
+                world_chain_proof_metrics::redact_endpoint(&cli.l1_rpc),
+            )
+        })?;
+
     let output_roots = VerifyingConsensusProvider::new(
         OptimismConsensusClient::new(cli.output_root_rpc.clone()),
         cli.verifying_output_root_rpc
@@ -164,10 +181,11 @@ async fn main() -> Result<()> {
     let mut bond_manager = BondManager::new(bond_manager_config, client, owned_games);
 
     info!(
-        l1_rpc_url = %cli.l1_rpc,
-        output_root_rpc_url = %cli.output_root_rpc,
+        l1_rpc_url = world_chain_proof_metrics::redact_endpoint(&cli.l1_rpc),
+        output_root_rpc_url = world_chain_proof_metrics::redact_endpoint(&cli.output_root_rpc),
         verifying_output_root_rpc_configured = cli.verifying_output_root_rpc.is_some(),
         dispute_game_factory = %cli.factory_address,
+        factory_game_count = game_count,
         anchor = %cli.anchor_registry_address,
         challenger = %challenger_address,
         max_games_per_tick = cli.max_games_per_tick,

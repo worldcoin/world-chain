@@ -98,7 +98,10 @@ world-chain-proof-kona-client-utils = { workspace = true, optional = true }
 # don't pull them in.
 alloy-network = { workspace = true, optional = true }
 alloy-contract = { workspace = true, optional = true }
-alloy-provider = { workspace = true, features = ["reqwest"], optional = true }
+alloy-provider = { workspace = true, features = [
+    "reqwest",
+    "reqwest-rustls-tls",
+], optional = true }
 alloy-signer-local = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 
