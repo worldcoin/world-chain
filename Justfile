@@ -144,9 +144,11 @@ install *args='':
 #   Phase 2   proof-deploy-system         – Deploy proof system contracts
 #   Phase 3a  proof-certmanager-prewarm   – Pre-warm CertManager with CA certs
 #   Phase 3b  proof-approve-pcrs          – Approve PCR set on verifier
+#   Phase 3c  proof-verify-pcrs           – Assert the RUNNING enclave's PCR set is approved
+#                                            (drift check; safe to run any time)
 #   Phase 4   proof-register-key          – Register the enclave's generated key on-chain
 #                                            (run separately; NOT part of proof-setup)
-#   Combined  proof-setup                 – Run deploy phases 0a–3b in sequence (does NOT
+#   Combined  proof-setup                 – Run deploy phases 0a–3c in sequence (does NOT
 #                                            run Phase 4 — register the key afterwards with
 #                                            proof-register-key, or let the worker
 #                                            self-register via `nitro-worker run --auto-register`)
@@ -562,6 +564,67 @@ proof-approve-pcrs env="alphanet":
     fi
     echo "PCR set approved."
 
+# Phase 3c – Verify the RUNNING enclave's PCR set is approved on-chain.
+#
+# The enclave image is built from a mutable tag (see PROOF_NITRO_IMAGE), so every EIF
+# rebuild changes PCR0 (enclave image) and PCR2 (application) while PCR1 (kernel) stays
+# put. Nothing re-approves the new measurements automatically, so the running enclave
+# silently drops off the on-chain allowlist and every registerKey / TEE proof reverts.
+#
+# This measures the enclave that is actually running rather than trusting PCR0/1/2 from
+# the shell — trusting the shell would reproduce exactly the drift this is meant to catch.
+#
+# Required: L1_RPC_URL. Optional: NITRO_ATTESTATION_VERIFIER (else read from the
+#           {{env}}-nitro.json deployment).
+proof-verify-pcrs env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f "scripts/proof-envs/{{env}}.env" ]; then
+        echo "Error: unknown env '{{env}}' — create scripts/proof-envs/{{env}}.env to configure it" >&2
+        exit 1
+    fi
+    DEPLOYMENTS_FILE="pkg/contracts/deployments/{{env}}-nitro.json"
+    if [ -z "${NITRO_ATTESTATION_VERIFIER:-}" ] && [ -f "$DEPLOYMENTS_FILE" ]; then
+        NITRO_ATTESTATION_VERIFIER=$(jq -r '.nitroAttestationVerifier // empty' "$DEPLOYMENTS_FILE")
+    fi
+    : "${NITRO_ATTESTATION_VERIFIER:?NITRO_ATTESTATION_VERIFIER is required (set it or run proof-deploy-nitro first)}"
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+
+    echo "Measuring the running enclave…" >&2
+    eval "$(just proof-get-pcrs {{env}})"
+    : "${PCR0:?proof-get-pcrs did not return PCR0}"
+    : "${PCR1:?proof-get-pcrs did not return PCR1}"
+    : "${PCR2:?proof-get-pcrs did not return PCR2}"
+    [[ "$PCR0" == 0x* ]] || PCR0="0x$PCR0"
+    [[ "$PCR1" == 0x* ]] || PCR1="0x$PCR1"
+    [[ "$PCR2" == 0x* ]] || PCR2="0x$PCR2"
+
+    # The verifier stores keccak256 of each raw 48-byte PCR, not the PCR itself.
+    APPROVED=$(cast call "$NITRO_ATTESTATION_VERIFIER" \
+        "isPCRSetApproved(bytes32,bytes32,bytes32)(bool)" \
+        "$(cast keccak "$PCR0")" "$(cast keccak "$PCR1")" "$(cast keccak "$PCR2")" \
+        --rpc-url "$L1_RPC_URL")
+
+    if [ "$APPROVED" != "true" ]; then
+        echo "" >&2
+        echo "ERROR: the running enclave's PCR set is NOT approved on ${NITRO_ATTESTATION_VERIFIER}." >&2
+        echo "" >&2
+        echo "  running enclave:" >&2
+        echo "    PCR0=$PCR0" >&2
+        echo "    PCR1=$PCR1" >&2
+        echo "    PCR2=$PCR2" >&2
+        if [ -f "$DEPLOYMENTS_FILE" ]; then
+            echo "  approved in $DEPLOYMENTS_FILE:" >&2
+            jq -r '.approvedPCRSets[]? | "    PCR0=\(.pcr0)\n    PCR1=\(.pcr1)\n    PCR2=\(.pcr2)"' \
+                "$DEPLOYMENTS_FILE" >&2 || true
+        fi
+        echo "" >&2
+        echo "Until this is approved, registerKey and every TEE proof will revert." >&2
+        echo "Fix: OWNER_KEY=... just proof-approve-pcrs {{env}}" >&2
+        exit 1
+    fi
+    echo "Running enclave's PCR set is approved on ${NITRO_ATTESTATION_VERIFIER}."
+
 # Phase 4 – Register the enclave's generated signing key on-chain.
 #            Execs into the running nitro-worker pod (which has vsock access to the
 #            enclave) and runs `nitro-worker register`, which fetches a public-key
@@ -704,7 +767,14 @@ proof-setup env="alphanet":
     echo "=== Step 3b: Approving PCR set ===" >&2
     just dry_run={{dry_run}} proof-approve-pcrs {{env}}
 
-    echo "=== Deploy phases 0a-3b complete. ===" >&2
+    # Verify rather than assume: re-measure the running enclave and confirm the allowlist
+    # actually accepts it. A dry run approves nothing, so there is nothing to verify.
+    if [ "{{dry_run}}" = "false" ]; then
+        echo "=== Step 3c: Verifying the running enclave's PCR set ===" >&2
+        just proof-verify-pcrs {{env}}
+    fi
+
+    echo "=== Deploy phases 0a-3c complete. ===" >&2
     echo "The game is registered but not activated; run 'just proof-activate-system {{env}}' after readiness checks." >&2
     echo "Next: register the enclave signing key (Phase 4) with 'just proof-register-key {{env}}'," >&2
     echo "      or run the worker with '--auto-register' so it self-registers on startup." >&2
