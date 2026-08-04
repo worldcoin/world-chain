@@ -317,30 +317,66 @@ cargo run -p prover-cli -- \
 
 ---
 
-## Known gap / follow-up: automated self-registration
+## Automated self-registration
 
-Because `registerKey` is not owner-gated and is authorized purely by attestation +
-the owner-approved PCR allowlist (see Phase 4), the worker could in principle
-**register itself on boot** — fetch its own `public_key`-embedding attestation from the
-enclave, compute the P-384 hints, and submit `registerKey` on L1 — with no human or
-owner signature required. This is fully compatible with the trust model: the owner
-still controls _which enclave images_ may register via `approvePCRSet`.
+Because `registerKey` is not owner-gated and is authorized purely by attestation + the
+owner-approved PCR allowlist (Phase 4), the worker can register **itself** on boot — no
+human/owner signature needed. The owner still controls _which enclave images_ may register
+via `approvePCRSet`. This is implemented (world-chain PR #938); Phase 4's manual steps
+remain as a fallback.
 
-This automation is **not implemented today**:
+One shared flow (`register_enclave_key` in `proofs/nitro/src/register.rs`) fetches the
+`public_key`-embedding attestation over vsock, builds the `registerKey` calldata (TBS +
+P-384 hints), submits it, and confirms `isSignerRegistered`. It is idempotent (treats
+already-registered / concurrent-registration races as success) and retries transient RPC /
+nonce failures while failing fast on deterministic reverts. Entry points:
 
-- `NitroProver::get_public_key_async` exists in `proofs/nitro/src/host.rs` but has
-  **no callers** — nothing wires it into worker startup.
-- The worker's `run` command (`proofs/nitro/worker/src/cmd/run.rs`) only leases jobs,
-  proves them in the enclave, and submits the signed attestations back to the
-  prover-service. It never fetches its pubkey attestation or calls `registerKey`.
-- There is no `just` recipe, CLI subcommand, startup hook, or `crypto-apps` sidecar
-  that performs registration. The only exposed enclave-attestation tooling is the
-  bare `get-attestation` subcommand, which omits `public_key` and is used solely for
-  CertManager pre-warm (Phase 3a).
+- **`world-chain-prover-nitro register`** — one-shot CLI (dev/local).
+- **`nitro-worker register`** — same, on the worker binary (used in-pod).
+- **`nitro-worker run --auto-register`** — registers at startup before leasing jobs.
+- **`just proof-register-key <env>`** — wraps the in-pod invocation.
 
-Until a self-registration path is built, Phase 4 must be driven manually as described
-above. Suggested follow-up: a `just proof-register-key <env>` recipe, or (better) a
-worker startup hook that self-registers using `get_public_key_async`.
+Config: `NITRO_ENCLAVE_KEY_REGISTRY` (registry address), `L1_RPC_URL` (reused for the tx),
+and a funding key via `REGISTER_PRIVATE_KEY` (falls back to `PRIVATE_KEY`).
+
+## Kubernetes deployment (alphanet auto-register)
+
+The alphanet worker (`worldcoin/crypto-apps`
+`values/devnets/alphanet/world-chain-proof-nitro-worker`) self-registers on boot. The
+pieces that make that work — and that the deployment values only reference tersely:
+
+**Enclave in production mode.** The enclave-launcher sidecar runs `nitro-cli run-enclave`
+**without** `--debug-mode` (`ENCLAVE_DEBUG_MODE=false`). Debug mode makes the NSM report
+all-zero PCRs; production mode reports the EIF's real PCR0/1/2, which must match the set
+approved on-chain (Phase 3b / `alphanet-nitro.json`) for `registerKey` to succeed. No EIF
+rebuild is needed — it's a runtime flag.
+
+**Keep-alive via probes, not `nitro-cli console`.** `nitro-cli console` only attaches to
+debug-mode enclaves, so the launcher instead starts the enclave, extracts the ID/CID with
+`jq` (`nitro-cli describe-enclaves | jq -r '.[0].EnclaveID'` / `.EnclaveCID`), writes the
+CID to the shared `/run/nitro-shared/enclave-cid` volume for the worker, `trap`s
+`nitro-cli terminate-enclave` on shutdown, touches `/tmp/enclave-initialized`, then blocks
+on `sleep infinity`. Kubernetes `startup`/`liveness`/`readiness` probes assert the enclave
+is `RUNNING` (`nitro-cli describe-enclaves | jq -e '.[].State == "RUNNING"'`; startup /
+readiness also check the marker) and restart the pod on failure. This mirrors the
+world-chat secure-enclave deployment pattern.
+
+**Funding-key provisioning chain.** `REGISTER_PRIVATE_KEY` is not stored in git. It flows:
+`worldcoin/infrastructure` Terraform (`crypto/dev/us-east-1/alphanet.tf` — `random_bytes`
+→ AWS Secrets Manager `proof_nitro_worker_register_key.hex`) → the `kube-ops` controller
+syncs it into the namespace's `application` Kubernetes Secret → the `common-app` chart's
+`mountSecrets` mounts it at `/etc/secrets` → the worker's startup shell runs
+`export REGISTER_PRIVATE_KEY=$(cat /etc/secrets/proof_nitro_worker_register_key.hex)`.
+Fund the derived address with (Sepolia) ETH after apply. Mirrors the defender/challenger
+key pattern.
+
+**PCR verification.** The approved PCR0/1/2 in `alphanet-nitro.json` are captured from the
+EIF via `nitro-cli describe-eif` (build-time, independent of debug/production runtime), so
+production mode reports exactly those — **provided the deployed EIF image is the one they
+were captured from**. Confirm before rollout, and re-run `just proof-approve-pcrs` if the
+EIF was rebuilt. Host-side PCR pinning on the worker (`PCR0/1/2` env) is optional (the
+on-chain registry already enforces the set); leaving it unset avoids a host-side hard-fail
+if the EIF drifts.
 
 ---
 
