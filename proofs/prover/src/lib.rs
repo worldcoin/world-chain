@@ -69,6 +69,12 @@ pub struct RpcArgs {
     #[arg(long, env = "L2_RPC_URL")]
     pub l2_rpc: String,
 
+    /// World Chain L2 consensus (op-node / rollup) RPC URL, serving `optimism_outputAtBlock`.
+    /// Used only as the `eth_getProof` fallback; must be the op-node RPC, not the execution
+    /// RPC.
+    #[arg(long, env = "L2_CONSENSUS_RPC_URL")]
+    pub l2_consensus_rpc: Option<String>,
+
     /// Ethereum L1 execution RPC URL.
     #[arg(long, env = "L1_RPC_URL")]
     pub l1_rpc: String,
@@ -156,6 +162,7 @@ pub fn online_host_config(args: &RpcArgs) -> Result<OnlineHostConfig> {
         l1_rpc: args.l1_rpc.clone(),
         l1_beacon_rpc: args.l1_beacon_rpc.clone(),
         l2_rpc: args.l2_rpc.clone(),
+        l2_consensus_rpc: args.l2_consensus_rpc.clone(),
         schedule,
         rollup_config_hash,
         l2_chain_id: args

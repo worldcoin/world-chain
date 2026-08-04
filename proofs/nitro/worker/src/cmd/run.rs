@@ -63,6 +63,15 @@ pub struct WorkerArgs {
     #[arg(long, env = "L2_RPC_URL")]
     l2_rpc: String,
 
+    /// World Chain L2 consensus (op-node / rollup) RPC URL, serving `optimism_outputAtBlock`.
+    ///
+    /// Used only when `eth_getProof` against `--l2-rpc` fails. This must be the op-node RPC,
+    /// not the execution RPC: an execution client answers `optimism_outputAtBlock` with
+    /// `-32601 Method not found`, which masks the underlying `eth_getProof` error. When unset
+    /// the fallback is skipped and the `eth_getProof` failure is reported directly.
+    #[arg(long, env = "L2_CONSENSUS_RPC_URL")]
+    l2_consensus_rpc: Option<String>,
+
     /// Ethereum L1 execution RPC URL.
     #[arg(long, env = "L1_RPC_URL")]
     l1_rpc: String,
@@ -187,6 +196,7 @@ pub async fn run(args: WorkerArgs) -> Result<()> {
         args.l1_rpc.clone(),
         args.l1_beacon_rpc.clone(),
         args.l2_rpc.clone(),
+        args.l2_consensus_rpc.clone(),
         args.network.chain_id(),
         &schedule,
         Duration::from_secs(args.witness_timeout_seconds),
