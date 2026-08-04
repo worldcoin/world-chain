@@ -75,12 +75,7 @@ where
 
     /// Resolves the WIP-1006 game at a factory index, skipping other game types.
     async fn wip_1006_game_at(&self, index: u64) -> Result<Option<Address>, ProposerError> {
-        let entry = self
-            .factory
-            .gameAtIndex(U256::from(index))
-            .call()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let entry = self.factory.gameAtIndex(U256::from(index)).call().await?;
 
         Ok((entry.gameType == MULTI_PROOF_GAME_TYPE).then_some(entry.proxy))
     }
@@ -99,23 +94,17 @@ where
             .isGameFinalized(game)
             .call()
             .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))
+            .map_err(Into::into)
     }
 
     async fn send_resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
-        let pending = self
-            .game(game)
-            .resolve()
-            .send()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let pending = self.game(game).resolve().send().await?;
 
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
             .get_receipt()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+            .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
         if !receipt.status() {
             return Err(ProposerError::Revert(tx_hash));
@@ -130,7 +119,7 @@ where
             .credit(recipient)
             .call()
             .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))
+            .map_err(Into::into)
     }
 
     /// Reads `recipient`'s pending `DelayedWETH` withdrawal for `game`.
@@ -139,12 +128,7 @@ where
         game: Address,
         recipient: Address,
     ) -> Result<PendingWithdrawal, ProposerError> {
-        let weth_address = self
-            .game(game)
-            .weth()
-            .call()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let weth_address = self.game(game).weth().call().await?;
         let weth = IDelayedWETH::IDelayedWETHInstance::new(weth_address, self.provider.clone());
 
         let (pending, delay) = self
@@ -153,8 +137,7 @@ where
             .add(weth.withdrawals(game, recipient))
             .add(weth.delay())
             .aggregate()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+            .await?;
 
         if pending.amount.is_zero() {
             return Ok(PendingWithdrawal::default());
@@ -162,11 +145,11 @@ where
         let unlock_at = pending
             .timestamp
             .checked_add(delay)
-            .ok_or_else(|| ProposerError::Contract("DelayedWETH unlock time overflows".into()))?;
+            .ok_or(ProposerError::Overflow)?;
 
         Ok(PendingWithdrawal {
             amount: pending.amount,
-            unlock_at: u256_to_u64(unlock_at, "DelayedWETH unlock time")?,
+            unlock_at: u256_to_u64(unlock_at)?,
         })
     }
 
@@ -185,18 +168,12 @@ where
             PendingWithdrawal::default()
         };
 
-        let pending_tx = self
-            .game(game)
-            .claimCredit(recipient)
-            .send()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let pending_tx = self.game(game).claimCredit(recipient).send().await?;
         let tx_hash = *pending_tx.tx_hash();
         let receipt = pending_tx
             .with_required_confirmations(self.confirmations)
             .get_receipt()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+            .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
         if !receipt.status() {
             return Err(ProposerError::Revert(tx_hash));
@@ -228,13 +205,8 @@ where
     }
 
     async fn game_count(&self) -> Result<u64, ProposerError> {
-        let count = self
-            .factory
-            .gameCount()
-            .call()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
-        u256_to_u64(count, "gameCount")
+        let count = self.factory.gameCount().call().await?;
+        u256_to_u64(count)
     }
 
     async fn game_at(&self, index: u64) -> Result<Option<Address>, ProposerError> {
@@ -246,7 +218,7 @@ where
             .gameCreator()
             .call()
             .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))
+            .map_err(Into::into)
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
@@ -273,10 +245,9 @@ where
     async fn latest_l1_timestamp(&self) -> Result<u64, ProposerError> {
         self.provider
             .get_block_by_number(BlockNumberOrTag::Latest)
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?
+            .await?
             .map(|block| block.header.timestamp())
-            .ok_or_else(|| ProposerError::Contract("latest L1 block is unavailable".into()))
+            .ok_or(ProposerError::UnavailableLatestL1Block)
     }
 
     async fn claim_credit(&self, game: Address) -> Result<ClaimSubmission, ProposerError> {
@@ -326,19 +297,13 @@ where
     }
 
     async fn close_game(&self, game: Address) -> Result<CloseGameSubmission, ProposerError> {
-        let pending = self
-            .game(game)
-            .closeGame()
-            .send()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let pending = self.game(game).closeGame().send().await?;
 
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
             .get_receipt()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+            .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
         if !receipt.status() {
             return Err(ProposerError::Revert(tx_hash));
@@ -353,12 +318,7 @@ where
     ) -> Result<ProposalSubmission, ProposerError> {
         // `DisputeGameFactory.create` reverts unless `msg.value` matches the configured init
         // bond exactly, so it is read per submission rather than cached in configuration.
-        let init_bond = self
-            .factory
-            .initBonds(MULTI_PROOF_GAME_TYPE)
-            .call()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let init_bond = self.factory.initBonds(MULTI_PROOF_GAME_TYPE).call().await?;
 
         let extra_data = proposal
             .commitment()
@@ -368,15 +328,13 @@ where
             .create(MULTI_PROOF_GAME_TYPE, proposal.root_claim, extra_data)
             .value(init_bond)
             .send()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+            .await?;
 
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
             .get_receipt()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+            .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
         if !receipt.status() {
             return Err(ProposerError::Revert(tx_hash));
@@ -395,11 +353,7 @@ where
                 event.gameType == MULTI_PROOF_GAME_TYPE && event.rootClaim == proposal.root_claim
             })
             .map(|event| event.disputeProxy)
-            .ok_or_else(|| {
-                ProposerError::Contract(format!(
-                    "DisputeGameCreated event missing from proposal transaction {tx_hash}"
-                ))
-            })?;
+            .ok_or(ProposerError::MissingProposalEvent(tx_hash))?;
 
         Ok(ProposalSubmission {
             tx_hash,
@@ -414,19 +368,12 @@ where
 {
     /// Reads an L2 block number from a game contract.
     pub async fn game_l2_block_number(&self, game: Address) -> Result<u64, ProposerError> {
-        let l2_block_number = self
-            .game(game)
-            .l2BlockNumber()
-            .call()
-            .await
-            .map_err(|error| ProposerError::Contract(error.to_string()))?;
+        let l2_block_number = self.game(game).l2BlockNumber().call().await?;
 
-        u256_to_u64(l2_block_number, "l2BlockNumber")
+        u256_to_u64(l2_block_number)
     }
 }
 
-fn u256_to_u64(value: U256, field: &'static str) -> Result<u64, ProposerError> {
-    value
-        .try_into()
-        .map_err(|_| ProposerError::Contract(format!("{field} overflows u64")))
+fn u256_to_u64(value: U256) -> Result<u64, ProposerError> {
+    value.try_into().map_err(|_| ProposerError::Overflow)
 }

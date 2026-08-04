@@ -217,7 +217,7 @@ impl DefenderClient for MockClient {
             .games
             .get(&game)
             .map(|record| record.metadata)
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| DefenderError::message(format!("unknown game {game}")))
     }
 
     async fn proof_bitmap(&self, game: Address) -> Result<u8, DefenderError> {
@@ -227,7 +227,7 @@ impl DefenderClient for MockClient {
             .games
             .get(&game)
             .map(|record| record.proof_bitmap)
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| DefenderError::message(format!("unknown game {game}")))
     }
 
     async fn submit_proof(
@@ -240,7 +240,7 @@ impl DefenderClient for MockClient {
         guard
             .games
             .get_mut(&game)
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))?
+            .ok_or_else(|| DefenderError::message(format!("unknown game {game}")))?
             .proof_bitmap |= 1 << lane;
         guard.submissions.push((game, lane));
         Ok(DefenderSubmission {

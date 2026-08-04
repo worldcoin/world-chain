@@ -414,7 +414,7 @@ impl ProposerClient for FakeExecution {
     async fn resolve_game(&self, game: Address) -> Result<ResolveSubmission, ProposerError> {
         let status = self.lineage_resolution_status(game).await?;
         if !status.resolvable {
-            return Err(ProposerError::Contract(format!(
+            return Err(ProposerError::message(format!(
                 "game {game} is not resolvable"
             )));
         }
@@ -422,12 +422,12 @@ impl ProposerClient for FakeExecution {
         let record = state
             .games_by_address
             .get_mut(&game)
-            .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
+            .ok_or_else(|| ProposerError::message(format!("unknown game {game}")))?;
         record.state = match status.root_state {
             RootState::Finalized => STATE_FINALIZED,
             RootState::Invalidated => STATE_INVALIDATED,
             _ => {
-                return Err(ProposerError::Contract(format!(
+                return Err(ProposerError::message(format!(
                     "game {game} has no terminal outcome"
                 )));
             }
@@ -443,9 +443,9 @@ impl ProposerClient for FakeExecution {
         let record = state
             .games_by_address
             .get(&game)
-            .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))?;
+            .ok_or_else(|| ProposerError::message(format!("unknown game {game}")))?;
         if record.state != STATE_FINALIZED {
-            return Err(ProposerError::Contract(format!(
+            return Err(ProposerError::message(format!(
                 "game {game} is not finalized"
             )));
         }
@@ -466,7 +466,7 @@ impl ProposerClient for FakeExecution {
         let mut state = self.state.lock().expect("fake execution mutex poisoned");
         let uuid = proposal.commitment().game_uuid(state.domain_hash);
         if let Some(existing) = state.games_by_key.get(&uuid) {
-            return Err(ProposerError::Contract(format!(
+            return Err(ProposerError::message(format!(
                 "game already exists for factory uuid {uuid} at {existing}"
             )));
         }
@@ -574,7 +574,7 @@ impl DefenderClient for FakeExecution {
                 proof_deadline: record.proof_deadline,
                 proof_threshold: PROOF_THRESHOLD,
             })
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| DefenderError::message(format!("unknown game {game}")))
     }
 
     async fn proof_bitmap(&self, game: Address) -> Result<u8, DefenderError> {
@@ -584,7 +584,7 @@ impl DefenderClient for FakeExecution {
             .games_by_address
             .get(&game)
             .map(|record| record.proof_bitmap)
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| DefenderError::message(format!("unknown game {game}")))
     }
 
     async fn submit_proof(
@@ -593,19 +593,18 @@ impl DefenderClient for FakeExecution {
         lane: u8,
         proof: Bytes,
     ) -> Result<DefenderSubmission, DefenderError> {
-        let lane =
-            proof_lane(lane).ok_or_else(|| DefenderError::Contract("invalid lane".into()))?;
+        let lane = proof_lane(lane).ok_or_else(|| DefenderError::message("invalid lane"))?;
         if proof.is_empty() {
-            return Err(DefenderError::Contract("empty proof".into()));
+            return Err(DefenderError::message("empty proof"));
         }
 
         let mut state = self.state.lock().expect("fake execution mutex poisoned");
         let record = state
             .games_by_address
             .get_mut(&game)
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))?;
+            .ok_or_else(|| DefenderError::message(format!("unknown game {game}")))?;
         if record.state != STATE_PROPOSED && record.state != STATE_CHALLENGED {
-            return Err(DefenderError::Contract(format!(
+            return Err(DefenderError::message(format!(
                 "game {game} is not open for proofs"
             )));
         }

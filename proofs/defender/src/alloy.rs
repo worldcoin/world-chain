@@ -118,12 +118,12 @@ where
             .add(game.proofDeadline())
             .add(game.PROOF_THRESHOLD())
             .aggregate()
-            .await
-            .map_err(|error| DefenderError::Contract(error.to_string()))?;
+            .await?;
         if proof_threshold == 0 || proof_threshold > PROOF_LANE_COUNT {
-            return Err(DefenderError::Contract(format!(
-                "invalid proof threshold {proof_threshold} for game {address}"
-            )));
+            return Err(DefenderError::InvalidProofThreshold {
+                proof_threshold,
+                game: address,
+            });
         }
 
         Ok(GameMetadata {
@@ -131,9 +131,9 @@ where
             domain_hash,
             parent_ref,
             root_claim,
-            l2_block_number: u256_to_u64(l2_block_number, "l2BlockNumber")?,
+            l2_block_number: u256_to_u64(l2_block_number)?,
             l1_origin_hash,
-            l1_origin_number: u256_to_u64(l1_origin_number, "l1OriginNumber")?,
+            l1_origin_number: u256_to_u64(l1_origin_number)?,
             challenge_deadline,
             proof_deadline,
             proof_threshold,
@@ -145,7 +145,7 @@ where
             .proofBitmap()
             .call()
             .await
-            .map_err(|error| DefenderError::Contract(error.to_string()))
+            .map_err(Into::into)
     }
 
     async fn submit_proof(
@@ -154,18 +154,12 @@ where
         lane: u8,
         proof: Bytes,
     ) -> Result<DefenderSubmission, DefenderError> {
-        let pending = self
-            .game(game)
-            .submitProofLane(lane, proof)
-            .send()
-            .await
-            .map_err(|err| DefenderError::Contract(err.to_string()))?;
+        let pending = self.game(game).submitProofLane(lane, proof).send().await?;
         let tx_hash = *pending.tx_hash();
         let receipt = pending
             .with_required_confirmations(self.confirmations)
             .get_receipt()
-            .await
-            .map_err(|err| DefenderError::Contract(err.to_string()))?;
+            .await?;
         world_chain_proof_metrics::refresh_wallet_balance(&self.provider, receipt.from).await;
         if !receipt.status() {
             return Err(DefenderError::Revert(tx_hash));
@@ -174,8 +168,6 @@ where
     }
 }
 
-fn u256_to_u64(value: U256, field: &'static str) -> Result<u64, DefenderError> {
-    value
-        .try_into()
-        .map_err(|_| DefenderError::Contract(format!("{field} overflows u64")))
+fn u256_to_u64(value: U256) -> Result<u64, DefenderError> {
+    value.try_into().map_err(|_| DefenderError::Overflow)
 }

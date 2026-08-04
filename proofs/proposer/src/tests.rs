@@ -124,8 +124,8 @@ impl ProposerClient for MockContracts {
         let mut failures = self.submission_failures.lock().expect("not poisoned");
         if *failures > 0 {
             *failures -= 1;
-            return Err(ProposerError::Contract(
-                "injected proposal submission failure".into(),
+            return Err(ProposerError::message(
+                "injected proposal submission failure",
             ));
         }
         drop(failures);
@@ -218,14 +218,14 @@ impl BondManagerClient for MockBondClient {
         let mut fail_index = self.fail_game_at_once.lock().expect("not poisoned");
         if *fail_index == Some(index) {
             *fail_index = None;
-            return Err(ProposerError::Contract("injected gameAt failure".into()));
+            return Err(ProposerError::message("injected gameAt failure"));
         }
         self.games
             .lock()
             .expect("not poisoned")
             .get(index as usize)
             .map(|(game, _)| *game)
-            .ok_or_else(|| ProposerError::Contract(format!("missing game at index {index}")))
+            .ok_or_else(|| ProposerError::message(format!("missing game at index {index}")))
     }
 
     async fn game_creator(&self, game: Address) -> Result<Address, ProposerError> {
@@ -234,7 +234,7 @@ impl BondManagerClient for MockBondClient {
             .expect("not poisoned")
             .iter()
             .find_map(|(candidate, creator)| (*candidate == Some(game)).then_some(*creator))
-            .ok_or_else(|| ProposerError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| ProposerError::message(format!("unknown game {game}")))
     }
 
     async fn resolution_status(&self, game: Address) -> Result<ResolutionStatus, ProposerError> {
@@ -267,9 +267,9 @@ impl BondManagerClient for MockBondClient {
         let mut statuses = self.resolution_statuses.lock().expect("not poisoned");
         let status = statuses
             .get_mut(&game)
-            .ok_or_else(|| ProposerError::Contract(format!("game {game} is not resolvable")))?;
+            .ok_or_else(|| ProposerError::message(format!("game {game} is not resolvable")))?;
         if !status.resolvable {
-            return Err(ProposerError::Contract(format!(
+            return Err(ProposerError::message(format!(
                 "game {game} is not resolvable"
             )));
         }
@@ -319,7 +319,7 @@ impl BondManagerClient for MockBondClient {
             .expect("not poisoned")
             .remove(&game)
         {
-            return Err(ProposerError::Contract("injected claim failure".into()));
+            return Err(ProposerError::message("injected claim failure"));
         }
 
         let credit = self
@@ -604,7 +604,7 @@ async fn propose_can_retry_a_failed_submission() {
 
     assert!(matches!(
         advance_proposal(&proposer, &scan).await,
-        Err(ProposerError::Contract(_))
+        Err(ProposerError::AlloyJsonRpc(_))
     ));
     assert!(submissions.lock().expect("not poisoned").is_empty());
 
