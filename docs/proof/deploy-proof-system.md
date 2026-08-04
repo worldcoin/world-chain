@@ -358,7 +358,12 @@ debug-mode enclaves, so the launcher instead starts the enclave and reads the ne
 would pick a stale/leaked enclave from a previous crashed pod). It writes the CID to the
 shared `/run/nitro-shared/enclave-cid` volume for the worker, publishes the ID to
 `/tmp/enclave-id`, `trap`s `nitro-cli terminate-enclave --enclave-id <our id>` on shutdown,
-touches `/tmp/enclave-initialized`, then blocks on `sleep infinity`. Kubernetes
+touches `/tmp/enclave-initialized`, then blocks on a **backgrounded** `sleep infinity &` +
+`wait "$SLEEP_PID"`. (A *foreground* `sleep infinity` would block the shell in `waitpid()`,
+so a trapped `SIGTERM` from a rollout / eviction / liveness restart wouldn't run the
+cleanup trap until the grace period expired and the container was `SIGKILL`ed — leaking the
+enclave; the `wait` builtin is interruptible by trapped signals, so the trap fires
+promptly and terminates our enclave.) Kubernetes
 `startup`/`liveness`/`readiness` probes assert **our specific** enclave is `RUNNING`
 (`nitro-cli describe-enclaves | jq -e --arg id "$(cat /tmp/enclave-id)" 'any(.[]; .EnclaveID == $id and .State == "RUNNING")'`;
 startup / readiness also check the marker) — filtering by ID so a leaked enclave can't make
