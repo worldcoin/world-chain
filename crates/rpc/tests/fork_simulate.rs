@@ -751,12 +751,10 @@ async fn test_revert_with_reason() {
     }
 }
 
-/// The inspector exposes the deepest reverted frame's decoded payload —
-/// which the handler uses for `revertReason` so wrappers like EntryPoint's
-/// `FailedOp(...)` don't mask the root cause. Single-frame case: WLD reverts
-/// directly with no wrapper.
+/// The inspector exposes the terminal failure path's decoded payload. In this
+/// single-frame case, WLD reverts directly with no wrapper.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_deepest_revert_reason_decodes_payload() {
+async fn test_terminal_revert_reason_decodes_payload() {
     let mut db = forked_db!();
     let caller = address!("00000000000000000000000000ffffffffffffff");
     db.insert_account_info(
@@ -799,7 +797,7 @@ async fn test_deepest_revert_reason_decodes_payload() {
 
     let (_, inspector, _) = evm.components_mut();
     assert_eq!(
-        inspector.take_deepest_revert_reason().as_deref(),
+        inspector.terminal_revert_reason().as_deref(),
         Some("ERC20: transfer amount exceeds balance"),
     );
 }
@@ -808,7 +806,7 @@ async fn test_deepest_revert_reason_decodes_payload() {
 /// the inspector returns `None` and the handler falls back to the
 /// `HaltReason` debug name for `revertReason`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_deepest_revert_reason_skips_halts() {
+async fn test_terminal_revert_reason_skips_halts() {
     let mut db = forked_db!();
     let caller = address!("00000000000000000000000000ffffffffffffff");
     db.insert_account_info(
@@ -856,7 +854,7 @@ async fn test_deepest_revert_reason_skips_halts() {
     );
 
     let (_, inspector, _) = evm.components_mut();
-    assert!(inspector.take_deepest_revert_reason().is_none());
+    assert!(inspector.terminal_revert_reason().is_none());
 }
 
 /// Trace captures top-level calls from a simulated execution.
@@ -903,7 +901,7 @@ async fn test_trace_captures_calls() {
 
     let (_, inspector, _) = evm.components_mut();
     let trace = inspector
-        .take_trace_entries()
+        .trace_entries()
         .expect("completed simulation should produce a complete trace");
     for entry in &trace {
         assert!(
@@ -1053,7 +1051,7 @@ async fn test_trace_detects_malicious_safe_call() {
 
     let (_, inspector, _) = evm.components_mut();
     let trace = inspector
-        .take_trace_entries()
+        .trace_entries()
         .expect("completed simulation should produce a complete trace");
     // Log what the trace captured (informational)
     for entry in &trace {
@@ -1558,7 +1556,7 @@ async fn test_inspector_captures_create_via_call_frame() {
     assert_ne!(deployed, Address::ZERO, "deployed address populated");
 
     let trace = inspector
-        .take_trace_entries()
+        .trace_entries()
         .expect("completed simulation should produce a complete trace");
     let create = trace
         .iter()
