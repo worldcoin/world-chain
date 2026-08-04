@@ -411,7 +411,6 @@ proof-deploy-system env="alphanet":
     : "${OP_CHAIN_PROXY_ADMIN:?OP_CHAIN_PROXY_ADMIN is required (op-deployer ProxyAdmin)}"
     : "${OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY:?OP_CHAIN_PROXY_ADMIN_OWNER_PRIVATE_KEY is required}"
     : "${DGF_OWNER_KEY:?DGF_OWNER_KEY is required}"
-    : "${GUARDIAN_KEY:?GUARDIAN_KEY is required}"
     : "${PROTOCOL_FEE_RECIPIENT:?PROTOCOL_FEE_RECIPIENT is required (challenge-fee proceeds)}"
     : "${VALIDITY_PROOF_VERIFIER:?VALIDITY_PROOF_VERIFIER is required (e.g. SP1ValidityVerifier; devnet: proof-deploy-mocks)}"
     : "${TEE_VERIFIER:?TEE_VERIFIER is required (e.g. NitroProofVerifier from proof-deploy-nitro)}"
@@ -419,13 +418,23 @@ proof-deploy-system env="alphanet":
     : "${STAKING_REGISTRY:?STAKING_REGISTRY is required (IWorldChainStakingRegistry implementation)}"
     export PROOF_SYSTEM_BLOCK_INTERVAL="${PROOF_SYSTEM_BLOCK_INTERVAL:-10}"
     export PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL="${PROOF_SYSTEM_INTERMEDIATE_BLOCK_INTERVAL:-5}"
+    export CHALLENGE_PERIOD="${CHALLENGE_PERIOD:-86400}"
+    export PROOF_PERIOD="${PROOF_PERIOD:-604800}"
+    export PROPOSER_BOND="${PROPOSER_BOND:-10000000000000000}"
+    export CHALLENGER_BOND="${CHALLENGER_BOND:-1000000000000000}"
+    export CHALLENGE_FEE="${CHALLENGE_FEE:-100000000000000}"
     export PROOF_THRESHOLD="${PROOF_THRESHOLD:-2}"
     export DELAYED_WETH_DELAY="${DELAYED_WETH_DELAY:-300}"
-    export SET_RESPECTED_GAME_TYPE="${SET_RESPECTED_GAME_TYPE:-true}"
     BROADCAST_FLAG=""
     if [ "{{dry_run}}" = "false" ]; then
         BROADCAST_FLAG="--broadcast"
     fi
+    echo "Proof-system parameters:" >&2
+    echo "  challenge period: $CHALLENGE_PERIOD seconds" >&2
+    echo "  proof period: $PROOF_PERIOD seconds" >&2
+    echo "  proposer bond: $PROPOSER_BOND wei" >&2
+    echo "  challenger bond: $CHALLENGER_BOND wei" >&2
+    echo "  challenge fee: $CHALLENGE_FEE wei" >&2
     # A dry run must never overwrite the record of a live deployment: the simulated game and
     # WETH addresses are never deployed, so writing them to the real path silently replaces a
     # true record with fictional addresses.
@@ -437,6 +446,25 @@ proof-deploy-system env="alphanet":
     echo "Deploying proof system contracts (deployment → $PROOF_SYSTEM_DEPLOYMENT_OUT)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…"
     cd pkg/contracts && mkdir -p deployments && forge script scripts/devnet/DeployProofSystem.s.sol:DeployProofSystem \
         --rpc-url "$L1_RPC_URL" --private-key "$PRIVATE_KEY" $BROADCAST_FLAG --slow
+
+# Activate the registered WIP-1006 implementation after validating its wiring and current anchor.
+# Set REQUIRE_FRESH_ANCHOR=true during a clean chain bootstrap.
+proof-activate-system env="alphanet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${L1_RPC_URL:?L1_RPC_URL is required}"
+    : "${DISPUTE_GAME_FACTORY:?DISPUTE_GAME_FACTORY is required}"
+    : "${ANCHOR_STATE_REGISTRY:?ANCHOR_STATE_REGISTRY is required}"
+    : "${SYSTEM_CONFIG:?SYSTEM_CONFIG is required}"
+    : "${GUARDIAN_KEY:?GUARDIAN_KEY is required}"
+    export REQUIRE_FRESH_ANCHOR="${REQUIRE_FRESH_ANCHOR:-false}"
+    BROADCAST_FLAG=""
+    if [ "{{dry_run}}" = "false" ]; then
+        BROADCAST_FLAG="--broadcast"
+    fi
+    echo "Activating WIP-1006 (require fresh anchor: $REQUIRE_FRESH_ANCHOR)$([ -n "$BROADCAST_FLAG" ] || echo ' [DRY RUN]')…" >&2
+    cd pkg/contracts && forge script scripts/devnet/ActivateProofSystem.s.sol:ActivateProofSystem \
+        --rpc-url "$L1_RPC_URL" --private-key "$GUARDIAN_KEY" $BROADCAST_FLAG --slow
 
 # Phase 3a – Pre-warm CertManager with the AWS Nitro CA cert chain.
 proof-certmanager-prewarm env="alphanet":
@@ -677,5 +705,6 @@ proof-setup env="alphanet":
     just dry_run={{dry_run}} proof-approve-pcrs {{env}}
 
     echo "=== Deploy phases 0a-3b complete. ===" >&2
+    echo "The game is registered but not activated; run 'just proof-activate-system {{env}}' after readiness checks." >&2
     echo "Next: register the enclave signing key (Phase 4) with 'just proof-register-key {{env}}'," >&2
     echo "      or run the worker with '--auto-register' so it self-registers on startup." >&2
