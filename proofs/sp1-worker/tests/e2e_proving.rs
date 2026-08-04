@@ -134,6 +134,8 @@ async fn worker_proves_real_range_end_to_end() {
         l1_rpc,
         l1_beacon_rpc,
         l2_rpc,
+        // No op-node in this fixture; the eth_getProof path is expected to succeed.
+        None,
         Some(PathBuf::from(rollup_config)),
         timeout,
     )
