@@ -64,11 +64,13 @@ impl<E, C> WorldChainChallenger<E, C> {
         self.next_game_index
     }
 
+    /// Returns the games currently queued for retry.
     #[cfg(test)]
     pub(crate) fn retry_games(&self) -> Vec<Address> {
         self.retry_games.keys().copied().collect()
     }
 
+    /// Adds a failed game scan to the retry queue.
     fn queue_retry_game(&mut self, game: GameMetadata, challenge_deadline: Option<u64>) {
         let existing = self.retry_games.get(&game.address);
         let retry_game = RetryGame {
@@ -114,6 +116,7 @@ where
         Ok(low)
     }
 
+    /// Determines whether a game should be challenged.
     async fn process_game(
         &self,
         game: &GameMetadata,
@@ -172,6 +175,7 @@ where
         }
     }
 
+    /// Processes games concurrently up to the configured limit.
     async fn process_games(
         &self,
         games: impl IntoIterator<Item = GameMetadata>,
@@ -190,6 +194,7 @@ where
             .await
     }
 
+    /// Handles scan outcomes and submits required challenges.
     async fn handle_game_results(
         &mut self,
         results: Vec<(GameMetadata, Result<GameScanOutcome, GameScanError>)>,
@@ -239,7 +244,8 @@ where
         }
     }
 
-    pub async fn select_range(&mut self, now: u64) -> Result<((u64, u64)), ChallengerError> {
+    /// Selects the factory index range to scan this tick.
+    pub async fn select_range(&mut self, now: u64) -> Result<(u64, u64), ChallengerError> {
         let game_count = self.execution_provider.game_count().await?;
         let initialize_cursor = self
             .next_game_index
@@ -269,6 +275,7 @@ where
         Ok((start, end))
     }
 
+    /// Loads metadata for newly discovered challenger games.
     pub async fn discover_new_games(
         &self,
         start: u64,
@@ -289,6 +296,7 @@ where
         Ok(new_games)
     }
 
+    /// Reprocesses games queued after transient failures.
     pub async fn handle_retry_games(
         &mut self,
         now: u64,
@@ -321,6 +329,7 @@ where
         Ok(())
     }
 
+    /// Processes games discovered in the selected scan range.
     pub async fn handle_new_games(
         &mut self,
         new_games: Vec<GameMetadata>,
@@ -336,6 +345,7 @@ where
         Ok(())
     }
 
+    /// Runs one challenger iteration at the given Unix timestamp.
     pub async fn tick_at(&mut self, now: u64) -> Result<(), ChallengerError> {
         self.config.validate()?;
         let (start, end) = self.select_range(now).await?;
@@ -353,6 +363,7 @@ where
         Ok(())
     }
 
+    /// Runs one challenger iteration.
     pub async fn tick(&mut self) -> Result<(), ChallengerError> {
         let now = unix_now();
         self.tick_at(now).await
@@ -372,6 +383,7 @@ where
     }
 }
 
+/// Returns the current Unix timestamp in seconds.
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
