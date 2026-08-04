@@ -69,9 +69,8 @@ pub struct RpcArgs {
     #[arg(long, env = "L2_RPC_URL")]
     pub l2_rpc: String,
 
-    /// World Chain L2 consensus (op-node / rollup) RPC URL, serving `optimism_outputAtBlock`.
-    /// Used only as the `eth_getProof` fallback; must be the op-node RPC, not the execution
-    /// RPC.
+    /// op-node RPC serving `optimism_outputAtBlock`, used only as the `eth_getProof` fallback.
+    /// Must not be the execution RPC.
     #[arg(long, env = "L2_CONSENSUS_RPC_URL")]
     pub l2_consensus_rpc: Option<String>,
 

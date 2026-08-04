@@ -49,14 +49,8 @@ pub struct OnlineHostConfig {
     pub l1_beacon_rpc: String,
     /// World Chain L2 execution RPC URL.
     pub l2_rpc: String,
-    /// World Chain L2 *consensus* (op-node / rollup) RPC URL, serving
-    /// `optimism_outputAtBlock`.
-    ///
-    /// Only used as the fallback when `eth_getProof` against [`Self::l2_rpc`] fails. An
-    /// execution client does not implement `optimism_outputAtBlock`, so pointing this at
-    /// `l2_rpc` turns a recoverable proof failure into `-32601 Method not found` and hides
-    /// the real error. `None` disables the fallback and surfaces the `eth_getProof` failure
-    /// directly.
+    /// op-node RPC serving `optimism_outputAtBlock`, used only as the `eth_getProof`
+    /// fallback. Must not be the execution RPC. `None` disables the fallback.
     pub l2_consensus_rpc: Option<String>,
     /// World hardfork schedule baked into the witness.
     pub schedule: WorldRangeHardforkConfig,
@@ -514,11 +508,8 @@ async fn get_block(client: &Client, rpc_url: &str, tag: BlockTag) -> anyhow::Res
     .with_context(|| format!("eth_getBlockByNumber returned null for {}", tag.display()))
 }
 
-/// Builds the output-root witness for `block_number`, preferring `eth_getProof` against the
-/// execution client and falling back to `optimism_outputAtBlock` on the consensus client.
-///
-/// `consensus_rpc_url` MUST be an op-node / rollup RPC. Passing the execution URL makes the
-/// fallback fail with `-32601 Method not found`, which masks the real `eth_getProof` error.
+/// Builds the output-root witness, preferring `eth_getProof` and falling back to
+/// `optimism_outputAtBlock` on the consensus client.
 async fn output_root_witness(
     client: &Client,
     rpc_url: &str,
