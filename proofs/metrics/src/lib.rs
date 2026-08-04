@@ -148,11 +148,30 @@ where
     }
 }
 
+/// Default per-request timeout applied to every outbound RPC call.
+///
+/// Sized for the slowest call the proof services make on a healthy endpoint — `eth_estimateGas`
+/// and `eth_call` against finalized state on a shared provider — not for the median one, so a
+/// merely slow provider does not fail ticks. Operators pointing a service at a slower or faster
+/// endpoint override it per service.
+pub const DEFAULT_RPC_REQUEST_TIMEOUT_SECONDS: u64 = 10;
+
 /// Builds an Alloy HTTP client that counts completed RPC outcomes.
-pub fn metered_http_client(url: Url, target: &'static str) -> RpcClient {
-    ClientBuilder::default()
+///
+/// `request_timeout` bounds each individual request so a hung connection cannot stall a
+/// service's poll loop indefinitely. It is per request, not per operation: a confirmation wait
+/// polls with fresh requests and so is not capped by this value.
+pub fn metered_http_client(
+    url: Url,
+    target: &'static str,
+    request_timeout: Duration,
+) -> Result<RpcClient, alloy_transport_http::reqwest::Error> {
+    let client = alloy_transport_http::reqwest::Client::builder()
+        .timeout(request_timeout)
+        .build()?;
+    Ok(ClientBuilder::default()
         .layer(RpcMetricsLayer { target })
-        .http(url)
+        .http_with_client(client, url))
 }
 
 /// Renders an RPC endpoint for logs with any embedded credential removed.
