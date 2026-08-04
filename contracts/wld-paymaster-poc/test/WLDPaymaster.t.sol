@@ -187,7 +187,27 @@ contract WLDPaymasterTest is Test {
         assertEq(wld.balanceOf(address(paymaster)), 0, "no WLD pulled");
     }
 
-    /// @dev Missing `paymasterData` fails closed instead of meaning "unlimited".
+    /// @dev An explicit 0 opts out of the cap: the charge goes through unbounded.
+    function test_ZeroClientMaxDisablesTheCheck() public {
+        uint256 quote = paymaster.quoteWldCharge(MAX_COST);
+
+        vm.prank(address(entryPoint));
+        paymaster.validatePaymasterUserOp(_userOp(user, 0), bytes32(0), MAX_COST);
+        assertEq(wld.balanceOf(address(paymaster)), quote, "charged with no ceiling");
+    }
+
+    /// @dev 0 is an opt-out, not a zero-tolerance cap: even a premium raised after
+    ///      the quote is accepted.
+    function test_ZeroClientMax_AcceptsRaisedPremium() public {
+        paymaster.setPremiumBps(5_000);
+        uint256 raised = paymaster.quoteWldCharge(MAX_COST);
+
+        vm.prank(address(entryPoint));
+        paymaster.validatePaymasterUserOp(_userOp(user, 0), bytes32(0), MAX_COST);
+        assertEq(wld.balanceOf(address(paymaster)), raised, "no ceiling to breach");
+    }
+
+    /// @dev Missing `paymasterData` still reverts — absent is not the same as 0.
     function test_RevertWhen_PaymasterDataAbsent() public {
         PackedUserOperation memory op;
         op.sender = user;

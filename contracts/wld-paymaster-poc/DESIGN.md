@@ -62,9 +62,11 @@ signs each UserOp and keeps the deposit topped up).
 4. Decode the client's ceiling from `paymasterData` (`paymasterAndData[52:]`,
    exactly 32 bytes, `abi.encode(maxWldAllowed)`) and revert
    `WldChargeExceedsMax(maxWldCharge, maxWldAllowed)` if the priced charge is
-   higher. Malformed or absent data reverts `InvalidPaymasterData` — it never
-   means "unlimited". This bounds the user's exposure to an oracle print or a
-   `premiumBps` change landing between quote and inclusion.
+   higher. This bounds the user's exposure to an oracle print or a `premiumBps`
+   change landing between quote and inclusion. A ceiling of `0` skips the check
+   (unbounded, oracle price accepted as-is); the 32 bytes are still mandatory, so
+   malformed or absent data reverts `InvalidPaymasterData` rather than being
+   silently reinterpreted.
 5. Require the user has `balanceOf >= maxWldCharge` and
    `allowance(user, paymaster) >= maxWldCharge`.
 6. **Pull the maximum charge up-front** with `transferFrom` (see

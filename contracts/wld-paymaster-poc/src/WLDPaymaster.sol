@@ -27,7 +27,8 @@ import {ISwapRouter, IWETH9} from "./interfaces/ISwapRouter.sol";
  *     bytes — as `paymasterData` (i.e. `paymasterAndData[52:]`). If the priced
  *     charge exceeds that ceiling the op reverts with {WldChargeExceedsMax}, so a
  *     bad oracle print or a premium raised between quote and inclusion can never
- *     pull more WLD than the user signed off on.
+ *     pull more WLD than the user signed off on. A ceiling of 0 disables the check
+ *     (unbounded charge at the oracle's price) — the 32 bytes are still required.
  *
  *     The WLD/ETH rate actually used is carried to `postOp` in the context, so the
  *     refund is settled at the same price the charge was taken at — a mid-op
@@ -115,7 +116,7 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
     /// @param length Byte length of the supplied `paymasterData` (must be 32).
     error InvalidPaymasterData(uint256 length);
     /// @param required WLD the op would take at the current oracle price + premium.
-    /// @param allowed Ceiling the client encoded in `paymasterData`.
+    /// @param allowed Non-zero ceiling the client encoded in `paymasterData`.
     error WldChargeExceedsMax(uint256 required, uint256 allowed);
 
     /// @dev Context passed from validate -> postOp.
@@ -192,10 +193,13 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
         // Price the EntryPoint's own worst-case estimate for this op.
         uint256 maxWldCharge = _wldCharge(maxCost);
 
-        // Client-signed ceiling. Fail closed: malformed or absent data reverts
-        // rather than defaulting to "unlimited".
+        // Client-signed ceiling. The 32 bytes are mandatory — malformed or absent
+        // data reverts rather than being reinterpreted — but an explicit 0 opts out
+        // of the cap, for clients that accept whatever the oracle prices.
         uint256 maxWldAllowed = _decodeMaxWldAllowed(userOp.paymasterAndData);
-        if (maxWldCharge > maxWldAllowed) revert WldChargeExceedsMax(maxWldCharge, maxWldAllowed);
+        if (maxWldAllowed != 0 && maxWldCharge > maxWldAllowed) {
+            revert WldChargeExceedsMax(maxWldCharge, maxWldAllowed);
+        }
 
         if (wld.balanceOf(sender) < maxWldCharge) revert InsufficientWldBalance();
         if (wld.allowance(sender, address(this)) < maxWldCharge) revert InsufficientWldAllowance();
@@ -265,6 +269,7 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
      * @notice Client helper: build the full `paymasterAndData` field for a UserOp.
      * @param maxWldAllowed Ceiling on WLD this op may pull. Quote it with
      *        {quoteWldCharge} and add headroom for oracle drift before inclusion.
+     *        0 disables the check entirely.
      * @dev `postOpGasLimit` must be non-zero or v0.7 skips `postOp` and no refund
      *      is issued — the user then eats the full max charge.
      */
