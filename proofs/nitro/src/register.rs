@@ -124,7 +124,7 @@ fn enclave_signer_address(public_key: &[u8]) -> Result<Address> {
 sol! {
     /// Minimal on-chain surface of `NitroEnclaveKeyRegistry` needed for self-registration.
     #[sol(rpc)]
-    interface INitroEnclaveKeyRegistry {
+    interface NitroEnclaveKeyRegistry {
         /// Reverted by `registerKey` when the signer is already `Active`.
         error SignerAlreadyRegistered();
         /// Reverted by `registerKey` when the signer was permanently revoked.
