@@ -362,12 +362,12 @@ touches `/tmp/enclave-initialized`, then blocks on `sleep infinity`. Kubernetes
 `startup`/`liveness`/`readiness` probes assert **our specific** enclave is `RUNNING`
 (`nitro-cli describe-enclaves | jq -e --arg id "$(cat /tmp/enclave-id)" 'any(.[]; .EnclaveID == $id and .State == "RUNNING")'`;
 startup / readiness also check the marker) — filtering by ID so a leaked enclave can't make
-the pod report healthy — and restart the pod on failure. Because Nitro enclaves are
-**node-level** resources (state under the hostPath-mounted `/run/nitro_enclaves`) that
-outlive the container, and this pod is the sole enclave user on its node (it requests
-`aws.ec2.nitro/nitro_enclaves: 1`), the launcher also **terminates any pre-existing/leaked
-enclave on startup** (with a warning) before launching, to free the node's hugepages/CID.
-This mirrors the world-chat secure-enclave deployment pattern.
+the pod report healthy — and restart the pod on failure. The launcher only ever terminates
+**its own** enclave (the captured ID), never other enclaves on the node — those may belong
+to a different workload. If `run-enclave` fails because the node's hugepages/vCPU are
+already claimed, the launcher **fails loudly** (logging the current `describe-enclaves` list
+for diagnostics) and exits so Kubernetes retries/reschedules, rather than force-terminating
+anything to make room. This mirrors the world-chat secure-enclave deployment pattern.
 
 **Funding-key provisioning chain.** `REGISTER_PRIVATE_KEY` is not stored in git. It flows:
 `worldcoin/infrastructure` Terraform (`crypto/dev/us-east-1/alphanet.tf` — `random_bytes`
