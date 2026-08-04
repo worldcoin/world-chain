@@ -18703,11 +18703,13 @@ dependencies = [
 name = "world-chain-defender"
 version = "2.4.0"
 dependencies = [
+ "alloy-contract",
  "alloy-network 2.0.5",
  "alloy-primitives",
  "alloy-provider",
  "alloy-signer-local 2.0.5",
  "alloy-sol-types",
+ "alloy-transport",
  "anyhow",
  "async-trait",
  "clap",

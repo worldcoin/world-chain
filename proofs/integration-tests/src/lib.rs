@@ -574,7 +574,7 @@ impl DefenderClient for FakeExecution {
                 proof_deadline: record.proof_deadline,
                 proof_threshold: PROOF_THRESHOLD,
             })
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| DefenderError::message(format!("unknown game {game}")))
     }
 
     async fn proof_bitmap(&self, game: Address) -> Result<u8, DefenderError> {
@@ -584,7 +584,7 @@ impl DefenderClient for FakeExecution {
             .games_by_address
             .get(&game)
             .map(|record| record.proof_bitmap)
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))
+            .ok_or_else(|| DefenderError::message(format!("unknown game {game}")))
     }
 
     async fn submit_proof(
@@ -593,19 +593,18 @@ impl DefenderClient for FakeExecution {
         lane: u8,
         proof: Bytes,
     ) -> Result<DefenderSubmission, DefenderError> {
-        let lane =
-            proof_lane(lane).ok_or_else(|| DefenderError::Contract("invalid lane".into()))?;
+        let lane = proof_lane(lane).ok_or_else(|| DefenderError::message("invalid lane"))?;
         if proof.is_empty() {
-            return Err(DefenderError::Contract("empty proof".into()));
+            return Err(DefenderError::message("empty proof"));
         }
 
         let mut state = self.state.lock().expect("fake execution mutex poisoned");
         let record = state
             .games_by_address
             .get_mut(&game)
-            .ok_or_else(|| DefenderError::Contract(format!("unknown game {game}")))?;
+            .ok_or_else(|| DefenderError::message(format!("unknown game {game}")))?;
         if record.state != STATE_PROPOSED && record.state != STATE_CHALLENGED {
-            return Err(DefenderError::Contract(format!(
+            return Err(DefenderError::message(format!(
                 "game {game} is not open for proofs"
             )));
         }
