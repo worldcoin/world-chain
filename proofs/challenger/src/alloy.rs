@@ -18,10 +18,8 @@ use world_chain_proofs::{
 
 /// Alloy-backed implementation of the challenger contract clients.
 ///
-/// Binds the stock OP Stack `DisputeGameFactory`; WIP-1006 games are one game type among several
-/// on that factory, so every index-based read filters on [`MULTI_PROOF_GAME_TYPE`]. The anchor
-/// registry is read from each game because the factory's current implementation may be replaced
-/// or cleared while older games still need resolution and bond recovery.
+/// Binds the stock OP Stack `DisputeGameFactory`. Since WIP-1006 is one of several game types,
+/// index-based reads filter on [`MULTI_PROOF_GAME_TYPE`].
 #[derive(Debug, Clone)]
 pub struct AlloyChallengerClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
