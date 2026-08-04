@@ -5,6 +5,7 @@ import {Script, console2} from "forge-std/Script.sol";
 import {WLDPaymaster} from "../src/WLDPaymaster.sol";
 import {IStakeManager} from "@account-abstraction/interfaces/IStakeManager.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 /**
  * @notice Read-only readiness check for an already-deployed paymaster. Answers
@@ -30,6 +31,17 @@ contract CheckReady is Script {
 
         console2.log("paymaster:", address(paymaster));
         console2.log("chain id: ", block.chainid);
+
+        // PAYMASTER is expected to be the proxy. Pointing this at an implementation
+        // by mistake reads as "not ready" for confusing reasons, so name it here.
+        address impl = address(uint160(uint256(vm.load(address(paymaster), ERC1967Utils.IMPLEMENTATION_SLOT))));
+        if (impl == address(0)) {
+            console2.log("[warn] no ERC-1967 implementation slot: not a proxy.");
+            console2.log("       Is PAYMASTER the implementation instead of the proxy?");
+        } else {
+            console2.log("implementation:", impl);
+            console2.log("version:       ", paymaster.version());
+        }
         console2.log("");
 
         // --- 1. oracle produces a price ---

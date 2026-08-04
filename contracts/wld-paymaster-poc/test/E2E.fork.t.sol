@@ -8,6 +8,7 @@ import {IPaymaster} from "@account-abstraction/interfaces/IPaymaster.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {WLDPaymaster} from "../src/WLDPaymaster.sol";
+import {DeployProxy} from "./utils/DeployProxy.sol";
 import {ChainlinkWldEthOracle} from "../src/oracle/ChainlinkWldEthOracle.sol";
 import {IAggregatorV3} from "../src/interfaces/IAggregatorV3.sol";
 import {IWldEthOracle} from "../src/interfaces/IWldEthOracle.sol";
@@ -42,6 +43,7 @@ contract E2EForkTest is Test {
     uint256 constant MAX_COST = 0.001 ether;
 
     WLDPaymaster paymaster;
+    address implementation;
     ChainlinkWldEthOracle oracle;
     address user = makeAddr("user");
     bool skipped;
@@ -55,13 +57,14 @@ contract E2EForkTest is Test {
         vm.createSelectFork(rpc);
 
         oracle = new ChainlinkWldEthOracle(IAggregatorV3(WLD_USD_FEED), IAggregatorV3(ETH_USD_FEED), 1 hours);
-        paymaster = new WLDPaymaster(
+        (paymaster, implementation) = DeployProxy.deploy(
             IEntryPoint(ENTRYPOINT_V07),
             IERC20(WLD),
             IWETH9(WETH),
             ISwapRouter(SWAP_ROUTER_02),
             IWldEthOracle(address(oracle)),
-            POOL_FEE
+            POOL_FEE,
+            address(this)
         );
 
         vm.deal(address(this), 10 ether);

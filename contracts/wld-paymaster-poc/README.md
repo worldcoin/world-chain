@@ -39,6 +39,7 @@ src/
   vendor/                          # TickMath / FullMath / OracleLibrary ported to solc ^0.8
 test/
   WLDPaymaster.t.sol               # validate/postOp, premium math, batching, edge cases
+  Upgradeability.t.sol             # proxy init, upgrade authorization, state survives upgrade
   ChainlinkWldEthOracle.t.sol      # cross math, decimal normalisation, stale/invalid feeds
   ChainlinkWldEthOracle.fork.t.sol # optional: live World Chain feeds (needs WORLDCHAIN_RPC_URL)
   EntryPointIntegration.t.sol      # real EntryPoint.handleOps: prefund ordering, floor, refunds
@@ -48,7 +49,8 @@ test/
   UniswapV3TwapOracle.t.sol        # TWAP conversion via a mock V3 pool
   mocks/Mocks.sol                  # ERC20 / WETH / oracle / aggregator / router / pool mocks
 script/
-  Deploy.s.sol                     # deploy + configure + fund + assert ready-to-sponsor
+  Deploy.s.sol                     # deploy impl + proxy, configure, fund, assert ready
+  Upgrade.s.sol                    # ship a new implementation behind the same proxy
   CheckReady.s.sol                 # read-only: can a deployed paymaster sponsor right now?
   Unwind.s.sol                     # teardown: recover deposit + stake + WLD for redeploy
 ```
@@ -59,6 +61,7 @@ script/
 # install dependencies (pinned versions used by this POC)
 forge install foundry-rs/forge-std
 forge install OpenZeppelin/openzeppelin-contracts@v5.0.2
+forge install OpenZeppelin/openzeppelin-contracts-upgradeable@v5.0.2
 forge install eth-infinitism/account-abstraction@v0.7.0
 
 forge build
@@ -69,10 +72,59 @@ WORLDCHAIN_RPC_URL=https://worldchain-mainnet.g.alchemy.com/public \
   forge test --match-path 'test/*.fork.t.sol' -vv
 ```
 
-Expected: **47 passing unit tests**, plus **19 fork tests** that are skipped unless
+Expected: **68 passing unit tests**, plus **19 fork tests** that are skipped unless
 `WORLDCHAIN_RPC_URL` is set. The fork suite is what catches integration breakage
 the mocks cannot — `E2E.fork.t.sol` runs charge → reconcile → swap → re-deposit
 against the real EntryPoint, WLD, SwapRouter02 and WLD/WETH pool.
+
+## Upgradeability (UUPS proxy)
+
+The paymaster is deployed as an implementation behind an ERC-1967 proxy, using
+OpenZeppelin's UUPS pattern. **The proxy is the paymaster**: it holds the EntryPoint
+deposit and stake, it is what users `approve()` their WLD to, what clients put in
+`paymasterAndData`, and what gets whitelisted on the bundler. It does not change when
+the logic does. The implementation address holds no funds and no state.
+
+```
+user / bundler ──► ERC1967Proxy (fixed address, all state)
+                        │ delegatecall
+                        ▼
+                   WLDPaymaster implementation (logic only, uninitialized)
+```
+
+- `initialize(...)` runs inside the proxy's constructor, so the proxy is never
+  un-owned for even one block. The implementation's constructor calls
+  `_disableInitializers()`, so it can never be initialized in its own right.
+- Upgrades are `onlyOwner` via `_authorizeUpgrade`. **This is a strictly larger power
+  than the owner already had** — it can replace validation logic outright, not just
+  drain the deposit or swap the oracle. Hold ownership in a multisig, ideally behind
+  a timelock, and treat `OWNER=<multisig>` on deploy as mandatory for anything real.
+- `version()` reports the implementation's layout version; bump it whenever storage
+  changes.
+
+Ship a new implementation:
+
+```bash
+PAYMASTER=<proxy> forge script script/Upgrade.s.sol:Upgrade \
+  --rpc-url "$WORLDCHAIN_RPC_URL" --private-key "$PK" --broadcast
+```
+
+The script refuses to run if the target is not a proxy, the broadcaster is not the
+owner, or the new implementation is byte-identical to the current one; afterwards it
+asserts owner, EntryPoint, WLD, `accumulatedWld`, deposit and pricing all survived.
+Pass `INIT_DATA` to run a `reinitializer` migration in the same transaction.
+
+**Storage layout is your responsibility.** Nothing on-chain can check it. Appending
+variables is safe; reordering, removing, or retyping an existing one silently
+corrupts live state. Diff before upgrading:
+
+```bash
+forge inspect src/WLDPaymaster.sol:WLDPaymaster storage-layout
+```
+
+Inherited state (ownership, reentrancy guard, UUPS, and this repo's
+`BasePaymasterUpgradeable`) uses ERC-7201 namespaced slots, so it occupies none of
+`WLDPaymaster`'s own layout and can grow without shifting anything.
 
 ## Live World Chain addresses (chain id 480)
 

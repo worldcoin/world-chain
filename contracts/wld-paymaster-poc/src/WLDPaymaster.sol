@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import {BasePaymaster} from "@account-abstraction/core/BasePaymaster.sol";
 import {IEntryPoint} from "@account-abstraction/interfaces/IEntryPoint.sol";
 import {PackedUserOperation} from "@account-abstraction/interfaces/PackedUserOperation.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+
+import {BasePaymasterUpgradeable} from "./BasePaymasterUpgradeable.sol";
 
 import {IWldEthOracle} from "./interfaces/IWldEthOracle.sol";
 import {ISwapRouter, IWETH9} from "./interfaces/ISwapRouter.sol";
@@ -55,10 +57,16 @@ import {ISwapRouter, IWETH9} from "./interfaces/ISwapRouter.sol";
  *     WETH, and re-deposits the ETH into the EntryPoint — making the paymaster
  *     self-sustaining after initial funding.
  *
+ * UPGRADEABILITY: deployed behind an ERC-1967 proxy (UUPS). The proxy address is
+ * what users approve WLD to and what clients put in `paymasterAndData`, so it stays
+ * fixed across upgrades. `_authorizeUpgrade` is `onlyOwner`, which means the owner
+ * can replace validation logic outright — a strictly larger power than the drain
+ * and oracle-swap it already has. Hold ownership in a multisig, ideally timelocked.
+ *
  * SECURITY: This is a POC/MVP. It has NOT been audited. Paymasters custody funds
  * and are high-value targets — do not deploy to production without review.
  */
-contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
+contract WLDPaymaster is BasePaymasterUpgradeable, ReentrancyGuardUpgradeable, UUPSUpgradeable {
     using SafeERC20 for IERC20;
 
     uint256 internal constant BPS = 10_000;
@@ -69,10 +77,13 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
     /// @dev Byte length of `paymasterData` when the optional ceiling is present.
     uint256 internal constant PAYMASTER_DATA_LENGTH = 32;
 
-    // --- immutable config ---
-    IERC20 public immutable wld;
-    IWETH9 public immutable weth;
-    ISwapRouter public immutable swapRouter;
+    // --- set once at initialization ---
+    // Not `immutable`: an implementation's immutables live in its own bytecode, so
+    // behind a proxy they would have to be re-supplied on every upgrade and could
+    // silently diverge from the storage the proxy actually uses.
+    IERC20 public wld;
+    IWETH9 public weth;
+    ISwapRouter public swapRouter;
 
     // --- owner-configurable config ---
     /// @notice Price oracle (WLD/ETH). Swappable: Chainlink default, TWAP fallback.
@@ -133,14 +144,38 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
         uint256 wldPerWeiRate;
     }
 
-    constructor(
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        // The implementation must never be initialized in its own right: an
+        // initialized implementation with an owner is a live paymaster that could be
+        // made to selfdestruct-equivalent (upgraded) out from under nobody, and it
+        // muddies which address holds the real state.
+        _disableInitializers();
+    }
+
+    /**
+     * @notice Initializes the proxy. Callable exactly once.
+     * @param initialOwner Owner: can configure, drain the deposit, swap the oracle,
+     *        and upgrade the implementation. Use a multisig.
+     */
+    function initialize(
         IEntryPoint _entryPoint,
         IERC20 _wld,
         IWETH9 _weth,
         ISwapRouter _swapRouter,
         IWldEthOracle _oracle,
-        uint24 _swapPoolFee
-    ) BasePaymaster(_entryPoint) {
+        uint24 _swapPoolFee,
+        address initialOwner
+    ) external initializer {
+        if (
+            address(_wld) == address(0) || address(_weth) == address(0) || address(_swapRouter) == address(0)
+                || address(_oracle) == address(0)
+        ) revert InvalidConfig();
+
+        __BasePaymaster_init(_entryPoint, initialOwner);
+        __ReentrancyGuard_init();
+        __UUPSUpgradeable_init();
+
         wld = _wld;
         weth = _weth;
         swapRouter = _swapRouter;
@@ -162,6 +197,17 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
     }
 
     receive() external payable {}
+
+    /// @dev UUPS: only the owner may ship a new implementation.
+    function _authorizeUpgrade(address) internal override onlyOwner {}
+
+    /**
+     * @notice Layout version of this implementation, bumped whenever storage
+     *         changes, so a deployment can be checked against the ABI expected of it.
+     */
+    function version() external pure virtual returns (string memory) {
+        return "2.0.0";
+    }
 
     // =========================================================================
     //                          ERC-4337 paymaster hooks
@@ -366,7 +412,7 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
 
         // Re-deposit remaining ETH into the EntryPoint to self-replenish.
         uint256 redeposit = ethOut - keeperReward;
-        entryPoint.depositTo{value: redeposit}(address(this));
+        entryPoint().depositTo{value: redeposit}(address(this));
 
         emit BatchSwapExecuted(msg.sender, amountIn, ethOut, keeperReward, redeposit);
     }

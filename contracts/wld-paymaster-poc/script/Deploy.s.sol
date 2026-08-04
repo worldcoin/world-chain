@@ -11,6 +11,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IWETH9, ISwapRouter} from "../src/interfaces/ISwapRouter.sol";
 import {IWldEthOracle} from "../src/interfaces/IWldEthOracle.sol";
 import {IAggregatorV3} from "../src/interfaces/IAggregatorV3.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {ERC1967Utils} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 
 /**
  * @notice Deploys and fully configures the WLD paymaster so it is **ready to
@@ -22,12 +24,20 @@ import {IAggregatorV3} from "../src/interfaces/IAggregatorV3.sol";
  *   1. Pre-flight: every configured address must have code; the deployer must hold
  *      DEPOSIT + STAKE; the oracle must return a live price *before* the paymaster
  *      is deployed.
- *   2. Deploy the oracle (Chainlink by default) and the paymaster.
+ *   2. Deploy the oracle (Chainlink by default), the paymaster implementation, and
+ *      an ERC-1967 (UUPS) proxy in front of it, initialized in the same transaction
+ *      so the implementation is never left un-owned.
  *   3. Apply all owner configuration in one pass.
  *   4. `deposit` (gas the paymaster spends) and `addStake` (required by bundler
  *      storage rules — see below).
- *   5. Post-flight: assert the deposit clears the paymaster's own floor, the stake
- *      and unstake delay clear bundler minimums, and pricing works end to end.
+ *   5. Post-flight: assert the proxy points at the implementation just deployed, the
+ *      implementation itself cannot be initialized, the deposit clears the
+ *      paymaster's own floor, the stake and unstake delay clear bundler minimums,
+ *      and pricing works end to end.
+ *
+ * The **proxy** address is the paymaster: it is what users approve WLD to, what
+ * clients put in `paymasterAndData`, and what holds the deposit and stake. It
+ * survives upgrades; the implementation address does not. See script/Upgrade.s.sol.
  *
  * Usage (World Chain mainnet defaults; drop `--broadcast` for a dry run):
  *
@@ -106,6 +116,9 @@ contract Deploy is Script {
         address newOwner;
     }
 
+    /// @notice Implementation deployed by the last `run()`; the proxy is the paymaster.
+    address public implementation;
+
     function run() external returns (WLDPaymaster paymaster, IWldEthOracle oracle) {
         Config memory c = _config();
 
@@ -116,9 +129,27 @@ contract Deploy is Script {
         oracle = _deployOracle(c.wld, c.weth);
         _requireLiveOracle(oracle);
 
-        paymaster = new WLDPaymaster(
-            IEntryPoint(c.entryPoint), IERC20(c.wld), IWETH9(c.weth), ISwapRouter(c.router), oracle, c.poolFee
+        // Implementation, then proxy. `initialize` runs inside the proxy's
+        // constructor: there is no window in which the proxy exists un-owned, and
+        // the implementation's own storage stays permanently uninitialized.
+        implementation = address(new WLDPaymaster());
+        bytes memory initData = abi.encodeCall(
+            WLDPaymaster.initialize,
+            (
+                IEntryPoint(c.entryPoint),
+                IERC20(c.wld),
+                IWETH9(c.weth),
+                ISwapRouter(c.router),
+                oracle,
+                c.poolFee,
+                // Own it as the broadcasting EOA so the configuration calls below
+                // succeed; handed over to OWNER at the end if one was given. Under
+                // `vm.startBroadcast()` those calls come from tx.origin, not from
+                // this script contract, so `msg.sender` here would be the wrong one.
+                tx.origin
+            )
         );
+        paymaster = WLDPaymaster(payable(address(new ERC1967Proxy(implementation, initData))));
 
         _configure(paymaster, c);
 
@@ -243,7 +274,17 @@ contract Deploy is Script {
 
     /// @dev Assert the deployed paymaster is actually able to sponsor.
     function _postflight(Config memory c, WLDPaymaster paymaster, IWldEthOracle oracle) internal view {
+        // The proxy must point at the implementation we just deployed, and that
+        // implementation must be un-initializable on its own.
+        require(
+            address(uint160(uint256(vm.load(address(paymaster), ERC1967Utils.IMPLEMENTATION_SLOT)))) == implementation,
+            "proxy does not point at the deployed implementation"
+        );
+        require(WLDPaymaster(payable(implementation)).owner() == address(0), "implementation was initialized");
+        require(paymaster.owner() != address(0), "proxy was not initialized");
+
         require(address(paymaster.entryPoint()) == c.entryPoint, "entryPoint mismatch");
+        require(address(paymaster.wld()) == c.wld, "wld mismatch");
         require(address(paymaster.oracle()) == address(oracle), "oracle mismatch");
 
         // validate() reverts unless deposit >= maxCost + minEntryPointDeposit, so a
@@ -277,7 +318,9 @@ contract Deploy is Script {
         console2.log("");
         console2.log("=== deployed & ready to sponsor ===");
         console2.log("chain id:             ", block.chainid);
-        console2.log("paymaster:            ", address(paymaster));
+        console2.log("paymaster (proxy):    ", address(paymaster));
+        console2.log("  implementation:     ", implementation);
+        console2.log("  version:            ", paymaster.version());
         console2.log("oracle:               ", address(oracle));
         console2.log("owner:                ", paymaster.owner());
         console2.log("");
@@ -299,10 +342,12 @@ contract Deploy is Script {
         console2.log("2. Clients must set a NON-ZERO paymasterPostOpGasLimit in");
         console2.log("   paymasterAndData, or v0.7 skips postOp: no refund is issued");
         console2.log("   and nothing is booked for batch settlement.");
-        console2.log("3. Whitelist the paymaster on the World Chain Rundler sidecar.");
+        console2.log("3. Whitelist the PROXY address on the World Chain Rundler sidecar.");
+        console2.log("   Use the proxy everywhere; the implementation is not a paymaster.");
         if (paymaster.owner() == tx.origin) {
             console2.log("4. WARNING: owner is the deploying EOA. It can withdraw the whole");
-            console2.log("   deposit and replace the price oracle. Set OWNER=<multisig>.");
+            console2.log("   deposit, replace the price oracle, and UPGRADE the");
+            console2.log("   implementation. Set OWNER=<multisig>.");
         }
     }
 }

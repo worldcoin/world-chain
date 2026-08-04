@@ -36,7 +36,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *     --rpc-url "$WORLDCHAIN_RPC_URL" --private-key "$PK" --broadcast
  *
  * Env:
- *   PAYMASTER   - the deployed paymaster (required)
+ *   PAYMASTER   - the deployed paymaster PROXY (required). The proxy holds the
+ *                 deposit, stake and WLD; the implementation holds nothing.
  *   ACTION      - "unwind" (default) or "claim-stake"
  *   RECIPIENT   - where funds go (default: the broadcasting EOA)
  *   SKIP_SWAP   - "true" to skip the batch swap in step 1

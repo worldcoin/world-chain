@@ -8,6 +8,7 @@ import {PackedUserOperation} from "@account-abstraction/interfaces/PackedUserOpe
 import {IPaymaster} from "@account-abstraction/interfaces/IPaymaster.sol";
 
 import {WLDPaymaster} from "../src/WLDPaymaster.sol";
+import {DeployProxy} from "./utils/DeployProxy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IWETH9, ISwapRouter} from "../src/interfaces/ISwapRouter.sol";
 import {IWldEthOracle} from "../src/interfaces/IWldEthOracle.sol";
@@ -24,6 +25,7 @@ contract WLDPaymasterTest is Test {
     MockOracle oracle;
     MockSwapRouter router;
     WLDPaymaster paymaster;
+    address implementation;
 
     address owner = address(this);
     address user = makeAddr("user");
@@ -37,13 +39,14 @@ contract WLDPaymasterTest is Test {
         oracle = new MockOracle(NUM, DEN);
         router = new MockSwapRouter(weth, NUM, DEN);
 
-        paymaster = new WLDPaymaster(
+        (paymaster, implementation) = DeployProxy.deploy(
             IEntryPoint(address(entryPoint)),
             IERC20(address(wld)),
             IWETH9(address(weth)),
             ISwapRouter(address(router)),
             IWldEthOracle(address(oracle)),
-            3000
+            3000,
+            address(this)
         );
 
         // Fund the paymaster's EntryPoint deposit once.
@@ -66,14 +69,9 @@ contract WLDPaymasterTest is Test {
         return _userOp(sender, type(uint256).max);
     }
 
-    function _userOp(address sender, uint256 maxWldAllowed)
-        internal
-        view
-        returns (PackedUserOperation memory op)
-    {
+    function _userOp(address sender, uint256 maxWldAllowed) internal view returns (PackedUserOperation memory op) {
         op.sender = sender;
-        op.paymasterAndData =
-            abi.encodePacked(address(paymaster), uint128(150_000), uint128(100_000), maxWldAllowed);
+        op.paymasterAndData = abi.encodePacked(address(paymaster), uint128(150_000), uint128(100_000), maxWldAllowed);
     }
 
     function _validate(uint256 maxCost) internal returns (bytes memory context) {
@@ -141,8 +139,7 @@ contract WLDPaymasterTest is Test {
 
         uint256 actualGasCost = 0.0004 ether;
         uint256 feePerGas = 1 gwei;
-        uint256 expectedCharge =
-            1.2e18 * (actualGasCost + paymaster.postOpGasOverhead() * feePerGas) / MAX_COST;
+        uint256 expectedCharge = 1.2e18 * (actualGasCost + paymaster.postOpGasOverhead() * feePerGas) / MAX_COST;
 
         // WLD halves against ETH between validation and settlement.
         oracle.setRate(NUM * 2, DEN);
@@ -161,9 +158,7 @@ contract WLDPaymasterTest is Test {
     function test_RevertWhen_ChargeExceedsClientMax() public {
         uint256 quote = paymaster.quoteWldCharge(MAX_COST); // 1.2e18
         vm.prank(address(entryPoint));
-        vm.expectRevert(
-            abi.encodeWithSelector(WLDPaymaster.WldChargeExceedsMax.selector, quote, quote - 1)
-        );
+        vm.expectRevert(abi.encodeWithSelector(WLDPaymaster.WldChargeExceedsMax.selector, quote, quote - 1));
         paymaster.validatePaymasterUserOp(_userOp(user, quote - 1), bytes32(0), MAX_COST);
     }
 
@@ -225,8 +220,7 @@ contract WLDPaymasterTest is Test {
     function test_RevertWhen_PaymasterDataWrongLength() public {
         PackedUserOperation memory op;
         op.sender = user;
-        op.paymasterAndData =
-            abi.encodePacked(address(paymaster), uint128(150_000), uint128(100_000), uint64(1e18));
+        op.paymasterAndData = abi.encodePacked(address(paymaster), uint128(150_000), uint128(100_000), uint64(1e18));
 
         vm.prank(address(entryPoint));
         vm.expectRevert(abi.encodeWithSelector(WLDPaymaster.InvalidPaymasterData.selector, 8));
@@ -236,9 +230,7 @@ contract WLDPaymasterTest is Test {
     function test_EncodePaymasterAndData_RoundTrips() public {
         bytes memory pd = paymaster.encodePaymasterAndData(150_000, 100_000, 5e18);
         assertEq(pd.length, 52 + 32, "packed layout with the ceiling");
-        assertEq(
-            paymaster.encodePaymasterAndData(150_000, 100_000, 0).length, 52, "0 omits the ceiling"
-        );
+        assertEq(paymaster.encodePaymasterAndData(150_000, 100_000, 0).length, 52, "0 omits the ceiling");
 
         PackedUserOperation memory op;
         op.sender = user;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import {Test, console2} from "forge-std/Test.sol";
+import {Test, console2, stdStorage, StdStorage} from "forge-std/Test.sol";
 import {Deploy} from "../script/Deploy.s.sol";
 import {Unwind} from "../script/Unwind.s.sol";
 import {WLDPaymaster} from "../src/WLDPaymaster.sol";
@@ -22,10 +22,10 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  *         WORLDCHAIN_RPC_URL=... forge test --match-path 'test/Unwind.fork.t.sol' -vv
  */
 contract UnwindForkTest is Test {
+    using stdStorage for StdStorage;
+
     address constant ENTRYPOINT_V07 = 0x0000000071727De22E5E9d8BAf0edAc6f37da032;
     address constant WLD = 0x2cFc85d8E48F8EAB294be644d9E25C3030863003;
-    /// @dev `accumulatedWld` storage slot (from `forge inspect storage-layout`).
-    uint256 constant SLOT_ACCUMULATED_WLD = 11;
 
     WLDPaymaster paymaster;
     Unwind unwinder;
@@ -51,7 +51,9 @@ contract UnwindForkTest is Test {
     /// @dev Books `booked` WLD for settlement plus `stray` unbooked WLD.
     function _seed(uint256 booked, uint256 stray) internal {
         deal(WLD, address(paymaster), booked + stray);
-        vm.store(address(paymaster), bytes32(SLOT_ACCUMULATED_WLD), bytes32(booked));
+        // Located by getter rather than a hardcoded slot: the layout moved once
+        // already when the paymaster went behind a proxy.
+        stdstore.target(address(paymaster)).sig(paymaster.accumulatedWld.selector).checked_write(booked);
         assertEq(paymaster.accumulatedWld(), booked, "seeded accumulatedWld");
     }
 

@@ -9,6 +9,7 @@ evm_version = "cancun"
 via_ir = false
 remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+    "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/",
     "@account-abstraction/=lib/account-abstraction/contracts/",
     "account-abstraction/=lib/account-abstraction/contracts/",
     "forge-std/=lib/forge-std/src/",

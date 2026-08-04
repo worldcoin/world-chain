@@ -317,6 +317,39 @@ griefing/MEV surface. Chainlink Automation remains available as a drop-in later
 - **Griefing via reverting user ops.** Even if a user op reverts, the up-front
   WLD pull means the paymaster is paid, so this is not economically exploitable.
 
+## 7a. Upgradeability
+
+The paymaster runs as an implementation behind an ERC-1967 proxy (OpenZeppelin UUPS).
+The proxy address is the paymaster's identity — deposit, stake, WLD approvals,
+`paymasterAndData`, bundler whitelist — and it survives every upgrade.
+
+Why UUPS rather than a transparent proxy: one contract instead of two, the upgrade
+hook lives in the implementation where its authorization can be reviewed alongside
+the logic it guards, and there is no admin-vs-owner split to get wrong for a contract
+that already has exactly one privileged role.
+
+What this changes about the trust model, explicitly: the owner could already drain
+the deposit and replace the oracle. It can now also replace validation and settlement
+logic wholesale — including in ways that take user WLD without sponsoring anything.
+Upgradeability is therefore a *strict escalation* of owner power, and the mitigation
+is entirely social: ownership in a multisig, ideally timelocked, and `OWNER=<multisig>`
+set at deploy time rather than afterwards.
+
+Mechanics worth stating once:
+
+- `initialize` runs in the proxy's constructor, so no block exists in which the proxy
+  is deployed but un-owned.
+- The implementation's constructor calls `_disableInitializers()`; an un-neutered
+  implementation is a live paymaster anyone can claim and upgrade.
+- `entryPoint` moves from an `immutable` into ERC-7201 namespaced storage
+  (`BasePaymasterUpgradeable`). Upstream `BasePaymaster` cannot be used as-is: its
+  constructor would set `Ownable(msg.sender)` to whoever deployed the *implementation*.
+- All inherited state is ERC-7201 namespaced, so `WLDPaymaster`'s own variables own
+  slots 0..n and new inherited fields can never shift them.
+- Storage-layout compatibility is unchecked and uncheckable on-chain. Append only;
+  diff `forge inspect ... storage-layout` against the deployed version; bump
+  `version()` when the layout moves; use `reinitializer(n)` for migrations.
+
 ## 8. Whitelisting
 
 For this design to work at all, the paymaster address must be **whitelisted on

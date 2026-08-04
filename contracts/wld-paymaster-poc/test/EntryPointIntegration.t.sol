@@ -7,6 +7,7 @@ import {IEntryPoint} from "@account-abstraction/interfaces/IEntryPoint.sol";
 import {PackedUserOperation} from "@account-abstraction/interfaces/PackedUserOperation.sol";
 
 import {WLDPaymaster} from "../src/WLDPaymaster.sol";
+import {DeployProxy} from "./utils/DeployProxy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IWETH9, ISwapRouter} from "../src/interfaces/ISwapRouter.sol";
 import {IWldEthOracle} from "../src/interfaces/IWldEthOracle.sol";
@@ -37,6 +38,7 @@ contract EntryPointIntegrationTest is Test {
     MockOracle oracle;
     MockSwapRouter router;
     WLDPaymaster paymaster;
+    address implementation;
     MockAccount account;
 
     address beneficiary = makeAddr("beneficiary");
@@ -57,13 +59,14 @@ contract EntryPointIntegrationTest is Test {
         router = new MockSwapRouter(weth, NUM, DEN);
         account = new MockAccount();
 
-        paymaster = new WLDPaymaster(
+        (paymaster, implementation) = DeployProxy.deploy(
             IEntryPoint(address(entryPoint)),
             IERC20(address(wld)),
             IWETH9(address(weth)),
             ISwapRouter(address(router)),
             IWldEthOracle(address(oracle)),
-            3000
+            3000,
+            address(this)
         );
 
         vm.deal(address(router), 100 ether);
