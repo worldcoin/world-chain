@@ -192,13 +192,10 @@ where
                 .into_iter()
                 .zip(aggregated_ops.userOps)
                 .map(|(payload, op)| {
-                    PbhPayload::try_from(payload)
-                        .map(|payload| (payload, op))
-                        .map_err(|_| {
-                            WorldChainPoolTransactionError::from(
-                                PBHValidationError::InvalidCalldata,
-                            )
-                        })
+                    let pbh_payload = PbhPayload::try_from(payload).map_err(|_| {
+                        WorldChainPoolTransactionError::from(PBHValidationError::InvalidCalldata)
+                    })?;
+                    Ok((pbh_payload, op))
                 })
                 .collect::<Result<Vec<_>, WorldChainPoolTransactionError>>()
             {
