@@ -23,12 +23,15 @@ import {ISwapRouter, IWETH9} from "./interfaces/ISwapRouter.sol";
  *     ETH/USD by default), adds a `premiumBps` premium (default 20%), and pulls
  *     that maximum WLD charge from the user with `transferFrom`.
  *
- *     The client MUST encode its own ceiling — `abi.encode(maxWldAllowed)`, 32
- *     bytes — as `paymasterData` (i.e. `paymasterAndData[52:]`). If the priced
- *     charge exceeds that ceiling the op reverts with {WldChargeExceedsMax}, so a
- *     bad oracle print or a premium raised between quote and inclusion can never
- *     pull more WLD than the user signed off on. A ceiling of 0 disables the check
- *     (unbounded charge at the oracle's price) — the 32 bytes are still required.
+ *     A client can cap its exposure by appending its own ceiling —
+ *     `abi.encode(maxWldAllowed)`, 32 bytes — as `paymasterData` (i.e.
+ *     `paymasterAndData[52:]`; bytes 20..52 are the gas limits the EntryPoint
+ *     itself parses). If the priced charge exceeds that ceiling the op reverts with
+ *     {WldChargeExceedsMax}, so a bad oracle print or a premium raised between
+ *     quote and inclusion can never pull more WLD than the user signed off on.
+ *
+ *     The field is optional: omitted, or an explicit 0, means no ceiling. Any other
+ *     length is a client bug and reverts {InvalidPaymasterData}.
  *
  *     The WLD/ETH rate actually used is carried to `postOp` in the context, so the
  *     refund is settled at the same price the charge was taken at — a mid-op
@@ -63,7 +66,7 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
     uint256 internal constant RATE_SCALE = 1e18;
     /// @dev `PAYMASTER_DATA_OFFSET` (52 = 20-byte paymaster + 16-byte
     ///      verificationGasLimit + 16-byte postOpGasLimit) comes from BasePaymaster.
-    /// @dev Required byte length of `paymasterData`: one `uint256` ceiling.
+    /// @dev Byte length of `paymasterData` when the optional ceiling is present.
     uint256 internal constant PAYMASTER_DATA_LENGTH = 32;
 
     // --- immutable config ---
@@ -113,7 +116,7 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
     error NothingToSwap();
     error SlippageTooHigh();
     error InvalidConfig();
-    /// @param length Byte length of the supplied `paymasterData` (must be 32).
+    /// @param length Byte length of the supplied `paymasterData` (must be 0 or 32).
     error InvalidPaymasterData(uint256 length);
     /// @param required WLD the op would take at the current oracle price + premium.
     /// @param allowed Non-zero ceiling the client encoded in `paymasterData`.
@@ -193,9 +196,9 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
         // Price the EntryPoint's own worst-case estimate for this op.
         uint256 maxWldCharge = _wldCharge(maxCost);
 
-        // Client-signed ceiling. The 32 bytes are mandatory — malformed or absent
-        // data reverts rather than being reinterpreted — but an explicit 0 opts out
-        // of the cap, for clients that accept whatever the oracle prices.
+        // Optional client-signed ceiling: omitted or 0 means the client accepts
+        // whatever the oracle prices. A wrong-length payload still reverts rather
+        // than being reinterpreted.
         uint256 maxWldAllowed = _decodeMaxWldAllowed(userOp.paymasterAndData);
         if (maxWldAllowed != 0 && maxWldCharge > maxWldAllowed) {
             revert WldChargeExceedsMax(maxWldCharge, maxWldAllowed);
@@ -252,8 +255,8 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
     }
 
     /**
-     * @dev Reads the client's WLD ceiling out of `paymasterAndData`. Exactly 32
-     *      bytes of `paymasterData` are required — a shorter or longer payload is a
+     * @dev Reads the client's WLD ceiling out of `paymasterAndData`. `paymasterData`
+     *      is either empty (no ceiling) or exactly 32 bytes; any other length is a
      *      client bug and must not be silently reinterpreted.
      */
     function _decodeMaxWldAllowed(bytes calldata paymasterAndData) internal pure returns (uint256) {
@@ -261,6 +264,8 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
         // Guard the subtraction: a direct caller can pass anything, and an
         // arithmetic panic here is a much worse error message than the named one.
         uint256 dataLength = length < PAYMASTER_DATA_OFFSET ? 0 : length - PAYMASTER_DATA_OFFSET;
+        // Omitted entirely == 0 == no ceiling.
+        if (dataLength == 0) return 0;
         if (dataLength != PAYMASTER_DATA_LENGTH) revert InvalidPaymasterData(dataLength);
         return uint256(bytes32(paymasterAndData[PAYMASTER_DATA_OFFSET:]));
     }
@@ -269,15 +274,20 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
      * @notice Client helper: build the full `paymasterAndData` field for a UserOp.
      * @param maxWldAllowed Ceiling on WLD this op may pull. Quote it with
      *        {quoteWldCharge} and add headroom for oracle drift before inclusion.
-     *        0 disables the check entirely.
-     * @dev `postOpGasLimit` must be non-zero or v0.7 skips `postOp` and no refund
-     *      is issued — the user then eats the full max charge.
+     *        0 omits the field entirely, accepting whatever the oracle prices.
+     * @dev The gas limits are not the paymaster's own convention — the EntryPoint
+     *      unpacks them from these exact offsets. `postOpGasLimit` must be non-zero
+     *      or v0.7 skips `postOp` and no refund is issued: the user then eats the
+     *      full max charge.
      */
     function encodePaymasterAndData(uint128 verificationGasLimit, uint128 postOpGasLimit, uint256 maxWldAllowed)
         external
         view
         returns (bytes memory)
     {
+        if (maxWldAllowed == 0) {
+            return abi.encodePacked(address(this), verificationGasLimit, postOpGasLimit);
+        }
         return abi.encodePacked(address(this), verificationGasLimit, postOpGasLimit, maxWldAllowed);
     }
 

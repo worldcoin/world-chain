@@ -237,20 +237,25 @@ the deposit and stake dominate. Budget **~0.07 ETH** total for the default setup
 
 ### Client integration: `paymasterAndData`
 
-The client MUST supply the 32-byte ceiling on the WLD this op may pull, or
-validation reverts `InvalidPaymasterData`:
-
 ```
-paymasterAndData = paymaster (20B) | verificationGasLimit (16B) | postOpGasLimit (16B) | maxWldAllowed (32B)
+paymasterAndData = paymaster (20B) | verificationGasLimit (16B) | postOpGasLimit (16B) | maxWldAllowed (32B, optional)
 ```
 
-Build it with `paymaster.encodePaymasterAndData(verificationGas, postOpGas, maxWld)`.
-Size `maxWldAllowed` from `quoteWldCharge(maxCost)` plus headroom for oracle drift
-before inclusion; if the priced charge exceeds it the op reverts
-`WldChargeExceedsMax(required, allowed)` and no WLD is taken. Pass `0` to skip the
-check and accept whatever the oracle prices — the field itself is still required.
+The two gas limits are not this paymaster's convention — the EntryPoint unpacks
+them from those exact offsets before validation runs, so they are always required.
 `postOpGasLimit` must be non-zero or v0.7 skips `postOp` and the user is never
 refunded.
+
+`maxWldAllowed` is the only field this contract reads, and it is optional: it caps
+the WLD this op may pull. Size it from `quoteWldCharge(maxCost)` plus headroom for
+oracle drift before inclusion; if the priced charge exceeds it the op reverts
+`WldChargeExceedsMax(required, allowed)` and no WLD is taken. Omit it (or encode
+`0`) to accept whatever the oracle prices. Any other length reverts
+`InvalidPaymasterData`.
+
+Build the whole field with
+`paymaster.encodePaymasterAndData(verificationGas, postOpGas, maxWld)` — passing
+`maxWld = 0` omits the tail.
 - ⬜ **Owner is fully trusted** — no timelock, pause, or guardian; see DESIGN.md §7.
 - ⬜ Not audited; no
   permit/Permit2 path yet. See DESIGN.md §7 & §9 for open risks/follow-ups.

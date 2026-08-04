@@ -60,8 +60,8 @@ contract WLDPaymasterTest is Test {
 
     // --- helpers ---
 
-    /// @dev Default ceiling: effectively unlimited, so tests that don't care about
-    ///      the cap behave as before. Cap-specific tests pass their own.
+    /// @dev Default: no ceiling, so tests that don't care about the cap behave as
+    ///      before. Cap-specific tests pass their own.
     function _userOp(address sender) internal view returns (PackedUserOperation memory op) {
         return _userOp(sender, type(uint256).max);
     }
@@ -207,15 +207,18 @@ contract WLDPaymasterTest is Test {
         assertEq(wld.balanceOf(address(paymaster)), raised, "no ceiling to breach");
     }
 
-    /// @dev Missing `paymasterData` still reverts — absent is not the same as 0.
-    function test_RevertWhen_PaymasterDataAbsent() public {
+    /// @dev The ceiling is optional: omitting it entirely means no cap, same as 0.
+    ///      The gas-limit bytes before it belong to the EntryPoint, not to us.
+    function test_OmittedPaymasterDataMeansNoCeiling() public {
+        uint256 quote = paymaster.quoteWldCharge(MAX_COST);
+
         PackedUserOperation memory op;
         op.sender = user;
         op.paymasterAndData = abi.encodePacked(address(paymaster), uint128(150_000), uint128(100_000));
 
         vm.prank(address(entryPoint));
-        vm.expectRevert(abi.encodeWithSelector(WLDPaymaster.InvalidPaymasterData.selector, 0));
         paymaster.validatePaymasterUserOp(op, bytes32(0), MAX_COST);
+        assertEq(wld.balanceOf(address(paymaster)), quote, "charged with the field omitted");
     }
 
     /// @dev A wrong-length payload is a client bug, not something to reinterpret.
@@ -232,7 +235,10 @@ contract WLDPaymasterTest is Test {
 
     function test_EncodePaymasterAndData_RoundTrips() public {
         bytes memory pd = paymaster.encodePaymasterAndData(150_000, 100_000, 5e18);
-        assertEq(pd.length, 52 + 32, "packed layout");
+        assertEq(pd.length, 52 + 32, "packed layout with the ceiling");
+        assertEq(
+            paymaster.encodePaymasterAndData(150_000, 100_000, 0).length, 52, "0 omits the ceiling"
+        );
 
         PackedUserOperation memory op;
         op.sender = user;

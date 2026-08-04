@@ -59,14 +59,14 @@ signs each UserOp and keeps the deposit topped up).
 3. Price the op from the EntryPoint's own estimate:
    `base = oracle.wldForEth(maxCost)`, then
    `maxWldCharge = base * (10000 + premiumBps) / 10000` (default +20%).
-4. Decode the client's ceiling from `paymasterData` (`paymasterAndData[52:]`,
-   exactly 32 bytes, `abi.encode(maxWldAllowed)`) and revert
+4. Decode the client's optional ceiling from `paymasterData`
+   (`paymasterAndData[52:]` — bytes 20..52 are the paymaster gas limits the
+   EntryPoint unpacks itself) and revert
    `WldChargeExceedsMax(maxWldCharge, maxWldAllowed)` if the priced charge is
    higher. This bounds the user's exposure to an oracle print or a `premiumBps`
-   change landing between quote and inclusion. A ceiling of `0` skips the check
-   (unbounded, oracle price accepted as-is); the 32 bytes are still mandatory, so
-   malformed or absent data reverts `InvalidPaymasterData` rather than being
-   silently reinterpreted.
+   change landing between quote and inclusion. Omitting the field, or encoding `0`,
+   skips the check (oracle price accepted as-is). Any other length reverts
+   `InvalidPaymasterData` rather than being silently reinterpreted.
 5. Require the user has `balanceOf >= maxWldCharge` and
    `allowance(user, paymaster) >= maxWldCharge`.
 6. **Pull the maximum charge up-front** with `transferFrom` (see
