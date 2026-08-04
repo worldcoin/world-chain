@@ -122,7 +122,7 @@ fn enclave_signer_address(public_key: &[u8]) -> Result<Address> {
 sol! {
     /// Minimal on-chain surface of `NitroEnclaveKeyRegistry` needed for self-registration.
     #[sol(rpc)]
-    interface INitroEnclaveKeyRegistry {
+    interface NitroEnclaveKeyRegistry {
         /// Reverted by `registerKey` when the signer is already `Active`.
         error SignerAlreadyRegistered();
         /// Reverted by `registerKey` when the signer was permanently revoked.
@@ -219,7 +219,7 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(signer))
         .connect_http(url);
-    let registry = INitroEnclaveKeyRegistry::new(registry_address, provider);
+    let registry = NitroEnclaveKeyRegistry::new(registry_address, provider);
 
     // 3-5. Submit registerKey with bounded retries. Each enclave registers its OWN distinct
     //      signer, so retries exist to survive transient RPC failures and funding-account
