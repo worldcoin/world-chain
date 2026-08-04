@@ -21,13 +21,15 @@ use std::time::Duration;
 
 use alloy_network::EthereumWallet;
 use alloy_primitives::{Address, Bytes, TxHash, keccak256};
-use alloy_provider::ProviderBuilder;
+use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::sol;
 use anyhow::{Context, Result, anyhow, bail};
 use sha2::{Digest, Sha384};
 use tracing::{info, warn};
 use url::Url;
+
+use crate::prewarm::{ColdCert, build_prewarm_plan, packed_cert_not_after};
 
 /// Max attempts for the `registerKey` submission. Retries let the flow survive transient
 /// RPC errors and funding-account nonce contention when several worker replicas share the
@@ -134,7 +136,165 @@ sol! {
             external
             returns (address signer, bytes32 pcr0, bytes32 pcr1, bytes32 pcr2);
         function isSignerRegistered(address signer) external view returns (bool);
+        /// `NitroAttestationVerifier`, which is itself a `NitroValidator` and so exposes
+        /// `certManager()`. Used to discover the CertManager without extra configuration.
+        function verifier() external view returns (address);
     }
+
+    /// `NitroValidator`'s view of its CertManager. `NitroAttestationVerifier is NitroValidator`,
+    /// so this is callable on the address returned by `INitroEnclaveKeyRegistry.verifier()`.
+    #[sol(rpc)]
+    interface INitroValidator {
+        function certManager() external view returns (address);
+    }
+
+    /// The subset of `CertManager` needed to pre-warm the attestation's certificate bundle.
+    #[sol(rpc)]
+    interface ICertManager {
+        /// Raw packed `VerifiedCert` record, or empty bytes when the cert is not cached.
+        function verified(bytes32 certHash) external view returns (bytes);
+        function verifyCACertWithHints(bytes cert, bytes32 parentCertHash, bytes signatureHints)
+            external
+            returns (bytes32);
+        function verifyClientCertWithHints(bytes cert, bytes32 parentCertHash, bytes signatureHints)
+            external;
+    }
+}
+
+/// Ensures every certificate in `plan` is present in the on-chain `CertManager` cache,
+/// submitting a verification transaction for each one that is not.
+///
+/// `registerKey` re-walks the attestation's certificate bundle with **empty** hints, so an
+/// uncached certificate makes it revert with `"inverse hint underflow"` regardless of how good
+/// the attestation's own hints are. AWS rotates the enclave leaf certificate roughly every three
+/// hours, so this runs on every registration rather than as a one-off deploy step.
+///
+/// Entries are submitted in order because each one's parent must be cached first. A certificate
+/// cached by a peer replica between the check and the submit is treated as success, not an error.
+///
+/// # Errors
+///
+/// Returns an error if a certificate is cached but already expired (a new attestation is needed;
+/// resubmitting cannot help), or if a verification transaction fails and the certificate is
+/// still not cached afterwards.
+async fn prewarm_cert_bundle<P: Provider + Clone>(
+    provider: P,
+    cert_manager_address: Address,
+    plan: &[ColdCert],
+    now_secs: u64,
+) -> Result<usize> {
+    let cert_manager = ICertManager::new(cert_manager_address, provider);
+    let mut submitted = 0usize;
+
+    for (i, entry) in plan.iter().enumerate() {
+        let cached = cert_manager
+            .verified(entry.cache_key)
+            .call()
+            .await
+            .with_context(|| format!("checking CertManager cache for chain[{i}]"))?;
+
+        if !cached.is_empty() {
+            // A cached-but-expired cert cannot be re-verified: `_verifyCert` short-circuits on
+            // the cache and reverts with "cert expired". Only a fresh attestation fixes it, so
+            // say so explicitly rather than letting registerKey fail opaquely later.
+            match packed_cert_not_after(&cached) {
+                Some(not_after) if not_after <= now_secs => bail!(
+                    "chain[{i}] (cache key {}) is cached but expired at {not_after} (now {now_secs}); \
+                     the enclave needs a fresh attestation before it can register",
+                    entry.cache_key
+                ),
+                _ => {}
+            }
+            continue;
+        }
+
+        info!(
+            target: "world_chain::nitro",
+            cert_manager = %cert_manager_address,
+            cache_key = %entry.cache_key,
+            parent = %entry.parent_hash,
+            is_ca = entry.is_ca,
+            hint_bytes = entry.hints.len(),
+            "pre-warming CertManager with uncached certificate"
+        );
+
+        let cert = Bytes::from(entry.cert.clone());
+        let hints = Bytes::from(entry.hints.clone());
+        let sent = if entry.is_ca {
+            cert_manager
+                .verifyCACertWithHints(cert, entry.parent_hash, hints)
+                .send()
+                .await
+        } else {
+            cert_manager
+                .verifyClientCertWithHints(cert, entry.parent_hash, hints)
+                .send()
+                .await
+        };
+
+        let outcome = match sent {
+            Ok(pending) => {
+                let tx_hash = *pending.tx_hash();
+                pending
+                    .get_receipt()
+                    .await
+                    .map(|receipt| (tx_hash, receipt.status()))
+                    .map_err(|err| anyhow!("awaiting receipt for tx {tx_hash}: {err}"))
+            }
+            Err(err) => Err(anyhow!("submitting cert verification: {err}")),
+        };
+
+        match outcome {
+            Ok((tx_hash, true)) => {
+                submitted += 1;
+                info!(
+                    target: "world_chain::nitro",
+                    %tx_hash,
+                    cache_key = %entry.cache_key,
+                    "certificate verified into the CertManager cache"
+                );
+            }
+            // A revert (or a send failure) is only fatal if the cert is still uncached — a peer
+            // replica pre-warming the same chain concurrently is a benign race.
+            Ok((tx_hash, false)) => {
+                let now_cached = cert_manager
+                    .verified(entry.cache_key)
+                    .call()
+                    .await
+                    .map(|v| !v.is_empty())
+                    .unwrap_or(false);
+                if !now_cached {
+                    bail!(
+                        "cert verification tx {tx_hash} reverted and chain[{i}] is still uncached"
+                    );
+                }
+                warn!(
+                    target: "world_chain::nitro",
+                    %tx_hash,
+                    "cert verification reverted but the cert is now cached; treating as success"
+                );
+            }
+            Err(err) => {
+                let now_cached = cert_manager
+                    .verified(entry.cache_key)
+                    .call()
+                    .await
+                    .map(|v| !v.is_empty())
+                    .unwrap_or(false);
+                if !now_cached {
+                    return Err(err)
+                        .with_context(|| format!("pre-warming CertManager for chain[{i}] failed"));
+                }
+                warn!(
+                    target: "world_chain::nitro",
+                    error = %err,
+                    "cert verification failed but the cert is now cached; treating as success"
+                );
+            }
+        }
+    }
+
+    Ok(submitted)
 }
 
 /// Inputs for [`register_enclave_key`].
@@ -175,12 +335,16 @@ pub enum RegistrationOutcome {
 /// registration wins the race and the tx reverts with `SignerAlreadyRegistered`) this returns
 /// [`RegistrationOutcome::AlreadyRegistered`] instead of erroring.
 ///
+/// The attestation's certificate chain is pre-warmed into the on-chain `CertManager` first
+/// (see [`prewarm_cert_bundle`]), so registration recovers on its own after AWS rotates the
+/// enclave's leaf certificate — no operator-run pre-warm step is required.
+///
 /// # Errors
 ///
-/// Returns an error if the enclave is unreachable, the RPC/key are invalid, the
-/// `registerKey` transaction reverts for a reason other than `SignerAlreadyRegistered`
-/// (e.g. PCR set not approved, CertManager not pre-warmed), or the key is still not
-/// registered after a confirmed transaction.
+/// Returns an error if the enclave is unreachable, the RPC/key are invalid, the certificate
+/// chain cannot be pre-warmed, the `registerKey` transaction reverts for a reason other than
+/// `SignerAlreadyRegistered` (e.g. PCR set not approved), or the key is still not registered
+/// after a confirmed transaction.
 pub async fn register_enclave_key(params: RegisterParams) -> Result<RegistrationOutcome> {
     // 0. Validate the string inputs up front with clear messages. `.parse()` below
     //    would also reject these, but an explicit empty-string check gives operators a
@@ -219,9 +383,42 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(signer))
         .connect_http(url);
-    let registry = INitroEnclaveKeyRegistry::new(registry_address, provider);
+    let registry = INitroEnclaveKeyRegistry::new(registry_address, provider.clone());
 
-    // 3-5. Submit registerKey with bounded retries. Each enclave registers its OWN distinct
+    // 3. Pre-warm the CertManager with this attestation's certificate chain. `registerKey`
+    //    re-walks the bundle with empty hints, so any uncached certificate makes it revert with
+    //    "inverse hint underflow" no matter how good the attestation hints are — and AWS rotates
+    //    the enclave leaf roughly every three hours, so the cache goes cold on its own. The
+    //    CertManager address is discovered through the registry so there is no second address to
+    //    configure and drift.
+    let verifier_address = registry
+        .verifier()
+        .call()
+        .await
+        .context("reading NitroEnclaveKeyRegistry.verifier()")?;
+    let cert_manager_address = INitroValidator::new(verifier_address, provider.clone())
+        .certManager()
+        .call()
+        .await
+        .context("reading NitroAttestationVerifier.certManager()")?;
+
+    let plan = build_prewarm_plan(&attestation_doc)
+        .context("building the CertManager pre-warm plan from the enclave attestation")?;
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let submitted =
+        prewarm_cert_bundle(provider.clone(), cert_manager_address, &plan, now_secs).await?;
+    info!(
+        target: "world_chain::nitro",
+        cert_manager = %cert_manager_address,
+        chain_len = plan.len(),
+        submitted,
+        "CertManager pre-warm complete"
+    );
+
+    // 4-6. Submit registerKey with bounded retries. Each enclave registers its OWN distinct
     //      signer, so retries exist to survive transient RPC failures and funding-account
     //      nonce contention when several worker replicas share REGISTER_PRIVATE_KEY and
     //      register at the same time. Every attempt first re-checks isSignerRegistered so we
