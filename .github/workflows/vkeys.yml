@@ -22,6 +22,7 @@ on:
       - 'proofs/primitives/**'
       - 'Cargo.lock'
       - 'Justfile'
+      - '.github/workflows/vkeys.yml'
 
 jobs:
   verify-vkeys:

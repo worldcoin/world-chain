@@ -4,7 +4,16 @@ permissions: {}
 
 on:
   push:
+    branches: [main]
+    paths:
+      - "pkg/contracts/**"
+      - ".gitmodules"
+      - ".github/workflows/foundry.yml"
   pull_request:
+    paths:
+      - "pkg/contracts/**"
+      - ".gitmodules"
+      - ".github/workflows/foundry.yml"
   workflow_dispatch:
 
 env:

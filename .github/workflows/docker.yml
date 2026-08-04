@@ -23,6 +23,7 @@ on:
       - "crates/**"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "rust-toolchain.toml"
       - ".cargo/config.toml"
       - "Dockerfile"
       - "scripts/**"
