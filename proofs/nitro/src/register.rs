@@ -142,7 +142,7 @@ sol! {
     }
 
     /// `NitroValidator`'s view of its CertManager. `NitroAttestationVerifier is NitroValidator`,
-    /// so this is callable on the address returned by `INitroEnclaveKeyRegistry.verifier()`.
+    /// so this is callable on the address returned by `NitroEnclaveKeyRegistry.verifier()`.
     #[sol(rpc)]
     interface INitroValidator {
         function certManager() external view returns (address);
@@ -383,7 +383,7 @@ pub async fn register_enclave_key(params: RegisterParams) -> Result<Registration
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(signer))
         .connect_http(url);
-    let registry = INitroEnclaveKeyRegistry::new(registry_address, provider.clone());
+    let registry = NitroEnclaveKeyRegistry::new(registry_address, provider.clone());
 
     // 3. Pre-warm the CertManager with this attestation's certificate chain. `registerKey`
     //    re-walks the bundle with empty hints, so any uncached certificate makes it revert with
