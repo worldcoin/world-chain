@@ -2756,11 +2756,6 @@ async fn start_world_chain_challenger(
         .proof_system_factory
         .parse()
         .wrap_err("invalid proof-system factory address")?;
-    let anchor_address: Address = deployment
-        .anchor_state_registry
-        .parse()
-        .wrap_err("invalid anchor-state-registry address")?;
-
     let signer: PrivateKeySigner = WORLD_CHALLENGER_PRIVATE_KEY
         .parse()
         .wrap_err("invalid World Chain challenger signing key")?;
@@ -2769,12 +2764,7 @@ async fn start_world_chain_challenger(
         .wallet(EthereumWallet::from(signer))
         .connect_http(Url::parse(l1_rpc_url)?);
 
-    let client = AlloyChallengerClient::new(
-        provider,
-        factory_address,
-        anchor_address,
-        DEFAULT_L1_TX_CONFIRMATIONS,
-    );
+    let client = AlloyChallengerClient::new(provider, factory_address, DEFAULT_L1_TX_CONFIRMATIONS);
     let output_roots = OptimismConsensusClient::new(output_root_rpc_url.to_string());
     let config = ChallengerConfig {
         poll_interval: WORLD_CHALLENGER_POLL_INTERVAL,

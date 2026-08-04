@@ -18,13 +18,11 @@ use world_chain_proofs::{
 
 /// Alloy-backed implementation of the challenger contract clients.
 ///
-/// Binds the stock OP Stack `DisputeGameFactory` and `AnchorStateRegistry`; WIP-1006 games are
-/// one game type among several on that factory, so every index-based read filters on
-/// [`MULTI_PROOF_GAME_TYPE`].
+/// Binds the stock OP Stack `DisputeGameFactory`. Since WIP-1006 is one of several game types,
+/// index-based reads filter on [`MULTI_PROOF_GAME_TYPE`].
 #[derive(Debug, Clone)]
 pub struct AlloyChallengerClient<P> {
     factory: IDisputeGameFactory::IDisputeGameFactoryInstance<P>,
-    anchor: IAnchorStateRegistry::IAnchorStateRegistryInstance<P>,
     confirmations: u64,
     provider: P,
 }
@@ -34,24 +32,14 @@ where
     P: Provider + Clone,
 {
     /// Creates an Alloy-backed contract client.
-    pub fn new(
-        provider: P,
-        factory_address: Address,
-        anchor_address: Address,
-        confirmations: u64,
-    ) -> Self {
+    pub fn new(provider: P, factory_address: Address, confirmations: u64) -> Self {
         let factory = IDisputeGameFactory::IDisputeGameFactoryInstance::new(
             factory_address,
-            provider.clone(),
-        );
-        let anchor = IAnchorStateRegistry::IAnchorStateRegistryInstance::new(
-            anchor_address,
             provider.clone(),
         );
 
         Self {
             factory,
-            anchor,
             confirmations,
             provider,
         }
@@ -241,7 +229,12 @@ where
     }
 
     async fn is_game_finalized(&self, address: Address) -> Result<bool, ChallengerError> {
-        Ok(self.anchor.isGameFinalized(address).call().await?)
+        let anchor_address = self.game(address).anchorStateRegistry().call().await?;
+        let anchor = IAnchorStateRegistry::IAnchorStateRegistryInstance::new(
+            anchor_address,
+            self.provider.clone(),
+        );
+        Ok(anchor.isGameFinalized(address).call().await?)
     }
 
     async fn credit(&self, address: Address) -> Result<U256, ChallengerError> {
