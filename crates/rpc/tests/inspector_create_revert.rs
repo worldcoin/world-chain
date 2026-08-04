@@ -14,7 +14,9 @@ use revm::{
 use revm_database::{CacheDB, EmptyDB};
 use revm_primitives::TxKind;
 
-use world_chain_rpc::simulate::{SimulationInspector, TraceKind, TraceOutcome, relax_cfg_for_simulation};
+use world_chain_rpc::simulate::{
+    SimulationInspector, TraceKind, TraceOutcome, relax_cfg_for_simulation,
+};
 
 const CHAIN_ID: u64 = 480;
 const CALLER: Address = address!("00000000000000000000000000000000DeaDBeef");
