@@ -56,23 +56,33 @@ signs each UserOp and keeps the deposit topped up).
 1. EntryPoint calls `validatePaymasterUserOp(userOp, hash, maxCost)`.
 2. Safety: require `getDeposit() >= maxCost + minEntryPointDeposit` so a burst of
    ops cannot drain the deposit below the configured floor mid-batch.
-3. Price the op: `base = oracle.wldForEth(maxCost)`, then
+3. Price the op from the EntryPoint's own estimate:
+   `base = oracle.wldForEth(maxCost)`, then
    `maxWldCharge = base * (10000 + premiumBps) / 10000` (default +20%).
-4. Require the user has `balanceOf >= maxWldCharge` and
+4. Decode the client's ceiling from `paymasterData` (`paymasterAndData[52:]`,
+   exactly 32 bytes, `abi.encode(maxWldAllowed)`) and revert
+   `WldChargeExceedsMax(maxWldCharge, maxWldAllowed)` if the priced charge is
+   higher. Malformed or absent data reverts `InvalidPaymasterData` — it never
+   means "unlimited". This bounds the user's exposure to an oracle print or a
+   `premiumBps` change landing between quote and inclusion.
+5. Require the user has `balanceOf >= maxWldCharge` and
    `allowance(user, paymaster) >= maxWldCharge`.
-5. **Pull the maximum charge up-front** with `transferFrom` (see
+6. **Pull the maximum charge up-front** with `transferFrom` (see
    [§3 Collection](#3-collecting-wld-from-the-user)).
-6. Return `context = (sender, maxWldCharge, maxCost)` and `validationData = 0`.
+7. Freeze the effective rate, `wldPerWeiRate = maxWldCharge * 1e18 / maxCost`, and
+   return `context = (sender, wldTaken, wldPerWeiRate)` with `validationData = 0`.
 
 ### 1.2 `postOp` flow
 
 1. EntryPoint calls `postOp(mode, context, actualGasCost, actualUserOpFeePerGas)`.
 2. Estimate the true cost including postOp's own gas:
-   `costWithPostOp = actualGasCost + postOpGasOverhead * actualUserOpFeePerGas`,
-   capped at `maxCost`.
-3. Charge pro-rata (premium is already baked into `maxWldCharge`):
-   `actualWldCharge = maxWldCharge * costWithPostOp / maxCost`.
-4. `accumulatedWld += actualWldCharge`; refund `maxWldCharge - actualWldCharge`
+   `costWithPostOp = actualGasCost + postOpGasOverhead * actualUserOpFeePerGas`.
+3. Charge at the **rate from the context**, never a fresh oracle read (premium is
+   already baked in): `actualWldCharge = wldPerWeiRate * costWithPostOp / 1e18`,
+   clamped to `wldTaken`. Re-using the frozen rate means a price move between
+   validation and settlement cannot change what the user pays; the clamp means an
+   actual cost above the estimate is absorbed by the paymaster, not billed.
+4. `accumulatedWld += actualWldCharge`; refund `wldTaken - actualWldCharge`
    to the user.
 
 `postOp` is always requested (non-empty context). Even on `opReverted`, the

@@ -18,10 +18,20 @@ import {ISwapRouter, IWETH9} from "./interfaces/ISwapRouter.sol";
  *
  * @dev High-level flow (see DESIGN.md for the full write-up):
  *
- *  1. `validatePaymasterUserOp`: prices the op's max ETH cost in WLD via
- *     {IWldEthOracle} (Chainlink WLD/USD x ETH/USD by default), adds a
- *     `premiumBps` premium (default 20%), and pulls that maximum WLD charge from
- *     the user with `transferFrom`.
+ *  1. `validatePaymasterUserOp`: prices the op's max ETH cost (`maxCost`, the
+ *     EntryPoint's estimate) in WLD via {IWldEthOracle} (Chainlink WLD/USD x
+ *     ETH/USD by default), adds a `premiumBps` premium (default 20%), and pulls
+ *     that maximum WLD charge from the user with `transferFrom`.
+ *
+ *     The client MUST encode its own ceiling — `abi.encode(maxWldAllowed)`, 32
+ *     bytes — as `paymasterData` (i.e. `paymasterAndData[52:]`). If the priced
+ *     charge exceeds that ceiling the op reverts with {WldChargeExceedsMax}, so a
+ *     bad oracle print or a premium raised between quote and inclusion can never
+ *     pull more WLD than the user signed off on.
+ *
+ *     The WLD/ETH rate actually used is carried to `postOp` in the context, so the
+ *     refund is settled at the same price the charge was taken at — a mid-op
+ *     oracle move cannot change what the user pays.
  *
  *     Writing token state during validation touches the paymaster's *own*
  *     associated storage in the WLD contract, which ERC-7562 only permits for a
@@ -48,6 +58,12 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     uint256 internal constant BPS = 10_000;
+    /// @dev Fixed-point scale for the WLD-per-wei rate carried in {Context}.
+    uint256 internal constant RATE_SCALE = 1e18;
+    /// @dev `PAYMASTER_DATA_OFFSET` (52 = 20-byte paymaster + 16-byte
+    ///      verificationGasLimit + 16-byte postOpGasLimit) comes from BasePaymaster.
+    /// @dev Required byte length of `paymasterData`: one `uint256` ceiling.
+    uint256 internal constant PAYMASTER_DATA_LENGTH = 32;
 
     // --- immutable config ---
     IERC20 public immutable wld;
@@ -96,12 +112,21 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
     error NothingToSwap();
     error SlippageTooHigh();
     error InvalidConfig();
+    /// @param length Byte length of the supplied `paymasterData` (must be 32).
+    error InvalidPaymasterData(uint256 length);
+    /// @param required WLD the op would take at the current oracle price + premium.
+    /// @param allowed Ceiling the client encoded in `paymasterData`.
+    error WldChargeExceedsMax(uint256 required, uint256 allowed);
 
     /// @dev Context passed from validate -> postOp.
+    /// @param wldTaken WLD actually pulled from the sender during validation.
+    /// @param wldPerWeiRate WLD per wei of gas cost, scaled by {RATE_SCALE}. Frozen
+    ///        at validation time so postOp refunds at the price charged, not a
+    ///        fresh oracle read.
     struct Context {
         address sender;
-        uint256 maxWldCharge;
-        uint256 maxCost;
+        uint256 wldTaken;
+        uint256 wldPerWeiRate;
     }
 
     constructor(
@@ -164,14 +189,23 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
         // test/EntryPointIntegration.t.sol, which drives real `handleOps`.
         if (getDeposit() < minEntryPointDeposit) revert DepositFloorBreached();
 
+        // Price the EntryPoint's own worst-case estimate for this op.
         uint256 maxWldCharge = _wldCharge(maxCost);
+
+        // Client-signed ceiling. Fail closed: malformed or absent data reverts
+        // rather than defaulting to "unlimited".
+        uint256 maxWldAllowed = _decodeMaxWldAllowed(userOp.paymasterAndData);
+        if (maxWldCharge > maxWldAllowed) revert WldChargeExceedsMax(maxWldCharge, maxWldAllowed);
 
         if (wld.balanceOf(sender) < maxWldCharge) revert InsufficientWldBalance();
         if (wld.allowance(sender, address(this)) < maxWldCharge) revert InsufficientWldAllowance();
 
         wld.safeTransferFrom(sender, address(this), maxWldCharge);
 
-        context = abi.encode(Context({sender: sender, maxWldCharge: maxWldCharge, maxCost: maxCost}));
+        // Freeze the effective rate (WLD per wei, premium included) for postOp.
+        uint256 rate = maxCost == 0 ? 0 : (maxWldCharge * RATE_SCALE) / maxCost;
+
+        context = abi.encode(Context({sender: sender, wldTaken: maxWldCharge, wldPerWeiRate: rate}));
         validationData = 0; // valid, no time range
     }
 
@@ -187,11 +221,14 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
 
         // Include an estimate of this postOp's own gas so it is covered by WLD.
         uint256 costWithPostOp = actualGasCost + postOpGasOverhead * actualUserOpFeePerGas;
-        if (costWithPostOp > ctx.maxCost) costWithPostOp = ctx.maxCost;
 
-        // Pro-rata the WLD charge (premium is already baked into maxWldCharge).
-        uint256 actualWldCharge = ctx.maxCost == 0 ? 0 : (ctx.maxWldCharge * costWithPostOp) / ctx.maxCost;
-        uint256 refund = ctx.maxWldCharge - actualWldCharge;
+        // Re-use the rate frozen at validation time — never a fresh oracle read —
+        // so the refund is priced exactly as the charge was.
+        uint256 actualWldCharge = (ctx.wldPerWeiRate * costWithPostOp) / RATE_SCALE;
+        // Actual cost can exceed the estimate (or rounding can nudge it up); the
+        // user never owes more than was taken.
+        if (actualWldCharge > ctx.wldTaken) actualWldCharge = ctx.wldTaken;
+        uint256 refund = ctx.wldTaken - actualWldCharge;
 
         accumulatedWld += actualWldCharge;
         if (refund > 0) wld.safeTransfer(ctx.sender, refund);
@@ -208,6 +245,35 @@ contract WLDPaymaster is BasePaymaster, ReentrancyGuard {
     /// @notice View helper: quote the WLD charge (incl. premium) for an ETH cost.
     function quoteWldCharge(uint256 ethWei) external view returns (uint256) {
         return _wldCharge(ethWei);
+    }
+
+    /**
+     * @dev Reads the client's WLD ceiling out of `paymasterAndData`. Exactly 32
+     *      bytes of `paymasterData` are required — a shorter or longer payload is a
+     *      client bug and must not be silently reinterpreted.
+     */
+    function _decodeMaxWldAllowed(bytes calldata paymasterAndData) internal pure returns (uint256) {
+        uint256 length = paymasterAndData.length;
+        // Guard the subtraction: a direct caller can pass anything, and an
+        // arithmetic panic here is a much worse error message than the named one.
+        uint256 dataLength = length < PAYMASTER_DATA_OFFSET ? 0 : length - PAYMASTER_DATA_OFFSET;
+        if (dataLength != PAYMASTER_DATA_LENGTH) revert InvalidPaymasterData(dataLength);
+        return uint256(bytes32(paymasterAndData[PAYMASTER_DATA_OFFSET:]));
+    }
+
+    /**
+     * @notice Client helper: build the full `paymasterAndData` field for a UserOp.
+     * @param maxWldAllowed Ceiling on WLD this op may pull. Quote it with
+     *        {quoteWldCharge} and add headroom for oracle drift before inclusion.
+     * @dev `postOpGasLimit` must be non-zero or v0.7 skips `postOp` and no refund
+     *      is issued — the user then eats the full max charge.
+     */
+    function encodePaymasterAndData(uint128 verificationGasLimit, uint128 postOpGasLimit, uint256 maxWldAllowed)
+        external
+        view
+        returns (bytes memory)
+    {
+        return abi.encodePacked(address(this), verificationGasLimit, postOpGasLimit, maxWldAllowed);
     }
 
     // =========================================================================

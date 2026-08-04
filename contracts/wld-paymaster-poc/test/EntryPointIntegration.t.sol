@@ -84,7 +84,9 @@ contract EntryPointIntegrationTest is Test {
         op.accountGasLimits = bytes32((uint256(VERIFICATION_GAS) << 128) | uint256(CALL_GAS));
         op.preVerificationGas = PRE_VERIFICATION_GAS;
         op.gasFees = bytes32((uint256(MAX_FEE_PER_GAS) << 128) | uint256(MAX_FEE_PER_GAS));
-        op.paymasterAndData = abi.encodePacked(address(paymaster), PM_VERIFICATION_GAS, PM_POSTOP_GAS);
+        // Client-signed WLD ceiling, generous so these tests exercise other paths.
+        op.paymasterAndData =
+            abi.encodePacked(address(paymaster), PM_VERIFICATION_GAS, PM_POSTOP_GAS, type(uint256).max);
     }
 
     function _handleOps() internal {
@@ -180,7 +182,8 @@ contract EntryPointIntegrationTest is Test {
 
         PackedUserOperation[] memory ops = new PackedUserOperation[](1);
         ops[0] = _buildOp();
-        ops[0].paymasterAndData = abi.encodePacked(address(paymaster), PM_VERIFICATION_GAS, uint128(0));
+        ops[0].paymasterAndData =
+            abi.encodePacked(address(paymaster), PM_VERIFICATION_GAS, uint128(0), type(uint256).max);
 
         uint256 wldBefore = wld.balanceOf(address(account));
         entryPoint.handleOps(ops, payable(beneficiary));
@@ -212,6 +215,33 @@ contract EntryPointIntegrationTest is Test {
         assertLt(sponsored, attempts, "the floor eventually stopped sponsoring");
         assertGe(paymaster.getDeposit(), floor, "never dipped below the floor");
         console2.log("ops sponsored before hitting the floor:", sponsored);
+    }
+
+    /// @dev The ceiling is enforced through the real EntryPoint too: a too-tight
+    ///      cap surfaces as AA33 and nothing is pulled from the user.
+    function test_RevertWhen_ClientMaxWldTooLow() public {
+        paymaster.setMinEntryPointDeposit(0.01 ether);
+        paymaster.deposit{value: 1 ether}();
+
+        uint256 maxCharge = paymaster.quoteWldCharge(_maxCost());
+        uint256 wldBefore = wld.balanceOf(address(account));
+
+        PackedUserOperation[] memory ops = new PackedUserOperation[](1);
+        ops[0] = _buildOp();
+        ops[0].paymasterAndData =
+            abi.encodePacked(address(paymaster), PM_VERIFICATION_GAS, PM_POSTOP_GAS, maxCharge - 1);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IEntryPoint.FailedOpWithRevert.selector,
+                0,
+                "AA33 reverted",
+                abi.encodeWithSelector(WLDPaymaster.WldChargeExceedsMax.selector, maxCharge, maxCharge - 1)
+            )
+        );
+        entryPoint.handleOps(ops, payable(beneficiary));
+
+        assertEq(wld.balanceOf(address(account)), wldBefore, "no WLD pulled");
     }
 
     function handleOpsExternal() external {

@@ -72,6 +72,12 @@ contract E2EForkTest is Test {
         IERC20(WLD).approve(address(paymaster), type(uint256).max);
     }
 
+    /// @dev `paymasterAndData` for v0.7: paymaster | verificationGas | postOpGas |
+    ///      the client's WLD ceiling.
+    function _paymasterAndData(uint256 maxWldAllowed) internal view returns (bytes memory) {
+        return abi.encodePacked(address(paymaster), uint128(150_000), uint128(100_000), maxWldAllowed);
+    }
+
     /// @dev Sanity: the addresses baked into the deploy script are what we think.
     function test_LiveAddressesAreAsExpected() public {
         vm.skip(skipped);
@@ -98,6 +104,8 @@ contract E2EForkTest is Test {
         uint256 userWldBefore = IERC20(WLD).balanceOf(user);
         PackedUserOperation memory op;
         op.sender = user;
+        // Client-signed WLD ceiling, quoted with headroom for oracle drift.
+        op.paymasterAndData = _paymasterAndData(quote * 2);
 
         vm.prank(ENTRYPOINT_V07);
         (bytes memory context,) = paymaster.validatePaymasterUserOp(op, bytes32(0), MAX_COST);
@@ -151,6 +159,7 @@ contract E2EForkTest is Test {
         uint256 ethCost = oracle.ethForWld(cap) * 10_000 / (10_000 + paymaster.premiumBps());
         PackedUserOperation memory op;
         op.sender = user;
+        op.paymasterAndData = _paymasterAndData(type(uint256).max);
         deal(WLD, user, cap * 2);
 
         vm.prank(ENTRYPOINT_V07);

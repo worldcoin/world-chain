@@ -66,6 +66,7 @@ contract DeployForkTest is Test {
 
         PackedUserOperation memory op;
         op.sender = user;
+        op.paymasterAndData = abi.encodePacked(address(paymaster), uint128(150_000), uint128(100_000), quote * 2);
 
         vm.prank(ENTRYPOINT_V07);
         (bytes memory context, uint256 validationData) = paymaster.validatePaymasterUserOp(op, bytes32(0), maxCost);

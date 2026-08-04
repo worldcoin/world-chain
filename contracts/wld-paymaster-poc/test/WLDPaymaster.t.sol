@@ -60,8 +60,20 @@ contract WLDPaymasterTest is Test {
 
     // --- helpers ---
 
-    function _userOp(address sender) internal pure returns (PackedUserOperation memory op) {
+    /// @dev Default ceiling: effectively unlimited, so tests that don't care about
+    ///      the cap behave as before. Cap-specific tests pass their own.
+    function _userOp(address sender) internal view returns (PackedUserOperation memory op) {
+        return _userOp(sender, type(uint256).max);
+    }
+
+    function _userOp(address sender, uint256 maxWldAllowed)
+        internal
+        view
+        returns (PackedUserOperation memory op)
+    {
         op.sender = sender;
+        op.paymasterAndData =
+            abi.encodePacked(address(paymaster), uint128(150_000), uint128(100_000), maxWldAllowed);
     }
 
     function _validate(uint256 maxCost) internal returns (bytes memory context) {
@@ -113,12 +125,100 @@ contract WLDPaymasterTest is Test {
         assertEq(wld.balanceOf(user) - userBalAfterValidate, refund, "user refunded the difference");
     }
 
-    function test_PostOp_CapsAtMaxCost() public {
+    function test_PostOp_CapsAtWldTaken() public {
         bytes memory ctx = _validate(MAX_COST);
         // actualGasCost already == maxCost; overhead pushes above -> capped
         _postOp(ctx, MAX_COST, 1 gwei);
         assertEq(paymaster.accumulatedWld(), 1.2e18, "charge capped at max WLD");
         assertEq(wld.balanceOf(address(paymaster)), 1.2e18);
+    }
+
+    /// @dev postOp must settle at the rate frozen during validation. If it re-read
+    ///      the oracle, a mid-op price move would change what the user pays.
+    function test_PostOp_UsesRateFromContext_NotFreshOracle() public {
+        bytes memory ctx = _validate(MAX_COST);
+        uint256 userBalAfterValidate = wld.balanceOf(user);
+
+        uint256 actualGasCost = 0.0004 ether;
+        uint256 feePerGas = 1 gwei;
+        uint256 expectedCharge =
+            1.2e18 * (actualGasCost + paymaster.postOpGasOverhead() * feePerGas) / MAX_COST;
+
+        // WLD halves against ETH between validation and settlement.
+        oracle.setRate(NUM * 2, DEN);
+        _postOp(ctx, actualGasCost, feePerGas);
+
+        assertEq(paymaster.accumulatedWld(), expectedCharge, "charged at the frozen rate");
+        assertEq(wld.balanceOf(user) - userBalAfterValidate, 1.2e18 - expectedCharge, "refund too");
+    }
+
+    // =====================================================================
+    //                    client-supplied WLD ceiling
+    // =====================================================================
+
+    /// @dev The ceiling is what the user signed off on: a charge above it must
+    ///      abort the op rather than pull the WLD anyway.
+    function test_RevertWhen_ChargeExceedsClientMax() public {
+        uint256 quote = paymaster.quoteWldCharge(MAX_COST); // 1.2e18
+        vm.prank(address(entryPoint));
+        vm.expectRevert(
+            abi.encodeWithSelector(WLDPaymaster.WldChargeExceedsMax.selector, quote, quote - 1)
+        );
+        paymaster.validatePaymasterUserOp(_userOp(user, quote - 1), bytes32(0), MAX_COST);
+    }
+
+    /// @dev Exactly at the ceiling is allowed.
+    function test_ChargeExactlyAtClientMaxIsAccepted() public {
+        uint256 quote = paymaster.quoteWldCharge(MAX_COST);
+        vm.prank(address(entryPoint));
+        paymaster.validatePaymasterUserOp(_userOp(user, quote), bytes32(0), MAX_COST);
+        assertEq(wld.balanceOf(address(paymaster)), quote, "pulled exactly the ceiling");
+    }
+
+    /// @dev A premium raised between quote and inclusion cannot overcharge.
+    function test_RevertWhen_PremiumRaisedAfterQuote() public {
+        uint256 quote = paymaster.quoteWldCharge(MAX_COST);
+        paymaster.setPremiumBps(5_000); // +50%, above the quoted +20%
+        uint256 raised = paymaster.quoteWldCharge(MAX_COST);
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(abi.encodeWithSelector(WLDPaymaster.WldChargeExceedsMax.selector, raised, quote));
+        paymaster.validatePaymasterUserOp(_userOp(user, quote), bytes32(0), MAX_COST);
+        assertEq(wld.balanceOf(address(paymaster)), 0, "no WLD pulled");
+    }
+
+    /// @dev Missing `paymasterData` fails closed instead of meaning "unlimited".
+    function test_RevertWhen_PaymasterDataAbsent() public {
+        PackedUserOperation memory op;
+        op.sender = user;
+        op.paymasterAndData = abi.encodePacked(address(paymaster), uint128(150_000), uint128(100_000));
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(abi.encodeWithSelector(WLDPaymaster.InvalidPaymasterData.selector, 0));
+        paymaster.validatePaymasterUserOp(op, bytes32(0), MAX_COST);
+    }
+
+    /// @dev A wrong-length payload is a client bug, not something to reinterpret.
+    function test_RevertWhen_PaymasterDataWrongLength() public {
+        PackedUserOperation memory op;
+        op.sender = user;
+        op.paymasterAndData =
+            abi.encodePacked(address(paymaster), uint128(150_000), uint128(100_000), uint64(1e18));
+
+        vm.prank(address(entryPoint));
+        vm.expectRevert(abi.encodeWithSelector(WLDPaymaster.InvalidPaymasterData.selector, 8));
+        paymaster.validatePaymasterUserOp(op, bytes32(0), MAX_COST);
+    }
+
+    function test_EncodePaymasterAndData_RoundTrips() public {
+        bytes memory pd = paymaster.encodePaymasterAndData(150_000, 100_000, 5e18);
+        assertEq(pd.length, 52 + 32, "packed layout");
+
+        PackedUserOperation memory op;
+        op.sender = user;
+        op.paymasterAndData = pd;
+        vm.prank(address(entryPoint));
+        paymaster.validatePaymasterUserOp(op, bytes32(0), MAX_COST); // 1.2e18 <= 5e18
     }
 
     // =====================================================================
