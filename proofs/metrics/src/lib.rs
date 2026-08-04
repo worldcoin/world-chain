@@ -148,20 +148,26 @@ where
     }
 }
 
-/// Per-request timeout applied to every outbound RPC call.
+/// Default per-request timeout applied to every outbound RPC call.
 ///
-/// Bounds each request so a hung connection cannot stall a service's poll loop indefinitely.
-const RPC_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
+/// Sized for the slowest call the proof services make on a healthy endpoint — `eth_estimateGas`
+/// and `eth_call` against finalized state on a shared provider — not for the median one, so a
+/// merely slow provider does not fail ticks. Operators pointing a service at a slower or faster
+/// endpoint override it per service.
+pub const DEFAULT_RPC_REQUEST_TIMEOUT_SECONDS: u64 = 10;
 
 /// Builds an Alloy HTTP client that counts completed RPC outcomes.
 ///
-/// Every request is bounded by [`RPC_REQUEST_TIMEOUT`].
+/// `request_timeout` bounds each individual request so a hung connection cannot stall a
+/// service's poll loop indefinitely. It is per request, not per operation: a confirmation wait
+/// polls with fresh requests and so is not capped by this value.
 pub fn metered_http_client(
     url: Url,
     target: &'static str,
+    request_timeout: Duration,
 ) -> Result<RpcClient, alloy_transport_http::reqwest::Error> {
     let client = alloy_transport_http::reqwest::Client::builder()
-        .timeout(RPC_REQUEST_TIMEOUT)
+        .timeout(request_timeout)
         .build()?;
     Ok(ClientBuilder::default()
         .layer(RpcMetricsLayer { target })
