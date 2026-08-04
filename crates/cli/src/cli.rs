@@ -522,6 +522,33 @@ mod tests {
         assert_eq!(args.witness.depth, 32);
     }
 
+    /// The launcher only installs the proofs-history ExEx and RPC overrides when this is set, so
+    /// the default must stay off to preserve stock launch behaviour.
+    #[test]
+    fn proofs_history_defaults_off() {
+        let args = CommandParser::parse_from(["bin"]).world;
+        assert!(!args.rollup.proofs_history);
+        assert!(
+            CommandParser::parse_from(["bin", "--proofs-history"])
+                .world
+                .rollup
+                .proofs_history
+        );
+    }
+
+    /// Upstream `RollupArgs::proofs_history` carries a `default_value_ifs` keyed on
+    /// `"proofs-history.storage-path"`, but clap matches those predicates by arg *id*
+    /// (`storage_path`), not by long name — so the storage path alone does not enable the feature.
+    /// If op-reth fixes this, the launcher starts opening the proofs DB for these operators and
+    /// this test should fail loudly rather than change behaviour silently.
+    #[test]
+    fn proofs_history_storage_path_alone_does_not_enable() {
+        let args =
+            CommandParser::parse_from(["bin", "--proofs-history.storage-path", "/data/proofs"])
+                .world;
+        assert!(!args.rollup.proofs_history);
+    }
+
     #[test]
     fn flashblocks_enabled_should_materialize_flashblocks_args() {
         let args = CommandParser::parse_from(["bin", "--flashblocks.enabled"]).world;

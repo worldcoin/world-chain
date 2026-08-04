@@ -1,6 +1,5 @@
 use clap::Parser;
 use eyre::config::HookBuilder;
-use reth_node_builder::NodeHandle;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_tracing::tracing::info;
 use std::sync::Arc;
@@ -10,6 +9,8 @@ use world_chain_cli::{
 };
 use world_chain_evm::WorldChainEvmConfig;
 use world_chain_node::{context::WorldChainDefaultContext, node::WorldChainNode};
+
+mod proofs_history;
 
 #[cfg(all(feature = "jemalloc", unix))]
 #[global_allocator]
@@ -41,15 +42,7 @@ fn main() {
                 let config: WorldChainNodeConfig = args.into_config(builder.config_mut())?;
 
                 info!(target: "reth::cli", "Starting in Flashblocks mode");
-                let node = WorldChainNode::<WorldChainDefaultContext>::new(config.clone());
-                let NodeHandle {
-                    node_exit_future,
-                    node: _node,
-                } = builder.node(node).launch().await?;
-
-                node_exit_future.await?;
-
-                Ok(())
+                proofs_history::launch_node(builder, config).await
             },
             |chain_spec: Arc<WorldChainSpec>| {
                 (

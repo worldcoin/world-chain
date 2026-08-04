@@ -20,11 +20,19 @@ world-chain-rpc.workspace = true
 
 # reth
 reth-cli-util.workspace = true
+reth-db.workspace = true
 reth-node-builder.workspace = true
+reth-tasks.workspace = true
 reth-tracing.workspace = true
 
 # op-reth
 reth-optimism-consensus.workspace = true
+reth-optimism-exex = { workspace = true, features = ["metrics"] }
+reth-optimism-node.workspace = true
+reth-optimism-payload-builder.workspace = true
+reth-optimism-primitives.workspace = true
+reth-optimism-rpc.workspace = true
+reth-optimism-trie = { workspace = true, features = ["metrics"] }
 
 reth-provider.workspace = true
 
@@ -32,6 +40,8 @@ reth-provider.workspace = true
 dotenvy.workspace = true
 clap.workspace = true
 eyre.workspace = true
+futures-util.workspace = true
+tokio.workspace = true
 
 # optional
 tikv-jemallocator = { workspace = true, optional = true }
