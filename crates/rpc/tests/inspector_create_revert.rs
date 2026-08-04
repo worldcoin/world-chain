@@ -14,7 +14,7 @@ use revm::{
 use revm_database::{CacheDB, EmptyDB};
 use revm_primitives::TxKind;
 
-use world_chain_rpc::simulate::SimulationInspector;
+use world_chain_rpc::simulate::{SimulationInspector, relax_cfg_for_simulation};
 
 const CHAIN_ID: u64 = 480;
 
@@ -42,9 +42,7 @@ const CREATE_REVERT_TRAMPOLINE: &[u8] = &[
 fn evm_env() -> reth_evm::EvmEnv<OpSpecId> {
     let mut cfg = CfgEnv::new_with_spec(OpSpecId::ISTHMUS);
     cfg.chain_id = CHAIN_ID;
-    cfg.disable_nonce_check = true;
-    cfg.disable_balance_check = true;
-    cfg.disable_base_fee = true;
+    relax_cfg_for_simulation(&mut cfg);
     reth_evm::EvmEnv::new(cfg, BlockEnv::default())
 }
 
