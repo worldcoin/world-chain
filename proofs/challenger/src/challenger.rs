@@ -64,11 +64,13 @@ impl<E, C> WorldChainChallenger<E, C> {
         self.next_game_index
     }
 
+    /// Returns the games currently queued for retry.
     #[cfg(test)]
     pub(crate) fn retry_games(&self) -> Vec<Address> {
         self.retry_games.keys().copied().collect()
     }
 
+    /// Adds a failed game scan to the retry queue.
     fn queue_retry_game(&mut self, game: GameMetadata, challenge_deadline: Option<u64>) {
         let existing = self.retry_games.get(&game.address);
         let retry_game = RetryGame {
@@ -114,6 +116,7 @@ where
         Ok(low)
     }
 
+    /// Determines whether a game should be challenged.
     async fn process_game(
         &self,
         game: &GameMetadata,
@@ -172,6 +175,7 @@ where
         }
     }
 
+    /// Processes games concurrently up to the configured limit.
     async fn process_games(
         &self,
         games: impl IntoIterator<Item = GameMetadata>,
@@ -190,6 +194,7 @@ where
             .await
     }
 
+    /// Handles scan outcomes and submits required challenges.
     async fn handle_game_results(
         &mut self,
         results: Vec<(GameMetadata, Result<GameScanOutcome, GameScanError>)>,
@@ -239,11 +244,8 @@ where
         }
     }
 
-    /// Scans one bounded factory range and retries transient validation failures.
-    pub async fn scan_once(&mut self) -> Result<(), ChallengerError> {
-        self.config.validate()?;
-
-        let now = unix_now();
+    /// Selects the factory index range to scan this tick.
+    pub async fn select_range(&mut self, now: u64) -> Result<(u64, u64), ChallengerError> {
         let game_count = self.execution_provider.game_count().await?;
         let initialize_cursor = self
             .next_game_index
@@ -269,6 +271,16 @@ where
         let end = cursor
             .saturating_add(self.config.max_games_per_tick)
             .min(game_count);
+
+        Ok((start, end))
+    }
+
+    /// Loads metadata for newly discovered challenger games.
+    pub async fn discover_new_games(
+        &self,
+        start: u64,
+        end: u64,
+    ) -> Result<Vec<GameMetadata>, ChallengerError> {
         let mut new_games = Vec::with_capacity((end - start) as usize);
         for index in start..end {
             // The dispute-game factory indexes every game type; skip the ones that are not ours.
@@ -281,12 +293,15 @@ where
             new_games.push(self.execution_provider.game_metadata(game).await?);
         }
 
-        if new_games.is_empty() && self.retry_games.is_empty() {
-            self.next_game_index = Some(end);
-            return Ok(());
-        }
+        Ok(new_games)
+    }
 
-        let latest_finalized_l2_block = self.consensus_provider.latest_l2_finalized_block().await?;
+    /// Reprocesses games queued after transient failures.
+    pub async fn handle_retry_games(
+        &mut self,
+        now: u64,
+        latest_finalized_l2_block: BlockNumber,
+    ) -> Result<(), ChallengerError> {
         let mut retry_games: Vec<RetryGame> = self.retry_games.values().copied().collect();
         retry_games.sort_by_key(|retry| retry.challenge_deadline.unwrap_or(0));
         retry_games.retain(|retry_game| {
@@ -311,14 +326,47 @@ where
         self.handle_game_results(retry_results, "retry game failed")
             .await;
 
+        Ok(())
+    }
+
+    /// Processes games discovered in the selected scan range.
+    pub async fn handle_new_games(
+        &mut self,
+        new_games: Vec<GameMetadata>,
+        now: u64,
+        latest_finalized_l2_block: BlockNumber,
+    ) -> Result<(), ChallengerError> {
         let scan_results = self
             .process_games(new_games, latest_finalized_l2_block, now)
             .await;
         self.handle_game_results(scan_results, "game scan failed; adding to retry list")
             .await;
 
+        Ok(())
+    }
+
+    /// Runs one challenger iteration at the given Unix timestamp.
+    pub async fn tick_at(&mut self, now: u64) -> Result<(), ChallengerError> {
+        self.config.validate()?;
+        let (start, end) = self.select_range(now).await?;
+        let new_games = self.discover_new_games(start, end).await?;
+        if new_games.is_empty() && self.retry_games.is_empty() {
+            self.next_game_index = Some(end);
+            return Ok(());
+        }
+        let latest_finalized_l2_block = self.consensus_provider.latest_l2_finalized_block().await?;
+        self.handle_retry_games(now, latest_finalized_l2_block)
+            .await?;
+        self.handle_new_games(new_games, now, latest_finalized_l2_block)
+            .await?;
         self.next_game_index = Some(end);
         Ok(())
+    }
+
+    /// Runs one challenger iteration.
+    pub async fn tick(&mut self) -> Result<(), ChallengerError> {
+        let now = unix_now();
+        self.tick_at(now).await
     }
 
     /// Runs the challenger forever, logging transient failures and retrying on each tick.
@@ -328,13 +376,14 @@ where
         let mut interval = tokio::time::interval(self.config.poll_interval);
         loop {
             interval.tick().await;
-            if let Err(error) = self.scan_once().await {
-                warn!(%error, "scan attempt failed");
+            if let Err(error) = self.tick().await {
+                warn!(%error, "challenger iteration failed; retrying on next tick");
             }
         }
     }
 }
 
+/// Returns the current Unix timestamp in seconds.
 fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

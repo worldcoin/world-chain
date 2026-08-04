@@ -366,7 +366,7 @@ fn config() -> ChallengerConfig {
 }
 
 #[tokio::test]
-async fn scan_once_challenges_invalid_root_and_tracks_game() {
+async fn tick_challenges_invalid_root_and_tracks_game() {
     let proposed_root = B256::repeat_byte(0x10);
     let canonical_root = B256::repeat_byte(0x20);
     let client = MockClient::new(vec![MockGame::proposed(GAME_1, proposed_root, L2_BLOCK)]);
@@ -380,7 +380,7 @@ async fn scan_once_challenges_invalid_root_and_tracks_game() {
         owned_games.clone(),
     );
 
-    challenger.scan_once().await.unwrap();
+    challenger.tick_at(1).await.unwrap();
 
     assert_eq!(client.challenges(), vec![GAME_1]);
     assert!(owned_games.contains(GAME_1));
@@ -399,7 +399,7 @@ async fn startup_binary_search_finds_first_live_game_by_deadline() {
         mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
     let mut challenger = WorldChainChallenger::new(config(), client.clone(), output_roots);
 
-    challenger.scan_once().await.unwrap();
+    challenger.tick_at(1).await.unwrap();
 
     assert_eq!(client.challenges(), vec![GAME_2]);
     assert_eq!(challenger.next_game_index(), Some(2));
@@ -417,14 +417,14 @@ async fn startup_binary_search_skips_games_older_than_max_age() {
         mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
     let mut challenger = WorldChainChallenger::new(config(), client.clone(), output_roots);
 
-    challenger.scan_once().await.unwrap();
+    challenger.tick_at(1).await.unwrap();
 
     assert_eq!(client.challenges(), vec![GAME_2]);
     assert_eq!(challenger.next_game_index(), Some(2));
 }
 
 #[tokio::test]
-async fn scan_once_respects_new_game_tick_budget() {
+async fn tick_respects_new_game_budget() {
     let proposed_root = B256::repeat_byte(0x10);
     let canonical_root = B256::repeat_byte(0x20);
     let client = MockClient::new(vec![
@@ -438,17 +438,17 @@ async fn scan_once_respects_new_game_tick_budget() {
     limited_config.max_games_per_tick = 2;
     let mut challenger = WorldChainChallenger::new(limited_config, client.clone(), output_roots);
 
-    challenger.scan_once().await.unwrap();
+    challenger.tick_at(1).await.unwrap();
     assert_eq!(client.challenges(), vec![GAME_1, GAME_2]);
     assert_eq!(challenger.next_game_index(), Some(2));
 
-    challenger.scan_once().await.unwrap();
+    challenger.tick_at(1).await.unwrap();
     assert_eq!(client.challenges(), vec![GAME_1, GAME_2, GAME_3]);
     assert_eq!(challenger.next_game_index(), Some(3));
 }
 
 #[tokio::test]
-async fn scan_once_rechecks_lookback_without_reducing_forward_progress() {
+async fn tick_rechecks_lookback_without_reducing_forward_progress() {
     let proposed_root = B256::repeat_byte(0x10);
     let canonical_root = B256::repeat_byte(0x20);
     let client = MockClient::new(vec![
@@ -464,7 +464,7 @@ async fn scan_once_rechecks_lookback_without_reducing_forward_progress() {
     challenger_config.game_scan_lookback = 1;
     let mut challenger = WorldChainChallenger::new(challenger_config, client.clone(), output_roots);
 
-    challenger.scan_once().await.unwrap();
+    challenger.tick_at(1).await.unwrap();
     client
         .state
         .lock()
@@ -474,14 +474,14 @@ async fn scan_once_rechecks_lookback_without_reducing_forward_progress() {
         .expect("game exists")
         .state = STATE_PROPOSED;
 
-    challenger.scan_once().await.unwrap();
+    challenger.tick_at(1).await.unwrap();
 
     assert_eq!(client.challenges(), vec![GAME_1, GAME_2, GAME_2, GAME_3]);
     assert_eq!(challenger.next_game_index(), Some(3));
 }
 
 #[tokio::test]
-async fn scan_once_leaves_valid_and_non_proposed_games() {
+async fn tick_leaves_valid_and_non_proposed_games() {
     let canonical_root = B256::repeat_byte(0x20);
     let valid = MockGame::proposed(GAME_1, canonical_root, L2_BLOCK);
     let mut challenged = MockGame::proposed(GAME_2, B256::repeat_byte(0x10), L2_BLOCK);
@@ -491,7 +491,7 @@ async fn scan_once_leaves_valid_and_non_proposed_games() {
         mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
     let mut challenger = WorldChainChallenger::new(config(), client.clone(), output_roots);
 
-    challenger.scan_once().await.unwrap();
+    challenger.tick_at(1).await.unwrap();
 
     assert!(client.challenges().is_empty());
     assert!(challenger.retry_games().is_empty());
@@ -506,12 +506,12 @@ async fn retry_game_is_challenged_after_l2_finalizes() {
         mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK - 1);
     let mut challenger = WorldChainChallenger::new(config(), client.clone(), output_roots);
 
-    challenger.scan_once().await.unwrap();
+    challenger.tick_at(1).await.unwrap();
     assert_eq!(challenger.retry_games(), vec![GAME_1]);
     assert!(client.challenges().is_empty());
 
     finalized_l2_block.store(L2_BLOCK, Ordering::SeqCst);
-    challenger.scan_once().await.unwrap();
+    challenger.tick_at(1).await.unwrap();
 
     assert_eq!(client.challenges(), vec![GAME_1]);
     assert!(challenger.retry_games().is_empty());
@@ -713,7 +713,7 @@ async fn bond_manager_uses_l1_timestamp_for_delayed_withdrawal() {
 }
 
 #[tokio::test]
-async fn scan_once_skips_foreign_game_types() {
+async fn tick_skips_foreign_game_types() {
     let proposed_root = B256::repeat_byte(0x10);
     let canonical_root = B256::repeat_byte(0x20);
     let client = MockClient::new(vec![MockGame::proposed(GAME_1, proposed_root, L2_BLOCK)]);
@@ -727,7 +727,7 @@ async fn scan_once_skips_foreign_game_types() {
         mock_output_roots(HashMap::from([(L2_BLOCK, canonical_root)]), L2_BLOCK);
     let mut challenger = WorldChainChallenger::new(config(), client.clone(), output_roots);
 
-    challenger.scan_once().await.unwrap();
+    challenger.tick_at(1).await.unwrap();
 
     assert_eq!(client.challenges(), vec![GAME_1]);
 }
