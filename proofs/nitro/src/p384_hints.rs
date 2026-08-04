@@ -678,5 +678,4 @@ mod tests {
         let got = collect_hints(&hash, &sig, &pub_).expect("collect_hints");
         assert_eq!(got, expected);
     }
-
 }
