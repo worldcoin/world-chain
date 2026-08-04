@@ -566,10 +566,10 @@ proof-approve-pcrs env="alphanet":
 
 # Phase 3c – Verify the RUNNING enclave's PCR set is approved on-chain.
 #
-# The enclave image is built from a mutable tag (see PROOF_NITRO_IMAGE), so every EIF
-# rebuild changes PCR0 (enclave image) and PCR2 (application) while PCR1 (kernel) stays
-# put. Nothing re-approves the new measurements automatically, so the running enclave
-# silently drops off the on-chain allowlist and every registerKey / TEE proof reverts.
+# Every EIF rollout changes PCR0 (enclave image) and PCR2 (application) while PCR1
+# (kernel) stays put. Nothing re-approves the new measurements automatically, so the
+# running enclave silently drops off the on-chain allowlist and every registerKey / TEE
+# proof reverts.
 #
 # This measures the enclave that is actually running rather than trusting PCR0/1/2 from
 # the shell — trusting the shell would reproduce exactly the drift this is meant to catch.
