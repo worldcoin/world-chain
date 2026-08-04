@@ -84,6 +84,7 @@ contract DeployProofSystem is Script {
 
     uint64 internal constant DEFAULT_CHALLENGE_PERIOD = 1 days;
     uint64 internal constant DEFAULT_PROOF_PERIOD = 7 days;
+    uint256 internal constant DEFAULT_BLOCK_INTERVAL = 450;
     uint256 internal constant DEFAULT_PROPOSER_BOND = 0.01 ether;
     uint256 internal constant DEFAULT_CHALLENGER_BOND = 0.001 ether;
     uint256 internal constant DEFAULT_CHALLENGE_FEE = 0.0001 ether;
@@ -149,7 +150,7 @@ contract DeployProofSystem is Script {
         config.privateKey = vm.envUint("PRIVATE_KEY");
         config.l2ChainId = vm.envUint("WORLD_CHAIN_L2_CHAIN_ID");
         config.rollupConfigHash = vm.envBytes32("ROLLUP_CONFIG_HASH");
-        config.blockInterval = vm.envOr("PROOF_SYSTEM_BLOCK_INTERVAL", uint256(10));
+        config.blockInterval = vm.envOr("PROOF_SYSTEM_BLOCK_INTERVAL", DEFAULT_BLOCK_INTERVAL);
         config.challengePeriod = vm.envOr("CHALLENGE_PERIOD", uint256(DEFAULT_CHALLENGE_PERIOD)).toUint64();
         config.proofPeriod = vm.envOr("PROOF_PERIOD", uint256(DEFAULT_PROOF_PERIOD)).toUint64();
         config.proposerBond = vm.envOr("PROPOSER_BOND", DEFAULT_PROPOSER_BOND);
@@ -215,6 +216,7 @@ contract DeployProofSystem is Script {
             "DeployProofSystem: ProxyAdmin owner key mismatch"
         );
         require(config.protocolFeeRecipient != address(0), "DeployProofSystem: protocol fee recipient required");
+        require(config.blockInterval > 0, "DeployProofSystem: block interval required");
         require(config.challengePeriod > 0, "DeployProofSystem: challenge period required");
         require(config.proofPeriod > config.challengePeriod, "DeployProofSystem: proof period must exceed challenge");
         require(config.proposerBond > 0, "DeployProofSystem: proposer bond required");
