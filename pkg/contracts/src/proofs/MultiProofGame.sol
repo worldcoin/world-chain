@@ -42,13 +42,14 @@ import {IDelayedWETH} from "@optimism-bedrock/interfaces/dispute/IDelayedWETH.so
 import {ISemver} from "@optimism-bedrock/interfaces/universal/ISemver.sol";
 
 /// @title MultiProofGame
-/// @notice A multi-proof dispute game created through the stock Optimism `DisputeGameFactory`
-///         using the Clone-With-Immutable-Args (CWIA) pattern. Proposals chain parent-to-parent
-///         at a fixed block interval. An unchallenged proposal requires one valid proof lane;
-///         a challenged proposal requires enough independent lanes (validity proof, TEE
-///         attestation, security council) to reach the configured threshold. Bond custody uses
-///         `DelayedWETH` with the two-phase unlock/withdraw claim flow.
-/// @dev Structure follows `ZKDisputeGame`; challenge/lane semantics are World Chain specific.
+/// @author World Contributors
+/// @notice A Multi Proof `IDisputeGame` supporing 3 different proof 'lanes'.
+///     1.) ZK Validity Proof via Succinct Prover
+///     2.) AWS Nitro Enclave Attestation
+///     3.) Security Council Attestations
+///
+/// @dev Additional Proof Lanes may be added in the future for this game type. 
+/// @custom:security-contact security@toolsforhumanity.com
 contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     ////////////////////////////////////////////////////////////////
     //                       Immutables                           //
@@ -61,9 +62,13 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     uint8 public constant PROOF_LANE_COUNT = ProofLib.PROOF_LANE_COUNT;
 
     uint256 internal immutable DOMAIN_CHAIN_ID;
+    
     uint256 internal immutable DOMAIN_PROOF_SYSTEM_VERSION;
+    
     bytes32 internal immutable DOMAIN_ROLLUP_CONFIG_HASH;
+    
     uint256 internal immutable DOMAIN_BLOCK_INTERVAL;
+    
     bytes32 public immutable domainHash;
 
     uint64 public immutable challengePeriod;
