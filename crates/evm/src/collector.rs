@@ -7,7 +7,9 @@ use reth_provider::CanonStateSubscriptions;
 use reth_revm::witness::ExecutionWitnessRecord;
 use reth_tasks::TaskExecutor;
 
-use crate::{BlockExecutionWitness, ExecutionWitnessHandle, ProviderBounds};
+use crate::{
+    BlockExecutionWitness, ExecutionWitnessHandle, ProviderBounds, metrics::WitnessMetrics,
+};
 
 /// Spawns the live witness collector as a critical task.
 pub fn spawn_witness_collector<P>(
@@ -67,12 +69,15 @@ pub fn spawn_witness_collector<P>(
                     });
                     match result {
                         Ok(witness) => cache.insert(block_number, witness),
-                        Err(err) => tracing::error!(
-                            target: "world_chain::witness",
-                            block_number,
-                            %err,
-                            "failed to assemble execution witness; skipping",
-                        ),
+                        Err(err) => {
+                            WitnessMetrics::get().assembly_failed.increment(1);
+                            tracing::error!(
+                                target: "world_chain::witness",
+                                block_number,
+                                %err,
+                                "failed to assemble execution witness; skipping",
+                            );
+                        }
                     }
                 }
             });

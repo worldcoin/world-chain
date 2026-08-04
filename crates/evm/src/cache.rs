@@ -5,13 +5,29 @@ use std::{collections::BTreeMap, sync::Arc};
 use alloy_rpc_types_debug::ExecutionWitness;
 use parking_lot::Mutex;
 
+use crate::metrics::WitnessMetrics;
+
 /// Default number of execution witnesses to retain in memory.
 pub const DEFAULT_WITNESS_CAP: usize = 1024;
+
+/// A cached witness alongside the number of bytes it retains.
+#[derive(Debug)]
+struct CachedWitness {
+    witness: Arc<ExecutionWitness>,
+    bytes: usize,
+}
+
+/// Cache contents guarded by a single lock, with a running total of retained bytes.
+#[derive(Debug, Default)]
+struct Inner {
+    witnesses: BTreeMap<u64, CachedWitness>,
+    bytes: usize,
+}
 
 /// A bounded, reorg-safe in-memory ring buffer of [`ExecutionWitness`]es keyed by block number.
 #[derive(Debug)]
 pub struct WitnessCache {
-    inner: Mutex<BTreeMap<u64, Arc<ExecutionWitness>>>,
+    inner: Mutex<Inner>,
     depth: usize,
 }
 
@@ -35,7 +51,7 @@ impl WitnessCache {
     #[must_use]
     pub fn with_depth(depth: usize) -> Self {
         Self {
-            inner: Mutex::new(BTreeMap::new()),
+            inner: Mutex::new(Inner::default()),
             depth: depth.max(1),
         }
     }
@@ -43,10 +59,41 @@ impl WitnessCache {
     /// Inserts (or replaces) the execution witness for `block_number`, evicting the lowest block(s)
     /// once `depth` is exceeded.
     pub fn insert(&self, block_number: u64, witness: ExecutionWitness) {
+        let metrics = WitnessMetrics::get();
+        let bytes = retained_bytes(&witness);
         let mut inner = self.inner.lock();
-        inner.insert(block_number, Arc::new(witness));
-        while inner.len() > self.depth {
-            inner.pop_first();
+
+        if let Some(replaced) = inner.witnesses.insert(
+            block_number,
+            CachedWitness {
+                witness: Arc::new(witness),
+                bytes,
+            },
+        ) {
+            inner.bytes -= replaced.bytes;
+        }
+        inner.bytes += bytes;
+
+        let mut evicted = 0u64;
+        while inner.witnesses.len() > self.depth {
+            let Some((_, dropped)) = inner.witnesses.pop_first() else {
+                break;
+            };
+            inner.bytes -= dropped.bytes;
+            evicted += 1;
+        }
+
+        metrics.inserted.increment(1);
+        metrics.evicted.increment(evicted);
+        metrics.witness_bytes.record(bytes as f64);
+        metrics.cache_bytes.set(inner.bytes as f64);
+        metrics.cache_len.set(inner.witnesses.len() as f64);
+        if let (Some((oldest, _)), Some((newest, _))) = (
+            inner.witnesses.first_key_value(),
+            inner.witnesses.last_key_value(),
+        ) {
+            metrics.cache_oldest_block.set(*oldest as f64);
+            metrics.cache_newest_block.set(*newest as f64);
         }
     }
 
@@ -54,14 +101,21 @@ impl WitnessCache {
     /// [`Arc`].
     #[must_use]
     pub fn get(&self, block_number: u64) -> Option<Arc<ExecutionWitness>> {
-        self.inner.lock().get(&block_number).cloned()
+        self.inner
+            .lock()
+            .witnesses
+            .get(&block_number)
+            .map(|entry| Arc::clone(&entry.witness))
     }
 
     /// Returns the lowest and highest cached block numbers, if any.
     #[must_use]
     pub fn bounds(&self) -> Option<(u64, u64)> {
         let inner = self.inner.lock();
-        Some((*inner.first_key_value()?.0, *inner.last_key_value()?.0))
+        Some((
+            *inner.witnesses.first_key_value()?.0,
+            *inner.witnesses.last_key_value()?.0,
+        ))
     }
 
     /// Collects the execution witnesses for the contiguous, inclusive L2 range
@@ -72,17 +126,38 @@ impl WitnessCache {
     /// only the per-block [`Arc`]s are cloned, never the witness data.
     #[must_use]
     pub fn range(&self, start_block: u64, end_block: u64) -> Option<Vec<Arc<ExecutionWitness>>> {
+        let metrics = WitnessMetrics::get();
         if end_block < start_block {
+            metrics.range_miss.increment(1);
             return None;
         }
+
         let inner = self.inner.lock();
         let witnesses: Vec<_> = inner
+            .witnesses
             .range(start_block..=end_block)
-            .map(|(_, witness)| Arc::clone(witness))
+            .map(|(_, entry)| Arc::clone(&entry.witness))
             .collect();
+        drop(inner);
+
         // Every block in `[start_block, end_block]` must be present.
-        (witnesses.len() as u64 == end_block - start_block + 1).then_some(witnesses)
+        let requested = end_block - start_block + 1;
+        let missing = requested - witnesses.len() as u64;
+        if missing > 0 {
+            metrics.range_miss.increment(1);
+            metrics.range_missing_blocks.increment(missing);
+            return None;
+        }
+        metrics.range_hit.increment(1);
+        Some(witnesses)
     }
+}
+
+/// Returns the number of witness-data bytes an [`ExecutionWitness`] retains.
+fn retained_bytes(witness: &ExecutionWitness) -> usize {
+    let total =
+        |entries: &[alloy_primitives::Bytes]| entries.iter().map(|b| b.len()).sum::<usize>();
+    total(&witness.state) + total(&witness.codes) + total(&witness.keys) + total(&witness.headers)
 }
 
 #[cfg(test)]
@@ -126,6 +201,31 @@ mod tests {
         cache.insert(10, witness(2));
         assert_eq!(cache.get(10).unwrap().keys, vec![Bytes::from(vec![2])]);
         assert_eq!(cache.bounds(), Some((10, 10)));
+    }
+
+    /// A witness whose `state` entry is exactly `len` bytes.
+    fn sized_witness(len: usize) -> ExecutionWitness {
+        ExecutionWitness {
+            state: vec![Bytes::from(vec![0u8; len])],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn tracks_retained_bytes_across_replace_and_evict() {
+        let cache = WitnessCache::with_depth(2);
+        cache.insert(1, witness(1));
+        cache.insert(2, witness(2));
+        assert_eq!(cache.inner.lock().bytes, 2);
+
+        // Replacing a block swaps its contribution instead of double-counting it.
+        cache.insert(2, sized_witness(4));
+        assert_eq!(cache.inner.lock().bytes, 5);
+
+        // Evicting block 1 releases exactly its contribution.
+        cache.insert(3, witness(3));
+        assert_eq!(cache.inner.lock().bytes, 5);
+        assert_eq!(cache.bounds(), Some((2, 3)));
     }
 
     #[test]

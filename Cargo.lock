@@ -18820,6 +18820,8 @@ dependencies = [
  "color-eyre",
  "crossbeam-channel",
  "futures",
+ "metrics",
+ "metrics-derive",
  "op-alloy-consensus",
  "op-revm",
  "parking_lot",

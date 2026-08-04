@@ -7,7 +7,7 @@ use reth_revm::{State, witness::ExecutionWitnessRecord};
 use revm::context::Block;
 use tracing::error;
 
-use crate::BlockExecutionWitness;
+use crate::{BlockExecutionWitness, metrics::WitnessMetrics};
 
 /// A [`BlockExecutor`] that delegates to an inner executor and, on
 #[derive(Debug)]
@@ -76,9 +76,16 @@ where
                 record,
             };
 
-            let _ = sender.try_send(captured).inspect_err(|e| {
-                error!(target: "world_chain::witness", %block_number, %e, "failed to send captured witness");
-            });
+            let metrics = WitnessMetrics::get();
+            match sender.try_send(captured) {
+                Ok(()) => metrics.captured.increment(1),
+                Err(e) => {
+                    // A dropped witness leaves a permanent hole: any range spanning this block is
+                    // unservable until it is evicted.
+                    metrics.dropped.increment(1);
+                    error!(target: "world_chain::witness", %block_number, %e, "failed to send captured witness");
+                }
+            }
         }
 
         self.inner.finish()
