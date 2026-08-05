@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, B256, U256};
+use alloy_primitives::{Address, B256, BlockNumber, Bytes, U256, keccak256};
 use alloy_sol_types::SolValue;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
