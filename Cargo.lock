@@ -18718,6 +18718,7 @@ dependencies = [
  "reth-tracing",
  "tracing",
  "world-chain-chainspec",
+ "world-chain-commands",
  "world-chain-primitives",
 ]
 

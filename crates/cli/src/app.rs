@@ -21,10 +21,7 @@ use reth_tracing::{Layers, TracingGuards};
 use tracing::{info, warn};
 use world_chain_chainspec::WorldChainSpec;
 
-use crate::{WorldChainArgs, chainspec::WorldChainSpecParser};
-
-/// Optimism CLI commands, parameterized with the World Chain chain spec parser.
-pub use reth_optimism_cli::commands::Commands;
+use crate::{WorldChainArgs, chainspec::WorldChainSpecParser, commands::Commands};
 
 /// The main World Chain cli interface.
 #[derive(Debug, Parser)]
@@ -214,9 +211,6 @@ where
                 let runtime = runner.runtime();
                 runner.run_blocking_until_ctrl_c(command.execute::<N>(runtime))
             }
-            Commands::InitState(_) | Commands::ImportOp(_) | Commands::ImportReceiptsOp(_) => Err(
-                eyre!("this OP-specific command is not yet supported with WorldChainSpec"),
-            ),
             #[cfg(feature = "dev")]
             Commands::TestVectors(_) => Err(eyre!(
                 "test-vectors is not yet supported with WorldChainSpec"
