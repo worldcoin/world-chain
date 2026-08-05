@@ -18722,6 +18722,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "world-chain-commands"
+version = "2.4.0"
+dependencies = [
+ "clap",
+ "color-eyre",
+ "reth-chainspec",
+ "reth-cli",
+ "reth-cli-commands",
+ "reth-node-core",
+ "reth-optimism-node",
+ "reth-optimism-trie",
+ "reth-provider",
+ "reth-tasks",
+ "tracing",
+ "world-chain-chainspec",
+]
+
+[[package]]
 name = "world-chain-defender"
 version = "2.4.0"
 dependencies = [

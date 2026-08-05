@@ -1,6 +1,7 @@
 pub mod app;
 pub mod chainspec;
 pub mod cli;
+pub mod commands;
 pub mod config;
 
 // Re-export key types at the crate root for convenience

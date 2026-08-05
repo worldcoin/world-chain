@@ -1,0 +1,30 @@
+[package]
+name = "world-chain-commands"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# workspace
+world-chain-chainspec.workspace = true
+
+# reth
+reth-cli.workspace = true
+reth-cli-commands.workspace = true
+reth-tasks.workspace = true
+reth-chainspec.workspace = true
+reth-node-core.workspace = true
+reth-provider.workspace = true
+
+# op-reth
+reth-optimism-node.workspace = true
+reth-optimism-trie.workspace = true
+
+# misc
+clap.workspace = true
+eyre.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+
+[features]
