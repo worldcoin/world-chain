@@ -413,6 +413,25 @@ async fn selected_proposed_game_gets_initial_tee_proof() {
 }
 
 #[tokio::test]
+async fn selected_proposed_game_with_council_support_needs_no_tee_proof() {
+    let root = B256::repeat_byte(0x20);
+    let client = MockClient::new();
+    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, RootState::Proposed);
+    client.set_bitmap(GAME_1, ProofLane::SecurityCouncil.mask());
+    let prover = MockProver::default();
+    let mut defender = WorldChainDefender::new(
+        config(),
+        client,
+        output_roots(&[(L2_BLOCK, root)], L2_BLOCK),
+        prover.clone(),
+    );
+
+    defender.tick().await.unwrap();
+    assert!(prover.requests().is_empty());
+    assert!(defender.active_defenses().is_empty());
+}
+
+#[tokio::test]
 async fn selected_challenged_game_gets_threshold_lanes() {
     let root = B256::repeat_byte(0x20);
     let client = MockClient::new();
@@ -441,6 +460,34 @@ async fn selected_challenged_game_gets_threshold_lanes() {
 
     defender.tick().await.unwrap();
     assert_eq!(client.submissions().len(), 2);
+    assert!(defender.active_defenses().is_empty());
+}
+
+#[tokio::test]
+async fn selected_challenged_game_with_council_support_only_requests_tee() {
+    let root = B256::repeat_byte(0x20);
+    let client = MockClient::new();
+    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, RootState::Challenged);
+    client.set_bitmap(GAME_1, ProofLane::SecurityCouncil.mask());
+    let prover = MockProver::default();
+    let mut defender = WorldChainDefender::new(
+        config(),
+        client.clone(),
+        output_roots(&[(L2_BLOCK, root)], L2_BLOCK),
+        prover.clone(),
+    );
+
+    defender.tick().await.unwrap();
+    assert_eq!(prover.requests().len(), 1);
+    assert_eq!(prover.requests()[0].backend, ProofBackend::Nitro);
+
+    defender.tick().await.unwrap();
+    assert_eq!(
+        client.submissions(),
+        vec![(GAME_1, ProofLane::TeeAttestation as u8)]
+    );
+
+    defender.tick().await.unwrap();
     assert!(defender.active_defenses().is_empty());
 }
 
@@ -624,6 +671,25 @@ async fn existing_lane_is_not_requested_again() {
     defender.tick().await.unwrap();
     assert_eq!(prover.requests().len(), 1);
     assert_eq!(prover.requests()[0].backend, ProofBackend::Nitro);
+}
+
+#[tokio::test]
+async fn existing_tee_lane_only_requests_sp1_when_challenged() {
+    let root = B256::repeat_byte(0x20);
+    let client = MockClient::new();
+    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, RootState::Challenged);
+    client.set_bitmap(GAME_1, ProofLane::TeeAttestation.mask());
+    let prover = MockProver::default();
+    let mut defender = WorldChainDefender::new(
+        config(),
+        client,
+        output_roots(&[(L2_BLOCK, root)], L2_BLOCK),
+        prover.clone(),
+    );
+
+    defender.tick().await.unwrap();
+    assert_eq!(prover.requests().len(), 1);
+    assert_eq!(prover.requests()[0].backend, ProofBackend::Sp1);
 }
 
 #[tokio::test]

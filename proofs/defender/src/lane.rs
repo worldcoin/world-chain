@@ -12,11 +12,11 @@ use world_chain_prover_service::{
 /// Number of proof lanes the defender drives.
 pub(crate) const DEFENDED_LANE_COUNT: usize = 2;
 
-/// The proof lanes the defender drives, paired with the prover-service
-/// backend that generates each proof.
+/// The proof lanes the defender drives, ordered by preference and paired with
+/// the prover-service backend that generates each proof.
 pub(crate) const DEFENDED_LANES: [(ProofLane, ProofBackend); DEFENDED_LANE_COUNT] = [
-    (ProofLane::ValidityProof, ProofBackend::Sp1),
     (ProofLane::TeeAttestation, ProofBackend::Nitro),
+    (ProofLane::ValidityProof, ProofBackend::Sp1),
 ];
 
 /// Progress of a single proof lane within an active defense.

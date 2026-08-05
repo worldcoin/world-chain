@@ -13,7 +13,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::{error, info, warn};
-use world_chain_proofs::{ConsensusProvider, InvalidationReason, ProofLane, select_lineage};
+use world_chain_proofs::{
+    ConsensusProvider, InvalidationReason, ProofLane, proof_count, select_lineage,
+};
 use world_chain_prover_service::ProofRequester;
 
 /// An active proof-support workflow for a selected game.
@@ -39,7 +41,19 @@ enum DefenseProgress {
     Closed,
     Complete,
     DeadlineElapsed,
-    Lanes([LaneState; DEFENDED_LANE_COUNT]),
+    Lanes {
+        lanes: [LaneState; DEFENDED_LANE_COUNT],
+        sufficient_support_submitted: bool,
+    },
+}
+
+fn effective_proof_bitmap(mut proof_bitmap: u8, lanes: &[LaneState; DEFENDED_LANE_COUNT]) -> u8 {
+    for (slot, (proof_lane, _)) in DEFENDED_LANES.into_iter().enumerate() {
+        if lanes[slot] == LaneState::Proven {
+            proof_bitmap |= proof_lane.mask();
+        }
+    }
+    proof_bitmap
 }
 
 /// Supplies proof support for every valid game on the proposer-selected lineage.
@@ -162,53 +176,74 @@ where
     ) -> Result<DefenseProgress, DefenderError> {
         let metadata = &defense.game;
         let evaluator = GameEvaluator::new(&self.execution_provider);
-        let (proof_bitmap, deadline, tee_only) = match evaluator.observe(metadata).await? {
-            GameObservation::Finalized => return Ok(DefenseProgress::Complete),
-            GameObservation::Invalidated { reason } => {
-                if reason == InvalidationReason::ProofTimeout {
-                    return Ok(DefenseProgress::DeadlineElapsed);
+        let (proof_bitmap, deadline, required_support, tee_only) =
+            match evaluator.observe(metadata).await? {
+                GameObservation::Finalized => return Ok(DefenseProgress::Complete),
+                GameObservation::Invalidated { reason } => {
+                    if reason == InvalidationReason::ProofTimeout {
+                        return Ok(DefenseProgress::DeadlineElapsed);
+                    }
+                    return Ok(DefenseProgress::Closed);
                 }
-                return Ok(DefenseProgress::Closed);
-            }
-            GameObservation::Proposed {
-                proof_bitmap,
-                has_initial_support,
-            } => {
-                if has_initial_support {
-                    return Ok(DefenseProgress::Complete);
+                GameObservation::Proposed {
+                    proof_bitmap,
+                    has_initial_support,
+                } => {
+                    if has_initial_support {
+                        return Ok(DefenseProgress::Complete);
+                    }
+                    (proof_bitmap, metadata.challenge_deadline, 1, true)
                 }
-                (proof_bitmap, metadata.challenge_deadline, true)
-            }
-            GameObservation::Challenged {
-                proof_bitmap,
-                has_required_support,
-            } => {
-                if has_required_support {
-                    return Ok(DefenseProgress::Complete);
+                GameObservation::Challenged {
+                    proof_bitmap,
+                    has_required_support,
+                } => {
+                    if has_required_support {
+                        return Ok(DefenseProgress::Complete);
+                    }
+                    (
+                        proof_bitmap,
+                        metadata.proof_deadline,
+                        metadata.proof_threshold,
+                        false,
+                    )
                 }
-                (proof_bitmap, metadata.proof_deadline, false)
-            }
-            GameObservation::Unset => return Ok(DefenseProgress::Closed),
-        };
+                GameObservation::Unset => return Ok(DefenseProgress::Closed),
+            };
         if now >= deadline {
             return Ok(DefenseProgress::DeadlineElapsed);
         }
 
         let mut lanes = defense.lanes;
+        let mut lanes_needed = required_support
+            .saturating_sub(proof_count(effective_proof_bitmap(proof_bitmap, &lanes)));
         let lane_driver = LaneDriver::new(&self.execution_provider, &self.proof_requester);
         for (slot, (proof_lane, backend)) in DEFENDED_LANES.into_iter().enumerate() {
+            if proof_bitmap & proof_lane.mask() != 0 {
+                lanes[slot] = LaneState::Proven;
+                continue;
+            }
             if tee_only && proof_lane != ProofLane::TeeAttestation {
                 continue;
             }
-            if proof_bitmap & proof_lane.mask() != 0 {
-                lanes[slot] = LaneState::Proven;
+            if lanes[slot] == LaneState::Proven || lanes_needed == 0 {
                 continue;
             }
             lanes[slot] = lane_driver
                 .advance(metadata, proof_lane, backend, lanes[slot])
                 .await;
+            // An active request reserves one of the remaining support slots so a lower-priority
+            // lane is not started unless this lane is permanently abandoned.
+            if lanes[slot] != LaneState::Abandoned {
+                lanes_needed -= 1;
+            }
         }
-        Ok(DefenseProgress::Lanes(lanes))
+
+        Ok(DefenseProgress::Lanes {
+            lanes,
+            sufficient_support_submitted: proof_count(effective_proof_bitmap(proof_bitmap, &lanes))
+                >= required_support,
+        })
     }
 
     async fn scan_active_defenses(
@@ -261,7 +296,10 @@ where
                     );
                     self.active_defenses.remove(&game);
                 }
-                Ok(DefenseProgress::Lanes(lanes)) => {
+                Ok(DefenseProgress::Lanes {
+                    lanes,
+                    sufficient_support_submitted,
+                }) => {
                     if lanes.iter().all(|lane| *lane == LaneState::Proven) {
                         info!(
                             lifecycle_event = "defense_completed",
@@ -270,6 +308,10 @@ where
                             "all proof lanes submitted; defense completed"
                         );
                         self.active_defenses.remove(&game);
+                    } else if sufficient_support_submitted {
+                        if let Some(defense) = self.active_defenses.get_mut(&game) {
+                            defense.lanes = lanes;
+                        }
                     } else if lanes.iter().all(|lane| lane.is_terminal()) {
                         error!(
                             lifecycle_event = "defense_failed",
