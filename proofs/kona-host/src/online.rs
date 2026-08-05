@@ -391,6 +391,9 @@ async fn collect_world_range_witness(
 ) -> anyhow::Result<WorldRangeWitnessData> {
     let preimage = BidirectionalChannel::new()?;
     let hint = BidirectionalChannel::new()?;
+
+    // This mirrors `SingleChainHost::start_server`, which creates its key-value store internally.
+    // Constructing the server here lets us seed the agreed output preimage before it starts.
     let kv_store = host.create_key_value_store()?;
 
     // Kona asks for this preimage to recover the agreed L2 head. Seeding the value avoids
