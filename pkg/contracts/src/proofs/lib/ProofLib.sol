@@ -2,10 +2,6 @@
 pragma solidity 0.8.28;
 
 library ProofLib {
-    /// Default number of distinct proof lanes required to finalize a challenged
-    /// root. Deployments may override this per game implementation (see
-    /// `IMultiProofGame.GameConfig.proofThreshold`).
-    uint8 internal constant PROOF_THRESHOLD = 2;
     uint8 internal constant PROOF_LANE_COUNT = 3;
 
     enum RootState {
@@ -19,21 +15,13 @@ library ProofLib {
     enum InvalidationReason {
         NONE,
         PROOF_TIMEOUT,
-        INVALID_PARENT,
-        BLACKLISTED
+        INVALID_PARENT
     }
 
     enum ProofLane {
         VALIDITY_PROOF,
         TEE_ATTESTATION,
         SECURITY_COUNCIL
-    }
-
-    struct Domain {
-        uint256 chainId;
-        uint256 proofSystemVersion;
-        bytes32 rollupConfigHash;
-        uint256 blockInterval;
     }
 
     /// ABI-encoded public values shared by all transition proof lanes.
@@ -47,11 +35,14 @@ library ProofLib {
         bytes32 rollupConfigHash;
     }
 
-    function domainHash(Domain memory domain) internal pure returns (bytes32) {
-        return
-            keccak256(
-                abi.encode(domain.chainId, domain.proofSystemVersion, domain.rollupConfigHash, domain.blockInterval)
-            );
+    /// Commitment binding a deployment to its chain, proof-system version, rollup
+    /// configuration, and proposal cadence.
+    function domainHash(uint256 chainId, uint256 proofSystemVersion, bytes32 rollupConfigHash, uint256 blockInterval)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(chainId, proofSystemVersion, rollupConfigHash, blockInterval));
     }
 
     function rootId(

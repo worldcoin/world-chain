@@ -11,9 +11,9 @@ import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDispute
 import {IAnchorStateRegistry} from "@optimism-bedrock/interfaces/dispute/IAnchorStateRegistry.sol";
 import {IDelayedWETH} from "@optimism-bedrock/interfaces/dispute/IDelayedWETH.sol";
 
-/// @notice The WIP-1006 proof-lane extensions layered on top of the stock `IDisputeGame`
-///         surface. Only the members `IDisputeGame` does not already declare live here;
-///         proof-lane verifiers and offchain services need them to bind a proof to a game.
+/// @title IMultiProofGame
+/// @author World Contributors
+/// @custom:security-contact security@toolsforhumanity.com
 interface IMultiProofGame is IDisputeGame {
     ////////////////////////////////////////////////////////////////
     //                         Enums                              //
@@ -50,19 +50,19 @@ interface IMultiProofGame is IDisputeGame {
     /// @dev The implementation is registered with empty DGF implementation args, so none of
     ///      this configuration rides in the CWIA payload.
     struct GameConfig {
-        ProofLib.Domain domain;
+        uint256 proofSystemVersion;
+        bytes32 rollupConfigHash;
+        uint256 blockInterval;
         uint64 challengePeriod;
         uint64 proofPeriod;
         uint256 proposerBond;
         uint256 challengerBond;
         address protocolFeeRecipient;
-        uint256 challengeFee;
         uint8 proofThreshold;
         IWorldChainProofVerifier validityProofVerifier;
         IWorldChainProofVerifier teeVerifier;
         IWorldChainProofVerifier securityCouncil;
         IWorldChainStakingRegistry stakingRegistry;
-        IDisputeGameFactory disputeGameFactory;
         IAnchorStateRegistry anchorStateRegistry;
         IDelayedWETH weth;
     }
@@ -102,9 +102,6 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Emitted when a staked challenger disputes the proposal.
     event Challenged(address indexed challenger, uint64 proofDeadline);
 
-    /// @notice Emitted when a challenge assigns its non-refundable fee to the protocol.
-    event ChallengeFeeCharged(address indexed recipient, uint256 amount);
-
     /// @notice Emitted when a proof lane is accepted for the first time.
     event ProofLaneSupported(ProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
 
@@ -127,11 +124,15 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Total number of proof lanes defined by the protocol.
     function PROOF_LANE_COUNT() external view returns (uint8);
 
-    /// @notice Domain parameters this deployment proves against.
-    function domain() external view returns (ProofLib.Domain memory);
-
-    /// @notice Hash of the deployment's domain parameters.
+    /// @notice Commitment binding this deployment to its chain, proof-system version, rollup
+    ///         configuration, and proposal cadence.
     function domainHash() external view returns (bytes32);
+
+    /// @notice Hash of the rollup configuration the proof lanes verify against.
+    function rollupConfigHash() external view returns (bytes32);
+
+    /// @notice Number of L2 blocks each proposal must extend its parent by.
+    function blockInterval() external view returns (uint256);
 
     /// @notice Seconds a proposal may be challenged after creation.
     function challengePeriod() external view returns (Duration);
@@ -145,11 +146,8 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Bond required to challenge a proposal.
     function challengerBond() external view returns (uint256);
 
-    /// @notice Protocol-controlled recipient of proof-timeout forfeitures and challenge fees.
+    /// @notice Recipient of proposer bonds forfeited by proofless unchallenged timeouts.
     function protocolFeeRecipient() external view returns (address);
-
-    /// @notice Non-refundable portion of the challenger bond charged whenever a game is challenged.
-    function challengeFee() external view returns (uint256);
 
     /// @notice Verifier backing the validity-proof lane.
     function validityProofVerifier() external view returns (IWorldChainProofVerifier);

@@ -68,16 +68,14 @@ contract NitroEndToEndTest is Test {
         registry = new NitroEnclaveKeyRegistry(attestationVerifier, owner);
         parent = new EndToEndParentGame(PRE);
         proofVerifier = new NitroProofVerifier(registry);
-        ProofLib.Domain memory domain =
-            ProofLib.Domain({chainId: 480, proofSystemVersion: 1, rollupConfigHash: CFG, blockInterval: BLK - PRE_BLK});
-        domainHash = ProofLib.domainHash(domain);
+        domainHash = ProofLib.domainHash(480, 1, CFG, BLK - PRE_BLK);
         game = new MockProofSystemGame();
         game.setContext(
             MockProofSystemGame.Context({
-                domain: domain,
                 rootId: _rootId(POST, BLK),
                 anchorStateRegistry: ANCHOR_STATE_REGISTRY,
                 domainHash: domainHash,
+                rollupConfigHash: CFG,
                 parentRef: address(parent),
                 startingRootHash: PRE,
                 startingBlockNumber: PRE_BLK,

@@ -41,6 +41,7 @@ import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.so
 import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
 import {IAnchorStateRegistry} from "@optimism-bedrock/interfaces/dispute/IAnchorStateRegistry.sol";
 import {IDelayedWETH} from "@optimism-bedrock/interfaces/dispute/IDelayedWETH.sol";
+import {ISystemConfig} from "@optimism-bedrock/interfaces/L1/ISystemConfig.sol";
 import {ISemver} from "@optimism-bedrock/interfaces/universal/ISemver.sol";
 
 /// @title MultiProofGame
@@ -58,8 +59,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     ////////////////////////////////////////////////////////////////
 
     /// @notice Semantic version.
-    /// @custom:semver 0.1.0
-    string public constant version = "0.1.0";
+    /// @custom:semver 1.0.0
+    string public constant version = "1.0.0";
 
     /// @notice Number of distinct proof lanes required to finalize a challenged root.
     uint8 public immutable PROOF_THRESHOLD;
@@ -67,14 +68,14 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice Total number of proof lanes defined by the protocol.
     uint8 public constant PROOF_LANE_COUNT = ProofLib.PROOF_LANE_COUNT;
 
-    /// @notice Domain parameters this deployment proves against, exposed through `domain()`.
-    uint256 internal immutable DOMAIN_CHAIN_ID;
-    uint256 internal immutable DOMAIN_PROOF_SYSTEM_VERSION;
-    bytes32 internal immutable DOMAIN_ROLLUP_CONFIG_HASH;
-    uint256 internal immutable DOMAIN_BLOCK_INTERVAL;
-
-    /// @notice Hash of the deployment's domain parameters.
+    /// @notice Commitment binding this deployment to its chain
     bytes32 public immutable domainHash;
+
+    /// @notice Hash of the rollup configuration the proof lanes verify against.
+    bytes32 public immutable rollupConfigHash;
+
+    /// @notice Number of L2 blocks each proposal must extend its parent by.
+    uint256 public immutable blockInterval;
 
     /// @notice Seconds a proposal may be challenged after creation.
     Duration public immutable challengePeriod;
@@ -88,11 +89,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice Bond required to challenge a proposal.
     uint256 public immutable challengerBond;
 
-    /// @notice Protocol-controlled recipient of proof-timeout forfeitures and challenge fees.
+    /// @notice Recipient of proposer bonds forfeited by proofless unchallenged timeouts.
     address public immutable protocolFeeRecipient;
-
-    /// @notice Non-refundable portion of the challenger bond charged whenever a game is challenged.
-    uint256 public immutable challengeFee;
 
     /// @notice Verifiers backing the proof lanes, indexed by `ProofLib.ProofLane`.
     IWorldChainProofVerifier public immutable validityProofVerifier;
@@ -147,52 +145,46 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice The total bonds deposited into the game.
     uint256 public totalBonds;
 
-    /// @notice The proposal transition identifier bound by every proof lane.
-    bytes32 public rootId;
-
     ////////////////////////////////////////////////////////////////
     //                        Constructor                         //
     ////////////////////////////////////////////////////////////////
 
     constructor(GameConfig memory config) {
         if (
-            config.challengePeriod == 0 || config.proofPeriod <= config.challengePeriod || config.domain.chainId == 0
-                || config.domain.proofSystemVersion == 0 || config.domain.blockInterval == 0
-                || config.proofThreshold == 0 || config.proofThreshold > ProofLib.PROOF_LANE_COUNT
-                || config.protocolFeeRecipient == address(0) || address(config.disputeGameFactory) == address(0)
-                || config.challengeFee == 0 || config.challengeFee > config.challengerBond
-                || config.challengeFee >= config.proposerBond || address(config.anchorStateRegistry) == address(0)
-                || address(config.weth) == address(0) || address(config.stakingRegistry) == address(0)
-                || address(config.validityProofVerifier) == address(0) || address(config.teeVerifier) == address(0)
-                || address(config.securityCouncil) == address(0)
+            config.proofSystemVersion == 0 || config.blockInterval == 0 || config.challengePeriod == 0
+                || config.proofPeriod <= config.challengePeriod || config.proposerBond == 0
+                || config.challengerBond == 0 || config.proofThreshold == 0
+                || config.proofThreshold > ProofLib.PROOF_LANE_COUNT || config.protocolFeeRecipient == address(0)
+                || address(config.anchorStateRegistry) == address(0) || address(config.weth) == address(0)
+                || address(config.stakingRegistry) == address(0) || address(config.validityProofVerifier) == address(0)
+                || address(config.teeVerifier) == address(0) || address(config.securityCouncil) == address(0)
         ) {
             revert InvalidActivationParameters();
         }
-        if (
-            address(config.anchorStateRegistry.disputeGameFactory()) != address(config.disputeGameFactory)
-                || address(config.weth.systemConfig()) != address(config.anchorStateRegistry.systemConfig())
-                || config.domain.chainId != config.anchorStateRegistry.systemConfig().l2ChainId()
-        ) {
-            revert InconsistentSystemConfiguration();
-        }
 
-        DOMAIN_CHAIN_ID = config.domain.chainId;
-        DOMAIN_PROOF_SYSTEM_VERSION = config.domain.proofSystemVersion;
-        DOMAIN_ROLLUP_CONFIG_HASH = config.domain.rollupConfigHash;
-        DOMAIN_BLOCK_INTERVAL = config.domain.blockInterval;
-        domainHash = ProofLib.domainHash(config.domain);
+        // The factory and chain ID are read from the registry rather than configured, so they
+        // cannot disagree with it.
+        IDisputeGameFactory factory = config.anchorStateRegistry.disputeGameFactory();
+        ISystemConfig systemConfig = config.anchorStateRegistry.systemConfig();
+        uint256 chainId = systemConfig.l2ChainId();
+        if (address(factory) == address(0) || chainId == 0) revert InvalidActivationParameters();
+        if (address(config.weth.systemConfig()) != address(systemConfig)) revert InconsistentSystemConfiguration();
+
+        domainHash =
+            ProofLib.domainHash(chainId, config.proofSystemVersion, config.rollupConfigHash, config.blockInterval);
+        rollupConfigHash = config.rollupConfigHash;
+        blockInterval = config.blockInterval;
         challengePeriod = Duration.wrap(config.challengePeriod);
         proofPeriod = Duration.wrap(config.proofPeriod);
         proposerBond = config.proposerBond;
         challengerBond = config.challengerBond;
         protocolFeeRecipient = config.protocolFeeRecipient;
-        challengeFee = config.challengeFee;
         PROOF_THRESHOLD = config.proofThreshold;
         validityProofVerifier = config.validityProofVerifier;
         teeVerifier = config.teeVerifier;
         securityCouncil = config.securityCouncil;
         stakingRegistry = config.stakingRegistry;
-        disputeGameFactory = config.disputeGameFactory;
+        disputeGameFactory = factory;
         anchorStateRegistry = config.anchorStateRegistry;
         weth = config.weth;
     }
@@ -321,7 +313,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         }
 
         // INVARIANT: Each proposal extends its parent by exactly one block interval.
-        uint256 expectedL2BlockNumber = startingProposal.l2SequenceNumber + DOMAIN_BLOCK_INTERVAL;
+        uint256 expectedL2BlockNumber = startingProposal.l2SequenceNumber + blockInterval;
         if (l2SequenceNumber() != expectedL2BlockNumber) {
             revert InvalidL2BlockNumber(expectedL2BlockNumber, l2SequenceNumber());
         }
@@ -355,14 +347,6 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // `initialize` runs in the same transaction as `DisputeGameFactory.create`, which set
         // `l1Head = blockhash(block.number - 1)`.
         _l1OriginNumber = uint64(block.number - 1);
-        rootId = ProofLib.rootId(
-            domainHash,
-            parentRef_,
-            Claim.unwrap(rootClaim()),
-            l2SequenceNumber(),
-            Hash.unwrap(l1Head()),
-            _l1OriginNumber
-        );
 
         // Set the root claim.
         claimData = ClaimData({
@@ -389,7 +373,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             anchorStateRegistry.respectedGameType().raw() == GameTypes.MULTI_PROOF_GAME_TYPE.raw();
 
         emit WorldChainGameCreated(
-            rootId,
+            rootId(),
             parentRef_,
             Claim.unwrap(rootClaim()),
             l2SequenceNumber(),
@@ -439,14 +423,11 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // at the challenge, so late challenges cannot extend the game.
         claimData.deadline = proofDeadline();
 
-        // The fee is credited in both settlement modes so no later outcome can recycle it.
-        normalModeCredit[protocolFeeRecipient] += challengeFee;
-        refundModeCredit[protocolFeeRecipient] += challengeFee;
-        refundModeCredit[msg.sender] += msg.value - challengeFee;
+        // Deposit the bond into DelayedWETH and track credits.
+        refundModeCredit[msg.sender] += msg.value;
         totalBonds += msg.value;
         weth.deposit{value: msg.value}();
 
-        emit ChallengeFeeCharged(protocolFeeRecipient, challengeFee);
         emit Challenged(msg.sender, claimData.deadline.raw());
 
         return claimData.status;
@@ -466,25 +447,26 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         if (laneId >= PROOF_LANE_COUNT) revert InvalidLane(laneId);
         ProofLib.ProofLane lane = ProofLib.ProofLane(laneId);
         uint8 mask = ProofLib.laneMask(lane);
+        bytes32 rootId_ = rootId();
 
         // No-op on resubmission so racing provers do not revert each other.
         if (claimData.proofBitmap & mask != 0) {
-            emit DuplicateProofLane(lane, rootId, claimData.proofBitmap);
+            emit DuplicateProofLane(lane, rootId_, claimData.proofBitmap);
             return claimData.status;
         }
 
         // Verify the proof against the verifier configured for this lane.
-        if (!_verifierFor(lane).verify(rootId, proof)) revert InvalidProof(lane, rootId);
+        if (!_verifierFor(lane).verify(rootId_, proof)) revert InvalidProof(lane, rootId_);
 
         uint8 bitmap = claimData.proofBitmap | mask;
         claimData.proofBitmap = bitmap;
-        emit ProofLaneSupported(lane, rootId, bitmap);
+        emit ProofLaneSupported(lane, rootId_, bitmap);
 
         // Update the status of the proposal. Unchallenged, a single lane is a valid proof that
         // finalizes once the challenge window closes; challenged, only the threshold is.
         if (ProofLib.hasThreshold(bitmap, PROOF_THRESHOLD)) {
             // First crossing only: `gameOver()` blocks any submission after the threshold.
-            emit ProofThresholdReached(rootId, bitmap);
+            emit ProofThresholdReached(rootId_, bitmap);
             claimData.status = claimData.challenger == address(0)
                 ? ProposalStatus.UnchallengedAndValidProofProvided
                 : ProposalStatus.ChallengedAndValidProofProvided;
@@ -526,13 +508,11 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         if (parentBlacklisted || parentStatus == GameStatus.CHALLENGER_WINS) {
             // An invalid parent invalidates this game regardless of its own proof state. Unlike
-            // ZKDisputeGame (which awards the challenger), participant funds are refunded
-            // because neither party caused the ancestor failure; the protocol fee remains charged.
             status = GameStatus.CHALLENGER_WINS;
             claimData.invalidationReason = ProofLib.InvalidationReason.INVALID_PARENT;
             normalModeCredit[gameCreator()] += proposerBond;
             if (claimData.challenger != address(0)) {
-                normalModeCredit[claimData.challenger] += challengerBond - challengeFee;
+                normalModeCredit[claimData.challenger] += challengerBond;
             }
         } else if (parentStatus == GameStatus.IN_PROGRESS) {
             // INVARIANT: Cannot resolve a game if the parent game has not been resolved.
@@ -550,19 +530,17 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
                 normalModeCredit[protocolFeeRecipient] += totalBonds;
             } else if (claimData.status == ProposalStatus.Challenged) {
                 // A challenged game below threshold times out once its proof window expires.
-                // The challenger takes the proposer bond.
+                // The challenger takes all bonds.
                 status = GameStatus.CHALLENGER_WINS;
                 claimData.invalidationReason = ProofLib.InvalidationReason.PROOF_TIMEOUT;
-                normalModeCredit[claimData.challenger] += totalBonds - challengeFee;
-            } else if (claimData.status == ProposalStatus.UnchallengedAndValidProofProvided) {
-                // Claim is unchallenged and proven: defender wins, game creator gets everything.
+                normalModeCredit[claimData.challenger] += totalBonds;
+            } else if (
+                claimData.status == ProposalStatus.UnchallengedAndValidProofProvided
+                    || claimData.status == ProposalStatus.ChallengedAndValidProofProvided
+            ) {
+                // The claim is proven: defender wins and the game creator takes all bonds.
                 status = GameStatus.DEFENDER_WINS;
                 normalModeCredit[gameCreator()] += totalBonds;
-            } else if (claimData.status == ProposalStatus.ChallengedAndValidProofProvided) {
-                // Claim is challenged but the threshold was reached: defender wins, game
-                // creator takes the challenger bond net of the protocol fee.
-                status = GameStatus.DEFENDER_WINS;
-                normalModeCredit[gameCreator()] += totalBonds - challengeFee;
             } else {
                 // This edge case shouldn't be reached, sanity check just in case.
                 revert InvalidProposalStatus();
@@ -707,13 +685,17 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     /// @inheritdoc IMultiProofGame
-    function domain() external view returns (ProofLib.Domain memory) {
-        return ProofLib.Domain({
-            chainId: DOMAIN_CHAIN_ID,
-            proofSystemVersion: DOMAIN_PROOF_SYSTEM_VERSION,
-            rollupConfigHash: DOMAIN_ROLLUP_CONFIG_HASH,
-            blockInterval: DOMAIN_BLOCK_INTERVAL
-        });
+    /// @dev Derived, not stored: the preimage is fixed at creation, so recomputing keeps a
+    ///      single source of truth.
+    function rootId() public view returns (bytes32) {
+        return ProofLib.rootId(
+            domainHash,
+            parentRef(),
+            Claim.unwrap(rootClaim()),
+            l2SequenceNumber(),
+            Hash.unwrap(l1Head()),
+            _l1OriginNumber
+        );
     }
 
     /// @notice Only the starting block number of the game.

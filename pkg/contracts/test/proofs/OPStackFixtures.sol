@@ -33,7 +33,6 @@ abstract contract OPStackFixtures is Test {
     uint64 internal constant PROOF_PERIOD = 7 days;
     uint256 internal constant PROPOSER_BOND = 1 ether;
     uint256 internal constant CHALLENGER_BOND = 0.1 ether;
-    uint256 internal constant CHALLENGE_FEE = 0.01 ether;
     uint8 internal constant PROOF_THRESHOLD = 2;
 
     uint256 internal constant CHAIN_ID = 480;
@@ -130,31 +129,26 @@ abstract contract OPStackFixtures is Test {
 
     function _gameConfig() internal view returns (IMultiProofGame.GameConfig memory) {
         return IMultiProofGame.GameConfig({
-            domain: _domain(),
+            proofSystemVersion: PROOF_SYSTEM_VERSION,
+            rollupConfigHash: ROLLUP_CONFIG_HASH,
+            blockInterval: BLOCK_INTERVAL,
             challengePeriod: CHALLENGE_PERIOD,
             proofPeriod: PROOF_PERIOD,
             proposerBond: PROPOSER_BOND,
             challengerBond: CHALLENGER_BOND,
             protocolFeeRecipient: protocolFeeRecipient,
-            challengeFee: CHALLENGE_FEE,
             proofThreshold: PROOF_THRESHOLD,
             validityProofVerifier: IWorldChainProofVerifier(address(validityVerifier)),
             teeVerifier: IWorldChainProofVerifier(address(teeVerifier)),
             securityCouncil: IWorldChainProofVerifier(address(councilVerifier)),
             stakingRegistry: IWorldChainStakingRegistry(address(stakingRegistry)),
-            disputeGameFactory: dgf,
             anchorStateRegistry: asr,
             weth: weth
         });
     }
 
-    function _domain() internal pure returns (ProofLib.Domain memory) {
-        return ProofLib.Domain({
-            chainId: CHAIN_ID,
-            proofSystemVersion: PROOF_SYSTEM_VERSION,
-            rollupConfigHash: ROLLUP_CONFIG_HASH,
-            blockInterval: BLOCK_INTERVAL
-        });
+    function _domainHash() internal pure returns (bytes32) {
+        return ProofLib.domainHash(CHAIN_ID, PROOF_SYSTEM_VERSION, ROLLUP_CONFIG_HASH, BLOCK_INTERVAL);
     }
 
     function _extraData(uint256 l2BlockNumber, uint256 parentIndex, uint256 attempt)
@@ -175,7 +169,7 @@ abstract contract OPStackFixtures is Test {
         pure
         returns (bytes memory)
     {
-        return abi.encode(ProofLib.domainHash(_domain()), l2BlockNumber, parent, attempt);
+        return abi.encode(_domainHash(), l2BlockNumber, parent, attempt);
     }
 
     function _rootClaimFor(uint256 l2BlockNumber) internal pure returns (bytes32) {
