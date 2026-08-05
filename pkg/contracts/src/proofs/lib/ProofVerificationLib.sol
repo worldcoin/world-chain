@@ -5,6 +5,9 @@ import {IMultiProofGame} from "../interfaces/IMultiProofGame.sol";
 import {ProofLib} from "./ProofLib.sol";
 import {Claim, Hash} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 
+/// @title ProofVerificationLib
+/// @author World Contributors
+/// @custom:security-contact security@toolsforhumanity.com
 library ProofVerificationLib {
     /// @dev Validates the proof against the game's root, domain, and creation-time transition snapshot.
     function matchesGame(

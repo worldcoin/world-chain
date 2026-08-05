@@ -2,19 +2,8 @@
 pragma solidity 0.8.28;
 
 /// @title INitroAttestationVerifier
-/// @author Worldcoin
-/// @notice Interface for fully on-chain AWS Nitro Enclaves attestation document
-///         verification with an owner-managed PCR allowlist. An implementation
-///         MUST:
-///           1. parse the COSE_Sign1 to-be-signed (TBS) bytes;
-///           2. verify the entire X.509 cert bundle up to the pinned AWS Nitro
-///              root CA;
-///           3. verify the P-384 signature over the TBS;
-///           4. ensure the document is fresh (not stale);
-///           5. ensure the PCR0/1/2 values embedded in the doc correspond to
-///              an enclave image that the owner has explicitly approved;
-///           6. return the certified enclave public key (65-byte SEC1
-///              uncompressed secp256k1) **and** the PCR triple it was bound to.
+/// @author World Contributors
+/// @custom:security-contact security@toolsforhumanity.com
 interface INitroAttestationVerifier {
     /// @notice Verify an attestation document, ensure its PCR triple is in
     ///         the owner-managed allowlist, and return the certified key.

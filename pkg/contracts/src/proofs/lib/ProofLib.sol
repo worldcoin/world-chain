@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
+/// @title ProofLib
+/// @author World Contributors
+/// @custom:security-contact security@toolsforhumanity.com
 library ProofLib {
     uint8 internal constant PROOF_LANE_COUNT = 3;
 
