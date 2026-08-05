@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainHardforks};
 use world_chain_proof_core::{
     hash_world_rollup_config,
-    range::{WorldRangeHardforkConfig, WorldRangeSpecId},
+    range::{WorldRangeHardfork, WorldRangeHardforkConfig, WorldRangeSpecId},
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
 use world_chain_proof_kona_client_utils::{
@@ -223,6 +223,7 @@ struct RpcBlock {
     hash: B256,
     state_root: B256,
     timestamp: HexU64,
+    withdrawals_root: Option<B256>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -301,10 +302,22 @@ pub async fn build_range_input(
     .await?;
     let post_block =
         get_block(&client, &config.l2_rpc, BlockTag::Number(request.end_block)).await?;
-    let pre_state =
-        output_root_witness(&client, &config.l2_rpc, request.start_block, &pre_block).await?;
-    let post_state =
-        output_root_witness(&client, &config.l2_rpc, request.end_block, &post_block).await?;
+    let pre_state = output_root_witness(
+        &client,
+        &config.l2_rpc,
+        &config.schedule,
+        request.start_block,
+        &pre_block,
+    )
+    .await?;
+    let post_state = output_root_witness(
+        &client,
+        &config.l2_rpc,
+        &config.schedule,
+        request.end_block,
+        &post_block,
+    )
+    .await?;
     let pre_root = pre_state.output_root();
     let post_root = post_state.output_root();
 
@@ -491,9 +504,21 @@ async fn get_block(client: &Client, rpc_url: &str, tag: BlockTag) -> anyhow::Res
 async fn output_root_witness(
     client: &Client,
     rpc_url: &str,
+    schedule: &WorldRangeHardforkConfig,
     block_number: u64,
     block: &RpcBlock,
 ) -> anyhow::Result<OutputRootWitness> {
+    if schedule.is_active(WorldRangeHardfork::Isthmus, block_number, block.timestamp.0) {
+        let message_passer_storage_root = block.withdrawals_root.with_context(|| {
+            format!("post-Isthmus L2 block {block_number} is missing withdrawalsRoot")
+        })?;
+        return Ok(OutputRootWitness {
+            state_root: block.state_root,
+            message_passer_storage_root,
+            block_hash: block.hash,
+        });
+    }
+
     let proof = match rpc::<AccountProof>(
         client,
         rpc_url,
@@ -668,5 +693,54 @@ impl BlockTag {
 
     fn display(self) -> String {
         self.to_rpc_value()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rpc_block(withdrawals_root: Option<B256>) -> RpcBlock {
+        RpcBlock {
+            number: HexU64(10),
+            hash: B256::with_last_byte(1),
+            state_root: B256::with_last_byte(2),
+            timestamp: HexU64(100),
+            withdrawals_root,
+        }
+    }
+
+    #[tokio::test]
+    async fn post_isthmus_output_root_uses_header_withdrawals_root() {
+        let withdrawals_root = B256::with_last_byte(3);
+        let block = rpc_block(Some(withdrawals_root));
+        let schedule = WorldRangeHardforkConfig {
+            isthmus_time: Some(100),
+            ..Default::default()
+        };
+
+        let witness =
+            output_root_witness(&Client::new(), "http://127.0.0.1:1", &schedule, 10, &block)
+                .await
+                .unwrap();
+
+        assert_eq!(witness.message_passer_storage_root, withdrawals_root);
+        assert_eq!(witness.state_root, block.state_root);
+        assert_eq!(witness.block_hash, block.hash);
+    }
+
+    #[tokio::test]
+    async fn post_isthmus_output_root_requires_header_withdrawals_root() {
+        let block = rpc_block(None);
+        let schedule = WorldRangeHardforkConfig {
+            isthmus_time: Some(0),
+            ..Default::default()
+        };
+
+        let err = output_root_witness(&Client::new(), "http://127.0.0.1:1", &schedule, 10, &block)
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("missing withdrawalsRoot"));
     }
 }
