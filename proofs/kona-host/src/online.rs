@@ -16,16 +16,22 @@ use std::{
 use crate::{OnlineBlobStore, PreimageWitnessCollector};
 use alloy_primitives::{Address, B256, address, keccak256};
 use anyhow::{Context, anyhow, bail};
-use kona_host::{DataFormat, single::SingleChainHost};
-use kona_preimage::{BidirectionalChannel, HintWriter, NativeChannel, OracleReader};
-use kona_proof::{CachingOracle, l1::OracleBlobProvider};
+use kona_host::{
+    DataFormat, OnlineHostBackend, PreimageServer,
+    single::{SingleChainHintHandler, SingleChainHost},
+};
+use kona_preimage::{
+    BidirectionalChannel, HintReader, HintWriter, NativeChannel, OracleReader, OracleServer,
+    PreimageKey, VerifyingPreimageFetcher,
+};
+use kona_proof::{CachingOracle, HintType, l1::OracleBlobProvider};
 use reqwest::Client;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use world_chain_chainspec::{WorldChainHardfork, WorldChainHardforks};
 use world_chain_proof_core::{
     hash_world_rollup_config,
-    range::{WorldRangeHardforkConfig, WorldRangeSpecId},
+    range::{WorldRangeHardfork, WorldRangeHardforkConfig, WorldRangeSpecId},
     witness::{BlobData, WorldRangeWitnessData, preimage_store::PreimageStore},
 };
 use world_chain_proof_kona_client_utils::{
@@ -49,6 +55,9 @@ pub struct OnlineHostConfig {
     pub l1_beacon_rpc: String,
     /// World Chain L2 execution RPC URL.
     pub l2_rpc: String,
+    /// L2 consensus RPC serving `optimism_outputAtBlock`, used only as the `eth_getProof`
+    /// fallback. Must not be the execution RPC. `None` disables the fallback.
+    pub l2_consensus_rpc: Option<String>,
     /// World hardfork schedule baked into the witness.
     pub schedule: WorldRangeHardforkConfig,
     /// Rollup config hash recorded in the witness metadata.
@@ -89,6 +98,7 @@ impl OnlineHostConfig {
         l1_rpc: String,
         l1_beacon_rpc: String,
         l2_rpc: String,
+        l2_consensus_rpc: Option<String>,
         rollup_config_path: Option<PathBuf>,
         witness_timeout: Duration,
     ) -> anyhow::Result<Self> {
@@ -103,6 +113,7 @@ impl OnlineHostConfig {
             l1_rpc,
             l1_beacon_rpc,
             l2_rpc,
+            l2_consensus_rpc,
             schedule,
             rollup_config_hash,
             l2_chain_id: None,
@@ -146,6 +157,7 @@ pub fn build_online_config(
     l1_rpc: String,
     l1_beacon_rpc: String,
     l2_rpc: String,
+    l2_consensus_rpc: Option<String>,
     l2_chain_id: u64,
     schedule: &WorldRangeHardforkConfig,
     witness_timeout: Duration,
@@ -160,6 +172,7 @@ pub fn build_online_config(
             l1_rpc,
             l1_beacon_rpc,
             l2_rpc,
+            l2_consensus_rpc,
             Some(path),
             witness_timeout,
         );
@@ -171,6 +184,7 @@ pub fn build_online_config(
         l1_rpc,
         l1_beacon_rpc,
         l2_rpc,
+        l2_consensus_rpc,
         schedule: schedule.clone(),
         rollup_config_hash,
         l2_chain_id: Some(l2_chain_id),
@@ -223,6 +237,7 @@ struct RpcBlock {
     hash: B256,
     state_root: B256,
     timestamp: HexU64,
+    withdrawals_root: Option<B256>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -301,10 +316,24 @@ pub async fn build_range_input(
     .await?;
     let post_block =
         get_block(&client, &config.l2_rpc, BlockTag::Number(request.end_block)).await?;
-    let pre_state =
-        output_root_witness(&client, &config.l2_rpc, request.start_block, &pre_block).await?;
-    let post_state =
-        output_root_witness(&client, &config.l2_rpc, request.end_block, &post_block).await?;
+    let pre_state = output_root_witness(
+        &client,
+        &config.l2_rpc,
+        &config.schedule,
+        config.l2_consensus_rpc.as_deref(),
+        request.start_block,
+        &pre_block,
+    )
+    .await?;
+    let post_state = output_root_witness(
+        &client,
+        &config.l2_rpc,
+        &config.schedule,
+        config.l2_consensus_rpc.as_deref(),
+        request.end_block,
+        &post_block,
+    )
+    .await?;
     let pre_root = pre_state.output_root();
     let post_root = post_state.output_root();
 
@@ -340,8 +369,13 @@ pub async fn build_range_input(
         l1_config_path: None,
     };
 
-    let witness =
-        collect_world_range_witness(host, config.schedule.clone(), config.witness_timeout).await?;
+    let witness = collect_world_range_witness(
+        host,
+        &pre_state,
+        config.schedule.clone(),
+        config.witness_timeout,
+    )
+    .await?;
 
     Ok(RangeProofInput {
         metadata: RangeMetadata {
@@ -361,12 +395,37 @@ pub async fn build_range_input(
 
 async fn collect_world_range_witness(
     host: SingleChainHost,
+    agreed_output: &OutputRootWitness,
     schedule: WorldRangeHardforkConfig,
     timeout: Duration,
 ) -> anyhow::Result<WorldRangeWitnessData> {
     let preimage = BidirectionalChannel::new()?;
     let hint = BidirectionalChannel::new()?;
-    let mut server_task = host.start_server(hint.host, preimage.host).await?;
+
+    // This mirrors `SingleChainHost::start_server`, which creates its key-value store internally.
+    // Constructing the server here lets us seed the agreed output preimage before it starts.
+    let kv_store = host.create_key_value_store()?;
+
+    // Kona asks for this preimage to recover the agreed L2 head. Seeding the value avoids
+    // recomputing the post-Isthmus storage root through `eth_getProof`.
+    let agreed_output_root = agreed_output.output_root();
+    kv_store.write().await.set(
+        PreimageKey::new_keccak256(*agreed_output_root).into(),
+        agreed_output.encode().to_vec(),
+    )?;
+
+    let providers = host.create_providers().await?;
+    let backend = OnlineHostBackend::new(host.clone(), kv_store, providers, SingleChainHintHandler)
+        .with_high_level_hint(HintType::L2PayloadWitness);
+    let mut server_task = tokio::spawn(async move {
+        PreimageServer::new(
+            OracleServer::new(preimage.host),
+            HintReader::new(hint.host),
+            Arc::new(VerifyingPreimageFetcher::new(backend)),
+        )
+        .start()
+        .await
+    });
 
     let witness = collect_witness_from_channels(preimage.client, hint.client, schedule);
     tokio::pin!(witness);
@@ -488,12 +547,27 @@ async fn get_block(client: &Client, rpc_url: &str, tag: BlockTag) -> anyhow::Res
     .with_context(|| format!("eth_getBlockByNumber returned null for {}", tag.display()))
 }
 
+/// Builds the output-root witness from the post-Isthmus header, or for earlier blocks by
+/// preferring `eth_getProof` and falling back to `optimism_outputAtBlock` on the consensus client.
 async fn output_root_witness(
     client: &Client,
     rpc_url: &str,
+    schedule: &WorldRangeHardforkConfig,
+    consensus_rpc_url: Option<&str>,
     block_number: u64,
     block: &RpcBlock,
 ) -> anyhow::Result<OutputRootWitness> {
+    if schedule.is_active(WorldRangeHardfork::Isthmus, block_number, block.timestamp.0) {
+        let message_passer_storage_root = block.withdrawals_root.with_context(|| {
+            format!("post-Isthmus L2 block {block_number} is missing withdrawalsRoot")
+        })?;
+        return Ok(OutputRootWitness {
+            state_root: block.state_root,
+            message_passer_storage_root,
+            block_hash: block.hash,
+        });
+    }
+
     let proof = match rpc::<AccountProof>(
         client,
         rpc_url,
@@ -509,9 +583,21 @@ async fn output_root_witness(
         Ok(Some(proof)) => proof,
         Ok(None) => bail!("eth_getProof returned null"),
         Err(proof_err) => {
-            return output_root_witness_from_op_node(client, rpc_url, block_number, block)
-                .await
-                .with_context(|| format!("eth_getProof failed first: {proof_err}"));
+            let Some(consensus_rpc_url) = consensus_rpc_url else {
+                return Err(proof_err).context(
+                    "eth_getProof failed and no L2 consensus RPC is configured for the \
+                     optimism_outputAtBlock fallback (set --l2-consensus-rpc / \
+                     L2_CONSENSUS_RPC_URL to the L2 consensus RPC)",
+                );
+            };
+            return output_root_witness_from_op_node(
+                client,
+                consensus_rpc_url,
+                block_number,
+                block,
+            )
+            .await
+            .with_context(|| format!("eth_getProof failed first: {proof_err}"));
         }
     };
 
@@ -668,5 +754,78 @@ impl BlockTag {
 
     fn display(self) -> String {
         self.to_rpc_value()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rpc_block(withdrawals_root: Option<B256>) -> RpcBlock {
+        RpcBlock {
+            number: HexU64(10),
+            hash: B256::with_last_byte(1),
+            state_root: B256::with_last_byte(2),
+            timestamp: HexU64(100),
+            withdrawals_root,
+        }
+    }
+
+    #[tokio::test]
+    async fn post_isthmus_output_root_uses_header_withdrawals_root() {
+        let withdrawals_root = B256::with_last_byte(3);
+        let block = rpc_block(Some(withdrawals_root));
+        let schedule = WorldRangeHardforkConfig {
+            isthmus_time: Some(100),
+            ..Default::default()
+        };
+
+        let witness = output_root_witness(
+            &Client::new(),
+            "http://127.0.0.1:1",
+            &schedule,
+            None,
+            10,
+            &block,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(witness.message_passer_storage_root, withdrawals_root);
+        assert_eq!(witness.state_root, block.state_root);
+        assert_eq!(witness.block_hash, block.hash);
+    }
+
+    #[tokio::test]
+    async fn post_isthmus_output_root_requires_header_withdrawals_root() {
+        let block = rpc_block(None);
+        let schedule = WorldRangeHardforkConfig {
+            isthmus_time: Some(0),
+            ..Default::default()
+        };
+
+        let err = output_root_witness(
+            &Client::new(),
+            "http://127.0.0.1:1",
+            &schedule,
+            None,
+            10,
+            &block,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("missing withdrawalsRoot"));
+    }
+
+    #[test]
+    fn starting_output_preimage_matches_output_root() {
+        let output = OutputRootWitness {
+            state_root: B256::with_last_byte(1),
+            message_passer_storage_root: B256::with_last_byte(2),
+            block_hash: B256::with_last_byte(3),
+        };
+
+        assert_eq!(keccak256(output.encode()), output.output_root());
     }
 }

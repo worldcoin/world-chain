@@ -506,14 +506,20 @@ pub fn leaf_cert_pubkey_xy(doc: &[u8]) -> Result<[u8; 96], AttestationError> {
         )
     })?;
 
-    let verifying_key = extract_p384_key(&cert_der)?;
+    cert_pubkey_xy(&cert_der)
+}
+
+/// Extracts any certificate's P-384 public key as the uncompressed `x || y` coordinate pair
+/// (96 bytes, without the SEC1 `0x04` prefix).
+pub fn cert_pubkey_xy(cert_der: &[u8]) -> Result<[u8; 96], AttestationError> {
+    let verifying_key = extract_p384_key(cert_der)?;
     let point = verifying_key.to_encoded_point(false);
     let bytes = point.as_bytes();
 
     // Uncompressed SEC1 encoding is `0x04 || X (48) || Y (48)` = 97 bytes.
     if bytes.len() != 97 || bytes[0] != 0x04 {
         return Err(AttestationError::CertChain(format!(
-            "unexpected leaf public key encoding ({} bytes, prefix 0x{:02x})",
+            "unexpected public key encoding ({} bytes, prefix 0x{:02x})",
             bytes.len(),
             bytes.first().copied().unwrap_or(0)
         )));

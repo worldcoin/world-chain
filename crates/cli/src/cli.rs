@@ -523,6 +523,26 @@ mod tests {
     }
 
     #[test]
+    fn proofs_history_args_parsed() {
+        let args = CommandParser::parse_from([
+            "bin",
+            "--proofs-history",
+            "--proofs-history.storage-version",
+            "v2",
+            "--proofs-history.window",
+            "302400",
+        ])
+        .world;
+
+        assert!(args.rollup.proofs_history);
+        assert_eq!(
+            args.rollup.history.storage_version,
+            reth_optimism_node::args::ProofsStorageVersion::V2
+        );
+        assert_eq!(args.rollup.proofs_history_window.window, 302_400);
+    }
+
+    #[test]
     fn flashblocks_enabled_should_materialize_flashblocks_args() {
         let args = CommandParser::parse_from(["bin", "--flashblocks.enabled"]).world;
         assert!(

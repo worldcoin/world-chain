@@ -3021,6 +3021,8 @@ async fn start_sp1_worker(
         l1_rpc_url.to_string(),
         l1_rpc_url.to_string(),
         l2_rpc_url.to_string(),
+        // Devnet reth serves eth_getProof directly; no op-node fallback needed.
+        None,
         Some(rollup_path.to_path_buf()),
         Duration::from_secs(900),
     )
