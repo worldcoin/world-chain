@@ -22,6 +22,8 @@
 
 #![cfg(target_os = "linux")]
 
+use std::sync::Arc;
+
 use alloy_primitives::Bytes;
 use alloy_sol_types::SolValue;
 use anyhow::{Context, Result, anyhow, bail};
@@ -29,12 +31,13 @@ use tracing::info;
 use world_chain_proof_kona_host_utils::online::{
     OnlineHostConfig, RangeWitnessRequest, build_range_input,
 };
-use world_chain_proof_nitro::{
-    ExpectedPcrs, NitroRangeProofRequest,
-    host::{EnclaveEndpoint, NitroProver},
-};
+use world_chain_proof_nitro::{ExpectedPcrs, NitroRangeProofRequest};
 use world_chain_proof_worker::{ClaimedProofJobHandler, ProofJob};
 use world_chain_prover_service::{ProofBackend, ProofData};
+
+pub mod binding;
+
+pub use binding::{EnclaveBinding, EnclaveCidSource, EnclaveSession, RegistrationCredentials};
 
 // ──────────────────────────────────────────────────────────────────────────────────────
 // NitroBackend — ClaimedProofJobHandler implementation for the Nitro TEE lane
@@ -44,9 +47,8 @@ use world_chain_prover_service::{ProofBackend, ProofData};
 pub struct NitroBackendConfig {
     pub block_interval: u64,
     pub online: OnlineHostConfig,
-    pub enclave_cid: u32,
-    pub enclave_port: u32,
-    pub expected_pcrs: ExpectedPcrs,
+    /// Re-resolved before every job so a replaced enclave costs one job, not an operator.
+    pub binding: Arc<EnclaveBinding>,
 }
 
 pub struct NitroBackend {
@@ -88,9 +90,17 @@ impl ClaimedProofJobHandler for NitroBackend {
             "nitro worker claimed proof job"
         );
 
-        let endpoint =
-            EnclaveEndpoint::with_port(self.config.enclave_cid, self.config.enclave_port);
-        let prover = NitroProver::new(endpoint, self.config.expected_pcrs);
+        // Bind before spending minutes on a witness: this is the only point that proves the
+        // enclave we are about to sign with still exists and is registered. Failing here
+        // re-queues the job; proving with an unregistered key would instead produce a
+        // "successful" proof that every verifier rejects.
+        let session = self
+            .config
+            .binding
+            .bind()
+            .await
+            .context("enclave binding failed")?;
+        let prover = session.prover;
 
         info!(
             start_block,

@@ -50,3 +50,6 @@ dotenvy.workspace = true
 
 # Misc
 hex.workspace = true
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+tempfile.workspace = true

@@ -8,13 +8,14 @@ use backon::{ExponentialBuilder, Retryable};
 use clap::Parser;
 use tracing::{error, info};
 use world_chain_chainspec::WorldChainSpec;
-use world_chain_nitro_worker::{NitroBackend, NitroBackendConfig, build_expected_pcrs};
+use world_chain_nitro_worker::{
+    EnclaveBinding, EnclaveCidSource, NitroBackend, NitroBackendConfig, RegistrationCredentials,
+    build_expected_pcrs,
+};
 use world_chain_proof_kona_host_utils::online::{
     build_online_config, hardfork_config_from_chain_spec,
 };
-use world_chain_proof_nitro::register::{
-    RegisterParams, RegistrationOutcome, register_enclave_key,
-};
+use world_chain_proof_nitro::register::RegistrationOutcome;
 use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
 };
@@ -50,20 +51,16 @@ fn registration_backoff() -> ExponentialBuilder {
 /// This deliberately never aborts the process. Every way registration can fail — PCR set not
 /// yet approved on-chain, registration key unfunded, L1 unreachable, certificate chain not yet
 /// verifiable — is a condition an operator resolves *while the worker is running*.
-async fn register_with_retry(params: RegisterParams) -> bool {
-    let attempt = || {
-        let params = params.clone();
-        async move { register_enclave_key(params).await }
-    };
+async fn bind_with_retry(binding: &EnclaveBinding) -> bool {
+    let attempt = || async { binding.bind().await };
 
-    let registration = attempt
+    let bind = attempt
         .retry(registration_backoff())
         .notify(|error, delay| {
-            world_chain_proof_metrics::increment_enclave_registration_attempts("failed");
             error!(
                 ?error,
                 retry_in_secs = delay.as_secs(),
-                "enclave key registration failed; worker stays up and will retry without \
+                "enclave binding failed; worker stays up and will retry without \
              leasing proof jobs"
             );
         });
@@ -71,31 +68,28 @@ async fn register_with_retry(params: RegisterParams) -> bool {
     // Race the (unbounded) retry against shutdown so a pod being rolled does not have to wait
     // out a full backoff interval.
     tokio::select! {
-        outcome = registration => match outcome {
-            Ok(outcome) => {
-                let label = match outcome {
-                    RegistrationOutcome::AlreadyRegistered => {
-                        info!("enclave key already registered on-chain");
-                        "already_registered"
+        outcome = bind => match outcome {
+            Ok(session) => {
+                match session.registration {
+                    Some(RegistrationOutcome::AlreadyRegistered) => {
+                        info!(enclave_cid = session.cid, "enclave key already registered on-chain");
                     }
-                    RegistrationOutcome::Registered { tx_hash } => {
-                        info!(%tx_hash, "enclave key registered on-chain");
-                        "registered"
+                    Some(RegistrationOutcome::Registered { tx_hash }) => {
+                        info!(%tx_hash, enclave_cid = session.cid, "enclave key registered on-chain");
                     }
-                };
-                world_chain_proof_metrics::increment_enclave_registration_attempts(label);
-                world_chain_proof_metrics::set_enclave_key_registered(true);
+                    None => info!(enclave_cid = session.cid, "bound to enclave"),
+                }
                 true
             }
             // Unreachable while the backoff is unbounded, but treat it the same as shutdown
-            // rather than leasing jobs with an unregistered key.
+            // rather than leasing jobs against an enclave we could not bind to.
             Err(error) => {
-                error!(?error, "enclave key registration gave up; not leasing proof jobs");
+                error!(?error, "enclave binding gave up; not leasing proof jobs");
                 false
             }
         },
         _ = tokio::signal::ctrl_c() => {
-            info!("received ctrl-c while retrying registration, shutting down");
+            info!("received ctrl-c while retrying enclave binding, shutting down");
             false
         }
     }
@@ -169,9 +163,15 @@ pub struct WorkerArgs {
     #[arg(long, env = "BLOCK_INTERVAL")]
     block_interval: u64,
 
-    /// vsock CID of the running Nitro Enclave.
+    /// vsock CID of the running Nitro Enclave. Ignored when `--enclave-cid-file` is set.
     #[arg(long, env = "ENCLAVE_CID", default_value_t = 16)]
     enclave_cid: u32,
+
+    /// File the enclave launcher rewrites with the current vsock CID. Prefer this over
+    /// `--enclave-cid`: it is re-read before every job, so an enclave replaced underneath the
+    /// worker is picked up instead of stranding it on a dead CID.
+    #[arg(long, env = "ENCLAVE_CID_FILE")]
+    enclave_cid_file: Option<PathBuf>,
 
     /// vsock port the enclave listens on.
     #[arg(
@@ -279,45 +279,50 @@ pub async fn run(args: WorkerArgs) -> Result<()> {
         args.pcr2.as_deref(),
     )?;
 
-    // Self-register the enclave's generated signing key on-chain before leasing any jobs:
-    // proofs signed by an unregistered key do not verify, so an unregistered worker must not
-    // take work. Registration is a *precondition*, not a fatal error — see
-    // [`register_with_retry`] for why this never aborts the process.
-    if args.auto_register {
-        let registry = args
-            .registry
-            .clone()
-            .context("--auto-register requires --registry / NITRO_ENCLAVE_KEY_REGISTRY")?;
-        // Registration reuses the same L1 endpoint as witness building (`--l1-rpc`).
-        let l1_rpc_url = args.l1_rpc.clone();
-        let private_key = args
-            .register_private_key
-            .clone()
-            .or_else(|| std::env::var("PRIVATE_KEY").ok())
-            .context(
-                "--auto-register requires a key: set --register-private-key, \
-                 REGISTER_PRIVATE_KEY, or PRIVATE_KEY",
-            )?;
+    let cid_source = args.enclave_cid_file.clone().map_or_else(
+        || EnclaveCidSource::Fixed(args.enclave_cid),
+        EnclaveCidSource::File,
+    );
 
+    let registration = if args.auto_register {
+        Some(RegistrationCredentials {
+            // Registration reuses the same L1 endpoint as witness building (`--l1-rpc`).
+            l1_rpc_url: args.l1_rpc.clone(),
+            registry: args
+                .registry
+                .clone()
+                .context("--auto-register requires --registry / NITRO_ENCLAVE_KEY_REGISTRY")?,
+            private_key: args
+                .register_private_key
+                .clone()
+                .or_else(|| std::env::var("PRIVATE_KEY").ok())
+                .context(
+                    "--auto-register requires a key: set --register-private-key, \
+                     REGISTER_PRIVATE_KEY, or PRIVATE_KEY",
+                )?,
+        })
+    } else {
+        None
+    };
+
+    let binding = Arc::new(EnclaveBinding::new(
+        cid_source,
+        args.enclave_port,
+        expected_pcrs,
+        registration,
+    ));
+
+    // Bind before leasing any jobs: proofs signed by an unregistered key do not verify, so an
+    // unbound worker must not take work. Binding is a *precondition*, not a fatal error — see
+    // [`bind_with_retry`] for why this never aborts the process. Every job re-binds, so this
+    // only gates startup.
+    if args.auto_register {
         // Publish the gauge before the first attempt so "never registered" is a visible zero
         // rather than an absent series a threshold monitor would silently ignore.
         world_chain_proof_metrics::set_enclave_key_registered(false);
-        info!(
-            registry = %registry,
-            enclave_cid = args.enclave_cid,
-            "auto-register enabled; registering enclave key on-chain before leasing jobs"
-        );
+        info!("auto-register enabled; binding to the enclave before leasing jobs");
 
-        let registered = register_with_retry(RegisterParams {
-            enclave_cid: args.enclave_cid,
-            enclave_port: args.enclave_port,
-            expected_pcrs,
-            l1_rpc_url,
-            registry,
-            private_key,
-        })
-        .await;
-        if !registered {
+        if !bind_with_retry(&binding).await {
             // Shutdown was requested while retrying; exit cleanly rather than starting up.
             return Ok(());
         }
@@ -325,7 +330,6 @@ pub async fn run(args: WorkerArgs) -> Result<()> {
 
     info!(
         prover_service = %args.prover_service_url,
-        enclave_cid = args.enclave_cid,
         block_interval = args.block_interval,
         submit_proof_retry_max_retries = args.submit_proof_retry_max_retries,
         submit_proof_retry_initial_delay_ms = args.submit_proof_retry_initial_delay_ms,
@@ -336,9 +340,7 @@ pub async fn run(args: WorkerArgs) -> Result<()> {
     let backend = NitroBackend::new(NitroBackendConfig {
         block_interval: args.block_interval,
         online,
-        enclave_cid: args.enclave_cid,
-        enclave_port: args.enclave_port,
-        expected_pcrs,
+        binding: Arc::clone(&binding),
     });
 
     let queue = RpcProverServiceClient::new(&args.prover_service_url)
