@@ -37,7 +37,7 @@ async-trait.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
 futures-util.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal", "time", "test-util"] }
 tracing.workspace = true
 telemetry-batteries.workspace = true
 url.workspace = true

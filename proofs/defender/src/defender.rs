@@ -349,15 +349,40 @@ where
     }
 
     /// Runs the defender forever, logging transient failures and retrying on each tick.
+    ///
+    /// The tick is bounded: a single call that never returns would otherwise stop the loop
+    /// while leaving the process alive and Ready, which reads as a healthy defender that
+    /// silently submits nothing. Abandoning the tick loses one cycle; not abandoning it loses
+    /// every cycle until an operator notices.
     pub async fn run_forever(&mut self) -> Result<(), DefenderError> {
         self.config.validate()?;
 
         let mut interval = tokio::time::interval(self.config.poll_interval);
         loop {
             interval.tick().await;
-            if let Err(e) = self.tick().await {
-                warn!(%e, "defender iteration failed; retrying on next tick");
+            match tokio::time::timeout(self.config.tick_timeout, self.tick()).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => warn!(%e, "defender iteration failed; retrying on next tick"),
+                Err(_) => error!(
+                    timeout_secs = self.config.tick_timeout.as_secs(),
+                    "defender tick timed out; abandoning it and retrying on next tick"
+                ),
             }
+            self.touch_heartbeat();
+        }
+    }
+
+    /// Records that the loop came back around. A liveness probe stats this file; without it
+    /// "the loop is wedged" is indistinguishable from "there is nothing to do", since both
+    /// look like an idle process.
+    fn touch_heartbeat(&self) {
+        let Some(path) = self.config.heartbeat_file.as_ref() else {
+            return;
+        };
+        if let Err(error) = std::fs::write(path, b"") {
+            // Never fatal: losing the heartbeat degrades detection, and killing the defender
+            // over a filesystem error would be the more damaging failure.
+            warn!(%error, path = %path.display(), "failed to touch defender heartbeat file");
         }
     }
 }

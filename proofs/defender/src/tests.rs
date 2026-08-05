@@ -12,7 +12,7 @@ use std::{
     collections::HashMap,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -55,6 +55,9 @@ struct MockState {
 #[derive(Debug, Clone)]
 struct MockClient {
     state: Arc<Mutex<MockState>>,
+    /// When set, `lineage_anchor` never returns — the shape of the hang seen on alphanet
+    /// 2026-08-05, where one un-timed-out call stopped the loop for 26 minutes.
+    stall: Arc<AtomicBool>,
 }
 
 impl MockClient {
@@ -69,6 +72,7 @@ impl MockClient {
                 games: HashMap::new(),
                 submissions: Vec::new(),
             })),
+            stall: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -158,6 +162,9 @@ impl LineageProvider for MockClient {
     }
 
     async fn lineage_anchor(&self) -> Result<LineageAnchor, LineageError> {
+        if self.stall.load(Ordering::SeqCst) {
+            std::future::pending::<()>().await;
+        }
         Ok(self.state.lock().expect("not poisoned").anchor)
     }
 
@@ -384,6 +391,8 @@ impl ProofRequester for MockProver {
 fn config() -> DefenderConfig {
     DefenderConfig {
         poll_interval: Duration::from_secs(1),
+        tick_timeout: Duration::from_secs(300),
+        heartbeat_file: None,
         max_game_concurrency: 10,
     }
 }
@@ -737,7 +746,43 @@ async fn selected_game_deadline_stops_proof_work() {
 fn config_rejects_zero_concurrency() {
     let config = DefenderConfig {
         poll_interval: Duration::from_secs(1),
+        tick_timeout: Duration::from_secs(300),
+        heartbeat_file: None,
         max_game_concurrency: 0,
     };
     assert!(config.validate().is_err());
+}
+
+/// A tick that never returns must not stop the loop: before `tick_timeout` existed, one
+/// un-timed-out call left the defender Ready, silent, and submitting nothing until an
+/// operator restarted the pod (alphanet, 2026-08-05, twice).
+#[tokio::test(start_paused = true)]
+async fn a_hung_tick_is_abandoned_and_the_loop_continues() {
+    let heartbeat = std::env::temp_dir().join("wc-defender-hung-tick-heartbeat");
+    let _ = std::fs::remove_file(&heartbeat);
+
+    let client = MockClient::new();
+    client.stall.store(true, Ordering::SeqCst);
+    let mut defender = WorldChainDefender::new(
+        DefenderConfig {
+            poll_interval: Duration::from_secs(1),
+            tick_timeout: Duration::from_secs(30),
+            heartbeat_file: Some(heartbeat.clone()),
+            max_game_concurrency: 10,
+        },
+        client,
+        output_roots(&[], 0),
+        MockProver::default(),
+    );
+
+    let run = tokio::spawn(async move { defender.run_forever().await });
+    // Paused time auto-advances, so this resolves as soon as the loop has had the chance to
+    // start a tick, hit the 30s ceiling, abandon it, and come back around.
+    tokio::time::sleep(Duration::from_secs(120)).await;
+    run.abort();
+
+    assert!(
+        heartbeat.exists(),
+        "the loop must survive a hung tick and touch its heartbeat"
+    );
 }

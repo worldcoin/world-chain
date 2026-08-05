@@ -5,7 +5,7 @@
 //! (`crates/devnet/src/full_stack.rs::start_world_chain_defender`), reading its
 //! configuration from flags/environment so it can run as a standalone service.
 
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use alloy_network::EthereumWallet;
 use alloy_primitives::Address;
@@ -58,6 +58,14 @@ struct Cli {
     /// Maximum number of games processed concurrently.
     #[arg(long, env = "MAX_GAME_CONCURRENCY", default_value_t = 10)]
     max_game_concurrency: usize,
+
+    /// Seconds a single tick may run before it is abandoned.
+    #[arg(long, env = "TICK_TIMEOUT_SECONDS", default_value_t = 300)]
+    tick_timeout_seconds: u64,
+
+    /// File touched after every tick, for a liveness probe to stat.
+    #[arg(long, env = "HEARTBEAT_FILE")]
+    heartbeat_file: Option<PathBuf>,
 
     /// Number of L1 confirmations required before a proof submission is accepted.
     #[arg(
@@ -114,6 +122,8 @@ async fn main() -> Result<()> {
     let config = DefenderConfig {
         poll_interval: Duration::from_secs(cli.poll_interval_seconds),
         max_game_concurrency: cli.max_game_concurrency,
+        tick_timeout: Duration::from_secs(cli.tick_timeout_seconds),
+        heartbeat_file: cli.heartbeat_file.clone(),
     };
     let mut defender = WorldChainDefender::new(config, client, output_roots, proof_requester);
 
