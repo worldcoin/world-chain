@@ -231,8 +231,8 @@ abstract contract OPStackFixtures is Test {
         if (game.proofBitmap() == 0) {
             game.submitProofLane(uint8(ProofLib.ProofLane.TEE_ATTESTATION), abi.encodePacked(game.rootId()));
         }
-        if (block.timestamp < game.challengeDeadline()) {
-            vm.warp(game.challengeDeadline());
+        if (block.timestamp < game.challengeDeadline().raw()) {
+            vm.warp(game.challengeDeadline().raw());
         }
         game.resolve();
     }

@@ -11,8 +11,8 @@ contract MockProofSystemGame {
         address anchorStateRegistry;
         bytes32 domainHash;
         address parentRef;
-        bytes32 startingRootClaim;
-        uint256 startingL2BlockNumber;
+        bytes32 startingRootHash;
+        uint256 startingBlockNumber;
         bytes32 rootClaim;
         uint256 l2BlockNumber;
         bytes32 l1OriginHash;
@@ -24,8 +24,8 @@ contract MockProofSystemGame {
     address public anchorStateRegistry;
     bytes32 public domainHash;
     address public parentRef;
-    bytes32 public startingRootClaim;
-    uint256 public startingL2BlockNumber;
+    bytes32 public startingRootHash;
+    uint256 public startingBlockNumber;
     bytes32 public rootClaim;
     uint256 public l2BlockNumber;
     bytes32 public l1OriginHash;
@@ -37,8 +37,8 @@ contract MockProofSystemGame {
         anchorStateRegistry = context.anchorStateRegistry;
         domainHash = context.domainHash;
         parentRef = context.parentRef;
-        startingRootClaim = context.startingRootClaim;
-        startingL2BlockNumber = context.startingL2BlockNumber;
+        startingRootHash = context.startingRootHash;
+        startingBlockNumber = context.startingBlockNumber;
         rootClaim = context.rootClaim;
         l2BlockNumber = context.l2BlockNumber;
         l1OriginHash = context.l1OriginHash;

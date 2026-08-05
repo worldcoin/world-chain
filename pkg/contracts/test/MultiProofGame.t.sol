@@ -6,12 +6,20 @@ import {MultiProofGame} from "../src/proofs/MultiProofGame.sol";
 import {IMultiProofGame} from "../src/proofs/interfaces/IMultiProofGame.sol";
 import {ProofLib} from "../src/proofs/lib/ProofLib.sol";
 
-import {BondDistributionMode, Claim, GameStatus, GameType, Hash} from "@optimism-bedrock/src/dispute/lib/Types.sol";
+import {
+    BondDistributionMode,
+    Claim,
+    GameStatus,
+    GameType,
+    Hash,
+    Timestamp
+} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {
     BadExtraData,
     ClaimAlreadyChallenged,
     GameNotFinalized,
     GameNotOver,
+    GameOver,
     GamePaused,
     IncorrectBondAmount,
     InvalidParentGame,
@@ -28,8 +36,8 @@ contract MultiProofGameTest is OPStackFixtures {
         assertEq(Claim.unwrap(game.rootClaim()), _rootClaimFor(target));
         assertEq(game.l2SequenceNumber(), target);
         assertEq(game.parentRef(), address(asr));
-        assertEq(game.startingRootClaim(), STARTING_ANCHOR_ROOT);
-        assertEq(game.startingL2BlockNumber(), STARTING_ANCHOR_BLOCK);
+        assertEq(Hash.unwrap(game.startingRootHash()), STARTING_ANCHOR_ROOT);
+        assertEq(game.startingBlockNumber(), STARTING_ANCHOR_BLOCK);
         assertEq(game.attempt(), 0);
         assertEq(GameType.unwrap(game.gameType()), GameType.unwrap(WC_GAME_TYPE));
         assertTrue(game.wasRespectedGameTypeWhenCreated());
@@ -143,8 +151,8 @@ contract MultiProofGameTest is OPStackFixtures {
             )
         );
         assertEq(previousAnchorChild.parentRef(), address(parent));
-        assertEq(previousAnchorChild.startingRootClaim(), Claim.unwrap(parent.rootClaim()));
-        assertEq(previousAnchorChild.startingL2BlockNumber(), parent.l2SequenceNumber());
+        assertEq(Hash.unwrap(previousAnchorChild.startingRootHash()), Claim.unwrap(parent.rootClaim()));
+        assertEq(previousAnchorChild.startingBlockNumber(), parent.l2SequenceNumber());
     }
 
     function test_Constructor_RejectsInvalidConfiguration() public {
@@ -192,7 +200,7 @@ contract MultiProofGameTest is OPStackFixtures {
             MultiProofGame game = _propose(type(uint256).max, rootClaim, target, 0);
 
             game.submitProofLane(lane, abi.encodePacked(game.rootId()));
-            vm.warp(game.challengeDeadline());
+            vm.warp(game.challengeDeadline().raw());
             game.resolve();
 
             assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
@@ -220,12 +228,12 @@ contract MultiProofGameTest is OPStackFixtures {
         game.resolve();
         assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
         assertEq(game.credit(proposer), PROPOSER_BOND);
-        assertLt(block.timestamp, game.challengeDeadline());
+        assertLt(block.timestamp, game.challengeDeadline().raw());
     }
 
     function test_UnchallengedFlow_ProoflessProposalLosesBondAndCanRetry() public {
         MultiProofGame first = _proposeAtAnchor();
-        vm.warp(first.challengeDeadline());
+        vm.warp(first.challengeDeadline().raw());
 
         (bool resolvable, ProofLib.RootState rootState, ProofLib.InvalidationReason reason) = first.resolutionStatus();
         assertTrue(resolvable);
@@ -318,13 +326,14 @@ contract MultiProofGameTest is OPStackFixtures {
 
     function test_Challenge_DoesNotExtendProofDeadline() public {
         MultiProofGame game = _proposeAtAnchor();
-        uint64 proofDeadline = game.proofDeadline();
-        vm.warp(game.challengeDeadline() - 1);
+        uint64 proofDeadline = game.proofDeadline().raw();
+        vm.warp(game.challengeDeadline().raw() - 1);
         _challenge(game);
 
-        assertEq(game.proofDeadline(), proofDeadline);
-        assertEq(game.challengedAt(), uint64(block.timestamp));
-        assertLt(game.proofDeadline() - game.challengedAt(), game.proofPeriod());
+        assertEq(game.proofDeadline().raw(), proofDeadline);
+        (,, Timestamp deadline,,) = game.claimData();
+        assertEq(deadline.raw(), proofDeadline);
+        assertLt(proofDeadline - uint64(block.timestamp), game.proofPeriod().raw());
     }
 
     function test_ProofThreshold_DefenderWinsAndDuplicateDoesNotCount() public {
@@ -333,7 +342,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         game.submitProofLane(0, abi.encodePacked(game.rootId()));
         game.submitProofLane(0, abi.encodePacked(game.rootId()));
-        assertEq(game.proofCount(), 1);
+        assertEq(ProofLib.proofCount(game.proofBitmap()), 1);
 
         game.submitProofLane(1, abi.encodePacked(game.rootId()));
         game.resolve();
@@ -378,7 +387,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         MultiProofGame game = _proposeAtAnchor();
         _challenge(game);
-        vm.warp(game.proofDeadline());
+        vm.warp(game.proofDeadline().raw());
         game.resolve();
 
         assertEq(game.credit(challengerAccount), game.totalBonds());
@@ -404,7 +413,7 @@ contract MultiProofGameTest is OPStackFixtures {
         vm.expectRevert();
         game.submitProofLane(0, abi.encodePacked(keccak256("wrong-root")));
 
-        vm.warp(game.proofDeadline());
+        vm.warp(game.proofDeadline().raw());
         bytes memory proof = abi.encodePacked(game.rootId());
         vm.expectRevert();
         game.submitProofLane(0, proof);
@@ -412,18 +421,71 @@ contract MultiProofGameTest is OPStackFixtures {
 
     function test_ProofLane_RejectsInitialProofAtChallengeDeadline() public {
         MultiProofGame game = _proposeAtAnchor();
-        uint64 deadline = game.challengeDeadline();
         bytes memory proof = abi.encodePacked(game.rootId());
-        vm.warp(deadline);
+        vm.warp(game.challengeDeadline().raw());
 
-        vm.expectRevert(abi.encodeWithSelector(IMultiProofGame.ProofPeriodElapsed.selector, block.timestamp, deadline));
+        vm.expectRevert(GameOver.selector);
         game.submitProofLane(0, proof);
+    }
+
+    function test_ProofLane_RejectsSubmissionOnceThresholdReached() public {
+        MultiProofGame game = _proposeAtAnchor();
+        _challenge(game);
+        _submitLanes(game, PROOF_THRESHOLD);
+        assertTrue(game.gameOver());
+
+        bytes memory proof = abi.encodePacked(game.rootId());
+        vm.expectRevert(GameOver.selector);
+        game.submitProofLane(PROOF_THRESHOLD, proof);
+    }
+
+    function test_Challenge_RejectsGameOver() public {
+        // Once the challenge window closes.
+        MultiProofGame expired = _proposeAtAnchor();
+        vm.warp(expired.challengeDeadline().raw());
+        vm.prank(challengerAccount);
+        vm.expectRevert(GameOver.selector);
+        expired.challenge{value: CHALLENGER_BOND}();
+
+        // Once the threshold already guarantees the defender wins.
+        (, uint256 anchorBlock) = asr.getAnchorRoot();
+        uint256 target = anchorBlock + BLOCK_INTERVAL;
+        MultiProofGame proven = _propose(type(uint256).max, keccak256("proven-root"), target, 0);
+        _submitLanes(proven, PROOF_THRESHOLD);
+        vm.prank(challengerAccount);
+        vm.expectRevert(GameOver.selector);
+        proven.challenge{value: CHALLENGER_BOND}();
+    }
+
+    function test_ClaimData_FollowsProposalStatusStateMachine() public {
+        MultiProofGame game = _proposeAtAnchor();
+        (IMultiProofGame.ProposalStatus status,,,,) = game.claimData();
+        assertEq(uint8(status), uint8(IMultiProofGame.ProposalStatus.Unchallenged));
+
+        game.submitProofLane(0, abi.encodePacked(game.rootId()));
+        (status,,,,) = game.claimData();
+        assertEq(uint8(status), uint8(IMultiProofGame.ProposalStatus.UnchallengedAndValidProofProvided));
+
+        // A challenge demotes the initial proof: the lane keeps counting, but no longer
+        // finalizes on its own.
+        _challenge(game);
+        (status,,,,) = game.claimData();
+        assertEq(uint8(status), uint8(IMultiProofGame.ProposalStatus.Challenged));
+
+        game.submitProofLane(1, abi.encodePacked(game.rootId()));
+        (status,,,,) = game.claimData();
+        assertEq(uint8(status), uint8(IMultiProofGame.ProposalStatus.ChallengedAndValidProofProvided));
+
+        game.resolve();
+        (status,,,,) = game.claimData();
+        assertEq(uint8(status), uint8(IMultiProofGame.ProposalStatus.Resolved));
+        assertEq(uint8(game.status()), uint8(GameStatus.DEFENDER_WINS));
     }
 
     function test_ProofTimeout_ChallengerWinsAndRetryIsAllowed() public {
         MultiProofGame first = _proposeAtAnchor();
         _challenge(first);
-        vm.warp(first.proofDeadline());
+        vm.warp(first.proofDeadline().raw());
         first.resolve();
 
         assertEq(uint8(first.status()), uint8(GameStatus.CHALLENGER_WINS));
@@ -433,7 +495,7 @@ contract MultiProofGameTest is OPStackFixtures {
 
         MultiProofGame retry = _propose(type(uint256).max, Claim.unwrap(first.rootClaim()), first.l2SequenceNumber(), 1);
         assertEq(retry.attempt(), 1);
-        assertEq(retry.startingRootClaim(), first.startingRootClaim());
+        assertEq(Hash.unwrap(retry.startingRootHash()), Hash.unwrap(first.startingRootHash()));
     }
 
     function test_Retry_RejectsInProgressPreviousAttempt() public {
@@ -466,7 +528,7 @@ contract MultiProofGameTest is OPStackFixtures {
         MultiProofGame child = _proposeChild(0);
         _challenge(child);
 
-        vm.warp(parent.proofDeadline());
+        vm.warp(parent.proofDeadline().raw());
         parent.resolve();
         child.resolve();
 
@@ -530,7 +592,7 @@ contract MultiProofGameTest is OPStackFixtures {
     function test_Retirement_UsesRefundMode() public {
         MultiProofGame game = _proposeAtAnchor();
         _challenge(game);
-        vm.warp(game.proofDeadline());
+        vm.warp(game.proofDeadline().raw());
         game.resolve();
 
         vm.prank(guardian);

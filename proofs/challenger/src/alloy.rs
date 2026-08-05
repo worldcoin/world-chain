@@ -136,7 +136,7 @@ where
         let game = self.game(address);
         let (root_claim, l2_block_number) =
             tokio::try_join!(async { game.rootClaim().call().await }, async {
-                game.l2BlockNumber().call().await
+                game.l2SequenceNumber().call().await
             },)?;
 
         Ok(GameMetadata {

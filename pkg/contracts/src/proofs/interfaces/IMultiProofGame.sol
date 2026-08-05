@@ -5,7 +5,7 @@ import {ProofLib} from "../lib/ProofLib.sol";
 import {IWorldChainProofVerifier} from "./IWorldChainProofVerifier.sol";
 import {IWorldChainStakingRegistry} from "./IWorldChainStakingRegistry.sol";
 
-import {BondDistributionMode} from "@optimism-bedrock/src/dispute/lib/Types.sol";
+import {BondDistributionMode, Duration, Hash, Timestamp} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
 import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
 import {IAnchorStateRegistry} from "@optimism-bedrock/interfaces/dispute/IAnchorStateRegistry.sol";
@@ -16,8 +16,37 @@ import {IDelayedWETH} from "@optimism-bedrock/interfaces/dispute/IDelayedWETH.so
 ///         proof-lane verifiers and offchain services need them to bind a proof to a game.
 interface IMultiProofGame is IDisputeGame {
     ////////////////////////////////////////////////////////////////
+    //                         Enums                              //
+    ////////////////////////////////////////////////////////////////
+
+    /// @notice The lifecycle of the proposer's claim, mirroring `ZKDisputeGame.ProposalStatus`.
+    enum ProposalStatus {
+        // The initial state of a new proposal.
+        Unchallenged,
+        // A proposal that has been challenged but not yet proven.
+        Challenged,
+        // An unchallenged proposal supported by at least one accepted proof lane.
+        UnchallengedAndValidProofProvided,
+        // A challenged proposal supported by `PROOF_THRESHOLD` distinct proof lanes.
+        ChallengedAndValidProofProvided,
+        // The final state after resolution, either GameStatus.CHALLENGER_WINS or GameStatus.DEFENDER_WINS.
+        Resolved
+    }
+
+    ////////////////////////////////////////////////////////////////
     //                         Structs                            //
     ////////////////////////////////////////////////////////////////
+
+    /// @notice The `ClaimData` struct represents the data associated with the root claim.
+    ///         Mirrors `ZKDisputeGame.ClaimData`; the single `prover` is replaced by the
+    ///         bitmap of accepted proof lanes.
+    struct ClaimData {
+        ProposalStatus status; // 1 byte   \
+        address challenger; // 20 bytes  |
+        Timestamp deadline; // 8 bytes   |-- one slot (31 bytes)
+        uint8 proofBitmap; // 1 byte    |
+        ProofLib.InvalidationReason invalidationReason; // 1 byte    /
+    }
 
     /// @notice Per-deployment configuration, fixed as immutables on the implementation.
     /// @dev The implementation is registered with empty DGF implementation args, so none of
@@ -46,12 +75,9 @@ interface IMultiProofGame is IDisputeGame {
 
     error InvalidActivationParameters();
     error NotDisputeGameFactory(address caller);
-    error AnchorRootNotFound();
     error InvalidL2BlockNumber(uint256 expectedL2BlockNumber, uint256 actualL2BlockNumber);
     error GameNotRetryable(bytes32 uuidPreimageHash);
     error UnstakedChallenger(address challenger);
-    error ChallengePeriodElapsed(uint256 timestamp, uint256 challengeDeadline);
-    error ProofPeriodElapsed(uint256 timestamp, uint256 proofDeadline);
     error InvalidLane(uint8 lane);
     error InvalidProof(ProofLib.ProofLane lane, bytes32 rootId);
     error InvalidDomainHash(bytes32 expected, bytes32 actual);
@@ -109,13 +135,11 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Hash of the deployment's domain parameters.
     function domainHash() external view returns (bytes32);
 
-    /// @notice Parent reference required for a proposal that directly extends the current anchor.
-
     /// @notice Seconds a proposal may be challenged after creation.
-    function challengePeriod() external view returns (uint64);
+    function challengePeriod() external view returns (Duration);
 
-    /// @notice Seconds a challenged proposal has to reach the proof threshold.
-    function proofPeriod() external view returns (uint64);
+    /// @notice Seconds after creation a challenged proposal has to reach the proof threshold.
+    function proofPeriod() external view returns (Duration);
 
     /// @notice Bond required to create a proposal.
     function proposerBond() external view returns (uint256);
@@ -167,17 +191,14 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Parent game, or the anchor registry when no compatible anchor game exists.
     function parentRef() external view returns (address);
 
-    /// @notice Output root this proposal starts from.
-    function startingRootClaim() external view returns (bytes32);
+    /// @notice The output root and L2 block number this proposal starts from.
+    function startingProposal() external view returns (Hash root, uint256 l2SequenceNumber);
 
-    /// @notice L2 block number this proposal starts from.
-    function startingL2BlockNumber() external view returns (uint256);
+    /// @notice Only the starting block number of the game.
+    function startingBlockNumber() external view returns (uint256);
 
-    /// @notice Alias of `l2SequenceNumber` retained for proof-lane and offchain consumers.
-    function l2BlockNumber() external view returns (uint256);
-
-    /// @notice Alias of `l1Head` retained for proof-lane and offchain consumers.
-    function l1OriginHash() external view returns (bytes32);
+    /// @notice Starting output root of the game.
+    function startingRootHash() external view returns (Hash);
 
     /// @notice L1 block number of `l1Head`.
     function l1OriginNumber() external view returns (uint256);
@@ -185,6 +206,18 @@ interface IMultiProofGame is IDisputeGame {
     ////////////////////////////////////////////////////////////////
     //                       Game progress                        //
     ////////////////////////////////////////////////////////////////
+
+    /// @notice The claim state, following the `ProposalStatus` state machine.
+    function claimData()
+        external
+        view
+        returns (
+            ProposalStatus status,
+            address challenger,
+            Timestamp deadline,
+            uint8 proofBitmap,
+            ProofLib.InvalidationReason invalidationReason
+        );
 
     /// @notice Derived legacy state machine view.
     function state() external view returns (ProofLib.RootState);
@@ -195,26 +228,18 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Bitmap of the proof lanes that count toward the threshold.
     function proofBitmap() external view returns (uint8);
 
-    /// @notice Number of set lanes in `proofBitmap`.
-    function proofCount() external view returns (uint8);
-
     /// @notice Challenger that disputed this proposal, or the zero address.
-    function challenger() external view returns (address payable);
+    function challenger() external view returns (address);
 
     /// @notice Timestamp after which the proposal can no longer be challenged.
-    function challengeDeadline() external view returns (uint64);
+    function challengeDeadline() external view returns (Timestamp);
 
     /// @notice Timestamp after which a challenged proposal can no longer gain proof lanes.
-    function proofDeadline() external view returns (uint64);
+    function proofDeadline() external view returns (Timestamp);
 
-    /// @notice Timestamp of the challenge, or zero.
-    function challengedAt() external view returns (uint64);
-
-    /// @notice Resolution timestamp when the defender won, otherwise zero.
-    function finalizedAt() external view returns (uint64);
-
-    /// @notice Resolution timestamp when the challenger won, otherwise zero.
-    function invalidatedAt() external view returns (uint64);
+    /// @notice True once the game can no longer change outcome: the active deadline has
+    ///         passed or the proof threshold has been reached.
+    function gameOver() external view returns (bool);
 
     /// @notice Returns whether this game can resolve now and the resulting legacy outcome.
     function resolutionStatus()
@@ -228,12 +253,12 @@ interface IMultiProofGame is IDisputeGame {
 
     /// @notice Disputes the proposal. Requires a staked caller, an open challenge window, and
     ///         exactly `challengerBond`.
-    function challenge() external payable;
+    function challenge() external payable returns (ProposalStatus);
 
     /// @notice Submits `proof` for `laneId`. Before a challenge, any accepted lane satisfies the
     ///         initial proof requirement; after a challenge, distinct lanes count toward the
     ///         configured threshold. No-ops when the lane already counts.
-    function submitProofLane(uint8 laneId, bytes calldata proof) external;
+    function submitProofLane(uint8 laneId, bytes calldata proof) external returns (ProposalStatus);
 
     ////////////////////////////////////////////////////////////////
     //                      Bond settlement                       //
