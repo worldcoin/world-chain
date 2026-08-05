@@ -38,6 +38,10 @@ pub const METRICS_PROOF_JOBS_CLAIMED: &str = "proof_jobs.claimed";
 pub const METRICS_PROOF_JOBS_COMPLETED: &str = "proof_jobs.completed";
 /// End-to-end worker proof-job attempt duration.
 pub const METRICS_PROOF_JOB_DURATION_SECONDS: &str = "proof_job.duration_seconds";
+/// Whether this worker's enclave signing key is registered on-chain.
+pub const METRICS_ENCLAVE_KEY_REGISTERED: &str = "enclave_key.registered";
+/// Enclave key registration attempts, by outcome.
+pub const METRICS_ENCLAVE_REGISTRATION_ATTEMPTS: &str = "enclave_key.registration_attempts";
 
 /// Registers shared metric descriptions.
 pub fn describe_metrics() {
@@ -86,6 +90,31 @@ pub fn describe_metrics() {
         metrics::Unit::Seconds,
         "End-to-end worker proof-job attempt duration by backend and outcome."
     );
+    metrics::describe_gauge!(
+        METRICS_ENCLAVE_KEY_REGISTERED,
+        metrics::Unit::Count,
+        "1 when this worker's enclave signing key is registered on-chain, 0 otherwise. \
+         A worker holding 0 leases no proof jobs, because proofs signed by an unregistered \
+         key do not verify."
+    );
+    metrics::describe_counter!(
+        METRICS_ENCLAVE_REGISTRATION_ATTEMPTS,
+        metrics::Unit::Count,
+        "Enclave key registration attempts by outcome (registered, already_registered, failed)."
+    );
+}
+
+/// Sets the enclave-key registration gauge.
+///
+/// Emitted eagerly at `0` on startup so the "never registered" case is a visible zero rather
+/// than an absent series that a threshold monitor would silently ignore.
+pub fn set_enclave_key_registered(registered: bool) {
+    metrics::gauge!(METRICS_ENCLAVE_KEY_REGISTERED).set(if registered { 1.0 } else { 0.0 });
+}
+
+/// Records an enclave key registration attempt and its outcome.
+pub fn increment_enclave_registration_attempts(outcome: &'static str) {
+    metrics::counter!(METRICS_ENCLAVE_REGISTRATION_ATTEMPTS, "outcome" => outcome).increment(1);
 }
 
 /// Updates the latest finalized L2 block gauge.
@@ -148,11 +177,30 @@ where
     }
 }
 
+/// Default per-request timeout applied to every outbound RPC call.
+///
+/// Sized for the slowest call the proof services make on a healthy endpoint — `eth_estimateGas`
+/// and `eth_call` against finalized state on a shared provider — not for the median one, so a
+/// merely slow provider does not fail ticks. Operators pointing a service at a slower or faster
+/// endpoint override it per service.
+pub const DEFAULT_RPC_REQUEST_TIMEOUT_SECONDS: u64 = 10;
+
 /// Builds an Alloy HTTP client that counts completed RPC outcomes.
-pub fn metered_http_client(url: Url, target: &'static str) -> RpcClient {
-    ClientBuilder::default()
+///
+/// `request_timeout` bounds each individual request so a hung connection cannot stall a
+/// service's poll loop indefinitely. It is per request, not per operation: a confirmation wait
+/// polls with fresh requests and so is not capped by this value.
+pub fn metered_http_client(
+    url: Url,
+    target: &'static str,
+    request_timeout: Duration,
+) -> Result<RpcClient, alloy_transport_http::reqwest::Error> {
+    let client = alloy_transport_http::reqwest::Client::builder()
+        .timeout(request_timeout)
+        .build()?;
+    Ok(ClientBuilder::default()
         .layer(RpcMetricsLayer { target })
-        .http(url)
+        .http_with_client(client, url))
 }
 
 /// Renders an RPC endpoint for logs with any embedded credential removed.
