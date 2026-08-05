@@ -398,7 +398,7 @@ async fn collect_world_range_witness(
     let agreed_output_root = agreed_output.output_root();
     kv_store.write().await.set(
         PreimageKey::new_keccak256(*agreed_output_root).into(),
-        output_root_preimage(agreed_output).to_vec(),
+        agreed_output.encode().to_vec(),
     )?;
 
     let providers = host.create_providers().await?;
@@ -440,14 +440,6 @@ async fn collect_world_range_witness(
         server_task.abort();
     }
     result
-}
-
-fn output_root_preimage(output: &OutputRootWitness) -> [u8; 128] {
-    let mut preimage = [0u8; 128];
-    preimage[32..64].copy_from_slice(output.state_root.as_slice());
-    preimage[64..96].copy_from_slice(output.message_passer_storage_root.as_slice());
-    preimage[96..128].copy_from_slice(output.block_hash.as_slice());
-    preimage
 }
 
 async fn collect_witness_from_channels(
@@ -793,9 +785,6 @@ mod tests {
             block_hash: B256::with_last_byte(3),
         };
 
-        assert_eq!(
-            keccak256(output_root_preimage(&output)),
-            output.output_root()
-        );
+        assert_eq!(keccak256(output.encode()), output.output_root());
     }
 }
