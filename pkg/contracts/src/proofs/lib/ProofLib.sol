@@ -5,19 +5,11 @@ pragma solidity 0.8.28;
 /// @author World Contributors
 /// @custom:security-contact security@toolsforhumanity.com
 library ProofLib {
+    /// @dev Quantifies the number of proof lanes in the MultiProofGame.
     uint8 internal constant PROOF_LANE_COUNT = 3;
 
-    /// Version of the proof-domain encoding, committed into every domain hash. Bump alongside
-    /// incompatible proof-system upgrades; must match `world_chain_proofs::PROOF_SYSTEM_VERSION`.
+    /// @dev Version of the proof-domain encoding.
     uint256 internal constant PROOF_SYSTEM_VERSION = 1;
-
-    enum RootState {
-        NONE,
-        PROPOSED,
-        CHALLENGED,
-        FINALIZED,
-        INVALIDATED
-    }
 
     enum InvalidationReason {
         NONE,

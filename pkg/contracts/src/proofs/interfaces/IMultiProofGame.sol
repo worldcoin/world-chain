@@ -5,7 +5,7 @@ import {ProofLib} from "../lib/ProofLib.sol";
 import {IWorldChainProofVerifier} from "./IWorldChainProofVerifier.sol";
 import {IWorldChainStakingRegistry} from "./IWorldChainStakingRegistry.sol";
 
-import {BondDistributionMode, Duration, Hash, Timestamp} from "@optimism-bedrock/src/dispute/lib/Types.sol";
+import {BondDistributionMode, Duration, GameStatus, Hash, Timestamp} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 import {IDisputeGame} from "@optimism-bedrock/interfaces/dispute/IDisputeGame.sol";
 import {IDisputeGameFactory} from "@optimism-bedrock/interfaces/dispute/IDisputeGameFactory.sol";
 import {IAnchorStateRegistry} from "@optimism-bedrock/interfaces/dispute/IAnchorStateRegistry.sol";
@@ -101,11 +101,9 @@ interface IMultiProofGame is IDisputeGame {
     /// @notice Emitted when a staked challenger disputes the proposal.
     event Challenged(address indexed challenger, uint64 proofDeadline);
 
-    /// @notice Emitted when a proof lane is accepted for the first time.
-    event ProofLaneSupported(ProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
-
-    /// @notice Emitted once, on the transition to settlement-ready.
-    event ProofThresholdReached(bytes32 indexed rootId, uint8 proofBitmap);
+    /// @notice Emitted when a proof lane is accepted; `proofBitmap` carries the updated lane
+    ///         set, from which indexers can derive threshold status.
+    event ProofSubmitted(ProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
 
     /// @notice Emitted when a lane that already counts toward the threshold is resubmitted.
     event DuplicateProofLane(ProofLib.ProofLane indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
@@ -214,9 +212,6 @@ interface IMultiProofGame is IDisputeGame {
             ProofLib.InvalidationReason invalidationReason
         );
 
-    /// @notice Derived legacy state machine view.
-    function state() external view returns (ProofLib.RootState);
-
     /// @notice Why the game was invalidated, if it was.
     function invalidationReason() external view returns (ProofLib.InvalidationReason);
 
@@ -236,11 +231,12 @@ interface IMultiProofGame is IDisputeGame {
     ///         passed or the proof threshold has been reached.
     function gameOver() external view returns (bool);
 
-    /// @notice Returns whether this game can resolve now and the resulting legacy outcome.
+    /// @notice Returns whether this game can resolve now and the outcome a resolve call would
+    ///         produce; `outcome` is `IN_PROGRESS` while the game cannot resolve.
     function resolutionStatus()
         external
         view
-        returns (bool resolvable, ProofLib.RootState outcome, ProofLib.InvalidationReason reason);
+        returns (bool resolvable, GameStatus outcome, ProofLib.InvalidationReason reason);
 
     ////////////////////////////////////////////////////////////////
     //                    Challenge and proofs                    //
