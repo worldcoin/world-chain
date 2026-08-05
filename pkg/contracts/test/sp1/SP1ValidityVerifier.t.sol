@@ -62,7 +62,6 @@ contract SP1ValidityVerifierTest is Test {
     StubParentGame internal parent;
     SP1ValidityVerifier internal verifier;
     MockProofSystemGame internal game;
-    ProofLib.Domain internal domain;
     bytes32 internal domainHash;
 
     bytes32 internal constant AGGREGATION_VKEY = bytes32(uint256(0xA66));
@@ -83,13 +82,7 @@ contract SP1ValidityVerifierTest is Test {
         sp1 = new StubSP1Verifier();
         anchor = new StubAnchorStateRegistry(L2_PRE_ROOT);
         parent = new StubParentGame(L2_PRE_ROOT);
-        domain = ProofLib.Domain({
-            chainId: 480,
-            proofSystemVersion: 1,
-            rollupConfigHash: ROLLUP_CONFIG_HASH,
-            blockInterval: L2_BLOCK_NUMBER - L2_PRE_BLOCK_NUMBER
-        });
-        domainHash = ProofLib.domainHash(domain);
+        domainHash = ProofLib.domainHash(480, 1, ROLLUP_CONFIG_HASH, L2_BLOCK_NUMBER - L2_PRE_BLOCK_NUMBER);
         verifier = new SP1ValidityVerifier(ISP1Verifier(address(sp1)), AGGREGATION_VKEY, RANGE_VKEY_COMMITMENT);
         game = new MockProofSystemGame();
         _setGameContext(address(parent));
@@ -148,10 +141,10 @@ contract SP1ValidityVerifierTest is Test {
     function _setGameContext(address parentRef) internal {
         game.setContext(
             MockProofSystemGame.Context({
-                domain: domain,
                 rootId: _rootId(parentRef),
                 anchorStateRegistry: address(anchor),
                 domainHash: domainHash,
+                rollupConfigHash: ROLLUP_CONFIG_HASH,
                 parentRef: parentRef,
                 startingRootHash: L2_PRE_ROOT,
                 startingBlockNumber: L2_PRE_BLOCK_NUMBER,

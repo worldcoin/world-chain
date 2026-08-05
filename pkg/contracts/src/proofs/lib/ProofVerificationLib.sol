@@ -16,23 +16,8 @@ library ProofVerificationLib {
         ProofLib.TransitionPublicValues memory transition
     ) internal view returns (bool) {
         IMultiProofGame game = IMultiProofGame(gameAddress);
-        if (!_matchesRoot(game, rootId, proofDomainHash, proofParentRef, proofL1OriginNumber, transition)) {
-            return false;
-        }
 
-        if (!_matchesDomain(game, proofDomainHash, transition.rollupConfigHash, game.domain())) return false;
-
-        return _matchesTransition(game, proofL1OriginNumber, transition);
-    }
-
-    function _matchesRoot(
-        IMultiProofGame game,
-        bytes32 rootId,
-        bytes32 proofDomainHash,
-        address proofParentRef,
-        uint256 proofL1OriginNumber,
-        ProofLib.TransitionPublicValues memory transition
-    ) private view returns (bool) {
+        // The root id binds every transition field; recompute it from the proof's own values.
         bytes32 reconstructedRootId = ProofLib.rootId(
             proofDomainHash,
             proofParentRef,
@@ -41,26 +26,15 @@ library ProofVerificationLib {
             transition.l1Head,
             proofL1OriginNumber
         );
+        if (reconstructedRootId != rootId || game.rootId() != rootId) return false;
 
-        return reconstructedRootId == rootId && game.rootId() == rootId && game.parentRef() == proofParentRef;
-    }
+        // The proof must target this deployment's domain and rollup configuration.
+        if (game.domainHash() != proofDomainHash || game.rollupConfigHash() != transition.rollupConfigHash) {
+            return false;
+        }
 
-    function _matchesDomain(
-        IMultiProofGame game,
-        bytes32 proofDomainHash,
-        bytes32 transitionRollupConfigHash,
-        ProofLib.Domain memory gameDomain
-    ) private view returns (bool) {
-        return game.domainHash() == proofDomainHash && ProofLib.domainHash(gameDomain) == proofDomainHash
-            && transitionRollupConfigHash == gameDomain.rollupConfigHash;
-    }
-
-    function _matchesTransition(
-        IMultiProofGame game,
-        uint256 proofL1OriginNumber,
-        ProofLib.TransitionPublicValues memory transition
-    ) private view returns (bool) {
-        return Hash.unwrap(game.startingRootHash()) == transition.l2PreRoot
+        // The transition must match the game's creation-time snapshot.
+        return game.parentRef() == proofParentRef && Hash.unwrap(game.startingRootHash()) == transition.l2PreRoot
             && game.startingBlockNumber() == uint256(transition.l2PreBlockNumber)
             && Claim.unwrap(game.rootClaim()) == transition.l2PostRoot
             && game.l2SequenceNumber() == uint256(transition.l2PostBlockNumber)

@@ -46,7 +46,6 @@ contract NitroProofVerifierTest is Test {
     bytes enclavePubKey;
     MockParentGame parent;
     MockProofSystemGame game;
-    ProofLib.Domain domain;
     bytes32 domainHash;
 
     function setUp() public {
@@ -54,10 +53,7 @@ contract NitroProofVerifierTest is Test {
         registry = new NitroEnclaveKeyRegistry(attestationVerifier, owner);
         parent = new MockParentGame(L2_PRE_ROOT);
         proofVerifier = new NitroProofVerifier(registry);
-        domain = ProofLib.Domain({
-            chainId: 480, proofSystemVersion: 1, rollupConfigHash: ROLLUP_CFG, blockInterval: L2_BLOCK - L2_PRE_BLOCK
-        });
-        domainHash = ProofLib.domainHash(domain);
+        domainHash = ProofLib.domainHash(480, 1, ROLLUP_CFG, L2_BLOCK - L2_PRE_BLOCK);
         game = new MockProofSystemGame();
         _setGameContext(_transition());
 
@@ -127,10 +123,10 @@ contract NitroProofVerifierTest is Test {
         );
         game.setContext(
             MockProofSystemGame.Context({
-                domain: domain,
                 rootId: rootId,
                 anchorStateRegistry: ANCHOR_STATE_REGISTRY,
                 domainHash: domainHash,
+                rollupConfigHash: ROLLUP_CFG,
                 parentRef: address(parent),
                 startingRootHash: L2_PRE_ROOT,
                 startingBlockNumber: L2_PRE_BLOCK,

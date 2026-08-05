@@ -5,7 +5,6 @@ import {Script} from "forge-std/Script.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import {GameTypes} from "../../src/proofs/GameTypes.sol";
-import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
 import {MultiProofGame} from "../../src/proofs/MultiProofGame.sol";
 import {IMultiProofGame} from "../../src/proofs/interfaces/IMultiProofGame.sol";
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
@@ -68,7 +67,6 @@ contract DeployProofSystem is Script {
         uint256 challengerBond;
         uint8 proofThreshold;
         address protocolFeeRecipient;
-        uint256 challengeFee;
         IWorldChainProofVerifier validityProofVerifier;
         IWorldChainProofVerifier teeVerifier;
         IWorldChainProofVerifier securityCouncil;
@@ -87,7 +85,7 @@ contract DeployProofSystem is Script {
     uint256 internal constant DEFAULT_BLOCK_INTERVAL = 450;
     uint256 internal constant DEFAULT_PROPOSER_BOND = 0.01 ether;
     uint256 internal constant DEFAULT_CHALLENGER_BOND = 0.001 ether;
-    uint256 internal constant DEFAULT_CHALLENGE_FEE = 0.0001 ether;
+    uint8 internal constant DEFAULT_PROOF_THRESHOLD = 2;
 
     function run() external returns (Deployment memory deployment) {
         Config memory config = _readConfig();
@@ -155,10 +153,9 @@ contract DeployProofSystem is Script {
         config.proofPeriod = vm.envOr("PROOF_PERIOD", uint256(DEFAULT_PROOF_PERIOD)).toUint64();
         config.proposerBond = vm.envOr("PROPOSER_BOND", DEFAULT_PROPOSER_BOND);
         config.challengerBond = vm.envOr("CHALLENGER_BOND", DEFAULT_CHALLENGER_BOND);
-        config.proofThreshold = vm.envOr("PROOF_THRESHOLD", uint256(ProofLib.PROOF_THRESHOLD)).toUint8();
-        // Required: there is no sane default owner for challenge-fee proceeds.
+        config.proofThreshold = vm.envOr("PROOF_THRESHOLD", uint256(DEFAULT_PROOF_THRESHOLD)).toUint8();
+        // Required: there is no sane default owner for proof-timeout forfeitures.
         config.protocolFeeRecipient = vm.envAddress("PROTOCOL_FEE_RECIPIENT");
-        config.challengeFee = vm.envOr("CHALLENGE_FEE", DEFAULT_CHALLENGE_FEE);
         // Proof lanes and staking: required inputs, never deployed here.
         config.validityProofVerifier = IWorldChainProofVerifier(vm.envAddress("VALIDITY_PROOF_VERIFIER"));
         config.teeVerifier = IWorldChainProofVerifier(vm.envAddress("TEE_VERIFIER"));
@@ -221,9 +218,6 @@ contract DeployProofSystem is Script {
         require(config.proofPeriod > config.challengePeriod, "DeployProofSystem: proof period must exceed challenge");
         require(config.proposerBond > 0, "DeployProofSystem: proposer bond required");
         require(config.challengerBond > 0, "DeployProofSystem: challenger bond required");
-        require(config.challengeFee > 0, "DeployProofSystem: challenge fee required");
-        require(config.challengeFee <= config.challengerBond, "DeployProofSystem: challenge fee exceeds bond");
-        require(config.challengeFee < config.proposerBond, "DeployProofSystem: proposer bond must exceed challenge fee");
     }
 
     function _gameConfig(Deployment memory deployment, Config memory config)
@@ -232,24 +226,19 @@ contract DeployProofSystem is Script {
         returns (IMultiProofGame.GameConfig memory)
     {
         return IMultiProofGame.GameConfig({
-            domain: ProofLib.Domain({
-                chainId: config.l2ChainId,
-                proofSystemVersion: 1,
-                rollupConfigHash: config.rollupConfigHash,
-                blockInterval: config.blockInterval
-            }),
+            proofSystemVersion: 1,
+            rollupConfigHash: config.rollupConfigHash,
+            blockInterval: config.blockInterval,
             challengePeriod: config.challengePeriod,
             proofPeriod: config.proofPeriod,
             proposerBond: config.proposerBond,
             challengerBond: config.challengerBond,
             protocolFeeRecipient: config.protocolFeeRecipient,
-            challengeFee: config.challengeFee,
             proofThreshold: config.proofThreshold,
             validityProofVerifier: config.validityProofVerifier,
             teeVerifier: config.teeVerifier,
             securityCouncil: config.securityCouncil,
             stakingRegistry: config.stakingRegistry,
-            disputeGameFactory: config.disputeGameFactory,
             anchorStateRegistry: config.anchorStateRegistry,
             weth: deployment.weth
         });
@@ -284,7 +273,6 @@ contract DeployProofSystem is Script {
         vm.serializeUint(root, "proofPeriod", config.proofPeriod);
         vm.serializeUint(root, "proposerBond", config.proposerBond);
         vm.serializeUint(root, "challengerBond", config.challengerBond);
-        vm.serializeUint(root, "challengeFee", config.challengeFee);
         vm.serializeUint(root, "delayedWethDelay", config.delayedWethDelay);
         vm.serializeUint(root, "retirementTimestampAtDeployment", config.anchorStateRegistry.retirementTimestamp());
         vm.serializeAddress(root, "anchorGameAtDeployment", address(config.anchorStateRegistry.anchorGame()));
