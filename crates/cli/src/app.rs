@@ -211,10 +211,6 @@ where
                 let runtime = runner.runtime();
                 runner.run_blocking_until_ctrl_c(command.execute::<N>(runtime))
             }
-            #[cfg(feature = "dev")]
-            Commands::TestVectors(_) => Err(eyre!(
-                "test-vectors is not yet supported with WorldChainSpec"
-            )),
         }
     }
 
