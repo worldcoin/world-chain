@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 import {IMultiProofGame} from "../interfaces/IMultiProofGame.sol";
 import {ProofLib} from "./ProofLib.sol";
-import {Claim, Hash} from "@optimism-bedrock/src/dispute/lib/Types.sol";
+import {Hash} from "@optimism-bedrock/src/dispute/lib/Types.sol";
 
 /// @title ProofVerificationLib
 /// @author World Contributors
@@ -20,7 +20,10 @@ library ProofVerificationLib {
     ) internal view returns (bool) {
         IMultiProofGame game = IMultiProofGame(gameAddress);
 
-        // The root id binds every transition field; recompute it from the proof's own values.
+        // The root id commits to (domainHash, parentRef, rootClaim, l2BlockNumber, l1Head,
+        // l1OriginNumber). Matching both the id reconstructed from the proof's own values and
+        // the game's self-reported id therefore proves, by collision resistance, that every
+        // one of those fields equals the game's — no field-by-field comparison is needed.
         bytes32 reconstructedRootId = ProofLib.rootId(
             proofDomainHash,
             proofParentRef,
@@ -31,16 +34,10 @@ library ProofVerificationLib {
         );
         if (reconstructedRootId != rootId || game.rootId() != rootId) return false;
 
-        // The proof must target this deployment's domain and rollup configuration.
-        if (game.domainHash() != proofDomainHash || game.rollupConfigHash() != transition.rollupConfigHash) {
-            return false;
-        }
-
-        // The transition must match the game's creation-time snapshot.
-        return game.parentRef() == proofParentRef && Hash.unwrap(game.startingRootHash()) == transition.l2PreRoot
-            && game.startingBlockNumber() == uint256(transition.l2PreBlockNumber)
-            && Claim.unwrap(game.rootClaim()) == transition.l2PostRoot
-            && game.l2SequenceNumber() == uint256(transition.l2PostBlockNumber)
-            && Hash.unwrap(game.l1Head()) == transition.l1Head && game.l1OriginNumber() == proofL1OriginNumber;
+        // Not covered by the root id: the rollup configuration (committed only inside the
+        // opaque domain hash) and the pre-state snapshot (derived from the parent at creation).
+        return game.rollupConfigHash() == transition.rollupConfigHash
+            && Hash.unwrap(game.startingRootHash()) == transition.l2PreRoot
+            && game.startingBlockNumber() == uint256(transition.l2PreBlockNumber);
     }
 }

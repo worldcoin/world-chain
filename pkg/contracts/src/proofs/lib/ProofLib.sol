@@ -7,6 +7,10 @@ pragma solidity 0.8.28;
 library ProofLib {
     uint8 internal constant PROOF_LANE_COUNT = 3;
 
+    /// Version of the proof-domain encoding, committed into every domain hash. Bump alongside
+    /// incompatible proof-system upgrades; must match `world_chain_proofs::PROOF_SYSTEM_VERSION`.
+    uint256 internal constant PROOF_SYSTEM_VERSION = 1;
+
     enum RootState {
         NONE,
         PROPOSED,
