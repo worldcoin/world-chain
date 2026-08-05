@@ -13,13 +13,18 @@ pub struct OutputRootWitness {
 }
 
 impl OutputRootWitness {
-    /// Computes the OP Stack output root:
-    /// `keccak256(version || state_root || message_passer_storage_root || block_hash)`.
-    pub fn output_root(&self) -> B256 {
+    /// Encodes the versioned OP Stack output-root preimage.
+    pub fn encode(&self) -> [u8; 128] {
         let mut preimage = [0u8; 128];
         preimage[32..64].copy_from_slice(self.state_root.as_slice());
         preimage[64..96].copy_from_slice(self.message_passer_storage_root.as_slice());
         preimage[96..128].copy_from_slice(self.block_hash.as_slice());
-        keccak256(preimage)
+        preimage
+    }
+
+    /// Computes the OP Stack output root:
+    /// `keccak256(version || state_root || message_passer_storage_root || block_hash)`.
+    pub fn output_root(&self) -> B256 {
+        keccak256(self.encode())
     }
 }

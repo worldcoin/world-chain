@@ -23,6 +23,7 @@ members = [
     "crates/pool",
     "crates/evm",
     "crates/pbh",
+    "crates/commands",
     "proofs/core",
     "proofs/nitro",
     "proofs/nitro/worker",
@@ -79,6 +80,7 @@ world-chain = { path = "bin/world-chain", default-features = false }
 world-chain-chainspec = { path = "crates/chainspec", default-features = false }
 world-chain-primitives = { path = "crates/primitives", default-features = false }
 world-chain-cli = { path = "crates/cli", default-features = false }
+world-chain-commands = { path = "crates/commands", default-features = false }
 world-chain-p2p = { path = "crates/p2p", default-features = false }
 world-chain-builder = { path = "crates/builder", default-features = false }
 world-chain-validator = { path = "crates/validator", default-features = false }
@@ -181,6 +183,7 @@ reth-optimism-forks = { git = "https://github.com/ethereum-optimism/optimism", r
 reth-optimism-primitives = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da", default-features = false }
 reth-optimism-storage = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da", default-features = false }
 reth-optimism-flashblocks = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da", default-features = false }
+reth-optimism-trie = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da", default-features = false }
 
 # alloy op
 op-alloy-consensus = { git = "https://github.com/ethereum-optimism/optimism", rev = "423d93e6374a65f3a83c1ed5e29c5998c972a5da", default-features = false }
