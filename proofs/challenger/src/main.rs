@@ -100,6 +100,15 @@ struct Cli {
     /// Number of recent factory games scanned when the bond manager starts.
     #[arg(long, env = "BOND_MANAGER_INITIAL_SCAN_LIMIT", default_value_t = 1_000)]
     bond_manager_initial_scan_limit: u64,
+
+    /// Per-request timeout applied to every L1 RPC call, in seconds.
+    #[arg(
+        long,
+        env = "L1_RPC_TIMEOUT_SECONDS",
+        default_value_t = world_chain_proof_metrics::DEFAULT_RPC_REQUEST_TIMEOUT_SECONDS,
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
+    l1_rpc_timeout_seconds: u64,
 }
 
 #[tokio::main]
@@ -116,7 +125,9 @@ async fn main() -> Result<()> {
     let l1_rpc_client = world_chain_proof_metrics::metered_http_client(
         l1_rpc_url,
         world_chain_proof_metrics::RPC_TARGET_L1_EXECUTION,
-    );
+        Duration::from_secs(cli.l1_rpc_timeout_seconds),
+    )
+    .context("failed to build the L1 RPC client")?;
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::from(cli.challenger_key))
         .connect_client(l1_rpc_client);
@@ -183,6 +194,7 @@ async fn main() -> Result<()> {
         max_resolutions_per_tick = cli.max_resolutions_per_tick,
         bond_manager_poll_interval_seconds = cli.bond_manager_poll_interval_seconds,
         bond_manager_initial_scan_limit = cli.bond_manager_initial_scan_limit,
+        l1_rpc_timeout_seconds = cli.l1_rpc_timeout_seconds,
         "starting World Chain proof-system challenger"
     );
 

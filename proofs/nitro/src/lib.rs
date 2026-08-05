@@ -52,6 +52,10 @@ pub mod cose;
 /// See [`p384_hints::collect_hints`] for the primary entry point.
 pub mod p384_hints;
 
+/// Pre-warming the on-chain `CertManager` cert cache so `registerKey` can verify the
+/// attestation's certificate bundle. See [`prewarm::build_prewarm_plan`].
+pub mod prewarm;
+
 /// On-chain enclave key registration (calldata builder + self-registration flow).
 #[cfg(all(feature = "enclave", target_os = "linux"))]
 pub mod register;

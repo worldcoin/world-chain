@@ -36,6 +36,7 @@ alloy-sol-types.workspace = true
 
 # Async / runtime
 tokio = { workspace = true, features = ["full", "signal"] }
+backon.workspace = true
 
 # Error handling / logging
 anyhow.workspace = true

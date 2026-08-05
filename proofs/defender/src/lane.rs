@@ -12,11 +12,11 @@ use world_chain_prover_service::{
 /// Number of proof lanes the defender drives.
 pub(crate) const DEFENDED_LANE_COUNT: usize = 2;
 
-/// The proof lanes the defender drives, paired with the prover-service
-/// backend that generates each proof.
+/// The proof lanes the defender drives, ordered by preference and paired with
+/// the prover-service backend that generates each proof.
 pub(crate) const DEFENDED_LANES: [(ProofLane, ProofBackend); DEFENDED_LANE_COUNT] = [
-    (ProofLane::ValidityProof, ProofBackend::Sp1),
     (ProofLane::TeeAttestation, ProofBackend::Nitro),
+    (ProofLane::ValidityProof, ProofBackend::Sp1),
 ];
 
 /// Progress of a single proof lane within an active defense.
@@ -273,7 +273,7 @@ fn encode_proof(metadata: &GameMetadata, proof: &ProofData) -> Result<Bytes, Def
             public_values.clone(),
             proof.clone(),
         )
-            .abi_encode()
+            .abi_encode_params()
             .into()),
         ProofData::Nitro {
             attestation: _,
@@ -292,7 +292,7 @@ fn encode_proof(metadata: &GameMetadata, proof: &ProofData) -> Result<Bytes, Def
                 transition,
                 signature.clone(),
             )
-                .abi_encode()
+                .abi_encode_params()
                 .into())
         }
     }
@@ -333,15 +333,28 @@ mod tests {
         };
 
         let encoded = encode_proof(&metadata, &proof).expect("valid Nitro proof payload");
-        let expected = (
-            metadata.domain_hash,
-            metadata.parent_ref,
-            U256::from(metadata.l1_origin_number),
-            transition,
-            signature,
-        )
-            .abi_encode();
 
-        assert_eq!(encoded.as_ref(), expected);
+        // NitroProofVerifier does `abi.decode(proof, (bytes32, address, uint256,
+        // TransitionPublicValues, bytes))`, which is the params encoding. Asserting against
+        // `.abi_encode()` here would be tautological — and would have passed while the
+        // implementation shipped the single-value form, whose leading 0x20 offset makes the
+        // verifier's decode revert and `verify` return false.
+        assert_eq!(
+            &encoded[..32],
+            metadata.domain_hash.as_slice(),
+            "payload must start with domainHash, not an ABI offset"
+        );
+        // 3 head words + 6 transition words + signature offset/length + 3 signature words.
+        assert_eq!(encoded.len(), 448, "verifier-accepted payload size");
+
+        let (domain_hash, parent_ref, l1_origin_number, decoded_transition, decoded_signature) =
+            <(B256, Address, U256, TransitionPublicValues, Bytes)>::abi_decode_params(&encoded)
+                .expect("verifier-compatible params encoding");
+
+        assert_eq!(domain_hash, metadata.domain_hash);
+        assert_eq!(parent_ref, metadata.parent_ref);
+        assert_eq!(l1_origin_number, U256::from(metadata.l1_origin_number));
+        assert_eq!(decoded_transition, transition);
+        assert_eq!(decoded_signature, signature);
     }
 }
