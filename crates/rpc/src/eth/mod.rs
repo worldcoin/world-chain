@@ -23,8 +23,8 @@ use reth_optimism_rpc::{OpEthApi, OpEthApiBuilder, OpEthApiError, eth::OpRpcConv
 use reth_rpc_eth_api::{
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcNodeCore, RpcNodeCoreExt, RpcTypes,
     helpers::{
-        EthApiSpec, EthFees, EthState, GetBlockAccessList, LoadFee, LoadPendingBlock, LoadState,
-        SpawnBlocking, Trace, pending_block::BuildPendingEnv,
+        EthApiSpec, EthFees, EthState, EthSubscriptions, GetBlockAccessList, LoadFee,
+        LoadPendingBlock, LoadState, SpawnBlocking, Trace, pending_block::BuildPendingEnv,
     },
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
@@ -227,6 +227,17 @@ where
     OpEthApi<N, Rpc>: RpcNodeCore<Primitives = OpPrimitives>
         + EthApiTypes<Error = OpEthApiError>
         + EthFees
+        + Clone,
+{
+}
+
+impl<N, Rpc> EthSubscriptions for FlashblocksEthApi<N, Rpc>
+where
+    N: RpcNodeCore<Primitives = OpPrimitives>,
+    Rpc: RpcConvert + Clone,
+    OpEthApi<N, Rpc>: RpcNodeCore<Primitives = OpPrimitives>
+        + EthApiTypes<Error = OpEthApiError>
+        + EthSubscriptions
         + Clone,
 {
 }

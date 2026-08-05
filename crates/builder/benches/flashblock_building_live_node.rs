@@ -159,7 +159,7 @@ fn bench_build_flashblock_case<F>(
                     cancel: Default::default(),
                     best_payload: None,
                     execution_cache: None,
-                    trie_handle: None,
+                    state_root_handle: None,
                 };
 
                 let (outcome, access_list) = builder

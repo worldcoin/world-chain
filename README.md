@@ -17,6 +17,7 @@
 <p align="center">
   <a href="#crates">Crates</a> •
   <a href="#proofs">Proofs</a> •
+  <a href="#versioning">Versioning</a> •
   <a href="#development">Development</a> •
   <a href="#specs">Specs</a> •
   <a href="#security">Security</a> •
@@ -58,6 +59,10 @@ World Chain is a blockchain designed for humans. It prioritizes scalability and 
 | [`world-chain-challenger`](proofs/services/challenger)         | Fault-proof challenger service. |
 | [`world-chain-proposer`](proofs/services/proposer)             | Output root proposer service. |
 | [`world-chain-prover-service`](proofs/services/prover-service) | Proof generation service. |
+
+## Versioning
+
+World Chain's major and minor version numbers are aligned with the underlying reth release line. For a World Chain `X.Y.Z` release, `X.Y` must match reth's `X.Y`. World Chain patch versions are released independently and do not need to match the reth patch version.
 
 ## Development
 
