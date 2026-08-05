@@ -5,6 +5,7 @@ import {Script} from "forge-std/Script.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import {GameTypes} from "../../src/proofs/GameTypes.sol";
+import {ProofLib} from "../../src/proofs/lib/ProofLib.sol";
 import {MultiProofGame} from "../../src/proofs/MultiProofGame.sol";
 import {IMultiProofGame} from "../../src/proofs/interfaces/IMultiProofGame.sol";
 import {IWorldChainProofVerifier} from "../../src/proofs/interfaces/IWorldChainProofVerifier.sol";
@@ -226,7 +227,6 @@ contract DeployProofSystem is Script {
         returns (IMultiProofGame.GameConfig memory)
     {
         return IMultiProofGame.GameConfig({
-            proofSystemVersion: 1,
             rollupConfigHash: config.rollupConfigHash,
             blockInterval: config.blockInterval,
             challengePeriod: config.challengePeriod,
@@ -267,7 +267,7 @@ contract DeployProofSystem is Script {
         vm.serializeUint(root, "gameType", uint256(GameType.unwrap(GameTypes.MULTI_PROOF_GAME_TYPE)));
         vm.serializeBytes32(root, "rollupConfigHash", config.rollupConfigHash);
         vm.serializeUint(root, "l2ChainId", config.l2ChainId);
-        vm.serializeUint(root, "proofSystemVersion", 1);
+        vm.serializeUint(root, "proofSystemVersion", ProofLib.PROOF_SYSTEM_VERSION);
         vm.serializeUint(root, "blockInterval", config.blockInterval);
         vm.serializeUint(root, "challengePeriod", config.challengePeriod);
         vm.serializeUint(root, "proofPeriod", config.proofPeriod);

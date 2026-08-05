@@ -172,11 +172,6 @@ contract MultiProofGameTest is OPStackFixtures {
         new MultiProofGame(config);
 
         config = _gameConfig();
-        config.proofSystemVersion = 0;
-        vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
-        new MultiProofGame(config);
-
-        config = _gameConfig();
         config.blockInterval = 0;
         vm.expectRevert(IMultiProofGame.InvalidActivationParameters.selector);
         new MultiProofGame(config);

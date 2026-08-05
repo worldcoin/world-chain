@@ -50,7 +50,6 @@ interface IMultiProofGame is IDisputeGame {
     /// @dev The implementation is registered with empty DGF implementation args, so none of
     ///      this configuration rides in the CWIA payload.
     struct GameConfig {
-        uint256 proofSystemVersion;
         bytes32 rollupConfigHash;
         uint256 blockInterval;
         uint64 challengePeriod;

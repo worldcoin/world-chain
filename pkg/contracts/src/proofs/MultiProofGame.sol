@@ -127,14 +127,10 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice The claim made by the proposer.
     ClaimData public claimData;
 
-    /// @notice Credited balances for winning participants.
-    mapping(address recipient => uint256 amount) public normalModeCredit;
-
-    /// @notice A mapping of each claimant's refund mode credit.
-    mapping(address recipient => uint256 amount) public refundModeCredit;
-
-    /// @notice The starting output root of the game that is proven from in case of a challenge.
-    Proposal public startingProposal;
+    /// @notice Whether `recipient` has already unlocked its credit via `claimCredit`.
+    /// @dev Credits themselves are derived, not stored — see `normalModeCredit` and
+    ///      `refundModeCredit`; this flag is the only settlement state per recipient.
+    mapping(address recipient => bool claimed) public creditClaimed;
 
     /// @notice The bond distribution mode of the game.
     BondDistributionMode public bondDistributionMode;
@@ -142,18 +138,14 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     /// @notice A boolean for whether or not the game type was respected when the game was created.
     bool public wasRespectedGameTypeWhenCreated;
 
-    /// @notice The total bonds deposited into the game.
-    uint256 public totalBonds;
-
     ////////////////////////////////////////////////////////////////
     //                        Constructor                         //
     ////////////////////////////////////////////////////////////////
 
     constructor(GameConfig memory config) {
         if (
-            config.proofSystemVersion == 0 || config.blockInterval == 0 || config.challengePeriod == 0
-                || config.proofPeriod <= config.challengePeriod || config.proposerBond == 0
-                || config.challengerBond == 0 || config.proofThreshold == 0
+            config.blockInterval == 0 || config.challengePeriod == 0 || config.proofPeriod <= config.challengePeriod
+                || config.proposerBond == 0 || config.challengerBond == 0 || config.proofThreshold == 0
                 || config.proofThreshold > ProofLib.PROOF_LANE_COUNT || config.protocolFeeRecipient == address(0)
                 || address(config.anchorStateRegistry) == address(0) || address(config.weth) == address(0)
                 || address(config.stakingRegistry) == address(0) || address(config.validityProofVerifier) == address(0)
@@ -171,7 +163,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         if (address(config.weth.systemConfig()) != address(systemConfig)) revert InconsistentSystemConfiguration();
 
         domainHash =
-            ProofLib.domainHash(chainId, config.proofSystemVersion, config.rollupConfigHash, config.blockInterval);
+            ProofLib.domainHash(chainId, ProofLib.PROOF_SYSTEM_VERSION, config.rollupConfigHash, config.blockInterval);
         rollupConfigHash = config.rollupConfigHash;
         blockInterval = config.blockInterval;
         challengePeriod = Duration.wrap(config.challengePeriod);
@@ -295,31 +287,28 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         if (anchorStateRegistry.paused()) revert GamePaused();
 
         // INVARIANT: The proposal must target the domain this implementation proves against.
-        if (proposalDomainHash() != domainHash) revert InvalidDomainHash(domainHash, proposalDomainHash());
+        bytes32 proposalDomainHash_ = proposalDomainHash();
+        if (proposalDomainHash_ != domainHash) revert InvalidDomainHash(domainHash, proposalDomainHash_);
 
         address parentRef_ = parentRef();
+        uint256 l2SequenceNumber_ = l2SequenceNumber();
+        Claim rootClaim_ = rootClaim();
+        uint256 attempt_ = attempt();
 
-        if (parentRef_ == address(anchorStateRegistry)) {
-            // When there is no parent game, the starting output root is the starting anchor.
-            startingProposal = anchorStateRegistry.getStartingAnchorRoot();
-        } else {
-            IDisputeGame parent = IDisputeGame(parentRef_);
-
-            // INVARIANT: The parent must be a registered, respected, live game of this type.
-            if (!_isValidGame(parent)) revert InvalidParentGame();
-
-            startingProposal =
-                Proposal({root: Hash.wrap(parent.rootClaim().raw()), l2SequenceNumber: parent.l2SequenceNumber()});
+        // INVARIANT: The parent must be a registered, respected, live game of this type.
+        if (parentRef_ != address(anchorStateRegistry) && !_isValidGame(IDisputeGame(parentRef_))) {
+            revert InvalidParentGame();
         }
 
         // INVARIANT: Each proposal extends its parent by exactly one block interval.
-        uint256 expectedL2BlockNumber = startingProposal.l2SequenceNumber + blockInterval;
-        if (l2SequenceNumber() != expectedL2BlockNumber) {
-            revert InvalidL2BlockNumber(expectedL2BlockNumber, l2SequenceNumber());
+        (, uint256 startingBlockNumber_) = startingProposal();
+        uint256 expectedL2BlockNumber = startingBlockNumber_ + blockInterval;
+        if (l2SequenceNumber_ != expectedL2BlockNumber) {
+            revert InvalidL2BlockNumber(expectedL2BlockNumber, l2SequenceNumber_);
         }
 
         // Per spec, the sequence number must fit within a uint64.
-        if (l2SequenceNumber() > type(uint64).max) revert UnexpectedRootClaim(rootClaim());
+        if (l2SequenceNumber_ > type(uint64).max) revert UnexpectedRootClaim(rootClaim_);
 
         // Retries: attempt N is only proposable when attempt N-1 for the identical transition
         // timed out on proofs or was created before WIP-1006 became respected. The latter
@@ -327,10 +316,10 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // invalidations rebase onto a replacement parent and therefore restart at attempt zero.
         // Duplicate attempts are impossible: the factory UUID covers (gameType, rootClaim,
         // extraData).
-        if (attempt() > 0) {
-            bytes memory previousExtraData = abi.encode(domainHash, l2SequenceNumber(), parentRef_, attempt() - 1);
+        if (attempt_ > 0) {
+            bytes memory previousExtraData = abi.encode(domainHash, l2SequenceNumber_, parentRef_, attempt_ - 1);
             (IDisputeGame previous,) =
-                disputeGameFactory.games(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim(), previousExtraData);
+                disputeGameFactory.games(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim_, previousExtraData);
             if (
                 address(previous) == address(0)
                     || (previous.wasRespectedGameTypeWhenCreated()
@@ -339,7 +328,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
                                 != ProofLib.InvalidationReason.PROOF_TIMEOUT))
             ) {
                 revert GameNotRetryable(keccak256(
-                        abi.encode(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim(), previousExtraData)
+                        abi.encode(GameTypes.MULTI_PROOF_GAME_TYPE, rootClaim_, previousExtraData)
                     ));
             }
         }
@@ -360,9 +349,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // Set the game as initialized.
         initialized = true;
 
-        // Deposit the bond into DelayedWETH and track credits.
-        refundModeCredit[gameCreator()] += msg.value;
-        totalBonds += msg.value;
+        // Deposit the bond into DelayedWETH. Credits are derived from the bond immutables and
+        // the game outcome — see `refundModeCredit` and `normalModeCredit`.
         weth.deposit{value: msg.value}();
 
         // Set the game's starting timestamp.
@@ -375,11 +363,11 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         emit WorldChainGameCreated(
             rootId(),
             parentRef_,
-            Claim.unwrap(rootClaim()),
-            l2SequenceNumber(),
+            Claim.unwrap(rootClaim_),
+            l2SequenceNumber_,
             Hash.unwrap(l1Head()),
             _l1OriginNumber,
-            attempt(),
+            attempt_,
             gameCreator()
         );
     }
@@ -423,9 +411,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // at the challenge, so late challenges cannot extend the game.
         claimData.deadline = proofDeadline();
 
-        // Deposit the bond into DelayedWETH and track credits.
-        refundModeCredit[msg.sender] += msg.value;
-        totalBonds += msg.value;
+        // Deposit the bond into DelayedWETH.
         weth.deposit{value: msg.value}();
 
         emit Challenged(msg.sender, claimData.deadline.raw());
@@ -507,13 +493,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         (GameStatus parentStatus, bool parentBlacklisted) = _parentResolution();
 
         if (parentBlacklisted || parentStatus == GameStatus.CHALLENGER_WINS) {
-            // An invalid parent invalidates this game regardless of its own proof state. Unlike
+            // An invalid parent invalidates this game regardless of its own proof state.
             status = GameStatus.CHALLENGER_WINS;
             claimData.invalidationReason = ProofLib.InvalidationReason.INVALID_PARENT;
-            normalModeCredit[gameCreator()] += proposerBond;
-            if (claimData.challenger != address(0)) {
-                normalModeCredit[claimData.challenger] += challengerBond;
-            }
         } else if (parentStatus == GameStatus.IN_PROGRESS) {
             // INVARIANT: Cannot resolve a game if the parent game has not been resolved.
             revert ParentGameNotResolved();
@@ -522,32 +504,25 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
             if (!gameOver()) revert GameNotOver();
 
             // Determine status based on claim status.
-            if (claimData.status == ProposalStatus.Unchallenged) {
-                // A proofless proposal cannot win merely because nobody challenged it: the
-                // proposer forfeits the bond to the protocol.
-                status = GameStatus.CHALLENGER_WINS;
-                claimData.invalidationReason = ProofLib.InvalidationReason.PROOF_TIMEOUT;
-                normalModeCredit[protocolFeeRecipient] += totalBonds;
-            } else if (claimData.status == ProposalStatus.Challenged) {
-                // A challenged game below threshold times out once its proof window expires.
-                // The challenger takes all bonds.
-                status = GameStatus.CHALLENGER_WINS;
-                claimData.invalidationReason = ProofLib.InvalidationReason.PROOF_TIMEOUT;
-                normalModeCredit[claimData.challenger] += totalBonds;
-            } else if (
+            if (
                 claimData.status == ProposalStatus.UnchallengedAndValidProofProvided
                     || claimData.status == ProposalStatus.ChallengedAndValidProofProvided
             ) {
-                // The claim is proven: defender wins and the game creator takes all bonds.
                 status = GameStatus.DEFENDER_WINS;
-                normalModeCredit[gameCreator()] += totalBonds;
+            } else if (claimData.status == ProposalStatus.Unchallenged || claimData.status == ProposalStatus.Challenged)
+            {
+                // An applicable proof window expired below its requirement. A proofless
+                // proposal cannot win merely because nobody challenged it.
+                status = GameStatus.CHALLENGER_WINS;
+                claimData.invalidationReason = ProofLib.InvalidationReason.PROOF_TIMEOUT;
             } else {
                 // This edge case shouldn't be reached, sanity check just in case.
                 revert InvalidProposalStatus();
             }
         }
 
-        // Mark the game as resolved.
+        // Mark the game as resolved. Bonds are paid out through `claimCredit` after
+        // `closeGame`
         claimData.status = ProposalStatus.Resolved;
         resolvedAt = Timestamp.wrap(uint64(block.timestamp));
         emit Resolved(status);
@@ -593,17 +568,16 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         uint256 recipientCredit;
         if (bondDistributionMode == BondDistributionMode.REFUND) {
-            recipientCredit = refundModeCredit[recipient];
+            recipientCredit = refundModeCredit(recipient);
         } else if (bondDistributionMode == BondDistributionMode.NORMAL) {
-            recipientCredit = normalModeCredit[recipient];
+            recipientCredit = normalModeCredit(recipient);
         } else {
             revert InvalidBondDistributionMode();
         }
 
-        // Phase 1: zero the credit and unlock it in DelayedWETH.
+        // mark the credit claimed and unlock it in DelayedWETH.
         if (recipientCredit > 0) {
-            refundModeCredit[recipient] = 0;
-            normalModeCredit[recipient] = 0;
+            creditClaimed[recipient] = true;
             weth.unlock(recipient, recipientCredit);
             return;
         }
@@ -678,10 +652,42 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
                 || (bondDistributionMode == BondDistributionMode.UNDECIDED
                     && !anchorStateRegistry.isGameProper(IDisputeGame(address(this))))
         ) {
-            credit_ = refundModeCredit[recipient];
+            credit_ = refundModeCredit(recipient);
         } else {
-            credit_ = normalModeCredit[recipient];
+            credit_ = normalModeCredit(recipient);
         }
+    }
+
+    /// @inheritdoc IMultiProofGame
+    function refundModeCredit(address recipient) public view returns (uint256 amount) {
+        if (creditClaimed[recipient]) return 0;
+        if (recipient == gameCreator()) amount += proposerBond;
+        if (claimData.challenger != address(0) && recipient == claimData.challenger) amount += challengerBond;
+    }
+
+    /// @inheritdoc IMultiProofGame
+    function normalModeCredit(address recipient) public view returns (uint256 amount) {
+        if (creditClaimed[recipient]) return 0;
+
+        if (status == GameStatus.DEFENDER_WINS) {
+            // The claim is proven: the game creator takes all bonds.
+            if (recipient == gameCreator()) amount = totalBonds();
+        } else if (status == GameStatus.CHALLENGER_WINS) {
+            if (claimData.invalidationReason == ProofLib.InvalidationReason.INVALID_PARENT) {
+                amount = refundModeCredit(recipient);
+            } else if (claimData.challenger != address(0)) {
+                // Proof timeout on a challenged game: the challenger takes all bonds.
+                if (recipient == claimData.challenger) amount = totalBonds();
+            } else if (recipient == protocolFeeRecipient) {
+                // Proofless unchallenged timeout: the proposer forfeits the bond to the protocol.
+                amount = totalBonds();
+            }
+        }
+    }
+
+    /// @inheritdoc IMultiProofGame
+    function totalBonds() public view returns (uint256) {
+        return claimData.challenger == address(0) ? proposerBond : proposerBond + challengerBond;
     }
 
     /// @inheritdoc IMultiProofGame
@@ -698,14 +704,26 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         );
     }
 
+    /// @inheritdoc IMultiProofGame
+    function startingProposal() public view returns (Hash root, uint256 l2SequenceNumber) {
+        address parentRef_ = parentRef();
+        if (parentRef_ == address(anchorStateRegistry)) {
+            // When there is no parent game, the starting output root is the starting anchor.
+            Proposal memory anchor = anchorStateRegistry.getStartingAnchorRoot();
+            return (anchor.root, anchor.l2SequenceNumber);
+        }
+        IDisputeGame parent = IDisputeGame(parentRef_);
+        return (Hash.wrap(parent.rootClaim().raw()), parent.l2SequenceNumber());
+    }
+
     /// @notice Only the starting block number of the game.
     function startingBlockNumber() external view returns (uint256 startingBlockNumber_) {
-        startingBlockNumber_ = startingProposal.l2SequenceNumber;
+        (, startingBlockNumber_) = startingProposal();
     }
 
     /// @notice Starting output root of the game.
     function startingRootHash() external view returns (Hash startingRootHash_) {
-        startingRootHash_ = startingProposal.root;
+        (startingRootHash_,) = startingProposal();
     }
 
     /// @inheritdoc IMultiProofGame

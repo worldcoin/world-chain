@@ -36,7 +36,6 @@ abstract contract OPStackFixtures is Test {
     uint8 internal constant PROOF_THRESHOLD = 2;
 
     uint256 internal constant CHAIN_ID = 480;
-    uint256 internal constant PROOF_SYSTEM_VERSION = 1;
     bytes32 internal constant ROLLUP_CONFIG_HASH = keccak256("world-chain-rollup-config");
     uint256 internal constant BLOCK_INTERVAL = 100;
 
@@ -129,7 +128,6 @@ abstract contract OPStackFixtures is Test {
 
     function _gameConfig() internal view returns (IMultiProofGame.GameConfig memory) {
         return IMultiProofGame.GameConfig({
-            proofSystemVersion: PROOF_SYSTEM_VERSION,
             rollupConfigHash: ROLLUP_CONFIG_HASH,
             blockInterval: BLOCK_INTERVAL,
             challengePeriod: CHALLENGE_PERIOD,
@@ -148,7 +146,7 @@ abstract contract OPStackFixtures is Test {
     }
 
     function _domainHash() internal pure returns (bytes32) {
-        return ProofLib.domainHash(CHAIN_ID, PROOF_SYSTEM_VERSION, ROLLUP_CONFIG_HASH, BLOCK_INTERVAL);
+        return ProofLib.domainHash(CHAIN_ID, ProofLib.PROOF_SYSTEM_VERSION, ROLLUP_CONFIG_HASH, BLOCK_INTERVAL);
     }
 
     function _extraData(uint256 l2BlockNumber, uint256 parentIndex, uint256 attempt)
