@@ -215,11 +215,11 @@ contract MultiProofGameTest is OPStackFixtures {
         game.resolve();
 
         game.submitProofLane(1, abi.encodePacked(game.rootId()));
-        ProofLib.RootState rootState;
+        GameStatus outcome;
         ProofLib.InvalidationReason reason;
-        (resolvable, rootState, reason) = game.resolutionStatus();
+        (resolvable, outcome, reason) = game.resolutionStatus();
         assertTrue(resolvable);
-        assertEq(uint8(rootState), uint8(ProofLib.RootState.FINALIZED));
+        assertEq(uint8(outcome), uint8(GameStatus.DEFENDER_WINS));
         assertEq(uint8(reason), uint8(ProofLib.InvalidationReason.NONE));
 
         game.resolve();
@@ -232,9 +232,9 @@ contract MultiProofGameTest is OPStackFixtures {
         MultiProofGame first = _proposeAtAnchor();
         vm.warp(first.challengeDeadline().raw());
 
-        (bool resolvable, ProofLib.RootState rootState, ProofLib.InvalidationReason reason) = first.resolutionStatus();
+        (bool resolvable, GameStatus outcome, ProofLib.InvalidationReason reason) = first.resolutionStatus();
         assertTrue(resolvable);
-        assertEq(uint8(rootState), uint8(ProofLib.RootState.INVALIDATED));
+        assertEq(uint8(outcome), uint8(GameStatus.CHALLENGER_WINS));
         assertEq(uint8(reason), uint8(ProofLib.InvalidationReason.PROOF_TIMEOUT));
 
         first.resolve();
@@ -390,6 +390,19 @@ contract MultiProofGameTest is OPStackFixtures {
         bytes memory proof = abi.encodePacked(game.rootId());
         vm.expectRevert(GameOver.selector);
         game.submitProofLane(PROOF_THRESHOLD, proof);
+    }
+
+    function test_ProofLane_RejectsSubmissionWhenParentInvalid() public {
+        MultiProofGame parent = _proposeAtAnchor();
+        _challenge(parent);
+        MultiProofGame child = _proposeChild(0);
+
+        vm.warp(parent.proofDeadline().raw());
+        parent.resolve();
+
+        bytes memory proof = abi.encodePacked(child.rootId());
+        vm.expectRevert(InvalidParentGame.selector);
+        child.submitProofLane(0, proof);
     }
 
     function test_Challenge_RejectsGameOver() public {

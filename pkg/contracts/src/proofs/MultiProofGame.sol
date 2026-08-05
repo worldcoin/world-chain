@@ -50,7 +50,6 @@ import {ISemver} from "@optimism-bedrock/interfaces/universal/ISemver.sol";
 ///     1.) ZK Validity Proof via Succinct Prover
 ///     2.) AWS Nitro Enclave Attestation
 ///     3.) Security Council Attestations
-///
 /// @dev Additional Proof Lanes may be added in the future for this game type.
 /// @custom:security-contact security@toolsforhumanity.com
 contract MultiProofGame is Clone, ISemver, IMultiProofGame {
@@ -159,8 +158,12 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         IDisputeGameFactory factory = config.anchorStateRegistry.disputeGameFactory();
         ISystemConfig systemConfig = config.anchorStateRegistry.systemConfig();
         uint256 chainId = systemConfig.l2ChainId();
-        if (address(factory) == address(0) || chainId == 0) revert InvalidActivationParameters();
-        if (address(config.weth.systemConfig()) != address(systemConfig)) revert InconsistentSystemConfiguration();
+        if (address(factory) == address(0) || chainId == 0) {
+            revert InvalidActivationParameters();
+        }
+        if (address(config.weth.systemConfig()) != address(systemConfig)) {
+            revert InconsistentSystemConfiguration();
+        }
 
         domainHash =
             ProofLib.domainHash(chainId, ProofLib.PROOF_SYSTEM_VERSION, config.rollupConfigHash, config.blockInterval);
@@ -278,7 +281,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         // Only the configured factory may initialize; this also rules out direct initialization
         // of the implementation contract itself.
-        if (msg.sender != address(disputeGameFactory)) revert NotDisputeGameFactory(msg.sender);
+        if (msg.sender != address(disputeGameFactory)) {
+            revert NotDisputeGameFactory(msg.sender);
+        }
 
         // Defense-in-depth against `setInitBond` drifting from the configured proposer bond.
         if (msg.value != proposerBond) revert IncorrectBondAmount();
@@ -288,7 +293,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
 
         // INVARIANT: The proposal must target the domain this implementation proves against.
         bytes32 proposalDomainHash_ = proposalDomainHash();
-        if (proposalDomainHash_ != domainHash) revert InvalidDomainHash(domainHash, proposalDomainHash_);
+        if (proposalDomainHash_ != domainHash) {
+            revert InvalidDomainHash(domainHash, proposalDomainHash_);
+        }
 
         address parentRef_ = parentRef();
         uint256 l2SequenceNumber_ = l2SequenceNumber();
@@ -308,7 +315,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         }
 
         // Per spec, the sequence number must fit within a uint64.
-        if (l2SequenceNumber_ > type(uint64).max) revert UnexpectedRootClaim(rootClaim_);
+        if (l2SequenceNumber_ > type(uint64).max) {
+            revert UnexpectedRootClaim(rootClaim_);
+        }
 
         // Retries: attempt N is only proposable when attempt N-1 for the identical transition
         // timed out on proofs or was created before WIP-1006 became respected. The latter
@@ -396,7 +405,9 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         if (claimData.challenger != address(0)) revert ClaimAlreadyChallenged();
 
         // INVARIANT: Only staked challengers may open a dispute.
-        if (!stakingRegistry.isStaked(msg.sender)) revert UnstakedChallenger(msg.sender);
+        if (!stakingRegistry.isStaked(msg.sender)) {
+            revert UnstakedChallenger(msg.sender);
+        }
 
         // If the required bond is not met, revert.
         if (msg.value != challengerBond) revert IncorrectBondAmount();
@@ -426,6 +437,13 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         // INVARIANT: Cannot prove if the game is already resolved.
         if (status != GameStatus.IN_PROGRESS) revert ClaimAlreadyResolved();
 
+        // INVARIANT: Cannot prove if the parent game is invalid: this game will resolve
+        // `CHALLENGER_WINS` with `INVALID_PARENT` regardless of its own proof state.
+        (GameStatus parentStatus, bool parentBlacklisted) = _parentResolution();
+        if (parentBlacklisted || parentStatus == GameStatus.CHALLENGER_WINS) {
+            revert InvalidParentGame();
+        }
+
         // INVARIANT: Cannot prove if the game is over. Also caps the bitmap at the threshold:
         // once enough lanes have been accepted, further submissions are rejected.
         if (gameOver()) revert GameOver();
@@ -442,23 +460,24 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         }
 
         // Verify the proof against the verifier configured for this lane.
-        if (!_verifierFor(lane).verify(rootId_, proof)) revert InvalidProof(lane, rootId_);
+        if (!_verifierFor(lane).verify(rootId_, proof)) {
+            revert InvalidProof(lane, rootId_);
+        }
 
         uint8 bitmap = claimData.proofBitmap | mask;
         claimData.proofBitmap = bitmap;
-        emit ProofLaneSupported(lane, rootId_, bitmap);
 
         // Update the status of the proposal. Unchallenged, a single lane is a valid proof that
         // finalizes once the challenge window closes; challenged, only the threshold is.
         if (ProofLib.hasThreshold(bitmap, PROOF_THRESHOLD)) {
-            // First crossing only: `gameOver()` blocks any submission after the threshold.
-            emit ProofThresholdReached(rootId_, bitmap);
             claimData.status = claimData.challenger == address(0)
                 ? ProposalStatus.UnchallengedAndValidProofProvided
                 : ProposalStatus.ChallengedAndValidProofProvided;
         } else if (claimData.challenger == address(0)) {
             claimData.status = ProposalStatus.UnchallengedAndValidProofProvided;
         }
+
+        emit ProofSubmitted(lane, rootId_, bitmap);
 
         return claimData.status;
     }
@@ -535,25 +554,25 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     function resolutionStatus()
         external
         view
-        returns (bool resolvable, ProofLib.RootState outcome, ProofLib.InvalidationReason reason)
+        returns (bool resolvable, GameStatus outcome, ProofLib.InvalidationReason reason)
     {
         if (status != GameStatus.IN_PROGRESS) {
-            return (false, state(), claimData.invalidationReason);
+            return (false, status, claimData.invalidationReason);
         }
 
         (GameStatus parentStatus, bool parentBlacklisted) = _parentResolution();
         if (parentBlacklisted || parentStatus == GameStatus.CHALLENGER_WINS) {
-            return (true, ProofLib.RootState.INVALIDATED, ProofLib.InvalidationReason.INVALID_PARENT);
+            return (true, GameStatus.CHALLENGER_WINS, ProofLib.InvalidationReason.INVALID_PARENT);
         }
         if (parentStatus == GameStatus.IN_PROGRESS || !gameOver()) {
-            return (false, state(), ProofLib.InvalidationReason.NONE);
+            return (false, GameStatus.IN_PROGRESS, ProofLib.InvalidationReason.NONE);
         }
 
         bool proven = claimData.status == ProposalStatus.UnchallengedAndValidProofProvided
             || claimData.status == ProposalStatus.ChallengedAndValidProofProvided;
         return proven
-            ? (true, ProofLib.RootState.FINALIZED, ProofLib.InvalidationReason.NONE)
-            : (true, ProofLib.RootState.INVALIDATED, ProofLib.InvalidationReason.PROOF_TIMEOUT);
+            ? (true, GameStatus.DEFENDER_WINS, ProofLib.InvalidationReason.NONE)
+            : (true, GameStatus.CHALLENGER_WINS, ProofLib.InvalidationReason.PROOF_TIMEOUT);
     }
 
     /// @inheritdoc IMultiProofGame
@@ -619,13 +638,14 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         IDisputeGame self = IDisputeGame(address(this));
 
         // The finality airgap must elapse after resolution before any payout.
-        if (!anchorStateRegistry.isGameFinalized(self)) revert GameNotFinalized();
+        if (!anchorStateRegistry.isGameFinalized(self)) {
+            revert GameNotFinalized();
+        }
 
         // Advancing the anchor is best-effort: this game may legitimately be ineligible (e.g.
         // an older block number than the current anchor, or an unrespected game type).
         // nosemgrep: sol-safety-trycatch-eip150
         try anchorStateRegistry.setAnchorState(self) {} catch {}
-
         bondDistributionMode =
             anchorStateRegistry.isGameProper(self) ? BondDistributionMode.NORMAL : BondDistributionMode.REFUND;
 
@@ -705,7 +725,7 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
     }
 
     /// @inheritdoc IMultiProofGame
-    function startingProposal() public view returns (Hash root, uint256 l2SequenceNumber) {
+    function startingProposal() public view returns (Hash root_, uint256 l2SequenceNumber_) {
         address parentRef_ = parentRef();
         if (parentRef_ == address(anchorStateRegistry)) {
             // When there is no parent game, the starting output root is the starting anchor.
@@ -756,16 +776,11 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         return Timestamp.wrap(createdAt.raw() + proofPeriod.raw());
     }
 
-    /// @inheritdoc IMultiProofGame
-    function state() public view returns (ProofLib.RootState) {
-        if (status == GameStatus.DEFENDER_WINS) return ProofLib.RootState.FINALIZED;
-        if (status == GameStatus.CHALLENGER_WINS) return ProofLib.RootState.INVALIDATED;
-        return claimData.challenger == address(0) ? ProofLib.RootState.PROPOSED : ProofLib.RootState.CHALLENGED;
-    }
-
     /// @notice Returns the verifier configured for `lane`.
     function _verifierFor(ProofLib.ProofLane lane) internal view returns (IWorldChainProofVerifier) {
-        if (lane == ProofLib.ProofLane.VALIDITY_PROOF) return validityProofVerifier;
+        if (lane == ProofLib.ProofLane.VALIDITY_PROOF) {
+            return validityProofVerifier;
+        }
         if (lane == ProofLib.ProofLane.TEE_ATTESTATION) return teeVerifier;
         return securityCouncil;
     }
