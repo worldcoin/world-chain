@@ -7,6 +7,7 @@ pub mod node;
 pub mod payload;
 pub mod payload_service;
 pub mod pool;
+pub mod proof_history;
 pub mod tx_propagation;
 pub mod version;
 

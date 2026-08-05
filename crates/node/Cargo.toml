@@ -23,12 +23,16 @@ world-chain-chainspec.workspace = true
 world-chain-evm.workspace = true
 
 reth-node-builder.workspace = true
+reth-db = { workspace = true, features = ["mdbx"] }
+reth-db-api.workspace = true
 reth-chainspec.workspace = true
 reth-evm.workspace = true
 reth-optimism-chainspec.workspace = true
+reth-optimism-exex = { workspace = true, features = ["metrics"] }
 reth-optimism-payload-builder.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-rpc.workspace = true
+reth-optimism-trie = { workspace = true, features = ["metrics"] }
 reth-optimism-evm.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-forks.workspace = true
@@ -45,6 +49,7 @@ reth-rpc-eth-api.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-server-types.workspace = true
 reth-node-core.workspace = true
+reth-tasks.workspace = true
 reth-primitives-traits.workspace = true
 reth-codecs.workspace = true
 
@@ -60,6 +65,7 @@ op-alloy-rpc-types-engine.workspace = true
 
 tokio.workspace = true
 eyre.workspace = true
+futures-util.workspace = true
 tracing.workspace = true
 ed25519-dalek.workspace = true
 hex.workspace = true
