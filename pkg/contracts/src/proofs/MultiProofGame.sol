@@ -256,9 +256,8 @@ contract MultiProofGame is Clone, ISemver, IMultiProofGame {
         gameType_ = GameTypes.MULTI_PROOF_GAME_TYPE;
     }
 
-    /// @dev `IDisputeGame` declares this `pure`, so it cannot gate on the `DOMAIN_CHAIN_ID`
-    ///      immutable. This matches `ZKDisputeGame`; only super game types carry per-chain
-    ///      root claims, and `OptimismPortal2` reads `rootClaim()` for non-super types.
+    /// @notice Getter for the root claim for a given L2 chain ID.
+    /// @return rootClaim_ The root claim of the DisputeGame.
     function rootClaimByChainId(uint256) external pure returns (Claim rootClaim_) {
         rootClaim_ = rootClaim();
     }

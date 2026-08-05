@@ -19,7 +19,7 @@ interface IMultiProofGame is IDisputeGame {
     //                         Enums                              //
     ////////////////////////////////////////////////////////////////
 
-    /// @notice The lifecycle of the proposer's claim, mirroring `ZKDisputeGame.ProposalStatus`.
+    /// @notice The lifecycle of the proposer's claim.
     enum ProposalStatus {
         // The initial state of a new proposal.
         Unchallenged,
@@ -38,8 +38,6 @@ interface IMultiProofGame is IDisputeGame {
     ////////////////////////////////////////////////////////////////
 
     /// @notice The `ClaimData` struct represents the data associated with the root claim.
-    ///         Mirrors `ZKDisputeGame.ClaimData`; the single `prover` is replaced by the
-    ///         bitmap of accepted proof lanes.
     struct ClaimData {
         ProposalStatus status; // 1 byte   \
         address challenger; // 20 bytes  |
