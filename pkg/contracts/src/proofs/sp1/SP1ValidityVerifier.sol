@@ -14,13 +14,7 @@ struct AggregationPublicValues {
 
 /// @title SP1ValidityVerifier
 /// @author World Contributors
-/// @notice SP1 validity-proof lane verifier compatible with WIP-1006's
-///         multi-proof system (`IWorldChainProofVerifier`).
-/// @dev The verifier checks the SP1 aggregation proof with Succinct's verifier
-///      gateway, then binds the aggregation public values to the supplied
-///      World Chain `rootId`. Invalid proofs return `false` rather than
-///      bubbling reverts, matching the predicate contract expected by
-///      `MultiProofGame`.
+/// @custom:security-contact security@toolsforhumanity.com
 contract SP1ValidityVerifier is IWorldChainProofVerifier {
     /*//////////////////////////////////////////////////////////////
                                 ERRORS

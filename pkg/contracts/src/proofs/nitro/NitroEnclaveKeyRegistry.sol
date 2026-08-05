@@ -5,29 +5,8 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {INitroAttestationVerifier} from "./INitroAttestationVerifier.sol";
 
 /// @title NitroEnclaveKeyRegistry
-/// @author Worldcoin
-/// @notice Registry of attested AWS Nitro enclave secp256k1 signers.
-/// @dev Registration goes through a fully on-chain `INitroAttestationVerifier`
-///      which:
-///        - validates the COSE_Sign1 P-384 signature;
-///        - validates the X.509 cert chain to the AWS Nitro root CA (via the
-///          cached `ICertManager`);
-///        - extracts PCR0/1/2 from the document and checks they correspond to
-///          an enclave image that the verifier's owner has explicitly approved;
-///        - returns the embedded SEC1-uncompressed secp256k1 public key together
-///          with the PCR triple it was bound to.
-///
-///      The registry derives the key's Ethereum address and records lifecycle
-///      state by signer. `SignerRegistered` is the authoritative off-chain
-///      index from PCRs to signers. The registry
-///      deliberately does NOT maintain an on-chain `PCRs → key` lookup:
-///      multiple validator instances run the same enclave image simultaneously,
-///      so the relationship is one-to-many and any 1:1 map would silently
-///      overwrite peers' entries.
-///
-///      The registry owner can revoke any signer at any time (e.g. on enclave
-///      compromise); revocation is permanent — a revoked signer cannot be
-///      re-registered even if a valid attestation document for it is replayed.
+/// @author World Contributors
+/// @custom:security-contact security@toolsforhumanity.com
 contract NitroEnclaveKeyRegistry is Ownable {
     /*//////////////////////////////////////////////////////////////
                                  ERRORS

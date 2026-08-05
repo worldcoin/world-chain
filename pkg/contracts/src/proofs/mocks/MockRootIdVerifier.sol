@@ -3,6 +3,9 @@ pragma solidity 0.8.28;
 
 import {IWorldChainProofVerifier} from "../interfaces/IWorldChainProofVerifier.sol";
 
+/// @title MockRootIdVerifier
+/// @author World Contributors
+/// @custom:security-contact security@toolsforhumanity.com
 contract MockRootIdVerifier is IWorldChainProofVerifier {
     mapping(bytes32 rootId => bool accepted) public acceptedRoots;
     bool public acceptAny;

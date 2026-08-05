@@ -7,27 +7,8 @@ import {ProofVerificationLib} from "../lib/ProofVerificationLib.sol";
 import {NitroEnclaveKeyRegistry} from "./NitroEnclaveKeyRegistry.sol";
 
 /// @title NitroProofVerifier
-/// @author Worldcoin
-/// @notice TEE-attestation proof lane verifier compatible with WIP-1006's
-///         multi-proof system (`IWorldChainProofVerifier`).
-/// @dev The enclave produces an ECDSA (secp256k1) signature over the
-///      `transition_commitment` computed in `proofs/nitro/src/protocol.rs`:
-///
-///         signingCommitment = keccak256(abi.encode(transitionPublicValues))
-///
-///      The `verify` hook — the only public entry point on this contract —:
-///        1. Reconstructs the proposal's `rootId` from the transition public values plus the
-///           remaining context fields supplied in the proof and asserts it
-///           equals the `rootId` the game is asking about. This binds the
-///           Nitro signature to the *specific* proposal under dispute.
-///        2. Binds the proposal transition fields to the calling game's immutable snapshot.
-///        3. Recomputes the signing commitment from all transition public values.
-///        4. Recovers the signer via `ecrecover` and checks that address against
-///           `NitroEnclaveKeyRegistry`.
-///
-///      Any decode or verification failure is surfaced as `false` (never
-///      a revert) to honour the boolean-predicate contract of
-///      `IWorldChainProofVerifier`.
+/// @author World Contributors
+/// @custom:security-contact security@toolsforhumanity.com
 contract NitroProofVerifier is IWorldChainProofVerifier {
     /*//////////////////////////////////////////////////////////////
                                  ERRORS

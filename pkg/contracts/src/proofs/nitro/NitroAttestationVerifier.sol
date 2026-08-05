@@ -10,56 +10,8 @@ import {LibBytes} from "@nitro-validator/LibBytes.sol";
 import {INitroAttestationVerifier} from "./INitroAttestationVerifier.sol";
 
 /// @title NitroAttestationVerifier
-/// @author Worldcoin
-/// @notice Fully on-chain AWS Nitro Enclaves attestation verifier built on top
-///         of Base's `nitro-validator` library
-///         (<https://github.com/base/nitro-validator>) with an owner-managed
-///         allowlist of approved enclave images (PCR triples).
-///
-/// @dev This contract inherits `NitroValidator`, which performs:
-///        - CBOR parsing of the COSE_Sign1 attestation document;
-///        - X.509 chain validation against the pinned AWS Nitro root CA,
-///          delegated to `ICertManager` (cert verifications can be amortized
-///          across calls);
-///        - P-384 ECDSA verification of the COSE signature.
-///
-///      On top of that, this contract:
-///        - rejects stale attestations (older than `MAX_AGE`) and attestations
-///          dated more than `CLOCK_SKEW_TOLERANCE` in the future;
-///        - extracts the PCR0/1/2 triple embedded in the document, hashes each
-///          raw 48-byte PCR with keccak256, and asserts the resulting
-///          `(pcr0, pcr1, pcr2)` triple is in the owner-managed allowlist
-///          `approvedPCRSets`;
-///        - returns the certified secp256k1 enclave public key together with
-///          the triple it was bound to.
-///
-///      ## Allowlist & upgrade flow
-///
-///      The owner maintains a set of approved PCR triples. Each triple
-///      identifies one enclave image (EIF). Adding a new image is done via
-///      `approvePCRSet`; retiring an old one is done via `revokePCRSet`. The
-///      registry stores enclave keys keyed by PCR triple and accepts new
-///      attestations only for triples that are *currently* approved, so the
-///      operator upgrade flow is:
-///        1. Build a new EIF and capture its PCR0/1/2 measurements.
-///        2. `approvePCRSet(newPcr0, newPcr1, newPcr2)`.
-///        3. Roll out new enclaves; each registers its ephemeral key via
-///           `NitroEnclaveKeyRegistry.registerKey`, which delegates here.
-///        4. Once the migration completes, `revokePCRSet(oldPcr0, oldPcr1,
-///           oldPcr2)` to disallow future registrations for the old image.
-///           Already-registered keys remain valid until separately revoked in
-///           the registry.
-///
-///      ## Expected calling pattern
-///        1. Caller invokes `NitroValidator.decodeAttestationTbs(rawDoc)`
-///           (off-chain or on-chain) to split the document into
-///           `(attestationTbs, signature)`.
-///        2. Caller pre-warms `ICertManager` by calling
-///           `verifyCACert`/`verifyClientCert` for each cert in the cabundle
-///           in separate transactions (this amortizes the ~63M-gas chain
-///           validation cost across many attestations).
-///        3. Caller invokes `verifyAttestation` (typically via
-///           `NitroEnclaveKeyRegistry.registerKey`).
+/// @author World Contributors
+/// @custom:security-contact security@toolsforhumanity.com
 contract NitroAttestationVerifier is NitroValidator, INitroAttestationVerifier, Ownable {
     using LibCborElement for CborElement;
     using LibBytes for bytes;

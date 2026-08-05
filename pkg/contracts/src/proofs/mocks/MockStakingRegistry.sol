@@ -3,6 +3,9 @@ pragma solidity 0.8.28;
 
 import {IWorldChainStakingRegistry} from "../interfaces/IWorldChainStakingRegistry.sol";
 
+/// @title MockStakingRegistry
+/// @author World Contributors
+/// @custom:security-contact security@toolsforhumanity.com
 contract MockStakingRegistry is IWorldChainStakingRegistry {
     mapping(address account => bool staked) public staked;
 
