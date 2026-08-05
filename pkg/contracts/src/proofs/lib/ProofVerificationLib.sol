@@ -60,8 +60,8 @@ library ProofVerificationLib {
         uint256 proofL1OriginNumber,
         ProofLib.TransitionPublicValues memory transition
     ) private view returns (bool) {
-        return game.startingRootClaim() == transition.l2PreRoot
-            && game.startingL2BlockNumber() == uint256(transition.l2PreBlockNumber)
+        return Hash.unwrap(game.startingRootHash()) == transition.l2PreRoot
+            && game.startingBlockNumber() == uint256(transition.l2PreBlockNumber)
             && Claim.unwrap(game.rootClaim()) == transition.l2PostRoot
             && game.l2SequenceNumber() == uint256(transition.l2PostBlockNumber)
             && Hash.unwrap(game.l1Head()) == transition.l1Head && game.l1OriginNumber() == proofL1OriginNumber;
