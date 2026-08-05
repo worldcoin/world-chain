@@ -44,8 +44,7 @@ sol! {
             address gameCreator
         );
         event Challenged(address indexed challenger, uint64 proofDeadline);
-        event ProofLaneSupported(uint8 indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
-        event ProofThresholdReached(bytes32 indexed rootId, uint8 proofBitmap);
+        event ProofSubmitted(uint8 indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
         event DuplicateProofLane(uint8 indexed lane, bytes32 indexed rootId, uint8 proofBitmap);
         event GameClosed(uint8 bondDistributionMode);
         event Resolved(uint8 indexed status);
@@ -85,7 +84,6 @@ sol! {
         function createdAt() external view returns (uint64);
         function resolvedAt() external view returns (uint64);
         function status() external view returns (uint8);
-        function state() external view returns (uint8);
         function claimData()
             external
             view

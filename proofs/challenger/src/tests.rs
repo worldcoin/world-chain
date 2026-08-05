@@ -15,7 +15,8 @@ use std::{
     time::Duration,
 };
 use world_chain_proofs::{
-    ConsensusError, ConsensusProvider, InvalidationReason, ResolutionStatus, RootState,
+    ClaimData, ConsensusError, ConsensusProvider, GameStatus, InvalidationReason, ProposalStatus,
+    ResolutionStatus,
 };
 
 const CHALLENGER: Address = address!("00000000000000000000000000000000000000cc");
@@ -30,6 +31,24 @@ const STATE_FINALIZED: u8 = 3;
 const STATE_INVALIDATED: u8 = 4;
 const REASON_NONE: u8 = 0;
 const REASON_PROOF_TIMEOUT: u8 = 1;
+
+/// Maps the mock's internal state byte to the claim lifecycle the contract would report.
+fn proposal_status_from_state(state: u8) -> ProposalStatus {
+    match state {
+        STATE_CHALLENGED => ProposalStatus::Challenged,
+        STATE_FINALIZED | STATE_INVALIDATED => ProposalStatus::Resolved,
+        _ => ProposalStatus::Unchallenged,
+    }
+}
+
+/// Maps the mock's internal state byte to a resolution outcome.
+fn outcome_from_state(state: u8) -> GameStatus {
+    match state {
+        STATE_FINALIZED => GameStatus::DefenderWins,
+        STATE_INVALIDATED => GameStatus::ChallengerWins,
+        _ => GameStatus::InProgress,
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 struct MockGame {
@@ -149,15 +168,20 @@ impl ChallengerClient for MockClient {
             .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))
     }
 
-    async fn root_state(&self, game: Address) -> Result<RootState, ChallengerError> {
-        let raw = self
+    async fn claim_data(&self, game: Address) -> Result<ClaimData, ChallengerError> {
+        let record = self
             .state
             .lock()
             .expect("not poisoned")
             .games
             .get(&game)
-            .map_or(0, |game| game.state);
-        RootState::try_from(raw).map_err(Into::into)
+            .copied()
+            .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))?;
+        Ok(ClaimData {
+            status: proposal_status_from_state(record.state),
+            proof_bitmap: 0,
+            invalidation_reason: InvalidationReason::try_from(record.resolution_reason)?,
+        })
     }
 
     async fn challenge_deadline(&self, game: Address) -> Result<u64, ChallengerError> {
@@ -203,7 +227,7 @@ impl ResolutionManagerClient for MockClient {
             .ok_or_else(|| ChallengerError::message(format!("unknown game {game}")))?;
         Ok(ResolutionStatus {
             resolvable: record.resolvable,
-            root_state: RootState::try_from(record.resolution_outcome)?,
+            outcome: outcome_from_state(record.resolution_outcome),
             invalidation_reason: InvalidationReason::try_from(record.resolution_reason)?,
         })
     }

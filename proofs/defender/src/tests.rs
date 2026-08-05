@@ -18,9 +18,9 @@ use std::{
 };
 use world_chain_proof_core::boot::TransitionPublicValues;
 use world_chain_proofs::{
-    ConsensusError, ConsensusProvider, InvalidationReason, LineageAnchor, LineageError,
-    LineageGame, LineageProvider, LineageTransition, MAX_ATTEMPT_SCAN, PROOF_THRESHOLD, ProofLane,
-    ProposalCommitment, ResolutionStatus, RootState, proof_count,
+    ClaimData, ConsensusError, ConsensusProvider, GameStatus, InvalidationReason, LineageAnchor,
+    LineageError, LineageGame, LineageProvider, LineageTransition, MAX_ATTEMPT_SCAN,
+    PROOF_THRESHOLD, ProofLane, ProposalCommitment, ProposalStatus, ResolutionStatus, proof_count,
 };
 use world_chain_prover_service::{
     ProofBackend, ProofData, ProofRequest, ProofRequestError, ProofRequestId, ProofRequester,
@@ -36,10 +36,19 @@ const L2_BLOCK: u64 = 100;
 const L1_ORIGIN_HASH: B256 = B256::repeat_byte(0x42);
 const DOMAIN_HASH: B256 = B256::repeat_byte(0x43);
 
+/// The mock's game lifecycle, from which both the claim status and the resolution outcome
+/// reported to the defender are derived.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MockGameState {
+    Proposed,
+    Challenged,
+    Invalidated,
+}
+
 #[derive(Debug, Clone)]
 struct GameRecord {
     metadata: GameMetadata,
-    state: RootState,
+    state: MockGameState,
     invalidation_reason: InvalidationReason,
     proof_bitmap: u8,
 }
@@ -79,7 +88,7 @@ impl MockClient {
         root_claim: B256,
         l2_block_number: u64,
         attempt: u64,
-        state: RootState,
+        state: MockGameState,
     ) {
         let metadata = GameMetadata {
             address,
@@ -122,7 +131,7 @@ impl MockClient {
         };
     }
 
-    fn set_state(&self, game: Address, state: RootState, reason: InvalidationReason) {
+    fn set_state(&self, game: Address, state: MockGameState, reason: InvalidationReason) {
         let mut guard = self.state.lock().expect("not poisoned");
         let record = guard.games.get_mut(&game).expect("game exists");
         record.state = state;
@@ -192,17 +201,17 @@ impl LineageProvider for MockClient {
             .games
             .get(&game)
             .ok_or_else(|| LineageError::Contract(format!("unknown game {game}")))?;
-        let root_state = match record.state {
-            RootState::Proposed | RootState::Challenged
-                if proof_count(record.proof_bitmap) >= record.metadata.proof_threshold =>
-            {
-                RootState::Finalized
+        let threshold_met = proof_count(record.proof_bitmap) >= record.metadata.proof_threshold;
+        let (resolvable, outcome) = match record.state {
+            MockGameState::Invalidated => (false, GameStatus::ChallengerWins),
+            MockGameState::Proposed | MockGameState::Challenged if threshold_met => {
+                (true, GameStatus::DefenderWins)
             }
-            state => state,
+            MockGameState::Proposed | MockGameState::Challenged => (false, GameStatus::InProgress),
         };
         Ok(ResolutionStatus {
-            resolvable: root_state != record.state,
-            root_state,
+            resolvable,
+            outcome,
             invalidation_reason: record.invalidation_reason,
         })
     }
@@ -220,13 +229,21 @@ impl DefenderClient for MockClient {
             .ok_or_else(|| DefenderError::message(format!("unknown game {game}")))
     }
 
-    async fn proof_bitmap(&self, game: Address) -> Result<u8, DefenderError> {
+    async fn claim_data(&self, game: Address) -> Result<ClaimData, DefenderError> {
         self.state
             .lock()
             .expect("not poisoned")
             .games
             .get(&game)
-            .map(|record| record.proof_bitmap)
+            .map(|record| ClaimData {
+                status: match record.state {
+                    MockGameState::Proposed => ProposalStatus::Unchallenged,
+                    MockGameState::Challenged => ProposalStatus::Challenged,
+                    MockGameState::Invalidated => ProposalStatus::Resolved,
+                },
+                proof_bitmap: record.proof_bitmap,
+                invalidation_reason: record.invalidation_reason,
+            })
             .ok_or_else(|| DefenderError::message(format!("unknown game {game}")))
     }
 
@@ -392,7 +409,7 @@ fn config() -> DefenderConfig {
 async fn selected_proposed_game_gets_initial_tee_proof() {
     let root = B256::repeat_byte(0x20);
     let client = MockClient::new();
-    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, RootState::Proposed);
+    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, MockGameState::Proposed);
     let prover = MockProver::default();
     let mut defender = WorldChainDefender::new(
         config(),
@@ -416,7 +433,7 @@ async fn selected_proposed_game_gets_initial_tee_proof() {
 async fn selected_proposed_game_with_council_support_needs_no_tee_proof() {
     let root = B256::repeat_byte(0x20);
     let client = MockClient::new();
-    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, RootState::Proposed);
+    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, MockGameState::Proposed);
     client.set_bitmap(GAME_1, ProofLane::SecurityCouncil.mask());
     let prover = MockProver::default();
     let mut defender = WorldChainDefender::new(
@@ -435,7 +452,7 @@ async fn selected_proposed_game_with_council_support_needs_no_tee_proof() {
 async fn selected_challenged_game_gets_threshold_lanes() {
     let root = B256::repeat_byte(0x20);
     let client = MockClient::new();
-    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, RootState::Challenged);
+    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, MockGameState::Challenged);
     let prover = MockProver::default();
     let mut defender = WorldChainDefender::new(
         config(),
@@ -467,7 +484,7 @@ async fn selected_challenged_game_gets_threshold_lanes() {
 async fn selected_challenged_game_with_council_support_only_requests_tee() {
     let root = B256::repeat_byte(0x20);
     let client = MockClient::new();
-    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, RootState::Challenged);
+    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, MockGameState::Challenged);
     client.set_bitmap(GAME_1, ProofLane::SecurityCouncil.mask());
     let prover = MockProver::default();
     let mut defender = WorldChainDefender::new(
@@ -496,7 +513,7 @@ async fn selected_descendant_is_defended_before_parent_resolves() {
     let root_1 = B256::repeat_byte(0x20);
     let root_2 = B256::repeat_byte(0x21);
     let client = MockClient::new();
-    client.insert_game(GAME_1, ANCHOR, root_1, L2_BLOCK, 0, RootState::Proposed);
+    client.insert_game(GAME_1, ANCHOR, root_1, L2_BLOCK, 0, MockGameState::Proposed);
     client.set_bitmap(GAME_1, ProofLane::TeeAttestation.mask());
     client.insert_game(
         GAME_2,
@@ -504,7 +521,7 @@ async fn selected_descendant_is_defended_before_parent_resolves() {
         root_2,
         L2_BLOCK + BLOCK_INTERVAL,
         0,
-        RootState::Challenged,
+        MockGameState::Challenged,
     );
     let prover = MockProver::default();
     let mut defender = WorldChainDefender::new(
@@ -538,7 +555,7 @@ async fn game_for_a_different_root_is_not_selected() {
         other_root,
         L2_BLOCK,
         0,
-        RootState::Challenged,
+        MockGameState::Challenged,
     );
     let prover = MockProver::default();
     let mut defender = WorldChainDefender::new(
@@ -557,7 +574,7 @@ async fn game_for_a_different_root_is_not_selected() {
 async fn retry_replaces_active_old_attempt() {
     let root = B256::repeat_byte(0x20);
     let client = MockClient::new();
-    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, RootState::Challenged);
+    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, MockGameState::Challenged);
     let prover = MockProver::default();
     let mut defender = WorldChainDefender::new(
         config(),
@@ -571,10 +588,10 @@ async fn retry_replaces_active_old_attempt() {
 
     client.set_state(
         GAME_1,
-        RootState::Invalidated,
+        MockGameState::Invalidated,
         InvalidationReason::ProofTimeout,
     );
-    client.insert_game(GAME_2, ANCHOR, root, L2_BLOCK, 1, RootState::Proposed);
+    client.insert_game(GAME_2, ANCHOR, root, L2_BLOCK, 1, MockGameState::Proposed);
     defender.tick().await.unwrap();
 
     assert_eq!(defender.active_defenses(), [GAME_2]);
@@ -586,14 +603,21 @@ async fn anchor_advance_drops_the_old_prefix() {
     let root_1 = B256::repeat_byte(0x20);
     let root_2 = B256::repeat_byte(0x21);
     let client = MockClient::new();
-    client.insert_game(GAME_1, ANCHOR, root_1, L2_BLOCK, 0, RootState::Challenged);
+    client.insert_game(
+        GAME_1,
+        ANCHOR,
+        root_1,
+        L2_BLOCK,
+        0,
+        MockGameState::Challenged,
+    );
     client.insert_game(
         GAME_2,
         GAME_1,
         root_2,
         L2_BLOCK + BLOCK_INTERVAL,
         0,
-        RootState::Proposed,
+        MockGameState::Proposed,
     );
     let mut defender = WorldChainDefender::new(
         config(),
@@ -618,10 +642,17 @@ async fn anchor_advance_drops_the_old_prefix() {
 async fn invalidated_selected_attempt_is_left_for_the_proposer() {
     let root = B256::repeat_byte(0x20);
     let client = MockClient::new();
-    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, RootState::Invalidated);
+    client.insert_game(
+        GAME_1,
+        ANCHOR,
+        root,
+        L2_BLOCK,
+        0,
+        MockGameState::Invalidated,
+    );
     client.set_state(
         GAME_1,
-        RootState::Invalidated,
+        MockGameState::Invalidated,
         InvalidationReason::ProofTimeout,
     );
     let prover = MockProver::default();
@@ -641,7 +672,7 @@ async fn invalidated_selected_attempt_is_left_for_the_proposer() {
 async fn unfinalized_transition_is_not_selected_yet() {
     let root = B256::repeat_byte(0x20);
     let client = MockClient::new();
-    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, RootState::Challenged);
+    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, MockGameState::Challenged);
     let prover = MockProver::default();
     let mut defender = WorldChainDefender::new(
         config(),
@@ -658,7 +689,7 @@ async fn unfinalized_transition_is_not_selected_yet() {
 async fn existing_lane_is_not_requested_again() {
     let root = B256::repeat_byte(0x20);
     let client = MockClient::new();
-    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, RootState::Challenged);
+    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, MockGameState::Challenged);
     client.set_bitmap(GAME_1, ProofLane::ValidityProof.mask());
     let prover = MockProver::default();
     let mut defender = WorldChainDefender::new(
@@ -677,7 +708,7 @@ async fn existing_lane_is_not_requested_again() {
 async fn existing_tee_lane_only_requests_sp1_when_challenged() {
     let root = B256::repeat_byte(0x20);
     let client = MockClient::new();
-    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, RootState::Challenged);
+    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, MockGameState::Challenged);
     client.set_bitmap(GAME_1, ProofLane::TeeAttestation.mask());
     let prover = MockProver::default();
     let mut defender = WorldChainDefender::new(
@@ -696,7 +727,7 @@ async fn existing_tee_lane_only_requests_sp1_when_challenged() {
 async fn exhausted_challenged_proofs_are_not_restarted() {
     let root = B256::repeat_byte(0x20);
     let client = MockClient::new();
-    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, RootState::Challenged);
+    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, MockGameState::Challenged);
     let prover = MockProver::failing(2);
     let mut defender = WorldChainDefender::new(
         config(),
@@ -718,7 +749,7 @@ async fn exhausted_challenged_proofs_are_not_restarted() {
 async fn selected_game_deadline_stops_proof_work() {
     let root = B256::repeat_byte(0x20);
     let client = MockClient::new();
-    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, RootState::Proposed);
+    client.insert_game(GAME_1, ANCHOR, root, L2_BLOCK, 0, MockGameState::Proposed);
     client.set_deadlines(GAME_1, 10, 20);
     let prover = MockProver::default();
     let mut defender = WorldChainDefender::new(

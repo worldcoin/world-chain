@@ -7,10 +7,10 @@ use alloy_primitives::{Address, Bytes, U256};
 use alloy_provider::Provider;
 use async_trait::async_trait;
 use world_chain_proofs::{
-    IAnchorStateRegistry, IDisputeGameFactory, IMultiProofGame, LineageAnchor, LineageError,
-    LineageGame, LineageProvider, LineageTransition, PROOF_LANE_COUNT, RegisteredLineageConfig,
-    ResolutionStatus, read_game_for_transition, read_lineage_anchor,
-    read_lineage_resolution_status, read_registered_lineage_config,
+    ClaimData, IAnchorStateRegistry, IDisputeGameFactory, IMultiProofGame, InvalidationReasonError,
+    LineageAnchor, LineageError, LineageGame, LineageProvider, LineageTransition, PROOF_LANE_COUNT,
+    ProposalStatusError, RegisteredLineageConfig, ResolutionStatus, read_game_for_transition,
+    read_lineage_anchor, read_lineage_resolution_status, read_registered_lineage_config,
 };
 
 /// Alloy-backed implementation of [`DefenderClient`].
@@ -140,12 +140,18 @@ where
         })
     }
 
-    async fn proof_bitmap(&self, address: Address) -> Result<u8, DefenderError> {
-        self.game(address)
-            .proofBitmap()
-            .call()
-            .await
-            .map_err(Into::into)
+    async fn claim_data(&self, address: Address) -> Result<ClaimData, DefenderError> {
+        let result = self.game(address).claimData().call().await?;
+        Ok(ClaimData {
+            status: result
+                .status
+                .try_into()
+                .map_err(|error: ProposalStatusError| DefenderError::message(error.to_string()))?,
+            proof_bitmap: result.proofBitmap,
+            invalidation_reason: result.invalidationReason.try_into().map_err(
+                |error: InvalidationReasonError| DefenderError::message(error.to_string()),
+            )?,
+        })
     }
 
     async fn submit_proof(

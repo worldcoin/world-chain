@@ -1,7 +1,7 @@
 use crate::{
-    ConsensusError, ConsensusProvider, IAnchorStateRegistry, IDisputeGameFactory, IMultiProofGame,
-    InvalidationReasonError, MAX_ATTEMPT_SCAN, MULTI_PROOF_GAME_TYPE, ProposalCommitment,
-    ResolutionStatus, RootState, RootStateError,
+    ConsensusError, ConsensusProvider, GameStatus, GameStatusError, IAnchorStateRegistry,
+    IDisputeGameFactory, IMultiProofGame, InvalidationReasonError, MAX_ATTEMPT_SCAN,
+    MULTI_PROOF_GAME_TYPE, ProposalCommitment, ResolutionStatus,
 };
 use alloy_primitives::{Address, B256};
 use alloy_provider::Provider;
@@ -112,12 +112,10 @@ pub enum LineageError {
     },
     #[error("lineage block interval must be greater than zero")]
     ZeroBlockInterval,
-    #[error("selected game {0} has unset root state")]
-    UnsetGame(Address),
     #[error(transparent)]
     Consensus(#[from] ConsensusError),
     #[error(transparent)]
-    InvalidRootState(#[from] RootStateError),
+    InvalidGameStatus(#[from] GameStatusError),
     #[error(transparent)]
     InvalidInvalidationReason(#[from] InvalidationReasonError),
 }
@@ -191,7 +189,7 @@ where
             });
         };
         let status = execution.lineage_resolution_status(game.address).await?;
-        if status.root_state == RootState::Invalidated {
+        if status.outcome == GameStatus::ChallengerWins {
             return Ok(SelectedLineage {
                 anchor,
                 games,
@@ -201,9 +199,6 @@ where
                     status,
                 },
             });
-        }
-        if status.root_state == RootState::None {
-            return Err(LineageError::UnsetGame(game.address));
         }
 
         games.push(SelectedLineageGame { transition, game });
@@ -345,7 +340,7 @@ where
 
     Ok(ResolutionStatus {
         resolvable: result.resolvable,
-        root_state: result.outcome.try_into()?,
+        outcome: result.outcome.try_into()?,
         invalidation_reason: result.reason.try_into()?,
     })
 }

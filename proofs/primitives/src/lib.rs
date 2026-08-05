@@ -21,8 +21,9 @@ pub use lineage::{
     select_lineage,
 };
 pub use types::{
-    InvalidationReason, InvalidationReasonError, MAX_ATTEMPT_SCAN, MULTI_PROOF_GAME_TYPE,
-    PROOF_LANE_COUNT, PROOF_SYSTEM_VERSION, PROOF_THRESHOLD, ProofDomain, ProofLane,
-    ProposalCommitment, ResolutionStatus, RootCommitment, RootState, RootStateError,
-    WorldChainGameCreated, has_threshold, proof_count,
+    ClaimData, GameStatus, GameStatusError, InvalidationReason, InvalidationReasonError,
+    MAX_ATTEMPT_SCAN, MULTI_PROOF_GAME_TYPE, PROOF_LANE_COUNT, PROOF_SYSTEM_VERSION,
+    PROOF_THRESHOLD, ProofDomain, ProofLane, ProposalCommitment, ProposalStatus,
+    ProposalStatusError, ResolutionStatus, RootCommitment, WorldChainGameCreated, has_threshold,
+    proof_count,
 };

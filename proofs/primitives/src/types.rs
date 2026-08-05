@@ -35,35 +35,81 @@ pub struct WorldChainGameCreated {
     pub attempt: u64,
 }
 
-/// A game root state.
+/// The OP Stack `GameStatus` of a dispute game or a predicted resolution outcome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RootState {
-    None,
-    Proposed,
-    Challenged,
-    Finalized,
-    Invalidated,
+pub enum GameStatus {
+    InProgress,
+    ChallengerWins,
+    DefenderWins,
 }
 
 #[derive(Debug, Error)]
-pub enum RootStateError {
-    #[error("Invalid root state: {0}")]
-    InvalieRootState(u8),
+pub enum GameStatusError {
+    #[error("Invalid game status: {0}")]
+    InvalidGameStatus(u8),
 }
 
-impl TryFrom<u8> for RootState {
-    type Error = RootStateError;
+impl TryFrom<u8> for GameStatus {
+    type Error = GameStatusError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(RootState::None),
-            1 => Ok(RootState::Proposed),
-            2 => Ok(RootState::Challenged),
-            3 => Ok(RootState::Finalized),
-            4 => Ok(RootState::Invalidated),
-            _ => Err(RootStateError::InvalieRootState(value)),
+            0 => Ok(GameStatus::InProgress),
+            1 => Ok(GameStatus::ChallengerWins),
+            2 => Ok(GameStatus::DefenderWins),
+            _ => Err(GameStatusError::InvalidGameStatus(value)),
         }
     }
+}
+
+/// The `MultiProofGame.ProposalStatus` claim lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProposalStatus {
+    Unchallenged,
+    Challenged,
+    UnchallengedAndValidProofProvided,
+    ChallengedAndValidProofProvided,
+    Resolved,
+}
+
+impl ProposalStatus {
+    /// Returns whether the claim is unresolved and unchallenged, i.e. still challengeable.
+    #[must_use]
+    pub const fn is_unchallenged(self) -> bool {
+        matches!(
+            self,
+            Self::Unchallenged | Self::UnchallengedAndValidProofProvided
+        )
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum ProposalStatusError {
+    #[error("Invalid proposal status: {0}")]
+    InvalidProposalStatus(u8),
+}
+
+impl TryFrom<u8> for ProposalStatus {
+    type Error = ProposalStatusError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(ProposalStatus::Unchallenged),
+            1 => Ok(ProposalStatus::Challenged),
+            2 => Ok(ProposalStatus::UnchallengedAndValidProofProvided),
+            3 => Ok(ProposalStatus::ChallengedAndValidProofProvided),
+            4 => Ok(ProposalStatus::Resolved),
+            _ => Err(ProposalStatusError::InvalidProposalStatus(value)),
+        }
+    }
+}
+
+/// The subset of `MultiProofGame.claimData()` consumed by the offchain services.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClaimData {
+    pub status: ProposalStatus,
+    pub proof_bitmap: u8,
+    pub invalidation_reason: InvalidationReason,
 }
 
 /// Domain constants committed into every root id.
@@ -254,33 +300,33 @@ impl TryFrom<u8> for InvalidationReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResolutionStatus {
     pub resolvable: bool,
-    pub root_state: RootState,
+    /// The resolved `GameStatus`, or the outcome a resolve call would produce when
+    /// `resolvable` is true; `InProgress` while neither applies.
+    pub outcome: GameStatus,
     pub invalidation_reason: InvalidationReason,
 }
 
 impl ResolutionStatus {
     /// Returns true whether this resolution status is positive resolvable:
     /// - `resolvable` is true AND
-    /// - the expected root state outcome is `Finalized`.
+    /// - the expected outcome is `DefenderWins`.
     pub fn positive_resolvable(&self) -> bool {
-        self.resolvable && self.root_state == RootState::Finalized
+        self.resolvable && self.outcome == GameStatus::DefenderWins
     }
 
     /// Returns whether the game can be resolved as invalid because its parent is invalid.
     pub fn invalid_parent_resolvable(&self) -> bool {
         self.resolvable
-            && self.root_state == RootState::Invalidated
+            && self.outcome == GameStatus::ChallengerWins
             && self.invalidation_reason == InvalidationReason::InvalidParent
     }
 
     /// Returns whether the game has already reached a terminal state.
     ///
-    /// The root state may describe the expected outcome of a game that is currently resolvable,
-    /// so a terminal root state is considered resolved only when `resolvable` is false.
+    /// The outcome may describe the expected result of a game that is currently resolvable,
+    /// so a terminal outcome is considered resolved only when `resolvable` is false.
     pub fn is_resolved(&self) -> bool {
-        !self.resolvable
-            && (self.root_state == RootState::Finalized
-                || self.root_state == RootState::Invalidated)
+        !self.resolvable && self.outcome != GameStatus::InProgress
     }
 }
 

@@ -208,7 +208,6 @@ where
                         false,
                     )
                 }
-                GameObservation::Unset => return Ok(DefenseProgress::Closed),
             };
         if now >= deadline {
             return Ok(DefenseProgress::DeadlineElapsed);

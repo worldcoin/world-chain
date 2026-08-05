@@ -8,12 +8,13 @@ use tokio_util::sync::CancellationToken;
 use world_chain_challenger::{ChallengerConfig, WorldChainChallenger};
 use world_chain_defender::{DefenderClient, DefenderConfig, WorldChainDefender};
 use world_chain_proof_integration_tests::{
-    BLOCK_INTERVAL, FakeConsensus, FakeExecution, FakeProofBackend, SharedProverService,
+    BLOCK_INTERVAL, FakeConsensus, FakeExecution, FakeGameState, FakeProofBackend,
+    SharedProverService,
 };
 use world_chain_proof_worker::{
     ProofWorker, ProofWorkerConfig, RetryConfig, WorkerHeartbeatConfig,
 };
-use world_chain_proofs::{LineageProvider, ProofLane, RootState, has_threshold};
+use world_chain_proofs::{GameStatus, LineageProvider, ProofLane, has_threshold};
 use world_chain_proposer::{
     ProposerClient, ProposerConfig, ProposerError, ProposerScan, WorldChainProposer,
 };
@@ -106,8 +107,8 @@ async fn fake_resolution_matches_contract_transition_semantics() {
         .await
         .expect("resolution status available");
     assert!(ready.resolvable);
-    assert_eq!(ready.root_state, RootState::Finalized);
-    assert_eq!(chain.game_state(game), RootState::Challenged);
+    assert_eq!(ready.outcome, GameStatus::DefenderWins);
+    assert_eq!(chain.game_state(game), FakeGameState::Challenged);
 
     settle_with_proposer(&proposer).await;
 
@@ -115,7 +116,7 @@ async fn fake_resolution_matches_contract_transition_semantics() {
         .await
         .expect("resolution status available");
     assert!(!finalized.resolvable);
-    assert_eq!(finalized.root_state, RootState::Finalized);
+    assert_eq!(finalized.outcome, GameStatus::DefenderWins);
     assert!(ProposerClient::resolve_game(&chain, game).await.is_err());
 }
 
@@ -242,7 +243,7 @@ async fn invalid_root_is_challenged_by_real_challenger() {
         .await
         .expect("challenger scan succeeds");
 
-    assert_eq!(chain.game_state(game), RootState::Challenged);
+    assert_eq!(chain.game_state(game), FakeGameState::Challenged);
     assert_eq!(chain.challenge_count(game), 1);
 }
 
@@ -279,7 +280,7 @@ async fn valid_proposal_receives_initial_tee_proof_through_worker() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    assert_eq!(chain.game_state(game), RootState::Proposed);
+    assert_eq!(chain.game_state(game), FakeGameState::Proposed);
     assert_eq!(chain.submitted_lanes(game), [ProofLane::TeeAttestation]);
 
     stop_proof_stack(stack).await;
@@ -320,12 +321,12 @@ async fn valid_challenged_root_is_defended_through_workers() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    assert_eq!(chain.game_state(game), RootState::Challenged);
+    assert_eq!(chain.game_state(game), FakeGameState::Challenged);
     assert_defense_lanes(chain.submitted_lanes(game));
 
     settle_with_proposer(&proposer).await;
 
-    assert_eq!(chain.game_state(game), RootState::Finalized);
+    assert_eq!(chain.game_state(game), FakeGameState::Finalized);
 
     stop_proof_stack(stack).await;
 }
@@ -370,12 +371,12 @@ async fn valid_challenged_root_survives_transient_proof_failure() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    assert_eq!(chain.game_state(game), RootState::Challenged);
+    assert_eq!(chain.game_state(game), FakeGameState::Challenged);
     assert_defense_lanes(chain.submitted_lanes(game));
 
     settle_with_proposer(&proposer).await;
 
-    assert_eq!(chain.game_state(game), RootState::Finalized);
+    assert_eq!(chain.game_state(game), FakeGameState::Finalized);
 
     stop_proof_stack(stack).await;
 }
@@ -417,7 +418,7 @@ async fn defender_ignores_challenged_invalid_root() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    assert_eq!(chain.game_state(game), RootState::Challenged);
+    assert_eq!(chain.game_state(game), FakeGameState::Challenged);
     assert_eq!(chain.proof_bitmap(game), 0);
     assert!(chain.submitted_lanes(game).is_empty());
 
